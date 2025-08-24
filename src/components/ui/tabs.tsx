@@ -1,0 +1,49 @@
+import * as TabsPrimitive from "@radix-ui/react-tabs";
+import * as React from "react";
+
+import { cn } from "~/lib/utils/index";
+
+function Tabs({ className, ...props }: React.ComponentProps<typeof TabsPrimitive.Root>) {
+  return <TabsPrimitive.Root className={cn("w-full", className)} data-slot="tabs" {...props} />;
+}
+
+function TabsContent({ className, ...props }: React.ComponentProps<typeof TabsPrimitive.Content>) {
+  return (
+    <TabsPrimitive.Content
+      className={cn(
+        "focus-visible:ring-ring mt-2 ring-offset-white focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none",
+        className,
+      )}
+      data-slot="tabs-content"
+      {...props}
+    />
+  );
+}
+
+function TabsList({ className, ...props }: React.ComponentProps<typeof TabsPrimitive.List>) {
+  return (
+    <TabsPrimitive.List
+      className={cn(
+        "rounded-base border-border bg-background text-foreground inline-flex h-12 items-center justify-center border-2 p-1",
+        className,
+      )}
+      data-slot="tabs-list"
+      {...props}
+    />
+  );
+}
+
+function TabsTrigger({ className, ...props }: React.ComponentProps<typeof TabsPrimitive.Trigger>) {
+  return (
+    <TabsPrimitive.Trigger
+      className={cn(
+        "rounded-base font-heading focus-visible:ring-ring data-[state=active]:bg-main data-[state=active]:text-main-foreground data-[state=active]:border-border inline-flex items-center justify-center gap-1.5 border-2 border-transparent px-2 py-1 text-sm whitespace-nowrap ring-offset-white transition-all focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50",
+        className,
+      )}
+      data-slot="tabs-trigger"
+      {...props}
+    />
+  );
+}
+
+export { Tabs, TabsContent, TabsList, TabsTrigger };

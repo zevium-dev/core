@@ -1,0 +1,8 @@
+[tools]
+node = "22.12.0"
+
+[hooks]
+postinstall = "yes | npm i -g pnpm && pnpm install"
+
+[tasks]
+ci = "pnpm run ci"

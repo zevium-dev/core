@@ -1,0 +1,14 @@
+{
+  "name": "between.cloud",
+  "short_name": "between.cloud",
+  "icons": [
+    {
+      "src": "/icon.png",
+      "sizes": "256x256",
+      "type": "image/png"
+    }
+  ],
+  "theme_color": "#000000",
+  "background_color": "#000000",
+  "display": "standalone"
+}
