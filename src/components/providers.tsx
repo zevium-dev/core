@@ -48,7 +48,7 @@ const getQueryClient = () => {
 
 const PHProvider: React.FC<React.PropsWithChildren> = ({ children }) => {
   if (!clientEnv.VITE_PUBLIC_POSTHOG_KEY) {
-    return <>children</>;
+    return <React.Fragment>{children}</React.Fragment>;
   }
   return (
     <PostHogProvider
