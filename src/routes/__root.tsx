@@ -22,7 +22,7 @@ export const Route = createRootRoute({
     meta: [
       { charSet: "utf-8" },
       { content: "width=device-width, initial-scale=1", name: "viewport" },
-      ...seo({ description: `between.cloud`, title: "between.cloud" }),
+      ...seo({ description: `zevium.dev`, title: "zevium.dev" }),
     ],
   }),
   notFoundComponent: () => <NotFound />,

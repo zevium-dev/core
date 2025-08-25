@@ -10,7 +10,7 @@ function Home() {
     <ScreenCenter>
       <div className="z-10 flex items-center justify-center px-4">
         <div className="text-foreground mx-auto text-3xl font-normal lg:text-5xl">
-          <span>between.cloud</span>
+          <span>zevium.dev</span>
         </div>
       </div>
     </ScreenCenter>

@@ -74,7 +74,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                   <img alt="between cloud" className="size-7" src="/icon.svg" />
                 </div>
                 <div className="grid flex-1 text-left text-sm leading-tight">
-                  <span className="font-heading truncate">between.cloud</span>
+                  <span className="font-heading truncate">zevium.dev</span>
                   <span className="truncate text-xs">a place to share</span>
                 </div>
               </SidebarMenuButton>
