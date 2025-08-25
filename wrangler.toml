@@ -1,5 +1,5 @@
 "$schema" = "node_modules/wrangler/config-schema.json"
-name = "between-cloud"
+name = "zevium-dev"
 main = ".output/server/index.mjs"
 compatibility_date = "2025-08-02"
 compatibility_flags = ["nodejs_compat"]
