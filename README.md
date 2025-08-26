@@ -43,6 +43,8 @@ pnpm dev
 
 - Open `http://localhost:5173` in your browser to view the website.
 
+---
+
 ## Docs
 
 ### Framework
@@ -52,7 +54,6 @@ pnpm dev
 ### UI
 
 - [shadcn/ui](https://ui.shadcn.com/docs): UI framework.
-- [Neobrutalism UI](https://www.neobrutalism.dev/docs): UI components (subject to change).
 - [Tailwind CSS](https://tailwindcss.com/docs/styling-with-utility-classes): Styling.
 
 ### Backend
