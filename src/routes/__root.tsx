@@ -3,8 +3,8 @@ import { createRootRoute, HeadContent, Scripts } from "@tanstack/react-router";
 import { TanStackRouterDevtools } from "@tanstack/react-router-devtools";
 import * as React from "react";
 
-import { DefaultCatchBoundary } from "~/components/DefaultCatchBoundary";
-import { NotFound } from "~/components/NotFound";
+import { DefaultCatchBoundary } from "~/components/default-catch-boundary";
+import { NotFound } from "~/components/not-found";
 import { Providers } from "~/components/providers";
 import { seo } from "~/lib/utils";
 import appCss from "~/styles/app.css?url";
