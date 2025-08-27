@@ -1,8 +1,9 @@
-import { exampleRouter } from "./rpcs/example";
+import { lazy } from "@trpc/server";
+
 import { router } from "./trpc";
 
 export const appRouter = router({
-  example: exampleRouter,
+  example: lazy(() => import("./rpcs/example").then((v) => v.exampleRouter)),
 });
 
 export type AppRouter = typeof appRouter;

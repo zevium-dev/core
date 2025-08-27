@@ -1,12 +1,12 @@
 import { createServerFileRoute } from "@tanstack/react-start/server";
 
-import { openApiHandler } from "~/server/orpc";
-
 export const ServerRoute = createServerFileRoute("/api/openapi/$").methods({
-  GET: ({ request }) => {
+  GET: async ({ request }) => {
+    const { openApiHandler } = await import("~/server/orpc");
     return openApiHandler(request);
   },
-  POST: ({ request }) => {
+  POST: async ({ request }) => {
+    const { openApiHandler } = await import("~/server/orpc");
     return openApiHandler(request);
   },
 });
