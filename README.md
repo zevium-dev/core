@@ -42,3 +42,26 @@ pnpm dev
 ```
 
 - Open `http://localhost:5173` in your browser to view the website.
+
+---
+
+## Docs
+
+### Framework
+
+- [TanStack Start](https://tanstack.com/start/latest/docs/framework/react/overview): Core client and server framework.
+
+### UI
+
+- [shadcn/ui](https://ui.shadcn.com/docs): UI framework.
+- [Tailwind CSS](https://tailwindcss.com/docs/styling-with-utility-classes): Styling.
+
+### Backend
+
+- [tRPC](https://trpc.io/docs/quickstart): App server framework.
+- [Better Auth](https://www.better-auth.com/docs/introduction): Authentication.
+
+### Data
+
+- [Drizzle ORM](https://orm.drizzle.team/docs/get-started): Database ORM.
+- [Turso (libSQL)](https://docs.turso.tech/libsql): Database (subject to change).
