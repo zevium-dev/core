@@ -33,6 +33,7 @@ export default tseslint.config(
       },
     },
     rules: {
+      "@eslint-react/no-context-provider": "off",
       "@typescript-eslint/array-type": ["warn", { default: "generic", readonly: "generic" }],
       "@typescript-eslint/no-confusing-void-expression": "off",
       "@typescript-eslint/no-deprecated": "off",

@@ -1,3 +1,4 @@
+import dedent from "dedent";
 import * as React from "react";
 import * as RechartsPrimitive from "recharts";
 
@@ -8,10 +9,11 @@ const THEMES = { dark: ".dark", light: "" } as const;
 
 export type ChartConfig = Record<
   string,
-  ({ color?: never; theme: Record<keyof typeof THEMES, string> } | { color?: string; theme?: never }) & {
-    icon?: React.ComponentType;
-    label?: React.ReactNode;
-  }
+  | (({ color?: never; theme: Record<keyof typeof THEMES, string> } | { color?: string; theme?: never }) & {
+      icon?: React.ComponentType;
+      label?: React.ReactNode;
+    })
+  | undefined
 >;
 
 interface ChartContextProps {
@@ -64,7 +66,7 @@ function useChart() {
 }
 
 const ChartStyle = ({ config, id }: { config: ChartConfig; id: string }) => {
-  const colorConfig = Object.entries(config).filter(([, config]) => config.theme ?? config.color);
+  const colorConfig = Object.entries(config).filter(([, config]) => config?.theme ?? config?.color);
 
   if (!colorConfig.length) {
     return null;
@@ -72,19 +74,20 @@ const ChartStyle = ({ config, id }: { config: ChartConfig; id: string }) => {
 
   return (
     <style
+      // eslint-disable-next-line @eslint-react/dom/no-dangerously-set-innerhtml
       dangerouslySetInnerHTML={{
         __html: Object.entries(THEMES)
           .map(
-            ([theme, prefix]) => `
-${prefix} [data-chart=${id}] {
-${colorConfig
-  .map(([key, itemConfig]) => {
-    const color = itemConfig.theme?.[theme as keyof typeof itemConfig.theme] ?? itemConfig.color;
-    return color ? `  --color-${key}: ${color};` : null;
-  })
-  .join("\n")}
-}
-`,
+            ([theme, prefix]) => dedent`
+              ${prefix} [data-chart=${id}] {
+              ${colorConfig
+                .map(([key, itemConfig]) => {
+                  const color = itemConfig?.theme?.[theme as keyof typeof itemConfig.theme] ?? itemConfig?.color;
+                  return color ? `  --color-${key}: ${color};` : null;
+                })
+                .join("\n")}
+              }
+            `,
           )
           .join("\n"),
       }}
@@ -124,7 +127,7 @@ function ChartTooltipContent({
     }
 
     const [item] = payload;
-    const key = `${labelKey ?? item?.dataKey ?? item?.name ?? "value"}`;
+    const key = `${labelKey ?? item.dataKey ?? item.name ?? "value"}`;
     const itemConfig = getPayloadConfigFromPayload(config, item, key);
     const value = !labelKey && typeof label === "string" ? (config[label]?.label ?? label) : itemConfig?.label;
 
@@ -168,7 +171,7 @@ function ChartTooltipContent({
               )}
               key={item.dataKey}
             >
-              {formatter && item?.value !== undefined && item.name ? (
+              {formatter && item.value !== undefined && item.name ? (
                 // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
                 formatter(item.value, item.name, item, index, item.payload)
               ) : (
@@ -200,7 +203,7 @@ function ChartTooltipContent({
                       {nestLabel ? tooltipLabel : null}
                       <span className="text-muted-foreground">{itemConfig?.label ?? item.name}</span>
                     </div>
-                    {item.value && (
+                    {!!item.value && (
                       <span className="text-foreground font-mono font-medium tabular-nums">
                         {item.value.toLocaleString()}
                       </span>
@@ -238,7 +241,7 @@ function ChartLegendContent({
   return (
     <div className={cn("flex items-center justify-center gap-4", verticalAlign === "top" ? "pb-3" : "pt-3", className)}>
       {payload.map((item) => {
-        const key = `${nameKey ?? item.dataKey ?? "value"}`;
+        const key = nameKey ?? item.dataKey?.toString() ?? "value";
         const itemConfig = getPayloadConfigFromPayload(config, item, key);
 
         return (

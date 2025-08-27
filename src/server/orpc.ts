@@ -1,10 +1,10 @@
 import { experimental_ArkTypeToJsonSchemaConverter as ArkTypeToJsonSchemaConverter } from "@orpc/arktype";
 import { OpenAPIGenerator } from "@orpc/openapi";
-import { OpenAPIHandler } from "@orpc/openapi/fetch"; // or '@orpc/server/node'
+import { OpenAPIHandler } from "@orpc/openapi/fetch";
 import { onError, ORPCError } from "@orpc/server";
 import { CORSPlugin } from "@orpc/server/plugins";
 import { toORPCRouter } from "@orpc/trpc";
-import { ZodToJsonSchemaConverter } from "@orpc/zod/zod4"; // <-- zod v4
+import { ZodToJsonSchemaConverter } from "@orpc/zod/zod4";
 import { TRPCError } from "@trpc/server";
 import { type } from "arktype";
 import { z, ZodError } from "zod";
@@ -19,14 +19,6 @@ const orpcRouter = toORPCRouter(appRouter);
 
 const openAPIGenerator = new OpenAPIGenerator({
   schemaConverters: [new ZodToJsonSchemaConverter(), new ArkTypeToJsonSchemaConverter()],
-});
-
-// Improve startup time by generating the OpenAPI spec lazily on first request and caching it
-export const openApiSpec = await openAPIGenerator.generate(orpcRouter, {
-  components: { securitySchemes: { bearerAuth: { bearerFormat: "JWT", scheme: "bearer", type: "http" } } },
-  info: { title: "zevium", version: packageJson.version },
-  security: [{ bearerAuth: [] }],
-  servers: [{ url: `${clientEnv.VITE_PUBLIC_URL}/api/openapi` }],
 });
 
 const _openApiHandler = new OpenAPIHandler(orpcRouter, {
@@ -64,6 +56,13 @@ export const openApiHandler = async (request: Request): Promise<Response> => {
   if (matched) return response;
 
   if (request.url === `${clientEnv.VITE_PUBLIC_URL}/api/openapi/spec.json`) {
+    // Improve startup time by generating the OpenAPI spec lazily on first request and caching it
+    const openApiSpec = await openAPIGenerator.generate(orpcRouter, {
+      components: { securitySchemes: { bearerAuth: { bearerFormat: "JWT", scheme: "bearer", type: "http" } } },
+      info: { title: "zevium", version: packageJson.version },
+      security: [{ bearerAuth: [] }],
+      servers: [{ url: `${clientEnv.VITE_PUBLIC_URL}/api/openapi` }],
+    });
     return Response.json(openApiSpec);
   }
 
