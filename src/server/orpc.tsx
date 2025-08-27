@@ -63,7 +63,9 @@ export const openApiHandler = async (request: Request): Promise<Response> => {
   });
   if (matched) return response;
 
-  if (request.url === `${clientEnv.VITE_PUBLIC_URL}/api/openapi/spec.json`) {
+  const url = new URL(request.url);
+
+  if (url.pathname === `/api/openapi/spec.json`) {
     const createOpenApiSpec = memoryCached({ namespace: "orpc-openapi-spec" }, async () => {
       const openAPIGenerator = new OpenAPIGenerator({
         schemaConverters: [new ZodToJsonSchemaConverter(), new ArkTypeToJsonSchemaConverter()],
@@ -72,7 +74,7 @@ export const openApiHandler = async (request: Request): Promise<Response> => {
         components: { securitySchemes: { bearerAuth: { bearerFormat: "JWT", scheme: "bearer", type: "http" } } },
         info: { title: "zevium", version: packageJson.version },
         security: [{ bearerAuth: [] }],
-        servers: [{ url: `${clientEnv.VITE_PUBLIC_URL}/api/openapi` }],
+        servers: [{ url: `${url.origin}/api/openapi` }],
       });
       return openApiSpec;
     });
@@ -80,7 +82,7 @@ export const openApiHandler = async (request: Request): Promise<Response> => {
     return Response.json(openApiSpec);
   }
 
-  if (request.url === `${clientEnv.VITE_PUBLIC_URL}/api/openapi`) {
+  if (url.pathname === `/api/openapi`) {
     const scalarHtml = await createScalarHtml({ specUrl: "/api/openapi/spec.json" });
     return new Response(scalarHtml, {
       headers: { "Content-Type": "text/html" },
