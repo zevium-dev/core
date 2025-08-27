@@ -1,9 +1,11 @@
 import { createServerFileRoute } from "@tanstack/react-start/server";
 
 const handler = async (req: Request) => {
-  const { appRouter } = await import("~/server");
-  const { createServerContext } = await import("~/server/context");
-  const { fetchRequestHandler } = await import("@trpc/server/adapters/fetch");
+  const [{ appRouter }, { createServerContext }, { fetchRequestHandler }] = await Promise.all([
+    import("~/server"),
+    import("~/server/context"),
+    import("@trpc/server/adapters/fetch"),
+  ]);
   return fetchRequestHandler({
     createContext: createServerContext,
     endpoint: "/api/trpc",
@@ -11,6 +13,7 @@ const handler = async (req: Request) => {
     router: appRouter,
   });
 };
+
 export const ServerRoute = createServerFileRoute("/api/trpc/$").methods({
   GET: ({ request }) => {
     return handler(request);
