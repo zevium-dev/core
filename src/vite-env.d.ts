@@ -7,6 +7,7 @@ interface ImportMeta {
 interface ImportMetaEnv {
   // Client
   VITE_PUBLIC_POSTHOG_KEY?: string;
+  VITE_PUBLIC_URL?: string;
 }
 
 interface ViteTypeOptions {

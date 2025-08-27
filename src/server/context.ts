@@ -1,11 +1,11 @@
 import { authServer } from "~/lib/server/auth";
 
-export type Context = Awaited<ReturnType<typeof createContext>>;
+export type Context = Awaited<ReturnType<typeof createServerContext>>;
 
 interface Options {
   req: Request;
 }
-export async function createContext({ req }: Options) {
+export async function createServerContext({ req }: Options) {
   const auth = await authServer.api.getSession({ headers: req.headers });
   return { raw: { req }, user: auth?.user ?? null };
 }
