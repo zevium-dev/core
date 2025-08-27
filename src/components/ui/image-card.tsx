@@ -10,12 +10,13 @@ export default function ImageCard({ caption, className, imageUrl }: Props) {
   return (
     <figure
       className={cn(
-        "rounded-base border-border bg-main font-base shadow-shadow w-[250px] overflow-hidden border-2",
+        // remove fixed width so the card will size to its grid cell; reduce padding for compact layout
+        "rounded-base border-border bg-main font-base shadow-shadow overflow-hidden border-2",
         className,
       )}
     >
-      <img alt="image" className="aspect-4/3 w-full" src={imageUrl} />
-      <figcaption className="text-main-foreground border-border border-t-2 p-4">{caption}</figcaption>
+      <img alt="image" className="w-full object-cover aspect-video" src={imageUrl} />
+      <figcaption className="text-main-foreground border-border border-t-2 px-3 py-2 text-sm">{caption}</figcaption>
     </figure>
   );
 }
