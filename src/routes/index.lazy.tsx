@@ -1,7 +1,7 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createLazyFileRoute } from "@tanstack/react-router";
 
 import { ScreenCenter } from "~/components/ui/screen-center";
-export const Route = createFileRoute("/")({
+export const Route = createLazyFileRoute("/")({
   component: Home,
 });
 
