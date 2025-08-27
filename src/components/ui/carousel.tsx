@@ -1,9 +1,11 @@
+"use client";
+
 import useEmblaCarousel, { type UseEmblaCarouselType } from "embla-carousel-react";
 import { ArrowLeft, ArrowRight } from "lucide-react";
 import * as React from "react";
 
 import { Button } from "~/components/ui/button";
-import { cn } from "~/lib/utils/index";
+import { cn } from "~/lib/utils";
 
 type CarouselApi = UseEmblaCarouselType[1];
 type CarouselContextProps = {
@@ -11,7 +13,6 @@ type CarouselContextProps = {
   canScrollNext: boolean;
   canScrollPrev: boolean;
   carouselRef: ReturnType<typeof useEmblaCarousel>[0];
-  plugins?: CarouselPlugin;
   scrollNext: () => void;
   scrollPrev: () => void;
 } & CarouselProps;
@@ -49,10 +50,7 @@ function Carousel({
   const [canScrollNext, setCanScrollNext] = React.useState(false);
 
   const onSelect = React.useCallback((api: CarouselApi) => {
-    if (!api) {
-      return;
-    }
-
+    if (!api) return;
     // eslint-disable-next-line @eslint-react/hooks-extra/no-direct-set-state-in-use-effect
     setCanScrollPrev(api.canScrollPrev());
     // eslint-disable-next-line @eslint-react/hooks-extra/no-direct-set-state-in-use-effect
@@ -81,18 +79,12 @@ function Carousel({
   );
 
   React.useEffect(() => {
-    if (!api || !setApi) {
-      return;
-    }
-
+    if (!api || !setApi) return;
     setApi(api);
   }, [api, setApi]);
 
   React.useEffect(() => {
-    if (!api) {
-      return;
-    }
-
+    if (!api) return;
     onSelect(api);
     api.on("reInit", onSelect);
     api.on("select", onSelect);
@@ -102,14 +94,14 @@ function Carousel({
     };
   }, [api, onSelect]);
 
-  const value = React.useMemo(
+  const contextValue = React.useMemo(
     () => ({
       api: api,
       canScrollNext,
       canScrollPrev,
       carouselRef,
       opts,
-      orientation,
+      orientation: orientation ?? (opts?.axis === "y" ? "vertical" : "horizontal"),
       scrollNext,
       scrollPrev,
     }),
@@ -117,7 +109,7 @@ function Carousel({
   );
 
   return (
-    <CarouselContext value={value}>
+    <CarouselContext value={contextValue}>
       <div
         aria-roledescription="carousel"
         className={cn("relative", className)}
@@ -159,7 +151,7 @@ function CarouselItem({ className, ...props }: React.ComponentProps<"div">) {
 function CarouselNext({
   className,
   size = "icon",
-  variant = "noShadow",
+  variant = "outline",
   ...props
 }: React.ComponentProps<typeof Button>) {
   const { canScrollNext, orientation, scrollNext } = useCarousel();
@@ -167,7 +159,7 @@ function CarouselNext({
   return (
     <Button
       className={cn(
-        "rounded-base absolute h-8 w-8",
+        "absolute size-8 rounded-full",
         orientation === "horizontal"
           ? "top-1/2 -right-12 -translate-y-1/2"
           : "-bottom-12 left-1/2 -translate-x-1/2 rotate-90",
@@ -189,7 +181,7 @@ function CarouselNext({
 function CarouselPrevious({
   className,
   size = "icon",
-  variant = "noShadow",
+  variant = "outline",
   ...props
 }: React.ComponentProps<typeof Button>) {
   const { canScrollPrev, orientation, scrollPrev } = useCarousel();
@@ -197,7 +189,7 @@ function CarouselPrevious({
   return (
     <Button
       className={cn(
-        "rounded-base absolute size-8",
+        "absolute size-8 rounded-full",
         orientation === "horizontal"
           ? "top-1/2 -left-12 -translate-y-1/2"
           : "-top-12 left-1/2 -translate-x-1/2 rotate-90",

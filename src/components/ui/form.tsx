@@ -12,7 +12,7 @@ import {
 } from "react-hook-form";
 
 import { Label } from "~/components/ui/label";
-import { cn } from "~/lib/utils/index";
+import { cn } from "~/lib/utils";
 
 const Form = FormProvider;
 
@@ -25,17 +25,20 @@ interface FormFieldContextValue<
 
 const FormFieldContext = React.createContext<FormFieldContextValue>({} as FormFieldContextValue);
 
-function FormField<
+const FormField = <
   TFieldValues extends FieldValues = FieldValues,
   TName extends FieldPath<TFieldValues> = FieldPath<TFieldValues>,
->({ ...props }: ControllerProps<TFieldValues, TName>) {
-  const value = React.useMemo(() => ({ name: props.name }), [props.name]);
+>({
+  ...props
+}: ControllerProps<TFieldValues, TName>) => {
+  const contextValue = React.useMemo(() => ({ name: props.name }), [props.name]);
+
   return (
-    <FormFieldContext value={value}>
+    <FormFieldContext value={contextValue}>
       <Controller {...props} />
     </FormFieldContext>
   );
-}
+};
 
 const useFormField = () => {
   const fieldContext = React.use(FormFieldContext);
@@ -43,11 +46,6 @@ const useFormField = () => {
   const { getFieldState } = useFormContext();
   const formState = useFormState({ name: fieldContext.name });
   const fieldState = getFieldState(fieldContext.name, formState);
-
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-  if (!fieldContext) {
-    throw new Error("useFormField should be used within <FormField>");
-  }
 
   const { id } = itemContext;
 
@@ -86,7 +84,7 @@ function FormDescription({ className, ...props }: React.ComponentProps<"p">) {
 
   return (
     <p
-      className={cn("font-base text-foreground text-sm", className)}
+      className={cn("text-muted-foreground text-sm", className)}
       data-slot="form-description"
       id={formDescriptionId}
       {...props}
@@ -96,10 +94,10 @@ function FormDescription({ className, ...props }: React.ComponentProps<"p">) {
 
 function FormItem({ className, ...props }: React.ComponentProps<"div">) {
   const id = React.useId();
-  const value = React.useMemo(() => ({ id }), [id]);
+  const contextValue = React.useMemo(() => ({ id }), [id]);
 
   return (
-    <FormItemContext value={value}>
+    <FormItemContext value={contextValue}>
       <div className={cn("grid gap-2", className)} data-slot="form-item" {...props} />
     </FormItemContext>
   );
@@ -110,7 +108,7 @@ function FormLabel({ className, ...props }: React.ComponentProps<typeof LabelPri
 
   return (
     <Label
-      className={cn("font-heading", className)}
+      className={cn("data-[error=true]:text-destructive", className)}
       data-error={!!error}
       data-slot="form-label"
       htmlFor={formItemId}
@@ -128,12 +126,7 @@ function FormMessage({ className, ...props }: React.ComponentProps<"p">) {
   }
 
   return (
-    <p
-      className={cn("font-base text-sm text-red-500", className)}
-      data-slot="form-message"
-      id={formMessageId}
-      {...props}
-    >
+    <p className={cn("text-destructive text-sm", className)} data-slot="form-message" id={formMessageId} {...props}>
       {body}
     </p>
   );

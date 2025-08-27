@@ -1,10 +1,8 @@
-"use client";
-
 import * as SheetPrimitive from "@radix-ui/react-dialog";
-import { X } from "lucide-react";
+import { XIcon } from "lucide-react";
 import * as React from "react";
 
-import { cn } from "~/lib/utils/index";
+import { cn } from "~/lib/utils";
 
 function Sheet({ ...props }: React.ComponentProps<typeof SheetPrimitive.Root>) {
   return <SheetPrimitive.Root data-slot="sheet" {...props} />;
@@ -27,7 +25,7 @@ function SheetContent({
       <SheetOverlay />
       <SheetPrimitive.Content
         className={cn(
-          "bg-background data-[state=open]:animate-in data-[state=closed]:animate-out border-border fixed z-50 flex flex-col gap-4 border-2 transition ease-in-out data-[state=closed]:duration-300 data-[state=open]:duration-500",
+          "bg-background data-[state=open]:animate-in data-[state=closed]:animate-out fixed z-50 flex flex-col gap-4 shadow-lg transition ease-in-out data-[state=closed]:duration-300 data-[state=open]:duration-500",
           side === "right" &&
             "data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right inset-y-0 right-0 h-full w-3/4 border-l sm:max-w-sm",
           side === "left" &&
@@ -42,8 +40,8 @@ function SheetContent({
         {...props}
       >
         {children}
-        <SheetPrimitive.Close className="rounded-base focus:ring-ring absolute top-4 right-4 ring-offset-white focus:ring-2 focus:ring-offset-2 focus:outline-none disabled:pointer-events-none">
-          <X className="h-4 w-4" />
+        <SheetPrimitive.Close className="ring-offset-background focus:ring-ring data-[state=open]:bg-secondary absolute top-4 right-4 rounded-xs opacity-70 transition-opacity hover:opacity-100 focus:ring-2 focus:ring-offset-2 focus:outline-hidden disabled:pointer-events-none">
+          <XIcon className="size-4" />
           <span className="sr-only">Close</span>
         </SheetPrimitive.Close>
       </SheetPrimitive.Content>
@@ -54,7 +52,7 @@ function SheetContent({
 function SheetDescription({ className, ...props }: React.ComponentProps<typeof SheetPrimitive.Description>) {
   return (
     <SheetPrimitive.Description
-      className={cn("text-foreground font-base text-sm", className)}
+      className={cn("text-muted-foreground text-sm", className)}
       data-slot="sheet-description"
       {...props}
     />
@@ -62,7 +60,7 @@ function SheetDescription({ className, ...props }: React.ComponentProps<typeof S
 }
 
 function SheetFooter({ className, ...props }: React.ComponentProps<"div">) {
-  return <div className={cn("mt-auto flex flex-col gap-3 p-4", className)} data-slot="sheet-footer" {...props} />;
+  return <div className={cn("mt-auto flex flex-col gap-2 p-4", className)} data-slot="sheet-footer" {...props} />;
 }
 
 function SheetHeader({ className, ...props }: React.ComponentProps<"div">) {
@@ -73,7 +71,7 @@ function SheetOverlay({ className, ...props }: React.ComponentProps<typeof Sheet
   return (
     <SheetPrimitive.Overlay
       className={cn(
-        "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 bg-overlay fixed inset-0 z-50",
+        "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 fixed inset-0 z-50 bg-black/50",
         className,
       )}
       data-slot="sheet-overlay"
@@ -89,7 +87,7 @@ function SheetPortal({ ...props }: React.ComponentProps<typeof SheetPrimitive.Po
 function SheetTitle({ className, ...props }: React.ComponentProps<typeof SheetPrimitive.Title>) {
   return (
     <SheetPrimitive.Title
-      className={cn("text-foreground font-heading", className)}
+      className={cn("text-foreground font-semibold", className)}
       data-slot="sheet-title"
       {...props}
     />
@@ -100,15 +98,4 @@ function SheetTrigger({ ...props }: React.ComponentProps<typeof SheetPrimitive.T
   return <SheetPrimitive.Trigger data-slot="sheet-trigger" {...props} />;
 }
 
-export {
-  Sheet,
-  SheetClose,
-  SheetContent,
-  SheetDescription,
-  SheetFooter,
-  SheetHeader,
-  SheetOverlay,
-  SheetPortal,
-  SheetTitle,
-  SheetTrigger,
-};
+export { Sheet, SheetClose, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle, SheetTrigger };
