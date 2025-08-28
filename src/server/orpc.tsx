@@ -12,7 +12,6 @@ import { renderToString } from "react-dom/server";
 import { z, ZodError } from "zod";
 
 import packageJson from "~/../package.json" with { type: "json" };
-import { clientEnv } from "~/env/client";
 import { memoryCached } from "~/lib/cache";
 
 import { createServerContext } from "./context";
@@ -104,7 +103,7 @@ const createScalarHtml = memoryCached(
             <meta charSet="utf-8" />
             <meta content="width=device-width, initial-scale=1" name="viewport" />
             <meta content="Zevium OpenAPI" name="description" />
-            <link href="https://orpc.unnoq.com/logo.svg" rel="icon" type="image/svg+xml" />
+            <link href="/icon.png" rel="icon" sizes="256x256" type="image/png" />
             <script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference" />
           </head>
           <body>
