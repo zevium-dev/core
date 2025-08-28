@@ -71,7 +71,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
             <Link to="/">
               <SidebarMenuButton size="lg">
                 <div className="flex aspect-square size-8 items-center justify-center rounded-full bg-black">
-                  <img alt="between cloud" className="size-7" src="/icon.svg" />
+                  <img alt="zevium" className="size-7" src="/icon.png" />
                 </div>
                 <div className="grid flex-1 text-left text-sm leading-tight">
                   <span className="font-heading truncate">zevium.dev</span>
@@ -114,8 +114,8 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                   size="lg"
                 >
                   <Avatar className="h-8 w-8">
-                    <AvatarImage alt="tnfssc" src="https://github.com/tnfssc.png?size=40" />
-                    <AvatarFallback>T</AvatarFallback>
+                    <AvatarImage alt="zevium" src="/icon.png" />
+                    <AvatarFallback>Z</AvatarFallback>
                   </Avatar>
                   <div className="grid flex-1 text-left text-sm leading-tight">
                     <span className="font-heading truncate">Signed In user</span>
