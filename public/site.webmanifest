@@ -3,7 +3,7 @@
   "short_name": "zevium.dev",
   "icons": [
     {
-      "src": "/icon.png",
+      "src": "/logo.png",
       "sizes": "256x256",
       "type": "image/png"
     }

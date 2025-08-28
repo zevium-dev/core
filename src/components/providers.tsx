@@ -8,12 +8,10 @@ import React, { useState } from "react";
 import { toast } from "sonner";
 
 import { ThemeProvider } from "~/components/theme-provider";
-import { SidebarInset, SidebarProvider } from "~/components/ui/sidebar";
 import { clientEnv } from "~/env/client";
 import { createClient, TRPCProvider } from "~/lib/trpc";
 
 import { PostHogIdentify } from "./posthog-identify";
-import { AppSidebar, PageHeader } from "./sidebar";
 import { Toaster } from "./ui/sonner";
 
 let _queryClientSingleton: null | QueryClient = null;
@@ -77,15 +75,9 @@ export const Providers: React.FC<React.PropsWithChildren> = ({ children }) => {
           <ThemeProvider defaultTheme="dark" storageKey="vite-ui-theme">
             <LazyMotion features={domAnimation} strict>
               <JotaiProvider>
-                <SidebarProvider>
-                  <Toaster />
-                  <PostHogIdentify />
-                  <AppSidebar />
-                  <SidebarInset>
-                    <PageHeader />
-                    {children}
-                  </SidebarInset>
-                </SidebarProvider>
+                <Toaster />
+                <PostHogIdentify />
+                {children}
               </JotaiProvider>
             </LazyMotion>
           </ThemeProvider>

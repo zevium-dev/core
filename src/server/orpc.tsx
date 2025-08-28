@@ -104,7 +104,7 @@ const createScalarHtml = memoryCached(
             <meta charSet="utf-8" />
             <meta content="width=device-width, initial-scale=1" name="viewport" />
             <meta content="Zevium OpenAPI" name="description" />
-            <link href="https://orpc.unnoq.com/icon.svg" rel="icon" type="image/svg+xml" />
+            <link href="https://orpc.unnoq.com/logo.svg" rel="icon" type="image/svg+xml" />
             <script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference" />
           </head>
           <body>

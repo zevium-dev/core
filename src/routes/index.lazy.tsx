@@ -1,18 +1,53 @@
 import { createLazyFileRoute } from "@tanstack/react-router";
 
-import { ScreenCenter } from "~/components/ui/screen-center";
+import { Footer } from "~/components/footer";
+import { Hero } from "~/components/home/hero";
+import { PopularApis } from "~/components/home/popular-apis";
+import { Stats } from "~/components/home/stats";
+import { Testimonials } from "~/components/home/testimonials";
+import { TopNav } from "~/components/top-navbar";
+
 export const Route = createLazyFileRoute("/")({
   component: Home,
 });
 
 function Home() {
   return (
-    <ScreenCenter>
-      <div className="z-10 flex items-center justify-center px-4">
-        <div className="text-foreground mx-auto text-3xl font-normal lg:text-5xl">
-          <span>zevium.dev</span>
-        </div>
-      </div>
-    </ScreenCenter>
+    <div className="flex min-h-svh flex-col">
+      <TopNav />
+
+      <main className="flex-1">
+        <Hero />
+
+        <section aria-labelledby="popular-apis" className="border-t">
+          <div className="mx-auto max-w-6xl px-4 py-16 sm:px-6 lg:px-8">
+            <h2 className="text-foreground mb-8 text-xl font-semibold tracking-tight" id="popular-apis">
+              Popular APIs
+            </h2>
+            <PopularApis />
+          </div>
+        </section>
+
+        <section aria-labelledby="success-stats" className="border-t">
+          <div className="mx-auto max-w-6xl px-4 py-16 sm:px-6 lg:px-8">
+            <h2 className="sr-only" id="success-stats">
+              Success Stats
+            </h2>
+            <Stats />
+          </div>
+        </section>
+
+        <section aria-labelledby="testimonials" className="border-t">
+          <div className="mx-auto max-w-6xl px-4 py-16 sm:px-6 lg:px-8">
+            <h2 className="text-foreground mb-8 text-xl font-semibold tracking-tight" id="testimonials">
+              Loved by Developers & API Providers
+            </h2>
+            <Testimonials />
+          </div>
+        </section>
+      </main>
+
+      <Footer />
+    </div>
   );
 }

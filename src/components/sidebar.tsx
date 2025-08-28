@@ -71,7 +71,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
             <Link to="/">
               <SidebarMenuButton size="lg">
                 <div className="flex aspect-square size-8 items-center justify-center rounded-full bg-black">
-                  <img alt="between cloud" className="size-7" src="/icon.svg" />
+                  <img alt="between cloud" className="size-7" src="/logo.svg" />
                 </div>
                 <div className="grid flex-1 text-left text-sm leading-tight">
                   <span className="font-heading truncate">zevium.dev</span>
