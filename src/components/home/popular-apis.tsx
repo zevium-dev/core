@@ -64,7 +64,7 @@ export function PopularApis() {
   return (
     <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
       {popular.map((api) => (
-        <article className="group rounded-lg border p-5 transition-colors hover:bg-accent/40" key={api.name}>
+        <article className="group hover:bg-accent/40 rounded-lg border p-5 transition-colors" key={api.name}>
           <div className="mb-4 flex items-center justify-between">
             <div className="flex items-center gap-3">
               <div className="bg-muted text-foreground/80 grid size-9 place-items-center rounded-md text-sm font-semibold">
@@ -81,8 +81,8 @@ export function PopularApis() {
             </span>
           </div>
           <p className="text-muted-foreground line-clamp-2 text-sm">{api.description}</p>
-          <div className="mt-4 flex items-center gap-2 text-xs text-foreground/80">
-            <Star className="size-4 fill-current text-primary" />
+          <div className="text-foreground/80 mt-4 flex items-center gap-2 text-xs">
+            <Star className="text-primary size-4 fill-current" />
             <span className="font-medium">{api.rating.toFixed(1)}</span>
             <span className="text-muted-foreground">({api.reviews.toLocaleString()})</span>
           </div>

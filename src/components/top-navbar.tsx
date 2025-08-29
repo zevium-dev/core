@@ -9,7 +9,7 @@ export function TopNav() {
       <div className="mx-auto flex h-14 max-w-6xl items-center justify-between px-4 sm:px-6 lg:px-8">
         <div className="flex items-center gap-6">
           <Link className="text-foreground flex items-center gap-2" to="/">
-            <img alt="Zevium" className="size-6" src="/logo.svg" />
+            <img alt="Zevium" className="size-6" src="/icon.png" />
             <span className="font-medium">zevium.dev</span>
           </Link>
           <Link className="text-muted-foreground hover:text-foreground text-sm transition-colors" to="/">
