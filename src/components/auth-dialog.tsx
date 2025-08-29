@@ -185,12 +185,7 @@ export function AuthDialog({ onOpenChange, open }: AuthDialogProps) {
             </>
           )}
 
-          {/* Show message when email auth is disabled */}
-          {!isEmailEnabled && (
-            <div className="text-muted-foreground text-center text-sm">
-              Email authentication is currently disabled in production.
-            </div>
-          )}
+
         </div>
       </DialogContent>
     </Dialog>
