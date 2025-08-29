@@ -5,6 +5,7 @@ interface ImportMeta {
 }
 
 interface ImportMetaEnv {
+  VITE_AUTH_EMAIL_ENABLED?: string;
   // Client
   VITE_PUBLIC_POSTHOG_KEY?: string;
   VITE_PUBLIC_URL?: string;

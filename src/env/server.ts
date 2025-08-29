@@ -1,6 +1,7 @@
 import { type } from "arktype";
 
 const ServerEnvArk = type({
+  "AUTH_EMAIL_ENABLED?": "string | undefined",
   AUTH_GOOGLE_CLIENT_ID: "string",
   AUTH_GOOGLE_CLIENT_SECRET: "string",
   LIBSQL_SECRET: "string",
@@ -10,6 +11,7 @@ const ServerEnvArk = type({
 export type ServerEnv = typeof ServerEnvArk.infer;
 
 export const serverEnv = ServerEnvArk.assert({
+  AUTH_EMAIL_ENABLED: process.env.AUTH_EMAIL_ENABLED,
   AUTH_GOOGLE_CLIENT_ID: process.env.AUTH_GOOGLE_CLIENT_ID,
   AUTH_GOOGLE_CLIENT_SECRET: process.env.AUTH_GOOGLE_CLIENT_SECRET,
   LIBSQL_SECRET: process.env.LIBSQL_SECRET,

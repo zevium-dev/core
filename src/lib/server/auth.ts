@@ -8,6 +8,10 @@ import { serverEnv } from "~/env/server";
 
 export const authServer = betterAuth({
   database: drizzleAdapter(db, { provider: "sqlite", schema }),
+  emailAndPassword: {
+    enabled: serverEnv.AUTH_EMAIL_ENABLED === "true",
+    requireEmailVerification: false, // Simplified for development
+  },
   plugins: [reactStartCookies()],
   socialProviders: {
     google: {
