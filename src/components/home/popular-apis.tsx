@@ -64,7 +64,7 @@ export function PopularApis() {
   return (
     <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
       {popular.map((api) => (
-        <article className="group hover:bg-accent/40 rounded-lg border p-5 transition-colors" key={api.name}>
+        <article className="group hover:bg-accent/40 rounded-lg border p-5 transition-colors cursor-pointer" key={api.name}>
           <div className="mb-4 flex items-center justify-between">
             <div className="flex items-center gap-3">
               <div className="bg-muted text-foreground/80 grid size-9 place-items-center rounded-md text-sm font-semibold">
