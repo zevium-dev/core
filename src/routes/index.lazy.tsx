@@ -1,14 +1,131 @@
 import { createLazyFileRoute } from "@tanstack/react-router";
-import { ArrowRight, Code, BarChart3, Zap, Users, Globe, TrendingUp, Star } from "lucide-react";
+import { ArrowRight, Code, BarChart3, Zap, Users, Globe, TrendingUp, Star, FileText, MessageSquare, Folder, Bot } from "lucide-react";
+import React, { forwardRef, useRef } from "react";
 
 import { Button } from "~/components/ui/button";
 import { Card, CardContent, CardHeader } from "~/components/ui/card";
 import { Badge } from "~/components/ui/badge";
 import { PageHeaderContent } from "~/components/sidebar";
+import { cn } from "~/lib/utils";
+import { AnimatedBeam } from "~/components/magicui/animated-beam";
+import { Ripple } from "~/components/magicui/ripple";
+import { WordRotate } from "~/components/magicui/word-rotate";
 
 export const Route = createLazyFileRoute("/")({
   component: Home,
 });
+
+const Circle = forwardRef<
+  HTMLDivElement,
+  { className?: string; children?: React.ReactNode }
+>(({ className, children }, ref) => {
+  return (
+    <div
+      ref={ref}
+      className={cn(
+        "z-10 flex size-12 items-center justify-center rounded-full border-2 bg-white p-3 shadow-[0_0_20px_-12px_rgba(0,0,0,0.8)]",
+        className,
+      )}
+    >
+      {children}
+    </div>
+  );
+});
+
+Circle.displayName = "Circle";
+
+function AnimatedBeamDemo({
+  className,
+}: {
+  className?: string;
+}) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const div1Ref = useRef<HTMLDivElement>(null);
+  const div2Ref = useRef<HTMLDivElement>(null);
+  const div3Ref = useRef<HTMLDivElement>(null);
+  const div4Ref = useRef<HTMLDivElement>(null);
+  const div5Ref = useRef<HTMLDivElement>(null);
+  const div6Ref = useRef<HTMLDivElement>(null);
+  const div7Ref = useRef<HTMLDivElement>(null);
+
+  return (
+    <div
+      className={cn(
+        "relative flex h-[500px] w-full items-center justify-center overflow-hidden p-10",
+        className,
+      )}
+      ref={containerRef}
+    >
+      <div className="flex size-full max-w-lg flex-row items-stretch justify-between gap-10">
+        <div className="flex flex-col justify-center">
+          <Circle ref={div7Ref}>
+            <Users className="h-6 w-6" />
+          </Circle>
+        </div>
+        <div className="flex flex-col justify-center">
+          <Circle ref={div6Ref} className="size-16">
+            <Bot className="h-8 w-8" />
+          </Circle>
+        </div>
+        <div className="flex flex-col justify-center gap-2">
+          <Circle ref={div1Ref}>
+            <Folder className="h-6 w-6" />
+          </Circle>
+          <Circle ref={div2Ref}>
+            <FileText className="h-6 w-6" />
+          </Circle>
+          <Circle ref={div3Ref}>
+            <MessageSquare className="h-6 w-6" />
+          </Circle>
+          <Circle ref={div4Ref}>
+            <Globe className="h-6 w-6" />
+          </Circle>
+          <Circle ref={div5Ref}>
+            <Code className="h-6 w-6" />
+          </Circle>
+        </div>
+      </div>
+
+      {/* AnimatedBeams */}
+      <AnimatedBeam
+        containerRef={containerRef}
+        fromRef={div1Ref}
+        toRef={div6Ref}
+        duration={3}
+      />
+      <AnimatedBeam
+        containerRef={containerRef}
+        fromRef={div2Ref}
+        toRef={div6Ref}
+        duration={3}
+      />
+      <AnimatedBeam
+        containerRef={containerRef}
+        fromRef={div3Ref}
+        toRef={div6Ref}
+        duration={3}
+      />
+      <AnimatedBeam
+        containerRef={containerRef}
+        fromRef={div4Ref}
+        toRef={div6Ref}
+        duration={3}
+      />
+      <AnimatedBeam
+        containerRef={containerRef}
+        fromRef={div5Ref}
+        toRef={div6Ref}
+        duration={3}
+      />
+      <AnimatedBeam
+        containerRef={containerRef}
+        fromRef={div6Ref}
+        toRef={div7Ref}
+        duration={3}
+      />
+    </div>
+  );
+}
 
 function Home() {
   return (
@@ -32,40 +149,50 @@ function Home() {
 
       <div className="flex-1 space-y-8 p-4 md:p-8 pt-6">
         {/* Hero Section */}
-        <section className="relative py-16">
-          <div className="grid lg:grid-cols-2 gap-12 items-center">
-            <div className="space-y-6">
+        <section className="relative py-16 overflow-hidden">
+          <Ripple />
+          <div className="relative z-10 space-y-12">
+            <div className="text-center space-y-6 max-w-4xl mx-auto">
               <h1 className="text-4xl lg:text-6xl font-bold text-foreground leading-tight">
-                Your dream API is on the market
+                Integrate{" "}
+                <WordRotate
+                  className="inline text-4xl lg:text-6xl font-bold text-blue-600"
+                  words={[
+                    "payments",
+                    "data",
+                    "AI features",
+                    "analytics",
+                    "chat",
+                    "notifications",
+                    "storage",
+                    "messaging",
+                    "monitoring",
+                    "search",
+                    "email",
+                    "CRM",
+                    "e-commerce",
+                    "social media",
+                    "mapping",
+                    "video calls",
+                    "file uploads"
+                  ]}
+                  duration={3000}
+                />{" "}
+                in one click
               </h1>
-              <p className="text-lg text-muted-foreground max-w-lg leading-relaxed">
-                Previously known as RapidX, Nokia API Hub is more than just a catalog for APIs. 
-                Find the perfect API using our discovery features or publish your own APIs and 
-                drive new API revenue streams.
+              <p className="text-lg text-muted-foreground leading-relaxed max-w-3xl mx-auto">
+                Connect any API faster, securely, and reliably through Zevium. 
+                <br />
+                Our unified gateway simplifies integration, reduces complexity, 
+                and accelerates your development workflow.
               </p>
               <Button size="lg" className="bg-blue-600 hover:bg-blue-700">
                 API hub
                 <ArrowRight className="ml-2 h-4 w-4" />
               </Button>
             </div>
-            <div className="relative">
-              <div className="bg-gradient-to-br from-blue-50 to-indigo-100 dark:from-gray-800 dark:to-gray-900 rounded-2xl p-8 border border-blue-200 dark:border-gray-700 shadow-xl">
-                <div className="text-center space-y-6">
-                  <div className="flex justify-center">
-                    <div className="bg-blue-600 p-4 rounded-full">
-                      <Globe className="h-12 w-12 text-white" />
-                    </div>
-                  </div>
-                  <p className="text-muted-foreground font-medium">API Marketplace</p>
-                  <div className="grid grid-cols-3 gap-3">
-                    {[...Array(9)].map((_, i) => (
-                      <div key={i} className="h-12 bg-white dark:bg-gray-800 rounded-lg border shadow-sm flex items-center justify-center">
-                        <div className="w-8 h-2 bg-gradient-to-r from-blue-400 to-purple-400 rounded-full"></div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
+            <div className="flex justify-center">
+              <AnimatedBeamDemo />
             </div>
           </div>
         </section>
