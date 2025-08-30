@@ -12,17 +12,14 @@ interface WordRotateProps {
   words: Array<string>;
 }
 
-export function WordRotate({
-  className,
-  duration = 2500,
-  motionProps = {
-    animate: { opacity: 1, y: 0 },
-    exit: { opacity: 0, y: 50 },
-    initial: { opacity: 0, y: -50 },
-    transition: { duration: 0.25, ease: "easeOut" },
-  },
-  words,
-}: WordRotateProps) {
+const defaultMotionProps: MotionProps = {
+  animate: { opacity: 1, y: 0 },
+  exit: { opacity: 0, y: 50 },
+  initial: { opacity: 0, y: -50 },
+  transition: { duration: 0.25, ease: "easeOut" },
+};
+
+export function WordRotate({ className, duration = 2500, motionProps = defaultMotionProps, words }: WordRotateProps) {
   const [index, setIndex] = useState(0);
 
   useEffect(() => {

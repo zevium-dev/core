@@ -22,23 +22,20 @@ export const TextReveal: FC<TextRevealProps> = ({ children, className }) => {
   const words = children.split(" ");
 
   return (
-    <div ref={targetRef} className={cn("relative z-0 h-[200vh]", className)}>
-      <div
-        className={
-          "sticky top-0 mx-auto flex h-[50%] max-w-4xl items-center bg-transparent px-[1rem] py-[5rem]"
-        }
-      >
+    <div className={cn("relative z-0 h-[200vh]", className)} ref={targetRef}>
+      <div className={"sticky top-0 mx-auto flex h-[50%] max-w-4xl items-center bg-transparent px-[1rem] py-[5rem]"}>
         <span
-          ref={targetRef}
           className={
-            "flex flex-wrap p-5 text-2xl font-bold text-black/20 dark:text-white/20 md:p-8 md:text-3xl lg:p-10 lg:text-4xl xl:text-5xl"
+            "flex flex-wrap p-5 text-2xl font-bold text-black/20 md:p-8 md:text-3xl lg:p-10 lg:text-4xl xl:text-5xl dark:text-white/20"
           }
+          ref={targetRef}
         >
           {words.map((word, i) => {
             const start = i / words.length;
             const end = start + 1 / words.length;
             return (
-              <Word key={i} progress={scrollYProgress} range={[start, end]}>
+              // eslint-disable-next-line @eslint-react/no-array-index-key
+              <Word key={`reveal-word-${word.trim() || "space"}-${i}`} progress={scrollYProgress} range={[start, end]}>
                 {word}
               </Word>
             );
@@ -60,10 +57,7 @@ const Word: FC<WordProps> = ({ children, progress, range }) => {
   return (
     <span className="xl:lg-3 relative mx-1 lg:mx-1.5">
       <span className="absolute opacity-30">{children}</span>
-      <m.span
-        style={{ opacity: opacity }}
-        className={"text-black dark:text-white"}
-      >
+      <m.span className={"text-black dark:text-white"} style={{ opacity: opacity }}>
         {children}
       </m.span>
     </span>
