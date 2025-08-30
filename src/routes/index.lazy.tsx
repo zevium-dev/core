@@ -16,7 +16,9 @@ import {
 import React, { forwardRef, useRef } from "react";
 
 import { AnimatedBeam } from "~/components/magicui/animated-beam";
+import { NumberTicker } from "~/components/magicui/number-ticker";
 import { Ripple } from "~/components/magicui/ripple";
+import { TextAnimate } from "~/components/magicui/text-animate";
 import { WordRotate } from "~/components/magicui/word-rotate";
 import { PageHeaderContent } from "~/components/sidebar";
 import { Badge } from "~/components/ui/badge";
@@ -176,7 +178,7 @@ function Home() {
                 Integrate{" "}
                 <WordRotate
                   className="inline text-4xl font-bold text-blue-600 lg:text-6xl"
-                  duration={3000}
+                  duration={2500}
                   words={[
                     "payments",
                     "data",
@@ -220,8 +222,13 @@ function Home() {
         <section className="bg-muted/30 rounded-2xl py-20">
           <div className="space-y-16 text-center">
             <div className="space-y-4">
-              <h2 className="text-foreground text-4xl font-bold lg:text-6xl">World's largest public</h2>
-              <h2 className="text-foreground text-4xl font-bold lg:text-6xl">API Hub</h2>
+              <TextAnimate
+                animation="blurInUp"
+                by="character"
+                className="text-foreground text-4xl font-bold lg:text-6xl"
+              >
+                World's largest public API Hub
+              </TextAnimate>
             </div>
 
             <div className="grid gap-12 md:grid-cols-3">
@@ -229,21 +236,27 @@ function Home() {
                 <div className="mb-6 inline-flex h-20 w-20 items-center justify-center rounded-full bg-blue-100 transition-transform duration-300 group-hover:scale-110 dark:bg-blue-900/20">
                   <Users className="h-10 w-10 text-blue-600" />
                 </div>
-                <div className="text-foreground mb-3 text-5xl font-bold lg:text-7xl">7M+</div>
+                <div className="text-foreground mb-3 text-5xl font-bold lg:text-7xl">
+                  <NumberTicker value={7} />M+
+                </div>
                 <p className="text-lg font-semibold text-blue-600">Developers</p>
               </div>
               <div className="group cursor-pointer text-center">
                 <div className="mb-6 inline-flex h-20 w-20 items-center justify-center rounded-full bg-green-100 transition-transform duration-300 group-hover:scale-110 dark:bg-green-900/20">
                   <Code className="h-10 w-10 text-green-600" />
                 </div>
-                <div className="text-foreground mb-3 text-5xl font-bold lg:text-7xl">75K+</div>
+                <div className="text-foreground mb-3 text-5xl font-bold lg:text-7xl">
+                  <NumberTicker value={75} />K+
+                </div>
                 <p className="text-lg font-semibold text-green-600">APIs in the Hub</p>
               </div>
               <div className="group cursor-pointer text-center">
                 <div className="mb-6 inline-flex h-20 w-20 items-center justify-center rounded-full bg-purple-100 transition-transform duration-300 group-hover:scale-110 dark:bg-purple-900/20">
                   <TrendingUp className="h-10 w-10 text-purple-600" />
                 </div>
-                <div className="text-foreground mb-3 text-5xl font-bold lg:text-7xl">8B+</div>
+                <div className="text-foreground mb-3 text-5xl font-bold lg:text-7xl">
+                  <NumberTicker value={8} />B+
+                </div>
                 <p className="text-lg font-semibold text-purple-600">API calls per month</p>
               </div>
             </div>
@@ -275,8 +288,8 @@ function Home() {
                   <div className="ml-8 text-orange-400">projectSlugType: '2'</div>
                   <div className="ml-4 text-purple-400">{"},"}</div>
                   <div className="ml-4 text-blue-400">headers: {"{"}</div>
-                  <div className="ml-8 text-green-400">'X-RapidAPI-Key': 'API-KEY-HERE',</div>
-                  <div className="ml-8 text-green-400">'X-RapidAPI-Host': 'example-in-live-sc...'</div>
+                  <div className="ml-8 text-green-400">'X-Zevium-Key': 'API-KEY-HERE',</div>
+                  <div className="ml-8 text-green-400">'X-Zevium-Host': 'example-in-live-sc...'</div>
                   <div className="ml-4 text-blue-400">{"}"}</div>
                   <div className="text-yellow-400">{"};"}</div>
                   <div className="mt-4 text-blue-400">try {"{"}</div>
