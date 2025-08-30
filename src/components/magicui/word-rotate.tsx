@@ -6,22 +6,22 @@ import { useEffect, useState } from "react";
 import { cn } from "~/lib/utils/index";
 
 interface WordRotateProps {
-  words: string[];
+  className?: string;
   duration?: number;
   motionProps?: MotionProps;
-  className?: string;
+  words: Array<string>;
 }
 
 export function WordRotate({
-  words,
+  className,
   duration = 2500,
   motionProps = {
-    initial: { opacity: 0, y: -50 },
     animate: { opacity: 1, y: 0 },
     exit: { opacity: 0, y: 50 },
+    initial: { opacity: 0, y: -50 },
     transition: { duration: 0.25, ease: "easeOut" },
   },
-  className,
+  words,
 }: WordRotateProps) {
   const [index, setIndex] = useState(0);
 
@@ -37,11 +37,7 @@ export function WordRotate({
   return (
     <div className="overflow-hidden py-2">
       <AnimatePresence mode="wait">
-        <m.h1
-          key={words[index]}
-          className={cn(className)}
-          {...motionProps}
-        >
+        <m.h1 className={cn(className)} key={words[index]} {...motionProps}>
           {words[index]}
         </m.h1>
       </AnimatePresence>

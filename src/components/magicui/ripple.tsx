@@ -3,22 +3,22 @@ import React, { ComponentPropsWithoutRef, CSSProperties } from "react";
 import { cn } from "~/lib/utils/index";
 
 interface RippleProps extends ComponentPropsWithoutRef<"div"> {
-  mainCircleSize?: number;
   mainCircleOpacity?: number;
+  mainCircleSize?: number;
   numCircles?: number;
 }
 
 export const Ripple = React.memo(function Ripple({
-  mainCircleSize = 210,
-  mainCircleOpacity = 0.24,
-  numCircles = 8,
   className,
+  mainCircleOpacity = 0.24,
+  mainCircleSize = 210,
+  numCircles = 8,
   ...props
 }: RippleProps) {
   return (
     <div
       className={cn(
-        "pointer-events-none absolute inset-0 select-none [mask-image:linear-gradient(to_bottom,white,transparent)]",
+        "pointer-events-none absolute inset-0 [mask-image:linear-gradient(to_bottom,white,transparent)] select-none",
         className,
       )}
       {...props}
@@ -31,21 +31,21 @@ export const Ripple = React.memo(function Ripple({
 
         return (
           <div
+            className={`animate-ripple bg-foreground/25 absolute rounded-full border shadow-xl`}
             key={i}
-            className={`absolute animate-ripple rounded-full border bg-foreground/25 shadow-xl`}
             style={
               {
                 "--i": i,
-                width: `${size}px`,
-                height: `${size}px`,
-                opacity,
                 animationDelay,
+                borderColor: `var(--foreground)`,
                 borderStyle,
                 borderWidth: "1px",
-                borderColor: `var(--foreground)`,
-                top: "50%",
+                height: `${size}px`,
                 left: "50%",
+                opacity,
+                top: "50%",
                 transform: "translate(-50%, -50%) scale(1)",
+                width: `${size}px`,
               } as CSSProperties
             }
           />
