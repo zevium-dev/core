@@ -22,7 +22,7 @@ function Home() {
       <PageHeaderContent>
         <div className="flex w-full items-center gap-4">
           <div className="flex items-center space-x-2">
-            <Globe className="h-5 w-5 text-blue-600" />
+            <Globe className="h-5 w-5 text-primary" />
             <span className="font-semibold">API Hub Dashboard</span>
           </div>
         </div>
@@ -32,12 +32,13 @@ function Home() {
         {/* Hero Section */}
         <section className="relative overflow-hidden py-16">
           <Ripple />
+          <div className="absolute inset-0 bg-gradient-to-br from-chart-1/5 via-transparent to-chart-3/5"></div>
           <div className="relative z-10 space-y-12">
             <div className="mx-auto max-w-4xl space-y-6 text-center">
               <h1 className="text-foreground text-4xl leading-tight font-bold lg:text-6xl">
                 Integrate{" "}
                 <WordRotate
-                  className="inline text-4xl font-bold text-blue-600 lg:text-6xl"
+                  className="inline text-4xl font-bold text-primary lg:text-6xl"
                   duration={2500}
                   words={[
                     "payments",
@@ -67,7 +68,7 @@ function Home() {
                 Our unified gateway simplifies integration, reduces complexity, and accelerates your development
                 workflow.
               </p>
-              <Button className="bg-blue-600 hover:bg-blue-700" size="lg">
+              <Button className="bg-gradient-to-r from-chart-1 to-chart-3 hover:from-chart-1/90 hover:to-chart-3/90 text-primary-foreground shadow-lg" size="lg">
                 API hub
                 <ArrowRight className="ml-2 h-4 w-4" />
               </Button>
@@ -79,7 +80,7 @@ function Home() {
         </section>
 
         {/* Stats Section */}
-        <section className="bg-muted/30 rounded-2xl py-20">
+        <section className="bg-gradient-to-r from-chart-1/5 via-muted/30 to-chart-4/5 rounded-2xl py-20">
           <div className="space-y-16 text-center">
             <div className="space-y-4">
               <TextAnimate
@@ -93,34 +94,34 @@ function Home() {
 
             <div className="grid gap-12 md:grid-cols-3">
               <div className="group cursor-pointer text-center">
-                <div className="mb-6 inline-flex h-20 w-20 items-center justify-center rounded-full bg-blue-100 transition-transform duration-300 group-hover:scale-110 dark:bg-blue-900/20">
-                  <Users className="h-10 w-10 text-blue-600" />
+                <div className="mb-6 inline-flex h-20 w-20 items-center justify-center rounded-full bg-chart-1/10 transition-transform duration-300 group-hover:scale-110 dark:bg-chart-1/20">
+                  <Users className="h-10 w-10 text-chart-1" />
                 </div>
                 <div className="text-foreground mb-3 text-5xl font-bold lg:text-7xl">
                   <NumberTicker value={7} />
                   M+
                 </div>
-                <p className="text-lg font-semibold text-blue-600">Developers</p>
+                <p className="text-lg font-semibold text-chart-1">Developers</p>
               </div>
               <div className="group cursor-pointer text-center">
-                <div className="mb-6 inline-flex h-20 w-20 items-center justify-center rounded-full bg-green-100 transition-transform duration-300 group-hover:scale-110 dark:bg-green-900/20">
-                  <Code className="h-10 w-10 text-green-600" />
+                <div className="mb-6 inline-flex h-20 w-20 items-center justify-center rounded-full bg-chart-4/10 transition-transform duration-300 group-hover:scale-110 dark:bg-chart-4/20">
+                  <Code className="h-10 w-10 text-chart-4" />
                 </div>
                 <div className="text-foreground mb-3 text-5xl font-bold lg:text-7xl">
                   <NumberTicker value={75} />
                   K+
                 </div>
-                <p className="text-lg font-semibold text-green-600">APIs in the Hub</p>
+                <p className="text-lg font-semibold text-chart-4">APIs in the Hub</p>
               </div>
               <div className="group cursor-pointer text-center">
-                <div className="mb-6 inline-flex h-20 w-20 items-center justify-center rounded-full bg-purple-100 transition-transform duration-300 group-hover:scale-110 dark:bg-purple-900/20">
-                  <TrendingUp className="h-10 w-10 text-purple-600" />
+                <div className="mb-6 inline-flex h-20 w-20 items-center justify-center rounded-full bg-chart-5/10 transition-transform duration-300 group-hover:scale-110 dark:bg-chart-5/20">
+                  <TrendingUp className="h-10 w-10 text-chart-5" />
                 </div>
                 <div className="text-foreground mb-3 text-5xl font-bold lg:text-7xl">
                   <NumberTicker value={8} />
                   B+
                 </div>
-                <p className="text-lg font-semibold text-purple-600">API calls per month</p>
+                <p className="text-lg font-semibold text-chart-5">API calls per month</p>
               </div>
             </div>
           </div>
@@ -131,43 +132,43 @@ function Home() {
           {/* Publish APIs */}
           <div className="grid items-center gap-16 lg:grid-cols-2">
             <div>
-              <Card className="border-gray-700 bg-gray-900 text-white shadow-2xl dark:bg-gray-950">
+              <Card className="border-chart-2/20 bg-gradient-to-br from-gray-900 via-chart-2/5 to-gray-950 text-white shadow-2xl">
                 <CardHeader className="pb-4">
                   <div className="mb-4 flex items-center gap-3">
-                    <Badge className="bg-blue-100 px-3 py-1 text-blue-900" variant="secondary">
+                    <Badge className="bg-chart-1/10 px-3 py-1 text-chart-1" variant="secondary">
                       Node.js Axios
                     </Badge>
-                    <Button className="text-blue-400 hover:text-blue-300" size="sm" variant="ghost">
+                    <Button className="text-chart-3 hover:text-chart-3/80" size="sm" variant="ghost">
                       Copy Code
                     </Button>
                   </div>
                 </CardHeader>
                 <CardContent className="space-y-1 font-mono text-sm">
-                  <div className="text-blue-400">const axios = require('axios');</div>
+                  <div className="text-chart-3">const axios = require('axios');</div>
                   <div className="text-yellow-400">const options = {"{"};</div>
-                  <div className="ml-4 text-green-400">method: 'GET',</div>
-                  <div className="ml-4 text-green-400">url: 'https://example-api-url.in-game.ra...',</div>
-                  <div className="ml-4 text-purple-400">params: {"{"}</div>
+                  <div className="ml-4 text-chart-4">method: 'GET',</div>
+                  <div className="ml-4 text-chart-4">url: 'https://example-api-url.in-game.ra...',</div>
+                  <div className="ml-4 text-chart-5">params: {"{"}</div>
                   <div className="ml-8 text-orange-400">projectSlugType: '2'</div>
-                  <div className="ml-4 text-purple-400">{"},"}</div>
-                  <div className="ml-4 text-blue-400">headers: {"{"}</div>
-                  <div className="ml-8 text-green-400">'X-Zevium-Key': 'API-KEY-HERE',</div>
-                  <div className="ml-8 text-green-400">'X-Zevium-Host': 'example-in-live-sc...'</div>
-                  <div className="ml-4 text-blue-400">{"}"}</div>
+                  <div className="ml-4 text-chart-5">{"},"}</div>
+                  <div className="ml-4 text-chart-3">headers: {"{"}</div>
+                  <div className="ml-8 text-chart-4">'X-Zevium-Key': 'API-KEY-HERE',</div>
+                  <div className="ml-8 text-chart-4">'X-Zevium-Host': 'example-in-live-sc...'</div>
+                  <div className="ml-4 text-chart-3">{"}"}</div>
                   <div className="text-yellow-400">{"};"}</div>
-                  <div className="mt-4 text-blue-400">try {"{"}</div>
-                  <div className="ml-4 text-green-400">const response = await axios.request(options);</div>
-                  <div className="ml-4 text-green-400">console.log(response.data);</div>
-                  <div className="text-blue-400">{"} catch (error) {"}</div>
+                  <div className="mt-4 text-chart-3">try {"{"}</div>
+                  <div className="ml-4 text-chart-4">const response = await axios.request(options);</div>
+                  <div className="ml-4 text-chart-4">console.log(response.data);</div>
+                  <div className="text-chart-3">{"} catch (error) {"}</div>
                   <div className="ml-4 text-red-400">console.error(error);</div>
-                  <div className="text-blue-400">{"}"}</div>
+                  <div className="text-chart-3">{"}"}</div>
                 </CardContent>
               </Card>
             </div>
             <div className="space-y-6">
               <div className="flex items-center gap-4">
-                <div className="rounded-xl bg-blue-100 p-3 dark:bg-blue-900/20">
-                  <Zap className="h-8 w-8 text-blue-600" />
+                <div className="rounded-xl bg-chart-1/10 p-3 dark:bg-chart-1/20">
+                  <Zap className="h-8 w-8 text-chart-1" />
                 </div>
                 <h3 className="text-foreground text-4xl font-bold">Publish APIs</h3>
               </div>
@@ -182,8 +183,8 @@ function Home() {
           <div className="grid items-center gap-16 lg:grid-cols-2">
             <div className="order-2 space-y-6 lg:order-1">
               <div className="flex items-center gap-4">
-                <div className="rounded-xl bg-green-100 p-3 dark:bg-green-900/20">
-                  <Globe className="h-8 w-8 text-green-600" />
+                <div className="rounded-xl bg-chart-4/10 p-3 dark:bg-chart-4/20">
+                  <Globe className="h-8 w-8 text-chart-4" />
                 </div>
                 <h3 className="text-foreground text-4xl font-bold">Consume APIs</h3>
               </div>
@@ -193,30 +194,31 @@ function Home() {
               </p>
             </div>
             <div className="order-1 lg:order-2">
-              <Card className="border bg-white shadow-2xl dark:bg-gray-900">
+              <Card className="border-chart-4/20 bg-gradient-to-br from-white via-chart-4/5 to-white shadow-2xl dark:from-gray-900 dark:via-chart-4/10 dark:to-gray-900">
                 <CardContent className="p-8">
                   <div className="space-y-6">
                     <div className="flex items-center gap-3">
-                      <div className="h-4 w-4 rounded-full bg-red-500"></div>
-                      <div className="h-4 w-4 rounded-full bg-yellow-500"></div>
-                      <div className="h-4 w-4 rounded-full bg-green-500"></div>
+                      <div className="h-4 w-4 rounded-full bg-red-500 shadow-sm"></div>
+                      <div className="h-4 w-4 rounded-full bg-yellow-500 shadow-sm"></div>
+                      <div className="h-4 w-4 rounded-full bg-green-500 shadow-sm"></div>
+                      <div className="ml-auto text-xs text-muted-foreground">API Browser</div>
                     </div>
                     <div className="space-y-4">
                       <div className="flex items-center gap-3">
-                        <div className="h-5 w-5 rounded bg-gray-300 dark:bg-gray-600"></div>
-                        <div className="h-3 flex-1 rounded bg-gray-300 dark:bg-gray-600"></div>
+                        <div className="h-5 w-5 rounded bg-muted-foreground/30"></div>
+                        <div className="h-3 flex-1 rounded bg-muted-foreground/30"></div>
                       </div>
                       <div className="flex items-center gap-3">
-                        <div className="h-5 w-5 rounded bg-blue-500"></div>
-                        <div className="h-3 w-2/3 rounded bg-blue-500"></div>
+                        <div className="h-5 w-5 rounded bg-chart-1"></div>
+                        <div className="h-3 w-2/3 rounded bg-chart-1"></div>
                       </div>
                       <div className="flex items-center gap-3">
-                        <div className="h-5 w-5 rounded bg-gray-300 dark:bg-gray-600"></div>
-                        <div className="h-3 w-1/2 rounded bg-gray-300 dark:bg-gray-600"></div>
+                        <div className="h-5 w-5 rounded bg-muted-foreground/30"></div>
+                        <div className="h-3 w-1/2 rounded bg-muted-foreground/30"></div>
                       </div>
                       <div className="flex items-center gap-3">
-                        <div className="h-5 w-5 rounded bg-purple-500"></div>
-                        <div className="h-3 w-3/4 rounded bg-purple-500"></div>
+                        <div className="h-5 w-5 rounded bg-chart-5"></div>
+                        <div className="h-3 w-3/4 rounded bg-chart-5"></div>
                       </div>
                     </div>
                   </div>
@@ -228,14 +230,14 @@ function Home() {
           {/* Manage APIs */}
           <div className="grid items-center gap-16 lg:grid-cols-2">
             <div>
-              <Card className="border bg-white shadow-2xl dark:bg-gray-900">
+              <Card className="border-chart-5/20 bg-gradient-to-br from-white via-chart-5/5 to-white shadow-2xl dark:from-gray-900 dark:via-chart-5/10 dark:to-gray-900">
                 <CardContent className="p-8">
                   <div className="space-y-6">
                     <div className="flex items-center justify-between">
-                      <Badge className="px-3 py-1" variant="outline">
+                      <Badge className="bg-gradient-to-r from-chart-1/10 to-chart-3/10 px-3 py-1 text-chart-1 border-chart-1/20" variant="outline">
                         General Settings
                       </Badge>
-                      <div className="text-muted-foreground text-sm font-medium">100%</div>
+                      <div className="text-chart-4 text-sm font-medium">100%</div>
                     </div>
                     <div className="space-y-5">
                       <div className="space-y-2">
@@ -243,9 +245,9 @@ function Home() {
                           <span className="text-sm font-medium">API Calls</span>
                           <span className="text-sm font-bold">8.8/10</span>
                         </div>
-                        <div className="h-3 w-full rounded-full bg-gray-200 dark:bg-gray-700">
+                        <div className="h-3 w-full rounded-full bg-muted">
                           <div
-                            className="h-3 rounded-full bg-green-500 transition-all duration-500"
+                            className="h-3 rounded-full bg-chart-4 transition-all duration-500"
                             style={{ width: "88%" }}
                           ></div>
                         </div>
@@ -255,8 +257,8 @@ function Home() {
                           <span className="text-sm font-medium">Performance</span>
                           <span className="text-sm font-bold">100%</span>
                         </div>
-                        <div className="h-3 w-full rounded-full bg-gray-200 dark:bg-gray-700">
-                          <div className="h-3 w-full rounded-full bg-green-500 transition-all duration-500"></div>
+                        <div className="h-3 w-full rounded-full bg-muted">
+                          <div className="h-3 w-full rounded-full bg-chart-4 transition-all duration-500"></div>
                         </div>
                       </div>
                       <div className="space-y-2">
@@ -264,9 +266,9 @@ function Home() {
                           <span className="text-sm font-medium">Uptime</span>
                           <span className="text-sm font-bold">99.9%</span>
                         </div>
-                        <div className="h-3 w-full rounded-full bg-gray-200 dark:bg-gray-700">
+                        <div className="h-3 w-full rounded-full bg-muted">
                           <div
-                            className="h-3 rounded-full bg-blue-500 transition-all duration-500"
+                            className="h-3 rounded-full bg-chart-1 transition-all duration-500"
                             style={{ width: "99%" }}
                           ></div>
                         </div>
@@ -278,8 +280,8 @@ function Home() {
             </div>
             <div className="space-y-6">
               <div className="flex items-center gap-4">
-                <div className="rounded-xl bg-purple-100 p-3 dark:bg-purple-900/20">
-                  <BarChart3 className="h-8 w-8 text-purple-600" />
+                <div className="rounded-xl bg-chart-5/10 p-3 dark:bg-chart-5/20">
+                  <BarChart3 className="h-8 w-8 text-chart-5" />
                 </div>
                 <h3 className="text-foreground text-4xl font-bold">Manage APIs</h3>
               </div>
@@ -293,11 +295,11 @@ function Home() {
         </section>
 
         {/* Footer */}
-        <footer className="border-border/40 mt-20 border-t py-20">
+        <footer className="border-border/40 mt-20 border-t bg-gradient-to-b from-transparent to-chart-2/5 py-20">
           <div className="grid gap-12 md:grid-cols-4">
             <div className="col-span-2 space-y-6">
               <div className="flex items-center space-x-3">
-                <Globe className="h-8 w-8 text-blue-600" />
+                <Globe className="h-8 w-8 text-primary" />
                 <span className="text-2xl font-bold">Zevium API Hub</span>
               </div>
               <p className="text-muted-foreground max-w-md leading-relaxed">
@@ -305,13 +307,13 @@ function Home() {
                 our comprehensive API ecosystem.
               </p>
               <div className="flex space-x-3">
-                <Button className="hover:border-blue-200 hover:bg-blue-50" size="icon" variant="outline">
+                <Button className="hover:border-chart-1/20 hover:bg-chart-1/5" size="icon" variant="outline">
                   <Globe className="h-5 w-5" />
                 </Button>
-                <Button className="hover:border-green-200 hover:bg-green-50" size="icon" variant="outline">
+                <Button className="hover:border-chart-4/20 hover:bg-chart-4/5" size="icon" variant="outline">
                   <Code className="h-5 w-5" />
                 </Button>
-                <Button className="hover:border-purple-200 hover:bg-purple-50" size="icon" variant="outline">
+                <Button className="hover:border-chart-5/20 hover:bg-chart-5/5" size="icon" variant="outline">
                   <Users className="h-5 w-5" />
                 </Button>
               </div>
