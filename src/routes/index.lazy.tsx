@@ -25,14 +25,6 @@ function Home() {
             <Globe className="h-5 w-5 text-blue-600" />
             <span className="font-semibold">API Hub Dashboard</span>
           </div>
-          <div className="ml-auto flex items-center space-x-2">
-            <Button size="sm" variant="ghost">
-              Sign in
-            </Button>
-            <Button className="bg-blue-600 hover:bg-blue-700" size="sm">
-              Get started
-            </Button>
-          </div>
         </div>
       </PageHeaderContent>
 
