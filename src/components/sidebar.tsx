@@ -1,6 +1,6 @@
 import { Link, useMatches } from "@tanstack/react-router";
 import { atom, useAtom } from "jotai";
-import { HomeIcon } from "lucide-react";
+import { Database, HomeIcon } from "lucide-react";
 import * as React from "react";
 
 import { Avatar, AvatarFallback, AvatarImage } from "~/components/ui/avatar";
@@ -56,6 +56,11 @@ const navData = [
     icon: HomeIcon,
     title: "Home",
     url: "/",
+  },
+  {
+    icon: Database,
+    title: "API Catalogue",
+    url: "/catalogue",
   },
 ];
 
