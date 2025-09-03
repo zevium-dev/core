@@ -93,28 +93,39 @@ const categories = [
 
 function APICard({ api }: { api: typeof mockAPIs[0] }) {
   return (
-    <Card className="group hover:shadow-lg transition-all duration-300 border-border/50 hover:border-border bg-card/50 backdrop-blur-sm">
-      <CardHeader className="pb-4">
-        <div className="flex items-start justify-between">
-          <div className="space-y-2 flex-1">
-            <h3 className="font-semibold text-lg text-foreground group-hover:text-primary transition-colors">
+    <Card className="group hover:shadow-lg transition-all duration-300 border-border/50 hover:border-border bg-card/50 backdrop-blur-sm h-full flex flex-col cursor-pointer">
+      <CardHeader className="pb-6">
+        <div className="space-y-3">
+          {/* Title and Category Badge */}
+          <div className="flex items-start justify-between gap-4">
+            <h3 className="font-semibold text-lg text-foreground group-hover:text-primary transition-colors leading-tight">
               {api.title}
             </h3>
-            <CardDescription className="text-sm leading-relaxed">
-              {api.description}
-            </CardDescription>
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              <span>by</span>
-              <span className="font-medium text-foreground">{api.provider}</span>
-            </div>
+            <Badge className="shrink-0" variant="outline">
+              {api.category}
+            </Badge>
           </div>
-          <Badge className="shrink-0 ml-4" variant="outline">
-            {api.category}
-          </Badge>
+          
+          {/* Provider */}
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <span>by</span>
+            <span className="font-medium text-foreground">{api.provider}</span>
+          </div>
         </div>
       </CardHeader>
       
-      <CardContent className="pt-0">
+      <CardContent className="flex-1 flex flex-col pt-0 pb-6">
+        {/* Description - Full Width */}
+        <div className="mb-6">
+          <CardDescription className="text-sm leading-relaxed">
+            {api.description}
+          </CardDescription>
+        </div>
+        
+        {/* Spacer to push footer content to bottom */}
+        <div className="flex-1"></div>
+        
+        {/* Footer Content - Tags and Metrics */}
         <div className="space-y-4">
           {/* Tags */}
           <div className="flex flex-wrap gap-1.5">
@@ -126,31 +137,31 @@ function APICard({ api }: { api: typeof mockAPIs[0] }) {
           </div>
           
           {/* Metrics */}
-          <div className="grid grid-cols-3 gap-4 pt-2 border-t border-border/50">
+          <div className="grid grid-cols-3 gap-4 pt-4 border-t border-border/50">
             <div className="text-center">
-              <div className="flex items-center justify-center gap-1 text-muted-foreground mb-1">
+              <div className="flex items-center justify-center gap-1 text-muted-foreground mb-1.5">
                 <Activity className="size-3" />
-                <span className="text-xs">Calls</span>
+                <span className="text-xs font-medium">Calls</span>
               </div>
-              <div className="text-sm font-semibold">
+              <div className="text-sm font-semibold text-foreground">
                 {api.callCount.toLocaleString()}
               </div>
             </div>
             
             <div className="text-center">
-              <div className="flex items-center justify-center gap-1 text-muted-foreground mb-1">
+              <div className="flex items-center justify-center gap-1 text-muted-foreground mb-1.5">
                 <Clock className="size-3" />
-                <span className="text-xs">Latency</span>
+                <span className="text-xs font-medium">Latency</span>
               </div>
-              <div className="text-sm font-semibold">
+              <div className="text-sm font-semibold text-foreground">
                 {api.latency}ms
               </div>
             </div>
             
             <div className="text-center">
-              <div className="flex items-center justify-center gap-1 text-muted-foreground mb-1">
+              <div className="flex items-center justify-center gap-1 text-muted-foreground mb-1.5">
                 <TrendingUp className="size-3" />
-                <span className="text-xs">Success</span>
+                <span className="text-xs font-medium">Success</span>
               </div>
               <div className="text-sm font-semibold text-green-600 dark:text-green-400">
                 {api.successRate}%
@@ -171,12 +182,12 @@ function CategorySidebar({
   selectedCategory: string
 }) {
   return (
-    <aside className="w-64 shrink-0 space-y-2">
-      <h2 className="font-semibold text-sm text-muted-foreground uppercase tracking-wide mb-4">
+    <aside className="w-64 shrink-0 space-y-3">
+      <h2 className="font-semibold text-sm text-muted-foreground uppercase tracking-wide px-3">
         Categories
       </h2>
       
-      <nav className="space-y-1">
+      <nav className="space-y-1 px-2">
         {categories.map((category) => {
           const Icon = category.icon
           const isActive = selectedCategory === category.id
@@ -184,9 +195,9 @@ function CategorySidebar({
           return (
             <Button
               className={cn(
-                "w-full justify-start gap-3 h-10 px-3 transition-all duration-200",
+                "w-full justify-start gap-3 h-11 px-3 transition-all duration-200 rounded-lg",
                 isActive 
-                  ? "bg-primary/10 text-primary border-r-2 border-primary" 
+                  ? "bg-primary/10 text-primary border-r-2 border-primary shadow-sm" 
                   : "text-muted-foreground hover:text-foreground hover:bg-accent/50"
               )}
               key={category.id}
@@ -194,9 +205,9 @@ function CategorySidebar({
               variant="ghost"
             >
               <Icon className="size-4 shrink-0" />
-              <span className="flex-1 text-left truncate">{category.name}</span>
+              <span className="flex-1 text-left truncate font-medium">{category.name}</span>
               <Badge 
-                className="text-xs px-1.5 py-0.5 min-w-[1.5rem] h-5"
+                className="text-xs px-2 py-0.5 min-w-[1.75rem] h-5 font-medium"
                 variant={isActive ? "default" : "secondary"}
               >
                 {category.count}
@@ -246,22 +257,22 @@ function RouteComponent() {
     <div className="min-h-screen bg-background">
       {/* Header */}
       <header className="border-b border-border/50 bg-background/80 backdrop-blur-sm sticky top-0 z-10">
-        <div className="max-w-7xl mx-auto px-6 py-6">
-          <div className="space-y-4">
-            <div>
-              <h1 className="text-3xl font-bold tracking-tight text-foreground">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
+          <div className="space-y-6">
+            <div className="space-y-2">
+              <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground">
                 API Catalogue
               </h1>
-              <p className="text-muted-foreground mt-2">
+              <p className="text-muted-foreground text-sm sm:text-base">
                 Discover and integrate powerful APIs to enhance your applications
               </p>
             </div>
             
             {/* Search Bar */}
-            <div className="relative max-w-md lg:max-w-lg xl:max-w-xl">
+            <div className="relative max-w-full sm:max-w-md lg:max-w-lg xl:max-w-xl">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground size-4" />
               <Input
-                className="pl-10 h-10 bg-background/50 border-border/50 focus:border-primary/50"
+                className="pl-10 h-11 bg-background/50 border-border/50 focus:border-primary/50 text-sm"
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Search APIs, providers, or technologies..."
                 value={searchQuery}
@@ -272,40 +283,89 @@ function RouteComponent() {
       </header>
 
       {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-6 py-8">
-        <div className="flex gap-8">
-          {/* Sidebar */}
-          <CategorySidebar 
-            onCategoryChange={setSelectedCategory}
-            selectedCategory={selectedCategory}
-          />
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
+        <div className="flex flex-col lg:flex-row gap-8">
+          {/* Sidebar - Hidden on mobile, shown as drawer if needed */}
+          <div className="hidden lg:block">
+            <CategorySidebar 
+              onCategoryChange={setSelectedCategory}
+              selectedCategory={selectedCategory}
+            />
+          </div>
+
+          {/* Mobile Category Filter */}
+          <div className="lg:hidden mb-6">
+            <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
+              {categories.map((category) => {
+                const Icon = category.icon
+                const isActive = selectedCategory === category.id
+                
+                return (
+                  <Button
+                    className={cn(
+                      "shrink-0 gap-2 h-9 px-4 rounded-full",
+                      isActive 
+                        ? "bg-primary text-primary-foreground" 
+                        : "bg-secondary text-secondary-foreground hover:bg-secondary/80"
+                    )}
+                    key={category.id}
+                    onClick={() => setSelectedCategory(category.id)}
+                    size="sm"
+                  >
+                    <Icon className="size-3" />
+                    <span className="text-xs font-medium">{category.name}</span>
+                    <Badge 
+                      className="text-xs px-1.5 py-0 h-4 min-w-[1rem]"
+                      variant={isActive ? "secondary" : "outline"}
+                    >
+                      {category.count}
+                    </Badge>
+                  </Button>
+                )
+              })}
+            </div>
+          </div>
 
           {/* API Grid */}
-          <div className="flex-1">
+          <div className="flex-1 min-w-0">
             {filteredAPIs.length > 0 ? (
               <>
                 <div className="flex items-center justify-between mb-6">
                   <p className="text-sm text-muted-foreground">
                     Showing {filteredAPIs.length} {filteredAPIs.length === 1 ? 'API' : 'APIs'}
+                    {selectedCategory !== 'all' && (
+                      <span className="ml-1">
+                        in {categories.find(c => c.id === selectedCategory)?.name}
+                      </span>
+                    )}
                   </p>
                 </div>
                 
-                <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 auto-rows-fr">
                   {filteredAPIs.map((api) => (
                     <APICard api={api} key={api.id} />
                   ))}
                 </div>
               </>
             ) : (
-              <div className="text-center py-12">
+              <div className="text-center py-16">
                 <div className="max-w-md mx-auto">
-                  <Database className="size-12 text-muted-foreground mx-auto mb-4" />
-                  <h3 className="text-lg font-semibold text-foreground mb-2">
+                  <Database className="size-16 text-muted-foreground mx-auto mb-6" />
+                  <h3 className="text-xl font-semibold text-foreground mb-3">
                     No APIs found
                   </h3>
-                  <p className="text-muted-foreground">
-                    Try adjusting your search criteria or browse different categories.
+                  <p className="text-muted-foreground text-sm leading-relaxed">
+                    Try adjusting your search criteria or browse different categories to discover more APIs.
                   </p>
+                  {searchQuery && (
+                    <Button 
+                      className="mt-4" 
+                      onClick={() => setSearchQuery('')}
+                      variant="outline"
+                    >
+                      Clear search
+                    </Button>
+                  )}
                 </div>
               </div>
             )}
