@@ -12,6 +12,8 @@ import { createFileRoute } from '@tanstack/react-router'
 import { createServerRootRoute } from '@tanstack/react-start/server'
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as SettingsRouteImport } from './routes/settings'
+import { Route as SettingsActivitySplatRouteImport } from './routes/settings/activity/$'
 import { ServerRoute as ApiTrpcSplatServerRouteImport } from './routes/api/trpc/$'
 import { ServerRoute as ApiPosthogSplatServerRouteImport } from './routes/api/posthog/$'
 import { ServerRoute as ApiOpenapiSplatServerRouteImport } from './routes/api/openapi/$'
@@ -19,6 +21,9 @@ import { ServerRoute as ApiAuthSplatServerRouteImport } from './routes/api/auth/
 
 const CatalogueLazyRouteImport = createFileRoute('/catalogue')()
 const IndexLazyRouteImport = createFileRoute('/')()
+const SettingsActivityIndexLazyRouteImport = createFileRoute(
+  '/settings/activity/',
+)()
 const rootServerRouteImport = createServerRootRoute()
 
 const CatalogueLazyRoute = CatalogueLazyRouteImport.update({
@@ -26,11 +31,31 @@ const CatalogueLazyRoute = CatalogueLazyRouteImport.update({
   path: '/catalogue',
   getParentRoute: () => rootRouteImport,
 } as any).lazy(() => import('./routes/catalogue.lazy').then((d) => d.Route))
+const SettingsRoute = SettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const IndexLazyRoute = IndexLazyRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any).lazy(() => import('./routes/index.lazy').then((d) => d.Route))
+const SettingsActivityIndexLazyRoute =
+  SettingsActivityIndexLazyRouteImport.update({
+    id: '/activity/',
+    path: '/activity/',
+    getParentRoute: () => SettingsRoute,
+  } as any).lazy(() =>
+    import('./routes/settings/activity/index.lazy').then((d) => d.Route),
+  )
+const SettingsActivitySplatRoute = SettingsActivitySplatRouteImport.update({
+  id: '/activity/$',
+  path: '/activity/$',
+  getParentRoute: () => SettingsRoute,
+} as any).lazy(() =>
+  import('./routes/settings/activity/$.lazy').then((d) => d.Route),
+)
 const ApiTrpcSplatServerRoute = ApiTrpcSplatServerRouteImport.update({
   id: '/api/trpc/$',
   path: '/api/trpc/$',
@@ -54,27 +79,53 @@ const ApiAuthSplatServerRoute = ApiAuthSplatServerRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexLazyRoute
+  '/settings': typeof SettingsRouteWithChildren
   '/catalogue': typeof CatalogueLazyRoute
+  '/settings/activity/$': typeof SettingsActivitySplatRoute
+  '/settings/activity': typeof SettingsActivityIndexLazyRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexLazyRoute
+  '/settings': typeof SettingsRouteWithChildren
   '/catalogue': typeof CatalogueLazyRoute
+  '/settings/activity/$': typeof SettingsActivitySplatRoute
+  '/settings/activity': typeof SettingsActivityIndexLazyRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexLazyRoute
+  '/settings': typeof SettingsRouteWithChildren
   '/catalogue': typeof CatalogueLazyRoute
+  '/settings/activity/$': typeof SettingsActivitySplatRoute
+  '/settings/activity/': typeof SettingsActivityIndexLazyRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/catalogue'
+  fullPaths:
+    | '/'
+    | '/settings'
+    | '/catalogue'
+    | '/settings/activity/$'
+    | '/settings/activity'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/catalogue'
-  id: '__root__' | '/' | '/catalogue'
+  to:
+    | '/'
+    | '/settings'
+    | '/catalogue'
+    | '/settings/activity/$'
+    | '/settings/activity'
+  id:
+    | '__root__'
+    | '/'
+    | '/settings'
+    | '/catalogue'
+    | '/settings/activity/$'
+    | '/settings/activity/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexLazyRoute: typeof IndexLazyRoute
+  SettingsRoute: typeof SettingsRouteWithChildren
   CatalogueLazyRoute: typeof CatalogueLazyRoute
 }
 export interface FileServerRoutesByFullPath {
@@ -125,12 +176,33 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CatalogueLazyRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/settings': {
+      id: '/settings'
+      path: '/settings'
+      fullPath: '/settings'
+      preLoaderRoute: typeof SettingsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/': {
       id: '/'
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexLazyRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/settings/activity/': {
+      id: '/settings/activity/'
+      path: '/activity'
+      fullPath: '/settings/activity'
+      preLoaderRoute: typeof SettingsActivityIndexLazyRouteImport
+      parentRoute: typeof SettingsRoute
+    }
+    '/settings/activity/$': {
+      id: '/settings/activity/$'
+      path: '/activity/$'
+      fullPath: '/settings/activity/$'
+      preLoaderRoute: typeof SettingsActivitySplatRouteImport
+      parentRoute: typeof SettingsRoute
     }
   }
 }
@@ -167,8 +239,23 @@ declare module '@tanstack/react-start/server' {
   }
 }
 
+interface SettingsRouteChildren {
+  SettingsActivitySplatRoute: typeof SettingsActivitySplatRoute
+  SettingsActivityIndexLazyRoute: typeof SettingsActivityIndexLazyRoute
+}
+
+const SettingsRouteChildren: SettingsRouteChildren = {
+  SettingsActivitySplatRoute: SettingsActivitySplatRoute,
+  SettingsActivityIndexLazyRoute: SettingsActivityIndexLazyRoute,
+}
+
+const SettingsRouteWithChildren = SettingsRoute._addFileChildren(
+  SettingsRouteChildren,
+)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexLazyRoute: IndexLazyRoute,
+  SettingsRoute: SettingsRouteWithChildren,
   CatalogueLazyRoute: CatalogueLazyRoute,
 }
 export const routeTree = rootRouteImport
