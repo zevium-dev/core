@@ -172,3 +172,13 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* Custom utilities */
+.scrollbar-hide {
+  /* Firefox */
+  scrollbar-width: none;
+  /* Safari and Chrome */
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
