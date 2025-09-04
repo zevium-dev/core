@@ -1,8 +1,10 @@
 import { createLazyFileRoute } from "@tanstack/react-router";
 import { Plus, Search, Settings } from "lucide-react";
 import { m } from "motion/react";
-import React from "react";
+import * as React from "react";
 
+import { AuthLoadingFallback } from "~/components/auth-loading-fallback";
+import { ProtectedRoute } from "~/components/protected-route";
 import { ProjectCard } from "~/components/shared/project-card";
 import { Button } from "~/components/ui/button";
 import {
@@ -96,7 +98,8 @@ function CreateProjectDialog() {
 
 function RouteComponent() {
   return (
-    <div className="container mx-auto space-y-8 p-6">
+    <ProtectedRoute fallback={<AuthLoadingFallback />}>
+      <div className="container mx-auto space-y-8 p-6">
       {/* Header */}
       <m.div
         animate={{ opacity: 1, y: 0 }}
@@ -141,5 +144,6 @@ function RouteComponent() {
         </div>
       </div>
     </div>
+    </ProtectedRoute>
   );
 }

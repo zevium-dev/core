@@ -18,7 +18,6 @@ import {
   SidebarContent,
   SidebarFooter,
   SidebarGroup,
-  SidebarGroupLabel,
   SidebarHeader,
   SidebarMenu,
   SidebarMenuButton,
@@ -55,21 +54,25 @@ export function PageHeader() {
 const navData = [
   {
     icon: HomeIcon,
+    requiresAuth: false,
     title: "Home",
     url: "/",
   },
   {
     icon: Database,
+    requiresAuth: false,
     title: "API Catalogue",
     url: "/catalogue",
   },
   {
     icon: Building2Icon,
+    requiresAuth: true,
     title: "Organizations",
     url: "/organizations",
   },
   {
     icon: DockIcon,
+    requiresAuth: true,
     title: "Projects",
     url: "/projects",
   },
@@ -77,6 +80,15 @@ const navData = [
 
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const [, match] = useMatches();
+  const authState = auth.useSession();
+
+  // Filter navigation items based on authentication state
+  const filteredNavData = navData.filter(item => {
+    if (item.requiresAuth) {
+      return authState.data?.user;
+    }
+    return true;
+  });
 
   return (
     <Sidebar collapsible="icon" {...props}>
@@ -99,9 +111,8 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
       </SidebarHeader>
       <SidebarContent>
         <SidebarGroup>
-          <SidebarGroupLabel>About me</SidebarGroupLabel>
           <SidebarMenu>
-            {navData.map((item) => (
+            {filteredNavData.map((item) => (
               <SidebarMenuItem key={item.title}>
                 <SidebarMenuButton
                   asChild

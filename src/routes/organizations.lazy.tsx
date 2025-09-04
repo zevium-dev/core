@@ -10,6 +10,8 @@ import {
 import { m } from "motion/react";
 import * as React from "react";
 
+import { AuthLoadingFallback } from "~/components/auth-loading-fallback";
+import { ProtectedRoute } from "~/components/protected-route";
 import { Avatar, AvatarFallback } from "~/components/ui/avatar";
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
@@ -203,7 +205,8 @@ function RouteComponent() {
   );
 
   return (
-    <div className="container mx-auto space-y-8 px-8 py-8">
+    <ProtectedRoute fallback={<AuthLoadingFallback />}>
+      <div className="container mx-auto space-y-8 px-8 py-8">
       {/* Header */}
       <m.div 
         animate={{ opacity: 1, y: 0 }} 
@@ -284,5 +287,6 @@ function RouteComponent() {
         )}
       </m.div>
     </div>
+    </ProtectedRoute>
   );
 }
