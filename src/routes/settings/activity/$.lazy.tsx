@@ -228,7 +228,7 @@ export function ActivityComponent() {
   const currentItems = mockActivityData.slice(startIndex, endIndex)
 
   return (
-    <div className="min-h-screen bg-background p-6 space-y-6">
+  <div className="flex-1 w-full min-w-0 max-w-3xl mx-auto p-6 space-y-6">
       {/* Header */}
       <div className="space-y-2">
         <h1 className="text-2xl font-bold text-foreground">API Activity</h1>
