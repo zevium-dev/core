@@ -65,3 +65,85 @@ export const cache = sqliteTable("cache", {
   updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => /* @__PURE__ */ new Date()),
   value: text("value").notNull(),
 });
+
+export const organization = sqliteTable("organization", {
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .$defaultFn(() => /* @__PURE__ */ new Date())
+    .notNull(),
+  description: text("description"),
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp" })
+    .$defaultFn(() => /* @__PURE__ */ new Date())
+    .notNull(),
+});
+
+export const project = sqliteTable("project", {
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .$defaultFn(() => /* @__PURE__ */ new Date())
+    .notNull(),
+  description: text("description"),
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  organizationId: text("organization_id")
+    .notNull()
+    .references(() => organization.id, { onDelete: "cascade" }),
+  updatedAt: integer("updated_at", { mode: "timestamp" })
+    .$defaultFn(() => /* @__PURE__ */ new Date())
+    .notNull(),
+});
+
+export const api = sqliteTable("api", {
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .$defaultFn(() => /* @__PURE__ */ new Date())
+    .notNull(),
+  description: text("description"),
+  documentation: text("documentation"),
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  openApiSpec: text("openapi_spec"),
+  projectId: text("project_id")
+    .notNull()
+    .references(() => project.id, { onDelete: "cascade" }),
+  status: text("status", { enum: ["active", "deprecated", "beta"] })
+    .$defaultFn(() => "active")
+    .notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp" })
+    .$defaultFn(() => /* @__PURE__ */ new Date())
+    .notNull(),
+  version: text("version").notNull(),
+});
+
+export const apiPricing = sqliteTable("api_pricing", {
+  apiId: text("api_id")
+    .notNull()
+    .references(() => api.id, { onDelete: "cascade" }),
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .$defaultFn(() => /* @__PURE__ */ new Date())
+    .notNull(),
+  currency: text("currency").$defaultFn(() => "USD").notNull(),
+  id: text("id").primaryKey(),
+  price: integer("price").notNull(), // stored in cents
+  tier: text("tier").notNull(), // e.g., "basic", "pro", "enterprise"
+  updatedAt: integer("updated_at", { mode: "timestamp" })
+    .$defaultFn(() => /* @__PURE__ */ new Date())
+    .notNull(),
+});
+
+export const projectMember = sqliteTable("project_member", {
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .$defaultFn(() => /* @__PURE__ */ new Date())
+    .notNull(),
+  id: text("id").primaryKey(),
+  projectId: text("project_id")
+    .notNull()
+    .references(() => project.id, { onDelete: "cascade" }),
+  role: text("role", { enum: ["owner", "admin", "editor", "viewer"] })
+    .notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp" })
+    .$defaultFn(() => /* @__PURE__ */ new Date())
+    .notNull(),
+  userId: text("user_id")
+    .notNull()
+    .references(() => user.id, { onDelete: "cascade" }),
+});
