@@ -1,10 +1,9 @@
 import { createLazyFileRoute } from '@tanstack/react-router'
-import { Settings, ExternalLink } from 'lucide-react'
+import { Settings, ExternalLink, FileText } from 'lucide-react'
 import { useState } from 'react'
 
 import { Button } from '~/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '~/components/ui/card'
-import { Switch } from '~/components/ui/switch'
 
 export const Route = createLazyFileRoute('/settings/credits/$')({
   component: CreditsComponent,
@@ -31,7 +30,6 @@ const recentTransactions = [
 ]
 
 export function CreditsComponent() {
-  const [useCrypto, setUseCrypto] = useState(false)
   const [autoTopUpEnabled, setAutoTopUpEnabled] = useState(false)
   const [currentPage, setCurrentPage] = useState(1)
   
@@ -42,22 +40,12 @@ export function CreditsComponent() {
       {/* Header */}
       <div className="flex items-center gap-2">
         <h1 className="text-2xl font-bold text-foreground">Credits</h1>
-        <button className="text-muted-foreground hover:text-foreground">
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-            <path d="M8 12a.5.5 0 0 1-.5-.5V9H5.5a.5.5 0 0 1 0-1H7.5V6a.5.5 0 0 1 1 0v2H10.5a.5.5 0 0 1 0 1H8.5v2.5A.5.5 0 0 1 8 12z"/>
-          </svg>
-        </button>
       </div>
 
       {/* Current Balance */}
       <Card className="bg-card/50 backdrop-blur-sm border-border/50 w-full">
         <CardContent className="p-6">
-          <div className="flex items-center justify-between">
-            <div className="text-4xl font-bold text-foreground">{currentBalance}</div>
-            <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-foreground">
-              <span className="text-lg">ℹ️</span>
-            </Button>
-          </div>
+          <div className="text-4xl font-bold text-foreground">{currentBalance}</div>
         </CardContent>
       </Card>
 
@@ -66,19 +54,10 @@ export function CreditsComponent() {
         {/* Buy Credits */}
         <Card className="bg-card/50 backdrop-blur-sm border-border/50 w-full">
           <CardHeader className="pb-4">
-            <div className="flex items-center justify-between">
-              <CardTitle className="text-lg font-semibold">Buy Credits</CardTitle>
-              <div className="flex items-center gap-2">
-                <span className="text-sm text-muted-foreground">Use crypto</span>
-                <Switch 
-                  checked={useCrypto} 
-                  onCheckedChange={setUseCrypto}
-                />
-              </div>
-            </div>
+            <CardTitle className="text-lg font-semibold">Buy Credits</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <Button className="w-full bg-blue-600 hover:bg-blue-700 text-white" size="lg">
+            <Button className="w-full" size="lg">
               Add Credits
             </Button>
             <Button variant="ghost" className="w-full text-sm text-muted-foreground hover:text-foreground">
@@ -123,10 +102,10 @@ export function CreditsComponent() {
               <div key={transaction.id} className="flex items-center justify-between py-2 border-b border-border/20 last:border-b-0">
                 <span className="text-sm text-muted-foreground">{transaction.time}</span>
                 <div className="flex items-center gap-4">
-                  <span className="text-sm font-medium text-blue-400">{transaction.amount}</span>
-                  <Button variant="ghost" size="sm" className="text-xs text-muted-foreground hover:text-foreground">
-                    Get Invoice 📄
-                  </Button>
+                  <span className="text-sm font-medium text-primary">{transaction.amount}</span>
+                  <span className="text-xs text-muted-foreground hover:text-foreground cursor-pointer hover:underline flex items-center gap-1">
+                    Get Invoice <FileText className="h-3 w-3" />
+                  </span>
                 </div>
               </div>
             ))}
