@@ -1,13 +1,16 @@
 import { Link, useMatches } from "@tanstack/react-router";
 import { atom, useAtom } from "jotai";
-import { Database, HomeIcon } from "lucide-react";
+import { Building2Icon, Database, DockIcon, HomeIcon, LogIn, LogOut, Moon, Palette, Sun } from "lucide-react";
 import * as React from "react";
 
+import { useTheme } from "~/components/theme-provider";
 import { Avatar, AvatarFallback, AvatarImage } from "~/components/ui/avatar";
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuItem,
   DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "~/components/ui/dropdown-menu";
 import {
@@ -15,7 +18,6 @@ import {
   SidebarContent,
   SidebarFooter,
   SidebarGroup,
-  SidebarGroupLabel,
   SidebarHeader,
   SidebarMenu,
   SidebarMenuButton,
@@ -24,9 +26,7 @@ import {
   SidebarTrigger,
   useSidebar,
 } from "~/components/ui/sidebar";
-
-import { AccountButton } from "./account-button";
-import { ModeToggle } from "./theme-toggle";
+import { auth } from "~/lib/auth";
 
 const headerContentAtom = atom<React.ReactNode>(null);
 
@@ -54,19 +54,41 @@ export function PageHeader() {
 const navData = [
   {
     icon: HomeIcon,
+    requiresAuth: false,
     title: "Home",
     url: "/",
   },
   {
     icon: Database,
+    requiresAuth: false,
     title: "API Catalogue",
     url: "/catalogue",
+  },
+  {
+    icon: Building2Icon,
+    requiresAuth: true,
+    title: "Organizations",
+    url: "/organizations",
+  },
+  {
+    icon: DockIcon,
+    requiresAuth: true,
+    title: "Projects",
+    url: "/projects",
   },
 ];
 
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
-  const { isMobile } = useSidebar();
   const [, match] = useMatches();
+  const authState = auth.useSession();
+
+  // Filter navigation items based on authentication state
+  const filteredNavData = navData.filter(item => {
+    if (item.requiresAuth) {
+      return authState.data?.user;
+    }
+    return true;
+  });
 
   return (
     <Sidebar collapsible="icon" {...props}>
@@ -89,9 +111,8 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
       </SidebarHeader>
       <SidebarContent>
         <SidebarGroup>
-          <SidebarGroupLabel>About me</SidebarGroupLabel>
           <SidebarMenu>
-            {navData.map((item) => (
+            {filteredNavData.map((item) => (
               <SidebarMenuItem key={item.title}>
                 <SidebarMenuButton
                   asChild
@@ -111,41 +132,207 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
       </SidebarContent>
       <SidebarFooter>
         <SidebarMenu>
+          {/* Theme Selector */}
           <SidebarMenuItem>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <SidebarMenuButton
-                  className="overflow-visible group-data-[state=collapsed]:hover:bg-transparent group-data-[state=collapsed]:hover:outline-0"
-                  size="lg"
-                >
-                  <Avatar className="h-8 w-8">
-                    <AvatarImage alt="zevium" src="/icon.png" />
-                    <AvatarFallback>Z</AvatarFallback>
-                  </Avatar>
-                  <div className="grid flex-1 text-left text-sm leading-tight">
-                    <span className="font-heading truncate">Signed In user</span>
-                    <span className="truncate text-xs">Placeholder</span>
-                  </div>
-                </SidebarMenuButton>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent
-                align="end"
-                className="w-[--radix-dropdown-menu-trigger-width] min-w-56"
-                side={isMobile ? "bottom" : "right"}
-                sideOffset={4}
-              >
-                <DropdownMenuLabel className="font-base p-0">
-                  <div className="flex items-center justify-between gap-2 px-2 py-1.5 text-sm">
-                    <AccountButton />
-                    <ModeToggle />
-                  </div>
-                </DropdownMenuLabel>
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <ThemeSelector />
+          </SidebarMenuItem>
+          {/* Account Section */}
+          <SidebarMenuItem>
+            <AccountSection />
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarFooter>
       <SidebarRail />
     </Sidebar>
+  );
+}
+
+// Account Section Component
+function AccountSection() {
+  const authState = auth.useSession();
+  const { state } = useSidebar();
+  
+  const handleSignIn = async () => {
+    await auth.signIn.social({ provider: "google" });
+  };
+
+  const handleSignOut = async () => {
+    await auth.signOut();
+  };
+
+  const getUserInitials = (user: NonNullable<typeof authState.data>["user"]) => {
+    return user.name.charAt(0) || user.email.charAt(0) || "U";
+  };
+  
+  if (state === "collapsed") {
+    if (authState.data?.user) {
+      // Signed in - show avatar with dropdown
+      return (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <SidebarMenuButton
+              className="group-data-[state=collapsed]:hover:bg-sidebar-accent group-data-[state=collapsed]:hover:text-sidebar-accent-foreground transition-colors"
+              size="default"
+            >
+              <Avatar className="size-6">
+                <AvatarImage alt={authState.data.user.name || "User"} src={authState.data.user.image ?? ""} />
+                <AvatarFallback className="text-xs">
+                  {getUserInitials(authState.data.user)}
+                </AvatarFallback>
+              </Avatar>
+              <span className="sr-only">Account menu</span>
+            </SidebarMenuButton>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="center" side="right" sideOffset={4}>
+            <DropdownMenuLabel className="font-normal">
+              <div className="flex flex-col space-y-1">
+                <p className="text-sm font-medium leading-none">{authState.data.user.name}</p>
+                <p className="text-xs leading-none text-muted-foreground">{authState.data.user.email}</p>
+              </div>
+            </DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={handleSignOut}>
+              <LogOut className="mr-2 size-4" />
+              Sign out
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      );
+    } else {
+      // Not signed in - show sign in icon
+      return (
+        <SidebarMenuButton
+          className="group-data-[state=collapsed]:hover:bg-sidebar-accent group-data-[state=collapsed]:hover:text-sidebar-accent-foreground transition-colors"
+          disabled={authState.isPending}
+          onClick={handleSignIn}
+          size="default"
+        >
+          <LogIn className="size-4" />
+          <span className="sr-only">Sign in</span>
+        </SidebarMenuButton>
+      );
+    }
+  }
+  
+  if (authState.data?.user) {
+    // Signed in - show full profile with dropdown
+    return (
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <SidebarMenuButton className="group-data-[state=expanded]:hover:bg-sidebar-accent group-data-[state=expanded]:hover:text-sidebar-accent-foreground transition-colors">
+            <Avatar className="size-6">
+              <AvatarImage alt={authState.data.user.name || "User"} src={authState.data.user.image ?? ""} />
+              <AvatarFallback className="text-xs">
+                {getUserInitials(authState.data.user)}
+              </AvatarFallback>
+            </Avatar>
+            <div className="grid flex-1 text-left text-sm leading-tight">
+              <span className="font-medium truncate">{authState.data.user.name}</span>
+              <span className="truncate text-xs text-muted-foreground">{authState.data.user.email}</span>
+            </div>
+          </SidebarMenuButton>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" side="right" sideOffset={4}>
+          <DropdownMenuLabel className="font-normal">
+            <div className="flex flex-col space-y-1">
+              <p className="text-sm font-medium leading-none">{authState.data.user.name}</p>
+              <p className="text-xs leading-none text-muted-foreground">{authState.data.user.email}</p>
+            </div>
+          </DropdownMenuLabel>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem onClick={handleSignOut}>
+            <LogOut className="mr-2 size-4" />
+            Sign out
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    );
+  } else {
+    // Not signed in - show sign in button
+    return (
+      <SidebarMenuButton
+        className="group-data-[state=expanded]:hover:bg-sidebar-accent group-data-[state=expanded]:hover:text-sidebar-accent-foreground transition-colors"
+        disabled={authState.isPending}
+        onClick={handleSignIn}
+      >
+        <LogIn className="size-4" />
+        <span className="font-medium">Sign in</span>
+      </SidebarMenuButton>
+    );
+  }
+}
+
+// Theme Selector Component
+function ThemeSelector() {
+  const { setTheme, theme } = useTheme();
+  const { state } = useSidebar();
+  
+  const getThemeIcon = () => {
+    if (theme === "dark") return Moon;
+    if (theme === "light") return Sun;
+    return Palette;
+  };
+  
+  const getThemeLabel = () => {
+    if (theme === "dark") return "Dark";
+    if (theme === "light") return "Light";
+    return "System";
+  };
+  
+  const ThemeIcon = getThemeIcon();
+  
+  if (state === "collapsed") {
+    return (
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <SidebarMenuButton
+            className="group-data-[state=collapsed]:hover:bg-sidebar-accent group-data-[state=collapsed]:hover:text-sidebar-accent-foreground transition-colors"
+            size="default"
+          >
+            <ThemeIcon className="size-4" />
+            <span className="sr-only">Toggle theme</span>
+          </SidebarMenuButton>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="center" side="right" sideOffset={4}>
+          <DropdownMenuItem onClick={() => setTheme("light")}>
+            <Sun className="mr-2 size-4" />
+            Light
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => setTheme("dark")}>
+            <Moon className="mr-2 size-4" />
+            Dark
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => setTheme("system")}>
+            <Palette className="mr-2 size-4" />
+            System
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    );
+  }
+  
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <SidebarMenuButton className="group-data-[state=expanded]:hover:bg-sidebar-accent group-data-[state=expanded]:hover:text-sidebar-accent-foreground transition-colors">
+          <ThemeIcon className="size-4" />
+          <span className="font-medium">{getThemeLabel()}</span>
+        </SidebarMenuButton>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" side="right" sideOffset={4}>
+        <DropdownMenuItem onClick={() => setTheme("light")}>
+          <Sun className="mr-2 size-4" />
+          Light
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => setTheme("dark")}>
+          <Moon className="mr-2 size-4" />
+          Dark
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => setTheme("system")}>
+          <Palette className="mr-2 size-4" />
+          System
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
