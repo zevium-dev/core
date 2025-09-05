@@ -15,15 +15,15 @@ interface FileUploadProps {
   placeholder?: string;
 }
 
-function FileUpload({ 
-  accept = ".json,.yaml,.yml", 
-  className, 
-  disabled, 
-  maxSize = 10, 
-  multiple = false, 
-  onFileSelect, 
+function FileUpload({
+  accept = ".json,.yaml,.yml",
+  className,
+  disabled,
+  maxSize = 10,
+  multiple = false,
+  onFileSelect,
   placeholder = "Upload OpenAPI specification files",
-  ref
+  ref,
 }: { ref?: React.Ref<HTMLInputElement> } & FileUploadProps) {
   const [dragActive, setDragActive] = React.useState(false);
   const [files, setFiles] = React.useState<Array<File>>([]);
@@ -39,47 +39,59 @@ function FileUpload({
     }
   }, []);
 
-  const validateFile = React.useCallback((file: File): boolean => {
-    if (maxSize && file.size > maxSize * 1024 * 1024) {
-      console.error(`File ${file.name} is too large. Maximum size is ${maxSize}MB.`);
-      return false;
-    }
-    return true;
-  }, [maxSize]);
+  const validateFile = React.useCallback(
+    (file: File): boolean => {
+      if (maxSize && file.size > maxSize * 1024 * 1024) {
+        console.error(`File ${file.name} is too large. Maximum size is ${maxSize}MB.`);
+        return false;
+      }
+      return true;
+    },
+    [maxSize],
+  );
 
-  const handleDrop = React.useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setDragActive(false);
+  const handleDrop = React.useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setDragActive(false);
 
-    if (disabled) return;
+      if (disabled) return;
 
-    const droppedFiles = Array.from(e.dataTransfer.files).filter(validateFile);
-    
-    if (droppedFiles.length > 0) {
-      const newFiles = multiple ? [...files, ...droppedFiles] : droppedFiles.slice(0, 1);
+      const droppedFiles = Array.from(e.dataTransfer.files).filter(validateFile);
+
+      if (droppedFiles.length > 0) {
+        const newFiles = multiple ? [...files, ...droppedFiles] : droppedFiles.slice(0, 1);
+        setFiles(newFiles);
+        onFileSelect(newFiles);
+      }
+    },
+    [disabled, files, multiple, onFileSelect, validateFile],
+  );
+
+  const handleFileSelect = React.useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      if (disabled) return;
+
+      const selectedFiles = Array.from(e.target.files ?? []).filter(validateFile);
+
+      if (selectedFiles.length > 0) {
+        const newFiles = multiple ? [...files, ...selectedFiles] : selectedFiles.slice(0, 1);
+        setFiles(newFiles);
+        onFileSelect(newFiles);
+      }
+    },
+    [disabled, files, multiple, onFileSelect, validateFile],
+  );
+
+  const removeFile = React.useCallback(
+    (index: number) => {
+      const newFiles = files.filter((_, i) => i !== index);
       setFiles(newFiles);
       onFileSelect(newFiles);
-    }
-  }, [disabled, files, multiple, onFileSelect, validateFile]);
-
-  const handleFileSelect = React.useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    if (disabled) return;
-
-    const selectedFiles = Array.from(e.target.files ?? []).filter(validateFile);
-    
-    if (selectedFiles.length > 0) {
-      const newFiles = multiple ? [...files, ...selectedFiles] : selectedFiles.slice(0, 1);
-      setFiles(newFiles);
-      onFileSelect(newFiles);
-    }
-  }, [disabled, files, multiple, onFileSelect, validateFile]);
-
-  const removeFile = React.useCallback((index: number) => {
-    const newFiles = files.filter((_, i) => i !== index);
-    setFiles(newFiles);
-    onFileSelect(newFiles);
-  }, [files, onFileSelect]);
+    },
+    [files, onFileSelect],
+  );
 
   const openFileDialog = () => {
     inputRef.current?.click();
@@ -94,8 +106,8 @@ function FileUpload({
         }}
         className={cn(
           "relative rounded-lg border-2 border-dashed p-6 transition-colors",
-          disabled && "opacity-50 cursor-not-allowed",
-          !disabled && "cursor-pointer hover:border-blue-400 hover:bg-blue-50/50 dark:hover:bg-blue-950/50"
+          disabled && "cursor-not-allowed opacity-50",
+          !disabled && "cursor-pointer hover:border-blue-400 hover:bg-blue-50/50 dark:hover:bg-blue-950/50",
         )}
         onClick={!disabled ? openFileDialog : undefined}
         onDragEnter={handleDrag}
@@ -114,38 +126,22 @@ function FileUpload({
           ref={ref ?? inputRef}
           type="file"
         />
-        
+
         <div className="flex flex-col items-center justify-center space-y-3">
-          <m.div
-            animate={{ rotate: dragActive ? 360 : 0 }}
-            transition={{ duration: 0.6 }}
-          >
-            <Upload className={cn(
-              "h-8 w-8",
-              dragActive ? "text-blue-500" : "text-gray-400"
-            )} />
+          <m.div animate={{ rotate: dragActive ? 360 : 0 }} transition={{ duration: 0.6 }}>
+            <Upload className={cn("h-8 w-8", dragActive ? "text-blue-500" : "text-gray-400")} />
           </m.div>
-          
+
           <div className="text-center">
-            <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
-              {placeholder}
-            </p>
-            <p className="text-xs text-gray-500 dark:text-gray-400">
-              Drag and drop files here, or click to browse
-            </p>
-            <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
-              Supports JSON, YAML files up to {maxSize}MB
-            </p>
+            <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{placeholder}</p>
+            <p className="text-xs text-gray-500 dark:text-gray-400">Drag and drop files here, or click to browse</p>
+            <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">Supports JSON, YAML files up to {maxSize}MB</p>
           </div>
         </div>
       </m.div>
 
       {files.length > 0 && (
-        <m.div
-          animate={{ opacity: 1, y: 0 }}
-          className="mt-4 space-y-2"
-          initial={{ opacity: 0, y: 10 }}
-        >
+        <m.div animate={{ opacity: 1, y: 0 }} className="mt-4 space-y-2" initial={{ opacity: 0, y: 10 }}>
           {files.map((file, index) => (
             <m.div
               animate={{ opacity: 1, x: 0 }}
@@ -157,15 +153,11 @@ function FileUpload({
               <div className="flex items-center space-x-3">
                 <FileText className="h-4 w-4 text-blue-500" />
                 <div>
-                  <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                    {file.name}
-                  </p>
-                  <p className="text-xs text-gray-500 dark:text-gray-400">
-                    {(file.size / 1024 / 1024).toFixed(2)} MB
-                  </p>
+                  <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{file.name}</p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
                 </div>
               </div>
-              
+
               <div className="flex items-center space-x-2">
                 <div className="flex items-center space-x-1 text-green-600">
                   <Check className="h-3 w-3" />

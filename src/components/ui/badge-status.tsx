@@ -11,12 +11,13 @@ const badgeStatusVariants = cva(
     },
     variants: {
       variant: {
-        active: "border-green-200 bg-green-50 text-green-700 dark:border-green-800 dark:bg-green-950 dark:text-green-300",
+        active:
+          "border-green-200 bg-green-50 text-green-700 dark:border-green-800 dark:bg-green-950 dark:text-green-300",
         beta: "border-orange-200 bg-orange-50 text-orange-700 dark:border-orange-800 dark:bg-orange-950 dark:text-orange-300",
         deprecated: "border-red-200 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-300",
       },
     },
-  }
+  },
 );
 
 export interface BadgeStatusProps
@@ -26,12 +27,14 @@ export interface BadgeStatusProps
 }
 
 const StatusIndicator = ({ status }: { status: "active" | "beta" | "deprecated" }) => (
-  <div className={cn(
-    "h-1.5 w-1.5 rounded-full",
-    status === "active" && "bg-green-500",
-    status === "beta" && "bg-orange-500",
-    status === "deprecated" && "bg-red-500"
-  )} />
+  <div
+    className={cn(
+      "h-1.5 w-1.5 rounded-full",
+      status === "active" && "bg-green-500",
+      status === "beta" && "bg-orange-500",
+      status === "deprecated" && "bg-red-500",
+    )}
+  />
 );
 
 function BadgeStatus({ children, className, status, variant, ...props }: BadgeStatusProps) {

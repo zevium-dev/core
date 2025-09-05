@@ -10,11 +10,7 @@ interface ProtectedRouteProps {
 
 const defaultFallback = <div>Loading...</div>;
 
-export function ProtectedRoute({ 
-  children, 
-  fallback = defaultFallback, 
-  redirectTo = "/" 
-}: ProtectedRouteProps) {
+export function ProtectedRoute({ children, fallback = defaultFallback, redirectTo = "/" }: ProtectedRouteProps) {
   const { isAuthenticated, isLoading } = useAuthGuard(redirectTo);
 
   if (isLoading) {
