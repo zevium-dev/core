@@ -1,22 +1,19 @@
-import { 
-  Building2, 
-  Clock, 
-  Code, 
-  ExternalLink, 
-  MoreHorizontal, 
-  Settings, 
-  Users 
-} from "lucide-react";
+import { Building2, Clock, Code, ExternalLink, MoreHorizontal, Settings, Users } from "lucide-react";
 import { m } from "motion/react";
 
 import { BadgeStatus } from "~/components/ui/badge-status";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "~/components/ui/card";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "~/components/ui/dropdown-menu";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "~/components/ui/dropdown-menu";
 import { mockProjects } from "~/lib/utils/mockdata";
 
 interface ProjectCardProps {
-  project: typeof mockProjects[0];
+  project: (typeof mockProjects)[0];
   variant?: "compact" | "default";
 }
 
@@ -71,7 +68,7 @@ export function ProjectCard({ project, variant = "default" }: ProjectCardProps) 
             </div>
           </CardContent>
 
-          <div className="border-t pt-4 px-6 pb-6">
+          <div className="border-t px-6 pt-4 pb-6">
             <div className="flex w-full items-center justify-between">
               <span className="text-muted-foreground text-xs">Updated {project.lastUpdated}</span>
               <DropdownMenu>
@@ -109,19 +106,17 @@ export function ProjectCard({ project, variant = "default" }: ProjectCardProps) 
       transition={{ duration: 0.5 }}
       whileHover={{ transition: { duration: 0.2 }, y: -4 }}
     >
-      <Card className="group hover:shadow-lg transition-all duration-300 border-border/50 hover:border-border">
+      <Card className="group border-border/50 hover:border-border transition-all duration-300 hover:shadow-lg">
         <CardHeader className="space-y-4">
           <div className="flex items-start justify-between">
             <div className="space-y-2">
               <div className="flex items-center gap-2">
-                <CardTitle className="text-lg font-semibold group-hover:text-primary transition-colors">
+                <CardTitle className="group-hover:text-primary text-lg font-semibold transition-colors">
                   {project.name}
                 </CardTitle>
-                <BadgeStatus status={project.status}>
-                  {project.status}
-                </BadgeStatus>
+                <BadgeStatus status={project.status}>{project.status}</BadgeStatus>
               </div>
-              <CardDescription className="text-sm text-muted-foreground line-clamp-2">
+              <CardDescription className="text-muted-foreground line-clamp-2 text-sm">
                 {project.description}
               </CardDescription>
             </div>
@@ -133,22 +128,22 @@ export function ProjectCard({ project, variant = "default" }: ProjectCardProps) 
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
                 <DropdownMenuItem>
-                  <Settings className="h-4 w-4 mr-2" />
+                  <Settings className="mr-2 h-4 w-4" />
                   Settings
                 </DropdownMenuItem>
                 <DropdownMenuItem>
-                  <ExternalLink className="h-4 w-4 mr-2" />
+                  <ExternalLink className="mr-2 h-4 w-4" />
                   View Documentation
                 </DropdownMenuItem>
                 <DropdownMenuItem>
-                  <Users className="h-4 w-4 mr-2" />
+                  <Users className="mr-2 h-4 w-4" />
                   Manage Team
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
-          
-          <div className="flex items-center gap-4 text-sm text-muted-foreground">
+
+          <div className="text-muted-foreground flex items-center gap-4 text-sm">
             <div className="flex items-center gap-1">
               <Building2 className="h-3 w-3" />
               <span>{project.organization}</span>
@@ -163,7 +158,7 @@ export function ProjectCard({ project, variant = "default" }: ProjectCardProps) 
             </div>
           </div>
         </CardHeader>
-        
+
         <CardContent className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1">
@@ -171,27 +166,31 @@ export function ProjectCard({ project, variant = "default" }: ProjectCardProps) 
                 <span className="text-muted-foreground">API Usage</span>
                 <span className="font-medium">{project.usage}%</span>
               </div>
-              <div className="w-full bg-muted rounded-full h-1.5">
-                <m.div 
+              <div className="bg-muted h-1.5 w-full rounded-full">
+                <m.div
                   animate={{ width: `${project.usage}%` }}
-                  className="bg-gradient-to-r from-green-500 to-emerald-500 h-1.5 rounded-full"
+                  className="h-1.5 rounded-full bg-gradient-to-r from-green-500 to-emerald-500"
                   initial={{ width: 0 }}
                   transition={{ delay: 0.5, duration: 1 }}
                 />
               </div>
             </div>
             <div className="text-right">
-              <div className="text-sm text-muted-foreground">Monthly Revenue</div>
+              <div className="text-muted-foreground text-sm">Monthly Revenue</div>
               <div className="text-lg font-semibold text-green-600">{project.revenue}</div>
             </div>
           </div>
-          
-          <div className="flex items-center justify-between pt-2 border-t border-border/50">
-            <div className="flex items-center gap-4 text-sm text-muted-foreground">
+
+          <div className="border-border/50 flex items-center justify-between border-t pt-2">
+            <div className="text-muted-foreground flex items-center gap-4 text-sm">
               <span>{project.endpoints} endpoints</span>
               <span>{project.members} members</span>
             </div>
-            <Button className="group-hover:bg-primary group-hover:text-primary-foreground transition-colors" size="sm" variant="outline">
+            <Button
+              className="group-hover:bg-primary group-hover:text-primary-foreground transition-colors"
+              size="sm"
+              variant="outline"
+            >
               View Details
             </Button>
           </div>

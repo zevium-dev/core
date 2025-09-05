@@ -5,7 +5,8 @@ const mockProjects = [
       { name: "Payments API", status: "active" as const, version: "v2.1.0" },
       { name: "Webhooks API", status: "beta" as const, version: "v1.3.0" },
     ],
-    description: "Complete API suite for modern e-commerce platform with payment processing, inventory management, and user authentication.",
+    description:
+      "Complete API suite for modern e-commerce platform with payment processing, inventory management, and user authentication.",
     endpoints: 23,
     id: "1",
     lastUpdated: "2 hours ago",
@@ -45,9 +46,7 @@ const mockProjects = [
     version: "v1.8.2",
   },
   {
-    apis: [
-      { name: "Legacy Bridge API", status: "deprecated" as const, version: "v1.0.0" },
-    ],
+    apis: [{ name: "Legacy Bridge API", status: "deprecated" as const, version: "v1.0.0" }],
     description: "Bridge API for connecting legacy systems with modern applications. Currently being phased out.",
     endpoints: 8,
     id: "3",

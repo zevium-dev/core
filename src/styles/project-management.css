@@ -2,16 +2,16 @@
 
 @layer components {
   .project-card-hover {
-    @apply transition-all duration-300 ease-out hover:shadow-xl hover:shadow-primary/5;
+    @apply hover:shadow-primary/5 transition-all duration-300 ease-out hover:shadow-xl;
   }
 
   .stats-card {
-    @apply relative overflow-hidden bg-gradient-to-br from-background to-muted/20;
+    @apply from-background to-muted/20 relative overflow-hidden bg-gradient-to-br;
   }
 
   .stats-card::before {
-    content: '';
-    @apply absolute inset-0 bg-gradient-to-br from-primary/5 to-transparent opacity-0 transition-opacity duration-300;
+    content: "";
+    @apply from-primary/5 absolute inset-0 bg-gradient-to-br to-transparent opacity-0 transition-opacity duration-300;
   }
 
   .stats-card:hover::before {
@@ -32,20 +32,32 @@
     animation: fadeInUp 0.6s ease-out forwards;
   }
 
-  .stagger-children > *:nth-child(1) { animation-delay: 0.1s; }
-  .stagger-children > *:nth-child(2) { animation-delay: 0.2s; }
-  .stagger-children > *:nth-child(3) { animation-delay: 0.3s; }
-  .stagger-children > *:nth-child(4) { animation-delay: 0.4s; }
-  .stagger-children > *:nth-child(5) { animation-delay: 0.5s; }
-  .stagger-children > *:nth-child(6) { animation-delay: 0.6s; }
+  .stagger-children > *:nth-child(1) {
+    animation-delay: 0.1s;
+  }
+  .stagger-children > *:nth-child(2) {
+    animation-delay: 0.2s;
+  }
+  .stagger-children > *:nth-child(3) {
+    animation-delay: 0.3s;
+  }
+  .stagger-children > *:nth-child(4) {
+    animation-delay: 0.4s;
+  }
+  .stagger-children > *:nth-child(5) {
+    animation-delay: 0.5s;
+  }
+  .stagger-children > *:nth-child(6) {
+    animation-delay: 0.6s;
+  }
 
   .api-status-indicator {
     @apply relative;
   }
 
   .api-status-indicator::before {
-    content: '';
-    @apply absolute -inset-1 rounded-full opacity-30 animate-ping;
+    content: "";
+    @apply absolute -inset-1 animate-ping rounded-full opacity-30;
   }
 
   .api-status-indicator.status-active::before {
@@ -65,8 +77,8 @@
   }
 
   .pricing-tier-highlight::after {
-    content: '';
-    @apply absolute inset-0 rounded-lg bg-gradient-to-r from-primary/10 to-secondary/10 opacity-0 transition-opacity duration-300;
+    content: "";
+    @apply from-primary/10 to-secondary/10 absolute inset-0 rounded-lg bg-gradient-to-r opacity-0 transition-opacity duration-300;
   }
 
   .pricing-tier-highlight:hover::after {
@@ -78,8 +90,8 @@
   }
 
   .member-role-badge::before {
-    content: '';
-    @apply absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent -translate-x-full transition-transform duration-700;
+    content: "";
+    @apply absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/20 to-transparent transition-transform duration-700;
   }
 
   .member-role-badge:hover::before {
@@ -91,16 +103,16 @@
   }
 
   .file-upload-zone::before {
-    content: '';
-    @apply absolute inset-0 rounded-lg bg-gradient-to-br from-primary/5 to-secondary/5 opacity-0 transition-all duration-300 scale-95;
+    content: "";
+    @apply from-primary/5 to-secondary/5 absolute inset-0 scale-95 rounded-lg bg-gradient-to-br opacity-0 transition-all duration-300;
   }
 
   .file-upload-zone.drag-active::before {
-    @apply opacity-100 scale-100;
+    @apply scale-100 opacity-100;
   }
 
   .floating-action-button {
-    @apply fixed bottom-6 right-6 z-50 shadow-2xl transition-all duration-300 hover:shadow-primary/25;
+    @apply hover:shadow-primary/25 fixed right-6 bottom-6 z-50 shadow-2xl transition-all duration-300;
   }
 
   .floating-action-button:hover {
@@ -108,7 +120,7 @@
   }
 
   .data-table-row {
-    @apply transition-colors duration-200 hover:bg-muted/50;
+    @apply hover:bg-muted/50 transition-colors duration-200;
   }
 
   .data-table-row:hover .action-buttons {
@@ -120,12 +132,13 @@
   }
 
   .search-highlight {
-    @apply bg-yellow-200/50 dark:bg-yellow-900/50 rounded px-1;
+    @apply rounded bg-yellow-200/50 px-1 dark:bg-yellow-900/50;
   }
 }
 
 @keyframes pulse-gentle {
-  0%, 100% {
+  0%,
+  100% {
     opacity: 1;
   }
   50% {
@@ -185,11 +198,11 @@
 /* High contrast mode support */
 @media (prefers-contrast: high) {
   .project-card-hover {
-    @apply border-2 border-foreground;
+    @apply border-foreground border-2;
   }
 
   .stats-card {
-    @apply border border-foreground;
+    @apply border-foreground border;
   }
 }
 
@@ -214,7 +227,7 @@
 
 /* Focus management for accessibility */
 .focus-visible {
-  @apply outline-none ring-2 ring-primary ring-offset-2 ring-offset-background;
+  @apply ring-primary ring-offset-background ring-2 ring-offset-2 outline-none;
 }
 
 /* Print styles */
@@ -227,6 +240,6 @@
 
   .project-card-hover,
   .stats-card {
-    @apply shadow-none border border-gray-300;
+    @apply border border-gray-300 shadow-none;
   }
 }

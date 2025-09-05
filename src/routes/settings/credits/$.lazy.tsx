@@ -1,58 +1,58 @@
-import { createLazyFileRoute } from '@tanstack/react-router'
-import { Settings, ExternalLink, FileText } from 'lucide-react'
-import { useState } from 'react'
+import { createLazyFileRoute } from "@tanstack/react-router";
+import { ExternalLink, FileText, Settings } from "lucide-react";
+import { useState } from "react";
 
-import { Button } from '~/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '~/components/ui/card'
+import { Button } from "~/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
 
-export const Route = createLazyFileRoute('/settings/credits/$')({
+export const Route = createLazyFileRoute("/settings/credits/$")({
   component: CreditsComponent,
-})
+});
 
 // TODO: Replace with API call to fetch real credits data
 // Mock data for recent transactions
 const recentTransactions = [
   {
+    amount: "$10",
     id: 1,
-    time: '2 months ago',
-    amount: '$10',
+    time: "2 months ago",
   },
   {
+    amount: "$3.75",
     id: 2,
-    time: '2 months ago',
-    amount: '$3.75',
+    time: "2 months ago",
   },
   {
+    amount: "$10",
     id: 3,
-    time: '4 months ago',
-    amount: '$10',
-  }
-]
+    time: "4 months ago",
+  },
+];
 
 export function CreditsComponent() {
-  const [autoTopUpEnabled, setAutoTopUpEnabled] = useState(false)
-  const [currentPage, setCurrentPage] = useState(1)
-  
-  const currentBalance = '$12.26'
+  const [_autoTopUpEnabled, _setAutoTopUpEnabled] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+
+  const currentBalance = "$12.26";
 
   return (
-  <div className="flex-1 w-full min-w-0 max-w-3xl mx-auto p-6 space-y-6">
+    <div className="mx-auto w-full max-w-3xl min-w-0 flex-1 space-y-6 p-6">
       {/* Header */}
       <div className="flex items-center gap-2">
-        <h1 className="text-2xl font-bold text-foreground">Credits</h1>
+        <h1 className="text-foreground text-2xl font-bold">Credits</h1>
       </div>
 
       {/* Current Balance */}
-      <Card className="bg-card/50 backdrop-blur-sm border-border/50 w-full">
+      <Card className="bg-card/50 border-border/50 w-full backdrop-blur-sm">
         <CardContent className="p-6">
-          <div className="text-4xl font-bold text-foreground">{currentBalance}</div>
+          <div className="text-foreground text-4xl font-bold">{currentBalance}</div>
         </CardContent>
       </Card>
 
       {/* Main Actions Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 w-full">
+      <div className="grid w-full grid-cols-1 gap-6 lg:grid-cols-2">
         {/* Buy Credits */}
-        <Card className="bg-card/50 backdrop-blur-sm border-border/50 w-full">
+        <Card className="bg-card/50 border-border/50 w-full backdrop-blur-sm">
           <CardHeader className="pb-4">
             <CardTitle className="text-lg font-semibold">Buy Credits</CardTitle>
           </CardHeader>
@@ -60,50 +60,53 @@ export function CreditsComponent() {
             <Button className="w-full" size="lg">
               Add Credits
             </Button>
-            <Button variant="ghost" className="w-full text-sm text-muted-foreground hover:text-foreground">
-              View Usage <ExternalLink className="h-3 w-3 ml-1" />
+            <Button className="text-muted-foreground hover:text-foreground w-full text-sm" variant="ghost">
+              View Usage <ExternalLink className="ml-1 h-3 w-3" />
             </Button>
           </CardContent>
         </Card>
 
         {/* Auto Top-Up */}
-        <Card className="bg-card/50 backdrop-blur-sm border-border/50 w-full">
+        <Card className="bg-card/50 border-border/50 w-full backdrop-blur-sm">
           <CardHeader className="pb-4">
             <div className="flex items-center justify-between">
               <CardTitle className="text-lg font-semibold">Auto Top-Up</CardTitle>
               <div className="flex items-center gap-2">
-                <Settings className="h-4 w-4 text-muted-foreground" />
-                <span className="text-sm text-muted-foreground">Enable</span>
+                <Settings className="text-muted-foreground h-4 w-4" />
+                <span className="text-muted-foreground text-sm">Enable</span>
               </div>
             </div>
           </CardHeader>
           <CardContent>
-            <p className="text-sm text-muted-foreground">
-              Automatically purchase credits when your balance is below a certain threshold. 
-              Your most recent payment method will be used.
+            <p className="text-muted-foreground text-sm">
+              Automatically purchase credits when your balance is below a certain threshold. Your most recent payment
+              method will be used.
             </p>
           </CardContent>
         </Card>
       </div>
 
       {/* Recent Transactions */}
-      <Card className="bg-card/50 backdrop-blur-sm border-border/50 w-full">
+      <Card className="bg-card/50 border-border/50 w-full backdrop-blur-sm">
         <CardHeader className="pb-4">
           <div className="flex items-center justify-between">
             <CardTitle className="text-lg font-semibold">Recent Transactions</CardTitle>
-            <Button variant="ghost" className="text-sm text-muted-foreground hover:text-foreground">
-              Payment History <ExternalLink className="h-3 w-3 ml-1" />
+            <Button className="text-muted-foreground hover:text-foreground text-sm" variant="ghost">
+              Payment History <ExternalLink className="ml-1 h-3 w-3" />
             </Button>
           </div>
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
             {recentTransactions.map((transaction) => (
-              <div key={transaction.id} className="flex items-center justify-between py-2 border-b border-border/20 last:border-b-0">
-                <span className="text-sm text-muted-foreground">{transaction.time}</span>
+              <div
+                className="border-border/20 flex items-center justify-between border-b py-2 last:border-b-0"
+                key={transaction.id}
+              >
+                <span className="text-muted-foreground text-sm">{transaction.time}</span>
                 <div className="flex items-center gap-4">
-                  <span className="text-sm font-medium text-primary">{transaction.amount}</span>
-                  <span className="text-xs text-muted-foreground hover:text-foreground cursor-pointer hover:underline flex items-center gap-1">
+                  <span className="text-primary text-sm font-medium">{transaction.amount}</span>
+                  <span className="text-muted-foreground hover:text-foreground flex cursor-pointer items-center gap-1 text-xs hover:underline">
                     Get Invoice <FileText className="h-3 w-3" />
                   </span>
                 </div>
@@ -112,28 +115,24 @@ export function CreditsComponent() {
           </div>
 
           {/* Pagination */}
-          <div className="flex items-center justify-center gap-2 mt-6">
-            <Button 
-              variant="ghost" 
-              size="sm" 
-              disabled={currentPage === 1}
-              onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+          <div className="mt-6 flex items-center justify-center gap-2">
+            <Button
               className="text-muted-foreground"
+              disabled={currentPage === 1}
+              onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
+              size="sm"
+              variant="ghost"
             >
               ‹
             </Button>
-            <Button 
-              variant="ghost"
-              size="sm"
-              className="bg-muted text-foreground"
-            >
+            <Button className="bg-muted text-foreground" size="sm" variant="ghost">
               {currentPage}
             </Button>
-            <Button 
-              variant="ghost" 
-              size="sm" 
-              onClick={() => setCurrentPage(prev => prev + 1)}
+            <Button
               className="text-muted-foreground"
+              onClick={() => setCurrentPage((prev) => prev + 1)}
+              size="sm"
+              variant="ghost"
             >
               ›
             </Button>
@@ -141,5 +140,5 @@ export function CreditsComponent() {
         </CardContent>
       </Card>
     </div>
-  )
+  );
 }

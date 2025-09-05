@@ -83,7 +83,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const authState = auth.useSession();
 
   // Filter navigation items based on authentication state
-  const filteredNavData = navData.filter(item => {
+  const filteredNavData = navData.filter((item) => {
     if (item.requiresAuth) {
       return authState.data?.user;
     }
@@ -151,7 +151,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
 function AccountSection() {
   const authState = auth.useSession();
   const { state } = useSidebar();
-  
+
   const handleSignIn = async () => {
     await auth.signIn.social({ provider: "google" });
   };
@@ -163,7 +163,7 @@ function AccountSection() {
   const getUserInitials = (user: NonNullable<typeof authState.data>["user"]) => {
     return user.name.charAt(0) || user.email.charAt(0) || "U";
   };
-  
+
   if (state === "collapsed") {
     if (authState.data?.user) {
       // Signed in - show avatar with dropdown
@@ -176,9 +176,7 @@ function AccountSection() {
             >
               <Avatar className="size-6">
                 <AvatarImage alt={authState.data.user.name || "User"} src={authState.data.user.image ?? ""} />
-                <AvatarFallback className="text-xs">
-                  {getUserInitials(authState.data.user)}
-                </AvatarFallback>
+                <AvatarFallback className="text-xs">{getUserInitials(authState.data.user)}</AvatarFallback>
               </Avatar>
               <span className="sr-only">Account menu</span>
             </SidebarMenuButton>
@@ -186,8 +184,8 @@ function AccountSection() {
           <DropdownMenuContent align="center" side="right" sideOffset={4}>
             <DropdownMenuLabel className="font-normal">
               <div className="flex flex-col space-y-1">
-                <p className="text-sm font-medium leading-none">{authState.data.user.name}</p>
-                <p className="text-xs leading-none text-muted-foreground">{authState.data.user.email}</p>
+                <p className="text-sm leading-none font-medium">{authState.data.user.name}</p>
+                <p className="text-muted-foreground text-xs leading-none">{authState.data.user.email}</p>
               </div>
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
@@ -213,7 +211,7 @@ function AccountSection() {
       );
     }
   }
-  
+
   if (authState.data?.user) {
     // Signed in - show full profile with dropdown
     return (
@@ -222,21 +220,19 @@ function AccountSection() {
           <SidebarMenuButton className="group-data-[state=expanded]:hover:bg-sidebar-accent group-data-[state=expanded]:hover:text-sidebar-accent-foreground transition-colors">
             <Avatar className="size-6">
               <AvatarImage alt={authState.data.user.name || "User"} src={authState.data.user.image ?? ""} />
-              <AvatarFallback className="text-xs">
-                {getUserInitials(authState.data.user)}
-              </AvatarFallback>
+              <AvatarFallback className="text-xs">{getUserInitials(authState.data.user)}</AvatarFallback>
             </Avatar>
             <div className="grid flex-1 text-left text-sm leading-tight">
-              <span className="font-medium truncate">{authState.data.user.name}</span>
-              <span className="truncate text-xs text-muted-foreground">{authState.data.user.email}</span>
+              <span className="truncate font-medium">{authState.data.user.name}</span>
+              <span className="text-muted-foreground truncate text-xs">{authState.data.user.email}</span>
             </div>
           </SidebarMenuButton>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" side="right" sideOffset={4}>
           <DropdownMenuLabel className="font-normal">
             <div className="flex flex-col space-y-1">
-              <p className="text-sm font-medium leading-none">{authState.data.user.name}</p>
-              <p className="text-xs leading-none text-muted-foreground">{authState.data.user.email}</p>
+              <p className="text-sm leading-none font-medium">{authState.data.user.name}</p>
+              <p className="text-muted-foreground text-xs leading-none">{authState.data.user.email}</p>
             </div>
           </DropdownMenuLabel>
           <DropdownMenuSeparator />
@@ -266,21 +262,21 @@ function AccountSection() {
 function ThemeSelector() {
   const { setTheme, theme } = useTheme();
   const { state } = useSidebar();
-  
+
   const getThemeIcon = () => {
     if (theme === "dark") return Moon;
     if (theme === "light") return Sun;
     return Palette;
   };
-  
+
   const getThemeLabel = () => {
     if (theme === "dark") return "Dark";
     if (theme === "light") return "Light";
     return "System";
   };
-  
+
   const ThemeIcon = getThemeIcon();
-  
+
   if (state === "collapsed") {
     return (
       <DropdownMenu>
@@ -310,7 +306,7 @@ function ThemeSelector() {
       </DropdownMenu>
     );
   }
-  
+
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>

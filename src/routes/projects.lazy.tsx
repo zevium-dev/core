@@ -100,50 +100,50 @@ function RouteComponent() {
   return (
     <ProtectedRoute fallback={<AuthLoadingFallback />}>
       <div className="container mx-auto space-y-8 p-6">
-      {/* Header */}
-      <m.div
-        animate={{ opacity: 1, y: 0 }}
-        className="flex items-center justify-between"
-        initial={{ opacity: 0, y: -20 }}
-        transition={{ duration: 0.6 }}
-      >
-        <div>
-          <h1 className="bg-gradient-to-r from-gray-900 to-gray-600 bg-clip-text text-4xl font-bold tracking-tight text-transparent dark:from-gray-100 dark:to-gray-300">
-            Projects
-          </h1>
-          <p className="text-muted-foreground mt-2">
-            Manage your API projects, monitor performance, and collaborate with your team
-          </p>
-        </div>
-        <CreateProjectDialog />
-      </m.div>
-
-      {/* Projects Content */}
-      <div className="space-y-6">
-        <div className="flex items-center justify-between">
+        {/* Header */}
+        <m.div
+          animate={{ opacity: 1, y: 0 }}
+          className="flex items-center justify-between"
+          initial={{ opacity: 0, y: -20 }}
+          transition={{ duration: 0.6 }}
+        >
           <div>
-            <h2 className="text-xl font-semibold">All Projects</h2>
-            <p className="text-muted-foreground text-sm">Manage and monitor your API projects</p>
+            <h1 className="bg-gradient-to-r from-gray-900 to-gray-600 bg-clip-text text-4xl font-bold tracking-tight text-transparent dark:from-gray-100 dark:to-gray-300">
+              Projects
+            </h1>
+            <p className="text-muted-foreground mt-2">
+              Manage your API projects, monitor performance, and collaborate with your team
+            </p>
           </div>
-          <div className="flex gap-2">
-            <div className="relative">
-              <Search className="text-muted-foreground absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 transform" />
-              <Input className="w-64 pl-9" placeholder="Search projects..." />
-            </div>
-            <Button size="sm" variant="outline">
-              <Settings className="mr-2 h-4 w-4" />
-              Filter
-            </Button>
-          </div>
-        </div>
+          <CreateProjectDialog />
+        </m.div>
 
-        <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
-          {mockProjects.map((project) => (
-            <ProjectCard key={project.id} project={project} />
-          ))}
+        {/* Projects Content */}
+        <div className="space-y-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-xl font-semibold">All Projects</h2>
+              <p className="text-muted-foreground text-sm">Manage and monitor your API projects</p>
+            </div>
+            <div className="flex gap-2">
+              <div className="relative">
+                <Search className="text-muted-foreground absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 transform" />
+                <Input className="w-64 pl-9" placeholder="Search projects..." />
+              </div>
+              <Button size="sm" variant="outline">
+                <Settings className="mr-2 h-4 w-4" />
+                Filter
+              </Button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
+            {mockProjects.map((project) => (
+              <ProjectCard key={project.id} project={project} />
+            ))}
+          </div>
         </div>
       </div>
-    </div>
     </ProtectedRoute>
   );
 }
