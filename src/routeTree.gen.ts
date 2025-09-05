@@ -12,6 +12,7 @@ import { createFileRoute } from '@tanstack/react-router'
 import { createServerRootRoute } from '@tanstack/react-start/server'
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as SettingsSplatRouteImport } from './routes/settings/$'
 import { ServerRoute as ApiTrpcSplatServerRouteImport } from './routes/api/trpc/$'
 import { ServerRoute as ApiPosthogSplatServerRouteImport } from './routes/api/posthog/$'
 import { ServerRoute as ApiOpenapiSplatServerRouteImport } from './routes/api/openapi/$'
@@ -21,6 +22,12 @@ const ProjectsLazyRouteImport = createFileRoute('/projects')()
 const OrganizationsLazyRouteImport = createFileRoute('/organizations')()
 const CatalogueLazyRouteImport = createFileRoute('/catalogue')()
 const IndexLazyRouteImport = createFileRoute('/')()
+const SettingsCreditsSplatLazyRouteImport = createFileRoute(
+  '/settings/credits/$',
+)()
+const SettingsActivitySplatLazyRouteImport = createFileRoute(
+  '/settings/activity/$',
+)()
 const rootServerRouteImport = createServerRootRoute()
 
 const ProjectsLazyRoute = ProjectsLazyRouteImport.update({
@@ -43,6 +50,27 @@ const IndexLazyRoute = IndexLazyRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any).lazy(() => import('./routes/index.lazy').then((d) => d.Route))
+const SettingsSplatRoute = SettingsSplatRouteImport.update({
+  id: '/settings/$',
+  path: '/settings/$',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SettingsCreditsSplatLazyRoute =
+  SettingsCreditsSplatLazyRouteImport.update({
+    id: '/settings/credits/$',
+    path: '/settings/credits/$',
+    getParentRoute: () => rootRouteImport,
+  } as any).lazy(() =>
+    import('./routes/settings/credits/$.lazy').then((d) => d.Route),
+  )
+const SettingsActivitySplatLazyRoute =
+  SettingsActivitySplatLazyRouteImport.update({
+    id: '/settings/activity/$',
+    path: '/settings/activity/$',
+    getParentRoute: () => rootRouteImport,
+  } as any).lazy(() =>
+    import('./routes/settings/activity/$.lazy').then((d) => d.Route),
+  )
 const ApiTrpcSplatServerRoute = ApiTrpcSplatServerRouteImport.update({
   id: '/api/trpc/$',
   path: '/api/trpc/$',
@@ -69,12 +97,18 @@ export interface FileRoutesByFullPath {
   '/catalogue': typeof CatalogueLazyRoute
   '/organizations': typeof OrganizationsLazyRoute
   '/projects': typeof ProjectsLazyRoute
+  '/settings/$': typeof SettingsSplatRoute
+  '/settings/activity/$': typeof SettingsActivitySplatLazyRoute
+  '/settings/credits/$': typeof SettingsCreditsSplatLazyRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexLazyRoute
   '/catalogue': typeof CatalogueLazyRoute
   '/organizations': typeof OrganizationsLazyRoute
   '/projects': typeof ProjectsLazyRoute
+  '/settings/$': typeof SettingsSplatRoute
+  '/settings/activity/$': typeof SettingsActivitySplatLazyRoute
+  '/settings/credits/$': typeof SettingsCreditsSplatLazyRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -82,13 +116,38 @@ export interface FileRoutesById {
   '/catalogue': typeof CatalogueLazyRoute
   '/organizations': typeof OrganizationsLazyRoute
   '/projects': typeof ProjectsLazyRoute
+  '/settings/$': typeof SettingsSplatRoute
+  '/settings/activity/$': typeof SettingsActivitySplatLazyRoute
+  '/settings/credits/$': typeof SettingsCreditsSplatLazyRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/catalogue' | '/organizations' | '/projects'
+  fullPaths:
+    | '/'
+    | '/catalogue'
+    | '/organizations'
+    | '/projects'
+    | '/settings/$'
+    | '/settings/activity/$'
+    | '/settings/credits/$'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/catalogue' | '/organizations' | '/projects'
-  id: '__root__' | '/' | '/catalogue' | '/organizations' | '/projects'
+  to:
+    | '/'
+    | '/catalogue'
+    | '/organizations'
+    | '/projects'
+    | '/settings/$'
+    | '/settings/activity/$'
+    | '/settings/credits/$'
+  id:
+    | '__root__'
+    | '/'
+    | '/catalogue'
+    | '/organizations'
+    | '/projects'
+    | '/settings/$'
+    | '/settings/activity/$'
+    | '/settings/credits/$'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -96,6 +155,9 @@ export interface RootRouteChildren {
   CatalogueLazyRoute: typeof CatalogueLazyRoute
   OrganizationsLazyRoute: typeof OrganizationsLazyRoute
   ProjectsLazyRoute: typeof ProjectsLazyRoute
+  SettingsSplatRoute: typeof SettingsSplatRoute
+  SettingsActivitySplatLazyRoute: typeof SettingsActivitySplatLazyRoute
+  SettingsCreditsSplatLazyRoute: typeof SettingsCreditsSplatLazyRoute
 }
 export interface FileServerRoutesByFullPath {
   '/api/auth/$': typeof ApiAuthSplatServerRoute
@@ -166,6 +228,27 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexLazyRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/settings/$': {
+      id: '/settings/$'
+      path: '/settings/$'
+      fullPath: '/settings/$'
+      preLoaderRoute: typeof SettingsSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/settings/credits/$': {
+      id: '/settings/credits/$'
+      path: '/settings/credits/$'
+      fullPath: '/settings/credits/$'
+      preLoaderRoute: typeof SettingsCreditsSplatLazyRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/settings/activity/$': {
+      id: '/settings/activity/$'
+      path: '/settings/activity/$'
+      fullPath: '/settings/activity/$'
+      preLoaderRoute: typeof SettingsActivitySplatLazyRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 declare module '@tanstack/react-start/server' {
@@ -206,6 +289,9 @@ const rootRouteChildren: RootRouteChildren = {
   CatalogueLazyRoute: CatalogueLazyRoute,
   OrganizationsLazyRoute: OrganizationsLazyRoute,
   ProjectsLazyRoute: ProjectsLazyRoute,
+  SettingsSplatRoute: SettingsSplatRoute,
+  SettingsActivitySplatLazyRoute: SettingsActivitySplatLazyRoute,
+  SettingsCreditsSplatLazyRoute: SettingsCreditsSplatLazyRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
