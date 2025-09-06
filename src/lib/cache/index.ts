@@ -9,7 +9,11 @@ const defaultMemoryCacheTtlMs = 60 * 1000;
 const memoryCacheMap = new Map<string, { expiresAt: Date; value: unknown }>();
 
 // Helper functions to reduce code duplication
-const generateCacheKey = async <Args extends Array<unknown>>(namespace: string, fn: (...args: Args) => Promise<unknown>, args: Args): Promise<string> => {
+const generateCacheKey = async <Args extends Array<unknown>>(
+  namespace: string,
+  fn: (...args: Args) => Promise<unknown>,
+  args: Args,
+): Promise<string> => {
   const hashedArgs = await hashString(SuperJSON.stringify(args));
   return `${namespace}:${fn.name || "anonymous"}:${hashedArgs}`;
 };
