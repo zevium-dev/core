@@ -12,8 +12,10 @@ const badgeStatusVariants = cva(
     variants: {
       variant: {
         active: "border-green-200 bg-green-50 text-green-700 dark:border-green-800 dark:bg-green-950 dark:text-green-300",
+        archived: "border-gray-200 bg-gray-50 text-gray-700 dark:border-gray-800 dark:bg-gray-950 dark:text-gray-300",
         beta: "border-orange-200 bg-orange-50 text-orange-700 dark:border-orange-800 dark:bg-orange-950 dark:text-orange-300",
         deprecated: "border-red-200 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-300",
+        inactive: "border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-300",
       },
     },
   }
@@ -22,15 +24,17 @@ const badgeStatusVariants = cva(
 export interface BadgeStatusProps
   extends React.HTMLAttributes<HTMLDivElement>,
     VariantProps<typeof badgeStatusVariants> {
-  status?: "active" | "beta" | "deprecated";
+  status?: "active" | "archived" | "beta" | "deprecated" | "inactive";
 }
 
-const StatusIndicator = ({ status }: { status: "active" | "beta" | "deprecated" }) => (
+const StatusIndicator = ({ status }: { status: "active" | "archived" | "beta" | "deprecated" | "inactive" }) => (
   <div className={cn(
     "h-1.5 w-1.5 rounded-full",
     status === "active" && "bg-green-500",
+    status === "archived" && "bg-gray-500",
     status === "beta" && "bg-orange-500",
-    status === "deprecated" && "bg-red-500"
+    status === "deprecated" && "bg-red-500",
+    status === "inactive" && "bg-slate-500"
   )} />
 );
 

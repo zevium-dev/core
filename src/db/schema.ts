@@ -173,6 +173,49 @@ export const organizationInvitation = sqliteTable("organization_invitation", {
   token: text("token").notNull().unique(), // Secure invitation token
 });
 
+// ===== API SPEC SCHEMA =====
+
+export const apiSpec = sqliteTable("api_spec", {
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .$defaultFn(() => new Date())
+    .notNull(),
+  format: text("format", { enum: ["json", "yaml"] }).notNull(),
+  hash: text("hash").notNull().unique(), // SHA256 of normalized JSON to prevent duplicates
+  id: text("id").primaryKey(),
+  originalRaw: text("original_raw"), // Original uploaded text (YAML/JSON)
+  projectId: text("project_id")
+    .notNull()
+    .references(() => project.id, { onDelete: "cascade" }),
+  specJson: text("spec_json", { mode: "json" }).notNull(), // Normalized JSON object
+  status: text("status", { enum: ["active", "deprecated", "archived"] })
+    .$defaultFn(() => "active")
+    .notNull(),
+  title: text("title"),
+  updatedAt: integer("updated_at", { mode: "timestamp" })
+    .$defaultFn(() => new Date())
+    .notNull(),
+  versionLabel: text("version_label").notNull(), // e.g. "v1", "2025-09-05"
+});
+
+export const apiEndpoint = sqliteTable("api_endpoint", {
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .$defaultFn(() => new Date())
+    .notNull(),
+  deprecated: integer("deprecated", { mode: "boolean" })
+    .$defaultFn(() => false)
+    .notNull(),
+  id: text("id").primaryKey(),
+  method: text("method").notNull(), // GET, POST, PUT, DELETE, etc.
+  operationId: text("operation_id"),
+  path: text("path").notNull(),
+  security: text("security", { mode: "json" }).$defaultFn(() => []), // Security requirements array
+  specId: text("spec_id")
+    .notNull()
+    .references(() => apiSpec.id, { onDelete: "cascade" }),
+  summary: text("summary"),
+  tags: text("tags", { mode: "json" }).$defaultFn(() => []), // Array of tag strings
+});
+
 // ===== RELATIONS =====
 
 export const userRelations = relations(user, ({ many }) => ({
@@ -209,6 +252,7 @@ export const organizationMemberRelations = relations(organizationMember, ({ one 
 }));
 
 export const projectRelations = relations(project, ({ many, one }) => ({
+  apiSpecs: many(apiSpec),
   creator: one(user, {
     fields: [project.createdBy],
     references: [user.id],
@@ -243,6 +287,21 @@ export const organizationInvitationRelations = relations(organizationInvitation,
   organization: one(organization, {
     fields: [organizationInvitation.organizationId],
     references: [organization.id],
+  }),
+}));
+
+export const apiSpecRelations = relations(apiSpec, ({ many, one }) => ({
+  endpoints: many(apiEndpoint),
+  project: one(project, {
+    fields: [apiSpec.projectId],
+    references: [project.id],
+  }),
+}));
+
+export const apiEndpointRelations = relations(apiEndpoint, ({ one }) => ({
+  spec: one(apiSpec, {
+    fields: [apiEndpoint.specId],
+    references: [apiSpec.id],
   }),
 }));
 
