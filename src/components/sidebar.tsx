@@ -260,22 +260,8 @@ function AccountSection() {
 
 // Theme Selector Component
 function ThemeSelector() {
-  const { setTheme, theme } = useTheme();
+  const { setTheme } = useTheme();
   const { state } = useSidebar();
-
-  const getThemeIcon = () => {
-    if (theme === "dark") return Moon;
-    if (theme === "light") return Sun;
-    return Palette;
-  };
-
-  const getThemeLabel = () => {
-    if (theme === "dark") return "Dark";
-    if (theme === "light") return "Light";
-    return "System";
-  };
-
-  const ThemeIcon = getThemeIcon();
 
   if (state === "collapsed") {
     return (
@@ -285,7 +271,8 @@ function ThemeSelector() {
             className="group-data-[state=collapsed]:hover:bg-sidebar-accent group-data-[state=collapsed]:hover:text-sidebar-accent-foreground transition-colors"
             size="default"
           >
-            <ThemeIcon className="size-4" />
+            <Sun className="size-4 scale-100 rotate-0 transition-all dark:scale-0 dark:-rotate-90" />
+            <Moon className="absolute size-4 scale-0 rotate-90 transition-all dark:scale-100 dark:rotate-0" />
             <span className="sr-only">Toggle theme</span>
           </SidebarMenuButton>
         </DropdownMenuTrigger>
@@ -311,8 +298,10 @@ function ThemeSelector() {
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <SidebarMenuButton className="group-data-[state=expanded]:hover:bg-sidebar-accent group-data-[state=expanded]:hover:text-sidebar-accent-foreground transition-colors">
-          <ThemeIcon className="size-4" />
-          <span className="font-medium">{getThemeLabel()}</span>
+          <Sun className="size-4 scale-100 rotate-0 transition-all dark:scale-0 dark:-rotate-90" />
+          <span className="font-medium opacity-100 dark:opacity-0">Light</span>
+          <Moon className="absolute size-4 scale-0 rotate-90 transition-all dark:scale-100 dark:rotate-0" />
+          <span className="absolute ml-6 font-medium opacity-0 dark:opacity-100">Dark</span>
         </SidebarMenuButton>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" side="right" sideOffset={4}>
