@@ -12,6 +12,7 @@ import { createFileRoute } from '@tanstack/react-router'
 import { createServerRootRoute } from '@tanstack/react-start/server'
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as ExampleTodosRouteImport } from './routes/exampleTodos'
 import { Route as SettingsSplatRouteImport } from './routes/settings/$'
 import { ServerRoute as ApiTrpcSplatServerRouteImport } from './routes/api/trpc/$'
 import { ServerRoute as ApiPosthogSplatServerRouteImport } from './routes/api/posthog/$'
@@ -45,6 +46,11 @@ const CatalogueLazyRoute = CatalogueLazyRouteImport.update({
   path: '/catalogue',
   getParentRoute: () => rootRouteImport,
 } as any).lazy(() => import('./routes/catalogue.lazy').then((d) => d.Route))
+const ExampleTodosRoute = ExampleTodosRouteImport.update({
+  id: '/exampleTodos',
+  path: '/exampleTodos',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const IndexLazyRoute = IndexLazyRouteImport.update({
   id: '/',
   path: '/',
@@ -94,6 +100,7 @@ const ApiAuthSplatServerRoute = ApiAuthSplatServerRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexLazyRoute
+  '/exampleTodos': typeof ExampleTodosRoute
   '/catalogue': typeof CatalogueLazyRoute
   '/organizations': typeof OrganizationsLazyRoute
   '/projects': typeof ProjectsLazyRoute
@@ -103,6 +110,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexLazyRoute
+  '/exampleTodos': typeof ExampleTodosRoute
   '/catalogue': typeof CatalogueLazyRoute
   '/organizations': typeof OrganizationsLazyRoute
   '/projects': typeof ProjectsLazyRoute
@@ -113,6 +121,7 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexLazyRoute
+  '/exampleTodos': typeof ExampleTodosRoute
   '/catalogue': typeof CatalogueLazyRoute
   '/organizations': typeof OrganizationsLazyRoute
   '/projects': typeof ProjectsLazyRoute
@@ -124,6 +133,7 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/exampleTodos'
     | '/catalogue'
     | '/organizations'
     | '/projects'
@@ -133,6 +143,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/exampleTodos'
     | '/catalogue'
     | '/organizations'
     | '/projects'
@@ -142,6 +153,7 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
+    | '/exampleTodos'
     | '/catalogue'
     | '/organizations'
     | '/projects'
@@ -152,6 +164,7 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexLazyRoute: typeof IndexLazyRoute
+  ExampleTodosRoute: typeof ExampleTodosRoute
   CatalogueLazyRoute: typeof CatalogueLazyRoute
   OrganizationsLazyRoute: typeof OrganizationsLazyRoute
   ProjectsLazyRoute: typeof ProjectsLazyRoute
@@ -221,6 +234,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CatalogueLazyRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/exampleTodos': {
+      id: '/exampleTodos'
+      path: '/exampleTodos'
+      fullPath: '/exampleTodos'
+      preLoaderRoute: typeof ExampleTodosRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/': {
       id: '/'
       path: '/'
@@ -286,6 +306,7 @@ declare module '@tanstack/react-start/server' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexLazyRoute: IndexLazyRoute,
+  ExampleTodosRoute: ExampleTodosRoute,
   CatalogueLazyRoute: CatalogueLazyRoute,
   OrganizationsLazyRoute: OrganizationsLazyRoute,
   ProjectsLazyRoute: ProjectsLazyRoute,

@@ -7,7 +7,7 @@ import { NumberTicker } from "~/components/magicui/number-ticker";
 import { Ripple } from "~/components/magicui/ripple";
 import { TextAnimate } from "~/components/magicui/text-animate";
 import { WordRotate } from "~/components/magicui/word-rotate";
-import { PageHeaderContent } from "~/components/sidebar";
+// import { PageHeaderContent } from "~/components/sidebar";
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent, CardHeader } from "~/components/ui/card";
@@ -19,14 +19,14 @@ export const Route = createLazyFileRoute("/")({
 function Home() {
   return (
     <>
-      <PageHeaderContent>
+      {/* <PageHeaderContent>
         <div className="flex w-full items-center gap-4">
           <div className="flex items-center space-x-2">
             <Globe className="text-primary h-5 w-5" />
             <span className="font-semibold">API Hub Dashboard</span>
           </div>
         </div>
-      </PageHeaderContent>
+      </PageHeaderContent> */}
 
       <div className="flex-1 space-y-8 p-4 pt-6 md:p-8">
         {/* Hero Section */}
