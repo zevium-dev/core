@@ -90,8 +90,7 @@ export const organization = sqliteTable("organization", {
 
 export const organizationMember = sqliteTable("organization_member", {
   id: text("id").primaryKey(),
-  invitedBy: text("invited_by")
-    .references(() => user.id, { onDelete: "set null" }),
+  invitedBy: text("invited_by").references(() => user.id, { onDelete: "set null" }),
   joinedAt: integer("joined_at", { mode: "timestamp" })
     .$defaultFn(() => new Date())
     .notNull(),
@@ -135,8 +134,7 @@ export const project = sqliteTable("project", {
 });
 
 export const projectMember = sqliteTable("project_member", {
-  addedBy: text("added_by")
-    .references(() => user.id, { onDelete: "set null" }),
+  addedBy: text("added_by").references(() => user.id, { onDelete: "set null" }),
   id: text("id").primaryKey(),
   joinedAt: integer("joined_at", { mode: "timestamp" })
     .$defaultFn(() => new Date())

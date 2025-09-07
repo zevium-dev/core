@@ -18,7 +18,7 @@ const badgeStatusVariants = cva(
         inactive: "border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-300",
       },
     },
-  }
+  },
 );
 
 export interface BadgeStatusProps

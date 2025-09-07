@@ -12,6 +12,7 @@ import { createFileRoute } from '@tanstack/react-router'
 import { createServerRootRoute } from '@tanstack/react-start/server'
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as SettingsSplatRouteImport } from './routes/settings/$'
 import { ServerRoute as ApiTrpcSplatServerRouteImport } from './routes/api/trpc/$'
 import { ServerRoute as ApiPosthogSplatServerRouteImport } from './routes/api/posthog/$'
 import { ServerRoute as ApiOpenapiSplatServerRouteImport } from './routes/api/openapi/$'
@@ -19,11 +20,19 @@ import { ServerRoute as ApiAuthSplatServerRouteImport } from './routes/api/auth/
 
 const CatalogueLazyRouteImport = createFileRoute('/catalogue')()
 const IndexLazyRouteImport = createFileRoute('/')()
+<<<<<<< HEAD
 const ProjectsIndexLazyRouteImport = createFileRoute('/projects/')()
 const OrganizationsIndexLazyRouteImport = createFileRoute('/organizations/')()
 const ProjectsSlugLazyRouteImport = createFileRoute('/projects/$slug')()
 const OrganizationsSlugLazyRouteImport = createFileRoute(
   '/organizations/$slug',
+=======
+const SettingsCreditsSplatLazyRouteImport = createFileRoute(
+  '/settings/credits/$',
+)()
+const SettingsActivitySplatLazyRouteImport = createFileRoute(
+  '/settings/activity/$',
+>>>>>>> develop
 )()
 const rootServerRouteImport = createServerRootRoute()
 
@@ -37,6 +46,7 @@ const IndexLazyRoute = IndexLazyRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any).lazy(() => import('./routes/index.lazy').then((d) => d.Route))
+<<<<<<< HEAD
 const ProjectsIndexLazyRoute = ProjectsIndexLazyRouteImport.update({
   id: '/projects/',
   path: '/projects/',
@@ -65,6 +75,29 @@ const OrganizationsSlugLazyRoute = OrganizationsSlugLazyRouteImport.update({
 } as any).lazy(() =>
   import('./routes/organizations/$slug.lazy').then((d) => d.Route),
 )
+=======
+const SettingsSplatRoute = SettingsSplatRouteImport.update({
+  id: '/settings/$',
+  path: '/settings/$',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SettingsCreditsSplatLazyRoute =
+  SettingsCreditsSplatLazyRouteImport.update({
+    id: '/settings/credits/$',
+    path: '/settings/credits/$',
+    getParentRoute: () => rootRouteImport,
+  } as any).lazy(() =>
+    import('./routes/settings/credits/$.lazy').then((d) => d.Route),
+  )
+const SettingsActivitySplatLazyRoute =
+  SettingsActivitySplatLazyRouteImport.update({
+    id: '/settings/activity/$',
+    path: '/settings/activity/$',
+    getParentRoute: () => rootRouteImport,
+  } as any).lazy(() =>
+    import('./routes/settings/activity/$.lazy').then((d) => d.Route),
+  )
+>>>>>>> develop
 const ApiTrpcSplatServerRoute = ApiTrpcSplatServerRouteImport.update({
   id: '/api/trpc/$',
   path: '/api/trpc/$',
@@ -89,62 +122,118 @@ const ApiAuthSplatServerRoute = ApiAuthSplatServerRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexLazyRoute
   '/catalogue': typeof CatalogueLazyRoute
+<<<<<<< HEAD
   '/organizations/$slug': typeof OrganizationsSlugLazyRoute
   '/projects/$slug': typeof ProjectsSlugLazyRoute
   '/organizations': typeof OrganizationsIndexLazyRoute
   '/projects': typeof ProjectsIndexLazyRoute
+=======
+  '/organizations': typeof OrganizationsLazyRoute
+  '/projects': typeof ProjectsLazyRoute
+  '/settings/$': typeof SettingsSplatRoute
+  '/settings/activity/$': typeof SettingsActivitySplatLazyRoute
+  '/settings/credits/$': typeof SettingsCreditsSplatLazyRoute
+>>>>>>> develop
 }
 export interface FileRoutesByTo {
   '/': typeof IndexLazyRoute
   '/catalogue': typeof CatalogueLazyRoute
+<<<<<<< HEAD
   '/organizations/$slug': typeof OrganizationsSlugLazyRoute
   '/projects/$slug': typeof ProjectsSlugLazyRoute
   '/organizations': typeof OrganizationsIndexLazyRoute
   '/projects': typeof ProjectsIndexLazyRoute
+=======
+  '/organizations': typeof OrganizationsLazyRoute
+  '/projects': typeof ProjectsLazyRoute
+  '/settings/$': typeof SettingsSplatRoute
+  '/settings/activity/$': typeof SettingsActivitySplatLazyRoute
+  '/settings/credits/$': typeof SettingsCreditsSplatLazyRoute
+>>>>>>> develop
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexLazyRoute
   '/catalogue': typeof CatalogueLazyRoute
+<<<<<<< HEAD
   '/organizations/$slug': typeof OrganizationsSlugLazyRoute
   '/projects/$slug': typeof ProjectsSlugLazyRoute
   '/organizations/': typeof OrganizationsIndexLazyRoute
   '/projects/': typeof ProjectsIndexLazyRoute
+=======
+  '/organizations': typeof OrganizationsLazyRoute
+  '/projects': typeof ProjectsLazyRoute
+  '/settings/$': typeof SettingsSplatRoute
+  '/settings/activity/$': typeof SettingsActivitySplatLazyRoute
+  '/settings/credits/$': typeof SettingsCreditsSplatLazyRoute
+>>>>>>> develop
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
     | '/catalogue'
+<<<<<<< HEAD
     | '/organizations/$slug'
     | '/projects/$slug'
     | '/organizations'
     | '/projects'
+=======
+    | '/organizations'
+    | '/projects'
+    | '/settings/$'
+    | '/settings/activity/$'
+    | '/settings/credits/$'
+>>>>>>> develop
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/catalogue'
+<<<<<<< HEAD
     | '/organizations/$slug'
     | '/projects/$slug'
     | '/organizations'
     | '/projects'
+=======
+    | '/organizations'
+    | '/projects'
+    | '/settings/$'
+    | '/settings/activity/$'
+    | '/settings/credits/$'
+>>>>>>> develop
   id:
     | '__root__'
     | '/'
     | '/catalogue'
+<<<<<<< HEAD
     | '/organizations/$slug'
     | '/projects/$slug'
     | '/organizations/'
     | '/projects/'
+=======
+    | '/organizations'
+    | '/projects'
+    | '/settings/$'
+    | '/settings/activity/$'
+    | '/settings/credits/$'
+>>>>>>> develop
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexLazyRoute: typeof IndexLazyRoute
   CatalogueLazyRoute: typeof CatalogueLazyRoute
+<<<<<<< HEAD
   OrganizationsSlugLazyRoute: typeof OrganizationsSlugLazyRoute
   ProjectsSlugLazyRoute: typeof ProjectsSlugLazyRoute
   OrganizationsIndexLazyRoute: typeof OrganizationsIndexLazyRoute
   ProjectsIndexLazyRoute: typeof ProjectsIndexLazyRoute
+=======
+  OrganizationsLazyRoute: typeof OrganizationsLazyRoute
+  ProjectsLazyRoute: typeof ProjectsLazyRoute
+  SettingsSplatRoute: typeof SettingsSplatRoute
+  SettingsActivitySplatLazyRoute: typeof SettingsActivitySplatLazyRoute
+  SettingsCreditsSplatLazyRoute: typeof SettingsCreditsSplatLazyRoute
+>>>>>>> develop
 }
 export interface FileServerRoutesByFullPath {
   '/api/auth/$': typeof ApiAuthSplatServerRoute
@@ -201,6 +290,7 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexLazyRouteImport
       parentRoute: typeof rootRouteImport
     }
+<<<<<<< HEAD
     '/projects/': {
       id: '/projects/'
       path: '/projects'
@@ -227,6 +317,27 @@ declare module '@tanstack/react-router' {
       path: '/organizations/$slug'
       fullPath: '/organizations/$slug'
       preLoaderRoute: typeof OrganizationsSlugLazyRouteImport
+=======
+    '/settings/$': {
+      id: '/settings/$'
+      path: '/settings/$'
+      fullPath: '/settings/$'
+      preLoaderRoute: typeof SettingsSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/settings/credits/$': {
+      id: '/settings/credits/$'
+      path: '/settings/credits/$'
+      fullPath: '/settings/credits/$'
+      preLoaderRoute: typeof SettingsCreditsSplatLazyRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/settings/activity/$': {
+      id: '/settings/activity/$'
+      path: '/settings/activity/$'
+      fullPath: '/settings/activity/$'
+      preLoaderRoute: typeof SettingsActivitySplatLazyRouteImport
+>>>>>>> develop
       parentRoute: typeof rootRouteImport
     }
   }
@@ -267,10 +378,18 @@ declare module '@tanstack/react-start/server' {
 const rootRouteChildren: RootRouteChildren = {
   IndexLazyRoute: IndexLazyRoute,
   CatalogueLazyRoute: CatalogueLazyRoute,
+<<<<<<< HEAD
   OrganizationsSlugLazyRoute: OrganizationsSlugLazyRoute,
   ProjectsSlugLazyRoute: ProjectsSlugLazyRoute,
   OrganizationsIndexLazyRoute: OrganizationsIndexLazyRoute,
   ProjectsIndexLazyRoute: ProjectsIndexLazyRoute,
+=======
+  OrganizationsLazyRoute: OrganizationsLazyRoute,
+  ProjectsLazyRoute: ProjectsLazyRoute,
+  SettingsSplatRoute: SettingsSplatRoute,
+  SettingsActivitySplatLazyRoute: SettingsActivitySplatLazyRoute,
+  SettingsCreditsSplatLazyRoute: SettingsCreditsSplatLazyRoute,
+>>>>>>> develop
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

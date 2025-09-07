@@ -67,7 +67,7 @@ function CreateOrganizationModal({ children }: { children: React.ReactNode }) {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if (!organizationName.trim()) {
       alert("Please enter an organization name");
       return;
@@ -100,15 +100,11 @@ function CreateOrganizationModal({ children }: { children: React.ReactNode }) {
 
   return (
     <Dialog onOpenChange={setOpen} open={open}>
-      <DialogTrigger asChild>
-        {children}
-      </DialogTrigger>
+      <DialogTrigger asChild>{children}</DialogTrigger>
       <DialogContent className="sm:max-w-[425px]">
         <DialogHeader>
           <DialogTitle>Create New Organization</DialogTitle>
-          <DialogDescription>
-            Set up a new organization to manage your projects and team members.
-          </DialogDescription>
+          <DialogDescription>Set up a new organization to manage your projects and team members.</DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit}>
           <div className="grid gap-4 py-4">
@@ -177,36 +173,36 @@ function OrganizationCard({ index, organization }: { index: number; organization
                 <h3 className="text-lg font-semibold tracking-tight">{organization.name}</h3>
               </div>
             </div>
-            <Button 
-              className="opacity-0 group-hover:opacity-100 transition-opacity duration-300"
-              size="sm" 
-              variant="ghost" 
+            <Button
+              className="opacity-0 transition-opacity duration-300 group-hover:opacity-100"
+              size="sm"
+              variant="ghost"
             >
               <ArrowRight className="h-4 w-4" />
             </Button>
           </div>
         </CardHeader>
-        
+
         <CardContent className="pt-0">
           <div className="space-y-4">
             {/* Organization Stats */}
             <div className="grid grid-cols-2 gap-4">
               <div className="flex items-center gap-2">
-                <div className="bg-blue-100 dark:bg-blue-900/50 rounded-full p-1.5">
+                <div className="rounded-full bg-blue-100 p-1.5 dark:bg-blue-900/50">
                   <Building2 className="h-3 w-3 text-blue-600 dark:text-blue-400" />
                 </div>
                 <div>
-                  <p className="text-xs text-muted-foreground">Projects</p>
+                  <p className="text-muted-foreground text-xs">Projects</p>
                   <p className="text-sm font-semibold">{organization.projectCount}</p>
                 </div>
               </div>
-              
+
               <div className="flex items-center gap-2">
-                <div className="bg-green-100 dark:bg-green-900/50 rounded-full p-1.5">
+                <div className="rounded-full bg-green-100 p-1.5 dark:bg-green-900/50">
                   <Users className="h-3 w-3 text-green-600 dark:text-green-400" />
                 </div>
                 <div>
-                  <p className="text-xs text-muted-foreground">Members</p>
+                  <p className="text-muted-foreground text-xs">Members</p>
                   <p className="text-sm font-semibold">{organization.memberCount}</p>
                 </div>
               </div>
@@ -217,7 +213,7 @@ function OrganizationCard({ index, organization }: { index: number; organization
               <Badge className="text-xs" variant="secondary">
                 Active
               </Badge>
-              <div className="flex items-center gap-1 text-xs text-muted-foreground">
+              <div className="text-muted-foreground flex items-center gap-1 text-xs">
                 <Calendar className="h-3 w-3" />
                 Est. 2024
               </div>
@@ -275,86 +271,71 @@ function RouteComponent() {
   return (
     <ProtectedRoute fallback={<AuthLoadingFallback />}>
       <div className="container mx-auto space-y-8 px-8 py-8">
-      {/* Header */}
-      <m.div 
-        animate={{ opacity: 1, y: 0 }} 
-        initial={{ opacity: 0, y: -20 }} 
-        transition={{ duration: 0.5 }}
-      >
-        <div className="flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
-          <div className="space-y-2">
-            <h1 className="text-3xl font-bold tracking-tight">Organizations</h1>
-            <p className="text-muted-foreground">
-              Manage your organizations and collaborate with your teams
-            </p>
-          </div>
-
-          <div className="flex items-center gap-4">
-            <div className="relative min-w-[300px]">
-              <Search className="text-muted-foreground absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 transform" />
-              <Input
-                className="pl-10"
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search organizations..."
-                value={searchQuery}
-              />
+        {/* Header */}
+        <m.div animate={{ opacity: 1, y: 0 }} initial={{ opacity: 0, y: -20 }} transition={{ duration: 0.5 }}>
+          <div className="flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
+            <div className="space-y-2">
+              <h1 className="text-3xl font-bold tracking-tight">Organizations</h1>
+              <p className="text-muted-foreground">Manage your organizations and collaborate with your teams</p>
             </div>
-            <CreateOrganizationModal>
-              <Button className="gap-2">
-                <Plus className="h-4 w-4" />
-                New Organization
-              </Button>
-            </CreateOrganizationModal>
-          </div>
-        </div>
-      </m.div>
 
-      {/* Organizations Grid */}
-      <m.div 
-        animate={{ opacity: 1 }} 
-        initial={{ opacity: 0 }} 
-        transition={{ delay: 0.2, duration: 0.5 }}
-      >
-        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-          {filteredOrganizations.map((organization, index) => (
-            <OrganizationCard
-              index={index}
-              key={organization.id}
-              organization={organization}
-            />
-          ))}
-        </div>
-
-        {/* Empty State */}
-        {filteredOrganizations.length === 0 && (
-          <m.div
-            animate={{ opacity: 1, scale: 1 }}
-            className="flex flex-col items-center justify-center py-12 text-center"
-            initial={{ opacity: 0, scale: 0.95 }}
-            transition={{ delay: 0.3, duration: 0.5 }}
-          >
-            <div className="bg-muted/50 rounded-full p-6 mb-4">
-              <Building2 className="text-muted-foreground h-8 w-8" />
-            </div>
-            <h3 className="text-lg font-semibold mb-2">No organizations found</h3>
-            <p className="text-muted-foreground text-sm mb-4 max-w-md">
-              {searchQuery ? 
-                "No organizations match your search criteria. Try adjusting your search terms." :
-                "You haven't created any organizations yet. Get started by creating your first organization."
-              }
-            </p>
-            {!searchQuery && (
+            <div className="flex items-center gap-4">
+              <div className="relative min-w-[300px]">
+                <Search className="text-muted-foreground absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 transform" />
+                <Input
+                  className="pl-10"
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Search organizations..."
+                  value={searchQuery}
+                />
+              </div>
               <CreateOrganizationModal>
                 <Button className="gap-2">
                   <Plus className="h-4 w-4" />
-                  Create Organization
+                  New Organization
                 </Button>
               </CreateOrganizationModal>
-            )}
-          </m.div>
-        )}
-      </m.div>
-    </div>
+            </div>
+          </div>
+        </m.div>
+
+        {/* Organizations Grid */}
+        <m.div animate={{ opacity: 1 }} initial={{ opacity: 0 }} transition={{ delay: 0.2, duration: 0.5 }}>
+          <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+            {filteredOrganizations.map((organization, index) => (
+              <OrganizationCard index={index} key={organization.id} organization={organization} />
+            ))}
+          </div>
+
+          {/* Empty State */}
+          {filteredOrganizations.length === 0 && (
+            <m.div
+              animate={{ opacity: 1, scale: 1 }}
+              className="flex flex-col items-center justify-center py-12 text-center"
+              initial={{ opacity: 0, scale: 0.95 }}
+              transition={{ delay: 0.3, duration: 0.5 }}
+            >
+              <div className="bg-muted/50 mb-4 rounded-full p-6">
+                <Building2 className="text-muted-foreground h-8 w-8" />
+              </div>
+              <h3 className="mb-2 text-lg font-semibold">No organizations found</h3>
+              <p className="text-muted-foreground mb-4 max-w-md text-sm">
+                {searchQuery
+                  ? "No organizations match your search criteria. Try adjusting your search terms."
+                  : "You haven't created any organizations yet. Get started by creating your first organization."}
+              </p>
+              {!searchQuery && (
+                <CreateOrganizationModal>
+                  <Button className="gap-2">
+                    <Plus className="h-4 w-4" />
+                    Create Organization
+                  </Button>
+                </CreateOrganizationModal>
+              )}
+            </m.div>
+          )}
+        </m.div>
+      </div>
     </ProtectedRoute>
   );
 }

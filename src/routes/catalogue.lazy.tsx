@@ -1,16 +1,16 @@
-import { createLazyFileRoute } from '@tanstack/react-router'
-import { Activity, Clock, Database, Globe, Search, Shield, TrendingUp, Users, Zap } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { createLazyFileRoute } from "@tanstack/react-router";
+import { Activity, Clock, Database, Globe, Search, Shield, TrendingUp, Users, Zap } from "lucide-react";
+import { useMemo, useState } from "react";
 
-import { Badge } from '~/components/ui/badge'
-import { Button } from '~/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader } from '~/components/ui/card'
-import { Input } from '~/components/ui/input'
-import { cn } from '~/lib/utils'
+import { Badge } from "~/components/ui/badge";
+import { Button } from "~/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader } from "~/components/ui/card";
+import { Input } from "~/components/ui/input";
+import { cn } from "~/lib/utils";
 
-export const Route = createLazyFileRoute('/catalogue')({
+export const Route = createLazyFileRoute("/catalogue")({
   component: RouteComponent,
-})
+});
 
 // Mock data for demonstration
 const mockAPIs = [
@@ -23,7 +23,7 @@ const mockAPIs = [
     provider: "PaySecure Inc.",
     successRate: 99.8,
     tags: ["payment", "security", "fintech"],
-    title: "Payment Gateway API"
+    title: "Payment Gateway API",
   },
   {
     callCount: 128943,
@@ -34,7 +34,7 @@ const mockAPIs = [
     provider: "WeatherTech",
     successRate: 99.5,
     tags: ["weather", "forecast", "geolocation"],
-    title: "Weather Forecast API"
+    title: "Weather Forecast API",
   },
   {
     callCount: 89234,
@@ -45,7 +45,7 @@ const mockAPIs = [
     provider: "AuthFlow Solutions",
     successRate: 99.9,
     tags: ["auth", "oauth", "security"],
-    title: "User Authentication API"
+    title: "User Authentication API",
   },
   {
     callCount: 34567,
@@ -56,7 +56,7 @@ const mockAPIs = [
     provider: "VisionAI Corp",
     successRate: 98.7,
     tags: ["ai", "image", "processing"],
-    title: "Image Processing API"
+    title: "Image Processing API",
   },
   {
     callCount: 67890,
@@ -67,7 +67,7 @@ const mockAPIs = [
     provider: "MailStream",
     successRate: 99.6,
     tags: ["email", "delivery", "analytics"],
-    title: "Email Delivery API"
+    title: "Email Delivery API",
   },
   {
     callCount: 156789,
@@ -78,201 +78,190 @@ const mockAPIs = [
     provider: "GeoPoint Systems",
     successRate: 99.4,
     tags: ["location", "gps", "mapping"],
-    title: "Geolocation API"
-  }
-]
+    title: "Geolocation API",
+  },
+];
 
 const categories = [
-  { count: mockAPIs.length, icon: Globe, id: 'all', name: 'All APIs' },
-  { count: 1, icon: Shield, id: 'financial', name: 'Financial Services' },
-  { count: 2, icon: Database, id: 'data', name: 'Data & Analytics' },
-  { count: 1, icon: Shield, id: 'security', name: 'Security' },
-  { count: 1, icon: Zap, id: 'ml', name: 'Machine Learning' },
-  { count: 1, icon: Users, id: 'communication', name: 'Communication' }
-]
+  { count: mockAPIs.length, icon: Globe, id: "all", name: "All APIs" },
+  { count: 1, icon: Shield, id: "financial", name: "Financial Services" },
+  { count: 2, icon: Database, id: "data", name: "Data & Analytics" },
+  { count: 1, icon: Shield, id: "security", name: "Security" },
+  { count: 1, icon: Zap, id: "ml", name: "Machine Learning" },
+  { count: 1, icon: Users, id: "communication", name: "Communication" },
+];
 
-function APICard({ api }: { api: typeof mockAPIs[0] }) {
+function APICard({ api }: { api: (typeof mockAPIs)[0] }) {
   return (
-    <Card className="group hover:shadow-lg transition-all duration-300 border-border/50 hover:border-border bg-card/50 backdrop-blur-sm h-full flex flex-col cursor-pointer">
+    <Card className="group border-border/50 hover:border-border bg-card/50 flex h-full cursor-pointer flex-col backdrop-blur-sm transition-all duration-300 hover:shadow-lg">
       <CardHeader className="pb-6">
         <div className="space-y-3">
           {/* Title and Category Badge */}
           <div className="flex items-start justify-between gap-4">
-            <h3 className="font-semibold text-lg text-foreground group-hover:text-primary transition-colors leading-tight">
+            <h3 className="text-foreground group-hover:text-primary text-lg leading-tight font-semibold transition-colors">
               {api.title}
             </h3>
             <Badge className="shrink-0" variant="outline">
               {api.category}
             </Badge>
           </div>
-          
+
           {/* Provider */}
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <div className="text-muted-foreground flex items-center gap-2 text-xs">
             <span>by</span>
-            <span className="font-medium text-foreground">{api.provider}</span>
+            <span className="text-foreground font-medium">{api.provider}</span>
           </div>
         </div>
       </CardHeader>
-      
-      <CardContent className="flex-1 flex flex-col pt-0 pb-6">
+
+      <CardContent className="flex flex-1 flex-col pt-0 pb-6">
         {/* Description - Full Width */}
         <div className="mb-6">
-          <CardDescription className="text-sm leading-relaxed">
-            {api.description}
-          </CardDescription>
+          <CardDescription className="text-sm leading-relaxed">{api.description}</CardDescription>
         </div>
-        
+
         {/* Spacer to push footer content to bottom */}
         <div className="flex-1"></div>
-        
+
         {/* Footer Content - Tags and Metrics */}
         <div className="space-y-4">
           {/* Tags */}
           <div className="flex flex-wrap gap-1.5">
             {api.tags.map((tag) => (
-              <Badge className="text-xs px-2 py-0.5" key={tag} variant="secondary">
+              <Badge className="px-2 py-0.5 text-xs" key={tag} variant="secondary">
                 {tag}
               </Badge>
             ))}
           </div>
-          
+
           {/* Metrics */}
-          <div className="grid grid-cols-3 gap-4 pt-4 border-t border-border/50">
+          <div className="border-border/50 grid grid-cols-3 gap-4 border-t pt-4">
             <div className="text-center">
-              <div className="flex items-center justify-center gap-1 text-muted-foreground mb-1.5">
+              <div className="text-muted-foreground mb-1.5 flex items-center justify-center gap-1">
                 <Activity className="size-3" />
                 <span className="text-xs font-medium">Calls</span>
               </div>
-              <div className="text-sm font-semibold text-foreground">
-                {api.callCount.toLocaleString()}
-              </div>
+              <div className="text-foreground text-sm font-semibold">{api.callCount.toLocaleString()}</div>
             </div>
-            
+
             <div className="text-center">
-              <div className="flex items-center justify-center gap-1 text-muted-foreground mb-1.5">
+              <div className="text-muted-foreground mb-1.5 flex items-center justify-center gap-1">
                 <Clock className="size-3" />
                 <span className="text-xs font-medium">Latency</span>
               </div>
-              <div className="text-sm font-semibold text-foreground">
-                {api.latency}ms
-              </div>
+              <div className="text-foreground text-sm font-semibold">{api.latency}ms</div>
             </div>
-            
+
             <div className="text-center">
-              <div className="flex items-center justify-center gap-1 text-muted-foreground mb-1.5">
+              <div className="text-muted-foreground mb-1.5 flex items-center justify-center gap-1">
                 <TrendingUp className="size-3" />
                 <span className="text-xs font-medium">Success</span>
               </div>
-              <div className="text-sm font-semibold text-green-600 dark:text-green-400">
-                {api.successRate}%
-              </div>
+              <div className="text-sm font-semibold text-green-600 dark:text-green-400">{api.successRate}%</div>
             </div>
           </div>
         </div>
       </CardContent>
     </Card>
-  )
+  );
 }
 
-function CategorySidebar({ 
+function CategorySidebar({
   onCategoryChange,
-  selectedCategory
-}: { 
-  onCategoryChange: (category: string) => void
-  selectedCategory: string
+  selectedCategory,
+}: {
+  onCategoryChange: (category: string) => void;
+  selectedCategory: string;
 }) {
   return (
     <aside className="w-64 shrink-0 space-y-3">
-      <h2 className="font-semibold text-sm text-muted-foreground uppercase tracking-wide px-3">
-        Categories
-      </h2>
-      
+      <h2 className="text-muted-foreground px-3 text-sm font-semibold tracking-wide uppercase">Categories</h2>
+
       <nav className="space-y-1 px-2">
         {categories.map((category) => {
-          const Icon = category.icon
-          const isActive = selectedCategory === category.id
-          
+          const Icon = category.icon;
+          const isActive = selectedCategory === category.id;
+
           return (
             <Button
               className={cn(
-                "w-full justify-start gap-3 h-11 px-3 transition-all duration-200 rounded-lg",
-                isActive 
-                  ? "bg-primary/10 text-primary border-r-2 border-primary shadow-sm" 
-                  : "text-muted-foreground hover:text-foreground hover:bg-accent/50"
+                "h-11 w-full justify-start gap-3 rounded-lg px-3 transition-all duration-200",
+                isActive
+                  ? "bg-primary/10 text-primary border-primary border-r-2 shadow-sm"
+                  : "text-muted-foreground hover:text-foreground hover:bg-accent/50",
               )}
               key={category.id}
               onClick={() => onCategoryChange(category.id)}
               variant="ghost"
             >
               <Icon className="size-4 shrink-0" />
-              <span className="flex-1 text-left truncate font-medium">{category.name}</span>
-              <Badge 
-                className="text-xs px-2 py-0.5 min-w-[1.75rem] h-5 font-medium"
+              <span className="flex-1 truncate text-left font-medium">{category.name}</span>
+              <Badge
+                className="h-5 min-w-[1.75rem] px-2 py-0.5 text-xs font-medium"
                 variant={isActive ? "default" : "secondary"}
               >
                 {category.count}
               </Badge>
             </Button>
-          )
+          );
         })}
       </nav>
     </aside>
-  )
+  );
 }
 
 function RouteComponent() {
-  const [searchQuery, setSearchQuery] = useState('')
-  const [selectedCategory, setSelectedCategory] = useState('all')
+  const [searchQuery, setSearchQuery] = useState("");
+  const [selectedCategory, setSelectedCategory] = useState("all");
 
   const filteredAPIs = useMemo(() => {
-    let filtered = mockAPIs
+    let filtered = mockAPIs;
 
     // Filter by category
-    if (selectedCategory !== 'all') {
+    if (selectedCategory !== "all") {
       const categoryMap: Record<string, string> = {
-        'communication': 'Communication',
-        'data': 'Data & Analytics',
-        'financial': 'Financial Services',
-        'ml': 'Machine Learning',
-        'security': 'Security'
-      }
-      filtered = filtered.filter(api => api.category === categoryMap[selectedCategory])
+        communication: "Communication",
+        data: "Data & Analytics",
+        financial: "Financial Services",
+        ml: "Machine Learning",
+        security: "Security",
+      };
+      filtered = filtered.filter((api) => api.category === categoryMap[selectedCategory]);
     }
 
     // Filter by search query
     if (searchQuery) {
-      const query = searchQuery.toLowerCase()
-      filtered = filtered.filter(api => 
-        api.title.toLowerCase().includes(query) ||
-        api.description.toLowerCase().includes(query) ||
-        api.provider.toLowerCase().includes(query) ||
-        api.tags.some(tag => tag.toLowerCase().includes(query))
-      )
+      const query = searchQuery.toLowerCase();
+      filtered = filtered.filter(
+        (api) =>
+          api.title.toLowerCase().includes(query) ||
+          api.description.toLowerCase().includes(query) ||
+          api.provider.toLowerCase().includes(query) ||
+          api.tags.some((tag) => tag.toLowerCase().includes(query)),
+      );
     }
 
-    return filtered
-  }, [searchQuery, selectedCategory])
+    return filtered;
+  }, [searchQuery, selectedCategory]);
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="bg-background min-h-screen">
       {/* Header */}
-      <header className="border-b border-border/50 bg-background/80 backdrop-blur-sm sticky top-0 z-10">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
+      <header className="border-border/50 bg-background/80 sticky top-0 z-10 border-b backdrop-blur-sm">
+        <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6">
           <div className="space-y-6">
             <div className="space-y-2">
-              <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground">
-                API Catalogue
-              </h1>
+              <h1 className="text-foreground text-2xl font-bold tracking-tight sm:text-3xl">API Catalogue</h1>
               <p className="text-muted-foreground text-sm sm:text-base">
                 Discover and integrate powerful APIs to enhance your applications
               </p>
             </div>
-            
+
             {/* Search Bar */}
             <div className="relative max-w-full sm:max-w-md lg:max-w-lg xl:max-w-xl">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground size-4" />
+              <Search className="text-muted-foreground absolute top-1/2 left-3 size-4 -translate-y-1/2 transform" />
               <Input
-                className="pl-10 h-11 bg-background/50 border-border/50 focus:border-primary/50 text-sm"
+                className="bg-background/50 border-border/50 focus:border-primary/50 h-11 pl-10 text-sm"
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Search APIs, providers, or technologies..."
                 value={searchQuery}
@@ -283,30 +272,27 @@ function RouteComponent() {
       </header>
 
       {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
-        <div className="flex flex-col lg:flex-row gap-8">
+      <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6">
+        <div className="flex flex-col gap-8 lg:flex-row">
           {/* Sidebar - Hidden on mobile, shown as drawer if needed */}
           <div className="hidden lg:block">
-            <CategorySidebar 
-              onCategoryChange={setSelectedCategory}
-              selectedCategory={selectedCategory}
-            />
+            <CategorySidebar onCategoryChange={setSelectedCategory} selectedCategory={selectedCategory} />
           </div>
 
           {/* Mobile Category Filter */}
-          <div className="lg:hidden mb-6">
-            <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
+          <div className="mb-6 lg:hidden">
+            <div className="scrollbar-hide flex gap-2 overflow-x-auto pb-2">
               {categories.map((category) => {
-                const Icon = category.icon
-                const isActive = selectedCategory === category.id
-                
+                const Icon = category.icon;
+                const isActive = selectedCategory === category.id;
+
                 return (
                   <Button
                     className={cn(
-                      "shrink-0 gap-2 h-9 px-4 rounded-full",
-                      isActive 
-                        ? "bg-primary text-primary-foreground" 
-                        : "bg-secondary text-secondary-foreground hover:bg-secondary/80"
+                      "h-9 shrink-0 gap-2 rounded-full px-4",
+                      isActive
+                        ? "bg-primary text-primary-foreground"
+                        : "bg-secondary text-secondary-foreground hover:bg-secondary/80",
                     )}
                     key={category.id}
                     onClick={() => setSelectedCategory(category.id)}
@@ -314,55 +300,47 @@ function RouteComponent() {
                   >
                     <Icon className="size-3" />
                     <span className="text-xs font-medium">{category.name}</span>
-                    <Badge 
-                      className="text-xs px-1.5 py-0 h-4 min-w-[1rem]"
+                    <Badge
+                      className="h-4 min-w-[1rem] px-1.5 py-0 text-xs"
                       variant={isActive ? "secondary" : "outline"}
                     >
                       {category.count}
                     </Badge>
                   </Button>
-                )
+                );
               })}
             </div>
           </div>
 
           {/* API Grid */}
-          <div className="flex-1 min-w-0">
+          <div className="min-w-0 flex-1">
             {filteredAPIs.length > 0 ? (
               <>
-                <div className="flex items-center justify-between mb-6">
-                  <p className="text-sm text-muted-foreground">
-                    Showing {filteredAPIs.length} {filteredAPIs.length === 1 ? 'API' : 'APIs'}
-                    {selectedCategory !== 'all' && (
-                      <span className="ml-1">
-                        in {categories.find(c => c.id === selectedCategory)?.name}
-                      </span>
+                <div className="mb-6 flex items-center justify-between">
+                  <p className="text-muted-foreground text-sm">
+                    Showing {filteredAPIs.length} {filteredAPIs.length === 1 ? "API" : "APIs"}
+                    {selectedCategory !== "all" && (
+                      <span className="ml-1">in {categories.find((c) => c.id === selectedCategory)?.name}</span>
                     )}
                   </p>
                 </div>
-                
-                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 auto-rows-fr">
+
+                <div className="grid auto-rows-fr grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-3">
                   {filteredAPIs.map((api) => (
                     <APICard api={api} key={api.id} />
                   ))}
                 </div>
               </>
             ) : (
-              <div className="text-center py-16">
-                <div className="max-w-md mx-auto">
-                  <Database className="size-16 text-muted-foreground mx-auto mb-6" />
-                  <h3 className="text-xl font-semibold text-foreground mb-3">
-                    No APIs found
-                  </h3>
+              <div className="py-16 text-center">
+                <div className="mx-auto max-w-md">
+                  <Database className="text-muted-foreground mx-auto mb-6 size-16" />
+                  <h3 className="text-foreground mb-3 text-xl font-semibold">No APIs found</h3>
                   <p className="text-muted-foreground text-sm leading-relaxed">
                     Try adjusting your search criteria or browse different categories to discover more APIs.
                   </p>
                   {searchQuery && (
-                    <Button 
-                      className="mt-4" 
-                      onClick={() => setSearchQuery('')}
-                      variant="outline"
-                    >
+                    <Button className="mt-4" onClick={() => setSearchQuery("")} variant="outline">
                       Clear search
                     </Button>
                   )}
@@ -373,5 +351,5 @@ function RouteComponent() {
         </div>
       </main>
     </div>
-  )
+  );
 }
