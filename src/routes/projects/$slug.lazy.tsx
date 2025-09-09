@@ -580,6 +580,10 @@ function EndpointsSection({ project }: { project: ProjectData }) {
           All endpoints across your API specifications
         </CardDescription>
       </CardHeader>
+      {/* Insert API Specifications list here to keep specs and endpoints together */}
+      <CardContent>
+        <ApiSpecsSection projectId={project.id} />
+      </CardContent>
       <CardContent>
         <div className="space-y-4">
           {specs.map((spec) => {
@@ -925,8 +929,7 @@ function ProjectOverview({ project }: { project: ProjectData }) {
         </CardContent>
       </Card>
 
-      {/* API Specifications */}
-      <ApiSpecsSection projectId={project.id} />
+  {/* API Specifications are shown in the Endpoints tab */}
     </div>
   );
 }
