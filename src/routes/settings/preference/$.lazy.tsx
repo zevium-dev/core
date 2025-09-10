@@ -1,5 +1,5 @@
 import { createLazyFileRoute } from "@tanstack/react-router";
-import { Camera, User, Mail, Phone, MapPin, Calendar, Shield, Trash2 } from "lucide-react";
+import { Calendar, Camera, Mail, MapPin, Phone, Shield, Trash2, User } from "lucide-react";
 import { useState } from "react";
 
 import { Avatar, AvatarFallback, AvatarImage } from "~/components/ui/avatar";
@@ -7,8 +7,8 @@ import { Button } from "~/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
 import { Input } from "~/components/ui/input";
 import { Label } from "~/components/ui/label";
-import { Separator } from "~/components/ui/separator";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "~/components/ui/select";
+import { Separator } from "~/components/ui/separator";
 
 export const Route = createLazyFileRoute("/settings/preference/$")({
   component: AccountPreferenceComponent,
@@ -26,7 +26,7 @@ export function AccountPreferenceComponent() {
     <div className="mx-auto w-full max-w-3xl min-w-0 flex-1 space-y-6 p-6">
       {/* Header */}
       <div className="flex items-center gap-2">
-        <User className="h-6 w-6 text-muted-foreground" />
+        <User className="text-muted-foreground h-6 w-6" />
         <h1 className="text-foreground text-2xl font-bold">Account</h1>
       </div>
 
@@ -43,21 +43,23 @@ export function AccountPreferenceComponent() {
           <div className="flex items-center gap-4">
             <div className="relative">
               <Avatar className="h-20 w-20">
-                <AvatarImage src="/placeholder-avatar.jpg" alt="Profile" />
+                <AvatarImage alt="Profile" src="/placeholder-avatar.jpg" />
                 <AvatarFallback className="text-lg">JD</AvatarFallback>
               </Avatar>
               <Button
+                className="border-background absolute -right-1 -bottom-1 h-8 w-8 rounded-full border-2"
                 size="icon"
                 variant="outline"
-                className="absolute -bottom-1 -right-1 h-8 w-8 rounded-full border-2 border-background"
               >
                 <Camera className="h-4 w-4" />
               </Button>
             </div>
             <div className="space-y-1">
-              <h3 className="text-lg font-medium">{firstName} {lastName}</h3>
-              <p className="text-sm text-muted-foreground">{email}</p>
-              <Button variant="outline" size="sm">
+              <h3 className="text-lg font-medium">
+                {firstName} {lastName}
+              </h3>
+              <p className="text-muted-foreground text-sm">{email}</p>
+              <Button size="sm" variant="outline">
                 Change Photo
               </Button>
             </div>
@@ -71,18 +73,18 @@ export function AccountPreferenceComponent() {
               <Label htmlFor="firstName">First Name</Label>
               <Input
                 id="firstName"
-                value={firstName}
                 onChange={(e) => setFirstName(e.target.value)}
                 placeholder="Enter first name"
+                value={firstName}
               />
             </div>
             <div className="space-y-2">
               <Label htmlFor="lastName">Last Name</Label>
               <Input
                 id="lastName"
-                value={lastName}
                 onChange={(e) => setLastName(e.target.value)}
                 placeholder="Enter last name"
+                value={lastName}
               />
             </div>
           </div>
@@ -99,29 +101,29 @@ export function AccountPreferenceComponent() {
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="email" className="flex items-center gap-2">
+            <Label className="flex items-center gap-2" htmlFor="email">
               <Mail className="h-4 w-4" />
               Email Address
             </Label>
             <Input
               id="email"
-              type="email"
-              value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="Enter email address"
+              type="email"
+              value={email}
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="phone" className="flex items-center gap-2">
+            <Label className="flex items-center gap-2" htmlFor="phone">
               <Phone className="h-4 w-4" />
               Phone Number
             </Label>
             <Input
               id="phone"
-              type="tel"
-              value={phone}
               onChange={(e) => setPhone(e.target.value)}
               placeholder="Enter phone number"
+              type="tel"
+              value={phone}
             />
           </div>
         </CardContent>
@@ -137,23 +139,23 @@ export function AccountPreferenceComponent() {
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="location" className="flex items-center gap-2">
+            <Label className="flex items-center gap-2" htmlFor="location">
               <MapPin className="h-4 w-4" />
               Location
             </Label>
             <Input
               id="location"
-              value={location}
               onChange={(e) => setLocation(e.target.value)}
               placeholder="Enter your location"
+              value={location}
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="timezone" className="flex items-center gap-2">
+            <Label className="flex items-center gap-2" htmlFor="timezone">
               <Calendar className="h-4 w-4" />
               Timezone
             </Label>
-            <Select value={timezone} onValueChange={setTimezone}>
+            <Select onValueChange={setTimezone} value={timezone}>
               <SelectTrigger>
                 <SelectValue placeholder="Select timezone" />
               </SelectTrigger>
@@ -181,7 +183,7 @@ export function AccountPreferenceComponent() {
           <div className="flex items-center justify-between">
             <div className="space-y-1">
               <p className="font-medium">Password</p>
-              <p className="text-sm text-muted-foreground">Last changed 3 months ago</p>
+              <p className="text-muted-foreground text-sm">Last changed 3 months ago</p>
             </div>
             <Button variant="outline">Change Password</Button>
           </div>
@@ -189,7 +191,7 @@ export function AccountPreferenceComponent() {
           <div className="flex items-center justify-between">
             <div className="space-y-1">
               <p className="font-medium">Two-Factor Authentication</p>
-              <p className="text-sm text-muted-foreground">Add an extra layer of security</p>
+              <p className="text-muted-foreground text-sm">Add an extra layer of security</p>
             </div>
             <Button variant="outline">Configure</Button>
           </div>
@@ -197,7 +199,7 @@ export function AccountPreferenceComponent() {
           <div className="flex items-center justify-between">
             <div className="space-y-1">
               <p className="font-medium">Active Sessions</p>
-              <p className="text-sm text-muted-foreground">Manage your active sessions</p>
+              <p className="text-muted-foreground text-sm">Manage your active sessions</p>
             </div>
             <Button variant="outline">View Sessions</Button>
           </div>
@@ -207,7 +209,7 @@ export function AccountPreferenceComponent() {
       {/* Danger Zone */}
       <Card className="bg-card/50 border-border/50 border-destructive/20 w-full backdrop-blur-sm">
         <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-destructive">
+          <CardTitle className="text-destructive flex items-center gap-2">
             <Trash2 className="h-5 w-5" />
             Danger Zone
           </CardTitle>
@@ -216,9 +218,9 @@ export function AccountPreferenceComponent() {
           <div className="flex items-center justify-between">
             <div className="space-y-1">
               <p className="font-medium">Delete Account</p>
-              <p className="text-sm text-muted-foreground">Permanently delete your account and all data</p>
+              <p className="text-muted-foreground text-sm">Permanently delete your account and all data</p>
             </div>
-            <Button variant="destructive" size="sm">
+            <Button size="sm" variant="destructive">
               Delete Account
             </Button>
           </div>
