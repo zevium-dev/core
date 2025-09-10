@@ -301,7 +301,7 @@ function Home() {
         </section>
 
         {/* Footer */}
-        <footer className="border-border/40 to-chart-2/5 mt-20 border-t bg-gradient-to-b from-transparent py-20">
+        <footer className="border-border/40 to-chart-2/5 mt-20 border-t py-10">
           <div className="grid gap-12 md:grid-cols-4">
             <div className="col-span-2 space-y-6">
               <div className="flex items-center space-x-3">
