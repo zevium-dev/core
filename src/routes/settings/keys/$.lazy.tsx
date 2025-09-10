@@ -1,5 +1,5 @@
 import { createLazyFileRoute } from "@tanstack/react-router";
-import { Copy, Info, MoreHorizontal, Pencil, Plus, Trash2 } from "lucide-react";
+import { Check, Copy, Info, MoreHorizontal, Pencil, Plus, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { Button } from "~/components/ui/button";
@@ -22,7 +22,6 @@ import {
 import { Input } from "~/components/ui/input";
 import { Label } from "~/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "~/components/ui/table";
-import { Textarea } from "~/components/ui/textarea";
 import { useCopy } from "~/hooks/use-copy";
 
 // Types
@@ -30,11 +29,10 @@ interface ApiKeyRecord {
   id: number;
   key: string; // full key value
   name: string;
-  limit: string; // e.g. "Unlimited" or custom string
+  limit: string; // e.g. "Unlimited" or custom string like "1000 req/day"
   usage: string; // formatted usage string
   createdAt: string;
   lastUsed: string;
-  description?: string;
 }
 
 // Cast path to any until routeTree regeneration includes /settings/keys/$
@@ -48,45 +46,45 @@ const mockApiKeysData: ApiKeyRecord[] = [
   {
     id: 1,
     key: "sk-or-v1-e97b8f0d91c7a6c54",
-  name: "Internal Jira Bot",
-    limit: "Unlimited",
-    usage: "$0 used",
+    name: "Internal Jira Bot",
+  limit: "Unlimited",
+  usage: "$12.40 used",
     createdAt: "2024-08-15",
     lastUsed: "2024-09-01",
   },
   {
     id: 2,
     key: "sk-or-v1-4b6d9a7217bd0f417b",
-  name: "Desktop Client (Win)",
-    limit: "Unlimited",
-    usage: "$2.836 used",
+    name: "Desktop Client (Win)",
+  limit: "$200",
+  usage: "$45.82 used",
     createdAt: "2024-07-20",
     lastUsed: "2024-09-08",
   },
   {
     id: 3,
     key: "sk-or-v1-da3be50aa9293f25d61",
-  name: "Domain Filter Service",
-    limit: "Unlimited",
-    usage: "$8.293 used",
+    name: "Domain Filter Service",
+  limit: "Unlimited",
+  usage: "$8.293 used",
     createdAt: "2024-06-10",
     lastUsed: "2024-09-09",
   },
   {
     id: 4,
     key: "sk-or-v1-23ef10b19bb176462ee",
-  name: "OAuth: Roo Prod App",
-    limit: "Unlimited",
-    usage: "$10.36 used",
+    name: "OAuth: Roo Prod App",
+  limit: "Unlimited",
+  usage: "$210.36 used",
     createdAt: "2024-05-25",
     lastUsed: "2024-09-07",
   },
   {
     id: 5,
     key: "sk-or-v1-667af09c1834d9289a5",
-  name: "PathOfFate Game",
-    limit: "Unlimited",
-    usage: "$0 used",
+    name: "PathOfFate Game",
+  limit: "$10",
+  usage: "$0 used",
     createdAt: "2024-04-12",
     lastUsed: "Never",
   },
@@ -100,26 +98,26 @@ export function ApiKeysComponent() {
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [editingKey, setEditingKey] = useState<ApiKeyRecord | null>(null);
   const [newKeyName, setNewKeyName] = useState("");
-  const [newKeyDescription, setNewKeyDescription] = useState("");
+  const [newKeyLimit, setNewKeyLimit] = useState(""); // user input for credit limit (money)
   const [, copy] = useCopy();
 
   // Helpers
 
   const handleCreateKey = () => {
     // TODO: Replace with API call
+    const formattedLimit = formatLimit(newKeyLimit);
     const newKey: ApiKeyRecord = {
       id: Date.now(),
       key: `sk-or-v1-${Math.random().toString(36).slice(2, 18)}`,
       name: newKeyName.trim(),
-      limit: "Unlimited",
+      limit: formattedLimit,
       usage: "$0 used",
       createdAt: new Date().toISOString().slice(0, 10),
       lastUsed: "Never",
-      description: newKeyDescription.trim() || undefined,
     };
     setApiKeys((prev) => [newKey, ...prev]);
     setNewKeyName("");
-    setNewKeyDescription("");
+    setNewKeyLimit("");
     setIsCreateDialogOpen(false);
   };
 
@@ -134,8 +132,8 @@ export function ApiKeysComponent() {
 
   const openEditDialog = (record: ApiKeyRecord) => {
     setEditingKey(record);
-    setNewKeyName(record.name);
-    setNewKeyDescription(record.description || "");
+  setNewKeyName(record.name);
+  setNewKeyLimit(record.limit === "Unlimited" ? "" : record.limit.replace(/^[^0-9$]*/, ""));
     setIsEditDialogOpen(true);
   };
 
@@ -144,14 +142,14 @@ export function ApiKeysComponent() {
     setApiKeys((prev) =>
       prev.map((k) =>
         k.id === editingKey.id
-          ? { ...k, name: newKeyName.trim() || k.name, description: newKeyDescription.trim() || undefined }
+          ? { ...k, name: newKeyName.trim() || k.name, limit: formatLimit(newKeyLimit) }
           : k,
       ),
     );
     setIsEditDialogOpen(false);
     setEditingKey(null);
     setNewKeyName("");
-    setNewKeyDescription("");
+    setNewKeyLimit("");
   };
 
   const formatKey = (key: string) => {
@@ -163,10 +161,25 @@ export function ApiKeysComponent() {
 
   const hasKeys = apiKeys.length > 0;
   const totalUsage = useMemo(() => apiKeys.reduce((acc, k) => acc + (parseFloat(k.usage.replace(/[^0-9.]/g, "")) || 0), 0), [apiKeys]);
-  const snippet = `curl -X POST https://openrouter.ai/api/v1/chat/completions \\
+  const [snippetCopied, setSnippetCopied] = useState(false);
+  const formatLimit = (raw: string) => {
+    const trimmed = raw.trim();
+    if (!trimmed) return "Unlimited";
+    // accept forms like 50, $50, 50.25, $50.25
+    const match = trimmed.match(/\$?([0-9]+(?:\.[0-9]{1,2})?)/);
+    if (!match) return "Unlimited"; // fallback if invalid
+    return `$${match[1]}`;
+  };
+  const snippet = `curl -X POST https://zevium.dev/api/v1/scrapperApi/ \\
   -H 'Content-Type: application/json' \\
   -H 'Authorization: Bearer YOUR_API_KEY' \\
   -d '{\n    "model": "openai/gpt-4o-mini",\n    "messages": [{"role":"user","content":"Explain how AI works in a few words"}]\n  }'`;
+  
+  const handleCopySnippet = async () => {
+    await handleCopyKey(snippet);
+    setSnippetCopied(true);
+    window.setTimeout(() => setSnippetCopied(false), 2500);
+  };
 
   return (
     <div className="mx-auto w-full max-w-3xl min-w-0 flex-1 space-y-6 p-6">
@@ -178,7 +191,7 @@ export function ApiKeysComponent() {
           <h1 className="text-foreground text-2xl font-bold">API Keys</h1>
           <div className="flex items-center gap-2">
             <p className="text-muted-foreground text-sm">
-              Manage your API keys to access all models from OpenRouter
+              Manage your API keys to access all Zevium-integrated APIs
             </p>
             <Info className="text-muted-foreground h-4 w-4" />
           </div>
@@ -196,7 +209,7 @@ export function ApiKeysComponent() {
             <DialogHeader>
               <DialogTitle>Create API Key</DialogTitle>
               <DialogDescription>
-                Create a new API key to access OpenRouter models. Keep your key secure and never share it publicly.
+                Create a new API key to access Zevium APIs. Keep your key secure and never share it publicly.
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-4">
@@ -210,13 +223,12 @@ export function ApiKeysComponent() {
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="key-description">Description (Optional)</Label>
-                <Textarea
-                  id="key-description"
-                  placeholder="Describe what this key will be used for"
-                  rows={3}
-                  value={newKeyDescription}
-                  onChange={(e) => setNewKeyDescription(e.target.value)}
+                <Label htmlFor="key-limit">Credit Limit (Optional)</Label>
+                <Input
+                  id="key-limit"
+                  placeholder="e.g. 50 or $50"
+                  value={newKeyLimit}
+                  onChange={(e) => setNewKeyLimit(e.target.value)}
                 />
               </div>
             </div>
@@ -240,7 +252,7 @@ export function ApiKeysComponent() {
               <TableHeader>
                 <TableRow className="bg-muted/30">
                   <TableHead className="text-xs font-medium">Key</TableHead>
-                  <TableHead className="text-xs font-medium">Limit</TableHead>
+                  <TableHead className="text-xs font-medium">Credit Limit</TableHead>
                   <TableHead className="text-xs font-medium">Usage</TableHead>
                   <TableHead className="w-12"></TableHead>
                 </TableRow>
@@ -264,9 +276,7 @@ export function ApiKeysComponent() {
                       <div className="space-y-1">
                         <div className="flex items-center gap-2">
                           <span className="text-sm font-medium">{apiKey.name}</span>
-                          {apiKey.description && (
-                            <span className="text-muted-foreground truncate text-[10px]">{apiKey.description}</span>
-                          )}
+                          {/* No secondary line now; rate limit displayed in column */}
                         </div>
                         <div className="flex items-center gap-2">
                           <code className="bg-muted text-muted-foreground text-xs font-mono px-2 py-1 rounded">
@@ -313,57 +323,59 @@ export function ApiKeysComponent() {
         </CardContent>
       </Card>
 
-        {/* Quick Start Snippet */}
-        <Card className="bg-card/50 border-border/50 backdrop-blur-sm">
-          <CardHeader className="pb-2 flex flex-row items-center justify-between space-y-0">
-            <CardTitle className="text-sm font-medium">Quick Start (cURL)</CardTitle>
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-7 px-2 text-xs"
-              onClick={() => handleCopyKey(snippet)}
-            >
-              <Copy className="mr-1 h-3 w-3" /> Copy
-            </Button>
-          </CardHeader>
-          <CardContent className="pt-0">
-            <div className="relative">
-              <pre className="bg-muted/50 border-border/50 font-mono text-xs whitespace-pre overflow-x-auto rounded-md border p-4 leading-relaxed">
-  {snippet}
-              </pre>
-              <p className="text-muted-foreground mt-2 text-[11px]">Replace <code className="font-mono">YOUR_API_KEY</code> with one of the keys above.</p>
-            </div>
-          </CardContent>
-        </Card>
+      {/* Quick Start Snippet */}
+      <Card className="bg-card/50 border-border/50 backdrop-blur-sm">
+        <CardHeader className="pb-2 flex flex-row items-center justify-between space-y-0">
+          <CardTitle className="text-sm font-medium">Quick Start (cURL)</CardTitle>
+          <Button
+            size="sm"
+            variant="ghost"
+            title={snippetCopied ? "Copied" : "Copy snippet"}
+            aria-live="polite"
+            data-copied={snippetCopied || undefined}
+            className="h-7 px-2 text-xs border border-border/40 bg-muted/30 hover:bg-muted/50 dark:hover:bg-muted/60 text-muted-foreground hover:text-foreground data-[copied]:bg-emerald-500/20 data-[copied]:text-emerald-500 data-[copied]:hover:bg-emerald-500/30 transition-colors"
+            onClick={handleCopySnippet}
+          >
+            {snippetCopied ? <Check className="mr-1 h-3 w-3" /> : <Copy className="mr-1 h-3 w-3" />} {snippetCopied ? "Copied" : "Copy"}
+          </Button>
+        </CardHeader>
+        <CardContent className="pt-0">
+          <div className="relative">
+            <pre className="bg-muted/50 border-border/50 font-mono text-xs whitespace-pre overflow-x-auto rounded-md border p-4 leading-relaxed selection:bg-primary/30 selection:text-primary-foreground">{snippet}</pre>
+            <p className="text-muted-foreground mt-2 text-[11px]">
+              Replace <code className="font-mono">YOUR_API_KEY</code> with one of the keys above.
+            </p>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Edit Dialog */}
       <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Edit API Key</DialogTitle>
-            <DialogDescription>Update the display name or description of this key.</DialogDescription>
+            <DialogDescription>Update the display name or credit (spend) limit for this key.</DialogDescription>
           </DialogHeader>
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="edit-key-name">Key Name</Label>
-                <Input
-                  id="edit-key-name"
-                  placeholder="Key name"
-                  value={newKeyName}
-                  onChange={(e) => setNewKeyName(e.target.value)}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="edit-key-description">Description (Optional)</Label>
-                <Textarea
-                  id="edit-key-description"
-                  placeholder="Description"
-                  rows={3}
-                  value={newKeyDescription}
-                  onChange={(e) => setNewKeyDescription(e.target.value)}
-                />
-              </div>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="edit-key-name">Key Name</Label>
+              <Input
+                id="edit-key-name"
+                placeholder="Key name"
+                value={newKeyName}
+                onChange={(e) => setNewKeyName(e.target.value)}
+              />
             </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-key-limit">Credit Limit (Optional)</Label>
+              <Input
+                id="edit-key-limit"
+                placeholder="e.g. 50 or $50"
+                value={newKeyLimit}
+                onChange={(e) => setNewKeyLimit(e.target.value)}
+              />
+            </div>
+          </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsEditDialogOpen(false)}>Cancel</Button>
             <Button onClick={handleSaveEdit} disabled={!newKeyName.trim()}>Save</Button>
