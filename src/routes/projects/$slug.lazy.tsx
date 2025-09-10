@@ -17,7 +17,6 @@ import {
   MoreHorizontal,
   Plus,
   Save,
-  Settings,
   Shield,
   Trash2,
   Users,
@@ -34,6 +33,7 @@ import { Badge } from "~/components/ui/badge";
 import { BadgeStatus } from "~/components/ui/badge-status";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "~/components/ui/card";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "~/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "~/components/ui/dropdown-menu";
 import { EasyTooltip } from "~/components/ui/easy-tooltip";
 import { Input } from "~/components/ui/input";
@@ -644,7 +644,10 @@ function EndpointsSection({ project }: { project: ProjectData }) {
   );
 }
 
-function ProjectHeader({ project }: { project: ProjectData }) {
+function ProjectHeader({ onVisibilityChange, project }: { 
+  onVisibilityChange: () => void;
+  project: ProjectData;
+}) {
   const [isCopied, copyToClipboard] = useCopy();
   const trpcClient = useTRPCClient();
 
@@ -719,13 +722,17 @@ function ProjectHeader({ project }: { project: ProjectData }) {
               <div className="flex items-end space-x-4">
                 <h1 className="text-2xl font-bold tracking-tight">{project.name}</h1>
                 <div className="flex items-end space-x-2">
-                  <Badge
-                    className={`${getVisibilityColor(project.visibility)} border-0`}
-                    variant="secondary"
-                  >
-                    {getVisibilityIcon(project.visibility)}
-                    <span className="ml-1 capitalize">{project.visibility}</span>
-                  </Badge>
+                  <EasyTooltip label="Click to change visibility">
+                    <Badge
+                      className={`${getVisibilityColor(project.visibility)} border-0 cursor-pointer hover:opacity-80 transition-opacity`}
+                      onClick={onVisibilityChange}
+                      variant="secondary"
+                    >
+                      {getVisibilityIcon(project.visibility)}
+                      <span className="ml-1 capitalize">{project.visibility}</span>
+                      <Edit3 className="h-3 w-3 ml-1 opacity-60" />
+                    </Badge>
+                  </EasyTooltip>
                   <EasyTooltip label={getStatusLabel(project.status)}>
                     <div>
                       <BadgeStatus status={project.status} />
@@ -769,11 +776,6 @@ function ProjectHeader({ project }: { project: ProjectData }) {
             </Button>
           )}
           
-          <Button size="sm" variant="outline">
-            <Settings className="h-4 w-4 mr-2" />
-            Settings
-          </Button>
-          
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button size="sm" variant="outline">
@@ -781,6 +783,11 @@ function ProjectHeader({ project }: { project: ProjectData }) {
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={onVisibilityChange}>
+                <Shield className="h-4 w-4 mr-2" />
+                Change Visibility
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
               <DropdownMenuItem>
                 <Users className="h-4 w-4 mr-2" />
                 Manage Access
@@ -1004,6 +1011,8 @@ function RichTextEditor({
 function RouteComponent() {
   const { slug } = Route.useParams();
   const trpcClient = useTRPCClient();
+  const queryClient = useQueryClient();
+  const [visibilityDialogOpen, setVisibilityDialogOpen] = React.useState(false);
 
   const {
     data: projectData,
@@ -1013,6 +1022,66 @@ function RouteComponent() {
     queryFn: () => trpcClient.project.getBySlug.query({ slug }),
     queryKey: ["project", slug],
   });
+
+  // Visibility change mutation
+  const updateVisibilityMutation = useMutation<
+    unknown,
+    Error,
+    { visibility: string },
+    { previousProject: unknown }
+  >({
+    mutationFn: (data: { visibility: string }) => {
+      if (!projectData?.project) {
+        throw new Error("Project not found");
+      }
+      return trpcClient.project.update.mutate({
+        projectId: projectData.project.id,
+        visibility: data.visibility as "internal" | "private" | "public",
+      });
+    },
+    onError: (error, _variables, context) => {
+      console.error("Failed to update visibility:", error);
+      toast.error("Failed to update visibility");
+      // Revert optimistic update on error
+      if (context?.previousProject) {
+        queryClient.setQueryData(["project", slug], context.previousProject);
+      }
+    },
+    onMutate: async (variables) => {
+      // Cancel any outgoing refetches
+      await queryClient.cancelQueries({ queryKey: ["project", slug] });
+
+      // Snapshot the previous value
+      const previousProject = queryClient.getQueryData(["project", slug]);
+
+      // Optimistically update the cache
+      queryClient.setQueryData(["project", slug], (old: { project: ProjectData } | undefined) => {
+        if (!old) return old;
+        return {
+          ...old,
+          project: {
+            ...old.project,
+            updatedAt: new Date(),
+            visibility: variables.visibility as "internal" | "private" | "public",
+          },
+        };
+      });
+
+      return { previousProject };
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: ["project", slug] });
+    },
+    onSuccess: () => {
+      toast.success("Project visibility updated successfully");
+      setVisibilityDialogOpen(false);
+      void queryClient.invalidateQueries({ queryKey: ["project", slug] });
+    },
+  });
+
+  const handleVisibilityChange = (visibility: string) => {
+    updateVisibilityMutation.mutate({ visibility });
+  };
 
   if (projectLoading) {
     return <AuthLoadingFallback />;
@@ -1045,7 +1114,18 @@ function RouteComponent() {
       initial={{ opacity: 0, y: 20 }}
       transition={{ duration: 0.3 }}
     >
-      <ProjectHeader project={project} />
+      <ProjectHeader 
+        onVisibilityChange={() => setVisibilityDialogOpen(true)} 
+        project={project}
+      />
+
+      <VisibilityChangeDialog
+        currentVisibility={project.visibility}
+        isLoading={updateVisibilityMutation.isPending}
+        onOpenChange={setVisibilityDialogOpen}
+        onSave={handleVisibilityChange}
+        open={visibilityDialogOpen}
+      />
 
       <Tabs className="space-y-6" defaultValue="overview">
         <TabsList className="grid w-full grid-cols-4">
@@ -1218,5 +1298,171 @@ function TeamManagementSection({ project }: { project: ProjectData }) {
         </Table>
       </CardContent>
     </Card>
+  );
+}
+
+// Visibility Change Dialog Component
+function VisibilityChangeDialog({ 
+  currentVisibility,
+  isLoading = false,
+  onOpenChange, 
+  onSave,
+  open
+}: {
+  currentVisibility: string;
+  isLoading?: boolean;
+  onOpenChange: (open: boolean) => void;
+  onSave: (visibility: string) => void;
+  open: boolean;
+}) {
+  const [selectedVisibility, setSelectedVisibility] = React.useState(currentVisibility);
+
+  // Reset selection when dialog opens with new current visibility
+  const previousCurrentVisibility = React.useRef(currentVisibility);
+  if (previousCurrentVisibility.current !== currentVisibility && open) {
+    setSelectedVisibility(currentVisibility);
+    previousCurrentVisibility.current = currentVisibility;
+  }
+
+  const visibilityOptions = [
+    {
+      bgColor: "bg-gray-50 dark:bg-gray-900/20",
+      color: "text-gray-600",
+      description: "Only project members can view and access this project",
+      features: ["Team members only", "Secure access", "Internal collaboration"],
+      icon: <Lock className="h-5 w-5" />,
+      label: "Private",
+      value: "private"
+    },
+    {
+      bgColor: "bg-blue-50 dark:bg-blue-900/20",
+      color: "text-blue-600",
+      description: "All organization members can discover and view this project",
+      features: ["Organization wide", "Internal discovery", "Company collaboration"],
+      icon: <Building2 className="h-5 w-5" />,
+      label: "Internal",
+      value: "internal"
+    },
+    {
+      bgColor: "bg-green-50 dark:bg-green-900/20",
+      color: "text-green-600",
+      description: "Anyone can view this project and its documentation",
+      features: ["Public documentation", "Open collaboration", "Community access"],
+      icon: <Globe className="h-5 w-5" />,
+      label: "Public",
+      value: "public"
+    }
+  ];
+
+  const getVisibilityChangeWarning = (from: string, to: string): string => {
+    if (from === "private" && to === "public") {
+      return "Making this project public will allow anyone to view its documentation and API specifications.";
+    }
+    if (from === "public" && to === "private") {
+      return "Making this project private will restrict access to team members only. Public documentation will no longer be accessible.";
+    }
+    if (to === "internal") {
+      return "Internal visibility allows all organization members to discover and view this project.";
+    }
+    return "This change will affect who can view and access this project.";
+  };
+
+  return (
+    <Dialog onOpenChange={onOpenChange} open={open}>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Shield className="h-5 w-5" />
+            Change Project Visibility
+          </DialogTitle>
+          <DialogDescription>
+            Choose who can view and access this project. This affects documentation visibility and collaboration settings.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4">
+          {visibilityOptions.map((option) => (
+            <div
+              className={`
+                relative p-4 rounded-lg border-2 cursor-pointer transition-all
+                ${selectedVisibility === option.value 
+                  ? 'border-primary bg-primary/5' 
+                  : 'border-border hover:border-primary/50 hover:bg-muted/50'
+                }
+              `}
+              key={option.value}
+              onClick={() => setSelectedVisibility(option.value)}
+            >
+              <div className="flex items-start gap-4">
+                <div className={`p-2 rounded-lg ${option.bgColor}`}>
+                  <div className={option.color}>
+                    {option.icon}
+                  </div>
+                </div>
+                <div className="flex-1">
+                  <div className="flex items-center gap-2 mb-2">
+                    <h3 className="font-semibold">{option.label}</h3>
+                    {selectedVisibility === option.value && (
+                      <Badge className="text-xs" variant="default">Selected</Badge>
+                    )}
+                  </div>
+                  <p className="text-sm text-muted-foreground mb-3">
+                    {option.description}
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {option.features.map((feature) => (
+                      <Badge className="text-xs" key={feature} variant="outline">
+                        {feature}
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+                <div className="flex items-center">
+                  <div className={`
+                    h-4 w-4 rounded-full border-2 transition-all
+                    ${selectedVisibility === option.value 
+                      ? 'border-primary bg-primary' 
+                      : 'border-muted-foreground'
+                    }
+                  `}>
+                    {selectedVisibility === option.value && (
+                      <div className="h-full w-full rounded-full bg-white scale-50" />
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {selectedVisibility !== currentVisibility && (
+          <div className="p-4 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
+            <div className="flex items-start gap-2">
+              <AlertCircle className="h-5 w-5 text-yellow-600 dark:text-yellow-400 mt-0.5" />
+              <div>
+                <h4 className="font-medium text-yellow-800 dark:text-yellow-200">
+                  Visibility Change Impact
+                </h4>
+                <p className="text-sm text-yellow-700 dark:text-yellow-300 mt-1">
+                  {getVisibilityChangeWarning(currentVisibility, selectedVisibility)}
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        <DialogFooter>
+          <Button disabled={isLoading} onClick={() => onOpenChange(false)} variant="outline">
+            Cancel
+          </Button>
+          <Button 
+            disabled={selectedVisibility === currentVisibility || isLoading}
+            onClick={() => onSave(selectedVisibility)}
+          >
+            {isLoading ? "Updating..." : "Update Visibility"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

@@ -120,6 +120,7 @@ export const project = sqliteTable("project", {
   organizationId: text("organization_id")
     .notNull()
     .references(() => organization.id, { onDelete: "cascade" }),
+  projectCategoryId: text("project_category_id").references(() => projectCategory.id, { onDelete: "set null" }),
   settings: text("settings", { mode: "json" }).$defaultFn(() => ({})), // Project-specific settings
   slug: text("slug").notNull(), // Unique within organization
   status: text("status", { enum: ["active", "inactive", "archived", "beta", "deprecated"] })
@@ -131,6 +132,24 @@ export const project = sqliteTable("project", {
   visibility: text("visibility", { enum: ["public", "private", "internal"] })
     .notNull()
     .$defaultFn(() => "private"),
+});
+
+export const projectCategory = sqliteTable("project_category", {
+  color: text("color"), // Hex color code for UI display
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .$defaultFn(() => new Date())
+    .notNull(),
+  description: text("description"),
+  displayOrder: integer("display_order").$defaultFn(() => 0), // For custom ordering in UI
+  icon: text("icon"), // Icon name or emoji for UI display
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  organizationId: text("organization_id")
+    .notNull()
+    .references(() => organization.id, { onDelete: "cascade" }),
+  updatedAt: integer("updated_at", { mode: "timestamp" })
+    .$defaultFn(() => new Date())
+    .notNull(),
 });
 
 export const projectMember = sqliteTable("project_member", {
@@ -231,6 +250,7 @@ export const organizationRelations = relations(organization, ({ many, one }) => 
     fields: [organization.ownerId],
     references: [user.id],
   }),
+  projectCategories: many(projectCategory),
   projects: many(project),
 }));
 
@@ -251,6 +271,10 @@ export const organizationMemberRelations = relations(organizationMember, ({ one 
 
 export const projectRelations = relations(project, ({ many, one }) => ({
   apiSpecs: many(apiSpec),
+  category: one(projectCategory, {
+    fields: [project.projectCategoryId],
+    references: [projectCategory.id],
+  }),
   creator: one(user, {
     fields: [project.createdBy],
     references: [user.id],
@@ -275,6 +299,14 @@ export const projectMemberRelations = relations(projectMember, ({ one }) => ({
     fields: [projectMember.userId],
     references: [user.id],
   }),
+}));
+
+export const projectCategoryRelations = relations(projectCategory, ({ many, one }) => ({
+  organization: one(organization, {
+    fields: [projectCategory.organizationId],
+    references: [organization.id],
+  }),
+  projects: many(project),
 }));
 
 export const organizationInvitationRelations = relations(organizationInvitation, ({ one }) => ({
