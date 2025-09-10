@@ -575,11 +575,7 @@ function RouteComponent() {
                   </CardContent>
                 </Card>
               ) : (
-                <div
-                  className={
-                    viewMode === "grid" ? "grid gap-6 sm:grid-cols-2 lg:grid-cols-3" : "space-y-4"
-                  }
-                >
+                <div className={viewMode === "grid" ? "grid gap-6 sm:grid-cols-2 lg:grid-cols-3" : "space-y-4"}>
                   {filteredProjects.map((project, index) => (
                     <m.div
                       animate={{ opacity: 1, y: 0 }}
@@ -587,10 +583,7 @@ function RouteComponent() {
                       key={project.id}
                       transition={{ delay: index * 0.05, duration: 0.3 }}
                     >
-                      <ProjectCard
-                        project={project}
-                        variant={viewMode === "list" ? "compact" : "default"}
-                      />
+                      <ProjectCard project={project} variant={viewMode === "list" ? "compact" : "default"} />
                     </m.div>
                   ))}
                 </div>

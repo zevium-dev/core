@@ -35,7 +35,7 @@ const getCategoryIcon = (iconName: null | string) => {
     users: Users,
     zap: Zap,
   };
-  
+
   return iconMap[iconName?.toLowerCase() ?? ""] ?? Database;
 };
 
@@ -64,13 +64,13 @@ interface ProjectData {
 
 function APICard({ api }: { api: ProjectData }) {
   return (
-    <Card className="group border-border/40 hover:border-border bg-card/30 hover:bg-card/60 flex h-full cursor-pointer flex-col backdrop-blur-sm transition-all duration-300 hover:shadow-xl hover:shadow-primary/5">
+    <Card className="group border-border/40 hover:border-border bg-card/30 hover:bg-card/60 hover:shadow-primary/5 flex h-full cursor-pointer flex-col backdrop-blur-sm transition-all duration-300 hover:shadow-xl">
       <CardHeader className="">
         <div className="space-y-4">
           {/* Title and Category */}
           <div className="space-y-2">
             <div className="flex items-start justify-between gap-3">
-              <h3 className="text-foreground group-hover:text-primary text-xl font-bold leading-tight transition-colors line-clamp-2">
+              <h3 className="text-foreground group-hover:text-primary line-clamp-2 text-xl leading-tight font-bold transition-colors">
                 {api.name}
               </h3>
               {api.categoryName && (
@@ -79,10 +79,10 @@ function APICard({ api }: { api: ProjectData }) {
                 </Badge>
               )}
             </div>
-            
+
             {/* Organization */}
             <div className="text-muted-foreground text-sm">
-              <span className="font-medium text-foreground/80">{api.organizationName}</span>
+              <span className="text-foreground/80 font-medium">{api.organizationName}</span>
             </div>
           </div>
         </div>
@@ -90,21 +90,21 @@ function APICard({ api }: { api: ProjectData }) {
 
       <CardContent className="flex flex-1 flex-col pt-0">
         {/* Description */}
-        <div className="flex-1 mb-6">
-          <p className="text-muted-foreground text-sm leading-relaxed line-clamp-3">
-            {api.description ?? 'No description available'}
+        <div className="mb-6 flex-1">
+          <p className="text-muted-foreground line-clamp-3 text-sm leading-relaxed">
+            {api.description ?? "No description available"}
           </p>
         </div>
 
         {/* Footer - Updated At */}
-        <div className="mt-auto pt-4 border-t border-border/30">
-          <div className="flex items-center justify-between text-xs text-muted-foreground">
+        <div className="border-border/30 mt-auto border-t pt-4">
+          <div className="text-muted-foreground flex items-center justify-between text-xs">
             <span>Last updated</span>
-            <time className="font-medium text-foreground/70">
-              {api.updatedAt.toLocaleDateString('en-US', { 
-                day: 'numeric',
-                month: 'short', 
-                year: 'numeric' 
+            <time className="text-foreground/70 font-medium">
+              {api.updatedAt.toLocaleDateString("en-US", {
+                day: "numeric",
+                month: "short",
+                year: "numeric",
               })}
             </time>
           </div>
@@ -145,7 +145,7 @@ function CategorySidebar({
     <aside className="w-64 shrink-0 space-y-3">
       <h2 className="text-muted-foreground px-3 text-sm font-semibold tracking-wide uppercase">Categories</h2>
 
-      <nav className="space-y-1 px-2 max-h-100 overflow-y-auto scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent">
+      <nav className="scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent max-h-100 space-y-1 overflow-y-auto px-2">
         {allCategories.map((category) => {
           const Icon = category.icon;
           const isActive = selectedCategory === category.id;
@@ -198,10 +198,10 @@ function RouteComponent() {
   // Calculate project counts per category
   const projectCounts = useMemo(() => {
     if (!projectsQuery.data) return {};
-    
+
     const counts: Record<string, number> = {};
     projectsQuery.data.projects.forEach((project) => {
-      const categoryId = project.categoryId ?? 'uncategorized';
+      const categoryId = project.categoryId ?? "uncategorized";
       counts[categoryId] = (counts[categoryId] || 0) + 1;
     });
     return counts;
@@ -210,7 +210,7 @@ function RouteComponent() {
   // Filter projects based on category and search
   const filteredProjects = useMemo(() => {
     if (!projectsQuery.data) return [];
-    
+
     let filtered = projectsQuery.data.projects;
 
     // Filter by category
@@ -224,9 +224,9 @@ function RouteComponent() {
       filtered = filtered.filter(
         (project) =>
           project.name.toLowerCase().includes(query) ||
-          (project.description ?? '').toLowerCase().includes(query) ||
+          (project.description ?? "").toLowerCase().includes(query) ||
           project.organizationName.toLowerCase().includes(query) ||
-          (project.categoryName ?? '').toLowerCase().includes(query),
+          (project.categoryName ?? "").toLowerCase().includes(query),
       );
     }
 
@@ -349,11 +349,11 @@ function RouteComponent() {
         <div className="flex flex-col gap-8 lg:flex-row">
           {/* Sidebar - Hidden on mobile, shown as drawer if needed */}
           <div className="hidden lg:block">
-            <CategorySidebar 
+            <CategorySidebar
               categories={categories}
-              onCategoryChange={setSelectedCategory} 
+              onCategoryChange={setSelectedCategory}
               projectCounts={projectCounts}
-              selectedCategory={selectedCategory} 
+              selectedCategory={selectedCategory}
             />
           </div>
 
@@ -397,9 +397,7 @@ function RouteComponent() {
                 <div className="mb-6 flex items-center justify-between">
                   <p className="text-muted-foreground text-sm">
                     Showing {filteredProjects.length} {filteredProjects.length === 1 ? "project" : "projects"}
-                    {selectedCategoryName && (
-                      <span className="ml-1">in {selectedCategoryName}</span>
-                    )}
+                    {selectedCategoryName && <span className="ml-1">in {selectedCategoryName}</span>}
                   </p>
                 </div>
 

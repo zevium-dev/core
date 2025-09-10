@@ -25,7 +25,7 @@ export async function createProjectCategory(data: {
 }): Promise<ProjectCategory> {
   try {
     const id = crypto.randomUUID();
-    
+
     const [category] = await db
       .insert(schema.projectCategory)
       .values({
@@ -70,9 +70,7 @@ export async function deleteProjectCategory(id: string): Promise<void> {
       throw new Error("Cannot delete category that is in use by projects");
     }
 
-    await db
-      .delete(schema.projectCategory)
-      .where(eq(schema.projectCategory.id, id));
+    await db.delete(schema.projectCategory).where(eq(schema.projectCategory.id, id));
   } catch (error) {
     console.error("Failed to delete project category:", error);
     throw new Error("Failed to delete project category");
@@ -89,7 +87,7 @@ export async function getProjectCategories(): Promise<Array<ProjectCategory>> {
       .from(schema.projectCategory)
       .orderBy(asc(schema.projectCategory.weight), asc(schema.projectCategory.name));
 
-    return categories.map(category => ({
+    return categories.map((category) => ({
       createdAt: category.createdAt,
       description: category.description,
       icon: category.icon,
@@ -109,11 +107,7 @@ export async function getProjectCategories(): Promise<Array<ProjectCategory>> {
  */
 export async function getProjectCategoryById(id: string): Promise<null | ProjectCategory> {
   try {
-    const category = await db
-      .select()
-      .from(schema.projectCategory)
-      .where(eq(schema.projectCategory.id, id))
-      .limit(1);
+    const category = await db.select().from(schema.projectCategory).where(eq(schema.projectCategory.id, id)).limit(1);
 
     if (category.length === 0) {
       return null;
@@ -145,7 +139,7 @@ export async function updateProjectCategory(
     icon?: string;
     name?: string;
     weight?: number;
-  }
+  },
 ): Promise<ProjectCategory> {
   try {
     const [category] = await db

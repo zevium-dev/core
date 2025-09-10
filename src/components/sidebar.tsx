@@ -114,9 +114,8 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
           <SidebarMenu>
             {filteredNavData.map((item) => {
               // Check if current path matches the item URL or starts with it (for nested routes)
-              const isActive = match.pathname === item.url || 
-                (item.url !== "/" && match.pathname.startsWith(item.url));
-              
+              const isActive = match.pathname === item.url || (item.url !== "/" && match.pathname.startsWith(item.url));
+
               return (
                 <SidebarMenuItem key={item.title}>
                   <SidebarMenuButton

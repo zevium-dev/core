@@ -22,22 +22,12 @@ export interface UpdateApiSpecOptions {
 /**
  * Creates a new API specification and its endpoints
  */
-export async function createApiSpec({
-  parsedSpec,
-  projectId,
-  userId,
-  versionLabel,
-}: CreateApiSpecOptions) {
+export async function createApiSpec({ parsedSpec, projectId, userId, versionLabel }: CreateApiSpecOptions) {
   // Check if user has access to the project
   const projectMember = await db
     .select({ role: schema.projectMember.role })
     .from(schema.projectMember)
-    .where(
-      and(
-        eq(schema.projectMember.projectId, projectId),
-        eq(schema.projectMember.userId, userId)
-      )
-    )
+    .where(and(eq(schema.projectMember.projectId, projectId), eq(schema.projectMember.userId, userId)))
     .limit(1);
 
   if (projectMember.length === 0) {
@@ -54,12 +44,7 @@ export async function createApiSpec({
   const existingSpec = await db
     .select({ id: schema.apiSpec.id })
     .from(schema.apiSpec)
-    .where(
-      and(
-        eq(schema.apiSpec.projectId, projectId),
-        eq(schema.apiSpec.hash, parsedSpec.hash)
-      )
-    )
+    .where(and(eq(schema.apiSpec.projectId, projectId), eq(schema.apiSpec.hash, parsedSpec.hash)))
     .limit(1);
 
   if (existingSpec.length > 0) {
@@ -74,12 +59,7 @@ export async function createApiSpec({
   const existingVersion = await db
     .select({ id: schema.apiSpec.id })
     .from(schema.apiSpec)
-    .where(
-      and(
-        eq(schema.apiSpec.projectId, projectId),
-        eq(schema.apiSpec.versionLabel, finalVersionLabel)
-      )
-    )
+    .where(and(eq(schema.apiSpec.projectId, projectId), eq(schema.apiSpec.versionLabel, finalVersionLabel)))
     .limit(1);
 
   if (existingVersion.length > 0) {
@@ -87,27 +67,25 @@ export async function createApiSpec({
   }
 
   // Create the API specification
-  await db
-    .insert(schema.apiSpec)
-    .values({
-      createdAt: new Date(),
-      format: parsedSpec.format,
-      hash: parsedSpec.hash,
-      id: specId,
-      originalRaw: parsedSpec.originalRaw,
-      projectId,
-      specJson: parsedSpec.specJson,
-      status: "active",
-      title: parsedSpec.title,
-      updatedAt: new Date(),
-      versionLabel: finalVersionLabel,
-    });
+  await db.insert(schema.apiSpec).values({
+    createdAt: new Date(),
+    format: parsedSpec.format,
+    hash: parsedSpec.hash,
+    id: specId,
+    originalRaw: parsedSpec.originalRaw,
+    projectId,
+    specJson: parsedSpec.specJson,
+    status: "active",
+    title: parsedSpec.title,
+    updatedAt: new Date(),
+    versionLabel: finalVersionLabel,
+  });
 
   // Extract and create endpoints
   const endpoints = extractEndpoints(parsedSpec.specJson);
-  
+
   if (endpoints.length > 0) {
-    const endpointInserts = endpoints.map(endpoint => ({
+    const endpointInserts = endpoints.map((endpoint) => ({
       createdAt: new Date(),
       deprecated: endpoint.deprecated,
       id: crypto.randomUUID(),
@@ -186,12 +164,7 @@ export async function getApiSpecById(specId: string, userId: string) {
   const projectMember = await db
     .select({ role: schema.projectMember.role })
     .from(schema.projectMember)
-    .where(
-      and(
-        eq(schema.projectMember.projectId, spec[0]?.projectId || ""),
-        eq(schema.projectMember.userId, userId)
-      )
-    )
+    .where(and(eq(schema.projectMember.projectId, spec[0]?.projectId || ""), eq(schema.projectMember.userId, userId)))
     .limit(1);
 
   if (projectMember.length === 0) {
@@ -218,7 +191,7 @@ export async function getApiSpecById(specId: string, userId: string) {
 
   return {
     ...result,
-    endpoints: endpoints.map(endpoint => ({
+    endpoints: endpoints.map((endpoint) => ({
       ...endpoint,
       security: endpoint.security as Array<unknown>,
       tags: endpoint.tags as Array<string>,
@@ -235,12 +208,7 @@ export async function getProjectApiSpecs(projectId: string, userId: string) {
   const projectMember = await db
     .select({ role: schema.projectMember.role })
     .from(schema.projectMember)
-    .where(
-      and(
-        eq(schema.projectMember.projectId, projectId),
-        eq(schema.projectMember.userId, userId)
-      )
-    )
+    .where(and(eq(schema.projectMember.projectId, projectId), eq(schema.projectMember.userId, userId)))
     .limit(1);
 
   if (projectMember.length === 0) {
@@ -266,16 +234,13 @@ export async function getProjectApiSpecs(projectId: string, userId: string) {
   // Get endpoint counts for each spec
   const specsWithCounts = await Promise.all(
     specs.map(async (spec) => {
-      const endpoints = await db
-        .select()
-        .from(schema.apiEndpoint)
-        .where(eq(schema.apiEndpoint.specId, spec.id));
+      const endpoints = await db.select().from(schema.apiEndpoint).where(eq(schema.apiEndpoint.specId, spec.id));
 
       return {
         ...spec,
         endpointCount: endpoints.length,
       };
-    })
+    }),
   );
 
   return specsWithCounts;
@@ -287,7 +252,7 @@ export async function getProjectApiSpecs(projectId: string, userId: string) {
 export async function updateApiSpecStatus(
   specId: string,
   status: "active" | "archived" | "deprecated",
-  userId: string
+  userId: string,
 ) {
   // Get spec info to check project access
   const spec = await db
@@ -307,12 +272,7 @@ export async function updateApiSpecStatus(
   const projectMember = await db
     .select({ role: schema.projectMember.role })
     .from(schema.projectMember)
-    .where(
-      and(
-        eq(schema.projectMember.projectId, spec[0]?.projectId || ""),
-        eq(schema.projectMember.userId, userId)
-      )
-    )
+    .where(and(eq(schema.projectMember.projectId, spec[0]?.projectId || ""), eq(schema.projectMember.userId, userId)))
     .limit(1);
 
   if (projectMember.length === 0) {

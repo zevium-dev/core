@@ -18,11 +18,7 @@ interface EditableCategoryFieldProps {
   };
 }
 
-export function EditableCategoryField({
-  isLoading = false,
-  onSave,
-  value,
-}: EditableCategoryFieldProps) {
+export function EditableCategoryField({ isLoading = false, onSave, value }: EditableCategoryFieldProps) {
   const [isEditing, setIsEditing] = React.useState(false);
   const [open, setOpen] = React.useState(false);
   const [selectedCategoryId, setSelectedCategoryId] = React.useState<null | string>(value.categoryId);
@@ -30,10 +26,7 @@ export function EditableCategoryField({
   const trpcClient = useTRPCClient();
 
   // Fetch categories
-  const {
-    data: categoriesData,
-    isLoading: categoriesLoading,
-  } = useQuery({
+  const { data: categoriesData, isLoading: categoriesLoading } = useQuery({
     queryFn: () => trpcClient.projectCategory.getAll.query({}),
     queryKey: ["projectCategories"],
   });
@@ -49,10 +42,10 @@ export function EditableCategoryField({
   }
 
   const handleSave = () => {
-    const selectedCategory = categories.find(cat => cat.id === selectedCategoryId);
+    const selectedCategory = categories.find((cat) => cat.id === selectedCategoryId);
     // Immediately update the display name for better UX
     setDisplayCategoryName(selectedCategory?.name ?? null);
-    
+
     onSave(selectedCategoryId);
     setIsEditing(false);
     toast.success("Category updated successfully");
@@ -65,20 +58,18 @@ export function EditableCategoryField({
     setOpen(false);
   };
 
-  const selectedCategory = categories.find(cat => cat.id === selectedCategoryId);
+  const selectedCategory = categories.find((cat) => cat.id === selectedCategoryId);
 
   if (!isEditing) {
     return (
       <div className="group cursor-pointer" onClick={() => setIsEditing(true)}>
-        <Label className="text-sm font-medium text-muted-foreground">Category</Label>
-        <div className="flex items-center gap-2 mt-1 p-3 rounded-md border border-dashed border-muted-foreground/30 hover:border-muted-foreground/50 hover:bg-muted/50 transition-all">
-          <Tag className="h-4 w-4 text-muted-foreground/60" />
+        <Label className="text-muted-foreground text-sm font-medium">Category</Label>
+        <div className="border-muted-foreground/30 hover:border-muted-foreground/50 hover:bg-muted/50 mt-1 flex items-center gap-2 rounded-md border border-dashed p-3 transition-all">
+          <Tag className="text-muted-foreground/60 h-4 w-4" />
           <span className="flex-1 text-sm">
-            {displayCategoryName ?? (
-              <span className="text-muted-foreground italic">No category assigned</span>
-            )}
+            {displayCategoryName ?? <span className="text-muted-foreground italic">No category assigned</span>}
           </span>
-          <Edit3 className="h-4 w-4 text-muted-foreground/60 group-hover:text-muted-foreground transition-colors" />
+          <Edit3 className="text-muted-foreground/60 group-hover:text-muted-foreground h-4 w-4 transition-colors" />
         </div>
       </div>
     );
@@ -97,7 +88,7 @@ export function EditableCategoryField({
             variant="outline"
           >
             <div className="flex items-center gap-2">
-              <Tag className="h-4 w-4 text-muted-foreground" />
+              <Tag className="text-muted-foreground h-4 w-4" />
               {selectedCategory ? (
                 <span>{selectedCategory.name}</span>
               ) : (
@@ -111,9 +102,7 @@ export function EditableCategoryField({
           <Command>
             <CommandInput placeholder="Search categories..." />
             <CommandList>
-              <CommandEmpty>
-                {categoriesLoading ? "Loading categories..." : "No categories found."}
-              </CommandEmpty>
+              <CommandEmpty>{categoriesLoading ? "Loading categories..." : "No categories found."}</CommandEmpty>
               <CommandGroup>
                 {/* Option to clear category */}
                 <CommandItem
@@ -123,15 +112,15 @@ export function EditableCategoryField({
                   }}
                   value="no-category"
                 >
-                  <div className="flex items-center gap-2 w-full">
-                    <X className="h-4 w-4 text-muted-foreground" />
+                  <div className="flex w-full items-center gap-2">
+                    <X className="text-muted-foreground h-4 w-4" />
                     <div>
                       <div className="font-medium">No Category</div>
-                      <div className="text-sm text-muted-foreground">Remove category assignment</div>
+                      <div className="text-muted-foreground text-sm">Remove category assignment</div>
                     </div>
                   </div>
                 </CommandItem>
-                
+
                 {/* Category options */}
                 {categories.map((category) => (
                   <CommandItem
@@ -142,14 +131,12 @@ export function EditableCategoryField({
                     }}
                     value={category.name}
                   >
-                    <div className="flex items-center gap-2 w-full">
-                      <Tag className="h-4 w-4 text-muted-foreground" />
+                    <div className="flex w-full items-center gap-2">
+                      <Tag className="text-muted-foreground h-4 w-4" />
                       <div className="flex-1">
                         <div className="font-medium">{category.name}</div>
                         {category.description && (
-                          <div className="text-sm text-muted-foreground line-clamp-1">
-                            {category.description}
-                          </div>
+                          <div className="text-muted-foreground line-clamp-1 text-sm">{category.description}</div>
                         )}
                       </div>
                     </div>
@@ -160,13 +147,13 @@ export function EditableCategoryField({
           </Command>
         </PopoverContent>
       </Popover>
-      
+
       <div className="flex gap-2">
         <Button disabled={isLoading} onClick={handleSave} size="sm">
           {isLoading ? "Saving..." : "Save"}
         </Button>
         <Button disabled={isLoading} onClick={handleCancel} size="sm" variant="outline">
-          <X className="h-4 w-4 mr-2" />
+          <X className="mr-2 h-4 w-4" />
           Cancel
         </Button>
       </div>

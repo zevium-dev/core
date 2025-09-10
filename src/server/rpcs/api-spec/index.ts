@@ -34,19 +34,23 @@ export const apiSpecRouter = router({
   // Get API specification by ID
   getById: protectedProcedure
     .meta({ route: { path: "/api-spec/get-by-id", summary: "Get API specification by ID" } })
-    .input(z.object({
-      specId: z.string(),
-    }))
-    .output(z.object({
-      spec: apiSpecSchema.extend({
-        endpoints: z.array(endpointSchema),
-        originalRaw: z.string().nullable(),
-        specJson: z.record(z.string(), z.unknown()),
+    .input(
+      z.object({
+        specId: z.string(),
       }),
-    }))
+    )
+    .output(
+      z.object({
+        spec: apiSpecSchema.extend({
+          endpoints: z.array(endpointSchema),
+          originalRaw: z.string().nullable(),
+          specJson: z.record(z.string(), z.unknown()),
+        }),
+      }),
+    )
     .query(async ({ ctx, input }) => {
       const spec = await getApiSpecById(input.specId, ctx.user.id);
-      
+
       return {
         spec,
       };
@@ -55,19 +59,25 @@ export const apiSpecRouter = router({
   // Get all API specifications for a project
   getByProject: protectedProcedure
     .meta({ route: { path: "/api-spec/get-by-project", summary: "Get API specifications for project" } })
-    .input(z.object({
-      projectId: z.string(),
-    }))
-    .output(z.object({
-      specs: z.array(apiSpecSchema.extend({
-        endpointCount: z.number(),
-      })),
-    }))
+    .input(
+      z.object({
+        projectId: z.string(),
+      }),
+    )
+    .output(
+      z.object({
+        specs: z.array(
+          apiSpecSchema.extend({
+            endpointCount: z.number(),
+          }),
+        ),
+      }),
+    )
     .query(async ({ ctx, input }) => {
       const specs = await getProjectApiSpecs(input.projectId, ctx.user.id);
-      
+
       return {
-        specs: specs.map(spec => ({
+        specs: specs.map((spec) => ({
           ...spec,
           projectId: input.projectId,
         })),
@@ -77,16 +87,20 @@ export const apiSpecRouter = router({
   // Update API specification status
   updateStatus: protectedProcedure
     .meta({ route: { path: "/api-spec/update-status", summary: "Update API specification status" } })
-    .input(z.object({
-      specId: z.string(),
-      status: z.enum(["active", "archived", "deprecated"]),
-    }))
-    .output(z.object({
-      success: z.boolean(),
-    }))
+    .input(
+      z.object({
+        specId: z.string(),
+        status: z.enum(["active", "archived", "deprecated"]),
+      }),
+    )
+    .output(
+      z.object({
+        success: z.boolean(),
+      }),
+    )
     .mutation(async ({ ctx, input }) => {
       await updateApiSpecStatus(input.specId, input.status, ctx.user.id);
-      
+
       return {
         success: true,
       };
@@ -95,23 +109,27 @@ export const apiSpecRouter = router({
   // Upload and create new API specification
   upload: protectedProcedure
     .meta({ route: { path: "/api-spec/upload", summary: "Upload OpenAPI specification" } })
-    .input(z.object({
-      fileContent: z.string().min(1, "File content is required"),
-      fileName: z.string().min(1, "File name is required"),
-      projectId: z.string().min(1, "Project ID is required"),
-      versionLabel: z.string().optional(),
-    }))
-    .output(z.object({
-      spec: apiSpecSchema.extend({
-        endpointCount: z.number(),
+    .input(
+      z.object({
+        fileContent: z.string().min(1, "File content is required"),
+        fileName: z.string().min(1, "File name is required"),
+        projectId: z.string().min(1, "Project ID is required"),
+        versionLabel: z.string().optional(),
       }),
-      success: z.boolean(),
-    }))
+    )
+    .output(
+      z.object({
+        spec: apiSpecSchema.extend({
+          endpointCount: z.number(),
+        }),
+        success: z.boolean(),
+      }),
+    )
     .mutation(async ({ ctx, input }) => {
       try {
         // Validate file content and format
         const parsedSpec = parseAndValidateOpenApiSpec(input.fileContent, input.fileName);
-        
+
         // Create the API specification
         const spec = await createApiSpec({
           parsedSpec,
@@ -130,7 +148,7 @@ export const apiSpecRouter = router({
         };
       } catch (error) {
         if (error instanceof OpenApiValidationError) {
-          throw new Error(`OpenAPI validation failed: ${error.errors.map(e => e.message).join(", ")}`);
+          throw new Error(`OpenAPI validation failed: ${error.errors.map((e) => e.message).join(", ")}`);
         }
         throw error;
       }
@@ -139,29 +157,39 @@ export const apiSpecRouter = router({
   // Validate OpenAPI specification without saving
   validate: protectedProcedure
     .meta({ route: { path: "/api-spec/validate", summary: "Validate OpenAPI specification" } })
-    .input(z.object({
-      fileContent: z.string().min(1, "File content is required"),
-      fileName: z.string().min(1, "File name is required"),
-    }))
-    .output(z.object({
-      errors: z.array(z.object({
-        code: z.string(),
-        message: z.string(),
-        path: z.string().optional(),
-      })).optional(),
-      isValid: z.boolean(),
-      spec: z.object({
-        endpointCount: z.number(),
-        format: z.enum(["json", "yaml"]),
-        title: z.string(),
-        version: z.string(),
-      }).optional(),
-    }))
+    .input(
+      z.object({
+        fileContent: z.string().min(1, "File content is required"),
+        fileName: z.string().min(1, "File name is required"),
+      }),
+    )
+    .output(
+      z.object({
+        errors: z
+          .array(
+            z.object({
+              code: z.string(),
+              message: z.string(),
+              path: z.string().optional(),
+            }),
+          )
+          .optional(),
+        isValid: z.boolean(),
+        spec: z
+          .object({
+            endpointCount: z.number(),
+            format: z.enum(["json", "yaml"]),
+            title: z.string(),
+            version: z.string(),
+          })
+          .optional(),
+      }),
+    )
     .mutation(({ input }) => {
       try {
         const parsedSpec = parseAndValidateOpenApiSpec(input.fileContent, input.fileName);
         const endpoints = extractEndpoints(parsedSpec.specJson);
-        
+
         return {
           isValid: true,
           spec: {
@@ -178,12 +206,14 @@ export const apiSpecRouter = router({
             isValid: false,
           };
         }
-        
+
         return {
-          errors: [{
-            code: "UNKNOWN_ERROR",
-            message: error instanceof Error ? error.message : "Unknown validation error",
-          }],
+          errors: [
+            {
+              code: "UNKNOWN_ERROR",
+              message: error instanceof Error ? error.message : "Unknown validation error",
+            },
+          ],
           isValid: false,
         };
       }

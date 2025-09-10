@@ -1,13 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createLazyFileRoute, useNavigate } from "@tanstack/react-router";
-import {
-  ArrowRight,
-  Building2,
-  Calendar,
-  Plus,
-  Search,
-  Users,
-} from "lucide-react";
+import { ArrowRight, Building2, Calendar, Plus, Search, Users } from "lucide-react";
 import { m } from "motion/react";
 import * as React from "react";
 
@@ -84,7 +77,7 @@ function CreateOrganizationModal({ children }: { children: React.ReactNode }) {
 
       // Invalidate organizations query to refetch the list
       await queryClient.invalidateQueries({ queryKey: ["organizations"] });
-      
+
       // Reset form and close modal
       setOrganizationName("");
       setDescription("");
@@ -159,8 +152,8 @@ function OrganizationCard({ index, organization }: { index: number; organization
       transition={{ delay: index * 0.1, duration: 0.5 }}
       whileHover={{ y: -4 }}
     >
-      <Card 
-        className="group-hover:shadow-lg group-hover:border-primary/20 h-full cursor-pointer transition-all duration-300 ease-out"
+      <Card
+        className="group-hover:border-primary/20 h-full cursor-pointer transition-all duration-300 ease-out group-hover:shadow-lg"
         onClick={handleCardClick}
       >
         <CardHeader className="">
@@ -241,9 +234,7 @@ function RouteComponent() {
 
   const filteredOrganizations = React.useMemo(() => {
     const organizations: Array<Organization> = organizationsData?.organizations ?? [];
-    return organizations.filter((org) =>
-      org.name.toLowerCase().includes(searchQuery.toLowerCase())
-    );
+    return organizations.filter((org) => org.name.toLowerCase().includes(searchQuery.toLowerCase()));
   }, [organizationsData?.organizations, searchQuery]);
 
   if (isLoading) {
