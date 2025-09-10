@@ -26,73 +26,72 @@ import { useCopy } from "~/hooks/use-copy";
 
 // Types
 interface ApiKeyRecord {
+  createdAt: string;
   id: number;
   key: string; // full key value
-  name: string;
-  limit: string; // e.g. "Unlimited" or custom string like "1000 req/day"
-  usage: string; // formatted usage string
-  createdAt: string;
   lastUsed: string;
+  limit: string; // e.g. "Unlimited" or custom string like "1000 req/day"
+  name: string;
+  usage: string; // formatted usage string
 }
 
-// Cast path to any until routeTree regeneration includes /settings/keys/$
-export const Route = createLazyFileRoute("/settings/keys/$" as any)({
+export const Route = createLazyFileRoute("/settings/keys/$")({
   component: ApiKeysComponent,
 });
 
 // TODO: Replace with API call to fetch real API keys data
 // Mock data for the API keys table
-const mockApiKeysData: ApiKeyRecord[] = [
+const mockApiKeysData: Array<ApiKeyRecord> = [
   {
+    createdAt: "2024-08-15",
     id: 1,
     key: "sk-or-v1-e97b8f0d91c7a6c54",
-    name: "Internal Jira Bot",
+  lastUsed: "2024-09-01",
   limit: "Unlimited",
-  usage: "$12.40 used",
-    createdAt: "2024-08-15",
-    lastUsed: "2024-09-01",
+    name: "Internal Jira Bot",
+    usage: "$12.40 used",
   },
   {
+    createdAt: "2024-07-20",
     id: 2,
     key: "sk-or-v1-4b6d9a7217bd0f417b",
-    name: "Desktop Client (Win)",
+  lastUsed: "2024-09-08",
   limit: "$200",
-  usage: "$45.82 used",
-    createdAt: "2024-07-20",
-    lastUsed: "2024-09-08",
+    name: "Desktop Client (Win)",
+    usage: "$45.82 used",
   },
   {
+    createdAt: "2024-06-10",
     id: 3,
     key: "sk-or-v1-da3be50aa9293f25d61",
-    name: "Domain Filter Service",
+  lastUsed: "2024-09-09",
   limit: "Unlimited",
-  usage: "$8.293 used",
-    createdAt: "2024-06-10",
-    lastUsed: "2024-09-09",
+    name: "Domain Filter Service",
+    usage: "$8.293 used",
   },
   {
+    createdAt: "2024-05-25",
     id: 4,
     key: "sk-or-v1-23ef10b19bb176462ee",
-    name: "OAuth: Roo Prod App",
+  lastUsed: "2024-09-07",
   limit: "Unlimited",
-  usage: "$210.36 used",
-    createdAt: "2024-05-25",
-    lastUsed: "2024-09-07",
+    name: "OAuth: Roo Prod App",
+    usage: "$210.36 used",
   },
   {
+    createdAt: "2024-04-12",
     id: 5,
     key: "sk-or-v1-667af09c1834d9289a5",
-    name: "PathOfFate Game",
+  lastUsed: "Never",
   limit: "$10",
-  usage: "$0 used",
-    createdAt: "2024-04-12",
-    lastUsed: "Never",
+    name: "PathOfFate Game",
+    usage: "$0 used",
   },
 ];
 
 export function ApiKeysComponent() {
   // State
-  const [apiKeys, setApiKeys] = useState<ApiKeyRecord[]>(mockApiKeysData);
+  const [apiKeys, setApiKeys] = useState<Array<ApiKeyRecord>>(mockApiKeysData);
   // Keys are never fully viewable again after creation
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
@@ -107,13 +106,13 @@ export function ApiKeysComponent() {
     // TODO: Replace with API call
     const formattedLimit = formatLimit(newKeyLimit);
     const newKey: ApiKeyRecord = {
+      createdAt: new Date().toISOString().slice(0, 10),
       id: Date.now(),
       key: `sk-or-v1-${Math.random().toString(36).slice(2, 18)}`,
-      name: newKeyName.trim(),
-      limit: formattedLimit,
-      usage: "$0 used",
-      createdAt: new Date().toISOString().slice(0, 10),
       lastUsed: "Never",
+      limit: formattedLimit,
+      name: newKeyName.trim(),
+      usage: "$0 used",
     };
     setApiKeys((prev) => [newKey, ...prev]);
     setNewKeyName("");
@@ -121,8 +120,8 @@ export function ApiKeysComponent() {
     setIsCreateDialogOpen(false);
   };
 
-  const handleCopyKey = async (value: string) => {
-    await copy(value);
+  const handleCopyKey = (value: string) => {
+    copy(value);
   };
 
   const handleDeleteKey = (keyId: number) => {
@@ -142,7 +141,7 @@ export function ApiKeysComponent() {
     setApiKeys((prev) =>
       prev.map((k) =>
         k.id === editingKey.id
-          ? { ...k, name: newKeyName.trim() || k.name, limit: formatLimit(newKeyLimit) }
+          ? { ...k, limit: formatLimit(newKeyLimit), name: newKeyName.trim() || k.name }
           : k,
       ),
     );
@@ -166,7 +165,7 @@ export function ApiKeysComponent() {
     const trimmed = raw.trim();
     if (!trimmed) return "Unlimited";
     // accept forms like 50, $50, 50.25, $50.25
-    const match = trimmed.match(/\$?([0-9]+(?:\.[0-9]{1,2})?)/);
+    const match = /\$?([0-9]+(?:\.[0-9]{1,2})?)/.exec(trimmed);
     if (!match) return "Unlimited"; // fallback if invalid
     return `$${match[1]}`;
   };
@@ -175,8 +174,8 @@ export function ApiKeysComponent() {
   -H 'Authorization: Bearer YOUR_API_KEY' \\
   -d '{\n    "model": "openai/gpt-4o-mini",\n    "messages": [{"role":"user","content":"Explain how AI works in a few words"}]\n  }'`;
   
-  const handleCopySnippet = async () => {
-    await handleCopyKey(snippet);
+  const handleCopySnippet = () => {
+    handleCopyKey(snippet);
     setSnippetCopied(true);
     window.setTimeout(() => setSnippetCopied(false), 2500);
   };
@@ -198,7 +197,7 @@ export function ApiKeysComponent() {
         </div>
 
         {/* Create API Key Button */}
-        <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
+        <Dialog onOpenChange={setIsCreateDialogOpen} open={isCreateDialogOpen}>
           <DialogTrigger asChild>
             <Button className="gap-2">
               <Plus className="h-4 w-4" />
@@ -217,26 +216,26 @@ export function ApiKeysComponent() {
                 <Label htmlFor="key-name">Key Name</Label>
                 <Input
                   id="key-name"
+                  onChange={(e) => setNewKeyName(e.target.value)}
                   placeholder="Enter a name for your API key"
                   value={newKeyName}
-                  onChange={(e) => setNewKeyName(e.target.value)}
                 />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="key-limit">Credit Limit (Optional)</Label>
                 <Input
                   id="key-limit"
+                  onChange={(e) => setNewKeyLimit(e.target.value)}
                   placeholder="e.g. 50 or $50"
                   value={newKeyLimit}
-                  onChange={(e) => setNewKeyLimit(e.target.value)}
                 />
               </div>
             </div>
             <DialogFooter>
-              <Button variant="outline" onClick={() => setIsCreateDialogOpen(false)}>
+              <Button onClick={() => setIsCreateDialogOpen(false)} variant="outline">
                 Cancel
               </Button>
-              <Button onClick={handleCreateKey} disabled={!newKeyName.trim()}>
+              <Button disabled={!newKeyName.trim()} onClick={handleCreateKey}>
                 Create Key
               </Button>
             </DialogFooter>
@@ -260,10 +259,10 @@ export function ApiKeysComponent() {
               <TableBody>
                 {!hasKeys && (
                   <TableRow>
-                    <TableCell colSpan={4} className="text-center py-10">
+                    <TableCell className="text-center py-10" colSpan={4}>
                       <div className="flex flex-col items-center gap-2">
                         <span className="text-muted-foreground text-sm">No API keys yet.</span>
-                        <Button size="sm" onClick={() => setIsCreateDialogOpen(true)} className="gap-2">
+                        <Button className="gap-2" onClick={() => setIsCreateDialogOpen(true)} size="sm">
                           <Plus className="h-4 w-4" /> Create your first key
                         </Button>
                       </div>
@@ -294,15 +293,15 @@ export function ApiKeysComponent() {
                     <TableCell>
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
-                          <Button size="sm" variant="ghost" className="h-8 w-8 p-0">
+                          <Button className="h-8 w-8 p-0" size="sm" variant="ghost">
                             <MoreHorizontal className="h-4 w-4" />
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end" className="w-40">
-                          <DropdownMenuItem onClick={() => openEditDialog(apiKey)} className="gap-2">
+                          <DropdownMenuItem className="gap-2" onClick={() => openEditDialog(apiKey)}>
                             <Pencil className="h-4 w-4" /> Rename
                           </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => handleDeleteKey(apiKey.id)} className="gap-2 text-red-500">
+                          <DropdownMenuItem className="gap-2 text-red-500" onClick={() => handleDeleteKey(apiKey.id)}>
                             <Trash2 className="h-4 w-4" /> Delete
                           </DropdownMenuItem>
                         </DropdownMenuContent>
@@ -328,13 +327,13 @@ export function ApiKeysComponent() {
         <CardHeader className="pb-2 flex flex-row items-center justify-between space-y-0">
           <CardTitle className="text-sm font-medium">Quick Start (cURL)</CardTitle>
           <Button
-            size="sm"
-            variant="ghost"
-            title={snippetCopied ? "Copied" : "Copy snippet"}
             aria-live="polite"
-            data-copied={snippetCopied || undefined}
             className="h-7 px-2 text-xs border border-border/40 bg-muted/30 hover:bg-muted/50 dark:hover:bg-muted/60 text-muted-foreground hover:text-foreground data-[copied]:bg-emerald-500/20 data-[copied]:text-emerald-500 data-[copied]:hover:bg-emerald-500/30 transition-colors"
+            data-copied={snippetCopied || undefined}
             onClick={handleCopySnippet}
+            size="sm"
+            title={snippetCopied ? "Copied" : "Copy snippet"}
+            variant="ghost"
           >
             {snippetCopied ? <Check className="mr-1 h-3 w-3" /> : <Copy className="mr-1 h-3 w-3" />} {snippetCopied ? "Copied" : "Copy"}
           </Button>
@@ -350,7 +349,7 @@ export function ApiKeysComponent() {
       </Card>
 
       {/* Edit Dialog */}
-      <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+      <Dialog onOpenChange={setIsEditDialogOpen} open={isEditDialogOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Edit API Key</DialogTitle>
@@ -361,24 +360,24 @@ export function ApiKeysComponent() {
               <Label htmlFor="edit-key-name">Key Name</Label>
               <Input
                 id="edit-key-name"
+                onChange={(e) => setNewKeyName(e.target.value)}
                 placeholder="Key name"
                 value={newKeyName}
-                onChange={(e) => setNewKeyName(e.target.value)}
               />
             </div>
             <div className="space-y-2">
               <Label htmlFor="edit-key-limit">Credit Limit (Optional)</Label>
               <Input
                 id="edit-key-limit"
+                onChange={(e) => setNewKeyLimit(e.target.value)}
                 placeholder="e.g. 50 or $50"
                 value={newKeyLimit}
-                onChange={(e) => setNewKeyLimit(e.target.value)}
               />
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsEditDialogOpen(false)}>Cancel</Button>
-            <Button onClick={handleSaveEdit} disabled={!newKeyName.trim()}>Save</Button>
+            <Button onClick={() => setIsEditDialogOpen(false)} variant="outline">Cancel</Button>
+            <Button disabled={!newKeyName.trim()} onClick={handleSaveEdit}>Save</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
