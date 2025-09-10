@@ -112,21 +112,26 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
       <SidebarContent>
         <SidebarGroup>
           <SidebarMenu>
-            {filteredNavData.map((item) => (
-              <SidebarMenuItem key={item.title}>
-                <SidebarMenuButton
-                  asChild
-                  className="data-[active=true]:bg-main data-[active=true]:text-main-foreground"
-                  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-                  isActive={match?.pathname === item.url}
-                >
-                  <Link to={item.url}>
-                    <item.icon />
-                    <span>{item.title}</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            ))}
+            {filteredNavData.map((item) => {
+              // Check if current path matches the item URL or starts with it (for nested routes)
+              const isActive = match.pathname === item.url || 
+                (item.url !== "/" && match.pathname.startsWith(item.url));
+              
+              return (
+                <SidebarMenuItem key={item.title}>
+                  <SidebarMenuButton
+                    asChild
+                    className="data-[active=true]:bg-main data-[active=true]:text-main-foreground"
+                    isActive={isActive}
+                  >
+                    <Link to={item.url}>
+                      <item.icon />
+                      <span>{item.title}</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              );
+            })}
           </SidebarMenu>
         </SidebarGroup>
       </SidebarContent>

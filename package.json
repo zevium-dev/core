@@ -120,5 +120,8 @@
   "packageManager": "pnpm@10.15.1",
   "trustedDependencies": [
     "@parcel/watcher"
-  ]
+  ],
+  "dependencies": {
+    "yaml": "^2.8.1"
+  }
 }

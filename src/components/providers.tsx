@@ -10,6 +10,7 @@ import { toast } from "sonner";
 import { ThemeProvider } from "~/components/theme-provider";
 import { SidebarInset, SidebarProvider } from "~/components/ui/sidebar";
 import { clientEnv } from "~/env/client";
+import { AutoCreateDefaultOrganization } from "~/hooks/use-ensure-default-organization";
 import { createClient, TRPCProvider } from "~/lib/trpc";
 
 import { PostHogIdentify } from "./posthog-identify";
@@ -80,6 +81,7 @@ export const Providers: React.FC<React.PropsWithChildren> = ({ children }) => {
                 <SidebarProvider>
                   <Toaster />
                   <PostHogIdentify />
+                  <AutoCreateDefaultOrganization />
                   <AppSidebar />
                   <SidebarInset>
                     <PageHeader />
