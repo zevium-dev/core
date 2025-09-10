@@ -35,12 +35,12 @@ export function useEnsureDefaultOrganization() {
 
       try {
         const result = await trpcClient.organization.ensureDefaultOrganization.mutate();
-        
+
         if (result.created) {
           setOrganizationCreated(true);
           console.log("Default organization created for user:", session.user.email);
         }
-        
+
         setHasChecked(true);
       } catch (error) {
         console.error("Failed to ensure default organization:", error);

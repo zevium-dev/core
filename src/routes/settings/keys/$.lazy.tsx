@@ -46,8 +46,8 @@ const mockApiKeysData: Array<ApiKeyRecord> = [
     createdAt: "2024-08-15",
     id: 1,
     key: "sk-or-v1-e97b8f0d91c7a6c54",
-  lastUsed: "2024-09-01",
-  limit: "Unlimited",
+    lastUsed: "2024-09-01",
+    limit: "Unlimited",
     name: "Internal Jira Bot",
     usage: "$12.40 used",
   },
@@ -55,8 +55,8 @@ const mockApiKeysData: Array<ApiKeyRecord> = [
     createdAt: "2024-07-20",
     id: 2,
     key: "sk-or-v1-4b6d9a7217bd0f417b",
-  lastUsed: "2024-09-08",
-  limit: "$200",
+    lastUsed: "2024-09-08",
+    limit: "$200",
     name: "Desktop Client (Win)",
     usage: "$45.82 used",
   },
@@ -64,8 +64,8 @@ const mockApiKeysData: Array<ApiKeyRecord> = [
     createdAt: "2024-06-10",
     id: 3,
     key: "sk-or-v1-da3be50aa9293f25d61",
-  lastUsed: "2024-09-09",
-  limit: "Unlimited",
+    lastUsed: "2024-09-09",
+    limit: "Unlimited",
     name: "Domain Filter Service",
     usage: "$8.293 used",
   },
@@ -73,8 +73,8 @@ const mockApiKeysData: Array<ApiKeyRecord> = [
     createdAt: "2024-05-25",
     id: 4,
     key: "sk-or-v1-23ef10b19bb176462ee",
-  lastUsed: "2024-09-07",
-  limit: "Unlimited",
+    lastUsed: "2024-09-07",
+    limit: "Unlimited",
     name: "OAuth: Roo Prod App",
     usage: "$210.36 used",
   },
@@ -82,8 +82,8 @@ const mockApiKeysData: Array<ApiKeyRecord> = [
     createdAt: "2024-04-12",
     id: 5,
     key: "sk-or-v1-667af09c1834d9289a5",
-  lastUsed: "Never",
-  limit: "$10",
+    lastUsed: "Never",
+    limit: "$10",
     name: "PathOfFate Game",
     usage: "$0 used",
   },
@@ -131,8 +131,8 @@ export function ApiKeysComponent() {
 
   const openEditDialog = (record: ApiKeyRecord) => {
     setEditingKey(record);
-  setNewKeyName(record.name);
-  setNewKeyLimit(record.limit === "Unlimited" ? "" : record.limit.replace(/^[^0-9$]*/, ""));
+    setNewKeyName(record.name);
+    setNewKeyLimit(record.limit === "Unlimited" ? "" : record.limit.replace(/^[^0-9$]*/, ""));
     setIsEditDialogOpen(true);
   };
 
@@ -140,9 +140,7 @@ export function ApiKeysComponent() {
     if (!editingKey) return;
     setApiKeys((prev) =>
       prev.map((k) =>
-        k.id === editingKey.id
-          ? { ...k, limit: formatLimit(newKeyLimit), name: newKeyName.trim() || k.name }
-          : k,
+        k.id === editingKey.id ? { ...k, limit: formatLimit(newKeyLimit), name: newKeyName.trim() || k.name } : k,
       ),
     );
     setIsEditDialogOpen(false);
@@ -159,7 +157,10 @@ export function ApiKeysComponent() {
   };
 
   const hasKeys = apiKeys.length > 0;
-  const totalUsage = useMemo(() => apiKeys.reduce((acc, k) => acc + (parseFloat(k.usage.replace(/[^0-9.]/g, "")) || 0), 0), [apiKeys]);
+  const totalUsage = useMemo(
+    () => apiKeys.reduce((acc, k) => acc + (parseFloat(k.usage.replace(/[^0-9.]/g, "")) || 0), 0),
+    [apiKeys],
+  );
   const [snippetCopied, setSnippetCopied] = useState(false);
   const formatLimit = (raw: string) => {
     const trimmed = raw.trim();
@@ -173,7 +174,7 @@ export function ApiKeysComponent() {
   -H 'Content-Type: application/json' \\
   -H 'Authorization: Bearer YOUR_API_KEY' \\
   -d '{\n    "model": "openai/gpt-4o-mini",\n    "messages": [{"role":"user","content":"Explain how AI works in a few words"}]\n  }'`;
-  
+
   const handleCopySnippet = () => {
     handleCopyKey(snippet);
     setSnippetCopied(true);
@@ -182,16 +183,14 @@ export function ApiKeysComponent() {
 
   return (
     <div className="mx-auto w-full max-w-3xl min-w-0 flex-1 space-y-6 p-6">
-  {/* (Optional) Settings navigation placeholder – removed due to missing component */}
+      {/* (Optional) Settings navigation placeholder – removed due to missing component */}
 
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="space-y-2">
           <h1 className="text-foreground text-2xl font-bold">API Keys</h1>
           <div className="flex items-center gap-2">
-            <p className="text-muted-foreground text-sm">
-              Manage your API keys to access all Zevium-integrated APIs
-            </p>
+            <p className="text-muted-foreground text-sm">Manage your API keys to access all Zevium-integrated APIs</p>
             <Info className="text-muted-foreground h-4 w-4" />
           </div>
         </div>
@@ -259,7 +258,7 @@ export function ApiKeysComponent() {
               <TableBody>
                 {!hasKeys && (
                   <TableRow>
-                    <TableCell className="text-center py-10" colSpan={4}>
+                    <TableCell className="py-10 text-center" colSpan={4}>
                       <div className="flex flex-col items-center gap-2">
                         <span className="text-muted-foreground text-sm">No API keys yet.</span>
                         <Button className="gap-2" onClick={() => setIsCreateDialogOpen(true)} size="sm">
@@ -278,7 +277,7 @@ export function ApiKeysComponent() {
                           {/* No secondary line now; rate limit displayed in column */}
                         </div>
                         <div className="flex items-center gap-2">
-                          <code className="bg-muted text-muted-foreground text-xs font-mono px-2 py-1 rounded">
+                          <code className="bg-muted text-muted-foreground rounded px-2 py-1 font-mono text-xs">
                             {formatKey(apiKey.key)}
                           </code>
                         </div>
@@ -314,8 +313,8 @@ export function ApiKeysComponent() {
           </div>
           {hasKeys && (
             <div className="flex items-center justify-end px-4 py-2">
-              <span className="text-muted-foreground text-[10px] uppercase tracking-wide">
-                Total Usage: <span className="font-medium text-foreground">${totalUsage.toFixed(3)} used</span>
+              <span className="text-muted-foreground text-[10px] tracking-wide uppercase">
+                Total Usage: <span className="text-foreground font-medium">${totalUsage.toFixed(3)} used</span>
               </span>
             </div>
           )}
@@ -324,23 +323,26 @@ export function ApiKeysComponent() {
 
       {/* Quick Start Snippet */}
       <Card className="bg-card/50 border-border/50 backdrop-blur-sm">
-        <CardHeader className="pb-2 flex flex-row items-center justify-between space-y-0">
+        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
           <CardTitle className="text-sm font-medium">Quick Start (cURL)</CardTitle>
           <Button
             aria-live="polite"
-            className="h-7 px-2 text-xs border border-border/40 bg-muted/30 hover:bg-muted/50 dark:hover:bg-muted/60 text-muted-foreground hover:text-foreground data-[copied]:bg-emerald-500/20 data-[copied]:text-emerald-500 data-[copied]:hover:bg-emerald-500/30 transition-colors"
+            className="border-border/40 bg-muted/30 hover:bg-muted/50 dark:hover:bg-muted/60 text-muted-foreground hover:text-foreground h-7 border px-2 text-xs transition-colors data-[copied]:bg-emerald-500/20 data-[copied]:text-emerald-500 data-[copied]:hover:bg-emerald-500/30"
             data-copied={snippetCopied || undefined}
             onClick={handleCopySnippet}
             size="sm"
             title={snippetCopied ? "Copied" : "Copy snippet"}
             variant="ghost"
           >
-            {snippetCopied ? <Check className="mr-1 h-3 w-3" /> : <Copy className="mr-1 h-3 w-3" />} {snippetCopied ? "Copied" : "Copy"}
+            {snippetCopied ? <Check className="mr-1 h-3 w-3" /> : <Copy className="mr-1 h-3 w-3" />}{" "}
+            {snippetCopied ? "Copied" : "Copy"}
           </Button>
         </CardHeader>
         <CardContent className="pt-0">
           <div className="relative">
-            <pre className="bg-muted/50 border-border/50 font-mono text-xs whitespace-pre overflow-x-auto rounded-md border p-4 leading-relaxed selection:bg-primary/30 selection:text-primary-foreground">{snippet}</pre>
+            <pre className="bg-muted/50 border-border/50 selection:bg-primary/30 selection:text-primary-foreground overflow-x-auto rounded-md border p-4 font-mono text-xs leading-relaxed whitespace-pre">
+              {snippet}
+            </pre>
             <p className="text-muted-foreground mt-2 text-[11px]">
               Replace <code className="font-mono">YOUR_API_KEY</code> with one of the keys above.
             </p>
@@ -376,8 +378,12 @@ export function ApiKeysComponent() {
             </div>
           </div>
           <DialogFooter>
-            <Button onClick={() => setIsEditDialogOpen(false)} variant="outline">Cancel</Button>
-            <Button disabled={!newKeyName.trim()} onClick={handleSaveEdit}>Save</Button>
+            <Button onClick={() => setIsEditDialogOpen(false)} variant="outline">
+              Cancel
+            </Button>
+            <Button disabled={!newKeyName.trim()} onClick={handleSaveEdit}>
+              Save
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

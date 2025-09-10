@@ -16,33 +16,32 @@ interface CreateOrganizationOptions {
 /**
  * Creates a default organization for a new user
  */
-export async function createDefaultOrganization({ 
-  userEmail,
-  userId, 
-  userName 
-}: CreateDefaultOrganizationOptions) {
+export async function createDefaultOrganization({ userEmail, userId, userName }: CreateDefaultOrganizationOptions) {
   const organizationId = crypto.randomUUID();
   const organizationMemberId = crypto.randomUUID();
-  
+
   // Generate a unique slug based on the user's name or email
   const baseSlug = generateSlugFromName(userName || userEmail);
   const slug = await generateUniqueSlug(baseSlug);
-  
+
   // Create the organization
-  const organization = await db.insert(schema.organization).values({
-    createdAt: new Date(),
-    description: "Default organization created for new user",
-    id: organizationId,
-    name: `${userName}'s Organization`,
-    ownerId: userId,
-    settings: {
-      allowMemberProjectCreation: true,
-      defaultProjectVisibility: "private",
-      requireInviteApproval: false,
-    },
-    slug: slug,
-    updatedAt: new Date(),
-  }).returning();
+  const organization = await db
+    .insert(schema.organization)
+    .values({
+      createdAt: new Date(),
+      description: "Default organization created for new user",
+      id: organizationId,
+      name: `${userName}'s Organization`,
+      ownerId: userId,
+      settings: {
+        allowMemberProjectCreation: true,
+        defaultProjectVisibility: "private",
+        requireInviteApproval: false,
+      },
+      slug: slug,
+      updatedAt: new Date(),
+    })
+    .returning();
 
   // Add the user as the owner/admin of the organization
   await db.insert(schema.organizationMember).values({
@@ -66,35 +65,33 @@ export async function createDefaultOrganization({
 /**
  * Creates a new organization
  */
-export async function createOrganization({ 
-  description,
-  name, 
-  userId,
-  website 
-}: CreateOrganizationOptions) {
+export async function createOrganization({ description, name, userId, website }: CreateOrganizationOptions) {
   const organizationId = crypto.randomUUID();
   const organizationMemberId = crypto.randomUUID();
-  
+
   // Generate a unique slug based on the organization name
   const baseSlug = generateSlugFromName(name);
   const slug = await generateUniqueSlug(baseSlug);
-  
+
   // Create the organization
-  const organization = await db.insert(schema.organization).values({
-    createdAt: new Date(),
-    description: description ?? null,
-    id: organizationId,
-    name: name,
-    ownerId: userId,
-    settings: {
-      allowMemberProjectCreation: true,
-      defaultProjectVisibility: "private",
-      requireInviteApproval: false,
-    },
-    slug: slug,
-    updatedAt: new Date(),
-    website: website ?? null,
-  }).returning();
+  const organization = await db
+    .insert(schema.organization)
+    .values({
+      createdAt: new Date(),
+      description: description ?? null,
+      id: organizationId,
+      name: name,
+      ownerId: userId,
+      settings: {
+        allowMemberProjectCreation: true,
+        defaultProjectVisibility: "private",
+        requireInviteApproval: false,
+      },
+      slug: slug,
+      updatedAt: new Date(),
+      website: website ?? null,
+    })
+    .returning();
 
   // Add the user as the owner/admin of the organization
   await db.insert(schema.organizationMember).values({
@@ -118,10 +115,7 @@ export async function createOrganization({
       .select({ count: orm.count() })
       .from(schema.organizationMember)
       .where(orm.eq(schema.organizationMember.organizationId, organizationId)),
-    db
-      .select({ count: orm.count() })
-      .from(schema.project)
-      .where(orm.eq(schema.project.organizationId, organizationId)),
+    db.select({ count: orm.count() }).from(schema.project).where(orm.eq(schema.project.organizationId, organizationId)),
   ]);
 
   return {
@@ -172,8 +166,8 @@ export async function getOrganizationBySlug(slug: string, userId: string) {
     .where(
       orm.and(
         orm.eq(schema.organizationMember.organizationId, org.id),
-        orm.eq(schema.organizationMember.userId, userId)
-      )
+        orm.eq(schema.organizationMember.userId, userId),
+      ),
     )
     .limit(1);
 
@@ -188,10 +182,7 @@ export async function getOrganizationBySlug(slug: string, userId: string) {
       .select({ count: orm.count() })
       .from(schema.organizationMember)
       .where(orm.eq(schema.organizationMember.organizationId, org.id)),
-    db
-      .select({ count: orm.count() })
-      .from(schema.project)
-      .where(orm.eq(schema.project.organizationId, org.id)),
+    db.select({ count: orm.count() }).from(schema.project).where(orm.eq(schema.project.organizationId, org.id)),
   ]);
 
   return {
@@ -217,8 +208,8 @@ export async function getOrganizationMembers(organizationId: string, userId: str
     .where(
       orm.and(
         orm.eq(schema.organizationMember.organizationId, organizationId),
-        orm.eq(schema.organizationMember.userId, userId)
-      )
+        orm.eq(schema.organizationMember.userId, userId),
+      ),
     )
     .limit(1);
 
@@ -243,7 +234,7 @@ export async function getOrganizationMembers(organizationId: string, userId: str
     .where(orm.eq(schema.organizationMember.organizationId, organizationId))
     .orderBy(orm.desc(schema.organizationMember.joinedAt));
 
-  return members.map(member => ({
+  return members.map((member) => ({
     ...member,
     permissions: member.permissions as Record<string, unknown>,
   }));
@@ -260,8 +251,8 @@ export async function getOrganizationProjects(organizationId: string, userId: st
     .where(
       orm.and(
         orm.eq(schema.organizationMember.organizationId, organizationId),
-        orm.eq(schema.organizationMember.userId, userId)
-      )
+        orm.eq(schema.organizationMember.userId, userId),
+      ),
     )
     .limit(1);
 
@@ -290,7 +281,7 @@ export async function getOrganizationProjects(organizationId: string, userId: st
     .where(orm.eq(schema.project.organizationId, organizationId))
     .orderBy(orm.desc(schema.project.updatedAt));
 
-  return projects.map(project => ({
+  return projects.map((project) => ({
     ...project,
     metadata: project.metadata as Record<string, unknown>,
     settings: project.settings as Record<string, unknown>,
@@ -316,10 +307,7 @@ export async function getUserOrganizations(userId: string) {
       website: schema.organization.website,
     })
     .from(schema.organization)
-    .innerJoin(
-      schema.organizationMember,
-      orm.eq(schema.organization.id, schema.organizationMember.organizationId)
-    )
+    .innerJoin(schema.organizationMember, orm.eq(schema.organization.id, schema.organizationMember.organizationId))
     .where(orm.eq(schema.organizationMember.userId, userId))
     .orderBy(orm.desc(schema.organization.updatedAt));
 
@@ -331,10 +319,7 @@ export async function getUserOrganizations(userId: string) {
           .select({ count: orm.count() })
           .from(schema.organizationMember)
           .where(orm.eq(schema.organizationMember.organizationId, org.id)),
-        db
-          .select({ count: orm.count() })
-          .from(schema.project)
-          .where(orm.eq(schema.project.organizationId, org.id)),
+        db.select({ count: orm.count() }).from(schema.project).where(orm.eq(schema.project.organizationId, org.id)),
       ]);
 
       return {
@@ -343,7 +328,7 @@ export async function getUserOrganizations(userId: string) {
         projectCount: projectCount[0]?.count ?? 0,
         settings: org.settings as Record<string, unknown>,
       };
-    })
+    }),
   );
 
   return organizationsWithCounts;
@@ -359,18 +344,18 @@ export async function userHasOrganizations(userId: string): Promise<boolean> {
     .from(schema.organization)
     .where(orm.eq(schema.organization.ownerId, userId))
     .limit(1);
-  
+
   if (ownedOrgs.length > 0) {
     return true;
   }
-  
+
   // Check if user is a member of any organizations
   const memberOrgs = await db
     .select({ id: schema.organizationMember.id })
     .from(schema.organizationMember)
     .where(orm.eq(schema.organizationMember.userId, userId))
     .limit(1);
-  
+
   return memberOrgs.length > 0;
 }
 
@@ -378,14 +363,16 @@ export async function userHasOrganizations(userId: string): Promise<boolean> {
  * Generates a URL-friendly slug from a name
  */
 function generateSlugFromName(name: string): string {
-  return name
-    .toLowerCase()
-    .replace(/[^a-z0-9\s-]/g, '') // Remove special characters
-    .replace(/\s+/g, '-') // Replace spaces with hyphens
-    .replace(/-+/g, '-') // Replace multiple hyphens with single
-    .trim()
-    .slice(0, 50) // Limit length
-    || 'organization'; // Fallback if name is empty after processing
+  return (
+    name
+      .toLowerCase()
+      .replace(/[^a-z0-9\s-]/g, "") // Remove special characters
+      .replace(/\s+/g, "-") // Replace spaces with hyphens
+      .replace(/-+/g, "-") // Replace multiple hyphens with single
+      .trim()
+      .slice(0, 50) || // Limit length
+    "organization"
+  ); // Fallback if name is empty after processing
 }
 
 /**
@@ -394,7 +381,7 @@ function generateSlugFromName(name: string): string {
 async function generateUniqueSlug(baseSlug: string): Promise<string> {
   let slug = baseSlug;
   let counter = 1;
-  
+
   // Check if slug already exists
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
   while (true) {
@@ -403,11 +390,11 @@ async function generateUniqueSlug(baseSlug: string): Promise<string> {
       .from(schema.organization)
       .where(orm.eq(schema.organization.slug, slug))
       .limit(1);
-    
+
     if (existing.length === 0) {
       return slug;
     }
-    
+
     // If slug exists, try with a number suffix
     slug = `${baseSlug}-${counter}`;
     counter++;

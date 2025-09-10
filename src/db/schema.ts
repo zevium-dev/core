@@ -325,4 +325,3 @@ export const apiEndpointRelations = relations(apiEndpoint, ({ one }) => ({
     references: [apiSpec.id],
   }),
 }));
-
