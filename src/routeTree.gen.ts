@@ -22,6 +22,7 @@ const ProjectsLazyRouteImport = createFileRoute('/projects')()
 const OrganizationsLazyRouteImport = createFileRoute('/organizations')()
 const CatalogueLazyRouteImport = createFileRoute('/catalogue')()
 const IndexLazyRouteImport = createFileRoute('/')()
+const SettingsKeysSplatLazyRouteImport = createFileRoute('/settings/keys/$')()
 const SettingsCreditsSplatLazyRouteImport = createFileRoute(
   '/settings/credits/$',
 )()
@@ -55,6 +56,13 @@ const SettingsSplatRoute = SettingsSplatRouteImport.update({
   path: '/settings/$',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SettingsKeysSplatLazyRoute = SettingsKeysSplatLazyRouteImport.update({
+  id: '/settings/keys/$',
+  path: '/settings/keys/$',
+  getParentRoute: () => rootRouteImport,
+} as any).lazy(() =>
+  import('./routes/settings/keys/$.lazy').then((d) => d.Route),
+)
 const SettingsCreditsSplatLazyRoute =
   SettingsCreditsSplatLazyRouteImport.update({
     id: '/settings/credits/$',
@@ -100,6 +108,7 @@ export interface FileRoutesByFullPath {
   '/settings/$': typeof SettingsSplatRoute
   '/settings/activity/$': typeof SettingsActivitySplatLazyRoute
   '/settings/credits/$': typeof SettingsCreditsSplatLazyRoute
+  '/settings/keys/$': typeof SettingsKeysSplatLazyRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexLazyRoute
@@ -109,6 +118,7 @@ export interface FileRoutesByTo {
   '/settings/$': typeof SettingsSplatRoute
   '/settings/activity/$': typeof SettingsActivitySplatLazyRoute
   '/settings/credits/$': typeof SettingsCreditsSplatLazyRoute
+  '/settings/keys/$': typeof SettingsKeysSplatLazyRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -119,6 +129,7 @@ export interface FileRoutesById {
   '/settings/$': typeof SettingsSplatRoute
   '/settings/activity/$': typeof SettingsActivitySplatLazyRoute
   '/settings/credits/$': typeof SettingsCreditsSplatLazyRoute
+  '/settings/keys/$': typeof SettingsKeysSplatLazyRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -130,6 +141,7 @@ export interface FileRouteTypes {
     | '/settings/$'
     | '/settings/activity/$'
     | '/settings/credits/$'
+    | '/settings/keys/$'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -139,6 +151,7 @@ export interface FileRouteTypes {
     | '/settings/$'
     | '/settings/activity/$'
     | '/settings/credits/$'
+    | '/settings/keys/$'
   id:
     | '__root__'
     | '/'
@@ -148,6 +161,7 @@ export interface FileRouteTypes {
     | '/settings/$'
     | '/settings/activity/$'
     | '/settings/credits/$'
+    | '/settings/keys/$'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -158,6 +172,7 @@ export interface RootRouteChildren {
   SettingsSplatRoute: typeof SettingsSplatRoute
   SettingsActivitySplatLazyRoute: typeof SettingsActivitySplatLazyRoute
   SettingsCreditsSplatLazyRoute: typeof SettingsCreditsSplatLazyRoute
+  SettingsKeysSplatLazyRoute: typeof SettingsKeysSplatLazyRoute
 }
 export interface FileServerRoutesByFullPath {
   '/api/auth/$': typeof ApiAuthSplatServerRoute
@@ -235,6 +250,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/settings/keys/$': {
+      id: '/settings/keys/$'
+      path: '/settings/keys/$'
+      fullPath: '/settings/keys/$'
+      preLoaderRoute: typeof SettingsKeysSplatLazyRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/settings/credits/$': {
       id: '/settings/credits/$'
       path: '/settings/credits/$'
@@ -292,6 +314,7 @@ const rootRouteChildren: RootRouteChildren = {
   SettingsSplatRoute: SettingsSplatRoute,
   SettingsActivitySplatLazyRoute: SettingsActivitySplatLazyRoute,
   SettingsCreditsSplatLazyRoute: SettingsCreditsSplatLazyRoute,
+  SettingsKeysSplatLazyRoute: SettingsKeysSplatLazyRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
