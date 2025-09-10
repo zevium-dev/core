@@ -7,7 +7,6 @@ import {
   Globe,
   Lock,
   MoreHorizontal, 
-  Settings, 
   Users
 } from "lucide-react";
 import { m } from "motion/react";
@@ -103,10 +102,6 @@ export function ProjectCard({ project, variant = "default" }: ProjectCardProps) 
                     <DropdownMenuItem>
                       <ExternalLink className="mr-2 h-4 w-4" />
                       View Project
-                    </DropdownMenuItem>
-                    <DropdownMenuItem>
-                      <Settings className="mr-2 h-4 w-4" />
-                      Settings
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
@@ -209,10 +204,6 @@ export function ProjectCard({ project, variant = "default" }: ProjectCardProps) 
                   <DropdownMenuItem>
                     <ExternalLink className="mr-2 h-4 w-4" />
                     View Project
-                  </DropdownMenuItem>
-                  <DropdownMenuItem>
-                    <Settings className="mr-2 h-4 w-4" />
-                    Settings
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>

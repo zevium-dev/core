@@ -27,14 +27,28 @@ import * as React from "react";
 import { toast } from "sonner";
 
 import { AuthLoadingFallback } from "~/components/auth-loading-fallback";
+import { EditableCategoryField } from "~/components/projects/editable-category-field";
 import { ProtectedRoute } from "~/components/protected-route";
 import { Avatar, AvatarFallback, AvatarImage } from "~/components/ui/avatar";
 import { Badge } from "~/components/ui/badge";
 import { BadgeStatus } from "~/components/ui/badge-status";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "~/components/ui/card";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "~/components/ui/dialog";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "~/components/ui/dropdown-menu";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "~/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "~/components/ui/dropdown-menu";
 import { EasyTooltip } from "~/components/ui/easy-tooltip";
 import { Input } from "~/components/ui/input";
 import { Label } from "~/components/ui/label";
@@ -56,6 +70,8 @@ export const Route = createLazyFileRoute("/projects/$slug")({
 
 interface ProjectData {
   apiSpecCount: number;
+  categoryId: null | string;
+  categoryName: null | string;
   createdAt: Date;
   createdBy: string;
   creatorName: string;
@@ -97,7 +113,7 @@ function ApiSpecsSection({ projectId }: { projectId: string }) {
             {Array.from({ length: 3 }).map((_) => (
               <div className="flex items-center space-x-4" key={crypto.randomUUID()}>
                 <Skeleton className="h-10 w-10 rounded" />
-                <div className="space-y-2 flex-1">
+                <div className="flex-1 space-y-2">
                   <Skeleton className="h-4 w-[200px]" />
                   <Skeleton className="h-3 w-[100px]" />
                 </div>
@@ -116,8 +132,8 @@ function ApiSpecsSection({ projectId }: { projectId: string }) {
           <CardTitle>API Specifications</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="flex items-center justify-center py-8 text-muted-foreground">
-            <AlertCircle className="h-5 w-5 mr-2" />
+          <div className="text-muted-foreground flex items-center justify-center py-8">
+            <AlertCircle className="mr-2 h-5 w-5" />
             Failed to load API specifications
           </div>
         </CardContent>
@@ -132,25 +148,23 @@ function ApiSpecsSection({ projectId }: { projectId: string }) {
       <CardHeader className="flex flex-row items-center justify-between">
         <div>
           <CardTitle>API Specifications</CardTitle>
-          <CardDescription>
-            OpenAPI specifications and documentation for this project
-          </CardDescription>
+          <CardDescription>OpenAPI specifications and documentation for this project</CardDescription>
         </div>
         <Button size="sm" variant="outline">
-          <FileText className="h-4 w-4 mr-2" />
+          <FileText className="mr-2 h-4 w-4" />
           Upload Spec
         </Button>
       </CardHeader>
       <CardContent>
         {specs.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-12 text-center">
-            <Book className="h-12 w-12 text-muted-foreground mb-4" />
-            <h3 className="text-lg font-semibold mb-2">No API Specifications</h3>
+            <Book className="text-muted-foreground mb-4 h-12 w-12" />
+            <h3 className="mb-2 text-lg font-semibold">No API Specifications</h3>
             <p className="text-muted-foreground mb-4 max-w-md">
               Upload your first OpenAPI specification to start documenting your APIs and enable powerful features.
             </p>
             <Button>
-              <FileText className="h-4 w-4 mr-2" />
+              <FileText className="mr-2 h-4 w-4" />
               Upload OpenAPI Spec
             </Button>
           </div>
@@ -158,11 +172,11 @@ function ApiSpecsSection({ projectId }: { projectId: string }) {
           <div className="space-y-4">
             {specs.map((spec) => (
               <div
-                className="flex items-center justify-between p-4 border rounded-lg hover:bg-muted/50 transition-colors"
+                className="hover:bg-muted/50 flex items-center justify-between rounded-lg border p-4 transition-colors"
                 key={spec.id}
               >
                 <div className="flex items-center space-x-4">
-                  <div className="h-10 w-10 rounded bg-blue-100 dark:bg-blue-900/20 flex items-center justify-center">
+                  <div className="flex h-10 w-10 items-center justify-center rounded bg-blue-100 dark:bg-blue-900/20">
                     <FileText className="h-5 w-5 text-blue-600 dark:text-blue-400" />
                   </div>
                   <div>
@@ -173,7 +187,7 @@ function ApiSpecsSection({ projectId }: { projectId: string }) {
                       </Badge>
                       <BadgeStatus status={spec.status} />
                     </div>
-                    <div className="flex items-center space-x-4 mt-1 text-sm text-muted-foreground">
+                    <div className="text-muted-foreground mt-1 flex items-center space-x-4 text-sm">
                       <span>{spec.endpointCount} endpoints</span>
                       <span>•</span>
                       <span className="capitalize">{spec.format}</span>
@@ -184,7 +198,7 @@ function ApiSpecsSection({ projectId }: { projectId: string }) {
                 </div>
                 <div className="flex items-center space-x-2">
                   <Button size="sm" variant="ghost">
-                    <ExternalLink className="h-4 w-4 mr-2" />
+                    <ExternalLink className="mr-2 h-4 w-4" />
                     View Docs
                   </Button>
                   <DropdownMenu>
@@ -197,9 +211,7 @@ function ApiSpecsSection({ projectId }: { projectId: string }) {
                       <DropdownMenuItem>Edit Specification</DropdownMenuItem>
                       <DropdownMenuItem>Download</DropdownMenuItem>
                       <DropdownMenuItem>Duplicate</DropdownMenuItem>
-                      <DropdownMenuItem className="text-destructive">
-                        Delete
-                      </DropdownMenuItem>
+                      <DropdownMenuItem className="text-destructive">Delete</DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
                 </div>
@@ -215,9 +227,9 @@ function ApiSpecsSection({ projectId }: { projectId: string }) {
 // Documentation Section with Split View
 function DocumentationSection({ project }: { project: ProjectData }) {
   const [documentation, setDocumentation] = React.useState(
-    typeof project.metadata.documentation === "string" ? project.metadata.documentation : ""
+    typeof project.metadata.documentation === "string" ? project.metadata.documentation : "",
   );
-  
+
   // Update local state when project data changes (from optimistic updates)
   const previousDocumentation = React.useRef(project.metadata.documentation);
   const currentProjectDoc = typeof project.metadata.documentation === "string" ? project.metadata.documentation : "";
@@ -225,7 +237,7 @@ function DocumentationSection({ project }: { project: ProjectData }) {
     setDocumentation(currentProjectDoc);
     previousDocumentation.current = project.metadata.documentation;
   }
-  
+
   const trpcClient = useTRPCClient();
   const queryClient = useQueryClient();
 
@@ -294,7 +306,7 @@ function DocumentationSection({ project }: { project: ProjectData }) {
   };
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 h-[600px]">
+    <div className="grid h-[600px] grid-cols-1 gap-6 lg:grid-cols-2">
       {/* Editor */}
       <Card className="flex flex-col">
         <CardHeader>
@@ -302,9 +314,7 @@ function DocumentationSection({ project }: { project: ProjectData }) {
             <Edit3 className="h-5 w-5" />
             Editor
           </CardTitle>
-          <CardDescription>
-            Write your documentation in Markdown format
-          </CardDescription>
+          <CardDescription>Write your documentation in Markdown format</CardDescription>
         </CardHeader>
         <CardContent className="flex-1">
           <RichTextEditor
@@ -322,41 +332,63 @@ function DocumentationSection({ project }: { project: ProjectData }) {
             <Eye className="h-5 w-5" />
             Preview
           </CardTitle>
-          <CardDescription>
-            Live preview of your documentation
-          </CardDescription>
+          <CardDescription>Live preview of your documentation</CardDescription>
         </CardHeader>
         <CardContent className="flex-1">
-          <div className="h-full border rounded-lg p-4 overflow-auto bg-muted/20">
+          <div className="bg-muted/20 h-full overflow-auto rounded-lg border p-4">
             {documentation ? (
-              <div className="prose prose-sm max-w-none dark:prose-invert">
-                {documentation.split('\n').map((line, index) => {
+              <div className="prose prose-sm dark:prose-invert max-w-none">
+                {documentation.split("\n").map((line, index) => {
                   const key = `line-${index}-${line.slice(0, 10)}`;
-                  if (line.startsWith('# ')) {
-                    return <h1 className="text-2xl font-bold mt-6 mb-4" key={key}>{line.slice(2)}</h1>;
+                  if (line.startsWith("# ")) {
+                    return (
+                      <h1 className="mt-6 mb-4 text-2xl font-bold" key={key}>
+                        {line.slice(2)}
+                      </h1>
+                    );
                   }
-                  if (line.startsWith('## ')) {
-                    return <h2 className="text-xl font-semibold mt-5 mb-3" key={key}>{line.slice(3)}</h2>;
+                  if (line.startsWith("## ")) {
+                    return (
+                      <h2 className="mt-5 mb-3 text-xl font-semibold" key={key}>
+                        {line.slice(3)}
+                      </h2>
+                    );
                   }
-                  if (line.startsWith('### ')) {
-                    return <h3 className="text-lg font-medium mt-4 mb-2" key={key}>{line.slice(4)}</h3>;
+                  if (line.startsWith("### ")) {
+                    return (
+                      <h3 className="mt-4 mb-2 text-lg font-medium" key={key}>
+                        {line.slice(4)}
+                      </h3>
+                    );
                   }
-                  if (line.startsWith('**') && line.endsWith('**')) {
-                    return <p className="font-bold" key={key}>{line.slice(2, -2)}</p>;
+                  if (line.startsWith("**") && line.endsWith("**")) {
+                    return (
+                      <p className="font-bold" key={key}>
+                        {line.slice(2, -2)}
+                      </p>
+                    );
                   }
-                  if (line.startsWith('*') && line.endsWith('*')) {
-                    return <p className="italic" key={key}>{line.slice(1, -1)}</p>;
+                  if (line.startsWith("*") && line.endsWith("*")) {
+                    return (
+                      <p className="italic" key={key}>
+                        {line.slice(1, -1)}
+                      </p>
+                    );
                   }
-                  if (line.trim() === '') {
+                  if (line.trim() === "") {
                     return <br key={key} />;
                   }
-                  return <p className="mb-2" key={key}>{line}</p>;
+                  return (
+                    <p className="mb-2" key={key}>
+                      {line}
+                    </p>
+                  );
                 })}
               </div>
             ) : (
-              <div className="h-full flex items-center justify-center text-muted-foreground">
+              <div className="text-muted-foreground flex h-full items-center justify-center">
                 <div className="text-center">
-                  <Book className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                  <Book className="mx-auto mb-4 h-12 w-12 opacity-50" />
                   <p>Start writing to see the preview</p>
                 </div>
               </div>
@@ -410,12 +442,14 @@ function EditableField({
   if (!isEditing) {
     return (
       <div className="group cursor-pointer" onClick={() => setIsEditing(true)}>
-        <Label className="text-sm font-medium text-muted-foreground">{label}</Label>
-        <div className={`flex items-center gap-2 mt-1 p-3 rounded-md border border-dashed border-muted-foreground/30 hover:border-muted-foreground/50 hover:bg-muted/50 transition-all ${type === 'textarea' ? 'min-h-[80px] items-start' : ''}`}>
+        <Label className="text-muted-foreground text-sm font-medium">{label}</Label>
+        <div
+          className={`border-muted-foreground/30 hover:border-muted-foreground/50 hover:bg-muted/50 mt-1 flex items-center gap-2 rounded-md border border-dashed p-3 transition-all ${type === "textarea" ? "min-h-[80px] items-start" : ""}`}
+        >
           <span className="flex-1 text-sm">
             {value || <span className="text-muted-foreground italic">{placeholder ?? "Click to edit"}</span>}
           </span>
-          <Edit3 className="h-4 w-4 text-muted-foreground/60 group-hover:text-muted-foreground transition-colors" />
+          <Edit3 className="text-muted-foreground/60 group-hover:text-muted-foreground h-4 w-4 transition-colors" />
         </div>
       </div>
     );
@@ -438,25 +472,17 @@ function EditableField({
           </SelectContent>
         </Select>
       ) : type === "textarea" ? (
-        <Textarea
-          onChange={(e) => setEditValue(e.target.value)}
-          placeholder={placeholder}
-          value={editValue}
-        />
+        <Textarea onChange={(e) => setEditValue(e.target.value)} placeholder={placeholder} value={editValue} />
       ) : (
-        <Input
-          onChange={(e) => setEditValue(e.target.value)}
-          placeholder={placeholder}
-          value={editValue}
-        />
+        <Input onChange={(e) => setEditValue(e.target.value)} placeholder={placeholder} value={editValue} />
       )}
       <div className="flex gap-2">
         <Button disabled={isLoading} onClick={handleSave} size="sm">
-          <Save className="h-4 w-4 mr-2" />
+          <Save className="mr-2 h-4 w-4" />
           {isLoading ? "Saving..." : "Save"}
         </Button>
         <Button disabled={isLoading} onClick={handleCancel} size="sm" variant="outline">
-          <X className="h-4 w-4 mr-2" />
+          <X className="mr-2 h-4 w-4" />
           Cancel
         </Button>
       </div>
@@ -468,10 +494,7 @@ function EditableField({
 function EndpointsSection({ project }: { project: ProjectData }) {
   const trpcClient = useTRPCClient();
 
-  const {
-    data: specsData,
-    isLoading: specsLoading,
-  } = useQuery({
+  const { data: specsData, isLoading: specsLoading } = useQuery({
     queryFn: () => trpcClient.apiSpec.getByProject.query({ projectId: project.id }),
     queryKey: ["apiSpecs", project.id],
   });
@@ -492,19 +515,24 @@ function EndpointsSection({ project }: { project: ProjectData }) {
         }
       });
       const results = await Promise.all(endpointsPromises);
-      return results.reduce<Record<string, Array<{
-        deprecated: boolean;
-        id: string;
-        method: string;
-        path: string;
-        summary: null | string;
-        tags: Array<string>;
-      }>>>((acc, result) => {
+      return results.reduce<
+        Record<
+          string,
+          Array<{
+            deprecated: boolean;
+            id: string;
+            method: string;
+            path: string;
+            summary: null | string;
+            tags: Array<string>;
+          }>
+        >
+      >((acc, result) => {
         acc[result.specId] = result.endpoints;
         return acc;
       }, {});
     },
-    queryKey: ["specEndpoints", specs.map(s => s.id)],
+    queryKey: ["specEndpoints", specs.map((s) => s.id)],
   });
 
   const endpointsBySpec = specEndpointsQueries.data ?? {};
@@ -531,9 +559,7 @@ function EndpointsSection({ project }: { project: ProjectData }) {
       <Card>
         <CardHeader>
           <CardTitle>API Endpoints</CardTitle>
-          <CardDescription>
-            Detailed view of all endpoints in your API specifications
-          </CardDescription>
+          <CardDescription>Detailed view of all endpoints in your API specifications</CardDescription>
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
@@ -555,17 +581,13 @@ function EndpointsSection({ project }: { project: ProjectData }) {
       <Card>
         <CardHeader>
           <CardTitle>API Endpoints</CardTitle>
-          <CardDescription>
-            Detailed view of all endpoints in your API specifications
-          </CardDescription>
+          <CardDescription>Detailed view of all endpoints in your API specifications</CardDescription>
         </CardHeader>
         <CardContent>
           <div className="flex flex-col items-center justify-center py-12 text-center">
-            <Code2 className="h-12 w-12 text-muted-foreground mb-4" />
-            <h3 className="text-lg font-semibold mb-2">No Endpoints Found</h3>
-            <p className="text-muted-foreground">
-              Upload an OpenAPI specification to see your endpoints here.
-            </p>
+            <Code2 className="text-muted-foreground mb-4 h-12 w-12" />
+            <h3 className="mb-2 text-lg font-semibold">No Endpoints Found</h3>
+            <p className="text-muted-foreground">Upload an OpenAPI specification to see your endpoints here.</p>
           </div>
         </CardContent>
       </Card>
@@ -576,9 +598,7 @@ function EndpointsSection({ project }: { project: ProjectData }) {
     <Card>
       <CardHeader>
         <CardTitle>API Endpoints</CardTitle>
-        <CardDescription>
-          All endpoints across your API specifications
-        </CardDescription>
+        <CardDescription>All endpoints across your API specifications</CardDescription>
       </CardHeader>
       {/* Insert API Specifications list here to keep specs and endpoints together */}
       <CardContent>
@@ -590,34 +610,33 @@ function EndpointsSection({ project }: { project: ProjectData }) {
             const endpoints = endpointsBySpec[spec.id] ?? [];
             return (
               <div className="space-y-2" key={spec.id}>
-                <div className="flex items-center gap-2 pb-2 border-b">
+                <div className="flex items-center gap-2 border-b pb-2">
                   <FileText className="h-4 w-4" />
                   <span className="font-medium">{spec.title ?? "Untitled API"}</span>
-                  <Badge className="text-xs" variant="outline">v{spec.versionLabel}</Badge>
-                  <Badge className="text-xs" variant="secondary">{endpoints.length} endpoints</Badge>
+                  <Badge className="text-xs" variant="outline">
+                    v{spec.versionLabel}
+                  </Badge>
+                  <Badge className="text-xs" variant="secondary">
+                    {endpoints.length} endpoints
+                  </Badge>
                 </div>
-                <div className="pl-6 space-y-2">
+                <div className="space-y-2 pl-6">
                   {endpoints.length === 0 ? (
-                    <div className="py-4 text-center text-muted-foreground text-sm">
+                    <div className="text-muted-foreground py-4 text-center text-sm">
                       No endpoints found in this specification
                     </div>
                   ) : (
                     endpoints.map((endpoint) => (
-                      <div 
-                        className="flex items-center justify-between py-2 px-3 rounded-lg hover:bg-muted/50"
+                      <div
+                        className="hover:bg-muted/50 flex items-center justify-between rounded-lg px-3 py-2"
                         key={endpoint.id}
                       >
                         <div className="flex items-center gap-3">
-                          <Badge 
-                            className={getMethodColor(endpoint.method)} 
-                            variant="outline"
-                          >
+                          <Badge className={getMethodColor(endpoint.method)} variant="outline">
                             {endpoint.method.toUpperCase()}
                           </Badge>
                           <span className="font-mono text-sm">{endpoint.path}</span>
-                          <span className="text-sm text-muted-foreground">
-                            {endpoint.summary ?? "No description"}
-                          </span>
+                          <span className="text-muted-foreground text-sm">{endpoint.summary ?? "No description"}</span>
                           {endpoint.deprecated && (
                             <Badge className="text-xs" variant="destructive">
                               Deprecated
@@ -644,24 +663,18 @@ function EndpointsSection({ project }: { project: ProjectData }) {
   );
 }
 
-function ProjectHeader({ onVisibilityChange, project }: { 
-  onVisibilityChange: () => void;
-  project: ProjectData;
-}) {
+function ProjectHeader({ onVisibilityChange, project }: { onVisibilityChange: () => void; project: ProjectData }) {
   const [isCopied, copyToClipboard] = useCopy();
   const trpcClient = useTRPCClient();
 
   // Fetch available versions from API specs
-  const {
-    data: specsData,
-  } = useQuery({
+  const { data: specsData } = useQuery({
     queryFn: () => trpcClient.apiSpec.getByProject.query({ projectId: project.id }),
     queryKey: ["apiSpecs", project.id],
   });
 
   const specs = specsData?.specs ?? [];
-  const uniqueVersions = Array.from(new Set(specs.map(spec => spec.versionLabel)))
-    .sort((a, b) => b.localeCompare(a)); // Sort versions descending
+  const uniqueVersions = Array.from(new Set(specs.map((spec) => spec.versionLabel))).sort((a, b) => b.localeCompare(a)); // Sort versions descending
 
   const getVisibilityIcon = (visibility: string) => {
     switch (visibility) {
@@ -703,7 +716,7 @@ function ProjectHeader({ onVisibilityChange, project }: {
   return (
     <div className="space-y-6">
       {/* Breadcrumb Navigation */}
-      <nav className="flex items-center space-x-2 text-sm text-muted-foreground">
+      <nav className="text-muted-foreground flex items-center space-x-2 text-sm">
         <Link className="hover:text-foreground transition-colors" to="/projects">
           Projects
         </Link>
@@ -715,7 +728,7 @@ function ProjectHeader({ onVisibilityChange, project }: {
       <div className="flex items-start justify-between">
         <div className="flex-1 space-y-4">
           <div className="flex items-center space-x-4">
-            <div className="h-12 w-12 rounded-lg bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white font-semibold text-lg">
+            <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-gradient-to-br from-blue-500 to-purple-600 text-lg font-semibold text-white">
               {project.name.charAt(0).toUpperCase()}
             </div>
             <div className="flex-1">
@@ -724,13 +737,13 @@ function ProjectHeader({ onVisibilityChange, project }: {
                 <div className="flex items-end space-x-2">
                   <EasyTooltip label="Click to change visibility">
                     <Badge
-                      className={`${getVisibilityColor(project.visibility)} border-0 cursor-pointer hover:opacity-80 transition-opacity`}
+                      className={`${getVisibilityColor(project.visibility)} cursor-pointer border-0 transition-opacity hover:opacity-80`}
                       onClick={onVisibilityChange}
                       variant="secondary"
                     >
                       {getVisibilityIcon(project.visibility)}
                       <span className="ml-1 capitalize">{project.visibility}</span>
-                      <Edit3 className="h-3 w-3 ml-1 opacity-60" />
+                      <Edit3 className="ml-1 h-3 w-3 opacity-60" />
                     </Badge>
                   </EasyTooltip>
                   <EasyTooltip label={getStatusLabel(project.status)}>
@@ -745,7 +758,7 @@ function ProjectHeader({ onVisibilityChange, project }: {
                       size="sm"
                       variant="ghost"
                     >
-                      <Copy className="h-3 w-3 mr-1" />
+                      <Copy className="mr-1 h-3 w-3" />
                       {project.slug}
                     </Button>
                   </EasyTooltip>
@@ -775,7 +788,7 @@ function ProjectHeader({ onVisibilityChange, project }: {
               No Versions
             </Button>
           )}
-          
+
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button size="sm" variant="outline">
@@ -784,20 +797,20 @@ function ProjectHeader({ onVisibilityChange, project }: {
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
               <DropdownMenuItem onClick={onVisibilityChange}>
-                <Shield className="h-4 w-4 mr-2" />
+                <Shield className="mr-2 h-4 w-4" />
                 Change Visibility
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem>
-                <Users className="h-4 w-4 mr-2" />
+                <Users className="mr-2 h-4 w-4" />
                 Manage Access
               </DropdownMenuItem>
               <DropdownMenuItem>
-                <ExternalLink className="h-4 w-4 mr-2" />
+                <ExternalLink className="mr-2 h-4 w-4" />
                 View API Docs
               </DropdownMenuItem>
               <DropdownMenuItem>
-                <FileText className="h-4 w-4 mr-2" />
+                <FileText className="mr-2 h-4 w-4" />
                 Export Project
               </DropdownMenuItem>
             </DropdownMenuContent>
@@ -819,6 +832,7 @@ function ProjectOverview({ project }: { project: ProjectData }) {
     {
       description?: string;
       name?: string;
+      projectCategoryId?: null | string;
       status?: "active" | "archived" | "beta" | "deprecated" | "inactive";
       visibility?: "internal" | "private" | "public";
     },
@@ -827,12 +841,14 @@ function ProjectOverview({ project }: { project: ProjectData }) {
     mutationFn: (data: {
       description?: string;
       name?: string;
+      projectCategoryId?: null | string;
       status?: "active" | "archived" | "beta" | "deprecated" | "inactive";
       visibility?: "internal" | "private" | "public";
-    }) => trpcClient.project.update.mutate({
-      projectId: project.id,
-      ...data,
-    }),
+    }) =>
+      trpcClient.project.update.mutate({
+        projectId: project.id,
+        ...data,
+      }),
     onError: (error) => {
       console.error("Failed to update project:", error);
       toast.error("Failed to save changes");
@@ -874,57 +890,67 @@ function ProjectOverview({ project }: { project: ProjectData }) {
     updateProjectMutation.mutate({ [field]: value });
   };
 
+  const handleUpdateCategory = (categoryId: null | string) => {
+    updateProjectMutation.mutate({ projectCategoryId: categoryId });
+  };
+
   return (
     <div className="space-y-6">
       {/* Editable Project Information */}
       <Card>
         <CardHeader>
           <CardTitle>Project Information</CardTitle>
-          <CardDescription>
-            Manage your project's basic information and settings
-          </CardDescription>
+          <CardDescription>Manage your project's basic information and settings</CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
           {updateProjectMutation.error && (
-            <div className="p-3 text-sm text-red-600 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md">
+            <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-600 dark:border-red-800 dark:bg-red-900/20">
               Failed to update project: {updateProjectMutation.error.message}
             </div>
           )}
-          
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
             <div>
-              <Label className="text-sm font-medium text-muted-foreground">Creator</Label>
-              <div className="flex items-center gap-2 mt-1 p-2">
-                <Users className="h-4 w-4 text-muted-foreground" />
+              <Label className="text-muted-foreground text-sm font-medium">Creator</Label>
+              <div className="mt-1 flex items-center gap-2 p-2">
+                <Users className="text-muted-foreground h-4 w-4" />
                 <span>{project.creatorName}</span>
               </div>
             </div>
 
             <div>
-              <Label className="text-sm font-medium text-muted-foreground">Created</Label>
-              <div className="flex items-center gap-2 mt-1 p-2">
-                <Calendar className="h-4 w-4 text-muted-foreground" />
+              <Label className="text-muted-foreground text-sm font-medium">Created</Label>
+              <div className="mt-1 flex items-center gap-2 p-2">
+                <Calendar className="text-muted-foreground h-4 w-4" />
                 <span>{new Date(project.createdAt).toLocaleDateString()}</span>
               </div>
             </div>
 
             <div>
-              <Label className="text-sm font-medium text-muted-foreground">Last Updated</Label>
-              <div className="flex items-center gap-2 mt-1 p-2">
-                <Calendar className="h-4 w-4 text-muted-foreground" />
+              <Label className="text-muted-foreground text-sm font-medium">Last Updated</Label>
+              <div className="mt-1 flex items-center gap-2 p-2">
+                <Calendar className="text-muted-foreground h-4 w-4" />
                 <span>{new Date(project.updatedAt).toLocaleDateString()}</span>
               </div>
             </div>
 
             <div>
-              <Label className="text-sm font-medium text-muted-foreground">Organization</Label>
-              <div className="flex items-center gap-2 mt-1 p-2">
-                <Building2 className="h-4 w-4 text-muted-foreground" />
+              <Label className="text-muted-foreground text-sm font-medium">Organization</Label>
+              <div className="mt-1 flex items-center gap-2 p-2">
+                <Building2 className="text-muted-foreground h-4 w-4" />
                 <span>{project.organizationName}</span>
               </div>
             </div>
+            <div className="col-span-1 md:col-span-2 lg:col-span-2">
+              <EditableCategoryField
+                isLoading={updateProjectMutation.isPending}
+                onSave={handleUpdateCategory}
+                value={{
+                  categoryId: project.categoryId,
+                  categoryName: project.categoryName,
+                }}
+              />
+            </div>
           </div>
-          
           <EditableField
             isLoading={updateProjectMutation.isPending}
             label="Description"
@@ -936,20 +962,20 @@ function ProjectOverview({ project }: { project: ProjectData }) {
         </CardContent>
       </Card>
 
-  {/* API Specifications are shown in the Endpoints tab */}
+      {/* API Specifications are shown in the Endpoints tab */}
     </div>
   );
 }
 
 // Rich Text Editor Component
-function RichTextEditor({ 
+function RichTextEditor({
   onChange,
   placeholder = "Start writing...",
-  value, 
-}: { 
-  onChange: (value: string) => void; 
+  value,
+}: {
+  onChange: (value: string) => void;
   placeholder?: string;
-  value: string; 
+  value: string;
 }) {
   const [isEditing, setIsEditing] = React.useState(false);
   const [editorValue, setEditorValue] = React.useState(value);
@@ -967,13 +993,13 @@ function RichTextEditor({
   return (
     <div className="space-y-4">
       {!isEditing ? (
-        <div 
-          className="min-h-[200px] p-4 border rounded-lg cursor-pointer hover:bg-muted/50 transition-colors"
+        <div
+          className="hover:bg-muted/50 min-h-[200px] cursor-pointer rounded-lg border p-4 transition-colors"
           onClick={() => setIsEditing(true)}
         >
           {value ? (
-            <div className="prose prose-sm max-w-none dark:prose-invert">
-              {value.split('\n').map((line) => (
+            <div className="prose prose-sm dark:prose-invert max-w-none">
+              {value.split("\n").map((line) => (
                 <p key={line + crypto.randomUUID()}>{line}</p>
               ))}
             </div>
@@ -994,11 +1020,11 @@ function RichTextEditor({
           />
           <div className="flex gap-2">
             <Button onClick={handleSave} size="sm">
-              <Save className="h-4 w-4 mr-2" />
+              <Save className="mr-2 h-4 w-4" />
               Save
             </Button>
             <Button onClick={handleCancel} size="sm" variant="outline">
-              <X className="h-4 w-4 mr-2" />
+              <X className="mr-2 h-4 w-4" />
               Cancel
             </Button>
           </div>
@@ -1024,12 +1050,7 @@ function RouteComponent() {
   });
 
   // Visibility change mutation
-  const updateVisibilityMutation = useMutation<
-    unknown,
-    Error,
-    { visibility: string },
-    { previousProject: unknown }
-  >({
+  const updateVisibilityMutation = useMutation<unknown, Error, { visibility: string }, { previousProject: unknown }>({
     mutationFn: (data: { visibility: string }) => {
       if (!projectData?.project) {
         throw new Error("Project not found");
@@ -1089,15 +1110,15 @@ function RouteComponent() {
 
   if (projectError || !projectData?.project) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[400px] text-center">
-        <AlertCircle className="h-12 w-12 text-muted-foreground mb-4" />
-        <h2 className="text-xl font-semibold mb-2">Project Not Found</h2>
+      <div className="flex min-h-[400px] flex-col items-center justify-center text-center">
+        <AlertCircle className="text-muted-foreground mb-4 h-12 w-12" />
+        <h2 className="mb-2 text-xl font-semibold">Project Not Found</h2>
         <p className="text-muted-foreground mb-4">
           The project you're looking for doesn't exist or you don't have access to it.
         </p>
         <Link to="/projects">
           <Button>
-            <ArrowLeft className="h-4 w-4 mr-2" />
+            <ArrowLeft className="mr-2 h-4 w-4" />
             Back to Projects
           </Button>
         </Link>
@@ -1110,14 +1131,11 @@ function RouteComponent() {
   return (
     <m.div
       animate={{ opacity: 1, y: 0 }}
-      className="container mx-auto px-4 py-6 space-y-8"
+      className="container mx-auto space-y-8 px-4 py-6"
       initial={{ opacity: 0, y: 20 }}
       transition={{ duration: 0.3 }}
     >
-      <ProjectHeader 
-        onVisibilityChange={() => setVisibilityDialogOpen(true)} 
-        project={project}
-      />
+      <ProjectHeader onVisibilityChange={() => setVisibilityDialogOpen(true)} project={project} />
 
       <VisibilityChangeDialog
         currentVisibility={project.visibility}
@@ -1155,14 +1173,11 @@ function RouteComponent() {
   );
 }
 
-// Team Management Section  
+// Team Management Section
 function TeamManagementSection({ project }: { project: ProjectData }) {
   const trpcClient = useTRPCClient();
 
-  const {
-    data: membersData,
-    isLoading: membersLoading,
-  } = useQuery({
+  const { data: membersData, isLoading: membersLoading } = useQuery({
     queryFn: () => trpcClient.project.getMembers.query({ projectId: project.id }),
     queryKey: ["projectMembers", project.id],
   });
@@ -1197,12 +1212,10 @@ function TeamManagementSection({ project }: { project: ProjectData }) {
         <CardHeader className="flex flex-row items-center justify-between">
           <div>
             <CardTitle>Team Members</CardTitle>
-            <CardDescription>
-              Manage team members and their access to this project
-            </CardDescription>
+            <CardDescription>Manage team members and their access to this project</CardDescription>
           </div>
           <Button size="sm">
-            <Plus className="h-4 w-4 mr-2" />
+            <Plus className="mr-2 h-4 w-4" />
             Invite Member
           </Button>
         </CardHeader>
@@ -1211,7 +1224,7 @@ function TeamManagementSection({ project }: { project: ProjectData }) {
             {Array.from({ length: 3 }).map((_) => (
               <div className="flex items-center space-x-4" key={crypto.randomUUID()}>
                 <Skeleton className="h-10 w-10 rounded-full" />
-                <div className="space-y-2 flex-1">
+                <div className="flex-1 space-y-2">
                   <Skeleton className="h-4 w-[150px]" />
                   <Skeleton className="h-3 w-[100px]" />
                 </div>
@@ -1229,12 +1242,10 @@ function TeamManagementSection({ project }: { project: ProjectData }) {
       <CardHeader className="flex flex-row items-center justify-between">
         <div>
           <CardTitle>Team Members</CardTitle>
-          <CardDescription>
-            Manage team members and their access to this project
-          </CardDescription>
+          <CardDescription>Manage team members and their access to this project</CardDescription>
         </div>
         <Button size="sm">
-          <Plus className="h-4 w-4 mr-2" />
+          <Plus className="mr-2 h-4 w-4" />
           Invite Member
         </Button>
       </CardHeader>
@@ -1256,12 +1267,15 @@ function TeamManagementSection({ project }: { project: ProjectData }) {
                     <Avatar className="h-8 w-8">
                       <AvatarImage alt={member.userName} src={member.userImage ?? undefined} />
                       <AvatarFallback>
-                        {member.userName.split(' ').map((n: string) => n[0]).join('')}
+                        {member.userName
+                          .split(" ")
+                          .map((n: string) => n[0])
+                          .join("")}
                       </AvatarFallback>
                     </Avatar>
                     <div>
                       <div className="font-medium">{member.userName}</div>
-                      <div className="text-sm text-muted-foreground">{member.userEmail}</div>
+                      <div className="text-muted-foreground text-sm">{member.userEmail}</div>
                     </div>
                   </div>
                 </TableCell>
@@ -1271,9 +1285,7 @@ function TeamManagementSection({ project }: { project: ProjectData }) {
                     {member.role.charAt(0).toUpperCase() + member.role.slice(1)}
                   </Badge>
                 </TableCell>
-                <TableCell>
-                  {new Date(member.joinedAt).toLocaleDateString()}
-                </TableCell>
+                <TableCell>{new Date(member.joinedAt).toLocaleDateString()}</TableCell>
                 <TableCell>
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
@@ -1286,7 +1298,7 @@ function TeamManagementSection({ project }: { project: ProjectData }) {
                       <DropdownMenuItem>View Profile</DropdownMenuItem>
                       <DropdownMenuSeparator />
                       <DropdownMenuItem className="text-destructive">
-                        <Trash2 className="h-4 w-4 mr-2" />
+                        <Trash2 className="mr-2 h-4 w-4" />
                         Remove Member
                       </DropdownMenuItem>
                     </DropdownMenuContent>
@@ -1302,12 +1314,12 @@ function TeamManagementSection({ project }: { project: ProjectData }) {
 }
 
 // Visibility Change Dialog Component
-function VisibilityChangeDialog({ 
+function VisibilityChangeDialog({
   currentVisibility,
   isLoading = false,
-  onOpenChange, 
+  onOpenChange,
   onSave,
-  open
+  open,
 }: {
   currentVisibility: string;
   isLoading?: boolean;
@@ -1332,7 +1344,7 @@ function VisibilityChangeDialog({
       features: ["Team members only", "Secure access", "Internal collaboration"],
       icon: <Lock className="h-5 w-5" />,
       label: "Private",
-      value: "private"
+      value: "private",
     },
     {
       bgColor: "bg-blue-50 dark:bg-blue-900/20",
@@ -1341,7 +1353,7 @@ function VisibilityChangeDialog({
       features: ["Organization wide", "Internal discovery", "Company collaboration"],
       icon: <Building2 className="h-5 w-5" />,
       label: "Internal",
-      value: "internal"
+      value: "internal",
     },
     {
       bgColor: "bg-green-50 dark:bg-green-900/20",
@@ -1350,8 +1362,8 @@ function VisibilityChangeDialog({
       features: ["Public documentation", "Open collaboration", "Community access"],
       icon: <Globe className="h-5 w-5" />,
       label: "Public",
-      value: "public"
-    }
+      value: "public",
+    },
   ];
 
   const getVisibilityChangeWarning = (from: string, to: string): string => {
@@ -1376,39 +1388,36 @@ function VisibilityChangeDialog({
             Change Project Visibility
           </DialogTitle>
           <DialogDescription>
-            Choose who can view and access this project. This affects documentation visibility and collaboration settings.
+            Choose who can view and access this project. This affects documentation visibility and collaboration
+            settings.
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4">
           {visibilityOptions.map((option) => (
             <div
-              className={`
-                relative p-4 rounded-lg border-2 cursor-pointer transition-all
-                ${selectedVisibility === option.value 
-                  ? 'border-primary bg-primary/5' 
-                  : 'border-border hover:border-primary/50 hover:bg-muted/50'
-                }
-              `}
+              className={`relative cursor-pointer rounded-lg border-2 p-4 transition-all ${
+                selectedVisibility === option.value
+                  ? "border-primary bg-primary/5"
+                  : "border-border hover:border-primary/50 hover:bg-muted/50"
+              } `}
               key={option.value}
               onClick={() => setSelectedVisibility(option.value)}
             >
               <div className="flex items-start gap-4">
-                <div className={`p-2 rounded-lg ${option.bgColor}`}>
-                  <div className={option.color}>
-                    {option.icon}
-                  </div>
+                <div className={`rounded-lg p-2 ${option.bgColor}`}>
+                  <div className={option.color}>{option.icon}</div>
                 </div>
                 <div className="flex-1">
-                  <div className="flex items-center gap-2 mb-2">
+                  <div className="mb-2 flex items-center gap-2">
                     <h3 className="font-semibold">{option.label}</h3>
                     {selectedVisibility === option.value && (
-                      <Badge className="text-xs" variant="default">Selected</Badge>
+                      <Badge className="text-xs" variant="default">
+                        Selected
+                      </Badge>
                     )}
                   </div>
-                  <p className="text-sm text-muted-foreground mb-3">
-                    {option.description}
-                  </p>
+                  <p className="text-muted-foreground mb-3 text-sm">{option.description}</p>
                   <div className="flex flex-wrap gap-2">
                     {option.features.map((feature) => (
                       <Badge className="text-xs" key={feature} variant="outline">
@@ -1418,15 +1427,13 @@ function VisibilityChangeDialog({
                   </div>
                 </div>
                 <div className="flex items-center">
-                  <div className={`
-                    h-4 w-4 rounded-full border-2 transition-all
-                    ${selectedVisibility === option.value 
-                      ? 'border-primary bg-primary' 
-                      : 'border-muted-foreground'
-                    }
-                  `}>
+                  <div
+                    className={`h-4 w-4 rounded-full border-2 transition-all ${
+                      selectedVisibility === option.value ? "border-primary bg-primary" : "border-muted-foreground"
+                    } `}
+                  >
                     {selectedVisibility === option.value && (
-                      <div className="h-full w-full rounded-full bg-white scale-50" />
+                      <div className="h-full w-full scale-50 rounded-full bg-white" />
                     )}
                   </div>
                 </div>
@@ -1436,14 +1443,12 @@ function VisibilityChangeDialog({
         </div>
 
         {selectedVisibility !== currentVisibility && (
-          <div className="p-4 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
+          <div className="rounded-lg border border-yellow-200 bg-yellow-50 p-4 dark:border-yellow-800 dark:bg-yellow-900/20">
             <div className="flex items-start gap-2">
-              <AlertCircle className="h-5 w-5 text-yellow-600 dark:text-yellow-400 mt-0.5" />
+              <AlertCircle className="mt-0.5 h-5 w-5 text-yellow-600 dark:text-yellow-400" />
               <div>
-                <h4 className="font-medium text-yellow-800 dark:text-yellow-200">
-                  Visibility Change Impact
-                </h4>
-                <p className="text-sm text-yellow-700 dark:text-yellow-300 mt-1">
+                <h4 className="font-medium text-yellow-800 dark:text-yellow-200">Visibility Change Impact</h4>
+                <p className="mt-1 text-sm text-yellow-700 dark:text-yellow-300">
                   {getVisibilityChangeWarning(currentVisibility, selectedVisibility)}
                 </p>
               </div>
@@ -1455,7 +1460,7 @@ function VisibilityChangeDialog({
           <Button disabled={isLoading} onClick={() => onOpenChange(false)} variant="outline">
             Cancel
           </Button>
-          <Button 
+          <Button
             disabled={selectedVisibility === currentVisibility || isLoading}
             onClick={() => onSave(selectedVisibility)}
           >

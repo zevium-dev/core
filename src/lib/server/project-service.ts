@@ -17,6 +17,7 @@ export interface UpdateProjectOptions {
   description?: string;
   metadata?: Record<string, unknown>;
   name?: string;
+  projectCategoryId?: null | string;
   projectId: string;
   settings?: Record<string, unknown>;
   status?: "active" | "archived" | "beta" | "deprecated" | "inactive";
@@ -116,6 +117,8 @@ export async function createProject({
   // Get the created project with creator info, organization details, and statistics
   const createdProject = await db
     .select({
+      categoryId: schema.project.projectCategoryId,
+      categoryName: schema.projectCategory.name,
       createdAt: schema.project.createdAt,
       createdBy: schema.project.createdBy,
       creatorName: schema.user.name,
@@ -135,6 +138,7 @@ export async function createProject({
     .from(schema.project)
     .innerJoin(schema.user, eq(schema.project.createdBy, schema.user.id))
     .innerJoin(schema.organization, eq(schema.project.organizationId, schema.organization.id))
+    .leftJoin(schema.projectCategory, eq(schema.project.projectCategoryId, schema.projectCategory.id))
     .where(eq(schema.project.id, projectId))
     .limit(1);
 
@@ -183,6 +187,8 @@ export async function getProjectById(projectId: string, userId: string) {
 
   const projects = await db
     .select({
+      categoryId: schema.project.projectCategoryId,
+      categoryName: schema.projectCategory.name,
       createdAt: schema.project.createdAt,
       createdBy: schema.project.createdBy,
       creatorName: schema.user.name,
@@ -202,6 +208,7 @@ export async function getProjectById(projectId: string, userId: string) {
     .from(schema.project)
     .innerJoin(schema.user, eq(schema.project.createdBy, schema.user.id))
     .innerJoin(schema.organization, eq(schema.project.organizationId, schema.organization.id))
+    .leftJoin(schema.projectCategory, eq(schema.project.projectCategoryId, schema.projectCategory.id))
     .where(eq(schema.project.id, projectId))
     .limit(1);
 
@@ -239,6 +246,8 @@ export async function getProjectBySlug(slug: string, userId: string) {
   // First find the project by slug with organization and creator info
   const projects = await db
     .select({
+      categoryId: schema.project.projectCategoryId,
+      categoryName: schema.projectCategory.name,
       createdAt: schema.project.createdAt,
       createdBy: schema.project.createdBy,
       creatorName: schema.user.name,
@@ -258,6 +267,7 @@ export async function getProjectBySlug(slug: string, userId: string) {
     .from(schema.project)
     .innerJoin(schema.user, eq(schema.project.createdBy, schema.user.id))
     .innerJoin(schema.organization, eq(schema.project.organizationId, schema.organization.id))
+    .leftJoin(schema.projectCategory, eq(schema.project.projectCategoryId, schema.projectCategory.id))
     .where(eq(schema.project.slug, slug))
     .limit(1);
 
@@ -310,6 +320,8 @@ export async function getProjectBySlug(slug: string, userId: string) {
 export async function getUserProjects(userId: string) {
   const projects = await db
     .select({
+      categoryId: schema.project.projectCategoryId,
+      categoryName: schema.projectCategory.name,
       createdAt: schema.project.createdAt,
       createdBy: schema.project.createdBy,
       creatorName: schema.user.name,
@@ -331,6 +343,7 @@ export async function getUserProjects(userId: string) {
     .innerJoin(schema.user, eq(schema.project.createdBy, schema.user.id))
     .innerJoin(schema.organization, eq(schema.project.organizationId, schema.organization.id))
     .innerJoin(schema.projectMember, eq(schema.project.id, schema.projectMember.projectId))
+    .leftJoin(schema.projectCategory, eq(schema.project.projectCategoryId, schema.projectCategory.id))
     .where(eq(schema.projectMember.userId, userId))
     .orderBy(desc(schema.project.updatedAt));
 
@@ -380,6 +393,7 @@ export async function updateProject({
   description,
   metadata,
   name,
+  projectCategoryId,
   projectId,
   settings,
   status,
@@ -417,6 +431,7 @@ export async function updateProject({
 
   if (name !== undefined) updateData.name = name;
   if (description !== undefined) updateData.description = description;
+  if (projectCategoryId !== undefined) updateData.projectCategoryId = projectCategoryId;
   if (status !== undefined) updateData.status = status;
   if (visibility !== undefined) updateData.visibility = visibility;
   if (metadata !== undefined) updateData.metadata = metadata;
@@ -431,6 +446,8 @@ export async function updateProject({
   // Get the updated project with creator info, organization details, and statistics
   const projectWithCreator = await db
     .select({
+      categoryId: schema.project.projectCategoryId,
+      categoryName: schema.projectCategory.name,
       createdAt: schema.project.createdAt,
       createdBy: schema.project.createdBy,
       creatorName: schema.user.name,
@@ -450,6 +467,7 @@ export async function updateProject({
     .from(schema.project)
     .innerJoin(schema.user, eq(schema.project.createdBy, schema.user.id))
     .innerJoin(schema.organization, eq(schema.project.organizationId, schema.organization.id))
+    .leftJoin(schema.projectCategory, eq(schema.project.projectCategoryId, schema.projectCategory.id))
     .where(eq(schema.project.id, projectId))
     .limit(1);
 

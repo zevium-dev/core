@@ -9,6 +9,8 @@ import { protectedProcedure, router } from "~/server/trpc";
 // Project schema for responses
 const projectSchema = z.object({
   apiSpecCount: z.number(),
+  categoryId: z.string().nullable(),
+  categoryName: z.string().nullable(),
   createdAt: z.date(),
   createdBy: z.string(),
   creatorName: z.string(),
@@ -118,6 +120,7 @@ export const projectRouter = router({
       description: z.string().optional(),
       metadata: z.record(z.string(), z.unknown()).optional(),
       name: z.string().optional(),
+      projectCategoryId: z.string().nullable().optional(),
       projectId: z.string(),
       settings: z.record(z.string(), z.unknown()).optional(),
       status: z.enum(["active", "archived", "beta", "deprecated", "inactive"]).optional(),
@@ -132,6 +135,7 @@ export const projectRouter = router({
         description: input.description,
         metadata: input.metadata,
         name: input.name,
+        projectCategoryId: input.projectCategoryId,
         projectId: input.projectId,
         settings: input.settings,
         status: input.status,

@@ -135,21 +135,17 @@ export const project = sqliteTable("project", {
 });
 
 export const projectCategory = sqliteTable("project_category", {
-  color: text("color"), // Hex color code for UI display
   createdAt: integer("created_at", { mode: "timestamp" })
     .$defaultFn(() => new Date())
     .notNull(),
   description: text("description"),
-  displayOrder: integer("display_order").$defaultFn(() => 0), // For custom ordering in UI
   icon: text("icon"), // Icon name or emoji for UI display
   id: text("id").primaryKey(),
   name: text("name").notNull(),
-  organizationId: text("organization_id")
-    .notNull()
-    .references(() => organization.id, { onDelete: "cascade" }),
   updatedAt: integer("updated_at", { mode: "timestamp" })
     .$defaultFn(() => new Date())
     .notNull(),
+  weight: integer("weight").$defaultFn(() => 0), // For custom ordering in UI
 });
 
 export const projectMember = sqliteTable("project_member", {
@@ -250,7 +246,6 @@ export const organizationRelations = relations(organization, ({ many, one }) => 
     fields: [organization.ownerId],
     references: [user.id],
   }),
-  projectCategories: many(projectCategory),
   projects: many(project),
 }));
 
@@ -301,11 +296,7 @@ export const projectMemberRelations = relations(projectMember, ({ one }) => ({
   }),
 }));
 
-export const projectCategoryRelations = relations(projectCategory, ({ many, one }) => ({
-  organization: one(organization, {
-    fields: [projectCategory.organizationId],
-    references: [organization.id],
-  }),
+export const projectCategoryRelations = relations(projectCategory, ({ many }) => ({
   projects: many(project),
 }));
 
