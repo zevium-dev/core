@@ -47,22 +47,24 @@ export function OpenApiFileUpload({
 
   const validateFile = async (file: File) => {
     setIsValidating(true);
-    
+
     try {
       const fileContent = await file.text();
       const result = await trpcClient.apiSpec.validate.mutate({
         fileContent,
         fileName: file.name,
       });
-      
+
       onFileSelect(file, result);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "Validation failed";
       onFileSelect(file, {
-        errors: [{
-          code: "VALIDATION_ERROR",
-          message: errorMessage,
-        }],
+        errors: [
+          {
+            code: "VALIDATION_ERROR",
+            message: errorMessage,
+          },
+        ],
         isValid: false,
       });
     } finally {
@@ -84,7 +86,7 @@ export function OpenApiFileUpload({
     e.preventDefault();
     e.stopPropagation();
     setDragActive(false);
-    
+
     if (disabled) return;
 
     const files = e.dataTransfer.files;
@@ -98,7 +100,7 @@ export function OpenApiFileUpload({
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (disabled) return;
-    
+
     const files = e.target.files;
     if (files && files.length > 0) {
       const file = files[0];
@@ -109,8 +111,8 @@ export function OpenApiFileUpload({
   };
 
   const isValidFileType = (file: File) => {
-    const validExtensions = ['.json', '.yaml', '.yml'];
-    const fileExtension = file.name.toLowerCase().slice(file.name.lastIndexOf('.'));
+    const validExtensions = [".json", ".yaml", ".yml"];
+    const fileExtension = file.name.toLowerCase().slice(file.name.lastIndexOf("."));
     return validExtensions.includes(fileExtension);
   };
 
@@ -123,7 +125,7 @@ export function OpenApiFileUpload({
   const handleRemoveFile = () => {
     onFileRemove();
     if (fileInputRef.current) {
-      fileInputRef.current.value = '';
+      fileInputRef.current.value = "";
     }
   };
 
@@ -132,10 +134,10 @@ export function OpenApiFileUpload({
       {!selectedFile ? (
         <div
           className={cn(
-            "relative border-2 border-dashed rounded-lg p-6 transition-colors cursor-pointer",
-            "hover:bg-muted/50 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",
+            "relative cursor-pointer rounded-lg border-2 border-dashed p-6 transition-colors",
+            "hover:bg-muted/50 focus:ring-ring focus:ring-2 focus:ring-offset-2 focus:outline-none",
             dragActive ? "border-primary bg-primary/10" : "border-muted-foreground/25",
-            disabled && "opacity-50 cursor-not-allowed"
+            disabled && "cursor-not-allowed opacity-50",
           )}
           onClick={openFileDialog}
           onDragEnter={handleDrag}
@@ -151,40 +153,28 @@ export function OpenApiFileUpload({
             ref={fileInputRef}
             type="file"
           />
-          
+
           <div className="text-center">
-            <Upload className="mx-auto h-12 w-12 text-muted-foreground" />
+            <Upload className="text-muted-foreground mx-auto h-12 w-12" />
             <div className="mt-4">
-              <p className="text-sm font-medium">
-                Upload OpenAPI Specification
-              </p>
-              <p className="text-xs text-muted-foreground mt-1">
+              <p className="text-sm font-medium">Upload OpenAPI Specification</p>
+              <p className="text-muted-foreground mt-1 text-xs">
                 Drag and drop your OpenAPI file here, or click to browse
               </p>
-              <p className="text-xs text-muted-foreground mt-1">
-                Supports JSON (.json) and YAML (.yaml, .yml) formats
-              </p>
+              <p className="text-muted-foreground mt-1 text-xs">Supports JSON (.json) and YAML (.yaml, .yml) formats</p>
             </div>
           </div>
         </div>
       ) : (
         <div className="space-y-3">
           {/* File Info */}
-          <div className="flex items-center gap-3 p-3 bg-muted/50 rounded-lg">
+          <div className="bg-muted/50 flex items-center gap-3 rounded-lg p-3">
             <FileText className="h-8 w-8 text-blue-500" />
-            <div className="flex-1 min-w-0">
-              <p className="font-medium text-sm truncate">{selectedFile.name}</p>
-              <p className="text-xs text-muted-foreground">
-                {(selectedFile.size / 1024).toFixed(1)} KB
-              </p>
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-medium">{selectedFile.name}</p>
+              <p className="text-muted-foreground text-xs">{(selectedFile.size / 1024).toFixed(1)} KB</p>
             </div>
-            <Button
-              className="h-8 w-8 p-0"
-              disabled={disabled}
-              onClick={handleRemoveFile}
-              size="sm"
-              variant="ghost"
-            >
+            <Button className="h-8 w-8 p-0" disabled={disabled} onClick={handleRemoveFile} size="sm" variant="ghost">
               <X className="h-4 w-4" />
             </Button>
           </div>
@@ -193,9 +183,7 @@ export function OpenApiFileUpload({
           {isValidating ? (
             <Alert>
               <AlertCircle className="h-4 w-4" />
-              <AlertDescription>
-                Validating OpenAPI specification...
-              </AlertDescription>
+              <AlertDescription>Validating OpenAPI specification...</AlertDescription>
             </Alert>
           ) : validationResult ? (
             <div className="space-y-2">
@@ -207,10 +195,18 @@ export function OpenApiFileUpload({
                       <p className="font-medium">Valid OpenAPI specification!</p>
                       {validationResult.spec && (
                         <div className="text-sm">
-                          <p><strong>Title:</strong> {validationResult.spec.title}</p>
-                          <p><strong>Version:</strong> {validationResult.spec.version}</p>
-                          <p><strong>Format:</strong> {validationResult.spec.format.toUpperCase()}</p>
-                          <p><strong>Endpoints:</strong> {validationResult.spec.endpointCount}</p>
+                          <p>
+                            <strong>Title:</strong> {validationResult.spec.title}
+                          </p>
+                          <p>
+                            <strong>Version:</strong> {validationResult.spec.version}
+                          </p>
+                          <p>
+                            <strong>Format:</strong> {validationResult.spec.format.toUpperCase()}
+                          </p>
+                          <p>
+                            <strong>Endpoints:</strong> {validationResult.spec.endpointCount}
+                          </p>
                         </div>
                       )}
                     </div>
@@ -223,10 +219,11 @@ export function OpenApiFileUpload({
                     <div className="space-y-1">
                       <p className="font-medium">OpenAPI validation failed:</p>
                       {validationResult.errors && validationResult.errors.length > 0 && (
-                        <ul className="list-disc list-inside text-sm space-y-1">
+                        <ul className="list-inside list-disc space-y-1 text-sm">
                           {validationResult.errors.map((error) => (
                             <li key={`${error.code}-${error.path ?? error.message}`}>
-                              {error.path ? `${error.path}: ` : ""}{error.message}
+                              {error.path ? `${error.path}: ` : ""}
+                              {error.message}
                             </li>
                           ))}
                         </ul>

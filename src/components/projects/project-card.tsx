@@ -1,20 +1,16 @@
 import { Link } from "@tanstack/react-router";
-import { 
-  Activity,
-  Building2,
-  Clock, 
-  ExternalLink,
-  Globe,
-  Lock,
-  MoreHorizontal, 
-  Users
-} from "lucide-react";
+import { Activity, Building2, Clock, ExternalLink, Globe, Lock, MoreHorizontal, Users } from "lucide-react";
 import { m } from "motion/react";
 
 import { BadgeStatus } from "~/components/ui/badge-status";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "~/components/ui/card";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "~/components/ui/dropdown-menu";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "~/components/ui/dropdown-menu";
 
 interface ProjectCardProps {
   project: ProjectFromAPI;
@@ -42,7 +38,7 @@ interface ProjectFromAPI {
 export function ProjectCard({ project, variant = "default" }: ProjectCardProps) {
   const timeAgo = getTimeAgo(project.updatedAt);
   const visibilityInfo = getVisibilityInfo(project.visibility);
-  
+
   // Use real metrics from the database with fallbacks
   const metrics = {
     endpointCount: project.apiSpecCount ?? 0,
@@ -58,39 +54,44 @@ export function ProjectCard({ project, variant = "default" }: ProjectCardProps) 
         whileHover={{ y: -2 }}
       >
         <Link params={{ slug: project.slug }} to="/projects/$slug">
-          <Card className="group relative overflow-hidden border-border/40 bg-gradient-to-br from-card via-card to-card/95 transition-all duration-300 hover:shadow-xl hover:border-border/80 cursor-pointer">
+          <Card className="group border-border/40 from-card via-card to-card/95 hover:border-border/80 relative cursor-pointer overflow-hidden bg-gradient-to-br transition-all duration-300 hover:shadow-xl">
             {/* Status indicator stripe */}
-            <div className={`absolute top-0 left-0 right-0 h-1 bg-gradient-to-r ${
-              project.status === "active" ? "from-green-500 to-emerald-400" :
-              project.status === "beta" ? "from-blue-500 to-indigo-400" :
-              project.status === "deprecated" ? "from-orange-500 to-amber-400" :
-              "from-gray-500 to-slate-400"
-            }`} />
-            
+            <div
+              className={`absolute top-0 right-0 left-0 h-1 bg-gradient-to-r ${
+                project.status === "active"
+                  ? "from-green-500 to-emerald-400"
+                  : project.status === "beta"
+                    ? "from-blue-500 to-indigo-400"
+                    : project.status === "deprecated"
+                      ? "from-orange-500 to-amber-400"
+                      : "from-gray-500 to-slate-400"
+              }`}
+            />
+
             <CardHeader className="pb-0">
               <div className="flex items-start justify-between gap-3">
-                <div className="space-y-2 flex-1 min-w-0">
-                  <div className="flex items-center gap-3 justify-between">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <CardTitle className="text-lg font-bold leading-tight truncate group-hover:text-primary transition-colors">
+                <div className="min-w-0 flex-1 space-y-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <CardTitle className="group-hover:text-primary truncate text-lg leading-tight font-bold transition-colors">
                         {project.name}
                       </CardTitle>
                       <BadgeStatus status={project.status} />
                     </div>
-                    <div className="hidden sm:flex items-center gap-2 text-xs text-muted-foreground whitespace-nowrap">
+                    <div className="text-muted-foreground hidden items-center gap-2 text-xs whitespace-nowrap sm:flex">
                       <span className="font-medium">{project.creatorName}</span>
                       <span className="text-muted-foreground">•</span>
                       <span>Created {new Date(project.createdAt).toLocaleDateString()}</span>
                     </div>
                   </div>
-                  <CardDescription className="text-sm leading-relaxed line-clamp-3">
+                  <CardDescription className="line-clamp-3 text-sm leading-relaxed">
                     {project.description ?? "No description available"}
                   </CardDescription>
                 </div>
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
-                    <Button 
-                      className="h-8 w-8 p-0 opacity-0 group-hover:opacity-100 transition-opacity data-[state=open]:opacity-100" 
+                    <Button
+                      className="h-8 w-8 p-0 opacity-0 transition-opacity group-hover:opacity-100 data-[state=open]:opacity-100"
                       onClick={(e) => e.preventDefault()}
                       variant="ghost"
                     >
@@ -107,10 +108,10 @@ export function ProjectCard({ project, variant = "default" }: ProjectCardProps) 
                 </DropdownMenu>
               </div>
             </CardHeader>
-            
+
             <CardContent className="pt-0">
-              <div className="grid grid-cols-4 gap-3 text-sm mb-4">
-                <div className="flex items-center justify-between p-3 rounded-lg bg-muted/30 border border-border/40 h-12">
+              <div className="mb-4 grid grid-cols-4 gap-3 text-sm">
+                <div className="bg-muted/30 border-border/40 flex h-12 items-center justify-between rounded-lg border p-3">
                   <div className="flex items-center gap-2">
                     <Activity className="h-4 w-4 text-green-500" />
                     <span className="font-medium">Endpoints</span>
@@ -118,7 +119,7 @@ export function ProjectCard({ project, variant = "default" }: ProjectCardProps) 
                   <span className="text-sm font-semibold">{metrics.endpointCount}</span>
                 </div>
 
-                <div className="flex items-center justify-between p-3 rounded-lg bg-muted/30 border border-border/40 h-12">
+                <div className="bg-muted/30 border-border/40 flex h-12 items-center justify-between rounded-lg border p-3">
                   <div className="flex items-center gap-2">
                     <Users className="h-4 w-4 text-purple-500" />
                     <span className="font-medium">Members</span>
@@ -126,7 +127,7 @@ export function ProjectCard({ project, variant = "default" }: ProjectCardProps) 
                   <span className="text-sm font-semibold">{metrics.memberCount}</span>
                 </div>
 
-                <div className="flex items-center justify-between p-3 rounded-lg bg-muted/30 border border-border/40 h-12">
+                <div className="bg-muted/30 border-border/40 flex h-12 items-center justify-between rounded-lg border p-3">
                   <div className="flex items-center gap-2">
                     <Clock className="h-4 w-4 text-amber-500" />
                     <span className="font-medium">Updated</span>
@@ -134,7 +135,7 @@ export function ProjectCard({ project, variant = "default" }: ProjectCardProps) 
                   <span className="text-sm font-semibold">{timeAgo}</span>
                 </div>
 
-                <div className="flex items-center justify-between p-3 rounded-lg bg-muted/30 border border-border/40 h-12">
+                <div className="bg-muted/30 border-border/40 flex h-12 items-center justify-between rounded-lg border p-3">
                   <div className="flex items-center gap-2">
                     <visibilityInfo.icon className={`h-4 w-4 ${visibilityInfo.color}`} />
                     <span className="text-sm font-medium">Visibility</span>
@@ -142,7 +143,7 @@ export function ProjectCard({ project, variant = "default" }: ProjectCardProps) 
                   <span className="text-sm font-semibold capitalize">{visibilityInfo.label}</span>
                 </div>
               </div>
-              
+
               {/* compact variant: creator/date displayed in header */}
             </CardContent>
           </Card>
@@ -159,40 +160,45 @@ export function ProjectCard({ project, variant = "default" }: ProjectCardProps) 
       whileHover={{ y: -4 }}
     >
       <Link params={{ slug: project.slug }} to="/projects/$slug">
-        <Card className="group relative overflow-hidden border-border/40 bg-gradient-to-br from-card via-card to-card/95 transition-all duration-300 hover:shadow-2xl hover:border-border/80 cursor-pointer h-full">
+        <Card className="group border-border/40 from-card via-card to-card/95 hover:border-border/80 relative h-full cursor-pointer overflow-hidden bg-gradient-to-br transition-all duration-300 hover:shadow-2xl">
           {/* Status indicator stripe */}
-          <div className={`absolute top-0 left-0 right-0 h-1 bg-gradient-to-r ${
-            project.status === "active" ? "from-green-500 to-emerald-400" :
-            project.status === "beta" ? "from-blue-500 to-indigo-400" :
-            project.status === "deprecated" ? "from-orange-500 to-amber-400" :
-            "from-gray-500 to-slate-400"
-          }`} />
-          
+          <div
+            className={`absolute top-0 right-0 left-0 h-1 bg-gradient-to-r ${
+              project.status === "active"
+                ? "from-green-500 to-emerald-400"
+                : project.status === "beta"
+                  ? "from-blue-500 to-indigo-400"
+                  : project.status === "deprecated"
+                    ? "from-orange-500 to-amber-400"
+                    : "from-gray-500 to-slate-400"
+            }`}
+          />
+
           <CardHeader className="">
             <div className="flex items-start justify-between gap-3">
-              <div className="space-y-3 flex-1 min-w-0">
+              <div className="min-w-0 flex-1 space-y-3">
                 <div className="flex items-center gap-3">
-                  <CardTitle className="text-xl font-bold leading-tight truncate group-hover:text-primary transition-colors">
+                  <CardTitle className="group-hover:text-primary truncate text-xl leading-tight font-bold transition-colors">
                     {project.name}
                   </CardTitle>
                   <BadgeStatus status={project.status} />
                 </div>
-                <CardDescription className="text-sm leading-relaxed line-clamp-3 text-muted-foreground">
+                <CardDescription className="text-muted-foreground line-clamp-3 text-sm leading-relaxed">
                   {project.description ?? "No description available"}
                 </CardDescription>
-                
+
                 {/* Creator and creation date on the same line (concise) */}
-                <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                  <span className="text-xs font-medium truncate">{project.creatorName}</span>
-                  <span className="text-xs text-muted-foreground">•</span>
+                <div className="text-muted-foreground flex items-center gap-4 text-sm">
+                  <span className="truncate text-xs font-medium">{project.creatorName}</span>
+                  <span className="text-muted-foreground text-xs">•</span>
                   <span className="text-xs">Created {new Date(project.createdAt).toLocaleDateString()}</span>
                 </div>
               </div>
-              
+
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button 
-                    className="h-8 w-8 p-0 opacity-0 group-hover:opacity-100 transition-opacity data-[state=open]:opacity-100" 
+                  <Button
+                    className="h-8 w-8 p-0 opacity-0 transition-opacity group-hover:opacity-100 data-[state=open]:opacity-100"
                     onClick={(e) => e.preventDefault()}
                     variant="ghost"
                   >
@@ -209,12 +215,12 @@ export function ProjectCard({ project, variant = "default" }: ProjectCardProps) 
               </DropdownMenu>
             </div>
           </CardHeader>
-          
+
           <CardContent className="pt-0">
             {/* Metrics grid - standardized boxes */}
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-3">
-                <div className="flex items-center justify-between p-3 rounded-lg bg-muted/30 border border-border/40 h-12">
+                <div className="bg-muted/30 border-border/40 flex h-12 items-center justify-between rounded-lg border p-3">
                   <div className="flex items-center gap-2">
                     <Activity className="h-4 w-4 text-green-500" />
                     <span className="text-sm font-medium">Endpoints</span>
@@ -222,7 +228,7 @@ export function ProjectCard({ project, variant = "default" }: ProjectCardProps) 
                   <span className="text-sm font-semibold">{metrics.endpointCount}</span>
                 </div>
 
-                <div className="flex items-center justify-between p-3 rounded-lg bg-muted/30 border border-border/40 h-12">
+                <div className="bg-muted/30 border-border/40 flex h-12 items-center justify-between rounded-lg border p-3">
                   <div className="flex items-center gap-2">
                     <Users className="h-4 w-4 text-purple-500" />
                     <span className="text-sm font-medium">Members</span>
@@ -232,7 +238,7 @@ export function ProjectCard({ project, variant = "default" }: ProjectCardProps) 
               </div>
 
               <div className="space-y-3">
-                <div className="flex items-center justify-between p-3 rounded-lg bg-muted/30 border border-border/40 h-12">
+                <div className="bg-muted/30 border-border/40 flex h-12 items-center justify-between rounded-lg border p-3">
                   <div className="flex items-center gap-2">
                     <Clock className="h-4 w-4 text-amber-500" />
                     <span className="text-sm font-medium">Updated</span>
@@ -240,12 +246,14 @@ export function ProjectCard({ project, variant = "default" }: ProjectCardProps) 
                   <span className="text-sm font-semibold">{timeAgo}</span>
                 </div>
 
-                <div className="flex items-center justify-between p-3 rounded-lg bg-muted/30 border border-border/40 h-12">
+                <div className="bg-muted/30 border-border/40 flex h-12 items-center justify-between rounded-lg border p-3">
                   <div className="flex items-center gap-2">
                     <visibilityInfo.icon className={`h-4 w-4 ${visibilityInfo.color}`} />
                     <span className="text-sm font-medium">Visibility</span>
                   </div>
-                  <span className={`text-sm font-semibold capitalize ${visibilityInfo.color}`}>{visibilityInfo.label}</span>
+                  <span className={`text-sm font-semibold capitalize ${visibilityInfo.color}`}>
+                    {visibilityInfo.label}
+                  </span>
                 </div>
               </div>
             </div>
