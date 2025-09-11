@@ -1,4 +1,4 @@
-import { createLazyFileRoute } from "@tanstack/react-router";
+import { createLazyFileRoute, useNavigate } from "@tanstack/react-router";
 import { ArrowRight, BarChart3, Code, Globe, TrendingUp, Users, Zap } from "lucide-react";
 import React from "react";
 
@@ -17,6 +17,7 @@ export const Route = createLazyFileRoute("/")({
 });
 
 function Home() {
+  const navigate = useNavigate();
   return (
     <>
       <PageHeaderContent>
@@ -69,7 +70,8 @@ function Home() {
                 workflow.
               </p>
               <Button
-                className="from-chart-1 to-chart-3 hover:from-chart-1/90 hover:to-chart-3/90 text-primary-foreground bg-gradient-to-r shadow-lg"
+                className="from-chart-1 to-chart-3 hover:from-chart-1/90 hover:to-chart-3/90 text-primary-foreground cursor-pointer bg-gradient-to-r shadow-lg"
+                onClick={() => navigate({ to: "/catalogue" })}
                 size="lg"
               >
                 API hub
