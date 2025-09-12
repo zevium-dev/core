@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createLazyFileRoute, Link } from "@tanstack/react-router";
+import { createLazyFileRoute, Link, Outlet, useMatches } from "@tanstack/react-router";
 import {
   AlertCircle,
   ArrowLeft,
@@ -999,9 +999,15 @@ function RichTextEditor({
 
 function RouteComponent() {
   const { slug } = Route.useParams();
+  const matches = useMatches();
   const trpcClient = useTRPCClient();
   const queryClient = useQueryClient();
   const [visibilityDialogOpen, setVisibilityDialogOpen] = React.useState(false);
+
+  // Check if we're on a child route (like /projects/$slug/view/$version)
+  const isChildRoute = matches.some(match => 
+    match.routeId === '/projects/$slug/view/$version'
+  );
 
   const {
     data: projectData,
@@ -1094,6 +1100,11 @@ function RouteComponent() {
   }
 
   const project = projectData.project;
+
+  // If we're on a child route, render the Outlet instead of the main project content
+  if (isChildRoute) {
+    return <Outlet />;
+  }
 
   return (
     <m.div
@@ -1476,17 +1487,30 @@ function VersionManagement({ project }: { project: ProjectData }) {
           ) : (
             <div className="space-y-4">
               {versionGroups.map((group) => (
-                <Card className="border border-gray-200" key={group.version}>
-                  <CardContent className="">
+                <Link
+                  key={group.version}
+                  params={{ slug: project.slug, version: group.version }}
+                  to="/projects/$slug/view/$version"
+                >
+                  <Card 
+                    className="border border-gray-200 cursor-pointer transition-all hover:shadow-md hover:border-blue-300 group"
+                  >
+                  <CardContent className="p-6">
                     <div className="flex items-center justify-between">
                       <div className="flex-1">
                         <div className="flex items-center space-x-3 mb-2">
-                          <h3 className="text-lg font-semibold">v{group.version}</h3>
+                          <h3 className="text-lg font-semibold group-hover:text-blue-600 transition-colors">
+                            v{group.version}
+                          </h3>
                           <Badge className="bg-blue-100 text-blue-800">
                             {group.specs.length} spec{group.specs.length !== 1 ? 's' : ''}
                           </Badge>
                           <Badge className="bg-green-100 text-green-800">
                             {group.totalEndpoints} endpoint{group.totalEndpoints !== 1 ? 's' : ''}
+                          </Badge>
+                          <Badge className="bg-purple-100 text-purple-800 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <Eye className="h-3 w-3 mr-1" />
+                            View
                           </Badge>
                         </div>
                         <p className="text-gray-600 text-sm">
@@ -1513,7 +1537,10 @@ function VersionManagement({ project }: { project: ProjectData }) {
                                 </div>
                               </div>
                               <Button
-                                onClick={() => handleDownload(spec)}
+                                onClick={(e) => {
+                                  e.stopPropagation(); // Prevent card click when downloading
+                                  void handleDownload(spec);
+                                }}
                                 size="sm"
                                 variant="ghost"
                               >
@@ -1524,9 +1551,12 @@ function VersionManagement({ project }: { project: ProjectData }) {
                         </div>
                       </div>
                       
-                      <div className="flex items-center ml-6">
+                      <div className="flex items-center ml-6 space-x-2">
                         <Button
-                          onClick={() => handleEditVersion(group.version)}
+                          onClick={(e) => {
+                            e.stopPropagation(); // Prevent card click when updating
+                            handleEditVersion(group.version);
+                          }}
                           size="sm"
                           variant="outline"
                         >
@@ -1537,6 +1567,7 @@ function VersionManagement({ project }: { project: ProjectData }) {
                     </div>
                   </CardContent>
                 </Card>
+              </Link>
               ))}
             </div>
           )}
