@@ -36,6 +36,9 @@ const SettingsCreditsSplatLazyRouteImport = createFileRoute(
 const SettingsActivitySplatLazyRouteImport = createFileRoute(
   '/settings/activity/$',
 )()
+const ProjectsSlugViewVersionLazyRouteImport = createFileRoute(
+  '/projects/$slug/view/$version',
+)()
 const rootServerRouteImport = createServerRootRoute()
 
 const CatalogueLazyRoute = CatalogueLazyRouteImport.update({
@@ -112,6 +115,14 @@ const SettingsActivitySplatLazyRoute =
   } as any).lazy(() =>
     import('./routes/settings/activity/$.lazy').then((d) => d.Route),
   )
+const ProjectsSlugViewVersionLazyRoute =
+  ProjectsSlugViewVersionLazyRouteImport.update({
+    id: '/view/$version',
+    path: '/view/$version',
+    getParentRoute: () => ProjectsSlugLazyRoute,
+  } as any).lazy(() =>
+    import('./routes/projects/$slug/view/$version.lazy').then((d) => d.Route),
+  )
 const ApiTrpcSplatServerRoute = ApiTrpcSplatServerRouteImport.update({
   id: '/api/trpc/$',
   path: '/api/trpc/$',
@@ -138,26 +149,28 @@ export interface FileRoutesByFullPath {
   '/catalogue': typeof CatalogueLazyRoute
   '/settings/$': typeof SettingsSplatRoute
   '/organizations/$slug': typeof OrganizationsSlugLazyRoute
-  '/projects/$slug': typeof ProjectsSlugLazyRoute
+  '/projects/$slug': typeof ProjectsSlugLazyRouteWithChildren
   '/organizations': typeof OrganizationsIndexLazyRoute
   '/projects': typeof ProjectsIndexLazyRoute
   '/settings/activity/$': typeof SettingsActivitySplatLazyRoute
   '/settings/credits/$': typeof SettingsCreditsSplatLazyRoute
   '/settings/keys/$': typeof SettingsKeysSplatLazyRoute
   '/settings/preference/$': typeof SettingsPreferenceSplatLazyRoute
+  '/projects/$slug/view/$version': typeof ProjectsSlugViewVersionLazyRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexLazyRoute
   '/catalogue': typeof CatalogueLazyRoute
   '/settings/$': typeof SettingsSplatRoute
   '/organizations/$slug': typeof OrganizationsSlugLazyRoute
-  '/projects/$slug': typeof ProjectsSlugLazyRoute
+  '/projects/$slug': typeof ProjectsSlugLazyRouteWithChildren
   '/organizations': typeof OrganizationsIndexLazyRoute
   '/projects': typeof ProjectsIndexLazyRoute
   '/settings/activity/$': typeof SettingsActivitySplatLazyRoute
   '/settings/credits/$': typeof SettingsCreditsSplatLazyRoute
   '/settings/keys/$': typeof SettingsKeysSplatLazyRoute
   '/settings/preference/$': typeof SettingsPreferenceSplatLazyRoute
+  '/projects/$slug/view/$version': typeof ProjectsSlugViewVersionLazyRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -165,13 +178,14 @@ export interface FileRoutesById {
   '/catalogue': typeof CatalogueLazyRoute
   '/settings/$': typeof SettingsSplatRoute
   '/organizations/$slug': typeof OrganizationsSlugLazyRoute
-  '/projects/$slug': typeof ProjectsSlugLazyRoute
+  '/projects/$slug': typeof ProjectsSlugLazyRouteWithChildren
   '/organizations/': typeof OrganizationsIndexLazyRoute
   '/projects/': typeof ProjectsIndexLazyRoute
   '/settings/activity/$': typeof SettingsActivitySplatLazyRoute
   '/settings/credits/$': typeof SettingsCreditsSplatLazyRoute
   '/settings/keys/$': typeof SettingsKeysSplatLazyRoute
   '/settings/preference/$': typeof SettingsPreferenceSplatLazyRoute
+  '/projects/$slug/view/$version': typeof ProjectsSlugViewVersionLazyRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -187,6 +201,7 @@ export interface FileRouteTypes {
     | '/settings/credits/$'
     | '/settings/keys/$'
     | '/settings/preference/$'
+    | '/projects/$slug/view/$version'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -200,6 +215,7 @@ export interface FileRouteTypes {
     | '/settings/credits/$'
     | '/settings/keys/$'
     | '/settings/preference/$'
+    | '/projects/$slug/view/$version'
   id:
     | '__root__'
     | '/'
@@ -213,6 +229,7 @@ export interface FileRouteTypes {
     | '/settings/credits/$'
     | '/settings/keys/$'
     | '/settings/preference/$'
+    | '/projects/$slug/view/$version'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -220,7 +237,7 @@ export interface RootRouteChildren {
   CatalogueLazyRoute: typeof CatalogueLazyRoute
   SettingsSplatRoute: typeof SettingsSplatRoute
   OrganizationsSlugLazyRoute: typeof OrganizationsSlugLazyRoute
-  ProjectsSlugLazyRoute: typeof ProjectsSlugLazyRoute
+  ProjectsSlugLazyRoute: typeof ProjectsSlugLazyRouteWithChildren
   OrganizationsIndexLazyRoute: typeof OrganizationsIndexLazyRoute
   ProjectsIndexLazyRoute: typeof ProjectsIndexLazyRoute
   SettingsActivitySplatLazyRoute: typeof SettingsActivitySplatLazyRoute
@@ -346,6 +363,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsActivitySplatLazyRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/projects/$slug/view/$version': {
+      id: '/projects/$slug/view/$version'
+      path: '/view/$version'
+      fullPath: '/projects/$slug/view/$version'
+      preLoaderRoute: typeof ProjectsSlugViewVersionLazyRouteImport
+      parentRoute: typeof ProjectsSlugLazyRoute
+    }
   }
 }
 declare module '@tanstack/react-start/server' {
@@ -381,12 +405,23 @@ declare module '@tanstack/react-start/server' {
   }
 }
 
+interface ProjectsSlugLazyRouteChildren {
+  ProjectsSlugViewVersionLazyRoute: typeof ProjectsSlugViewVersionLazyRoute
+}
+
+const ProjectsSlugLazyRouteChildren: ProjectsSlugLazyRouteChildren = {
+  ProjectsSlugViewVersionLazyRoute: ProjectsSlugViewVersionLazyRoute,
+}
+
+const ProjectsSlugLazyRouteWithChildren =
+  ProjectsSlugLazyRoute._addFileChildren(ProjectsSlugLazyRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexLazyRoute: IndexLazyRoute,
   CatalogueLazyRoute: CatalogueLazyRoute,
   SettingsSplatRoute: SettingsSplatRoute,
   OrganizationsSlugLazyRoute: OrganizationsSlugLazyRoute,
-  ProjectsSlugLazyRoute: ProjectsSlugLazyRoute,
+  ProjectsSlugLazyRoute: ProjectsSlugLazyRouteWithChildren,
   OrganizationsIndexLazyRoute: OrganizationsIndexLazyRoute,
   ProjectsIndexLazyRoute: ProjectsIndexLazyRoute,
   SettingsActivitySplatLazyRoute: SettingsActivitySplatLazyRoute,
