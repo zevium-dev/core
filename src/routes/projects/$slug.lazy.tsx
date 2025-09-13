@@ -119,7 +119,7 @@ function ApiSpecUploadDialog({
   // Handle reset when dialog opens/closes
   const prevOpen = React.useRef(open);
   const prevInitialVersion = React.useRef(initialVersion);
-  
+
   if (open !== prevOpen.current || initialVersion !== prevInitialVersion.current) {
     if (open) {
       if (initialVersion) {
@@ -159,8 +159,7 @@ function ApiSpecUploadDialog({
     onUpload(selectedFiles, finalVersionLabel.trim(), isUpdate);
   };
 
-  const canUpload = selectedFiles.length > 0 && 
-    (isUpdate ? selectedExistingVersion : versionLabel.trim());
+  const canUpload = selectedFiles.length > 0 && (isUpdate ? selectedExistingVersion : versionLabel.trim());
 
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
@@ -180,11 +179,9 @@ function ApiSpecUploadDialog({
           <div className="space-y-4">
             <Label className="text-base font-medium">Upload Mode</Label>
             <div className="grid grid-cols-2 gap-4">
-              <Card 
+              <Card
                 className={`cursor-pointer border-2 transition-all ${
-                  !isUpdate 
-                    ? "border-blue-500 bg-blue-50 dark:bg-blue-950/20" 
-                    : "border-gray-200 hover:border-gray-300"
+                  !isUpdate ? "border-blue-500 bg-blue-50 dark:bg-blue-950/20" : "border-gray-200 hover:border-gray-300"
                 }`}
                 onClick={() => setIsUpdate(false)}
               >
@@ -201,12 +198,10 @@ function ApiSpecUploadDialog({
                 </CardContent>
               </Card>
 
-              <Card 
+              <Card
                 className={`cursor-pointer border-2 transition-all ${
-                  isUpdate 
-                    ? "border-blue-500 bg-blue-50 dark:bg-blue-950/20" 
-                    : "border-gray-200 hover:border-gray-300"
-                } ${existingVersions.length === 0 ? "opacity-50 cursor-not-allowed" : ""}`}
+                  isUpdate ? "border-blue-500 bg-blue-50 dark:bg-blue-950/20" : "border-gray-200 hover:border-gray-300"
+                } ${existingVersions.length === 0 ? "cursor-not-allowed opacity-50" : ""}`}
                 onClick={() => existingVersions.length > 0 && setIsUpdate(true)}
               >
                 <CardContent className="p-4">
@@ -251,9 +246,7 @@ function ApiSpecUploadDialog({
                   placeholder="e.g., 1.0.0, 2.1.0, v3-beta"
                   value={versionLabel}
                 />
-                <p className="text-xs text-gray-500">
-                  Use semantic versioning (e.g., 1.0.0) or any meaningful label
-                </p>
+                <p className="text-xs text-gray-500">Use semantic versioning (e.g., 1.0.0) or any meaningful label</p>
               </>
             )}
           </div>
@@ -275,10 +268,10 @@ function ApiSpecUploadDialog({
           <Button disabled={isLoading} onClick={() => onOpenChange(false)} variant="outline">
             Cancel
           </Button>
-          <Button 
+          <Button
             className="bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700"
             disabled={!canUpload || isLoading}
-            onClick={handleUpload} 
+            onClick={handleUpload}
           >
             {isLoading ? (
               <>
@@ -601,7 +594,15 @@ function ProjectHeader({
 
   // Upload mutation for API specifications
   const uploadSpecMutation = useMutation({
-    mutationFn: async ({ files, isUpdate, versionLabel }: { files: Array<File>; isUpdate?: boolean; versionLabel: string }) => {
+    mutationFn: async ({
+      files,
+      isUpdate,
+      versionLabel,
+    }: {
+      files: Array<File>;
+      isUpdate?: boolean;
+      versionLabel: string;
+    }) => {
       // Convert File objects to the format expected by the API
       const fileData = await Promise.all(
         files.map(async (file) => ({
@@ -609,7 +610,7 @@ function ProjectHeader({
           name: file.name,
           size: file.size,
           type: file.type,
-        }))
+        })),
       );
 
       return trpcClient.apiSpec.uploadFiles.mutate({
@@ -737,7 +738,7 @@ function ProjectHeader({
 
           {/* Current Version Info */}
           {uniqueVersions.length > 0 && selectedVersion && (
-            <Badge className="border-blue-200 text-blue-700 bg-blue-50" variant="outline">
+            <Badge className="border-blue-200 bg-blue-50 text-blue-700" variant="outline">
               Current: v{selectedVersion}
             </Badge>
           )}
@@ -1005,9 +1006,7 @@ function RouteComponent() {
   const [visibilityDialogOpen, setVisibilityDialogOpen] = React.useState(false);
 
   // Check if we're on a child route (like /projects/$slug/view/$version)
-  const isChildRoute = matches.some(match => 
-    match.routeId === '/projects/$slug/view/$version'
-  );
+  const isChildRoute = matches.some((match) => match.routeId === "/projects/$slug/view/$version");
 
   const {
     data: projectData,
@@ -1304,7 +1303,11 @@ function VersionManagement({ project }: { project: ProjectData }) {
   const [selectedVersionForEdit, setSelectedVersionForEdit] = React.useState<null | string>(null);
 
   // Fetch all API specs grouped by version
-  const { data: specsData, error, isLoading } = useQuery({
+  const {
+    data: specsData,
+    error,
+    isLoading,
+  } = useQuery({
     queryFn: () => trpcClient.apiSpec.getByProject.query({ projectId: project.id }),
     queryKey: ["apiSpecs", project.id],
   });
@@ -1312,8 +1315,8 @@ function VersionManagement({ project }: { project: ProjectData }) {
   // Group specs by version and sort
   const versionGroups = React.useMemo(() => {
     const specs = specsData?.specs ?? [];
-    const groups = new Map<string, Array<typeof specs[0]>>();
-    
+    const groups = new Map<string, Array<(typeof specs)[0]>>();
+
     specs.forEach((spec) => {
       const version = spec.versionLabel;
       if (!groups.has(version)) {
@@ -1327,7 +1330,7 @@ function VersionManagement({ project }: { project: ProjectData }) {
     return Array.from(groups.entries())
       .sort(([a], [b]) => b.localeCompare(a))
       .map(([version, versionSpecs]) => ({
-        lastUpdated: new Date(Math.max(...versionSpecs.map(spec => spec.updatedAt.getTime()))),
+        lastUpdated: new Date(Math.max(...versionSpecs.map((spec) => spec.updatedAt.getTime()))),
         specs: versionSpecs.sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime()),
         totalEndpoints: versionSpecs.reduce((sum, spec) => sum + spec.endpointCount, 0),
         version,
@@ -1336,7 +1339,15 @@ function VersionManagement({ project }: { project: ProjectData }) {
 
   // Upload mutation
   const uploadSpecMutation = useMutation({
-    mutationFn: async ({ files, isUpdate, versionLabel }: { files: Array<File>; isUpdate?: boolean; versionLabel: string }) => {
+    mutationFn: async ({
+      files,
+      isUpdate,
+      versionLabel,
+    }: {
+      files: Array<File>;
+      isUpdate?: boolean;
+      versionLabel: string;
+    }) => {
       // Convert File objects to the format expected by the API
       const fileData = await Promise.all(
         files.map(async (file) => ({
@@ -1344,7 +1355,7 @@ function VersionManagement({ project }: { project: ProjectData }) {
           name: file.name,
           size: file.size,
           type: file.type,
-        }))
+        })),
       );
 
       return trpcClient.apiSpec.uploadFiles.mutate({
@@ -1372,7 +1383,7 @@ function VersionManagement({ project }: { project: ProjectData }) {
       const response = await trpcClient.apiSpec.getById.query({ specId: spec.id });
       // The server returns the raw uploaded content as `originalRaw` and parsed JSON as `specJson`.
       // Use `originalRaw` when available, otherwise fallback to serializing `specJson`.
-  const content = response.spec.originalRaw ?? JSON.stringify(response.spec.specJson, null, 2);
+      const content = response.spec.originalRaw ?? JSON.stringify(response.spec.specJson, null, 2);
       if (!content) {
         toast.error("No content found for this API specification");
         return;
@@ -1398,7 +1409,7 @@ function VersionManagement({ project }: { project: ProjectData }) {
     setUploadDialogOpen(true);
   };
 
-  const existingVersions = versionGroups.map(group => group.version);
+  const existingVersions = versionGroups.map((group) => group.version);
 
   if (isLoading) {
     return (
@@ -1413,10 +1424,10 @@ function VersionManagement({ project }: { project: ProjectData }) {
               <div className="animate-pulse" key={crypto.randomUUID()}>
                 <div className="flex items-center justify-between rounded-lg border p-4">
                   <div className="space-y-2">
-                    <div className="h-4 w-20 bg-gray-200 rounded" />
-                    <div className="h-3 w-32 bg-gray-200 rounded" />
+                    <div className="h-4 w-20 rounded bg-gray-200" />
+                    <div className="h-3 w-32 rounded bg-gray-200" />
                   </div>
-                  <div className="h-8 w-20 bg-gray-200 rounded" />
+                  <div className="h-8 w-20 rounded bg-gray-200" />
                 </div>
               </div>
             ))}
@@ -1435,9 +1446,9 @@ function VersionManagement({ project }: { project: ProjectData }) {
         </CardHeader>
         <CardContent>
           <div className="flex flex-col items-center justify-center py-12 text-center">
-            <AlertCircle className="text-red-500 mb-4 h-12 w-12" />
+            <AlertCircle className="mb-4 h-12 w-12 text-red-500" />
             <h3 className="mb-2 text-lg font-medium">Failed to load versions</h3>
-            <p className="text-gray-600 mb-4">There was an error loading your API specifications.</p>
+            <p className="mb-4 text-gray-600">There was an error loading your API specifications.</p>
             <Button onClick={() => window.location.reload()} variant="outline">
               Try Again
             </Button>
@@ -1456,7 +1467,7 @@ function VersionManagement({ project }: { project: ProjectData }) {
               <CardTitle>API Versions</CardTitle>
               <CardDescription>Manage your API specification versions</CardDescription>
             </div>
-            <Button 
+            <Button
               className="bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700"
               onClick={() => {
                 setSelectedVersionForEdit(null);
@@ -1471,12 +1482,10 @@ function VersionManagement({ project }: { project: ProjectData }) {
         <CardContent>
           {versionGroups.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 text-center">
-              <Code2 className="text-gray-400 mb-4 h-12 w-12" />
+              <Code2 className="mb-4 h-12 w-12 text-gray-400" />
               <h3 className="mb-2 text-lg font-medium">No API versions yet</h3>
-              <p className="text-gray-600 mb-4">
-                Upload your first OpenAPI specification to get started.
-              </p>
-              <Button 
+              <p className="mb-4 text-gray-600">Upload your first OpenAPI specification to get started.</p>
+              <Button
                 className="bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700"
                 onClick={() => setUploadDialogOpen(true)}
               >
@@ -1492,82 +1501,80 @@ function VersionManagement({ project }: { project: ProjectData }) {
                   params={{ slug: project.slug, version: group.version }}
                   to="/projects/$slug/view/$version"
                 >
-                  <Card 
-                    className="border border-gray-200 cursor-pointer transition-all hover:shadow-md hover:border-blue-300 group"
-                  >
-                  <CardContent className="p-6">
-                    <div className="flex items-center justify-between">
-                      <div className="flex-1">
-                        <div className="flex items-center space-x-3 mb-2">
-                          <h3 className="text-lg font-semibold group-hover:text-blue-600 transition-colors">
-                            v{group.version}
-                          </h3>
-                          <Badge className="bg-blue-100 text-blue-800">
-                            {group.specs.length} spec{group.specs.length !== 1 ? 's' : ''}
-                          </Badge>
-                          <Badge className="bg-green-100 text-green-800">
-                            {group.totalEndpoints} endpoint{group.totalEndpoints !== 1 ? 's' : ''}
-                          </Badge>
-                          <Badge className="bg-purple-100 text-purple-800 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <Eye className="h-3 w-3 mr-1" />
-                            View
-                          </Badge>
-                        </div>
-                        <p className="text-gray-600 text-sm">
-                          Last updated {group.lastUpdated.toLocaleDateString()} at{' '}
-                          {group.lastUpdated.toLocaleTimeString()}
-                        </p>
-                        
-                        {/* Spec Files List */}
-                        <div className="mt-4 space-y-2">
-                          {group.specs.map((spec) => (
-                            <div
-                              className="flex items-center justify-between rounded-md border border-gray-100 bg-gray-50 p-3"
-                              key={spec.id}
-                            >
-                              <div className="flex items-center space-x-3">
-                                <FileText className="h-4 w-4 text-blue-500" />
-                                <div>
-                                  <p className="text-sm font-medium">
-                                    {spec.title ?? `API Spec ${spec.id.slice(0, 8)}`}
-                                  </p>
-                                  <p className="text-xs text-gray-500">
-                                    {spec.format.toUpperCase()} • {spec.endpointCount} endpoints
-                                  </p>
-                                </div>
-                              </div>
-                              <Button
-                                onClick={(e) => {
-                                  e.stopPropagation(); // Prevent card click when downloading
-                                  void handleDownload(spec);
-                                }}
-                                size="sm"
-                                variant="ghost"
+                  <Card className="group cursor-pointer border border-gray-200 transition-all hover:border-blue-300 hover:shadow-md">
+                    <CardContent className="p-6">
+                      <div className="flex items-center justify-between">
+                        <div className="flex-1">
+                          <div className="mb-2 flex items-center space-x-3">
+                            <h3 className="text-lg font-semibold transition-colors group-hover:text-blue-600">
+                              v{group.version}
+                            </h3>
+                            <Badge className="bg-blue-100 text-blue-800">
+                              {group.specs.length} spec{group.specs.length !== 1 ? "s" : ""}
+                            </Badge>
+                            <Badge className="bg-green-100 text-green-800">
+                              {group.totalEndpoints} endpoint{group.totalEndpoints !== 1 ? "s" : ""}
+                            </Badge>
+                            <Badge className="bg-purple-100 text-purple-800 opacity-0 transition-opacity group-hover:opacity-100">
+                              <Eye className="mr-1 h-3 w-3" />
+                              View
+                            </Badge>
+                          </div>
+                          <p className="text-sm text-gray-600">
+                            Last updated {group.lastUpdated.toLocaleDateString()} at{" "}
+                            {group.lastUpdated.toLocaleTimeString()}
+                          </p>
+
+                          {/* Spec Files List */}
+                          <div className="mt-4 space-y-2">
+                            {group.specs.map((spec) => (
+                              <div
+                                className="flex items-center justify-between rounded-md border border-gray-100 bg-gray-50 p-3"
+                                key={spec.id}
                               >
-                                <Download className="h-4 w-4" />
-                              </Button>
-                            </div>
-                          ))}
+                                <div className="flex items-center space-x-3">
+                                  <FileText className="h-4 w-4 text-blue-500" />
+                                  <div>
+                                    <p className="text-sm font-medium">
+                                      {spec.title ?? `API Spec ${spec.id.slice(0, 8)}`}
+                                    </p>
+                                    <p className="text-xs text-gray-500">
+                                      {spec.format.toUpperCase()} • {spec.endpointCount} endpoints
+                                    </p>
+                                  </div>
+                                </div>
+                                <Button
+                                  onClick={(e) => {
+                                    e.stopPropagation(); // Prevent card click when downloading
+                                    void handleDownload(spec);
+                                  }}
+                                  size="sm"
+                                  variant="ghost"
+                                >
+                                  <Download className="h-4 w-4" />
+                                </Button>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className="ml-6 flex items-center space-x-2">
+                          <Button
+                            onClick={(e) => {
+                              e.stopPropagation(); // Prevent card click when updating
+                              handleEditVersion(group.version);
+                            }}
+                            size="sm"
+                            variant="outline"
+                          >
+                            <Edit3 className="mr-2 h-4 w-4" />
+                            Update
+                          </Button>
                         </div>
                       </div>
-                      
-                      <div className="flex items-center ml-6 space-x-2">
-                        <Button
-                          onClick={(e) => {
-                            e.stopPropagation(); // Prevent card click when updating
-                            handleEditVersion(group.version);
-                          }}
-                          size="sm"
-                          variant="outline"
-                        >
-                          <Edit3 className="mr-2 h-4 w-4" />
-                          Update
-                        </Button>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              </Link>
+                    </CardContent>
+                  </Card>
+                </Link>
               ))}
             </div>
           )}

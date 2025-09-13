@@ -1,12 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { createLazyFileRoute, useNavigate } from "@tanstack/react-router";
-import {
-  AlertCircle,
-  ArrowLeft,
-  Code2,
-  Copy,
-  Download,
-} from "lucide-react";
+import { AlertCircle, ArrowLeft, Code2, Copy, Download } from "lucide-react";
 import { m } from "motion/react";
 import * as React from "react";
 
@@ -14,7 +8,7 @@ import { ScalarApiReference } from "~/components/api-viewer/scalar-api-reference
 import { AuthLoadingFallback } from "~/components/auth-loading-fallback";
 import { ProtectedRoute } from "~/components/protected-route";
 import { Button } from "~/components/ui/button";
-import { Card, CardContent} from "~/components/ui/card";
+import { Card, CardContent } from "~/components/ui/card";
 import { Separator } from "~/components/ui/separator";
 import { useCopy } from "~/hooks/use-copy";
 import { useTRPCClient } from "~/lib/trpc";
@@ -90,9 +84,8 @@ function ApiViewerHeader({
   const [isCopied, copyToClipboard] = useCopy();
 
   const totalEndpoints = specs.reduce((sum, spec) => sum + spec.endpointCount, 0);
-  const lastUpdated = specs.length > 0 
-    ? new Date(Math.max(...specs.map(spec => spec.updatedAt.getTime())))
-    : new Date();
+  const lastUpdated =
+    specs.length > 0 ? new Date(Math.max(...specs.map((spec) => spec.updatedAt.getTime()))) : new Date();
 
   return (
     <div className="border-b bg-gradient-to-r from-slate-50 to-gray-50 dark:from-slate-900 dark:to-gray-900">
@@ -120,11 +113,7 @@ function ApiViewerHeader({
             </div>
           </div>
           <div className="flex items-center space-x-2">
-            <Button
-              onClick={() => copyToClipboard(window.location.href)}
-              size="sm"
-              variant="outline"
-            >
+            <Button onClick={() => copyToClipboard(window.location.href)} size="sm" variant="outline">
               <Copy className="mr-2 h-4 w-4" />
               {isCopied ? "Copied!" : "Share"}
             </Button>
@@ -165,9 +154,9 @@ function RouteComponent() {
       if (!projectData?.project) {
         throw new Error("Project data is required");
       }
-      return trpcClient.apiSpec.getByProjectAndVersion.query({ 
-        projectId: projectData.project.id, 
-        versionLabel: version 
+      return trpcClient.apiSpec.getByProjectAndVersion.query({
+        projectId: projectData.project.id,
+        versionLabel: version,
       });
     },
     // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
@@ -185,7 +174,9 @@ function RouteComponent() {
           <CardContent className="py-12 text-center">
             <AlertCircle className="mx-auto h-12 w-12 text-red-500" />
             <h3 className="mt-4 text-lg font-medium">Project not found</h3>
-            <p className="text-gray-600">The project you're looking for doesn't exist or you don't have access to it.</p>
+            <p className="text-gray-600">
+              The project you're looking for doesn't exist or you don't have access to it.
+            </p>
           </CardContent>
         </Card>
       </div>
@@ -195,19 +186,13 @@ function RouteComponent() {
   if (specsError || !specsData?.specs || specsData.specs.length === 0) {
     return (
       <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
-        <ApiViewerHeader 
-          project={projectData.project} 
-          specs={[]} 
-          version={version} 
-        />
+        <ApiViewerHeader project={projectData.project} specs={[]} version={version} />
         <div className="container mx-auto px-4 py-12">
           <Card>
             <CardContent className="py-12 text-center">
               <Code2 className="mx-auto h-12 w-12 text-gray-400" />
               <h3 className="mt-4 text-lg font-medium">No API specifications found</h3>
-              <p className="text-gray-600">
-                Version v{version} doesn't have any API specifications yet.
-              </p>
+              <p className="text-gray-600">Version v{version} doesn't have any API specifications yet.</p>
             </CardContent>
           </Card>
         </div>
@@ -221,16 +206,12 @@ function RouteComponent() {
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
       <ApiViewerHeader project={project} specs={specs} version={version} />
-      
+
       <div className="container mx-auto px-4 py-8">
-        <m.div
-          animate={{ opacity: 1, y: 0 }}
-          initial={{ opacity: 0, y: 20 }}
-          transition={{ duration: 0.3 }}
-        >
+        <m.div animate={{ opacity: 1, y: 0 }} initial={{ opacity: 0, y: 20 }} transition={{ duration: 0.3 }}>
           {/* API Specifications with Scalar Viewer */}
           <div className="space-y-8">
-            {specs.map(spec => (
+            {specs.map((spec) => (
               <div key={spec.id}>
                 {/* Scalar API Reference Component */}
                 <ScalarApiReference

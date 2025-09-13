@@ -35,19 +35,18 @@ interface ScalarConfig {
   };
 }
 
-export function ScalarApiReference({ 
-  _projectSlug, 
-  _specTitle, 
-  specId, 
-  version 
-}: ScalarApiReferenceProps) {
+export function ScalarApiReference({ _projectSlug, _specTitle, specId, version }: ScalarApiReferenceProps) {
   const trpcClient = useTRPCClient();
   const containerRef = React.useRef<HTMLDivElement>(null);
   const [isScalarLoaded, setIsScalarLoaded] = React.useState(false);
   const scriptLoadedRef = React.useRef(false);
 
   // Fetch the API spec data
-  const { data: specData, error, isLoading } = useQuery({
+  const {
+    data: specData,
+    error,
+    isLoading,
+  } = useQuery({
     queryFn: () => trpcClient.apiSpec.getById.query({ specId }),
     queryKey: ["apiSpecDetail", specId],
   });
@@ -67,22 +66,22 @@ export function ScalarApiReference({
     const loadScalar = () => {
       try {
         // Check if Scalar is already loaded
-        if (typeof window.Scalar !== 'undefined') {
+        if (typeof window.Scalar !== "undefined") {
           markScalarAsLoaded();
           return;
         }
 
         // Create script element for Scalar
-        const script = document.createElement('script');
-        script.src = 'https://cdn.jsdelivr.net/npm/@scalar/api-reference';
+        const script = document.createElement("script");
+        script.src = "https://cdn.jsdelivr.net/npm/@scalar/api-reference";
         script.async = true;
-        
+
         script.onload = () => {
           markScalarAsLoaded();
         };
-        
+
         script.onerror = () => {
-          console.error('Failed to load Scalar API Reference');
+          console.error("Failed to load Scalar API Reference");
         };
 
         document.head.appendChild(script);
@@ -94,7 +93,7 @@ export function ScalarApiReference({
           }
         };
       } catch (error) {
-        console.error('Error loading Scalar:', error);
+        console.error("Error loading Scalar:", error);
       }
     };
 
@@ -109,14 +108,14 @@ export function ScalarApiReference({
     }
 
     const container = containerRef.current;
-    
+
     try {
       // Clear any existing content
-      container.innerHTML = '';
+      container.innerHTML = "";
 
       // Get the OpenAPI spec content
       const specContent = specData.spec.originalRaw ?? JSON.stringify(specData.spec.specJson, null, 2);
-      
+
       if (!specContent) {
         container.innerHTML = '<p class="text-center py-8 text-gray-500">No API specification content available</p>';
         return;
@@ -125,7 +124,7 @@ export function ScalarApiReference({
       // Parse the spec content to ensure it's valid JSON
       let parsedSpec: unknown;
       try {
-        if (typeof specContent === 'string') {
+        if (typeof specContent === "string") {
           // Try parsing as JSON first, fallback to YAML parsing if needed
           try {
             parsedSpec = JSON.parse(specContent) as unknown;
@@ -137,7 +136,7 @@ export function ScalarApiReference({
           parsedSpec = specContent;
         }
       } catch (parseError) {
-        console.error('Failed to parse spec content:', parseError);
+        console.error("Failed to parse spec content:", parseError);
         parsedSpec = specData.spec.specJson;
       }
 
@@ -149,7 +148,7 @@ export function ScalarApiReference({
             authentication: {
               securitySchemes: {
                 bearerAuth: {
-                  token: 'your-token-here', // This could be made configurable
+                  token: "your-token-here", // This could be made configurable
                 },
               },
             },
@@ -267,9 +266,9 @@ export function ScalarApiReference({
               hideDownloadButton: false,
               hideTestRequestButton: false,
               isEditable: false,
-              layout: 'modern',
+              layout: "modern",
               showSidebar: true,
-              theme: 'default',
+              theme: "default",
               withDefaultFonts: true,
             },
             spec: {
@@ -279,8 +278,8 @@ export function ScalarApiReference({
 
           window.Scalar.createApiReference(container, config);
         } catch (scalarError) {
-          console.error('Failed to create Scalar API reference:', scalarError);
-          const errorMessage = scalarError instanceof Error ? scalarError.message : 'Unknown error';
+          console.error("Failed to create Scalar API reference:", scalarError);
+          const errorMessage = scalarError instanceof Error ? scalarError.message : "Unknown error";
           container.innerHTML = `
             <div class="text-center py-8">
               <p class="text-red-500">Failed to load API documentation</p>
@@ -290,8 +289,8 @@ export function ScalarApiReference({
         }
       });
     } catch (error) {
-      console.error('Failed to initialize Scalar:', error);
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.error("Failed to initialize Scalar:", error);
+      const errorMessage = error instanceof Error ? error.message : "Unknown error";
       container.innerHTML = `
         <div class="text-center py-8">
           <p class="text-red-500">Failed to load API documentation</p>
@@ -310,15 +309,15 @@ export function ScalarApiReference({
         </CardHeader>
         <CardContent>
           <div className="flex items-center justify-center py-12">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
+            <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-blue-500"></div>
           </div>
           {/* Loading skeleton */}
-          <div className="space-y-4 animate-pulse">
-            <div className="h-4 bg-gray-200 rounded w-3/4"></div>
-            <div className="h-4 bg-gray-200 rounded w-1/2"></div>
-            <div className="h-32 bg-gray-200 rounded"></div>
-            <div className="h-4 bg-gray-200 rounded w-2/3"></div>
-            <div className="h-20 bg-gray-200 rounded"></div>
+          <div className="animate-pulse space-y-4">
+            <div className="h-4 w-3/4 rounded bg-gray-200"></div>
+            <div className="h-4 w-1/2 rounded bg-gray-200"></div>
+            <div className="h-32 rounded bg-gray-200"></div>
+            <div className="h-4 w-2/3 rounded bg-gray-200"></div>
+            <div className="h-20 rounded bg-gray-200"></div>
           </div>
         </CardContent>
       </Card>
@@ -326,7 +325,7 @@ export function ScalarApiReference({
   }
 
   if (error || !specData?.spec) {
-    const errorMessage = error instanceof Error ? error.message : 'Specification not found';
+    const errorMessage = error instanceof Error ? error.message : "Specification not found";
     return (
       <Card>
         <CardHeader>
@@ -334,11 +333,9 @@ export function ScalarApiReference({
           <CardDescription>Unable to fetch specification for v{version}</CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="text-center py-8">
+          <div className="py-8 text-center">
             <p className="text-red-500">Error loading API specification</p>
-            <p className="text-gray-500 text-sm mt-2">
-              {errorMessage}
-            </p>
+            <p className="mt-2 text-sm text-gray-500">{errorMessage}</p>
           </div>
         </CardContent>
       </Card>
@@ -348,15 +345,15 @@ export function ScalarApiReference({
   return (
     <Card className="overflow-hidden">
       <CardContent className="p-0">
-        <div 
+        <div
           className="min-h-[600px] w-full"
           ref={containerRef}
-          style={{ 
-            border: 'none',
-            borderRadius: '8px',
-            contain: 'layout style paint',
-            isolation: 'isolate',
-            willChange: 'scroll-position'
+          style={{
+            border: "none",
+            borderRadius: "8px",
+            contain: "layout style paint",
+            isolation: "isolate",
+            willChange: "scroll-position",
           }}
         />
       </CardContent>

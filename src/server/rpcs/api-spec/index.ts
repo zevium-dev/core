@@ -4,7 +4,12 @@ import z from "zod";
 import { db } from "~/db";
 import * as schema from "~/db/schema";
 import { createApiSpec, getApiSpecById, getProjectApiSpecs, updateApiSpecStatus } from "~/lib/server/api-spec-service";
-import { extractEndpoints, OpenApiValidationError, parseAndValidateOpenApiSpec, type ParsedOpenApiSpec } from "~/lib/server/openapi-validator";
+import {
+  extractEndpoints,
+  OpenApiValidationError,
+  parseAndValidateOpenApiSpec,
+  type ParsedOpenApiSpec,
+} from "~/lib/server/openapi-validator";
 import { protectedProcedure, router } from "~/server/trpc";
 
 // API Spec schema for responses
@@ -89,23 +94,31 @@ export const apiSpecRouter = router({
 
   // Get API specifications for a project by version
   getByProjectAndVersion: protectedProcedure
-    .meta({ route: { path: "/api-spec/get-by-project-version", summary: "Get API specifications for project by version" } })
-    .input(z.object({
-      projectId: z.string(),
-      versionLabel: z.string(),
-    }))
-    .output(z.object({
-      specs: z.array(apiSpecSchema.extend({
-        endpointCount: z.number(),
-        endpoints: z.array(endpointSchema),
-      })),
-    }))
+    .meta({
+      route: { path: "/api-spec/get-by-project-version", summary: "Get API specifications for project by version" },
+    })
+    .input(
+      z.object({
+        projectId: z.string(),
+        versionLabel: z.string(),
+      }),
+    )
+    .output(
+      z.object({
+        specs: z.array(
+          apiSpecSchema.extend({
+            endpointCount: z.number(),
+            endpoints: z.array(endpointSchema),
+          }),
+        ),
+      }),
+    )
     .query(async ({ ctx, input }) => {
       const specs = await getProjectApiSpecs(input.projectId, ctx.user.id);
-      
+
       // Filter specs by version label
-      const filteredSpecs = specs.filter(spec => spec.versionLabel === input.versionLabel);
-      
+      const filteredSpecs = specs.filter((spec) => spec.versionLabel === input.versionLabel);
+
       // Fetch detailed information including endpoints for each spec
       const specsWithEndpoints = await Promise.all(
         filteredSpecs.map(async (spec) => {
@@ -115,9 +128,9 @@ export const apiSpecRouter = router({
             endpoints: detailedSpec.endpoints,
             projectId: input.projectId,
           };
-        })
+        }),
       );
-      
+
       return {
         specs: specsWithEndpoints,
       };
@@ -196,45 +209,51 @@ export const apiSpecRouter = router({
   // Upload and create new API specification with file upload
   uploadFiles: protectedProcedure
     .meta({ route: { path: "/api-spec/upload-files", summary: "Upload OpenAPI specification files" } })
-    .input(z.object({
-      files: z.array(z.object({
-        content: z.string().min(1, "File content is required"),
-        name: z.string().min(1, "File name is required"),
-        size: z.number().positive("File size must be positive"),
-        type: z.string().optional(),
-      })).min(1, "At least one file is required").max(10, "Maximum 10 files allowed"),
-      isUpdate: z.boolean().default(false),
-      projectId: z.string().min(1, "Project ID is required"),
-      versionLabel: z.string().min(1, "Version label is required"),
-    }))
-    .output(z.object({
-      message: z.string(),
-      specs: z.array(apiSpecSchema.extend({
-        endpointCount: z.number(),
-      })),
-      success: z.boolean(),
-    }))
+    .input(
+      z.object({
+        files: z
+          .array(
+            z.object({
+              content: z.string().min(1, "File content is required"),
+              name: z.string().min(1, "File name is required"),
+              size: z.number().positive("File size must be positive"),
+              type: z.string().optional(),
+            }),
+          )
+          .min(1, "At least one file is required")
+          .max(10, "Maximum 10 files allowed"),
+        isUpdate: z.boolean().default(false),
+        projectId: z.string().min(1, "Project ID is required"),
+        versionLabel: z.string().min(1, "Version label is required"),
+      }),
+    )
+    .output(
+      z.object({
+        message: z.string(),
+        specs: z.array(
+          apiSpecSchema.extend({
+            endpointCount: z.number(),
+          }),
+        ),
+        success: z.boolean(),
+      }),
+    )
     .mutation(async ({ ctx, input }) => {
       const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB per file
-      const ALLOWED_EXTENSIONS = ['.json', '.yaml', '.yml'];
-      const ALLOWED_MIME_TYPES = ['application/json', 'text/yaml', 'application/x-yaml', 'text/x-yaml', 'text/plain'];
-      
+      const ALLOWED_EXTENSIONS = [".json", ".yaml", ".yml"];
+      const ALLOWED_MIME_TYPES = ["application/json", "text/yaml", "application/x-yaml", "text/x-yaml", "text/plain"];
+
       try {
         // Validate project access and permissions
         const projectMember = await db
-          .select({ 
+          .select({
             organizationId: schema.project.organizationId,
             projectName: schema.project.name,
             role: schema.projectMember.role,
           })
           .from(schema.projectMember)
           .innerJoin(schema.project, eq(schema.projectMember.projectId, schema.project.id))
-          .where(
-            and(
-              eq(schema.projectMember.projectId, input.projectId),
-              eq(schema.projectMember.userId, ctx.user.id)
-            )
-          )
+          .where(and(eq(schema.projectMember.projectId, input.projectId), eq(schema.projectMember.userId, ctx.user.id)))
           .limit(1);
 
         if (projectMember.length === 0) {
@@ -248,16 +267,16 @@ export const apiSpecRouter = router({
 
         // Validate each file
         const validationErrors: Array<string> = [];
-        const validatedFiles: Array<{ 
-          content: string; 
-          extension: string; 
-          name: string; 
-          parsedSpec: ParsedOpenApiSpec; 
+        const validatedFiles: Array<{
+          content: string;
+          extension: string;
+          name: string;
+          parsedSpec: ParsedOpenApiSpec;
         }> = [];
 
         for (const [index, file] of input.files.entries()) {
           const filePrefix = `File ${index + 1} (${file.name})`;
-          
+
           // Validate file size
           if (file.size > MAX_FILE_SIZE) {
             validationErrors.push(`${filePrefix}: File size exceeds 10MB limit`);
@@ -265,7 +284,7 @@ export const apiSpecRouter = router({
           }
 
           // Validate file extension
-          const extension = file.name.toLowerCase().substring(file.name.lastIndexOf('.'));
+          const extension = file.name.toLowerCase().substring(file.name.lastIndexOf("."));
           if (!ALLOWED_EXTENSIONS.includes(extension)) {
             validationErrors.push(`${filePrefix}: Invalid file type. Only .json, .yaml, and .yml files are allowed`);
             continue;
@@ -285,7 +304,8 @@ export const apiSpecRouter = router({
 
           // Check content size vs declared size (basic validation)
           const contentSize = new TextEncoder().encode(file.content).length;
-          if (Math.abs(contentSize - file.size) > file.size * 0.1) { // Allow 10% variance
+          if (Math.abs(contentSize - file.size) > file.size * 0.1) {
+            // Allow 10% variance
             validationErrors.push(`${filePrefix}: File size mismatch. Content size doesn't match declared size`);
             continue;
           }
@@ -305,12 +325,14 @@ export const apiSpecRouter = router({
               parsedSpec,
             });
           } catch (error) {
-            validationErrors.push(`${filePrefix}: Failed to parse OpenAPI specification - ${error instanceof Error ? error.message : 'Unknown error'}`);
+            validationErrors.push(
+              `${filePrefix}: Failed to parse OpenAPI specification - ${error instanceof Error ? error.message : "Unknown error"}`,
+            );
           }
         }
 
         if (validationErrors.length > 0) {
-          throw new Error(`File validation failed:\n${validationErrors.join('\n')}`);
+          throw new Error(`File validation failed:\n${validationErrors.join("\n")}`);
         }
 
         if (validatedFiles.length === 0) {
@@ -323,10 +345,7 @@ export const apiSpecRouter = router({
             .select({ id: schema.apiSpec.id })
             .from(schema.apiSpec)
             .where(
-              and(
-                eq(schema.apiSpec.projectId, input.projectId),
-                eq(schema.apiSpec.versionLabel, input.versionLabel)
-              )
+              and(eq(schema.apiSpec.projectId, input.projectId), eq(schema.apiSpec.versionLabel, input.versionLabel)),
             );
 
           if (existingSpecs.length === 0) {
@@ -336,16 +355,16 @@ export const apiSpecRouter = router({
           // Archive existing specs for this version
           await db
             .update(schema.apiSpec)
-            .set({ 
-              status: "archived", 
-              updatedAt: new Date() 
+            .set({
+              status: "archived",
+              updatedAt: new Date(),
             })
             .where(
               and(
                 eq(schema.apiSpec.projectId, input.projectId),
                 eq(schema.apiSpec.versionLabel, input.versionLabel),
-                eq(schema.apiSpec.status, "active")
-              )
+                eq(schema.apiSpec.status, "active"),
+              ),
             );
         } else {
           // Check if version already exists for new uploads
@@ -353,15 +372,14 @@ export const apiSpecRouter = router({
             .select({ id: schema.apiSpec.id })
             .from(schema.apiSpec)
             .where(
-              and(
-                eq(schema.apiSpec.projectId, input.projectId),
-                eq(schema.apiSpec.versionLabel, input.versionLabel)
-              )
+              and(eq(schema.apiSpec.projectId, input.projectId), eq(schema.apiSpec.versionLabel, input.versionLabel)),
             )
             .limit(1);
 
           if (existingVersion.length > 0) {
-            throw new Error(`Version "${input.versionLabel}" already exists. Use update mode to modify existing versions.`);
+            throw new Error(
+              `Version "${input.versionLabel}" already exists. Use update mode to modify existing versions.`,
+            );
           }
         }
 
@@ -372,7 +390,7 @@ export const apiSpecRouter = router({
         for (const file of validatedFiles) {
           try {
             // Check for duplicate specs by hash within this upload
-            const isDuplicate = createdSpecs.some(spec => spec.hash === file.parsedSpec.hash);
+            const isDuplicate = createdSpecs.some((spec) => spec.hash === file.parsedSpec.hash);
             if (isDuplicate) {
               processingErrors.push(`${file.name}: Duplicate specification detected within upload`);
               continue;
@@ -380,22 +398,24 @@ export const apiSpecRouter = router({
 
             // Check if a spec with the same hash already exists in the project (for different version)
             const existingSpecByHash = await db
-              .select({ 
-                id: schema.apiSpec.id, 
-                versionLabel: schema.apiSpec.versionLabel 
+              .select({
+                id: schema.apiSpec.id,
+                versionLabel: schema.apiSpec.versionLabel,
               })
               .from(schema.apiSpec)
               .where(
                 and(
                   eq(schema.apiSpec.projectId, input.projectId),
                   eq(schema.apiSpec.hash, file.parsedSpec.hash),
-                  eq(schema.apiSpec.status, "active")
-                )
+                  eq(schema.apiSpec.status, "active"),
+                ),
               )
               .limit(1);
 
             if (existingSpecByHash.length > 0 && !input.isUpdate) {
-              processingErrors.push(`${file.name}: This specification already exists in version "${existingSpecByHash[0]?.versionLabel}"`);
+              processingErrors.push(
+                `${file.name}: This specification already exists in version "${existingSpecByHash[0]?.versionLabel}"`,
+              );
               continue;
             }
 
@@ -411,43 +431,46 @@ export const apiSpecRouter = router({
               ...spec,
               endpointCount: spec.endpointCount,
             });
-
           } catch (error) {
             if (error instanceof OpenApiValidationError) {
-              processingErrors.push(`${file.name}: OpenAPI validation failed - ${error.errors.map(e => e.message).join(", ")}`);
+              processingErrors.push(
+                `${file.name}: OpenAPI validation failed - ${error.errors.map((e) => e.message).join(", ")}`,
+              );
             } else {
-              processingErrors.push(`${file.name}: ${error instanceof Error ? error.message : "Unknown processing error"}`);
+              processingErrors.push(
+                `${file.name}: ${error instanceof Error ? error.message : "Unknown processing error"}`,
+              );
             }
           }
         }
 
         // Check if any specs were successfully created
         if (createdSpecs.length === 0) {
-          const errorMessage = processingErrors.length > 0 
-            ? `All files failed to process:\n${processingErrors.join('\n')}`
-            : "No specifications could be created";
+          const errorMessage =
+            processingErrors.length > 0
+              ? `All files failed to process:\n${processingErrors.join("\n")}`
+              : "No specifications could be created";
           throw new Error(errorMessage);
         }
 
         // Prepare response message
         let message = `Successfully uploaded ${createdSpecs.length} specification(s)`;
         if (processingErrors.length > 0) {
-          message += `\n\nWarnings:\n${processingErrors.join('\n')}`;
+          message += `\n\nWarnings:\n${processingErrors.join("\n")}`;
         }
 
         return {
           message,
-          specs: createdSpecs.map(spec => ({
+          specs: createdSpecs.map((spec) => ({
             ...spec,
             projectId: input.projectId,
           })),
           success: true,
         };
-
       } catch (error) {
         // Log error for debugging (in production, use proper logging)
-        console.error('API Spec Upload Error:', error);
-        
+        console.error("API Spec Upload Error:", error);
+
         throw new Error(error instanceof Error ? error.message : "Failed to upload API specifications");
       }
     }),
