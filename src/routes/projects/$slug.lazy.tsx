@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createLazyFileRoute, Link } from "@tanstack/react-router";
+import { createLazyFileRoute, Link, Outlet, useMatches } from "@tanstack/react-router";
 import {
   AlertCircle,
   ArrowLeft,
@@ -8,6 +8,7 @@ import {
   Calendar,
   Code2,
   Copy,
+  Download,
   Edit3,
   ExternalLink,
   Eye,
@@ -19,6 +20,7 @@ import {
   Save,
   Shield,
   Trash2,
+  Upload,
   Users,
   X,
 } from "lucide-react";
@@ -50,6 +52,7 @@ import {
   DropdownMenuTrigger,
 } from "~/components/ui/dropdown-menu";
 import { EasyTooltip } from "~/components/ui/easy-tooltip";
+import { FileUpload } from "~/components/ui/file-upload";
 import { Input } from "~/components/ui/input";
 import { Label } from "~/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "~/components/ui/select";
@@ -90,137 +93,208 @@ interface ProjectData {
   visibility: "internal" | "private" | "public";
 }
 
-function ApiSpecsSection({ projectId }: { projectId: string }) {
-  const trpcClient = useTRPCClient();
+// API Specification Upload Dialog
+function ApiSpecUploadDialog({
+  existingVersions,
+  initialVersion,
+  isLoading,
+  onOpenChange,
+  onUpload,
+  open,
+  project: _project,
+}: {
+  existingVersions: Array<string>;
+  initialVersion?: null | string;
+  isLoading: boolean;
+  onOpenChange: (open: boolean) => void;
+  onUpload: (files: Array<File>, versionLabel: string, isUpdate: boolean) => void;
+  open: boolean;
+  project: ProjectData;
+}) {
+  const [selectedFiles, setSelectedFiles] = React.useState<Array<File>>([]);
+  const [versionLabel, setVersionLabel] = React.useState("");
+  const [isUpdate, setIsUpdate] = React.useState(!!initialVersion);
+  const [selectedExistingVersion, setSelectedExistingVersion] = React.useState(initialVersion ?? "");
 
-  const {
-    data: specsData,
-    error: specsError,
-    isLoading: specsLoading,
-  } = useQuery({
-    queryFn: () => trpcClient.apiSpec.getByProject.query({ projectId }),
-    queryKey: ["apiSpecs", projectId],
-  });
-
-  if (specsLoading) {
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle>API Specifications</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-4">
-            {Array.from({ length: 3 }).map((_) => (
-              <div className="flex items-center space-x-4" key={crypto.randomUUID()}>
-                <Skeleton className="h-10 w-10 rounded" />
-                <div className="flex-1 space-y-2">
-                  <Skeleton className="h-4 w-[200px]" />
-                  <Skeleton className="h-3 w-[100px]" />
-                </div>
-              </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
-    );
+  // Handle reset when dialog opens/closes
+  const prevOpen = React.useRef(open);
+  const prevInitialVersion = React.useRef(initialVersion);
+  
+  if (open !== prevOpen.current || initialVersion !== prevInitialVersion.current) {
+    if (open) {
+      if (initialVersion) {
+        setIsUpdate(true);
+        setSelectedExistingVersion(initialVersion);
+      } else if (prevInitialVersion.current !== initialVersion) {
+        setIsUpdate(false);
+        setSelectedExistingVersion("");
+      }
+    } else {
+      // Reset when closing
+      setSelectedFiles([]);
+      setVersionLabel("");
+      setIsUpdate(!!initialVersion);
+      setSelectedExistingVersion(initialVersion ?? "");
+    }
+    prevOpen.current = open;
+    prevInitialVersion.current = initialVersion;
   }
 
-  if (specsError) {
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle>API Specifications</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="text-muted-foreground flex items-center justify-center py-8">
-            <AlertCircle className="mr-2 h-5 w-5" />
-            Failed to load API specifications
-          </div>
-        </CardContent>
-      </Card>
-    );
-  }
+  const handleFileSelect = (files: Array<File>) => {
+    setSelectedFiles(files);
+  };
 
-  const specs = specsData?.specs ?? [];
+  const handleUpload = () => {
+    if (selectedFiles.length === 0) {
+      toast.error("Please select at least one file to upload");
+      return;
+    }
+
+    const finalVersionLabel = isUpdate ? selectedExistingVersion : versionLabel;
+    if (!finalVersionLabel.trim()) {
+      toast.error("Please provide a version label");
+      return;
+    }
+
+    onUpload(selectedFiles, finalVersionLabel.trim(), isUpdate);
+  };
+
+  const canUpload = selectedFiles.length > 0 && 
+    (isUpdate ? selectedExistingVersion : versionLabel.trim());
 
   return (
-    <Card>
-      <CardHeader className="flex flex-row items-center justify-between">
-        <div>
-          <CardTitle>API Specifications</CardTitle>
-          <CardDescription>OpenAPI specifications and documentation for this project</CardDescription>
-        </div>
-        <Button size="sm" variant="outline">
-          <FileText className="mr-2 h-4 w-4" />
-          Upload Spec
-        </Button>
-      </CardHeader>
-      <CardContent>
-        {specs.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-12 text-center">
-            <Book className="text-muted-foreground mb-4 h-12 w-12" />
-            <h3 className="mb-2 text-lg font-semibold">No API Specifications</h3>
-            <p className="text-muted-foreground mb-4 max-w-md">
-              Upload your first OpenAPI specification to start documenting your APIs and enable powerful features.
-            </p>
-            <Button>
-              <FileText className="mr-2 h-4 w-4" />
-              Upload OpenAPI Spec
-            </Button>
-          </div>
-        ) : (
+    <Dialog onOpenChange={onOpenChange} open={open}>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Upload className="h-5 w-5" />
+            Upload API Specification
+          </DialogTitle>
+          <DialogDescription>
+            Upload OpenAPI specification files to create a new version or update an existing one.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-6">
+          {/* Upload Mode Selection */}
           <div className="space-y-4">
-            {specs.map((spec) => (
-              <div
-                className="hover:bg-muted/50 flex items-center justify-between rounded-lg border p-4 transition-colors"
-                key={spec.id}
+            <Label className="text-base font-medium">Upload Mode</Label>
+            <div className="grid grid-cols-2 gap-4">
+              <Card 
+                className={`cursor-pointer border-2 transition-all ${
+                  !isUpdate 
+                    ? "border-blue-500 bg-blue-50 dark:bg-blue-950/20" 
+                    : "border-gray-200 hover:border-gray-300"
+                }`}
+                onClick={() => setIsUpdate(false)}
               >
-                <div className="flex items-center space-x-4">
-                  <div className="flex h-10 w-10 items-center justify-center rounded bg-blue-100 dark:bg-blue-900/20">
-                    <FileText className="h-5 w-5 text-blue-600 dark:text-blue-400" />
-                  </div>
-                  <div>
-                    <div className="flex items-center space-x-2">
-                      <h4 className="font-medium">{spec.title ?? "Untitled API"}</h4>
-                      <Badge className="text-xs" variant="outline">
-                        v{spec.versionLabel}
-                      </Badge>
-                      <BadgeStatus status={spec.status} />
+                <CardContent className="p-4">
+                  <div className="flex items-center space-x-3">
+                    <div className={`rounded-full p-1 ${!isUpdate ? "bg-blue-500" : "bg-gray-300"}`}>
+                      <Plus className={`h-4 w-4 ${!isUpdate ? "text-white" : "text-gray-600"}`} />
                     </div>
-                    <div className="text-muted-foreground mt-1 flex items-center space-x-4 text-sm">
-                      <span>{spec.endpointCount} endpoints</span>
-                      <span>•</span>
-                      <span className="capitalize">{spec.format}</span>
-                      <span>•</span>
-                      <span>Updated {new Date(spec.updatedAt).toLocaleDateString()}</span>
+                    <div>
+                      <h3 className="font-medium">New Version</h3>
+                      <p className="text-sm text-gray-600">Create a new API version</p>
                     </div>
                   </div>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <Button size="sm" variant="ghost">
-                    <ExternalLink className="mr-2 h-4 w-4" />
-                    View Docs
-                  </Button>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button size="sm" variant="ghost">
-                        <MoreHorizontal className="h-4 w-4" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      <DropdownMenuItem>Edit Specification</DropdownMenuItem>
-                      <DropdownMenuItem>Download</DropdownMenuItem>
-                      <DropdownMenuItem>Duplicate</DropdownMenuItem>
-                      <DropdownMenuItem className="text-destructive">Delete</DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </div>
-              </div>
-            ))}
+                </CardContent>
+              </Card>
+
+              <Card 
+                className={`cursor-pointer border-2 transition-all ${
+                  isUpdate 
+                    ? "border-blue-500 bg-blue-50 dark:bg-blue-950/20" 
+                    : "border-gray-200 hover:border-gray-300"
+                } ${existingVersions.length === 0 ? "opacity-50 cursor-not-allowed" : ""}`}
+                onClick={() => existingVersions.length > 0 && setIsUpdate(true)}
+              >
+                <CardContent className="p-4">
+                  <div className="flex items-center space-x-3">
+                    <div className={`rounded-full p-1 ${isUpdate ? "bg-blue-500" : "bg-gray-300"}`}>
+                      <Edit3 className={`h-4 w-4 ${isUpdate ? "text-white" : "text-gray-600"}`} />
+                    </div>
+                    <div>
+                      <h3 className="font-medium">Update Existing</h3>
+                      <p className="text-sm text-gray-600">Update an existing version</p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
           </div>
-        )}
-      </CardContent>
-    </Card>
+
+          {/* Version Input */}
+          <div className="space-y-2">
+            {isUpdate ? (
+              <>
+                <Label htmlFor="existing-version">Select Version to Update</Label>
+                <Select onValueChange={setSelectedExistingVersion} value={selectedExistingVersion}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select a version to update" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {existingVersions.map((version) => (
+                      <SelectItem key={version} value={version}>
+                        v{version}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </>
+            ) : (
+              <>
+                <Label htmlFor="version-label">New Version Label</Label>
+                <Input
+                  id="version-label"
+                  onChange={(e) => setVersionLabel(e.target.value)}
+                  placeholder="e.g., 1.0.0, 2.1.0, v3-beta"
+                  value={versionLabel}
+                />
+                <p className="text-xs text-gray-500">
+                  Use semantic versioning (e.g., 1.0.0) or any meaningful label
+                </p>
+              </>
+            )}
+          </div>
+
+          {/* File Upload */}
+          <div className="space-y-2">
+            <Label>API Specification Files</Label>
+            <FileUpload
+              accept=".json,.yaml,.yml"
+              maxSize={10}
+              multiple={true}
+              onFileSelect={handleFileSelect}
+              placeholder="Upload your OpenAPI specification files"
+            />
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button disabled={isLoading} onClick={() => onOpenChange(false)} variant="outline">
+            Cancel
+          </Button>
+          <Button 
+            className="bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700"
+            disabled={!canUpload || isLoading}
+            onClick={handleUpload} 
+          >
+            {isLoading ? (
+              <>
+                <div className="mr-2 h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                Uploading...
+              </>
+            ) : (
+              <>
+                <Upload className="mr-2 h-4 w-4" />
+                {isUpdate ? "Update Version" : "Create Version"}
+              </>
+            )}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -490,191 +564,73 @@ function EditableField({
   );
 }
 
-// Endpoints Section
-function EndpointsSection({ project }: { project: ProjectData }) {
-  const trpcClient = useTRPCClient();
-
-  const { data: specsData, isLoading: specsLoading } = useQuery({
-    queryFn: () => trpcClient.apiSpec.getByProject.query({ projectId: project.id }),
-    queryKey: ["apiSpecs", project.id],
-  });
-
-  const specs = specsData?.specs ?? [];
-
-  // Fetch endpoints for each spec
-  const specEndpointsQueries = useQuery({
-    enabled: specs.length > 0,
-    queryFn: async () => {
-      const endpointsPromises = specs.map(async (spec) => {
-        try {
-          const result = await trpcClient.apiSpec.getById.query({ specId: spec.id });
-          return { endpoints: result.spec.endpoints, specId: spec.id };
-        } catch (error) {
-          console.error(`Failed to fetch endpoints for spec ${spec.id}:`, error);
-          return { endpoints: [], specId: spec.id };
-        }
-      });
-      const results = await Promise.all(endpointsPromises);
-      return results.reduce<
-        Record<
-          string,
-          Array<{
-            deprecated: boolean;
-            id: string;
-            method: string;
-            path: string;
-            summary: null | string;
-            tags: Array<string>;
-          }>
-        >
-      >((acc, result) => {
-        acc[result.specId] = result.endpoints;
-        return acc;
-      }, {});
-    },
-    queryKey: ["specEndpoints", specs.map((s) => s.id)],
-  });
-
-  const endpointsBySpec = specEndpointsQueries.data ?? {};
-
-  const getMethodColor = (method: string) => {
-    switch (method.toUpperCase()) {
-      case "DELETE":
-        return "text-red-600 border-red-600";
-      case "GET":
-        return "text-green-600 border-green-600";
-      case "PATCH":
-        return "text-orange-600 border-orange-600";
-      case "POST":
-        return "text-blue-600 border-blue-600";
-      case "PUT":
-        return "text-yellow-600 border-yellow-600";
-      default:
-        return "text-gray-600 border-gray-600";
-    }
-  };
-
-  if (specsLoading || specEndpointsQueries.isLoading) {
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle>API Endpoints</CardTitle>
-          <CardDescription>Detailed view of all endpoints in your API specifications</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-4">
-            {Array.from({ length: 5 }).map((_) => (
-              <div className="flex items-center space-x-4" key={crypto.randomUUID()}>
-                <Skeleton className="h-6 w-16" />
-                <Skeleton className="h-4 flex-1" />
-                <Skeleton className="h-4 w-20" />
-              </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
-    );
-  }
-
-  if (specs.length === 0) {
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle>API Endpoints</CardTitle>
-          <CardDescription>Detailed view of all endpoints in your API specifications</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="flex flex-col items-center justify-center py-12 text-center">
-            <Code2 className="text-muted-foreground mb-4 h-12 w-12" />
-            <h3 className="mb-2 text-lg font-semibold">No Endpoints Found</h3>
-            <p className="text-muted-foreground">Upload an OpenAPI specification to see your endpoints here.</p>
-          </div>
-        </CardContent>
-      </Card>
-    );
-  }
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>API Endpoints</CardTitle>
-        <CardDescription>All endpoints across your API specifications</CardDescription>
-      </CardHeader>
-      {/* Insert API Specifications list here to keep specs and endpoints together */}
-      <CardContent>
-        <ApiSpecsSection projectId={project.id} />
-      </CardContent>
-      <CardContent>
-        <div className="space-y-4">
-          {specs.map((spec) => {
-            const endpoints = endpointsBySpec[spec.id] ?? [];
-            return (
-              <div className="space-y-2" key={spec.id}>
-                <div className="flex items-center gap-2 border-b pb-2">
-                  <FileText className="h-4 w-4" />
-                  <span className="font-medium">{spec.title ?? "Untitled API"}</span>
-                  <Badge className="text-xs" variant="outline">
-                    v{spec.versionLabel}
-                  </Badge>
-                  <Badge className="text-xs" variant="secondary">
-                    {endpoints.length} endpoints
-                  </Badge>
-                </div>
-                <div className="space-y-2 pl-6">
-                  {endpoints.length === 0 ? (
-                    <div className="text-muted-foreground py-4 text-center text-sm">
-                      No endpoints found in this specification
-                    </div>
-                  ) : (
-                    endpoints.map((endpoint) => (
-                      <div
-                        className="hover:bg-muted/50 flex items-center justify-between rounded-lg px-3 py-2"
-                        key={endpoint.id}
-                      >
-                        <div className="flex items-center gap-3">
-                          <Badge className={getMethodColor(endpoint.method)} variant="outline">
-                            {endpoint.method.toUpperCase()}
-                          </Badge>
-                          <span className="font-mono text-sm">{endpoint.path}</span>
-                          <span className="text-muted-foreground text-sm">{endpoint.summary ?? "No description"}</span>
-                          {endpoint.deprecated && (
-                            <Badge className="text-xs" variant="destructive">
-                              Deprecated
-                            </Badge>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-2">
-                          {endpoint.tags.map((tag) => (
-                            <Badge className="text-xs" key={tag} variant="secondary">
-                              {tag}
-                            </Badge>
-                          ))}
-                        </div>
-                      </div>
-                    ))
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-function ProjectHeader({ onVisibilityChange, project }: { onVisibilityChange: () => void; project: ProjectData }) {
+function ProjectHeader({
+  onVersionChange,
+  onVisibilityChange,
+  project,
+  selectedVersion,
+}: {
+  onVersionChange: (version: string) => void;
+  onVisibilityChange: () => void;
+  project: ProjectData;
+  selectedVersion?: string;
+}) {
   const [isCopied, copyToClipboard] = useCopy();
+  const [uploadDialogOpen, setUploadDialogOpen] = React.useState(false);
   const trpcClient = useTRPCClient();
+  const queryClient = useQueryClient();
 
-  // Fetch available versions from API specs
-  const { data: specsData } = useQuery({
+  // First fetch to get available versions (this will be cached)
+  const { data: allSpecsData } = useQuery({
     queryFn: () => trpcClient.apiSpec.getByProject.query({ projectId: project.id }),
     queryKey: ["apiSpecs", project.id],
+    select: (data) => ({
+      // Only extract version information for efficiency
+      versions: Array.from(new Set(data.specs.map((spec) => spec.versionLabel))).sort((a, b) => b.localeCompare(a)),
+    }),
   });
 
-  const specs = specsData?.specs ?? [];
-  const uniqueVersions = Array.from(new Set(specs.map((spec) => spec.versionLabel))).sort((a, b) => b.localeCompare(a)); // Sort versions descending
+  const uniqueVersions = React.useMemo(() => allSpecsData?.versions ?? [], [allSpecsData?.versions]);
+
+  // Set default version to the latest if none selected
+  React.useEffect(() => {
+    if (!selectedVersion && uniqueVersions.length > 0) {
+      onVersionChange(uniqueVersions[0]);
+    }
+  }, [uniqueVersions, selectedVersion, onVersionChange]);
+
+  // Upload mutation for API specifications
+  const uploadSpecMutation = useMutation({
+    mutationFn: async ({ files, isUpdate, versionLabel }: { files: Array<File>; isUpdate?: boolean; versionLabel: string }) => {
+      // Convert File objects to the format expected by the API
+      const fileData = await Promise.all(
+        files.map(async (file) => ({
+          content: await file.text(),
+          name: file.name,
+          size: file.size,
+          type: file.type,
+        }))
+      );
+
+      return trpcClient.apiSpec.uploadFiles.mutate({
+        files: fileData,
+        isUpdate: isUpdate ?? false,
+        projectId: project.id,
+        versionLabel,
+      });
+    },
+    onError: (error) => {
+      console.error("Failed to upload specification:", error);
+      toast.error("Failed to upload API specification again ding ding");
+    },
+    onSuccess: (data) => {
+      toast.success(data.message);
+      setUploadDialogOpen(false);
+      // Invalidate queries to refresh data
+      void queryClient.invalidateQueries({ queryKey: ["apiSpecs", project.id] });
+      void queryClient.invalidateQueries({ queryKey: ["project", project.slug] });
+    },
+  });
 
   const getVisibilityIcon = (visibility: string) => {
     switch (visibility) {
@@ -769,24 +725,21 @@ function ProjectHeader({ onVisibilityChange, project }: { onVisibilityChange: ()
         </div>
 
         <div className="flex items-center space-x-2">
-          {/* Version Selector */}
-          {uniqueVersions.length > 0 ? (
-            <Select defaultValue={uniqueVersions[0]}>
-              <SelectTrigger className="w-32">
-                <SelectValue placeholder="Version" />
-              </SelectTrigger>
-              <SelectContent>
-                {uniqueVersions.map((version) => (
-                  <SelectItem key={version} value={version}>
-                    v{version}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          ) : (
-            <Button disabled size="sm" variant="outline">
-              No Versions
-            </Button>
+          {/* Upload New Version Button */}
+          <Button
+            className="bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700"
+            onClick={() => setUploadDialogOpen(true)}
+            size="sm"
+          >
+            <Upload className="mr-2 h-4 w-4" />
+            Upload Spec
+          </Button>
+
+          {/* Current Version Info */}
+          {uniqueVersions.length > 0 && selectedVersion && (
+            <Badge className="border-blue-200 text-blue-700 bg-blue-50" variant="outline">
+              Current: v{selectedVersion}
+            </Badge>
           )}
 
           <DropdownMenu>
@@ -815,6 +768,18 @@ function ProjectHeader({ onVisibilityChange, project }: { onVisibilityChange: ()
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
+
+          {/* Upload Dialog */}
+          <ApiSpecUploadDialog
+            existingVersions={uniqueVersions}
+            isLoading={uploadSpecMutation.isPending}
+            onOpenChange={setUploadDialogOpen}
+            onUpload={(files, versionLabel, isUpdate) => {
+              uploadSpecMutation.mutate({ files, isUpdate, versionLabel });
+            }}
+            open={uploadDialogOpen}
+            project={project}
+          />
         </div>
       </div>
     </div>
@@ -961,8 +926,6 @@ function ProjectOverview({ project }: { project: ProjectData }) {
           />
         </CardContent>
       </Card>
-
-      {/* API Specifications are shown in the Endpoints tab */}
     </div>
   );
 }
@@ -1036,9 +999,15 @@ function RichTextEditor({
 
 function RouteComponent() {
   const { slug } = Route.useParams();
+  const matches = useMatches();
   const trpcClient = useTRPCClient();
   const queryClient = useQueryClient();
   const [visibilityDialogOpen, setVisibilityDialogOpen] = React.useState(false);
+
+  // Check if we're on a child route (like /projects/$slug/view/$version)
+  const isChildRoute = matches.some(match => 
+    match.routeId === '/projects/$slug/view/$version'
+  );
 
   const {
     data: projectData,
@@ -1048,6 +1017,10 @@ function RouteComponent() {
     queryFn: () => trpcClient.project.getBySlug.query({ slug }),
     queryKey: ["project", slug],
   });
+
+  const handleVersionChange = React.useCallback((_version: string) => {
+    // No longer needed since we removed version selection
+  }, []);
 
   // Visibility change mutation
   const updateVisibilityMutation = useMutation<unknown, Error, { visibility: string }, { previousProject: unknown }>({
@@ -1128,6 +1101,11 @@ function RouteComponent() {
 
   const project = projectData.project;
 
+  // If we're on a child route, render the Outlet instead of the main project content
+  if (isChildRoute) {
+    return <Outlet />;
+  }
+
   return (
     <m.div
       animate={{ opacity: 1, y: 0 }}
@@ -1135,7 +1113,12 @@ function RouteComponent() {
       initial={{ opacity: 0, y: 20 }}
       transition={{ duration: 0.3 }}
     >
-      <ProjectHeader onVisibilityChange={() => setVisibilityDialogOpen(true)} project={project} />
+      <ProjectHeader
+        onVersionChange={handleVersionChange}
+        onVisibilityChange={() => setVisibilityDialogOpen(true)}
+        project={project}
+        selectedVersion={undefined}
+      />
 
       <VisibilityChangeDialog
         currentVisibility={project.visibility}
@@ -1149,7 +1132,7 @@ function RouteComponent() {
         <TabsList className="grid w-full grid-cols-4">
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="documentation">Documentation</TabsTrigger>
-          <TabsTrigger value="endpoints">Endpoints</TabsTrigger>
+          <TabsTrigger value="versions">API Versions</TabsTrigger>
           <TabsTrigger value="team">Team</TabsTrigger>
         </TabsList>
 
@@ -1161,8 +1144,8 @@ function RouteComponent() {
           <DocumentationSection project={project} />
         </TabsContent>
 
-        <TabsContent value="endpoints">
-          <EndpointsSection project={project} />
+        <TabsContent value="versions">
+          <VersionManagement project={project} />
         </TabsContent>
 
         <TabsContent value="team">
@@ -1310,6 +1293,303 @@ function TeamManagementSection({ project }: { project: ProjectData }) {
         </Table>
       </CardContent>
     </Card>
+  );
+}
+
+// Version Management Section - replaces ApiSpecsSection for better version handling
+function VersionManagement({ project }: { project: ProjectData }) {
+  const trpcClient = useTRPCClient();
+  const queryClient = useQueryClient();
+  const [uploadDialogOpen, setUploadDialogOpen] = React.useState(false);
+  const [selectedVersionForEdit, setSelectedVersionForEdit] = React.useState<null | string>(null);
+
+  // Fetch all API specs grouped by version
+  const { data: specsData, error, isLoading } = useQuery({
+    queryFn: () => trpcClient.apiSpec.getByProject.query({ projectId: project.id }),
+    queryKey: ["apiSpecs", project.id],
+  });
+
+  // Group specs by version and sort
+  const versionGroups = React.useMemo(() => {
+    const specs = specsData?.specs ?? [];
+    const groups = new Map<string, Array<typeof specs[0]>>();
+    
+    specs.forEach((spec) => {
+      const version = spec.versionLabel;
+      if (!groups.has(version)) {
+        groups.set(version, []);
+      }
+      const arr = groups.get(version);
+      if (arr) arr.push(spec);
+    });
+
+    // Convert to array and sort by version (newest first)
+    return Array.from(groups.entries())
+      .sort(([a], [b]) => b.localeCompare(a))
+      .map(([version, versionSpecs]) => ({
+        lastUpdated: new Date(Math.max(...versionSpecs.map(spec => spec.updatedAt.getTime()))),
+        specs: versionSpecs.sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime()),
+        totalEndpoints: versionSpecs.reduce((sum, spec) => sum + spec.endpointCount, 0),
+        version,
+      }));
+  }, [specsData?.specs]);
+
+  // Upload mutation
+  const uploadSpecMutation = useMutation({
+    mutationFn: async ({ files, isUpdate, versionLabel }: { files: Array<File>; isUpdate?: boolean; versionLabel: string }) => {
+      // Convert File objects to the format expected by the API
+      const fileData = await Promise.all(
+        files.map(async (file) => ({
+          content: await file.text(),
+          name: file.name,
+          size: file.size,
+          type: file.type,
+        }))
+      );
+
+      return trpcClient.apiSpec.uploadFiles.mutate({
+        files: fileData,
+        isUpdate: isUpdate ?? false,
+        projectId: project.id,
+        versionLabel,
+      });
+    },
+    onError: (error) => {
+      console.error("Failed to upload specification:", error);
+      toast.error("Failed to upload API specification");
+    },
+    onSuccess: (data) => {
+      toast.success(data.message);
+      setUploadDialogOpen(false);
+      setSelectedVersionForEdit(null);
+      void queryClient.invalidateQueries({ queryKey: ["apiSpecs", project.id] });
+    },
+  });
+
+  // Download function for API specifications
+  const handleDownload = async (spec: { format: "json" | "yaml"; id: string; title: null | string }) => {
+    try {
+      const response = await trpcClient.apiSpec.getById.query({ specId: spec.id });
+      // The server returns the raw uploaded content as `originalRaw` and parsed JSON as `specJson`.
+      // Use `originalRaw` when available, otherwise fallback to serializing `specJson`.
+  const content = response.spec.originalRaw ?? JSON.stringify(response.spec.specJson, null, 2);
+      if (!content) {
+        toast.error("No content found for this API specification");
+        return;
+      }
+      const blob = new Blob([content], { type: `application/${spec.format}` });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `${spec.title ?? "api-spec"}.${spec.format}`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      toast.success("API specification downloaded successfully");
+    } catch (error) {
+      console.error("Download failed:", error);
+      toast.error("Failed to download API specification");
+    }
+  };
+
+  const handleEditVersion = (version: string) => {
+    setSelectedVersionForEdit(version);
+    setUploadDialogOpen(true);
+  };
+
+  const existingVersions = versionGroups.map(group => group.version);
+
+  if (isLoading) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>API Versions</CardTitle>
+          <CardDescription>Manage your API specification versions</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-4">
+            {Array.from({ length: 3 }).map(() => (
+              <div className="animate-pulse" key={crypto.randomUUID()}>
+                <div className="flex items-center justify-between rounded-lg border p-4">
+                  <div className="space-y-2">
+                    <div className="h-4 w-20 bg-gray-200 rounded" />
+                    <div className="h-3 w-32 bg-gray-200 rounded" />
+                  </div>
+                  <div className="h-8 w-20 bg-gray-200 rounded" />
+                </div>
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (error) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>API Versions</CardTitle>
+          <CardDescription>Manage your API specification versions</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-col items-center justify-center py-12 text-center">
+            <AlertCircle className="text-red-500 mb-4 h-12 w-12" />
+            <h3 className="mb-2 text-lg font-medium">Failed to load versions</h3>
+            <p className="text-gray-600 mb-4">There was an error loading your API specifications.</p>
+            <Button onClick={() => window.location.reload()} variant="outline">
+              Try Again
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <>
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle>API Versions</CardTitle>
+              <CardDescription>Manage your API specification versions</CardDescription>
+            </div>
+            <Button 
+              className="bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700"
+              onClick={() => {
+                setSelectedVersionForEdit(null);
+                setUploadDialogOpen(true);
+              }}
+            >
+              <Plus className="mr-2 h-4 w-4" />
+              New Version
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {versionGroups.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-16 text-center">
+              <Code2 className="text-gray-400 mb-4 h-12 w-12" />
+              <h3 className="mb-2 text-lg font-medium">No API versions yet</h3>
+              <p className="text-gray-600 mb-4">
+                Upload your first OpenAPI specification to get started.
+              </p>
+              <Button 
+                className="bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700"
+                onClick={() => setUploadDialogOpen(true)}
+              >
+                <Upload className="mr-2 h-4 w-4" />
+                Upload First Spec
+              </Button>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {versionGroups.map((group) => (
+                <Link
+                  key={group.version}
+                  params={{ slug: project.slug, version: group.version }}
+                  to="/projects/$slug/view/$version"
+                >
+                  <Card 
+                    className="border border-gray-200 cursor-pointer transition-all hover:shadow-md hover:border-blue-300 group"
+                  >
+                  <CardContent className="p-6">
+                    <div className="flex items-center justify-between">
+                      <div className="flex-1">
+                        <div className="flex items-center space-x-3 mb-2">
+                          <h3 className="text-lg font-semibold group-hover:text-blue-600 transition-colors">
+                            v{group.version}
+                          </h3>
+                          <Badge className="bg-blue-100 text-blue-800">
+                            {group.specs.length} spec{group.specs.length !== 1 ? 's' : ''}
+                          </Badge>
+                          <Badge className="bg-green-100 text-green-800">
+                            {group.totalEndpoints} endpoint{group.totalEndpoints !== 1 ? 's' : ''}
+                          </Badge>
+                          <Badge className="bg-purple-100 text-purple-800 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <Eye className="h-3 w-3 mr-1" />
+                            View
+                          </Badge>
+                        </div>
+                        <p className="text-gray-600 text-sm">
+                          Last updated {group.lastUpdated.toLocaleDateString()} at{' '}
+                          {group.lastUpdated.toLocaleTimeString()}
+                        </p>
+                        
+                        {/* Spec Files List */}
+                        <div className="mt-4 space-y-2">
+                          {group.specs.map((spec) => (
+                            <div
+                              className="flex items-center justify-between rounded-md border border-gray-100 bg-gray-50 p-3"
+                              key={spec.id}
+                            >
+                              <div className="flex items-center space-x-3">
+                                <FileText className="h-4 w-4 text-blue-500" />
+                                <div>
+                                  <p className="text-sm font-medium">
+                                    {spec.title ?? `API Spec ${spec.id.slice(0, 8)}`}
+                                  </p>
+                                  <p className="text-xs text-gray-500">
+                                    {spec.format.toUpperCase()} • {spec.endpointCount} endpoints
+                                  </p>
+                                </div>
+                              </div>
+                              <Button
+                                onClick={(e) => {
+                                  e.stopPropagation(); // Prevent card click when downloading
+                                  void handleDownload(spec);
+                                }}
+                                size="sm"
+                                variant="ghost"
+                              >
+                                <Download className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                      
+                      <div className="flex items-center ml-6 space-x-2">
+                        <Button
+                          onClick={(e) => {
+                            e.stopPropagation(); // Prevent card click when updating
+                            handleEditVersion(group.version);
+                          }}
+                          size="sm"
+                          variant="outline"
+                        >
+                          <Edit3 className="mr-2 h-4 w-4" />
+                          Update
+                        </Button>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              </Link>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Upload Dialog */}
+      <ApiSpecUploadDialog
+        existingVersions={existingVersions}
+        initialVersion={selectedVersionForEdit}
+        isLoading={uploadSpecMutation.isPending}
+        onOpenChange={(open) => {
+          setUploadDialogOpen(open);
+          if (!open) setSelectedVersionForEdit(null);
+        }}
+        onUpload={(files, versionLabel, isUpdate) => {
+          uploadSpecMutation.mutate({ files, isUpdate, versionLabel });
+        }}
+        open={uploadDialogOpen}
+        project={project}
+      />
+    </>
   );
 }
 
