@@ -82,7 +82,7 @@ const navData = [
   },
   {
     icon: Settings,
-    requiresAuth: false,
+    requiresAuth: true,
     subroutes: [
       { title: "Activity", url: "/settings/activity/$" },
       { title: "API Keys", url: "/settings/keys/$" },
