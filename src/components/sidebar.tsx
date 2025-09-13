@@ -1,6 +1,6 @@
 import { Link, useMatches } from "@tanstack/react-router";
 import { atom, useAtom } from "jotai";
-import { Building2Icon, Database, DockIcon, HomeIcon, LogIn, LogOut, Moon, Palette, Sun, Settings } from "lucide-react";
+import { Building2Icon, Database, DockIcon, HomeIcon, LogIn, LogOut, Moon, Palette, Settings, Sun } from "lucide-react";
 import * as React from "react";
 
 import { useTheme } from "~/components/theme-provider";
@@ -83,14 +83,14 @@ const navData = [
   {
     icon: Settings,
     requiresAuth: false,
-    title: "Settings",
-    url: "/settings",
     subroutes: [
       { title: "Activity", url: "/settings/activity/$" },
       { title: "API Keys", url: "/settings/keys/$" },
       { title: "Credits", url: "/settings/credits/$" },
       { title: "Preferences", url: "/settings/preference/$" },
     ],
+    title: "Settings",
+    url: "/settings",
   },
 ];
 
@@ -137,10 +137,13 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                 const isSettingsActive = match.pathname.startsWith("/settings");
 
                 return (
-                  <Collapsible defaultOpen={isSettingsActive} key={item.title} className="group/collapsible">
+                  <Collapsible className="group/collapsible" defaultOpen={isSettingsActive} key={item.title}>
                     <SidebarMenuItem>
                       <CollapsibleTrigger asChild>
-                        <SidebarMenuButton className="data-[active=true]:bg-main data-[active=true]:text-main-foreground" isActive={isSettingsActive}>
+                        <SidebarMenuButton
+                          className="data-[active=true]:bg-main data-[active=true]:text-main-foreground"
+                          isActive={isSettingsActive}
+                        >
                           <item.icon />
                           <span>{item.title}</span>
                         </SidebarMenuButton>
