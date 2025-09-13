@@ -1,10 +1,11 @@
 import { Link, useMatches } from "@tanstack/react-router";
 import { atom, useAtom } from "jotai";
-import { Building2Icon, Database, DockIcon, HomeIcon, LogIn, LogOut, Moon, Palette, Sun } from "lucide-react";
+import { Building2Icon, Database, DockIcon, HomeIcon, LogIn, LogOut, Moon, Palette, Sun, Settings } from "lucide-react";
 import * as React from "react";
 
 import { useTheme } from "~/components/theme-provider";
 import { Avatar, AvatarFallback, AvatarImage } from "~/components/ui/avatar";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "~/components/ui/collapsible";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -22,6 +23,9 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
+  SidebarMenuSub,
+  SidebarMenuSubButton,
+  SidebarMenuSubItem,
   SidebarRail,
   SidebarTrigger,
   useSidebar,
@@ -76,6 +80,18 @@ const navData = [
     title: "Projects",
     url: "/projects",
   },
+  {
+    icon: Settings,
+    requiresAuth: false,
+    title: "Settings",
+    url: "/settings",
+    subroutes: [
+      { title: "Activity", url: "/settings/activity/$" },
+      { title: "API Keys", url: "/settings/keys/$" },
+      { title: "Credits", url: "/settings/credits/$" },
+      { title: "Preferences", url: "/settings/preference/$" },
+    ],
+  },
 ];
 
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
@@ -115,6 +131,38 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
             {filteredNavData.map((item) => {
               // Check if current path matches the item URL or starts with it (for nested routes)
               const isActive = match.pathname === item.url || (item.url !== "/" && match.pathname.startsWith(item.url));
+
+              // Collapsible Settings item with subroutes
+              if (item.title === "Settings" && item.subroutes) {
+                const isSettingsActive = match.pathname.startsWith("/settings");
+
+                return (
+                  <Collapsible defaultOpen={isSettingsActive} key={item.title} className="group/collapsible">
+                    <SidebarMenuItem>
+                      <CollapsibleTrigger asChild>
+                        <SidebarMenuButton className="data-[active=true]:bg-main data-[active=true]:text-main-foreground" isActive={isSettingsActive}>
+                          <item.icon />
+                          <span>{item.title}</span>
+                        </SidebarMenuButton>
+                      </CollapsibleTrigger>
+                      <CollapsibleContent>
+                        <SidebarMenuSub>
+                          {item.subroutes.map((sub) => {
+                            const isSubActive = match.pathname === sub.url || match.pathname.startsWith(sub.url + "/");
+                            return (
+                              <SidebarMenuSubItem key={sub.title}>
+                                <SidebarMenuSubButton asChild isActive={isSubActive}>
+                                  <Link to={sub.url}>{sub.title}</Link>
+                                </SidebarMenuSubButton>
+                              </SidebarMenuSubItem>
+                            );
+                          })}
+                        </SidebarMenuSub>
+                      </CollapsibleContent>
+                    </SidebarMenuItem>
+                  </Collapsible>
+                );
+              }
 
               return (
                 <SidebarMenuItem key={item.title}>
