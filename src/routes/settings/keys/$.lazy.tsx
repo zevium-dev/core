@@ -23,130 +23,140 @@ import { Input } from "~/components/ui/input";
 import { Label } from "~/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "~/components/ui/table";
 import { useCopy } from "~/hooks/use-copy";
+import { useTRPCClient } from "~/lib/trpc";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { auth } from "~/lib/auth";
 
 // Types
 interface ApiKeyRecord {
-  createdAt: string;
-  id: number;
-  key: string; // full key value
-  lastUsed: string;
+  createdAt: Date;
+  id: string;
+  key?: string; // full key value (only available on creation)
+  lastUsed: Date | null;
   limit: string; // e.g. "Unlimited" or custom string like "1000 req/day"
-  name: string;
+  name: string | null;
   usage: string; // formatted usage string
+  prefix: string | null;
+  start: string | null;
+  enabled: boolean | null;
 }
 
 export const Route = createLazyFileRoute("/settings/keys/$")({
   component: ApiKeysComponent,
 });
 
-// TODO: Replace with API call to fetch real API keys data
-// Mock data for the API keys table
-const mockApiKeysData: Array<ApiKeyRecord> = [
-  {
-    createdAt: "2024-08-15",
-    id: 1,
-    key: "sk-or-v1-e97b8f0d91c7a6c54",
-    lastUsed: "2024-09-01",
-    limit: "Unlimited",
-    name: "Internal Jira Bot",
-    usage: "$12.40 used",
-  },
-  {
-    createdAt: "2024-07-20",
-    id: 2,
-    key: "sk-or-v1-4b6d9a7217bd0f417b",
-    lastUsed: "2024-09-08",
-    limit: "$200",
-    name: "Desktop Client (Win)",
-    usage: "$45.82 used",
-  },
-  {
-    createdAt: "2024-06-10",
-    id: 3,
-    key: "sk-or-v1-da3be50aa9293f25d61",
-    lastUsed: "2024-09-09",
-    limit: "Unlimited",
-    name: "Domain Filter Service",
-    usage: "$8.293 used",
-  },
-  {
-    createdAt: "2024-05-25",
-    id: 4,
-    key: "sk-or-v1-23ef10b19bb176462ee",
-    lastUsed: "2024-09-07",
-    limit: "Unlimited",
-    name: "OAuth: Roo Prod App",
-    usage: "$210.36 used",
-  },
-  {
-    createdAt: "2024-04-12",
-    id: 5,
-    key: "sk-or-v1-667af09c1834d9289a5",
-    lastUsed: "Never",
-    limit: "$10",
-    name: "PathOfFate Game",
-    usage: "$0 used",
-  },
-];
+function formatApiKeyData(key: any): ApiKeyRecord {
+  return {
+    createdAt: key.createdAt,
+    id: key.id,
+    key: key.key, // Only available on creation
+    lastUsed: key.lastUsed,
+    limit: "Unlimited", // TODO: Add credit limit logic
+    name: key.name,
+    usage: "$0 used", // TODO: Add usage calculation
+    prefix: key.prefix,
+    start: key.start,
+    enabled: key.enabled,
+  };
+}
 
 export function ApiKeysComponent() {
+  const queryClient = useQueryClient();
+  
   // State
-  const [apiKeys, setApiKeys] = useState<Array<ApiKeyRecord>>(mockApiKeysData);
-  // Keys are never fully viewable again after creation
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [editingKey, setEditingKey] = useState<ApiKeyRecord | null>(null);
   const [newKeyName, setNewKeyName] = useState("");
   const [newKeyLimit, setNewKeyLimit] = useState(""); // user input for credit limit (money)
   const [, copy] = useCopy();
+  const [createdKey, setCreatedKey] = useState<string | null>(null); // Store the newly created key to show once
+  const [isLoading, setIsLoading] = useState(false);
+  
+  // Queries using Better Auth client
+  const { data: rawApiKeys = [], refetch } = useQuery({
+    queryKey: ["apiKeys"],
+    queryFn: async () => {
+      const { data, error } = await auth.apiKey.list();
+      if (error) throw new Error(error.message);
+      return data || [];
+    },
+  });
+
+  // Convert raw API keys to display format
+  const apiKeys: ApiKeyRecord[] = rawApiKeys.map(formatApiKeyData);
 
   // Helpers
-
-  const handleCreateKey = () => {
-    // TODO: Replace with API call
-    const formattedLimit = formatLimit(newKeyLimit);
-    const newKey: ApiKeyRecord = {
-      createdAt: new Date().toISOString().slice(0, 10),
-      id: Date.now(),
-      key: `sk-or-v1-${Math.random().toString(36).slice(2, 18)}`,
-      lastUsed: "Never",
-      limit: formattedLimit,
-      name: newKeyName.trim(),
-      usage: "$0 used",
-    };
-    setApiKeys((prev) => [newKey, ...prev]);
-    setNewKeyName("");
-    setNewKeyLimit("");
-    setIsCreateDialogOpen(false);
+  const handleCreateKey = async () => {
+    if (!newKeyName.trim()) return;
+    
+    setIsLoading(true);
+    try {
+      const { data, error } = await auth.apiKey.create({
+        name: newKeyName.trim(),
+        expiresIn: undefined, // TODO: Add expiry support
+      });
+      
+      if (error) throw new Error(error.message);
+      
+      setCreatedKey(data.key);
+      refetch();
+      setNewKeyName("");
+      setNewKeyLimit("");
+      setIsCreateDialogOpen(false);
+    } catch (error) {
+      console.error("Failed to create API key:", error);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleCopyKey = (value: string) => {
     copy(value);
   };
 
-  const handleDeleteKey = (keyId: number) => {
-    // TODO: Replace with API call
-    setApiKeys((prev) => prev.filter((k) => k.id !== keyId));
+  const handleDeleteKey = async (keyId: string) => {
+    setIsLoading(true);
+    try {
+      const { error } = await auth.apiKey.delete({ keyId });
+      if (error) throw new Error(error.message);
+      refetch();
+    } catch (error) {
+      console.error("Failed to delete API key:", error);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const openEditDialog = (record: ApiKeyRecord) => {
     setEditingKey(record);
-    setNewKeyName(record.name);
+    setNewKeyName(record.name || "");
     setNewKeyLimit(record.limit === "Unlimited" ? "" : record.limit.replace(/^[^0-9$]*/, ""));
     setIsEditDialogOpen(true);
   };
 
-  const handleSaveEdit = () => {
-    if (!editingKey) return;
-    setApiKeys((prev) =>
-      prev.map((k) =>
-        k.id === editingKey.id ? { ...k, limit: formatLimit(newKeyLimit), name: newKeyName.trim() || k.name } : k,
-      ),
-    );
-    setIsEditDialogOpen(false);
-    setEditingKey(null);
-    setNewKeyName("");
-    setNewKeyLimit("");
+  const handleSaveEdit = async () => {
+    if (!editingKey || !newKeyName.trim()) return;
+    
+    setIsLoading(true);
+    try {
+      const { error } = await auth.apiKey.update({
+        keyId: editingKey.id,
+        name: newKeyName.trim(),
+      });
+      
+      if (error) throw new Error(error.message);
+      
+      refetch();
+      setIsEditDialogOpen(false);
+      setEditingKey(null);
+      setNewKeyName("");
+      setNewKeyLimit("");
+    } catch (error) {
+      console.error("Failed to update API key:", error);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const formatKey = (key: string) => {
@@ -231,11 +241,11 @@ export function ApiKeysComponent() {
               </div>
             </div>
             <DialogFooter>
-              <Button onClick={() => setIsCreateDialogOpen(false)} variant="outline">
+              <Button onClick={() => setIsCreateDialogOpen(false)} variant="outline" disabled={isLoading}>
                 Cancel
               </Button>
-              <Button disabled={!newKeyName.trim()} onClick={handleCreateKey}>
-                Create Key
+              <Button disabled={!newKeyName.trim() || isLoading} onClick={handleCreateKey}>
+                {isLoading ? "Creating..." : "Create Key"}
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -278,7 +288,7 @@ export function ApiKeysComponent() {
                         </div>
                         <div className="flex items-center gap-2">
                           <code className="bg-muted text-muted-foreground rounded px-2 py-1 font-mono text-xs">
-                            {formatKey(apiKey.key)}
+                            {apiKey.key ? formatKey(apiKey.key) : `${apiKey.prefix || 'sk'}...${apiKey.start || 'xxxx'}`}
                           </code>
                         </div>
                       </div>
@@ -378,11 +388,11 @@ export function ApiKeysComponent() {
             </div>
           </div>
           <DialogFooter>
-            <Button onClick={() => setIsEditDialogOpen(false)} variant="outline">
+            <Button onClick={() => setIsEditDialogOpen(false)} variant="outline" disabled={isLoading}>
               Cancel
             </Button>
-            <Button disabled={!newKeyName.trim()} onClick={handleSaveEdit}>
-              Save
+            <Button disabled={!newKeyName.trim() || isLoading} onClick={handleSaveEdit}>
+              {isLoading ? "Saving..." : "Save"}
             </Button>
           </DialogFooter>
         </DialogContent>
