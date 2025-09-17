@@ -1,3 +1,4 @@
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createLazyFileRoute } from "@tanstack/react-router";
 import { Check, Copy, Info, MoreHorizontal, Pencil, Plus, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
@@ -23,42 +24,26 @@ import { Input } from "~/components/ui/input";
 import { Label } from "~/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "~/components/ui/table";
 import { useCopy } from "~/hooks/use-copy";
-import { useTRPCClient } from "~/lib/trpc";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { auth } from "~/lib/auth";
+import { useTRPCClient } from "~/lib/trpc";
 
 // Types
 interface ApiKeyRecord {
   createdAt: Date;
+  enabled: boolean | null;
   id: string;
   key?: string; // full key value (only available on creation)
   lastUsed: Date | null;
   limit: string; // e.g. "Unlimited" or custom string like "1000 req/day"
-  name: string | null;
+  name: null | string;
+  prefix: null | string;
+  start: null | string;
   usage: string; // formatted usage string
-  prefix: string | null;
-  start: string | null;
-  enabled: boolean | null;
 }
 
 export const Route = createLazyFileRoute("/settings/keys/$")({
   component: ApiKeysComponent,
 });
-
-function formatApiKeyData(key: any): ApiKeyRecord {
-  return {
-    createdAt: key.createdAt,
-    id: key.id,
-    key: key.key, // Only available on creation
-    lastUsed: key.lastUsed,
-    limit: "Unlimited", // TODO: Add credit limit logic
-    name: key.name,
-    usage: "$0 used", // TODO: Add usage calculation
-    prefix: key.prefix,
-    start: key.start,
-    enabled: key.enabled,
-  };
-}
 
 export function ApiKeysComponent() {
   const queryClient = useQueryClient();
@@ -70,21 +55,21 @@ export function ApiKeysComponent() {
   const [newKeyName, setNewKeyName] = useState("");
   const [newKeyLimit, setNewKeyLimit] = useState(""); // user input for credit limit (money)
   const [, copy] = useCopy();
-  const [createdKey, setCreatedKey] = useState<string | null>(null); // Store the newly created key to show once
+  const [createdKey, setCreatedKey] = useState<null | string>(null); // Store the newly created key to show once
   const [isLoading, setIsLoading] = useState(false);
   
   // Queries using Better Auth client
   const { data: rawApiKeys = [], refetch } = useQuery({
-    queryKey: ["apiKeys"],
     queryFn: async () => {
       const { data, error } = await auth.apiKey.list();
       if (error) throw new Error(error.message);
       return data || [];
     },
+    queryKey: ["apiKeys"],
   });
 
   // Convert raw API keys to display format
-  const apiKeys: ApiKeyRecord[] = rawApiKeys.map(formatApiKeyData);
+  const apiKeys: Array<ApiKeyRecord> = rawApiKeys.map(formatApiKeyData);
 
   // Helpers
   const handleCreateKey = async () => {
@@ -93,8 +78,8 @@ export function ApiKeysComponent() {
     setIsLoading(true);
     try {
       const { data, error } = await auth.apiKey.create({
-        name: newKeyName.trim(),
         expiresIn: undefined, // TODO: Add expiry support
+        name: newKeyName.trim(),
       });
       
       if (error) throw new Error(error.message);
@@ -241,7 +226,7 @@ export function ApiKeysComponent() {
               </div>
             </div>
             <DialogFooter>
-              <Button onClick={() => setIsCreateDialogOpen(false)} variant="outline" disabled={isLoading}>
+              <Button disabled={isLoading} onClick={() => setIsCreateDialogOpen(false)} variant="outline">
                 Cancel
               </Button>
               <Button disabled={!newKeyName.trim() || isLoading} onClick={handleCreateKey}>
@@ -388,7 +373,7 @@ export function ApiKeysComponent() {
             </div>
           </div>
           <DialogFooter>
-            <Button onClick={() => setIsEditDialogOpen(false)} variant="outline" disabled={isLoading}>
+            <Button disabled={isLoading} onClick={() => setIsEditDialogOpen(false)} variant="outline">
               Cancel
             </Button>
             <Button disabled={!newKeyName.trim() || isLoading} onClick={handleSaveEdit}>
@@ -399,4 +384,19 @@ export function ApiKeysComponent() {
       </Dialog>
     </div>
   );
+}
+
+function formatApiKeyData(key: any): ApiKeyRecord {
+  return {
+    createdAt: key.createdAt,
+    enabled: key.enabled,
+    id: key.id,
+    key: key.key, // Only available on creation
+    lastUsed: key.lastUsed,
+    limit: "Unlimited", // TODO: Add credit limit logic
+    name: key.name,
+    prefix: key.prefix,
+    start: key.start,
+    usage: "$0 used", // TODO: Add usage calculation
+  };
 }

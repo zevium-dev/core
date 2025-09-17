@@ -68,31 +68,31 @@ export const cache = sqliteTable("cache", {
 });
 
 export const apikey = sqliteTable("apikey", {
-  id: text("id").primaryKey(),
-  name: text("name"),
-  start: text("start"),
-  prefix: text("prefix"),
-  key: text("key").notNull(),
-  userId: text("user_id")
-    .notNull()
-    .references(() => user.id, { onDelete: "cascade" }),
-  refillInterval: integer("refill_interval"),
-  refillAmount: integer("refill_amount"),
-  lastRefillAt: integer("last_refill_at", { mode: "timestamp" }),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
   enabled: integer("enabled", { mode: "boolean" }).default(true),
+  expiresAt: integer("expires_at", { mode: "timestamp" }),
+  id: text("id").primaryKey(),
+  key: text("key").notNull(),
+  lastRefillAt: integer("last_refill_at", { mode: "timestamp" }),
+  lastRequest: integer("last_request", { mode: "timestamp" }),
+  metadata: text("metadata"),
+  name: text("name"),
+  permissions: text("permissions"),
+  prefix: text("prefix"),
   rateLimitEnabled: integer("rate_limit_enabled", { mode: "boolean" }).default(
     true,
   ),
-  rateLimitTimeWindow: integer("rate_limit_time_window").default(86400000),
   rateLimitMax: integer("rate_limit_max").default(10),
-  requestCount: integer("request_count").default(0),
+  rateLimitTimeWindow: integer("rate_limit_time_window").default(86400000),
+  refillAmount: integer("refill_amount"),
+  refillInterval: integer("refill_interval"),
   remaining: integer("remaining"),
-  lastRequest: integer("last_request", { mode: "timestamp" }),
-  expiresAt: integer("expires_at", { mode: "timestamp" }),
-  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  requestCount: integer("request_count").default(0),
+  start: text("start"),
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
-  permissions: text("permissions"),
-  metadata: text("metadata"),
+  userId: text("user_id")
+    .notNull()
+    .references(() => user.id, { onDelete: "cascade" }),
 });
 
 // ===== ORGANIZATION SCHEMA =====

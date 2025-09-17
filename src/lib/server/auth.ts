@@ -1,6 +1,6 @@
 import { betterAuth } from "better-auth";
-import { apiKey } from "better-auth/plugins";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
+import { apiKey } from "better-auth/plugins";
 import { reactStartCookies } from "better-auth/react-start";
 
 import { db } from "~/db"; // your drizzle instance
