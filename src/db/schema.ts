@@ -79,9 +79,7 @@ export const apikey = sqliteTable("apikey", {
   name: text("name"),
   permissions: text("permissions"),
   prefix: text("prefix"),
-  rateLimitEnabled: integer("rate_limit_enabled", { mode: "boolean" }).default(
-    true,
-  ),
+  rateLimitEnabled: integer("rate_limit_enabled", { mode: "boolean" }).default(true),
   rateLimitMax: integer("rate_limit_max").default(10),
   rateLimitTimeWindow: integer("rate_limit_time_window").default(86400000),
   refillAmount: integer("refill_amount"),

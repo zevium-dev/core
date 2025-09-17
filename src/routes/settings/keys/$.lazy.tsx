@@ -1,4 +1,4 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { createLazyFileRoute } from "@tanstack/react-router";
 import { Check, Copy, Info, MoreHorizontal, Pencil, Plus, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
@@ -25,7 +25,6 @@ import { Label } from "~/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "~/components/ui/table";
 import { useCopy } from "~/hooks/use-copy";
 import { auth } from "~/lib/auth";
-import { useTRPCClient } from "~/lib/trpc";
 
 // Types
 interface ApiKeyRecord {
@@ -33,12 +32,34 @@ interface ApiKeyRecord {
   enabled: boolean | null;
   id: string;
   key?: string; // full key value (only available on creation)
+  lastRequest: Date | null;
   lastUsed: Date | null;
   limit: string; // e.g. "Unlimited" or custom string like "1000 req/day"
   name: null | string;
   prefix: null | string;
+  requestCount: number;
   start: null | string;
   usage: string; // formatted usage string
+}
+
+interface BetterAuthApiKey {
+  createdAt: Date;
+  enabled: boolean;
+  expiresAt: Date | null;
+  id: string;
+  key?: string;
+  lastRequest?: Date | null;
+  lastUsed?: Date | null;
+  metadata: null | Record<string, unknown>;
+  name: null | string;
+  permissions: null | Record<string, Array<string>>;
+  prefix: null | string;
+  refillAmount: null | number;
+  refillInterval: null | number;
+  requestCount?: number;
+  start: null | string;
+  updatedAt: Date;
+  userId: string;
 }
 
 export const Route = createLazyFileRoute("/settings/keys/$")({
@@ -46,8 +67,6 @@ export const Route = createLazyFileRoute("/settings/keys/$")({
 });
 
 export function ApiKeysComponent() {
-  const queryClient = useQueryClient();
-  
   // State
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
@@ -55,15 +74,14 @@ export function ApiKeysComponent() {
   const [newKeyName, setNewKeyName] = useState("");
   const [newKeyLimit, setNewKeyLimit] = useState(""); // user input for credit limit (money)
   const [, copy] = useCopy();
-  const [createdKey, setCreatedKey] = useState<null | string>(null); // Store the newly created key to show once
   const [isLoading, setIsLoading] = useState(false);
-  
+
   // Queries using Better Auth client
   const { data: rawApiKeys = [], refetch } = useQuery({
     queryFn: async () => {
       const { data, error } = await auth.apiKey.list();
       if (error) throw new Error(error.message);
-      return data || [];
+      return data;
     },
     queryKey: ["apiKeys"],
   });
@@ -74,18 +92,17 @@ export function ApiKeysComponent() {
   // Helpers
   const handleCreateKey = async () => {
     if (!newKeyName.trim()) return;
-    
+
     setIsLoading(true);
     try {
-      const { data, error } = await auth.apiKey.create({
+      const { error } = await auth.apiKey.create({
         expiresIn: undefined, // TODO: Add expiry support
         name: newKeyName.trim(),
       });
-      
+
       if (error) throw new Error(error.message);
-      
-      setCreatedKey(data.key);
-      refetch();
+
+      void refetch();
       setNewKeyName("");
       setNewKeyLimit("");
       setIsCreateDialogOpen(false);
@@ -105,7 +122,7 @@ export function ApiKeysComponent() {
     try {
       const { error } = await auth.apiKey.delete({ keyId });
       if (error) throw new Error(error.message);
-      refetch();
+      void refetch();
     } catch (error) {
       console.error("Failed to delete API key:", error);
     } finally {
@@ -115,24 +132,24 @@ export function ApiKeysComponent() {
 
   const openEditDialog = (record: ApiKeyRecord) => {
     setEditingKey(record);
-    setNewKeyName(record.name || "");
+    setNewKeyName(record.name ?? "");
     setNewKeyLimit(record.limit === "Unlimited" ? "" : record.limit.replace(/^[^0-9$]*/, ""));
     setIsEditDialogOpen(true);
   };
 
   const handleSaveEdit = async () => {
     if (!editingKey || !newKeyName.trim()) return;
-    
+
     setIsLoading(true);
     try {
       const { error } = await auth.apiKey.update({
         keyId: editingKey.id,
         name: newKeyName.trim(),
       });
-      
+
       if (error) throw new Error(error.message);
-      
-      refetch();
+
+      void refetch();
       setIsEditDialogOpen(false);
       setEditingKey(null);
       setNewKeyName("");
@@ -157,14 +174,6 @@ export function ApiKeysComponent() {
     [apiKeys],
   );
   const [snippetCopied, setSnippetCopied] = useState(false);
-  const formatLimit = (raw: string) => {
-    const trimmed = raw.trim();
-    if (!trimmed) return "Unlimited";
-    // accept forms like 50, $50, 50.25, $50.25
-    const match = /\$?([0-9]+(?:\.[0-9]{1,2})?)/.exec(trimmed);
-    if (!match) return "Unlimited"; // fallback if invalid
-    return `$${match[1]}`;
-  };
   const snippet = `curl -X POST https://zevium.dev/api/v1/scrapperApi/ \\
   -H 'Content-Type: application/json' \\
   -H 'Authorization: Bearer YOUR_API_KEY' \\
@@ -273,7 +282,9 @@ export function ApiKeysComponent() {
                         </div>
                         <div className="flex items-center gap-2">
                           <code className="bg-muted text-muted-foreground rounded px-2 py-1 font-mono text-xs">
-                            {apiKey.key ? formatKey(apiKey.key) : `${apiKey.prefix || 'sk'}...${apiKey.start || 'xxxx'}`}
+                            {apiKey.key
+                              ? formatKey(apiKey.key)
+                              : `${apiKey.prefix ?? "sk"}...${apiKey.start ?? "xxxx"}`}
                           </code>
                         </div>
                       </div>
@@ -386,17 +397,19 @@ export function ApiKeysComponent() {
   );
 }
 
-function formatApiKeyData(key: any): ApiKeyRecord {
+function formatApiKeyData(key: BetterAuthApiKey): ApiKeyRecord {
   return {
     createdAt: key.createdAt,
     enabled: key.enabled,
     id: key.id,
     key: key.key, // Only available on creation
-    lastUsed: key.lastUsed,
+    lastRequest: key.lastRequest ?? null,
+    lastUsed: key.lastUsed ?? null,
     limit: "Unlimited", // TODO: Add credit limit logic
     name: key.name,
     prefix: key.prefix,
+    requestCount: key.requestCount ?? 0,
     start: key.start,
-    usage: "$0 used", // TODO: Add usage calculation
+    usage: key.requestCount ? `${key.requestCount} requests` : "$0 used", // Show request count if available
   };
 }

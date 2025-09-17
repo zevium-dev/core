@@ -9,7 +9,7 @@ import { serverEnv } from "~/env/server";
 
 export const authServer = betterAuth({
   database: drizzleAdapter(db, { provider: "sqlite", schema }),
-  plugins: [apiKey() ,reactStartCookies()],
+  plugins: [apiKey(), reactStartCookies()],
   socialProviders: {
     google: {
       clientId: serverEnv.AUTH_GOOGLE_CLIENT_ID,
