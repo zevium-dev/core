@@ -67,6 +67,32 @@ export const cache = sqliteTable("cache", {
   value: text("value").notNull(),
 });
 
+export const apikey = sqliteTable("apikey", {
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  enabled: integer("enabled", { mode: "boolean" }).default(true),
+  expiresAt: integer("expires_at", { mode: "timestamp" }),
+  id: text("id").primaryKey(),
+  key: text("key").notNull(),
+  lastRefillAt: integer("last_refill_at", { mode: "timestamp" }),
+  lastRequest: integer("last_request", { mode: "timestamp" }),
+  metadata: text("metadata"),
+  name: text("name"),
+  permissions: text("permissions"),
+  prefix: text("prefix"),
+  rateLimitEnabled: integer("rate_limit_enabled", { mode: "boolean" }).default(true),
+  rateLimitMax: integer("rate_limit_max").default(10),
+  rateLimitTimeWindow: integer("rate_limit_time_window").default(86400000),
+  refillAmount: integer("refill_amount"),
+  refillInterval: integer("refill_interval"),
+  remaining: integer("remaining"),
+  requestCount: integer("request_count").default(0),
+  start: text("start"),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
+  userId: text("user_id")
+    .notNull()
+    .references(() => user.id, { onDelete: "cascade" }),
+});
+
 // ===== ORGANIZATION SCHEMA =====
 
 export const organization = sqliteTable("organization", {
