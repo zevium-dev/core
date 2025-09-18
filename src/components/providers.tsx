@@ -3,6 +3,7 @@ import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
 import { TRPCClientError } from "@trpc/client";
 import { Provider as JotaiProvider } from "jotai";
 import { domAnimation, LazyMotion } from "motion/react";
+import posthog from "posthog-js";
 import { PostHogProvider } from "posthog-js/react";
 import React, { useState } from "react";
 import { toast } from "sonner";
@@ -22,12 +23,11 @@ const makeQueryClient = () => {
   return new QueryClient({
     defaultOptions: {
       mutations: {
-        onError: (error) => {
-          if (error instanceof TRPCClientError) {
-            toast.error(error.message);
-          } else {
-            toast.error("Something went wrong");
-          }
+        onError: (cause) => {
+          const error = new Error("[TRPC]: some error occurred", { cause });
+          toast.error(cause instanceof TRPCClientError ? cause.message : "Something went wrong");
+          posthog.captureException(error);
+          console.error(cause);
         },
       },
     },

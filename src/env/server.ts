@@ -5,6 +5,9 @@ const ServerEnvArk = type({
   AUTH_GOOGLE_CLIENT_SECRET: "string",
   LIBSQL_SECRET: "string",
   LIBSQL_URL: "string",
+  RESEND_API_KEY: "string",
+  UPSTASH_REDIS_REST_TOKEN: "string",
+  UPSTASH_REDIS_REST_URL: "string.url",
 });
 
 export type ServerEnv = typeof ServerEnvArk.infer;
@@ -14,4 +17,7 @@ export const serverEnv = ServerEnvArk.assert({
   AUTH_GOOGLE_CLIENT_SECRET: process.env.AUTH_GOOGLE_CLIENT_SECRET,
   LIBSQL_SECRET: process.env.LIBSQL_SECRET,
   LIBSQL_URL: process.env.LIBSQL_URL,
+  RESEND_API_KEY: process.env.RESEND_API_KEY,
+  UPSTASH_REDIS_REST_TOKEN: process.env.UPSTASH_REDIS_REST_TOKEN,
+  UPSTASH_REDIS_REST_URL: process.env.UPSTASH_REDIS_REST_URL,
 });

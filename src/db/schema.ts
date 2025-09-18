@@ -67,6 +67,35 @@ export const cache = sqliteTable("cache", {
   value: text("value").notNull(),
 });
 
+// ===== Captcha =====
+
+export const captchaChallenge = sqliteTable("captcha_challenge", {
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .$defaultFn(() => new Date())
+    .notNull(),
+  data: text("data", { mode: "json" }).notNull(),
+  expires: integer("expires", { mode: "timestamp" })
+    .$defaultFn(() => new Date())
+    .notNull(),
+  token: text("token").notNull().primaryKey(),
+  updatedAt: integer("updated_at", { mode: "timestamp" })
+    .$defaultFn(() => new Date())
+    .notNull(),
+});
+
+export const captchaToken = sqliteTable("captcha_token", {
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .$defaultFn(() => new Date())
+    .notNull(),
+  expires: integer("expires", { mode: "timestamp" })
+    .$defaultFn(() => new Date())
+    .notNull(),
+  key: text("key").notNull().primaryKey(),
+  updatedAt: integer("updated_at", { mode: "timestamp" })
+    .$defaultFn(() => new Date())
+    .notNull(),
+});
+
 // ===== ORGANIZATION SCHEMA =====
 
 export const organization = sqliteTable("organization", {

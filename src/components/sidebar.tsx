@@ -1,4 +1,4 @@
-import { Link, useMatches } from "@tanstack/react-router";
+import { Link, useMatches, useRouter } from "@tanstack/react-router";
 import { atom, useAtom } from "jotai";
 import { Building2Icon, Database, DockIcon, HomeIcon, LogIn, LogOut, Moon, Palette, Sun } from "lucide-react";
 import * as React from "react";
@@ -151,9 +151,10 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
 function AccountSection() {
   const authState = auth.useSession();
   const { state } = useSidebar();
+  const router = useRouter();
 
   const handleSignIn = async () => {
-    await auth.signIn.social({ provider: "google" });
+    await router.navigate({ to: "/auth/sign-in" });
   };
 
   const handleSignOut = async () => {
