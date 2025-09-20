@@ -1,5 +1,5 @@
 import { createLazyFileRoute } from "@tanstack/react-router";
-import { Calendar, Camera, Mail, MapPin, Phone, Shield, Trash2, User } from "lucide-react";
+import { Calendar, Camera, Mail, MapPin, Phone, Shield, Trash2, User, Copy } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
 import { Avatar, AvatarFallback, AvatarImage } from "~/components/ui/avatar";
@@ -134,13 +134,29 @@ export function AccountPreferenceComponent() {
               <Mail className="h-4 w-4" />
               Email Address
             </Label>
-            <Input
-              id="email"
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="Enter email address"
-              type="email"
-              value={email}
-            />
+            <div className="flex items-center gap-2">
+              <div
+                className="border-input text-foreground/90 flex h-10 w-full items-center justify-between rounded-md border bg-transparent px-3 text-sm"
+                id="email"
+              >
+                <span className="truncate select-text" title={email}>{email || (isPending ? "Loading..." : "No email")}</span>
+                {email && (
+                  <Button
+                    size="icon"
+                    type="button"
+                    variant="ghost"
+                    className="shrink-0"
+                    aria-label="Copy email"
+                    onClick={() => {
+                      void navigator.clipboard.writeText(email);
+                      toast.success("Email copied");
+                    }}
+                  >
+                    <Copy className="h-4 w-4" />
+                  </Button>
+                )}
+              </div>
+            </div>
           </div>
           <div className="space-y-2">
             <Label className="flex items-center gap-2" htmlFor="phone">
