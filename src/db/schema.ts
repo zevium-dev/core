@@ -66,6 +66,8 @@ export const verification = sqliteTable("verification", {
   value: text("value").notNull(),
 });
 
+// ===== API Keys =====
+
 export const apikey = sqliteTable("apikey", {
   createdAt: integer("created_at", { mode: "timestamp" })
     .$defaultFn(() => /* @__PURE__ */ new Date())
@@ -95,6 +97,8 @@ export const apikey = sqliteTable("apikey", {
     .notNull()
     .references(() => user.id, { onDelete: "cascade" }),
 });
+
+// ===== Organizations =====
 
 export const organization = sqliteTable("organization", {
   createdAt: integer("created_at", { mode: "timestamp" })
