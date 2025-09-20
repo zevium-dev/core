@@ -90,7 +90,7 @@ cap-widget {
   --cap-border-color: var(--color-border);
   --cap-border-radius: 14px;
   --cap-widget-height: 30px;
-  --cap-widget-width: 160px;
+  --cap-widget-width: 200px;
   --cap-widget-padding: 14px;
   --cap-gap: 15px;
   --cap-color: var(--color-foreground);

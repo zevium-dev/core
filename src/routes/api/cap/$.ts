@@ -9,7 +9,8 @@ export const ServerRoute = createServerFileRoute("/api/cap/$").methods({
       return Response.json(challenge);
     } else if (request.url.includes("redeem")) {
       const { solutions, token } = (await request.json()) as Solution;
-      return await cap.redeemChallenge({ solutions, token });
+      const response = await cap.redeemChallenge({ solutions, token });
+      return Response.json(response);
     }
   },
 });

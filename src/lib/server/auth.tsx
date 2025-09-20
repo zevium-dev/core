@@ -1,5 +1,7 @@
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
+import { apiKey } from "better-auth/plugins";
+import { organization } from "better-auth/plugins/organization";
 import { reactStartCookies } from "better-auth/react-start";
 
 import { db, schema } from "~/db";
@@ -34,7 +36,7 @@ export const authServer = betterAuth({
       });
     },
   },
-  plugins: [reactStartCookies(), capCaptcha()],
+  plugins: [apiKey(), organization(), capCaptcha(), reactStartCookies()],
   rateLimit: {
     storage: "secondary-storage",
   },
@@ -56,3 +58,6 @@ export const authServer = betterAuth({
     },
   },
 });
+
+// Uncomment this for generating migrations
+// export const auth = authServer;
