@@ -19,6 +19,13 @@ export const authServer = betterAuth({
   user: {
     deleteUser: {
       enabled: true
+    },
+    additionalFields: {
+      timezone: {
+        type: "string",
+        required: false,
+        defaultValue: "Asia/Kolkata",
+      },
     }
   },
 });

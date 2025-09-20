@@ -15,6 +15,7 @@ export const user = sqliteTable("user", {
   updatedAt: integer("updated_at", { mode: "timestamp" })
     .$defaultFn(() => /* @__PURE__ */ new Date())
     .notNull(),
+  timezone: text("timezone").default("Asia/Kolkata"),
 });
 
 export const session = sqliteTable("session", {
