@@ -3,9 +3,11 @@ import { SiGoogle } from "@icons-pack/react-simple-icons";
 import { useMutation } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { type } from "arktype";
+import { useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 
-import { CapWidget, useCapState } from "~/components/cap-widget";
+import { CapWidget, type CapWidgetElement } from "~/components/cap-widget";
+import { Redirect } from "~/components/redirect";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
 import { Input } from "~/components/ui/input";
@@ -27,7 +29,10 @@ export const Route = createFileRoute("/auth/sign-in")({
 });
 
 function RouteComponent() {
-  const capState = useCapState();
+  const capRef = useRef<CapWidgetElement>(null);
+  const [capToken, setCapToken] = useState<null | string>(null);
+
+  const authState = auth.useSession();
   const navigate = Route.useNavigate();
 
   const {
@@ -43,11 +48,11 @@ function RouteComponent() {
   const signInMutation = useMutation({
     mutationFn: (data: FormValues) => {
       const headers = new Headers();
-      if (capState.token) headers.set(CAPTCHA_HEADER_KEY, capState.token);
+      if (capToken) headers.set(CAPTCHA_HEADER_KEY, capToken);
       return auth.signIn.email({ email: data.email, password: data.password }, { headers });
     },
     onSettled: () => {
-      capState.reset?.();
+      capRef.current?.reset();
     },
     onSuccess: () => {
       return navigate({ to: "/" });
@@ -61,6 +66,10 @@ function RouteComponent() {
   const onGoogle = () => {
     void auth.signIn.social({ provider: "google" });
   };
+
+  if (authState.data?.user) {
+    return <Redirect to="/" />;
+  }
 
   return (
     <ScreenCenter>
@@ -124,7 +133,7 @@ function RouteComponent() {
                       {errors.password?.message ?? "No error"}
                     </p>
                   </div>
-                  <CapWidget />
+                  <CapWidget onSolve={setCapToken} ref={capRef} />
                   <Button className="w-full" loading={isSubmitting} type="submit">
                     Sign in
                   </Button>

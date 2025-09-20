@@ -19,6 +19,7 @@ import { Route as AuthSignInRouteImport } from './routes/auth/sign-in'
 import { Route as AuthSentEmailRouteImport } from './routes/auth/sent-email'
 import { Route as AuthResetPasswordRouteImport } from './routes/auth/reset-password'
 import { Route as AuthForgotPasswordRouteImport } from './routes/auth/forgot-password'
+import { Route as AuthChangePasswordRouteImport } from './routes/auth/change-password'
 import { ServerRoute as InternalEmailTemplatesPreviewServerRouteImport } from './routes/$internal/email-templates-preview'
 import { ServerRoute as ApiTrpcSplatServerRouteImport } from './routes/api/trpc/$'
 import { ServerRoute as ApiPosthogSplatServerRouteImport } from './routes/api/posthog/$'
@@ -93,6 +94,11 @@ const AuthForgotPasswordRoute = AuthForgotPasswordRouteImport.update({
   path: '/auth/forgot-password',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AuthChangePasswordRoute = AuthChangePasswordRouteImport.update({
+  id: '/auth/change-password',
+  path: '/auth/change-password',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SettingsCreditsSplatLazyRoute =
   SettingsCreditsSplatLazyRouteImport.update({
     id: '/settings/credits/$',
@@ -146,6 +152,7 @@ export interface FileRoutesByFullPath {
   '/catalogue': typeof CatalogueLazyRoute
   '/organizations': typeof OrganizationsLazyRoute
   '/projects': typeof ProjectsLazyRoute
+  '/auth/change-password': typeof AuthChangePasswordRoute
   '/auth/forgot-password': typeof AuthForgotPasswordRoute
   '/auth/reset-password': typeof AuthResetPasswordRoute
   '/auth/sent-email': typeof AuthSentEmailRoute
@@ -161,6 +168,7 @@ export interface FileRoutesByTo {
   '/catalogue': typeof CatalogueLazyRoute
   '/organizations': typeof OrganizationsLazyRoute
   '/projects': typeof ProjectsLazyRoute
+  '/auth/change-password': typeof AuthChangePasswordRoute
   '/auth/forgot-password': typeof AuthForgotPasswordRoute
   '/auth/reset-password': typeof AuthResetPasswordRoute
   '/auth/sent-email': typeof AuthSentEmailRoute
@@ -177,6 +185,7 @@ export interface FileRoutesById {
   '/catalogue': typeof CatalogueLazyRoute
   '/organizations': typeof OrganizationsLazyRoute
   '/projects': typeof ProjectsLazyRoute
+  '/auth/change-password': typeof AuthChangePasswordRoute
   '/auth/forgot-password': typeof AuthForgotPasswordRoute
   '/auth/reset-password': typeof AuthResetPasswordRoute
   '/auth/sent-email': typeof AuthSentEmailRoute
@@ -194,6 +203,7 @@ export interface FileRouteTypes {
     | '/catalogue'
     | '/organizations'
     | '/projects'
+    | '/auth/change-password'
     | '/auth/forgot-password'
     | '/auth/reset-password'
     | '/auth/sent-email'
@@ -209,6 +219,7 @@ export interface FileRouteTypes {
     | '/catalogue'
     | '/organizations'
     | '/projects'
+    | '/auth/change-password'
     | '/auth/forgot-password'
     | '/auth/reset-password'
     | '/auth/sent-email'
@@ -224,6 +235,7 @@ export interface FileRouteTypes {
     | '/catalogue'
     | '/organizations'
     | '/projects'
+    | '/auth/change-password'
     | '/auth/forgot-password'
     | '/auth/reset-password'
     | '/auth/sent-email'
@@ -240,6 +252,7 @@ export interface RootRouteChildren {
   CatalogueLazyRoute: typeof CatalogueLazyRoute
   OrganizationsLazyRoute: typeof OrganizationsLazyRoute
   ProjectsLazyRoute: typeof ProjectsLazyRoute
+  AuthChangePasswordRoute: typeof AuthChangePasswordRoute
   AuthForgotPasswordRoute: typeof AuthForgotPasswordRoute
   AuthResetPasswordRoute: typeof AuthResetPasswordRoute
   AuthSentEmailRoute: typeof AuthSentEmailRoute
@@ -390,6 +403,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthForgotPasswordRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/auth/change-password': {
+      id: '/auth/change-password'
+      path: '/auth/change-password'
+      fullPath: '/auth/change-password'
+      preLoaderRoute: typeof AuthChangePasswordRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/settings/credits/$': {
       id: '/settings/credits/$'
       path: '/settings/credits/$'
@@ -458,6 +478,7 @@ const rootRouteChildren: RootRouteChildren = {
   CatalogueLazyRoute: CatalogueLazyRoute,
   OrganizationsLazyRoute: OrganizationsLazyRoute,
   ProjectsLazyRoute: ProjectsLazyRoute,
+  AuthChangePasswordRoute: AuthChangePasswordRoute,
   AuthForgotPasswordRoute: AuthForgotPasswordRoute,
   AuthResetPasswordRoute: AuthResetPasswordRoute,
   AuthSentEmailRoute: AuthSentEmailRoute,

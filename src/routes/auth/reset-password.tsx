@@ -6,6 +6,7 @@ import { TRPCClientError } from "@trpc/client";
 import { type } from "arktype";
 import { useForm } from "react-hook-form";
 
+import { Redirect } from "~/components/redirect";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
 import { Input } from "~/components/ui/input";
@@ -20,7 +21,7 @@ const SearchParamsArk = type({
 
 export const FormValuesArk = type({
   password: "0 < string < 128",
-  "password-confirm": "0 < string < 128",
+  passwordConfirm: "0 < string < 128",
 }).and(SearchParamsArk);
 
 type FormValues = typeof FormValuesArk.infer;
@@ -36,16 +37,18 @@ function RouteComponent() {
     handleSubmit,
     register,
   } = useForm<FormValues>({
-    defaultValues: { password: "", "password-confirm": "", token: "" },
+    defaultValues: { password: "", passwordConfirm: "", token: "" },
     mode: "onBlur",
     resolver: arktypeResolver(FormValuesArk),
   });
+
+  const authState = auth.useSession();
 
   const resetPasswordMutation = useMutation({
     mutationFn: (data: FormValues) => {
       const token = data.token;
       const password = data.password;
-      const passwordConfirm = data["password-confirm"];
+      const passwordConfirm = data.passwordConfirm;
       if (password !== passwordConfirm) throw new TRPCClientError("Passwords do not match");
       return auth.resetPassword({ newPassword: password, token });
     },
@@ -54,6 +57,10 @@ function RouteComponent() {
   const onSubmit = async (data: FormValues) => {
     await resetPasswordMutation.mutateAsync(data);
   };
+
+  if (authState.data?.user) {
+    return <Redirect to="/" />;
+  }
 
   return (
     <ScreenCenter>
@@ -86,18 +93,18 @@ function RouteComponent() {
                   <div className="grid gap-3">
                     <Label htmlFor="password-confirm">Confirm password</Label>
                     <Input
-                      aria-describedby={errors["password-confirm"] ? "password-confirm-error" : undefined}
-                      aria-invalid={!!errors["password-confirm"]}
+                      aria-describedby={errors.passwordConfirm ? "password-confirm-error" : undefined}
+                      aria-invalid={!!errors.passwordConfirm}
                       disabled={isSubmitting}
                       id="password-confirm"
                       type="password"
-                      {...register("password-confirm")}
+                      {...register("passwordConfirm")}
                     />
                     <p
-                      className={cn("text-destructive text-end text-xs", !errors["password-confirm"] && "invisible")}
+                      className={cn("text-destructive text-end text-xs", !errors.passwordConfirm && "invisible")}
                       id="password-confirm-error"
                     >
-                      {errors["password-confirm"]?.message ?? "No error"}
+                      {errors.passwordConfirm?.message ?? "No error"}
                     </p>
                   </div>
                   <div className="hidden gap-3">
