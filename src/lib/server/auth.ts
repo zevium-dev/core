@@ -16,6 +16,11 @@ export const authServer = betterAuth({
       clientSecret: serverEnv.AUTH_GOOGLE_CLIENT_SECRET,
     },
   },
+  user: {
+    deleteUser: {
+      enabled: true
+    }
+  },
 });
 
 export const auth = authServer;

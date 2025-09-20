@@ -1,6 +1,6 @@
 import { createLazyFileRoute } from "@tanstack/react-router";
 import { Calendar, Camera, Mail, MapPin, Phone, Shield, Trash2, User } from "lucide-react";
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { Avatar, AvatarFallback, AvatarImage } from "~/components/ui/avatar";
 import { Button } from "~/components/ui/button";
@@ -9,18 +9,46 @@ import { Input } from "~/components/ui/input";
 import { Label } from "~/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "~/components/ui/select";
 import { Separator } from "~/components/ui/separator";
+import { auth } from "~/lib/auth";
+import { toast } from "sonner";
 
 export const Route = createLazyFileRoute("/settings/preference/$")({
   component: AccountPreferenceComponent,
 });
 
 export function AccountPreferenceComponent() {
-  const [firstName, setFirstName] = useState("John");
-  const [lastName, setLastName] = useState("Doe");
-  const [email, setEmail] = useState("john.doe@example.com");
-  const [phone, setPhone] = useState("+1 (555) 123-4567");
-  const [location, setLocation] = useState("San Francisco, CA");
+  const { data: session, isPending } = auth.useSession();
+  const user = session?.user;
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  // Placeholder local-only fields (not yet persisted): phone, location, timezone
+  const [phone, setPhone] = useState("");
+  const [location, setLocation] = useState("");
   const [timezone, setTimezone] = useState("PST");
+  const [isSaving, setIsSaving] = useState(false);
+
+  // Initialize from session
+  useEffect(() => {
+    if (user) {
+      setName(user.name ?? "");
+      setEmail(user.email ?? "");
+    }
+  }, [user]);
+
+  const handleSave = useCallback(async () => {
+    if (!user) return;
+    setIsSaving(true);
+    try {
+      // Only updating name for now (email change & other fields not yet supported)
+      const { error } = await auth.updateUser({ name: name.trim() });
+      if (error) throw new Error(error.message);
+      toast.success("Profile updated");
+    } catch (e) {
+      toast.error((e as Error).message || "Update failed");
+    } finally {
+      setIsSaving(false);
+    }
+  }, [name, user]);
 
   return (
     <div className="mx-auto w-full max-w-3xl min-w-0 flex-1 space-y-6 p-6">
@@ -43,23 +71,33 @@ export function AccountPreferenceComponent() {
           <div className="flex items-center gap-4">
             <div className="relative">
               <Avatar className="h-20 w-20">
-                <AvatarImage alt="Profile" src="/placeholder-avatar.jpg" />
-                <AvatarFallback className="text-lg">JD</AvatarFallback>
+                <AvatarImage
+                  alt={name || "User avatar"}
+                  src={user?.image || "/placeholder-avatar.jpg"}
+                  onError={(e) => {
+                    // Replace broken image with fallback
+                    const target = e.currentTarget as HTMLImageElement;
+                    target.style.display = "none"; // let fallback show
+                  }}
+                />
+                <AvatarFallback className="text-lg">
+                  {(() => {
+                    if (name) {
+                      const parts = name.trim().split(/\s+/).slice(0, 2);
+                      return parts.map(p => p[0]?.toUpperCase()).join("") || "U";
+                    }
+                    if (email) return email[0]?.toUpperCase() ?? "U";
+                    return "U";
+                  })()}
+                </AvatarFallback>
               </Avatar>
-              <Button
-                className="border-background absolute -right-1 -bottom-1 h-8 w-8 rounded-full border-2"
-                size="icon"
-                variant="outline"
-              >
-                <Camera className="h-4 w-4" />
-              </Button>
             </div>
             <div className="space-y-1">
               <h3 className="text-lg font-medium">
-                {firstName} {lastName}
+                {name || (isPending ? "Loading..." : "Unnamed User")}
               </h3>
-              <p className="text-muted-foreground text-sm">{email}</p>
-              <Button size="sm" variant="outline">
+              <p className="text-muted-foreground text-sm">{email || (isPending ? "" : "No email")}</p>
+              <Button disabled size="sm" variant="outline" title="Avatar upload coming soon">
                 Change Photo
               </Button>
             </div>
@@ -69,22 +107,13 @@ export function AccountPreferenceComponent() {
 
           {/* Personal Information */}
           <div className="grid gap-4 md:grid-cols-2">
-            <div className="space-y-2">
-              <Label htmlFor="firstName">First Name</Label>
+            <div className="space-y-2 md:col-span-2">
+              <Label htmlFor="name">Name</Label>
               <Input
-                id="firstName"
-                onChange={(e) => setFirstName(e.target.value)}
-                placeholder="Enter first name"
-                value={firstName}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="lastName">Last Name</Label>
-              <Input
-                id="lastName"
-                onChange={(e) => setLastName(e.target.value)}
-                placeholder="Enter last name"
-                value={lastName}
+                id="name"
+                onChange={(e) => setName(e.target.value)}
+                placeholder="Enter your name"
+                value={name}
               />
             </div>
           </div>
@@ -229,8 +258,12 @@ export function AccountPreferenceComponent() {
 
       {/* Save Button */}
       <div className="flex justify-end gap-3">
-        <Button variant="outline">Cancel</Button>
-        <Button>Save Changes</Button>
+        <Button
+          disabled={isSaving || !user || name.trim() === (user?.name ?? "")}
+          onClick={() => void handleSave()}
+        >
+          {isSaving ? "Saving..." : "Save Changes"}
+        </Button>
       </div>
     </div>
   );
