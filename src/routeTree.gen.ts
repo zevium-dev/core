@@ -16,6 +16,7 @@ import { Route as SettingsSplatRouteImport } from './routes/settings/$'
 import { ServerRoute as ApiTrpcSplatServerRouteImport } from './routes/api/trpc/$'
 import { ServerRoute as ApiPosthogSplatServerRouteImport } from './routes/api/posthog/$'
 import { ServerRoute as ApiOpenapiSplatServerRouteImport } from './routes/api/openapi/$'
+import { ServerRoute as ApiAuthSetPasswordServerRouteImport } from './routes/api/auth/set-password'
 import { ServerRoute as ApiAuthSplatServerRouteImport } from './routes/api/auth/$'
 
 const CatalogueLazyRouteImport = createFileRoute('/catalogue')()
@@ -138,6 +139,12 @@ const ApiOpenapiSplatServerRoute = ApiOpenapiSplatServerRouteImport.update({
   path: '/api/openapi/$',
   getParentRoute: () => rootServerRouteImport,
 } as any)
+const ApiAuthSetPasswordServerRoute =
+  ApiAuthSetPasswordServerRouteImport.update({
+    id: '/api/auth/set-password',
+    path: '/api/auth/set-password',
+    getParentRoute: () => rootServerRouteImport,
+  } as any)
 const ApiAuthSplatServerRoute = ApiAuthSplatServerRouteImport.update({
   id: '/api/auth/$',
   path: '/api/auth/$',
@@ -247,12 +254,14 @@ export interface RootRouteChildren {
 }
 export interface FileServerRoutesByFullPath {
   '/api/auth/$': typeof ApiAuthSplatServerRoute
+  '/api/auth/set-password': typeof ApiAuthSetPasswordServerRoute
   '/api/openapi/$': typeof ApiOpenapiSplatServerRoute
   '/api/posthog/$': typeof ApiPosthogSplatServerRoute
   '/api/trpc/$': typeof ApiTrpcSplatServerRoute
 }
 export interface FileServerRoutesByTo {
   '/api/auth/$': typeof ApiAuthSplatServerRoute
+  '/api/auth/set-password': typeof ApiAuthSetPasswordServerRoute
   '/api/openapi/$': typeof ApiOpenapiSplatServerRoute
   '/api/posthog/$': typeof ApiPosthogSplatServerRoute
   '/api/trpc/$': typeof ApiTrpcSplatServerRoute
@@ -260,18 +269,30 @@ export interface FileServerRoutesByTo {
 export interface FileServerRoutesById {
   __root__: typeof rootServerRouteImport
   '/api/auth/$': typeof ApiAuthSplatServerRoute
+  '/api/auth/set-password': typeof ApiAuthSetPasswordServerRoute
   '/api/openapi/$': typeof ApiOpenapiSplatServerRoute
   '/api/posthog/$': typeof ApiPosthogSplatServerRoute
   '/api/trpc/$': typeof ApiTrpcSplatServerRoute
 }
 export interface FileServerRouteTypes {
   fileServerRoutesByFullPath: FileServerRoutesByFullPath
-  fullPaths: '/api/auth/$' | '/api/openapi/$' | '/api/posthog/$' | '/api/trpc/$'
+  fullPaths:
+    | '/api/auth/$'
+    | '/api/auth/set-password'
+    | '/api/openapi/$'
+    | '/api/posthog/$'
+    | '/api/trpc/$'
   fileServerRoutesByTo: FileServerRoutesByTo
-  to: '/api/auth/$' | '/api/openapi/$' | '/api/posthog/$' | '/api/trpc/$'
+  to:
+    | '/api/auth/$'
+    | '/api/auth/set-password'
+    | '/api/openapi/$'
+    | '/api/posthog/$'
+    | '/api/trpc/$'
   id:
     | '__root__'
     | '/api/auth/$'
+    | '/api/auth/set-password'
     | '/api/openapi/$'
     | '/api/posthog/$'
     | '/api/trpc/$'
@@ -279,6 +300,7 @@ export interface FileServerRouteTypes {
 }
 export interface RootServerRouteChildren {
   ApiAuthSplatServerRoute: typeof ApiAuthSplatServerRoute
+  ApiAuthSetPasswordServerRoute: typeof ApiAuthSetPasswordServerRoute
   ApiOpenapiSplatServerRoute: typeof ApiOpenapiSplatServerRoute
   ApiPosthogSplatServerRoute: typeof ApiPosthogSplatServerRoute
   ApiTrpcSplatServerRoute: typeof ApiTrpcSplatServerRoute
@@ -395,6 +417,13 @@ declare module '@tanstack/react-start/server' {
       preLoaderRoute: typeof ApiOpenapiSplatServerRouteImport
       parentRoute: typeof rootServerRouteImport
     }
+    '/api/auth/set-password': {
+      id: '/api/auth/set-password'
+      path: '/api/auth/set-password'
+      fullPath: '/api/auth/set-password'
+      preLoaderRoute: typeof ApiAuthSetPasswordServerRouteImport
+      parentRoute: typeof rootServerRouteImport
+    }
     '/api/auth/$': {
       id: '/api/auth/$'
       path: '/api/auth/$'
@@ -434,6 +463,7 @@ export const routeTree = rootRouteImport
   ._addFileTypes<FileRouteTypes>()
 const rootServerRouteChildren: RootServerRouteChildren = {
   ApiAuthSplatServerRoute: ApiAuthSplatServerRoute,
+  ApiAuthSetPasswordServerRoute: ApiAuthSetPasswordServerRoute,
   ApiOpenapiSplatServerRoute: ApiOpenapiSplatServerRoute,
   ApiPosthogSplatServerRoute: ApiPosthogSplatServerRoute,
   ApiTrpcSplatServerRoute: ApiTrpcSplatServerRoute,

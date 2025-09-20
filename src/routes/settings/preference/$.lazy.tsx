@@ -1,5 +1,5 @@
 import { createLazyFileRoute } from "@tanstack/react-router";
-import { Calendar, Camera, Mail, MapPin, Phone, Shield, Trash2, User, Copy } from "lucide-react";
+import { Calendar, Camera, Mail, MapPin, Phone, Shield, Trash2, User, Copy, Eye, EyeOff, Loader2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
 import { Avatar, AvatarFallback, AvatarImage } from "~/components/ui/avatar";
@@ -26,6 +26,19 @@ export function AccountPreferenceComponent() {
   const [location, setLocation] = useState("");
   const [timezone, setTimezone] = useState("PST");
   const [isSaving, setIsSaving] = useState(false);
+  // Password management UI state
+  const [showPasswords, setShowPasswords] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [isChangingPassword, setIsChangingPassword] = useState(false);
+  const [hasPassword, setHasPassword] = useState<boolean | null>(null); // null while detecting
+  const [showPasswordEditor, setShowPasswordEditor] = useState(false); // gate showing password forms
+  const MIN_PASSWORD_LENGTH = 8;
+  const MAX_PASSWORD_LENGTH = 128;
+  const passwordTooShort = newPassword.length > 0 && newPassword.length < MIN_PASSWORD_LENGTH;
+  const passwordTooLong = newPassword.length > MAX_PASSWORD_LENGTH;
+  const confirmMismatch = confirmPassword.length > 0 && newPassword !== confirmPassword;
 
   // Initialize from session
   useEffect(() => {
@@ -34,6 +47,102 @@ export function AccountPreferenceComponent() {
       setEmail(user.email ?? "");
     }
   }, [user]);
+
+  // Detect whether user already has a password-based (credential) account.
+  // Better Auth exposes listAccounts() on client per docs (listAccounts not yet imported in codebase, so we feature-detect)
+  useEffect(() => {
+    let ignore = false;
+    (async () => {
+      // @ts-ignore dynamic method check
+      if (!auth.listAccounts) {
+        // Fallback heuristic: if user signed in via oauth only -> assume no password
+        // We cannot be certain without listAccounts; default to no password to show Set Password UI
+        if (!ignore) setHasPassword(false);
+        return;
+      }
+      try {
+        // @ts-ignore
+        const result = await auth.listAccounts();
+        if (ignore) return;
+        const accounts = Array.isArray(result) ? result : (result?.data ?? []);
+        const credentialAccount = accounts.find((a: any) => a?.providerId === "credential" || a?.provider === "credential");
+        setHasPassword(Boolean(credentialAccount));
+      } catch (e) {
+        if (!ignore) setHasPassword(false);
+      }
+    })();
+    return () => { ignore = true; };
+  }, [session?.user?.id]);
+
+  const resetPasswordFields = () => {
+    setCurrentPassword("");
+    setNewPassword("");
+    setConfirmPassword("");
+  };
+
+  const handleChangePassword = async () => {
+    if (!hasPassword) return; // Should use set password instead
+    if (!currentPassword || !newPassword) {
+      toast.error("Fill in all password fields");
+      return;
+    }
+    if (passwordTooShort || passwordTooLong) {
+      toast.error("Password length invalid");
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      toast.error("Passwords do not match");
+      return;
+    }
+    setIsChangingPassword(true);
+    try {
+      // @ts-ignore Better Auth changePassword
+      if (!auth.changePassword) throw new Error("changePassword not available");
+      // @ts-ignore
+      const { error } = await auth.changePassword({ currentPassword, newPassword, revokeOtherSessions: true });
+      if (error) throw new Error(error.message);
+      toast.success("Password changed");
+      resetPasswordFields();
+    } catch (e) {
+      toast.error((e as Error).message || "Could not change password");
+    } finally {
+      setIsChangingPassword(false);
+    }
+  };
+
+  const handleSetPassword = async () => {
+    if (hasPassword) return; // Should change instead
+    if (!newPassword) {
+      toast.error("Enter a password");
+      return;
+    }
+    if (passwordTooShort || passwordTooLong) {
+      toast.error("Password length invalid");
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      toast.error("Passwords do not match");
+      return;
+    }
+    setIsChangingPassword(true);
+    try {
+      // setPassword requires server action; We'll call a (to be implemented) internal endpoint /api/auth/set-password
+      // Placeholder minimal implementation using fetch
+      const res = await fetch("/api/auth/set-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ newPassword }),
+      });
+      if (!res.ok) throw new Error("Failed to set password");
+      toast.success("Password set successfully");
+      setHasPassword(true);
+      resetPasswordFields();
+    } catch (e) {
+      toast.error((e as Error).message || "Could not set password");
+    } finally {
+      setIsChangingPassword(false);
+    }
+  };
 
   const handleSave = useCallback(async () => {
     if (!user) return;
@@ -225,13 +334,185 @@ export function AccountPreferenceComponent() {
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="flex items-center justify-between">
+          <div className="flex items-start justify-between gap-4">
             <div className="space-y-1">
               <p className="font-medium">Password</p>
-              <p className="text-muted-foreground text-sm">Last changed 3 months ago</p>
+              <p className="text-muted-foreground text-sm">
+                {hasPassword === null && "Detecting…"}
+                {hasPassword === true && "A password is set for this account"}
+                {hasPassword === false && "No password set (OAuth only). You can set one."}
+              </p>
             </div>
-            <Button variant="outline">Change Password</Button>
+            {showPasswordEditor === false && hasPassword !== null && (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => setShowPasswordEditor(true)}
+                disabled={hasPassword === null}
+                className="self-start"
+              >
+                {hasPassword ? "Change Password" : "Add Password"}
+              </Button>
+            )}
           </div>
+          {/* Password Forms (gated) */}
+          {showPasswordEditor && (
+          <div className="space-y-3 rounded-md border border-border/60 p-4">
+            {hasPassword === true && (
+              <div className="space-y-3">
+                <div className="grid gap-3 md:grid-cols-2">
+                  <div className="space-y-2 md:col-span-2">
+                    <Label htmlFor="currentPassword">Current Password</Label>
+                    <div className="flex items-center gap-2">
+                      <Input
+                        id="currentPassword"
+                        type={showPasswords ? "text" : "password"}
+                        value={currentPassword}
+                        onChange={(e) => setCurrentPassword(e.target.value)}
+                        placeholder="Enter current password"
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="newPassword">New Password</Label>
+                    <Input
+                      id="newPassword"
+                      type={showPasswords ? "text" : "password"}
+                      value={newPassword}
+                      onChange={(e) => setNewPassword(e.target.value)}
+                      placeholder="New password"
+                      maxLength={MAX_PASSWORD_LENGTH}
+                    />
+                    {passwordTooShort && <p className="text-destructive text-xs">Minimum {MIN_PASSWORD_LENGTH} characters</p>}
+                    {passwordTooLong && <p className="text-destructive text-xs">Maximum {MAX_PASSWORD_LENGTH} characters</p>}
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="confirmPassword">Confirm Password</Label>
+                    <Input
+                      id="confirmPassword"
+                      type={showPasswords ? "text" : "password"}
+                      value={confirmPassword}
+                      onChange={(e) => setConfirmPassword(e.target.value)}
+                      placeholder="Confirm new password"
+                      maxLength={MAX_PASSWORD_LENGTH}
+                    />
+                    {confirmMismatch && !passwordTooShort && !passwordTooLong && (
+                      <p className="text-destructive text-xs">Passwords do not match</p>
+                    )}
+                  </div>
+                </div>
+                <div className="flex items-center justify-end gap-2">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setShowPasswords((p) => !p)}
+                    className="mr-auto"
+                  >
+                    {showPasswords ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      setShowPasswordEditor(false);
+                      resetPasswordFields();
+                    }}
+                  >
+                    Close
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    disabled={
+                      isChangingPassword ||
+                      !currentPassword ||
+                      !newPassword ||
+                      passwordTooShort ||
+                      passwordTooLong ||
+                      newPassword !== confirmPassword
+                    }
+                    onClick={() => void handleChangePassword()}
+                  >
+                    {isChangingPassword ? <Loader2 className="h-4 w-4 animate-spin" /> : "Change Password"}
+                  </Button>
+                </div>
+              </div>
+            )}
+            {hasPassword === false && (
+              <div className="space-y-3">
+                <div className="grid gap-3 md:grid-cols-2">
+                  <div className="space-y-2 md:col-span-2">
+                    <Label htmlFor="newPassword">Set Password</Label>
+                    <Input
+                      id="newPassword"
+                      type={showPasswords ? "text" : "password"}
+                      value={newPassword}
+                      onChange={(e) => setNewPassword(e.target.value)}
+                      placeholder="Enter new password"
+                      maxLength={MAX_PASSWORD_LENGTH}
+                    />
+                    {passwordTooShort && <p className="text-destructive text-xs">Minimum {MIN_PASSWORD_LENGTH} characters</p>}
+                    {passwordTooLong && <p className="text-destructive text-xs">Maximum {MAX_PASSWORD_LENGTH} characters</p>}
+                  </div>
+                  <div className="space-y-2 md:col-span-2">
+                    <Label htmlFor="confirmPassword">Confirm Password</Label>
+                    <Input
+                      id="confirmPassword"
+                      type={showPasswords ? "text" : "password"}
+                      value={confirmPassword}
+                      onChange={(e) => setConfirmPassword(e.target.value)}
+                      placeholder="Confirm password"
+                      maxLength={MAX_PASSWORD_LENGTH}
+                    />
+                    {confirmMismatch && !passwordTooShort && !passwordTooLong && (
+                      <p className="text-destructive text-xs">Passwords do not match</p>
+                    )}
+                  </div>
+                </div>
+                <div className="flex items-center justify-end gap-2">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setShowPasswords((p) => !p)}
+                    className="mr-auto"
+                  >
+                    {showPasswords ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      setShowPasswordEditor(false);
+                      resetPasswordFields();
+                    }}
+                  >
+                    Close
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    disabled={
+                      isChangingPassword ||
+                      !newPassword ||
+                      passwordTooShort ||
+                      passwordTooLong ||
+                      newPassword !== confirmPassword
+                    }
+                    onClick={() => void handleSetPassword()}
+                  >
+                    {isChangingPassword ? <Loader2 className="h-4 w-4 animate-spin" /> : "Set Password"}
+                  </Button>
+                </div>
+              </div>
+            )}
+            {/* Close now integrated with action row above */}
+          </div>
+          )}
           <Separator />
           <div className="flex items-center justify-between">
             <div className="space-y-1">
