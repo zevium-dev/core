@@ -1,25 +1,27 @@
 import { arktypeResolver } from "@hookform/resolvers/arktype";
 import { SiGoogle } from "@icons-pack/react-simple-icons";
 import { useMutation } from "@tanstack/react-query";
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { TRPCClientError } from "@trpc/client";
 import { type } from "arktype";
 import { useForm } from "react-hook-form";
 
-import { CapWidget } from "~/components/cap-widget";
+import { CapWidget, useCapState } from "~/components/cap-widget";
+import { Redirect } from "~/components/redirect";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
 import { Input } from "~/components/ui/input";
 import { Label } from "~/components/ui/label";
 import { ScreenCenter } from "~/components/ui/screen-center";
 import { auth } from "~/lib/auth";
+import { CAPTCHA_HEADER_KEY } from "~/lib/constants";
 import { cn } from "~/lib/utils";
 
 export const FormValuesArk = type({
-  email: "string.email",
+  email: "string.email < 256",
   "name?": "0 < string < 128",
   password: "0 < string < 128",
-  "password-confirm": "0 < string < 128",
+  passwordConfirm: "0 < string < 128",
 });
 
 type FormValues = typeof FormValuesArk.infer;
@@ -29,12 +31,16 @@ export const Route = createFileRoute("/auth/sign-up")({
 });
 
 function RouteComponent() {
+  const capState = useCapState();
+  const authState = auth.useSession();
+  const navigate = useNavigate();
+
   const {
     formState: { errors, isSubmitting },
     handleSubmit,
     register,
   } = useForm<FormValues>({
-    defaultValues: { email: "", name: "", password: "" },
+    defaultValues: { email: "", name: "", password: "", passwordConfirm: "" },
     mode: "onBlur",
     resolver: arktypeResolver(FormValuesArk),
   });
@@ -44,19 +50,31 @@ function RouteComponent() {
       const email = data.email.trim();
       const name = data.name?.trim() ?? email.split("@").at(0) ?? crypto.randomUUID();
       const password = data.password;
-      const passwordConfirm = data["password-confirm"];
+      const passwordConfirm = data.passwordConfirm;
       if (password !== passwordConfirm) throw new TRPCClientError("Passwords do not match");
-      return auth.signUp.email({ email, name, password });
+      const headers = new Headers();
+      if (capState.token) headers.set(CAPTCHA_HEADER_KEY, capState.token);
+      return auth.signUp.email({ email, name, password }, { headers });
+    },
+    onSettled: () => {
+      capState.reset?.();
+    },
+    onSuccess: () => {
+      return navigate({ to: "/auth/sent-email" });
     },
   });
 
-  const onSubmit = (data: FormValues) => {
-    signUpMutation.mutate(data);
+  const onSubmit = async (data: FormValues) => {
+    await signUpMutation.mutateAsync(data);
   };
 
   const onGoogle = () => {
     void auth.signIn.social({ provider: "google" });
   };
+
+  if (authState.data?.user) {
+    return <Redirect to="/" />;
+  }
 
   return (
     <ScreenCenter>
@@ -79,6 +97,21 @@ function RouteComponent() {
                 </div>
                 <div className="grid gap-6">
                   <div className="grid gap-3">
+                    <Label htmlFor="name">Name</Label>
+                    <Input
+                      aria-describedby={errors.name ? "name-error" : undefined}
+                      aria-invalid={!!errors.name}
+                      disabled={isSubmitting}
+                      id="name"
+                      placeholder="Your Name"
+                      type="text"
+                      {...register("name")}
+                    />
+                    <p className={cn("text-destructive text-end text-xs", !errors.name && "invisible")} id="name-error">
+                      {errors.name?.message ?? "No error"}
+                    </p>
+                  </div>
+                  <div className="grid gap-3">
                     <Label htmlFor="email">Email</Label>
                     <Input
                       aria-describedby={errors.email ? "email-error" : undefined}
@@ -89,11 +122,12 @@ function RouteComponent() {
                       type="email"
                       {...register("email")}
                     />
-                    {errors.email && (
-                      <p className="text-destructive text-sm" id="email-error">
-                        {errors.email.message}
-                      </p>
-                    )}
+                    <p
+                      className={cn("text-destructive text-end text-xs", !errors.email && "invisible")}
+                      id="email-error"
+                    >
+                      {errors.email?.message ?? "No error"}
+                    </p>
                   </div>
                   <div className="grid gap-3">
                     <Label htmlFor="password">Password</Label>
@@ -105,27 +139,29 @@ function RouteComponent() {
                       type="password"
                       {...register("password")}
                     />
-                    {errors.password && (
-                      <p className="text-destructive text-sm" id="password-error">
-                        {errors.password.message}
-                      </p>
-                    )}
+                    <p
+                      className={cn("text-destructive text-end text-xs", !errors.password && "invisible")}
+                      id="password-error"
+                    >
+                      {errors.password?.message ?? "No error"}
+                    </p>
                   </div>
                   <div className="grid gap-3">
                     <Label htmlFor="password-confirm">Confirm password</Label>
                     <Input
-                      aria-describedby={errors["password-confirm"] ? "password-confirm-error" : undefined}
-                      aria-invalid={!!errors["password-confirm"]}
+                      aria-describedby={errors.passwordConfirm ? "password-confirm-error" : undefined}
+                      aria-invalid={!!errors.passwordConfirm}
                       disabled={isSubmitting}
                       id="password-confirm"
                       type="password"
-                      {...register("password-confirm")}
+                      {...register("passwordConfirm")}
                     />
-                    {errors["password-confirm"] && (
-                      <p className="text-destructive text-sm" id="password-confirm-error">
-                        {errors["password-confirm"].message}
-                      </p>
-                    )}
+                    <p
+                      className={cn("text-destructive text-end text-xs", !errors.passwordConfirm && "invisible")}
+                      id="password-confirm-error"
+                    >
+                      {errors.passwordConfirm?.message ?? "No error"}
+                    </p>
                   </div>
                   <CapWidget />
                   <Button className="w-full" loading={isSubmitting} type="submit">
@@ -134,7 +170,7 @@ function RouteComponent() {
                 </div>
                 <div className="text-center text-sm">
                   Already have an account?{" "}
-                  <Link className="underline underline-offset-4" to="/auth">
+                  <Link className="underline underline-offset-4" to="/auth/sign-in">
                     Sign in
                   </Link>
                 </div>

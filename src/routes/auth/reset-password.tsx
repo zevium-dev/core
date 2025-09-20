@@ -51,8 +51,8 @@ function RouteComponent() {
     },
   });
 
-  const onSubmit = (data: FormValues) => {
-    resetPasswordMutation.mutate(data);
+  const onSubmit = async (data: FormValues) => {
+    await resetPasswordMutation.mutateAsync(data);
   };
 
   return (
@@ -76,11 +76,12 @@ function RouteComponent() {
                       type="password"
                       {...register("password")}
                     />
-                    {errors.password && (
-                      <p className="text-destructive text-sm" id="password-error">
-                        {errors.password.message}
-                      </p>
-                    )}
+                    <p
+                      className={cn("text-destructive text-end text-xs", !errors.password && "invisible")}
+                      id="password-error"
+                    >
+                      {errors.password?.message ?? "No error"}
+                    </p>
                   </div>
                   <div className="grid gap-3">
                     <Label htmlFor="password-confirm">Confirm password</Label>
@@ -92,11 +93,12 @@ function RouteComponent() {
                       type="password"
                       {...register("password-confirm")}
                     />
-                    {errors["password-confirm"] && (
-                      <p className="text-destructive text-sm" id="password-confirm-error">
-                        {errors["password-confirm"].message}
-                      </p>
-                    )}
+                    <p
+                      className={cn("text-destructive text-end text-xs", !errors["password-confirm"] && "invisible")}
+                      id="password-confirm-error"
+                    >
+                      {errors["password-confirm"]?.message ?? "No error"}
+                    </p>
                   </div>
                   <div className="hidden gap-3">
                     <Label htmlFor="token">Token</Label>
@@ -108,11 +110,12 @@ function RouteComponent() {
                       type="password"
                       {...register("token")}
                     />
-                    {errors.token && (
-                      <p className="text-destructive text-sm" id="token-error">
-                        {errors.token.message}
-                      </p>
-                    )}
+                    <p
+                      className={cn("text-destructive text-end text-xs", !errors.token && "invisible")}
+                      id="token-error"
+                    >
+                      {errors.token?.message ?? "No error"}
+                    </p>
                   </div>
                   <Button className="w-full" loading={isSubmitting} type="submit">
                     Reset password

@@ -11,6 +11,7 @@ import { toast } from "sonner";
 import { ThemeProvider } from "~/components/theme-provider";
 import { SidebarInset, SidebarProvider } from "~/components/ui/sidebar";
 import { clientEnv } from "~/env/client";
+import { BetterAuthException } from "~/lib/auth";
 import { createClient, TRPCProvider } from "~/lib/trpc";
 
 import { PostHogIdentify } from "./posthog-identify";
@@ -24,9 +25,28 @@ const makeQueryClient = () => {
     defaultOptions: {
       mutations: {
         onError: (cause) => {
-          const error = new Error("[TRPC]: some error occurred", { cause });
-          toast.error(cause instanceof TRPCClientError ? cause.message : "Something went wrong");
-          posthog.captureException(error);
+          if (cause instanceof TRPCClientError) {
+            const error = new Error("[TRPC]: some error occurred", { cause });
+            toast.error(cause.message);
+            posthog.captureException(error);
+          } else if (BetterAuthException.match(cause)) {
+            console.log(cause.meta);
+            if (cause.meta?.response.status === 429) {
+              const retryAfter = cause.meta.response.headers.get("X-Retry-After");
+              toast.error(`Too many requests. Please try again after ${retryAfter} seconds.`);
+              posthog.captureException(cause);
+            } else if (cause.message.includes("Email not verified")) {
+              window.location.pathname = "/auth/sent-email";
+            } else {
+              const error = new Error("[BETTER_AUTH]: some error occurred", { cause });
+              toast.error(cause.message || "Something went wrong");
+              posthog.captureException(error);
+            }
+          } else {
+            const error = new Error("some error occurred", { cause });
+            toast.error(cause instanceof Error ? cause.message : "Something went wrong");
+            posthog.captureException(error);
+          }
           console.error(cause);
         },
       },
@@ -78,7 +98,7 @@ export const Providers: React.FC<React.PropsWithChildren> = ({ children }) => {
             <LazyMotion features={domAnimation} strict>
               <JotaiProvider>
                 <SidebarProvider>
-                  <Toaster />
+                  <Toaster richColors />
                   <PostHogIdentify />
                   <AppSidebar />
                   <SidebarInset>

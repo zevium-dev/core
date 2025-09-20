@@ -5,13 +5,14 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { type } from "arktype";
 import { useForm } from "react-hook-form";
 
-import { CapWidget } from "~/components/cap-widget";
+import { CapWidget, useCapState } from "~/components/cap-widget";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
 import { Input } from "~/components/ui/input";
 import { Label } from "~/components/ui/label";
 import { ScreenCenter } from "~/components/ui/screen-center";
 import { auth } from "~/lib/auth";
+import { CAPTCHA_HEADER_KEY } from "~/lib/constants";
 import { cn } from "~/lib/utils";
 
 export const FormValuesArk = type({
@@ -26,6 +27,9 @@ export const Route = createFileRoute("/auth/sign-in")({
 });
 
 function RouteComponent() {
+  const capState = useCapState();
+  const navigate = Route.useNavigate();
+
   const {
     formState: { errors, isSubmitting },
     handleSubmit,
@@ -38,12 +42,20 @@ function RouteComponent() {
 
   const signInMutation = useMutation({
     mutationFn: (data: FormValues) => {
-      return auth.signIn.email({ email: data.email, password: data.password });
+      const headers = new Headers();
+      if (capState.token) headers.set(CAPTCHA_HEADER_KEY, capState.token);
+      return auth.signIn.email({ email: data.email, password: data.password }, { headers });
+    },
+    onSettled: () => {
+      capState.reset?.();
+    },
+    onSuccess: () => {
+      return navigate({ to: "/" });
     },
   });
 
-  const onSubmit = (data: FormValues) => {
-    signInMutation.mutate(data);
+  const onSubmit = async (data: FormValues) => {
+    await signInMutation.mutateAsync(data);
   };
 
   const onGoogle = () => {
@@ -81,11 +93,12 @@ function RouteComponent() {
                       type="email"
                       {...register("email")}
                     />
-                    {errors.email && (
-                      <p className="text-destructive text-sm" id="email-error">
-                        {errors.email.message}
-                      </p>
-                    )}
+                    <p
+                      className={cn("text-destructive text-end text-xs", !errors.email && "invisible")}
+                      id="email-error"
+                    >
+                      {errors.email?.message ?? "No error"}
+                    </p>
                   </div>
                   <div className="grid gap-3">
                     <div className="flex items-center">
@@ -104,11 +117,12 @@ function RouteComponent() {
                       type="password"
                       {...register("password")}
                     />
-                    {errors.password && (
-                      <p className="text-destructive text-sm" id="password-error">
-                        {errors.password.message}
-                      </p>
-                    )}
+                    <p
+                      className={cn("text-destructive text-end text-xs", !errors.password && "invisible")}
+                      id="password-error"
+                    >
+                      {errors.password?.message ?? "No error"}
+                    </p>
                   </div>
                   <CapWidget />
                   <Button className="w-full" loading={isSubmitting} type="submit">

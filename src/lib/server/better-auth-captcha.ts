@@ -1,14 +1,13 @@
 import type { BetterAuthPlugin } from "better-auth/plugins";
 
-import { type } from "arktype";
-
+import { CAPTCHA_HEADER_KEY } from "~/lib/constants";
 import { cap } from "~/lib/server/cap";
 
 export interface BaseCaptchaOptions {
   endpoints?: Array<string>;
 }
 
-export const defaultEndpoints = ["/sign-up/email", "/sign-in/email", "/forget-password"];
+export const defaultEndpoints = ["/sign-up/email", "/sign-in/email", "/forget-password", "/send-verification-email"];
 
 export const capCaptcha = (options?: BaseCaptchaOptions): BetterAuthPlugin => ({
   id: "cap-captcha",
@@ -16,25 +15,19 @@ export const capCaptcha = (options?: BaseCaptchaOptions): BetterAuthPlugin => ({
     try {
       const endpoints = options?.endpoints?.length ? options.endpoints : defaultEndpoints;
       if (!endpoints.some((endpoint) => request.url.includes(endpoint))) return undefined;
-      const captchaToken = request.headers.get("x-captcha-token");
-      const captchaSolutions = type("number[]")(request.headers.get("x-captcha-solutions")?.split(","));
-      if (captchaSolutions instanceof type.errors) {
+      const captchaToken = request.headers.get(CAPTCHA_HEADER_KEY);
+
+      if (!captchaToken) {
         return {
-          response: Response.json({ message: "Missing CAPTCHA response" }, { status: 400 }),
+          response: Response.json({ message: "Captcha validation failed" }, { status: 400 }),
         };
       }
 
-      if (!captchaToken || !captchaSolutions.length) {
-        return {
-          response: Response.json({ message: "Missing CAPTCHA response" }, { status: 400 }),
-        };
-      }
-
-      const challengeValid = await cap.redeemChallenge({ solutions: captchaSolutions, token: captchaToken });
+      const challengeValid = await cap.validateToken(captchaToken);
 
       if (!challengeValid.success) {
         return {
-          response: Response.json({ message: "Invalid CAPTCHA response" }, { status: 400 }),
+          response: Response.json({ message: "Captcha validation failed" }, { status: 400 }),
         };
       }
     } catch (_error) {

@@ -13,8 +13,10 @@ import { createServerRootRoute } from '@tanstack/react-start/server'
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as SettingsSplatRouteImport } from './routes/settings/$'
+import { Route as AuthVerifyEmailRouteImport } from './routes/auth/verify-email'
 import { Route as AuthSignUpRouteImport } from './routes/auth/sign-up'
 import { Route as AuthSignInRouteImport } from './routes/auth/sign-in'
+import { Route as AuthSentEmailRouteImport } from './routes/auth/sent-email'
 import { Route as AuthResetPasswordRouteImport } from './routes/auth/reset-password'
 import { Route as AuthForgotPasswordRouteImport } from './routes/auth/forgot-password'
 import { ServerRoute as InternalEmailTemplatesPreviewServerRouteImport } from './routes/$internal/email-templates-preview'
@@ -61,6 +63,11 @@ const SettingsSplatRoute = SettingsSplatRouteImport.update({
   path: '/settings/$',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AuthVerifyEmailRoute = AuthVerifyEmailRouteImport.update({
+  id: '/auth/verify-email',
+  path: '/auth/verify-email',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AuthSignUpRoute = AuthSignUpRouteImport.update({
   id: '/auth/sign-up',
   path: '/auth/sign-up',
@@ -69,6 +76,11 @@ const AuthSignUpRoute = AuthSignUpRouteImport.update({
 const AuthSignInRoute = AuthSignInRouteImport.update({
   id: '/auth/sign-in',
   path: '/auth/sign-in',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AuthSentEmailRoute = AuthSentEmailRouteImport.update({
+  id: '/auth/sent-email',
+  path: '/auth/sent-email',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AuthResetPasswordRoute = AuthResetPasswordRouteImport.update({
@@ -136,8 +148,10 @@ export interface FileRoutesByFullPath {
   '/projects': typeof ProjectsLazyRoute
   '/auth/forgot-password': typeof AuthForgotPasswordRoute
   '/auth/reset-password': typeof AuthResetPasswordRoute
+  '/auth/sent-email': typeof AuthSentEmailRoute
   '/auth/sign-in': typeof AuthSignInRoute
   '/auth/sign-up': typeof AuthSignUpRoute
+  '/auth/verify-email': typeof AuthVerifyEmailRoute
   '/settings/$': typeof SettingsSplatRoute
   '/settings/activity/$': typeof SettingsActivitySplatLazyRoute
   '/settings/credits/$': typeof SettingsCreditsSplatLazyRoute
@@ -149,8 +163,10 @@ export interface FileRoutesByTo {
   '/projects': typeof ProjectsLazyRoute
   '/auth/forgot-password': typeof AuthForgotPasswordRoute
   '/auth/reset-password': typeof AuthResetPasswordRoute
+  '/auth/sent-email': typeof AuthSentEmailRoute
   '/auth/sign-in': typeof AuthSignInRoute
   '/auth/sign-up': typeof AuthSignUpRoute
+  '/auth/verify-email': typeof AuthVerifyEmailRoute
   '/settings/$': typeof SettingsSplatRoute
   '/settings/activity/$': typeof SettingsActivitySplatLazyRoute
   '/settings/credits/$': typeof SettingsCreditsSplatLazyRoute
@@ -163,8 +179,10 @@ export interface FileRoutesById {
   '/projects': typeof ProjectsLazyRoute
   '/auth/forgot-password': typeof AuthForgotPasswordRoute
   '/auth/reset-password': typeof AuthResetPasswordRoute
+  '/auth/sent-email': typeof AuthSentEmailRoute
   '/auth/sign-in': typeof AuthSignInRoute
   '/auth/sign-up': typeof AuthSignUpRoute
+  '/auth/verify-email': typeof AuthVerifyEmailRoute
   '/settings/$': typeof SettingsSplatRoute
   '/settings/activity/$': typeof SettingsActivitySplatLazyRoute
   '/settings/credits/$': typeof SettingsCreditsSplatLazyRoute
@@ -178,8 +196,10 @@ export interface FileRouteTypes {
     | '/projects'
     | '/auth/forgot-password'
     | '/auth/reset-password'
+    | '/auth/sent-email'
     | '/auth/sign-in'
     | '/auth/sign-up'
+    | '/auth/verify-email'
     | '/settings/$'
     | '/settings/activity/$'
     | '/settings/credits/$'
@@ -191,8 +211,10 @@ export interface FileRouteTypes {
     | '/projects'
     | '/auth/forgot-password'
     | '/auth/reset-password'
+    | '/auth/sent-email'
     | '/auth/sign-in'
     | '/auth/sign-up'
+    | '/auth/verify-email'
     | '/settings/$'
     | '/settings/activity/$'
     | '/settings/credits/$'
@@ -204,8 +226,10 @@ export interface FileRouteTypes {
     | '/projects'
     | '/auth/forgot-password'
     | '/auth/reset-password'
+    | '/auth/sent-email'
     | '/auth/sign-in'
     | '/auth/sign-up'
+    | '/auth/verify-email'
     | '/settings/$'
     | '/settings/activity/$'
     | '/settings/credits/$'
@@ -218,8 +242,10 @@ export interface RootRouteChildren {
   ProjectsLazyRoute: typeof ProjectsLazyRoute
   AuthForgotPasswordRoute: typeof AuthForgotPasswordRoute
   AuthResetPasswordRoute: typeof AuthResetPasswordRoute
+  AuthSentEmailRoute: typeof AuthSentEmailRoute
   AuthSignInRoute: typeof AuthSignInRoute
   AuthSignUpRoute: typeof AuthSignUpRoute
+  AuthVerifyEmailRoute: typeof AuthVerifyEmailRoute
   SettingsSplatRoute: typeof SettingsSplatRoute
   SettingsActivitySplatLazyRoute: typeof SettingsActivitySplatLazyRoute
   SettingsCreditsSplatLazyRoute: typeof SettingsCreditsSplatLazyRoute
@@ -322,6 +348,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/auth/verify-email': {
+      id: '/auth/verify-email'
+      path: '/auth/verify-email'
+      fullPath: '/auth/verify-email'
+      preLoaderRoute: typeof AuthVerifyEmailRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/auth/sign-up': {
       id: '/auth/sign-up'
       path: '/auth/sign-up'
@@ -334,6 +367,13 @@ declare module '@tanstack/react-router' {
       path: '/auth/sign-in'
       fullPath: '/auth/sign-in'
       preLoaderRoute: typeof AuthSignInRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/auth/sent-email': {
+      id: '/auth/sent-email'
+      path: '/auth/sent-email'
+      fullPath: '/auth/sent-email'
+      preLoaderRoute: typeof AuthSentEmailRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/auth/reset-password': {
@@ -420,8 +460,10 @@ const rootRouteChildren: RootRouteChildren = {
   ProjectsLazyRoute: ProjectsLazyRoute,
   AuthForgotPasswordRoute: AuthForgotPasswordRoute,
   AuthResetPasswordRoute: AuthResetPasswordRoute,
+  AuthSentEmailRoute: AuthSentEmailRoute,
   AuthSignInRoute: AuthSignInRoute,
   AuthSignUpRoute: AuthSignUpRoute,
+  AuthVerifyEmailRoute: AuthVerifyEmailRoute,
   SettingsSplatRoute: SettingsSplatRoute,
   SettingsActivitySplatLazyRoute: SettingsActivitySplatLazyRoute,
   SettingsCreditsSplatLazyRoute: SettingsCreditsSplatLazyRoute,

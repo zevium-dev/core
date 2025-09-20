@@ -6,6 +6,7 @@ import { reactStartCookies } from "better-auth/react-start";
 
 import { db, schema } from "~/db";
 import { serverEnv } from "~/env/server";
+import { EMAIL_FROM } from "~/lib/constants";
 
 import { sendEmail } from "../email";
 import { EmailVerify, EmailVerifySubject } from "../email/templates/email-verify";
@@ -25,18 +26,20 @@ export const authServer = betterAuth({
   database: drizzleAdapter(db, { provider: "sqlite", schema }),
   emailAndPassword: {
     enabled: true,
+    requireEmailVerification: true,
   },
   emailVerification: {
+    autoSignInAfterVerification: true,
     sendVerificationEmail: async (opts, _req) => {
       await sendEmail({
-        from: "Zevium <zevium@resend.dev>",
+        from: EMAIL_FROM,
         react: <EmailVerify fullUrl={opts.url} name={opts.user.name} />,
         subject: EmailVerifySubject,
         to: [opts.user.email],
       });
     },
   },
-  plugins: [apiKey(), organization(), capCaptcha(), reactStartCookies()],
+  plugins: [apiKey(), organization({ requireEmailVerificationOnInvitation: true }), capCaptcha(), reactStartCookies()],
   rateLimit: {
     storage: "secondary-storage",
   },

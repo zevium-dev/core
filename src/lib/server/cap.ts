@@ -4,7 +4,6 @@ import { db, orm, schema } from "~/db";
 
 export type Solution = Cap.Solution;
 
-// TODO: cap stores the solutions in memory. Need to fix that
 export const cap = new Cap({
   noFSState: true,
   storage: {

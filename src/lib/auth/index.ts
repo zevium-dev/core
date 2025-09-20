@@ -1,20 +1,13 @@
+import { Exception } from "@boi.gg/exception";
 import { apiKeyClient, organizationClient } from "better-auth/client/plugins";
-import { createAuthClient } from "better-auth/react";
-import posthog from "posthog-js";
-import { toast } from "sonner";
+import { createAuthClient, ErrorContext } from "better-auth/react";
+
+export class BetterAuthException extends Exception.kind<ErrorContext>("BetterAuthException") {}
 
 export const auth = createAuthClient({
   fetchOptions: {
     onError: (ctx) => {
-      if (ctx.response.status === 429) {
-        const retryAfter = ctx.response.headers.get("X-Retry-After");
-        toast.error(`Too many requests. Please try again after ${retryAfter} seconds.`);
-      } else {
-        const error = new Error("[BETTER_AUTH]: some error occurred", { cause: ctx.error });
-        posthog.captureException(error);
-        console.error(ctx.response);
-        toast.error("Something went wrong");
-      }
+      throw new BetterAuthException(ctx.error.message, ctx, ctx.error);
     },
   },
   plugins: [apiKeyClient(), organizationClient()],

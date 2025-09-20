@@ -1,6 +1,6 @@
 import { arktypeResolver } from "@hookform/resolvers/arktype";
 import { useMutation } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { type } from "arktype";
 import { useForm } from "react-hook-form";
 
@@ -14,18 +14,18 @@ import { auth } from "~/lib/auth";
 import { CAPTCHA_HEADER_KEY } from "~/lib/constants";
 import { cn } from "~/lib/utils";
 
-export const FormValuesArk = type({
-  email: "string.email",
-});
+export const FormValuesArk = type({ email: "string.email" });
 
 type FormValues = typeof FormValuesArk.infer;
 
-export const Route = createFileRoute("/auth/forgot-password")({
+export const Route = createFileRoute("/auth/verify-email")({
   component: RouteComponent,
 });
 
 function RouteComponent() {
   const capState = useCapState();
+  const navigate = useNavigate();
+
   const {
     formState: { errors, isSubmitting },
     handleSubmit,
@@ -36,19 +36,22 @@ function RouteComponent() {
     resolver: arktypeResolver(FormValuesArk),
   });
 
-  const requestPasswordResetMutation = useMutation({
+  const requestResendEmailMutation = useMutation({
     mutationFn: (data: FormValues) => {
       const headers = new Headers();
       if (capState.token) headers.set(CAPTCHA_HEADER_KEY, capState.token);
-      return auth.requestPasswordReset({ email: data.email }, { headers });
+      return auth.sendVerificationEmail({ email: data.email }, { headers });
     },
     onSettled: () => {
       capState.reset?.();
     },
+    onSuccess: () => {
+      return navigate({ to: "/auth/sent-email" });
+    },
   });
 
   const onSubmit = async (data: FormValues) => {
-    await requestPasswordResetMutation.mutateAsync(data);
+    await requestResendEmailMutation.mutateAsync(data);
   };
 
   return (
@@ -56,7 +59,7 @@ function RouteComponent() {
       <div className={cn("flex max-w-sm min-w-sm flex-col gap-6")}>
         <Card>
           <CardHeader className="text-center">
-            <CardTitle className="text-xl">Forgot Password</CardTitle>
+            <CardTitle className="text-xl">Resend Verification Email</CardTitle>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleSubmit(onSubmit)}>
@@ -82,7 +85,7 @@ function RouteComponent() {
                   </div>
                   <CapWidget />
                   <Button className="w-full" loading={isSubmitting} type="submit">
-                    Reset password
+                    Resend
                   </Button>
                 </div>
               </div>
