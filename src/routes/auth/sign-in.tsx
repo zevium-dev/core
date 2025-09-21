@@ -114,7 +114,7 @@ function RouteComponent() {
                       <Label className="mt-0.5" htmlFor="password">
                         Password
                       </Label>
-                      <Link className="ml-auto text-xs hover:underline" to="/auth/forgot-password">
+                      <Link className="ml-auto text-xs hover:underline" tabIndex={-1} to="/auth/forgot-password">
                         Forgot your password?
                       </Link>
                     </div>

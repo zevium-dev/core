@@ -94,7 +94,7 @@ export const Providers: React.FC<React.PropsWithChildren> = ({ children }) => {
 
   return (
     <PHProvider>
-      <AutumnProvider betterAuthUrl={clientEnv.VITE_PUBLIC_URL}>
+      <AutumnProvider betterAuthUrl={clientEnv.VITE_PUBLIC_URL} includeCredentials>
         <QueryClientProvider client={queryClient}>
           <TRPCProvider queryClient={queryClient} trpcClient={trpcClient}>
             <ThemeProvider defaultTheme="dark" storageKey="vite-ui-theme">
