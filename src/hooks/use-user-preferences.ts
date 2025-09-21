@@ -1,11 +1,11 @@
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { auth } from "~/lib/auth";
 import { useTRPCClient } from "~/lib/trpc";
 
-// We scope strictly by userId so cache is isolated. No generic base entry.
-// Query key shape: ["user-preferences", userId]
-const KEY_PREFIX = "user-preferences" as const;
+// Base key; we append userId for per-user scoping so multiple users in the
+// same session context (e.g. impersonation, test harness) don't share cache.
+const BASE_KEY = ["user-preferences"] as const;
 
 export function useUserPreferences() {
   const session = auth.useSession();
@@ -13,18 +13,17 @@ export function useUserPreferences() {
   const qc = useQueryClient();
   const userId = session.data?.user?.id;
 
-  const queryKey = [KEY_PREFIX, userId] as const;
-  const hadUserRef = useRef<boolean>(false);
+  const enabled = Boolean(userId);
+  const queryKey = userId ? ([...BASE_KEY, userId] as const) : BASE_KEY;
 
   const query = useQuery({
     queryKey,
-    enabled: Boolean(userId),
+    enabled,
     queryFn: async () => {
       const result = await trpc.userPreference.get.query();
       return result; // { timezone }
     },
-    staleTime: 5 * 60 * 1000,
-    gcTime: 10 * 60 * 1000,
+    staleTime: 5 * 60 * 1000, // 5 min; low churn
   });
 
   const mutation = useMutation({
@@ -36,17 +35,13 @@ export function useUserPreferences() {
     },
   });
 
-  // On transition from no user -> user, trigger an immediate refetch (cold start)
+  // Cleanup: when user logs out remove all user-preferences queries so
+  // previous user's data does not linger in cache.
   useEffect(() => {
-    if (userId && !hadUserRef.current) {
-      hadUserRef.current = true;
-      void query.refetch();
+    if (!userId) {
+      qc.removeQueries({ queryKey: BASE_KEY });
     }
-    if (!userId && hadUserRef.current) {
-      hadUserRef.current = false;
-      qc.removeQueries({ queryKey: [KEY_PREFIX] });
-    }
-  }, [userId, qc, query]);
+  }, [userId, qc]);
 
   return {
     preferences: query.data,
@@ -54,6 +49,5 @@ export function useUserPreferences() {
     error: query.error,
     update: mutation.mutateAsync,
     isUpdating: mutation.isPending,
-    refetch: query.refetch,
   };
 }

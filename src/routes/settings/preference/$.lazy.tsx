@@ -12,6 +12,7 @@ import { Separator } from "~/components/ui/separator";
 import { auth } from "~/lib/auth";
 import { toast } from "sonner";
 import { ProtectedRoute } from "~/components/protected-route";
+import { useUserPreferences } from "~/hooks/use-user-preferences";
 
 export const Route = createLazyFileRoute("/settings/preference/$")({
   component: AccountPreferenceComponent,
@@ -22,10 +23,10 @@ export function AccountPreferenceComponent() {
   const user = session?.user;
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
-  // Placeholder local-only fields (not yet persisted): phone, location, timezone
   const [phone, setPhone] = useState("");
   const [location, setLocation] = useState("");
-  const [timezone, setTimezone] = useState("PST");
+  const [timezone, setTimezone] = useState("");
+  const { preferences, update: updatePreferences, isLoading: prefsLoading, isUpdating: prefsSaving } = useUserPreferences();
   const [isSaving, setIsSaving] = useState(false);
   // Password management UI state
   const [showPasswords, setShowPasswords] = useState(false);
@@ -48,6 +49,13 @@ export function AccountPreferenceComponent() {
       setEmail(user.email ?? "");
     }
   }, [user]);
+
+  // Sync timezone from preferences when loaded (only set if empty locally)
+  useEffect(() => {
+    if (preferences?.timezone && !timezone) {
+      setTimezone(preferences.timezone);
+    }
+  }, [preferences?.timezone, timezone]);
 
   // Detect whether user already has a password-based (credential) account.
   // Better Auth exposes listAccounts() on client per docs (listAccounts not yet imported in codebase, so we feature-detect)
@@ -149,16 +157,23 @@ export function AccountPreferenceComponent() {
     if (!user) return;
     setIsSaving(true);
     try {
-      // Only updating name for now (email change & other fields not yet supported)
-      const { error } = await auth.updateUser({ name: name.trim() });
-      if (error) throw new Error(error.message);
-      toast.success("Profile updated");
+      // Persist changed profile + preferences in a single user action
+      // 1. Update name only if it actually changed
+      if (name.trim() !== (user?.name ?? "")) {
+        const { error } = await auth.updateUser({ name: name.trim() });
+        if (error) throw new Error(error.message);
+      }
+      // 2. Update timezone preference only if it changed (was previously saved on each select)
+      if (timezone && timezone !== (preferences?.timezone ?? "")) {
+        await updatePreferences({ timezone });
+      }
+      toast.success("Changes saved");
     } catch (e) {
       toast.error((e as Error).message || "Update failed");
     } finally {
       setIsSaving(false);
     }
-  }, [name, user]);
+  }, [name, timezone, user, preferences?.timezone, updatePreferences]);
 
   return (
     <ProtectedRoute>
@@ -311,9 +326,16 @@ export function AccountPreferenceComponent() {
               <Calendar className="h-4 w-4" />
               Timezone
             </Label>
-            <Select onValueChange={setTimezone} value={timezone}>
+            <Select
+              onValueChange={(val) => {
+                // Only update local state; defer persistence until Save is clicked
+                setTimezone(val);
+              }}
+              value={timezone}
+              disabled={prefsLoading}
+            >
               <SelectTrigger>
-                <SelectValue placeholder="Select timezone" />
+                <SelectValue placeholder={prefsLoading ? "Loading..." : "Select timezone"} />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="PST">Pacific Standard Time (PST)</SelectItem>
@@ -323,6 +345,7 @@ export function AccountPreferenceComponent() {
                 <SelectItem value="UTC">Coordinated Universal Time (UTC)</SelectItem>
               </SelectContent>
             </Select>
+            {/* Removed unsaved indicator to keep UI minimal */}
           </div>
         </CardContent>
       </Card>
@@ -558,7 +581,11 @@ export function AccountPreferenceComponent() {
       {/* Save Button */}
       <div className="flex justify-end gap-3">
         <Button
-          disabled={isSaving || !user || name.trim() === (user?.name ?? "")}
+          disabled={
+            isSaving ||
+            !user ||
+            (name.trim() === (user?.name ?? "") && (timezone === "" || timezone === (preferences?.timezone ?? "")))
+          }
           onClick={() => void handleSave()}
         >
           {isSaving ? "Saving..." : "Save Changes"}
