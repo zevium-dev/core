@@ -1,13 +1,13 @@
 {
   "name": "Zevium.dev Development",
   "image": "mcr.microsoft.com/devcontainers/typescript-node:22-bullseye",
-  
+
   "features": {
     "ghcr.io/devcontainers-contrib/features/mise:2": {
       "version": "latest"
     }
   },
-  
+
   "customizations": {
     "vscode": {
       "extensions": [
@@ -75,7 +75,7 @@
       }
     }
   },
-  
+
   "forwardPorts": [5173, 4173],
   "portsAttributes": {
     "5173": {
@@ -87,12 +87,10 @@
       "onAutoForward": "silent"
     }
   },
-  
+
   "postCreateCommand": "bash .devcontainer/setup.sh",
-  
-  "mounts": [
-    "source=${localEnv:HOME}/.gitconfig,target=/home/node/.gitconfig,type=bind,consistency=cached"
-  ],
-  
+
+  "mounts": ["source=${localEnv:HOME}/.gitconfig,target=/home/node/.gitconfig,type=bind,consistency=cached"],
+
   "remoteUser": "node"
 }

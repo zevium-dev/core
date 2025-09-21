@@ -5,12 +5,14 @@ This directory contains the development container configuration for the Zevium.d
 ## What's Included
 
 ### Base Environment
+
 - **Node.js 22.12.0** (specified in `mise.toml`)
 - **Ubuntu/Debian** base with development tools
 - **mise** for tool version management
 - **pnpm** package manager
 
 ### VS Code Extensions
+
 - **ESLint** - Code linting and formatting
 - **Prettier** - Code formatting
 - **Tailwind CSS IntelliSense** - Tailwind utility classes support
@@ -21,12 +23,14 @@ This directory contains the development container configuration for the Zevium.d
 - **Path Intellisense** - File path autocompletion
 
 ### Port Forwarding
+
 - **5173** - Development server (Vite)
 - **4173** - Preview server
 
 ## Quick Start
 
 ### Using VS Code
+
 1. Install the [Dev Containers extension](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers)
 2. Open the repository in VS Code
 3. When prompted, click "Reopen in Container" or use `Ctrl+Shift+P` → "Dev Containers: Reopen in Container"
@@ -34,6 +38,7 @@ This directory contains the development container configuration for the Zevium.d
 5. Run `pnpm dev` to start the development server
 
 ### Using GitHub Codespaces
+
 1. Create a new Codespace from the repository
 2. The devcontainer will automatically set up the environment
 3. Run `pnpm dev` to start the development server
@@ -72,18 +77,19 @@ UPSTASH_REDIS_REST_TOKEN=your_redis_token
 
 ## Available Commands
 
-| Command | Description |
-|---------|-------------|
-| `pnpm dev` | Start development server |
-| `pnpm build` | Build for production |
-| `pnpm lint` | Run ESLint |
-| `pnpm typecheck` | Run TypeScript compiler |
-| `pnpm ci` | Run all checks (typecheck + lint + format:check) |
-| `pnpm format` | Format code with Prettier and ESLint |
+| Command          | Description                                      |
+| ---------------- | ------------------------------------------------ |
+| `pnpm dev`       | Start development server                         |
+| `pnpm build`     | Build for production                             |
+| `pnpm lint`      | Run ESLint                                       |
+| `pnpm typecheck` | Run TypeScript compiler                          |
+| `pnpm ci`        | Run all checks (typecheck + lint + format:check) |
+| `pnpm format`    | Format code with Prettier and ESLint             |
 
 ## Customization
 
 ### Adding Extensions
+
 Edit `.devcontainer/devcontainer.json` and add extension IDs to the `extensions` array:
 
 ```json
@@ -94,6 +100,7 @@ Edit `.devcontainer/devcontainer.json` and add extension IDs to the `extensions`
 ```
 
 ### Modifying VS Code Settings
+
 Edit the `settings` object in `.devcontainer/devcontainer.json`:
 
 ```json
@@ -104,6 +111,7 @@ Edit the `settings` object in `.devcontainer/devcontainer.json`:
 ```
 
 ### Adding Features
+
 The devcontainer uses [Features](https://containers.dev/features) for additional functionality. Add them to the `features` object:
 
 ```json
@@ -116,19 +124,23 @@ The devcontainer uses [Features](https://containers.dev/features) for additional
 ## Troubleshooting
 
 ### Container Won't Start
+
 - Check Docker is running
 - Try rebuilding: `Ctrl+Shift+P` → "Dev Containers: Rebuild Container"
 
 ### Missing Tools
+
 - The `mise` feature should handle tool installation
 - Check `mise.toml` for configured tools
 - Manually run `mise install` in the terminal
 
 ### Port Already in Use
+
 - Change the port in `vite.config.ts` or `package.json`
 - Update `forwardPorts` in `devcontainer.json`
 
 ### Environment Variables
+
 - Ensure `.env` file exists and contains required values
 - Check the `.env.example` file for reference
 - Restart the dev server after updating environment variables
@@ -136,7 +148,7 @@ The devcontainer uses [Features](https://containers.dev/features) for additional
 ## Development Workflow
 
 1. **Start the container** - VS Code will handle this automatically
-2. **Update environment variables** - Edit `.env` with your actual values  
+2. **Update environment variables** - Edit `.env` with your actual values
 3. **Start development** - Run `pnpm dev`
 4. **Code with confidence** - Linting, formatting, and type checking are configured
 5. **Test changes** - Use `pnpm ci` to run all checks before committing
