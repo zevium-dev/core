@@ -1,4 +1,4 @@
-import { Link, useMatches } from "@tanstack/react-router";
+import { Link, useMatches, useRouter } from "@tanstack/react-router";
 import { atom, useAtom } from "jotai";
 import { Building2Icon, Database, DockIcon, HomeIcon, LogIn, LogOut, Moon, Palette, Settings, Sun } from "lucide-react";
 import * as React from "react";
@@ -129,6 +129,9 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         <SidebarGroup>
           <SidebarMenu>
             {filteredNavData.map((item) => {
+              // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+              if (!match) return <React.Fragment key={item.title} />;
+
               // Check if current path matches the item URL or starts with it (for nested routes)
               const isActive = match.pathname === item.url || (item.url !== "/" && match.pathname.startsWith(item.url));
 
@@ -206,9 +209,10 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
 function AccountSection() {
   const authState = auth.useSession();
   const { state } = useSidebar();
+  const router = useRouter();
 
   const handleSignIn = async () => {
-    await auth.signIn.social({ provider: "google" });
+    await router.navigate({ to: "/auth/sign-in" });
   };
 
   const handleSignOut = async () => {

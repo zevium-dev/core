@@ -19,12 +19,16 @@ export const user = sqliteTable("user", {
 });
 
 export const session = sqliteTable("session", {
-  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .$defaultFn(() => /* @__PURE__ */ new Date())
+    .notNull(),
   expiresAt: integer("expires_at", { mode: "timestamp" }).notNull(),
   id: text("id").primaryKey(),
   ipAddress: text("ip_address"),
   token: text("token").notNull().unique(),
-  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp" })
+    .$defaultFn(() => /* @__PURE__ */ new Date())
+    .notNull(),
   userAgent: text("user_agent"),
   userId: text("user_id")
     .notNull()
@@ -35,7 +39,9 @@ export const account = sqliteTable("account", {
   accessToken: text("access_token"),
   accessTokenExpiresAt: integer("access_token_expires_at", { mode: "timestamp" }),
   accountId: text("account_id").notNull(),
-  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .$defaultFn(() => /* @__PURE__ */ new Date())
+    .notNull(),
   id: text("id").primaryKey(),
   idToken: text("id_token"),
   password: text("password"),
@@ -45,7 +51,9 @@ export const account = sqliteTable("account", {
     mode: "timestamp",
   }),
   scope: text("scope"),
-  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp" })
+    .$defaultFn(() => /* @__PURE__ */ new Date())
+    .notNull(),
   userId: text("user_id")
     .notNull()
     .references(() => user.id, { onDelete: "cascade" }),
@@ -60,16 +68,12 @@ export const verification = sqliteTable("verification", {
   value: text("value").notNull(),
 });
 
-export const cache = sqliteTable("cache", {
-  createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => /* @__PURE__ */ new Date()),
-  expiresAt: integer("expires_at", { mode: "timestamp" }).notNull(),
-  key: text("key").notNull().unique().primaryKey(),
-  updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => /* @__PURE__ */ new Date()),
-  value: text("value").notNull(),
-});
+// ===== API Keys =====
 
 export const apikey = sqliteTable("apikey", {
-  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .$defaultFn(() => /* @__PURE__ */ new Date())
+    .notNull(),
   enabled: integer("enabled", { mode: "boolean" }).default(true),
   expiresAt: integer("expires_at", { mode: "timestamp" }),
   id: text("id").primaryKey(),
@@ -88,50 +92,56 @@ export const apikey = sqliteTable("apikey", {
   remaining: integer("remaining"),
   requestCount: integer("request_count").default(0),
   start: text("start"),
-  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp" })
+    .$defaultFn(() => /* @__PURE__ */ new Date())
+    .notNull(),
   userId: text("user_id")
     .notNull()
     .references(() => user.id, { onDelete: "cascade" }),
 });
 
-// ===== ORGANIZATION SCHEMA =====
+// ===== Organizations =====
 
 export const organization = sqliteTable("organization", {
   createdAt: integer("created_at", { mode: "timestamp" })
-    .$defaultFn(() => new Date())
+    .$defaultFn(() => /* @__PURE__ */ new Date())
     .notNull(),
-  description: text("description"),
   id: text("id").primaryKey(),
-  logo: text("logo"), // URL to organization logo
+  logo: text("logo"),
+  metadata: text("metadata"),
   name: text("name").notNull(),
-  ownerId: text("owner_id")
-    .notNull()
-    .references(() => user.id, { onDelete: "restrict" }), // Organization owner cannot be deleted
-  settings: text("settings", { mode: "json" }).$defaultFn(() => ({})), // JSON field for extensible settings
-  slug: text("slug").notNull().unique(), // For URL-friendly organization identification
-  updatedAt: integer("updated_at", { mode: "timestamp" })
-    .$defaultFn(() => new Date())
-    .notNull(),
-  website: text("website"),
+  slug: text("slug").unique(),
 });
 
-export const organizationMember = sqliteTable("organization_member", {
-  id: text("id").primaryKey(),
-  invitedBy: text("invited_by").references(() => user.id, { onDelete: "set null" }),
-  joinedAt: integer("joined_at", { mode: "timestamp" })
-    .$defaultFn(() => new Date())
+export const member = sqliteTable("member", {
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .$defaultFn(() => /* @__PURE__ */ new Date())
     .notNull(),
+  id: text("id").primaryKey(),
   organizationId: text("organization_id")
     .notNull()
     .references(() => organization.id, { onDelete: "cascade" }),
-  permissions: text("permissions", { mode: "json" }).$defaultFn(() => ({})), // Extensible permissions
-  role: text("role", { enum: ["owner", "admin", "member"] })
-    .notNull()
-    .$defaultFn(() => "member"),
+  role: text("role").default("member").notNull(),
   userId: text("user_id")
     .notNull()
     .references(() => user.id, { onDelete: "cascade" }),
 });
+
+export const invitation = sqliteTable("invitation", {
+  email: text("email").notNull(),
+  expiresAt: integer("expires_at", { mode: "timestamp" }).notNull(),
+  id: text("id").primaryKey(),
+  inviterId: text("inviter_id")
+    .notNull()
+    .references(() => user.id, { onDelete: "cascade" }),
+  organizationId: text("organization_id")
+    .notNull()
+    .references(() => organization.id, { onDelete: "cascade" }),
+  role: text("role"),
+  status: text("status").default("pending").notNull(),
+});
+
+// ===== Other =====
 
 export const project = sqliteTable("project", {
   createdAt: integer("created_at", { mode: "timestamp" })
@@ -193,28 +203,6 @@ export const projectMember = sqliteTable("project_member", {
     .references(() => user.id, { onDelete: "cascade" }),
 });
 
-export const organizationInvitation = sqliteTable("organization_invitation", {
-  acceptedAt: integer("accepted_at", { mode: "timestamp" }),
-  createdAt: integer("created_at", { mode: "timestamp" })
-    .$defaultFn(() => new Date())
-    .notNull(),
-  email: text("email").notNull(),
-  expiresAt: integer("expires_at", { mode: "timestamp" }).notNull(),
-  id: text("id").primaryKey(),
-  invitedBy: text("invited_by")
-    .notNull()
-    .references(() => user.id, { onDelete: "cascade" }),
-  organizationId: text("organization_id")
-    .notNull()
-    .references(() => organization.id, { onDelete: "cascade" }),
-  role: text("role", { enum: ["admin", "member"] })
-    .notNull()
-    .$defaultFn(() => "member"),
-  token: text("token").notNull().unique(), // Secure invitation token
-});
-
-// ===== API SPEC SCHEMA =====
-
 export const apiSpec = sqliteTable("api_spec", {
   createdAt: integer("created_at", { mode: "timestamp" })
     .$defaultFn(() => new Date())
@@ -256,41 +244,6 @@ export const apiEndpoint = sqliteTable("api_endpoint", {
   tags: text("tags", { mode: "json" }).$defaultFn(() => []), // Array of tag strings
 });
 
-// ===== RELATIONS =====
-
-export const userRelations = relations(user, ({ many }) => ({
-  createdProjects: many(project),
-  organizationMemberships: many(organizationMember),
-  ownedOrganizations: many(organization),
-  projectMemberships: many(projectMember),
-  sentInvitations: many(organizationInvitation),
-}));
-
-export const organizationRelations = relations(organization, ({ many, one }) => ({
-  invitations: many(organizationInvitation),
-  members: many(organizationMember),
-  owner: one(user, {
-    fields: [organization.ownerId],
-    references: [user.id],
-  }),
-  projects: many(project),
-}));
-
-export const organizationMemberRelations = relations(organizationMember, ({ one }) => ({
-  inviter: one(user, {
-    fields: [organizationMember.invitedBy],
-    references: [user.id],
-  }),
-  organization: one(organization, {
-    fields: [organizationMember.organizationId],
-    references: [organization.id],
-  }),
-  user: one(user, {
-    fields: [organizationMember.userId],
-    references: [user.id],
-  }),
-}));
-
 export const projectRelations = relations(project, ({ many, one }) => ({
   apiSpecs: many(apiSpec),
   category: one(projectCategory, {
@@ -325,17 +278,6 @@ export const projectMemberRelations = relations(projectMember, ({ one }) => ({
 
 export const projectCategoryRelations = relations(projectCategory, ({ many }) => ({
   projects: many(project),
-}));
-
-export const organizationInvitationRelations = relations(organizationInvitation, ({ one }) => ({
-  inviter: one(user, {
-    fields: [organizationInvitation.invitedBy],
-    references: [user.id],
-  }),
-  organization: one(organization, {
-    fields: [organizationInvitation.organizationId],
-    references: [organization.id],
-  }),
 }));
 
 export const apiSpecRelations = relations(apiSpec, ({ many, one }) => ({
