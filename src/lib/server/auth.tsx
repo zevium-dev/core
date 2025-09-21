@@ -6,6 +6,7 @@ import { organization } from "better-auth/plugins/organization";
 import { reactStartCookies } from "better-auth/react-start";
 
 import { db, schema } from "~/db";
+import { eq } from "drizzle-orm";
 import { serverEnv } from "~/env/server";
 import { EMAIL_FROM } from "~/lib/constants";
 
@@ -65,6 +66,22 @@ export const authServer = betterAuth({
     google: {
       clientId: serverEnv.AUTH_GOOGLE_CLIENT_ID,
       clientSecret: serverEnv.AUTH_GOOGLE_CLIENT_SECRET,
+    },
+  },
+  databaseHooks: {
+    user: {
+      create: {
+        after: async (user: { id: string }) => {
+          try {
+            await db.insert(schema.userPreference).values({
+              userId: user.id,
+              timezone: 'UTC',
+            });
+          } catch {
+            // ignore duplicate or race
+          }
+        },
+      },
     },
   },
 });

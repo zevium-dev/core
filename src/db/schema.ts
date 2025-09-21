@@ -15,7 +15,6 @@ export const user = sqliteTable("user", {
   updatedAt: integer("updated_at", { mode: "timestamp" })
     .$defaultFn(() => /* @__PURE__ */ new Date())
     .notNull(),
-  timezone: text("timezone").default("Asia/Kolkata"),
 });
 
 export const session = sqliteTable("session", {
@@ -292,5 +291,25 @@ export const apiEndpointRelations = relations(apiEndpoint, ({ one }) => ({
   spec: one(apiSpec, {
     fields: [apiEndpoint.specId],
     references: [apiSpec.id],
+  }),
+}));
+
+// ===== User Preferences (1:1) =====
+
+export const userPreference = sqliteTable("user_preference", {
+  // primary key also FK to user
+  userId: text("user_id")
+    .primaryKey()
+    .references(() => user.id, { onDelete: "cascade" }),
+  timezone: text("timezone").notNull().default("UTC"),
+  updatedAt: integer("updated_at", { mode: "timestamp" })
+    .$defaultFn(() => new Date())
+    .notNull(),
+});
+
+export const userPreferenceRelations = relations(userPreference, ({ one }) => ({
+  user: one(user, {
+    fields: [userPreference.userId],
+    references: [user.id],
   }),
 }));

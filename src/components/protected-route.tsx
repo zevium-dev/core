@@ -1,6 +1,7 @@
 import * as React from "react";
 
 import { useAuthGuard } from "~/hooks/use-auth-guard";
+import { useUserPreferences } from "~/hooks/use-user-preferences";
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
@@ -18,9 +19,11 @@ export function ProtectedRoute({ children, fallback = defaultFallback, redirectT
   }
 
   if (!isAuthenticated) {
-    // The hook will handle the redirect and toast
     return null;
   }
+
+  // Safe to load preferences now (user guaranteed). Only runs in authenticated areas.
+  useUserPreferences();
 
   return <>{children}</>;
 }
