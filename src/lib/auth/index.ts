@@ -31,12 +31,14 @@ const getSession = async () => {
 
 type SessionQueryFnData = Awaited<ReturnType<typeof getSession>>;
 
-export const sessionQueryOptions = (options?: QueryOptions<SessionQueryFnData>) =>
-  queryOptions({
-    ...options,
+export const sessionQueryOptions = (options?: QueryOptions<SessionQueryFnData>) => {
+  const { queryKey, ...restOptions } = options ?? {};
+  return queryOptions({
+    ...restOptions,
     queryFn: getSession,
-    queryKey: ["session", ...(options?.queryKey ?? [])],
+    queryKey: ["session", ...(queryKey ?? [])],
   });
+};
 
 export const useSession = () => useSuspenseQuery(sessionQueryOptions()).data;
 
