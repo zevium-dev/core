@@ -11,6 +11,7 @@ import { toast } from "sonner";
 import { ThemeProvider } from "~/components/theme-provider";
 import { SidebarInset, SidebarProvider } from "~/components/ui/sidebar";
 import { clientEnv } from "~/env/client";
+import { AutoCreateDefaultOrganization } from "~/hooks/use-ensure-default-organization";
 import { BetterAuthException } from "~/lib/auth";
 import { createClient, TRPCProvider } from "~/lib/trpc";
 
@@ -100,6 +101,7 @@ export const Providers: React.FC<React.PropsWithChildren> = ({ children }) => {
                 <SidebarProvider>
                   <Toaster richColors />
                   <PostHogIdentify />
+                  <AutoCreateDefaultOrganization />
                   <AppSidebar />
                   <SidebarInset>
                     <PageHeader />

@@ -1,7 +1,6 @@
 import type { BetterAuthPlugin } from "better-auth/plugins";
 
 import { CAPTCHA_HEADER_KEY } from "~/lib/constants";
-import { cap } from "~/lib/server/cap";
 
 export interface BaseCaptchaOptions {
   endpoints?: Array<string>;
@@ -12,6 +11,7 @@ export const defaultEndpoints = ["/sign-up/email", "/sign-in/email", "/forget-pa
 export const capCaptcha = (options?: BaseCaptchaOptions): BetterAuthPlugin => ({
   id: "cap-captcha",
   onRequest: async (request, ctx) => {
+    const { cap } = await import("~/lib/server/cap");
     try {
       const endpoints = options?.endpoints?.length ? options.endpoints : defaultEndpoints;
       if (!endpoints.some((endpoint) => request.url.includes(endpoint))) return undefined;

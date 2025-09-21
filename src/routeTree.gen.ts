@@ -27,28 +27,29 @@ import { ServerRoute as ApiOpenapiSplatServerRouteImport } from './routes/api/op
 import { ServerRoute as ApiCapSplatServerRouteImport } from './routes/api/cap/$'
 import { ServerRoute as ApiAuthSplatServerRouteImport } from './routes/api/auth/$'
 
-const ProjectsLazyRouteImport = createFileRoute('/projects')()
-const OrganizationsLazyRouteImport = createFileRoute('/organizations')()
 const CatalogueLazyRouteImport = createFileRoute('/catalogue')()
 const IndexLazyRouteImport = createFileRoute('/')()
+const ProjectsIndexLazyRouteImport = createFileRoute('/projects/')()
+const OrganizationsIndexLazyRouteImport = createFileRoute('/organizations/')()
+const ProjectsSlugLazyRouteImport = createFileRoute('/projects/$slug')()
+const OrganizationsSlugLazyRouteImport = createFileRoute(
+  '/organizations/$slug',
+)()
+const SettingsPreferenceSplatLazyRouteImport = createFileRoute(
+  '/settings/preference/$',
+)()
+const SettingsKeysSplatLazyRouteImport = createFileRoute('/settings/keys/$')()
 const SettingsCreditsSplatLazyRouteImport = createFileRoute(
   '/settings/credits/$',
 )()
 const SettingsActivitySplatLazyRouteImport = createFileRoute(
   '/settings/activity/$',
 )()
+const ProjectsSlugViewVersionLazyRouteImport = createFileRoute(
+  '/projects/$slug/view/$version',
+)()
 const rootServerRouteImport = createServerRootRoute()
 
-const ProjectsLazyRoute = ProjectsLazyRouteImport.update({
-  id: '/projects',
-  path: '/projects',
-  getParentRoute: () => rootRouteImport,
-} as any).lazy(() => import('./routes/projects.lazy').then((d) => d.Route))
-const OrganizationsLazyRoute = OrganizationsLazyRouteImport.update({
-  id: '/organizations',
-  path: '/organizations',
-  getParentRoute: () => rootRouteImport,
-} as any).lazy(() => import('./routes/organizations.lazy').then((d) => d.Route))
 const CatalogueLazyRoute = CatalogueLazyRouteImport.update({
   id: '/catalogue',
   path: '/catalogue',
@@ -59,6 +60,34 @@ const IndexLazyRoute = IndexLazyRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any).lazy(() => import('./routes/index.lazy').then((d) => d.Route))
+const ProjectsIndexLazyRoute = ProjectsIndexLazyRouteImport.update({
+  id: '/projects/',
+  path: '/projects/',
+  getParentRoute: () => rootRouteImport,
+} as any).lazy(() =>
+  import('./routes/projects/index.lazy').then((d) => d.Route),
+)
+const OrganizationsIndexLazyRoute = OrganizationsIndexLazyRouteImport.update({
+  id: '/organizations/',
+  path: '/organizations/',
+  getParentRoute: () => rootRouteImport,
+} as any).lazy(() =>
+  import('./routes/organizations/index.lazy').then((d) => d.Route),
+)
+const ProjectsSlugLazyRoute = ProjectsSlugLazyRouteImport.update({
+  id: '/projects/$slug',
+  path: '/projects/$slug',
+  getParentRoute: () => rootRouteImport,
+} as any).lazy(() =>
+  import('./routes/projects/$slug.lazy').then((d) => d.Route),
+)
+const OrganizationsSlugLazyRoute = OrganizationsSlugLazyRouteImport.update({
+  id: '/organizations/$slug',
+  path: '/organizations/$slug',
+  getParentRoute: () => rootRouteImport,
+} as any).lazy(() =>
+  import('./routes/organizations/$slug.lazy').then((d) => d.Route),
+)
 const SettingsSplatRoute = SettingsSplatRouteImport.update({
   id: '/settings/$',
   path: '/settings/$',
@@ -99,6 +128,21 @@ const AuthChangePasswordRoute = AuthChangePasswordRouteImport.update({
   path: '/auth/change-password',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SettingsPreferenceSplatLazyRoute =
+  SettingsPreferenceSplatLazyRouteImport.update({
+    id: '/settings/preference/$',
+    path: '/settings/preference/$',
+    getParentRoute: () => rootRouteImport,
+  } as any).lazy(() =>
+    import('./routes/settings/preference/$.lazy').then((d) => d.Route),
+  )
+const SettingsKeysSplatLazyRoute = SettingsKeysSplatLazyRouteImport.update({
+  id: '/settings/keys/$',
+  path: '/settings/keys/$',
+  getParentRoute: () => rootRouteImport,
+} as any).lazy(() =>
+  import('./routes/settings/keys/$.lazy').then((d) => d.Route),
+)
 const SettingsCreditsSplatLazyRoute =
   SettingsCreditsSplatLazyRouteImport.update({
     id: '/settings/credits/$',
@@ -114,6 +158,14 @@ const SettingsActivitySplatLazyRoute =
     getParentRoute: () => rootRouteImport,
   } as any).lazy(() =>
     import('./routes/settings/activity/$.lazy').then((d) => d.Route),
+  )
+const ProjectsSlugViewVersionLazyRoute =
+  ProjectsSlugViewVersionLazyRouteImport.update({
+    id: '/view/$version',
+    path: '/view/$version',
+    getParentRoute: () => ProjectsSlugLazyRoute,
+  } as any).lazy(() =>
+    import('./routes/projects/$slug/view/$version.lazy').then((d) => d.Route),
   )
 const InternalEmailTemplatesPreviewServerRoute =
   InternalEmailTemplatesPreviewServerRouteImport.update({
@@ -150,8 +202,6 @@ const ApiAuthSplatServerRoute = ApiAuthSplatServerRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexLazyRoute
   '/catalogue': typeof CatalogueLazyRoute
-  '/organizations': typeof OrganizationsLazyRoute
-  '/projects': typeof ProjectsLazyRoute
   '/auth/change-password': typeof AuthChangePasswordRoute
   '/auth/forgot-password': typeof AuthForgotPasswordRoute
   '/auth/reset-password': typeof AuthResetPasswordRoute
@@ -160,14 +210,19 @@ export interface FileRoutesByFullPath {
   '/auth/sign-up': typeof AuthSignUpRoute
   '/auth/verify-email': typeof AuthVerifyEmailRoute
   '/settings/$': typeof SettingsSplatRoute
+  '/organizations/$slug': typeof OrganizationsSlugLazyRoute
+  '/projects/$slug': typeof ProjectsSlugLazyRouteWithChildren
+  '/organizations': typeof OrganizationsIndexLazyRoute
+  '/projects': typeof ProjectsIndexLazyRoute
   '/settings/activity/$': typeof SettingsActivitySplatLazyRoute
   '/settings/credits/$': typeof SettingsCreditsSplatLazyRoute
+  '/settings/keys/$': typeof SettingsKeysSplatLazyRoute
+  '/settings/preference/$': typeof SettingsPreferenceSplatLazyRoute
+  '/projects/$slug/view/$version': typeof ProjectsSlugViewVersionLazyRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexLazyRoute
   '/catalogue': typeof CatalogueLazyRoute
-  '/organizations': typeof OrganizationsLazyRoute
-  '/projects': typeof ProjectsLazyRoute
   '/auth/change-password': typeof AuthChangePasswordRoute
   '/auth/forgot-password': typeof AuthForgotPasswordRoute
   '/auth/reset-password': typeof AuthResetPasswordRoute
@@ -176,15 +231,20 @@ export interface FileRoutesByTo {
   '/auth/sign-up': typeof AuthSignUpRoute
   '/auth/verify-email': typeof AuthVerifyEmailRoute
   '/settings/$': typeof SettingsSplatRoute
+  '/organizations/$slug': typeof OrganizationsSlugLazyRoute
+  '/projects/$slug': typeof ProjectsSlugLazyRouteWithChildren
+  '/organizations': typeof OrganizationsIndexLazyRoute
+  '/projects': typeof ProjectsIndexLazyRoute
   '/settings/activity/$': typeof SettingsActivitySplatLazyRoute
   '/settings/credits/$': typeof SettingsCreditsSplatLazyRoute
+  '/settings/keys/$': typeof SettingsKeysSplatLazyRoute
+  '/settings/preference/$': typeof SettingsPreferenceSplatLazyRoute
+  '/projects/$slug/view/$version': typeof ProjectsSlugViewVersionLazyRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexLazyRoute
   '/catalogue': typeof CatalogueLazyRoute
-  '/organizations': typeof OrganizationsLazyRoute
-  '/projects': typeof ProjectsLazyRoute
   '/auth/change-password': typeof AuthChangePasswordRoute
   '/auth/forgot-password': typeof AuthForgotPasswordRoute
   '/auth/reset-password': typeof AuthResetPasswordRoute
@@ -193,16 +253,21 @@ export interface FileRoutesById {
   '/auth/sign-up': typeof AuthSignUpRoute
   '/auth/verify-email': typeof AuthVerifyEmailRoute
   '/settings/$': typeof SettingsSplatRoute
+  '/organizations/$slug': typeof OrganizationsSlugLazyRoute
+  '/projects/$slug': typeof ProjectsSlugLazyRouteWithChildren
+  '/organizations/': typeof OrganizationsIndexLazyRoute
+  '/projects/': typeof ProjectsIndexLazyRoute
   '/settings/activity/$': typeof SettingsActivitySplatLazyRoute
   '/settings/credits/$': typeof SettingsCreditsSplatLazyRoute
+  '/settings/keys/$': typeof SettingsKeysSplatLazyRoute
+  '/settings/preference/$': typeof SettingsPreferenceSplatLazyRoute
+  '/projects/$slug/view/$version': typeof ProjectsSlugViewVersionLazyRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
     | '/catalogue'
-    | '/organizations'
-    | '/projects'
     | '/auth/change-password'
     | '/auth/forgot-password'
     | '/auth/reset-password'
@@ -211,14 +276,19 @@ export interface FileRouteTypes {
     | '/auth/sign-up'
     | '/auth/verify-email'
     | '/settings/$'
+    | '/organizations/$slug'
+    | '/projects/$slug'
+    | '/organizations'
+    | '/projects'
     | '/settings/activity/$'
     | '/settings/credits/$'
+    | '/settings/keys/$'
+    | '/settings/preference/$'
+    | '/projects/$slug/view/$version'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/catalogue'
-    | '/organizations'
-    | '/projects'
     | '/auth/change-password'
     | '/auth/forgot-password'
     | '/auth/reset-password'
@@ -227,14 +297,19 @@ export interface FileRouteTypes {
     | '/auth/sign-up'
     | '/auth/verify-email'
     | '/settings/$'
+    | '/organizations/$slug'
+    | '/projects/$slug'
+    | '/organizations'
+    | '/projects'
     | '/settings/activity/$'
     | '/settings/credits/$'
+    | '/settings/keys/$'
+    | '/settings/preference/$'
+    | '/projects/$slug/view/$version'
   id:
     | '__root__'
     | '/'
     | '/catalogue'
-    | '/organizations'
-    | '/projects'
     | '/auth/change-password'
     | '/auth/forgot-password'
     | '/auth/reset-password'
@@ -243,15 +318,20 @@ export interface FileRouteTypes {
     | '/auth/sign-up'
     | '/auth/verify-email'
     | '/settings/$'
+    | '/organizations/$slug'
+    | '/projects/$slug'
+    | '/organizations/'
+    | '/projects/'
     | '/settings/activity/$'
     | '/settings/credits/$'
+    | '/settings/keys/$'
+    | '/settings/preference/$'
+    | '/projects/$slug/view/$version'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexLazyRoute: typeof IndexLazyRoute
   CatalogueLazyRoute: typeof CatalogueLazyRoute
-  OrganizationsLazyRoute: typeof OrganizationsLazyRoute
-  ProjectsLazyRoute: typeof ProjectsLazyRoute
   AuthChangePasswordRoute: typeof AuthChangePasswordRoute
   AuthForgotPasswordRoute: typeof AuthForgotPasswordRoute
   AuthResetPasswordRoute: typeof AuthResetPasswordRoute
@@ -260,8 +340,14 @@ export interface RootRouteChildren {
   AuthSignUpRoute: typeof AuthSignUpRoute
   AuthVerifyEmailRoute: typeof AuthVerifyEmailRoute
   SettingsSplatRoute: typeof SettingsSplatRoute
+  OrganizationsSlugLazyRoute: typeof OrganizationsSlugLazyRoute
+  ProjectsSlugLazyRoute: typeof ProjectsSlugLazyRouteWithChildren
+  OrganizationsIndexLazyRoute: typeof OrganizationsIndexLazyRoute
+  ProjectsIndexLazyRoute: typeof ProjectsIndexLazyRoute
   SettingsActivitySplatLazyRoute: typeof SettingsActivitySplatLazyRoute
   SettingsCreditsSplatLazyRoute: typeof SettingsCreditsSplatLazyRoute
+  SettingsKeysSplatLazyRoute: typeof SettingsKeysSplatLazyRoute
+  SettingsPreferenceSplatLazyRoute: typeof SettingsPreferenceSplatLazyRoute
 }
 export interface FileServerRoutesByFullPath {
   '/$internal/email-templates-preview': typeof InternalEmailTemplatesPreviewServerRoute
@@ -326,20 +412,6 @@ export interface RootServerRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/projects': {
-      id: '/projects'
-      path: '/projects'
-      fullPath: '/projects'
-      preLoaderRoute: typeof ProjectsLazyRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/organizations': {
-      id: '/organizations'
-      path: '/organizations'
-      fullPath: '/organizations'
-      preLoaderRoute: typeof OrganizationsLazyRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/catalogue': {
       id: '/catalogue'
       path: '/catalogue'
@@ -352,6 +424,34 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexLazyRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/projects/': {
+      id: '/projects/'
+      path: '/projects'
+      fullPath: '/projects'
+      preLoaderRoute: typeof ProjectsIndexLazyRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/organizations/': {
+      id: '/organizations/'
+      path: '/organizations'
+      fullPath: '/organizations'
+      preLoaderRoute: typeof OrganizationsIndexLazyRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/projects/$slug': {
+      id: '/projects/$slug'
+      path: '/projects/$slug'
+      fullPath: '/projects/$slug'
+      preLoaderRoute: typeof ProjectsSlugLazyRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/organizations/$slug': {
+      id: '/organizations/$slug'
+      path: '/organizations/$slug'
+      fullPath: '/organizations/$slug'
+      preLoaderRoute: typeof OrganizationsSlugLazyRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/settings/$': {
@@ -410,6 +510,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthChangePasswordRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/settings/preference/$': {
+      id: '/settings/preference/$'
+      path: '/settings/preference/$'
+      fullPath: '/settings/preference/$'
+      preLoaderRoute: typeof SettingsPreferenceSplatLazyRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/settings/keys/$': {
+      id: '/settings/keys/$'
+      path: '/settings/keys/$'
+      fullPath: '/settings/keys/$'
+      preLoaderRoute: typeof SettingsKeysSplatLazyRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/settings/credits/$': {
       id: '/settings/credits/$'
       path: '/settings/credits/$'
@@ -423,6 +537,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/settings/activity/$'
       preLoaderRoute: typeof SettingsActivitySplatLazyRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/projects/$slug/view/$version': {
+      id: '/projects/$slug/view/$version'
+      path: '/view/$version'
+      fullPath: '/projects/$slug/view/$version'
+      preLoaderRoute: typeof ProjectsSlugViewVersionLazyRouteImport
+      parentRoute: typeof ProjectsSlugLazyRoute
     }
   }
 }
@@ -473,11 +594,20 @@ declare module '@tanstack/react-start/server' {
   }
 }
 
+interface ProjectsSlugLazyRouteChildren {
+  ProjectsSlugViewVersionLazyRoute: typeof ProjectsSlugViewVersionLazyRoute
+}
+
+const ProjectsSlugLazyRouteChildren: ProjectsSlugLazyRouteChildren = {
+  ProjectsSlugViewVersionLazyRoute: ProjectsSlugViewVersionLazyRoute,
+}
+
+const ProjectsSlugLazyRouteWithChildren =
+  ProjectsSlugLazyRoute._addFileChildren(ProjectsSlugLazyRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexLazyRoute: IndexLazyRoute,
   CatalogueLazyRoute: CatalogueLazyRoute,
-  OrganizationsLazyRoute: OrganizationsLazyRoute,
-  ProjectsLazyRoute: ProjectsLazyRoute,
   AuthChangePasswordRoute: AuthChangePasswordRoute,
   AuthForgotPasswordRoute: AuthForgotPasswordRoute,
   AuthResetPasswordRoute: AuthResetPasswordRoute,
@@ -486,8 +616,14 @@ const rootRouteChildren: RootRouteChildren = {
   AuthSignUpRoute: AuthSignUpRoute,
   AuthVerifyEmailRoute: AuthVerifyEmailRoute,
   SettingsSplatRoute: SettingsSplatRoute,
+  OrganizationsSlugLazyRoute: OrganizationsSlugLazyRoute,
+  ProjectsSlugLazyRoute: ProjectsSlugLazyRouteWithChildren,
+  OrganizationsIndexLazyRoute: OrganizationsIndexLazyRoute,
+  ProjectsIndexLazyRoute: ProjectsIndexLazyRoute,
   SettingsActivitySplatLazyRoute: SettingsActivitySplatLazyRoute,
   SettingsCreditsSplatLazyRoute: SettingsCreditsSplatLazyRoute,
+  SettingsKeysSplatLazyRoute: SettingsKeysSplatLazyRoute,
+  SettingsPreferenceSplatLazyRoute: SettingsPreferenceSplatLazyRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

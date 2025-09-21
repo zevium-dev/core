@@ -1,11 +1,12 @@
-import { createLazyFileRoute } from "@tanstack/react-router";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { createLazyFileRoute, useNavigate } from "@tanstack/react-router";
 import { ArrowRight, Building2, Calendar, Plus, Search, Users } from "lucide-react";
 import { m } from "motion/react";
 import * as React from "react";
 
 import { AuthLoadingFallback } from "~/components/auth-loading-fallback";
 import { ProtectedRoute } from "~/components/protected-route";
-import { Avatar, AvatarFallback } from "~/components/ui/avatar";
+// Avatar components removed — not used in this file
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent, CardHeader } from "~/components/ui/card";
@@ -21,18 +22,43 @@ import {
 import { Input } from "~/components/ui/input";
 import { Label } from "~/components/ui/label";
 import { Textarea } from "~/components/ui/textarea";
-import { mockOrganizations } from "~/lib/utils/mockdata";
+import { useTRPCClient } from "~/lib/trpc";
 
-export const Route = createLazyFileRoute("/organizations")({
-  component: RouteComponent,
+// Interface definition for organization from database
+interface Organization {
+  createdAt: Date;
+  description: null | string;
+  id: string;
+  logo: null | string;
+  memberCount: number;
+  name: string;
+  ownerId: string;
+  projectCount: number;
+  settings: Record<string, unknown>;
+  slug: string;
+  updatedAt: Date;
+  website: null | string;
+}
+
+export const Route = createLazyFileRoute("/organizations/")({
+  component: () => (
+    <ProtectedRoute>
+      <RouteComponent />
+    </ProtectedRoute>
+  ),
 });
 
 function CreateOrganizationModal({ children }: { children: React.ReactNode }) {
   const [open, setOpen] = React.useState(false);
   const [organizationName, setOrganizationName] = React.useState("");
   const [description, setDescription] = React.useState("");
+  const [website, setWebsite] = React.useState("");
+  const [_isLoading, setIsLoading] = React.useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const trpcClient = useTRPCClient();
+  const queryClient = useQueryClient();
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
     if (!organizationName.trim()) {
@@ -40,14 +66,29 @@ function CreateOrganizationModal({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    // TODO: Implement actual organization creation logic
-    console.log("Creating organization:", { description, name: organizationName });
-    alert(`Organization "${organizationName}" created successfully!`);
+    setIsLoading(true);
 
-    // Reset form and close modal
-    setOrganizationName("");
-    setDescription("");
-    setOpen(false);
+    try {
+      await trpcClient.organization.create.mutate({
+        description: description.trim() || undefined,
+        name: organizationName.trim(),
+        website: website.trim() || undefined,
+      });
+
+      // Invalidate organizations query to refetch the list
+      await queryClient.invalidateQueries({ queryKey: ["organizations"] });
+
+      // Reset form and close modal
+      setOrganizationName("");
+      setDescription("");
+      setWebsite("");
+      setOpen(false);
+    } catch (error) {
+      console.error("Error creating organization:", error);
+      alert(`Error creating organization: ${error instanceof Error ? error.message : "Unknown error"}`);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -96,7 +137,13 @@ function CreateOrganizationModal({ children }: { children: React.ReactNode }) {
   );
 }
 
-function OrganizationCard({ index, organization }: { index: number; organization: (typeof mockOrganizations)[0] }) {
+function OrganizationCard({ index, organization }: { index: number; organization: Organization }) {
+  const navigate = useNavigate();
+
+  const handleCardClick = () => {
+    void navigate({ to: `/organizations/${organization.slug}` });
+  };
+
   return (
     <m.div
       animate={{ opacity: 1, y: 0 }}
@@ -105,8 +152,11 @@ function OrganizationCard({ index, organization }: { index: number; organization
       transition={{ delay: index * 0.1, duration: 0.5 }}
       whileHover={{ y: -4 }}
     >
-      <Card className="group-hover:border-primary/20 h-full cursor-pointer transition-all duration-300 ease-out group-hover:shadow-lg">
-        <CardHeader className="pb-3">
+      <Card
+        className="group-hover:border-primary/20 h-full cursor-pointer transition-all duration-300 ease-out group-hover:shadow-lg"
+        onClick={handleCardClick}
+      >
+        <CardHeader className="">
           <div className="flex items-start justify-between">
             <div className="flex items-center gap-3">
               <div className="bg-primary/10 group-hover:bg-primary/20 rounded-full p-3 transition-colors duration-300">
@@ -114,7 +164,6 @@ function OrganizationCard({ index, organization }: { index: number; organization
               </div>
               <div>
                 <h3 className="text-lg font-semibold tracking-tight">{organization.name}</h3>
-                <p className="text-muted-foreground text-sm">Organization ID: #{organization.id}</p>
               </div>
             </div>
             <Button
@@ -152,23 +201,6 @@ function OrganizationCard({ index, organization }: { index: number; organization
               </div>
             </div>
 
-            {/* Team Members Preview */}
-            <div className="space-y-2">
-              <p className="text-muted-foreground text-xs font-medium">Recent Activity</p>
-              <div className="flex items-center gap-2">
-                <div className="flex -space-x-2">
-                  {/* Mock avatar stack */}
-                  <Avatar className="border-background h-6 w-6 border-2">
-                    <AvatarFallback className="text-xs">{organization.name.substring(0, 2)}</AvatarFallback>
-                  </Avatar>
-                  <Avatar className="border-background h-6 w-6 border-2">
-                    <AvatarFallback className="text-xs">+</AvatarFallback>
-                  </Avatar>
-                </div>
-                <p className="text-muted-foreground text-xs">Last updated 2 hours ago</p>
-              </div>
-            </div>
-
             {/* Status Badge */}
             <div className="flex items-center justify-between">
               <Badge className="text-xs" variant="secondary">
@@ -188,10 +220,44 @@ function OrganizationCard({ index, organization }: { index: number; organization
 
 function RouteComponent() {
   const [searchQuery, setSearchQuery] = React.useState("");
+  const trpcClient = useTRPCClient();
 
-  const filteredOrganizations = mockOrganizations.filter((org) =>
-    org.name.toLowerCase().includes(searchQuery.toLowerCase()),
-  );
+  // Fetch organizations using React Query with TRPC
+  const {
+    data: organizationsData,
+    error,
+    isLoading,
+  } = useQuery({
+    queryFn: () => trpcClient.organization.list.query(),
+    queryKey: ["organizations"],
+  });
+
+  const filteredOrganizations = React.useMemo(() => {
+    const organizations: Array<Organization> = organizationsData?.organizations ?? [];
+    return organizations.filter((org) => org.name.toLowerCase().includes(searchQuery.toLowerCase()));
+  }, [organizationsData?.organizations, searchQuery]);
+
+  if (isLoading) {
+    return (
+      <div className="container mx-auto space-y-8 px-8 py-8">
+        <div className="flex items-center justify-center py-12">
+          <div className="text-muted-foreground">Loading organizations...</div>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="container mx-auto space-y-8 px-8 py-8">
+        <div className="flex items-center justify-center py-12">
+          <div className="text-red-600">
+            Error loading organizations: {error instanceof Error ? error.message : "Unknown error"}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <ProtectedRoute fallback={<AuthLoadingFallback />}>
