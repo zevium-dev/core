@@ -1,7 +1,7 @@
 import SuperJSON from "superjson";
 
-import { db, orm, schema } from "~/db";
 import { hashString } from "~/lib/hash";
+import { kv } from "~/lib/kv";
 
 const defaultTtlMs = 24 * 60 * 60 * 1000;
 const defaultMemoryCacheTtlMs = 60 * 1000;
@@ -67,23 +67,9 @@ export const cached = <Args extends Array<unknown>, Result>(
     }
 
     // If memory cache miss or expired, check database cache
-    const cacheRow = await db
-      .select()
-      .from(schema.cache)
-      .where(orm.eq(schema.cache.key, cacheKey))
-      .then((v) => v.at(0))
-      .then(async (v) => {
-        if (!v) throw new Error("Cache row not found");
-        if (v.expiresAt < new Date()) {
-          await db
-            .delete(schema.cache)
-            .where(orm.eq(schema.cache.key, cacheKey))
-            .catch((e: unknown) => console.error("Error deleting cache row", e));
-          throw new Error("Cache row expired");
-        }
-        return v;
-      })
-      .then((v) => SuperJSON.parse<Result>(v.value || "null"))
+    const cacheRow = await kv
+      .get<string>(cacheKey)
+      .then((v) => SuperJSON.parse<Result>(v ?? "null"))
       .catch(() => null);
 
     if (cacheRow) {
@@ -104,14 +90,7 @@ export const cached = <Args extends Array<unknown>, Result>(
       value: result,
     });
 
-    await db
-      .insert(schema.cache)
-      .values({
-        expiresAt: new Date(Date.now() + ttlMs),
-        key: cacheKey,
-        value: SuperJSON.stringify(result),
-      })
-      .catch(() => void 0);
+    await kv.set(cacheKey, SuperJSON.stringify(result), { px: ttlMs }).catch(() => void 0);
 
     return result;
   };

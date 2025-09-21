@@ -140,45 +140,6 @@ export const invitation = sqliteTable("invitation", {
   status: text("status").default("pending").notNull(),
 });
 
-// ===== Cache ====
-
-export const cache = sqliteTable("cache", {
-  createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => /* @__PURE__ */ new Date()),
-  expiresAt: integer("expires_at", { mode: "timestamp" }).notNull(),
-  key: text("key").notNull().unique().primaryKey(),
-  updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => /* @__PURE__ */ new Date()),
-  value: text("value").notNull(),
-});
-
-// ===== Captcha =====
-
-export const captchaChallenge = sqliteTable("captcha_challenge", {
-  createdAt: integer("created_at", { mode: "timestamp" })
-    .$defaultFn(() => /* @__PURE__ */ new Date())
-    .notNull(),
-  data: text("data", { mode: "json" }).notNull(),
-  expires: integer("expires", { mode: "timestamp" })
-    .$defaultFn(() => /* @__PURE__ */ new Date())
-    .notNull(),
-  token: text("token").notNull().primaryKey(),
-  updatedAt: integer("updated_at", { mode: "timestamp" })
-    .$defaultFn(() => /* @__PURE__ */ new Date())
-    .notNull(),
-});
-
-export const captchaToken = sqliteTable("captcha_token", {
-  createdAt: integer("created_at", { mode: "timestamp" })
-    .$defaultFn(() => /* @__PURE__ */ new Date())
-    .notNull(),
-  expires: integer("expires", { mode: "timestamp" })
-    .$defaultFn(() => /* @__PURE__ */ new Date())
-    .notNull(),
-  key: text("key").notNull().primaryKey(),
-  updatedAt: integer("updated_at", { mode: "timestamp" })
-    .$defaultFn(() => /* @__PURE__ */ new Date())
-    .notNull(),
-});
-
 // ===== Other =====
 
 export const project = sqliteTable("project", {

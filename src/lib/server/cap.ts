@@ -1,90 +1,44 @@
 import Cap from "@cap.js/server";
 
-import { db, orm, schema } from "~/db";
+import { kv } from "~/lib/kv";
 
 export type Solution = Cap.Solution;
+
+const CAP_KV_PREFIX = "cap:";
 
 export const cap = new Cap({
   noFSState: true,
   storage: {
     challenges: {
       delete: async (token) => {
-        await db.delete(schema.captchaChallenge).where(orm.eq(schema.captchaChallenge.token, token));
+        await kv.del(CAP_KV_PREFIX + token);
       },
       listExpired: async () => {
-        const rows = await db
-          .select()
-          .from(schema.captchaChallenge)
-          .where(orm.lt(schema.captchaChallenge.expires, new Date()));
-        return rows.map((r) => r.token);
+        return await Promise.resolve([]); // No need to clean up since we're using KV which has its own TTL mechanism
       },
       read: async (token) => {
-        const row = await db
-          .select()
-          .from(schema.captchaChallenge)
-          .where(
-            orm.and(orm.eq(schema.captchaChallenge.token, token), orm.gt(schema.captchaChallenge.expires, new Date())),
-          )
-          .then((v) => v.at(0));
-        if (!row) return null;
-        return {
-          challenge: row.data,
-          expires: row.expires.getTime(),
-        } as Cap.ChallengeData;
+        const data = await kv.get<Cap.ChallengeData>(CAP_KV_PREFIX + token);
+        if (!data) return null;
+        return data;
       },
       store: async (token, challengeData) => {
-        await db.transaction(async (tx) => {
-          const existingChallenge = await tx
-            .select()
-            .from(schema.captchaChallenge)
-            .where(orm.eq(schema.captchaChallenge.token, token))
-            .then((v) => v.at(0));
-          if (!existingChallenge) {
-            await tx
-              .insert(schema.captchaChallenge)
-              .values({ data: challengeData.challenge, expires: new Date(challengeData.expires), token });
-          } else {
-            await tx
-              .update(schema.captchaChallenge)
-              .set({ data: challengeData.challenge, expires: new Date(challengeData.expires) })
-              .where(orm.eq(schema.captchaChallenge.token, token));
-          }
-        });
+        await kv.set(CAP_KV_PREFIX + token, challengeData, { pxat: challengeData.expires });
       },
     },
     tokens: {
       delete: async (tokenKey) => {
-        await db.delete(schema.captchaToken).where(orm.eq(schema.captchaToken.key, tokenKey));
+        await kv.del(CAP_KV_PREFIX + tokenKey);
       },
       get: async (tokenKey) => {
-        const row = await db
-          .select()
-          .from(schema.captchaToken)
-          .where(orm.and(orm.eq(schema.captchaToken.key, tokenKey), orm.gt(schema.captchaToken.expires, new Date())))
-          .then((v) => v.at(0));
-        if (!row) return null;
-        return row.expires.getTime();
+        const data = await kv.get<string>(CAP_KV_PREFIX + tokenKey);
+        if (!data) return null;
+        return parseInt(data, 10);
       },
       listExpired: async () => {
-        const rows = await db.select().from(schema.captchaToken).where(orm.lt(schema.captchaToken.expires, new Date()));
-        return rows.map((r) => r.key);
+        return await Promise.resolve([]); // No need to clean up since we're using KV which has its own TTL mechanism
       },
       store: async (tokenKey, expires) => {
-        await db.transaction(async (tx) => {
-          const existing = await tx
-            .select()
-            .from(schema.captchaToken)
-            .where(orm.eq(schema.captchaToken.key, tokenKey))
-            .then((v) => v.at(0));
-          if (existing) {
-            await tx
-              .update(schema.captchaToken)
-              .set({ expires: new Date(expires) })
-              .where(orm.eq(schema.captchaToken.key, tokenKey));
-          } else {
-            await tx.insert(schema.captchaToken).values({ expires: new Date(expires), key: tokenKey });
-          }
-        });
+        await kv.set(CAP_KV_PREFIX + tokenKey, expires.toString(), { pxat: expires });
       },
     },
   },
