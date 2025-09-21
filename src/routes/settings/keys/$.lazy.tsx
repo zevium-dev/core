@@ -25,6 +25,7 @@ import { Label } from "~/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "~/components/ui/table";
 import { useCopy } from "~/hooks/use-copy";
 import { auth } from "~/lib/auth";
+import { ProtectedRoute } from "~/components/protected-route";
 
 // Types
 interface ApiKeyRecord {
@@ -186,7 +187,8 @@ export function ApiKeysComponent() {
   };
 
   return (
-    <div className="mx-auto w-full max-w-3xl min-w-0 flex-1 space-y-6 p-6">
+    <ProtectedRoute>
+      <div className="mx-auto w-full max-w-3xl min-w-0 flex-1 space-y-6 p-6">
       {/* (Optional) Settings navigation placeholder – removed due to missing component */}
 
       {/* Header */}
@@ -393,7 +395,8 @@ export function ApiKeysComponent() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+      </div>
+    </ProtectedRoute>
   );
 }
 

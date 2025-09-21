@@ -9,6 +9,7 @@ import { Input } from "~/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "~/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "~/components/ui/table";
 import { cn } from "~/lib/utils";
+import { ProtectedRoute } from "~/components/protected-route";
 
 export const Route = createLazyFileRoute("/settings/activity/$")({
   component: ActivityComponent,
@@ -174,7 +175,8 @@ export function ActivityComponent() {
   const currentItems = mockActivityData.slice(startIndex, endIndex);
 
   return (
-    <div className="mx-auto w-full max-w-3xl min-w-0 flex-1 space-y-6 p-6">
+    <ProtectedRoute>
+      <div className="mx-auto w-full max-w-3xl min-w-0 flex-1 space-y-6 p-6">
       {/* Header */}
       <div className="space-y-2">
         <h1 className="text-foreground text-2xl font-bold">API Activity</h1>
@@ -339,7 +341,8 @@ export function ActivityComponent() {
           </div>
         </CardContent>
       </Card>
-    </div>
+      </div>
+    </ProtectedRoute>
   );
 }
 

@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "~
 import { Separator } from "~/components/ui/separator";
 import { auth } from "~/lib/auth";
 import { toast } from "sonner";
+import { ProtectedRoute } from "~/components/protected-route";
 
 export const Route = createLazyFileRoute("/settings/preference/$")({
   component: AccountPreferenceComponent,
@@ -160,7 +161,8 @@ export function AccountPreferenceComponent() {
   }, [name, user]);
 
   return (
-    <div className="mx-auto w-full max-w-3xl min-w-0 flex-1 space-y-6 p-6">
+    <ProtectedRoute>
+      <div className="mx-auto w-full max-w-3xl min-w-0 flex-1 space-y-6 p-6">
       {/* Header */}
       <div className="flex items-center gap-2">
         <User className="text-muted-foreground h-6 w-6" />
@@ -562,6 +564,7 @@ export function AccountPreferenceComponent() {
           {isSaving ? "Saving..." : "Save Changes"}
         </Button>
       </div>
-    </div>
+      </div>
+    </ProtectedRoute>
   );
 }
