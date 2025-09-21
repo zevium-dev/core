@@ -2,23 +2,24 @@ import { useNavigate } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { toast } from "sonner";
 
-import { auth } from "~/lib/auth";
+import { useUser } from "~/lib/auth";
 
 export function useAuthGuard(redirectTo = "/") {
-  const authState = auth.useSession();
+  const user = useUser();
   const navigate = useNavigate();
 
   useEffect(() => {
-    // Only check auth after loading is complete
-    if (!authState.isPending && !authState.data?.user) {
+    // Suspense will have resolved if we're here; just redirect if no user
+    if (!user) {
       toast.error("Please sign in to access this page");
       void navigate({ to: redirectTo });
     }
-  }, [authState.isPending, authState.data?.user, navigate, redirectTo]);
+  }, [user, navigate, redirectTo]);
 
   return {
-    isAuthenticated: !!authState.data?.user,
-    isLoading: authState.isPending,
-    user: authState.data?.user,
+    isAuthenticated: !!user,
+    // Using suspense, so loading state is handled by boundary
+    isLoading: false,
+    user,
   };
 }

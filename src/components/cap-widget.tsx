@@ -74,8 +74,11 @@ export const CapWidget: React.FC<CapWidgetProps> = ({ onSolve, ref }) => {
     <cap-widget
       data-cap-api-endpoint="/api/cap/"
       onsolve={handleSolve}
-      ref={(e: CapWidgetElement) => {
+      ref={(e: CapWidgetElement | null) => {
         capRef.current = e;
+        if (e?.shadowRoot) {
+          e.shadowRoot.querySelectorAll(".credits").forEach((creditElement) => creditElement.remove());
+        }
         if (ref) ref.current = e;
       }}
     />
