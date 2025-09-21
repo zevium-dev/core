@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-import { auth } from "~/lib/auth";
+import { useUser } from "~/lib/auth";
 import { useTRPCClient } from "~/lib/trpc";
 
 /**
@@ -21,13 +21,13 @@ export function useEnsureDefaultOrganization() {
   const [hasChecked, setHasChecked] = useState(false);
   const [organizationCreated, setOrganizationCreated] = useState(false);
 
-  const { data: session } = auth.useSession();
+  const user = useUser();
   const trpcClient = useTRPCClient();
 
   useEffect(() => {
     async function checkAndCreateOrganization() {
       // Only run if user is logged in and we haven't checked yet
-      if (!session?.user || hasChecked || isChecking) {
+      if (!user || hasChecked || isChecking) {
         return;
       }
 
@@ -38,7 +38,7 @@ export function useEnsureDefaultOrganization() {
 
         if (result.created) {
           setOrganizationCreated(true);
-          console.log("Default organization created for user:", session.user.email);
+          console.log("Default organization created for user:", user.email);
         }
 
         setHasChecked(true);
@@ -51,7 +51,7 @@ export function useEnsureDefaultOrganization() {
     }
 
     void checkAndCreateOrganization();
-  }, [session?.user, hasChecked, isChecking, trpcClient]);
+  }, [user, hasChecked, isChecking, trpcClient]);
 
   return {
     hasChecked,

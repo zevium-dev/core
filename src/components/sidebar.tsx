@@ -30,7 +30,7 @@ import {
   SidebarTrigger,
   useSidebar,
 } from "~/components/ui/sidebar";
-import { auth } from "~/lib/auth";
+import { auth, useUser } from "~/lib/auth";
 
 const headerContentAtom = atom<React.ReactNode>(null);
 
@@ -96,12 +96,12 @@ const navData = [
 
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const [, match] = useMatches();
-  const authState = auth.useSession();
+  const user = useUser();
 
   // Filter navigation items based on authentication state
   const filteredNavData = navData.filter((item) => {
     if (item.requiresAuth) {
-      return authState.data?.user;
+      return !!user;
     }
     return true;
   });
@@ -207,7 +207,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
 
 // Account Section Component
 function AccountSection() {
-  const authState = auth.useSession();
+  const user = useUser();
   const { state } = useSidebar();
   const router = useRouter();
 
@@ -219,12 +219,12 @@ function AccountSection() {
     await auth.signOut();
   };
 
-  const getUserInitials = (user: NonNullable<typeof authState.data>["user"]) => {
-    return user.name.charAt(0) || user.email.charAt(0) || "U";
+  const getUserInitials = (u: NonNullable<typeof user>) => {
+    return u.name.charAt(0) || u.email.charAt(0) || "U";
   };
 
   if (state === "collapsed") {
-    if (authState.data?.user) {
+    if (user) {
       // Signed in - show avatar with dropdown
       return (
         <DropdownMenu>
@@ -234,8 +234,8 @@ function AccountSection() {
               size="default"
             >
               <Avatar className="size-6">
-                <AvatarImage alt={authState.data.user.name || "User"} src={authState.data.user.image ?? ""} />
-                <AvatarFallback className="text-xs">{getUserInitials(authState.data.user)}</AvatarFallback>
+                <AvatarImage alt={user.name || "User"} src={user.image ?? ""} />
+                <AvatarFallback className="text-xs">{getUserInitials(user)}</AvatarFallback>
               </Avatar>
               <span className="sr-only">Account menu</span>
             </SidebarMenuButton>
@@ -243,8 +243,8 @@ function AccountSection() {
           <DropdownMenuContent align="center" side="right" sideOffset={4}>
             <DropdownMenuLabel className="font-normal">
               <div className="flex flex-col space-y-1">
-                <p className="text-sm leading-none font-medium">{authState.data.user.name}</p>
-                <p className="text-muted-foreground text-xs leading-none">{authState.data.user.email}</p>
+                <p className="text-sm leading-none font-medium">{user.name}</p>
+                <p className="text-muted-foreground text-xs leading-none">{user.email}</p>
               </div>
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
@@ -260,7 +260,6 @@ function AccountSection() {
       return (
         <SidebarMenuButton
           className="group-data-[state=collapsed]:hover:bg-sidebar-accent group-data-[state=collapsed]:hover:text-sidebar-accent-foreground transition-colors"
-          disabled={authState.isPending}
           onClick={handleSignIn}
           size="default"
         >
@@ -271,27 +270,27 @@ function AccountSection() {
     }
   }
 
-  if (authState.data?.user) {
+  if (user) {
     // Signed in - show full profile with dropdown
     return (
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <SidebarMenuButton className="group-data-[state=expanded]:hover:bg-sidebar-accent group-data-[state=expanded]:hover:text-sidebar-accent-foreground transition-colors">
             <Avatar className="size-6">
-              <AvatarImage alt={authState.data.user.name || "User"} src={authState.data.user.image ?? ""} />
-              <AvatarFallback className="text-xs">{getUserInitials(authState.data.user)}</AvatarFallback>
+              <AvatarImage alt={user.name || "User"} src={user.image ?? ""} />
+              <AvatarFallback className="text-xs">{getUserInitials(user)}</AvatarFallback>
             </Avatar>
             <div className="grid flex-1 text-left text-sm leading-tight">
-              <span className="truncate font-medium">{authState.data.user.name}</span>
-              <span className="text-muted-foreground truncate text-xs">{authState.data.user.email}</span>
+              <span className="truncate font-medium">{user.name}</span>
+              <span className="text-muted-foreground truncate text-xs">{user.email}</span>
             </div>
           </SidebarMenuButton>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" side="right" sideOffset={4}>
           <DropdownMenuLabel className="font-normal">
             <div className="flex flex-col space-y-1">
-              <p className="text-sm leading-none font-medium">{authState.data.user.name}</p>
-              <p className="text-muted-foreground text-xs leading-none">{authState.data.user.email}</p>
+              <p className="text-sm leading-none font-medium">{user.name}</p>
+              <p className="text-muted-foreground text-xs leading-none">{user.email}</p>
             </div>
           </DropdownMenuLabel>
           <DropdownMenuSeparator />
@@ -307,7 +306,6 @@ function AccountSection() {
     return (
       <SidebarMenuButton
         className="group-data-[state=expanded]:hover:bg-sidebar-accent group-data-[state=expanded]:hover:text-sidebar-accent-foreground transition-colors"
-        disabled={authState.isPending}
         onClick={handleSignIn}
       >
         <LogIn className="size-4" />

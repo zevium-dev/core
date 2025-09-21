@@ -13,7 +13,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
 import { Input } from "~/components/ui/input";
 import { Label } from "~/components/ui/label";
 import { ScreenCenter } from "~/components/ui/screen-center";
-import { auth } from "~/lib/auth";
+import { auth, useUser } from "~/lib/auth";
 import { CAPTCHA_HEADER_KEY } from "~/lib/constants";
 import { cn } from "~/lib/utils";
 
@@ -32,7 +32,7 @@ function RouteComponent() {
   const capRef = useRef<CapWidgetElement>(null);
   const [capToken, setCapToken] = useState<null | string>(null);
 
-  const authState = auth.useSession();
+  const user = useUser();
   const navigate = Route.useNavigate();
 
   const {
@@ -67,7 +67,7 @@ function RouteComponent() {
     void auth.signIn.social({ provider: "google" });
   };
 
-  if (authState.data?.user) {
+  if (user) {
     return <Redirect to="/" />;
   }
 
@@ -114,7 +114,7 @@ function RouteComponent() {
                       <Label className="mt-0.5" htmlFor="password">
                         Password
                       </Label>
-                      <Link className="ml-auto text-xs hover:underline" to="/auth/forgot-password">
+                      <Link className="ml-auto text-xs hover:underline" tabIndex={-1} to="/auth/forgot-password">
                         Forgot your password?
                       </Link>
                     </div>
