@@ -12,7 +12,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
 import { Input } from "~/components/ui/input";
 import { Label } from "~/components/ui/label";
 import { ScreenCenter } from "~/components/ui/screen-center";
-import { auth } from "~/lib/auth";
+import { auth, useUser } from "~/lib/auth";
 import { cn } from "~/lib/utils";
 
 const SearchParamsArk = type({
@@ -44,7 +44,7 @@ function RouteComponent() {
     resolver: arktypeResolver(FormValuesArk),
   });
 
-  const authState = auth.useSession();
+  const user = useUser();
 
   const resetPasswordMutation = useMutation({
     mutationFn: (data: FormValues) => {
@@ -59,7 +59,7 @@ function RouteComponent() {
     await resetPasswordMutation.mutateAsync(data);
   };
 
-  if (authState.data?.user) {
+  if (user) {
     return <Redirect to="/" />;
   }
 

@@ -1,4 +1,5 @@
 import { Exception } from "@boi.gg/exception";
+import { queryOptions, type QueryOptions, useSuspenseQuery } from "@tanstack/react-query";
 import { apiKeyClient, organizationClient } from "better-auth/client/plugins";
 import { createAuthClient, ErrorContext } from "better-auth/react";
 
@@ -12,3 +13,31 @@ export const auth = createAuthClient({
   },
   plugins: [apiKeyClient(), organizationClient()],
 });
+
+const getSession = async () => {
+  if (typeof window === "undefined") {
+    const { authServer } = await import("~/lib/server/auth");
+    const { getWebRequest } = await import("@tanstack/react-start/server");
+    const request = getWebRequest();
+    const response = await authServer.api.getSession({ headers: request.headers }).catch(() => null);
+    if (!response) return null;
+    const { session, user } = response;
+    return { session, user };
+  } else {
+    const session = await auth.getSession();
+    return { session: session.data?.session, user: session.data?.user };
+  }
+};
+
+type SessionQueryFnData = Awaited<ReturnType<typeof getSession>>;
+
+export const sessionQueryOptions = (options?: QueryOptions<SessionQueryFnData>) =>
+  queryOptions({
+    ...options,
+    queryFn: getSession,
+    queryKey: ["session", ...(options?.queryKey ?? [])],
+  });
+
+export const useSession = () => useSuspenseQuery(sessionQueryOptions()).data;
+
+export const useUser = () => useSession()?.user;

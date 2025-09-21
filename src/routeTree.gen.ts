@@ -21,6 +21,7 @@ import { Route as AuthSentEmailRouteImport } from './routes/auth/sent-email'
 import { Route as AuthResetPasswordRouteImport } from './routes/auth/reset-password'
 import { Route as AuthForgotPasswordRouteImport } from './routes/auth/forgot-password'
 import { Route as AuthChangePasswordRouteImport } from './routes/auth/change-password'
+import { Route as InternalSessionTestRouteImport } from './routes/$internal/session-test'
 import { ServerRoute as InternalEmailTemplatesPreviewServerRouteImport } from './routes/$internal/email-templates-preview'
 import { ServerRoute as ApiTrpcSplatServerRouteImport } from './routes/api/trpc/$'
 import { ServerRoute as ApiPosthogSplatServerRouteImport } from './routes/api/posthog/$'
@@ -134,6 +135,11 @@ const AuthChangePasswordRoute = AuthChangePasswordRouteImport.update({
   path: '/auth/change-password',
   getParentRoute: () => rootRouteImport,
 } as any)
+const InternalSessionTestRoute = InternalSessionTestRouteImport.update({
+  id: '/$internal/session-test',
+  path: '/$internal/session-test',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SettingsPreferenceSplatLazyRoute =
   SettingsPreferenceSplatLazyRouteImport.update({
     id: '/settings/preference/$',
@@ -208,6 +214,7 @@ const ApiAuthSplatServerRoute = ApiAuthSplatServerRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexLazyRoute
   '/catalogue': typeof CatalogueLazyRoute
+  '/$internal/session-test': typeof InternalSessionTestRoute
   '/auth/change-password': typeof AuthChangePasswordRoute
   '/auth/forgot-password': typeof AuthForgotPasswordRoute
   '/auth/reset-password': typeof AuthResetPasswordRoute
@@ -230,6 +237,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexLazyRoute
   '/catalogue': typeof CatalogueLazyRoute
+  '/$internal/session-test': typeof InternalSessionTestRoute
   '/auth/change-password': typeof AuthChangePasswordRoute
   '/auth/forgot-password': typeof AuthForgotPasswordRoute
   '/auth/reset-password': typeof AuthResetPasswordRoute
@@ -253,6 +261,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexLazyRoute
   '/catalogue': typeof CatalogueLazyRoute
+  '/$internal/session-test': typeof InternalSessionTestRoute
   '/auth/change-password': typeof AuthChangePasswordRoute
   '/auth/forgot-password': typeof AuthForgotPasswordRoute
   '/auth/reset-password': typeof AuthResetPasswordRoute
@@ -277,6 +286,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/catalogue'
+    | '/$internal/session-test'
     | '/auth/change-password'
     | '/auth/forgot-password'
     | '/auth/reset-password'
@@ -299,6 +309,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/catalogue'
+    | '/$internal/session-test'
     | '/auth/change-password'
     | '/auth/forgot-password'
     | '/auth/reset-password'
@@ -321,6 +332,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/catalogue'
+    | '/$internal/session-test'
     | '/auth/change-password'
     | '/auth/forgot-password'
     | '/auth/reset-password'
@@ -344,6 +356,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexLazyRoute: typeof IndexLazyRoute
   CatalogueLazyRoute: typeof CatalogueLazyRoute
+  InternalSessionTestRoute: typeof InternalSessionTestRoute
   AuthChangePasswordRoute: typeof AuthChangePasswordRoute
   AuthForgotPasswordRoute: typeof AuthForgotPasswordRoute
   AuthResetPasswordRoute: typeof AuthResetPasswordRoute
@@ -530,6 +543,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthChangePasswordRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/$internal/session-test': {
+      id: '/$internal/session-test'
+      path: '/$internal/session-test'
+      fullPath: '/$internal/session-test'
+      preLoaderRoute: typeof InternalSessionTestRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/settings/preference/$': {
       id: '/settings/preference/$'
       path: '/settings/preference/$'
@@ -628,6 +648,7 @@ const ProjectsSlugLazyRouteWithChildren =
 const rootRouteChildren: RootRouteChildren = {
   IndexLazyRoute: IndexLazyRoute,
   CatalogueLazyRoute: CatalogueLazyRoute,
+  InternalSessionTestRoute: InternalSessionTestRoute,
   AuthChangePasswordRoute: AuthChangePasswordRoute,
   AuthForgotPasswordRoute: AuthForgotPasswordRoute,
   AuthResetPasswordRoute: AuthResetPasswordRoute,
