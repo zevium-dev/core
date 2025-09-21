@@ -12,6 +12,7 @@ import { createFileRoute } from '@tanstack/react-router'
 import { createServerRootRoute } from '@tanstack/react-start/server'
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as PricingIndexRouteImport } from './routes/pricing/index'
 import { Route as SettingsSplatRouteImport } from './routes/settings/$'
 import { Route as AuthVerifyEmailRouteImport } from './routes/auth/verify-email'
 import { Route as AuthSignUpRouteImport } from './routes/auth/sign-up'
@@ -74,6 +75,11 @@ const OrganizationsIndexLazyRoute = OrganizationsIndexLazyRouteImport.update({
 } as any).lazy(() =>
   import('./routes/organizations/index.lazy').then((d) => d.Route),
 )
+const PricingIndexRoute = PricingIndexRouteImport.update({
+  id: '/pricing/',
+  path: '/pricing/',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ProjectsSlugLazyRoute = ProjectsSlugLazyRouteImport.update({
   id: '/projects/$slug',
   path: '/projects/$slug',
@@ -212,6 +218,7 @@ export interface FileRoutesByFullPath {
   '/settings/$': typeof SettingsSplatRoute
   '/organizations/$slug': typeof OrganizationsSlugLazyRoute
   '/projects/$slug': typeof ProjectsSlugLazyRouteWithChildren
+  '/pricing': typeof PricingIndexRoute
   '/organizations': typeof OrganizationsIndexLazyRoute
   '/projects': typeof ProjectsIndexLazyRoute
   '/settings/activity/$': typeof SettingsActivitySplatLazyRoute
@@ -233,6 +240,7 @@ export interface FileRoutesByTo {
   '/settings/$': typeof SettingsSplatRoute
   '/organizations/$slug': typeof OrganizationsSlugLazyRoute
   '/projects/$slug': typeof ProjectsSlugLazyRouteWithChildren
+  '/pricing': typeof PricingIndexRoute
   '/organizations': typeof OrganizationsIndexLazyRoute
   '/projects': typeof ProjectsIndexLazyRoute
   '/settings/activity/$': typeof SettingsActivitySplatLazyRoute
@@ -255,6 +263,7 @@ export interface FileRoutesById {
   '/settings/$': typeof SettingsSplatRoute
   '/organizations/$slug': typeof OrganizationsSlugLazyRoute
   '/projects/$slug': typeof ProjectsSlugLazyRouteWithChildren
+  '/pricing/': typeof PricingIndexRoute
   '/organizations/': typeof OrganizationsIndexLazyRoute
   '/projects/': typeof ProjectsIndexLazyRoute
   '/settings/activity/$': typeof SettingsActivitySplatLazyRoute
@@ -278,6 +287,7 @@ export interface FileRouteTypes {
     | '/settings/$'
     | '/organizations/$slug'
     | '/projects/$slug'
+    | '/pricing'
     | '/organizations'
     | '/projects'
     | '/settings/activity/$'
@@ -299,6 +309,7 @@ export interface FileRouteTypes {
     | '/settings/$'
     | '/organizations/$slug'
     | '/projects/$slug'
+    | '/pricing'
     | '/organizations'
     | '/projects'
     | '/settings/activity/$'
@@ -320,6 +331,7 @@ export interface FileRouteTypes {
     | '/settings/$'
     | '/organizations/$slug'
     | '/projects/$slug'
+    | '/pricing/'
     | '/organizations/'
     | '/projects/'
     | '/settings/activity/$'
@@ -342,6 +354,7 @@ export interface RootRouteChildren {
   SettingsSplatRoute: typeof SettingsSplatRoute
   OrganizationsSlugLazyRoute: typeof OrganizationsSlugLazyRoute
   ProjectsSlugLazyRoute: typeof ProjectsSlugLazyRouteWithChildren
+  PricingIndexRoute: typeof PricingIndexRoute
   OrganizationsIndexLazyRoute: typeof OrganizationsIndexLazyRoute
   ProjectsIndexLazyRoute: typeof ProjectsIndexLazyRoute
   SettingsActivitySplatLazyRoute: typeof SettingsActivitySplatLazyRoute
@@ -438,6 +451,13 @@ declare module '@tanstack/react-router' {
       path: '/organizations'
       fullPath: '/organizations'
       preLoaderRoute: typeof OrganizationsIndexLazyRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/pricing/': {
+      id: '/pricing/'
+      path: '/pricing'
+      fullPath: '/pricing'
+      preLoaderRoute: typeof PricingIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/projects/$slug': {
@@ -618,6 +638,7 @@ const rootRouteChildren: RootRouteChildren = {
   SettingsSplatRoute: SettingsSplatRoute,
   OrganizationsSlugLazyRoute: OrganizationsSlugLazyRoute,
   ProjectsSlugLazyRoute: ProjectsSlugLazyRouteWithChildren,
+  PricingIndexRoute: PricingIndexRoute,
   OrganizationsIndexLazyRoute: OrganizationsIndexLazyRoute,
   ProjectsIndexLazyRoute: ProjectsIndexLazyRoute,
   SettingsActivitySplatLazyRoute: SettingsActivitySplatLazyRoute,

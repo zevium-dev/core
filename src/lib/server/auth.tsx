@@ -1,3 +1,4 @@
+import { autumn } from "autumn-js/better-auth";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { apiKey } from "better-auth/plugins";
@@ -39,7 +40,13 @@ export const authServer = betterAuth({
       });
     },
   },
-  plugins: [apiKey(), organization({ requireEmailVerificationOnInvitation: true }), capCaptcha(), reactStartCookies()],
+  plugins: [
+    apiKey(),
+    organization({ requireEmailVerificationOnInvitation: true }),
+    autumn({ customerScope: "organization", secretKey: serverEnv.AUTUMN_SECRET_KEY }),
+    capCaptcha(),
+    reactStartCookies(),
+  ],
   rateLimit: {
     storage: "secondary-storage",
   },
