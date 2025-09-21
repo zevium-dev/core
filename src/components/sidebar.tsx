@@ -129,6 +129,9 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         <SidebarGroup>
           <SidebarMenu>
             {filteredNavData.map((item) => {
+              // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+              if (!match) return <React.Fragment key={item.title} />;
+
               // Check if current path matches the item URL or starts with it (for nested routes)
               const isActive = match.pathname === item.url || (item.url !== "/" && match.pathname.startsWith(item.url));
 
