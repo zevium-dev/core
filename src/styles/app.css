@@ -52,7 +52,7 @@
   --foreground: oklch(0.92 0.01 180);
   --main-foreground: oklch(0.12 0.02 220);
   --main: oklch(0.55 0.12 190);
-  --border: oklch(0.25 0.02 220);
+  --border: oklch(0.35 0.02 220);
   --ring: oklch(0.55 0.12 190);
   --shadow: 0px 4px 12px 0px oklch(0.05 0.01 220 / 0.3);
   --chart-1: oklch(0.55 0.12 190);
@@ -72,9 +72,9 @@
   --muted: oklch(0.22 0.02 220);
   --muted-foreground: oklch(0.7 0.05 200);
   --accent: oklch(0.55 0.12 190);
-  --accent-foreground: oklch(0.12 0.02 220);
+  --accent-foreground: oklch(0.62 0.02 220);
   --destructive: oklch(0.7 0.18 25);
-  --input: oklch(0.2 0.02 220);
+  --input: oklch(0.42 0.02 220);
   --sidebar: oklch(0.15 0.02 220);
   --sidebar-foreground: oklch(0.92 0.01 180);
   --sidebar-primary: oklch(0.65 0.15 190);
@@ -83,6 +83,30 @@
   --sidebar-accent-foreground: oklch(0.92 0.01 180);
   --sidebar-border: oklch(0.25 0.02 220);
   --sidebar-ring: oklch(0.55 0.12 190);
+}
+
+cap-widget {
+  --cap-background: var(--color-background);
+  --cap-border-color: var(--color-border);
+  --cap-border-radius: 14px;
+  --cap-widget-height: 30px;
+  --cap-widget-width: 200px;
+  --cap-widget-padding: 14px;
+  --cap-gap: 15px;
+  --cap-color: var(--color-foreground);
+  --cap-checkbox-size: 16px;
+  --cap-checkbox-border: 1px solid var(--color-border);
+  --cap-checkbox-border-radius: 6px;
+  --cap-checkbox-background: var(--color-input);
+  --cap-checkbox-margin: 2px;
+  --cap-font: var(--font-sans);
+  --cap-spinner-color: var(--color-foreground);
+  --cap-spinner-background-color: var(--color-background);
+  --cap-spinner-thickness: 5px;
+  --cap-checkmark: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9ImN1cnJlbnRDb2xvciIgc3Ryb2tlLXdpZHRoPSIyIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiIGNsYXNzPSJsdWNpZGUgbHVjaWRlLWNoZWNrLWljb24gbHVjaWRlLWNoZWNrIj48cGF0aCBkPSJNMjAgNiA5IDE3bC01LTUiLz48L3N2Zz4=");
+  --cap-error-cross: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9ImN1cnJlbnRDb2xvciIgc3Ryb2tlLXdpZHRoPSIyIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiIGNsYXNzPSJsdWNpZGUgbHVjaWRlLXgtaWNvbiBsdWNpZGUteCI+PHBhdGggZD0iTTE4IDYgNiAxOCIvPjxwYXRoIGQ9Im02IDYgMTIgMTIiLz48L3N2Zz4=");
+  --cap-credits-font-size: 0px;
+  --cap-opacity-hover: 0.8;
 }
 
 @theme inline {

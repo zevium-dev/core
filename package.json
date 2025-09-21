@@ -18,13 +18,14 @@
     "start": "node .output/server/index.mjs",
     "typecheck": "tsc --noEmit"
   },
-  "dependencies": {
-    "yaml": "^2.8.1"
-  },
   "devDependencies": {
+    "@boi.gg/exception": "^0.0.2",
+    "@cap.js/server": "^3.0.1",
+    "@cap.js/widget": "^0.1.28",
     "@eslint-react/eslint-plugin": "^1.53.0",
     "@eslint/js": "^9.35.0",
     "@hookform/resolvers": "^5.2.1",
+    "@icons-pack/react-simple-icons": "^13.7.0",
     "@libsql/client": "^0.15.15",
     "@orpc/arktype": "^1.8.7",
     "@orpc/openapi": "^1.8.7",
@@ -58,8 +59,11 @@
     "@radix-ui/react-toggle": "^1.1.10",
     "@radix-ui/react-toggle-group": "^1.1.11",
     "@radix-ui/react-tooltip": "^1.2.8",
+    "@react-email/components": "^0.5.3",
+    "@react-email/tailwind": "^1.2.2",
     "@tailwindcss/typography": "^0.5.16",
     "@tailwindcss/vite": "^4.1.13",
+    "@tanstack/arktype-adapter": "^1.131.36",
     "@tanstack/react-query": "^5.87.1",
     "@tanstack/react-query-devtools": "^5.87.3",
     "@tanstack/react-router": "^1.131.36",
@@ -71,6 +75,7 @@
     "@types/node": "^22.18.1",
     "@types/react": "^19.1.12",
     "@types/react-dom": "^19.1.9",
+    "@upstash/redis": "^1.35.3",
     "@vitejs/plugin-react": "^4.7.0",
     "arktype": "^2.1.22",
     "autoprefixer": "^10.4.21",
@@ -106,6 +111,7 @@
     "react-hook-form": "^7.62.0",
     "react-resizable-panels": "^3.0.5",
     "recharts": "2.15.4",
+    "resend": "^6.0.3",
     "sonner": "^2.0.7",
     "superjson": "^2.2.2",
     "tailwind-merge": "^3.3.1",
@@ -118,6 +124,7 @@
     "vite": "npm:rolldown-vite@^7.1.8",
     "vite-tsconfig-paths": "^5.1.4",
     "wrangler": "^4.34.0",
+    "yaml": "^2.8.1",
     "zod": "^4.1.5"
   },
   "packageManager": "pnpm@10.15.1",

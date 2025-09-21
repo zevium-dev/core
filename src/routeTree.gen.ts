@@ -13,9 +13,18 @@ import { createServerRootRoute } from '@tanstack/react-start/server'
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as SettingsSplatRouteImport } from './routes/settings/$'
+import { Route as AuthVerifyEmailRouteImport } from './routes/auth/verify-email'
+import { Route as AuthSignUpRouteImport } from './routes/auth/sign-up'
+import { Route as AuthSignInRouteImport } from './routes/auth/sign-in'
+import { Route as AuthSentEmailRouteImport } from './routes/auth/sent-email'
+import { Route as AuthResetPasswordRouteImport } from './routes/auth/reset-password'
+import { Route as AuthForgotPasswordRouteImport } from './routes/auth/forgot-password'
+import { Route as AuthChangePasswordRouteImport } from './routes/auth/change-password'
+import { ServerRoute as InternalEmailTemplatesPreviewServerRouteImport } from './routes/$internal/email-templates-preview'
 import { ServerRoute as ApiTrpcSplatServerRouteImport } from './routes/api/trpc/$'
 import { ServerRoute as ApiPosthogSplatServerRouteImport } from './routes/api/posthog/$'
 import { ServerRoute as ApiOpenapiSplatServerRouteImport } from './routes/api/openapi/$'
+import { ServerRoute as ApiCapSplatServerRouteImport } from './routes/api/cap/$'
 import { ServerRoute as ApiAuthSplatServerRouteImport } from './routes/api/auth/$'
 
 const CatalogueLazyRouteImport = createFileRoute('/catalogue')()
@@ -84,6 +93,41 @@ const SettingsSplatRoute = SettingsSplatRouteImport.update({
   path: '/settings/$',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AuthVerifyEmailRoute = AuthVerifyEmailRouteImport.update({
+  id: '/auth/verify-email',
+  path: '/auth/verify-email',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AuthSignUpRoute = AuthSignUpRouteImport.update({
+  id: '/auth/sign-up',
+  path: '/auth/sign-up',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AuthSignInRoute = AuthSignInRouteImport.update({
+  id: '/auth/sign-in',
+  path: '/auth/sign-in',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AuthSentEmailRoute = AuthSentEmailRouteImport.update({
+  id: '/auth/sent-email',
+  path: '/auth/sent-email',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AuthResetPasswordRoute = AuthResetPasswordRouteImport.update({
+  id: '/auth/reset-password',
+  path: '/auth/reset-password',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AuthForgotPasswordRoute = AuthForgotPasswordRouteImport.update({
+  id: '/auth/forgot-password',
+  path: '/auth/forgot-password',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AuthChangePasswordRoute = AuthChangePasswordRouteImport.update({
+  id: '/auth/change-password',
+  path: '/auth/change-password',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SettingsPreferenceSplatLazyRoute =
   SettingsPreferenceSplatLazyRouteImport.update({
     id: '/settings/preference/$',
@@ -123,6 +167,12 @@ const ProjectsSlugViewVersionLazyRoute =
   } as any).lazy(() =>
     import('./routes/projects/$slug/view/$version.lazy').then((d) => d.Route),
   )
+const InternalEmailTemplatesPreviewServerRoute =
+  InternalEmailTemplatesPreviewServerRouteImport.update({
+    id: '/$internal/email-templates-preview',
+    path: '/$internal/email-templates-preview',
+    getParentRoute: () => rootServerRouteImport,
+  } as any)
 const ApiTrpcSplatServerRoute = ApiTrpcSplatServerRouteImport.update({
   id: '/api/trpc/$',
   path: '/api/trpc/$',
@@ -138,6 +188,11 @@ const ApiOpenapiSplatServerRoute = ApiOpenapiSplatServerRouteImport.update({
   path: '/api/openapi/$',
   getParentRoute: () => rootServerRouteImport,
 } as any)
+const ApiCapSplatServerRoute = ApiCapSplatServerRouteImport.update({
+  id: '/api/cap/$',
+  path: '/api/cap/$',
+  getParentRoute: () => rootServerRouteImport,
+} as any)
 const ApiAuthSplatServerRoute = ApiAuthSplatServerRouteImport.update({
   id: '/api/auth/$',
   path: '/api/auth/$',
@@ -147,6 +202,13 @@ const ApiAuthSplatServerRoute = ApiAuthSplatServerRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexLazyRoute
   '/catalogue': typeof CatalogueLazyRoute
+  '/auth/change-password': typeof AuthChangePasswordRoute
+  '/auth/forgot-password': typeof AuthForgotPasswordRoute
+  '/auth/reset-password': typeof AuthResetPasswordRoute
+  '/auth/sent-email': typeof AuthSentEmailRoute
+  '/auth/sign-in': typeof AuthSignInRoute
+  '/auth/sign-up': typeof AuthSignUpRoute
+  '/auth/verify-email': typeof AuthVerifyEmailRoute
   '/settings/$': typeof SettingsSplatRoute
   '/organizations/$slug': typeof OrganizationsSlugLazyRoute
   '/projects/$slug': typeof ProjectsSlugLazyRouteWithChildren
@@ -161,6 +223,13 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexLazyRoute
   '/catalogue': typeof CatalogueLazyRoute
+  '/auth/change-password': typeof AuthChangePasswordRoute
+  '/auth/forgot-password': typeof AuthForgotPasswordRoute
+  '/auth/reset-password': typeof AuthResetPasswordRoute
+  '/auth/sent-email': typeof AuthSentEmailRoute
+  '/auth/sign-in': typeof AuthSignInRoute
+  '/auth/sign-up': typeof AuthSignUpRoute
+  '/auth/verify-email': typeof AuthVerifyEmailRoute
   '/settings/$': typeof SettingsSplatRoute
   '/organizations/$slug': typeof OrganizationsSlugLazyRoute
   '/projects/$slug': typeof ProjectsSlugLazyRouteWithChildren
@@ -176,6 +245,13 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexLazyRoute
   '/catalogue': typeof CatalogueLazyRoute
+  '/auth/change-password': typeof AuthChangePasswordRoute
+  '/auth/forgot-password': typeof AuthForgotPasswordRoute
+  '/auth/reset-password': typeof AuthResetPasswordRoute
+  '/auth/sent-email': typeof AuthSentEmailRoute
+  '/auth/sign-in': typeof AuthSignInRoute
+  '/auth/sign-up': typeof AuthSignUpRoute
+  '/auth/verify-email': typeof AuthVerifyEmailRoute
   '/settings/$': typeof SettingsSplatRoute
   '/organizations/$slug': typeof OrganizationsSlugLazyRoute
   '/projects/$slug': typeof ProjectsSlugLazyRouteWithChildren
@@ -192,6 +268,13 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/catalogue'
+    | '/auth/change-password'
+    | '/auth/forgot-password'
+    | '/auth/reset-password'
+    | '/auth/sent-email'
+    | '/auth/sign-in'
+    | '/auth/sign-up'
+    | '/auth/verify-email'
     | '/settings/$'
     | '/organizations/$slug'
     | '/projects/$slug'
@@ -206,6 +289,13 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/catalogue'
+    | '/auth/change-password'
+    | '/auth/forgot-password'
+    | '/auth/reset-password'
+    | '/auth/sent-email'
+    | '/auth/sign-in'
+    | '/auth/sign-up'
+    | '/auth/verify-email'
     | '/settings/$'
     | '/organizations/$slug'
     | '/projects/$slug'
@@ -220,6 +310,13 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/catalogue'
+    | '/auth/change-password'
+    | '/auth/forgot-password'
+    | '/auth/reset-password'
+    | '/auth/sent-email'
+    | '/auth/sign-in'
+    | '/auth/sign-up'
+    | '/auth/verify-email'
     | '/settings/$'
     | '/organizations/$slug'
     | '/projects/$slug'
@@ -235,6 +332,13 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexLazyRoute: typeof IndexLazyRoute
   CatalogueLazyRoute: typeof CatalogueLazyRoute
+  AuthChangePasswordRoute: typeof AuthChangePasswordRoute
+  AuthForgotPasswordRoute: typeof AuthForgotPasswordRoute
+  AuthResetPasswordRoute: typeof AuthResetPasswordRoute
+  AuthSentEmailRoute: typeof AuthSentEmailRoute
+  AuthSignInRoute: typeof AuthSignInRoute
+  AuthSignUpRoute: typeof AuthSignUpRoute
+  AuthVerifyEmailRoute: typeof AuthVerifyEmailRoute
   SettingsSplatRoute: typeof SettingsSplatRoute
   OrganizationsSlugLazyRoute: typeof OrganizationsSlugLazyRoute
   ProjectsSlugLazyRoute: typeof ProjectsSlugLazyRouteWithChildren
@@ -246,39 +350,61 @@ export interface RootRouteChildren {
   SettingsPreferenceSplatLazyRoute: typeof SettingsPreferenceSplatLazyRoute
 }
 export interface FileServerRoutesByFullPath {
+  '/$internal/email-templates-preview': typeof InternalEmailTemplatesPreviewServerRoute
   '/api/auth/$': typeof ApiAuthSplatServerRoute
+  '/api/cap/$': typeof ApiCapSplatServerRoute
   '/api/openapi/$': typeof ApiOpenapiSplatServerRoute
   '/api/posthog/$': typeof ApiPosthogSplatServerRoute
   '/api/trpc/$': typeof ApiTrpcSplatServerRoute
 }
 export interface FileServerRoutesByTo {
+  '/$internal/email-templates-preview': typeof InternalEmailTemplatesPreviewServerRoute
   '/api/auth/$': typeof ApiAuthSplatServerRoute
+  '/api/cap/$': typeof ApiCapSplatServerRoute
   '/api/openapi/$': typeof ApiOpenapiSplatServerRoute
   '/api/posthog/$': typeof ApiPosthogSplatServerRoute
   '/api/trpc/$': typeof ApiTrpcSplatServerRoute
 }
 export interface FileServerRoutesById {
   __root__: typeof rootServerRouteImport
+  '/$internal/email-templates-preview': typeof InternalEmailTemplatesPreviewServerRoute
   '/api/auth/$': typeof ApiAuthSplatServerRoute
+  '/api/cap/$': typeof ApiCapSplatServerRoute
   '/api/openapi/$': typeof ApiOpenapiSplatServerRoute
   '/api/posthog/$': typeof ApiPosthogSplatServerRoute
   '/api/trpc/$': typeof ApiTrpcSplatServerRoute
 }
 export interface FileServerRouteTypes {
   fileServerRoutesByFullPath: FileServerRoutesByFullPath
-  fullPaths: '/api/auth/$' | '/api/openapi/$' | '/api/posthog/$' | '/api/trpc/$'
+  fullPaths:
+    | '/$internal/email-templates-preview'
+    | '/api/auth/$'
+    | '/api/cap/$'
+    | '/api/openapi/$'
+    | '/api/posthog/$'
+    | '/api/trpc/$'
   fileServerRoutesByTo: FileServerRoutesByTo
-  to: '/api/auth/$' | '/api/openapi/$' | '/api/posthog/$' | '/api/trpc/$'
+  to:
+    | '/$internal/email-templates-preview'
+    | '/api/auth/$'
+    | '/api/cap/$'
+    | '/api/openapi/$'
+    | '/api/posthog/$'
+    | '/api/trpc/$'
   id:
     | '__root__'
+    | '/$internal/email-templates-preview'
     | '/api/auth/$'
+    | '/api/cap/$'
     | '/api/openapi/$'
     | '/api/posthog/$'
     | '/api/trpc/$'
   fileServerRoutesById: FileServerRoutesById
 }
 export interface RootServerRouteChildren {
+  InternalEmailTemplatesPreviewServerRoute: typeof InternalEmailTemplatesPreviewServerRoute
   ApiAuthSplatServerRoute: typeof ApiAuthSplatServerRoute
+  ApiCapSplatServerRoute: typeof ApiCapSplatServerRoute
   ApiOpenapiSplatServerRoute: typeof ApiOpenapiSplatServerRoute
   ApiPosthogSplatServerRoute: typeof ApiPosthogSplatServerRoute
   ApiTrpcSplatServerRoute: typeof ApiTrpcSplatServerRoute
@@ -335,6 +461,55 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/auth/verify-email': {
+      id: '/auth/verify-email'
+      path: '/auth/verify-email'
+      fullPath: '/auth/verify-email'
+      preLoaderRoute: typeof AuthVerifyEmailRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/auth/sign-up': {
+      id: '/auth/sign-up'
+      path: '/auth/sign-up'
+      fullPath: '/auth/sign-up'
+      preLoaderRoute: typeof AuthSignUpRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/auth/sign-in': {
+      id: '/auth/sign-in'
+      path: '/auth/sign-in'
+      fullPath: '/auth/sign-in'
+      preLoaderRoute: typeof AuthSignInRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/auth/sent-email': {
+      id: '/auth/sent-email'
+      path: '/auth/sent-email'
+      fullPath: '/auth/sent-email'
+      preLoaderRoute: typeof AuthSentEmailRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/auth/reset-password': {
+      id: '/auth/reset-password'
+      path: '/auth/reset-password'
+      fullPath: '/auth/reset-password'
+      preLoaderRoute: typeof AuthResetPasswordRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/auth/forgot-password': {
+      id: '/auth/forgot-password'
+      path: '/auth/forgot-password'
+      fullPath: '/auth/forgot-password'
+      preLoaderRoute: typeof AuthForgotPasswordRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/auth/change-password': {
+      id: '/auth/change-password'
+      path: '/auth/change-password'
+      fullPath: '/auth/change-password'
+      preLoaderRoute: typeof AuthChangePasswordRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/settings/preference/$': {
       id: '/settings/preference/$'
       path: '/settings/preference/$'
@@ -374,6 +549,13 @@ declare module '@tanstack/react-router' {
 }
 declare module '@tanstack/react-start/server' {
   interface ServerFileRoutesByPath {
+    '/$internal/email-templates-preview': {
+      id: '/$internal/email-templates-preview'
+      path: '/$internal/email-templates-preview'
+      fullPath: '/$internal/email-templates-preview'
+      preLoaderRoute: typeof InternalEmailTemplatesPreviewServerRouteImport
+      parentRoute: typeof rootServerRouteImport
+    }
     '/api/trpc/$': {
       id: '/api/trpc/$'
       path: '/api/trpc/$'
@@ -393,6 +575,13 @@ declare module '@tanstack/react-start/server' {
       path: '/api/openapi/$'
       fullPath: '/api/openapi/$'
       preLoaderRoute: typeof ApiOpenapiSplatServerRouteImport
+      parentRoute: typeof rootServerRouteImport
+    }
+    '/api/cap/$': {
+      id: '/api/cap/$'
+      path: '/api/cap/$'
+      fullPath: '/api/cap/$'
+      preLoaderRoute: typeof ApiCapSplatServerRouteImport
       parentRoute: typeof rootServerRouteImport
     }
     '/api/auth/$': {
@@ -419,6 +608,13 @@ const ProjectsSlugLazyRouteWithChildren =
 const rootRouteChildren: RootRouteChildren = {
   IndexLazyRoute: IndexLazyRoute,
   CatalogueLazyRoute: CatalogueLazyRoute,
+  AuthChangePasswordRoute: AuthChangePasswordRoute,
+  AuthForgotPasswordRoute: AuthForgotPasswordRoute,
+  AuthResetPasswordRoute: AuthResetPasswordRoute,
+  AuthSentEmailRoute: AuthSentEmailRoute,
+  AuthSignInRoute: AuthSignInRoute,
+  AuthSignUpRoute: AuthSignUpRoute,
+  AuthVerifyEmailRoute: AuthVerifyEmailRoute,
   SettingsSplatRoute: SettingsSplatRoute,
   OrganizationsSlugLazyRoute: OrganizationsSlugLazyRoute,
   ProjectsSlugLazyRoute: ProjectsSlugLazyRouteWithChildren,
@@ -433,7 +629,10 @@ export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
 const rootServerRouteChildren: RootServerRouteChildren = {
+  InternalEmailTemplatesPreviewServerRoute:
+    InternalEmailTemplatesPreviewServerRoute,
   ApiAuthSplatServerRoute: ApiAuthSplatServerRoute,
+  ApiCapSplatServerRoute: ApiCapSplatServerRoute,
   ApiOpenapiSplatServerRoute: ApiOpenapiSplatServerRoute,
   ApiPosthogSplatServerRoute: ApiPosthogSplatServerRoute,
   ApiTrpcSplatServerRoute: ApiTrpcSplatServerRoute,
