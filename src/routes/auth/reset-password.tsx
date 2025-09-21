@@ -22,7 +22,7 @@ const SearchParamsArk = type({
 export const FormValuesArk = type({
   password: "0 < string < 128",
   passwordConfirm: "0 < string < 128",
-}).and(SearchParamsArk);
+});
 
 type FormValues = typeof FormValuesArk.infer;
 
@@ -32,12 +32,14 @@ export const Route = createFileRoute("/auth/reset-password")({
 });
 
 function RouteComponent() {
+  const { token } = Route.useSearch();
+
   const {
     formState: { errors, isSubmitting },
     handleSubmit,
     register,
   } = useForm<FormValues>({
-    defaultValues: { password: "", passwordConfirm: "", token: "" },
+    defaultValues: { password: "", passwordConfirm: "" },
     mode: "onBlur",
     resolver: arktypeResolver(FormValuesArk),
   });
@@ -46,7 +48,6 @@ function RouteComponent() {
 
   const resetPasswordMutation = useMutation({
     mutationFn: (data: FormValues) => {
-      const token = data.token;
       const password = data.password;
       const passwordConfirm = data.passwordConfirm;
       if (password !== passwordConfirm) throw new TRPCClientError("Passwords do not match");
@@ -105,23 +106,6 @@ function RouteComponent() {
                       id="password-confirm-error"
                     >
                       {errors.passwordConfirm?.message ?? "No error"}
-                    </p>
-                  </div>
-                  <div className="hidden gap-3">
-                    <Label htmlFor="token">Token</Label>
-                    <Input
-                      aria-describedby={errors.token ? "token-error" : undefined}
-                      aria-invalid={!!errors.token}
-                      disabled={isSubmitting}
-                      id="token"
-                      type="password"
-                      {...register("token")}
-                    />
-                    <p
-                      className={cn("text-destructive text-end text-xs", !errors.token && "invisible")}
-                      id="token-error"
-                    >
-                      {errors.token?.message ?? "No error"}
                     </p>
                   </div>
                   <Button className="w-full" loading={isSubmitting} type="submit">
