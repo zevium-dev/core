@@ -16,7 +16,7 @@
     "lint": "eslint .",
     "prepush": "pnpm run typecheck && pnpm run format",
     "start": "node .output/server/index.mjs",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsgo --noEmit"
   },
   "devDependencies": {
     "@boi.gg/exception": "^0.0.2",
@@ -75,6 +75,7 @@
     "@types/node": "^22.18.6",
     "@types/react": "^19.1.13",
     "@types/react-dom": "^19.1.9",
+    "@typescript/native-preview": "7.0.0-dev.20250921.1",
     "@upstash/redis": "^1.35.4",
     "@vitejs/plugin-react": "^4.7.0",
     "arktype": "^2.1.22",
