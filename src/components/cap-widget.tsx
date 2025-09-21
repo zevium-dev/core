@@ -77,7 +77,7 @@ export const CapWidget: React.FC<CapWidgetProps> = ({ onSolve, ref }) => {
       ref={(e: CapWidgetElement | null) => {
         capRef.current = e;
         if (e?.shadowRoot) {
-          e.shadowRoot.querySelectorAll(".credits").forEach((e) => e.remove());
+          e.shadowRoot.querySelectorAll(".credits").forEach((creditElement) => creditElement.remove());
         }
         if (ref) ref.current = e;
       }}
