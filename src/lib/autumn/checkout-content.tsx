@@ -17,17 +17,15 @@ export const getCheckoutContent = (checkoutResult: CheckoutResult) => {
   }
 
   if (scenario == "active" && updateable) {
-    if (updateable) {
-      return {
-        message: (
-          <p>
-            Update your prepaid quantity. You&apos;ll be charged or credited the prorated difference based on your
-            current billing cycle.
-          </p>
-        ),
-        title: <p>Update Plan</p>,
-      };
-    }
+    return {
+      message: (
+        <p>
+          Update your prepaid quantity. You&apos;ll be charged or credited the prorated difference based on your current
+          billing cycle.
+        </p>
+      ),
+      title: <p>Update Plan</p>,
+    };
   }
 
   if (has_trial) {

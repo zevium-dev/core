@@ -3,7 +3,7 @@ import * as AccordionPrimitive from "@radix-ui/react-accordion";
 import { type CheckoutParams, type CheckoutResult, type ProductItem, UsageModel } from "autumn-js";
 import { useCustomer } from "autumn-js/react";
 import { ArrowRight, ChevronDown, Loader2 } from "lucide-react";
-import React, { useEffect, useState } from "react";
+import React, { useState } from "react";
 
 import { Accordion, AccordionContent, AccordionItem } from "~/components/ui/accordion";
 import { Button } from "~/components/ui/button";
@@ -29,24 +29,13 @@ const formatCurrency = ({ amount, currency }: { amount: number; currency: string
 
 export default function CheckoutDialog(params: CheckoutDialogProps) {
   const { attach } = useCustomer();
-  const [checkoutResult, setCheckoutResult] = useState<CheckoutResult | undefined>(params?.checkoutResult);
-
-  useEffect(() => {
-    if (params.checkoutResult) {
-      setCheckoutResult(params.checkoutResult);
-    }
-  }, [params.checkoutResult]);
-
+  const checkoutResult = params.checkoutResult;
   const [loading, setLoading] = useState(false);
-
-  if (!checkoutResult) {
-    return <></>;
-  }
 
   const { open, setOpen } = params;
   const { message, title } = getCheckoutContent(checkoutResult);
 
-  const isFree = checkoutResult?.product.properties?.is_free;
+  const isFree = checkoutResult.product.properties.is_free;
   const isPaid = !isFree;
 
   return (
@@ -55,9 +44,7 @@ export default function CheckoutDialog(params: CheckoutDialogProps) {
         <DialogTitle className="mb-1 px-6">{title}</DialogTitle>
         <div className="text-muted-foreground mt-1 mb-4 px-6">{message}</div>
 
-        {isPaid && checkoutResult && (
-          <PriceInformation checkoutResult={checkoutResult} setCheckoutResult={setCheckoutResult} />
-        )}
+        {isPaid && <PriceInformation checkoutResult={checkoutResult} />}
 
         <DialogFooter className="bg-secondary flex flex-col justify-between gap-x-4 border-t py-2 pr-3 pl-6 shadow-inner sm:flex-row">
           <Button
@@ -75,7 +62,7 @@ export default function CheckoutDialog(params: CheckoutDialogProps) {
 
               await attach({
                 productId: checkoutResult.product.id,
-                ...(params.checkoutParams || {}),
+                ...(params.checkoutParams ?? {}),
                 options,
               });
               setOpen(false);
@@ -111,15 +98,16 @@ function CheckoutLines({ checkoutResult }: { checkoutResult: CheckoutResult }) {
           </div>
         </CustomAccordionTrigger>
         <AccordionContent className="mt-2 mb-0 flex flex-col gap-2 pb-2">
-          {checkoutResult?.lines
-            .filter((line) => line.amount != 0)
-            .map((line, index) => {
+          {checkoutResult.lines
+            .filter((line) => line.amount !== 0)
+            .map((line) => {
+              const lineKey = `${line.description}-${line.amount}-${line.item.feature_id ?? "na"}`;
               return (
-                <div className="flex justify-between" key={index}>
+                <div className="flex justify-between" key={lineKey}>
                   <p className="text-muted-foreground">{line.description}</p>
                   <p className="text-muted-foreground">
                     {new Intl.NumberFormat("en-US", {
-                      currency: checkoutResult?.currency,
+                      currency: checkoutResult.currency,
                       style: "currency",
                     }).format(line.amount)}
                   </p>
@@ -170,8 +158,8 @@ function DueAmounts({ checkoutResult }: { checkoutResult: CheckoutResult }) {
 
         <p className="text-md font-medium">
           {formatCurrency({
-            amount: checkoutResult?.total,
-            currency: checkoutResult?.currency,
+            amount: checkoutResult.total,
+            currency: checkoutResult.currency,
           })}
         </p>
       </div>
@@ -183,7 +171,7 @@ function DueAmounts({ checkoutResult }: { checkoutResult: CheckoutResult }) {
           <p className="text-md">
             {formatCurrency({
               amount: next_cycle.total,
-              currency: checkoutResult?.currency,
+              currency: checkoutResult.currency,
             })}
             {hasUsagePrice && <span> + usage prices</span>}
           </p>
@@ -193,19 +181,13 @@ function DueAmounts({ checkoutResult }: { checkoutResult: CheckoutResult }) {
   );
 }
 
-function PriceInformation({
-  checkoutResult,
-  setCheckoutResult,
-}: {
-  checkoutResult: CheckoutResult;
-  setCheckoutResult: (checkoutResult: CheckoutResult) => void;
-}) {
+function PriceInformation({ checkoutResult }: { checkoutResult: CheckoutResult }) {
   return (
     <div className="mb-4 flex flex-col gap-4 px-6">
-      <ProductItems checkoutResult={checkoutResult} setCheckoutResult={setCheckoutResult} />
+      <ProductItems checkoutResult={checkoutResult} />
 
       <div className="flex flex-col gap-2">
-        {checkoutResult?.has_prorations && checkoutResult.lines.length > 0 && (
+        {checkoutResult.has_prorations && checkoutResult.lines.length > 0 && (
           <CheckoutLines checkoutResult={checkoutResult} />
         )}
         <DueAmounts checkoutResult={checkoutResult} />
@@ -214,31 +196,23 @@ function PriceInformation({
   );
 }
 
-function ProductItems({
-  checkoutResult,
-  setCheckoutResult,
-}: {
-  checkoutResult: CheckoutResult;
-  setCheckoutResult: (checkoutResult: CheckoutResult) => void;
-}) {
-  const isUpdateQuantity =
-    checkoutResult?.product.scenario === "active" && checkoutResult.product.properties.updateable;
+function ProductItems({ checkoutResult }: { checkoutResult: CheckoutResult }) {
+  const isUpdateQuantity = checkoutResult.product.scenario === "active" && checkoutResult.product.properties.updateable;
 
-  const isOneOff = checkoutResult?.product.properties.is_one_off;
+  const isOneOff = checkoutResult.product.properties.is_one_off;
 
   return (
     <div className="flex flex-col gap-2">
       <p className="text-sm font-medium">Price</p>
-      {checkoutResult?.product.items
+      {checkoutResult.product.items
         .filter((item) => item.type !== "feature")
-        .map((item, index) => {
+        .map((item) => {
           if (item.usage_model == UsageModel.Prepaid) {
             return (
               <PrepaidItem
                 checkoutResult={checkoutResult}
                 item={item}
-                key={index}
-                setCheckoutResult={setCheckoutResult}
+                key={item.feature_id ?? item.display?.primary_text ?? "prepaid-item"}
               />
             );
           }
@@ -248,10 +222,11 @@ function ProductItems({
           }
 
           return (
-            <div className="flex justify-between" key={index}>
-              <p className="text-muted-foreground">
-                {item.feature ? item.feature.name : isOneOff ? "Price" : "Subscription"}
-              </p>
+            <div
+              className="flex justify-between"
+              key={item.feature_id ?? `${item.display?.primary_text}-${item.display?.secondary_text}`}
+            >
+              <p className="text-muted-foreground">{item.feature?.name ?? (isOneOff ? "Price" : "Subscription")}</p>
               <p>
                 {item.display?.primary_text} {item.display?.secondary_text}
               </p>
@@ -262,15 +237,7 @@ function ProductItems({
   );
 }
 
-const PrepaidItem = ({
-  checkoutResult,
-  item,
-  setCheckoutResult,
-}: {
-  checkoutResult: CheckoutResult;
-  item: ProductItem;
-  setCheckoutResult: (checkoutResult: CheckoutResult) => void;
-}) => {
+const PrepaidItem = ({ checkoutResult, item }: { checkoutResult: CheckoutResult; item: ProductItem }) => {
   const { billing_units: billingUnits = 1, quantity = 0 } = item;
   const [quantityInput, setQuantityInput] = useState<string>((quantity / billingUnits).toString());
   const { checkout } = useCustomer();
@@ -290,24 +257,24 @@ const PrepaidItem = ({
           };
         });
 
-      newOptions.push({
-        featureId: item.feature_id!,
-        quantity: Number(quantityInput) * billingUnits,
-      });
+      if (item.feature_id) {
+        newOptions.push({
+          featureId: item.feature_id,
+          quantity: Number(quantityInput) * billingUnits,
+        });
+      }
 
-      const { data, error } = await checkout({
+      const { error } = await checkout({
         dialog: CheckoutDialog,
         options: newOptions,
         productId: checkoutResult.product.id,
       });
-
       if (error) {
         console.error(error);
         return;
       }
-      setCheckoutResult(data);
-    } catch (error) {
-      console.error(error);
+    } catch (err: unknown) {
+      console.error(err);
     } finally {
       setLoading(false);
       setOpen(false);
@@ -319,7 +286,7 @@ const PrepaidItem = ({
   return (
     <div className="flex justify-between gap-2">
       <div className="flex items-start gap-2">
-        <p className="text-muted-foreground whitespace-nowrap">{item.feature?.name}</p>
+        <p className="text-muted-foreground whitespace-nowrap">{item.feature?.name ?? "Feature"}</p>
         <Popover onOpenChange={setOpen} open={open}>
           <PopoverTrigger
             className={cn(
@@ -333,7 +300,7 @@ const PrepaidItem = ({
           </PopoverTrigger>
           <PopoverContent align="start" className="flex w-80 flex-col gap-4 p-4 pt-3 text-sm">
             <div className="flex flex-col gap-1">
-              <p className="text-sm font-medium">{item.feature?.name}</p>
+              <p className="text-sm font-medium">{item.feature?.name ?? "Feature"}</p>
               <p className="text-muted-foreground">
                 {item.display?.primary_text} {item.display?.secondary_text}
               </p>
@@ -348,7 +315,7 @@ const PrepaidItem = ({
                 />
                 <p className="text-muted-foreground">
                   {billingUnits > 1 && `x ${billingUnits} `}
-                  {item.feature?.name}
+                  {item.feature?.name ?? "Feature"}
                 </p>
               </div>
 

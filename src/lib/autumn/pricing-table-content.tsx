@@ -1,7 +1,7 @@
 import { type Product } from "autumn-js";
 
 export const getPricingTableContent = (product: Product) => {
-  const { free_trial, properties, scenario } = product;
+  const { properties, scenario } = product;
   const { has_trial, is_one_off, updateable } = properties;
 
   if (has_trial) {
