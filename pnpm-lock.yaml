@@ -158,6 +158,9 @@ importers:
       '@tanstack/react-start':
         specifier: ^1.131.49
         version: 1.131.49(@libsql/client@0.15.15)(@netlify/blobs@9.1.2)(@tanstack/react-router@1.131.49(react-dom@19.1.1(react@19.1.1))(react@19.1.1))(@upstash/redis@1.35.4)(@vitejs/plugin-react@4.7.0(rolldown-vite@7.1.11(@types/node@22.18.6)(esbuild@0.25.8)(jiti@2.5.1)(terser@5.43.1)(tsx@4.20.5)(yaml@2.8.1)))(aws4fetch@1.0.20)(drizzle-orm@0.44.5(@libsql/client@0.15.15)(@upstash/redis@1.35.4)(kysely@0.28.5))(react-dom@19.1.1(react@19.1.1))(react@19.1.1)(rolldown-vite@7.1.11(@types/node@22.18.6)(esbuild@0.25.8)(jiti@2.5.1)(terser@5.43.1)(tsx@4.20.5)(yaml@2.8.1))(rolldown@1.0.0-beta.38)(xml2js@0.6.2)
+      '@total-typescript/ts-reset':
+        specifier: ^0.6.1
+        version: 0.6.1
       '@trpc/client':
         specifier: ^11.5.1
         version: 11.5.1(@trpc/server@11.5.1(typescript@5.8.3))(typescript@5.8.3)
@@ -3250,6 +3253,9 @@ packages:
   '@tanstack/virtual-file-routes@1.131.2':
     resolution: {integrity: sha512-VEEOxc4mvyu67O+Bl0APtYjwcNRcL9it9B4HKbNgcBTIOEalhk+ufBl4kiqc8WP1sx1+NAaiS+3CcJBhrqaSRg==}
     engines: {node: '>=12'}
+
+  '@total-typescript/ts-reset@0.6.1':
+    resolution: {integrity: sha512-cka47fVSo6lfQDIATYqb/vO1nvFfbPw7uWLayIXIhGETj0wcOOlrlkobOMDNQOFr9QOafegUPq13V2+6vtD7yg==}
 
   '@trpc/client@11.5.1':
     resolution: {integrity: sha512-7I6JJ1I1lxv3S87ht3FAIZi0XxQa7hnQ9K+Oo5BH7cGO8ZtWe9Ftq6ItdkuDfpsnsRPcR2h158AMWbNs/iptqg==}
@@ -9971,6 +9977,8 @@ snapshots:
   '@tanstack/store@0.7.2': {}
 
   '@tanstack/virtual-file-routes@1.131.2': {}
+
+  '@total-typescript/ts-reset@0.6.1': {}
 
   '@trpc/client@11.5.1(@trpc/server@11.5.1(typescript@5.8.3))(typescript@5.8.3)':
     dependencies:
