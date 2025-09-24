@@ -22,6 +22,13 @@
       "when": 1758426252519,
       "tag": "0002_flawless_maddog",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1758556269546,
+      "tag": "0003_lumpy_wind_dancer",
+      "breakpoints": true
     }
   ]
 }
