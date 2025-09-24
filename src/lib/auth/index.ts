@@ -12,7 +12,17 @@ export const auth = createAuthClient({
       throw new BetterAuthException(ctx.error.message, ctx, ctx.error);
     },
   },
-  plugins: [apiKeyClient(),twoFactorClient() ,organizationClient()],
+  plugins: [
+    apiKeyClient(),
+    twoFactorClient({
+      onTwoFactorRedirect() {
+        if (typeof window !== "undefined") {
+          window.location.assign("/auth/two-factor-verify");
+        }
+      },
+    }),
+    organizationClient(),
+  ],
 });
 
 const getSession = async () => {
