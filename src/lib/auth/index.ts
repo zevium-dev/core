@@ -1,8 +1,8 @@
 import { Exception } from "@boi.gg/exception";
 import { queryOptions, type QueryOptions, useSuspenseQuery } from "@tanstack/react-query";
 import { apiKeyClient, organizationClient } from "better-auth/client/plugins";
-import { createAuthClient, ErrorContext } from "better-auth/react";
 import { twoFactorClient } from "better-auth/client/plugins"
+import { createAuthClient, ErrorContext } from "better-auth/react";
 
 export class BetterAuthException extends Exception.kind<ErrorContext>("BetterAuthException") {}
 

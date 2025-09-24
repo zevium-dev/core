@@ -16,13 +16,12 @@ export const ServerRoute = createServerFileRoute("/api/auth/set-password").metho
           headers: { "Content-Type": "application/json" },
         });
       }
-      // @ts-ignore runtime api namespace (Better Auth)
-      const { error } = await authServer.api.setPassword({
+      const result = await authServer.api.setPassword({
         body: { newPassword },
         headers: request.headers,
       });
-      if (error) {
-        return new Response(JSON.stringify({ error: error.message }), {
+      if (!result?.status) {
+        return new Response(JSON.stringify({ error: "Failed to set password" }), {
           status: 400,
           headers: { "Content-Type": "application/json" },
         });

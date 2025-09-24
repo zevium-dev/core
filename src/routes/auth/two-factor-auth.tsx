@@ -1,4 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import QRCode from "react-qr-code";
 
@@ -19,6 +20,7 @@ export const Route = createFileRoute("/auth/two-factor-auth")({
 });
 
 function RouteComponent() {
+  const queryClient = useQueryClient();
   const user = useUser();
 
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
@@ -44,7 +46,7 @@ function RouteComponent() {
     }
     setEnabling(true);
     try {
-      // @ts-ignore twoFactor plugin augmented by Better Auth
+    
       const { data, error: authError } = await auth.twoFactor.enable({ password });
       if (authError) throw new Error(authError.message);
       const uri = data?.totpURI || null;
@@ -69,12 +71,11 @@ function RouteComponent() {
     }
     setVerifying(true);
     try {
-      // @ts-ignore twoFactor plugin augmented by Better Auth
+    
       const { error: authError } = await auth.twoFactor.verifyTotp({ code: otp, trustDevice: true });
       if (authError) throw new Error(authError.message);
       try {
-        // @ts-ignore invalidate session cache if available
-        auth.queryClient?.invalidateQueries({ queryKey: ["session"] });
+        await queryClient.invalidateQueries({ queryKey: ["session"] });
       } catch { /* noop */ }
       setStep(3);
     } catch (e) {

@@ -1,4 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
 import { Redirect } from "~/components/redirect";
@@ -14,10 +15,11 @@ export const Route = createFileRoute("/auth/two-factor-verify")({
 });
 
 function RouteComponent() {
+  const queryClient = useQueryClient();
   const user = useUser();
   const navigate = Route.useNavigate();
   const [code, setCode] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<null | string>(null);
   const [loading, setLoading] = useState(false);
   const [redirectHome, setRedirectHome] = useState(false);
 
@@ -29,12 +31,10 @@ function RouteComponent() {
     }
     setLoading(true);
     try {
-      // @ts-ignore twoFactor plugin
       const { error: authError } = await auth.twoFactor.verifyTotp({ code, trustDevice: true });
       if (authError) throw new Error(authError.message);
       try {
-        // @ts-ignore invalidate session cache
-        auth.queryClient?.invalidateQueries({ queryKey: ["session"] });
+        await queryClient.invalidateQueries({ queryKey: ["session"] });
       } catch { /* noop */ }
       setRedirectHome(true);
     } catch (e) {
@@ -65,13 +65,13 @@ function RouteComponent() {
           <CardContent>
             <div className="grid gap-3">
               <InputOTP
-                maxLength={6}
-                value={code}
-                onChange={(val) => setCode(val.replace(/[^0-9]/g, ""))}
+                aria-describedby={error ? "otp-error" : undefined}
+                aria-invalid={!!error}
                 containerClassName="justify-center"
                 inputMode="numeric"
-                aria-invalid={!!error}
-                aria-describedby={error ? "otp-error" : undefined}
+                maxLength={6}
+                onChange={(val) => setCode(val.replace(/[^0-9]/g, ""))}
+                value={code}
               >
                 <InputOTPGroup>
                   <InputOTPSlot index={0} />

@@ -1,7 +1,11 @@
 import { createLazyFileRoute, useNavigate } from "@tanstack/react-router";
-import { Calendar, Camera, Mail, MapPin, Phone, Shield, Trash2, User, Copy, Eye, EyeOff, Loader2 } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
+import { Calendar, Camera, Copy, Eye, EyeOff, Loader2, Mail, MapPin, Phone, Shield, Trash2, User } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
+// 2FA moved to dedicated component
+import { toast } from "sonner";
 
+import { ProtectedRoute } from "~/components/protected-route";
 import { Avatar, AvatarFallback, AvatarImage } from "~/components/ui/avatar";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
@@ -9,17 +13,15 @@ import { Input } from "~/components/ui/input";
 import { Label } from "~/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "~/components/ui/select";
 import { Separator } from "~/components/ui/separator";
-import { auth } from "~/lib/auth";
-// 2FA moved to dedicated component
-import { toast } from "sonner";
-import { ProtectedRoute } from "~/components/protected-route";
 import { useUserPreferences } from "~/hooks/use-user-preferences";
+import { auth } from "~/lib/auth";
 
 export const Route = createLazyFileRoute("/settings/preference/$")({
   component: AccountPreferenceComponent,
 });
 
 export function AccountPreferenceComponent() {
+  const queryClient = useQueryClient();
   const navigate = useNavigate();
   const { data: session, isPending } = auth.useSession();
   const user = session?.user;
@@ -28,7 +30,7 @@ export function AccountPreferenceComponent() {
   const [phone, setPhone] = useState("");
   const [location, setLocation] = useState("");
   const [timezone, setTimezone] = useState("");
-  const { preferences, update: updatePreferences, isLoading: prefsLoading, isUpdating: prefsSaving } = useUserPreferences();
+  const { isLoading: prefsLoading, isUpdating: prefsSaving, preferences, update: updatePreferences } = useUserPreferences();
   const [isSaving, setIsSaving] = useState(false);
   // Password management UI state
   const [showPasswords, setShowPasswords] = useState(false);
@@ -65,7 +67,6 @@ export function AccountPreferenceComponent() {
   useEffect(() => {
     let ignore = false;
     (async () => {
-      // @ts-ignore dynamic method check
       if (!auth.listAccounts) {
         // Fallback heuristic: if user signed in via oauth only -> assume no password
         // We cannot be certain without listAccounts; default to no password to show Set Password UI
@@ -73,7 +74,6 @@ export function AccountPreferenceComponent() {
         return;
       }
       try {
-        // @ts-ignore
         const result = await auth.listAccounts();
         if (ignore) return;
         const accounts = Array.isArray(result) ? result : (result?.data ?? []);
@@ -108,9 +108,7 @@ export function AccountPreferenceComponent() {
     }
     setIsChangingPassword(true);
     try {
-      // @ts-ignore Better Auth changePassword
       if (!auth.changePassword) throw new Error("changePassword not available");
-      // @ts-ignore
       const { error } = await auth.changePassword({ currentPassword, newPassword, revokeOtherSessions: true });
       if (error) throw new Error(error.message);
       toast.success("Password changed");
@@ -141,9 +139,9 @@ export function AccountPreferenceComponent() {
       // setPassword requires server action; We'll call a (to be implemented) internal endpoint /api/auth/set-password
       // Placeholder minimal implementation using fetch
       const res = await fetch("/api/auth/set-password", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ newPassword }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
       });
       if (!res.ok) throw new Error("Failed to set password");
       toast.success("Password set successfully");
@@ -181,14 +179,13 @@ export function AccountPreferenceComponent() {
   // 2FA manage (enabled state) - inline controls
   const [twoFactorOpen, setTwoFactorOpen] = useState(false);
   const [twoFactorPassword, setTwoFactorPassword] = useState("");
-  const [twoFactorCodes, setTwoFactorCodes] = useState<string[] | null>(null);
+  const [twoFactorCodes, setTwoFactorCodes] = useState<Array<string> | null>(null);
   const [regenerating2FA, setRegenerating2FA] = useState(false);
   const [disabling2FA, setDisabling2FA] = useState(false);
 
   const refetchSession = async () => {
     try {
-      // @ts-ignore invalidate session cache if available
-      auth.queryClient?.invalidateQueries({ queryKey: ["session"] });
+      await queryClient.invalidateQueries({ queryKey: ["session"] });
     } catch { /* noop */ }
   };
 
@@ -199,7 +196,6 @@ export function AccountPreferenceComponent() {
     }
     setRegenerating2FA(true);
     try {
-      // @ts-ignore Better Auth twoFactor plugin
       const { data, error } = await auth.twoFactor.generateBackupCodes({ password: twoFactorPassword });
       if (error) throw new Error(error.message);
       if (Array.isArray(data?.backupCodes)) setTwoFactorCodes(data.backupCodes);
@@ -218,7 +214,6 @@ export function AccountPreferenceComponent() {
     }
     setDisabling2FA(true);
     try {
-      // @ts-ignore Better Auth twoFactor plugin
       const { error } = await auth.twoFactor.disable({ password: twoFactorPassword });
       if (error) throw new Error(error.message);
       toast.success("Two-factor authentication disabled");
@@ -257,12 +252,12 @@ export function AccountPreferenceComponent() {
               <Avatar className="h-20 w-20">
                 <AvatarImage
                   alt={name || "User avatar"}
-                  src={user?.image || "/placeholder-avatar.jpg"}
                   onError={(e) => {
                     // Replace broken image with fallback
                     const target = e.currentTarget as HTMLImageElement;
                     target.style.display = "none"; // let fallback show
                   }}
+                  src={user?.image || "/placeholder-avatar.jpg"}
                 />
                 <AvatarFallback className="text-lg">
                   {(() => {
@@ -281,7 +276,7 @@ export function AccountPreferenceComponent() {
                 {name || (isPending ? "Loading..." : "Unnamed User")}
               </h3>
               <p className="text-muted-foreground text-sm">{email || (isPending ? "" : "No email")}</p>
-              <Button disabled size="sm" variant="outline" title="Avatar upload coming soon">
+              <Button disabled size="sm" title="Avatar upload coming soon" variant="outline">
                 Change Photo
               </Button>
             </div>
@@ -326,15 +321,15 @@ export function AccountPreferenceComponent() {
                 <span className="truncate select-text" title={email}>{email || (isPending ? "Loading..." : "No email")}</span>
                 {email && (
                   <Button
-                    size="icon"
-                    type="button"
-                    variant="ghost"
-                    className="shrink-0"
                     aria-label="Copy email"
+                    className="shrink-0"
                     onClick={() => {
                       void navigator.clipboard.writeText(email);
                       toast.success("Email copied");
                     }}
+                    size="icon"
+                    type="button"
+                    variant="ghost"
                   >
                     <Copy className="h-4 w-4" />
                   </Button>
@@ -385,12 +380,12 @@ export function AccountPreferenceComponent() {
               Timezone
             </Label>
             <Select
+              disabled={prefsLoading}
               onValueChange={(val) => {
                 // Only update local state; defer persistence until Save is clicked
                 setTimezone(val);
               }}
               value={timezone}
-              disabled={prefsLoading}
             >
               <SelectTrigger>
                 <SelectValue placeholder={prefsLoading ? "Loading..." : "Select timezone"} />
@@ -426,14 +421,14 @@ export function AccountPreferenceComponent() {
                 {hasPassword === false && "No password set (OAuth only). You can set one."}
               </p>
             </div>
-            {showPasswordEditor === false && hasPassword !== null && (
+            {!showPasswordEditor && hasPassword !== null && (
               <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={() => setShowPasswordEditor(true)}
-                disabled={hasPassword === null}
                 className="self-start"
+                disabled={hasPassword === null}
+                onClick={() => setShowPasswordEditor(true)}
+                size="sm"
+                type="button"
+                variant="outline"
               >
                 {hasPassword ? "Change Password" : "Add Password"}
               </Button>
@@ -450,10 +445,10 @@ export function AccountPreferenceComponent() {
                     <div className="flex items-center gap-2">
                       <Input
                         id="currentPassword"
-                        type={showPasswords ? "text" : "password"}
-                        value={currentPassword}
                         onChange={(e) => setCurrentPassword(e.target.value)}
                         placeholder="Enter current password"
+                        type={showPasswords ? "text" : "password"}
+                        value={currentPassword}
                       />
                     </div>
                   </div>
@@ -461,11 +456,11 @@ export function AccountPreferenceComponent() {
                     <Label htmlFor="newPassword">New Password</Label>
                     <Input
                       id="newPassword"
-                      type={showPasswords ? "text" : "password"}
-                      value={newPassword}
+                      maxLength={MAX_PASSWORD_LENGTH}
                       onChange={(e) => setNewPassword(e.target.value)}
                       placeholder="New password"
-                      maxLength={MAX_PASSWORD_LENGTH}
+                      type={showPasswords ? "text" : "password"}
+                      value={newPassword}
                     />
                     {passwordTooShort && <p className="text-destructive text-xs">Minimum {MIN_PASSWORD_LENGTH} characters</p>}
                     {passwordTooLong && <p className="text-destructive text-xs">Maximum {MAX_PASSWORD_LENGTH} characters</p>}
@@ -474,11 +469,11 @@ export function AccountPreferenceComponent() {
                     <Label htmlFor="confirmPassword">Confirm Password</Label>
                     <Input
                       id="confirmPassword"
-                      type={showPasswords ? "text" : "password"}
-                      value={confirmPassword}
+                      maxLength={MAX_PASSWORD_LENGTH}
                       onChange={(e) => setConfirmPassword(e.target.value)}
                       placeholder="Confirm new password"
-                      maxLength={MAX_PASSWORD_LENGTH}
+                      type={showPasswords ? "text" : "password"}
+                      value={confirmPassword}
                     />
                     {confirmMismatch && !passwordTooShort && !passwordTooLong && (
                       <p className="text-destructive text-xs">Passwords do not match</p>
@@ -487,28 +482,26 @@ export function AccountPreferenceComponent() {
                 </div>
                 <div className="flex items-center justify-end gap-2">
                   <Button
+                    className="mr-auto"
+                    onClick={() => setShowPasswords((p) => !p)}
+                    size="sm"
                     type="button"
                     variant="ghost"
-                    size="sm"
-                    onClick={() => setShowPasswords((p) => !p)}
-                    className="mr-auto"
                   >
                     {showPasswords ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </Button>
                   <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
                     onClick={() => {
                       setShowPasswordEditor(false);
                       resetPasswordFields();
                     }}
+                    size="sm"
+                    type="button"
+                    variant="ghost"
                   >
                     Close
                   </Button>
                   <Button
-                    type="button"
-                    size="sm"
                     disabled={
                       isChangingPassword ||
                       !currentPassword ||
@@ -518,6 +511,8 @@ export function AccountPreferenceComponent() {
                       newPassword !== confirmPassword
                     }
                     onClick={() => void handleChangePassword()}
+                    size="sm"
+                    type="button"
                   >
                     {isChangingPassword ? <Loader2 className="h-4 w-4 animate-spin" /> : "Change Password"}
                   </Button>
@@ -531,11 +526,11 @@ export function AccountPreferenceComponent() {
                     <Label htmlFor="newPassword">Set Password</Label>
                     <Input
                       id="newPassword"
-                      type={showPasswords ? "text" : "password"}
-                      value={newPassword}
+                      maxLength={MAX_PASSWORD_LENGTH}
                       onChange={(e) => setNewPassword(e.target.value)}
                       placeholder="Enter new password"
-                      maxLength={MAX_PASSWORD_LENGTH}
+                      type={showPasswords ? "text" : "password"}
+                      value={newPassword}
                     />
                     {passwordTooShort && <p className="text-destructive text-xs">Minimum {MIN_PASSWORD_LENGTH} characters</p>}
                     {passwordTooLong && <p className="text-destructive text-xs">Maximum {MAX_PASSWORD_LENGTH} characters</p>}
@@ -544,11 +539,11 @@ export function AccountPreferenceComponent() {
                     <Label htmlFor="confirmPassword">Confirm Password</Label>
                     <Input
                       id="confirmPassword"
-                      type={showPasswords ? "text" : "password"}
-                      value={confirmPassword}
+                      maxLength={MAX_PASSWORD_LENGTH}
                       onChange={(e) => setConfirmPassword(e.target.value)}
                       placeholder="Confirm password"
-                      maxLength={MAX_PASSWORD_LENGTH}
+                      type={showPasswords ? "text" : "password"}
+                      value={confirmPassword}
                     />
                     {confirmMismatch && !passwordTooShort && !passwordTooLong && (
                       <p className="text-destructive text-xs">Passwords do not match</p>
@@ -557,28 +552,26 @@ export function AccountPreferenceComponent() {
                 </div>
                 <div className="flex items-center justify-end gap-2">
                   <Button
+                    className="mr-auto"
+                    onClick={() => setShowPasswords((p) => !p)}
+                    size="sm"
                     type="button"
                     variant="ghost"
-                    size="sm"
-                    onClick={() => setShowPasswords((p) => !p)}
-                    className="mr-auto"
                   >
                     {showPasswords ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </Button>
                   <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
                     onClick={() => {
                       setShowPasswordEditor(false);
                       resetPasswordFields();
                     }}
+                    size="sm"
+                    type="button"
+                    variant="ghost"
                   >
                     Close
                   </Button>
                   <Button
-                    type="button"
-                    size="sm"
                     disabled={
                       isChangingPassword ||
                       !newPassword ||
@@ -587,6 +580,8 @@ export function AccountPreferenceComponent() {
                       newPassword !== confirmPassword
                     }
                     onClick={() => void handleSetPassword()}
+                    size="sm"
+                    type="button"
                   >
                     {isChangingPassword ? <Loader2 className="h-4 w-4 animate-spin" /> : "Set Password"}
                   </Button>
@@ -610,20 +605,20 @@ export function AccountPreferenceComponent() {
                 {user?.twoFactorEnabled ? (
                   <div className="flex items-center gap-2">
                     <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
                       onClick={() => setTwoFactorOpen((p) => !p)}
+                      size="sm"
+                      type="button"
+                      variant="outline"
                     >
                       {twoFactorOpen ? "Close" : "Manage"}
                     </Button>
                   </div>
                 ) : (
                   <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
                     onClick={() => navigate({ to: "/auth/two-factor-auth" })}
+                    size="sm"
+                    type="button"
+                    variant="outline"
                   >
                     Configure
                   </Button>
@@ -636,10 +631,10 @@ export function AccountPreferenceComponent() {
                   <Label htmlFor="twoFactorPassword">Account Password</Label>
                   <Input
                     id="twoFactorPassword"
-                    type="password"
-                    value={twoFactorPassword}
                     onChange={(e) => setTwoFactorPassword(e.target.value)}
                     placeholder="Enter your password"
+                    type="password"
+                    value={twoFactorPassword}
                   />
                 </div>
                 {Array.isArray(twoFactorCodes) && twoFactorCodes.length > 0 && (
@@ -648,27 +643,24 @@ export function AccountPreferenceComponent() {
                     <p className="text-muted-foreground text-xs">Store these safely. Each can be used once.</p>
                     <div className="grid grid-cols-2 gap-2 md:grid-cols-3">
                       {twoFactorCodes.map((code) => (
-                        <code key={code} className="rounded bg-muted px-2 py-1 text-center text-xs font-mono">
+                        <code className="rounded bg-muted px-2 py-1 text-center text-xs font-mono" key={code}>
                           {code}
                         </code>
                       ))}
                     </div>
                     <div className="flex gap-2">
                       <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
                         onClick={() => {
                           void navigator.clipboard.writeText(twoFactorCodes.join("\n"));
                           toast.success("Backup codes copied");
                         }}
+                        size="sm"
+                        type="button"
+                        variant="outline"
                       >
                         Copy Codes
                       </Button>
                       <Button
-                        type="button"
-                        size="sm"
-                        variant="ghost"
                         onClick={() => {
                           const file = new Blob([twoFactorCodes.join("\n")], { type: "text/plain;charset=utf-8" });
                           const url = URL.createObjectURL(file);
@@ -680,6 +672,9 @@ export function AccountPreferenceComponent() {
                           a.remove();
                           URL.revokeObjectURL(url);
                         }}
+                        size="sm"
+                        type="button"
+                        variant="ghost"
                       >
                         Download
                       </Button>
@@ -688,20 +683,20 @@ export function AccountPreferenceComponent() {
                 )}
                 <div className="flex flex-wrap gap-2">
                   <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
                     disabled={regenerating2FA || !twoFactorPassword}
                     onClick={() => void handleRegenerateCodes()}
+                    size="sm"
+                    type="button"
+                    variant="outline"
                   >
                     {regenerating2FA ? <Loader2 className="h-4 w-4 animate-spin" /> : "Regenerate Codes"}
                   </Button>
                   <Button
-                    type="button"
-                    size="sm"
-                    variant="destructive"
                     disabled={disabling2FA || !twoFactorPassword}
                     onClick={() => void handleDisable2FA()}
+                    size="sm"
+                    type="button"
+                    variant="destructive"
                   >
                     {disabling2FA ? <Loader2 className="h-4 w-4 animate-spin" /> : "Disable 2FA"}
                   </Button>
