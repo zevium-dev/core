@@ -1,4 +1,4 @@
-import { createLazyFileRoute } from "@tanstack/react-router";
+import { createLazyFileRoute, useNavigate } from "@tanstack/react-router";
 import { Calendar, Camera, Mail, MapPin, Phone, Shield, Trash2, User, Copy, Eye, EyeOff, Loader2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
@@ -11,7 +11,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "~
 import { Separator } from "~/components/ui/separator";
 import { auth } from "~/lib/auth";
 // 2FA moved to dedicated component
-import { TwoFactorManager } from "~/components/security/two-factor-manager";
 import { toast } from "sonner";
 import { ProtectedRoute } from "~/components/protected-route";
 import { useUserPreferences } from "~/hooks/use-user-preferences";
@@ -21,6 +20,7 @@ export const Route = createLazyFileRoute("/settings/preference/$")({
 });
 
 export function AccountPreferenceComponent() {
+  const navigate = useNavigate();
   const { data: session, isPending } = auth.useSession();
   const user = session?.user;
   const [name, setName] = useState("");
@@ -177,6 +177,61 @@ export function AccountPreferenceComponent() {
       setIsSaving(false);
     }
   }, [name, timezone, user, preferences?.timezone, updatePreferences]);
+
+  // 2FA manage (enabled state) - inline controls
+  const [twoFactorOpen, setTwoFactorOpen] = useState(false);
+  const [twoFactorPassword, setTwoFactorPassword] = useState("");
+  const [twoFactorCodes, setTwoFactorCodes] = useState<string[] | null>(null);
+  const [regenerating2FA, setRegenerating2FA] = useState(false);
+  const [disabling2FA, setDisabling2FA] = useState(false);
+
+  const refetchSession = async () => {
+    try {
+      // @ts-ignore invalidate session cache if available
+      auth.queryClient?.invalidateQueries({ queryKey: ["session"] });
+    } catch { /* noop */ }
+  };
+
+  const handleRegenerateCodes = async () => {
+    if (!twoFactorPassword) {
+      toast.error("Enter password to regenerate codes");
+      return;
+    }
+    setRegenerating2FA(true);
+    try {
+      // @ts-ignore Better Auth twoFactor plugin
+      const { data, error } = await auth.twoFactor.generateBackupCodes({ password: twoFactorPassword });
+      if (error) throw new Error(error.message);
+      if (Array.isArray(data?.backupCodes)) setTwoFactorCodes(data.backupCodes);
+      toast.success("New backup codes generated");
+    } catch (e) {
+      toast.error((e as Error).message || "Could not regenerate codes");
+    } finally {
+      setRegenerating2FA(false);
+    }
+  };
+
+  const handleDisable2FA = async () => {
+    if (!twoFactorPassword) {
+      toast.error("Enter password to disable 2FA");
+      return;
+    }
+    setDisabling2FA(true);
+    try {
+      // @ts-ignore Better Auth twoFactor plugin
+      const { error } = await auth.twoFactor.disable({ password: twoFactorPassword });
+      if (error) throw new Error(error.message);
+      toast.success("Two-factor authentication disabled");
+      setTwoFactorOpen(false);
+      setTwoFactorCodes(null);
+      setTwoFactorPassword("");
+      await refetchSession();
+    } catch (e) {
+      toast.error((e as Error).message || "Failed to disable 2FA");
+    } finally {
+      setDisabling2FA(false);
+    }
+  };
 
   return (
     <ProtectedRoute>
@@ -542,8 +597,119 @@ export function AccountPreferenceComponent() {
           </div>
           )}
           <Separator />
-          <TwoFactorManager user={user} />
+          {/* Two-Factor Authentication: if not enabled, route to dedicated flow; if enabled, show manager */}
+          <>
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="space-y-1">
+                  <p className="font-medium">Two-Factor Authentication</p>
+                  <p className="text-muted-foreground text-sm">
+                    {user?.twoFactorEnabled ? "Enabled on this account" : "Add an extra layer of security"}
+                  </p>
+                </div>
+                {user?.twoFactorEnabled ? (
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setTwoFactorOpen((p) => !p)}
+                    >
+                      {twoFactorOpen ? "Close" : "Manage"}
+                    </Button>
+                  </div>
+                ) : (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => navigate({ to: "/auth/two-factor-auth" })}
+                  >
+                    Configure
+                  </Button>
+                )}
+              </div>
+            </div>
+            {user?.twoFactorEnabled && twoFactorOpen && (
+              <div className="mt-2 space-y-4 rounded-md border border-border/60 p-4">
+                <div className="space-y-2">
+                  <Label htmlFor="twoFactorPassword">Account Password</Label>
+                  <Input
+                    id="twoFactorPassword"
+                    type="password"
+                    value={twoFactorPassword}
+                    onChange={(e) => setTwoFactorPassword(e.target.value)}
+                    placeholder="Enter your password"
+                  />
+                </div>
+                {Array.isArray(twoFactorCodes) && twoFactorCodes.length > 0 && (
+                  <div className="space-y-2">
+                    <p className="text-sm font-medium">Backup Codes</p>
+                    <p className="text-muted-foreground text-xs">Store these safely. Each can be used once.</p>
+                    <div className="grid grid-cols-2 gap-2 md:grid-cols-3">
+                      {twoFactorCodes.map((code) => (
+                        <code key={code} className="rounded bg-muted px-2 py-1 text-center text-xs font-mono">
+                          {code}
+                        </code>
+                      ))}
+                    </div>
+                    <div className="flex gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          void navigator.clipboard.writeText(twoFactorCodes.join("\n"));
+                          toast.success("Backup codes copied");
+                        }}
+                      >
+                        Copy Codes
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => {
+                          const file = new Blob([twoFactorCodes.join("\n")], { type: "text/plain;charset=utf-8" });
+                          const url = URL.createObjectURL(file);
+                          const a = document.createElement("a");
+                          a.href = url;
+                          a.download = "zevium-backup-codes.txt";
+                          document.body.appendChild(a);
+                          a.click();
+                          a.remove();
+                          URL.revokeObjectURL(url);
+                        }}
+                      >
+                        Download
+                      </Button>
+                    </div>
+                  </div>
+                )}
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={regenerating2FA || !twoFactorPassword}
+                    onClick={() => void handleRegenerateCodes()}
+                  >
+                    {regenerating2FA ? <Loader2 className="h-4 w-4 animate-spin" /> : "Regenerate Codes"}
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="destructive"
+                    disabled={disabling2FA || !twoFactorPassword}
+                    onClick={() => void handleDisable2FA()}
+                  >
+                    {disabling2FA ? <Loader2 className="h-4 w-4 animate-spin" /> : "Disable 2FA"}
+                  </Button>
+                </div>
+              </div>
+            )}
           <Separator />
+          </>
           <div className="flex items-center justify-between">
             <div className="space-y-1">
               <p className="font-medium">Active Sessions</p>

@@ -15,6 +15,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as PricingIndexRouteImport } from './routes/pricing/index'
 import { Route as SettingsSplatRouteImport } from './routes/settings/$'
 import { Route as AuthVerifyEmailRouteImport } from './routes/auth/verify-email'
+import { Route as AuthTwoFactorAuthRouteImport } from './routes/auth/two-factor-auth'
 import { Route as AuthSignUpRouteImport } from './routes/auth/sign-up'
 import { Route as AuthSignInRouteImport } from './routes/auth/sign-in'
 import { Route as AuthSentEmailRouteImport } from './routes/auth/sent-email'
@@ -104,6 +105,11 @@ const SettingsSplatRoute = SettingsSplatRouteImport.update({
 const AuthVerifyEmailRoute = AuthVerifyEmailRouteImport.update({
   id: '/auth/verify-email',
   path: '/auth/verify-email',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AuthTwoFactorAuthRoute = AuthTwoFactorAuthRouteImport.update({
+  id: '/auth/two-factor-auth',
+  path: '/auth/two-factor-auth',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AuthSignUpRoute = AuthSignUpRouteImport.update({
@@ -228,6 +234,7 @@ export interface FileRoutesByFullPath {
   '/auth/sent-email': typeof AuthSentEmailRoute
   '/auth/sign-in': typeof AuthSignInRoute
   '/auth/sign-up': typeof AuthSignUpRoute
+  '/auth/two-factor-auth': typeof AuthTwoFactorAuthRoute
   '/auth/verify-email': typeof AuthVerifyEmailRoute
   '/settings/$': typeof SettingsSplatRoute
   '/organizations/$slug': typeof OrganizationsSlugLazyRoute
@@ -251,6 +258,7 @@ export interface FileRoutesByTo {
   '/auth/sent-email': typeof AuthSentEmailRoute
   '/auth/sign-in': typeof AuthSignInRoute
   '/auth/sign-up': typeof AuthSignUpRoute
+  '/auth/two-factor-auth': typeof AuthTwoFactorAuthRoute
   '/auth/verify-email': typeof AuthVerifyEmailRoute
   '/settings/$': typeof SettingsSplatRoute
   '/organizations/$slug': typeof OrganizationsSlugLazyRoute
@@ -275,6 +283,7 @@ export interface FileRoutesById {
   '/auth/sent-email': typeof AuthSentEmailRoute
   '/auth/sign-in': typeof AuthSignInRoute
   '/auth/sign-up': typeof AuthSignUpRoute
+  '/auth/two-factor-auth': typeof AuthTwoFactorAuthRoute
   '/auth/verify-email': typeof AuthVerifyEmailRoute
   '/settings/$': typeof SettingsSplatRoute
   '/organizations/$slug': typeof OrganizationsSlugLazyRoute
@@ -300,6 +309,7 @@ export interface FileRouteTypes {
     | '/auth/sent-email'
     | '/auth/sign-in'
     | '/auth/sign-up'
+    | '/auth/two-factor-auth'
     | '/auth/verify-email'
     | '/settings/$'
     | '/organizations/$slug'
@@ -323,6 +333,7 @@ export interface FileRouteTypes {
     | '/auth/sent-email'
     | '/auth/sign-in'
     | '/auth/sign-up'
+    | '/auth/two-factor-auth'
     | '/auth/verify-email'
     | '/settings/$'
     | '/organizations/$slug'
@@ -346,6 +357,7 @@ export interface FileRouteTypes {
     | '/auth/sent-email'
     | '/auth/sign-in'
     | '/auth/sign-up'
+    | '/auth/two-factor-auth'
     | '/auth/verify-email'
     | '/settings/$'
     | '/organizations/$slug'
@@ -370,6 +382,7 @@ export interface RootRouteChildren {
   AuthSentEmailRoute: typeof AuthSentEmailRoute
   AuthSignInRoute: typeof AuthSignInRoute
   AuthSignUpRoute: typeof AuthSignUpRoute
+  AuthTwoFactorAuthRoute: typeof AuthTwoFactorAuthRoute
   AuthVerifyEmailRoute: typeof AuthVerifyEmailRoute
   SettingsSplatRoute: typeof SettingsSplatRoute
   OrganizationsSlugLazyRoute: typeof OrganizationsSlugLazyRoute
@@ -513,6 +526,13 @@ declare module '@tanstack/react-router' {
       path: '/auth/verify-email'
       fullPath: '/auth/verify-email'
       preLoaderRoute: typeof AuthVerifyEmailRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/auth/two-factor-auth': {
+      id: '/auth/two-factor-auth'
+      path: '/auth/two-factor-auth'
+      fullPath: '/auth/two-factor-auth'
+      preLoaderRoute: typeof AuthTwoFactorAuthRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/auth/sign-up': {
@@ -676,6 +696,7 @@ const rootRouteChildren: RootRouteChildren = {
   AuthSentEmailRoute: AuthSentEmailRoute,
   AuthSignInRoute: AuthSignInRoute,
   AuthSignUpRoute: AuthSignUpRoute,
+  AuthTwoFactorAuthRoute: AuthTwoFactorAuthRoute,
   AuthVerifyEmailRoute: AuthVerifyEmailRoute,
   SettingsSplatRoute: SettingsSplatRoute,
   OrganizationsSlugLazyRoute: OrganizationsSlugLazyRoute,
