@@ -4,6 +4,7 @@ import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { apiKey } from "better-auth/plugins";
 import { organization } from "better-auth/plugins/organization";
 import { reactStartCookies } from "better-auth/react-start";
+import { twoFactor } from "better-auth/plugins"
 
 import { db, schema } from "~/db";
 import { eq } from "drizzle-orm";
@@ -18,6 +19,7 @@ import { capCaptcha } from "./better-auth-captcha";
 const BETTER_AUTH_KV_PREFIX = "better-auth:";
 
 export const authServer = betterAuth({
+  appName: "Zevium",
   account: {
     accountLinking: {
       allowDifferentEmails: false,
@@ -43,6 +45,7 @@ export const authServer = betterAuth({
   },
   plugins: [
     apiKey(),
+    twoFactor(),
     organization({ requireEmailVerificationOnInvitation: true }),
     autumn({ customerScope: "organization", secretKey: serverEnv.AUTUMN_SECRET_KEY }),
     capCaptcha(),
@@ -59,7 +62,27 @@ export const authServer = betterAuth({
       return await kv.get(BETTER_AUTH_KV_PREFIX + key);
     },
     set: async (key, value, ttl) => {
-      return await kv.set(BETTER_AUTH_KV_PREFIX + key, value, { ex: ttl ?? 30 * 24 * 60 * 60 });
+      // Only set TTL if it is a finite positive number. Some callers may pass Infinity/undefined to mean no TTL.
+      let pxMs: number | undefined;
+      if (typeof ttl === "number" && Number.isFinite(ttl) && ttl > 0) {
+        // Heuristic: if ttl looks like seconds, convert to ms; if it's already in ms, keep as is.
+        const ttlMs = ttl > 1000 * 1000 ? ttl : ttl * 1000;
+        pxMs = Math.floor(ttlMs);
+      } else if (ttl == null) {
+        // Default to ~24 days when ttl is not provided at all (fits within 32-bit ms range)
+        pxMs = 24 * 24 * 60 * 60 * 1000;
+      }
+
+      // Cap px to Redis/Upstash safe max (~2_147_483_647 ms)
+      const MAX_PX = 2147483647;
+      if (typeof pxMs === "number") {
+        pxMs = Math.min(pxMs, MAX_PX);
+      }
+
+      // Omit options entirely if pxMs is undefined to satisfy strict union types
+      return pxMs
+        ? await kv.set(BETTER_AUTH_KV_PREFIX + key, value, { px: pxMs })
+        : await kv.set(BETTER_AUTH_KV_PREFIX + key, value);
     },
   },
   socialProviders: {
@@ -87,4 +110,4 @@ export const authServer = betterAuth({
 });
 
 // Uncomment this for generating migrations
-// export const auth = authServer;
+//export const auth = authServer;

@@ -10,6 +10,8 @@ import { Label } from "~/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "~/components/ui/select";
 import { Separator } from "~/components/ui/separator";
 import { auth } from "~/lib/auth";
+// 2FA moved to dedicated component
+import { TwoFactorManager } from "~/components/security/two-factor-manager";
 import { toast } from "sonner";
 import { ProtectedRoute } from "~/components/protected-route";
 import { useUserPreferences } from "~/hooks/use-user-preferences";
@@ -41,6 +43,7 @@ export function AccountPreferenceComponent() {
   const passwordTooShort = newPassword.length > 0 && newPassword.length < MIN_PASSWORD_LENGTH;
   const passwordTooLong = newPassword.length > MAX_PASSWORD_LENGTH;
   const confirmMismatch = confirmPassword.length > 0 && newPassword !== confirmPassword;
+
 
   // Initialize from session
   useEffect(() => {
@@ -539,13 +542,7 @@ export function AccountPreferenceComponent() {
           </div>
           )}
           <Separator />
-          <div className="flex items-center justify-between">
-            <div className="space-y-1">
-              <p className="font-medium">Two-Factor Authentication</p>
-              <p className="text-muted-foreground text-sm">Add an extra layer of security</p>
-            </div>
-            <Button variant="outline">Configure</Button>
-          </div>
+          <TwoFactorManager user={user} />
           <Separator />
           <div className="flex items-center justify-between">
             <div className="space-y-1">
