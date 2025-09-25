@@ -5,6 +5,8 @@ import { apiKey } from "better-auth/plugins";
 import { organization } from "better-auth/plugins/organization";
 import { reactStartCookies } from "better-auth/react-start";
 
+import type { Permissions } from "~/lib/permission";
+
 import { db, schema } from "~/db";
 import { serverEnv } from "~/env/server";
 import { EMAIL_FROM } from "~/lib/constants";
@@ -41,14 +43,29 @@ export const authServer = betterAuth({
     },
   },
   plugins: [
-    apiKey(),
+    apiKey({
+      defaultPrefix: "zev_",
+      enableMetadata: true,
+      keyExpiration: {
+        defaultExpiresIn: 30 * 24 * 60 * 60,
+        maxExpiresIn: 365 * 24 * 60 * 60,
+        minExpiresIn: 24 * 60 * 60,
+      },
+      permissions: { defaultPermissions: {} satisfies Permissions },
+      // 100 requests per minute
+      rateLimit: { enabled: true, maxRequests: 100, timeWindow: 1000 * 60 },
+    }),
     organization({ requireEmailVerificationOnInvitation: true }),
     autumn({ customerScope: "organization", secretKey: serverEnv.AUTUMN_SECRET_KEY }),
     capCaptcha(),
     reactStartCookies(),
   ],
   rateLimit: {
+    // 100 requests per minute
+    enabled: true,
+    max: 100,
     storage: "secondary-storage",
+    window: 1000 * 60,
   },
   secondaryStorage: {
     delete: async (key) => {
