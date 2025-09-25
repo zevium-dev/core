@@ -1,17 +1,17 @@
-import { createFileRoute } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
+import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 import QRCode from "react-qr-code";
 
 import { Redirect } from "~/components/redirect";
+import { Avatar, AvatarFallback, AvatarImage } from "~/components/ui/avatar";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "~/components/ui/card";
-import { Avatar, AvatarFallback, AvatarImage } from "~/components/ui/avatar";
 import { Input } from "~/components/ui/input";
+import { InputOTP, InputOTPGroup, InputOTPSlot } from "~/components/ui/input-otp";
 import { Label } from "~/components/ui/label";
 import { Progress } from "~/components/ui/progress";
 import { ScreenCenter } from "~/components/ui/screen-center";
-import { InputOTP, InputOTPGroup, InputOTPSlot } from "~/components/ui/input-otp";
 import { auth, useUser } from "~/lib/auth";
 import { cn } from "~/lib/utils";
 
@@ -26,11 +26,11 @@ function RouteComponent() {
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
   const [password, setPassword] = useState("");
   const [enabling, setEnabling] = useState(false);
-  const [totpUri, setTotpUri] = useState<string | null>(null);
+  const [totpUri, setTotpUri] = useState<null | string>(null);
   const [otp, setOtp] = useState("");
   const [verifying, setVerifying] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [backupCodes, setBackupCodes] = useState<string[] | null>(null);
+  const [error, setError] = useState<null | string>(null);
+  const [backupCodes, setBackupCodes] = useState<Array<string> | null>(null);
 
   if (!user) {
     return <Redirect to="/" />;
@@ -49,7 +49,7 @@ function RouteComponent() {
     
       const { data, error: authError } = await auth.twoFactor.enable({ password });
       if (authError) throw new Error(authError.message);
-      const uri = data?.totpURI || null;
+      const uri = data?.totpURI ?? null;
       if (!uri) throw new Error("TOTP URI not received");
       setTotpUri(uri);
       if (Array.isArray(data?.backupCodes) && data.backupCodes.length > 0) {
@@ -74,9 +74,9 @@ function RouteComponent() {
     
       const { error: authError } = await auth.twoFactor.verifyTotp({ code: otp, trustDevice: true });
       if (authError) throw new Error(authError.message);
-      try {
-        await queryClient.invalidateQueries({ queryKey: ["session"] });
-      } catch { /* noop */ }
+      await queryClient
+        .invalidateQueries({ queryKey: ["session"] })
+        .catch(() => null);
       setStep(3);
     } catch (e) {
       setError((e as Error).message || "Verification failed");
@@ -99,7 +99,7 @@ function RouteComponent() {
                 <div className="grid gap-2 text-center">
                   <div className="flex justify-center">
                     <Avatar className="h-14 w-14">
-                      <AvatarImage alt={user.name ?? user.email ?? "User"} src={user.image || "/placeholder-avatar.jpg"} />
+                      <AvatarImage alt={user.name ?? user.email ?? "User"} src={user.image ?? "/placeholder-avatar.jpg"} />
                       <AvatarFallback>
                         {((user.name?.trim()?.split(/\s+/)?.[0]?.[0] ?? user.email?.[0] ?? "U").toUpperCase())}
                       </AvatarFallback>
@@ -111,14 +111,14 @@ function RouteComponent() {
                 <div className="grid gap-1">
                   <Label className="mb-2" htmlFor="password">Enter password to begin</Label>
                   <Input
-                    id="password"
-                    type="password"
-                    autoComplete="current-password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    disabled={enabling}
-                    aria-invalid={!!error}
                     aria-describedby={error ? "password-error" : undefined}
+                    aria-invalid={!!error}
+                    autoComplete="current-password"
+                    disabled={enabling}
+                    id="password"
+                    onChange={(e) => setPassword(e.target.value)}
+                    type="password"
+                    value={password}
                   />
                   <p className={cn("text-destructive text-end text-xs", !error && "invisible")} id="password-error">
                     {error ?? "No error"}
@@ -131,7 +131,7 @@ function RouteComponent() {
               <div className="grid gap-6">
                 {totpUri && (
                   <div className="flex flex-col items-center gap-2">
-                    <QRCode value={totpUri} className="bg-white p-3 rounded" />
+                    <QRCode className="bg-white p-3 rounded" value={totpUri} />
                     <p className="text-muted-foreground break-all text-center text-xs">
                       Can't scan? Use this key/URL: {totpUri}
                     </p>
@@ -140,13 +140,13 @@ function RouteComponent() {
                 <div className="grid gap-1">
                   <Label className="mb-2">Enter 6-digit code</Label>
                   <InputOTP
-                    maxLength={6}
-                    value={otp}
-                    onChange={(val) => setOtp(val.replace(/[^0-9]/g, ""))}
+                    aria-describedby={error ? "otp-error" : undefined}
+                    aria-invalid={!!error}
                     containerClassName="justify-center"
                     inputMode="numeric"
-                    aria-invalid={!!error}
-                    aria-describedby={error ? "otp-error" : undefined}
+                    maxLength={6}
+                    onChange={(val) => setOtp(val.replace(/[^0-9]/g, ""))}
+                    value={otp}
                   >
                     <InputOTPGroup>
                       <InputOTPSlot index={0} />
@@ -174,16 +174,13 @@ function RouteComponent() {
                   <>
                     <div className="grid grid-cols-2 gap-2 md:grid-cols-3">
                       {backupCodes.map((code) => (
-                        <code key={code} className="rounded bg-muted px-2 py-1 text-center text-xs font-mono">
+                        <code className="rounded bg-muted px-2 py-1 text-center text-xs font-mono" key={code}>
                           {code}
                         </code>
                       ))}
                     </div>
                     <div className="flex items-center justify-end gap-2">
                       <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
                         onClick={() => {
                           const file = new Blob([backupCodes.join("\n")], { type: "text/plain;charset=utf-8" });
                           const url = URL.createObjectURL(file);
@@ -195,6 +192,9 @@ function RouteComponent() {
                           a.remove();
                           URL.revokeObjectURL(url);
                         }}
+                        size="sm"
+                        type="button"
+                        variant="outline"
                       >
                         Download codes
                       </Button>

@@ -3,6 +3,7 @@ import { createLazyFileRoute } from "@tanstack/react-router";
 import { Check, Copy, Info, MoreHorizontal, Pencil, Plus, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
 
+import { ProtectedRoute } from "~/components/protected-route";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
 import {
@@ -25,7 +26,6 @@ import { Label } from "~/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "~/components/ui/table";
 import { useCopy } from "~/hooks/use-copy";
 import { auth } from "~/lib/auth";
-import { ProtectedRoute } from "~/components/protected-route";
 
 // Types
 interface ApiKeyRecord {

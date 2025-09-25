@@ -29,7 +29,6 @@ import { ServerRoute as ApiTrpcSplatServerRouteImport } from './routes/api/trpc/
 import { ServerRoute as ApiPosthogSplatServerRouteImport } from './routes/api/posthog/$'
 import { ServerRoute as ApiOpenapiSplatServerRouteImport } from './routes/api/openapi/$'
 import { ServerRoute as ApiCapSplatServerRouteImport } from './routes/api/cap/$'
-import { ServerRoute as ApiAuthSetPasswordServerRouteImport } from './routes/api/auth/set-password'
 import { ServerRoute as ApiAuthSplatServerRouteImport } from './routes/api/auth/$'
 
 const CatalogueLazyRouteImport = createFileRoute('/catalogue')()
@@ -218,12 +217,6 @@ const ApiCapSplatServerRoute = ApiCapSplatServerRouteImport.update({
   path: '/api/cap/$',
   getParentRoute: () => rootServerRouteImport,
 } as any)
-const ApiAuthSetPasswordServerRoute =
-  ApiAuthSetPasswordServerRouteImport.update({
-    id: '/api/auth/set-password',
-    path: '/api/auth/set-password',
-    getParentRoute: () => rootServerRouteImport,
-  } as any)
 const ApiAuthSplatServerRoute = ApiAuthSplatServerRouteImport.update({
   id: '/api/auth/$',
   path: '/api/auth/$',
@@ -411,7 +404,6 @@ export interface RootRouteChildren {
 export interface FileServerRoutesByFullPath {
   '/$internal/email-templates-preview': typeof InternalEmailTemplatesPreviewServerRoute
   '/api/auth/$': typeof ApiAuthSplatServerRoute
-  '/api/auth/set-password': typeof ApiAuthSetPasswordServerRoute
   '/api/cap/$': typeof ApiCapSplatServerRoute
   '/api/openapi/$': typeof ApiOpenapiSplatServerRoute
   '/api/posthog/$': typeof ApiPosthogSplatServerRoute
@@ -420,7 +412,6 @@ export interface FileServerRoutesByFullPath {
 export interface FileServerRoutesByTo {
   '/$internal/email-templates-preview': typeof InternalEmailTemplatesPreviewServerRoute
   '/api/auth/$': typeof ApiAuthSplatServerRoute
-  '/api/auth/set-password': typeof ApiAuthSetPasswordServerRoute
   '/api/cap/$': typeof ApiCapSplatServerRoute
   '/api/openapi/$': typeof ApiOpenapiSplatServerRoute
   '/api/posthog/$': typeof ApiPosthogSplatServerRoute
@@ -430,7 +421,6 @@ export interface FileServerRoutesById {
   __root__: typeof rootServerRouteImport
   '/$internal/email-templates-preview': typeof InternalEmailTemplatesPreviewServerRoute
   '/api/auth/$': typeof ApiAuthSplatServerRoute
-  '/api/auth/set-password': typeof ApiAuthSetPasswordServerRoute
   '/api/cap/$': typeof ApiCapSplatServerRoute
   '/api/openapi/$': typeof ApiOpenapiSplatServerRoute
   '/api/posthog/$': typeof ApiPosthogSplatServerRoute
@@ -441,7 +431,6 @@ export interface FileServerRouteTypes {
   fullPaths:
     | '/$internal/email-templates-preview'
     | '/api/auth/$'
-    | '/api/auth/set-password'
     | '/api/cap/$'
     | '/api/openapi/$'
     | '/api/posthog/$'
@@ -450,7 +439,6 @@ export interface FileServerRouteTypes {
   to:
     | '/$internal/email-templates-preview'
     | '/api/auth/$'
-    | '/api/auth/set-password'
     | '/api/cap/$'
     | '/api/openapi/$'
     | '/api/posthog/$'
@@ -459,7 +447,6 @@ export interface FileServerRouteTypes {
     | '__root__'
     | '/$internal/email-templates-preview'
     | '/api/auth/$'
-    | '/api/auth/set-password'
     | '/api/cap/$'
     | '/api/openapi/$'
     | '/api/posthog/$'
@@ -469,7 +456,6 @@ export interface FileServerRouteTypes {
 export interface RootServerRouteChildren {
   InternalEmailTemplatesPreviewServerRoute: typeof InternalEmailTemplatesPreviewServerRoute
   ApiAuthSplatServerRoute: typeof ApiAuthSplatServerRoute
-  ApiAuthSetPasswordServerRoute: typeof ApiAuthSetPasswordServerRoute
   ApiCapSplatServerRoute: typeof ApiCapSplatServerRoute
   ApiOpenapiSplatServerRoute: typeof ApiOpenapiSplatServerRoute
   ApiPosthogSplatServerRoute: typeof ApiPosthogSplatServerRoute
@@ -678,13 +664,6 @@ declare module '@tanstack/react-start/server' {
       preLoaderRoute: typeof ApiCapSplatServerRouteImport
       parentRoute: typeof rootServerRouteImport
     }
-    '/api/auth/set-password': {
-      id: '/api/auth/set-password'
-      path: '/api/auth/set-password'
-      fullPath: '/api/auth/set-password'
-      preLoaderRoute: typeof ApiAuthSetPasswordServerRouteImport
-      parentRoute: typeof rootServerRouteImport
-    }
     '/api/auth/$': {
       id: '/api/auth/$'
       path: '/api/auth/$'
@@ -737,7 +716,6 @@ const rootServerRouteChildren: RootServerRouteChildren = {
   InternalEmailTemplatesPreviewServerRoute:
     InternalEmailTemplatesPreviewServerRoute,
   ApiAuthSplatServerRoute: ApiAuthSplatServerRoute,
-  ApiAuthSetPasswordServerRoute: ApiAuthSetPasswordServerRoute,
   ApiCapSplatServerRoute: ApiCapSplatServerRoute,
   ApiOpenapiSplatServerRoute: ApiOpenapiSplatServerRoute,
   ApiPosthogSplatServerRoute: ApiPosthogSplatServerRoute,

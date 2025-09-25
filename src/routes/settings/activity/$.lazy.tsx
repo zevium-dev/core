@@ -2,6 +2,7 @@ import { createLazyFileRoute } from "@tanstack/react-router";
 import { Download, Filter, MoreHorizontal } from "lucide-react";
 import { useState } from "react";
 
+import { ProtectedRoute } from "~/components/protected-route";
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
@@ -9,7 +10,6 @@ import { Input } from "~/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "~/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "~/components/ui/table";
 import { cn } from "~/lib/utils";
-import { ProtectedRoute } from "~/components/protected-route";
 
 export const Route = createLazyFileRoute("/settings/activity/$")({
   component: ActivityComponent,

@@ -1,5 +1,5 @@
-import { createFileRoute } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
+import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 
 import { Redirect } from "~/components/redirect";
@@ -17,7 +17,6 @@ export const Route = createFileRoute("/auth/two-factor-verify")({
 function RouteComponent() {
   const queryClient = useQueryClient();
   const user = useUser();
-  const navigate = Route.useNavigate();
   const [code, setCode] = useState("");
   const [error, setError] = useState<null | string>(null);
   const [loading, setLoading] = useState(false);

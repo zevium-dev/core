@@ -2,9 +2,9 @@ import { createLazyFileRoute } from "@tanstack/react-router";
 import { ExternalLink, FileText, Settings } from "lucide-react";
 import { useState } from "react";
 
+import { ProtectedRoute } from "~/components/protected-route";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
-import { ProtectedRoute } from "~/components/protected-route";
 
 export const Route = createLazyFileRoute("/settings/credits/$")({
   component: CreditsComponent,

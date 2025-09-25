@@ -1,6 +1,7 @@
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { auth } from "~/lib/auth";
+
+import { useSession as useAuthSession } from "~/lib/auth";
 import { useTRPCClient } from "~/lib/trpc";
 
 // Base key; we append userId for per-user scoping so multiple users in the
@@ -8,21 +9,21 @@ import { useTRPCClient } from "~/lib/trpc";
 const BASE_KEY = ["user-preferences"] as const;
 
 export function useUserPreferences() {
-  const session = auth.useSession();
+  const session = useAuthSession();
   const trpc = useTRPCClient();
   const qc = useQueryClient();
-  const userId = session.data?.user?.id;
+  const userId = session?.user?.id ?? undefined;
 
   const enabled = Boolean(userId);
   const queryKey = userId ? ([...BASE_KEY, userId] as const) : BASE_KEY;
 
   const query = useQuery({
-    queryKey,
     enabled,
     queryFn: async () => {
       const result = await trpc.userPreference.get.query();
       return result; // { timezone }
     },
+    queryKey,
     staleTime: 5 * 60 * 1000, // 5 min; low churn
   });
 
@@ -44,10 +45,10 @@ export function useUserPreferences() {
   }, [userId, qc]);
 
   return {
-    preferences: query.data,
-    isLoading: query.isLoading,
     error: query.error,
-    update: mutation.mutateAsync,
+    isLoading: query.isLoading,
     isUpdating: mutation.isPending,
+    preferences: query.data,
+    update: mutation.mutateAsync,
   };
 }

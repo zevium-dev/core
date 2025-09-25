@@ -2,12 +2,11 @@ import { autumn } from "autumn-js/better-auth";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { apiKey } from "better-auth/plugins";
+import { twoFactor } from "better-auth/plugins"
 import { organization } from "better-auth/plugins/organization";
 import { reactStartCookies } from "better-auth/react-start";
-import { twoFactor } from "better-auth/plugins"
 
 import { db, schema } from "~/db";
-import { eq } from "drizzle-orm";
 import { serverEnv } from "~/env/server";
 import { EMAIL_FROM } from "~/lib/constants";
 
@@ -19,7 +18,6 @@ import { capCaptcha } from "./better-auth-captcha";
 const BETTER_AUTH_KV_PREFIX = "better-auth:";
 
 export const authServer = betterAuth({
-  appName: "Zevium",
   account: {
     accountLinking: {
       allowDifferentEmails: false,
@@ -27,7 +25,24 @@ export const authServer = betterAuth({
       trustedProviders: ["email-password", "google"],
     },
   },
+  appName: "Zevium",
   database: drizzleAdapter(db, { provider: "sqlite", schema }),
+  databaseHooks: {
+    user: {
+      create: {
+        after: async (user: { id: string }) => {
+          try {
+            await db.insert(schema.userPreference).values({
+              timezone: 'UTC',
+              userId: user.id,
+            });
+          } catch {
+            // ignore duplicate or race
+          }
+        },
+      },
+    },
+  },
   emailAndPassword: {
     enabled: true,
     requireEmailVerification: true,
@@ -89,22 +104,6 @@ export const authServer = betterAuth({
     google: {
       clientId: serverEnv.AUTH_GOOGLE_CLIENT_ID,
       clientSecret: serverEnv.AUTH_GOOGLE_CLIENT_SECRET,
-    },
-  },
-  databaseHooks: {
-    user: {
-      create: {
-        after: async (user: { id: string }) => {
-          try {
-            await db.insert(schema.userPreference).values({
-              userId: user.id,
-              timezone: 'UTC',
-            });
-          } catch {
-            // ignore duplicate or race
-          }
-        },
-      },
     },
   },
 });
