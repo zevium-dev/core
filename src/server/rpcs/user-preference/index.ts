@@ -1,5 +1,5 @@
-import z from "zod";
 import { eq } from "drizzle-orm";
+import z from "zod";
 
 import { db } from "~/db";
 import * as schema from "~/db/schema";
@@ -45,15 +45,15 @@ export const userPreferenceRouter = router({
       }
       await db
         .insert(schema.userPreference)
-        .values({ userId: ctx.user.id, timezone: patch.timezone! })
+        .values({ timezone: patch.timezone, userId: ctx.user.id })
         .onConflictDoUpdate({
-          target: schema.userPreference.userId,
           set: { ...patch },
+          target: schema.userPreference.userId,
         });
       return { timezone: patch.timezone ?? (await db
         .select({ timezone: schema.userPreference.timezone })
         .from(schema.userPreference)
         .where(eq(schema.userPreference.userId, ctx.user.id))
-        .limit(1))[0]!.timezone };
+        .limit(1))[0].timezone };
     }),
 });

@@ -1,6 +1,6 @@
-import { createLazyFileRoute, useNavigate } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
-import { Calendar, Camera, Copy, Eye, EyeOff, Loader2, Mail, MapPin, Phone, Shield, Trash2, User } from "lucide-react";
+import { createLazyFileRoute, useNavigate } from "@tanstack/react-router";
+import { Calendar, Copy, Eye, EyeOff, Loader2, Mail, MapPin, Phone, Shield, Trash2, User } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 // 2FA moved to dedicated component
 import { toast } from "sonner";
@@ -30,7 +30,7 @@ export function AccountPreferenceComponent() {
   const [phone, setPhone] = useState("");
   const [location, setLocation] = useState("");
   const [timezone, setTimezone] = useState("");
-  const { isLoading: prefsLoading, isUpdating: prefsSaving, preferences, update: updatePreferences } = useUserPreferences();
+  const { isLoading: prefsLoading, isUpdating: _prefsSaving, preferences, update: updatePreferences } = useUserPreferences();
   const [isSaving, setIsSaving] = useState(false);
   // Password management UI state
   const [showPasswords, setShowPasswords] = useState(false);
@@ -50,14 +50,17 @@ export function AccountPreferenceComponent() {
   // Initialize from session
   useEffect(() => {
     if (user) {
-      setName(user.name ?? "");
-      setEmail(user.email ?? "");
+      // eslint-disable-next-line @eslint-react/hooks-extra/no-direct-set-state-in-use-effect
+      setName(user.name);
+      // eslint-disable-next-line @eslint-react/hooks-extra/no-direct-set-state-in-use-effect
+      setEmail(user.email);
     }
   }, [user]);
 
   // Sync timezone from preferences when loaded (only set if empty locally)
   useEffect(() => {
     if (preferences?.timezone && !timezone) {
+      // eslint-disable-next-line @eslint-react/hooks-extra/no-direct-set-state-in-use-effect
       setTimezone(preferences.timezone);
     }
   }, [preferences?.timezone, timezone]);
@@ -65,26 +68,18 @@ export function AccountPreferenceComponent() {
   // Detect whether user already has a password-based (credential) account.
   // Better Auth exposes listAccounts() on client per docs (listAccounts not yet imported in codebase, so we feature-detect)
   useEffect(() => {
-    let ignore = false;
-    (async () => {
-      if (!auth.listAccounts) {
-        // Fallback heuristic: if user signed in via oauth only -> assume no password
-        // We cannot be certain without listAccounts; default to no password to show Set Password UI
-        if (!ignore) setHasPassword(false);
-        return;
-      }
+    void (async () => {
       try {
         const result = await auth.listAccounts();
-        if (ignore) return;
-        const accounts = Array.isArray(result) ? result : (result?.data ?? []);
-        const credentialAccount = accounts.find((a: any) => a?.providerId === "credential" || a?.provider === "credential");
+        if(!result.data) throw new Error("User has no accounts");
+        const accounts = result.data;
+        const credentialAccount = accounts.find((a) => a.providerId === "credential");
         setHasPassword(Boolean(credentialAccount));
-      } catch (e) {
-        if (!ignore) setHasPassword(false);
+      } catch (_e) {
+         setHasPassword(false);
       }
     })();
-    return () => { ignore = true; };
-  }, [session?.user?.id]);
+  }, [session?.user.id]);
 
   const resetPasswordFields = () => {
     setCurrentPassword("");
@@ -108,7 +103,6 @@ export function AccountPreferenceComponent() {
     }
     setIsChangingPassword(true);
     try {
-      if (!auth.changePassword) throw new Error("changePassword not available");
       const { error } = await auth.changePassword({ currentPassword, newPassword, revokeOtherSessions: true });
       if (error) throw new Error(error.message);
       toast.success("Password changed");
@@ -160,7 +154,7 @@ export function AccountPreferenceComponent() {
     try {
       // Persist changed profile + preferences in a single user action
       // 1. Update name only if it actually changed
-      if (name.trim() !== (user?.name ?? "")) {
+      if (name.trim() !== user.name) {
         const { error } = await auth.updateUser({ name: name.trim() });
         if (error) throw new Error(error.message);
       }
@@ -198,7 +192,7 @@ export function AccountPreferenceComponent() {
     try {
       const { data, error } = await auth.twoFactor.generateBackupCodes({ password: twoFactorPassword });
       if (error) throw new Error(error.message);
-      if (Array.isArray(data?.backupCodes)) setTwoFactorCodes(data.backupCodes);
+      if (Array.isArray(data.backupCodes)) setTwoFactorCodes(data.backupCodes);
       toast.success("New backup codes generated");
     } catch (e) {
       toast.error((e as Error).message || "Could not regenerate codes");
@@ -257,15 +251,15 @@ export function AccountPreferenceComponent() {
                     const target = e.currentTarget as HTMLImageElement;
                     target.style.display = "none"; // let fallback show
                   }}
-                  src={user?.image || "/placeholder-avatar.jpg"}
+                  src={user?.image ?? "/placeholder-avatar.jpg"}
                 />
                 <AvatarFallback className="text-lg">
                   {(() => {
                     if (name) {
                       const parts = name.trim().split(/\s+/).slice(0, 2);
-                      return parts.map(p => p[0]?.toUpperCase()).join("") || "U";
+                      return parts.map(part => part[0].toUpperCase()).join("") || "U";
                     }
-                    if (email) return email[0]?.toUpperCase() ?? "U";
+                    if (email) return email[0].toUpperCase();
                     return "U";
                   })()}
                 </AvatarFallback>
@@ -424,7 +418,6 @@ export function AccountPreferenceComponent() {
             {!showPasswordEditor && hasPassword !== null && (
               <Button
                 className="self-start"
-                disabled={hasPassword === null}
                 onClick={() => setShowPasswordEditor(true)}
                 size="sm"
                 type="button"
@@ -742,7 +735,7 @@ export function AccountPreferenceComponent() {
           disabled={
             isSaving ||
             !user ||
-            (name.trim() === (user?.name ?? "") && (timezone === "" || timezone === (preferences?.timezone ?? "")))
+            (name.trim() === user.name && (timezone === "" || timezone === (preferences?.timezone ?? "")))
           }
           onClick={() => void handleSave()}
         >

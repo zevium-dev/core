@@ -49,10 +49,10 @@ function RouteComponent() {
     
       const { data, error: authError } = await auth.twoFactor.enable({ password });
       if (authError) throw new Error(authError.message);
-      const uri = data?.totpURI ?? null;
+      const uri = data.totpURI;
       if (!uri) throw new Error("TOTP URI not received");
       setTotpUri(uri);
-      if (Array.isArray(data?.backupCodes) && data.backupCodes.length > 0) {
+      if (Array.isArray(data.backupCodes) && data.backupCodes.length > 0) {
         setBackupCodes(data.backupCodes);
       }
       setStep(2);
@@ -99,14 +99,14 @@ function RouteComponent() {
                 <div className="grid gap-2 text-center">
                   <div className="flex justify-center">
                     <Avatar className="h-14 w-14">
-                      <AvatarImage alt={user.name ?? user.email ?? "User"} src={user.image ?? "/placeholder-avatar.jpg"} />
+                      <AvatarImage alt={user.name} src={user.image ?? undefined} />
                       <AvatarFallback>
-                        {((user.name?.trim()?.split(/\s+/)?.[0]?.[0] ?? user.email?.[0] ?? "U").toUpperCase())}
+                        {(((user.name.trim().split(/\s+/)[0]?.[0] || user.email[0]) || "U").toUpperCase())}
                       </AvatarFallback>
                     </Avatar>
                   </div>
                   <div className="text-sm text-muted-foreground">Signed in as</div>
-                  <div className="font-medium">{user.email ?? "Your account"}</div>
+                  <div className="font-medium">{user.email}</div>
                 </div>
                 <div className="grid gap-1">
                   <Label className="mb-2" htmlFor="password">Enter password to begin</Label>
