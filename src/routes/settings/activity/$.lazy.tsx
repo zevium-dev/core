@@ -2,6 +2,7 @@ import { createLazyFileRoute } from "@tanstack/react-router";
 import { Download, Filter, MoreHorizontal } from "lucide-react";
 import { useState } from "react";
 
+import { ProtectedRoute } from "~/components/protected-route";
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
@@ -174,7 +175,8 @@ export function ActivityComponent() {
   const currentItems = mockActivityData.slice(startIndex, endIndex);
 
   return (
-    <div className="mx-auto w-full max-w-3xl min-w-0 flex-1 space-y-6 p-6">
+    <ProtectedRoute>
+      <div className="mx-auto w-full max-w-3xl min-w-0 flex-1 space-y-6 p-6">
       {/* Header */}
       <div className="space-y-2">
         <h1 className="text-foreground text-2xl font-bold">API Activity</h1>
@@ -339,7 +341,8 @@ export function ActivityComponent() {
           </div>
         </CardContent>
       </Card>
-    </div>
+      </div>
+    </ProtectedRoute>
   );
 }
 

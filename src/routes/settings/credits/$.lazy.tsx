@@ -2,6 +2,7 @@ import { createLazyFileRoute } from "@tanstack/react-router";
 import { ExternalLink, FileText, Settings } from "lucide-react";
 import { useState } from "react";
 
+import { ProtectedRoute } from "~/components/protected-route";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
 
@@ -36,7 +37,8 @@ export function CreditsComponent() {
   const currentBalance = "$12.26";
 
   return (
-    <div className="mx-auto w-full max-w-3xl min-w-0 flex-1 space-y-6 p-6">
+    <ProtectedRoute>
+      <div className="mx-auto w-full max-w-3xl min-w-0 flex-1 space-y-6 p-6">
       {/* Header */}
       <div className="flex items-center gap-2">
         <h1 className="text-foreground text-2xl font-bold">Credits</h1>
@@ -139,6 +141,7 @@ export function CreditsComponent() {
           </div>
         </CardContent>
       </Card>
-    </div>
+      </div>
+    </ProtectedRoute>
   );
 }

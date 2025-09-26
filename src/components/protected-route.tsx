@@ -18,7 +18,6 @@ export function ProtectedRoute({ children, fallback = defaultFallback, redirectT
   }
 
   if (!isAuthenticated) {
-    // The hook will handle the redirect and toast
     return null;
   }
 

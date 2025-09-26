@@ -8,6 +8,7 @@ export const appRouter = router({
   organization: lazy(() => import("./rpcs/organization").then((v) => v.organizationRouter)),
   project: lazy(() => import("./rpcs/project").then((v) => v.projectRouter)),
   projectCategory: lazy(() => import("./rpcs/project-category").then((v) => v.projectCategoryRouter)),
+  userPreference: lazy(() => import("./rpcs/user-preference").then((v) => v.userPreferenceRouter)),
 });
 
 export type AppRouter = typeof appRouter;

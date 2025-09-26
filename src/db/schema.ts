@@ -12,6 +12,9 @@ export const user = sqliteTable("user", {
   id: text("id").primaryKey(),
   image: text("image"),
   name: text("name").notNull(),
+  twoFactorEnabled: integer("two_factor_enabled", { mode: "boolean" }).default(
+    false,
+  ),
   updatedAt: integer("updated_at", { mode: "timestamp" })
     .$defaultFn(() => /* @__PURE__ */ new Date())
     .notNull(),
@@ -94,6 +97,17 @@ export const apikey = sqliteTable("apikey", {
   updatedAt: integer("updated_at", { mode: "timestamp" })
     .$defaultFn(() => /* @__PURE__ */ new Date())
     .notNull(),
+  userId: text("user_id")
+    .notNull()
+    .references(() => user.id, { onDelete: "cascade" }),
+});
+
+// === Two-Factor Authentication =====
+
+export const twoFactor = sqliteTable("two_factor", {
+  backupCodes: text("backup_codes").notNull(),
+  id: text("id").primaryKey(),
+  secret: text("secret").notNull(),
   userId: text("user_id")
     .notNull()
     .references(() => user.id, { onDelete: "cascade" }),
@@ -291,5 +305,25 @@ export const apiEndpointRelations = relations(apiEndpoint, ({ one }) => ({
   spec: one(apiSpec, {
     fields: [apiEndpoint.specId],
     references: [apiSpec.id],
+  }),
+}));
+
+// ===== User Preferences (1:1) =====
+
+export const userPreference = sqliteTable("user_preference", {
+  timezone: text("timezone").notNull().default("UTC"),
+  updatedAt: integer("updated_at", { mode: "timestamp" })
+    .$defaultFn(() => new Date())
+    .notNull(),
+  // primary key also FK to user
+  userId: text("user_id")
+    .primaryKey()
+    .references(() => user.id, { onDelete: "cascade" }),
+});
+
+export const userPreferenceRelations = relations(userPreference, ({ one }) => ({
+  user: one(user, {
+    fields: [userPreference.userId],
+    references: [user.id],
   }),
 }));

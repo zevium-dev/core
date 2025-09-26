@@ -3,6 +3,7 @@ import { createLazyFileRoute } from "@tanstack/react-router";
 import { Check, Copy, Info, MoreHorizontal, Pencil, Plus, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
 
+import { ProtectedRoute } from "~/components/protected-route";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
 import {
@@ -186,7 +187,8 @@ export function ApiKeysComponent() {
   };
 
   return (
-    <div className="mx-auto w-full max-w-3xl min-w-0 flex-1 space-y-6 p-6">
+    <ProtectedRoute>
+      <div className="mx-auto w-full max-w-3xl min-w-0 flex-1 space-y-6 p-6">
       {/* (Optional) Settings navigation placeholder – removed due to missing component */}
 
       {/* Header */}
@@ -393,7 +395,8 @@ export function ApiKeysComponent() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+      </div>
+    </ProtectedRoute>
   );
 }
 
