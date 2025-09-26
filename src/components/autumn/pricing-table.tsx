@@ -2,8 +2,7 @@ import type { Product, ProductItem } from "autumn-js";
 
 import { ProductDetails, useCustomer, usePricingTable } from "autumn-js/react";
 import { Loader2 } from "lucide-react";
-import React from "react";
-import { createContext, use, useState } from "react";
+import React, { createContext, use, useState } from "react";
 
 import CheckoutDialog from "~/components/autumn/checkout-dialog";
 import { Button } from "~/components/ui/button";
@@ -13,7 +12,6 @@ import { cn } from "~/lib/utils/index";
 
 export default function PricingTable({ productDetails }: { productDetails?: Array<ProductDetails> }) {
   const { checkout, customer } = useCustomer({ errorOnNotFound: false });
-
   const [isAnnual, setIsAnnual] = useState(false);
   const { error, isLoading, products } = usePricingTable({ productDetails });
 
@@ -24,58 +22,47 @@ export default function PricingTable({ productDetails }: { productDetails?: Arra
       </div>
     );
   }
-
   if (error) {
     return <div> Something went wrong...</div>;
   }
+  if (!products) {
+    return null;
+  }
 
-  const intervals = Array.from(new Set(products?.map((p) => p.properties?.interval_group).filter((i) => !!i)));
-
+  const intervals = Array.from(new Set(products.map((p) => p.properties.interval_group).filter(Boolean)));
   const multiInterval = intervals.length > 1;
 
   const intervalFilter = (product: Product) => {
-    if (!product.properties?.interval_group) {
-      return true;
-    }
-
+    if (!product.properties.interval_group) return true;
     if (multiInterval) {
-      if (isAnnual) {
-        return product.properties?.interval_group === "year";
-      } else {
-        return product.properties?.interval_group === "month";
-      }
+      return isAnnual ? product.properties.interval_group === "year" : product.properties.interval_group === "month";
     }
-
     return true;
   };
 
   return (
     <div className={cn("root")}>
-      {products && (
+      {products.length > 0 && (
         <PricingTableContainer
           isAnnualToggle={isAnnual}
           multiInterval={multiInterval}
           products={products}
           setIsAnnualToggle={setIsAnnual}
         >
-          {products.filter(intervalFilter).map((product, index) => (
+          {products.filter(intervalFilter).map((product) => (
             <PricingCard
               buttonProps={{
                 disabled:
                   (product.scenario === "active" && !product.properties.updateable) || product.scenario === "scheduled",
-
                 onClick: async () => {
                   if (product.id && customer) {
-                    await checkout({
-                      dialog: CheckoutDialog,
-                      productId: product.id,
-                    });
+                    await checkout({ dialog: CheckoutDialog, productId: product.id });
                   } else if (product.display?.button_url) {
-                    window.open(product.display?.button_url, "_blank");
+                    window.open(product.display.button_url, "_blank");
                   }
                 },
               }}
-              key={index}
+              key={product.id}
               productId={product.id}
             />
           ))}
@@ -97,15 +84,7 @@ const PricingTableContext = createContext<{
   showFeatures: true,
 });
 
-export const usePricingTableContext = (componentName: string) => {
-  const context = use(PricingTableContext);
-
-  if (context === undefined) {
-    throw new Error(`${componentName} must be used within <PricingTable />`);
-  }
-
-  return context;
-};
+export const usePricingTableContext = (_componentName: string) => use(PricingTableContext);
 
 export const PricingTableContainer = ({
   children,
@@ -127,14 +106,17 @@ export const PricingTableContainer = ({
   if (!products) {
     throw new Error("products is required in <PricingTable />");
   }
-
+  const value = React.useMemo(
+    () => ({ isAnnualToggle, products, setIsAnnualToggle, showFeatures }),
+    [isAnnualToggle, products, setIsAnnualToggle, showFeatures],
+  );
   if (products.length === 0) {
-    return <></>;
+    return <PricingTableContext.Provider value={value}></PricingTableContext.Provider>;
   }
+  const hasRecommended = products.some((p) => p.display?.recommend_text);
 
-  const hasRecommended = products?.some((p) => p.display?.recommend_text);
   return (
-    <PricingTableContext.Provider value={{ isAnnualToggle, products, setIsAnnualToggle, showFeatures }}>
+    <PricingTableContext.Provider value={value}>
       <div className={cn("flex flex-col items-center", hasRecommended && "!py-10")}>
         {multiInterval && (
           <div className={cn(products.some((p) => p.display?.recommend_text) && "mb-8")}>
@@ -175,14 +157,13 @@ export const PricingCard = ({ buttonProps, className, productId }: PricingCardPr
 
   const { buttonText } = getPricingTableContent(product);
 
-  const isRecommended = productDisplay?.recommend_text ? true : false;
-  const mainPriceDisplay = product.properties?.is_free
-    ? {
-        primary_text: "Free",
-      }
-    : product.items[0].display;
+  const isRecommended = !!productDisplay?.recommend_text;
 
-  const featureItems = product.properties?.is_free ? product.items : product.items.slice(1);
+  const mainPriceDisplay = product.properties.is_free
+    ? { primary_text: "Free" }
+    : (product.items[0].display ?? { primary_text: "" });
+
+  const featureItems = product.properties.is_free ? product.items : product.items.slice(1);
 
   return (
     <div
@@ -193,38 +174,38 @@ export const PricingCard = ({ buttonProps, className, productId }: PricingCardPr
         className,
       )}
     >
-      {productDisplay?.recommend_text && <RecommendedBadge recommended={productDisplay?.recommend_text} />}
+      {productDisplay?.recommend_text && <RecommendedBadge recommended={productDisplay.recommend_text} />}
       <div className={cn("flex h-full flex-grow flex-col", isRecommended && "lg:translate-y-6")}>
         <div className="h-full">
           <div className="flex flex-col">
             <div className="pb-4">
-              <h2 className="truncate px-6 text-2xl font-semibold">{productDisplay?.name || name}</h2>
+              <h2 className="truncate px-6 text-2xl font-semibold">{productDisplay?.name ?? name}</h2>
               {productDisplay?.description && (
                 <div className="text-muted-foreground h-8 px-6 text-sm">
-                  <p className="line-clamp-2">{productDisplay?.description}</p>
+                  <p className="line-clamp-2">{productDisplay.description}</p>
                 </div>
               )}
             </div>
             <div className="mb-2">
               <h3 className="bg-secondary/40 mb-4 flex h-16 items-center border-y px-6 font-semibold">
                 <div className="line-clamp-2">
-                  {mainPriceDisplay?.primary_text}{" "}
-                  {mainPriceDisplay?.secondary_text && (
-                    <span className="text-muted-foreground mt-1 font-normal">{mainPriceDisplay?.secondary_text}</span>
+                  {mainPriceDisplay.primary_text}{" "}
+                  {mainPriceDisplay.secondary_text && (
+                    <span className="text-muted-foreground mt-1 font-normal">{mainPriceDisplay.secondary_text}</span>
                   )}
                 </div>
               </h3>
             </div>
           </div>
-          {showFeatures && featureItems.length > 0 && (
+          {showFeatures && featureItems.length > 0 && productDisplay?.everything_from !== undefined && (
             <div className="mb-6 flex-grow px-6">
-              <PricingFeatureList everythingFrom={product.display?.everything_from} items={featureItems} />
+              <PricingFeatureList everythingFrom={productDisplay.everything_from} items={featureItems} />
             </div>
           )}
         </div>
         <div className={cn("px-6", isRecommended && "lg:-translate-y-12")}>
-          <PricingCardButton recommended={productDisplay?.recommend_text ? true : false} {...buttonProps}>
-            {productDisplay?.button_text || buttonText}
+          <PricingCardButton recommended={isRecommended} {...buttonProps}>
+            {productDisplay?.button_text ?? buttonText}
           </PricingCardButton>
         </div>
       </div>
@@ -246,19 +227,20 @@ export const PricingFeatureList = ({
     <div className={cn("flex-grow", className)}>
       {everythingFrom && <p className="mb-4 text-sm">Everything from {everythingFrom}, plus:</p>}
       <div className="space-y-3">
-        {items.map((item, index) => (
-          <div className="flex items-start gap-2 text-sm" key={index}>
-            {/* {showIcon && (
-              <Check className="h-4 w-4 text-primary flex-shrink-0 mt-0.5" />
-            )} */}
-            <div className="flex flex-col">
-              <span>{item.display?.primary_text}</span>
-              {item.display?.secondary_text && (
-                <span className="text-muted-foreground text-sm">{item.display?.secondary_text}</span>
-              )}
+        {items.map((item) => {
+          const key =
+            item.feature_id ?? `${item.display?.primary_text ?? "item"}-${item.display?.secondary_text ?? ""}`;
+          return (
+            <div className="flex items-start gap-2 text-sm" key={key}>
+              <div className="flex flex-col">
+                <span>{item.display?.primary_text}</span>
+                {item.display?.secondary_text && (
+                  <span className="text-muted-foreground text-sm">{item.display.secondary_text}</span>
+                )}
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );

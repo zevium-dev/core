@@ -6,6 +6,8 @@ import { twoFactor } from "better-auth/plugins"
 import { organization } from "better-auth/plugins/organization";
 import { reactStartCookies } from "better-auth/react-start";
 
+import type { Permissions } from "~/lib/permission";
+
 import { db, schema } from "~/db";
 import { serverEnv } from "~/env/server";
 import { EMAIL_FROM } from "~/lib/constants";
@@ -59,7 +61,18 @@ export const authServer = betterAuth({
     },
   },
   plugins: [
-    apiKey(),
+    apiKey({
+      defaultPrefix: "zev_",
+      enableMetadata: true,
+      keyExpiration: {
+        defaultExpiresIn: 30 * 24 * 60 * 60,
+        maxExpiresIn: 365 * 24 * 60 * 60,
+        minExpiresIn: 24 * 60 * 60,
+      },
+      permissions: { defaultPermissions: {} satisfies Permissions },
+      // 100 requests per minute
+      rateLimit: { enabled: true, maxRequests: 100, timeWindow: 1000 * 60 },
+    }),
     twoFactor(),
     organization({ requireEmailVerificationOnInvitation: true }),
     autumn({ customerScope: "organization", secretKey: serverEnv.AUTUMN_SECRET_KEY }),
@@ -67,7 +80,11 @@ export const authServer = betterAuth({
     reactStartCookies(),
   ],
   rateLimit: {
+    // 100 requests per minute
+    enabled: true,
+    max: 100,
     storage: "secondary-storage",
+    window: 1000 * 60,
   },
   secondaryStorage: {
     delete: async (key) => {
@@ -77,14 +94,11 @@ export const authServer = betterAuth({
       return await kv.get(BETTER_AUTH_KV_PREFIX + key);
     },
     set: async (key, value, ttl) => {
-      // Only set TTL if it is a finite positive number. Some callers may pass Infinity/undefined to mean no TTL.
       let pxMs: number | undefined;
       if (typeof ttl === "number" && Number.isFinite(ttl) && ttl > 0) {
-        // Heuristic: if ttl looks like seconds, convert to ms; if it's already in ms, keep as is.
         const ttlMs = ttl > 1000 * 1000 ? ttl : ttl * 1000;
         pxMs = Math.floor(ttlMs);
       } else if (ttl == null) {
-        // Default to ~24 days when ttl is not provided at all (fits within 32-bit ms range)
         pxMs = 24 * 24 * 60 * 60 * 1000;
       }
 

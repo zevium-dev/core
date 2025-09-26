@@ -127,7 +127,7 @@ export function ScalarApiReference({ _projectSlug, _specTitle, specId, version }
         if (typeof specContent === "string") {
           // Try parsing as JSON first, fallback to YAML parsing if needed
           try {
-            parsedSpec = JSON.parse(specContent) as unknown;
+            parsedSpec = JSON.parse(specContent);
           } catch {
             // If JSON parsing fails, treat as YAML or use the specJson
             parsedSpec = specData.spec.specJson;
@@ -167,28 +167,28 @@ export function ScalarApiReference({ _projectSlug, _specTitle, specId, version }
                 * {
                   scroll-behavior: smooth;
                 }
-                
+
                 /* Enhanced scrollbar styling */
                 ::-webkit-scrollbar {
                   width: 8px;
                   height: 8px;
                 }
-                
+
                 ::-webkit-scrollbar-track {
                   background: #f1f5f9;
                   border-radius: 4px;
                 }
-                
+
                 ::-webkit-scrollbar-thumb {
                   background: #cbd5e1;
                   border-radius: 4px;
                   transition: background-color 0.2s ease;
                 }
-                
+
                 ::-webkit-scrollbar-thumb:hover {
                   background: #94a3b8;
                 }
-                
+
                 /* Optimize rendering performance */
                 .scalar-app,
                 .scalar-app * {
@@ -197,36 +197,36 @@ export function ScalarApiReference({ _projectSlug, _specTitle, specId, version }
                   backface-visibility: hidden;
                   perspective: 1000px;
                 }
-                
+
                 /* Smooth transitions for interactive elements */
                 .scalar-app button,
                 .scalar-app a,
                 .scalar-app [role="button"] {
                   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
                 }
-                
+
                 /* Prevent layout shifts */
                 .scalar-app img {
                   max-width: 100%;
                   height: auto;
                 }
-                
+
                 /* Enhanced focus states */
                 .scalar-app *:focus {
                   outline: 2px solid #3b82f6;
                   outline-offset: 2px;
                   transition: outline 0.15s ease;
                 }
-                
+
                 /* Smooth accordion/collapsible animations */
                 .scalar-app [data-state="open"] {
                   animation: slideDown 0.2s cubic-bezier(0.4, 0, 0.2, 1);
                 }
-                
+
                 .scalar-app [data-state="closed"] {
                   animation: slideUp 0.2s cubic-bezier(0.4, 0, 0.2, 1);
                 }
-                
+
                 @keyframes slideDown {
                   from {
                     height: 0;
@@ -237,7 +237,7 @@ export function ScalarApiReference({ _projectSlug, _specTitle, specId, version }
                     opacity: 1;
                   }
                 }
-                
+
                 @keyframes slideUp {
                   from {
                     height: var(--radix-accordion-content-height);
@@ -248,14 +248,14 @@ export function ScalarApiReference({ _projectSlug, _specTitle, specId, version }
                     opacity: 0;
                   }
                 }
-                
+
                 /* Optimize text rendering */
                 .scalar-app {
                   text-rendering: optimizeLegibility;
                   -webkit-font-smoothing: antialiased;
                   -moz-osx-font-smoothing: grayscale;
                 }
-                
+
                 /* Prevent unnecessary repaints */
                 .scalar-app .sticky,
                 .scalar-app [position="sticky"] {
