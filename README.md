@@ -48,6 +48,9 @@ vim .env
 # Install dependencies
 pnpm install
 
+# Setup DB
+pnpm drizzle-kit migrate
+
 # Start the dev server
 pnpm dev
 ```
