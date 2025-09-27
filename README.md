@@ -6,7 +6,7 @@ The entire website was made using TanStack Start.
 ![TanStack Start](https://img.shields.io/badge/TanStack%20Start-0-c93679?style=for-the-badge&logo=zap)
 ![shadcn](https://img.shields.io/badge/shadcnui-4-ffffff?style=for-the-badge&logo=shadcnui)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5-4476c0?style=for-the-badge&logo=typescript)
-![PNPM](https://img.shields.io/badge/pnpm-9-f69220?style=for-the-badge&logo=pnpm)
+![PNPM](https://img.shields.io/badge/pnpm-10-f69220?style=for-the-badge&logo=pnpm)
 
 ![Drizzle](https://img.shields.io/badge/Drizzle-ORM-ffffff?style=for-the-badge&logo=drizzle)
 ![Turso](https://img.shields.io/badge/Turso-Database-ffffff?style=for-the-badge&logo=turso)
