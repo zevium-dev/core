@@ -17,15 +17,6 @@ The entire website was made using TanStack Start.
 
 ## Instructions
 
-### Quick Start with Dev Containers (Recommended)
-
-For the fastest setup experience, use the provided devcontainer configuration:
-
-1. **VS Code**: Install the [Dev Containers extension](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers), open the repo, and click "Reopen in Container"
-2. **GitHub Codespaces**: Create a new Codespace from this repository
-
-The devcontainer automatically handles all setup steps below and provides a consistent development environment.
-
 ### Manual Setup
 
 - You can start the dev server using the following commands:
