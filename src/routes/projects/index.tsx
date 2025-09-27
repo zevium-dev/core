@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { createLazyFileRoute } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { Building2, Filter, Grid3X3, List, Plus, Search, Settings } from "lucide-react";
 import { m } from "motion/react";
 import * as React from "react";
@@ -25,7 +25,7 @@ import { Textarea } from "~/components/ui/textarea";
 import { ToggleGroup, ToggleGroupItem } from "~/components/ui/toggle-group";
 import { useTRPCClient } from "~/lib/trpc";
 
-export const Route = createLazyFileRoute("/projects/")({
+export const Route = createFileRoute("/projects/")({
   component: RouteComponent,
 });
 

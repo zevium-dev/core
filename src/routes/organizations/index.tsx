@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { createLazyFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { ArrowRight, Building2, Calendar, Plus, Search, Users } from "lucide-react";
 import { m } from "motion/react";
 import * as React from "react";
@@ -40,7 +40,7 @@ interface Organization {
   website: null | string;
 }
 
-export const Route = createLazyFileRoute("/organizations/")({
+export const Route = createFileRoute("/organizations/")({
   component: () => (
     <ProtectedRoute>
       <RouteComponent />

@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { createLazyFileRoute } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import {
   Activity,
   Building2,
@@ -36,7 +36,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "~
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "~/components/ui/tabs";
 import { useTRPCClient } from "~/lib/trpc";
 
-export const Route = createLazyFileRoute("/organizations/$slug")({
+export const Route = createFileRoute("/organizations/$slug")({
   component: () => (
     <ProtectedRoute>
       <RouteComponent />

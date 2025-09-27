@@ -5,7 +5,7 @@ import { DefaultCatchBoundary } from "./components/default-catch-boundary";
 import { NotFound } from "./components/not-found";
 import { routeTree } from "./routeTree.gen";
 
-export function createRouter() {
+export function getRouter() {
   const router = createTanStackRouter({
     defaultErrorComponent: DefaultCatchBoundary,
     defaultNotFoundComponent: () => <NotFound />,
@@ -19,6 +19,6 @@ export function createRouter() {
 
 declare module "@tanstack/react-router" {
   interface Register {
-    router: ReturnType<typeof createRouter>;
+    router: ReturnType<typeof getRouter>;
   }
 }

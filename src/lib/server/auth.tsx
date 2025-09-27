@@ -2,7 +2,7 @@ import { autumn } from "autumn-js/better-auth";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { apiKey } from "better-auth/plugins";
-import { twoFactor } from "better-auth/plugins"
+import { twoFactor } from "better-auth/plugins";
 import { organization } from "better-auth/plugins/organization";
 import { reactStartCookies } from "better-auth/react-start";
 
@@ -35,7 +35,7 @@ export const authServer = betterAuth({
         after: async (user: { id: string }) => {
           try {
             await db.insert(schema.userPreference).values({
-              timezone: 'UTC',
+              timezone: "UTC",
               userId: user.id,
             });
           } catch {
@@ -70,8 +70,8 @@ export const authServer = betterAuth({
         minExpiresIn: 24 * 60 * 60,
       },
       permissions: { defaultPermissions: {} satisfies Permissions },
-      // 100 requests per minute
-      rateLimit: { enabled: true, maxRequests: 100, timeWindow: 1000 * 60 },
+      // 200 requests per minute
+      rateLimit: { enabled: true, maxRequests: 200, timeWindow: 1000 * 60 },
     }),
     twoFactor(),
     organization({ requireEmailVerificationOnInvitation: true }),
@@ -80,9 +80,9 @@ export const authServer = betterAuth({
     reactStartCookies(),
   ],
   rateLimit: {
-    // 100 requests per minute
+    // 200 requests per minute
     enabled: true,
-    max: 100,
+    max: 200,
     storage: "secondary-storage",
     window: 1000 * 60,
   },

@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { createLazyFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { AlertCircle, ArrowLeft, Code2, Copy, Download } from "lucide-react";
 import { m } from "motion/react";
 import * as React from "react";
@@ -13,7 +13,7 @@ import { Separator } from "~/components/ui/separator";
 import { useCopy } from "~/hooks/use-copy";
 import { useTRPCClient } from "~/lib/trpc";
 
-export const Route = createLazyFileRoute("/projects/$slug/view/$version")({
+export const Route = createFileRoute("/projects/$slug/view/$version")({
   component: () => (
     <ProtectedRoute>
       <RouteComponent />

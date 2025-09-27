@@ -10,7 +10,7 @@ export const userPreferenceSchema = z.object({
   timezone: z.string(),
 });
 
-export const userPreferenceRouter = router({ 
+export const userPreferenceRouter = router({
   get: protectedProcedure
     .meta({ route: { path: "/user-preference/get", summary: "Get current user's preferences" } })
     .output(userPreferenceSchema)
@@ -50,10 +50,16 @@ export const userPreferenceRouter = router({
           set: { ...patch },
           target: schema.userPreference.userId,
         });
-      return { timezone: patch.timezone ?? (await db
-        .select({ timezone: schema.userPreference.timezone })
-        .from(schema.userPreference)
-        .where(eq(schema.userPreference.userId, ctx.user.id))
-        .limit(1))[0].timezone };
+      return {
+        timezone:
+          patch.timezone ??
+          (
+            await db
+              .select({ timezone: schema.userPreference.timezone })
+              .from(schema.userPreference)
+              .where(eq(schema.userPreference.userId, ctx.user.id))
+              .limit(1)
+          )[0].timezone,
+      };
     }),
 });

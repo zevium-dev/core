@@ -1,11 +1,14 @@
-import { createServerFileRoute } from "@tanstack/react-start/server";
+import { createFileRoute } from "@tanstack/react-router";
 
-import { EmailVerify } from "~/lib/email/templates/email-verify";
-
-export const ServerRoute = createServerFileRoute("/$internal/email-templates-preview").methods({
-  GET: async () => {
-    const { renderToString } = await import("react-dom/server");
-    const html = renderToString(<EmailVerify fullUrl="#" name="John Doe" />);
-    return new Response(html, { headers: { "Content-Type": "text/html" } });
+export const Route = createFileRoute("/$internal/email-templates-preview")({
+  server: {
+    handlers: {
+      GET: async () => {
+        const { renderToString } = await import("react-dom/server");
+        const { EmailVerify } = await import("~/lib/email/templates/email-verify");
+        const html = renderToString(<EmailVerify fullUrl="#" name="John Doe" />);
+        return new Response(html, { headers: { "Content-Type": "text/html" } });
+      },
+    },
   },
 });

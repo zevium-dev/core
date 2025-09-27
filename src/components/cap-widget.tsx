@@ -59,7 +59,6 @@ export const CapWidget: React.FC<CapWidgetProps> = ({ onSolve, ref }) => {
 
   const { isPending } = useQuery({
     queryFn: async () => {
-      // @ts-expect-error - Cap widget does not have types
       await import("@cap.js/widget");
       return true;
     },

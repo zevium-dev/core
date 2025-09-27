@@ -12,7 +12,7 @@ export function useUserPreferences() {
   const session = useAuthSession();
   const trpc = useTRPCClient();
   const qc = useQueryClient();
-  const userId = session?.user?.id ?? undefined;
+  const userId = session.user?.id ?? undefined;
 
   const enabled = Boolean(userId);
   const queryKey = userId ? ([...BASE_KEY, userId] as const) : BASE_KEY;

@@ -1,6 +1,5 @@
-import { createLazyFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { ArrowRight, BarChart3, Code, Globe, TrendingUp, Users, Zap } from "lucide-react";
-import React from "react";
 
 import { AnimatedBeamZev } from "~/components/animated-beam-zev";
 import { NumberTicker } from "~/components/magicui/number-ticker";
@@ -12,12 +11,12 @@ import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent, CardHeader } from "~/components/ui/card";
 
-export const Route = createLazyFileRoute("/")({
+export const Route = createFileRoute("/")({
   component: Home,
 });
 
 function Home() {
-  const navigate = useNavigate();
+  const navigate = Route.useNavigate();
   return (
     <>
       <PageHeaderContent>

@@ -29,16 +29,16 @@ export function DefaultCatchBoundary({ error }: ErrorComponentProps) {
             Home
           </Link>
         ) : (
-          <Link
+          <a
             className={`rounded bg-gray-600 px-2 py-1 font-extrabold text-white uppercase dark:bg-gray-700`}
+            href="/"
             onClick={(e) => {
               e.preventDefault();
               window.history.back();
             }}
-            to="/"
           >
             Go Back
-          </Link>
+          </a>
         )}
       </div>
     </div>

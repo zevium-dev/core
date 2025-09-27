@@ -1,4 +1,4 @@
-import { createServerFileRoute } from "@tanstack/react-start/server";
+import { createFileRoute } from "@tanstack/react-router";
 
 const API_HOST = "us.i.posthog.com";
 const ASSET_HOST = "us-assets.i.posthog.com";
@@ -31,11 +31,15 @@ const posthogProxy = async (request: Request) => {
   });
 };
 
-export const ServerRoute = createServerFileRoute("/api/posthog/$").methods({
-  GET: ({ request }) => {
-    return posthogProxy(request);
-  },
-  POST: ({ request }) => {
-    return posthogProxy(request);
+export const Route = createFileRoute("/api/posthog/$")({
+  server: {
+    handlers: {
+      GET: ({ request }) => {
+        return posthogProxy(request);
+      },
+      POST: ({ request }) => {
+        return posthogProxy(request);
+      },
+    },
   },
 });

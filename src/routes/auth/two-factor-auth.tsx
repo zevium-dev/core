@@ -46,7 +46,6 @@ function RouteComponent() {
     }
     setEnabling(true);
     try {
-    
       const { data, error: authError } = await auth.twoFactor.enable({ password });
       if (authError) throw new Error(authError.message);
       const uri = data.totpURI;
@@ -71,12 +70,9 @@ function RouteComponent() {
     }
     setVerifying(true);
     try {
-    
       const { error: authError } = await auth.twoFactor.verifyTotp({ code: otp, trustDevice: true });
       if (authError) throw new Error(authError.message);
-      await queryClient
-        .invalidateQueries({ queryKey: ["session"] })
-        .catch(() => null);
+      await queryClient.invalidateQueries({ queryKey: ["session"] }).catch(() => null);
       setStep(3);
     } catch (e) {
       setError((e as Error).message || "Verification failed");
@@ -87,7 +83,7 @@ function RouteComponent() {
 
   return (
     <ScreenCenter>
-      <div className={cn("flex max-w-sm min-w-sm flex-col gap-6")}> 
+      <div className={cn("flex max-w-sm min-w-sm flex-col gap-6")}>
         <Card>
           <CardHeader className="space-y-2 text-center">
             <CardTitle className="text-xl">Two-Factor Authentication</CardTitle>
@@ -101,15 +97,17 @@ function RouteComponent() {
                     <Avatar className="h-14 w-14">
                       <AvatarImage alt={user.name} src={user.image ?? undefined} />
                       <AvatarFallback>
-                        {(((user.name.trim().split(/\s+/)[0]?.[0] || user.email[0]) || "U").toUpperCase())}
+                        {(user.name.trim().split(/\s+/)[0]?.[0] || user.email[0] || "U").toUpperCase()}
                       </AvatarFallback>
                     </Avatar>
                   </div>
-                  <div className="text-sm text-muted-foreground">Signed in as</div>
+                  <div className="text-muted-foreground text-sm">Signed in as</div>
                   <div className="font-medium">{user.email}</div>
                 </div>
                 <div className="grid gap-1">
-                  <Label className="mb-2" htmlFor="password">Enter password to begin</Label>
+                  <Label className="mb-2" htmlFor="password">
+                    Enter password to begin
+                  </Label>
                   <Input
                     aria-describedby={error ? "password-error" : undefined}
                     aria-invalid={!!error}
@@ -131,8 +129,8 @@ function RouteComponent() {
               <div className="grid gap-6">
                 {totpUri && (
                   <div className="flex flex-col items-center gap-2">
-                    <QRCode className="bg-white p-3 rounded" value={totpUri} />
-                    <p className="text-muted-foreground break-all text-center text-xs">
+                    <QRCode className="rounded bg-white p-3" value={totpUri} />
+                    <p className="text-muted-foreground text-center text-xs break-all">
                       Can't scan? Use this key/URL: {totpUri}
                     </p>
                   </div>
@@ -174,7 +172,7 @@ function RouteComponent() {
                   <>
                     <div className="grid grid-cols-2 gap-2 md:grid-cols-3">
                       {backupCodes.map((code) => (
-                        <code className="rounded bg-muted px-2 py-1 text-center text-xs font-mono" key={code}>
+                        <code className="bg-muted rounded px-2 py-1 text-center font-mono text-xs" key={code}>
                           {code}
                         </code>
                       ))}
@@ -225,15 +223,24 @@ function RouteComponent() {
               </Button>
             )}
             {step === 2 && (
-              <Button className="w-full" disabled={otp.length !== 6} loading={verifying} onClick={() => void verifyOtp()}>
+              <Button
+                className="w-full"
+                disabled={otp.length !== 6}
+                loading={verifying}
+                onClick={() => void verifyOtp()}
+              >
                 Verify & Enable
               </Button>
             )}
             {step === 3 && (
-              <Button className="w-full" onClick={() => setStep(4)}>Continue</Button>
+              <Button className="w-full" onClick={() => setStep(4)}>
+                Continue
+              </Button>
             )}
             {step === 4 && (
-              <Button className="w-full" onClick={() => history.back()}>Close</Button>
+              <Button className="w-full" onClick={() => history.back()}>
+                Close
+              </Button>
             )}
           </CardFooter>
         </Card>
@@ -241,4 +248,3 @@ function RouteComponent() {
     </ScreenCenter>
   );
 }
-

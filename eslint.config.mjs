@@ -25,7 +25,7 @@ export default defineConfig(
   reactCompiler.configs.recommended,
   perfectionist.configs["recommended-alphabetical"],
   {
-    ignores: [".nitro", ".output", "node_modules", ".tanstack"],
+    ignores: [".nitro", ".output", "node_modules", ".tanstack", "dist"],
     rules: {
       "@eslint-react/no-context-provider": "off",
       "@typescript-eslint/array-type": ["warn", { default: "generic", readonly: "generic" }],

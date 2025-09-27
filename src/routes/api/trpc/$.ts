@@ -1,4 +1,4 @@
-import { createServerFileRoute } from "@tanstack/react-start/server";
+import { createFileRoute } from "@tanstack/react-router";
 
 const handler = async (req: Request) => {
   const [{ appRouter }, { createServerContext }, { fetchRequestHandler }] = await Promise.all([
@@ -14,11 +14,15 @@ const handler = async (req: Request) => {
   });
 };
 
-export const ServerRoute = createServerFileRoute("/api/trpc/$").methods({
-  GET: ({ request }) => {
-    return handler(request);
-  },
-  POST: ({ request }) => {
-    return handler(request);
+export const Route = createFileRoute("/api/trpc/$")({
+  server: {
+    handlers: {
+      GET: ({ request }) => {
+        return handler(request);
+      },
+      POST: ({ request }) => {
+        return handler(request);
+      },
+    },
   },
 });

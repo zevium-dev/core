@@ -34,7 +34,9 @@ function RouteComponent() {
       if (authError) throw new Error(authError.message);
       try {
         await queryClient.invalidateQueries({ queryKey: ["session"] });
-      } catch { /* noop */ }
+      } catch {
+        /* noop */
+      }
       setRedirectHome(true);
     } catch (e) {
       setError((e as Error).message || "Verification failed");
@@ -54,7 +56,7 @@ function RouteComponent() {
 
   return (
     <ScreenCenter>
-      <div className={cn("flex max-w-sm min-w-sm flex-col gap-6")}> 
+      <div className={cn("flex max-w-sm min-w-sm flex-col gap-6")}>
         <Card>
           <CardHeader className="space-y-2 text-center">
             <img alt="Zevium" className="mx-auto h-10 w-10" src="/icon.png" />
@@ -94,4 +96,3 @@ function RouteComponent() {
     </ScreenCenter>
   );
 }
-

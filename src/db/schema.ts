@@ -12,9 +12,7 @@ export const user = sqliteTable("user", {
   id: text("id").primaryKey(),
   image: text("image"),
   name: text("name").notNull(),
-  twoFactorEnabled: integer("two_factor_enabled", { mode: "boolean" }).default(
-    false,
-  ),
+  twoFactorEnabled: integer("two_factor_enabled", { mode: "boolean" }).default(false),
   updatedAt: integer("updated_at", { mode: "timestamp" })
     .$defaultFn(() => /* @__PURE__ */ new Date())
     .notNull(),

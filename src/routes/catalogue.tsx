@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { createLazyFileRoute } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { Activity, Database, Globe, Search, Shield, Users, Zap } from "lucide-react";
 import { useMemo, useState } from "react";
 
@@ -10,7 +10,7 @@ import { Input } from "~/components/ui/input";
 import { useTRPCClient } from "~/lib/trpc";
 import { cn } from "~/lib/utils";
 
-export const Route = createLazyFileRoute("/catalogue")({
+export const Route = createFileRoute("/catalogue")({
   component: RouteComponent,
 });
 

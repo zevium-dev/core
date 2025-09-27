@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createLazyFileRoute, Link, Outlet, useMatches } from "@tanstack/react-router";
+import { createFileRoute, Link, Outlet, useMatches } from "@tanstack/react-router";
 import {
   AlertCircle,
   ArrowLeft,
@@ -63,7 +63,7 @@ import { Textarea } from "~/components/ui/textarea";
 import { useCopy } from "~/hooks/use-copy";
 import { useTRPCClient } from "~/lib/trpc";
 
-export const Route = createLazyFileRoute("/projects/$slug")({
+export const Route = createFileRoute("/projects/$slug")({
   component: () => (
     <ProtectedRoute>
       <RouteComponent />
