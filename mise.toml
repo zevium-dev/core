@@ -1,5 +1,5 @@
 [tools]
-node = "22.12.0"
+node = "22.16.0"
 
 [hooks]
 postinstall = "yes | npm i -g pnpm && pnpm install"

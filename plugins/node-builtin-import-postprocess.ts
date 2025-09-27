@@ -1,6 +1,6 @@
 import type { PluginOption, ResolvedConfig } from "vite";
 
-import { readdir, readFile, writeFile } from "node:fs/promises";
+import { readdir, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 const REQUIRE_PATTERN = /(var|let|const)\s+(\{[^}]+\}|[\w$]+)\s*=\s*__require\("(node:[^"]+)"\);/g;
@@ -98,6 +98,21 @@ function injectImports(code: string, importStatements: Array<string>): string {
 }
 
 async function rewriteNodeImports(outDir: string) {
+  let directoryStats;
+  try {
+    directoryStats = await stat(outDir);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return;
+    }
+
+    throw error;
+  }
+
+  if (!directoryStats.isDirectory()) {
+    return;
+  }
+
   const jsFiles = await collectJsFiles(outDir);
 
   await Promise.all(jsFiles.map((file) => transformFile(file)));

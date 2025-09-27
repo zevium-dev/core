@@ -713,7 +713,7 @@ export function AccountPreferenceComponent() {
         </Card>
 
         {/* Danger Zone */}
-        <Card className="bg-card/50 border-border/50 border-destructive/20 w-full backdrop-blur-sm">
+        <Card className="bg-card/50 border-border/50 w-full backdrop-blur-sm">
           <CardHeader>
             <CardTitle className="text-destructive flex items-center gap-2">
               <Trash2 className="h-5 w-5" />
