@@ -1,6 +1,6 @@
 import { arktypeResolver } from "@hookform/resolvers/arktype";
 import { SiGoogle } from "@icons-pack/react-simple-icons";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { type } from "arktype";
 import { useRef, useState } from "react";
@@ -29,6 +29,7 @@ export const Route = createFileRoute("/auth/sign-in")({
 });
 
 function RouteComponent() {
+  const queryClient = useQueryClient();
   const capRef = useRef<CapWidgetElement>(null);
   const [capToken, setCapToken] = useState<null | string>(null);
 
@@ -55,6 +56,7 @@ function RouteComponent() {
       capRef.current?.reset();
     },
     onSuccess: () => {
+      void queryClient.invalidateQueries();
       return navigate({ to: "/" });
     },
   });

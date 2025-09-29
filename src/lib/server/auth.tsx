@@ -9,11 +9,13 @@ import { reactStartCookies } from "better-auth/react-start";
 import type { Permissions } from "~/lib/permission";
 
 import { db, schema } from "~/db";
+import { clientEnv } from "~/env/client";
 import { serverEnv } from "~/env/server";
 import { EMAIL_FROM } from "~/lib/constants";
 
 import { sendEmail } from "../email";
 import { EmailVerify, EmailVerifySubject } from "../email/templates/email-verify";
+import { ResetPasswordEmail, ResetPasswordSubject } from "../email/templates/reset-password";
 import { kv } from "../kv";
 import { capCaptcha } from "./better-auth-captcha";
 
@@ -48,6 +50,19 @@ export const authServer = betterAuth({
   emailAndPassword: {
     enabled: true,
     requireEmailVerification: true,
+    sendResetPassword: async (opts, _req) => {
+      await sendEmail({
+        from: EMAIL_FROM,
+        react: (
+          <ResetPasswordEmail
+            fullUrl={clientEnv.VITE_PUBLIC_URL + `/auth/reset-password?token=${encodeURIComponent(opts.token)}`}
+            name={opts.user.name}
+          />
+        ),
+        subject: ResetPasswordSubject,
+        to: [opts.user.email],
+      });
+    },
   },
   emailVerification: {
     autoSignInAfterVerification: true,
@@ -80,11 +95,11 @@ export const authServer = betterAuth({
     reactStartCookies(),
   ],
   rateLimit: {
-    // 200 requests per minute
+    // 60 requests per minute
     enabled: true,
-    max: 200,
+    max: 60,
     storage: "secondary-storage",
-    window: 1000 * 60,
+    window: 60,
   },
   secondaryStorage: {
     delete: async (key) => {
