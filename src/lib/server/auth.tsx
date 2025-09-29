@@ -80,11 +80,11 @@ export const authServer = betterAuth({
     reactStartCookies(),
   ],
   rateLimit: {
-    // 200 requests per minute
+    // 60 requests per minute
     enabled: true,
-    max: 200,
+    max: 60,
     storage: "secondary-storage",
-    window: 1000 * 60,
+    window: 60,
   },
   secondaryStorage: {
     delete: async (key) => {
