@@ -1,3 +1,4 @@
+import { useQueryClient } from "@tanstack/react-query";
 import { Link, useMatches, useRouter } from "@tanstack/react-router";
 import { atom, useAtom } from "jotai";
 import { Building2Icon, Database, DockIcon, HomeIcon, LogIn, LogOut, Moon, Palette, Settings, Sun } from "lucide-react";
@@ -207,16 +208,19 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
 
 // Account Section Component
 function AccountSection() {
+  const queryClient = useQueryClient();
   const user = useUser();
   const { state } = useSidebar();
   const router = useRouter();
 
   const handleSignIn = async () => {
     await router.navigate({ to: "/auth/sign-in" });
+    void queryClient.invalidateQueries();
   };
 
   const handleSignOut = async () => {
     await auth.signOut();
+    void queryClient.invalidateQueries();
   };
 
   const getUserInitials = (u: NonNullable<typeof user>) => {
