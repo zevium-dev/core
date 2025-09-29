@@ -1,4 +1,4 @@
-import { useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { Calendar, Copy, Eye, EyeOff, Loader2, Mail, MapPin, Phone, Shield, Trash2, User } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
@@ -77,13 +77,23 @@ export function AccountPreferenceComponent() {
         const result = await auth.listAccounts();
         if (!result.data) throw new Error("User has no accounts");
         const accounts = result.data;
-        const credentialAccount = accounts.find((a) => a.providerId === "credential");
+        const credentialAccount = accounts.find((a) => a.providerId === "email-password");
         setHasPassword(Boolean(credentialAccount));
       } catch (_e) {
         setHasPassword(false);
       }
     })();
   }, [session?.user.id]);
+
+  const requestPasswordResetMutation = useMutation({
+    mutationFn: () => {
+      const headers = new Headers();
+      return auth.requestPasswordReset({ email: user?.email! }, { headers });
+    },
+    onSuccess: async () => {
+      toast.success("You will receive a password reset link shortly.", { duration: 100 * 1000 });
+    },
+  });
 
   const resetPasswordFields = () => {
     setCurrentPassword("");
@@ -113,40 +123,6 @@ export function AccountPreferenceComponent() {
       resetPasswordFields();
     } catch (e) {
       toast.error((e as Error).message || "Could not change password");
-    } finally {
-      setIsChangingPassword(false);
-    }
-  };
-
-  const handleSetPassword = async () => {
-    if (hasPassword) return; // Should change instead
-    if (!newPassword) {
-      toast.error("Enter a password");
-      return;
-    }
-    if (passwordTooShort || passwordTooLong) {
-      toast.error("Password length invalid");
-      return;
-    }
-    if (newPassword !== confirmPassword) {
-      toast.error("Passwords do not match");
-      return;
-    }
-    setIsChangingPassword(true);
-    try {
-      // setPassword requires server action; We'll call a (to be implemented) internal endpoint /api/auth/set-password
-      // Placeholder minimal implementation using fetch
-      const res = await fetch("/api/auth/set-password", {
-        body: JSON.stringify({ newPassword }),
-        headers: { "Content-Type": "application/json" },
-        method: "POST",
-      });
-      if (!res.ok) throw new Error("Failed to set password");
-      toast.success("Password set successfully");
-      setHasPassword(true);
-      resetPasswordFields();
-    } catch (e) {
-      toast.error((e as Error).message || "Could not set password");
     } finally {
       setIsChangingPassword(false);
     }
@@ -519,49 +495,11 @@ export function AccountPreferenceComponent() {
                 )}
                 {hasPassword === false && (
                   <div className="space-y-3">
-                    <div className="grid gap-3 md:grid-cols-2">
-                      <div className="space-y-2 md:col-span-2">
-                        <Label htmlFor="newPassword">Set Password</Label>
-                        <Input
-                          id="newPassword"
-                          maxLength={MAX_PASSWORD_LENGTH}
-                          onChange={(e) => setNewPassword(e.target.value)}
-                          placeholder="Enter new password"
-                          type={showPasswords ? "text" : "password"}
-                          value={newPassword}
-                        />
-                        {passwordTooShort && (
-                          <p className="text-destructive text-xs">Minimum {MIN_PASSWORD_LENGTH} characters</p>
-                        )}
-                        {passwordTooLong && (
-                          <p className="text-destructive text-xs">Maximum {MAX_PASSWORD_LENGTH} characters</p>
-                        )}
-                      </div>
-                      <div className="space-y-2 md:col-span-2">
-                        <Label htmlFor="confirmPassword">Confirm Password</Label>
-                        <Input
-                          id="confirmPassword"
-                          maxLength={MAX_PASSWORD_LENGTH}
-                          onChange={(e) => setConfirmPassword(e.target.value)}
-                          placeholder="Confirm password"
-                          type={showPasswords ? "text" : "password"}
-                          value={confirmPassword}
-                        />
-                        {confirmMismatch && !passwordTooShort && !passwordTooLong && (
-                          <p className="text-destructive text-xs">Passwords do not match</p>
-                        )}
-                      </div>
-                    </div>
+                    <p className="text-muted-foreground text-sm">
+                      You're currently signed in with OAuth only. To change your password in the future, set a password
+                      first. We will email a secure link to {email || "your email"} to set it.
+                    </p>
                     <div className="flex items-center justify-end gap-2">
-                      <Button
-                        className="mr-auto"
-                        onClick={() => setShowPasswords((p) => !p)}
-                        size="sm"
-                        type="button"
-                        variant="ghost"
-                      >
-                        {showPasswords ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                      </Button>
                       <Button
                         onClick={() => {
                           setShowPasswordEditor(false);
@@ -573,19 +511,12 @@ export function AccountPreferenceComponent() {
                       >
                         Close
                       </Button>
-                      <Button
-                        disabled={
-                          isChangingPassword ||
-                          !newPassword ||
-                          passwordTooShort ||
-                          passwordTooLong ||
-                          newPassword !== confirmPassword
-                        }
-                        onClick={() => void handleSetPassword()}
-                        size="sm"
-                        type="button"
-                      >
-                        {isChangingPassword ? <Loader2 className="h-4 w-4 animate-spin" /> : "Set Password"}
+                      <Button disabled={requestPasswordResetMutation.isPending} onClick={() => requestPasswordResetMutation.mutate()} size="sm" type="button">
+                        {requestPasswordResetMutation.isPending ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          "Email set-password link"
+                        )}
                       </Button>
                     </div>
                   </div>
