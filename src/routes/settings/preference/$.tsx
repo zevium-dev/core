@@ -20,7 +20,7 @@ export const Route = createFileRoute("/settings/preference/$")({
   component: AccountPreferenceComponent,
 });
 
-export function AccountPreferenceComponent() {
+function AccountPreferenceComponent() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const { data: session, isPending } = auth.useSession();

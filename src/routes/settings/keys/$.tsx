@@ -67,7 +67,7 @@ export const Route = createFileRoute("/settings/keys/$")({
   component: ApiKeysComponent,
 });
 
-export function ApiKeysComponent() {
+function ApiKeysComponent() {
   // State
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
