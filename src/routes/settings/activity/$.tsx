@@ -162,7 +162,7 @@ const chartData = {
   },
 };
 
-export function ActivityComponent() {
+function ActivityComponent() {
   const [dateFrom, setDateFrom] = useState("04-08-2025");
   const [dateTo, setDateTo] = useState("03-09-2025");
   const [timeFilter, setTimeFilter] = useState("1 Month");

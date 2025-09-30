@@ -4,6 +4,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { type } from "arktype";
 import { useRef, useState } from "react";
 import { useForm } from "react-hook-form";
+import { toast } from "sonner";
 
 import { CapWidget, type CapWidgetElement } from "~/components/cap-widget";
 import { Redirect } from "~/components/redirect";
@@ -27,6 +28,7 @@ export const Route = createFileRoute("/auth/forgot-password")({
 });
 
 function RouteComponent() {
+  const navigate = Route.useNavigate();
   const capRef = useRef<CapWidgetElement>(null);
   const [capToken, setCapToken] = useState<null | string>(null);
 
@@ -50,6 +52,10 @@ function RouteComponent() {
     },
     onSettled: () => {
       capRef.current?.reset();
+    },
+    onSuccess: async () => {
+      await navigate({ to: "/auth/sign-in" });
+      toast.success("You will receive a password reset link shortly.", { duration: 100 * 1000 });
     },
   });
 

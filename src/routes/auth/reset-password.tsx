@@ -5,6 +5,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { TRPCClientError } from "@trpc/client";
 import { type } from "arktype";
 import { useForm } from "react-hook-form";
+import { toast } from "sonner";
 
 import { Redirect } from "~/components/redirect";
 import { Button } from "~/components/ui/button";
@@ -32,6 +33,7 @@ export const Route = createFileRoute("/auth/reset-password")({
 });
 
 function RouteComponent() {
+  const navigate = Route.useNavigate();
   const { token } = Route.useSearch();
 
   const {
@@ -52,6 +54,10 @@ function RouteComponent() {
       const passwordConfirm = data.passwordConfirm;
       if (password !== passwordConfirm) throw new TRPCClientError("Passwords do not match");
       return auth.resetPassword({ newPassword: password, token });
+    },
+    onSuccess: async () => {
+      await navigate({ to: "/auth/sign-in" });
+      toast.success("Reset successful. Please sign in.", { duration: 100 * 1000 });
     },
   });
 
