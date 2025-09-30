@@ -86,11 +86,12 @@ function AccountPreferenceComponent() {
   }, [session?.user.id]);
 
   const requestPasswordResetMutation = useMutation({
-    mutationFn: () => {
+    mutationFn: async () => {
+      if (!user) return Promise.reject(new Error("User unavailable"));
       const headers = new Headers();
-      return auth.requestPasswordReset({ email: user?.email! }, { headers });
+      return auth.requestPasswordReset({ email: user.email }, { headers });
     },
-    onSuccess: async () => {
+    onSuccess: () => {
       toast.success("You will receive a password reset link shortly.", { duration: 100 * 1000 });
     },
   });
@@ -511,7 +512,12 @@ function AccountPreferenceComponent() {
                       >
                         Close
                       </Button>
-                      <Button disabled={requestPasswordResetMutation.isPending} onClick={() => requestPasswordResetMutation.mutate()} size="sm" type="button">
+                      <Button
+                        disabled={requestPasswordResetMutation.isPending}
+                        onClick={() => requestPasswordResetMutation.mutate()}
+                        size="sm"
+                        type="button"
+                      >
                         {requestPasswordResetMutation.isPending ? (
                           <Loader2 className="h-4 w-4 animate-spin" />
                         ) : (
