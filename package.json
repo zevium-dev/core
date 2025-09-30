@@ -15,6 +15,7 @@
     "format:check": "prettier --check .",
     "lint": "rimraf dist && eslint .",
     "prepush": "pnpm run typecheck && pnpm run format",
+    "precheck": "pnpm run typecheck && pnpm run format:check", 
     "typecheck": "tsgo --noEmit"
   },
   "devDependencies": {
