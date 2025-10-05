@@ -11,10 +11,14 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as CatalogueRouteImport } from './routes/catalogue'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as SettingsIndexRouteImport } from './routes/settings/index'
 import { Route as ProjectsIndexRouteImport } from './routes/projects/index'
 import { Route as PricingIndexRouteImport } from './routes/pricing/index'
 import { Route as OrganizationsIndexRouteImport } from './routes/organizations/index'
-import { Route as SettingsSplatRouteImport } from './routes/settings/$'
+import { Route as SettingsPreferenceRouteImport } from './routes/settings/preference'
+import { Route as SettingsKeysRouteImport } from './routes/settings/keys'
+import { Route as SettingsCreditsRouteImport } from './routes/settings/credits'
+import { Route as SettingsActivityRouteImport } from './routes/settings/activity'
 import { Route as ProjectsSlugRouteImport } from './routes/projects/$slug'
 import { Route as OrganizationsSlugRouteImport } from './routes/organizations/$slug'
 import { Route as AuthVerifyEmailRouteImport } from './routes/auth/verify-email'
@@ -27,10 +31,6 @@ import { Route as AuthResetPasswordRouteImport } from './routes/auth/reset-passw
 import { Route as AuthForgotPasswordRouteImport } from './routes/auth/forgot-password'
 import { Route as AuthChangePasswordRouteImport } from './routes/auth/change-password'
 import { Route as InternalEmailTemplatesPreviewRouteImport } from './routes/$internal/email-templates-preview'
-import { Route as SettingsPreferenceSplatRouteImport } from './routes/settings/preference/$'
-import { Route as SettingsKeysSplatRouteImport } from './routes/settings/keys/$'
-import { Route as SettingsCreditsSplatRouteImport } from './routes/settings/credits/$'
-import { Route as SettingsActivitySplatRouteImport } from './routes/settings/activity/$'
 import { Route as ApiTrpcSplatRouteImport } from './routes/api/trpc/$'
 import { Route as ApiPosthogSplatRouteImport } from './routes/api/posthog/$'
 import { Route as ApiOpenapiSplatRouteImport } from './routes/api/openapi/$'
@@ -48,6 +48,11 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SettingsIndexRoute = SettingsIndexRouteImport.update({
+  id: '/settings/',
+  path: '/settings/',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ProjectsIndexRoute = ProjectsIndexRouteImport.update({
   id: '/projects/',
   path: '/projects/',
@@ -63,9 +68,24 @@ const OrganizationsIndexRoute = OrganizationsIndexRouteImport.update({
   path: '/organizations/',
   getParentRoute: () => rootRouteImport,
 } as any)
-const SettingsSplatRoute = SettingsSplatRouteImport.update({
-  id: '/settings/$',
-  path: '/settings/$',
+const SettingsPreferenceRoute = SettingsPreferenceRouteImport.update({
+  id: '/settings/preference',
+  path: '/settings/preference',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SettingsKeysRoute = SettingsKeysRouteImport.update({
+  id: '/settings/keys',
+  path: '/settings/keys',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SettingsCreditsRoute = SettingsCreditsRouteImport.update({
+  id: '/settings/credits',
+  path: '/settings/credits',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SettingsActivityRoute = SettingsActivityRouteImport.update({
+  id: '/settings/activity',
+  path: '/settings/activity',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ProjectsSlugRoute = ProjectsSlugRouteImport.update({
@@ -129,26 +149,6 @@ const InternalEmailTemplatesPreviewRoute =
     path: '/$internal/email-templates-preview',
     getParentRoute: () => rootRouteImport,
   } as any)
-const SettingsPreferenceSplatRoute = SettingsPreferenceSplatRouteImport.update({
-  id: '/settings/preference/$',
-  path: '/settings/preference/$',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const SettingsKeysSplatRoute = SettingsKeysSplatRouteImport.update({
-  id: '/settings/keys/$',
-  path: '/settings/keys/$',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const SettingsCreditsSplatRoute = SettingsCreditsSplatRouteImport.update({
-  id: '/settings/credits/$',
-  path: '/settings/credits/$',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const SettingsActivitySplatRoute = SettingsActivitySplatRouteImport.update({
-  id: '/settings/activity/$',
-  path: '/settings/activity/$',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const ApiTrpcSplatRoute = ApiTrpcSplatRouteImport.update({
   id: '/api/trpc/$',
   path: '/api/trpc/$',
@@ -195,19 +195,19 @@ export interface FileRoutesByFullPath {
   '/auth/verify-email': typeof AuthVerifyEmailRoute
   '/organizations/$slug': typeof OrganizationsSlugRoute
   '/projects/$slug': typeof ProjectsSlugRouteWithChildren
-  '/settings/$': typeof SettingsSplatRoute
+  '/settings/activity': typeof SettingsActivityRoute
+  '/settings/credits': typeof SettingsCreditsRoute
+  '/settings/keys': typeof SettingsKeysRoute
+  '/settings/preference': typeof SettingsPreferenceRoute
   '/organizations': typeof OrganizationsIndexRoute
   '/pricing': typeof PricingIndexRoute
   '/projects': typeof ProjectsIndexRoute
+  '/settings': typeof SettingsIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/cap/$': typeof ApiCapSplatRoute
   '/api/openapi/$': typeof ApiOpenapiSplatRoute
   '/api/posthog/$': typeof ApiPosthogSplatRoute
   '/api/trpc/$': typeof ApiTrpcSplatRoute
-  '/settings/activity/$': typeof SettingsActivitySplatRoute
-  '/settings/credits/$': typeof SettingsCreditsSplatRoute
-  '/settings/keys/$': typeof SettingsKeysSplatRoute
-  '/settings/preference/$': typeof SettingsPreferenceSplatRoute
   '/projects/$slug/view/$version': typeof ProjectsSlugViewVersionRoute
 }
 export interface FileRoutesByTo {
@@ -225,19 +225,19 @@ export interface FileRoutesByTo {
   '/auth/verify-email': typeof AuthVerifyEmailRoute
   '/organizations/$slug': typeof OrganizationsSlugRoute
   '/projects/$slug': typeof ProjectsSlugRouteWithChildren
-  '/settings/$': typeof SettingsSplatRoute
+  '/settings/activity': typeof SettingsActivityRoute
+  '/settings/credits': typeof SettingsCreditsRoute
+  '/settings/keys': typeof SettingsKeysRoute
+  '/settings/preference': typeof SettingsPreferenceRoute
   '/organizations': typeof OrganizationsIndexRoute
   '/pricing': typeof PricingIndexRoute
   '/projects': typeof ProjectsIndexRoute
+  '/settings': typeof SettingsIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/cap/$': typeof ApiCapSplatRoute
   '/api/openapi/$': typeof ApiOpenapiSplatRoute
   '/api/posthog/$': typeof ApiPosthogSplatRoute
   '/api/trpc/$': typeof ApiTrpcSplatRoute
-  '/settings/activity/$': typeof SettingsActivitySplatRoute
-  '/settings/credits/$': typeof SettingsCreditsSplatRoute
-  '/settings/keys/$': typeof SettingsKeysSplatRoute
-  '/settings/preference/$': typeof SettingsPreferenceSplatRoute
   '/projects/$slug/view/$version': typeof ProjectsSlugViewVersionRoute
 }
 export interface FileRoutesById {
@@ -256,19 +256,19 @@ export interface FileRoutesById {
   '/auth/verify-email': typeof AuthVerifyEmailRoute
   '/organizations/$slug': typeof OrganizationsSlugRoute
   '/projects/$slug': typeof ProjectsSlugRouteWithChildren
-  '/settings/$': typeof SettingsSplatRoute
+  '/settings/activity': typeof SettingsActivityRoute
+  '/settings/credits': typeof SettingsCreditsRoute
+  '/settings/keys': typeof SettingsKeysRoute
+  '/settings/preference': typeof SettingsPreferenceRoute
   '/organizations/': typeof OrganizationsIndexRoute
   '/pricing/': typeof PricingIndexRoute
   '/projects/': typeof ProjectsIndexRoute
+  '/settings/': typeof SettingsIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/cap/$': typeof ApiCapSplatRoute
   '/api/openapi/$': typeof ApiOpenapiSplatRoute
   '/api/posthog/$': typeof ApiPosthogSplatRoute
   '/api/trpc/$': typeof ApiTrpcSplatRoute
-  '/settings/activity/$': typeof SettingsActivitySplatRoute
-  '/settings/credits/$': typeof SettingsCreditsSplatRoute
-  '/settings/keys/$': typeof SettingsKeysSplatRoute
-  '/settings/preference/$': typeof SettingsPreferenceSplatRoute
   '/projects/$slug/view/$version': typeof ProjectsSlugViewVersionRoute
 }
 export interface FileRouteTypes {
@@ -288,19 +288,19 @@ export interface FileRouteTypes {
     | '/auth/verify-email'
     | '/organizations/$slug'
     | '/projects/$slug'
-    | '/settings/$'
+    | '/settings/activity'
+    | '/settings/credits'
+    | '/settings/keys'
+    | '/settings/preference'
     | '/organizations'
     | '/pricing'
     | '/projects'
+    | '/settings'
     | '/api/auth/$'
     | '/api/cap/$'
     | '/api/openapi/$'
     | '/api/posthog/$'
     | '/api/trpc/$'
-    | '/settings/activity/$'
-    | '/settings/credits/$'
-    | '/settings/keys/$'
-    | '/settings/preference/$'
     | '/projects/$slug/view/$version'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -318,19 +318,19 @@ export interface FileRouteTypes {
     | '/auth/verify-email'
     | '/organizations/$slug'
     | '/projects/$slug'
-    | '/settings/$'
+    | '/settings/activity'
+    | '/settings/credits'
+    | '/settings/keys'
+    | '/settings/preference'
     | '/organizations'
     | '/pricing'
     | '/projects'
+    | '/settings'
     | '/api/auth/$'
     | '/api/cap/$'
     | '/api/openapi/$'
     | '/api/posthog/$'
     | '/api/trpc/$'
-    | '/settings/activity/$'
-    | '/settings/credits/$'
-    | '/settings/keys/$'
-    | '/settings/preference/$'
     | '/projects/$slug/view/$version'
   id:
     | '__root__'
@@ -348,19 +348,19 @@ export interface FileRouteTypes {
     | '/auth/verify-email'
     | '/organizations/$slug'
     | '/projects/$slug'
-    | '/settings/$'
+    | '/settings/activity'
+    | '/settings/credits'
+    | '/settings/keys'
+    | '/settings/preference'
     | '/organizations/'
     | '/pricing/'
     | '/projects/'
+    | '/settings/'
     | '/api/auth/$'
     | '/api/cap/$'
     | '/api/openapi/$'
     | '/api/posthog/$'
     | '/api/trpc/$'
-    | '/settings/activity/$'
-    | '/settings/credits/$'
-    | '/settings/keys/$'
-    | '/settings/preference/$'
     | '/projects/$slug/view/$version'
   fileRoutesById: FileRoutesById
 }
@@ -379,19 +379,19 @@ export interface RootRouteChildren {
   AuthVerifyEmailRoute: typeof AuthVerifyEmailRoute
   OrganizationsSlugRoute: typeof OrganizationsSlugRoute
   ProjectsSlugRoute: typeof ProjectsSlugRouteWithChildren
-  SettingsSplatRoute: typeof SettingsSplatRoute
+  SettingsActivityRoute: typeof SettingsActivityRoute
+  SettingsCreditsRoute: typeof SettingsCreditsRoute
+  SettingsKeysRoute: typeof SettingsKeysRoute
+  SettingsPreferenceRoute: typeof SettingsPreferenceRoute
   OrganizationsIndexRoute: typeof OrganizationsIndexRoute
   PricingIndexRoute: typeof PricingIndexRoute
   ProjectsIndexRoute: typeof ProjectsIndexRoute
+  SettingsIndexRoute: typeof SettingsIndexRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
   ApiCapSplatRoute: typeof ApiCapSplatRoute
   ApiOpenapiSplatRoute: typeof ApiOpenapiSplatRoute
   ApiPosthogSplatRoute: typeof ApiPosthogSplatRoute
   ApiTrpcSplatRoute: typeof ApiTrpcSplatRoute
-  SettingsActivitySplatRoute: typeof SettingsActivitySplatRoute
-  SettingsCreditsSplatRoute: typeof SettingsCreditsSplatRoute
-  SettingsKeysSplatRoute: typeof SettingsKeysSplatRoute
-  SettingsPreferenceSplatRoute: typeof SettingsPreferenceSplatRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -408,6 +408,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/settings/': {
+      id: '/settings/'
+      path: '/settings'
+      fullPath: '/settings'
+      preLoaderRoute: typeof SettingsIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/projects/': {
@@ -431,11 +438,32 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OrganizationsIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/settings/$': {
-      id: '/settings/$'
-      path: '/settings/$'
-      fullPath: '/settings/$'
-      preLoaderRoute: typeof SettingsSplatRouteImport
+    '/settings/preference': {
+      id: '/settings/preference'
+      path: '/settings/preference'
+      fullPath: '/settings/preference'
+      preLoaderRoute: typeof SettingsPreferenceRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/settings/keys': {
+      id: '/settings/keys'
+      path: '/settings/keys'
+      fullPath: '/settings/keys'
+      preLoaderRoute: typeof SettingsKeysRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/settings/credits': {
+      id: '/settings/credits'
+      path: '/settings/credits'
+      fullPath: '/settings/credits'
+      preLoaderRoute: typeof SettingsCreditsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/settings/activity': {
+      id: '/settings/activity'
+      path: '/settings/activity'
+      fullPath: '/settings/activity'
+      preLoaderRoute: typeof SettingsActivityRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/projects/$slug': {
@@ -522,34 +550,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof InternalEmailTemplatesPreviewRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/settings/preference/$': {
-      id: '/settings/preference/$'
-      path: '/settings/preference/$'
-      fullPath: '/settings/preference/$'
-      preLoaderRoute: typeof SettingsPreferenceSplatRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/settings/keys/$': {
-      id: '/settings/keys/$'
-      path: '/settings/keys/$'
-      fullPath: '/settings/keys/$'
-      preLoaderRoute: typeof SettingsKeysSplatRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/settings/credits/$': {
-      id: '/settings/credits/$'
-      path: '/settings/credits/$'
-      fullPath: '/settings/credits/$'
-      preLoaderRoute: typeof SettingsCreditsSplatRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/settings/activity/$': {
-      id: '/settings/activity/$'
-      path: '/settings/activity/$'
-      fullPath: '/settings/activity/$'
-      preLoaderRoute: typeof SettingsActivitySplatRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/api/trpc/$': {
       id: '/api/trpc/$'
       path: '/api/trpc/$'
@@ -622,19 +622,19 @@ const rootRouteChildren: RootRouteChildren = {
   AuthVerifyEmailRoute: AuthVerifyEmailRoute,
   OrganizationsSlugRoute: OrganizationsSlugRoute,
   ProjectsSlugRoute: ProjectsSlugRouteWithChildren,
-  SettingsSplatRoute: SettingsSplatRoute,
+  SettingsActivityRoute: SettingsActivityRoute,
+  SettingsCreditsRoute: SettingsCreditsRoute,
+  SettingsKeysRoute: SettingsKeysRoute,
+  SettingsPreferenceRoute: SettingsPreferenceRoute,
   OrganizationsIndexRoute: OrganizationsIndexRoute,
   PricingIndexRoute: PricingIndexRoute,
   ProjectsIndexRoute: ProjectsIndexRoute,
+  SettingsIndexRoute: SettingsIndexRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
   ApiCapSplatRoute: ApiCapSplatRoute,
   ApiOpenapiSplatRoute: ApiOpenapiSplatRoute,
   ApiPosthogSplatRoute: ApiPosthogSplatRoute,
   ApiTrpcSplatRoute: ApiTrpcSplatRoute,
-  SettingsActivitySplatRoute: SettingsActivitySplatRoute,
-  SettingsCreditsSplatRoute: SettingsCreditsSplatRoute,
-  SettingsKeysSplatRoute: SettingsKeysSplatRoute,
-  SettingsPreferenceSplatRoute: SettingsPreferenceSplatRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
