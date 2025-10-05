@@ -13,29 +13,24 @@ import { Input } from "~/components/ui/input";
 import { Label } from "~/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "~/components/ui/select";
 import { Separator } from "~/components/ui/separator";
-import { useUserPreferences } from "~/hooks/use-user-preferences";
-import { auth } from "~/lib/auth";
+import { useUserPreferencesMutation, useUserPreferencesQuery } from "~/hooks/use-user-preferences";
+import { auth, useUser } from "~/lib/auth";
 
-export const Route = createFileRoute("/settings/preference/$")({
+export const Route = createFileRoute("/settings/preference")({
   component: AccountPreferenceComponent,
 });
 
 function AccountPreferenceComponent() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
-  const { data: session, isPending } = auth.useSession();
-  const user = session?.user;
+  const user = useUser();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [location, setLocation] = useState("");
-  const [timezone, setTimezone] = useState("");
-  const {
-    isLoading: prefsLoading,
-    isUpdating: _prefsSaving,
-    preferences,
-    update: updatePreferences,
-  } = useUserPreferences();
+  const userPreferencesMutation = useUserPreferencesMutation();
+  const userPreferencesQuery = useUserPreferencesQuery();
+  const [timezone, setTimezone] = useState(userPreferencesQuery.data?.timezone ?? "");
   const [isSaving, setIsSaving] = useState(false);
   // Password management UI state
   const [showPasswords, setShowPasswords] = useState(false);
@@ -63,11 +58,11 @@ function AccountPreferenceComponent() {
 
   // Sync timezone from preferences when loaded (only set if empty locally)
   useEffect(() => {
-    if (preferences?.timezone && !timezone) {
+    if (userPreferencesQuery.data?.timezone && !timezone) {
       // eslint-disable-next-line @eslint-react/hooks-extra/no-direct-set-state-in-use-effect
-      setTimezone(preferences.timezone);
+      setTimezone(userPreferencesQuery.data.timezone);
     }
-  }, [preferences?.timezone, timezone]);
+  }, [userPreferencesQuery.data?.timezone, timezone]);
 
   // Detect whether user already has a password-based (credential) account.
   // Better Auth exposes listAccounts() on client per docs (listAccounts not yet imported in codebase, so we feature-detect)
@@ -83,7 +78,7 @@ function AccountPreferenceComponent() {
         setHasPassword(false);
       }
     })();
-  }, [session?.user.id]);
+  }, [user?.id]);
 
   const requestPasswordResetMutation = useMutation({
     mutationFn: async () => {
@@ -140,8 +135,8 @@ function AccountPreferenceComponent() {
         if (error) throw new Error(error.message);
       }
       // 2. Update timezone preference only if it changed (was previously saved on each select)
-      if (timezone && timezone !== (preferences?.timezone ?? "")) {
-        await updatePreferences({ timezone });
+      if (timezone && timezone !== (userPreferencesQuery.data?.timezone ?? "")) {
+        await userPreferencesMutation.mutateAsync({ timezone });
       }
       toast.success("Changes saved");
     } catch (e) {
@@ -149,7 +144,7 @@ function AccountPreferenceComponent() {
     } finally {
       setIsSaving(false);
     }
-  }, [name, timezone, user, preferences?.timezone, updatePreferences]);
+  }, [name, timezone, user, userPreferencesQuery.data?.timezone, userPreferencesMutation]);
 
   // 2FA manage (enabled state) - inline controls
   const [twoFactorOpen, setTwoFactorOpen] = useState(false);
@@ -249,8 +244,12 @@ function AccountPreferenceComponent() {
                 </Avatar>
               </div>
               <div className="space-y-1">
-                <h3 className="text-lg font-medium">{name || (isPending ? "Loading..." : "Unnamed User")}</h3>
-                <p className="text-muted-foreground text-sm">{email || (isPending ? "" : "No email")}</p>
+                <h3 className="text-lg font-medium">
+                  {name || (userPreferencesQuery.isPending ? "Loading..." : "Unnamed User")}
+                </h3>
+                <p className="text-muted-foreground text-sm">
+                  {email || (userPreferencesQuery.isPending ? "" : "No email")}
+                </p>
                 <Button disabled size="sm" title="Avatar upload coming soon" variant="outline">
                   Change Photo
                 </Button>
@@ -289,7 +288,7 @@ function AccountPreferenceComponent() {
                   id="email"
                 >
                   <span className="truncate select-text" title={email}>
-                    {email || (isPending ? "Loading..." : "No email")}
+                    {email || (userPreferencesQuery.isPending ? "Loading..." : "No email")}
                   </span>
                   {email && (
                     <Button
@@ -352,7 +351,7 @@ function AccountPreferenceComponent() {
                 Timezone
               </Label>
               <Select
-                disabled={prefsLoading}
+                disabled={userPreferencesQuery.isPending || userPreferencesMutation.isPending}
                 onValueChange={(val) => {
                   // Only update local state; defer persistence until Save is clicked
                   setTimezone(val);
@@ -360,7 +359,7 @@ function AccountPreferenceComponent() {
                 value={timezone}
               >
                 <SelectTrigger>
-                  <SelectValue placeholder={prefsLoading ? "Loading..." : "Select timezone"} />
+                  <SelectValue placeholder={userPreferencesQuery.isPending ? "Loading..." : "Select timezone"} />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="PST">Pacific Standard Time (PST)</SelectItem>
@@ -676,7 +675,8 @@ function AccountPreferenceComponent() {
             disabled={
               isSaving ||
               !user ||
-              (name.trim() === user.name && (timezone === "" || timezone === (preferences?.timezone ?? "")))
+              (name.trim() === user.name &&
+                (timezone === "" || timezone === (userPreferencesQuery.data?.timezone ?? "")))
             }
             onClick={() => void handleSave()}
           >
@@ -685,5 +685,5 @@ function AccountPreferenceComponent() {
         </div>
       </div>
     </ProtectedRoute>
-  );
+  )
 }
