@@ -91,6 +91,7 @@ export function OpenApiFileUpload({
 
     const files = e.dataTransfer.files;
     if (files.length > 0) {
+      // eslint-disable-next-line prefer-array-at/prefer-array-at
       const file = files[0];
       if (isValidFileType(file)) {
         void validateFile(file);
@@ -103,6 +104,7 @@ export function OpenApiFileUpload({
 
     const files = e.target.files;
     if (files && files.length > 0) {
+      // eslint-disable-next-line prefer-array-at/prefer-array-at
       const file = files[0];
       if (isValidFileType(file)) {
         void validateFile(file);

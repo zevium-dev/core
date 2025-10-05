@@ -109,11 +109,12 @@ export async function getProjectCategoryById(id: string): Promise<null | Project
   try {
     const category = await db.select().from(schema.projectCategory).where(eq(schema.projectCategory.id, id)).limit(1);
 
-    if (category.length === 0) {
+    const result = category.at(0);
+
+    if (!result) {
       return null;
     }
 
-    const result = category[0];
     return {
       createdAt: result.createdAt,
       description: result.description,

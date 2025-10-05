@@ -161,7 +161,7 @@ export const PricingCard = ({ buttonProps, className, productId }: PricingCardPr
 
   const mainPriceDisplay = product.properties.is_free
     ? { primary_text: "Free" }
-    : (product.items[0].display ?? { primary_text: "" });
+    : (product.items.at(0)?.display ?? { primary_text: "" });
 
   const featureItems = product.properties.is_free ? product.items : product.items.slice(1);
 

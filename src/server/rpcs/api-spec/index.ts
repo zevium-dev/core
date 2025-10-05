@@ -260,7 +260,7 @@ export const apiSpecRouter = router({
           throw new Error("Access denied: You don't have access to this project");
         }
 
-        const userRole = projectMember[0]?.role;
+        const userRole = projectMember.at(0)?.role;
         if (userRole === "viewer") {
           throw new Error("Access denied: You don't have permission to upload specifications");
         }
@@ -414,7 +414,7 @@ export const apiSpecRouter = router({
 
             if (existingSpecByHash.length > 0 && !input.isUpdate) {
               processingErrors.push(
-                `${file.name}: This specification already exists in version "${existingSpecByHash[0]?.versionLabel}"`,
+                `${file.name}: This specification already exists in version "${existingSpecByHash.at(0)?.versionLabel}"`,
               );
               continue;
             }
