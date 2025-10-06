@@ -14,8 +14,8 @@
     "format": "rimraf dist && eslint --fix . && prettier --write .",
     "format:check": "prettier --check .",
     "lint": "rimraf dist && eslint .",
+    "precheck": "pnpm run typecheck && pnpm run format:check",
     "prepush": "pnpm run typecheck && pnpm run format",
-    "precheck": "pnpm run typecheck && pnpm run format:check", 
     "typecheck": "tsgo --noEmit"
   },
   "devDependencies": {
