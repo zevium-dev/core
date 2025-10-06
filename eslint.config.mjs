@@ -1,5 +1,6 @@
 // @ts-check
 
+import preferArrayAt from "@boi.gg/eslint-plugin-prefer-array-at";
 import eslintReact from "@eslint-react/eslint-plugin";
 import eslint from "@eslint/js";
 import perfectionist from "eslint-plugin-perfectionist";
@@ -7,8 +8,6 @@ import reactCompiler from "eslint-plugin-react-compiler";
 import reactHooks from "eslint-plugin-react-hooks";
 import { defineConfig } from "eslint/config";
 import tseslint from "typescript-eslint";
-
-import preferArrayAt from "./eslint/prefer-array-at.mjs";
 
 export default defineConfig(
   {
