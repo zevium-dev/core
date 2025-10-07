@@ -1,0 +1,32 @@
+name: Database Migration
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["develop"]
+    paths:
+      - "drizzle/**"
+
+env:
+  MISE_EXPERIMENTAL: true
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: jdx/mise-action@v2
+
+      - name: Install migration dependencies
+        run: pnpm install
+
+      - name: Run database migration
+        env:
+          LIBSQL_URL: ${{ secrets.LIBSQL_URL }}
+          LIBSQL_SECRET: ${{ secrets.LIBSQL_SECRET }}
+        run: npx drizzle-kit migrate
+
+      - name: Migration completed
+        run: echo "✅ Database migration completed successfully"
