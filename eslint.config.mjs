@@ -8,6 +8,8 @@ import reactHooks from "eslint-plugin-react-hooks";
 import { defineConfig } from "eslint/config";
 import tseslint from "typescript-eslint";
 
+import preferArrayAt from "./eslint/prefer-array-at.mjs";
+
 export default defineConfig(
   {
     languageOptions: {
@@ -24,6 +26,7 @@ export default defineConfig(
   reactHooks.configs["recommended-latest"],
   reactCompiler.configs.recommended,
   perfectionist.configs["recommended-alphabetical"],
+  preferArrayAt.configs.recommended,
   {
     ignores: [".nitro", ".output", "node_modules", ".tanstack", "dist"],
     rules: {

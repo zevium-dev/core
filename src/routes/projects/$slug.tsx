@@ -587,8 +587,9 @@ function ProjectHeader({
 
   // Set default version to the latest if none selected
   React.useEffect(() => {
-    if (!selectedVersion && uniqueVersions.length > 0) {
-      onVersionChange(uniqueVersions[0]);
+    const latestVersion = uniqueVersions.at(0);
+    if (!selectedVersion && latestVersion) {
+      onVersionChange(latestVersion);
     }
   }, [uniqueVersions, selectedVersion, onVersionChange]);
 
@@ -1251,7 +1252,7 @@ function TeamManagementSection({ project }: { project: ProjectData }) {
                       <AvatarFallback>
                         {member.userName
                           .split(" ")
-                          .map((n: string) => n[0])
+                          .map((n: string) => n.at(0))
                           .join("")}
                       </AvatarFallback>
                     </Avatar>

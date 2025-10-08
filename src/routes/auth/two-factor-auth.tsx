@@ -97,7 +97,7 @@ function RouteComponent() {
                     <Avatar className="h-14 w-14">
                       <AvatarImage alt={user.name} src={user.image ?? undefined} />
                       <AvatarFallback>
-                        {(user.name.trim().split(/\s+/)[0]?.[0] || user.email[0] || "U").toUpperCase()}
+                        {(user.name.trim().split(/\s+/).at(0)?.at(0) ?? user.email.at(0) ?? "U").toUpperCase()}
                       </AvatarFallback>
                     </Avatar>
                   </div>

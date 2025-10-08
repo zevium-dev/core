@@ -35,7 +35,7 @@ export async function createApiSpec({ parsedSpec, projectId, userId, versionLabe
   }
 
   // Check if user has permission to upload specs
-  const userRole = projectMember[0]?.role;
+  const userRole = projectMember.at(0)?.role;
   if (userRole === "viewer") {
     throw new Error("Access denied: You don't have permission to upload specifications");
   }
@@ -122,7 +122,11 @@ export async function createApiSpec({ parsedSpec, projectId, userId, versionLabe
     .where(eq(schema.apiSpec.id, specId))
     .limit(1);
 
-  const result = createdSpec[0];
+  const result = createdSpec.at(0);
+
+  if (!result) {
+    throw new Error("Failed to retrieve the created API specification");
+  }
 
   return {
     ...result,
@@ -164,7 +168,9 @@ export async function getApiSpecById(specId: string, userId: string) {
   const projectMember = await db
     .select({ role: schema.projectMember.role })
     .from(schema.projectMember)
-    .where(and(eq(schema.projectMember.projectId, spec[0]?.projectId || ""), eq(schema.projectMember.userId, userId)))
+    .where(
+      and(eq(schema.projectMember.projectId, spec.at(0)?.projectId ?? ""), eq(schema.projectMember.userId, userId)),
+    )
     .limit(1);
 
   if (projectMember.length === 0) {
@@ -187,7 +193,11 @@ export async function getApiSpecById(specId: string, userId: string) {
     .from(schema.apiEndpoint)
     .where(eq(schema.apiEndpoint.specId, specId));
 
-  const result = spec[0];
+  const result = spec.at(0);
+
+  if (!result) {
+    throw new Error("Failed to retrieve the API specification");
+  }
 
   return {
     ...result,
@@ -272,14 +282,16 @@ export async function updateApiSpecStatus(
   const projectMember = await db
     .select({ role: schema.projectMember.role })
     .from(schema.projectMember)
-    .where(and(eq(schema.projectMember.projectId, spec[0]?.projectId || ""), eq(schema.projectMember.userId, userId)))
+    .where(
+      and(eq(schema.projectMember.projectId, spec.at(0)?.projectId ?? ""), eq(schema.projectMember.userId, userId)),
+    )
     .limit(1);
 
   if (projectMember.length === 0) {
     throw new Error("Access denied: You don't have access to this project");
   }
 
-  const userRole = projectMember[0]?.role;
+  const userRole = projectMember.at(0)?.role;
   if (userRole === "viewer") {
     throw new Error("Access denied: You don't have permission to modify specifications");
   }

@@ -129,8 +129,11 @@ async function transformFile(filePath: string) {
   const imports = new Map<string, ImportDescriptor>();
 
   for (const match of matches) {
-    const bindingRaw = match[2].trim();
-    const specifier = match[3];
+    const bindingRaw = match.at(2)?.trim();
+    const specifier = match.at(3);
+    if (!bindingRaw || !specifier) {
+      continue;
+    }
     const entry =
       imports.get(specifier) ??
       ({

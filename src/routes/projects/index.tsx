@@ -356,7 +356,7 @@ function RouteComponent() {
   // Auto-select first organization if none selected
   React.useEffect(() => {
     if (!selectedOrgId && organizations.length > 0) {
-      const firstOrgId = organizations[0]?.id ?? null;
+      const firstOrgId = organizations.at(0)?.id ?? null;
       if (firstOrgId) {
         // Intentionally call the setter here to initialize selection when orgs load.
         // Disable the specific linter rule for this line because we need to set state
