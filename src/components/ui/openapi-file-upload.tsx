@@ -91,8 +91,7 @@ export function OpenApiFileUpload({
 
     const files = e.dataTransfer.files;
     if (files.length > 0) {
-      // eslint-disable-next-line prefer-array-at/prefer-array-at
-      const file = files[0];
+      const file = files.item(0);
       if (isValidFileType(file)) {
         void validateFile(file);
       }
@@ -104,15 +103,16 @@ export function OpenApiFileUpload({
 
     const files = e.target.files;
     if (files && files.length > 0) {
-      // eslint-disable-next-line prefer-array-at/prefer-array-at
-      const file = files[0];
+      const file = files.item(0);
       if (isValidFileType(file)) {
         void validateFile(file);
       }
     }
   };
 
-  const isValidFileType = (file: File) => {
+  const isValidFileType = (file: File | null): file is File => {
+    if (!file) return false;
+
     const validExtensions = [".json", ".yaml", ".yml"];
     const fileExtension = file.name.toLowerCase().slice(file.name.lastIndexOf("."));
     return validExtensions.includes(fileExtension);
