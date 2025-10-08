@@ -20,5 +20,12 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
       - uses: jdx/mise-action@v2
+        with:
+          cache: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.mise.toml'
+          cache: 'pnpm'
       - run: mise run ci
