@@ -19,14 +19,16 @@ jobs:
 
       - uses: pnpm/action-setup@v4
 
+      - uses: actions/cache@v4
+        with:
+          path: ~/.local/share/pnpm/store
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
       - uses: jdx/mise-action@v2
         with:
           cache: false
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version-file: '.mise.toml'
-          cache: 'pnpm'
 
       - name: Install migration dependencies
         run: pnpm install
