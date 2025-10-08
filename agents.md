@@ -260,15 +260,164 @@ Based on the codebase structure and mock data, planned features include:
 - **Custom domain** support
 - **Enterprise features**
 
-## Getting Started for Agents
+## Contribution Guidelines
 
-To work effectively with this codebase:
+These rules exist so contributions stay consistent, type-safe, minimal, and easily maintainable.
 
-1. **Understand the stack**: Familiarize yourself with TanStack Start, tRPC, and Drizzle ORM
-2. **Study the routing**: File-based routing in `src/routes/`
-3. **Explore components**: shadcn/ui components in `src/components/ui/`
-4. **Review schemas**: Database schema in `src/db/schema.ts`
-5. **Check APIs**: tRPC procedures in `src/server/rpcs/`
-6. **Mock data**: Understanding features through `src/lib/utils/mockdata.ts`
+### 1. General Principles
 
-The codebase follows modern React patterns with strong TypeScript integration, making it maintainable and scalable for future development.
+- Prefer composition over duplication
+- Minimize side-effects; colocate network logic in React Query / tRPC option objects
+- Only fetch what is needed; defer persistence until explicit user intent (e.g. Save button)
+- Never guess types — always import existing Zod schemas / inferred types
+- Favor idempotent server mutations and optimistic UI where safe
+- Keep client state (form drafts) separate from server state (queries)
+- Avoid stale reads: invalidate after mutation (unless mutation result is authoritative)
+
+### 2. React Query + tRPC Usage
+
+DO NOT manually build `queryKey` arrays unless absolutely necessary. Use the generated helpers:
+
+```ts
+import { useTRPC } from "~/lib/trpc";
+
+export const useUserPreferencesQuery = () => {
+  const trpc = useTRPC();
+  return useQuery(trpc.userPreference.get.queryOptions(undefined));
+};
+
+export const useUserPreferencesOptimisticMutation = () => {
+  const trpc = useTRPC();
+  const qc = useQueryClient();
+  return useMutation(
+    trpc.userPreference.update.mutationOptions({
+      onMutate(variables) {
+        qc.setQueryData(trpc.userPreference.get.queryKey(), (old) => ({ ...old, ...variables }));
+      },
+      async onSettled() {
+        await qc.invalidateQueries(trpc.userPreference.get.queryOptions());
+      },
+    }),
+  );
+};
+```
+
+Rules:
+
+- Split query and mutation hooks (no combined objects returning mixed state)
+- Use `mutationOptions` / `queryOptions` from tRPC proxy when available
+- For optimistic updates: `setQueryData` + post-settle `invalidateQueries`
+- Do NOT trigger side-effects in the body of a hook outside React Query lifecycle callbacks
+
+### 3. Local Draft vs Server State
+
+Pattern:
+
+- Initialize local form state once (inside `useEffect`) only if the draft is still empty
+- Do not persist on every change; batch on explicit action (e.g. Save)
+- Compare against last known server values before deciding to mutate
+
+### 4. Zod & Schemas
+
+- Name exported schemas with PascalCase (`UserPreferenceZod`)
+- Always reuse shared schemas for input & output where shape matches; avoid drift
+
+### 5. Drizzle ORM Patterns
+
+- Import from a _single_ barrel when available: `import { db, orm, schema } from "~/db"`
+- Use `row = rows.at(0)` instead of index `[0]` to avoid undefined access pitfalls
+- Use `returning()` + `.at(0)` after UPSERT operations instead of issuing follow-up selects
+- Build `patch` object _only_ with provided fields
+
+### 6. Mutation Design
+
+- Mutations must be idempotent where feasible
+- Return the canonical post-write state (or at least the changed subset)
+- Let client optimistic layer hydrate instantly, then reconcile after invalidation
+
+### 7. Naming Conventions
+
+| Concern                  | Pattern                       |
+| ------------------------ | ----------------------------- |
+| Query hook               | `useThingQuery`               |
+| Mutation hook            | `useThingMutation`            |
+| Optimistic Mutation hook | `useThingOptimisticMutation`  |
+| Form state vars          | `const [name, setName] = ...` |
+| Boolean flags            | `isSaving`, `isPending`       |
+| Zod schema               | `ThingZod`                    |
+| Server router file       | `feature-name/index.ts`       |
+
+### 8. Side-Effects
+
+Only allowed via:
+
+- React Query callbacks: `onSuccess`, `onError`, `onSettled`, `onMutate`
+- Explicit user-intent handlers (e.g. button click)
+  Avoid:
+- `useEffect` that mirrors query data into state every render (only initialize when empty)
+- Manual cache purges unless security-bound (e.g. on logout)
+
+### 9. Conditional Enabling
+
+Use `enabled: Boolean(dependency)` inside query options. Do not guard fetches with ternaries that render null early unless UX requires.
+
+### 10. Error Handling
+
+- Let React Query surface errors; map to toast/UI at call site
+- Avoid swallowing errors in mutations; rethrow after logging if needed
+- Never return `{ error: ... }` objects; throw instead
+
+### 11. Form
+
+Follow react-hook-form's best practices.
+
+### 14. Returning Values from Mutations
+
+Return exactly what the UI needs for reconciliation (e.g. updated fragment). Avoid large payloads.
+
+### 15. Prevent Over-Fetching
+
+- Prefer invalidation over refetch inside mutation `onSuccess`, unless the mutation response is incomplete
+
+### 16. Examples of Anti-Patterns (Avoid)
+
+| Anti-Pattern                                                  | Better                          |
+| ------------------------------------------------------------- | ------------------------------- |
+| Combined query + mutation hook returning many unrelated flags | Separate focused hooks          |
+| Re-selecting row after insert/update                          | Use `.returning()`              |
+| Index `[0]` access                                            | `.at(0)`                        |
+| Immediate persistence on every select change                  | Local draft + explicit save     |
+| Manual array query keys                                       | `trpc.entity.action.queryKey()` |
+
+### 18. Commit Guidance
+
+- Group schema + router + hook changes logically
+- Include migration when altering DB schema
+- Keep diff surface minimal; remove dead code instead of commenting it
+
+### 19. Security & Data Hygiene
+
+- Never trust client-provided identifiers when auth context supplies them
+- Validate all mutation inputs with Zod schema at boundary
+- Avoid leaking internal errors; map to generic messages if security-sensitive
+
+### 20. When Unsure
+
+Prefer:
+
+1. Reuse existing pattern
+2. Smaller, composable hook
+3. Explicit state transitions
+
+---
+
+### Quick Start Checklist for an AI Agent
+
+1. Import existing schemas (do not redefine)
+2. Use `useTRPC()` + generated `queryOptions` / `mutationOptions`
+3. Add optimistic mutation only if merge is safe & deterministic
+4. Invalidate post-settle
+5. Keep UI update logic inside React Query callbacks
+6. Return minimal object shapes
+
+Following these guidelines ensures generated code remains aligned with current best practices introduced in recent refactors (e.g. user preference handling).
