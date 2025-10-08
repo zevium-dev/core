@@ -16,7 +16,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-      - uses: pnpm/action-setup@v4
       - uses: actions/cache@v4
         with:
           path: ~/.local/share/pnpm/store
@@ -24,8 +23,6 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pnpm-store-
       - uses: jdx/mise-action@v2
-        with:
-          cache: false
       - name: Install dependencies
         run: pnpm install
       - name: Run format script
