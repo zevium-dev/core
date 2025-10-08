@@ -235,9 +235,9 @@ function AccountPreferenceComponent() {
                     {(() => {
                       if (name) {
                         const parts = name.trim().split(/\s+/).slice(0, 2);
-                        return parts.map((part) => part[0].toUpperCase()).join("") || "U";
+                        return parts.map((part) => part.at(0)?.toUpperCase() ?? "").join("") || "U";
                       }
-                      if (email) return email[0].toUpperCase();
+                      if (email) return email.at(0)?.toUpperCase() ?? "";
                       return "U";
                     })()}
                   </AvatarFallback>
@@ -685,5 +685,5 @@ function AccountPreferenceComponent() {
         </div>
       </div>
     </ProtectedRoute>
-  )
+  );
 }
