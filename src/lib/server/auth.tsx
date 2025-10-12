@@ -80,9 +80,9 @@ export const authServer = betterAuth({
       defaultPrefix: "zev_",
       enableMetadata: true,
       keyExpiration: {
-        defaultExpiresIn: 30 * 24 * 60 * 60,
-        maxExpiresIn: 365 * 24 * 60 * 60,
-        minExpiresIn: 24 * 60 * 60,
+        defaultExpiresIn: 30 * 24 * 60 * 60, // 30 days
+        maxExpiresIn: 365 * 24 * 60 * 60, // 1 year
+        minExpiresIn: 24 * 60 * 60, // 1 day
       },
       permissions: { defaultPermissions: {} satisfies Permissions },
       // 200 requests per minute
