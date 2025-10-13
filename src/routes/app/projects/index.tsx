@@ -6,7 +6,6 @@ import * as React from "react";
 
 import { AuthLoadingFallback } from "~/components/auth-loading-fallback";
 import { ProjectCard } from "~/components/projects/project-card";
-import { ProtectedRoute } from "~/components/protected-route";
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent } from "~/components/ui/card";
@@ -399,207 +398,205 @@ function RouteComponent() {
   }
 
   return (
-    <ProtectedRoute>
-      <div className="bg-background min-h-screen">
-        {/* Enhanced Header with better spacing and gradients */}
-        <div className="from-background via-background to-secondary-background supports-[backdrop-filter]:bg-background/95 border-b bg-gradient-to-r backdrop-blur">
-          <div className="container mx-auto px-4 py-4">
-            <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
-              {/* Header Content */}
-              <div className="space-y-3">
-                <div className="flex items-center gap-2">
-                  <Building2 className="text-primary h-8 w-8" />
-                  <h1 className="from-foreground to-foreground/70 bg-gradient-to-r bg-clip-text text-4xl font-bold tracking-tight text-transparent">
-                    Projects
-                  </h1>
-                </div>
-                <p className="text-muted-foreground max-w-2xl text-lg">
-                  Manage your API projects, specifications, and team collaboration across your organization
-                </p>
+    <div className="bg-background min-h-screen">
+      {/* Enhanced Header with better spacing and gradients */}
+      <div className="from-background via-background to-secondary-background supports-[backdrop-filter]:bg-background/95 border-b bg-gradient-to-r backdrop-blur">
+        <div className="container mx-auto px-4 py-4">
+          <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
+            {/* Header Content */}
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                <Building2 className="text-primary h-8 w-8" />
+                <h1 className="from-foreground to-foreground/70 bg-gradient-to-r bg-clip-text text-4xl font-bold tracking-tight text-transparent">
+                  Projects
+                </h1>
               </div>
+              <p className="text-muted-foreground max-w-2xl text-lg">
+                Manage your API projects, specifications, and team collaboration across your organization
+              </p>
+            </div>
 
-              {/* Actions */}
-              <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
-                <div className="relative">
-                  <Select onValueChange={setSelectedOrgId} value={selectedOrgId ?? ""}>
-                    <SelectTrigger className="bg-card border-border/40 w-full shadow-sm transition-shadow hover:shadow-md sm:w-[400px]">
-                      <div className="flex items-center gap-2">
-                        <Building2 className="text-muted-foreground h-4 w-4" />
-                        <SelectValue placeholder="Select organization" />
-                      </div>
-                    </SelectTrigger>
-                    <SelectContent>
-                      {organizations.map((org) => (
-                        <SelectItem key={org.id} value={org.id}>
-                          <div className="flex items-center gap-3">
-                            <div className="flex flex-col">
-                              <span className="font-medium">{org.name}</span>
-                            </div>
+            {/* Actions */}
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+              <div className="relative">
+                <Select onValueChange={setSelectedOrgId} value={selectedOrgId ?? ""}>
+                  <SelectTrigger className="bg-card border-border/40 w-full shadow-sm transition-shadow hover:shadow-md sm:w-[400px]">
+                    <div className="flex items-center gap-2">
+                      <Building2 className="text-muted-foreground h-4 w-4" />
+                      <SelectValue placeholder="Select organization" />
+                    </div>
+                  </SelectTrigger>
+                  <SelectContent>
+                    {organizations.map((org) => (
+                      <SelectItem key={org.id} value={org.id}>
+                        <div className="flex items-center gap-3">
+                          <div className="flex flex-col">
+                            <span className="font-medium">{org.name}</span>
                           </div>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <CreateProjectDialog organizations={organizations} selectedOrgId={selectedOrgId} />
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
+
+              <CreateProjectDialog organizations={organizations} selectedOrgId={selectedOrgId} />
             </div>
           </div>
         </div>
+      </div>
 
-        <div className="container mx-auto px-4 py-4">
-          {selectedOrgId ? (
-            <div className="space-y-8">
-              {/* Enhanced Filters and Search */}
-              <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
-                <div className="flex flex-1 items-center gap-4">
-                  <div className="relative max-w-md flex-1">
-                    <Search className="text-muted-foreground absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2" />
-                    <Input
-                      className="bg-card border-border/40 pl-10 shadow-sm transition-shadow focus:shadow-md"
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                      placeholder="Search projects by name, description, or slug..."
-                      value={searchQuery}
-                    />
-                  </div>
+      <div className="container mx-auto px-4 py-4">
+        {selectedOrgId ? (
+          <div className="space-y-8">
+            {/* Enhanced Filters and Search */}
+            <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
+              <div className="flex flex-1 items-center gap-4">
+                <div className="relative max-w-md flex-1">
+                  <Search className="text-muted-foreground absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2" />
+                  <Input
+                    className="bg-card border-border/40 pl-10 shadow-sm transition-shadow focus:shadow-md"
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="Search projects by name, description, or slug..."
+                    value={searchQuery}
+                  />
+                </div>
 
-                  <Select onValueChange={setStatusFilter} value={statusFilter}>
-                    <SelectTrigger className="bg-card border-border/40 w-[180px] shadow-sm transition-shadow hover:shadow-md">
+                <Select onValueChange={setStatusFilter} value={statusFilter}>
+                  <SelectTrigger className="bg-card border-border/40 w-[180px] shadow-sm transition-shadow hover:shadow-md">
+                    <div className="flex items-center gap-2">
+                      <Filter className="h-4 w-4" />
+                      <SelectValue />
+                    </div>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Status</SelectItem>
+                    <SelectItem value="active">
                       <div className="flex items-center gap-2">
-                        <Filter className="h-4 w-4" />
-                        <SelectValue />
+                        <Badge className="h-2 w-2 bg-green-500 p-0" variant="default"></Badge>
+                        Active
                       </div>
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Status</SelectItem>
-                      <SelectItem value="active">
-                        <div className="flex items-center gap-2">
-                          <Badge className="h-2 w-2 bg-green-500 p-0" variant="default"></Badge>
-                          Active
-                        </div>
-                      </SelectItem>
-                      <SelectItem value="beta">
-                        <div className="flex items-center gap-2">
-                          <Badge className="h-2 w-2 bg-yellow-500 p-0" variant="default"></Badge>
-                          Beta
-                        </div>
-                      </SelectItem>
-                      <SelectItem value="deprecated">
-                        <div className="flex items-center gap-2">
-                          <Badge className="h-2 w-2 bg-orange-500 p-0" variant="default"></Badge>
-                          Deprecated
-                        </div>
-                      </SelectItem>
-                      <SelectItem value="archived">
-                        <div className="flex items-center gap-2">
-                          <Badge className="h-2 w-2 bg-gray-500 p-0" variant="default"></Badge>
-                          Archived
-                        </div>
-                      </SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <span className="text-muted-foreground text-sm">View:</span>
-                  <ToggleGroup
-                    className="border-border/40 border shadow-sm"
-                    onValueChange={(value) => value && setViewMode(value as "grid" | "list")}
-                    type="single"
-                    value={viewMode}
-                  >
-                    <ToggleGroupItem
-                      aria-label="Grid view"
-                      className="data-[state=on]:bg-primary data-[state=on]:text-primary-foreground"
-                      value="grid"
-                    >
-                      <Grid3X3 className="h-4 w-4" />
-                    </ToggleGroupItem>
-                    <ToggleGroupItem
-                      aria-label="List view"
-                      className="data-[state=on]:bg-primary data-[state=on]:text-primary-foreground"
-                      value="list"
-                    >
-                      <List className="h-4 w-4" />
-                    </ToggleGroupItem>
-                  </ToggleGroup>
-                </div>
+                    </SelectItem>
+                    <SelectItem value="beta">
+                      <div className="flex items-center gap-2">
+                        <Badge className="h-2 w-2 bg-yellow-500 p-0" variant="default"></Badge>
+                        Beta
+                      </div>
+                    </SelectItem>
+                    <SelectItem value="deprecated">
+                      <div className="flex items-center gap-2">
+                        <Badge className="h-2 w-2 bg-orange-500 p-0" variant="default"></Badge>
+                        Deprecated
+                      </div>
+                    </SelectItem>
+                    <SelectItem value="archived">
+                      <div className="flex items-center gap-2">
+                        <Badge className="h-2 w-2 bg-gray-500 p-0" variant="default"></Badge>
+                        Archived
+                      </div>
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
 
-              {/* Results Summary */}
-              {!projectsLoading && (
-                <div className="flex items-center justify-between">
-                  <p className="text-muted-foreground text-sm">
-                    {filteredProjects.length === projects.length
-                      ? `Showing all ${projects.length} project${projects.length !== 1 ? "s" : ""}`
-                      : `Showing ${filteredProjects.length} of ${projects.length} project${projects.length !== 1 ? "s" : ""}`}
-                  </p>
-                  {searchQuery && (
-                    <Button className="text-xs" onClick={() => setSearchQuery("")} size="sm" variant="ghost">
-                      Clear search
-                    </Button>
-                  )}
-                </div>
-              )}
-
-              {/* Projects Grid/List */}
-              {projectsLoading ? (
-                <div className="flex items-center justify-center py-6">
-                  <AuthLoadingFallback />
-                </div>
-              ) : projectsError ? (
-                <Card className="border-border/40">
-                  <CardContent className="py-6 text-center">
-                    <h3 className="text-destructive text-lg font-semibold">Failed to load projects</h3>
-                    <p className="text-muted-foreground mt-1 text-sm">Please try refreshing the page</p>
-                  </CardContent>
-                </Card>
-              ) : filteredProjects.length === 0 ? (
-                <Card className="border-border/40">
-                  <CardContent className="space-y-4 py-6 text-center">
-                    <Settings className="text-muted-foreground mx-auto h-12 w-12" />
-                    <div>
-                      <h3 className="text-lg font-semibold">
-                        {projects.length === 0 ? "No Projects Yet" : "No Matching Projects"}
-                      </h3>
-                      <p className="text-muted-foreground text-sm">
-                        {projects.length === 0
-                          ? "Create your first project to get started with API management"
-                          : "Try adjusting your search or filter criteria"}
-                      </p>
-                    </div>
-                    {projects.length === 0 && (
-                      <CreateProjectDialog organizations={organizations} selectedOrgId={selectedOrgId} />
-                    )}
-                  </CardContent>
-                </Card>
-              ) : (
-                <div className={viewMode === "grid" ? "grid gap-6 sm:grid-cols-2 lg:grid-cols-3" : "space-y-4"}>
-                  {filteredProjects.map((project, index) => (
-                    <m.div
-                      animate={{ opacity: 1, y: 0 }}
-                      initial={{ opacity: 0, y: 20 }}
-                      key={project.id}
-                      transition={{ delay: index * 0.05, duration: 0.3 }}
-                    >
-                      <ProjectCard project={project} variant={viewMode === "list" ? "compact" : "default"} />
-                    </m.div>
-                  ))}
-                </div>
-              )}
+              <div className="flex items-center gap-2">
+                <span className="text-muted-foreground text-sm">View:</span>
+                <ToggleGroup
+                  className="border-border/40 border shadow-sm"
+                  onValueChange={(value) => value && setViewMode(value as "grid" | "list")}
+                  type="single"
+                  value={viewMode}
+                >
+                  <ToggleGroupItem
+                    aria-label="Grid view"
+                    className="data-[state=on]:bg-primary data-[state=on]:text-primary-foreground"
+                    value="grid"
+                  >
+                    <Grid3X3 className="h-4 w-4" />
+                  </ToggleGroupItem>
+                  <ToggleGroupItem
+                    aria-label="List view"
+                    className="data-[state=on]:bg-primary data-[state=on]:text-primary-foreground"
+                    value="list"
+                  >
+                    <List className="h-4 w-4" />
+                  </ToggleGroupItem>
+                </ToggleGroup>
+              </div>
             </div>
-          ) : (
-            <Card className="border-border/40">
-              <CardContent className="py-6 text-center">
-                <Building2 className="text-muted-foreground mx-auto h-12 w-12" />
-                <h3 className="mt-4 text-lg font-semibold">Select an Organization</h3>
-                <p className="text-muted-foreground text-sm">Choose an organization to view and manage projects</p>
-              </CardContent>
-            </Card>
-          )}
-        </div>
+
+            {/* Results Summary */}
+            {!projectsLoading && (
+              <div className="flex items-center justify-between">
+                <p className="text-muted-foreground text-sm">
+                  {filteredProjects.length === projects.length
+                    ? `Showing all ${projects.length} project${projects.length !== 1 ? "s" : ""}`
+                    : `Showing ${filteredProjects.length} of ${projects.length} project${projects.length !== 1 ? "s" : ""}`}
+                </p>
+                {searchQuery && (
+                  <Button className="text-xs" onClick={() => setSearchQuery("")} size="sm" variant="ghost">
+                    Clear search
+                  </Button>
+                )}
+              </div>
+            )}
+
+            {/* Projects Grid/List */}
+            {projectsLoading ? (
+              <div className="flex items-center justify-center py-6">
+                <AuthLoadingFallback />
+              </div>
+            ) : projectsError ? (
+              <Card className="border-border/40">
+                <CardContent className="py-6 text-center">
+                  <h3 className="text-destructive text-lg font-semibold">Failed to load projects</h3>
+                  <p className="text-muted-foreground mt-1 text-sm">Please try refreshing the page</p>
+                </CardContent>
+              </Card>
+            ) : filteredProjects.length === 0 ? (
+              <Card className="border-border/40">
+                <CardContent className="space-y-4 py-6 text-center">
+                  <Settings className="text-muted-foreground mx-auto h-12 w-12" />
+                  <div>
+                    <h3 className="text-lg font-semibold">
+                      {projects.length === 0 ? "No Projects Yet" : "No Matching Projects"}
+                    </h3>
+                    <p className="text-muted-foreground text-sm">
+                      {projects.length === 0
+                        ? "Create your first project to get started with API management"
+                        : "Try adjusting your search or filter criteria"}
+                    </p>
+                  </div>
+                  {projects.length === 0 && (
+                    <CreateProjectDialog organizations={organizations} selectedOrgId={selectedOrgId} />
+                  )}
+                </CardContent>
+              </Card>
+            ) : (
+              <div className={viewMode === "grid" ? "grid gap-6 sm:grid-cols-2 lg:grid-cols-3" : "space-y-4"}>
+                {filteredProjects.map((project, index) => (
+                  <m.div
+                    animate={{ opacity: 1, y: 0 }}
+                    initial={{ opacity: 0, y: 20 }}
+                    key={project.id}
+                    transition={{ delay: index * 0.05, duration: 0.3 }}
+                  >
+                    <ProjectCard project={project} variant={viewMode === "list" ? "compact" : "default"} />
+                  </m.div>
+                ))}
+              </div>
+            )}
+          </div>
+        ) : (
+          <Card className="border-border/40">
+            <CardContent className="py-6 text-center">
+              <Building2 className="text-muted-foreground mx-auto h-12 w-12" />
+              <h3 className="mt-4 text-lg font-semibold">Select an Organization</h3>
+              <p className="text-muted-foreground text-sm">Choose an organization to view and manage projects</p>
+            </CardContent>
+          </Card>
+        )}
       </div>
-    </ProtectedRoute>
+    </div>
   );
 }

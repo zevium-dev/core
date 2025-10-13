@@ -3,7 +3,6 @@ import { createFileRoute } from "@tanstack/react-router";
 import { Check, Copy, Info, MoreHorizontal, Pencil, Plus, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
 
-import { ProtectedRoute } from "~/components/protected-route";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
 import {
@@ -192,198 +191,48 @@ function ApiKeysComponent() {
   };
 
   return (
-    <ProtectedRoute>
-      <div className="mx-auto w-full max-w-3xl min-w-0 flex-1 space-y-6 p-6">
-        {/* (Optional) Settings navigation placeholder – removed due to missing component */}
+    <div className="mx-auto w-full max-w-3xl min-w-0 flex-1 space-y-6 p-6">
+      {/* (Optional) Settings navigation placeholder – removed due to missing component */}
 
-        {/* Header */}
-        <div className="flex items-center justify-between">
-          <div className="space-y-2">
-            <h1 className="text-foreground text-2xl font-bold">API Keys</h1>
-            <div className="flex items-center gap-2">
-              <p className="text-muted-foreground text-sm">Manage your API keys to access all Zevium-integrated APIs</p>
-              <Info className="text-muted-foreground h-4 w-4" />
-            </div>
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div className="space-y-2">
+          <h1 className="text-foreground text-2xl font-bold">API Keys</h1>
+          <div className="flex items-center gap-2">
+            <p className="text-muted-foreground text-sm">Manage your API keys to access all Zevium-integrated APIs</p>
+            <Info className="text-muted-foreground h-4 w-4" />
           </div>
-
-          {/* Create API Key Button */}
-          <Dialog onOpenChange={setIsCreateDialogOpen} open={isCreateDialogOpen}>
-            <DialogTrigger asChild>
-              <Button className="gap-2">
-                <Plus className="h-4 w-4" />
-                Create API Key
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="sm:max-w-md">
-              <DialogHeader>
-                <DialogTitle>Create API Key</DialogTitle>
-                <DialogDescription>
-                  Create a new API key to access Zevium APIs. Keep your key secure and never share it publicly.
-                </DialogDescription>
-              </DialogHeader>
-              <div className="space-y-4">
-                <div className="space-y-2">
-                  <Label htmlFor="key-name">Key Name</Label>
-                  <Input
-                    id="key-name"
-                    onChange={(e) => setNewKeyName(e.target.value)}
-                    placeholder="Enter a name for your API key"
-                    value={newKeyName}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="key-limit">Credit Limit (Optional)</Label>
-                  <Input
-                    id="key-limit"
-                    onChange={(e) => setNewKeyLimit(e.target.value)}
-                    placeholder="e.g. 50 or $50"
-                    value={newKeyLimit}
-                  />
-                </div>
-              </div>
-              <DialogFooter>
-                <Button disabled={isLoading} onClick={() => setIsCreateDialogOpen(false)} variant="outline">
-                  Cancel
-                </Button>
-                <Button disabled={!newKeyName.trim() || isLoading} onClick={handleCreateKey}>
-                  {isLoading ? "Creating..." : "Create Key"}
-                </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
         </div>
 
-        {/* API Keys Table */}
-        <Card className="bg-card/50 border-border/50 backdrop-blur-sm">
-          <CardContent className="p-0">
-            <div className="border-border/50 overflow-hidden rounded-md border">
-              <Table>
-                <TableHeader>
-                  <TableRow className="bg-muted/30">
-                    <TableHead className="text-xs font-medium">Key</TableHead>
-                    <TableHead className="text-xs font-medium">Credit Limit</TableHead>
-                    <TableHead className="text-xs font-medium">Usage</TableHead>
-                    <TableHead className="w-12"></TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {!hasKeys && (
-                    <TableRow>
-                      <TableCell className="py-10 text-center" colSpan={4}>
-                        <div className="flex flex-col items-center gap-2">
-                          <span className="text-muted-foreground text-sm">No API keys yet.</span>
-                          <Button className="gap-2" onClick={() => setIsCreateDialogOpen(true)} size="sm">
-                            <Plus className="h-4 w-4" /> Create your first key
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  )}
-                  {apiKeys.map((apiKey) => (
-                    <TableRow className="hover:bg-muted/20" key={apiKey.id}>
-                      <TableCell>
-                        <div className="space-y-1">
-                          <div className="flex items-center gap-2">
-                            <span className="text-sm font-medium">{apiKey.name}</span>
-                            {/* No secondary line now; rate limit displayed in column */}
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <code className="bg-muted text-muted-foreground rounded px-2 py-1 font-mono text-xs">
-                              {apiKey.key
-                                ? formatKey(apiKey.key)
-                                : `${apiKey.prefix ?? "sk"}...${apiKey.start ?? "xxxx"}`}
-                            </code>
-                          </div>
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <span className="text-muted-foreground text-sm">{apiKey.limit}</span>
-                      </TableCell>
-                      <TableCell>
-                        <span className="text-sm font-medium">{apiKey.usage}</span>
-                      </TableCell>
-                      <TableCell>
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button className="h-8 w-8 p-0" size="sm" variant="ghost">
-                              <MoreHorizontal className="h-4 w-4" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end" className="w-40">
-                            <DropdownMenuItem className="gap-2" onClick={() => openEditDialog(apiKey)}>
-                              <Pencil className="h-4 w-4" /> Rename
-                            </DropdownMenuItem>
-                            <DropdownMenuItem className="gap-2 text-red-500" onClick={() => handleDeleteKey(apiKey.id)}>
-                              <Trash2 className="h-4 w-4" /> Delete
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-            {hasKeys && (
-              <div className="flex items-center justify-end px-4 py-2">
-                <span className="text-muted-foreground text-[10px] tracking-wide uppercase">
-                  Total Usage: <span className="text-foreground font-medium">${totalUsage.toFixed(3)} used</span>
-                </span>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Quick Start Snippet */}
-        <Card className="bg-card/50 border-border/50 backdrop-blur-sm">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Quick Start (cURL)</CardTitle>
-            <Button
-              aria-live="polite"
-              className="border-border/40 bg-muted/30 hover:bg-muted/50 dark:hover:bg-muted/60 text-muted-foreground hover:text-foreground h-7 border px-2 text-xs transition-colors data-[copied]:bg-emerald-500/20 data-[copied]:text-emerald-500 data-[copied]:hover:bg-emerald-500/30"
-              data-copied={snippetCopied || undefined}
-              onClick={handleCopySnippet}
-              size="sm"
-              title={snippetCopied ? "Copied" : "Copy snippet"}
-              variant="ghost"
-            >
-              {snippetCopied ? <Check className="mr-1 h-3 w-3" /> : <Copy className="mr-1 h-3 w-3" />}{" "}
-              {snippetCopied ? "Copied" : "Copy"}
+        {/* Create API Key Button */}
+        <Dialog onOpenChange={setIsCreateDialogOpen} open={isCreateDialogOpen}>
+          <DialogTrigger asChild>
+            <Button className="gap-2">
+              <Plus className="h-4 w-4" />
+              Create API Key
             </Button>
-          </CardHeader>
-          <CardContent className="pt-0">
-            <div className="relative">
-              <pre className="bg-muted/50 border-border/50 selection:bg-primary/30 selection:text-primary-foreground overflow-x-auto rounded-md border p-4 font-mono text-xs leading-relaxed whitespace-pre">
-                {snippet}
-              </pre>
-              <p className="text-muted-foreground mt-2 text-[11px]">
-                Replace <code className="font-mono">YOUR_API_KEY</code> with one of the keys above.
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Edit Dialog */}
-        <Dialog onOpenChange={setIsEditDialogOpen} open={isEditDialogOpen}>
+          </DialogTrigger>
           <DialogContent className="sm:max-w-md">
             <DialogHeader>
-              <DialogTitle>Edit API Key</DialogTitle>
-              <DialogDescription>Update the display name or credit (spend) limit for this key.</DialogDescription>
+              <DialogTitle>Create API Key</DialogTitle>
+              <DialogDescription>
+                Create a new API key to access Zevium APIs. Keep your key secure and never share it publicly.
+              </DialogDescription>
             </DialogHeader>
             <div className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="edit-key-name">Key Name</Label>
+                <Label htmlFor="key-name">Key Name</Label>
                 <Input
-                  id="edit-key-name"
+                  id="key-name"
                   onChange={(e) => setNewKeyName(e.target.value)}
-                  placeholder="Key name"
+                  placeholder="Enter a name for your API key"
                   value={newKeyName}
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="edit-key-limit">Credit Limit (Optional)</Label>
+                <Label htmlFor="key-limit">Credit Limit (Optional)</Label>
                 <Input
-                  id="edit-key-limit"
+                  id="key-limit"
                   onChange={(e) => setNewKeyLimit(e.target.value)}
                   placeholder="e.g. 50 or $50"
                   value={newKeyLimit}
@@ -391,11 +240,11 @@ function ApiKeysComponent() {
               </div>
             </div>
             <DialogFooter>
-              <Button disabled={isLoading} onClick={() => setIsEditDialogOpen(false)} variant="outline">
+              <Button disabled={isLoading} onClick={() => setIsCreateDialogOpen(false)} variant="outline">
                 Cancel
               </Button>
-              <Button disabled={!newKeyName.trim() || isLoading} onClick={handleSaveEdit}>
-                {isLoading ? "Saving..." : "Save"}
+              <Button disabled={!newKeyName.trim() || isLoading} onClick={handleCreateKey}>
+                {isLoading ? "Creating..." : "Create Key"}
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -452,7 +301,155 @@ function ApiKeysComponent() {
           </DialogContent>
         </Dialog>
       </div>
-    </ProtectedRoute>
+
+      {/* API Keys Table */}
+      <Card className="bg-card/50 border-border/50 backdrop-blur-sm">
+        <CardContent className="p-0">
+          <div className="border-border/50 overflow-hidden rounded-md border">
+            <Table>
+              <TableHeader>
+                <TableRow className="bg-muted/30">
+                  <TableHead className="text-xs font-medium">Key</TableHead>
+                  <TableHead className="text-xs font-medium">Credit Limit</TableHead>
+                  <TableHead className="text-xs font-medium">Usage</TableHead>
+                  <TableHead className="w-12"></TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {!hasKeys && (
+                  <TableRow>
+                    <TableCell className="py-10 text-center" colSpan={4}>
+                      <div className="flex flex-col items-center gap-2">
+                        <span className="text-muted-foreground text-sm">No API keys yet.</span>
+                        <Button className="gap-2" onClick={() => setIsCreateDialogOpen(true)} size="sm">
+                          <Plus className="h-4 w-4" /> Create your first key
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                )}
+                {apiKeys.map((apiKey) => (
+                  <TableRow className="hover:bg-muted/20" key={apiKey.id}>
+                    <TableCell>
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-medium">{apiKey.name}</span>
+                          {/* No secondary line now; rate limit displayed in column */}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <code className="bg-muted text-muted-foreground rounded px-2 py-1 font-mono text-xs">
+                            {apiKey.key
+                              ? formatKey(apiKey.key)
+                              : `${apiKey.prefix ?? "sk"}...${apiKey.start ?? "xxxx"}`}
+                          </code>
+                        </div>
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <span className="text-muted-foreground text-sm">{apiKey.limit}</span>
+                    </TableCell>
+                    <TableCell>
+                      <span className="text-sm font-medium">{apiKey.usage}</span>
+                    </TableCell>
+                    <TableCell>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button className="h-8 w-8 p-0" size="sm" variant="ghost">
+                            <MoreHorizontal className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-40">
+                          <DropdownMenuItem className="gap-2" onClick={() => openEditDialog(apiKey)}>
+                            <Pencil className="h-4 w-4" /> Rename
+                          </DropdownMenuItem>
+                          <DropdownMenuItem className="gap-2 text-red-500" onClick={() => handleDeleteKey(apiKey.id)}>
+                            <Trash2 className="h-4 w-4" /> Delete
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+          {hasKeys && (
+            <div className="flex items-center justify-end px-4 py-2">
+              <span className="text-muted-foreground text-[10px] tracking-wide uppercase">
+                Total Usage: <span className="text-foreground font-medium">${totalUsage.toFixed(3)} used</span>
+              </span>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Quick Start Snippet */}
+      <Card className="bg-card/50 border-border/50 backdrop-blur-sm">
+        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+          <CardTitle className="text-sm font-medium">Quick Start (cURL)</CardTitle>
+          <Button
+            aria-live="polite"
+            className="border-border/40 bg-muted/30 hover:bg-muted/50 dark:hover:bg-muted/60 text-muted-foreground hover:text-foreground h-7 border px-2 text-xs transition-colors data-[copied]:bg-emerald-500/20 data-[copied]:text-emerald-500 data-[copied]:hover:bg-emerald-500/30"
+            data-copied={snippetCopied || undefined}
+            onClick={handleCopySnippet}
+            size="sm"
+            title={snippetCopied ? "Copied" : "Copy snippet"}
+            variant="ghost"
+          >
+            {snippetCopied ? <Check className="mr-1 h-3 w-3" /> : <Copy className="mr-1 h-3 w-3" />}{" "}
+            {snippetCopied ? "Copied" : "Copy"}
+          </Button>
+        </CardHeader>
+        <CardContent className="pt-0">
+          <div className="relative">
+            <pre className="bg-muted/50 border-border/50 selection:bg-primary/30 selection:text-primary-foreground overflow-x-auto rounded-md border p-4 font-mono text-xs leading-relaxed whitespace-pre">
+              {snippet}
+            </pre>
+            <p className="text-muted-foreground mt-2 text-[11px]">
+              Replace <code className="font-mono">YOUR_API_KEY</code> with one of the keys above.
+            </p>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Edit Dialog */}
+      <Dialog onOpenChange={setIsEditDialogOpen} open={isEditDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Edit API Key</DialogTitle>
+            <DialogDescription>Update the display name or credit (spend) limit for this key.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="edit-key-name">Key Name</Label>
+              <Input
+                id="edit-key-name"
+                onChange={(e) => setNewKeyName(e.target.value)}
+                placeholder="Key name"
+                value={newKeyName}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-key-limit">Credit Limit (Optional)</Label>
+              <Input
+                id="edit-key-limit"
+                onChange={(e) => setNewKeyLimit(e.target.value)}
+                placeholder="e.g. 50 or $50"
+                value={newKeyLimit}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button disabled={isLoading} onClick={() => setIsEditDialogOpen(false)} variant="outline">
+              Cancel
+            </Button>
+            <Button disabled={!newKeyName.trim() || isLoading} onClick={handleSaveEdit}>
+              {isLoading ? "Saving..." : "Save"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
   );
 }
 

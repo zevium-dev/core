@@ -5,7 +5,6 @@ import { m } from "motion/react";
 import * as React from "react";
 
 import { AuthLoadingFallback } from "~/components/auth-loading-fallback";
-import { ProtectedRoute } from "~/components/protected-route";
 // Avatar components removed — not used in this file
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
@@ -41,11 +40,7 @@ interface Organization {
 }
 
 export const Route = createFileRoute("/app/organizations/")({
-  component: () => (
-    <ProtectedRoute>
-      <RouteComponent />
-    </ProtectedRoute>
-  ),
+  component: RouteComponent,
 });
 
 function CreateOrganizationModal({ children }: { children: React.ReactNode }) {
@@ -260,73 +255,71 @@ function RouteComponent() {
   }
 
   return (
-    <ProtectedRoute fallback={<AuthLoadingFallback />}>
-      <div className="container mx-auto space-y-8 px-8 py-8">
-        {/* Header */}
-        <m.div animate={{ opacity: 1, y: 0 }} initial={{ opacity: 0, y: -20 }} transition={{ duration: 0.5 }}>
-          <div className="flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
-            <div className="space-y-2">
-              <h1 className="text-3xl font-bold tracking-tight">Organizations</h1>
-              <p className="text-muted-foreground">Manage your organizations and collaborate with your teams</p>
-            </div>
+    <div className="container mx-auto space-y-8 px-8 py-8">
+      {/* Header */}
+      <m.div animate={{ opacity: 1, y: 0 }} initial={{ opacity: 0, y: -20 }} transition={{ duration: 0.5 }}>
+        <div className="flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
+          <div className="space-y-2">
+            <h1 className="text-3xl font-bold tracking-tight">Organizations</h1>
+            <p className="text-muted-foreground">Manage your organizations and collaborate with your teams</p>
+          </div>
 
-            <div className="flex items-center gap-4">
-              <div className="relative min-w-[300px]">
-                <Search className="text-muted-foreground absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 transform" />
-                <Input
-                  className="pl-10"
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Search organizations..."
-                  value={searchQuery}
-                />
-              </div>
+          <div className="flex items-center gap-4">
+            <div className="relative min-w-[300px]">
+              <Search className="text-muted-foreground absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 transform" />
+              <Input
+                className="pl-10"
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search organizations..."
+                value={searchQuery}
+              />
+            </div>
+            <CreateOrganizationModal>
+              <Button className="gap-2">
+                <Plus className="h-4 w-4" />
+                New Organization
+              </Button>
+            </CreateOrganizationModal>
+          </div>
+        </div>
+      </m.div>
+
+      {/* Organizations Grid */}
+      <m.div animate={{ opacity: 1 }} initial={{ opacity: 0 }} transition={{ delay: 0.2, duration: 0.5 }}>
+        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+          {filteredOrganizations.map((organization, index) => (
+            <OrganizationCard index={index} key={organization.id} organization={organization} />
+          ))}
+        </div>
+
+        {/* Empty State */}
+        {filteredOrganizations.length === 0 && (
+          <m.div
+            animate={{ opacity: 1, scale: 1 }}
+            className="flex flex-col items-center justify-center py-12 text-center"
+            initial={{ opacity: 0, scale: 0.95 }}
+            transition={{ delay: 0.3, duration: 0.5 }}
+          >
+            <div className="bg-muted/50 mb-4 rounded-full p-6">
+              <Building2 className="text-muted-foreground h-8 w-8" />
+            </div>
+            <h3 className="mb-2 text-lg font-semibold">No organizations found</h3>
+            <p className="text-muted-foreground mb-4 max-w-md text-sm">
+              {searchQuery
+                ? "No organizations match your search criteria. Try adjusting your search terms."
+                : "You haven't created any organizations yet. Get started by creating your first organization."}
+            </p>
+            {!searchQuery && (
               <CreateOrganizationModal>
                 <Button className="gap-2">
                   <Plus className="h-4 w-4" />
-                  New Organization
+                  Create Organization
                 </Button>
               </CreateOrganizationModal>
-            </div>
-          </div>
-        </m.div>
-
-        {/* Organizations Grid */}
-        <m.div animate={{ opacity: 1 }} initial={{ opacity: 0 }} transition={{ delay: 0.2, duration: 0.5 }}>
-          <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-            {filteredOrganizations.map((organization, index) => (
-              <OrganizationCard index={index} key={organization.id} organization={organization} />
-            ))}
-          </div>
-
-          {/* Empty State */}
-          {filteredOrganizations.length === 0 && (
-            <m.div
-              animate={{ opacity: 1, scale: 1 }}
-              className="flex flex-col items-center justify-center py-12 text-center"
-              initial={{ opacity: 0, scale: 0.95 }}
-              transition={{ delay: 0.3, duration: 0.5 }}
-            >
-              <div className="bg-muted/50 mb-4 rounded-full p-6">
-                <Building2 className="text-muted-foreground h-8 w-8" />
-              </div>
-              <h3 className="mb-2 text-lg font-semibold">No organizations found</h3>
-              <p className="text-muted-foreground mb-4 max-w-md text-sm">
-                {searchQuery
-                  ? "No organizations match your search criteria. Try adjusting your search terms."
-                  : "You haven't created any organizations yet. Get started by creating your first organization."}
-              </p>
-              {!searchQuery && (
-                <CreateOrganizationModal>
-                  <Button className="gap-2">
-                    <Plus className="h-4 w-4" />
-                    Create Organization
-                  </Button>
-                </CreateOrganizationModal>
-              )}
-            </m.div>
-          )}
-        </m.div>
-      </div>
-    </ProtectedRoute>
+            )}
+          </m.div>
+        )}
+      </m.div>
+    </div>
   );
 }

@@ -30,7 +30,6 @@ import { toast } from "sonner";
 
 import { AuthLoadingFallback } from "~/components/auth-loading-fallback";
 import { EditableCategoryField } from "~/components/projects/editable-category-field";
-import { ProtectedRoute } from "~/components/protected-route";
 import { Avatar, AvatarFallback, AvatarImage } from "~/components/ui/avatar";
 import { Badge } from "~/components/ui/badge";
 import { BadgeStatus } from "~/components/ui/badge-status";
@@ -64,11 +63,7 @@ import { useCopy } from "~/hooks/use-copy";
 import { useTRPCClient } from "~/lib/trpc";
 
 export const Route = createFileRoute("/app/projects/$slug")({
-  component: () => (
-    <ProtectedRoute>
-      <RouteComponent />
-    </ProtectedRoute>
-  ),
+  component: RouteComponent,
 });
 
 interface ProjectData {

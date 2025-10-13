@@ -6,7 +6,6 @@ import * as React from "react";
 
 import { ScalarApiReference } from "~/components/api-viewer/scalar-api-reference";
 import { AuthLoadingFallback } from "~/components/auth-loading-fallback";
-import { ProtectedRoute } from "~/components/protected-route";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent } from "~/components/ui/card";
 import { Separator } from "~/components/ui/separator";
@@ -14,11 +13,7 @@ import { useCopy } from "~/hooks/use-copy";
 import { useTRPCClient } from "~/lib/trpc";
 
 export const Route = createFileRoute("/app/projects/$slug/view/$version")({
-  component: () => (
-    <ProtectedRoute>
-      <RouteComponent />
-    </ProtectedRoute>
-  ),
+  component: RouteComponent,
 });
 
 interface ApiSpec {

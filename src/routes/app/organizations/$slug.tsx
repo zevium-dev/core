@@ -19,7 +19,6 @@ import { m } from "motion/react";
 import * as React from "react";
 
 import { AuthLoadingFallback } from "~/components/auth-loading-fallback";
-import { ProtectedRoute } from "~/components/protected-route";
 import { Avatar, AvatarFallback, AvatarImage } from "~/components/ui/avatar";
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
@@ -37,11 +36,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "~/components/ui/tabs";
 import { useTRPCClient } from "~/lib/trpc";
 
 export const Route = createFileRoute("/app/organizations/$slug")({
-  component: () => (
-    <ProtectedRoute>
-      <RouteComponent />
-    </ProtectedRoute>
-  ),
+  component: RouteComponent,
 });
 
 interface OrganizationData {
@@ -471,73 +466,71 @@ function RouteComponent() {
   const organization = organizationData.organization;
 
   return (
-    <ProtectedRoute fallback={<AuthLoadingFallback />}>
-      <div className="container mx-auto space-y-8 px-8 py-8">
-        {/* Header */}
-        <m.div animate={{ opacity: 1, y: 0 }} initial={{ opacity: 0, y: -20 }} transition={{ duration: 0.5 }}>
-          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-            <div className="space-y-2">
-              <h1 className="text-3xl font-bold tracking-tight">{organization.name}</h1>
-              <p className="text-muted-foreground">Manage your organization, team members, and projects</p>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <Button size="sm" variant="outline">
-                <Settings className="mr-2 h-4 w-4" />
-                Settings
-              </Button>
-              <Button size="sm">
-                <Plus className="mr-2 h-4 w-4" />
-                Invite Members
-              </Button>
-            </div>
+    <div className="container mx-auto space-y-8 px-8 py-8">
+      {/* Header */}
+      <m.div animate={{ opacity: 1, y: 0 }} initial={{ opacity: 0, y: -20 }} transition={{ duration: 0.5 }}>
+        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+          <div className="space-y-2">
+            <h1 className="text-3xl font-bold tracking-tight">{organization.name}</h1>
+            <p className="text-muted-foreground">Manage your organization, team members, and projects</p>
           </div>
-        </m.div>
 
-        {/* Overview Cards */}
-        <m.div animate={{ opacity: 1 }} initial={{ opacity: 0 }} transition={{ delay: 0.1, duration: 0.5 }}>
-          <OrganizationOverview organization={organization} />
-        </m.div>
+          <div className="flex items-center gap-2">
+            <Button size="sm" variant="outline">
+              <Settings className="mr-2 h-4 w-4" />
+              Settings
+            </Button>
+            <Button size="sm">
+              <Plus className="mr-2 h-4 w-4" />
+              Invite Members
+            </Button>
+          </div>
+        </div>
+      </m.div>
 
-        {/* Main Content */}
-        <m.div animate={{ opacity: 1 }} initial={{ opacity: 0 }} transition={{ delay: 0.2, duration: 0.5 }}>
-          <Tabs className="space-y-6" defaultValue="team">
-            <TabsList className="grid w-full grid-cols-6">
-              <TabsTrigger value="profile">Profile</TabsTrigger>
-              <TabsTrigger value="team">Team</TabsTrigger>
-              <TabsTrigger value="projects">Projects</TabsTrigger>
-              <TabsTrigger value="billing">Billing</TabsTrigger>
-              <TabsTrigger value="activity">Activity</TabsTrigger>
-              <TabsTrigger value="integrations">Integrations</TabsTrigger>
-            </TabsList>
+      {/* Overview Cards */}
+      <m.div animate={{ opacity: 1 }} initial={{ opacity: 0 }} transition={{ delay: 0.1, duration: 0.5 }}>
+        <OrganizationOverview organization={organization} />
+      </m.div>
 
-            <TabsContent className="space-y-6" value="profile">
-              <OrganizationProfile organization={organization} />
-            </TabsContent>
+      {/* Main Content */}
+      <m.div animate={{ opacity: 1 }} initial={{ opacity: 0 }} transition={{ delay: 0.2, duration: 0.5 }}>
+        <Tabs className="space-y-6" defaultValue="team">
+          <TabsList className="grid w-full grid-cols-6">
+            <TabsTrigger value="profile">Profile</TabsTrigger>
+            <TabsTrigger value="team">Team</TabsTrigger>
+            <TabsTrigger value="projects">Projects</TabsTrigger>
+            <TabsTrigger value="billing">Billing</TabsTrigger>
+            <TabsTrigger value="activity">Activity</TabsTrigger>
+            <TabsTrigger value="integrations">Integrations</TabsTrigger>
+          </TabsList>
 
-            <TabsContent className="space-y-6" value="team">
-              <TeamManagement organizationId={organization.id} />
-            </TabsContent>
+          <TabsContent className="space-y-6" value="profile">
+            <OrganizationProfile organization={organization} />
+          </TabsContent>
 
-            <TabsContent className="space-y-6" value="projects">
-              <ProjectsList organizationId={organization.id} />
-            </TabsContent>
+          <TabsContent className="space-y-6" value="team">
+            <TeamManagement organizationId={organization.id} />
+          </TabsContent>
 
-            <TabsContent className="space-y-6" value="billing">
-              <BillingSection />
-            </TabsContent>
+          <TabsContent className="space-y-6" value="projects">
+            <ProjectsList organizationId={organization.id} />
+          </TabsContent>
 
-            <TabsContent className="space-y-6" value="activity">
-              <ActivityLog />
-            </TabsContent>
+          <TabsContent className="space-y-6" value="billing">
+            <BillingSection />
+          </TabsContent>
 
-            <TabsContent className="space-y-6" value="integrations">
-              <IntegrationSettings />
-            </TabsContent>
-          </Tabs>
-        </m.div>
-      </div>
-    </ProtectedRoute>
+          <TabsContent className="space-y-6" value="activity">
+            <ActivityLog />
+          </TabsContent>
+
+          <TabsContent className="space-y-6" value="integrations">
+            <IntegrationSettings />
+          </TabsContent>
+        </Tabs>
+      </m.div>
+    </div>
   );
 }
 
