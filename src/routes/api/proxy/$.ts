@@ -1,4 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { lookup } from "node:dns/promises";
+import { isIP } from "node:net";
+import ip from "ip";
+import isPrivate from "private-ip";
 
 const PROXY_ROUTE_PREFIX = "/api/proxy";
 
@@ -10,8 +14,9 @@ async function getProxySecretFromDb(): Promise<string> {
 
 // Placeholder: Replace with a real DB lookup for host allowlist
 async function isHostAllowlistedInDb(hostname: string): Promise<boolean> {
-  // TODO: Replace with real DB lookup. For now, allow any non-private, non-local host.
-  return !isPrivateOrLocalHostname(hostname);
+  // TODO: Replace with real DB lookup
+  const DEFAULT_ALLOWED = new Set<string>(["api.example.com"]);
+  return DEFAULT_ALLOWED.has(hostname);
 }
 
 function jsonWithRequestId(status: number, message: string, requestId: string) {
@@ -35,46 +40,22 @@ function normalizeHostUrl(input: string): URL | null {
   }
 }
 
-function isIpv4(host: string): boolean {
-  return /^(\d{1,3}\.){3}\d{1,3}$/.test(host);
-}
+// (Previous hostname-only private/local checks removed in favor of robust DNS/IP validation.)
 
-function parseIpv4(host: string): number[] | null {
-  if (!isIpv4(host)) return null;
-  const parts = host.split(".").map((p) => Number(p));
-  if (parts.some((n) => Number.isNaN(n) || n < 0 || n > 255)) return null;
-  return parts;
-}
-
-function isPrivateIpv4(host: string): boolean {
-  const parts = parseIpv4(host);
-  if (!parts) return false;
-  const [a, b] = parts;
-  if (a === 10) return true; // 10.0.0.0/8
-  if (a === 127) return true; // 127.0.0.0/8 loopback
-  if (a === 169 && b === 254) return true; // 169.254.0.0/16 link-local
-  if (a === 172 && b >= 16 && b <= 31) return true; // 172.16.0.0/12
-  if (a === 192 && b === 168) return true; // 192.168.0.0/16
-  return false;
-}
-
-function isPrivateOrLocalHostname(hostname: string): boolean {
+// Robust local/private host detection using DNS resolution and IP checks
+async function isLocalOrPrivateHost(hostname: string): Promise<boolean> {
   const lower = hostname.toLowerCase();
-  if (
-    lower === "localhost" ||
-    lower === "localhost." ||
-    lower.endsWith(".localhost") ||
-    lower.endsWith(".local") ||
-    lower.endsWith(".localdomain") ||
-    lower === "127.0.0.1" ||
-    lower === "::1"
-  ) {
-    return true;
+  if (lower === "localhost" || lower === "127.0.0.1" || lower === "::1") return true;
+  try {
+    const result = await lookup(hostname);
+    const address = result.address;
+    if (!isIP(address)) return false;
+    if (isPrivate(address) || ip.isLoopback(address)) return true;
+    return false;
+  } catch {
+    // Fail safe: treat as non-local/private on resolution error
+    return false;
   }
-  if (isPrivateIpv4(lower)) return true;
-  // Conservative: block raw IPv6 literals via bracket or colon presence
-  if (/[\[\]:]/.test(lower) && !isIpv4(lower)) return true;
-  return false;
 }
 
 async function proxyHandler(request: Request): Promise<Response> {
@@ -91,19 +72,18 @@ async function proxyHandler(request: Request): Promise<Response> {
   }
 
   // Verify API key with Better Auth
-  try {
-    const { authServer } = await import("~/lib/server/auth");
-    const verification = await authServer.api.verifyApiKey({
-      body: { key: zeviumKey, permissions: { api: ["read"] } },
-    });
-    if (!verification?.valid) {
-      const errorMessage = verification?.error?.message ?? "Invalid API key";
-      return jsonWithRequestId(401, errorMessage, requestId);
-    }
-  } catch (err) {
-    return jsonWithRequestId(500, "Failed to verify API key", requestId);
+ 
+  const { authServer } = await import("~/lib/server/auth");
+  const verification = await authServer.api.verifyApiKey({
+    body: { key: zeviumKey, permissions: { api: ["read"] } },
+  });
+  if (verification.error) {
+    const errorMessage = verification.error.message ?? "Failed to verify API key";
+    return jsonWithRequestId(500, errorMessage, requestId);
   }
-
+  if(!verification.valid){
+    return jsonWithRequestId(401, "Failed to verify API key", requestId);
+  }
   // Normalize and validate host
   const normalized = normalizeHostUrl(zeviumHostHeader);
   if (!normalized) {
@@ -112,7 +92,8 @@ async function proxyHandler(request: Request): Promise<Response> {
   if (normalized.protocol !== "https:") {
     return jsonWithRequestId(400, "Only HTTPS hosts are allowed", requestId);
   }
-  if (isPrivateOrLocalHostname(normalized.hostname)) {
+  // Additional robust DNS/IP-based private/local check
+  if (await isLocalOrPrivateHost(normalized.hostname)) {
     return jsonWithRequestId(403, "Host not allowed", requestId);
   }
 

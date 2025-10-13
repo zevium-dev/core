@@ -176,6 +176,9 @@ importers:
       '@trpc/tanstack-react-query':
         specifier: ^11.6.0
         version: 11.6.0(@tanstack/react-query@5.90.2(react@19.1.1))(@trpc/client@11.6.0(@trpc/server@11.6.0(typescript@5.8.3))(typescript@5.8.3))(@trpc/server@11.6.0(typescript@5.8.3))(react-dom@19.1.1(react@19.1.1))(react@19.1.1)(typescript@5.8.3)
+      '@types/ip':
+        specifier: ^1.1.3
+        version: 1.1.3
       '@types/node':
         specifier: ^22.18.6
         version: 22.18.6
@@ -257,6 +260,9 @@ importers:
       input-otp:
         specifier: ^1.4.2
         version: 1.4.2(react-dom@19.1.1(react@19.1.1))(react@19.1.1)
+      ip:
+        specifier: ^2.0.1
+        version: 2.0.1
       jotai:
         specifier: ^2.15.0
         version: 2.15.0(@babel/core@7.28.0)(@babel/template@7.27.2)(@types/react@19.1.14)(react@19.1.1)
@@ -284,6 +290,9 @@ importers:
       prettier-plugin-tailwindcss:
         specifier: ^0.6.14
         version: 0.6.14(prettier@3.6.2)
+      private-ip:
+        specifier: ^3.0.2
+        version: 3.0.2
       react:
         specifier: ^19.1.1
         version: 19.1.1
@@ -573,6 +582,9 @@ packages:
 
   '@cap.js/widget@0.1.29':
     resolution: {integrity: sha512-W098knk3qDDJ0mH+PkDRMx5wTAnxjzh6qTE53F+GVoeemUbNf1BGuFijbIaH4kouC4f1wE2/nZrTInpXBJDKaQ==}
+
+  '@chainsafe/is-ip@2.1.0':
+    resolution: {integrity: sha512-KIjt+6IfysQ4GCv66xihEitBjvhU/bixbbbFxdJ1sqCp4uJ0wuZiYBPhksZoy4lfaF0k9cwNzY5upEW/VWdw3w==}
 
   '@cloudflare/kv-asset-handler@0.4.0':
     resolution: {integrity: sha512-+tv3z+SPp+gqTIcImN9o0hqE9xyfQjI1XD9pL6NuKjua9B1y7mNYv0S9cP+QEbA4ppVgGZEmKOvHX5G5Ei1CVA==}
@@ -2986,6 +2998,9 @@ packages:
   '@types/estree@1.0.8':
     resolution: {integrity: sha512-dWHzHa2WqEXI/O1E9OjrocMTKJl2mSrEolh1Iomrv6U+JuNwaHXsXx9bLu5gG7BUWFIN0skIQJQ/L1rIex4X6w==}
 
+  '@types/ip@1.1.3':
+    resolution: {integrity: sha512-64waoJgkXFTYnCYDUWgSATJ/dXEBanVkaP5d4Sbk7P6U7cTTMhxVyROTckc6JKdwCrgnAjZMn0k3177aQxtDEA==}
+
   '@types/json-schema@7.0.15':
     resolution: {integrity: sha512-5+fP8P8MFNC+AyZCDxrB2pkZFPGzqQWUzpSeuuVLvm8VMcorNYavBqoFcxK8bQz4Qsbn4oUEEem4wDLfcysGHA==}
 
@@ -4258,6 +4273,17 @@ packages:
     resolution: {integrity: sha512-5Hh7Y1wQbvY5ooGgPbDaL5iYLAPzMTUrjMulskHLH6wnv/A+1q5rgEaiuqEjB+oxGXIVZs1FF+R/KPN3ZSQYYg==}
     engines: {node: '>=12'}
 
+  ip-regex@5.0.0:
+    resolution: {integrity: sha512-fOCG6lhoKKakwv+C6KdsOnGvgXnmgfmp0myi3bcNwj3qfwPAxRKWEuFhvEFF7ceYIz6+1jRZ+yguLFAmUNPEfw==}
+    engines: {node: ^12.20.0 || ^14.13.1 || >=16.0.0}
+
+  ip@2.0.1:
+    resolution: {integrity: sha512-lJUL9imLTNi1ZfXT+DU6rBBdbiKGBuay9B6xGSPVjUeQwaH1RIGqef8RZkUtHioLmSNpPR5M4HVKJGm1j8FWVQ==}
+
+  ipaddr.js@2.2.0:
+    resolution: {integrity: sha512-Ag3wB2o37wslZS19hZqorUnrnzSkpOVy+IiiDEiTqNubEYpYuHWIf6K4psgN2ZWKExS4xhVCrRVfb/wfW8fWJA==}
+    engines: {node: '>= 10'}
+
   is-arrayish@0.3.2:
     resolution: {integrity: sha512-eVRqCvVlZbuw3GrM63ovNSNAeA1K16kaR/LRY/92w0zxQ5/1YzwblUX652i4Xs9RwAGjW9d9y6X88t8OaAJfWQ==}
 
@@ -4605,6 +4631,10 @@ packages:
     resolution: {integrity: sha512-kKHJhxwpR/Okycz4HhQKKlhWe4ASEfPgkSWNmKFHd7+ezuQlxkA5cM3+XkBPvm1gmHen3w53qsYAv+8GwRrBlg==}
     engines: {node: '>=18'}
 
+  netmask@2.0.2:
+    resolution: {integrity: sha512-dBpDMdxv9Irdq66304OLfEmQ9tbNRFnFTuZiLo+bD+r332bBmMJ8GBLXklIXXgxd3+v9+KUnZaUR5PJMa75Gsg==}
+    engines: {node: '>= 0.4.0'}
+
   next-themes@0.4.6:
     resolution: {integrity: sha512-pZvgD5L0IEvX5/9GWyHMf3m8BKiVQwsCMHfoFosXtXBMnaS0ZnIJ9ST4b4NqLVKDEm8QBxoNNGNaBv2JNF6XNA==}
     peerDependencies:
@@ -4817,6 +4847,10 @@ packages:
   prismjs@1.30.0:
     resolution: {integrity: sha512-DEvV2ZF2r2/63V+tK8hQvrR2ZGn10srHbXviTlcv7Kpzw8jWiNTqbVgjO3IY8RxrrOUF8VPMQQFysYYYv0YZxw==}
     engines: {node: '>=6'}
+
+  private-ip@3.0.2:
+    resolution: {integrity: sha512-2pkOVPGYD/4QyAg95c6E/4bLYXPthT5Xw4ocXYzIIsMBhskOMn6IwkWXmg6ZiA6K58+O6VD/n02r1hDhk7vDPw==}
+    engines: {node: '>=14.16'}
 
   promise-limit@2.7.0:
     resolution: {integrity: sha512-7nJ6v5lnJsXwGprnGXga4wx6d1POjvi5Qmf1ivTRxTjH4Z/9Czja/UCMLVmB9N93GeWOU93XaFaEt6jbuoagNw==}
@@ -5845,6 +5879,8 @@ snapshots:
       typescript: 5.8.3
 
   '@cap.js/widget@0.1.29': {}
+
+  '@chainsafe/is-ip@2.1.0': {}
 
   '@cloudflare/kv-asset-handler@0.4.0':
     dependencies:
@@ -8213,6 +8249,10 @@ snapshots:
 
   '@types/estree@1.0.8': {}
 
+  '@types/ip@1.1.3':
+    dependencies:
+      '@types/node': 22.18.6
+
   '@types/json-schema@7.0.15': {}
 
   '@types/node@22.18.6':
@@ -9572,6 +9612,12 @@ snapshots:
 
   internmap@2.0.3: {}
 
+  ip-regex@5.0.0: {}
+
+  ip@2.0.1: {}
+
+  ipaddr.js@2.2.0: {}
+
   is-arrayish@0.3.2: {}
 
   is-binary-path@2.1.0:
@@ -9845,6 +9891,8 @@ snapshots:
 
   natural-orderby@5.0.0: {}
 
+  netmask@2.0.2: {}
+
   next-themes@0.4.6(react-dom@19.1.1(react@19.1.1))(react@19.1.1):
     dependencies:
       react: 19.1.1
@@ -9982,6 +10030,13 @@ snapshots:
   prettier@3.6.2: {}
 
   prismjs@1.30.0: {}
+
+  private-ip@3.0.2:
+    dependencies:
+      '@chainsafe/is-ip': 2.1.0
+      ip-regex: 5.0.0
+      ipaddr.js: 2.2.0
+      netmask: 2.0.2
 
   promise-limit@2.7.0: {}
 
