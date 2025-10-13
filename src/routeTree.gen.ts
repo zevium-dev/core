@@ -9,18 +9,10 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as CatalogueRouteImport } from './routes/catalogue'
+import { Route as AppRouteImport } from './routes/app'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as SettingsIndexRouteImport } from './routes/settings/index'
-import { Route as ProjectsIndexRouteImport } from './routes/projects/index'
-import { Route as PricingIndexRouteImport } from './routes/pricing/index'
-import { Route as OrganizationsIndexRouteImport } from './routes/organizations/index'
-import { Route as SettingsPreferenceRouteImport } from './routes/settings/preference'
-import { Route as SettingsKeysRouteImport } from './routes/settings/keys'
-import { Route as SettingsCreditsRouteImport } from './routes/settings/credits'
-import { Route as SettingsActivityRouteImport } from './routes/settings/activity'
-import { Route as ProjectsSlugRouteImport } from './routes/projects/$slug'
-import { Route as OrganizationsSlugRouteImport } from './routes/organizations/$slug'
+import { Route as AuthIndexRouteImport } from './routes/auth/index'
+import { Route as AppIndexRouteImport } from './routes/app/index'
 import { Route as AuthVerifyEmailRouteImport } from './routes/auth/verify-email'
 import { Route as AuthTwoFactorVerifyRouteImport } from './routes/auth/two-factor-verify'
 import { Route as AuthTwoFactorAuthRouteImport } from './routes/auth/two-factor-auth'
@@ -30,17 +22,28 @@ import { Route as AuthSentEmailRouteImport } from './routes/auth/sent-email'
 import { Route as AuthResetPasswordRouteImport } from './routes/auth/reset-password'
 import { Route as AuthForgotPasswordRouteImport } from './routes/auth/forgot-password'
 import { Route as AuthChangePasswordRouteImport } from './routes/auth/change-password'
+import { Route as AppDashboardRouteImport } from './routes/app/dashboard'
+import { Route as AppCatalogueRouteImport } from './routes/app/catalogue'
 import { Route as InternalEmailTemplatesPreviewRouteImport } from './routes/$internal/email-templates-preview'
+import { Route as AppSettingsIndexRouteImport } from './routes/app/settings/index'
+import { Route as AppProjectsIndexRouteImport } from './routes/app/projects/index'
+import { Route as AppOrganizationsIndexRouteImport } from './routes/app/organizations/index'
+import { Route as AppSettingsPreferenceRouteImport } from './routes/app/settings/preference'
+import { Route as AppSettingsKeysRouteImport } from './routes/app/settings/keys'
+import { Route as AppSettingsCreditsRouteImport } from './routes/app/settings/credits'
+import { Route as AppSettingsActivityRouteImport } from './routes/app/settings/activity'
+import { Route as AppProjectsSlugRouteImport } from './routes/app/projects/$slug'
+import { Route as AppOrganizationsSlugRouteImport } from './routes/app/organizations/$slug'
 import { Route as ApiTrpcSplatRouteImport } from './routes/api/trpc/$'
 import { Route as ApiPosthogSplatRouteImport } from './routes/api/posthog/$'
 import { Route as ApiOpenapiSplatRouteImport } from './routes/api/openapi/$'
 import { Route as ApiCapSplatRouteImport } from './routes/api/cap/$'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
-import { Route as ProjectsSlugViewVersionRouteImport } from './routes/projects/$slug/view/$version'
+import { Route as AppProjectsSlugViewVersionRouteImport } from './routes/app/projects/$slug/view/$version'
 
-const CatalogueRoute = CatalogueRouteImport.update({
-  id: '/catalogue',
-  path: '/catalogue',
+const AppRoute = AppRouteImport.update({
+  id: '/app',
+  path: '/app',
   getParentRoute: () => rootRouteImport,
 } as any)
 const IndexRoute = IndexRouteImport.update({
@@ -48,55 +51,15 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
-const SettingsIndexRoute = SettingsIndexRouteImport.update({
-  id: '/settings/',
-  path: '/settings/',
+const AuthIndexRoute = AuthIndexRouteImport.update({
+  id: '/auth/',
+  path: '/auth/',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ProjectsIndexRoute = ProjectsIndexRouteImport.update({
-  id: '/projects/',
-  path: '/projects/',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const PricingIndexRoute = PricingIndexRouteImport.update({
-  id: '/pricing/',
-  path: '/pricing/',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const OrganizationsIndexRoute = OrganizationsIndexRouteImport.update({
-  id: '/organizations/',
-  path: '/organizations/',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const SettingsPreferenceRoute = SettingsPreferenceRouteImport.update({
-  id: '/settings/preference',
-  path: '/settings/preference',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const SettingsKeysRoute = SettingsKeysRouteImport.update({
-  id: '/settings/keys',
-  path: '/settings/keys',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const SettingsCreditsRoute = SettingsCreditsRouteImport.update({
-  id: '/settings/credits',
-  path: '/settings/credits',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const SettingsActivityRoute = SettingsActivityRouteImport.update({
-  id: '/settings/activity',
-  path: '/settings/activity',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ProjectsSlugRoute = ProjectsSlugRouteImport.update({
-  id: '/projects/$slug',
-  path: '/projects/$slug',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const OrganizationsSlugRoute = OrganizationsSlugRouteImport.update({
-  id: '/organizations/$slug',
-  path: '/organizations/$slug',
-  getParentRoute: () => rootRouteImport,
+const AppIndexRoute = AppIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AppRoute,
 } as any)
 const AuthVerifyEmailRoute = AuthVerifyEmailRouteImport.update({
   id: '/auth/verify-email',
@@ -143,12 +106,67 @@ const AuthChangePasswordRoute = AuthChangePasswordRouteImport.update({
   path: '/auth/change-password',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AppDashboardRoute = AppDashboardRouteImport.update({
+  id: '/dashboard',
+  path: '/dashboard',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppCatalogueRoute = AppCatalogueRouteImport.update({
+  id: '/catalogue',
+  path: '/catalogue',
+  getParentRoute: () => AppRoute,
+} as any)
 const InternalEmailTemplatesPreviewRoute =
   InternalEmailTemplatesPreviewRouteImport.update({
     id: '/$internal/email-templates-preview',
     path: '/$internal/email-templates-preview',
     getParentRoute: () => rootRouteImport,
   } as any)
+const AppSettingsIndexRoute = AppSettingsIndexRouteImport.update({
+  id: '/settings/',
+  path: '/settings/',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppProjectsIndexRoute = AppProjectsIndexRouteImport.update({
+  id: '/projects/',
+  path: '/projects/',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppOrganizationsIndexRoute = AppOrganizationsIndexRouteImport.update({
+  id: '/organizations/',
+  path: '/organizations/',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppSettingsPreferenceRoute = AppSettingsPreferenceRouteImport.update({
+  id: '/settings/preference',
+  path: '/settings/preference',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppSettingsKeysRoute = AppSettingsKeysRouteImport.update({
+  id: '/settings/keys',
+  path: '/settings/keys',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppSettingsCreditsRoute = AppSettingsCreditsRouteImport.update({
+  id: '/settings/credits',
+  path: '/settings/credits',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppSettingsActivityRoute = AppSettingsActivityRouteImport.update({
+  id: '/settings/activity',
+  path: '/settings/activity',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppProjectsSlugRoute = AppProjectsSlugRouteImport.update({
+  id: '/projects/$slug',
+  path: '/projects/$slug',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppOrganizationsSlugRoute = AppOrganizationsSlugRouteImport.update({
+  id: '/organizations/$slug',
+  path: '/organizations/$slug',
+  getParentRoute: () => AppRoute,
+} as any)
 const ApiTrpcSplatRoute = ApiTrpcSplatRouteImport.update({
   id: '/api/trpc/$',
   path: '/api/trpc/$',
@@ -174,16 +192,19 @@ const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
   path: '/api/auth/$',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ProjectsSlugViewVersionRoute = ProjectsSlugViewVersionRouteImport.update({
-  id: '/view/$version',
-  path: '/view/$version',
-  getParentRoute: () => ProjectsSlugRoute,
-} as any)
+const AppProjectsSlugViewVersionRoute =
+  AppProjectsSlugViewVersionRouteImport.update({
+    id: '/view/$version',
+    path: '/view/$version',
+    getParentRoute: () => AppProjectsSlugRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/catalogue': typeof CatalogueRoute
+  '/app': typeof AppRouteWithChildren
   '/$internal/email-templates-preview': typeof InternalEmailTemplatesPreviewRoute
+  '/app/catalogue': typeof AppCatalogueRoute
+  '/app/dashboard': typeof AppDashboardRoute
   '/auth/change-password': typeof AuthChangePasswordRoute
   '/auth/forgot-password': typeof AuthForgotPasswordRoute
   '/auth/reset-password': typeof AuthResetPasswordRoute
@@ -193,27 +214,29 @@ export interface FileRoutesByFullPath {
   '/auth/two-factor-auth': typeof AuthTwoFactorAuthRoute
   '/auth/two-factor-verify': typeof AuthTwoFactorVerifyRoute
   '/auth/verify-email': typeof AuthVerifyEmailRoute
-  '/organizations/$slug': typeof OrganizationsSlugRoute
-  '/projects/$slug': typeof ProjectsSlugRouteWithChildren
-  '/settings/activity': typeof SettingsActivityRoute
-  '/settings/credits': typeof SettingsCreditsRoute
-  '/settings/keys': typeof SettingsKeysRoute
-  '/settings/preference': typeof SettingsPreferenceRoute
-  '/organizations': typeof OrganizationsIndexRoute
-  '/pricing': typeof PricingIndexRoute
-  '/projects': typeof ProjectsIndexRoute
-  '/settings': typeof SettingsIndexRoute
+  '/app/': typeof AppIndexRoute
+  '/auth': typeof AuthIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/cap/$': typeof ApiCapSplatRoute
   '/api/openapi/$': typeof ApiOpenapiSplatRoute
   '/api/posthog/$': typeof ApiPosthogSplatRoute
   '/api/trpc/$': typeof ApiTrpcSplatRoute
-  '/projects/$slug/view/$version': typeof ProjectsSlugViewVersionRoute
+  '/app/organizations/$slug': typeof AppOrganizationsSlugRoute
+  '/app/projects/$slug': typeof AppProjectsSlugRouteWithChildren
+  '/app/settings/activity': typeof AppSettingsActivityRoute
+  '/app/settings/credits': typeof AppSettingsCreditsRoute
+  '/app/settings/keys': typeof AppSettingsKeysRoute
+  '/app/settings/preference': typeof AppSettingsPreferenceRoute
+  '/app/organizations': typeof AppOrganizationsIndexRoute
+  '/app/projects': typeof AppProjectsIndexRoute
+  '/app/settings': typeof AppSettingsIndexRoute
+  '/app/projects/$slug/view/$version': typeof AppProjectsSlugViewVersionRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/catalogue': typeof CatalogueRoute
   '/$internal/email-templates-preview': typeof InternalEmailTemplatesPreviewRoute
+  '/app/catalogue': typeof AppCatalogueRoute
+  '/app/dashboard': typeof AppDashboardRoute
   '/auth/change-password': typeof AuthChangePasswordRoute
   '/auth/forgot-password': typeof AuthForgotPasswordRoute
   '/auth/reset-password': typeof AuthResetPasswordRoute
@@ -223,28 +246,31 @@ export interface FileRoutesByTo {
   '/auth/two-factor-auth': typeof AuthTwoFactorAuthRoute
   '/auth/two-factor-verify': typeof AuthTwoFactorVerifyRoute
   '/auth/verify-email': typeof AuthVerifyEmailRoute
-  '/organizations/$slug': typeof OrganizationsSlugRoute
-  '/projects/$slug': typeof ProjectsSlugRouteWithChildren
-  '/settings/activity': typeof SettingsActivityRoute
-  '/settings/credits': typeof SettingsCreditsRoute
-  '/settings/keys': typeof SettingsKeysRoute
-  '/settings/preference': typeof SettingsPreferenceRoute
-  '/organizations': typeof OrganizationsIndexRoute
-  '/pricing': typeof PricingIndexRoute
-  '/projects': typeof ProjectsIndexRoute
-  '/settings': typeof SettingsIndexRoute
+  '/app': typeof AppIndexRoute
+  '/auth': typeof AuthIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/cap/$': typeof ApiCapSplatRoute
   '/api/openapi/$': typeof ApiOpenapiSplatRoute
   '/api/posthog/$': typeof ApiPosthogSplatRoute
   '/api/trpc/$': typeof ApiTrpcSplatRoute
-  '/projects/$slug/view/$version': typeof ProjectsSlugViewVersionRoute
+  '/app/organizations/$slug': typeof AppOrganizationsSlugRoute
+  '/app/projects/$slug': typeof AppProjectsSlugRouteWithChildren
+  '/app/settings/activity': typeof AppSettingsActivityRoute
+  '/app/settings/credits': typeof AppSettingsCreditsRoute
+  '/app/settings/keys': typeof AppSettingsKeysRoute
+  '/app/settings/preference': typeof AppSettingsPreferenceRoute
+  '/app/organizations': typeof AppOrganizationsIndexRoute
+  '/app/projects': typeof AppProjectsIndexRoute
+  '/app/settings': typeof AppSettingsIndexRoute
+  '/app/projects/$slug/view/$version': typeof AppProjectsSlugViewVersionRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
-  '/catalogue': typeof CatalogueRoute
+  '/app': typeof AppRouteWithChildren
   '/$internal/email-templates-preview': typeof InternalEmailTemplatesPreviewRoute
+  '/app/catalogue': typeof AppCatalogueRoute
+  '/app/dashboard': typeof AppDashboardRoute
   '/auth/change-password': typeof AuthChangePasswordRoute
   '/auth/forgot-password': typeof AuthForgotPasswordRoute
   '/auth/reset-password': typeof AuthResetPasswordRoute
@@ -254,29 +280,32 @@ export interface FileRoutesById {
   '/auth/two-factor-auth': typeof AuthTwoFactorAuthRoute
   '/auth/two-factor-verify': typeof AuthTwoFactorVerifyRoute
   '/auth/verify-email': typeof AuthVerifyEmailRoute
-  '/organizations/$slug': typeof OrganizationsSlugRoute
-  '/projects/$slug': typeof ProjectsSlugRouteWithChildren
-  '/settings/activity': typeof SettingsActivityRoute
-  '/settings/credits': typeof SettingsCreditsRoute
-  '/settings/keys': typeof SettingsKeysRoute
-  '/settings/preference': typeof SettingsPreferenceRoute
-  '/organizations/': typeof OrganizationsIndexRoute
-  '/pricing/': typeof PricingIndexRoute
-  '/projects/': typeof ProjectsIndexRoute
-  '/settings/': typeof SettingsIndexRoute
+  '/app/': typeof AppIndexRoute
+  '/auth/': typeof AuthIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/cap/$': typeof ApiCapSplatRoute
   '/api/openapi/$': typeof ApiOpenapiSplatRoute
   '/api/posthog/$': typeof ApiPosthogSplatRoute
   '/api/trpc/$': typeof ApiTrpcSplatRoute
-  '/projects/$slug/view/$version': typeof ProjectsSlugViewVersionRoute
+  '/app/organizations/$slug': typeof AppOrganizationsSlugRoute
+  '/app/projects/$slug': typeof AppProjectsSlugRouteWithChildren
+  '/app/settings/activity': typeof AppSettingsActivityRoute
+  '/app/settings/credits': typeof AppSettingsCreditsRoute
+  '/app/settings/keys': typeof AppSettingsKeysRoute
+  '/app/settings/preference': typeof AppSettingsPreferenceRoute
+  '/app/organizations/': typeof AppOrganizationsIndexRoute
+  '/app/projects/': typeof AppProjectsIndexRoute
+  '/app/settings/': typeof AppSettingsIndexRoute
+  '/app/projects/$slug/view/$version': typeof AppProjectsSlugViewVersionRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
-    | '/catalogue'
+    | '/app'
     | '/$internal/email-templates-preview'
+    | '/app/catalogue'
+    | '/app/dashboard'
     | '/auth/change-password'
     | '/auth/forgot-password'
     | '/auth/reset-password'
@@ -286,27 +315,29 @@ export interface FileRouteTypes {
     | '/auth/two-factor-auth'
     | '/auth/two-factor-verify'
     | '/auth/verify-email'
-    | '/organizations/$slug'
-    | '/projects/$slug'
-    | '/settings/activity'
-    | '/settings/credits'
-    | '/settings/keys'
-    | '/settings/preference'
-    | '/organizations'
-    | '/pricing'
-    | '/projects'
-    | '/settings'
+    | '/app/'
+    | '/auth'
     | '/api/auth/$'
     | '/api/cap/$'
     | '/api/openapi/$'
     | '/api/posthog/$'
     | '/api/trpc/$'
-    | '/projects/$slug/view/$version'
+    | '/app/organizations/$slug'
+    | '/app/projects/$slug'
+    | '/app/settings/activity'
+    | '/app/settings/credits'
+    | '/app/settings/keys'
+    | '/app/settings/preference'
+    | '/app/organizations'
+    | '/app/projects'
+    | '/app/settings'
+    | '/app/projects/$slug/view/$version'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
-    | '/catalogue'
     | '/$internal/email-templates-preview'
+    | '/app/catalogue'
+    | '/app/dashboard'
     | '/auth/change-password'
     | '/auth/forgot-password'
     | '/auth/reset-password'
@@ -316,27 +347,30 @@ export interface FileRouteTypes {
     | '/auth/two-factor-auth'
     | '/auth/two-factor-verify'
     | '/auth/verify-email'
-    | '/organizations/$slug'
-    | '/projects/$slug'
-    | '/settings/activity'
-    | '/settings/credits'
-    | '/settings/keys'
-    | '/settings/preference'
-    | '/organizations'
-    | '/pricing'
-    | '/projects'
-    | '/settings'
+    | '/app'
+    | '/auth'
     | '/api/auth/$'
     | '/api/cap/$'
     | '/api/openapi/$'
     | '/api/posthog/$'
     | '/api/trpc/$'
-    | '/projects/$slug/view/$version'
+    | '/app/organizations/$slug'
+    | '/app/projects/$slug'
+    | '/app/settings/activity'
+    | '/app/settings/credits'
+    | '/app/settings/keys'
+    | '/app/settings/preference'
+    | '/app/organizations'
+    | '/app/projects'
+    | '/app/settings'
+    | '/app/projects/$slug/view/$version'
   id:
     | '__root__'
     | '/'
-    | '/catalogue'
+    | '/app'
     | '/$internal/email-templates-preview'
+    | '/app/catalogue'
+    | '/app/dashboard'
     | '/auth/change-password'
     | '/auth/forgot-password'
     | '/auth/reset-password'
@@ -346,27 +380,28 @@ export interface FileRouteTypes {
     | '/auth/two-factor-auth'
     | '/auth/two-factor-verify'
     | '/auth/verify-email'
-    | '/organizations/$slug'
-    | '/projects/$slug'
-    | '/settings/activity'
-    | '/settings/credits'
-    | '/settings/keys'
-    | '/settings/preference'
-    | '/organizations/'
-    | '/pricing/'
-    | '/projects/'
-    | '/settings/'
+    | '/app/'
+    | '/auth/'
     | '/api/auth/$'
     | '/api/cap/$'
     | '/api/openapi/$'
     | '/api/posthog/$'
     | '/api/trpc/$'
-    | '/projects/$slug/view/$version'
+    | '/app/organizations/$slug'
+    | '/app/projects/$slug'
+    | '/app/settings/activity'
+    | '/app/settings/credits'
+    | '/app/settings/keys'
+    | '/app/settings/preference'
+    | '/app/organizations/'
+    | '/app/projects/'
+    | '/app/settings/'
+    | '/app/projects/$slug/view/$version'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-  CatalogueRoute: typeof CatalogueRoute
+  AppRoute: typeof AppRouteWithChildren
   InternalEmailTemplatesPreviewRoute: typeof InternalEmailTemplatesPreviewRoute
   AuthChangePasswordRoute: typeof AuthChangePasswordRoute
   AuthForgotPasswordRoute: typeof AuthForgotPasswordRoute
@@ -377,16 +412,7 @@ export interface RootRouteChildren {
   AuthTwoFactorAuthRoute: typeof AuthTwoFactorAuthRoute
   AuthTwoFactorVerifyRoute: typeof AuthTwoFactorVerifyRoute
   AuthVerifyEmailRoute: typeof AuthVerifyEmailRoute
-  OrganizationsSlugRoute: typeof OrganizationsSlugRoute
-  ProjectsSlugRoute: typeof ProjectsSlugRouteWithChildren
-  SettingsActivityRoute: typeof SettingsActivityRoute
-  SettingsCreditsRoute: typeof SettingsCreditsRoute
-  SettingsKeysRoute: typeof SettingsKeysRoute
-  SettingsPreferenceRoute: typeof SettingsPreferenceRoute
-  OrganizationsIndexRoute: typeof OrganizationsIndexRoute
-  PricingIndexRoute: typeof PricingIndexRoute
-  ProjectsIndexRoute: typeof ProjectsIndexRoute
-  SettingsIndexRoute: typeof SettingsIndexRoute
+  AuthIndexRoute: typeof AuthIndexRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
   ApiCapSplatRoute: typeof ApiCapSplatRoute
   ApiOpenapiSplatRoute: typeof ApiOpenapiSplatRoute
@@ -396,11 +422,11 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/catalogue': {
-      id: '/catalogue'
-      path: '/catalogue'
-      fullPath: '/catalogue'
-      preLoaderRoute: typeof CatalogueRouteImport
+    '/app': {
+      id: '/app'
+      path: '/app'
+      fullPath: '/app'
+      preLoaderRoute: typeof AppRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/': {
@@ -410,75 +436,19 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/settings/': {
-      id: '/settings/'
-      path: '/settings'
-      fullPath: '/settings'
-      preLoaderRoute: typeof SettingsIndexRouteImport
+    '/auth/': {
+      id: '/auth/'
+      path: '/auth'
+      fullPath: '/auth'
+      preLoaderRoute: typeof AuthIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/projects/': {
-      id: '/projects/'
-      path: '/projects'
-      fullPath: '/projects'
-      preLoaderRoute: typeof ProjectsIndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/pricing/': {
-      id: '/pricing/'
-      path: '/pricing'
-      fullPath: '/pricing'
-      preLoaderRoute: typeof PricingIndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/organizations/': {
-      id: '/organizations/'
-      path: '/organizations'
-      fullPath: '/organizations'
-      preLoaderRoute: typeof OrganizationsIndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/settings/preference': {
-      id: '/settings/preference'
-      path: '/settings/preference'
-      fullPath: '/settings/preference'
-      preLoaderRoute: typeof SettingsPreferenceRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/settings/keys': {
-      id: '/settings/keys'
-      path: '/settings/keys'
-      fullPath: '/settings/keys'
-      preLoaderRoute: typeof SettingsKeysRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/settings/credits': {
-      id: '/settings/credits'
-      path: '/settings/credits'
-      fullPath: '/settings/credits'
-      preLoaderRoute: typeof SettingsCreditsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/settings/activity': {
-      id: '/settings/activity'
-      path: '/settings/activity'
-      fullPath: '/settings/activity'
-      preLoaderRoute: typeof SettingsActivityRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/projects/$slug': {
-      id: '/projects/$slug'
-      path: '/projects/$slug'
-      fullPath: '/projects/$slug'
-      preLoaderRoute: typeof ProjectsSlugRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/organizations/$slug': {
-      id: '/organizations/$slug'
-      path: '/organizations/$slug'
-      fullPath: '/organizations/$slug'
-      preLoaderRoute: typeof OrganizationsSlugRouteImport
-      parentRoute: typeof rootRouteImport
+    '/app/': {
+      id: '/app/'
+      path: '/'
+      fullPath: '/app/'
+      preLoaderRoute: typeof AppIndexRouteImport
+      parentRoute: typeof AppRoute
     }
     '/auth/verify-email': {
       id: '/auth/verify-email'
@@ -543,12 +513,89 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthChangePasswordRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/app/dashboard': {
+      id: '/app/dashboard'
+      path: '/dashboard'
+      fullPath: '/app/dashboard'
+      preLoaderRoute: typeof AppDashboardRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/app/catalogue': {
+      id: '/app/catalogue'
+      path: '/catalogue'
+      fullPath: '/app/catalogue'
+      preLoaderRoute: typeof AppCatalogueRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/$internal/email-templates-preview': {
       id: '/$internal/email-templates-preview'
       path: '/$internal/email-templates-preview'
       fullPath: '/$internal/email-templates-preview'
       preLoaderRoute: typeof InternalEmailTemplatesPreviewRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/app/settings/': {
+      id: '/app/settings/'
+      path: '/settings'
+      fullPath: '/app/settings'
+      preLoaderRoute: typeof AppSettingsIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/app/projects/': {
+      id: '/app/projects/'
+      path: '/projects'
+      fullPath: '/app/projects'
+      preLoaderRoute: typeof AppProjectsIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/app/organizations/': {
+      id: '/app/organizations/'
+      path: '/organizations'
+      fullPath: '/app/organizations'
+      preLoaderRoute: typeof AppOrganizationsIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/app/settings/preference': {
+      id: '/app/settings/preference'
+      path: '/settings/preference'
+      fullPath: '/app/settings/preference'
+      preLoaderRoute: typeof AppSettingsPreferenceRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/app/settings/keys': {
+      id: '/app/settings/keys'
+      path: '/settings/keys'
+      fullPath: '/app/settings/keys'
+      preLoaderRoute: typeof AppSettingsKeysRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/app/settings/credits': {
+      id: '/app/settings/credits'
+      path: '/settings/credits'
+      fullPath: '/app/settings/credits'
+      preLoaderRoute: typeof AppSettingsCreditsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/app/settings/activity': {
+      id: '/app/settings/activity'
+      path: '/settings/activity'
+      fullPath: '/app/settings/activity'
+      preLoaderRoute: typeof AppSettingsActivityRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/app/projects/$slug': {
+      id: '/app/projects/$slug'
+      path: '/projects/$slug'
+      fullPath: '/app/projects/$slug'
+      preLoaderRoute: typeof AppProjectsSlugRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/app/organizations/$slug': {
+      id: '/app/organizations/$slug'
+      path: '/organizations/$slug'
+      fullPath: '/app/organizations/$slug'
+      preLoaderRoute: typeof AppOrganizationsSlugRouteImport
+      parentRoute: typeof AppRoute
     }
     '/api/trpc/$': {
       id: '/api/trpc/$'
@@ -585,31 +632,63 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiAuthSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/projects/$slug/view/$version': {
-      id: '/projects/$slug/view/$version'
+    '/app/projects/$slug/view/$version': {
+      id: '/app/projects/$slug/view/$version'
       path: '/view/$version'
-      fullPath: '/projects/$slug/view/$version'
-      preLoaderRoute: typeof ProjectsSlugViewVersionRouteImport
-      parentRoute: typeof ProjectsSlugRoute
+      fullPath: '/app/projects/$slug/view/$version'
+      preLoaderRoute: typeof AppProjectsSlugViewVersionRouteImport
+      parentRoute: typeof AppProjectsSlugRoute
     }
   }
 }
 
-interface ProjectsSlugRouteChildren {
-  ProjectsSlugViewVersionRoute: typeof ProjectsSlugViewVersionRoute
+interface AppProjectsSlugRouteChildren {
+  AppProjectsSlugViewVersionRoute: typeof AppProjectsSlugViewVersionRoute
 }
 
-const ProjectsSlugRouteChildren: ProjectsSlugRouteChildren = {
-  ProjectsSlugViewVersionRoute: ProjectsSlugViewVersionRoute,
+const AppProjectsSlugRouteChildren: AppProjectsSlugRouteChildren = {
+  AppProjectsSlugViewVersionRoute: AppProjectsSlugViewVersionRoute,
 }
 
-const ProjectsSlugRouteWithChildren = ProjectsSlugRoute._addFileChildren(
-  ProjectsSlugRouteChildren,
+const AppProjectsSlugRouteWithChildren = AppProjectsSlugRoute._addFileChildren(
+  AppProjectsSlugRouteChildren,
 )
+
+interface AppRouteChildren {
+  AppCatalogueRoute: typeof AppCatalogueRoute
+  AppDashboardRoute: typeof AppDashboardRoute
+  AppIndexRoute: typeof AppIndexRoute
+  AppOrganizationsSlugRoute: typeof AppOrganizationsSlugRoute
+  AppProjectsSlugRoute: typeof AppProjectsSlugRouteWithChildren
+  AppSettingsActivityRoute: typeof AppSettingsActivityRoute
+  AppSettingsCreditsRoute: typeof AppSettingsCreditsRoute
+  AppSettingsKeysRoute: typeof AppSettingsKeysRoute
+  AppSettingsPreferenceRoute: typeof AppSettingsPreferenceRoute
+  AppOrganizationsIndexRoute: typeof AppOrganizationsIndexRoute
+  AppProjectsIndexRoute: typeof AppProjectsIndexRoute
+  AppSettingsIndexRoute: typeof AppSettingsIndexRoute
+}
+
+const AppRouteChildren: AppRouteChildren = {
+  AppCatalogueRoute: AppCatalogueRoute,
+  AppDashboardRoute: AppDashboardRoute,
+  AppIndexRoute: AppIndexRoute,
+  AppOrganizationsSlugRoute: AppOrganizationsSlugRoute,
+  AppProjectsSlugRoute: AppProjectsSlugRouteWithChildren,
+  AppSettingsActivityRoute: AppSettingsActivityRoute,
+  AppSettingsCreditsRoute: AppSettingsCreditsRoute,
+  AppSettingsKeysRoute: AppSettingsKeysRoute,
+  AppSettingsPreferenceRoute: AppSettingsPreferenceRoute,
+  AppOrganizationsIndexRoute: AppOrganizationsIndexRoute,
+  AppProjectsIndexRoute: AppProjectsIndexRoute,
+  AppSettingsIndexRoute: AppSettingsIndexRoute,
+}
+
+const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  CatalogueRoute: CatalogueRoute,
+  AppRoute: AppRouteWithChildren,
   InternalEmailTemplatesPreviewRoute: InternalEmailTemplatesPreviewRoute,
   AuthChangePasswordRoute: AuthChangePasswordRoute,
   AuthForgotPasswordRoute: AuthForgotPasswordRoute,
@@ -620,16 +699,7 @@ const rootRouteChildren: RootRouteChildren = {
   AuthTwoFactorAuthRoute: AuthTwoFactorAuthRoute,
   AuthTwoFactorVerifyRoute: AuthTwoFactorVerifyRoute,
   AuthVerifyEmailRoute: AuthVerifyEmailRoute,
-  OrganizationsSlugRoute: OrganizationsSlugRoute,
-  ProjectsSlugRoute: ProjectsSlugRouteWithChildren,
-  SettingsActivityRoute: SettingsActivityRoute,
-  SettingsCreditsRoute: SettingsCreditsRoute,
-  SettingsKeysRoute: SettingsKeysRoute,
-  SettingsPreferenceRoute: SettingsPreferenceRoute,
-  OrganizationsIndexRoute: OrganizationsIndexRoute,
-  PricingIndexRoute: PricingIndexRoute,
-  ProjectsIndexRoute: ProjectsIndexRoute,
-  SettingsIndexRoute: SettingsIndexRoute,
+  AuthIndexRoute: AuthIndexRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
   ApiCapSplatRoute: ApiCapSplatRoute,
   ApiOpenapiSplatRoute: ApiOpenapiSplatRoute,

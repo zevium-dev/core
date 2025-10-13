@@ -1,7 +1,18 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { Link, useMatches, useRouter } from "@tanstack/react-router";
 import { atom, useAtom } from "jotai";
-import { Building2Icon, Database, DockIcon, HomeIcon, LogIn, LogOut, Moon, Palette, Settings, Sun } from "lucide-react";
+import {
+  Building2Icon,
+  Database,
+  DockIcon,
+  LayoutDashboardIcon,
+  LogIn,
+  LogOut,
+  Moon,
+  Palette,
+  Settings,
+  Sun,
+} from "lucide-react";
 import * as React from "react";
 
 import { useTheme } from "~/components/theme-provider";
@@ -58,54 +69,42 @@ export function PageHeader() {
 
 const navData = [
   {
-    icon: HomeIcon,
-    requiresAuth: false,
-    title: "Home",
-    url: "/",
-  },
-  {
     icon: Database,
     requiresAuth: false,
     title: "API Catalogue",
-    url: "/catalogue",
+    url: "/app/catalogue",
   },
   {
     icon: Building2Icon,
     requiresAuth: true,
     title: "Organizations",
-    url: "/organizations",
+    url: "/app/organizations",
   },
   {
     icon: DockIcon,
     requiresAuth: true,
     title: "Projects",
-    url: "/projects",
+    url: "/app/projects",
   },
   {
     icon: Settings,
     requiresAuth: true,
     subroutes: [
-      { title: "Activity", url: "/settings/activity/$" },
-      { title: "API Keys", url: "/settings/keys/$" },
-      { title: "Credits", url: "/settings/credits/$" },
-      { title: "Preferences", url: "/settings/preference/$" },
+      { title: "Activity", url: "/app/settings/activity/$" },
+      { title: "API Keys", url: "/app/settings/keys/$" },
+      { title: "Credits", url: "/app/settings/credits/$" },
+      { title: "Preferences", url: "/app/settings/preference/$" },
     ],
     title: "Settings",
-    url: "/settings",
+    url: "/app/settings",
   },
 ];
 
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const [, match] = useMatches();
-  const user = useUser();
 
   // Filter navigation items based on authentication state
-  const filteredNavData = navData.filter((item) => {
-    if (item.requiresAuth) {
-      return !!user;
-    }
-    return true;
-  });
+  const filteredNavData = navData;
 
   return (
     <Sidebar collapsible="icon" {...props}>
@@ -129,6 +128,135 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
       <SidebarContent>
         <SidebarGroup>
           <SidebarMenu>
+            <SidebarMenuItem>
+              <SidebarMenuButton asChild className="data-[active=true]:bg-main data-[active=true]:text-main-foreground">
+                <Link to="/app/dashboard">
+                  <LayoutDashboardIcon />
+                  <span>Dashboard</span>
+                </Link>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+
+            {filteredNavData.map((item) => {
+              // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+              if (!match) return <React.Fragment key={item.title} />;
+
+              // Check if current path matches the item URL or starts with it (for nested routes)
+              const isActive = match.pathname === item.url || (item.url !== "/" && match.pathname.startsWith(item.url));
+
+              // Collapsible Settings item with subroutes
+              if (item.title === "Settings" && item.subroutes) {
+                const isSettingsActive = match.pathname.startsWith("/settings");
+
+                return (
+                  <Collapsible className="group/collapsible" defaultOpen={isSettingsActive} key={item.title}>
+                    <SidebarMenuItem>
+                      <CollapsibleTrigger asChild>
+                        <SidebarMenuButton
+                          className="data-[active=true]:bg-main data-[active=true]:text-main-foreground"
+                          isActive={isSettingsActive}
+                        >
+                          <item.icon />
+                          <span>{item.title}</span>
+                        </SidebarMenuButton>
+                      </CollapsibleTrigger>
+                      <CollapsibleContent>
+                        <SidebarMenuSub>
+                          {item.subroutes.map((sub) => {
+                            const isSubActive = match.pathname === sub.url || match.pathname.startsWith(sub.url + "/");
+                            return (
+                              <SidebarMenuSubItem key={sub.title}>
+                                <SidebarMenuSubButton asChild isActive={isSubActive}>
+                                  <Link to={sub.url}>{sub.title}</Link>
+                                </SidebarMenuSubButton>
+                              </SidebarMenuSubItem>
+                            );
+                          })}
+                        </SidebarMenuSub>
+                      </CollapsibleContent>
+                    </SidebarMenuItem>
+                  </Collapsible>
+                );
+              }
+
+              return (
+                <SidebarMenuItem key={item.title}>
+                  <SidebarMenuButton
+                    asChild
+                    className="data-[active=true]:bg-main data-[active=true]:text-main-foreground"
+                    isActive={isActive}
+                  >
+                    <Link to={item.url}>
+                      <item.icon />
+                      <span>{item.title}</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              );
+            })}
+          </SidebarMenu>
+        </SidebarGroup>
+      </SidebarContent>
+      <SidebarFooter>
+        <SidebarMenu>
+          {/* Theme Selector */}
+          <SidebarMenuItem>
+            <ThemeSelector />
+          </SidebarMenuItem>
+          {/* Account Section */}
+          <SidebarMenuItem>
+            <AccountSection />
+          </SidebarMenuItem>
+        </SidebarMenu>
+      </SidebarFooter>
+      <SidebarRail />
+    </Sidebar>
+  );
+}
+
+export function MainSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
+  const [, match] = useMatches();
+  const user = useUser();
+
+  // Filter navigation items based on authentication state
+  const filteredNavData = navData.filter((item) => !item.requiresAuth);
+
+  return (
+    <Sidebar collapsible="icon" {...props}>
+      <SidebarHeader>
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <Link to="/">
+              <SidebarMenuButton size="lg">
+                <div className="flex aspect-square size-8 items-center justify-center rounded-full bg-black">
+                  <img alt="zevium" className="size-7" src="/icon.png" />
+                </div>
+                <div className="grid flex-1 text-left text-sm leading-tight">
+                  <span className="font-heading truncate">zevium.dev</span>
+                  <span className="truncate text-xs">a place to share</span>
+                </div>
+              </SidebarMenuButton>
+            </Link>
+          </SidebarMenuItem>
+        </SidebarMenu>
+      </SidebarHeader>
+      <SidebarContent>
+        <SidebarGroup>
+          <SidebarMenu>
+            {user && (
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  asChild
+                  className="data-[active=true]:bg-main data-[active=true]:text-main-foreground"
+                >
+                  <Link to="/app/dashboard">
+                    <LayoutDashboardIcon />
+                    <span>Dashboard</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            )}
+
             {filteredNavData.map((item) => {
               // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
               if (!match) return <React.Fragment key={item.title} />;

@@ -36,7 +36,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "~
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "~/components/ui/tabs";
 import { useTRPCClient } from "~/lib/trpc";
 
-export const Route = createFileRoute("/organizations/$slug")({
+export const Route = createFileRoute("/app/organizations/$slug")({
   component: () => (
     <ProtectedRoute>
       <RouteComponent />

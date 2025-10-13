@@ -13,7 +13,7 @@ import { Separator } from "~/components/ui/separator";
 import { useCopy } from "~/hooks/use-copy";
 import { useTRPCClient } from "~/lib/trpc";
 
-export const Route = createFileRoute("/projects/$slug/view/$version")({
+export const Route = createFileRoute("/app/projects/$slug/view/$version")({
   component: () => (
     <ProtectedRoute>
       <RouteComponent />
@@ -93,7 +93,7 @@ function ApiViewerHeader({
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-4">
             <Button
-              onClick={() => navigate({ params: { slug: project.slug }, to: "/projects/$slug" })}
+              onClick={() => navigate({ params: { slug: project.slug }, to: "/app/projects/$slug" })}
               size="sm"
               variant="ghost"
             >
