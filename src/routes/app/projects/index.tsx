@@ -25,7 +25,7 @@ import { Textarea } from "~/components/ui/textarea";
 import { ToggleGroup, ToggleGroupItem } from "~/components/ui/toggle-group";
 import { useTRPCClient } from "~/lib/trpc";
 
-export const Route = createFileRoute("/projects/")({
+export const Route = createFileRoute("/app/projects/")({
   component: RouteComponent,
 });
 

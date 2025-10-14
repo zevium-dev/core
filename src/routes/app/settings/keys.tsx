@@ -63,7 +63,7 @@ interface BetterAuthApiKey {
   userId: string;
 }
 
-export const Route = createFileRoute("/settings/keys")({
+export const Route = createFileRoute("/app/settings/keys")({
   component: ApiKeysComponent,
 });
 
