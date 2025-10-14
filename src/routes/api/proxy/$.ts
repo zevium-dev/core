@@ -1,22 +1,35 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { lookup } from "node:dns/promises";
-import { isIP } from "node:net";
 import ip from "ip";
+import { lookup } from "node:dns/promises";
 import isPrivate from "private-ip";
-
-const PROXY_ROUTE_PREFIX = "/api/proxy";
 
 // Placeholder: Replace with a real DB fetch for the proxy secret
 async function getProxySecretFromDb(): Promise<string> {
   // TODO: Replace with real DB fetch
-  return "replace-me-with-secret-from-db";
+  return await Promise.resolve("replace-me-with-secret-from-db");
 }
 
 // Placeholder: Replace with a real DB lookup for host allowlist
-async function isHostAllowlistedInDb(hostname: string): Promise<boolean> {
+async function isHostAllowlistedInDb(_hostname: string): Promise<boolean> {
   // TODO: Replace with real DB lookup
-  const DEFAULT_ALLOWED = new Set<string>(["api.example.com"]);
-  return DEFAULT_ALLOWED.has(hostname);
+  return await Promise.resolve(true);
+}
+
+// Robust local/private host detection using DNS resolution and IP checks
+async function isLocalOrPrivateHost(hostname: string): Promise<boolean> {
+  const lower = hostname.toLowerCase();
+  if (lower === "localhost" || lower === "127.0.0.1" || lower === "::1") return true;
+  try {
+    //I think this is slowlying down the proxy . TODO: Find a way to cache this.
+    const results = await lookup(hostname, { all: true, verbatim: true });
+    for (const { address } of results) {
+      if (isPrivate(address) || ip.isLoopback(address)) return true;
+    }
+    return false;
+  } catch (_error) {
+    // Fail closed: treat as local/private on resolution error
+    return true;
+  }
 }
 
 function jsonWithRequestId(status: number, message: string, requestId: string) {
@@ -29,7 +42,9 @@ function jsonWithRequestId(status: number, message: string, requestId: string) {
   );
 }
 
-function normalizeHostUrl(input: string): URL | null {
+// (Previous hostname-only private/local checks removed in favor of robust DNS/IP validation.)
+
+function normalizeHostUrl(input: string): null | URL {
   try {
     const trimmed = input.trim();
     const withScheme = /^(https?:)?\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
@@ -40,25 +55,7 @@ function normalizeHostUrl(input: string): URL | null {
   }
 }
 
-// (Previous hostname-only private/local checks removed in favor of robust DNS/IP validation.)
-
-// Robust local/private host detection using DNS resolution and IP checks
-async function isLocalOrPrivateHost(hostname: string): Promise<boolean> {
-  const lower = hostname.toLowerCase();
-  if (lower === "localhost" || lower === "127.0.0.1" || lower === "::1") return true;
-  try {
-    const result = await lookup(hostname);
-    const address = result.address;
-    if (!isIP(address)) return false;
-    if (isPrivate(address) || ip.isLoopback(address)) return true;
-    return false;
-  } catch {
-    // Fail safe: treat as non-local/private on resolution error
-    return false;
-  }
-}
-
-async function proxyHandler(request: Request): Promise<Response> {
+const proxyHandler = async (request: Request) => {
   const requestId = crypto.randomUUID();
 
   const zeviumKey = request.headers.get("x-zevium-key");
@@ -72,18 +69,21 @@ async function proxyHandler(request: Request): Promise<Response> {
   }
 
   // Verify API key with Better Auth
- 
+
   const { authServer } = await import("~/lib/server/auth");
   const verification = await authServer.api.verifyApiKey({
     body: { key: zeviumKey, permissions: { api: ["read"] } },
   });
+
+  if (!verification.valid) {
+    return jsonWithRequestId(401, "Failed to verify API key", requestId);
+  }
+
   if (verification.error) {
     const errorMessage = verification.error.message ?? "Failed to verify API key";
     return jsonWithRequestId(500, errorMessage, requestId);
   }
-  if(!verification.valid){
-    return jsonWithRequestId(401, "Failed to verify API key", requestId);
-  }
+
   // Normalize and validate host
   const normalized = normalizeHostUrl(zeviumHostHeader);
   if (!normalized) {
@@ -142,10 +142,10 @@ async function proxyHandler(request: Request): Promise<Response> {
       status: upstream.status,
       statusText: upstream.statusText,
     });
-  } catch (error) {
+  } catch (_error) {
     return jsonWithRequestId(502, "Upstream request failed", requestId);
   }
-}
+};
 
 export const Route = createFileRoute("/api/proxy/$")({
   server: {
@@ -160,5 +160,3 @@ export const Route = createFileRoute("/api/proxy/$")({
     },
   },
 });
-
-

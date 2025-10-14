@@ -32,6 +32,7 @@ import { Route as AuthForgotPasswordRouteImport } from './routes/auth/forgot-pas
 import { Route as AuthChangePasswordRouteImport } from './routes/auth/change-password'
 import { Route as InternalEmailTemplatesPreviewRouteImport } from './routes/$internal/email-templates-preview'
 import { Route as ApiTrpcSplatRouteImport } from './routes/api/trpc/$'
+import { Route as ApiProxySplatRouteImport } from './routes/api/proxy/$'
 import { Route as ApiPosthogSplatRouteImport } from './routes/api/posthog/$'
 import { Route as ApiOpenapiSplatRouteImport } from './routes/api/openapi/$'
 import { Route as ApiCapSplatRouteImport } from './routes/api/cap/$'
@@ -154,6 +155,11 @@ const ApiTrpcSplatRoute = ApiTrpcSplatRouteImport.update({
   path: '/api/trpc/$',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiProxySplatRoute = ApiProxySplatRouteImport.update({
+  id: '/api/proxy/$',
+  path: '/api/proxy/$',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiPosthogSplatRoute = ApiPosthogSplatRouteImport.update({
   id: '/api/posthog/$',
   path: '/api/posthog/$',
@@ -207,6 +213,7 @@ export interface FileRoutesByFullPath {
   '/api/cap/$': typeof ApiCapSplatRoute
   '/api/openapi/$': typeof ApiOpenapiSplatRoute
   '/api/posthog/$': typeof ApiPosthogSplatRoute
+  '/api/proxy/$': typeof ApiProxySplatRoute
   '/api/trpc/$': typeof ApiTrpcSplatRoute
   '/projects/$slug/view/$version': typeof ProjectsSlugViewVersionRoute
 }
@@ -237,6 +244,7 @@ export interface FileRoutesByTo {
   '/api/cap/$': typeof ApiCapSplatRoute
   '/api/openapi/$': typeof ApiOpenapiSplatRoute
   '/api/posthog/$': typeof ApiPosthogSplatRoute
+  '/api/proxy/$': typeof ApiProxySplatRoute
   '/api/trpc/$': typeof ApiTrpcSplatRoute
   '/projects/$slug/view/$version': typeof ProjectsSlugViewVersionRoute
 }
@@ -268,6 +276,7 @@ export interface FileRoutesById {
   '/api/cap/$': typeof ApiCapSplatRoute
   '/api/openapi/$': typeof ApiOpenapiSplatRoute
   '/api/posthog/$': typeof ApiPosthogSplatRoute
+  '/api/proxy/$': typeof ApiProxySplatRoute
   '/api/trpc/$': typeof ApiTrpcSplatRoute
   '/projects/$slug/view/$version': typeof ProjectsSlugViewVersionRoute
 }
@@ -300,6 +309,7 @@ export interface FileRouteTypes {
     | '/api/cap/$'
     | '/api/openapi/$'
     | '/api/posthog/$'
+    | '/api/proxy/$'
     | '/api/trpc/$'
     | '/projects/$slug/view/$version'
   fileRoutesByTo: FileRoutesByTo
@@ -330,6 +340,7 @@ export interface FileRouteTypes {
     | '/api/cap/$'
     | '/api/openapi/$'
     | '/api/posthog/$'
+    | '/api/proxy/$'
     | '/api/trpc/$'
     | '/projects/$slug/view/$version'
   id:
@@ -360,6 +371,7 @@ export interface FileRouteTypes {
     | '/api/cap/$'
     | '/api/openapi/$'
     | '/api/posthog/$'
+    | '/api/proxy/$'
     | '/api/trpc/$'
     | '/projects/$slug/view/$version'
   fileRoutesById: FileRoutesById
@@ -391,6 +403,7 @@ export interface RootRouteChildren {
   ApiCapSplatRoute: typeof ApiCapSplatRoute
   ApiOpenapiSplatRoute: typeof ApiOpenapiSplatRoute
   ApiPosthogSplatRoute: typeof ApiPosthogSplatRoute
+  ApiProxySplatRoute: typeof ApiProxySplatRoute
   ApiTrpcSplatRoute: typeof ApiTrpcSplatRoute
 }
 
@@ -557,6 +570,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiTrpcSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/proxy/$': {
+      id: '/api/proxy/$'
+      path: '/api/proxy/$'
+      fullPath: '/api/proxy/$'
+      preLoaderRoute: typeof ApiProxySplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/posthog/$': {
       id: '/api/posthog/$'
       path: '/api/posthog/$'
@@ -634,6 +654,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiCapSplatRoute: ApiCapSplatRoute,
   ApiOpenapiSplatRoute: ApiOpenapiSplatRoute,
   ApiPosthogSplatRoute: ApiPosthogSplatRoute,
+  ApiProxySplatRoute: ApiProxySplatRoute,
   ApiTrpcSplatRoute: ApiTrpcSplatRoute,
 }
 export const routeTree = rootRouteImport

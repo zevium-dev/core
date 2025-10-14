@@ -84,7 +84,7 @@ export const authServer = betterAuth({
         maxExpiresIn: 365 * 24 * 60 * 60, // 1 year
         minExpiresIn: 24 * 60 * 60, // 1 day
       },
-      permissions: { defaultPermissions: {} satisfies Permissions },
+      permissions: { defaultPermissions: { api: ["read"] } satisfies Permissions },
       // 200 requests per minute
       rateLimit: { enabled: true, maxRequests: 200, timeWindow: 1000 * 60 },
     }),
