@@ -76,6 +76,8 @@ function ApiKeysComponent() {
   const [newKeyLimit, setNewKeyLimit] = useState(""); // user input for credit limit (money)
   const [, copy] = useCopy();
   const [isLoading, setIsLoading] = useState(false);
+  const [newlyCreatedKey, setNewlyCreatedKey] = useState<null | string>(null);
+  const [createdKeyCopied, setCreatedKeyCopied] = useState(false);
 
   // Queries using Better Auth client
   const { data: rawApiKeys = [], refetch } = useQuery({
@@ -96,12 +98,15 @@ function ApiKeysComponent() {
 
     setIsLoading(true);
     try {
-      const { error } = await auth.apiKey.create({
+      const { data, error } = await auth.apiKey.create({
         expiresIn: undefined, // TODO: Add expiry support
         name: newKeyName.trim(),
       });
 
       if (error) throw new Error(error.message);
+
+      // Show plaintext key once for copying
+      setNewlyCreatedKey(data.key);
 
       void refetch();
       setNewKeyName("");
@@ -391,6 +396,57 @@ function ApiKeysComponent() {
               </Button>
               <Button disabled={!newKeyName.trim() || isLoading} onClick={handleSaveEdit}>
                 {isLoading ? "Saving..." : "Save"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* One-time Key Reveal Dialog */}
+        <Dialog
+          onOpenChange={(open) => {
+            if (!open) {
+              setNewlyCreatedKey(null);
+              setCreatedKeyCopied(false);
+            }
+          }}
+          open={!!newlyCreatedKey}
+        >
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Your new API key</DialogTitle>
+              <DialogDescription>
+                Copy and store this key now. For security, you won't be able to see it again.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                <Input readOnly value={newlyCreatedKey ?? ""} />
+                <Button
+                  aria-live="polite"
+                  className="border-border/40 bg-muted/30 hover:bg-muted/50 dark:hover:bg-muted/60 text-muted-foreground hover:text-foreground border px-3 transition-colors data-[copied]:bg-emerald-500/20 data-[copied]:text-emerald-500 data-[copied]:hover:bg-emerald-500/30"
+                  data-copied={createdKeyCopied || undefined}
+                  onClick={() => {
+                    if (newlyCreatedKey) {
+                      copy(newlyCreatedKey);
+                      setCreatedKeyCopied(true);
+                      window.setTimeout(() => setCreatedKeyCopied(false), 2500);
+                    }
+                  }}
+                  size="sm"
+                  title={createdKeyCopied ? "Copied" : "Copy key"}
+                  variant="ghost"
+                >
+                  {createdKeyCopied ? <Check className="mr-1 h-3 w-3" /> : <Copy className="mr-1 h-3 w-3" />}{" "}
+                  {createdKeyCopied ? "Copied" : "Copy"}
+                </Button>
+              </div>
+              <p className="text-muted-foreground text-[11px]">
+                Never share your API key publicly. Treat it like a password.
+              </p>
+            </div>
+            <DialogFooter>
+              <Button onClick={() => setNewlyCreatedKey(null)} variant="default">
+                Done
               </Button>
             </DialogFooter>
           </DialogContent>

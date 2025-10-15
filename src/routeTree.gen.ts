@@ -35,6 +35,7 @@ import { Route as AppSettingsActivityRouteImport } from './routes/app/settings/a
 import { Route as AppProjectsSlugRouteImport } from './routes/app/projects/$slug'
 import { Route as AppOrganizationsSlugRouteImport } from './routes/app/organizations/$slug'
 import { Route as ApiTrpcSplatRouteImport } from './routes/api/trpc/$'
+import { Route as ApiProxySplatRouteImport } from './routes/api/proxy/$'
 import { Route as ApiPosthogSplatRouteImport } from './routes/api/posthog/$'
 import { Route as ApiOpenapiSplatRouteImport } from './routes/api/openapi/$'
 import { Route as ApiCapSplatRouteImport } from './routes/api/cap/$'
@@ -172,6 +173,11 @@ const ApiTrpcSplatRoute = ApiTrpcSplatRouteImport.update({
   path: '/api/trpc/$',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiProxySplatRoute = ApiProxySplatRouteImport.update({
+  id: '/api/proxy/$',
+  path: '/api/proxy/$',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiPosthogSplatRoute = ApiPosthogSplatRouteImport.update({
   id: '/api/posthog/$',
   path: '/api/posthog/$',
@@ -220,6 +226,7 @@ export interface FileRoutesByFullPath {
   '/api/cap/$': typeof ApiCapSplatRoute
   '/api/openapi/$': typeof ApiOpenapiSplatRoute
   '/api/posthog/$': typeof ApiPosthogSplatRoute
+  '/api/proxy/$': typeof ApiProxySplatRoute
   '/api/trpc/$': typeof ApiTrpcSplatRoute
   '/app/organizations/$slug': typeof AppOrganizationsSlugRoute
   '/app/projects/$slug': typeof AppProjectsSlugRouteWithChildren
@@ -252,6 +259,7 @@ export interface FileRoutesByTo {
   '/api/cap/$': typeof ApiCapSplatRoute
   '/api/openapi/$': typeof ApiOpenapiSplatRoute
   '/api/posthog/$': typeof ApiPosthogSplatRoute
+  '/api/proxy/$': typeof ApiProxySplatRoute
   '/api/trpc/$': typeof ApiTrpcSplatRoute
   '/app/organizations/$slug': typeof AppOrganizationsSlugRoute
   '/app/projects/$slug': typeof AppProjectsSlugRouteWithChildren
@@ -286,6 +294,7 @@ export interface FileRoutesById {
   '/api/cap/$': typeof ApiCapSplatRoute
   '/api/openapi/$': typeof ApiOpenapiSplatRoute
   '/api/posthog/$': typeof ApiPosthogSplatRoute
+  '/api/proxy/$': typeof ApiProxySplatRoute
   '/api/trpc/$': typeof ApiTrpcSplatRoute
   '/app/organizations/$slug': typeof AppOrganizationsSlugRoute
   '/app/projects/$slug': typeof AppProjectsSlugRouteWithChildren
@@ -321,6 +330,7 @@ export interface FileRouteTypes {
     | '/api/cap/$'
     | '/api/openapi/$'
     | '/api/posthog/$'
+    | '/api/proxy/$'
     | '/api/trpc/$'
     | '/app/organizations/$slug'
     | '/app/projects/$slug'
@@ -353,6 +363,7 @@ export interface FileRouteTypes {
     | '/api/cap/$'
     | '/api/openapi/$'
     | '/api/posthog/$'
+    | '/api/proxy/$'
     | '/api/trpc/$'
     | '/app/organizations/$slug'
     | '/app/projects/$slug'
@@ -386,6 +397,7 @@ export interface FileRouteTypes {
     | '/api/cap/$'
     | '/api/openapi/$'
     | '/api/posthog/$'
+    | '/api/proxy/$'
     | '/api/trpc/$'
     | '/app/organizations/$slug'
     | '/app/projects/$slug'
@@ -417,6 +429,7 @@ export interface RootRouteChildren {
   ApiCapSplatRoute: typeof ApiCapSplatRoute
   ApiOpenapiSplatRoute: typeof ApiOpenapiSplatRoute
   ApiPosthogSplatRoute: typeof ApiPosthogSplatRoute
+  ApiProxySplatRoute: typeof ApiProxySplatRoute
   ApiTrpcSplatRoute: typeof ApiTrpcSplatRoute
 }
 
@@ -604,6 +617,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiTrpcSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/proxy/$': {
+      id: '/api/proxy/$'
+      path: '/api/proxy/$'
+      fullPath: '/api/proxy/$'
+      preLoaderRoute: typeof ApiProxySplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/posthog/$': {
       id: '/api/posthog/$'
       path: '/api/posthog/$'
@@ -704,6 +724,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiCapSplatRoute: ApiCapSplatRoute,
   ApiOpenapiSplatRoute: ApiOpenapiSplatRoute,
   ApiPosthogSplatRoute: ApiPosthogSplatRoute,
+  ApiProxySplatRoute: ApiProxySplatRoute,
   ApiTrpcSplatRoute: ApiTrpcSplatRoute,
 }
 export const routeTree = rootRouteImport
