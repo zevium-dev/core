@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
+import { useLocation } from "@tanstack/react-router";
 import { TRPCClientError } from "@trpc/client";
 import { AutumnProvider } from "autumn-js/react";
 import { Provider as JotaiProvider } from "jotai";
@@ -12,12 +13,11 @@ import { toast } from "sonner";
 import { ThemeProvider } from "~/components/theme-provider";
 import { SidebarInset, SidebarProvider } from "~/components/ui/sidebar";
 import { clientEnv } from "~/env/client";
-import { AutoCreateDefaultOrganization } from "~/hooks/use-ensure-default-organization";
 import { BetterAuthException } from "~/lib/auth";
 import { createClient, TRPCProvider } from "~/lib/trpc";
 
 import { PostHogIdentify } from "./posthog-identify";
-import { AppSidebar, PageHeader } from "./sidebar";
+import { MainSidebar, PageHeader } from "./sidebar";
 import { Toaster } from "./ui/sonner";
 
 let _queryClientSingleton: null | QueryClient = null;
@@ -91,25 +91,29 @@ const PHProvider: React.FC<React.PropsWithChildren> = ({ children }) => {
 export const Providers: React.FC<React.PropsWithChildren> = ({ children }) => {
   const queryClient = getQueryClient();
   const [trpcClient] = useState(() => createClient());
+  const location = useLocation();
+  const isAppRoute = location.pathname.startsWith("/app");
 
   return (
     <PHProvider>
-      <AutumnProvider betterAuthUrl={clientEnv.VITE_PUBLIC_URL}>
+      <AutumnProvider betterAuthUrl={clientEnv.VITE_PUBLIC_URL} includeCredentials>
         <QueryClientProvider client={queryClient}>
           <TRPCProvider queryClient={queryClient} trpcClient={trpcClient}>
             <ThemeProvider defaultTheme="dark" storageKey="vite-ui-theme">
               <LazyMotion features={domAnimation} strict>
                 <JotaiProvider>
-                  <SidebarProvider>
-                    <Toaster richColors />
-                    <PostHogIdentify />
-                    <AutoCreateDefaultOrganization />
-                    <AppSidebar />
-                    <SidebarInset>
-                      <PageHeader />
-                      {children}
-                    </SidebarInset>
-                  </SidebarProvider>
+                  <Toaster richColors />
+                  <PostHogIdentify />
+                  {!isAppRoute && (
+                    <SidebarProvider>
+                      <MainSidebar />
+                      <SidebarInset>
+                        <PageHeader />
+                        {children}
+                      </SidebarInset>
+                    </SidebarProvider>
+                  )}
+                  {isAppRoute && children}
                 </JotaiProvider>
               </LazyMotion>
             </ThemeProvider>

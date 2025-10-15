@@ -16,7 +16,7 @@ import { Separator } from "~/components/ui/separator";
 import { useUserPreferencesMutation, useUserPreferencesQuery } from "~/hooks/use-user-preferences";
 import { auth, useUser } from "~/lib/auth";
 
-export const Route = createFileRoute("/settings/preference")({
+export const Route = createFileRoute("/app/settings/preference")({
   component: AccountPreferenceComponent,
 });
 

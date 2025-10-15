@@ -70,7 +70,7 @@ function Home() {
               </p>
               <Button
                 className="from-chart-1 to-chart-3 hover:from-chart-1/90 hover:to-chart-3/90 text-primary-foreground cursor-pointer bg-gradient-to-r shadow-lg"
-                onClick={() => navigate({ to: "/catalogue" })}
+                onClick={() => navigate({ to: "/app/catalogue" })}
                 size="lg"
               >
                 API hub

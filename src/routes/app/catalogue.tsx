@@ -10,7 +10,7 @@ import { Input } from "~/components/ui/input";
 import { useTRPCClient } from "~/lib/trpc";
 import { cn } from "~/lib/utils";
 
-export const Route = createFileRoute("/catalogue")({
+export const Route = createFileRoute("/app/catalogue")({
   component: RouteComponent,
 });
 

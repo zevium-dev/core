@@ -63,7 +63,7 @@ import { Textarea } from "~/components/ui/textarea";
 import { useCopy } from "~/hooks/use-copy";
 import { useTRPCClient } from "~/lib/trpc";
 
-export const Route = createFileRoute("/projects/$slug")({
+export const Route = createFileRoute("/app/projects/$slug")({
   component: () => (
     <ProtectedRoute>
       <RouteComponent />
@@ -675,7 +675,7 @@ function ProjectHeader({
     <div className="space-y-6">
       {/* Breadcrumb Navigation */}
       <nav className="text-muted-foreground flex items-center space-x-2 text-sm">
-        <Link className="hover:text-foreground transition-colors" to="/projects">
+        <Link className="hover:text-foreground transition-colors" to="/app/projects">
           Projects
         </Link>
         <span>/</span>
@@ -1007,7 +1007,7 @@ function RouteComponent() {
   const [visibilityDialogOpen, setVisibilityDialogOpen] = React.useState(false);
 
   // Check if we're on a child route (like /projects/$slug/view/$version)
-  const isChildRoute = matches.some((match) => match.routeId === "/projects/$slug/view/$version");
+  const isChildRoute = matches.some((match) => match.routeId === "/app/projects/$slug/view/$version");
 
   const {
     data: projectData,
@@ -1089,7 +1089,7 @@ function RouteComponent() {
         <p className="text-muted-foreground mb-4">
           The project you're looking for doesn't exist or you don't have access to it.
         </p>
-        <Link to="/projects">
+        <Link to="/app/projects">
           <Button>
             <ArrowLeft className="mr-2 h-4 w-4" />
             Back to Projects
@@ -1500,7 +1500,7 @@ function VersionManagement({ project }: { project: ProjectData }) {
                 <Link
                   key={group.version}
                   params={{ slug: project.slug, version: group.version }}
-                  to="/projects/$slug/view/$version"
+                  to="/app/projects/$slug/view/$version"
                 >
                   <Card className="group cursor-pointer border border-gray-200 transition-all hover:border-blue-300 hover:shadow-md">
                     <CardContent className="p-6">

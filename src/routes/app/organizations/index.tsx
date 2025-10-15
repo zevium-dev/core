@@ -40,7 +40,7 @@ interface Organization {
   website: null | string;
 }
 
-export const Route = createFileRoute("/organizations/")({
+export const Route = createFileRoute("/app/organizations/")({
   component: () => (
     <ProtectedRoute>
       <RouteComponent />

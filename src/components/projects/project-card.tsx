@@ -53,7 +53,7 @@ export function ProjectCard({ project, variant = "default" }: ProjectCardProps) 
         transition={{ duration: 0.3, ease: "easeOut" }}
         whileHover={{ y: -2 }}
       >
-        <Link params={{ slug: project.slug }} to="/projects/$slug">
+        <Link params={{ slug: project.slug }} to="/app/projects/$slug">
           <Card className="group border-border/40 from-card via-card to-card/95 hover:border-border/80 relative cursor-pointer overflow-hidden bg-gradient-to-br transition-all duration-300 hover:shadow-xl">
             {/* Status indicator stripe */}
             <div
@@ -159,7 +159,7 @@ export function ProjectCard({ project, variant = "default" }: ProjectCardProps) 
       transition={{ duration: 0.3, ease: "easeOut" }}
       whileHover={{ y: -4 }}
     >
-      <Link params={{ slug: project.slug }} to="/projects/$slug">
+      <Link params={{ slug: project.slug }} to="/app/projects/$slug">
         <Card className="group border-border/40 from-card via-card to-card/95 hover:border-border/80 relative h-full cursor-pointer overflow-hidden bg-gradient-to-br transition-all duration-300 hover:shadow-2xl">
           {/* Status indicator stripe */}
           <div
