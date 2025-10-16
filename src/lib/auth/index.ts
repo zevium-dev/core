@@ -1,7 +1,8 @@
 import { Exception } from "@boi.gg/exception";
 import { queryOptions, type QueryOptions, useSuspenseQuery } from "@tanstack/react-query";
 import { createServerOnlyFn } from "@tanstack/react-start";
-import { apiKeyClient, organizationClient } from "better-auth/client/plugins";
+import { apiKeyClient } from "better-auth/client/plugins";
+// import { organizationClient } from "better-auth/client/plugins";
 import { twoFactorClient } from "better-auth/client/plugins";
 import { createAuthClient, ErrorContext } from "better-auth/react";
 
@@ -22,7 +23,8 @@ export const auth = createAuthClient({
         }
       },
     }),
-    organizationClient(),
+    // Intentionally remove organizationClient in the browser for more control
+    // organizationClient(),
   ],
 });
 

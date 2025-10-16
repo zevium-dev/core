@@ -26,8 +26,23 @@ export const createClient = () => {
       }),
       splitLink({
         condition: (op) => isNonJsonSerializable(op.input),
-        false: httpBatchStreamLink({ transformer: SuperJSON, url: `${getBaseUrl()}/api/trpc` }),
+        false: httpBatchStreamLink({
+          async headers() {
+            if (typeof window !== "undefined") return {};
+            const { getRequestHeaders } = await import("@tanstack/react-start/server");
+            const headers = getRequestHeaders();
+            return headers;
+          },
+          transformer: SuperJSON,
+          url: `${getBaseUrl()}/api/trpc`,
+        }),
         true: httpLink({
+          async headers() {
+            if (typeof window !== "undefined") return {};
+            const { getRequestHeaders } = await import("@tanstack/react-start/server");
+            const headers = getRequestHeaders();
+            return headers;
+          },
           transformer: { deserialize: SuperJSON.deserialize, serialize: (d) => d as unknown },
           url: `${getBaseUrl()}/api/trpc`,
         }),
