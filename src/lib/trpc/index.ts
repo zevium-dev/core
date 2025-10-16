@@ -16,6 +16,14 @@ function getBaseUrl() {
   return `http://localhost:${process.env.PORT ?? 5173}`;
 }
 
+async function getHeaders() {
+  if (typeof window !== "undefined") return {};
+  if (!import.meta.env.SSR) return {};
+
+  const { getServerHeaders } = await import("./headers.server");
+  return getServerHeaders();
+}
+
 export const createClient = () => {
   return createTRPCClient<AppRouter>({
     links: [
@@ -27,22 +35,12 @@ export const createClient = () => {
       splitLink({
         condition: (op) => isNonJsonSerializable(op.input),
         false: httpBatchStreamLink({
-          async headers() {
-            if (typeof window !== "undefined") return {};
-            const { getRequestHeaders } = await import("@tanstack/react-start/server");
-            const headers = getRequestHeaders();
-            return headers;
-          },
+          headers: getHeaders,
           transformer: SuperJSON,
           url: `${getBaseUrl()}/api/trpc`,
         }),
         true: httpLink({
-          async headers() {
-            if (typeof window !== "undefined") return {};
-            const { getRequestHeaders } = await import("@tanstack/react-start/server");
-            const headers = getRequestHeaders();
-            return headers;
-          },
+          headers: getHeaders,
           transformer: { deserialize: SuperJSON.deserialize, serialize: (d) => d as unknown },
           url: `${getBaseUrl()}/api/trpc`,
         }),
