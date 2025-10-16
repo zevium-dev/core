@@ -10,4 +10,5 @@ const client = createClient({
 
 export const db = drizzle({ client });
 export * as schema from "./schema";
+export * as schemaZod from "./zod";
 export * as orm from "drizzle-orm";

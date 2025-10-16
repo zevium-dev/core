@@ -1,6 +1,8 @@
 import { relations } from "drizzle-orm";
 import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
+type Base64String = {} & string;
+
 export const user = sqliteTable("user", {
   createdAt: integer("created_at", { mode: "timestamp" })
     .$defaultFn(() => /* @__PURE__ */ new Date())
@@ -12,13 +14,14 @@ export const user = sqliteTable("user", {
   id: text("id").primaryKey(),
   image: text("image"),
   name: text("name").notNull(),
-  twoFactorEnabled: integer("two_factor_enabled", { mode: "boolean" }).default(false),
+  twoFactorEnabled: integer("two_factor_enabled", { mode: "boolean" }).default(false).notNull(),
   updatedAt: integer("updated_at", { mode: "timestamp" })
     .$defaultFn(() => /* @__PURE__ */ new Date())
     .notNull(),
 });
 
 export const session = sqliteTable("session", {
+  activeOrganizationId: text("active_organization_id").references(() => organization.id, { onDelete: "set null" }),
   createdAt: integer("created_at", { mode: "timestamp" })
     .$defaultFn(() => /* @__PURE__ */ new Date())
     .notNull(),
@@ -74,23 +77,23 @@ export const apikey = sqliteTable("apikey", {
   createdAt: integer("created_at", { mode: "timestamp" })
     .$defaultFn(() => /* @__PURE__ */ new Date())
     .notNull(),
-  enabled: integer("enabled", { mode: "boolean" }).default(true),
+  enabled: integer("enabled", { mode: "boolean" }).default(true).notNull(),
   expiresAt: integer("expires_at", { mode: "timestamp" }),
   id: text("id").primaryKey(),
   key: text("key").notNull(),
   lastRefillAt: integer("last_refill_at", { mode: "timestamp" }),
   lastRequest: integer("last_request", { mode: "timestamp" }),
-  metadata: text("metadata"),
+  metadata: text("metadata", { mode: "json" }).$defaultFn(() => ({})),
   name: text("name"),
   permissions: text("permissions"),
   prefix: text("prefix"),
-  rateLimitEnabled: integer("rate_limit_enabled", { mode: "boolean" }).default(true),
-  rateLimitMax: integer("rate_limit_max").default(10),
-  rateLimitTimeWindow: integer("rate_limit_time_window").default(86400000),
+  rateLimitEnabled: integer("rate_limit_enabled", { mode: "boolean" }).default(true).notNull(),
+  rateLimitMax: integer("rate_limit_max").default(10).notNull(),
+  rateLimitTimeWindow: integer("rate_limit_time_window").default(86400000).notNull(),
   refillAmount: integer("refill_amount"),
   refillInterval: integer("refill_interval"),
   remaining: integer("remaining"),
-  requestCount: integer("request_count").default(0),
+  requestCount: integer("request_count").default(0).notNull(),
   start: text("start"),
   updatedAt: integer("updated_at", { mode: "timestamp" })
     .$defaultFn(() => /* @__PURE__ */ new Date())
@@ -118,10 +121,10 @@ export const organization = sqliteTable("organization", {
     .$defaultFn(() => /* @__PURE__ */ new Date())
     .notNull(),
   id: text("id").primaryKey(),
-  logo: text("logo"),
-  metadata: text("metadata"),
+  logo: text("logo").$type<Base64String>(),
+  metadata: text("metadata", { mode: "json" }).$defaultFn(() => ({})),
   name: text("name").notNull(),
-  slug: text("slug").unique(),
+  slug: text("slug").unique().notNull(),
 });
 
 export const member = sqliteTable("member", {
@@ -193,7 +196,9 @@ export const projectCategory = sqliteTable("project_category", {
   updatedAt: integer("updated_at", { mode: "timestamp" })
     .$defaultFn(() => new Date())
     .notNull(),
-  weight: integer("weight").$defaultFn(() => 0), // For custom ordering in UI
+  weight: integer("weight")
+    .$defaultFn(() => 0)
+    .notNull(), // For custom ordering in UI
 });
 
 export const projectMember = sqliteTable("project_member", {
@@ -202,7 +207,9 @@ export const projectMember = sqliteTable("project_member", {
   joinedAt: integer("joined_at", { mode: "timestamp" })
     .$defaultFn(() => new Date())
     .notNull(),
-  permissions: text("permissions", { mode: "json" }).$defaultFn(() => ({})), // Project-specific permissions
+  permissions: text("permissions", { mode: "json" })
+    .$defaultFn(() => ({}))
+    .notNull(), // Project-specific permissions
   projectId: text("project_id")
     .notNull()
     .references(() => project.id, { onDelete: "cascade" }),
@@ -247,12 +254,16 @@ export const apiEndpoint = sqliteTable("api_endpoint", {
   method: text("method").notNull(), // GET, POST, PUT, DELETE, etc.
   operationId: text("operation_id"),
   path: text("path").notNull(),
-  security: text("security", { mode: "json" }).$defaultFn(() => []), // Security requirements array
+  security: text("security", { mode: "json" })
+    .$defaultFn(() => [])
+    .notNull(), // Security requirements array
   specId: text("spec_id")
     .notNull()
     .references(() => apiSpec.id, { onDelete: "cascade" }),
   summary: text("summary"),
-  tags: text("tags", { mode: "json" }).$defaultFn(() => []), // Array of tag strings
+  tags: text("tags", { mode: "json" })
+    .$defaultFn(() => [])
+    .notNull(), // Array of tag strings
 });
 
 export const projectRelations = relations(project, ({ many, one }) => ({
