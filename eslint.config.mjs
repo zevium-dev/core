@@ -3,6 +3,7 @@
 import preferArrayAt from "@boi.gg/eslint-plugin-prefer-array-at";
 import eslintReact from "@eslint-react/eslint-plugin";
 import eslint from "@eslint/js";
+import pluginRouter from "@tanstack/eslint-plugin-router";
 import perfectionist from "eslint-plugin-perfectionist";
 import reactCompiler from "eslint-plugin-react-compiler";
 import reactHooks from "eslint-plugin-react-hooks";
@@ -24,6 +25,7 @@ export default defineConfig(
   eslintReact.configs["recommended-type-checked"],
   reactHooks.configs["recommended-latest"],
   reactCompiler.configs.recommended,
+  ...pluginRouter.configs["flat/recommended"],
   perfectionist.configs["recommended-alphabetical"],
   preferArrayAt.configs.recommended,
   {

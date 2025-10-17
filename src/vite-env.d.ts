@@ -1,4 +1,5 @@
 /// <reference types="vite/client" />
+/// <reference types="@vitest/browser/context" />
 
 interface ImportMeta {
   readonly env: ImportMetaEnv;
