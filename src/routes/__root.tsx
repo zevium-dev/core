@@ -1,5 +1,6 @@
 /// <reference types="vite/client" />
-import { createRootRoute, HeadContent, Scripts } from "@tanstack/react-router";
+import { QueryClient } from "@tanstack/react-query";
+import { createRootRouteWithContext, HeadContent, Scripts } from "@tanstack/react-router";
 import { TanStackRouterDevtools } from "@tanstack/react-router-devtools";
 import * as React from "react";
 
@@ -9,7 +10,9 @@ import { Providers } from "~/components/providers";
 import { seo } from "~/lib/utils";
 import appCss from "~/styles/app.css?url";
 
-export const Route = createRootRoute({
+export const Route = createRootRouteWithContext<{
+  queryClient: QueryClient;
+}>()({
   errorComponent: DefaultCatchBoundary,
   head: () => ({
     links: [
