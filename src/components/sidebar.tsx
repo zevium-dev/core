@@ -69,12 +69,6 @@ export function PageHeader() {
 
 const navData = [
   {
-    icon: Database,
-    requiresAuth: false,
-    title: "API Catalogue",
-    url: "/app/catalogue",
-  },
-  {
     icon: Building2Icon,
     requiresAuth: true,
     title: "Organizations",
@@ -133,6 +127,15 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                 <Link to="/app/dashboard">
                   <LayoutDashboardIcon />
                   <span>Dashboard</span>
+                </Link>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+
+            <SidebarMenuItem>
+              <SidebarMenuButton asChild className="data-[active=true]:bg-main data-[active=true]:text-main-foreground">
+                <Link to="/app/catalogue">
+                  <Database />
+                  <span>API Catalogue</span>
                 </Link>
               </SidebarMenuButton>
             </SidebarMenuItem>
@@ -256,6 +259,15 @@ export function MainSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) 
                 </SidebarMenuButton>
               </SidebarMenuItem>
             )}
+
+            <SidebarMenuItem>
+              <SidebarMenuButton asChild className="data-[active=true]:bg-main data-[active=true]:text-main-foreground">
+                <Link to="/app/catalogue">
+                  <Database />
+                  <span>API Catalogue</span>
+                </Link>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
 
             {filteredNavData.map((item) => {
               // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
