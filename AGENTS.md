@@ -339,9 +339,17 @@ Rules:
 - **Always use `isPending` instead of `isLoading`** for queries, mutations, and manual async operations:
   - From `useQuery`: destructure as `{ isPending }`
   - From `useMutation`: destructure as `{ isPending }`
-  - For manual state: use `const [isPending, setIsPending] = useState(false)`
-  - Rationale: React Query uses `isPending` for queries/mutations; consistent naming prevents confusion
+  - Rationale: `isPending` is the correct state indicator from React Query/TanStack Query (which implements SWR patterns). `isLoading` is deprecated/legacy. Always prefer `isPending` for clarity and consistency
   - Exception: External libraries that return `isLoading` (e.g., `autumn-js`'s `usePricingTable`) should be left as-is
+  - **Prefer deriving loading states directly from mutations and queries** rather than maintaining separate state variables
+  - **Whenever you need a loading state, wrap the corresponding logic into a `useQuery` or `useMutation` and use its `isPending` state instead**
+  - Example:
+
+```ts
+const createMutation = useMutation(...);
+// Use createMutation.isPending directly instead of separate isPending state
+<Button disabled={createMutation.isPending}>Create</Button>
+```
 
 ### 3. Local Draft vs Server State
 
