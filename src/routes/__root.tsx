@@ -12,6 +12,7 @@ import appCss from "~/styles/app.css?url";
 
 export const Route = createRootRouteWithContext<{
   queryClient: QueryClient;
+  trpc: ReturnType<typeof import("~/router").getTrpcOptionsProxy>["trpc"];
 }>()({
   errorComponent: DefaultCatchBoundary,
   head: () => ({

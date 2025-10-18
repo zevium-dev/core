@@ -6,8 +6,7 @@ import { useTRPC } from "~/lib/trpc";
 export const Route = createFileRoute("/app/organizations/$organizationSlug")({
   component: RouteComponent,
   loader: async ({ context, params: { organizationSlug } }) => {
-    const { trpcServer } = await import("~/server/ssr");
-    void context.queryClient.ensureQueryData(trpcServer.organization.get.queryOptions({ organizationSlug }));
+    await context.queryClient.ensureQueryData(context.trpc.organization.get.queryOptions({ organizationSlug }));
   },
 });
 

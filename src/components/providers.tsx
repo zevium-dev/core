@@ -5,13 +5,14 @@ import { AutumnProvider } from "autumn-js/react";
 import { Provider as JotaiProvider } from "jotai";
 import { domAnimation, LazyMotion } from "motion/react";
 import { PostHogProvider } from "posthog-js/react";
-import React, { useState } from "react";
+import React from "react";
 
 import { ThemeProvider } from "~/components/theme-provider";
 import { SidebarInset, SidebarProvider } from "~/components/ui/sidebar";
 import { clientEnv } from "~/env/client";
 import { getQueryClient } from "~/lib/query-client";
-import { createClient, TRPCProvider } from "~/lib/trpc";
+import { TRPCProvider } from "~/lib/trpc";
+import { getTrpcClient } from "~/lib/trpc/trpc";
 
 import { PostHogIdentify } from "./posthog-identify";
 import { MainSidebar, PageHeader } from "./sidebar";
@@ -39,7 +40,7 @@ const PHProvider: React.FC<React.PropsWithChildren> = ({ children }) => {
 
 export const Providers: React.FC<React.PropsWithChildren> = ({ children }) => {
   const queryClient = getQueryClient();
-  const [trpcClient] = useState(() => createClient());
+  const trpcClient = getTrpcClient();
   const location = useLocation();
   const isAppRoute = location.pathname.startsWith("/app");
 
