@@ -7,10 +7,10 @@ import { Button } from "~/components/ui/button";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "~/components/ui/command";
 import { Label } from "~/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "~/components/ui/popover";
-import { useTRPCClient } from "~/lib/trpc";
+import { useTRPC } from "~/lib/trpc";
 
 interface EditableCategoryFieldProps {
-  isLoading?: boolean;
+  isPending?: boolean;
   onSave: (categoryId: null | string) => void;
   value: {
     categoryId: null | string;
@@ -18,18 +18,15 @@ interface EditableCategoryFieldProps {
   };
 }
 
-export function EditableCategoryField({ isLoading = false, onSave, value }: EditableCategoryFieldProps) {
+export function EditableCategoryField({ isPending = false, onSave, value }: EditableCategoryFieldProps) {
   const [isEditing, setIsEditing] = React.useState(false);
   const [open, setOpen] = React.useState(false);
   const [selectedCategoryId, setSelectedCategoryId] = React.useState<null | string>(value.categoryId);
   const [displayCategoryName, setDisplayCategoryName] = React.useState<null | string>(value.categoryName);
-  const trpcClient = useTRPCClient();
+  const trpc = useTRPC();
 
   // Fetch categories
-  const { data: categoriesData, isLoading: categoriesLoading } = useQuery({
-    queryFn: () => trpcClient.projectCategory.getAll.query({}),
-    queryKey: ["projectCategories"],
-  });
+  const { data: categoriesData, isPending: categoriesPending } = useQuery(trpc.projectCategory.getAll.queryOptions({}));
 
   const categories = categoriesData?.categories ?? [];
 
@@ -83,7 +80,7 @@ export function EditableCategoryField({ isLoading = false, onSave, value }: Edit
           <Button
             aria-expanded={open}
             className="w-full justify-between font-normal"
-            disabled={categoriesLoading}
+            disabled={categoriesPending}
             role="combobox"
             variant="outline"
           >
@@ -102,7 +99,7 @@ export function EditableCategoryField({ isLoading = false, onSave, value }: Edit
           <Command>
             <CommandInput placeholder="Search categories..." />
             <CommandList>
-              <CommandEmpty>{categoriesLoading ? "Loading categories..." : "No categories found."}</CommandEmpty>
+              <CommandEmpty>{categoriesPending ? "Loading categories..." : "No categories found."}</CommandEmpty>
               <CommandGroup>
                 {/* Option to clear category */}
                 <CommandItem
@@ -149,10 +146,10 @@ export function EditableCategoryField({ isLoading = false, onSave, value }: Edit
       </Popover>
 
       <div className="flex gap-2">
-        <Button disabled={isLoading} onClick={handleSave} size="sm">
-          {isLoading ? "Saving..." : "Save"}
+        <Button disabled={isPending} onClick={handleSave} size="sm">
+          {isPending ? "Saving..." : "Save"}
         </Button>
-        <Button disabled={isLoading} onClick={handleCancel} size="sm" variant="outline">
+        <Button disabled={isPending} onClick={handleCancel} size="sm" variant="outline">
           <X className="mr-2 h-4 w-4" />
           Cancel
         </Button>

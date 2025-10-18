@@ -2,7 +2,7 @@
 /* eslint-disable */
 // @ts-nocheck
 
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import {
   Activity,
@@ -37,7 +37,7 @@ import { Separator } from "~/components/ui/separator";
 import { Skeleton } from "~/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "~/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "~/components/ui/tabs";
-import { useTRPCClient } from "~/lib/trpc";
+import { useTRPC } from "~/lib/trpc";
 
 export const Route = createFileRoute("/app/organizations/_slug")({
   component: RouteComponent,
@@ -288,12 +288,11 @@ function OrganizationProfile({ organization }: { organization: OrganizationData 
 }
 
 function ProjectsList({ organizationId }: { organizationId: string }) {
-  const trpcClient = useTRPCClient();
+  const trpc = useTRPC();
 
-  const { data: projectsData, isLoading: projectsLoading } = useQuery({
-    queryFn: () => trpcClient.organization.getProjects.query({ organizationId }),
-    queryKey: ["organization-projects", organizationId],
-  });
+  const { data: projectsData, isLoading: projectsLoading } = useQuery(
+    trpc.organization.getProjects.queryOptions({ organizationId }),
+  );
 
   const getStatusBadgeVariant = (status: string) => {
     switch (status) {
@@ -418,16 +417,9 @@ function ProjectsList({ organizationId }: { organizationId: string }) {
 
 function RouteComponent() {
   const { slug } = Route.useParams();
-  const trpcClient = useTRPCClient();
+  const trpc = useTRPC();
 
-  const {
-    data: organizationData,
-    error,
-    isLoading,
-  } = useQuery({
-    queryFn: () => trpcClient.organization.getBySlug.query({ slug }),
-    queryKey: ["organization-by-slug", slug],
-  });
+  const { data: organizationData, error, isLoading } = useQuery(trpc.organization.getBySlug.queryOptions({ slug }));
 
   if (isLoading) {
     return <LoadingSkeleton />;
@@ -539,12 +531,11 @@ function RouteComponent() {
 }
 
 function TeamManagement({ organizationId }: { organizationId: string }) {
-  const trpcClient = useTRPCClient();
+  const trpc = useTRPC();
 
-  const { data: membersData, isLoading: membersLoading } = useQuery({
-    queryFn: () => trpcClient.organization.getMembers.query({ organizationId }),
-    queryKey: ["organization-members", organizationId],
-  });
+  const { data: membersData, isLoading: membersLoading } = useQuery(
+    trpc.organization.getMembers.queryOptions({ organizationId }),
+  );
 
   const getRoleBadgeVariant = (role: string) => {
     switch (role) {

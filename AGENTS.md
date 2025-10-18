@@ -334,6 +334,15 @@ Rules:
   - This ensures UI stays in sync with server state after mutations
   - Example: After creating an org, invalidate the org list query so it refetches
 
+### 2.1 Loading State Naming
+
+- **Always use `isPending` instead of `isLoading`** for queries, mutations, and manual async operations:
+  - From `useQuery`: destructure as `{ isPending }`
+  - From `useMutation`: destructure as `{ isPending }`
+  - For manual state: use `const [isPending, setIsPending] = useState(false)`
+  - Rationale: React Query uses `isPending` for queries/mutations; consistent naming prevents confusion
+  - Exception: External libraries that return `isLoading` (e.g., `autumn-js`'s `usePricingTable`) should be left as-is
+
 ### 3. Local Draft vs Server State
 
 Pattern:

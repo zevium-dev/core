@@ -2,7 +2,7 @@
 /* eslint-disable */
 // @ts-nocheck
 
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { Building2, Filter, Grid3X3, List, Plus, Search, Settings } from "lucide-react";
 import { m } from "motion/react";
@@ -26,7 +26,7 @@ import { OpenApiFileUpload } from "~/components/ui/openapi-file-upload";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "~/components/ui/select";
 import { Textarea } from "~/components/ui/textarea";
 import { ToggleGroup, ToggleGroupItem } from "~/components/ui/toggle-group";
-import { useTRPCClient } from "~/lib/trpc";
+import { useTRPC } from "~/lib/trpc";
 
 export const Route = createFileRoute("/app/projects/")({
   component: RouteComponent,
@@ -82,8 +82,60 @@ function CreateProjectDialog({
   const [validationResult, setValidationResult] = React.useState<undefined | ValidationResult>(undefined);
   const [errors, setErrors] = React.useState<Record<string, string>>({});
 
-  const trpcClient = useTRPCClient();
+  const trpc = useTRPC();
   const queryClient = useQueryClient();
+
+  const createProjectMutation = useMutation(
+    trpc.project.create.mutationOptions({
+      onSuccess: async (result) => {
+        // If we have a valid OpenAPI spec, upload it
+        if (selectedFile && validationResult?.isValid) {
+          try {
+            const fileContent = await selectedFile.text();
+            await uploadSpecMutation.mutateAsync({
+              fileContent,
+              fileName: selectedFile.name,
+              projectId: result.project.id,
+              versionLabel: validationResult.spec?.version,
+            });
+          } catch (specError) {
+            // Project created but spec upload failed - show warning but continue
+            console.warn("Project created but OpenAPI spec upload failed:", specError);
+          }
+        }
+
+        // Close dialog and reset form
+        setIsOpen(false);
+        setFormData({
+          description: "",
+          name: "",
+          organizationId: selectedOrgId ?? "",
+          visibility: "private",
+        });
+        setSelectedFile(undefined);
+        setValidationResult(undefined);
+        setErrors({});
+
+        // Invalidate and refetch projects
+        await queryClient.invalidateQueries({ queryKey: ["projects"] });
+      },
+      onError: (error) => {
+        console.error("Failed to create project:", error);
+        setErrors({ submit: error instanceof Error ? error.message : "Failed to create project. Please try again." });
+      },
+      onSettled: () => {
+        setIsCreating(false);
+      },
+    }),
+  );
+
+  const uploadSpecMutation = useMutation(
+    trpc.apiSpec.upload.mutationOptions({
+      onError: (error) => {
+        console.warn("Project created but OpenAPI spec upload failed:", error);
+      },
+    }),
+  );
 
   // Update organization when selectedOrgId changes
   React.useEffect(() => {
@@ -146,50 +198,15 @@ function CreateProjectDialog({
     setIsCreating(true);
     try {
       // Create the project first
-      const result = await trpcClient.project.create.mutate({
+      await createProjectMutation.mutateAsync({
         description: formData.description || undefined,
         name: formData.name.trim(),
         organizationId: formData.organizationId,
         visibility: formData.visibility,
       });
-
-      if (result.success) {
-        // If we have a valid OpenAPI spec, upload it
-        if (selectedFile && validationResult?.isValid) {
-          try {
-            const fileContent = await selectedFile.text();
-            await trpcClient.apiSpec.upload.mutate({
-              fileContent,
-              fileName: selectedFile.name,
-              projectId: result.project.id,
-              versionLabel: validationResult.spec?.version,
-            });
-          } catch (specError) {
-            // Project created but spec upload failed - show warning but continue
-            console.warn("Project created but OpenAPI spec upload failed:", specError);
-          }
-        }
-
-        // Close dialog and reset form
-        setIsOpen(false);
-        setFormData({
-          description: "",
-          name: "",
-          organizationId: selectedOrgId ?? "",
-          visibility: "private",
-        });
-        setSelectedFile(undefined);
-        setValidationResult(undefined);
-        setErrors({});
-
-        // Invalidate and refetch projects
-        await queryClient.invalidateQueries({ queryKey: ["projects"] });
-      }
     } catch (error) {
+      // Error is handled in mutation callbacks
       console.error("Failed to create project:", error);
-      setErrors({ submit: "Failed to create project. Please try again." });
-    } finally {
-      setIsCreating(false);
     }
   };
 
@@ -297,7 +314,7 @@ function CreateProjectDialog({
 }
 
 function RouteComponent() {
-  const trpcClient = useTRPCClient();
+  const trpc = useTRPC();
 
   // State management for filtering and display
   const [selectedOrgId, setSelectedOrgId] = React.useState<null | string>(null);
@@ -310,10 +327,7 @@ function RouteComponent() {
     data: organizationsData,
     error: orgsError,
     isLoading: orgsLoading,
-  } = useQuery({
-    queryFn: () => trpcClient.organization.list.query(),
-    queryKey: ["organizations"],
-  });
+  } = useQuery(trpc.organization.list.queryOptions());
 
   // Fetch projects for selected organization
   const {
@@ -321,12 +335,8 @@ function RouteComponent() {
     error: projectsError,
     isLoading: projectsLoading,
   } = useQuery({
+    ...trpc.organization.getProjects.queryOptions({ organizationId: selectedOrgId ?? "" }),
     enabled: Boolean(selectedOrgId),
-    queryFn: () => {
-      if (!selectedOrgId) throw new Error("No organization selected");
-      return trpcClient.organization.getProjects.query({ organizationId: selectedOrgId });
-    },
-    queryKey: ["projects", selectedOrgId],
   });
 
   const organizations = React.useMemo(() => organizationsData?.organizations ?? [], [organizationsData]);

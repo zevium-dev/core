@@ -74,7 +74,7 @@ function ApiKeysComponent() {
   const [newKeyName, setNewKeyName] = useState("");
   const [newKeyLimit, setNewKeyLimit] = useState(""); // user input for credit limit (money)
   const [, copy] = useCopy();
-  const [isLoading, setIsLoading] = useState(false);
+  const [isPending, setIsPending] = useState(false);
   const [newlyCreatedKey, setNewlyCreatedKey] = useState<null | string>(null);
   const [createdKeyCopied, setCreatedKeyCopied] = useState(false);
 
@@ -95,7 +95,7 @@ function ApiKeysComponent() {
   const handleCreateKey = async () => {
     if (!newKeyName.trim()) return;
 
-    setIsLoading(true);
+    setIsPending(true);
     try {
       const { data, error } = await auth.apiKey.create({
         expiresIn: undefined, // TODO: Add expiry support
@@ -114,7 +114,7 @@ function ApiKeysComponent() {
     } catch (error) {
       console.error("Failed to create API key:", error);
     } finally {
-      setIsLoading(false);
+      setIsPending(false);
     }
   };
 
@@ -123,7 +123,7 @@ function ApiKeysComponent() {
   };
 
   const handleDeleteKey = async (keyId: string) => {
-    setIsLoading(true);
+    setIsPending(true);
     try {
       const { error } = await auth.apiKey.delete({ keyId });
       if (error) throw new Error(error.message);
@@ -131,7 +131,7 @@ function ApiKeysComponent() {
     } catch (error) {
       console.error("Failed to delete API key:", error);
     } finally {
-      setIsLoading(false);
+      setIsPending(false);
     }
   };
 
@@ -145,7 +145,7 @@ function ApiKeysComponent() {
   const handleSaveEdit = async () => {
     if (!editingKey || !newKeyName.trim()) return;
 
-    setIsLoading(true);
+    setIsPending(true);
     try {
       const { error } = await auth.apiKey.update({
         keyId: editingKey.id,
@@ -162,7 +162,7 @@ function ApiKeysComponent() {
     } catch (error) {
       console.error("Failed to update API key:", error);
     } finally {
-      setIsLoading(false);
+      setIsPending(false);
     }
   };
 
@@ -240,11 +240,11 @@ function ApiKeysComponent() {
               </div>
             </div>
             <DialogFooter>
-              <Button disabled={isLoading} onClick={() => setIsCreateDialogOpen(false)} variant="outline">
+              <Button disabled={isPending} onClick={() => setIsCreateDialogOpen(false)} variant="outline">
                 Cancel
               </Button>
-              <Button disabled={!newKeyName.trim() || isLoading} onClick={handleCreateKey}>
-                {isLoading ? "Creating..." : "Create Key"}
+              <Button disabled={!newKeyName.trim() || isPending} onClick={handleCreateKey}>
+                {isPending ? "Creating..." : "Create Key"}
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -440,11 +440,11 @@ function ApiKeysComponent() {
             </div>
           </div>
           <DialogFooter>
-            <Button disabled={isLoading} onClick={() => setIsEditDialogOpen(false)} variant="outline">
+            <Button disabled={isPending} onClick={() => setIsEditDialogOpen(false)} variant="outline">
               Cancel
             </Button>
-            <Button disabled={!newKeyName.trim() || isLoading} onClick={handleSaveEdit}>
-              {isLoading ? "Saving..." : "Save"}
+            <Button disabled={!newKeyName.trim() || isPending} onClick={handleSaveEdit}>
+              {isPending ? "Saving..." : "Save"}
             </Button>
           </DialogFooter>
         </DialogContent>

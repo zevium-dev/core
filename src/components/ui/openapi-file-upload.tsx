@@ -1,9 +1,10 @@
+import { useMutation } from "@tanstack/react-query";
 import { AlertCircle, CheckCircle, FileText, Upload, X } from "lucide-react";
 import * as React from "react";
 
 import { Alert, AlertDescription } from "~/components/ui/alert";
 import { Button } from "~/components/ui/button";
-import { useTRPCClient } from "~/lib/trpc";
+import { useTRPC } from "~/lib/trpc";
 import { cn } from "~/lib/utils";
 
 interface OpenApiFileUploadProps {
@@ -43,32 +44,46 @@ export function OpenApiFileUpload({
   const [dragActive, setDragActive] = React.useState(false);
   const [isValidating, setIsValidating] = React.useState(false);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
-  const trpcClient = useTRPCClient();
+  const trpc = useTRPC();
+
+  const [currentFile, setCurrentFile] = React.useState<File | null>(null);
+  const validateMutation = useMutation(
+    trpc.apiSpec.validate.mutationOptions({
+      onError: (error) => {
+        if (!currentFile) return;
+        const errorMessage = error instanceof Error ? error.message : "Validation failed";
+        onFileSelect(currentFile, {
+          errors: [
+            {
+              code: "VALIDATION_ERROR",
+              message: errorMessage,
+            },
+          ],
+          isValid: false,
+        });
+      },
+      onSettled: () => {
+        setIsValidating(false);
+      },
+      onSuccess: (result) => {
+        if (!currentFile) return;
+        onFileSelect(currentFile, result);
+      },
+    }),
+  );
 
   const validateFile = async (file: File) => {
     setIsValidating(true);
+    setCurrentFile(file);
 
     try {
       const fileContent = await file.text();
-      const result = await trpcClient.apiSpec.validate.mutate({
+      await validateMutation.mutateAsync({
         fileContent,
         fileName: file.name,
       });
-
-      onFileSelect(file, result);
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : "Validation failed";
-      onFileSelect(file, {
-        errors: [
-          {
-            code: "VALIDATION_ERROR",
-            message: errorMessage,
-          },
-        ],
-        isValid: false,
-      });
-    } finally {
-      setIsValidating(false);
+    } catch {
+      // Error is handled in onError callback
     }
   };
 

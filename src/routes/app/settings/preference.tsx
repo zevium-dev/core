@@ -220,15 +220,7 @@ function AccountPreferenceComponent() {
           <div className="flex items-center gap-4">
             <div className="relative">
               <Avatar className="h-20 w-20">
-                <AvatarImage
-                  alt={name || "User avatar"}
-                  onError={(e) => {
-                    // Replace broken image with fallback
-                    const target = e.currentTarget as HTMLImageElement;
-                    target.style.display = "none"; // let fallback show
-                  }}
-                  src={user?.image ?? "/placeholder-avatar.jpg"}
-                />
+                <AvatarImage alt={name || "User avatar"} src={user?.image ?? "/placeholder-avatar.jpg"} />
                 <AvatarFallback className="text-lg">
                   {(() => {
                     if (name) {
