@@ -111,7 +111,7 @@ export const MemberZod = z.object({
   createdAt: z.date(),
   id: z.string(),
   organizationId: z.string(),
-  role: z.string(),
+  role: z.enum(["owner", "member", "admin", "guest"]),
   userId: z.string(),
 }) satisfies z.ZodType<orm.InferSelectModel<(typeof schema)["member"]>>;
 
@@ -121,7 +121,7 @@ export const InvitationZod = z.object({
   id: z.string(),
   inviterId: z.string(),
   organizationId: z.string(),
-  role: z.string().nullable(),
+  role: z.enum(["owner", "member", "admin", "guest"]),
   status: z.string(),
 }) satisfies z.ZodType<orm.InferSelectModel<(typeof schema)["invitation"]>>;
 

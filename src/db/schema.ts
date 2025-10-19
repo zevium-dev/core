@@ -135,7 +135,9 @@ export const member = sqliteTable("member", {
   organizationId: text("organization_id")
     .notNull()
     .references(() => organization.id, { onDelete: "cascade" }),
-  role: text("role").default("member").notNull(),
+  role: text("role", { enum: ["owner", "member", "admin", "guest"] })
+    .notNull()
+    .$defaultFn(() => "member"),
   userId: text("user_id")
     .notNull()
     .references(() => user.id, { onDelete: "cascade" }),
@@ -151,7 +153,9 @@ export const invitation = sqliteTable("invitation", {
   organizationId: text("organization_id")
     .notNull()
     .references(() => organization.id, { onDelete: "cascade" }),
-  role: text("role"),
+  role: text("role", { enum: ["owner", "member", "admin", "guest"] })
+    .notNull()
+    .$defaultFn(() => "member"),
   status: text("status").default("pending").notNull(),
 });
 
