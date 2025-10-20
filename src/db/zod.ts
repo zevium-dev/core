@@ -3,6 +3,16 @@ import { z } from "zod";
 
 import * as schema from "./schema";
 
+const MetadataZod = z
+  .record(z.string(), z.unknown())
+  .or(
+    z
+      .string()
+      .transform((val) => JSON.parse(val))
+      .pipe(z.record(z.string(), z.unknown())),
+  )
+  .nullable();
+
 export const UserZod = z.object({
   createdAt: z.date(),
   email: z.email(),
@@ -59,15 +69,7 @@ export const ApiKeyZod = z.object({
   key: z.string(),
   lastRefillAt: z.date().nullable(),
   lastRequest: z.date().nullable(),
-  metadata: z
-    .record(z.string(), z.unknown())
-    .or(
-      z
-        .string()
-        .transform((val) => JSON.parse(val))
-        .pipe(z.record(z.string(), z.unknown())),
-    )
-    .nullable(),
+  metadata: MetadataZod,
   name: z.string().nullable(),
   permissions: z.string().nullable(),
   prefix: z.string().nullable(),
@@ -94,15 +96,7 @@ export const OrganizationZod = z.object({
   createdAt: z.date(),
   id: z.string(),
   logo: z.string().nullable(),
-  metadata: z
-    .record(z.string(), z.unknown())
-    .or(
-      z
-        .string()
-        .transform((val) => JSON.parse(val))
-        .pipe(z.record(z.string(), z.unknown())),
-    )
-    .nullable(),
+  metadata: MetadataZod,
   name: z.string(),
   slug: z.string(),
 }) satisfies z.ZodType<orm.InferSelectModel<(typeof schema)["organization"]>>;
@@ -127,74 +121,58 @@ export const InvitationZod = z.object({
 
 export const ProjectZod = z.object({
   createdAt: z.date(),
-  createdBy: z.string(),
-  description: z.string().nullable(),
+  deletedAt: z.date().nullable(),
+  description: z.string(),
+  documentation: z.string(),
   id: z.string(),
-  metadata: z
-    .record(z.string(), z.unknown())
-    .or(
-      z
-        .string()
-        .transform((val) => JSON.parse(val))
-        .pipe(z.record(z.string(), z.unknown())),
-    )
-    .nullable(),
+  metadata: MetadataZod,
   name: z.string(),
   organizationId: z.string(),
-  projectCategoryId: z.string().nullable(),
-  settings: z.record(z.string(), z.any()),
   slug: z.string(),
-  status: z.enum(["active", "inactive", "archived", "beta", "deprecated"]),
+  status: z.enum(["draft", "preview", "active", "archived"]),
   updatedAt: z.date(),
-  visibility: z.enum(["public", "private", "internal"]),
+  visibility: z.enum(["public", "private"]),
 }) satisfies z.ZodType<orm.InferSelectModel<(typeof schema)["project"]>>;
 
-export const ProjectCategoryZod = z.object({
+export const TagZod = z.object({
   createdAt: z.date(),
-  description: z.string().nullable(),
-  icon: z.string().nullable(),
+  createdBy: z.string().nullable(),
   id: z.string(),
+  metadata: MetadataZod,
   name: z.string(),
+  status: z.enum(["active", "archived"]),
   updatedAt: z.date(),
-  weight: z.number(),
-}) satisfies z.ZodType<orm.InferSelectModel<(typeof schema)["projectCategory"]>>;
+}) satisfies z.ZodType<orm.InferSelectModel<(typeof schema)["tag"]>>;
 
-export const ProjectMemberZod = z.object({
-  addedBy: z.string().nullable(),
+export const ProjectTagZod = z.object({
   id: z.string(),
-  joinedAt: z.date(),
-  permissions: z.record(z.string(), z.any()),
   projectId: z.string(),
-  role: z.enum(["admin", "editor", "viewer"]),
-  userId: z.string(),
-}) satisfies z.ZodType<orm.InferSelectModel<(typeof schema)["projectMember"]>>;
+  tagName: z.string(),
+}) satisfies z.ZodType<orm.InferSelectModel<(typeof schema)["projectTag"]>>;
 
-export const ApiSpecZod = z.object({
+export const OrganizationTagZod = z.object({
+  id: z.string(),
+  organizationId: z.string(),
+  tagName: z.string(),
+}) satisfies z.ZodType<orm.InferSelectModel<(typeof schema)["organizationTag"]>>;
+
+export const OpenAPISchemaZod = z.object({
   createdAt: z.date(),
-  format: z.enum(["json", "yaml"]),
-  hash: z.string(),
+  draft: z.unknown(),
   id: z.string(),
-  originalRaw: z.string().nullable(),
+  metadata: MetadataZod,
   projectId: z.string(),
-  specJson: z.record(z.string(), z.any()),
-  status: z.enum(["active", "deprecated", "archived"]),
-  title: z.string().nullable(),
   updatedAt: z.date(),
-  versionLabel: z.string(),
-}) satisfies z.ZodType<orm.InferSelectModel<(typeof schema)["apiSpec"]>>;
+}) satisfies z.ZodType<orm.InferSelectModel<(typeof schema)["openAPISchema"]>>;
 
-export const ApiEndpointZod = z.object({
+export const OpenAPISchemaVersionZod = z.object({
   createdAt: z.date(),
-  deprecated: z.boolean(),
   id: z.string(),
-  method: z.string(),
-  operationId: z.string().nullable(),
-  path: z.string(),
-  security: z.array(z.any()),
-  specId: z.string(),
-  summary: z.string().nullable(),
-  tags: z.array(z.string()),
-}) satisfies z.ZodType<orm.InferSelectModel<(typeof schema)["apiEndpoint"]>>;
+  openAPISchemaId: z.string(),
+  schema: z.unknown(),
+  updatedAt: z.date(),
+  version: z.string(),
+}) satisfies z.ZodType<orm.InferSelectModel<(typeof schema)["openAPISchemaVersion"]>>;
 
 export const UserPreferenceZod = z.object({
   timezone: z.string(),

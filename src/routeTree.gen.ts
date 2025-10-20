@@ -45,6 +45,8 @@ import { Route as ApiPosthogSplatRouteImport } from './routes/api/posthog/$'
 import { Route as ApiOpenapiSplatRouteImport } from './routes/api/openapi/$'
 import { Route as ApiCapSplatRouteImport } from './routes/api/cap/$'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
+import { Route as AppOrganizationsProjectsChar126RouteImport } from './routes/app/organizations/projects/~'
+import { Route as AppOrganizationsProjectsProjectIdRouteImport } from './routes/app/organizations/projects/$projectId'
 import { Route as AppProjectsSlugViewVersionRouteImport } from './routes/app/projects/$slug/view/$version'
 
 const AppRoute = AppRouteImport.update({
@@ -228,6 +230,18 @@ const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
   path: '/api/auth/$',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AppOrganizationsProjectsChar126Route =
+  AppOrganizationsProjectsChar126RouteImport.update({
+    id: '/projects/~',
+    path: '/projects/~',
+    getParentRoute: () => AppOrganizationsRoute,
+  } as any)
+const AppOrganizationsProjectsProjectIdRoute =
+  AppOrganizationsProjectsProjectIdRouteImport.update({
+    id: '/projects/$projectId',
+    path: '/projects/$projectId',
+    getParentRoute: () => AppOrganizationsRoute,
+  } as any)
 const AppProjectsSlugViewVersionRoute =
   AppProjectsSlugViewVersionRouteImport.update({
     id: '/view/$version',
@@ -271,6 +285,8 @@ export interface FileRoutesByFullPath {
   '/app/organizations/': typeof AppOrganizationsIndexRoute
   '/app/projects': typeof AppProjectsIndexRoute
   '/app/settings': typeof AppSettingsIndexRoute
+  '/app/organizations/projects/$projectId': typeof AppOrganizationsProjectsProjectIdRoute
+  '/app/organizations/projects/~': typeof AppOrganizationsProjectsChar126Route
   '/app/projects/$slug/view/$version': typeof AppProjectsSlugViewVersionRoute
 }
 export interface FileRoutesByTo {
@@ -307,6 +323,8 @@ export interface FileRoutesByTo {
   '/app/settings/preference': typeof AppSettingsPreferenceRoute
   '/app/projects': typeof AppProjectsIndexRoute
   '/app/settings': typeof AppSettingsIndexRoute
+  '/app/organizations/projects/$projectId': typeof AppOrganizationsProjectsProjectIdRoute
+  '/app/organizations/projects/~': typeof AppOrganizationsProjectsChar126Route
   '/app/projects/$slug/view/$version': typeof AppProjectsSlugViewVersionRoute
 }
 export interface FileRoutesById {
@@ -347,6 +365,8 @@ export interface FileRoutesById {
   '/app/organizations/': typeof AppOrganizationsIndexRoute
   '/app/projects/': typeof AppProjectsIndexRoute
   '/app/settings/': typeof AppSettingsIndexRoute
+  '/app/organizations/projects/$projectId': typeof AppOrganizationsProjectsProjectIdRoute
+  '/app/organizations/projects/~': typeof AppOrganizationsProjectsChar126Route
   '/app/projects/$slug/view/$version': typeof AppProjectsSlugViewVersionRoute
 }
 export interface FileRouteTypes {
@@ -387,6 +407,8 @@ export interface FileRouteTypes {
     | '/app/organizations/'
     | '/app/projects'
     | '/app/settings'
+    | '/app/organizations/projects/$projectId'
+    | '/app/organizations/projects/~'
     | '/app/projects/$slug/view/$version'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -423,6 +445,8 @@ export interface FileRouteTypes {
     | '/app/settings/preference'
     | '/app/projects'
     | '/app/settings'
+    | '/app/organizations/projects/$projectId'
+    | '/app/organizations/projects/~'
     | '/app/projects/$slug/view/$version'
   id:
     | '__root__'
@@ -462,6 +486,8 @@ export interface FileRouteTypes {
     | '/app/organizations/'
     | '/app/projects/'
     | '/app/settings/'
+    | '/app/organizations/projects/$projectId'
+    | '/app/organizations/projects/~'
     | '/app/projects/$slug/view/$version'
   fileRoutesById: FileRoutesById
 }
@@ -742,6 +768,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiAuthSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/app/organizations/projects/~': {
+      id: '/app/organizations/projects/~'
+      path: '/projects/~'
+      fullPath: '/app/organizations/projects/~'
+      preLoaderRoute: typeof AppOrganizationsProjectsChar126RouteImport
+      parentRoute: typeof AppOrganizationsRoute
+    }
+    '/app/organizations/projects/$projectId': {
+      id: '/app/organizations/projects/$projectId'
+      path: '/projects/$projectId'
+      fullPath: '/app/organizations/projects/$projectId'
+      preLoaderRoute: typeof AppOrganizationsProjectsProjectIdRouteImport
+      parentRoute: typeof AppOrganizationsRoute
+    }
     '/app/projects/$slug/view/$version': {
       id: '/app/projects/$slug/view/$version'
       path: '/view/$version'
@@ -758,6 +798,8 @@ interface AppOrganizationsRouteChildren {
   AppOrganizationsCreateRoute: typeof AppOrganizationsCreateRoute
   AppOrganizationsChar126Route: typeof AppOrganizationsChar126Route
   AppOrganizationsIndexRoute: typeof AppOrganizationsIndexRoute
+  AppOrganizationsProjectsProjectIdRoute: typeof AppOrganizationsProjectsProjectIdRoute
+  AppOrganizationsProjectsChar126Route: typeof AppOrganizationsProjectsChar126Route
 }
 
 const AppOrganizationsRouteChildren: AppOrganizationsRouteChildren = {
@@ -766,6 +808,9 @@ const AppOrganizationsRouteChildren: AppOrganizationsRouteChildren = {
   AppOrganizationsCreateRoute: AppOrganizationsCreateRoute,
   AppOrganizationsChar126Route: AppOrganizationsChar126Route,
   AppOrganizationsIndexRoute: AppOrganizationsIndexRoute,
+  AppOrganizationsProjectsProjectIdRoute:
+    AppOrganizationsProjectsProjectIdRoute,
+  AppOrganizationsProjectsChar126Route: AppOrganizationsProjectsChar126Route,
 }
 
 const AppOrganizationsRouteWithChildren =

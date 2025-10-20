@@ -213,9 +213,9 @@ export const project = sqliteTable(
       .$defaultFn(() => new Date())
       .notNull(),
     deletedAt: integer("deleted_at", { mode: "timestamp" }),
-    description: text("description"),
+    description: text("description").default("").notNull(),
     /** Markdown format */
-    documentation: text("documentation"),
+    documentation: text("documentation").default("").notNull(),
     id: text("id").primaryKey(),
     metadata: text("metadata", { mode: "json" }).$defaultFn(() => ({})),
     name: text("name").notNull(),
@@ -315,7 +315,9 @@ export const openAPISchema = sqliteTable(
     createdAt: integer("created_at", { mode: "timestamp" })
       .$defaultFn(() => new Date())
       .notNull(),
-    draft: text("draft", { mode: "json" }).notNull().default(""),
+    draft: text("draft", { mode: "json" })
+      .notNull()
+      .$defaultFn(() => ({})),
     id: text("id").primaryKey(),
     metadata: text("metadata", { mode: "json" }).$defaultFn(() => ({})),
     projectId: text("project_id")
@@ -343,12 +345,12 @@ export const openAPISchemaVersion = sqliteTable(
     updatedAt: integer("updated_at", { mode: "timestamp" })
       .$defaultFn(() => new Date())
       .notNull(),
-    versionNumber: integer("version_number").notNull(),
+    version: text("version").notNull(),
   },
   (self) => [
     index("openapi_schema_version_openapi_schema_id_index").on(self.openAPISchemaId),
-    index("openapi_schema_version_number_index").on(self.versionNumber),
-    uniqueIndex("openapi_schema_version_number_index").on(self.openAPISchemaId, self.versionNumber),
+    index("openapi_schema_version_number_index").on(self.version),
+    uniqueIndex("openapi_schema_version_number_index").on(self.openAPISchemaId, self.version),
   ],
 );
 
