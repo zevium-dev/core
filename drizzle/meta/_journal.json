@@ -36,6 +36,13 @@
       "when": 1760941883879,
       "tag": "0004_parched_chamber",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1760980016850,
+      "tag": "0005_sturdy_whizzer",
+      "breakpoints": true
     }
   ]
 }

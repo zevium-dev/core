@@ -1,6 +1,7 @@
 import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 type Base64String = {} & string;
+type Metadata = Record<string, unknown>;
 
 export const user = sqliteTable(
   "user",
@@ -99,7 +100,9 @@ export const apikey = sqliteTable(
     key: text("key").notNull(),
     lastRefillAt: integer("last_refill_at", { mode: "timestamp" }),
     lastRequest: integer("last_request", { mode: "timestamp" }),
-    metadata: text("metadata", { mode: "json" }).$defaultFn(() => ({})),
+    metadata: text("metadata", { mode: "json" })
+      .$defaultFn(() => ({}))
+      .$type<Metadata>(),
     name: text("name"),
     permissions: text("permissions"),
     prefix: text("prefix"),
@@ -150,7 +153,9 @@ export const organization = sqliteTable(
       .notNull(),
     id: text("id").primaryKey(),
     logo: text("logo").$type<Base64String>(),
-    metadata: text("metadata", { mode: "json" }).$defaultFn(() => ({})),
+    metadata: text("metadata", { mode: "json" })
+      .$defaultFn(() => ({}))
+      .$type<Metadata>(),
     name: text("name").notNull(),
     slug: text("slug").unique().notNull(),
   },
@@ -217,7 +222,9 @@ export const project = sqliteTable(
     /** Markdown format */
     documentation: text("documentation").default("").notNull(),
     id: text("id").primaryKey(),
-    metadata: text("metadata", { mode: "json" }).$defaultFn(() => ({})),
+    metadata: text("metadata", { mode: "json" })
+      .$defaultFn(() => ({}))
+      .$type<Metadata>(),
     name: text("name").notNull(),
     organizationId: text("organization_id")
       .notNull()
@@ -244,7 +251,8 @@ export const project = sqliteTable(
     // to be able to show "recently created/updated" projects
     index("project_created_at_index").on(self.createdAt),
     index("project_updated_at_index").on(self.updatedAt),
-    uniqueIndex("project_slug_index").on(self.slug),
+    // Projects can have same slugs, but not within the same org
+    uniqueIndex("project_slug_organization_id_index").on(self.slug, self.organizationId),
   ],
 );
 
@@ -257,7 +265,9 @@ export const tag = sqliteTable(
       .notNull(),
     createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
     id: text("id").primaryKey(),
-    metadata: text("metadata", { mode: "json" }).$defaultFn(() => ({})),
+    metadata: text("metadata", { mode: "json" })
+      .$defaultFn(() => ({}))
+      .$type<Metadata>(),
     name: text("name").notNull().unique(),
     status: text("status", { enum: ["active", "archived"] })
       .notNull()
@@ -319,7 +329,9 @@ export const openAPISchema = sqliteTable(
       .notNull()
       .$defaultFn(() => ({})),
     id: text("id").primaryKey(),
-    metadata: text("metadata", { mode: "json" }).$defaultFn(() => ({})),
+    metadata: text("metadata", { mode: "json" })
+      .$defaultFn(() => ({}))
+      .$type<Metadata>(),
     projectId: text("project_id")
       .notNull()
       .references(() => project.id, { onDelete: "cascade" }),
