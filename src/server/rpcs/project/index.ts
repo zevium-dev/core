@@ -180,6 +180,7 @@ export const projectRouter = router({
         tagNames: z.array(z.string()).min(1).max(100),
       }),
     )
+    .output(schemaZod.ProjectZod.and(z.object({ project_tags: z.array(schemaZod.ProjectTagZod) })))
     .mutation(async ({ ctx, input }) => {
       await verifyOrgAccess(ctx.user.id, input.organizationId);
       const project = await db
@@ -211,7 +212,7 @@ export const projectRouter = router({
       const insertedTags = await Promise.all(projectTags);
       return {
         ...project,
-        project_tags: new Set(insertedTags.filter(Boolean)),
+        project_tags: insertedTags.filter(Boolean),
       };
     }),
 });
