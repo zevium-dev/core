@@ -5,27 +5,52 @@ import z from "zod";
 import { db, orm, schema, schemaZod } from "~/db";
 import { protectedProcedure, router } from "~/server/trpc";
 
-const verifyOrgAccess = async (userId: string, organizationId: string) => {
-  const membership = await db
-    .select()
-    .from(schema.member)
-    .where(orm.and(orm.eq(schema.member.userId, userId), orm.eq(schema.member.organizationId, organizationId)))
-    .limit(1);
-  if (membership.length === 0) {
+const OrganizationInputZod = z.object({ organizationId: z.string() }).or(z.object({ organizationSlug: z.string() }));
+
+const organizationProcedure = protectedProcedure.input(OrganizationInputZod).use(async ({ ctx, input, next }) => {
+  const organizationWhere =
+    "organizationId" in input
+      ? orm.eq(schema.organization.id, input.organizationId)
+      : orm.eq(schema.organization.slug, input.organizationSlug);
+
+  const row = await db
+    .select({
+      memberId: schema.member.id,
+      organization: schema.organization,
+    })
+    .from(schema.organization)
+    .leftJoin(
+      schema.member,
+      orm.and(orm.eq(schema.member.organizationId, schema.organization.id), orm.eq(schema.member.userId, ctx.user.id)),
+    )
+    .where(organizationWhere)
+    .limit(1)
+    .then((rows) => rows.at(0));
+
+  const organization = row?.organization;
+  if (!organization) {
+    throw new TRPCError({
+      code: "NOT_FOUND",
+      message: "Organization not found",
+    });
+  }
+
+  if (!row.memberId) {
     throw new TRPCError({
       code: "FORBIDDEN",
       message: "You do not have access to this organization",
     });
   }
-};
+
+  return next({ ctx: { ...ctx, organization } });
+});
 
 export const projectRouter = router({
-  create: protectedProcedure
+  create: organizationProcedure
     .meta({ route: { path: "/project/create", summary: "Create a new project" } })
-    .input(schemaZod.ProjectZod.pick({ description: true, name: true, organizationId: true, slug: true }))
+    .input(OrganizationInputZod.and(schemaZod.ProjectZod.pick({ description: true, name: true, slug: true })))
     .output(schemaZod.ProjectZod)
     .mutation(async ({ ctx, input }) => {
-      await verifyOrgAccess(ctx.user.id, input.organizationId);
       const project = await db
         .insert(schema.project)
         .values({
@@ -35,7 +60,7 @@ export const projectRouter = router({
             createdBy: ctx.user.id,
           },
           name: input.name,
-          organizationId: input.organizationId,
+          organizationId: ctx.organization.id,
           slug: input.slug,
         })
         .returning()
@@ -49,17 +74,12 @@ export const projectRouter = router({
       return project;
     }),
 
-  get: protectedProcedure
+  get: organizationProcedure
     .meta({ route: { path: "/project/get", summary: "Get a project by ID or slug" } })
-    .input(
-      z
-        .object({ organizationId: z.string() })
-        .and(z.object({ projectId: z.string() }).or(z.object({ projectSlug: z.string() }))),
-    )
+    .input(OrganizationInputZod.and(z.object({ projectId: z.string() }).or(z.object({ projectSlug: z.string() }))))
     .output(schemaZod.ProjectZod.and(z.object({ project_tags: z.array(schemaZod.ProjectTagZod) })))
     .query(async ({ ctx, input }) => {
-      await verifyOrgAccess(ctx.user.id, input.organizationId);
-      const whereClauses = [orm.eq(schema.project.organizationId, input.organizationId)];
+      const whereClauses = [orm.eq(schema.project.organizationId, ctx.organization.id)];
       if ("projectId" in input) {
         whereClauses.push(orm.eq(schema.project.id, input.projectId));
       } else {
@@ -85,16 +105,12 @@ export const projectRouter = router({
       return projectWithTags;
     }),
 
-  list: protectedProcedure
+  list: organizationProcedure
     .meta({ route: { path: "/project/list", summary: "List all projects in an organization" } })
-    .input(
-      schemaZod.ProjectZod.pick({ organizationId: true }).and(z.object({ tagNames: z.array(z.string()).optional() })),
-    )
+    .input(OrganizationInputZod.and(z.object({ tagNames: z.array(z.string()).optional() })))
     .output(z.array(schemaZod.ProjectZod.and(z.object({ project_tags: z.array(schemaZod.ProjectTagZod) }))))
     .query(async ({ ctx, input }) => {
-      await verifyOrgAccess(ctx.user.id, input.organizationId);
-
-      const where = [orm.eq(schema.project.organizationId, input.organizationId)];
+      const where = [orm.eq(schema.project.organizationId, ctx.organization.id)];
       if (input.tagNames && input.tagNames.length > 0) {
         where.push(orm.inArray(schema.projectTag.tagName, input.tagNames));
       }
@@ -125,22 +141,22 @@ export const projectRouter = router({
       return result;
     }),
 
-  update: protectedProcedure
+  update: organizationProcedure
     .meta({ route: { path: "/project/update", summary: "Update a project" } })
     .input(
-      schemaZod.ProjectZod.pick({
-        description: true,
-        documentation: true,
-        id: true,
-        name: true,
-        organizationId: true,
-        status: true,
-        visibility: true,
-      }).and(z.object({ tagNames: z.array(z.string()) })),
+      OrganizationInputZod.and(
+        schemaZod.ProjectZod.pick({
+          description: true,
+          documentation: true,
+          id: true,
+          name: true,
+          status: true,
+          visibility: true,
+        }),
+      ).and(z.object({ tagNames: z.array(z.string()) })),
     )
     .output(schemaZod.ProjectZod.and(z.object({ project_tags: z.array(schemaZod.ProjectTagZod) })))
     .mutation(async ({ ctx, input }) => {
-      await verifyOrgAccess(ctx.user.id, input.organizationId);
       const project = await db
         .update(schema.project)
         .set({
@@ -150,9 +166,7 @@ export const projectRouter = router({
           status: input.status,
           visibility: input.visibility,
         })
-        .where(
-          orm.and(orm.eq(schema.project.id, input.id), orm.eq(schema.project.organizationId, input.organizationId)),
-        )
+        .where(orm.and(orm.eq(schema.project.id, input.id), orm.eq(schema.project.organizationId, ctx.organization.id)))
         .returning()
         .then((v) => v.at(0));
       if (!project) {
@@ -171,25 +185,25 @@ export const projectRouter = router({
       };
     }),
 
-  updateTags: protectedProcedure
+  updateTags: organizationProcedure
     .meta({ route: { path: "/project/update-tags", summary: "Update project tags" } })
     .input(
-      z.object({
-        organizationId: z.string(),
-        projectId: z.string(),
-        tagNames: z.array(z.string()).min(1).max(100),
-      }),
+      OrganizationInputZod.and(
+        z.object({
+          projectId: z.string(),
+          tagNames: z.array(z.string()).min(1).max(100),
+        }),
+      ),
     )
     .output(schemaZod.ProjectZod.and(z.object({ project_tags: z.array(schemaZod.ProjectTagZod) })))
     .mutation(async ({ ctx, input }) => {
-      await verifyOrgAccess(ctx.user.id, input.organizationId);
       const project = await db
         .select()
         .from(schema.project)
         .where(
           orm.and(
             orm.eq(schema.project.id, input.projectId),
-            orm.eq(schema.project.organizationId, input.organizationId),
+            orm.eq(schema.project.organizationId, ctx.organization.id),
           ),
         )
         .limit(1)

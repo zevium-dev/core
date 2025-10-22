@@ -1,3 +1,4 @@
+import { TRPCError } from "@trpc/server";
 import { type } from "arktype";
 import { z } from "zod";
 
@@ -52,16 +53,14 @@ export const organizationRouter = router({
             ),
           ),
         }),
-      )
-        .and(z.object({ invitations: z.array(schemaZod.InvitationZod) }))
-        .nullable(),
+      ).and(z.object({ invitations: z.array(schemaZod.InvitationZod) })),
     )
     .query(async ({ ctx, input }) => {
       const org = await authServer.api.getFullOrganization({
         headers: ctx.raw.req.headers,
         query: input,
       });
-      if (!org) return null;
+      if (!org) throw new TRPCError({ code: "NOT_FOUND", message: "Organization not found" });
 
       // Just some type gymnastics to ensure the output is correctly typed
       return {

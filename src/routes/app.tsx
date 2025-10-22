@@ -5,10 +5,13 @@ import { AppSidebar, PageHeader } from "~/components/sidebar";
 import { ScreenCenter } from "~/components/ui/screen-center";
 import { SidebarInset, SidebarProvider } from "~/components/ui/sidebar";
 import { Spinner } from "~/components/ui/spinner";
-import { useUser } from "~/lib/auth";
+import { sessionQueryOptions, useUser } from "~/lib/auth";
 
 export const Route = createFileRoute("/app")({
   component: RouteComponent,
+  loader: ({ context }) => {
+    void context.queryClient.ensureQueryData(sessionQueryOptions());
+  },
   pendingComponent: PendingComponent,
 });
 
