@@ -1,7 +1,7 @@
 import SuperJSON from "superjson";
 
 import { hashString } from "~/lib/hash";
-import { kv } from "~/lib/kv";
+import { kv } from "~/lib/server/kv";
 
 const defaultTtlMs = 24 * 60 * 60 * 1000;
 const defaultMemoryCacheTtlMs = 60 * 1000;
