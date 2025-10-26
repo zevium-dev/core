@@ -43,6 +43,13 @@
       "when": 1760980016850,
       "tag": "0005_sturdy_whizzer",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1761466381408,
+      "tag": "0006_sturdy_the_hand",
+      "breakpoints": true
     }
   ]
 }

@@ -353,7 +353,7 @@ export const openAPISchemaVersion = sqliteTable(
     openAPISchemaId: text("openapi_schema_id")
       .notNull()
       .references(() => openAPISchema.id, { onDelete: "cascade" }),
-    schema: text("spec", { mode: "json" }).notNull(),
+    schema: text("schema", { mode: "json" }).notNull(),
     updatedAt: integer("updated_at", { mode: "timestamp" })
       .$defaultFn(() => new Date())
       .notNull(),

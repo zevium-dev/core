@@ -1,0 +1,1 @@
+ALTER TABLE `openapi_schema_version` RENAME COLUMN "spec" TO "schema";
