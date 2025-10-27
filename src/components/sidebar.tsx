@@ -59,7 +59,7 @@ export function PageHeader() {
   const [headerContent] = useAtom(headerContentAtom);
 
   return (
-    <header className="sticky top-0 z-10 flex h-16 shrink-0 items-center gap-2 backdrop-blur-xs transition-[width,height] ease-linear group-has-[[data-collapsible=icon]]/sidebar-wrapper:h-12">
+    <header className="sticky top-0 z-10 flex h-16 shrink-0 items-center gap-2 backdrop-blur-xs transition-[width,height] ease-linear group-has-data-[collapsible=icon]/sidebar-wrapper:h-12">
       <div className="flex w-full items-center gap-2 px-4">
         <SidebarTrigger className="-ml-1 size-8" />
         {headerContent}
@@ -90,7 +90,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const user = useUser();
   const projectsListQuery = useQuery(
     trpc.project.list.queryOptions(
-      { organizationSlug: params?.organizationSlug ?? "" },
+      { organizationSlug: params?.organizationSlug ?? "unknown" },
       { enabled: !!params?.organizationSlug && !!user },
     ),
   );

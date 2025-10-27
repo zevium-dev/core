@@ -7,5 +7,6 @@ export const Route = createFileRoute("/app/organizations/$organizationSlug/proje
 });
 
 function RouteComponent() {
-  return <Redirect to="/app/organizations/$organizationSlug/projects/~" />;
+  const { organizationSlug } = Route.useParams();
+  return <Redirect params={{ organizationSlug }} to={`/app/organizations/$organizationSlug/projects/~`} />;
 }
