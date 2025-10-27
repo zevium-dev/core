@@ -16,8 +16,8 @@ import { EMAIL_FROM } from "~/lib/constants";
 import { sendEmail } from "../email";
 import { EmailVerify, EmailVerifySubject } from "../email/templates/email-verify";
 import { ResetPasswordEmail, ResetPasswordSubject } from "../email/templates/reset-password";
-import { kv } from "../kv";
 import { capCaptcha } from "./better-auth-captcha";
+import { kv } from "./kv";
 
 const BETTER_AUTH_KV_PREFIX = "better-auth:";
 

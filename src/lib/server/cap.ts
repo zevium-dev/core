@@ -1,6 +1,6 @@
 import Cap from "@cap.js/server";
 
-import { kv } from "~/lib/kv";
+import { kv } from "~/lib/server/kv";
 
 export type Solution = Cap.Solution;
 

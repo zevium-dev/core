@@ -5,7 +5,6 @@ import { useCallback, useEffect, useState } from "react";
 // 2FA moved to dedicated component
 import { toast } from "sonner";
 
-import { ProtectedRoute } from "~/components/protected-route";
 import { Avatar, AvatarFallback, AvatarImage } from "~/components/ui/avatar";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
@@ -201,489 +200,478 @@ function AccountPreferenceComponent() {
   };
 
   return (
-    <ProtectedRoute>
-      <div className="mx-auto w-full max-w-3xl min-w-0 flex-1 space-y-6 p-6">
-        {/* Header */}
-        <div className="flex items-center gap-2">
-          <User className="text-muted-foreground h-6 w-6" />
-          <h1 className="text-foreground text-2xl font-bold">Account</h1>
-        </div>
+    <div className="mx-auto w-full max-w-3xl min-w-0 flex-1 space-y-6 p-6">
+      {/* Header */}
+      <div className="flex items-center gap-2">
+        <User className="text-muted-foreground h-6 w-6" />
+        <h1 className="text-foreground text-2xl font-bold">Account</h1>
+      </div>
 
-        {/* Profile Section */}
-        <Card className="bg-card/50 border-border/50 w-full backdrop-blur-sm">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <User className="h-5 w-5" />
-              Profile Information
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            {/* Avatar Section */}
-            <div className="flex items-center gap-4">
-              <div className="relative">
-                <Avatar className="h-20 w-20">
-                  <AvatarImage
-                    alt={name || "User avatar"}
-                    onError={(e) => {
-                      // Replace broken image with fallback
-                      const target = e.currentTarget as HTMLImageElement;
-                      target.style.display = "none"; // let fallback show
+      {/* Profile Section */}
+      <Card className="bg-card/50 border-border/50 w-full backdrop-blur-sm">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <User className="h-5 w-5" />
+            Profile Information
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          {/* Avatar Section */}
+          <div className="flex items-center gap-4">
+            <div className="relative">
+              <Avatar className="h-20 w-20">
+                <AvatarImage alt={name || "User avatar"} src={user?.image ?? "/placeholder-avatar.jpg"} />
+                <AvatarFallback className="text-lg">
+                  {(() => {
+                    if (name) {
+                      const parts = name.trim().split(/\s+/).slice(0, 2);
+                      return parts.map((part) => part.at(0)?.toUpperCase() ?? "").join("") || "U";
+                    }
+                    if (email) return email.at(0)?.toUpperCase() ?? "";
+                    return "U";
+                  })()}
+                </AvatarFallback>
+              </Avatar>
+            </div>
+            <div className="space-y-1">
+              <h3 className="text-lg font-medium">
+                {name || (userPreferencesQuery.isPending ? "Loading..." : "Unnamed User")}
+              </h3>
+              <p className="text-muted-foreground text-sm">
+                {email || (userPreferencesQuery.isPending ? "" : "No email")}
+              </p>
+              <Button disabled size="sm" title="Avatar upload coming soon" variant="outline">
+                Change Photo
+              </Button>
+            </div>
+          </div>
+
+          <Separator />
+
+          {/* Personal Information */}
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="space-y-2 md:col-span-2">
+              <Label htmlFor="name">Name</Label>
+              <Input id="name" onChange={(e) => setName(e.target.value)} placeholder="Enter your name" value={name} />
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Contact Information */}
+      <Card className="bg-card/50 border-border/50 w-full backdrop-blur-sm">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Mail className="h-5 w-5" />
+            Contact Information
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="space-y-2">
+            <Label className="flex items-center gap-2" htmlFor="email">
+              <Mail className="h-4 w-4" />
+              Email Address
+            </Label>
+            <div className="flex items-center gap-2">
+              <div
+                className="border-input text-foreground/90 flex h-10 w-full items-center justify-between rounded-md border bg-transparent px-3 text-sm"
+                id="email"
+              >
+                <span className="truncate select-text" title={email}>
+                  {email || (userPreferencesQuery.isPending ? "Loading..." : "No email")}
+                </span>
+                {email && (
+                  <Button
+                    aria-label="Copy email"
+                    className="shrink-0"
+                    onClick={() => {
+                      void navigator.clipboard.writeText(email);
+                      toast.success("Email copied");
                     }}
-                    src={user?.image ?? "/placeholder-avatar.jpg"}
-                  />
-                  <AvatarFallback className="text-lg">
-                    {(() => {
-                      if (name) {
-                        const parts = name.trim().split(/\s+/).slice(0, 2);
-                        return parts.map((part) => part.at(0)?.toUpperCase() ?? "").join("") || "U";
-                      }
-                      if (email) return email.at(0)?.toUpperCase() ?? "";
-                      return "U";
-                    })()}
-                  </AvatarFallback>
-                </Avatar>
-              </div>
-              <div className="space-y-1">
-                <h3 className="text-lg font-medium">
-                  {name || (userPreferencesQuery.isPending ? "Loading..." : "Unnamed User")}
-                </h3>
-                <p className="text-muted-foreground text-sm">
-                  {email || (userPreferencesQuery.isPending ? "" : "No email")}
-                </p>
-                <Button disabled size="sm" title="Avatar upload coming soon" variant="outline">
-                  Change Photo
-                </Button>
+                    size="icon"
+                    type="button"
+                    variant="ghost"
+                  >
+                    <Copy className="h-4 w-4" />
+                  </Button>
+                )}
               </div>
             </div>
+          </div>
+          <div className="space-y-2">
+            <Label className="flex items-center gap-2" htmlFor="phone">
+              <Phone className="h-4 w-4" />
+              Phone Number
+            </Label>
+            <Input
+              id="phone"
+              onChange={(e) => setPhone(e.target.value)}
+              placeholder="Enter phone number"
+              type="tel"
+              value={phone}
+            />
+          </div>
+        </CardContent>
+      </Card>
 
-            <Separator />
+      {/* Location & Timezone */}
+      <Card className="bg-card/50 border-border/50 w-full backdrop-blur-sm">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <MapPin className="h-5 w-5" />
+            Location & Timezone
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="space-y-2">
+            <Label className="flex items-center gap-2" htmlFor="location">
+              <MapPin className="h-4 w-4" />
+              Location
+            </Label>
+            <Input
+              id="location"
+              onChange={(e) => setLocation(e.target.value)}
+              placeholder="Enter your location"
+              value={location}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label className="flex items-center gap-2" htmlFor="timezone">
+              <Calendar className="h-4 w-4" />
+              Timezone
+            </Label>
+            <Select
+              disabled={userPreferencesQuery.isPending || userPreferencesMutation.isPending}
+              onValueChange={(val) => {
+                // Only update local state; defer persistence until Save is clicked
+                setTimezone(val);
+              }}
+              value={timezone}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder={userPreferencesQuery.isPending ? "Loading..." : "Select timezone"} />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="PST">Pacific Standard Time (PST)</SelectItem>
+                <SelectItem value="MST">Mountain Standard Time (MST)</SelectItem>
+                <SelectItem value="CST">Central Standard Time (CST)</SelectItem>
+                <SelectItem value="EST">Eastern Standard Time (EST)</SelectItem>
+                <SelectItem value="UTC">Coordinated Universal Time (UTC)</SelectItem>
+              </SelectContent>
+            </Select>
+            {/* Removed unsaved indicator to keep UI minimal */}
+          </div>
+        </CardContent>
+      </Card>
 
-            {/* Personal Information */}
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-2 md:col-span-2">
-                <Label htmlFor="name">Name</Label>
-                <Input id="name" onChange={(e) => setName(e.target.value)} placeholder="Enter your name" value={name} />
-              </div>
+      {/* Security Section */}
+      <Card className="bg-card/50 border-border/50 w-full backdrop-blur-sm">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Shield className="h-5 w-5" />
+            Security
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-start justify-between gap-4">
+            <div className="space-y-1">
+              <p className="font-medium">Password</p>
+              <p className="text-muted-foreground text-sm">
+                {hasPassword === null && "Detecting…"}
+                {hasPassword === true && "A password is set for this account"}
+                {hasPassword === false && "No password set (OAuth only). You can set one."}
+              </p>
             </div>
-          </CardContent>
-        </Card>
-
-        {/* Contact Information */}
-        <Card className="bg-card/50 border-border/50 w-full backdrop-blur-sm">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Mail className="h-5 w-5" />
-              Contact Information
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label className="flex items-center gap-2" htmlFor="email">
-                <Mail className="h-4 w-4" />
-                Email Address
-              </Label>
-              <div className="flex items-center gap-2">
-                <div
-                  className="border-input text-foreground/90 flex h-10 w-full items-center justify-between rounded-md border bg-transparent px-3 text-sm"
-                  id="email"
-                >
-                  <span className="truncate select-text" title={email}>
-                    {email || (userPreferencesQuery.isPending ? "Loading..." : "No email")}
-                  </span>
-                  {email && (
+            {!showPasswordEditor && hasPassword !== null && (
+              <Button
+                className="self-start"
+                onClick={() => setShowPasswordEditor(true)}
+                size="sm"
+                type="button"
+                variant="outline"
+              >
+                {hasPassword ? "Change Password" : "Add Password"}
+              </Button>
+            )}
+          </div>
+          {/* Password Forms (gated) */}
+          {showPasswordEditor && (
+            <div className="border-border/60 space-y-3 rounded-md border p-4">
+              {hasPassword === true && (
+                <div className="space-y-3">
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <div className="space-y-2 md:col-span-2">
+                      <Label htmlFor="currentPassword">Current Password</Label>
+                      <div className="flex items-center gap-2">
+                        <Input
+                          id="currentPassword"
+                          onChange={(e) => setCurrentPassword(e.target.value)}
+                          placeholder="Enter current password"
+                          type={showPasswords ? "text" : "password"}
+                          value={currentPassword}
+                        />
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="newPassword">New Password</Label>
+                      <Input
+                        id="newPassword"
+                        maxLength={MAX_PASSWORD_LENGTH}
+                        onChange={(e) => setNewPassword(e.target.value)}
+                        placeholder="New password"
+                        type={showPasswords ? "text" : "password"}
+                        value={newPassword}
+                      />
+                      {passwordTooShort && (
+                        <p className="text-destructive text-xs">Minimum {MIN_PASSWORD_LENGTH} characters</p>
+                      )}
+                      {passwordTooLong && (
+                        <p className="text-destructive text-xs">Maximum {MAX_PASSWORD_LENGTH} characters</p>
+                      )}
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="confirmPassword">Confirm Password</Label>
+                      <Input
+                        id="confirmPassword"
+                        maxLength={MAX_PASSWORD_LENGTH}
+                        onChange={(e) => setConfirmPassword(e.target.value)}
+                        placeholder="Confirm new password"
+                        type={showPasswords ? "text" : "password"}
+                        value={confirmPassword}
+                      />
+                      {confirmMismatch && !passwordTooShort && !passwordTooLong && (
+                        <p className="text-destructive text-xs">Passwords do not match</p>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-end gap-2">
                     <Button
-                      aria-label="Copy email"
-                      className="shrink-0"
-                      onClick={() => {
-                        void navigator.clipboard.writeText(email);
-                        toast.success("Email copied");
-                      }}
-                      size="icon"
+                      className="mr-auto"
+                      onClick={() => setShowPasswords((p) => !p)}
+                      size="sm"
                       type="button"
                       variant="ghost"
                     >
-                      <Copy className="h-4 w-4" />
+                      {showPasswords ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                     </Button>
-                  )}
+                    <Button
+                      onClick={() => {
+                        setShowPasswordEditor(false);
+                        resetPasswordFields();
+                      }}
+                      size="sm"
+                      type="button"
+                      variant="ghost"
+                    >
+                      Close
+                    </Button>
+                    <Button
+                      disabled={
+                        isChangingPassword ||
+                        !currentPassword ||
+                        !newPassword ||
+                        passwordTooShort ||
+                        passwordTooLong ||
+                        newPassword !== confirmPassword
+                      }
+                      onClick={() => void handleChangePassword()}
+                      size="sm"
+                      type="button"
+                    >
+                      {isChangingPassword ? <Loader2 className="h-4 w-4 animate-spin" /> : "Change Password"}
+                    </Button>
+                  </div>
                 </div>
-              </div>
-            </div>
-            <div className="space-y-2">
-              <Label className="flex items-center gap-2" htmlFor="phone">
-                <Phone className="h-4 w-4" />
-                Phone Number
-              </Label>
-              <Input
-                id="phone"
-                onChange={(e) => setPhone(e.target.value)}
-                placeholder="Enter phone number"
-                type="tel"
-                value={phone}
-              />
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Location & Timezone */}
-        <Card className="bg-card/50 border-border/50 w-full backdrop-blur-sm">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <MapPin className="h-5 w-5" />
-              Location & Timezone
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label className="flex items-center gap-2" htmlFor="location">
-                <MapPin className="h-4 w-4" />
-                Location
-              </Label>
-              <Input
-                id="location"
-                onChange={(e) => setLocation(e.target.value)}
-                placeholder="Enter your location"
-                value={location}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label className="flex items-center gap-2" htmlFor="timezone">
-                <Calendar className="h-4 w-4" />
-                Timezone
-              </Label>
-              <Select
-                disabled={userPreferencesQuery.isPending || userPreferencesMutation.isPending}
-                onValueChange={(val) => {
-                  // Only update local state; defer persistence until Save is clicked
-                  setTimezone(val);
-                }}
-                value={timezone}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder={userPreferencesQuery.isPending ? "Loading..." : "Select timezone"} />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="PST">Pacific Standard Time (PST)</SelectItem>
-                  <SelectItem value="MST">Mountain Standard Time (MST)</SelectItem>
-                  <SelectItem value="CST">Central Standard Time (CST)</SelectItem>
-                  <SelectItem value="EST">Eastern Standard Time (EST)</SelectItem>
-                  <SelectItem value="UTC">Coordinated Universal Time (UTC)</SelectItem>
-                </SelectContent>
-              </Select>
-              {/* Removed unsaved indicator to keep UI minimal */}
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Security Section */}
-        <Card className="bg-card/50 border-border/50 w-full backdrop-blur-sm">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Shield className="h-5 w-5" />
-              Security
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex items-start justify-between gap-4">
-              <div className="space-y-1">
-                <p className="font-medium">Password</p>
-                <p className="text-muted-foreground text-sm">
-                  {hasPassword === null && "Detecting…"}
-                  {hasPassword === true && "A password is set for this account"}
-                  {hasPassword === false && "No password set (OAuth only). You can set one."}
-                </p>
-              </div>
-              {!showPasswordEditor && hasPassword !== null && (
-                <Button
-                  className="self-start"
-                  onClick={() => setShowPasswordEditor(true)}
-                  size="sm"
-                  type="button"
-                  variant="outline"
-                >
-                  {hasPassword ? "Change Password" : "Add Password"}
-                </Button>
               )}
+              {hasPassword === false && (
+                <div className="space-y-3">
+                  <p className="text-muted-foreground text-sm">
+                    You're currently signed in with OAuth only. To change your password in the future, set a password
+                    first. We will email a secure link to {email || "your email"} to set it.
+                  </p>
+                  <div className="flex items-center justify-end gap-2">
+                    <Button
+                      onClick={() => {
+                        setShowPasswordEditor(false);
+                        resetPasswordFields();
+                      }}
+                      size="sm"
+                      type="button"
+                      variant="ghost"
+                    >
+                      Close
+                    </Button>
+                    <Button
+                      disabled={requestPasswordResetMutation.isPending}
+                      onClick={() => requestPasswordResetMutation.mutate()}
+                      size="sm"
+                      type="button"
+                    >
+                      {requestPasswordResetMutation.isPending ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        "Email set-password link"
+                      )}
+                    </Button>
+                  </div>
+                </div>
+              )}
+              {/* Close now integrated with action row above */}
             </div>
-            {/* Password Forms (gated) */}
-            {showPasswordEditor && (
-              <div className="border-border/60 space-y-3 rounded-md border p-4">
-                {hasPassword === true && (
-                  <div className="space-y-3">
-                    <div className="grid gap-3 md:grid-cols-2">
-                      <div className="space-y-2 md:col-span-2">
-                        <Label htmlFor="currentPassword">Current Password</Label>
-                        <div className="flex items-center gap-2">
-                          <Input
-                            id="currentPassword"
-                            onChange={(e) => setCurrentPassword(e.target.value)}
-                            placeholder="Enter current password"
-                            type={showPasswords ? "text" : "password"}
-                            value={currentPassword}
-                          />
-                        </div>
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="newPassword">New Password</Label>
-                        <Input
-                          id="newPassword"
-                          maxLength={MAX_PASSWORD_LENGTH}
-                          onChange={(e) => setNewPassword(e.target.value)}
-                          placeholder="New password"
-                          type={showPasswords ? "text" : "password"}
-                          value={newPassword}
-                        />
-                        {passwordTooShort && (
-                          <p className="text-destructive text-xs">Minimum {MIN_PASSWORD_LENGTH} characters</p>
-                        )}
-                        {passwordTooLong && (
-                          <p className="text-destructive text-xs">Maximum {MAX_PASSWORD_LENGTH} characters</p>
-                        )}
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="confirmPassword">Confirm Password</Label>
-                        <Input
-                          id="confirmPassword"
-                          maxLength={MAX_PASSWORD_LENGTH}
-                          onChange={(e) => setConfirmPassword(e.target.value)}
-                          placeholder="Confirm new password"
-                          type={showPasswords ? "text" : "password"}
-                          value={confirmPassword}
-                        />
-                        {confirmMismatch && !passwordTooShort && !passwordTooLong && (
-                          <p className="text-destructive text-xs">Passwords do not match</p>
-                        )}
-                      </div>
+          )}
+          <Separator />
+          {/* Two-Factor Authentication: if not enabled, route to dedicated flow; if enabled, show manager */}
+          <>
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="space-y-1">
+                  <p className="font-medium">Two-Factor Authentication</p>
+                  <p className="text-muted-foreground text-sm">
+                    {user?.twoFactorEnabled ? "Enabled on this account" : "Add an extra layer of security"}
+                  </p>
+                </div>
+                {user?.twoFactorEnabled ? (
+                  <div className="flex items-center gap-2">
+                    <Button onClick={() => setTwoFactorOpen((p) => !p)} size="sm" type="button" variant="outline">
+                      {twoFactorOpen ? "Close" : "Manage"}
+                    </Button>
+                  </div>
+                ) : (
+                  <Button
+                    onClick={() => navigate({ to: "/auth/two-factor-auth" })}
+                    size="sm"
+                    type="button"
+                    variant="outline"
+                  >
+                    Configure
+                  </Button>
+                )}
+              </div>
+            </div>
+            {user?.twoFactorEnabled && twoFactorOpen && (
+              <div className="border-border/60 mt-2 space-y-4 rounded-md border p-4">
+                <div className="space-y-2">
+                  <Label htmlFor="twoFactorPassword">Account Password</Label>
+                  <Input
+                    id="twoFactorPassword"
+                    onChange={(e) => setTwoFactorPassword(e.target.value)}
+                    placeholder="Enter your password"
+                    type="password"
+                    value={twoFactorPassword}
+                  />
+                </div>
+                {Array.isArray(twoFactorCodes) && twoFactorCodes.length > 0 && (
+                  <div className="space-y-2">
+                    <p className="text-sm font-medium">Backup Codes</p>
+                    <p className="text-muted-foreground text-xs">Store these safely. Each can be used once.</p>
+                    <div className="grid grid-cols-2 gap-2 md:grid-cols-3">
+                      {twoFactorCodes.map((code) => (
+                        <code className="bg-muted rounded px-2 py-1 text-center font-mono text-xs" key={code}>
+                          {code}
+                        </code>
+                      ))}
                     </div>
-                    <div className="flex items-center justify-end gap-2">
+                    <div className="flex gap-2">
                       <Button
-                        className="mr-auto"
-                        onClick={() => setShowPasswords((p) => !p)}
+                        onClick={() => {
+                          void navigator.clipboard.writeText(twoFactorCodes.join("\n"));
+                          toast.success("Backup codes copied");
+                        }}
                         size="sm"
                         type="button"
-                        variant="ghost"
+                        variant="outline"
                       >
-                        {showPasswords ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                        Copy Codes
                       </Button>
                       <Button
                         onClick={() => {
-                          setShowPasswordEditor(false);
-                          resetPasswordFields();
+                          const file = new Blob([twoFactorCodes.join("\n")], { type: "text/plain;charset=utf-8" });
+                          const url = URL.createObjectURL(file);
+                          const a = document.createElement("a");
+                          a.href = url;
+                          a.download = "zevium-backup-codes.txt";
+                          document.body.appendChild(a);
+                          a.click();
+                          a.remove();
+                          URL.revokeObjectURL(url);
                         }}
                         size="sm"
                         type="button"
                         variant="ghost"
                       >
-                        Close
-                      </Button>
-                      <Button
-                        disabled={
-                          isChangingPassword ||
-                          !currentPassword ||
-                          !newPassword ||
-                          passwordTooShort ||
-                          passwordTooLong ||
-                          newPassword !== confirmPassword
-                        }
-                        onClick={() => void handleChangePassword()}
-                        size="sm"
-                        type="button"
-                      >
-                        {isChangingPassword ? <Loader2 className="h-4 w-4 animate-spin" /> : "Change Password"}
+                        Download
                       </Button>
                     </div>
                   </div>
                 )}
-                {hasPassword === false && (
-                  <div className="space-y-3">
-                    <p className="text-muted-foreground text-sm">
-                      You're currently signed in with OAuth only. To change your password in the future, set a password
-                      first. We will email a secure link to {email || "your email"} to set it.
-                    </p>
-                    <div className="flex items-center justify-end gap-2">
-                      <Button
-                        onClick={() => {
-                          setShowPasswordEditor(false);
-                          resetPasswordFields();
-                        }}
-                        size="sm"
-                        type="button"
-                        variant="ghost"
-                      >
-                        Close
-                      </Button>
-                      <Button
-                        disabled={requestPasswordResetMutation.isPending}
-                        onClick={() => requestPasswordResetMutation.mutate()}
-                        size="sm"
-                        type="button"
-                      >
-                        {requestPasswordResetMutation.isPending ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : (
-                          "Email set-password link"
-                        )}
-                      </Button>
-                    </div>
-                  </div>
-                )}
-                {/* Close now integrated with action row above */}
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    disabled={regenerating2FA || !twoFactorPassword}
+                    onClick={() => void handleRegenerateCodes()}
+                    size="sm"
+                    type="button"
+                    variant="outline"
+                  >
+                    {regenerating2FA ? <Loader2 className="h-4 w-4 animate-spin" /> : "Regenerate Codes"}
+                  </Button>
+                  <Button
+                    disabled={disabling2FA || !twoFactorPassword}
+                    onClick={() => void handleDisable2FA()}
+                    size="sm"
+                    type="button"
+                    variant="destructive"
+                  >
+                    {disabling2FA ? <Loader2 className="h-4 w-4 animate-spin" /> : "Disable 2FA"}
+                  </Button>
+                </div>
               </div>
             )}
             <Separator />
-            {/* Two-Factor Authentication: if not enabled, route to dedicated flow; if enabled, show manager */}
-            <>
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <div className="space-y-1">
-                    <p className="font-medium">Two-Factor Authentication</p>
-                    <p className="text-muted-foreground text-sm">
-                      {user?.twoFactorEnabled ? "Enabled on this account" : "Add an extra layer of security"}
-                    </p>
-                  </div>
-                  {user?.twoFactorEnabled ? (
-                    <div className="flex items-center gap-2">
-                      <Button onClick={() => setTwoFactorOpen((p) => !p)} size="sm" type="button" variant="outline">
-                        {twoFactorOpen ? "Close" : "Manage"}
-                      </Button>
-                    </div>
-                  ) : (
-                    <Button
-                      onClick={() => navigate({ to: "/auth/two-factor-auth" })}
-                      size="sm"
-                      type="button"
-                      variant="outline"
-                    >
-                      Configure
-                    </Button>
-                  )}
-                </div>
-              </div>
-              {user?.twoFactorEnabled && twoFactorOpen && (
-                <div className="border-border/60 mt-2 space-y-4 rounded-md border p-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="twoFactorPassword">Account Password</Label>
-                    <Input
-                      id="twoFactorPassword"
-                      onChange={(e) => setTwoFactorPassword(e.target.value)}
-                      placeholder="Enter your password"
-                      type="password"
-                      value={twoFactorPassword}
-                    />
-                  </div>
-                  {Array.isArray(twoFactorCodes) && twoFactorCodes.length > 0 && (
-                    <div className="space-y-2">
-                      <p className="text-sm font-medium">Backup Codes</p>
-                      <p className="text-muted-foreground text-xs">Store these safely. Each can be used once.</p>
-                      <div className="grid grid-cols-2 gap-2 md:grid-cols-3">
-                        {twoFactorCodes.map((code) => (
-                          <code className="bg-muted rounded px-2 py-1 text-center font-mono text-xs" key={code}>
-                            {code}
-                          </code>
-                        ))}
-                      </div>
-                      <div className="flex gap-2">
-                        <Button
-                          onClick={() => {
-                            void navigator.clipboard.writeText(twoFactorCodes.join("\n"));
-                            toast.success("Backup codes copied");
-                          }}
-                          size="sm"
-                          type="button"
-                          variant="outline"
-                        >
-                          Copy Codes
-                        </Button>
-                        <Button
-                          onClick={() => {
-                            const file = new Blob([twoFactorCodes.join("\n")], { type: "text/plain;charset=utf-8" });
-                            const url = URL.createObjectURL(file);
-                            const a = document.createElement("a");
-                            a.href = url;
-                            a.download = "zevium-backup-codes.txt";
-                            document.body.appendChild(a);
-                            a.click();
-                            a.remove();
-                            URL.revokeObjectURL(url);
-                          }}
-                          size="sm"
-                          type="button"
-                          variant="ghost"
-                        >
-                          Download
-                        </Button>
-                      </div>
-                    </div>
-                  )}
-                  <div className="flex flex-wrap gap-2">
-                    <Button
-                      disabled={regenerating2FA || !twoFactorPassword}
-                      onClick={() => void handleRegenerateCodes()}
-                      size="sm"
-                      type="button"
-                      variant="outline"
-                    >
-                      {regenerating2FA ? <Loader2 className="h-4 w-4 animate-spin" /> : "Regenerate Codes"}
-                    </Button>
-                    <Button
-                      disabled={disabling2FA || !twoFactorPassword}
-                      onClick={() => void handleDisable2FA()}
-                      size="sm"
-                      type="button"
-                      variant="destructive"
-                    >
-                      {disabling2FA ? <Loader2 className="h-4 w-4 animate-spin" /> : "Disable 2FA"}
-                    </Button>
-                  </div>
-                </div>
-              )}
-              <Separator />
-            </>
-            <div className="flex items-center justify-between">
-              <div className="space-y-1">
-                <p className="font-medium">Active Sessions</p>
-                <p className="text-muted-foreground text-sm">Manage your active sessions</p>
-              </div>
-              <Button variant="outline">View Sessions</Button>
+          </>
+          <div className="flex items-center justify-between">
+            <div className="space-y-1">
+              <p className="font-medium">Active Sessions</p>
+              <p className="text-muted-foreground text-sm">Manage your active sessions</p>
             </div>
-          </CardContent>
-        </Card>
+            <Button variant="outline">View Sessions</Button>
+          </div>
+        </CardContent>
+      </Card>
 
-        {/* Danger Zone */}
-        <Card className="bg-card/50 border-border/50 w-full backdrop-blur-sm">
-          <CardHeader>
-            <CardTitle className="text-destructive flex items-center gap-2">
-              <Trash2 className="h-5 w-5" />
-              Danger Zone
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex items-center justify-between">
-              <div className="space-y-1">
-                <p className="font-medium">Delete Account</p>
-                <p className="text-muted-foreground text-sm">Permanently delete your account and all data</p>
-              </div>
-              <Button size="sm" variant="destructive">
-                Delete Account
-              </Button>
+      {/* Danger Zone */}
+      <Card className="bg-card/50 border-border/50 w-full backdrop-blur-sm">
+        <CardHeader>
+          <CardTitle className="text-destructive flex items-center gap-2">
+            <Trash2 className="h-5 w-5" />
+            Danger Zone
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="space-y-1">
+              <p className="font-medium">Delete Account</p>
+              <p className="text-muted-foreground text-sm">Permanently delete your account and all data</p>
             </div>
-          </CardContent>
-        </Card>
+            <Button size="sm" variant="destructive">
+              Delete Account
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
 
-        {/* Save Button */}
-        <div className="flex justify-end gap-3">
-          <Button
-            disabled={
-              isSaving ||
-              !user ||
-              (name.trim() === user.name &&
-                (timezone === "" || timezone === (userPreferencesQuery.data?.timezone ?? "")))
-            }
-            onClick={() => void handleSave()}
-          >
-            {isSaving ? "Saving..." : "Save Changes"}
-          </Button>
-        </div>
+      {/* Save Button */}
+      <div className="flex justify-end gap-3">
+        <Button
+          disabled={
+            isSaving ||
+            !user ||
+            (name.trim() === user.name && (timezone === "" || timezone === (userPreferencesQuery.data?.timezone ?? "")))
+          }
+          onClick={() => void handleSave()}
+        >
+          {isSaving ? "Saving..." : "Save Changes"}
+        </Button>
       </div>
-    </ProtectedRoute>
+    </div>
   );
 }
