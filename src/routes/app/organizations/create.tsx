@@ -114,7 +114,7 @@ function RouteComponent() {
                         previewUrl={logoData ?? undefined}
                       />
                     </FormControl>
-                    <FormDescription>Upload a logo for your organization (1:1 aspect ratio, max 500KB)</FormDescription>
+                    <FormDescription>Upload a logo for your organization (1:1 aspect ratio, max 10MB)</FormDescription>
                   </FormItem>
                 )}
               />
