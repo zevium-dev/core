@@ -11,6 +11,7 @@ export const Route = createFileRoute("/app")({
   component: RouteComponent,
   loader: ({ context }) => {
     void context.queryClient.ensureQueryData(sessionQueryOptions());
+    void context.queryClient.ensureQueryData(context.trpc.organization.list.queryOptions());
   },
   pendingComponent: PendingComponent,
 });

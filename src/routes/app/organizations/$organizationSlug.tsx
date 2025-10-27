@@ -9,6 +9,8 @@ export const Route = createFileRoute("/app/organizations/$organizationSlug")({
   component: RouteComponent,
   loader: ({ context, params }) => {
     void context.queryClient.ensureQueryData(context.trpc.organization.get.queryOptions(params));
+    // Intentionally removed prefetching of projects list to prevent hydration error with app sidebar
+    // void context.queryClient.ensureQueryData(context.trpc.project.list.queryOptions(params));
   },
 });
 

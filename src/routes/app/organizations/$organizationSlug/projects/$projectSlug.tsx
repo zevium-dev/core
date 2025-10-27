@@ -12,7 +12,9 @@ import { formatDate } from "~/lib/utils";
 export const Route = createFileRoute("/app/organizations/$organizationSlug/projects/$projectSlug")({
   component: RouteComponent,
   loader: async ({ context, params }) => {
-    await context.queryClient.ensureQueryData(context.trpc.organization.get.queryOptions(params));
+    await context.queryClient.ensureQueryData(
+      context.trpc.organization.get.queryOptions({ organizationSlug: params.organizationSlug }),
+    );
     await context.queryClient.ensureQueryData(context.trpc.project.get.queryOptions(params));
   },
 });
@@ -22,7 +24,9 @@ function RouteComponent() {
   const trpc = useTRPC();
 
   const projectQuery = useSuspenseQuery(trpc.project.get.queryOptions(params));
-  const organizationDetailsQuery = useSuspenseQuery(trpc.organization.get.queryOptions(params));
+  const organizationDetailsQuery = useSuspenseQuery(
+    trpc.organization.get.queryOptions({ organizationSlug: params.organizationSlug }),
+  );
   const project = projectQuery.data;
 
   const visibilityIcon = project.visibility === "public" ? <Globe className="h-4 w-4" /> : <Lock className="h-4 w-4" />;

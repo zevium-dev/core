@@ -1,4 +1,4 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { Link, useMatches, useParams, useRouter } from "@tanstack/react-router";
 import { atom, useAtom } from "jotai";
 import {
@@ -94,9 +94,9 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
       { enabled: !!params?.organizationSlug && !!user },
     ),
   );
-  const orgListQuery = useQuery(trpc.organization.list.queryOptions(undefined, { enabled: !!user }));
+  const orgListQuery = useSuspenseQuery(trpc.organization.list.queryOptions(undefined, { enabled: !!user }));
 
-  const orgNavData = orgListQuery.data && {
+  const orgNavData = {
     icon: Building2Icon,
     requiresAuth: true,
     subroutes: orgListQuery.data.map((org) => ({
