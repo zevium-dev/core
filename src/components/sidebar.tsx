@@ -1,5 +1,5 @@
-import { useQueryClient } from "@tanstack/react-query";
-import { Link, useMatches, useRouter } from "@tanstack/react-router";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link, useMatches, useParams, useRouter } from "@tanstack/react-router";
 import { atom, useAtom } from "jotai";
 import {
   Building2Icon,
@@ -43,6 +43,7 @@ import {
   useSidebar,
 } from "~/components/ui/sidebar";
 import { auth, useUser } from "~/lib/auth";
+import { useTRPC } from "~/lib/trpc";
 
 const headerContentAtom = atom<React.ReactNode>(null);
 
@@ -69,18 +70,6 @@ export function PageHeader() {
 
 const navData = [
   {
-    icon: Building2Icon,
-    requiresAuth: true,
-    title: "Organizations",
-    url: "/app/organizations",
-  },
-  {
-    icon: DockIcon,
-    requiresAuth: true,
-    title: "Projects",
-    url: "/app/projects",
-  },
-  {
     icon: Settings,
     requiresAuth: true,
     subroutes: [
@@ -96,9 +85,40 @@ const navData = [
 
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const [, match] = useMatches();
+  const params = useParams({ from: "/app/organizations/$organizationSlug", shouldThrow: false });
+  const trpc = useTRPC();
+  const user = useUser();
+  const projectsListQuery = useQuery(
+    trpc.project.list.queryOptions(
+      { organizationSlug: params?.organizationSlug ?? "" },
+      { enabled: !!params?.organizationSlug && !!user },
+    ),
+  );
+  const orgListQuery = useQuery(trpc.organization.list.queryOptions(undefined, { enabled: !!user }));
 
-  // Filter navigation items based on authentication state
-  const filteredNavData = navData;
+  const orgNavData = orgListQuery.data && {
+    icon: Building2Icon,
+    requiresAuth: true,
+    subroutes: orgListQuery.data.map((org) => ({
+      title: org.name,
+      url: `/app/organizations/${org.slug}`,
+    })),
+    title: "Organizations",
+    url: "/app/organizations/~",
+  };
+
+  const projectNavData = projectsListQuery.data && {
+    icon: DockIcon,
+    requiresAuth: true,
+    subroutes: projectsListQuery.data.map((project) => ({
+      title: project.name,
+      url: `/app/organizations/${params?.organizationSlug}/projects/${project.slug}`,
+    })),
+    title: "Projects",
+    url: `/app/organizations/${params?.organizationSlug}/projects`,
+  };
+
+  const filteredNavData = [orgNavData, projectNavData, ...navData].filter(Boolean);
 
   return (
     <Sidebar collapsible="icon" {...props}>
@@ -148,7 +168,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
               const isActive = match.pathname === item.url || (item.url !== "/" && match.pathname.startsWith(item.url));
 
               // Collapsible Settings item with subroutes
-              if (item.title === "Settings" && item.subroutes) {
+              if (item.subroutes.length > 0) {
                 const isSettingsActive = match.pathname.startsWith("/settings");
 
                 return (
@@ -218,12 +238,6 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
 }
 
 export function MainSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
-  const [, match] = useMatches();
-  const user = useUser();
-
-  // Filter navigation items based on authentication state
-  const filteredNavData = navData.filter((item) => !item.requiresAuth);
-
   return (
     <Sidebar collapsible="icon" {...props}>
       <SidebarHeader>
@@ -246,19 +260,14 @@ export function MainSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) 
       <SidebarContent>
         <SidebarGroup>
           <SidebarMenu>
-            {user && (
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  asChild
-                  className="data-[active=true]:bg-main data-[active=true]:text-main-foreground"
-                >
-                  <Link to="/app/dashboard">
-                    <LayoutDashboardIcon />
-                    <span>Dashboard</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            )}
+            <SidebarMenuItem>
+              <SidebarMenuButton asChild className="data-[active=true]:bg-main data-[active=true]:text-main-foreground">
+                <Link to="/app/dashboard">
+                  <LayoutDashboardIcon />
+                  <span>Dashboard</span>
+                </Link>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
 
             <SidebarMenuItem>
               <SidebarMenuButton asChild className="data-[active=true]:bg-main data-[active=true]:text-main-foreground">
@@ -268,64 +277,6 @@ export function MainSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) 
                 </Link>
               </SidebarMenuButton>
             </SidebarMenuItem>
-
-            {filteredNavData.map((item) => {
-              // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-              if (!match) return <React.Fragment key={item.title} />;
-
-              // Check if current path matches the item URL or starts with it (for nested routes)
-              const isActive = match.pathname === item.url || (item.url !== "/" && match.pathname.startsWith(item.url));
-
-              // Collapsible Settings item with subroutes
-              if (item.title === "Settings" && item.subroutes) {
-                const isSettingsActive = match.pathname.startsWith("/settings");
-
-                return (
-                  <Collapsible className="group/collapsible" defaultOpen={isSettingsActive} key={item.title}>
-                    <SidebarMenuItem>
-                      <CollapsibleTrigger asChild>
-                        <SidebarMenuButton
-                          className="data-[active=true]:bg-main data-[active=true]:text-main-foreground"
-                          isActive={isSettingsActive}
-                        >
-                          <item.icon />
-                          <span>{item.title}</span>
-                        </SidebarMenuButton>
-                      </CollapsibleTrigger>
-                      <CollapsibleContent>
-                        <SidebarMenuSub>
-                          {item.subroutes.map((sub) => {
-                            const isSubActive = match.pathname === sub.url || match.pathname.startsWith(sub.url + "/");
-                            return (
-                              <SidebarMenuSubItem key={sub.title}>
-                                <SidebarMenuSubButton asChild isActive={isSubActive}>
-                                  <Link to={sub.url}>{sub.title}</Link>
-                                </SidebarMenuSubButton>
-                              </SidebarMenuSubItem>
-                            );
-                          })}
-                        </SidebarMenuSub>
-                      </CollapsibleContent>
-                    </SidebarMenuItem>
-                  </Collapsible>
-                );
-              }
-
-              return (
-                <SidebarMenuItem key={item.title}>
-                  <SidebarMenuButton
-                    asChild
-                    className="data-[active=true]:bg-main data-[active=true]:text-main-foreground"
-                    isActive={isActive}
-                  >
-                    <Link to={item.url}>
-                      <item.icon />
-                      <span>{item.title}</span>
-                    </Link>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              );
-            })}
           </SidebarMenu>
         </SidebarGroup>
       </SidebarContent>

@@ -1,9 +1,10 @@
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { Mail, Users } from "lucide-react";
 
 import { Avatar, AvatarFallback, AvatarImage } from "~/components/ui/avatar";
 import { Badge } from "~/components/ui/badge";
+import { Button } from "~/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "~/components/ui/card";
 import { Typography } from "~/components/ui/typography";
 import { useTRPC } from "~/lib/trpc";
@@ -44,11 +45,14 @@ function RouteComponent() {
                   <span className="bg-muted rounded px-2 py-1 font-mono text-xs">{org.slug}</span>
                 </CardDescription>
               </div>
-              {org.logo && (
-                <div className="ml-4">
-                  <img alt={org.name} className="h-16 w-16 rounded-lg object-cover" src={org.logo} />
-                </div>
-              )}
+              <div className="ml-4 flex flex-col gap-2">
+                {org.logo && <img alt={org.name} className="h-16 w-16 rounded-lg object-cover" src={org.logo} />}
+                <Button asChild size="sm" variant="outline">
+                  <Link params={{ organizationSlug }} to="/app/organizations/$organizationSlug/projects/~">
+                    Projects
+                  </Link>
+                </Button>
+              </div>
             </div>
             <div className="mt-4 flex flex-wrap gap-6 border-t pt-4">
               <div className="flex gap-2">
