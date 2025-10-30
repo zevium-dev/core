@@ -10,14 +10,6 @@ import { NotFound } from "./components/not-found";
 import { getTrpcClient } from "./lib/trpc/trpc";
 import { routeTree } from "./routeTree.gen";
 
-export const getTrpcOptionsProxy = () => {
-  const queryClient = getQueryClient();
-  const trpcClient = getTrpcClient();
-
-  const trpc = createTRPCOptionsProxy({ client: trpcClient, queryClient });
-  return { queryClient, trpc, trpcClient };
-};
-
 export function getRouter() {
   const { queryClient, trpc } = getTrpcOptionsProxy();
 
@@ -33,6 +25,14 @@ export function getRouter() {
   setupRouterSsrQueryIntegration({ queryClient, router });
 
   return router;
+}
+
+export function getTrpcOptionsProxy() {
+  const queryClient = getQueryClient();
+  const trpcClient = getTrpcClient();
+
+  const trpc = createTRPCOptionsProxy({ client: trpcClient, queryClient });
+  return { queryClient, trpc, trpcClient };
 }
 
 declare module "@tanstack/react-router" {
