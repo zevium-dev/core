@@ -4,6 +4,8 @@ import { createRootRouteWithContext, HeadContent, Scripts } from "@tanstack/reac
 import { TanStackRouterDevtools } from "@tanstack/react-router-devtools";
 import * as React from "react";
 
+import type { TrpcOptionsProxy } from "~/router";
+
 import { DefaultCatchBoundary } from "~/components/default-catch-boundary";
 import { NotFound } from "~/components/not-found";
 import { Providers } from "~/components/providers";
@@ -12,7 +14,7 @@ import appCss from "~/styles/app.css?url";
 
 export const Route = createRootRouteWithContext<{
   queryClient: QueryClient;
-  trpc: ReturnType<typeof import("~/router").getTrpcOptionsProxy>["trpc"];
+  trpc: TrpcOptionsProxy;
 }>()({
   errorComponent: DefaultCatchBoundary,
   head: () => ({

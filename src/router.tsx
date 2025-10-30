@@ -10,6 +10,8 @@ import { NotFound } from "./components/not-found";
 import { getTrpcClient } from "./lib/trpc/trpc";
 import { routeTree } from "./routeTree.gen";
 
+export type TrpcOptionsProxy = ReturnType<typeof getTrpcOptionsProxy>["trpc"];
+
 export function getRouter() {
   const { queryClient, trpc } = getTrpcOptionsProxy();
 
@@ -27,7 +29,7 @@ export function getRouter() {
   return router;
 }
 
-export function getTrpcOptionsProxy() {
+function getTrpcOptionsProxy() {
   const queryClient = getQueryClient();
   const trpcClient = getTrpcClient();
 
