@@ -238,6 +238,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
 }
 
 export function MainSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
+  const user = useUser();
   return (
     <Sidebar collapsible="icon" {...props}>
       <SidebarHeader>
@@ -262,7 +263,7 @@ export function MainSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) 
           <SidebarMenu>
             <SidebarMenuItem>
               <SidebarMenuButton asChild className="data-[active=true]:bg-main data-[active=true]:text-main-foreground">
-                <Link to="/app/dashboard">
+                <Link to={user ? "/app/dashboard" : "/auth/sign-in"}>
                   <LayoutDashboardIcon />
                   <span>Dashboard</span>
                 </Link>
@@ -271,7 +272,7 @@ export function MainSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) 
 
             <SidebarMenuItem>
               <SidebarMenuButton asChild className="data-[active=true]:bg-main data-[active=true]:text-main-foreground">
-                <Link to="/app/catalogue">
+                <Link to={user ? "/app/catalogue" : "/auth/sign-in"}>
                   <Database />
                   <span>API Catalogue</span>
                 </Link>
