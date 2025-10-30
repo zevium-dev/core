@@ -4,11 +4,21 @@ import preferArrayAt from "@boi.gg/eslint-plugin-prefer-array-at";
 import eslintReact from "@eslint-react/eslint-plugin";
 import eslint from "@eslint/js";
 import pluginRouter from "@tanstack/eslint-plugin-router";
+import drizzlePlugin from "eslint-plugin-drizzle";
 import perfectionist from "eslint-plugin-perfectionist";
 import reactCompiler from "eslint-plugin-react-compiler";
 import reactHooks from "eslint-plugin-react-hooks";
 import { defineConfig } from "eslint/config";
 import tseslint from "typescript-eslint";
+
+// eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- drizzle plugin does not ship types
+const drizzle = /** @type {import("eslint").ESLint.Plugin} */ (drizzlePlugin);
+const drizzleRecommendedConfig = /** @type {import("eslint").Linter.Config} */ (
+  drizzle.configs?.recommended ?? {}
+);
+const drizzleRecommendedRules = /** @type {import("eslint").Linter.RulesRecord} */ (
+  drizzleRecommendedConfig.rules ?? {}
+);
 
 export default defineConfig(
   {
@@ -28,6 +38,14 @@ export default defineConfig(
   ...pluginRouter.configs["flat/recommended"],
   perfectionist.configs["recommended-alphabetical"],
   preferArrayAt.configs.recommended,
+  {
+    plugins: {
+      drizzle,
+    },
+    rules: {
+      ...drizzleRecommendedRules,
+    },
+  },
   {
     ignores: [".nitro", ".output", "node_modules", ".tanstack", "dist"],
     rules: {
