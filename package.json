@@ -29,6 +29,7 @@
     "@hookform/resolvers": "^5.2.2",
     "@icons-pack/react-simple-icons": "^13.7.0",
     "@libsql/client": "^0.15.15",
+    "@modelcontextprotocol/sdk": "^1.20.2",
     "@orpc/arktype": "^1.9.1",
     "@orpc/openapi": "^1.9.1",
     "@orpc/server": "^1.9.1",

@@ -3,7 +3,7 @@ import { drizzle } from "drizzle-orm/libsql/http";
 
 import { serverEnv } from "~/env/server";
 
-const client = createClient({
+export const client = createClient({
   authToken: serverEnv.LIBSQL_SECRET,
   url: serverEnv.LIBSQL_URL,
 });

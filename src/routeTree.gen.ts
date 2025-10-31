@@ -13,6 +13,7 @@ import { Route as AppRouteImport } from './routes/app'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AuthIndexRouteImport } from './routes/auth/index'
 import { Route as AppIndexRouteImport } from './routes/app/index'
+import { Route as McpSplatRouteImport } from './routes/mcp/$'
 import { Route as AuthVerifyEmailRouteImport } from './routes/auth/verify-email'
 import { Route as AuthTwoFactorVerifyRouteImport } from './routes/auth/two-factor-verify'
 import { Route as AuthTwoFactorAuthRouteImport } from './routes/auth/two-factor-auth'
@@ -28,6 +29,7 @@ import { Route as InternalEmailTemplatesPreviewRouteImport } from './routes/$int
 import { Route as AppSettingsIndexRouteImport } from './routes/app/settings/index'
 import { Route as AppProjectsIndexRouteImport } from './routes/app/projects/index'
 import { Route as AppOrganizationsIndexRouteImport } from './routes/app/organizations/index'
+import { Route as ApiEmbeddingIndexRouteImport } from './routes/api/embedding/index'
 import { Route as AppSettingsPreferenceRouteImport } from './routes/app/settings/preference'
 import { Route as AppSettingsKeysRouteImport } from './routes/app/settings/keys'
 import { Route as AppSettingsCreditsRouteImport } from './routes/app/settings/credits'
@@ -38,6 +40,7 @@ import { Route as ApiTrpcSplatRouteImport } from './routes/api/trpc/$'
 import { Route as ApiProxySplatRouteImport } from './routes/api/proxy/$'
 import { Route as ApiPosthogSplatRouteImport } from './routes/api/posthog/$'
 import { Route as ApiOpenapiSplatRouteImport } from './routes/api/openapi/$'
+import { Route as ApiEmbeddingSearchRouteImport } from './routes/api/embedding/search'
 import { Route as ApiCapSplatRouteImport } from './routes/api/cap/$'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
 import { Route as AppProjectsSlugViewVersionRouteImport } from './routes/app/projects/$slug/view/$version'
@@ -61,6 +64,11 @@ const AppIndexRoute = AppIndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => AppRoute,
+} as any)
+const McpSplatRoute = McpSplatRouteImport.update({
+  id: '/mcp/$',
+  path: '/mcp/$',
+  getParentRoute: () => rootRouteImport,
 } as any)
 const AuthVerifyEmailRoute = AuthVerifyEmailRouteImport.update({
   id: '/auth/verify-email',
@@ -138,6 +146,11 @@ const AppOrganizationsIndexRoute = AppOrganizationsIndexRouteImport.update({
   path: '/organizations/',
   getParentRoute: () => AppRoute,
 } as any)
+const ApiEmbeddingIndexRoute = ApiEmbeddingIndexRouteImport.update({
+  id: '/api/embedding/',
+  path: '/api/embedding/',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AppSettingsPreferenceRoute = AppSettingsPreferenceRouteImport.update({
   id: '/settings/preference',
   path: '/settings/preference',
@@ -188,6 +201,11 @@ const ApiOpenapiSplatRoute = ApiOpenapiSplatRouteImport.update({
   path: '/api/openapi/$',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiEmbeddingSearchRoute = ApiEmbeddingSearchRouteImport.update({
+  id: '/api/embedding/search',
+  path: '/api/embedding/search',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiCapSplatRoute = ApiCapSplatRouteImport.update({
   id: '/api/cap/$',
   path: '/api/cap/$',
@@ -220,10 +238,12 @@ export interface FileRoutesByFullPath {
   '/auth/two-factor-auth': typeof AuthTwoFactorAuthRoute
   '/auth/two-factor-verify': typeof AuthTwoFactorVerifyRoute
   '/auth/verify-email': typeof AuthVerifyEmailRoute
+  '/mcp/$': typeof McpSplatRoute
   '/app/': typeof AppIndexRoute
   '/auth': typeof AuthIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/cap/$': typeof ApiCapSplatRoute
+  '/api/embedding/search': typeof ApiEmbeddingSearchRoute
   '/api/openapi/$': typeof ApiOpenapiSplatRoute
   '/api/posthog/$': typeof ApiPosthogSplatRoute
   '/api/proxy/$': typeof ApiProxySplatRoute
@@ -234,6 +254,7 @@ export interface FileRoutesByFullPath {
   '/app/settings/credits': typeof AppSettingsCreditsRoute
   '/app/settings/keys': typeof AppSettingsKeysRoute
   '/app/settings/preference': typeof AppSettingsPreferenceRoute
+  '/api/embedding': typeof ApiEmbeddingIndexRoute
   '/app/organizations': typeof AppOrganizationsIndexRoute
   '/app/projects': typeof AppProjectsIndexRoute
   '/app/settings': typeof AppSettingsIndexRoute
@@ -253,10 +274,12 @@ export interface FileRoutesByTo {
   '/auth/two-factor-auth': typeof AuthTwoFactorAuthRoute
   '/auth/two-factor-verify': typeof AuthTwoFactorVerifyRoute
   '/auth/verify-email': typeof AuthVerifyEmailRoute
+  '/mcp/$': typeof McpSplatRoute
   '/app': typeof AppIndexRoute
   '/auth': typeof AuthIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/cap/$': typeof ApiCapSplatRoute
+  '/api/embedding/search': typeof ApiEmbeddingSearchRoute
   '/api/openapi/$': typeof ApiOpenapiSplatRoute
   '/api/posthog/$': typeof ApiPosthogSplatRoute
   '/api/proxy/$': typeof ApiProxySplatRoute
@@ -267,6 +290,7 @@ export interface FileRoutesByTo {
   '/app/settings/credits': typeof AppSettingsCreditsRoute
   '/app/settings/keys': typeof AppSettingsKeysRoute
   '/app/settings/preference': typeof AppSettingsPreferenceRoute
+  '/api/embedding': typeof ApiEmbeddingIndexRoute
   '/app/organizations': typeof AppOrganizationsIndexRoute
   '/app/projects': typeof AppProjectsIndexRoute
   '/app/settings': typeof AppSettingsIndexRoute
@@ -288,10 +312,12 @@ export interface FileRoutesById {
   '/auth/two-factor-auth': typeof AuthTwoFactorAuthRoute
   '/auth/two-factor-verify': typeof AuthTwoFactorVerifyRoute
   '/auth/verify-email': typeof AuthVerifyEmailRoute
+  '/mcp/$': typeof McpSplatRoute
   '/app/': typeof AppIndexRoute
   '/auth/': typeof AuthIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/cap/$': typeof ApiCapSplatRoute
+  '/api/embedding/search': typeof ApiEmbeddingSearchRoute
   '/api/openapi/$': typeof ApiOpenapiSplatRoute
   '/api/posthog/$': typeof ApiPosthogSplatRoute
   '/api/proxy/$': typeof ApiProxySplatRoute
@@ -302,6 +328,7 @@ export interface FileRoutesById {
   '/app/settings/credits': typeof AppSettingsCreditsRoute
   '/app/settings/keys': typeof AppSettingsKeysRoute
   '/app/settings/preference': typeof AppSettingsPreferenceRoute
+  '/api/embedding/': typeof ApiEmbeddingIndexRoute
   '/app/organizations/': typeof AppOrganizationsIndexRoute
   '/app/projects/': typeof AppProjectsIndexRoute
   '/app/settings/': typeof AppSettingsIndexRoute
@@ -324,10 +351,12 @@ export interface FileRouteTypes {
     | '/auth/two-factor-auth'
     | '/auth/two-factor-verify'
     | '/auth/verify-email'
+    | '/mcp/$'
     | '/app/'
     | '/auth'
     | '/api/auth/$'
     | '/api/cap/$'
+    | '/api/embedding/search'
     | '/api/openapi/$'
     | '/api/posthog/$'
     | '/api/proxy/$'
@@ -338,6 +367,7 @@ export interface FileRouteTypes {
     | '/app/settings/credits'
     | '/app/settings/keys'
     | '/app/settings/preference'
+    | '/api/embedding'
     | '/app/organizations'
     | '/app/projects'
     | '/app/settings'
@@ -357,10 +387,12 @@ export interface FileRouteTypes {
     | '/auth/two-factor-auth'
     | '/auth/two-factor-verify'
     | '/auth/verify-email'
+    | '/mcp/$'
     | '/app'
     | '/auth'
     | '/api/auth/$'
     | '/api/cap/$'
+    | '/api/embedding/search'
     | '/api/openapi/$'
     | '/api/posthog/$'
     | '/api/proxy/$'
@@ -371,6 +403,7 @@ export interface FileRouteTypes {
     | '/app/settings/credits'
     | '/app/settings/keys'
     | '/app/settings/preference'
+    | '/api/embedding'
     | '/app/organizations'
     | '/app/projects'
     | '/app/settings'
@@ -391,10 +424,12 @@ export interface FileRouteTypes {
     | '/auth/two-factor-auth'
     | '/auth/two-factor-verify'
     | '/auth/verify-email'
+    | '/mcp/$'
     | '/app/'
     | '/auth/'
     | '/api/auth/$'
     | '/api/cap/$'
+    | '/api/embedding/search'
     | '/api/openapi/$'
     | '/api/posthog/$'
     | '/api/proxy/$'
@@ -405,6 +440,7 @@ export interface FileRouteTypes {
     | '/app/settings/credits'
     | '/app/settings/keys'
     | '/app/settings/preference'
+    | '/api/embedding/'
     | '/app/organizations/'
     | '/app/projects/'
     | '/app/settings/'
@@ -424,13 +460,16 @@ export interface RootRouteChildren {
   AuthTwoFactorAuthRoute: typeof AuthTwoFactorAuthRoute
   AuthTwoFactorVerifyRoute: typeof AuthTwoFactorVerifyRoute
   AuthVerifyEmailRoute: typeof AuthVerifyEmailRoute
+  McpSplatRoute: typeof McpSplatRoute
   AuthIndexRoute: typeof AuthIndexRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
   ApiCapSplatRoute: typeof ApiCapSplatRoute
+  ApiEmbeddingSearchRoute: typeof ApiEmbeddingSearchRoute
   ApiOpenapiSplatRoute: typeof ApiOpenapiSplatRoute
   ApiPosthogSplatRoute: typeof ApiPosthogSplatRoute
   ApiProxySplatRoute: typeof ApiProxySplatRoute
   ApiTrpcSplatRoute: typeof ApiTrpcSplatRoute
+  ApiEmbeddingIndexRoute: typeof ApiEmbeddingIndexRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -462,6 +501,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/app/'
       preLoaderRoute: typeof AppIndexRouteImport
       parentRoute: typeof AppRoute
+    }
+    '/mcp/$': {
+      id: '/mcp/$'
+      path: '/mcp/$'
+      fullPath: '/mcp/$'
+      preLoaderRoute: typeof McpSplatRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/auth/verify-email': {
       id: '/auth/verify-email'
@@ -568,6 +614,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppOrganizationsIndexRouteImport
       parentRoute: typeof AppRoute
     }
+    '/api/embedding/': {
+      id: '/api/embedding/'
+      path: '/api/embedding'
+      fullPath: '/api/embedding'
+      preLoaderRoute: typeof ApiEmbeddingIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/app/settings/preference': {
       id: '/app/settings/preference'
       path: '/settings/preference'
@@ -636,6 +689,13 @@ declare module '@tanstack/react-router' {
       path: '/api/openapi/$'
       fullPath: '/api/openapi/$'
       preLoaderRoute: typeof ApiOpenapiSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/embedding/search': {
+      id: '/api/embedding/search'
+      path: '/api/embedding/search'
+      fullPath: '/api/embedding/search'
+      preLoaderRoute: typeof ApiEmbeddingSearchRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/cap/$': {
@@ -719,13 +779,16 @@ const rootRouteChildren: RootRouteChildren = {
   AuthTwoFactorAuthRoute: AuthTwoFactorAuthRoute,
   AuthTwoFactorVerifyRoute: AuthTwoFactorVerifyRoute,
   AuthVerifyEmailRoute: AuthVerifyEmailRoute,
+  McpSplatRoute: McpSplatRoute,
   AuthIndexRoute: AuthIndexRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
   ApiCapSplatRoute: ApiCapSplatRoute,
+  ApiEmbeddingSearchRoute: ApiEmbeddingSearchRoute,
   ApiOpenapiSplatRoute: ApiOpenapiSplatRoute,
   ApiPosthogSplatRoute: ApiPosthogSplatRoute,
   ApiProxySplatRoute: ApiProxySplatRoute,
   ApiTrpcSplatRoute: ApiTrpcSplatRoute,
+  ApiEmbeddingIndexRoute: ApiEmbeddingIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
