@@ -2,7 +2,6 @@ import { createFileRoute } from "@tanstack/react-router";
 import { Download, Filter, MoreHorizontal } from "lucide-react";
 import { useState } from "react";
 
-import { ProtectedRoute } from "~/components/protected-route";
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
@@ -175,174 +174,172 @@ function ActivityComponent() {
   const currentItems = mockActivityData.slice(startIndex, endIndex);
 
   return (
-    <ProtectedRoute>
-      <div className="mx-auto w-full max-w-3xl min-w-0 flex-1 space-y-6 p-6">
-        {/* Header */}
-        <div className="space-y-2">
-          <h1 className="text-foreground text-2xl font-bold">API Activity</h1>
-          <p className="text-muted-foreground text-sm">
-            Your API usage and performance metrics across all integrated services.
-          </p>
-        </div>
-
-        {/* Time Filter */}
-        <div className="flex justify-end">
-          <Select onValueChange={setTimeFilter} value={timeFilter}>
-            <SelectTrigger className="bg-background border-border w-32">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="1 Week">1 Week</SelectItem>
-              <SelectItem value="1 Month">1 Month</SelectItem>
-              <SelectItem value="3 Months">3 Months</SelectItem>
-              <SelectItem value="6 Months">6 Months</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-
-        {/* Stats Cards */}
-        <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
-          <ActivityStatsCard
-            avgDay={chartData.spend.avgDay}
-            color="bg-blue-500"
-            data={chartData.spend.data}
-            pastMonth={chartData.spend.pastMonth}
-            title="Spend"
-          />
-          <ActivityStatsCard
-            avgDay={chartData.requests.avgDay}
-            color="bg-green-500"
-            data={chartData.requests.data}
-            pastMonth={chartData.requests.pastMonth}
-            title="Requests"
-          />
-          <ActivityStatsCard
-            avgDay={chartData.dataTransfer.avgDay}
-            color="bg-blue-400"
-            data={chartData.dataTransfer.data}
-            pastMonth={chartData.dataTransfer.pastMonth}
-            title="Data Transfer"
-          />
-        </div>
-
-        {/* Filters and Table */}
-        <Card className="bg-card/50 border-border/50 backdrop-blur-sm">
-          <CardHeader>
-            <div className="flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-center">
-              <div className="flex gap-2">
-                <div className="flex items-center gap-2">
-                  <span className="text-muted-foreground text-sm">From:</span>
-                  <Input
-                    className="w-auto text-xs"
-                    onChange={(e) => setDateFrom(e.target.value)}
-                    type="date"
-                    value={dateFrom}
-                  />
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-muted-foreground text-sm">To:</span>
-                  <Input
-                    className="w-auto text-xs"
-                    onChange={(e) => setDateTo(e.target.value)}
-                    type="date"
-                    value={dateTo}
-                  />
-                </div>
-              </div>
-
-              <div className="flex gap-2">
-                <Button className="gap-2" size="sm" variant="outline">
-                  <Filter className="h-4 w-4" />
-                  Filters
-                </Button>
-                <Button className="gap-2" size="sm" variant="outline">
-                  <Download className="h-4 w-4" />
-                  Export
-                </Button>
-              </div>
-            </div>
-          </CardHeader>
-
-          <CardContent>
-            <div className="border-border/50 overflow-hidden rounded-md border">
-              <Table>
-                <TableHeader>
-                  <TableRow className="bg-muted/30">
-                    <TableHead className="text-xs font-medium">Timestamp</TableHead>
-                    <TableHead className="text-xs font-medium">API / Provider</TableHead>
-                    <TableHead className="text-xs font-medium">Requests</TableHead>
-                    <TableHead className="text-xs font-medium">Data Transfer</TableHead>
-                    <TableHead className="text-xs font-medium">Cost</TableHead>
-                    <TableHead className="text-xs font-medium">Response Time</TableHead>
-                    <TableHead className="text-xs font-medium">Status</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {currentItems.map((activity) => (
-                    <TableRow className="hover:bg-muted/20" key={activity.id}>
-                      <TableCell className="text-muted-foreground text-xs">{activity.timestamp}</TableCell>
-                      <TableCell>
-                        <div className="flex items-center gap-2">
-                          <div className="bg-muted h-4 w-4 flex-shrink-0 rounded-sm" />
-                          <div className="flex flex-col">
-                            <span className="text-primary cursor-pointer text-xs font-medium hover:underline">
-                              {activity.api}
-                            </span>
-                            <span className="text-muted-foreground text-xs">{activity.provider}</span>
-                          </div>
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <span className="text-xs font-medium">{activity.requests}</span>
-                      </TableCell>
-                      <TableCell>
-                        <span className="text-xs">{activity.dataTransfer}</span>
-                      </TableCell>
-                      <TableCell className="text-xs font-medium">{activity.cost}</TableCell>
-                      <TableCell>
-                        <span className="text-xs">{activity.responseTime}</span>
-                      </TableCell>
-                      <TableCell>
-                        <Badge className="text-xs" variant={activity.status === "success" ? "default" : "destructive"}>
-                          {activity.status}
-                        </Badge>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-
-            {/* Pagination */}
-            <div className="mt-4 flex items-center justify-center gap-2">
-              <Button
-                disabled={currentPage === 1}
-                onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
-                size="sm"
-                variant="outline"
-              >
-                ←
-              </Button>
-              <Button onClick={() => setCurrentPage(1)} size="sm" variant={currentPage === 1 ? "default" : "outline"}>
-                1
-              </Button>
-              <Button onClick={() => setCurrentPage(2)} size="sm" variant={currentPage === 2 ? "default" : "outline"}>
-                2
-              </Button>
-              {totalPages > 2 && <span className="text-muted-foreground text-xs">...</span>}
-              <Button
-                disabled={currentPage === totalPages}
-                onClick={() => setCurrentPage((prev) => Math.min(prev + 1, totalPages))}
-                size="sm"
-                variant="outline"
-              >
-                →
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
+    <div className="mx-auto w-full max-w-3xl min-w-0 flex-1 space-y-6 p-6">
+      {/* Header */}
+      <div className="space-y-2">
+        <h1 className="text-foreground text-2xl font-bold">API Activity</h1>
+        <p className="text-muted-foreground text-sm">
+          Your API usage and performance metrics across all integrated services.
+        </p>
       </div>
-    </ProtectedRoute>
+
+      {/* Time Filter */}
+      <div className="flex justify-end">
+        <Select onValueChange={setTimeFilter} value={timeFilter}>
+          <SelectTrigger className="bg-background border-border w-32">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="1 Week">1 Week</SelectItem>
+            <SelectItem value="1 Month">1 Month</SelectItem>
+            <SelectItem value="3 Months">3 Months</SelectItem>
+            <SelectItem value="6 Months">6 Months</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+
+      {/* Stats Cards */}
+      <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
+        <ActivityStatsCard
+          avgDay={chartData.spend.avgDay}
+          color="bg-blue-500"
+          data={chartData.spend.data}
+          pastMonth={chartData.spend.pastMonth}
+          title="Spend"
+        />
+        <ActivityStatsCard
+          avgDay={chartData.requests.avgDay}
+          color="bg-green-500"
+          data={chartData.requests.data}
+          pastMonth={chartData.requests.pastMonth}
+          title="Requests"
+        />
+        <ActivityStatsCard
+          avgDay={chartData.dataTransfer.avgDay}
+          color="bg-blue-400"
+          data={chartData.dataTransfer.data}
+          pastMonth={chartData.dataTransfer.pastMonth}
+          title="Data Transfer"
+        />
+      </div>
+
+      {/* Filters and Table */}
+      <Card className="bg-card/50 border-border/50 backdrop-blur-sm">
+        <CardHeader>
+          <div className="flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-center">
+            <div className="flex gap-2">
+              <div className="flex items-center gap-2">
+                <span className="text-muted-foreground text-sm">From:</span>
+                <Input
+                  className="w-auto text-xs"
+                  onChange={(e) => setDateFrom(e.target.value)}
+                  type="date"
+                  value={dateFrom}
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-muted-foreground text-sm">To:</span>
+                <Input
+                  className="w-auto text-xs"
+                  onChange={(e) => setDateTo(e.target.value)}
+                  type="date"
+                  value={dateTo}
+                />
+              </div>
+            </div>
+
+            <div className="flex gap-2">
+              <Button className="gap-2" size="sm" variant="outline">
+                <Filter className="h-4 w-4" />
+                Filters
+              </Button>
+              <Button className="gap-2" size="sm" variant="outline">
+                <Download className="h-4 w-4" />
+                Export
+              </Button>
+            </div>
+          </div>
+        </CardHeader>
+
+        <CardContent>
+          <div className="border-border/50 overflow-hidden rounded-md border">
+            <Table>
+              <TableHeader>
+                <TableRow className="bg-muted/30">
+                  <TableHead className="text-xs font-medium">Timestamp</TableHead>
+                  <TableHead className="text-xs font-medium">API / Provider</TableHead>
+                  <TableHead className="text-xs font-medium">Requests</TableHead>
+                  <TableHead className="text-xs font-medium">Data Transfer</TableHead>
+                  <TableHead className="text-xs font-medium">Cost</TableHead>
+                  <TableHead className="text-xs font-medium">Response Time</TableHead>
+                  <TableHead className="text-xs font-medium">Status</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {currentItems.map((activity) => (
+                  <TableRow className="hover:bg-muted/20" key={activity.id}>
+                    <TableCell className="text-muted-foreground text-xs">{activity.timestamp}</TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-2">
+                        <div className="bg-muted h-4 w-4 flex-shrink-0 rounded-sm" />
+                        <div className="flex flex-col">
+                          <span className="text-primary cursor-pointer text-xs font-medium hover:underline">
+                            {activity.api}
+                          </span>
+                          <span className="text-muted-foreground text-xs">{activity.provider}</span>
+                        </div>
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <span className="text-xs font-medium">{activity.requests}</span>
+                    </TableCell>
+                    <TableCell>
+                      <span className="text-xs">{activity.dataTransfer}</span>
+                    </TableCell>
+                    <TableCell className="text-xs font-medium">{activity.cost}</TableCell>
+                    <TableCell>
+                      <span className="text-xs">{activity.responseTime}</span>
+                    </TableCell>
+                    <TableCell>
+                      <Badge className="text-xs" variant={activity.status === "success" ? "default" : "destructive"}>
+                        {activity.status}
+                      </Badge>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+
+          {/* Pagination */}
+          <div className="mt-4 flex items-center justify-center gap-2">
+            <Button
+              disabled={currentPage === 1}
+              onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
+              size="sm"
+              variant="outline"
+            >
+              ←
+            </Button>
+            <Button onClick={() => setCurrentPage(1)} size="sm" variant={currentPage === 1 ? "default" : "outline"}>
+              1
+            </Button>
+            <Button onClick={() => setCurrentPage(2)} size="sm" variant={currentPage === 2 ? "default" : "outline"}>
+              2
+            </Button>
+            {totalPages > 2 && <span className="text-muted-foreground text-xs">...</span>}
+            <Button
+              disabled={currentPage === totalPages}
+              onClick={() => setCurrentPage((prev) => Math.min(prev + 1, totalPages))}
+              size="sm"
+              variant="outline"
+            >
+              →
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
   );
 }
 

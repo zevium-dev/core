@@ -1,5 +1,4 @@
 import { createFileRoute } from "@tanstack/react-router";
-import ip from "ip";
 import { lookup } from "node:dns/promises";
 import isPrivate from "private-ip";
 
@@ -23,13 +22,24 @@ async function isLocalOrPrivateHost(hostname: string): Promise<boolean> {
     //I think this is slowlying down the proxy . TODO: Find a way to cache this.
     const results = await lookup(hostname, { all: true, verbatim: true });
     for (const { address } of results) {
-      if (isPrivate(address) || ip.isLoopback(address)) return true;
+      if (isPrivate(address) || isLoopback(address)) return true;
     }
     return false;
   } catch (_error) {
     // Fail closed: treat as local/private on resolution error
     return true;
   }
+}
+
+function isLoopback(addr: string): boolean {
+  return (
+    /^(::f{4}:)?127\.([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})/.test(addr) ||
+    addr.startsWith("0177.") ||
+    /^0x7f\./i.test(addr) ||
+    /^fe80::1$/i.test(addr) ||
+    /^::1$/.test(addr) ||
+    /^::$/.test(addr)
+  );
 }
 
 function jsonWithRequestId(status: number, message: string, requestId: string) {
@@ -113,8 +123,11 @@ const proxyHandler = async (request: Request) => {
 
   // Prepare outbound headers
   const outboundHeaders = new Headers(request.headers);
+  // eslint-disable-next-line drizzle/enforce-delete-with-where
   outboundHeaders.delete("x-zevium-key");
+  // eslint-disable-next-line drizzle/enforce-delete-with-where
   outboundHeaders.delete("content-length");
+  // eslint-disable-next-line drizzle/enforce-delete-with-where
   outboundHeaders.delete("cookie");
   outboundHeaders.set("host", normalized.hostname);
   outboundHeaders.set("x-zevium-request-id", requestId);
@@ -135,6 +148,7 @@ const proxyHandler = async (request: Request) => {
     // Ensure request id is included in the client response
     responseHeaders.set("x-zevium-request-id", requestId);
     // Never leak the proxy secret back to the client
+    // eslint-disable-next-line drizzle/enforce-delete-with-where
     responseHeaders.delete("x-zevium-proxy-secret");
 
     return new Response(upstream.body, {

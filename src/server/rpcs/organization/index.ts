@@ -1,284 +1,87 @@
-// TODO fix
-/* eslint-disable */
-// @ts-nocheck
+import { TRPCError } from "@trpc/server";
+import { type } from "arktype";
+import { z } from "zod";
 
-import z from "zod";
-
-import {
-  createDefaultOrganization,
-  createOrganization,
-  getOrganizationBySlug,
-  getOrganizationMembers,
-  getOrganizationProjects,
-  getUserOrganizations,
-  userHasOrganizations,
-} from "~/lib/server/organization-service";
+import { schemaZod } from "~/db";
+import { authServer } from "~/lib/server/auth";
 import { protectedProcedure, router } from "~/server/trpc";
 
-// Organization schema for responses
-const organizationSchema = z.object({
-  createdAt: z.date(),
-  description: z.string().nullable(),
-  id: z.string(),
-  logo: z.string().nullable(),
-  memberCount: z.number(),
-  name: z.string(),
-  ownerId: z.string(),
-  projectCount: z.number(),
-  settings: z.record(z.string(), z.unknown()),
-  slug: z.string(),
-  updatedAt: z.date(),
-  website: z.string().nullable(),
-});
-
 export const organizationRouter = router({
-  // Create new organization
   create: protectedProcedure
     .meta({ route: { path: "/organization/create", summary: "Create new organization" } })
     .input(
       z.object({
-        description: z.string().optional(),
-        name: z.string().min(1, "Organization name is required"),
-        website: z.string().url().optional().or(z.literal("")),
+        logo: z.string().max(128_000).optional(),
+        name: z.string().min(3).max(96),
+        slug: z
+          .string()
+          .min(4)
+          .max(64)
+          // URL safe characters only
+          .regex(/^[a-zA-Z0-9-_]+$/)
+          .toLowerCase(),
       }),
     )
-    .output(
-      z.object({
-        organization: organizationSchema,
-        success: z.boolean(),
-      }),
-    )
+    .output(schemaZod.OrganizationZod.and(z.object({ members: z.array(schemaZod.MemberZod) })).nullable())
     .mutation(async ({ ctx, input }) => {
-      const organization = await createOrganization({
-        description: input.description,
-        name: input.name,
-        userId: ctx.user.id,
-        website: input.website,
-      });
-
-      return {
-        organization,
-        success: true,
-      };
-    }),
-
-  // Create default organization for the current user
-  createDefault: protectedProcedure
-    .meta({ route: { path: "/organization/create-default", summary: "Create default organization for user" } })
-    .input(z.object({}).optional())
-    .output(
-      z.object({
-        organization: z.object({
-          createdAt: z.date(),
-          description: z.string().nullable(),
-          id: z.string(),
-          logo: z.string().nullable(),
-          name: z.string(),
-          ownerId: z.string(),
-          settings: z.record(z.string(), z.unknown()),
-          slug: z.string(),
-          updatedAt: z.date(),
-          website: z.string().nullable(),
-        }),
-        success: z.boolean(),
-      }),
-    )
-    .mutation(async ({ ctx }) => {
-      // Check if user already has organizations
-      const hasOrganizations = await userHasOrganizations(ctx.user.id);
-
-      if (hasOrganizations) {
-        throw new Error("User already has organizations");
-      }
-
-      const organization = await createDefaultOrganization({
-        userEmail: ctx.user.email,
-        userId: ctx.user.id,
-        userName: ctx.user.name,
-      });
-
-      return {
-        organization: {
-          ...organization,
-          settings: organization.settings as Record<string, unknown>,
+      const org = await authServer.api.createOrganization({
+        body: {
+          keepCurrentActiveOrganization: true,
+          logo: input.logo,
+          metadata: {
+            createdBy: ctx.user.id,
+          },
+          name: input.name,
+          slug: input.slug,
+          userId: ctx.user.id,
         },
-        success: true,
-      };
-    }),
-  // Auto-create organization during first login (can be called from client)
-  ensureDefaultOrganization: protectedProcedure
-    .meta({ route: { path: "/organization/ensure-default", summary: "Ensure user has a default organization" } })
-    .input(z.object({}).optional())
-    .output(
-      z.object({
-        created: z.boolean(),
-        hasOrganizations: z.boolean(),
-        organization: z
-          .object({
-            createdAt: z.date(),
-            description: z.string().nullable(),
-            id: z.string(),
-            logo: z.string().nullable(),
-            name: z.string(),
-            ownerId: z.string(),
-            settings: z.record(z.string(), z.unknown()),
-            slug: z.string(),
-            updatedAt: z.date(),
-            website: z.string().nullable(),
-          })
-          .optional(),
-      }),
-    )
-    .mutation(async ({ ctx }) => {
-      // Check if user already has organizations
-      const hasOrganizations = await userHasOrganizations(ctx.user.id);
-
-      if (hasOrganizations) {
-        return {
-          created: false,
-          hasOrganizations: true,
-        };
-      }
-
-      // Create default organization
-      const organization = await createDefaultOrganization({
-        userEmail: ctx.user.email,
-        userId: ctx.user.id,
-        userName: ctx.user.name,
+        headers: ctx.raw.req.headers,
       });
-
-      return {
-        created: true,
-        hasOrganizations: true,
-        organization: {
-          ...organization,
-          settings: organization.settings as Record<string, unknown>,
-        },
-      };
+      if (!org) return null;
+      return { ...org, createdAt: org.createdAt, logo: org.logo ?? null, members: org.members.filter(Boolean) };
     }),
 
-  // Get organization by slug
-  getBySlug: protectedProcedure
-    .meta({ route: { path: "/organization/get-by-slug", summary: "Get organization by slug" } })
-    .input(
-      z.object({
-        slug: z.string(),
-      }),
-    )
+  get: protectedProcedure
+    .meta({ route: { path: "/organization/get", summary: "Get organization by ID or slug" } })
+    .input(type({ organizationId: "string" }).or(type({ organizationSlug: "string" })))
     .output(
-      z.object({
-        organization: organizationSchema.extend({
-          userMembership: z.object({
-            id: z.string(),
-            joinedAt: z.date(),
-            permissions: z.record(z.string(), z.unknown()),
-            role: z.enum(["owner", "admin", "member"]),
-          }),
+      schemaZod.OrganizationZod.and(
+        z.object({
+          members: z.array(
+            schemaZod.MemberZod.and(
+              z.object({ user: schemaZod.UserZod.pick({ email: true, image: true, name: true }) }),
+            ),
+          ),
         }),
-      }),
+      ).and(z.object({ invitations: z.array(schemaZod.InvitationZod) })),
     )
     .query(async ({ ctx, input }) => {
-      const organization = await getOrganizationBySlug(input.slug, ctx.user.id);
+      const org = await authServer.api.getFullOrganization({
+        headers: ctx.raw.req.headers,
+        query: input,
+      });
+      if (!org) throw new TRPCError({ code: "NOT_FOUND", message: "Organization not found" });
 
-      if (!organization) {
-        throw new Error("Organization not found");
-      }
-
+      // Just some type gymnastics to ensure the output is correctly typed
       return {
-        organization,
+        ...org,
+        createdAt: org.createdAt,
+        logo: org.logo ?? null,
+        members: org.members.map((m) => ({ ...m, user: { ...m.user, image: m.user.image ?? null } })),
+        metadata: org.metadata as Record<string, unknown>,
       };
     }),
 
-  // Get organization members
-  getMembers: protectedProcedure
-    .meta({ route: { path: "/organization/get-members", summary: "Get organization members" } })
-    .input(
-      z.object({
-        organizationId: z.string(),
-      }),
-    )
-    .output(
-      z.object({
-        members: z.array(
-          z.object({
-            id: z.string(),
-            joinedAt: z.date(),
-            permissions: z.record(z.string(), z.unknown()),
-            role: z.enum(["owner", "admin", "member"]),
-            userEmail: z.string(),
-            userId: z.string(),
-            userImage: z.string().nullable(),
-            userName: z.string(),
-          }),
-        ),
-      }),
-    )
-    .query(async ({ ctx, input }) => {
-      const members = await getOrganizationMembers(input.organizationId, ctx.user.id);
-
-      return {
-        members,
-      };
-    }),
-
-  // Get organization projects
-  getProjects: protectedProcedure
-    .meta({ route: { path: "/organization/get-projects", summary: "Get organization projects" } })
-    .input(
-      z.object({
-        organizationId: z.string(),
-      }),
-    )
-    .output(
-      z.object({
-        projects: z.array(
-          z.object({
-            createdAt: z.date(),
-            createdBy: z.string(),
-            creatorName: z.string(),
-            description: z.string().nullable(),
-            id: z.string(),
-            metadata: z.record(z.string(), z.unknown()),
-            name: z.string(),
-            settings: z.record(z.string(), z.unknown()),
-            slug: z.string(),
-            status: z.enum(["active", "inactive", "archived", "beta", "deprecated"]),
-            updatedAt: z.date(),
-            visibility: z.enum(["public", "private", "internal"]),
-          }),
-        ),
-      }),
-    )
-    .query(async ({ ctx, input }) => {
-      const projects = await getOrganizationProjects(input.organizationId, ctx.user.id);
-
-      return {
-        projects,
-      };
-    }),
-
-  // Check if user has organizations
-  hasOrganizations: protectedProcedure
-    .meta({ route: { path: "/organization/has-organizations", summary: "Check if user has organizations" } })
-    .output(z.object({ hasOrganizations: z.boolean() }))
-    .query(async ({ ctx }) => {
-      const hasOrganizations = await userHasOrganizations(ctx.user.id);
-      return { hasOrganizations };
-    }),
-
-  // Get all user organizations
   list: protectedProcedure
     .meta({ route: { path: "/organization/list", summary: "Get all user organizations" } })
-    .output(
-      z.object({
-        organizations: z.array(organizationSchema),
-      }),
-    )
+    .output(z.array(schemaZod.OrganizationZod))
     .query(async ({ ctx }) => {
-      const organizations = await getUserOrganizations(ctx.user.id);
-
-      return {
-        organizations,
-      };
+      const orgs = await authServer.api.listOrganizations({ headers: ctx.raw.req.headers });
+      return orgs.map((org) => ({
+        ...org,
+        createdAt: org.createdAt,
+        logo: org.logo ?? null,
+        metadata: org.metadata as Record<string, unknown>,
+      }));
     }),
 });

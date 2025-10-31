@@ -84,7 +84,7 @@ function RouteComponent() {
             <form onSubmit={handleSubmit(onSubmit)}>
               <div className="grid gap-6">
                 <div className="flex flex-col gap-4">
-                  <Button className="w-full" disabled={isSubmitting} onClick={onGoogle} type="button" variant="outline">
+                  <Button className="w-full" loading={isSubmitting} onClick={onGoogle} type="button" variant="outline">
                     <SiGoogle />
                     Sign in with Google
                   </Button>

@@ -1,244 +1,232 @@
-// TODO fix
-/* eslint-disable */
-// @ts-nocheck
-
-import { and, eq } from "drizzle-orm";
+import { createId } from "@paralleldrive/cuid2";
+import { TRPCError } from "@trpc/server";
 import z from "zod";
 
-import { db } from "~/db";
-import * as schema from "~/db/schema";
-import {
-  createProject,
-  getProjectById,
-  getProjectBySlug,
-  getUserProjects,
-  updateProject,
-} from "~/lib/server/project-service";
+import { db, orm, schema, schemaZod } from "~/db";
 import { protectedProcedure, router } from "~/server/trpc";
 
-// Project schema for responses
-const projectSchema = z.object({
-  apiSpecCount: z.number(),
-  categoryId: z.string().nullable(),
-  categoryName: z.string().nullable(),
-  createdAt: z.date(),
-  createdBy: z.string(),
-  creatorName: z.string(),
-  description: z.string().nullable(),
-  id: z.string(),
-  memberCount: z.number(),
-  metadata: z.record(z.string(), z.unknown()),
-  name: z.string(),
-  organizationId: z.string(),
-  organizationName: z.string(),
-  organizationSlug: z.string(),
-  settings: z.record(z.string(), z.unknown()),
-  slug: z.string(),
-  status: z.enum(["active", "archived", "beta", "deprecated", "inactive"]),
-  updatedAt: z.date(),
-  visibility: z.enum(["internal", "private", "public"]),
+const OrganizationInputZod = z.object({ organizationId: z.string() }).or(z.object({ organizationSlug: z.string() }));
+
+const organizationProcedure = protectedProcedure.input(OrganizationInputZod).use(async ({ ctx, input, next }) => {
+  const organizationWhere =
+    "organizationId" in input
+      ? orm.eq(schema.organization.id, input.organizationId)
+      : orm.eq(schema.organization.slug, input.organizationSlug);
+
+  const row = await db
+    .select({
+      memberId: schema.member.id,
+      organization: schema.organization,
+    })
+    .from(schema.organization)
+    .leftJoin(
+      schema.member,
+      orm.and(orm.eq(schema.member.organizationId, schema.organization.id), orm.eq(schema.member.userId, ctx.user.id)),
+    )
+    .where(organizationWhere)
+    .limit(1)
+    .then((rows) => rows.at(0));
+
+  const organization = row?.organization;
+  if (!organization) {
+    throw new TRPCError({
+      code: "NOT_FOUND",
+      message: "Organization not found",
+    });
+  }
+
+  if (!row.memberId) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "You do not have access to this organization",
+    });
+  }
+
+  return next({ ctx: { ...ctx, organization } });
 });
 
 export const projectRouter = router({
-  // Create new project
-  create: protectedProcedure
-    .meta({ route: { path: "/project/create", summary: "Create new project" } })
-    .input(
-      z.object({
-        description: z.string().optional(),
-        metadata: z.record(z.string(), z.unknown()).optional(),
-        name: z.string().min(1, "Project name is required"),
-        organizationId: z.string().min(1, "Organization ID is required"),
-        settings: z.record(z.string(), z.unknown()).optional(),
-        visibility: z.enum(["internal", "private", "public"]).optional(),
-      }),
-    )
-    .output(
-      z.object({
-        project: projectSchema,
-        success: z.boolean(),
-      }),
-    )
+  create: organizationProcedure
+    .meta({ route: { path: "/project/create", summary: "Create a new project" } })
+    .input(OrganizationInputZod.and(schemaZod.ProjectZod.pick({ description: true, name: true, slug: true })))
+    .output(schemaZod.ProjectZod)
     .mutation(async ({ ctx, input }) => {
-      const project = await createProject({
-        description: input.description,
-        metadata: input.metadata,
-        name: input.name,
-        organizationId: input.organizationId,
-        settings: input.settings,
-        userId: ctx.user.id,
-        visibility: input.visibility,
-      });
-
-      return {
-        project,
-        success: true,
-      };
+      const project = await db
+        .insert(schema.project)
+        .values({
+          description: input.description,
+          id: createId(),
+          metadata: {
+            createdBy: ctx.user.id,
+          },
+          name: input.name,
+          organizationId: ctx.organization.id,
+          slug: input.slug,
+        })
+        .returning()
+        .then((v) => v.at(0));
+      if (!project) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Failed to create project",
+        });
+      }
+      return project;
     }),
 
-  // Get project by ID
-  getById: protectedProcedure
-    .meta({ route: { path: "/project/get-by-id", summary: "Get project by ID" } })
-    .input(
-      z.object({
-        projectId: z.string(),
-      }),
-    )
-    .output(
-      z.object({
-        project: projectSchema,
-      }),
-    )
+  get: organizationProcedure
+    .meta({ route: { path: "/project/get", summary: "Get a project by ID or slug" } })
+    .input(OrganizationInputZod.and(z.object({ projectId: z.string() }).or(z.object({ projectSlug: z.string() }))))
+    .output(schemaZod.ProjectZod.and(z.object({ project_tags: z.array(schemaZod.ProjectTagZod) })))
     .query(async ({ ctx, input }) => {
-      const project = await getProjectById(input.projectId, ctx.user.id);
-
-      return {
-        project,
-      };
-    }),
-
-  // Get project by slug
-  getBySlug: protectedProcedure
-    .meta({ route: { path: "/project/get-by-slug", summary: "Get project by slug" } })
-    .input(
-      z.object({
-        slug: z.string(),
-      }),
-    )
-    .output(
-      z.object({
-        project: projectSchema,
-      }),
-    )
-    .query(async ({ ctx, input }) => {
-      const project = await getProjectBySlug(input.slug, ctx.user.id);
-
-      return {
-        project,
-      };
-    }),
-
-  // Get project members
-  getMembers: protectedProcedure
-    .meta({ route: { path: "/project/get-members", summary: "Get project members" } })
-    .input(
-      z.object({
-        projectId: z.string(),
-      }),
-    )
-    .output(
-      z.object({
-        members: z.array(
-          z.object({
-            addedBy: z.string().nullable(),
-            id: z.string(),
-            joinedAt: z.date(),
-            permissions: z.record(z.string(), z.unknown()),
-            role: z.enum(["admin", "editor", "viewer"]),
-            userEmail: z.string(),
-            userId: z.string(),
-            userImage: z.string().nullable(),
-            userName: z.string(),
-          }),
-        ),
-      }),
-    )
-    .query(async ({ ctx, input }) => {
-      // Check if user has access to this project
-      const projectMember = await db
-        .select({ role: schema.projectMember.role })
-        .from(schema.projectMember)
-        .where(and(eq(schema.projectMember.projectId, input.projectId), eq(schema.projectMember.userId, ctx.user.id)))
+      const whereClauses = [orm.eq(schema.project.organizationId, ctx.organization.id)];
+      if ("projectId" in input) {
+        whereClauses.push(orm.eq(schema.project.id, input.projectId));
+      } else {
+        whereClauses.push(orm.eq(schema.project.slug, input.projectSlug));
+      }
+      const projectsWithTags = await db
+        .select()
+        .from(schema.project)
+        .where(orm.and(...whereClauses))
+        .leftJoin(schema.projectTag, orm.eq(schema.project.id, schema.projectTag.projectId))
         .limit(1);
+      const preResult = projectsWithTags.map((row) => ({
+        ...row.project,
+        project_tags: [row.project_tag].filter(Boolean),
+      }));
+      const projectWithTags = preResult.at(0);
+      if (!projectWithTags) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Project not found",
+        });
+      }
+      return projectWithTags;
+    }),
 
-      if (projectMember.length === 0) {
-        throw new Error("Access denied: You are not a member of this project");
+  list: organizationProcedure
+    .meta({ route: { path: "/project/list", summary: "List all projects in an organization" } })
+    .input(OrganizationInputZod.and(z.object({ tagNames: z.array(z.string()).optional() })))
+    .output(z.array(schemaZod.ProjectZod.and(z.object({ project_tags: z.array(schemaZod.ProjectTagZod) }))))
+    .query(async ({ ctx, input }) => {
+      const where = [orm.eq(schema.project.organizationId, ctx.organization.id)];
+      if (input.tagNames && input.tagNames.length > 0) {
+        where.push(orm.inArray(schema.projectTag.tagName, input.tagNames));
       }
 
-      // Get all project members with user details
-      const members = await db
-        .select({
-          addedBy: schema.projectMember.addedBy,
-          id: schema.projectMember.id,
-          joinedAt: schema.projectMember.joinedAt,
-          permissions: schema.projectMember.permissions,
-          role: schema.projectMember.role,
-          userEmail: schema.user.email,
-          userId: schema.user.id,
-          userImage: schema.user.image,
-          userName: schema.user.name,
-        })
-        .from(schema.projectMember)
-        .innerJoin(schema.user, eq(schema.projectMember.userId, schema.user.id))
-        .where(eq(schema.projectMember.projectId, input.projectId))
-        .orderBy(schema.projectMember.joinedAt);
+      const projectsWithTags = await db
+        .select()
+        .from(schema.project)
+        .leftJoin(schema.projectTag, orm.eq(schema.project.id, schema.projectTag.projectId))
+        .where(orm.and(...where));
 
-      return {
-        members: members.map((member) => ({
-          ...member,
-          permissions: member.permissions as Record<string, unknown>,
-        })),
-      };
+      const preResult = projectsWithTags.map((row) => ({
+        ...row.project,
+        project_tags: [row.project_tag].filter(Boolean),
+      }));
+
+      const result = preResult.reduce<Array<(typeof preResult)[number]>>((acc, curr) => {
+        const existing = acc.findLast((p) => p.id === curr.id);
+        if (existing) {
+          for (const tag of curr.project_tags) {
+            if (!existing.project_tags.find((t) => t.id === tag.id)) existing.project_tags.push(tag);
+          }
+        } else {
+          acc.push(curr);
+        }
+        return acc;
+      }, []);
+
+      return result;
     }),
 
-  // Get all user projects
-  getUserProjects: protectedProcedure
-    .meta({ route: { path: "/project/get-user-projects", summary: "Get all user projects" } })
-    .output(
-      z.object({
-        projects: z.array(
-          projectSchema.extend({
-            organizationName: z.string(),
-            userRole: z.enum(["admin", "editor", "viewer"]),
-          }),
-        ),
-      }),
-    )
-    .query(async ({ ctx }) => {
-      const projects = await getUserProjects(ctx.user.id);
-
-      return {
-        projects,
-      };
-    }),
-
-  // Update project
-  update: protectedProcedure
-    .meta({ route: { path: "/project/update", summary: "Update project" } })
+  update: organizationProcedure
+    .meta({ route: { path: "/project/update", summary: "Update a project" } })
     .input(
-      z.object({
-        description: z.string().optional(),
-        metadata: z.record(z.string(), z.unknown()).optional(),
-        name: z.string().optional(),
-        projectCategoryId: z.string().nullable().optional(),
-        projectId: z.string(),
-        settings: z.record(z.string(), z.unknown()).optional(),
-        status: z.enum(["active", "archived", "beta", "deprecated", "inactive"]).optional(),
-        visibility: z.enum(["internal", "private", "public"]).optional(),
-      }),
+      OrganizationInputZod.and(
+        schemaZod.ProjectZod.pick({
+          description: true,
+          documentation: true,
+          id: true,
+          name: true,
+          status: true,
+          visibility: true,
+        }),
+      ).and(z.object({ tagNames: z.array(z.string()) })),
     )
-    .output(
-      z.object({
-        project: projectSchema,
-        success: z.boolean(),
-      }),
-    )
+    .output(schemaZod.ProjectZod.and(z.object({ project_tags: z.array(schemaZod.ProjectTagZod) })))
     .mutation(async ({ ctx, input }) => {
-      const project = await updateProject({
-        description: input.description,
-        metadata: input.metadata,
-        name: input.name,
-        projectCategoryId: input.projectCategoryId,
-        projectId: input.projectId,
-        settings: input.settings,
-        status: input.status,
-        userId: ctx.user.id,
-        visibility: input.visibility,
-      });
-
+      const project = await db
+        .update(schema.project)
+        .set({
+          description: input.description,
+          documentation: input.documentation,
+          name: input.name,
+          status: input.status,
+          visibility: input.visibility,
+        })
+        .where(orm.and(orm.eq(schema.project.id, input.id), orm.eq(schema.project.organizationId, ctx.organization.id)))
+        .returning()
+        .then((v) => v.at(0));
+      if (!project) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Project not found",
+        });
+      }
+      const project_tags = await db
+        .select()
+        .from(schema.projectTag)
+        .where(orm.eq(schema.projectTag.projectId, project.id));
       return {
-        project,
-        success: true,
+        ...project,
+        project_tags,
+      };
+    }),
+
+  updateTags: organizationProcedure
+    .meta({ route: { path: "/project/update-tags", summary: "Update project tags" } })
+    .input(
+      OrganizationInputZod.and(
+        z.object({
+          projectId: z.string(),
+          tagNames: z.array(z.string()).min(1).max(100),
+        }),
+      ),
+    )
+    .output(schemaZod.ProjectZod.and(z.object({ project_tags: z.array(schemaZod.ProjectTagZod) })))
+    .mutation(async ({ ctx, input }) => {
+      const project = await db
+        .select()
+        .from(schema.project)
+        .where(
+          orm.and(
+            orm.eq(schema.project.id, input.projectId),
+            orm.eq(schema.project.organizationId, ctx.organization.id),
+          ),
+        )
+        .limit(1)
+        .then((v) => v.at(0));
+      if (!project) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Project not found",
+        });
+      }
+      // TODO: maybe a better logic here?
+      await db.delete(schema.projectTag).where(orm.eq(schema.projectTag.projectId, project.id));
+      const projectTags = input.tagNames.map((tagName) =>
+        db
+          .insert(schema.projectTag)
+          .values({ id: createId(), projectId: project.id, tagName })
+          .returning()
+          .then((v) => v.at(0)),
+      );
+      const insertedTags = await Promise.all(projectTags);
+      return {
+        ...project,
+        project_tags: insertedTags.filter(Boolean),
       };
     }),
 });

@@ -171,6 +171,21 @@ cp .env.example .env
 pnpm dev
 ```
 
+### Code Formatting & Linting
+
+When you encounter **ESLint warnings** or **formatting issues** in files:
+
+```bash
+# Format all files in the project
+pnpm format
+```
+
+This command runs Prettier and ESLint fixes across the codebase to ensure:
+
+- Consistent code formatting
+- Automatic fixing of ESLint violations
+- Adherence to project style guidelines
+
 ### Database Management
 
 ```bash
@@ -308,6 +323,33 @@ Rules:
 - Use `mutationOptions` / `queryOptions` from tRPC proxy when available
 - For optimistic updates: `setQueryData` + post-settle `invalidateQueries`
 - Do NOT trigger side-effects in the body of a hook outside React Query lifecycle callbacks
+- **Do NOT add `onError` handlers** — a global default handler in `providers.tsx` already handles:
+  - `TRPCClientError`: Shows error toast + logs to PostHog
+  - `BetterAuthException`: Handles 429 rate limits, email verification redirects, and generic auth errors
+  - Other errors: Generic error toast + logging
+  - Only add `onError` if you need custom logic (redirect, conditional handling, etc.)
+- **Make `onSuccess` async and always invalidate related queries**:
+  - Use `useQueryClient()` to get the query client
+  - In `onSuccess`, call `await queryClient.invalidateQueries(trpc.resource.list.queryOptions())` to refetch fresh data
+  - This ensures UI stays in sync with server state after mutations
+  - Example: After creating an org, invalidate the org list query so it refetches
+
+### 2.1 Loading State Naming
+
+- **Always use `isPending` instead of `isLoading`** for queries, mutations, and manual async operations:
+  - From `useQuery`: destructure as `{ isPending }`
+  - From `useMutation`: destructure as `{ isPending }`
+  - Rationale: `isPending` is the correct state indicator from React Query/TanStack Query (which implements SWR patterns). `isLoading` is deprecated/legacy. Always prefer `isPending` for clarity and consistency
+  - Exception: External libraries that return `isLoading` (e.g., `autumn-js`'s `usePricingTable`) should be left as-is
+  - **Prefer deriving loading states directly from mutations and queries** rather than maintaining separate state variables
+  - **Whenever you need a loading state, wrap the corresponding logic into a `useQuery` or `useMutation` and use its `isPending` state instead**
+  - Example:
+
+```ts
+const createMutation = useMutation(...);
+// Use createMutation.isPending directly instead of separate isPending state
+<Button disabled={createMutation.isPending}>Create</Button>
+```
 
 ### 3. Local Draft vs Server State
 
@@ -409,6 +451,16 @@ Prefer:
 2. Smaller, composable hook
 3. Explicit state transitions
 
+### 21. Theme & Styling
+
+- **Never use hardcoded colors** from Tailwind (e.g., `bg-red-500`, `text-blue-600`, `rgb(239, 68, 68)`)
+- Always use shadcn/ui theme-defined semantic colors instead:
+  - For Tailwind classes: `bg-destructive`, `bg-primary`, `text-foreground`, etc.
+  - For SVG/inline styles: `stroke="hsl(var(--destructive))"`, `fill="hsl(var(--primary))"`, etc.
+  - With transparency: `stroke="hsl(var(--destructive) / 0.3)"` for 30% opacity
+- Check available theme tokens in the design system (e.g., `--primary`, `--destructive`, `--secondary`, `--muted`, etc.)
+- This ensures the component respects the design system and adapts to theme changes (e.g., dark mode)
+
 ---
 
 ### Quick Start Checklist for an AI Agent
@@ -419,5 +471,6 @@ Prefer:
 4. Invalidate post-settle
 5. Keep UI update logic inside React Query callbacks
 6. Return minimal object shapes
+7. Use theme colors from shadcn/ui, never hardcoded Tailwind colors
 
 Following these guidelines ensures generated code remains aligned with current best practices introduced in recent refactors (e.g. user preference handling).

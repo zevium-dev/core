@@ -23,19 +23,21 @@ import { Route as AuthSentEmailRouteImport } from './routes/auth/sent-email'
 import { Route as AuthResetPasswordRouteImport } from './routes/auth/reset-password'
 import { Route as AuthForgotPasswordRouteImport } from './routes/auth/forgot-password'
 import { Route as AuthChangePasswordRouteImport } from './routes/auth/change-password'
+import { Route as AppOrganizationsRouteImport } from './routes/app/organizations'
 import { Route as AppDashboardRouteImport } from './routes/app/dashboard'
 import { Route as AppCatalogueRouteImport } from './routes/app/catalogue'
+import { Route as InternalImageUploadTestRouteImport } from './routes/$internal/image-upload-test'
 import { Route as InternalEmailTemplatesPreviewRouteImport } from './routes/$internal/email-templates-preview'
 import { Route as AppSettingsIndexRouteImport } from './routes/app/settings/index'
-import { Route as AppProjectsIndexRouteImport } from './routes/app/projects/index'
 import { Route as AppOrganizationsIndexRouteImport } from './routes/app/organizations/index'
 import { Route as ApiEmbeddingIndexRouteImport } from './routes/api/embedding/index'
 import { Route as AppSettingsPreferenceRouteImport } from './routes/app/settings/preference'
 import { Route as AppSettingsKeysRouteImport } from './routes/app/settings/keys'
 import { Route as AppSettingsCreditsRouteImport } from './routes/app/settings/credits'
 import { Route as AppSettingsActivityRouteImport } from './routes/app/settings/activity'
-import { Route as AppProjectsSlugRouteImport } from './routes/app/projects/$slug'
-import { Route as AppOrganizationsSlugRouteImport } from './routes/app/organizations/$slug'
+import { Route as AppOrganizationsChar126RouteImport } from './routes/app/organizations/~'
+import { Route as AppOrganizationsCreateRouteImport } from './routes/app/organizations/create'
+import { Route as AppOrganizationsOrganizationSlugRouteImport } from './routes/app/organizations/$organizationSlug'
 import { Route as ApiTrpcSplatRouteImport } from './routes/api/trpc/$'
 import { Route as ApiProxySplatRouteImport } from './routes/api/proxy/$'
 import { Route as ApiPosthogSplatRouteImport } from './routes/api/posthog/$'
@@ -43,7 +45,12 @@ import { Route as ApiOpenapiSplatRouteImport } from './routes/api/openapi/$'
 import { Route as ApiEmbeddingSearchRouteImport } from './routes/api/embedding/search'
 import { Route as ApiCapSplatRouteImport } from './routes/api/cap/$'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
-import { Route as AppProjectsSlugViewVersionRouteImport } from './routes/app/projects/$slug/view/$version'
+import { Route as AppOrganizationsOrganizationSlugIndexRouteImport } from './routes/app/organizations/$organizationSlug/index'
+import { Route as AppOrganizationsOrganizationSlugProjectsRouteImport } from './routes/app/organizations/$organizationSlug/projects'
+import { Route as AppOrganizationsOrganizationSlugProjectsIndexRouteImport } from './routes/app/organizations/$organizationSlug/projects/index'
+import { Route as AppOrganizationsOrganizationSlugProjectsChar126RouteImport } from './routes/app/organizations/$organizationSlug/projects/~'
+import { Route as AppOrganizationsOrganizationSlugProjectsCreateRouteImport } from './routes/app/organizations/$organizationSlug/projects/create'
+import { Route as AppOrganizationsOrganizationSlugProjectsProjectSlugRouteImport } from './routes/app/organizations/$organizationSlug/projects/$projectSlug'
 
 const AppRoute = AppRouteImport.update({
   id: '/app',
@@ -115,6 +122,11 @@ const AuthChangePasswordRoute = AuthChangePasswordRouteImport.update({
   path: '/auth/change-password',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AppOrganizationsRoute = AppOrganizationsRouteImport.update({
+  id: '/organizations',
+  path: '/organizations',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppDashboardRoute = AppDashboardRouteImport.update({
   id: '/dashboard',
   path: '/dashboard',
@@ -124,6 +136,11 @@ const AppCatalogueRoute = AppCatalogueRouteImport.update({
   id: '/catalogue',
   path: '/catalogue',
   getParentRoute: () => AppRoute,
+} as any)
+const InternalImageUploadTestRoute = InternalImageUploadTestRouteImport.update({
+  id: '/$internal/image-upload-test',
+  path: '/$internal/image-upload-test',
+  getParentRoute: () => rootRouteImport,
 } as any)
 const InternalEmailTemplatesPreviewRoute =
   InternalEmailTemplatesPreviewRouteImport.update({
@@ -136,15 +153,10 @@ const AppSettingsIndexRoute = AppSettingsIndexRouteImport.update({
   path: '/settings/',
   getParentRoute: () => AppRoute,
 } as any)
-const AppProjectsIndexRoute = AppProjectsIndexRouteImport.update({
-  id: '/projects/',
-  path: '/projects/',
-  getParentRoute: () => AppRoute,
-} as any)
 const AppOrganizationsIndexRoute = AppOrganizationsIndexRouteImport.update({
-  id: '/organizations/',
-  path: '/organizations/',
-  getParentRoute: () => AppRoute,
+  id: '/',
+  path: '/',
+  getParentRoute: () => AppOrganizationsRoute,
 } as any)
 const ApiEmbeddingIndexRoute = ApiEmbeddingIndexRouteImport.update({
   id: '/api/embedding/',
@@ -171,16 +183,22 @@ const AppSettingsActivityRoute = AppSettingsActivityRouteImport.update({
   path: '/settings/activity',
   getParentRoute: () => AppRoute,
 } as any)
-const AppProjectsSlugRoute = AppProjectsSlugRouteImport.update({
-  id: '/projects/$slug',
-  path: '/projects/$slug',
-  getParentRoute: () => AppRoute,
+const AppOrganizationsChar126Route = AppOrganizationsChar126RouteImport.update({
+  id: '/~',
+  path: '/~',
+  getParentRoute: () => AppOrganizationsRoute,
 } as any)
-const AppOrganizationsSlugRoute = AppOrganizationsSlugRouteImport.update({
-  id: '/organizations/$slug',
-  path: '/organizations/$slug',
-  getParentRoute: () => AppRoute,
+const AppOrganizationsCreateRoute = AppOrganizationsCreateRouteImport.update({
+  id: '/create',
+  path: '/create',
+  getParentRoute: () => AppOrganizationsRoute,
 } as any)
+const AppOrganizationsOrganizationSlugRoute =
+  AppOrganizationsOrganizationSlugRouteImport.update({
+    id: '/$organizationSlug',
+    path: '/$organizationSlug',
+    getParentRoute: () => AppOrganizationsRoute,
+  } as any)
 const ApiTrpcSplatRoute = ApiTrpcSplatRouteImport.update({
   id: '/api/trpc/$',
   path: '/api/trpc/$',
@@ -216,19 +234,51 @@ const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
   path: '/api/auth/$',
   getParentRoute: () => rootRouteImport,
 } as any)
-const AppProjectsSlugViewVersionRoute =
-  AppProjectsSlugViewVersionRouteImport.update({
-    id: '/view/$version',
-    path: '/view/$version',
-    getParentRoute: () => AppProjectsSlugRoute,
+const AppOrganizationsOrganizationSlugIndexRoute =
+  AppOrganizationsOrganizationSlugIndexRouteImport.update({
+    id: '/',
+    path: '/',
+    getParentRoute: () => AppOrganizationsOrganizationSlugRoute,
+  } as any)
+const AppOrganizationsOrganizationSlugProjectsRoute =
+  AppOrganizationsOrganizationSlugProjectsRouteImport.update({
+    id: '/projects',
+    path: '/projects',
+    getParentRoute: () => AppOrganizationsOrganizationSlugRoute,
+  } as any)
+const AppOrganizationsOrganizationSlugProjectsIndexRoute =
+  AppOrganizationsOrganizationSlugProjectsIndexRouteImport.update({
+    id: '/',
+    path: '/',
+    getParentRoute: () => AppOrganizationsOrganizationSlugProjectsRoute,
+  } as any)
+const AppOrganizationsOrganizationSlugProjectsChar126Route =
+  AppOrganizationsOrganizationSlugProjectsChar126RouteImport.update({
+    id: '/~',
+    path: '/~',
+    getParentRoute: () => AppOrganizationsOrganizationSlugProjectsRoute,
+  } as any)
+const AppOrganizationsOrganizationSlugProjectsCreateRoute =
+  AppOrganizationsOrganizationSlugProjectsCreateRouteImport.update({
+    id: '/create',
+    path: '/create',
+    getParentRoute: () => AppOrganizationsOrganizationSlugProjectsRoute,
+  } as any)
+const AppOrganizationsOrganizationSlugProjectsProjectSlugRoute =
+  AppOrganizationsOrganizationSlugProjectsProjectSlugRouteImport.update({
+    id: '/$projectSlug',
+    path: '/$projectSlug',
+    getParentRoute: () => AppOrganizationsOrganizationSlugProjectsRoute,
   } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/app': typeof AppRouteWithChildren
   '/$internal/email-templates-preview': typeof InternalEmailTemplatesPreviewRoute
+  '/$internal/image-upload-test': typeof InternalImageUploadTestRoute
   '/app/catalogue': typeof AppCatalogueRoute
   '/app/dashboard': typeof AppDashboardRoute
+  '/app/organizations': typeof AppOrganizationsRouteWithChildren
   '/auth/change-password': typeof AuthChangePasswordRoute
   '/auth/forgot-password': typeof AuthForgotPasswordRoute
   '/auth/reset-password': typeof AuthResetPasswordRoute
@@ -248,21 +298,27 @@ export interface FileRoutesByFullPath {
   '/api/posthog/$': typeof ApiPosthogSplatRoute
   '/api/proxy/$': typeof ApiProxySplatRoute
   '/api/trpc/$': typeof ApiTrpcSplatRoute
-  '/app/organizations/$slug': typeof AppOrganizationsSlugRoute
-  '/app/projects/$slug': typeof AppProjectsSlugRouteWithChildren
+  '/app/organizations/$organizationSlug': typeof AppOrganizationsOrganizationSlugRouteWithChildren
+  '/app/organizations/create': typeof AppOrganizationsCreateRoute
+  '/app/organizations/~': typeof AppOrganizationsChar126Route
   '/app/settings/activity': typeof AppSettingsActivityRoute
   '/app/settings/credits': typeof AppSettingsCreditsRoute
   '/app/settings/keys': typeof AppSettingsKeysRoute
   '/app/settings/preference': typeof AppSettingsPreferenceRoute
   '/api/embedding': typeof ApiEmbeddingIndexRoute
-  '/app/organizations': typeof AppOrganizationsIndexRoute
-  '/app/projects': typeof AppProjectsIndexRoute
+  '/app/organizations/': typeof AppOrganizationsIndexRoute
   '/app/settings': typeof AppSettingsIndexRoute
-  '/app/projects/$slug/view/$version': typeof AppProjectsSlugViewVersionRoute
+  '/app/organizations/$organizationSlug/projects': typeof AppOrganizationsOrganizationSlugProjectsRouteWithChildren
+  '/app/organizations/$organizationSlug/': typeof AppOrganizationsOrganizationSlugIndexRoute
+  '/app/organizations/$organizationSlug/projects/$projectSlug': typeof AppOrganizationsOrganizationSlugProjectsProjectSlugRoute
+  '/app/organizations/$organizationSlug/projects/create': typeof AppOrganizationsOrganizationSlugProjectsCreateRoute
+  '/app/organizations/$organizationSlug/projects/~': typeof AppOrganizationsOrganizationSlugProjectsChar126Route
+  '/app/organizations/$organizationSlug/projects/': typeof AppOrganizationsOrganizationSlugProjectsIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/$internal/email-templates-preview': typeof InternalEmailTemplatesPreviewRoute
+  '/$internal/image-upload-test': typeof InternalImageUploadTestRoute
   '/app/catalogue': typeof AppCatalogueRoute
   '/app/dashboard': typeof AppDashboardRoute
   '/auth/change-password': typeof AuthChangePasswordRoute
@@ -284,25 +340,30 @@ export interface FileRoutesByTo {
   '/api/posthog/$': typeof ApiPosthogSplatRoute
   '/api/proxy/$': typeof ApiProxySplatRoute
   '/api/trpc/$': typeof ApiTrpcSplatRoute
-  '/app/organizations/$slug': typeof AppOrganizationsSlugRoute
-  '/app/projects/$slug': typeof AppProjectsSlugRouteWithChildren
+  '/app/organizations/create': typeof AppOrganizationsCreateRoute
+  '/app/organizations/~': typeof AppOrganizationsChar126Route
   '/app/settings/activity': typeof AppSettingsActivityRoute
   '/app/settings/credits': typeof AppSettingsCreditsRoute
   '/app/settings/keys': typeof AppSettingsKeysRoute
   '/app/settings/preference': typeof AppSettingsPreferenceRoute
   '/api/embedding': typeof ApiEmbeddingIndexRoute
   '/app/organizations': typeof AppOrganizationsIndexRoute
-  '/app/projects': typeof AppProjectsIndexRoute
   '/app/settings': typeof AppSettingsIndexRoute
-  '/app/projects/$slug/view/$version': typeof AppProjectsSlugViewVersionRoute
+  '/app/organizations/$organizationSlug': typeof AppOrganizationsOrganizationSlugIndexRoute
+  '/app/organizations/$organizationSlug/projects/$projectSlug': typeof AppOrganizationsOrganizationSlugProjectsProjectSlugRoute
+  '/app/organizations/$organizationSlug/projects/create': typeof AppOrganizationsOrganizationSlugProjectsCreateRoute
+  '/app/organizations/$organizationSlug/projects/~': typeof AppOrganizationsOrganizationSlugProjectsChar126Route
+  '/app/organizations/$organizationSlug/projects': typeof AppOrganizationsOrganizationSlugProjectsIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/app': typeof AppRouteWithChildren
   '/$internal/email-templates-preview': typeof InternalEmailTemplatesPreviewRoute
+  '/$internal/image-upload-test': typeof InternalImageUploadTestRoute
   '/app/catalogue': typeof AppCatalogueRoute
   '/app/dashboard': typeof AppDashboardRoute
+  '/app/organizations': typeof AppOrganizationsRouteWithChildren
   '/auth/change-password': typeof AuthChangePasswordRoute
   '/auth/forgot-password': typeof AuthForgotPasswordRoute
   '/auth/reset-password': typeof AuthResetPasswordRoute
@@ -322,17 +383,22 @@ export interface FileRoutesById {
   '/api/posthog/$': typeof ApiPosthogSplatRoute
   '/api/proxy/$': typeof ApiProxySplatRoute
   '/api/trpc/$': typeof ApiTrpcSplatRoute
-  '/app/organizations/$slug': typeof AppOrganizationsSlugRoute
-  '/app/projects/$slug': typeof AppProjectsSlugRouteWithChildren
+  '/app/organizations/$organizationSlug': typeof AppOrganizationsOrganizationSlugRouteWithChildren
+  '/app/organizations/create': typeof AppOrganizationsCreateRoute
+  '/app/organizations/~': typeof AppOrganizationsChar126Route
   '/app/settings/activity': typeof AppSettingsActivityRoute
   '/app/settings/credits': typeof AppSettingsCreditsRoute
   '/app/settings/keys': typeof AppSettingsKeysRoute
   '/app/settings/preference': typeof AppSettingsPreferenceRoute
   '/api/embedding/': typeof ApiEmbeddingIndexRoute
   '/app/organizations/': typeof AppOrganizationsIndexRoute
-  '/app/projects/': typeof AppProjectsIndexRoute
   '/app/settings/': typeof AppSettingsIndexRoute
-  '/app/projects/$slug/view/$version': typeof AppProjectsSlugViewVersionRoute
+  '/app/organizations/$organizationSlug/projects': typeof AppOrganizationsOrganizationSlugProjectsRouteWithChildren
+  '/app/organizations/$organizationSlug/': typeof AppOrganizationsOrganizationSlugIndexRoute
+  '/app/organizations/$organizationSlug/projects/$projectSlug': typeof AppOrganizationsOrganizationSlugProjectsProjectSlugRoute
+  '/app/organizations/$organizationSlug/projects/create': typeof AppOrganizationsOrganizationSlugProjectsCreateRoute
+  '/app/organizations/$organizationSlug/projects/~': typeof AppOrganizationsOrganizationSlugProjectsChar126Route
+  '/app/organizations/$organizationSlug/projects/': typeof AppOrganizationsOrganizationSlugProjectsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -340,8 +406,10 @@ export interface FileRouteTypes {
     | '/'
     | '/app'
     | '/$internal/email-templates-preview'
+    | '/$internal/image-upload-test'
     | '/app/catalogue'
     | '/app/dashboard'
+    | '/app/organizations'
     | '/auth/change-password'
     | '/auth/forgot-password'
     | '/auth/reset-password'
@@ -361,21 +429,27 @@ export interface FileRouteTypes {
     | '/api/posthog/$'
     | '/api/proxy/$'
     | '/api/trpc/$'
-    | '/app/organizations/$slug'
-    | '/app/projects/$slug'
+    | '/app/organizations/$organizationSlug'
+    | '/app/organizations/create'
+    | '/app/organizations/~'
     | '/app/settings/activity'
     | '/app/settings/credits'
     | '/app/settings/keys'
     | '/app/settings/preference'
     | '/api/embedding'
-    | '/app/organizations'
-    | '/app/projects'
+    | '/app/organizations/'
     | '/app/settings'
-    | '/app/projects/$slug/view/$version'
+    | '/app/organizations/$organizationSlug/projects'
+    | '/app/organizations/$organizationSlug/'
+    | '/app/organizations/$organizationSlug/projects/$projectSlug'
+    | '/app/organizations/$organizationSlug/projects/create'
+    | '/app/organizations/$organizationSlug/projects/~'
+    | '/app/organizations/$organizationSlug/projects/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/$internal/email-templates-preview'
+    | '/$internal/image-upload-test'
     | '/app/catalogue'
     | '/app/dashboard'
     | '/auth/change-password'
@@ -397,24 +471,29 @@ export interface FileRouteTypes {
     | '/api/posthog/$'
     | '/api/proxy/$'
     | '/api/trpc/$'
-    | '/app/organizations/$slug'
-    | '/app/projects/$slug'
+    | '/app/organizations/create'
+    | '/app/organizations/~'
     | '/app/settings/activity'
     | '/app/settings/credits'
     | '/app/settings/keys'
     | '/app/settings/preference'
     | '/api/embedding'
     | '/app/organizations'
-    | '/app/projects'
     | '/app/settings'
-    | '/app/projects/$slug/view/$version'
+    | '/app/organizations/$organizationSlug'
+    | '/app/organizations/$organizationSlug/projects/$projectSlug'
+    | '/app/organizations/$organizationSlug/projects/create'
+    | '/app/organizations/$organizationSlug/projects/~'
+    | '/app/organizations/$organizationSlug/projects'
   id:
     | '__root__'
     | '/'
     | '/app'
     | '/$internal/email-templates-preview'
+    | '/$internal/image-upload-test'
     | '/app/catalogue'
     | '/app/dashboard'
+    | '/app/organizations'
     | '/auth/change-password'
     | '/auth/forgot-password'
     | '/auth/reset-password'
@@ -434,23 +513,29 @@ export interface FileRouteTypes {
     | '/api/posthog/$'
     | '/api/proxy/$'
     | '/api/trpc/$'
-    | '/app/organizations/$slug'
-    | '/app/projects/$slug'
+    | '/app/organizations/$organizationSlug'
+    | '/app/organizations/create'
+    | '/app/organizations/~'
     | '/app/settings/activity'
     | '/app/settings/credits'
     | '/app/settings/keys'
     | '/app/settings/preference'
     | '/api/embedding/'
     | '/app/organizations/'
-    | '/app/projects/'
     | '/app/settings/'
-    | '/app/projects/$slug/view/$version'
+    | '/app/organizations/$organizationSlug/projects'
+    | '/app/organizations/$organizationSlug/'
+    | '/app/organizations/$organizationSlug/projects/$projectSlug'
+    | '/app/organizations/$organizationSlug/projects/create'
+    | '/app/organizations/$organizationSlug/projects/~'
+    | '/app/organizations/$organizationSlug/projects/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AppRoute: typeof AppRouteWithChildren
   InternalEmailTemplatesPreviewRoute: typeof InternalEmailTemplatesPreviewRoute
+  InternalImageUploadTestRoute: typeof InternalImageUploadTestRoute
   AuthChangePasswordRoute: typeof AuthChangePasswordRoute
   AuthForgotPasswordRoute: typeof AuthForgotPasswordRoute
   AuthResetPasswordRoute: typeof AuthResetPasswordRoute
@@ -572,6 +657,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthChangePasswordRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/app/organizations': {
+      id: '/app/organizations'
+      path: '/organizations'
+      fullPath: '/app/organizations'
+      preLoaderRoute: typeof AppOrganizationsRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/app/dashboard': {
       id: '/app/dashboard'
       path: '/dashboard'
@@ -585,6 +677,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/app/catalogue'
       preLoaderRoute: typeof AppCatalogueRouteImport
       parentRoute: typeof AppRoute
+    }
+    '/$internal/image-upload-test': {
+      id: '/$internal/image-upload-test'
+      path: '/$internal/image-upload-test'
+      fullPath: '/$internal/image-upload-test'
+      preLoaderRoute: typeof InternalImageUploadTestRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/$internal/email-templates-preview': {
       id: '/$internal/email-templates-preview'
@@ -600,19 +699,12 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppSettingsIndexRouteImport
       parentRoute: typeof AppRoute
     }
-    '/app/projects/': {
-      id: '/app/projects/'
-      path: '/projects'
-      fullPath: '/app/projects'
-      preLoaderRoute: typeof AppProjectsIndexRouteImport
-      parentRoute: typeof AppRoute
-    }
     '/app/organizations/': {
       id: '/app/organizations/'
-      path: '/organizations'
-      fullPath: '/app/organizations'
+      path: '/'
+      fullPath: '/app/organizations/'
       preLoaderRoute: typeof AppOrganizationsIndexRouteImport
-      parentRoute: typeof AppRoute
+      parentRoute: typeof AppOrganizationsRoute
     }
     '/api/embedding/': {
       id: '/api/embedding/'
@@ -649,19 +741,26 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppSettingsActivityRouteImport
       parentRoute: typeof AppRoute
     }
-    '/app/projects/$slug': {
-      id: '/app/projects/$slug'
-      path: '/projects/$slug'
-      fullPath: '/app/projects/$slug'
-      preLoaderRoute: typeof AppProjectsSlugRouteImport
-      parentRoute: typeof AppRoute
+    '/app/organizations/~': {
+      id: '/app/organizations/~'
+      path: '/~'
+      fullPath: '/app/organizations/~'
+      preLoaderRoute: typeof AppOrganizationsChar126RouteImport
+      parentRoute: typeof AppOrganizationsRoute
     }
-    '/app/organizations/$slug': {
-      id: '/app/organizations/$slug'
-      path: '/organizations/$slug'
-      fullPath: '/app/organizations/$slug'
-      preLoaderRoute: typeof AppOrganizationsSlugRouteImport
-      parentRoute: typeof AppRoute
+    '/app/organizations/create': {
+      id: '/app/organizations/create'
+      path: '/create'
+      fullPath: '/app/organizations/create'
+      preLoaderRoute: typeof AppOrganizationsCreateRouteImport
+      parentRoute: typeof AppOrganizationsRoute
+    }
+    '/app/organizations/$organizationSlug': {
+      id: '/app/organizations/$organizationSlug'
+      path: '/$organizationSlug'
+      fullPath: '/app/organizations/$organizationSlug'
+      preLoaderRoute: typeof AppOrganizationsOrganizationSlugRouteImport
+      parentRoute: typeof AppOrganizationsRoute
     }
     '/api/trpc/$': {
       id: '/api/trpc/$'
@@ -712,55 +811,132 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiAuthSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/app/projects/$slug/view/$version': {
-      id: '/app/projects/$slug/view/$version'
-      path: '/view/$version'
-      fullPath: '/app/projects/$slug/view/$version'
-      preLoaderRoute: typeof AppProjectsSlugViewVersionRouteImport
-      parentRoute: typeof AppProjectsSlugRoute
+    '/app/organizations/$organizationSlug/': {
+      id: '/app/organizations/$organizationSlug/'
+      path: '/'
+      fullPath: '/app/organizations/$organizationSlug/'
+      preLoaderRoute: typeof AppOrganizationsOrganizationSlugIndexRouteImport
+      parentRoute: typeof AppOrganizationsOrganizationSlugRoute
+    }
+    '/app/organizations/$organizationSlug/projects': {
+      id: '/app/organizations/$organizationSlug/projects'
+      path: '/projects'
+      fullPath: '/app/organizations/$organizationSlug/projects'
+      preLoaderRoute: typeof AppOrganizationsOrganizationSlugProjectsRouteImport
+      parentRoute: typeof AppOrganizationsOrganizationSlugRoute
+    }
+    '/app/organizations/$organizationSlug/projects/': {
+      id: '/app/organizations/$organizationSlug/projects/'
+      path: '/'
+      fullPath: '/app/organizations/$organizationSlug/projects/'
+      preLoaderRoute: typeof AppOrganizationsOrganizationSlugProjectsIndexRouteImport
+      parentRoute: typeof AppOrganizationsOrganizationSlugProjectsRoute
+    }
+    '/app/organizations/$organizationSlug/projects/~': {
+      id: '/app/organizations/$organizationSlug/projects/~'
+      path: '/~'
+      fullPath: '/app/organizations/$organizationSlug/projects/~'
+      preLoaderRoute: typeof AppOrganizationsOrganizationSlugProjectsChar126RouteImport
+      parentRoute: typeof AppOrganizationsOrganizationSlugProjectsRoute
+    }
+    '/app/organizations/$organizationSlug/projects/create': {
+      id: '/app/organizations/$organizationSlug/projects/create'
+      path: '/create'
+      fullPath: '/app/organizations/$organizationSlug/projects/create'
+      preLoaderRoute: typeof AppOrganizationsOrganizationSlugProjectsCreateRouteImport
+      parentRoute: typeof AppOrganizationsOrganizationSlugProjectsRoute
+    }
+    '/app/organizations/$organizationSlug/projects/$projectSlug': {
+      id: '/app/organizations/$organizationSlug/projects/$projectSlug'
+      path: '/$projectSlug'
+      fullPath: '/app/organizations/$organizationSlug/projects/$projectSlug'
+      preLoaderRoute: typeof AppOrganizationsOrganizationSlugProjectsProjectSlugRouteImport
+      parentRoute: typeof AppOrganizationsOrganizationSlugProjectsRoute
     }
   }
 }
 
-interface AppProjectsSlugRouteChildren {
-  AppProjectsSlugViewVersionRoute: typeof AppProjectsSlugViewVersionRoute
+interface AppOrganizationsOrganizationSlugProjectsRouteChildren {
+  AppOrganizationsOrganizationSlugProjectsProjectSlugRoute: typeof AppOrganizationsOrganizationSlugProjectsProjectSlugRoute
+  AppOrganizationsOrganizationSlugProjectsCreateRoute: typeof AppOrganizationsOrganizationSlugProjectsCreateRoute
+  AppOrganizationsOrganizationSlugProjectsChar126Route: typeof AppOrganizationsOrganizationSlugProjectsChar126Route
+  AppOrganizationsOrganizationSlugProjectsIndexRoute: typeof AppOrganizationsOrganizationSlugProjectsIndexRoute
 }
 
-const AppProjectsSlugRouteChildren: AppProjectsSlugRouteChildren = {
-  AppProjectsSlugViewVersionRoute: AppProjectsSlugViewVersionRoute,
+const AppOrganizationsOrganizationSlugProjectsRouteChildren: AppOrganizationsOrganizationSlugProjectsRouteChildren =
+  {
+    AppOrganizationsOrganizationSlugProjectsProjectSlugRoute:
+      AppOrganizationsOrganizationSlugProjectsProjectSlugRoute,
+    AppOrganizationsOrganizationSlugProjectsCreateRoute:
+      AppOrganizationsOrganizationSlugProjectsCreateRoute,
+    AppOrganizationsOrganizationSlugProjectsChar126Route:
+      AppOrganizationsOrganizationSlugProjectsChar126Route,
+    AppOrganizationsOrganizationSlugProjectsIndexRoute:
+      AppOrganizationsOrganizationSlugProjectsIndexRoute,
+  }
+
+const AppOrganizationsOrganizationSlugProjectsRouteWithChildren =
+  AppOrganizationsOrganizationSlugProjectsRoute._addFileChildren(
+    AppOrganizationsOrganizationSlugProjectsRouteChildren,
+  )
+
+interface AppOrganizationsOrganizationSlugRouteChildren {
+  AppOrganizationsOrganizationSlugProjectsRoute: typeof AppOrganizationsOrganizationSlugProjectsRouteWithChildren
+  AppOrganizationsOrganizationSlugIndexRoute: typeof AppOrganizationsOrganizationSlugIndexRoute
 }
 
-const AppProjectsSlugRouteWithChildren = AppProjectsSlugRoute._addFileChildren(
-  AppProjectsSlugRouteChildren,
-)
+const AppOrganizationsOrganizationSlugRouteChildren: AppOrganizationsOrganizationSlugRouteChildren =
+  {
+    AppOrganizationsOrganizationSlugProjectsRoute:
+      AppOrganizationsOrganizationSlugProjectsRouteWithChildren,
+    AppOrganizationsOrganizationSlugIndexRoute:
+      AppOrganizationsOrganizationSlugIndexRoute,
+  }
+
+const AppOrganizationsOrganizationSlugRouteWithChildren =
+  AppOrganizationsOrganizationSlugRoute._addFileChildren(
+    AppOrganizationsOrganizationSlugRouteChildren,
+  )
+
+interface AppOrganizationsRouteChildren {
+  AppOrganizationsOrganizationSlugRoute: typeof AppOrganizationsOrganizationSlugRouteWithChildren
+  AppOrganizationsCreateRoute: typeof AppOrganizationsCreateRoute
+  AppOrganizationsChar126Route: typeof AppOrganizationsChar126Route
+  AppOrganizationsIndexRoute: typeof AppOrganizationsIndexRoute
+}
+
+const AppOrganizationsRouteChildren: AppOrganizationsRouteChildren = {
+  AppOrganizationsOrganizationSlugRoute:
+    AppOrganizationsOrganizationSlugRouteWithChildren,
+  AppOrganizationsCreateRoute: AppOrganizationsCreateRoute,
+  AppOrganizationsChar126Route: AppOrganizationsChar126Route,
+  AppOrganizationsIndexRoute: AppOrganizationsIndexRoute,
+}
+
+const AppOrganizationsRouteWithChildren =
+  AppOrganizationsRoute._addFileChildren(AppOrganizationsRouteChildren)
 
 interface AppRouteChildren {
   AppCatalogueRoute: typeof AppCatalogueRoute
   AppDashboardRoute: typeof AppDashboardRoute
+  AppOrganizationsRoute: typeof AppOrganizationsRouteWithChildren
   AppIndexRoute: typeof AppIndexRoute
-  AppOrganizationsSlugRoute: typeof AppOrganizationsSlugRoute
-  AppProjectsSlugRoute: typeof AppProjectsSlugRouteWithChildren
   AppSettingsActivityRoute: typeof AppSettingsActivityRoute
   AppSettingsCreditsRoute: typeof AppSettingsCreditsRoute
   AppSettingsKeysRoute: typeof AppSettingsKeysRoute
   AppSettingsPreferenceRoute: typeof AppSettingsPreferenceRoute
-  AppOrganizationsIndexRoute: typeof AppOrganizationsIndexRoute
-  AppProjectsIndexRoute: typeof AppProjectsIndexRoute
   AppSettingsIndexRoute: typeof AppSettingsIndexRoute
 }
 
 const AppRouteChildren: AppRouteChildren = {
   AppCatalogueRoute: AppCatalogueRoute,
   AppDashboardRoute: AppDashboardRoute,
+  AppOrganizationsRoute: AppOrganizationsRouteWithChildren,
   AppIndexRoute: AppIndexRoute,
-  AppOrganizationsSlugRoute: AppOrganizationsSlugRoute,
-  AppProjectsSlugRoute: AppProjectsSlugRouteWithChildren,
   AppSettingsActivityRoute: AppSettingsActivityRoute,
   AppSettingsCreditsRoute: AppSettingsCreditsRoute,
   AppSettingsKeysRoute: AppSettingsKeysRoute,
   AppSettingsPreferenceRoute: AppSettingsPreferenceRoute,
-  AppOrganizationsIndexRoute: AppOrganizationsIndexRoute,
-  AppProjectsIndexRoute: AppProjectsIndexRoute,
   AppSettingsIndexRoute: AppSettingsIndexRoute,
 }
 
@@ -770,6 +946,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AppRoute: AppRouteWithChildren,
   InternalEmailTemplatesPreviewRoute: InternalEmailTemplatesPreviewRoute,
+  InternalImageUploadTestRoute: InternalImageUploadTestRoute,
   AuthChangePasswordRoute: AuthChangePasswordRoute,
   AuthForgotPasswordRoute: AuthForgotPasswordRoute,
   AuthResetPasswordRoute: AuthResetPasswordRoute,

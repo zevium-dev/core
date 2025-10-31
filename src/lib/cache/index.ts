@@ -1,7 +1,7 @@
 import SuperJSON from "superjson";
 
 import { hashString } from "~/lib/hash";
-import { kv } from "~/lib/kv";
+import { kv } from "~/lib/server/kv";
 
 const defaultTtlMs = 24 * 60 * 60 * 1000;
 const defaultMemoryCacheTtlMs = 60 * 1000;
@@ -30,6 +30,7 @@ export const memoryCached = <Args extends Array<unknown>, Result>(
       if (cacheRow.expiresAt > new Date()) {
         return cacheRow.value as Result;
       }
+      // eslint-disable-next-line drizzle/enforce-delete-with-where
       memoryCacheMap.delete(cacheKey);
     }
 

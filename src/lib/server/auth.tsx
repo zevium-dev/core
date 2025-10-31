@@ -6,8 +6,6 @@ import { twoFactor } from "better-auth/plugins";
 import { organization } from "better-auth/plugins/organization";
 import { reactStartCookies } from "better-auth/react-start";
 
-import type { Permissions } from "~/lib/permission";
-
 import { db, schema } from "~/db";
 import { clientEnv } from "~/env/client";
 import { serverEnv } from "~/env/server";
@@ -16,8 +14,8 @@ import { EMAIL_FROM } from "~/lib/constants";
 import { sendEmail } from "../email";
 import { EmailVerify, EmailVerifySubject } from "../email/templates/email-verify";
 import { ResetPasswordEmail, ResetPasswordSubject } from "../email/templates/reset-password";
-import { kv } from "../kv";
 import { capCaptcha } from "./better-auth-captcha";
+import { kv } from "./kv";
 
 const BETTER_AUTH_KV_PREFIX = "better-auth:";
 
@@ -84,7 +82,7 @@ export const authServer = betterAuth({
         maxExpiresIn: 365 * 24 * 60 * 60, // 1 year
         minExpiresIn: 24 * 60 * 60, // 1 day
       },
-      permissions: { defaultPermissions: { api: ["read"] } satisfies Permissions },
+      permissions: { defaultPermissions: { api: ["read"] } },
       // 200 requests per minute
       rateLimit: { enabled: true, maxRequests: 200, timeWindow: 1000 * 60 },
     }),
