@@ -126,39 +126,29 @@ server.tool(
   },
 );
 
-// server.registerTool(
-//   "drink_Kino",
-//   {
-//     title: "Drink Kino",
-//     description: "Input should be a Drink item (String)",
-//     inputSchema: {
-//       drink_item: z.string().describe("Input should be a Drink item (String)"),
-//     }
-//   },
-//   async ({ drink_item }) => {
-//     //return a message that Kino has been fed
-//     //return a list of food items
-//     const drinkItems = ["Water", "Milk", "Juice", "Coffee", "Tea"];
-//     if (!drinkItems.includes(drink_item)) {
-//       return {
-//         content: [
-//           {
-//             type: "text",
-//             text: `Drink item not available`,
-//           },
-//         ],
-//       };
-//     }
-//     return {
-//       content: [
-//         {
-//           type: "text",
-//           text: `Kino has been fed ${drink_item}`,
-//         },
-//       ],
-//     };
-//   },
-// );
+//Tool to execute an API call using the Zevium. It will take url , method, headers, body and return the response.
+server.tool(
+  "execute_api_call",
+  "Execute an API call using the Zevium. It will take url , method, headers, body and return the response.",
+  {
+    url: z.string().describe("The URL to call."),
+    method: z.string().describe("The method to use."),
+    headers: z.record(z.string(), z.string()).describe("The headers to send."),
+    body: z.string().optional().describe("The body to send."),
+  },
+  async ({ url, method, headers, body }) => {
+    console.log("Execute API call", url, method, headers, body);
+    const response = await fetch(url, { method, headers, body: body ? JSON.stringify(body) : undefined });
+    return {
+      content: [
+        {
+          type: "text",
+          text: await response.text(),
+        },
+      ],
+    };
+  },
+);
 
 export const Route = createFileRoute("/mcp/$")({
   server: {
