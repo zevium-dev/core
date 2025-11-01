@@ -3,6 +3,7 @@ import { TRPCError } from "@trpc/server";
 import z from "zod";
 
 import { db, orm, schema, schemaZod } from "~/db";
+import { createProjectEmbedding } from "~/lib/server/embeddings";
 import { protectedProcedure, router } from "~/server/trpc";
 
 const OrganizationInputZod = z.object({ organizationId: z.string() }).or(z.object({ organizationSlug: z.string() }));
@@ -71,6 +72,16 @@ export const projectRouter = router({
           message: "Failed to create project",
         });
       }
+
+      // Fire-and-forget: Create embedding asynchronously
+      await createProjectEmbedding(
+        project.id,
+        `${project.name}.${project.description}`
+      ).catch((error) => {
+        // Log error but don't fail the request
+        console.error(`Failed to create embedding for project ${project.id}:`, error);
+      });
+
       return project;
     }),
 
