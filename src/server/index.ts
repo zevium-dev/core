@@ -4,7 +4,6 @@ import { router } from "./trpc";
 
 export const appRouter = router({
   example: lazy(() => import("./rpcs/example").then((v) => v.exampleRouter)),
-  embedding: lazy(() => import("./rpcs/embedding").then((v) => v.embeddingRouter)),
   organization: lazy(() => import("./rpcs/organization").then((v) => v.organizationRouter)),
   project: lazy(() => import("./rpcs/project").then((v) => v.projectRouter)),
   userPreference: lazy(() => import("./rpcs/user-preference").then((v) => v.userPreferenceRouter)),
