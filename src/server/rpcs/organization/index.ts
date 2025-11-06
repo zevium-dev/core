@@ -22,7 +22,7 @@ export const organizationRouter = router({
           .toLowerCase(),
       }),
     )
-    .output(schemaZod.OrganizationZod.and(z.object({ members: z.array(schemaZod.MemberZod) })).nullable())
+    .output(schemaZod.OrganizationSelectZod.and(z.object({ members: z.array(schemaZod.MemberSelectZod) })).nullable())
     .mutation(async ({ ctx, input }) => {
       const org = await authServer.api.createOrganization({
         body: {
@@ -45,15 +45,15 @@ export const organizationRouter = router({
     .meta({ route: { path: "/organization/get", summary: "Get organization by ID or slug" } })
     .input(type({ organizationId: "string" }).or(type({ organizationSlug: "string" })))
     .output(
-      schemaZod.OrganizationZod.and(
+      schemaZod.OrganizationSelectZod.and(
         z.object({
           members: z.array(
-            schemaZod.MemberZod.and(
-              z.object({ user: schemaZod.UserZod.pick({ email: true, image: true, name: true }) }),
+            schemaZod.MemberSelectZod.and(
+              z.object({ user: schemaZod.UserSelectZod.pick({ email: true, image: true, name: true }) }),
             ),
           ),
         }),
-      ).and(z.object({ invitations: z.array(schemaZod.InvitationZod) })),
+      ).and(z.object({ invitations: z.array(schemaZod.InvitationSelectZod) })),
     )
     .query(async ({ ctx, input }) => {
       const org = await authServer.api.getFullOrganization({
@@ -74,7 +74,7 @@ export const organizationRouter = router({
 
   list: protectedProcedure
     .meta({ route: { path: "/organization/list", summary: "Get all user organizations" } })
-    .output(z.array(schemaZod.OrganizationZod))
+    .output(z.array(schemaZod.OrganizationSelectZod))
     .query(async ({ ctx }) => {
       const orgs = await authServer.api.listOrganizations({ headers: ctx.raw.req.headers });
       return orgs.map((org) => ({
