@@ -12,11 +12,6 @@ import { formatDate } from "~/lib/utils";
 
 export const Route = createFileRoute("/app/organizations/$organizationSlug/projects/~")({
   component: RouteComponent,
-  loader: ({ context, params }) => {
-    void context.queryClient.ensureQueryData(
-      context.trpc.project.list.queryOptions({ organizationSlug: params.organizationSlug }),
-    );
-  },
 });
 
 function RouteComponent() {

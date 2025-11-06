@@ -1,4 +1,4 @@
-import { useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { Link, useMatches, useParams, useRouter } from "@tanstack/react-router";
 import { atom, useAtom } from "jotai";
 import {
@@ -88,7 +88,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const params = useParams({ from: "/app/organizations/$organizationSlug", shouldThrow: false });
   const trpc = useTRPC();
   const user = useUser();
-  const projectsListQuery = useQuery(
+  const projectsListQuery = useSuspenseQuery(
     trpc.project.list.queryOptions(
       { organizationSlug: params?.organizationSlug ?? "unknown" },
       { enabled: !!params?.organizationSlug && !!user },
@@ -107,7 +107,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
     url: "/app/organizations/~",
   };
 
-  const projectNavData = projectsListQuery.data && {
+  const projectNavData = {
     icon: DockIcon,
     requiresAuth: true,
     subroutes: projectsListQuery.data.map((project) => ({
