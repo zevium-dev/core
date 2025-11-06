@@ -125,6 +125,7 @@ function ApiKeysComponent() {
   const handleDeleteKey = async (keyId: string) => {
     setIsPending(true);
     try {
+      // eslint-disable-next-line drizzle/enforce-delete-with-where
       const { error } = await auth.apiKey.delete({ keyId });
       if (error) throw new Error(error.message);
       void refetch();
@@ -272,7 +273,7 @@ function ApiKeysComponent() {
                 <Input readOnly value={newlyCreatedKey ?? ""} />
                 <Button
                   aria-live="polite"
-                  className="border-border/40 bg-muted/30 hover:bg-muted/50 dark:hover:bg-muted/60 text-muted-foreground hover:text-foreground border px-3 transition-colors data-[copied]:bg-emerald-500/20 data-[copied]:text-emerald-500 data-[copied]:hover:bg-emerald-500/30"
+                  className="border-border/40 bg-muted/30 hover:bg-muted/50 dark:hover:bg-muted/60 text-muted-foreground hover:text-foreground border px-3 transition-colors data-copied:bg-emerald-500/20 data-copied:text-emerald-500 data-copied:hover:bg-emerald-500/30"
                   data-copied={createdKeyCopied || undefined}
                   onClick={() => {
                     if (newlyCreatedKey) {
@@ -389,7 +390,7 @@ function ApiKeysComponent() {
           <CardTitle className="text-sm font-medium">Quick Start (cURL)</CardTitle>
           <Button
             aria-live="polite"
-            className="border-border/40 bg-muted/30 hover:bg-muted/50 dark:hover:bg-muted/60 text-muted-foreground hover:text-foreground h-7 border px-2 text-xs transition-colors data-[copied]:bg-emerald-500/20 data-[copied]:text-emerald-500 data-[copied]:hover:bg-emerald-500/30"
+            className="border-border/40 bg-muted/30 hover:bg-muted/50 dark:hover:bg-muted/60 text-muted-foreground hover:text-foreground h-7 border px-2 text-xs transition-colors data-copied:bg-emerald-500/20 data-copied:text-emerald-500 data-copied:hover:bg-emerald-500/30"
             data-copied={snippetCopied || undefined}
             onClick={handleCopySnippet}
             size="sm"

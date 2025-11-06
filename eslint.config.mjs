@@ -13,9 +13,7 @@ import tseslint from "typescript-eslint";
 
 // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- drizzle plugin does not ship types
 const drizzle = /** @type {import("eslint").ESLint.Plugin} */ (drizzlePlugin);
-const drizzleRecommendedConfig = /** @type {import("eslint").Linter.Config} */ (
-  drizzle.configs?.recommended ?? {}
-);
+const drizzleRecommendedConfig = /** @type {import("eslint").Linter.Config} */ (drizzle.configs?.recommended ?? {});
 const drizzleRecommendedRules = /** @type {import("eslint").Linter.RulesRecord} */ (
   drizzleRecommendedConfig.rules ?? {}
 );
