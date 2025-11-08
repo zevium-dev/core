@@ -463,14 +463,21 @@ Prefer:
 
 ---
 
+### 22. Package Manager
+
+- **Always use `pnpm`** for all package management and script running
+
+---
+
 ### Quick Start Checklist for an AI Agent
 
-1. Import existing schemas (do not redefine)
-2. Use `useTRPC()` + generated `queryOptions` / `mutationOptions`
-3. Add optimistic mutation only if merge is safe & deterministic
-4. Invalidate post-settle
-5. Keep UI update logic inside React Query callbacks
-6. Return minimal object shapes
-7. Use theme colors from shadcn/ui, never hardcoded Tailwind colors
+1. **Use `pnpm` for all package operations**
+2. Import existing schemas and types (do not redefine)
+3. Use `useTRPC()` + generated `queryOptions` / `mutationOptions`
+4. Add optimistic mutation when merge is safe & deterministic
+5. Invalidate post-settle
+6. Keep UI update logic inside React Query callbacks
+7. Return minimal object shapes
+8. Use theme colors from shadcn/ui, never hardcoded Tailwind colors
 
 Following these guidelines ensures generated code remains aligned with current best practices introduced in recent refactors (e.g. user preference handling).
