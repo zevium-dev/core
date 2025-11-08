@@ -5,14 +5,14 @@ export const PermissionValueZod = z
   .or(
     z.object({
       limit: z.number().int().positive(),
-      status: z.literal(["limited"]),
+      status: z.literal("limited"),
     }),
   )
   .or(
     z.object({
       // sliding window ratelimit
       limit: z.number().int().positive(),
-      status: z.literal(["ratelimit"]),
+      status: z.literal("ratelimit"),
       window: z.number().int().positive(), // in ms
     }),
   );
