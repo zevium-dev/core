@@ -4,6 +4,7 @@ import preferArrayAt from "@boi.gg/eslint-plugin-prefer-array-at";
 import eslintReact from "@eslint-react/eslint-plugin";
 import eslint from "@eslint/js";
 import pluginRouter from "@tanstack/eslint-plugin-router";
+import tailwindcss from "eslint-plugin-better-tailwindcss";
 import drizzlePlugin from "eslint-plugin-drizzle";
 import perfectionist from "eslint-plugin-perfectionist";
 import reactCompiler from "eslint-plugin-react-compiler";
@@ -17,6 +18,16 @@ const drizzleRecommendedConfig = /** @type {import("eslint").Linter.Config} */ (
 const drizzleRecommendedRules = /** @type {import("eslint").Linter.RulesRecord} */ (
   drizzleRecommendedConfig.rules ?? {}
 );
+
+const tailwind = defineConfig({
+  plugins: { "better-tailwindcss": tailwindcss },
+  rules: {
+    ...tailwindcss.configs["recommended-warn"].rules,
+    "better-tailwindcss/enforce-consistent-line-wrapping": "off",
+    "better-tailwindcss/no-unregistered-classes": "off",
+  },
+  settings: { "better-tailwindcss": { entryPoint: "./src/styles/app.css" } },
+});
 
 export default defineConfig(
   {
@@ -36,6 +47,7 @@ export default defineConfig(
   ...pluginRouter.configs["flat/recommended"],
   perfectionist.configs["recommended-alphabetical"],
   preferArrayAt.configs.recommended,
+  tailwind,
   {
     plugins: {
       drizzle,
