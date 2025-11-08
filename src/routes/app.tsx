@@ -9,9 +9,15 @@ import { sessionQueryOptions, useUser } from "~/lib/auth";
 
 export const Route = createFileRoute("/app")({
   component: RouteComponent,
-  loader: ({ context }) => {
+  loader: ({ context, params }) => {
     void context.queryClient.ensureQueryData(sessionQueryOptions());
     void context.queryClient.ensureQueryData(context.trpc.organization.list.queryOptions());
+
+    if ("organizationSlug" in params && typeof params.organizationSlug === "string" && params.organizationSlug) {
+      void context.queryClient.ensureQueryData(
+        context.trpc.project.list.queryOptions({ organizationSlug: params.organizationSlug }),
+      );
+    }
   },
   pendingComponent: PendingComponent,
 });

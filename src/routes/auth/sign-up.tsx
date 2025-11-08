@@ -95,8 +95,21 @@ function RouteComponent() {
                     Sign up with Google
                   </Button>
                 </div>
-                <div className="after:border-border relative text-center text-sm after:absolute after:inset-0 after:top-1/2 after:z-0 after:flex after:items-center after:border-t">
-                  <span className="bg-card text-muted-foreground relative z-10 px-2">Or continue with</span>
+                <div
+                  className={`
+                  relative text-center text-sm
+                  after:absolute after:inset-0 after:top-1/2 after:z-0
+                  after:flex after:items-center after:border-t
+                  after:border-border
+                `}
+                >
+                  <span
+                    className={`
+                    relative z-10 bg-card px-2 text-muted-foreground
+                  `}
+                  >
+                    Or continue with
+                  </span>
                 </div>
                 <div className="grid gap-6">
                   <div className="grid gap-3">
@@ -110,7 +123,16 @@ function RouteComponent() {
                       type="text"
                       {...register("name")}
                     />
-                    <p className={cn("text-destructive text-end text-xs", !errors.name && "invisible")} id="name-error">
+                    <p
+                      className={cn(
+                        "text-end text-xs text-destructive",
+                        !errors.name &&
+                          `
+                      invisible
+                    `,
+                      )}
+                      id="name-error"
+                    >
                       {errors.name?.message ?? "No error"}
                     </p>
                   </div>
@@ -126,7 +148,13 @@ function RouteComponent() {
                       {...register("email")}
                     />
                     <p
-                      className={cn("text-destructive text-end text-xs", !errors.email && "invisible")}
+                      className={cn(
+                        "text-end text-xs text-destructive",
+                        !errors.email &&
+                          `
+                        invisible
+                      `,
+                      )}
                       id="email-error"
                     >
                       {errors.email?.message ?? "No error"}
@@ -143,7 +171,13 @@ function RouteComponent() {
                       {...register("password")}
                     />
                     <p
-                      className={cn("text-destructive text-end text-xs", !errors.password && "invisible")}
+                      className={cn(
+                        "text-end text-xs text-destructive",
+                        !errors.password &&
+                          `
+                        invisible
+                      `,
+                      )}
                       id="password-error"
                     >
                       {errors.password?.message ?? "No error"}
@@ -160,7 +194,13 @@ function RouteComponent() {
                       {...register("passwordConfirm")}
                     />
                     <p
-                      className={cn("text-destructive text-end text-xs", !errors.passwordConfirm && "invisible")}
+                      className={cn(
+                        "text-end text-xs text-destructive",
+                        !errors.passwordConfirm &&
+                          `
+                        invisible
+                      `,
+                      )}
                       id="password-confirm-error"
                     >
                       {errors.passwordConfirm?.message ?? "No error"}

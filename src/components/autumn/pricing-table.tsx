@@ -17,7 +17,11 @@ export default function PricingTable({ productDetails }: { productDetails?: Arra
 
   if (isLoading) {
     return (
-      <div className="flex h-full min-h-[300px] w-full items-center justify-center">
+      <div
+        className={`
+        flex h-full min-h-[300px] w-full items-center justify-center
+      `}
+      >
         <Loader2 className="h-6 w-6 animate-spin text-zinc-400" />
       </div>
     );
@@ -117,15 +121,34 @@ export const PricingTableContainer = ({
 
   return (
     <PricingTableContext.Provider value={value}>
-      <div className={cn("flex flex-col items-center", hasRecommended && "!py-10")}>
+      <div
+        className={cn(
+          "flex flex-col items-center",
+          hasRecommended &&
+            `
+        py-10!
+      `,
+        )}
+      >
         {multiInterval && (
-          <div className={cn(products.some((p) => p.display?.recommend_text) && "mb-8")}>
+          <div
+            className={cn(
+              products.some((p) => p.display?.recommend_text) &&
+                `
+            mb-8
+          `,
+            )}
+          >
             <AnnualSwitch isAnnualToggle={isAnnualToggle} setIsAnnualToggle={setIsAnnualToggle} />
           </div>
         )}
         <div
           className={cn(
-            "grid w-full grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-[repeat(auto-fit,minmax(200px,1fr))]",
+            `
+              grid w-full grid-cols-1 gap-2
+              sm:grid-cols-2
+              lg:grid-cols-[repeat(auto-fit,minmax(200px,1fr))]
+            `,
             className,
           )}
         >
@@ -168,37 +191,57 @@ export const PricingCard = ({ buttonProps, className, productId }: PricingCardPr
   return (
     <div
       className={cn(
-        "text-foreground h-full w-full max-w-xl rounded-lg border py-6 shadow-sm",
+        `
+          h-full w-full max-w-xl rounded-lg border py-6 text-foreground
+          shadow-sm
+        `,
         isRecommended &&
-          "bg-secondary/40 lg:h-[calc(100%+48px)] lg:-translate-y-6 lg:shadow-lg dark:shadow-zinc-800/80",
+          `
+            bg-secondary/40
+            lg:h-[calc(100%+48px)] lg:-translate-y-6 lg:shadow-lg
+            dark:shadow-zinc-800/80
+          `,
         className,
       )}
     >
       {productDisplay?.recommend_text && <RecommendedBadge recommended={productDisplay.recommend_text} />}
-      <div className={cn("flex h-full flex-grow flex-col", isRecommended && "lg:translate-y-6")}>
+      <div
+        className={cn(
+          "flex h-full grow flex-col",
+          isRecommended &&
+            `
+        lg:translate-y-6
+      `,
+        )}
+      >
         <div className="h-full">
           <div className="flex flex-col">
             <div className="pb-4">
               <h2 className="truncate px-6 text-2xl font-semibold">{productDisplay?.name ?? name}</h2>
               {productDisplay?.description && (
-                <div className="text-muted-foreground h-8 px-6 text-sm">
+                <div className="h-8 px-6 text-sm text-muted-foreground">
                   <p className="line-clamp-2">{productDisplay.description}</p>
                 </div>
               )}
             </div>
             <div className="mb-2">
-              <h3 className="bg-secondary/40 mb-4 flex h-16 items-center border-y px-6 font-semibold">
+              <h3
+                className={`
+                mb-4 flex h-16 items-center border-y bg-secondary/40 px-6
+                font-semibold
+              `}
+              >
                 <div className="line-clamp-2">
                   {mainPriceDisplay.primary_text}{" "}
                   {mainPriceDisplay.secondary_text && (
-                    <span className="text-muted-foreground mt-1 font-normal">{mainPriceDisplay.secondary_text}</span>
+                    <span className="mt-1 font-normal text-muted-foreground">{mainPriceDisplay.secondary_text}</span>
                   )}
                 </div>
               </h3>
             </div>
           </div>
           {showFeatures && featureItems.length > 0 && productDisplay?.everything_from !== undefined && (
-            <div className="mb-6 flex-grow px-6">
+            <div className="mb-6 grow px-6">
               <PricingFeatureList everythingFrom={productDisplay.everything_from} items={featureItems} />
             </div>
           )}
@@ -224,7 +267,7 @@ export const PricingFeatureList = ({
   items: Array<ProductItem>;
 }) => {
   return (
-    <div className={cn("flex-grow", className)}>
+    <div className={cn("grow", className)}>
       {everythingFrom && <p className="mb-4 text-sm">Everything from {everythingFrom}, plus:</p>}
       <div className="space-y-3">
         {items.map((item) => {
@@ -235,7 +278,7 @@ export const PricingFeatureList = ({
               <div className="flex flex-col">
                 <span>{item.display?.primary_text}</span>
                 {item.display?.secondary_text && (
-                  <span className="text-muted-foreground text-sm">{item.display.secondary_text}</span>
+                  <span className="text-sm text-muted-foreground">{item.display.secondary_text}</span>
                 )}
               </div>
             </div>
@@ -276,7 +319,11 @@ export const PricingCardButton = ({
   return (
     <Button
       className={cn(
-        "group relative w-full overflow-hidden rounded-lg border px-4 py-3 transition-all duration-300 hover:brightness-90",
+        `
+          group relative w-full overflow-hidden rounded-lg border px-4 py-3
+          transition-all duration-300
+          hover:brightness-90
+        `,
         className,
       )}
       {...props}
@@ -289,11 +336,23 @@ export const PricingCardButton = ({
         <Loader2 className="h-4 w-4 animate-spin" />
       ) : (
         <>
-          <div className="flex w-full items-center justify-between transition-transform duration-300 group-hover:translate-y-[-130%]">
+          <div
+            className={`
+            flex w-full items-center justify-between transition-transform
+            duration-300
+            group-hover:translate-y-[-130%]
+          `}
+          >
             <span>{children}</span>
             <span className="text-sm">→</span>
           </div>
-          <div className="absolute mt-2 flex w-full translate-y-[130%] items-center justify-between px-4 transition-transform duration-300 group-hover:mt-0 group-hover:translate-y-0">
+          <div
+            className={`
+            absolute mt-2 flex w-full translate-y-[130%] items-center
+            justify-between px-4 transition-transform duration-300
+            group-hover:mt-0 group-hover:translate-y-0
+          `}
+          >
             <span>{children}</span>
             <span className="text-sm">→</span>
           </div>
@@ -314,16 +373,22 @@ export const AnnualSwitch = ({
 }) => {
   return (
     <div className="mb-4 flex items-center space-x-2">
-      <span className="text-muted-foreground text-sm">Monthly</span>
+      <span className="text-sm text-muted-foreground">Monthly</span>
       <Switch checked={isAnnualToggle} id="annual-billing" onCheckedChange={setIsAnnualToggle} />
-      <span className="text-muted-foreground text-sm">Annual</span>
+      <span className="text-sm text-muted-foreground">Annual</span>
     </div>
   );
 };
 
 export const RecommendedBadge = ({ recommended }: { recommended: string }) => {
   return (
-    <div className="bg-secondary text-muted-foreground absolute top-[-1px] right-[-1px] rounded-bl-lg border px-3 text-sm font-medium lg:top-4 lg:right-4 lg:rounded-full lg:py-0.5">
+    <div
+      className={`
+      absolute -top-px -right-px rounded-bl-lg border bg-secondary px-3
+      text-sm font-medium text-muted-foreground
+      lg:top-4 lg:right-4 lg:rounded-full lg:py-0.5
+    `}
+    >
       {recommended}
     </div>
   );

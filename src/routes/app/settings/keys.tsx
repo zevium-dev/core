@@ -125,6 +125,7 @@ function ApiKeysComponent() {
   const handleDeleteKey = async (keyId: string) => {
     setIsPending(true);
     try {
+      // eslint-disable-next-line drizzle/enforce-delete-with-where
       const { error } = await auth.apiKey.delete({ keyId });
       if (error) throw new Error(error.message);
       void refetch();
@@ -197,10 +198,10 @@ function ApiKeysComponent() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="space-y-2">
-          <h1 className="text-foreground text-2xl font-bold">API Keys</h1>
+          <h1 className="text-2xl font-bold text-foreground">API Keys</h1>
           <div className="flex items-center gap-2">
-            <p className="text-muted-foreground text-sm">Manage your API keys to access all Zevium-integrated APIs</p>
-            <Info className="text-muted-foreground h-4 w-4" />
+            <p className="text-sm text-muted-foreground">Manage your API keys to access all Zevium-integrated APIs</p>
+            <Info className="h-4 w-4 text-muted-foreground" />
           </div>
         </div>
 
@@ -272,7 +273,14 @@ function ApiKeysComponent() {
                 <Input readOnly value={newlyCreatedKey ?? ""} />
                 <Button
                   aria-live="polite"
-                  className="border-border/40 bg-muted/30 hover:bg-muted/50 dark:hover:bg-muted/60 text-muted-foreground hover:text-foreground border px-3 transition-colors data-[copied]:bg-emerald-500/20 data-[copied]:text-emerald-500 data-[copied]:hover:bg-emerald-500/30"
+                  className={`
+                    border border-border/40 bg-muted/30 px-3
+                    text-muted-foreground transition-colors
+                    hover:bg-muted/50 hover:text-foreground
+                    data-copied:bg-emerald-500/20 data-copied:text-emerald-500
+                    data-copied:hover:bg-emerald-500/30
+                    dark:hover:bg-muted/60
+                  `}
                   data-copied={createdKeyCopied || undefined}
                   onClick={() => {
                     if (newlyCreatedKey) {
@@ -285,11 +293,19 @@ function ApiKeysComponent() {
                   title={createdKeyCopied ? "Copied" : "Copy key"}
                   variant="ghost"
                 >
-                  {createdKeyCopied ? <Check className="mr-1 h-3 w-3" /> : <Copy className="mr-1 h-3 w-3" />}{" "}
+                  {createdKeyCopied ? (
+                    <Check className="mr-1 h-3 w-3" />
+                  ) : (
+                    <Copy
+                      className={`
+                    mr-1 h-3 w-3
+                  `}
+                    />
+                  )}{" "}
                   {createdKeyCopied ? "Copied" : "Copy"}
                 </Button>
               </div>
-              <p className="text-muted-foreground text-[11px]">
+              <p className="text-[11px] text-muted-foreground">
                 Never share your API key publicly. Treat it like a password.
               </p>
             </div>
@@ -303,9 +319,9 @@ function ApiKeysComponent() {
       </div>
 
       {/* API Keys Table */}
-      <Card className="bg-card/50 border-border/50 backdrop-blur-sm">
+      <Card className="border-border/50 bg-card/50 backdrop-blur-sm">
         <CardContent className="p-0">
-          <div className="border-border/50 overflow-hidden rounded-md border">
+          <div className="overflow-hidden rounded-md border border-border/50">
             <Table>
               <TableHeader>
                 <TableRow className="bg-muted/30">
@@ -320,7 +336,7 @@ function ApiKeysComponent() {
                   <TableRow>
                     <TableCell className="py-10 text-center" colSpan={4}>
                       <div className="flex flex-col items-center gap-2">
-                        <span className="text-muted-foreground text-sm">No API keys yet.</span>
+                        <span className="text-sm text-muted-foreground">No API keys yet.</span>
                         <Button className="gap-2" onClick={() => setIsCreateDialogOpen(true)} size="sm">
                           <Plus className="h-4 w-4" /> Create your first key
                         </Button>
@@ -337,7 +353,12 @@ function ApiKeysComponent() {
                           {/* No secondary line now; rate limit displayed in column */}
                         </div>
                         <div className="flex items-center gap-2">
-                          <code className="bg-muted text-muted-foreground rounded px-2 py-1 font-mono text-xs">
+                          <code
+                            className={`
+                            rounded bg-muted px-2 py-1 font-mono text-xs
+                            text-muted-foreground
+                          `}
+                          >
                             {apiKey.key
                               ? formatKey(apiKey.key)
                               : `${apiKey.prefix ?? "sk"}...${apiKey.start ?? "xxxx"}`}
@@ -346,7 +367,7 @@ function ApiKeysComponent() {
                       </div>
                     </TableCell>
                     <TableCell>
-                      <span className="text-muted-foreground text-sm">{apiKey.limit}</span>
+                      <span className="text-sm text-muted-foreground">{apiKey.limit}</span>
                     </TableCell>
                     <TableCell>
                       <span className="text-sm font-medium">{apiKey.usage}</span>
@@ -375,8 +396,12 @@ function ApiKeysComponent() {
           </div>
           {hasKeys && (
             <div className="flex items-center justify-end px-4 py-2">
-              <span className="text-muted-foreground text-[10px] tracking-wide uppercase">
-                Total Usage: <span className="text-foreground font-medium">${totalUsage.toFixed(3)} used</span>
+              <span
+                className={`
+                text-[10px] tracking-wide text-muted-foreground uppercase
+              `}
+              >
+                Total Usage: <span className="font-medium text-foreground">${totalUsage.toFixed(3)} used</span>
               </span>
             </div>
           )}
@@ -384,28 +409,53 @@ function ApiKeysComponent() {
       </Card>
 
       {/* Quick Start Snippet */}
-      <Card className="bg-card/50 border-border/50 backdrop-blur-sm">
-        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+      <Card className="border-border/50 bg-card/50 backdrop-blur-sm">
+        <CardHeader
+          className={`
+          flex flex-row items-center justify-between space-y-0 pb-2
+        `}
+        >
           <CardTitle className="text-sm font-medium">Quick Start (cURL)</CardTitle>
           <Button
             aria-live="polite"
-            className="border-border/40 bg-muted/30 hover:bg-muted/50 dark:hover:bg-muted/60 text-muted-foreground hover:text-foreground h-7 border px-2 text-xs transition-colors data-[copied]:bg-emerald-500/20 data-[copied]:text-emerald-500 data-[copied]:hover:bg-emerald-500/30"
+            className={`
+              h-7 border border-border/40 bg-muted/30 px-2 text-xs
+              text-muted-foreground transition-colors
+              hover:bg-muted/50 hover:text-foreground
+              data-copied:bg-emerald-500/20 data-copied:text-emerald-500
+              data-copied:hover:bg-emerald-500/30
+              dark:hover:bg-muted/60
+            `}
             data-copied={snippetCopied || undefined}
             onClick={handleCopySnippet}
             size="sm"
             title={snippetCopied ? "Copied" : "Copy snippet"}
             variant="ghost"
           >
-            {snippetCopied ? <Check className="mr-1 h-3 w-3" /> : <Copy className="mr-1 h-3 w-3" />}{" "}
+            {snippetCopied ? (
+              <Check className="mr-1 h-3 w-3" />
+            ) : (
+              <Copy
+                className={`
+              mr-1 h-3 w-3
+            `}
+              />
+            )}{" "}
             {snippetCopied ? "Copied" : "Copy"}
           </Button>
         </CardHeader>
         <CardContent className="pt-0">
           <div className="relative">
-            <pre className="bg-muted/50 border-border/50 selection:bg-primary/30 selection:text-primary-foreground overflow-x-auto rounded-md border p-4 font-mono text-xs leading-relaxed whitespace-pre">
+            <pre
+              className={`
+              overflow-x-auto rounded-md border border-border/50 bg-muted/50 p-4
+              font-mono text-xs leading-relaxed whitespace-pre
+              selection:bg-primary/30 selection:text-primary-foreground
+            `}
+            >
               {snippet}
             </pre>
-            <p className="text-muted-foreground mt-2 text-[11px]">
+            <p className="mt-2 text-[11px] text-muted-foreground">
               Replace <code className="font-mono">YOUR_API_KEY</code> with one of the keys above.
             </p>
           </div>

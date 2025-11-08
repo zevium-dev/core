@@ -48,8 +48,8 @@ const organizationProcedure = protectedProcedure.input(OrganizationInputZod).use
 export const projectRouter = router({
   create: organizationProcedure
     .meta({ route: { path: "/project/create", summary: "Create a new project" } })
-    .input(OrganizationInputZod.and(schemaZod.ProjectZod.pick({ description: true, name: true, slug: true })))
-    .output(schemaZod.ProjectZod)
+    .input(OrganizationInputZod.and(schemaZod.ProjectSelectZod.pick({ description: true, name: true, slug: true })))
+    .output(schemaZod.ProjectSelectZod)
     .mutation(async ({ ctx, input }) => {
       const project = await db
         .insert(schema.project)
@@ -77,7 +77,7 @@ export const projectRouter = router({
   get: organizationProcedure
     .meta({ route: { path: "/project/get", summary: "Get a project by ID or slug" } })
     .input(OrganizationInputZod.and(z.object({ projectId: z.string() }).or(z.object({ projectSlug: z.string() }))))
-    .output(schemaZod.ProjectZod.and(z.object({ project_tags: z.array(schemaZod.ProjectTagZod) })))
+    .output(schemaZod.ProjectSelectZod.and(z.object({ project_tags: z.array(schemaZod.ProjectTagSelectZod) })))
     .query(async ({ ctx, input }) => {
       const whereClauses = [orm.eq(schema.project.organizationId, ctx.organization.id)];
       if ("projectId" in input) {
@@ -108,7 +108,7 @@ export const projectRouter = router({
   list: organizationProcedure
     .meta({ route: { path: "/project/list", summary: "List all projects in an organization" } })
     .input(OrganizationInputZod.and(z.object({ tagNames: z.array(z.string()).optional() })))
-    .output(z.array(schemaZod.ProjectZod.and(z.object({ project_tags: z.array(schemaZod.ProjectTagZod) }))))
+    .output(z.array(schemaZod.ProjectSelectZod.and(z.object({ project_tags: z.array(schemaZod.ProjectTagSelectZod) }))))
     .query(async ({ ctx, input }) => {
       const where = [orm.eq(schema.project.organizationId, ctx.organization.id)];
       if (input.tagNames && input.tagNames.length > 0) {
@@ -145,7 +145,7 @@ export const projectRouter = router({
     .meta({ route: { path: "/project/update", summary: "Update a project" } })
     .input(
       OrganizationInputZod.and(
-        schemaZod.ProjectZod.pick({
+        schemaZod.ProjectSelectZod.pick({
           description: true,
           documentation: true,
           id: true,
@@ -155,7 +155,7 @@ export const projectRouter = router({
         }),
       ).and(z.object({ tagNames: z.array(z.string()) })),
     )
-    .output(schemaZod.ProjectZod.and(z.object({ project_tags: z.array(schemaZod.ProjectTagZod) })))
+    .output(schemaZod.ProjectSelectZod.and(z.object({ project_tags: z.array(schemaZod.ProjectTagSelectZod) })))
     .mutation(async ({ ctx, input }) => {
       const project = await db
         .update(schema.project)
@@ -195,7 +195,7 @@ export const projectRouter = router({
         }),
       ),
     )
-    .output(schemaZod.ProjectZod.and(z.object({ project_tags: z.array(schemaZod.ProjectTagZod) })))
+    .output(schemaZod.ProjectSelectZod.and(z.object({ project_tags: z.array(schemaZod.ProjectTagSelectZod) })))
     .mutation(async ({ ctx, input }) => {
       const project = await db
         .select()

@@ -12,11 +12,6 @@ import { formatDate } from "~/lib/utils";
 
 export const Route = createFileRoute("/app/organizations/$organizationSlug/projects/~")({
   component: RouteComponent,
-  loader: ({ context, params }) => {
-    void context.queryClient.ensureQueryData(
-      context.trpc.project.list.queryOptions({ organizationSlug: params.organizationSlug }),
-    );
-  },
 });
 
 function RouteComponent() {
@@ -69,7 +64,7 @@ function RouteComponent() {
         </CardHeader>
         <CardContent>
           {projectsListQuery.data.length === 0 ? (
-            <Typography className="text-muted-foreground py-8 text-center" variant="small">
+            <Typography className="py-8 text-center text-muted-foreground" variant="small">
               No projects yet. Create one to get started.
             </Typography>
           ) : (
@@ -80,16 +75,26 @@ function RouteComponent() {
                   params={{ organizationSlug, projectSlug: project.slug }}
                   to="/app/organizations/$organizationSlug/projects/$projectSlug"
                 >
-                  <div className="hover:bg-muted/50 flex cursor-pointer items-center justify-between rounded-lg border p-4 transition-colors">
+                  <div
+                    className={`
+                    flex cursor-pointer items-center justify-between rounded-lg
+                    border p-4 transition-colors
+                    hover:bg-muted/50
+                  `}
+                  >
                     <div className="flex-1 space-y-1">
                       <div className="flex items-center gap-2">
                         <h4 className="font-medium">{project.name}</h4>
                         {getVisibilityIcon(project.visibility)}
                       </div>
-                      <p className="text-muted-foreground text-sm">
+                      <p className="text-sm text-muted-foreground">
                         {project.description || "No description available"}
                       </p>
-                      <div className="text-muted-foreground flex items-center gap-2 text-xs">
+                      <div
+                        className={`
+                        flex items-center gap-2 text-xs text-muted-foreground
+                      `}
+                      >
                         <span>Created {formatDate(project.createdAt)}</span>
                         <span>•</span>
                         <span>Updated {formatDate(project.updatedAt)}</span>

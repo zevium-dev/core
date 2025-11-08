@@ -1,4 +1,4 @@
-import { useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { Link, useMatches, useParams, useRouter } from "@tanstack/react-router";
 import { atom, useAtom } from "jotai";
 import {
@@ -59,7 +59,13 @@ export function PageHeader() {
   const [headerContent] = useAtom(headerContentAtom);
 
   return (
-    <header className="sticky top-0 z-10 flex h-16 shrink-0 items-center gap-2 backdrop-blur-xs transition-[width,height] ease-linear group-has-data-[collapsible=icon]/sidebar-wrapper:h-12">
+    <header
+      className={`
+      sticky top-0 z-10 flex h-16 shrink-0 items-center gap-2 backdrop-blur-xs
+      transition-[width,height] ease-linear
+      group-has-data-[collapsible=icon]/sidebar-wrapper:h-12
+    `}
+    >
       <div className="flex w-full items-center gap-2 px-4">
         <SidebarTrigger className="-ml-1 size-8" />
         {headerContent}
@@ -88,7 +94,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const params = useParams({ from: "/app/organizations/$organizationSlug", shouldThrow: false });
   const trpc = useTRPC();
   const user = useUser();
-  const projectsListQuery = useQuery(
+  const projectsListQuery = useSuspenseQuery(
     trpc.project.list.queryOptions(
       { organizationSlug: params?.organizationSlug ?? "unknown" },
       { enabled: !!params?.organizationSlug && !!user },
@@ -107,7 +113,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
     url: "/app/organizations/~",
   };
 
-  const projectNavData = projectsListQuery.data && {
+  const projectNavData = {
     icon: DockIcon,
     requiresAuth: true,
     subroutes: projectsListQuery.data.map((project) => ({
@@ -127,7 +133,12 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
           <SidebarMenuItem>
             <Link to="/">
               <SidebarMenuButton size="lg">
-                <div className="flex aspect-square size-8 items-center justify-center rounded-full bg-black">
+                <div
+                  className={`
+                  flex aspect-square size-8 items-center justify-center
+                  rounded-full bg-black
+                `}
+                >
                   <img alt="zevium" className="size-7" src="/icon.png" />
                 </div>
                 <div className="grid flex-1 text-left text-sm leading-tight">
@@ -143,7 +154,13 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         <SidebarGroup>
           <SidebarMenu>
             <SidebarMenuItem>
-              <SidebarMenuButton asChild className="data-[active=true]:bg-main data-[active=true]:text-main-foreground">
+              <SidebarMenuButton
+                asChild
+                className={`
+                data-[active=true]:bg-main
+                data-[active=true]:text-main-foreground
+              `}
+              >
                 <Link to="/app/dashboard">
                   <LayoutDashboardIcon />
                   <span>Dashboard</span>
@@ -152,7 +169,13 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
             </SidebarMenuItem>
 
             <SidebarMenuItem>
-              <SidebarMenuButton asChild className="data-[active=true]:bg-main data-[active=true]:text-main-foreground">
+              <SidebarMenuButton
+                asChild
+                className={`
+                data-[active=true]:bg-main
+                data-[active=true]:text-main-foreground
+              `}
+              >
                 <Link to="/app/catalogue">
                   <Database />
                   <span>API Catalogue</span>
@@ -176,7 +199,10 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                     <SidebarMenuItem>
                       <CollapsibleTrigger asChild>
                         <SidebarMenuButton
-                          className="data-[active=true]:bg-main data-[active=true]:text-main-foreground"
+                          className={`
+                            data-[active=true]:bg-main
+                            data-[active=true]:text-main-foreground
+                          `}
                           isActive={isSettingsActive}
                         >
                           <item.icon />
@@ -206,7 +232,10 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                 <SidebarMenuItem key={item.title}>
                   <SidebarMenuButton
                     asChild
-                    className="data-[active=true]:bg-main data-[active=true]:text-main-foreground"
+                    className={`
+                      data-[active=true]:bg-main
+                      data-[active=true]:text-main-foreground
+                    `}
                     isActive={isActive}
                   >
                     <Link to={item.url}>
@@ -246,7 +275,12 @@ export function MainSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) 
           <SidebarMenuItem>
             <Link to="/">
               <SidebarMenuButton size="lg">
-                <div className="flex aspect-square size-8 items-center justify-center rounded-full bg-black">
+                <div
+                  className={`
+                  flex aspect-square size-8 items-center justify-center
+                  rounded-full bg-black
+                `}
+                >
                   <img alt="zevium" className="size-7" src="/icon.png" />
                 </div>
                 <div className="grid flex-1 text-left text-sm leading-tight">
@@ -262,7 +296,13 @@ export function MainSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) 
         <SidebarGroup>
           <SidebarMenu>
             <SidebarMenuItem>
-              <SidebarMenuButton asChild className="data-[active=true]:bg-main data-[active=true]:text-main-foreground">
+              <SidebarMenuButton
+                asChild
+                className={`
+                data-[active=true]:bg-main
+                data-[active=true]:text-main-foreground
+              `}
+              >
                 <Link to={user ? "/app/dashboard" : "/auth/sign-in"}>
                   <LayoutDashboardIcon />
                   <span>Dashboard</span>
@@ -271,7 +311,13 @@ export function MainSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) 
             </SidebarMenuItem>
 
             <SidebarMenuItem>
-              <SidebarMenuButton asChild className="data-[active=true]:bg-main data-[active=true]:text-main-foreground">
+              <SidebarMenuButton
+                asChild
+                className={`
+                data-[active=true]:bg-main
+                data-[active=true]:text-main-foreground
+              `}
+              >
                 <Link to={user ? "/app/catalogue" : "/auth/sign-in"}>
                   <Database />
                   <span>API Catalogue</span>
@@ -326,7 +372,11 @@ function AccountSection() {
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <SidebarMenuButton
-              className="group-data-[state=collapsed]:hover:bg-sidebar-accent group-data-[state=collapsed]:hover:text-sidebar-accent-foreground transition-colors"
+              className={`
+                transition-colors
+                group-data-[state=collapsed]:hover:bg-sidebar-accent
+                group-data-[state=collapsed]:hover:text-sidebar-accent-foreground
+              `}
               size="default"
             >
               <Avatar className="size-6">
@@ -340,7 +390,7 @@ function AccountSection() {
             <DropdownMenuLabel className="font-normal">
               <div className="flex flex-col space-y-1">
                 <p className="text-sm leading-none font-medium">{user.name}</p>
-                <p className="text-muted-foreground text-xs leading-none">{user.email}</p>
+                <p className="text-xs leading-none text-muted-foreground">{user.email}</p>
               </div>
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
@@ -355,7 +405,11 @@ function AccountSection() {
       // Not signed in - show sign in icon
       return (
         <SidebarMenuButton
-          className="group-data-[state=collapsed]:hover:bg-sidebar-accent group-data-[state=collapsed]:hover:text-sidebar-accent-foreground transition-colors"
+          className={`
+            transition-colors
+            group-data-[state=collapsed]:hover:bg-sidebar-accent
+            group-data-[state=collapsed]:hover:text-sidebar-accent-foreground
+          `}
           onClick={handleSignIn}
           size="default"
         >
@@ -371,14 +425,20 @@ function AccountSection() {
     return (
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <SidebarMenuButton className="group-data-[state=expanded]:hover:bg-sidebar-accent group-data-[state=expanded]:hover:text-sidebar-accent-foreground transition-colors">
+          <SidebarMenuButton
+            className={`
+            transition-colors
+            group-data-[state=expanded]:hover:bg-sidebar-accent
+            group-data-[state=expanded]:hover:text-sidebar-accent-foreground
+          `}
+          >
             <Avatar className="size-6">
               <AvatarImage alt={user.name || "User"} src={user.image ?? ""} />
               <AvatarFallback className="text-xs">{getUserInitials(user)}</AvatarFallback>
             </Avatar>
             <div className="grid flex-1 text-left text-sm leading-tight">
               <span className="truncate font-medium">{user.name}</span>
-              <span className="text-muted-foreground truncate text-xs">{user.email}</span>
+              <span className="truncate text-xs text-muted-foreground">{user.email}</span>
             </div>
           </SidebarMenuButton>
         </DropdownMenuTrigger>
@@ -386,7 +446,7 @@ function AccountSection() {
           <DropdownMenuLabel className="font-normal">
             <div className="flex flex-col space-y-1">
               <p className="text-sm leading-none font-medium">{user.name}</p>
-              <p className="text-muted-foreground text-xs leading-none">{user.email}</p>
+              <p className="text-xs leading-none text-muted-foreground">{user.email}</p>
             </div>
           </DropdownMenuLabel>
           <DropdownMenuSeparator />
@@ -401,7 +461,11 @@ function AccountSection() {
     // Not signed in - show sign in button
     return (
       <SidebarMenuButton
-        className="group-data-[state=expanded]:hover:bg-sidebar-accent group-data-[state=expanded]:hover:text-sidebar-accent-foreground transition-colors"
+        className={`
+          transition-colors
+          group-data-[state=expanded]:hover:bg-sidebar-accent
+          group-data-[state=expanded]:hover:text-sidebar-accent-foreground
+        `}
         onClick={handleSignIn}
       >
         <LogIn className="size-4" />
@@ -421,11 +485,25 @@ function ThemeSelector() {
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <SidebarMenuButton
-            className="group-data-[state=collapsed]:hover:bg-sidebar-accent group-data-[state=collapsed]:hover:text-sidebar-accent-foreground transition-colors"
+            className={`
+              transition-colors
+              group-data-[state=collapsed]:hover:bg-sidebar-accent
+              group-data-[state=collapsed]:hover:text-sidebar-accent-foreground
+            `}
             size="default"
           >
-            <Sun className="size-4 scale-100 rotate-0 transition-all dark:scale-0 dark:-rotate-90" />
-            <Moon className="absolute size-4 scale-0 rotate-90 transition-all dark:scale-100 dark:rotate-0" />
+            <Sun
+              className={`
+              size-4 scale-100 rotate-0 transition-all
+              dark:scale-0 dark:-rotate-90
+            `}
+            />
+            <Moon
+              className={`
+              absolute size-4 scale-0 rotate-90 transition-all
+              dark:scale-100 dark:rotate-0
+            `}
+            />
             <span className="sr-only">Toggle theme</span>
           </SidebarMenuButton>
         </DropdownMenuTrigger>
@@ -450,11 +528,41 @@ function ThemeSelector() {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <SidebarMenuButton className="group-data-[state=expanded]:hover:bg-sidebar-accent group-data-[state=expanded]:hover:text-sidebar-accent-foreground transition-colors">
-          <Sun className="size-4 scale-100 rotate-0 transition-all dark:scale-0 dark:-rotate-90" />
-          <span className="font-medium opacity-100 dark:opacity-0">Light</span>
-          <Moon className="absolute size-4 scale-0 rotate-90 transition-all dark:scale-100 dark:rotate-0" />
-          <span className="absolute ml-6 font-medium opacity-0 dark:opacity-100">Dark</span>
+        <SidebarMenuButton
+          className={`
+          transition-colors
+          group-data-[state=expanded]:hover:bg-sidebar-accent
+          group-data-[state=expanded]:hover:text-sidebar-accent-foreground
+        `}
+        >
+          <Sun
+            className={`
+            size-4 scale-100 rotate-0 transition-all
+            dark:scale-0 dark:-rotate-90
+          `}
+          />
+          <span
+            className={`
+            font-medium opacity-100
+            dark:opacity-0
+          `}
+          >
+            Light
+          </span>
+          <Moon
+            className={`
+            absolute size-4 scale-0 rotate-90 transition-all
+            dark:scale-100 dark:rotate-0
+          `}
+          />
+          <span
+            className={`
+            absolute ml-6 font-medium opacity-0
+            dark:opacity-100
+          `}
+          >
+            Dark
+          </span>
         </SidebarMenuButton>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" side="right" sideOffset={4}>

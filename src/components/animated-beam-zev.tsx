@@ -12,12 +12,23 @@ const Circle = ({
   return (
     <div
       className={cn(
-        "z-10 flex size-12 items-center justify-center rounded-full border-2 border-gray-300/30 bg-transparent p-3 shadow-lg backdrop-blur-sm dark:border-gray-600/30",
+        `
+          z-10 flex size-12 items-center justify-center rounded-full border-2
+          border-gray-300/30 bg-transparent p-3 shadow-lg backdrop-blur-sm
+          dark:border-gray-600/30
+        `,
         className,
       )}
       ref={ref}
     >
-      <div className="text-gray-700 dark:text-gray-400">{children}</div>
+      <div
+        className={`
+        text-gray-700
+        dark:text-gray-400
+      `}
+      >
+        {children}
+      </div>
     </div>
   );
 };
@@ -36,10 +47,20 @@ export function AnimatedBeamZev({ className }: { className?: string }) {
 
   return (
     <div
-      className={cn("relative flex h-[500px] w-full items-center justify-center overflow-hidden p-10", className)}
+      className={cn(
+        `
+        relative flex h-[500px] w-full items-center justify-center
+        overflow-hidden p-10
+      `,
+        className,
+      )}
       ref={containerRef}
     >
-      <div className="flex size-full max-w-lg flex-row items-stretch justify-between gap-10">
+      <div
+        className={`
+        flex size-full max-w-lg flex-row items-stretch justify-between gap-10
+      `}
+      >
         <div className="flex flex-col justify-center">
           <Circle ref={div7Ref}>
             <Users className="h-6 w-6" />
