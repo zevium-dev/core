@@ -40,13 +40,19 @@ export default function CheckoutDialog(params: CheckoutDialogProps) {
 
   return (
     <Dialog onOpenChange={setOpen} open={open}>
-      <DialogContent className="text-foreground gap-0 p-0 pt-4 text-sm">
+      <DialogContent className="gap-0 p-0 pt-4 text-sm text-foreground">
         <DialogTitle className="mb-1 px-6">{title}</DialogTitle>
-        <div className="text-muted-foreground mt-1 mb-4 px-6">{message}</div>
+        <div className="mt-1 mb-4 px-6 text-muted-foreground">{message}</div>
 
         {isPaid && <PriceInformation checkoutResult={checkoutResult} />}
 
-        <DialogFooter className="bg-secondary flex flex-col justify-between gap-x-4 border-t py-2 pr-3 pl-6 shadow-inner sm:flex-row">
+        <DialogFooter
+          className={`
+          flex flex-col justify-between gap-x-4 border-t bg-secondary py-2 pr-3
+          pl-6 shadow-inner
+          sm:flex-row
+        `}
+        >
           <Button
             className="flex min-w-16 items-center gap-2"
             disabled={loading}
@@ -88,11 +94,22 @@ function CheckoutLines({ checkoutResult }: { checkoutResult: CheckoutResult }) {
   return (
     <Accordion collapsible type="single">
       <AccordionItem className="border-b-0" value="total">
-        <CustomAccordionTrigger className="my-0 w-full justify-between border-none py-0">
-          <div className="flex w-full cursor-pointer items-center justify-end gap-1">
-            <p className="text-muted-foreground font-light">View details</p>
+        <CustomAccordionTrigger
+          className={`
+          my-0 w-full justify-between border-none py-0
+        `}
+        >
+          <div
+            className={`
+            flex w-full cursor-pointer items-center justify-end gap-1
+          `}
+          >
+            <p className="font-light text-muted-foreground">View details</p>
             <ChevronDown
-              className="text-muted-foreground mt-0.5 rotate-90 transition-transform duration-200 ease-in-out"
+              className={`
+                mt-0.5 rotate-90 text-muted-foreground transition-transform
+                duration-200 ease-in-out
+              `}
               size={14}
             />
           </div>
@@ -129,7 +146,14 @@ function CustomAccordionTrigger({
     <AccordionPrimitive.Header className="flex">
       <AccordionPrimitive.Trigger
         className={cn(
-          "focus-visible:border-ring focus-visible:ring-ring/50 flex flex-1 items-start justify-between gap-4 rounded-md py-4 text-left text-sm font-medium transition-all outline-none focus-visible:ring-[3px] disabled:pointer-events-none disabled:opacity-50 [&[data-state=open]_svg]:rotate-0",
+          `
+            flex flex-1 items-start justify-between gap-4 rounded-md py-4
+            text-left text-sm font-medium transition-all outline-none
+            focus-visible:border-ring focus-visible:ring-[3px]
+            focus-visible:ring-ring/50
+            disabled:pointer-events-none disabled:opacity-50
+            [&[data-state=open]_svg]:rotate-0
+          `,
           className,
         )}
         data-slot="accordion-trigger"
@@ -164,7 +188,7 @@ function DueAmounts({ checkoutResult }: { checkoutResult: CheckoutResult }) {
         </p>
       </div>
       {showNextCycle && (
-        <div className="text-muted-foreground flex justify-between">
+        <div className="flex justify-between text-muted-foreground">
           <div>
             <p className="text-md">Due next cycle ({nextCycleAtStr})</p>
           </div>
@@ -286,11 +310,14 @@ const PrepaidItem = ({ checkoutResult, item }: { checkoutResult: CheckoutResult;
   return (
     <div className="flex justify-between gap-2">
       <div className="flex items-start gap-2">
-        <p className="text-muted-foreground whitespace-nowrap">{item.feature?.name ?? "Feature"}</p>
+        <p className="whitespace-nowrap text-muted-foreground">{item.feature?.name ?? "Feature"}</p>
         <Popover onOpenChange={setOpen} open={open}>
           <PopoverTrigger
             className={cn(
-              "text-muted-foreground bg-accent/80 flex shrink-0 items-center gap-1 rounded-md px-1 py-0.5 text-xs",
+              `
+                flex shrink-0 items-center gap-1 rounded-md bg-accent/80 px-1
+                py-0.5 text-xs text-muted-foreground
+              `,
               !disableSelection && "hover:bg-accent hover:text-foreground",
             )}
             disabled={disableSelection}
@@ -298,7 +325,12 @@ const PrepaidItem = ({ checkoutResult, item }: { checkoutResult: CheckoutResult;
             Qty: {quantity}
             <ChevronDown size={12} />
           </PopoverTrigger>
-          <PopoverContent align="start" className="flex w-80 flex-col gap-4 p-4 pt-3 text-sm">
+          <PopoverContent
+            align="start"
+            className={`
+            flex w-80 flex-col gap-4 p-4 pt-3 text-sm
+          `}
+          >
             <div className="flex flex-col gap-1">
               <p className="text-sm font-medium">{item.feature?.name ?? "Feature"}</p>
               <p className="text-muted-foreground">
@@ -309,7 +341,10 @@ const PrepaidItem = ({ checkoutResult, item }: { checkoutResult: CheckoutResult;
             <div className="flex items-end justify-between">
               <div className="flex items-center gap-2">
                 <Input
-                  className="h-7 w-16 focus:!ring-2"
+                  className={`
+                    h-7 w-16
+                    focus:ring-2!
+                  `}
                   onChange={(e) => setQuantityInput(e.target.value)}
                   value={quantityInput}
                 />
@@ -320,11 +355,23 @@ const PrepaidItem = ({ checkoutResult, item }: { checkoutResult: CheckoutResult;
               </div>
 
               <Button
-                className="text-foreground !h-7 w-14 items-center border border-zinc-200 bg-white text-sm shadow-sm hover:bg-zinc-100"
+                className={`
+                  h-7! w-14 items-center border border-zinc-200 bg-white text-sm
+                  text-foreground shadow-sm
+                  hover:bg-zinc-100
+                `}
                 disabled={loading}
                 onClick={handleSave}
               >
-                {loading ? <Loader2 className="text-muted-foreground !h-4 !w-4 animate-spin" /> : "Save"}
+                {loading ? (
+                  <Loader2
+                    className={`
+                  h-4! w-4! animate-spin text-muted-foreground
+                `}
+                  />
+                ) : (
+                  "Save"
+                )}
               </Button>
             </div>
           </PopoverContent>
@@ -348,7 +395,10 @@ export const PriceItem = ({
   return (
     <div
       className={cn(
-        "flex flex-col justify-between gap-1 pb-4 sm:h-7 sm:flex-row sm:items-center sm:gap-2 sm:pb-0",
+        `
+          flex flex-col justify-between gap-1 pb-4
+          sm:h-7 sm:flex-row sm:items-center sm:gap-2 sm:pb-0
+        `,
         className,
       )}
       {...props}
@@ -374,7 +424,7 @@ export const PricingDialogButton = ({
   return (
     <Button className={cn(className, "shadow-sm shadow-stone-400")} disabled={disabled} onClick={onClick} size={size}>
       {children}
-      <ArrowRight className="!h-3" />
+      <ArrowRight className="h-3!" />
     </Button>
   );
 };

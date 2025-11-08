@@ -101,7 +101,7 @@ function RouteComponent() {
                       </AvatarFallback>
                     </Avatar>
                   </div>
-                  <div className="text-muted-foreground text-sm">Signed in as</div>
+                  <div className="text-sm text-muted-foreground">Signed in as</div>
                   <div className="font-medium">{user.email}</div>
                 </div>
                 <div className="grid gap-1">
@@ -118,7 +118,16 @@ function RouteComponent() {
                     type="password"
                     value={password}
                   />
-                  <p className={cn("text-destructive text-end text-xs", !error && "invisible")} id="password-error">
+                  <p
+                    className={cn(
+                      "text-end text-xs text-destructive",
+                      !error &&
+                        `
+                    invisible
+                  `,
+                    )}
+                    id="password-error"
+                  >
                     {error ?? "No error"}
                   </p>
                 </div>
@@ -130,7 +139,11 @@ function RouteComponent() {
                 {totpUri && (
                   <div className="flex flex-col items-center gap-2">
                     <QRCode className="rounded bg-white p-3" value={totpUri} />
-                    <p className="text-muted-foreground text-center text-xs break-all">
+                    <p
+                      className={`
+                      text-center text-xs break-all text-muted-foreground
+                    `}
+                    >
                       Can't scan? Use this key/URL: {totpUri}
                     </p>
                   </div>
@@ -155,7 +168,16 @@ function RouteComponent() {
                       <InputOTPSlot index={5} />
                     </InputOTPGroup>
                   </InputOTP>
-                  <p className={cn("text-destructive text-end text-xs", !error && "invisible")} id="otp-error">
+                  <p
+                    className={cn(
+                      "text-end text-xs text-destructive",
+                      !error &&
+                        `
+                    invisible
+                  `,
+                    )}
+                    id="otp-error"
+                  >
                     {error ?? "No error"}
                   </p>
                 </div>
@@ -166,13 +188,24 @@ function RouteComponent() {
               <div className="grid gap-4">
                 <div className="space-y-1 text-center">
                   <p className="text-lg font-semibold">Recovery codes</p>
-                  <p className="text-muted-foreground text-sm">Save these codes in a safe place.</p>
+                  <p className="text-sm text-muted-foreground">Save these codes in a safe place.</p>
                 </div>
                 {Array.isArray(backupCodes) && backupCodes.length > 0 ? (
                   <>
-                    <div className="grid grid-cols-2 gap-2 md:grid-cols-3">
+                    <div
+                      className={`
+                      grid grid-cols-2 gap-2
+                      md:grid-cols-3
+                    `}
+                    >
                       {backupCodes.map((code) => (
-                        <code className="bg-muted rounded px-2 py-1 text-center font-mono text-xs" key={code}>
+                        <code
+                          className={`
+                          rounded bg-muted px-2 py-1 text-center font-mono
+                          text-xs
+                        `}
+                          key={code}
+                        >
                           {code}
                         </code>
                       ))}
@@ -199,7 +232,7 @@ function RouteComponent() {
                     </div>
                   </>
                 ) : (
-                  <p className="text-muted-foreground text-sm">No recovery codes available.</p>
+                  <p className="text-sm text-muted-foreground">No recovery codes available.</p>
                 )}
               </div>
             )}
@@ -209,7 +242,7 @@ function RouteComponent() {
                 <img alt="Zevium" className="h-12 w-12" src="/icon.png" />
                 <div className="space-y-1">
                   <p className="text-lg font-semibold">You're all set!</p>
-                  <p className="text-muted-foreground text-sm">
+                  <p className="text-sm text-muted-foreground">
                     You have successfully enabled two-factor authentication for Zevium.
                   </p>
                 </div>

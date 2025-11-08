@@ -81,7 +81,13 @@ function RouteComponent() {
                       {...register("currentPassword")}
                     />
                     <p
-                      className={cn("text-destructive text-end text-xs", !errors.currentPassword && "invisible")}
+                      className={cn(
+                        "text-end text-xs text-destructive",
+                        !errors.currentPassword &&
+                          `
+                        invisible
+                      `,
+                      )}
                       id="current-password-error"
                     >
                       {errors.currentPassword?.message ?? "No error"}
@@ -98,7 +104,13 @@ function RouteComponent() {
                       {...register("password")}
                     />
                     <p
-                      className={cn("text-destructive text-end text-xs", !errors.password && "invisible")}
+                      className={cn(
+                        "text-end text-xs text-destructive",
+                        !errors.password &&
+                          `
+                        invisible
+                      `,
+                      )}
                       id="password-error"
                     >
                       {errors.password?.message ?? "No error"}
@@ -115,7 +127,13 @@ function RouteComponent() {
                       {...register("passwordConfirm")}
                     />
                     <p
-                      className={cn("text-destructive text-end text-xs", !errors.passwordConfirm && "invisible")}
+                      className={cn(
+                        "text-end text-xs text-destructive",
+                        !errors.passwordConfirm &&
+                          `
+                        invisible
+                      `,
+                      )}
                       id="password-confirm-error"
                     >
                       {errors.passwordConfirm?.message ?? "No error"}

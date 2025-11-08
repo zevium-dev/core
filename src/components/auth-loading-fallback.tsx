@@ -18,7 +18,13 @@ export function AuthLoadingFallback() {
       </div>
 
       {/* Grid skeleton */}
-      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+      <div
+        className={`
+        grid gap-6
+        md:grid-cols-2
+        lg:grid-cols-3
+      `}
+      >
         {[1, 2, 3, 4, 5, 6].map((id) => (
           <div className="space-y-4" key={id}>
             <Skeleton className="h-48 w-full rounded-lg" />

@@ -177,8 +177,8 @@ function ActivityComponent() {
     <div className="mx-auto w-full max-w-3xl min-w-0 flex-1 space-y-6 p-6">
       {/* Header */}
       <div className="space-y-2">
-        <h1 className="text-foreground text-2xl font-bold">API Activity</h1>
-        <p className="text-muted-foreground text-sm">
+        <h1 className="text-2xl font-bold text-foreground">API Activity</h1>
+        <p className="text-sm text-muted-foreground">
           Your API usage and performance metrics across all integrated services.
         </p>
       </div>
@@ -186,7 +186,7 @@ function ActivityComponent() {
       {/* Time Filter */}
       <div className="flex justify-end">
         <Select onValueChange={setTimeFilter} value={timeFilter}>
-          <SelectTrigger className="bg-background border-border w-32">
+          <SelectTrigger className="w-32 border-border bg-background">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -199,7 +199,12 @@ function ActivityComponent() {
       </div>
 
       {/* Stats Cards */}
-      <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
+      <div
+        className={`
+        grid grid-cols-1 gap-6
+        md:grid-cols-3
+      `}
+      >
         <ActivityStatsCard
           avgDay={chartData.spend.avgDay}
           color="bg-blue-500"
@@ -224,12 +229,17 @@ function ActivityComponent() {
       </div>
 
       {/* Filters and Table */}
-      <Card className="bg-card/50 border-border/50 backdrop-blur-sm">
+      <Card className="border-border/50 bg-card/50 backdrop-blur-sm">
         <CardHeader>
-          <div className="flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-center">
+          <div
+            className={`
+            flex flex-col items-start justify-between gap-4
+            sm:flex-row sm:items-center
+          `}
+          >
             <div className="flex gap-2">
               <div className="flex items-center gap-2">
-                <span className="text-muted-foreground text-sm">From:</span>
+                <span className="text-sm text-muted-foreground">From:</span>
                 <Input
                   className="w-auto text-xs"
                   onChange={(e) => setDateFrom(e.target.value)}
@@ -238,7 +248,7 @@ function ActivityComponent() {
                 />
               </div>
               <div className="flex items-center gap-2">
-                <span className="text-muted-foreground text-sm">To:</span>
+                <span className="text-sm text-muted-foreground">To:</span>
                 <Input
                   className="w-auto text-xs"
                   onChange={(e) => setDateTo(e.target.value)}
@@ -262,7 +272,7 @@ function ActivityComponent() {
         </CardHeader>
 
         <CardContent>
-          <div className="border-border/50 overflow-hidden rounded-md border">
+          <div className="overflow-hidden rounded-md border border-border/50">
             <Table>
               <TableHeader>
                 <TableRow className="bg-muted/30">
@@ -278,15 +288,24 @@ function ActivityComponent() {
               <TableBody>
                 {currentItems.map((activity) => (
                   <TableRow className="hover:bg-muted/20" key={activity.id}>
-                    <TableCell className="text-muted-foreground text-xs">{activity.timestamp}</TableCell>
+                    <TableCell className="text-xs text-muted-foreground">{activity.timestamp}</TableCell>
                     <TableCell>
                       <div className="flex items-center gap-2">
-                        <div className="bg-muted h-4 w-4 flex-shrink-0 rounded-sm" />
+                        <div
+                          className={`
+                          h-4 w-4 shrink-0 rounded-sm bg-muted
+                        `}
+                        />
                         <div className="flex flex-col">
-                          <span className="text-primary cursor-pointer text-xs font-medium hover:underline">
+                          <span
+                            className={`
+                            cursor-pointer text-xs font-medium text-primary
+                            hover:underline
+                          `}
+                          >
                             {activity.api}
                           </span>
-                          <span className="text-muted-foreground text-xs">{activity.provider}</span>
+                          <span className="text-xs text-muted-foreground">{activity.provider}</span>
                         </div>
                       </div>
                     </TableCell>
@@ -327,7 +346,7 @@ function ActivityComponent() {
             <Button onClick={() => setCurrentPage(2)} size="sm" variant={currentPage === 2 ? "default" : "outline"}>
               2
             </Button>
-            {totalPages > 2 && <span className="text-muted-foreground text-xs">...</span>}
+            {totalPages > 2 && <span className="text-xs text-muted-foreground">...</span>}
             <Button
               disabled={currentPage === totalPages}
               onClick={() => setCurrentPage((prev) => Math.min(prev + 1, totalPages))}
@@ -357,11 +376,11 @@ function ActivityStatsCard({
   title: string;
 }) {
   return (
-    <Card className="bg-card/50 border-border/50 backdrop-blur-sm">
+    <Card className="border-border/50 bg-card/50 backdrop-blur-sm">
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between">
-          <CardTitle className="text-muted-foreground text-sm font-medium">{title}</CardTitle>
-          <MoreHorizontal className="text-muted-foreground h-4 w-4" />
+          <CardTitle className="text-sm font-medium text-muted-foreground">{title}</CardTitle>
+          <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
         </div>
       </CardHeader>
       <CardContent className="pt-0">
@@ -388,7 +407,13 @@ function MiniChart({ color = "bg-blue-500", data }: { color?: string; data: Arra
     <div className="mt-4 flex h-16 items-end gap-1">
       {data.map((item) => (
         <div
-          className={cn("flex-1 rounded-t-sm transition-all hover:opacity-80", color)}
+          className={cn(
+            `
+            flex-1 rounded-t-sm transition-all
+            hover:opacity-80
+          `,
+            color,
+          )}
           key={item.day}
           style={{
             height: `${(item.value / maxValue) * 100}%`,

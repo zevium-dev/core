@@ -61,7 +61,7 @@ function RouteComponent() {
           <CardHeader className="space-y-2 text-center">
             <img alt="Zevium" className="mx-auto h-10 w-10" src="/icon.png" />
             <CardTitle className="text-xl">Verify two-factor code</CardTitle>
-            <p className="text-muted-foreground text-sm">Enter the code from your two-factor authentication app</p>
+            <p className="text-sm text-muted-foreground">Enter the code from your two-factor authentication app</p>
           </CardHeader>
           <CardContent>
             <div className="grid gap-3">
@@ -83,7 +83,16 @@ function RouteComponent() {
                   <InputOTPSlot index={5} />
                 </InputOTPGroup>
               </InputOTP>
-              <p className={cn("text-destructive text-end text-xs", !error && "invisible")} id="otp-error">
+              <p
+                className={cn(
+                  "text-end text-xs text-destructive",
+                  !error &&
+                    `
+                invisible
+              `,
+                )}
+                id="otp-error"
+              >
                 {error ?? "No error"}
               </p>
               <Button className="w-full" disabled={code.length !== 6} loading={loading} onClick={() => void onVerify()}>

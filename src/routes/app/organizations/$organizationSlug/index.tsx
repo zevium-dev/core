@@ -42,11 +42,19 @@ function RouteComponent() {
               <div className="flex-1">
                 <CardTitle className="text-2xl">{org.name}</CardTitle>
                 <CardDescription className="mt-2 text-base">
-                  <span className="bg-muted rounded px-2 py-1 font-mono text-xs">{org.slug}</span>
+                  <span className="rounded bg-muted px-2 py-1 font-mono text-xs">{org.slug}</span>
                 </CardDescription>
               </div>
               <div className="ml-4 flex flex-col gap-2">
-                {org.logo && <img alt={org.name} className="h-16 w-16 rounded-lg object-cover" src={org.logo} />}
+                {org.logo && (
+                  <img
+                    alt={org.name}
+                    className={`
+                  h-16 w-16 rounded-lg object-cover
+                `}
+                    src={org.logo}
+                  />
+                )}
                 <Button asChild size="sm" variant="outline">
                   <Link params={{ organizationSlug }} to="/app/organizations/$organizationSlug/projects/~">
                     Projects
@@ -56,13 +64,13 @@ function RouteComponent() {
             </div>
             <div className="mt-4 flex flex-wrap gap-6 border-t pt-4">
               <div className="flex gap-2">
-                <Typography className="text-muted-foreground font-medium" variant="small">
+                <Typography className="font-medium text-muted-foreground" variant="small">
                   Created:
                 </Typography>
                 <Typography variant="small">{formatDate(org.createdAt)}</Typography>
               </div>
               <div className="flex gap-2">
-                <Typography className="text-muted-foreground font-medium" variant="small">
+                <Typography className="font-medium text-muted-foreground" variant="small">
                   Organization ID:
                 </Typography>
                 <Typography className="font-mono text-xs" variant="small">
@@ -86,7 +94,12 @@ function RouteComponent() {
             {org.members.length > 0 ? (
               <div className="space-y-4">
                 {org.members.map((member) => (
-                  <div className="flex items-center justify-between rounded-lg border p-3" key={member.id}>
+                  <div
+                    className={`
+                    flex items-center justify-between rounded-lg border p-3
+                  `}
+                    key={member.id}
+                  >
                     <div className="flex flex-1 items-center gap-3">
                       <Avatar className="h-10 w-10">
                         {member.user.image && <AvatarImage src={member.user.image} />}
@@ -96,7 +109,12 @@ function RouteComponent() {
                         <Typography className="font-medium" variant="small">
                           {member.user.name}
                         </Typography>
-                        <Typography className="text-muted-foreground flex items-center gap-1 truncate" variant="small">
+                        <Typography
+                          className={`
+                          flex items-center gap-1 truncate text-muted-foreground
+                        `}
+                          variant="small"
+                        >
                           <Mail className="h-3 w-3" />
                           {member.user.email}
                         </Typography>
@@ -109,7 +127,7 @@ function RouteComponent() {
                 ))}
               </div>
             ) : (
-              <Typography className="text-muted-foreground py-4 text-center" variant="small">
+              <Typography className="py-4 text-center text-muted-foreground" variant="small">
                 No members yet
               </Typography>
             )}
@@ -129,12 +147,17 @@ function RouteComponent() {
             <CardContent>
               <div className="space-y-4">
                 {org.invitations.map((invitation) => (
-                  <div className="flex items-center justify-between rounded-lg border p-3" key={invitation.id}>
+                  <div
+                    className={`
+                    flex items-center justify-between rounded-lg border p-3
+                  `}
+                    key={invitation.id}
+                  >
                     <div className="flex-1">
                       <Typography className="font-medium" variant="small">
                         {invitation.email}
                       </Typography>
-                      <Typography className="text-muted-foreground text-xs" variant="small">
+                      <Typography className="text-xs text-muted-foreground" variant="small">
                         Expires: {formatDate(invitation.expiresAt)}
                       </Typography>
                     </div>
