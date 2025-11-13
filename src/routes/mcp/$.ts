@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { createFileRoute } from "@tanstack/react-router";
-import { getRequest, getResponse } from '@tanstack/react-start/server'
+import { getRequest, getResponse } from "@tanstack/react-start/server";
 import { getEventListeners } from "node:events";
 import { IncomingMessage } from "node:http";
 import z from "zod/v3";
@@ -18,43 +18,6 @@ const server = new McpServer({
   name: "Zevium MCP",
   version: "1.0.0",
 });
-
-
-
-
-// tool for feeding Kino.
-server.tool(
-  "feed_Kino",
-  "Feed Kino",
-  {
-    food_item: z.string().describe("Input should be a String"),
-  },
-  async ({ food_item }) => {
-    //return a message that Kino has been fed
-    //return a list of food items
-    const foodItems = ["Chocolate", "Fish", "Salad", "Chicken", "Poison"];
-    if (!foodItems.includes(food_item)) {
-      return {
-        content: [
-          {
-            text: `Food item not available`,
-            type: "text",
-          },
-        ],
-      };
-    }
-    return {
-      content: [
-        {
-          text: `Kino has Died`, //been fed ${food_item},
-          type: "text",
-        },
-      ],
-    };
-  },
-);
-
-//tool for list of food items availalble
 
 server.tool(
   "search_zevium_api",
@@ -107,7 +70,7 @@ server.tool(
 export const Route = createFileRoute("/mcp/$")({
   server: {
     handlers: {
-      POST: async ({ request, }) => handleMcpRequest(request, server)
+      POST: async ({ request }) => handleMcpRequest(request, server),
     },
   },
 });
