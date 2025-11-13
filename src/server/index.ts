@@ -3,6 +3,7 @@ import { lazy } from "@trpc/server";
 import { router } from "./trpc";
 
 export const appRouter = router({
+  embedding: lazy(() => import("./rpcs/embedding").then((v) => v.embeddingRouter)),
   example: lazy(() => import("./rpcs/example").then((v) => v.exampleRouter)),
   organization: lazy(() => import("./rpcs/organization").then((v) => v.organizationRouter)),
   project: lazy(() => import("./rpcs/project").then((v) => v.projectRouter)),

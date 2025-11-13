@@ -73,14 +73,8 @@ export const projectRouter = router({
         });
       }
 
-      // Fire-and-forget: Create embedding asynchronously
-      await createProjectEmbedding(
-        project.id,
-        `${project.name}.${project.description}`
-      ).catch((error) => {
-        // Log error but don't fail the request
-        console.error(`Failed to create embedding for project ${project.id}:`, error);
-      });
+      // Create embedding for the project
+      await createProjectEmbedding(project.id, `${project.name}.${project.description}`);
 
       return project;
     }),

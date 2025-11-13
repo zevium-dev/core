@@ -1,21 +1,22 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import { getRequest, getResponse } from '@tanstack/react-start/server'
 import { createFileRoute } from "@tanstack/react-router";
-import z from "zod/v3";
-import { IncomingMessage } from "node:http";
+import { getRequest, getResponse } from '@tanstack/react-start/server'
 import { getEventListeners } from "node:events";
-import { handleMcpRequest } from "~/lib/utils/mcp-handler";
+import { IncomingMessage } from "node:http";
+import z from "zod/v3";
+
 import { serverEnv } from "~/env/server";
 import { search_embeddings } from "~/lib/server/embeddings";
+import { handleMcpRequest } from "~/lib/utils/mcp-handler";
 
 const server = new McpServer({
-  name: "Zevium MCP",
-  version: "1.0.0",
   capabilities: {
     resources: {},
     tools: {},
   },
+  name: "Zevium MCP",
+  version: "1.0.0",
 });
 
 
@@ -36,8 +37,8 @@ server.tool(
       return {
         content: [
           {
-            type: "text",
             text: `Food item not available`,
+            type: "text",
           },
         ],
       };
@@ -45,8 +46,8 @@ server.tool(
     return {
       content: [
         {
-          type: "text",
           text: `Kino has Died`, //been fed ${food_item},
+          type: "text",
         },
       ],
     };
@@ -66,13 +67,13 @@ server.tool(
     console.log("Search query", search_query);
 
     // use the search_embeddings function to get the results
-    const results = await search_embeddings({ text: search_query, modelName: "Qwen/Qwen3-Embedding-8B", topK: 3 });
+    const results = await search_embeddings({ modelName: "Qwen/Qwen3-Embedding-8B", text: search_query, topK: 3 });
     console.log(JSON.stringify(results));
     return {
       content: [
         {
-          type: "text",
           text: JSON.stringify(results),
+          type: "text",
         },
       ],
     };
@@ -84,19 +85,19 @@ server.tool(
   "execute_api_call",
   "Execute an API call using the Zevium. It will take url , method, headers, body and return the response.",
   {
-    url: z.string().describe("The URL to call."),
-    method: z.string().describe("The method to use."),
-    headers: z.record(z.string(), z.string()).describe("The headers to send."),
     body: z.string().optional().describe("The body to send."),
+    headers: z.record(z.string(), z.string()).describe("The headers to send."),
+    method: z.string().describe("The method to use."),
+    url: z.string().describe("The URL to call."),
   },
-  async ({ url, method, headers, body }) => {
+  async ({ body, headers, method, url }) => {
     console.log("Execute API call", url, method, headers, body);
-    const response = await fetch(url, { method, headers, body: body ? body : undefined });
+    const response = await fetch(url, { body: body ? body : undefined, headers, method });
     return {
       content: [
         {
-          type: "text",
           text: await response.text(),
+          type: "text",
         },
       ],
     };
