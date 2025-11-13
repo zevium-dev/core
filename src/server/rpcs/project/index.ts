@@ -1,4 +1,6 @@
 import { createId } from "@paralleldrive/cuid2";
+//eslint-disable-next-line @typescript-eslint/no-restricted-imports
+import { waitUntil } from "cloudflare:workers";
 import { TRPCError } from "@trpc/server";
 import z from "zod";
 
@@ -72,9 +74,8 @@ export const projectRouter = router({
           message: "Failed to create project",
         });
       }
-
-      // Create embedding for the project
-      await createProjectEmbedding(project.id, `${project.name}.${project.description}`);
+      // Create embedding for the project asyncronously
+      waitUntil(createProjectEmbedding(project.id, `${project.name}.${project.description}`));
 
       return project;
     }),
