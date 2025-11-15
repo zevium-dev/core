@@ -3,11 +3,12 @@ import { TRPCError } from "@trpc/server";
 import z from "zod";
 
 import { db, orm, schema, schemaZod } from "~/db";
+import { OrganizationRolePermissions } from "~/db/role";
 import { protectedProcedure, router } from "~/server/trpc";
 
 const OrganizationInputZod = z.object({ organizationId: z.string() }).or(z.object({ organizationSlug: z.string() }));
 
-const organizationProcedure = protectedProcedure.input(OrganizationInputZod).use(async ({ ctx, input, next }) => {
+const organizationProcedure = protectedProcedure.input(OrganizationInputZod).use(async ({ ctx, input, meta, next }) => {
   const organizationWhere =
     "organizationId" in input
       ? orm.eq(schema.organization.id, input.organizationId)
@@ -17,6 +18,7 @@ const organizationProcedure = protectedProcedure.input(OrganizationInputZod).use
     .select({
       memberId: schema.member.id,
       organization: schema.organization,
+      role: schema.member.role,
     })
     .from(schema.organization)
     .leftJoin(
@@ -42,12 +44,40 @@ const organizationProcedure = protectedProcedure.input(OrganizationInputZod).use
     });
   }
 
-  return next({ ctx: { ...ctx, organization } });
+  if (!row.role) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "Your role in this organization is invalid",
+    });
+  }
+
+  const permissions = OrganizationRolePermissions[row.role];
+  if (!permissions) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "Your role in this organization has no permissions",
+    });
+  }
+
+  if (meta?.requiredPermissions) {
+    const missingPermissions = meta.requiredPermissions.filter((perm) => !permissions.includes(perm));
+    if (missingPermissions.length > 0) {
+      throw new TRPCError({
+        code: "FORBIDDEN",
+        message: `You are missing the following permissions: ${missingPermissions.join(", ")}`,
+      });
+    }
+  }
+
+  return next({ ctx: { ...ctx, organization, permissions } });
 });
 
 export const projectRouter = router({
   create: organizationProcedure
-    .meta({ route: { path: "/project/create", summary: "Create a new project" } })
+    .meta({
+      requiredPermissions: ["project.create"],
+      route: { path: "/project/create", summary: "Create a new project" },
+    })
     .input(OrganizationInputZod.and(schemaZod.ProjectSelectZod.pick({ description: true, name: true, slug: true })))
     .output(schemaZod.ProjectSelectZod)
     .mutation(async ({ ctx, input }) => {
@@ -75,7 +105,10 @@ export const projectRouter = router({
     }),
 
   get: organizationProcedure
-    .meta({ route: { path: "/project/get", summary: "Get a project by ID or slug" } })
+    .meta({
+      requiredPermissions: ["project.view"],
+      route: { path: "/project/get", summary: "Get a project by ID or slug" },
+    })
     .input(OrganizationInputZod.and(z.object({ projectId: z.string() }).or(z.object({ projectSlug: z.string() }))))
     .output(schemaZod.ProjectSelectZod.and(z.object({ project_tags: z.array(schemaZod.ProjectTagSelectZod) })))
     .query(async ({ ctx, input }) => {
@@ -106,7 +139,10 @@ export const projectRouter = router({
     }),
 
   list: organizationProcedure
-    .meta({ route: { path: "/project/list", summary: "List all projects in an organization" } })
+    .meta({
+      requiredPermissions: ["project.list"],
+      route: { path: "/project/list", summary: "List all projects in an organization" },
+    })
     .input(OrganizationInputZod.and(z.object({ tagNames: z.array(z.string()).optional() })))
     .output(z.array(schemaZod.ProjectSelectZod.and(z.object({ project_tags: z.array(schemaZod.ProjectTagSelectZod) }))))
     .query(async ({ ctx, input }) => {
@@ -142,7 +178,10 @@ export const projectRouter = router({
     }),
 
   update: organizationProcedure
-    .meta({ route: { path: "/project/update", summary: "Update a project" } })
+    .meta({
+      requiredPermissions: ["project.edit"],
+      route: { path: "/project/update", summary: "Update a project" },
+    })
     .input(
       OrganizationInputZod.and(
         schemaZod.ProjectSelectZod.pick({
@@ -186,7 +225,10 @@ export const projectRouter = router({
     }),
 
   updateTags: organizationProcedure
-    .meta({ route: { path: "/project/update-tags", summary: "Update project tags" } })
+    .meta({
+      requiredPermissions: ["project.edit"],
+      route: { path: "/project/update-tags", summary: "Update project tags" },
+    })
     .input(
       OrganizationInputZod.and(
         z.object({
