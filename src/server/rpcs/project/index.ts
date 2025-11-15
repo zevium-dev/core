@@ -3,7 +3,7 @@ import { TRPCError } from "@trpc/server";
 import z from "zod";
 
 import { db, orm, schema, schemaZod } from "~/db";
-import { OrganizationRolePermissions } from "~/db/role";
+import { OrganizationRolePermissions } from "~/db/default-roles";
 import { protectedProcedure, router } from "~/server/trpc";
 
 const OrganizationInputZod = z.object({ organizationId: z.string() }).or(z.object({ organizationSlug: z.string() }));
@@ -60,7 +60,15 @@ const organizationProcedure = protectedProcedure.input(OrganizationInputZod).use
   }
 
   if (meta?.requiredPermissions) {
-    const missingPermissions = meta.requiredPermissions.filter((perm) => !permissions.includes(perm));
+    const missingPermissions = meta.requiredPermissions.filter((perm) => {
+      // we are returning true for missing permissions
+      const value = permissions[perm];
+      if (!value) return true;
+      if (value.status === "deny") return true;
+      if (value.status === "allow") return false;
+      // TODO: add handling for limited or ratelimit statuses
+      return false;
+    });
     if (missingPermissions.length > 0) {
       throw new TRPCError({
         code: "FORBIDDEN",

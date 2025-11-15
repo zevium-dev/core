@@ -59,4 +59,6 @@ export const UserPermissions = [
   "marketplace.view", // ability to view the marketplace
   "organization.create", // ability to create organizations
 ] as const;
+export type AnyUserPermission = OrganizationUserPermission | ProjectUserPermission | UserPermission;
+export type Permissions = Partial<Record<AnyUserPermission, PermissionValue>>;
 export type UserPermission = (typeof UserPermissions)[number];

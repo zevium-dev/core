@@ -1,7 +1,7 @@
 import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
+import { DefaultOrganizationRoles } from "./default-roles";
 import { OrganizationUserPermissions, PermissionValue, ProjectUserPermissions, UserPermissions } from "./permission";
-import { OrganizationRoles } from "./role";
 
 type Base64String = {} & string;
 type Metadata = Record<string, unknown>;
@@ -175,7 +175,7 @@ export const member = sqliteTable(
     organizationId: text("organization_id")
       .notNull()
       .references(() => organization.id, { onDelete: "cascade" }),
-    role: text("role", { enum: OrganizationRoles })
+    role: text("role", { enum: DefaultOrganizationRoles })
       .notNull()
       .$defaultFn(() => "member"),
     userId: text("user_id")
@@ -201,7 +201,7 @@ export const invitation = sqliteTable(
     organizationId: text("organization_id")
       .notNull()
       .references(() => organization.id, { onDelete: "cascade" }),
-    role: text("role", { enum: OrganizationRoles })
+    role: text("role", { enum: DefaultOrganizationRoles })
       .notNull()
       .$defaultFn(() => "member"),
     status: text("status").default("pending").notNull(),
