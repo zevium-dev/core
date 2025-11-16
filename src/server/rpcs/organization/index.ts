@@ -79,6 +79,7 @@ export const organizationRouter = router({
       };
     }),
 
+  // TODO: move this out of this file
   list: secureProcedure
     .meta({
       requiredPermissions: ["organization.list"],

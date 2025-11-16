@@ -128,7 +128,7 @@ const getProjectPermissions = async (userId: string, input: z.infer<typeof Proje
     .limit(1)
     .then((rows) => rows.at(0));
 
-  if (!row?.project) {
+  if (!row?.project || !row.organization) {
     throw new TRPCError({
       code: "NOT_FOUND",
       message: "Project not found",
@@ -171,6 +171,7 @@ export const secureProcedure = protectedProcedure
       .where(orm.eq(schema.userPermission.userId, ctx.user.id));
 
     let permissions: Permissions = {};
+    // base user permissions
     for (const permission of userPermissions) {
       permissions[permission.permission] = permission.value;
     }
@@ -180,6 +181,7 @@ export const secureProcedure = protectedProcedure
 
     if (input && ("organizationId" in input || "organizationSlug" in input)) {
       const orgPermissions = await getOrganizationPermissions(ctx.user.id, input);
+      // override base user permissions with organization-specific permissions
       permissions = {
         ...permissions,
         ...orgPermissions.permissions,
@@ -189,6 +191,7 @@ export const secureProcedure = protectedProcedure
 
     if (input && ("projectId" in input || "projectSlug" in input)) {
       const projectPermissions = await getProjectPermissions(ctx.user.id, input);
+      // override previous permissions with project-specific permissions
       permissions = {
         ...permissions,
         ...projectPermissions.permissions,
