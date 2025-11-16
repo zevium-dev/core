@@ -3,85 +3,13 @@ import { TRPCError } from "@trpc/server";
 import z from "zod";
 
 import { db, orm, schema, schemaZod } from "~/db";
-import { OrganizationRolePermissions } from "~/db/default-roles";
-import { protectedProcedure, router } from "~/server/trpc";
+import { secureProcedure } from "~/server/secure-procedure";
+import { router } from "~/server/trpc";
 
 const OrganizationInputZod = z.object({ organizationId: z.string() }).or(z.object({ organizationSlug: z.string() }));
 
-const organizationProcedure = protectedProcedure.input(OrganizationInputZod).use(async ({ ctx, input, meta, next }) => {
-  const organizationWhere =
-    "organizationId" in input
-      ? orm.eq(schema.organization.id, input.organizationId)
-      : orm.eq(schema.organization.slug, input.organizationSlug);
-
-  const row = await db
-    .select({
-      memberId: schema.member.id,
-      organization: schema.organization,
-      role: schema.member.role,
-    })
-    .from(schema.organization)
-    .leftJoin(
-      schema.member,
-      orm.and(orm.eq(schema.member.organizationId, schema.organization.id), orm.eq(schema.member.userId, ctx.user.id)),
-    )
-    .where(organizationWhere)
-    .limit(1)
-    .then((rows) => rows.at(0));
-
-  const organization = row?.organization;
-  if (!organization) {
-    throw new TRPCError({
-      code: "NOT_FOUND",
-      message: "Organization not found",
-    });
-  }
-
-  if (!row.memberId) {
-    throw new TRPCError({
-      code: "FORBIDDEN",
-      message: "You do not have access to this organization",
-    });
-  }
-
-  if (!row.role) {
-    throw new TRPCError({
-      code: "FORBIDDEN",
-      message: "Your role in this organization is invalid",
-    });
-  }
-
-  const permissions = OrganizationRolePermissions[row.role];
-  if (!permissions) {
-    throw new TRPCError({
-      code: "FORBIDDEN",
-      message: "Your role in this organization has no permissions",
-    });
-  }
-
-  if (meta?.requiredPermissions) {
-    const missingPermissions = meta.requiredPermissions.filter((perm) => {
-      // we are returning true for missing permissions
-      const value = permissions[perm];
-      if (!value) return true;
-      if (value.status === "deny") return true;
-      if (value.status === "allow") return false;
-      // TODO: add handling for limited or ratelimit statuses
-      return false;
-    });
-    if (missingPermissions.length > 0) {
-      throw new TRPCError({
-        code: "FORBIDDEN",
-        message: `You are missing the following permissions: ${missingPermissions.join(", ")}`,
-      });
-    }
-  }
-
-  return next({ ctx: { ...ctx, organization, permissions } });
-});
-
 export const projectRouter = router({
-  create: organizationProcedure
+  create: secureProcedure
     .meta({
       requiredPermissions: ["project.create"],
       route: { path: "/project/create", summary: "Create a new project" },
@@ -89,6 +17,12 @@ export const projectRouter = router({
     .input(OrganizationInputZod.and(schemaZod.ProjectSelectZod.pick({ description: true, name: true, slug: true })))
     .output(schemaZod.ProjectSelectZod)
     .mutation(async ({ ctx, input }) => {
+      if (!ctx.orgId) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Organization ID not found in context",
+        });
+      }
       const project = await db
         .insert(schema.project)
         .values({
@@ -98,7 +32,7 @@ export const projectRouter = router({
             createdBy: ctx.user.id,
           },
           name: input.name,
-          organizationId: ctx.organization.id,
+          organizationId: ctx.orgId,
           slug: input.slug,
         })
         .returning()
@@ -112,7 +46,7 @@ export const projectRouter = router({
       return project;
     }),
 
-  get: organizationProcedure
+  get: secureProcedure
     .meta({
       requiredPermissions: ["project.view"],
       route: { path: "/project/get", summary: "Get a project by ID or slug" },
@@ -120,7 +54,13 @@ export const projectRouter = router({
     .input(OrganizationInputZod.and(z.object({ projectId: z.string() }).or(z.object({ projectSlug: z.string() }))))
     .output(schemaZod.ProjectSelectZod.and(z.object({ project_tags: z.array(schemaZod.ProjectTagSelectZod) })))
     .query(async ({ ctx, input }) => {
-      const whereClauses = [orm.eq(schema.project.organizationId, ctx.organization.id)];
+      if (!ctx.orgId) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Organization ID not found in context",
+        });
+      }
+      const whereClauses = [orm.eq(schema.project.organizationId, ctx.orgId)];
       if ("projectId" in input) {
         whereClauses.push(orm.eq(schema.project.id, input.projectId));
       } else {
@@ -146,7 +86,7 @@ export const projectRouter = router({
       return projectWithTags;
     }),
 
-  list: organizationProcedure
+  list: secureProcedure
     .meta({
       requiredPermissions: ["project.list"],
       route: { path: "/project/list", summary: "List all projects in an organization" },
@@ -154,7 +94,13 @@ export const projectRouter = router({
     .input(OrganizationInputZod.and(z.object({ tagNames: z.array(z.string()).optional() })))
     .output(z.array(schemaZod.ProjectSelectZod.and(z.object({ project_tags: z.array(schemaZod.ProjectTagSelectZod) }))))
     .query(async ({ ctx, input }) => {
-      const where = [orm.eq(schema.project.organizationId, ctx.organization.id)];
+      if (!ctx.orgId) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Organization ID not found in context",
+        });
+      }
+      const where = [orm.eq(schema.project.organizationId, ctx.orgId)];
       if (input.tagNames && input.tagNames.length > 0) {
         where.push(orm.inArray(schema.projectTag.tagName, input.tagNames));
       }
@@ -185,7 +131,7 @@ export const projectRouter = router({
       return result;
     }),
 
-  update: organizationProcedure
+  update: secureProcedure
     .meta({
       requiredPermissions: ["project.edit"],
       route: { path: "/project/update", summary: "Update a project" },
@@ -204,6 +150,12 @@ export const projectRouter = router({
     )
     .output(schemaZod.ProjectSelectZod.and(z.object({ project_tags: z.array(schemaZod.ProjectTagSelectZod) })))
     .mutation(async ({ ctx, input }) => {
+      if (!ctx.orgId) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Organization ID not found in context",
+        });
+      }
       const project = await db
         .update(schema.project)
         .set({
@@ -213,7 +165,7 @@ export const projectRouter = router({
           status: input.status,
           visibility: input.visibility,
         })
-        .where(orm.and(orm.eq(schema.project.id, input.id), orm.eq(schema.project.organizationId, ctx.organization.id)))
+        .where(orm.and(orm.eq(schema.project.id, input.id), orm.eq(schema.project.organizationId, ctx.orgId)))
         .returning()
         .then((v) => v.at(0));
       if (!project) {
@@ -232,7 +184,7 @@ export const projectRouter = router({
       };
     }),
 
-  updateTags: organizationProcedure
+  updateTags: secureProcedure
     .meta({
       requiredPermissions: ["project.edit"],
       route: { path: "/project/update-tags", summary: "Update project tags" },
@@ -247,15 +199,16 @@ export const projectRouter = router({
     )
     .output(schemaZod.ProjectSelectZod.and(z.object({ project_tags: z.array(schemaZod.ProjectTagSelectZod) })))
     .mutation(async ({ ctx, input }) => {
+      if (!ctx.orgId) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Organization ID not found in context",
+        });
+      }
       const project = await db
         .select()
         .from(schema.project)
-        .where(
-          orm.and(
-            orm.eq(schema.project.id, input.projectId),
-            orm.eq(schema.project.organizationId, ctx.organization.id),
-          ),
-        )
+        .where(orm.and(orm.eq(schema.project.id, input.projectId), orm.eq(schema.project.organizationId, ctx.orgId)))
         .limit(1)
         .then((v) => v.at(0));
       if (!project) {
