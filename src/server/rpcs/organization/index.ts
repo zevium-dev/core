@@ -4,11 +4,15 @@ import { z } from "zod";
 
 import { schemaZod } from "~/db";
 import { authServer } from "~/lib/server/auth";
-import { protectedProcedure, router } from "~/server/trpc";
+import { secureProcedure } from "~/server/secure-procedure";
+import { router } from "~/server/trpc";
 
 export const organizationRouter = router({
-  create: protectedProcedure
-    .meta({ route: { path: "/organization/create", summary: "Create new organization" } })
+  create: secureProcedure
+    .meta({
+      requiredPermissions: ["organization.create"],
+      route: { path: "/organization/create", summary: "Create new organization" },
+    })
     .input(
       z.object({
         logo: z.string().max(128_000).optional(),
@@ -41,8 +45,11 @@ export const organizationRouter = router({
       return { ...org, createdAt: org.createdAt, logo: org.logo ?? null, members: org.members.filter(Boolean) };
     }),
 
-  get: protectedProcedure
-    .meta({ route: { path: "/organization/get", summary: "Get organization by ID or slug" } })
+  get: secureProcedure
+    .meta({
+      requiredPermissions: ["organization.view"],
+      route: { path: "/organization/get", summary: "Get organization by ID or slug" },
+    })
     .input(type({ organizationId: "string" }).or(type({ organizationSlug: "string" })))
     .output(
       schemaZod.OrganizationSelectZod.and(
@@ -72,8 +79,12 @@ export const organizationRouter = router({
       };
     }),
 
-  list: protectedProcedure
-    .meta({ route: { path: "/organization/list", summary: "Get all user organizations" } })
+  // TODO: move this out of this file
+  list: secureProcedure
+    .meta({
+      requiredPermissions: ["organization.list"],
+      route: { path: "/organization/list", summary: "Get all user organizations" },
+    })
     .output(z.array(schemaZod.OrganizationSelectZod))
     .query(async ({ ctx }) => {
       const orgs = await authServer.api.listOrganizations({ headers: ctx.raw.req.headers });
