@@ -144,7 +144,7 @@ const getProjectPermissions = async (userId: string, input: z.infer<typeof Proje
     .where(
       orm.and(
         orm.eq(schema.projectUserPermission.userId, userId),
-        orm.eq(schema.organizationUserPermission.organizationId, row.project.id),
+        orm.eq(schema.projectUserPermission.projectId, row.project.id),
       ),
     );
 
