@@ -50,6 +50,13 @@
       "when": 1761466381408,
       "tag": "0006_sturdy_the_hand",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1763296579532,
+      "tag": "0007_outstanding_oracle",
+      "breakpoints": true
     }
   ]
 }
