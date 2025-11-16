@@ -10,14 +10,34 @@ import { Permissions } from "~/db/permission";
 
 import { protectedProcedure } from "./trpc";
 
-const OrganizationInputZod = z.object({ organizationId: z.string() }).or(z.object({ organizationSlug: z.string() }));
-const ProjectInputZod = z.object({ projectId: z.string() }).or(z.object({ projectSlug: z.string() }));
+const OrganizationInputZod = z.object({
+  organizationId: z.string().optional(),
+  organizationSlug: z.string().optional(),
+});
+const ProjectInputZod = z.object({
+  projectId: z.string().optional(),
+  projectSlug: z.string().optional(),
+});
 
 const getOrganizationPermissions = async (userId: string, input: z.infer<typeof OrganizationInputZod>) => {
-  const organizationWhere =
-    "organizationId" in input
-      ? orm.eq(schema.organization.id, input.organizationId)
-      : orm.eq(schema.organization.slug, input.organizationSlug);
+  if (input.organizationId && input.organizationSlug) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "Only one of organizationId or organizationSlug must be provided",
+    });
+  }
+
+  let organizationWhere = orm.and();
+  if (input.organizationId) {
+    organizationWhere = orm.eq(schema.organization.id, input.organizationId);
+  } else if (input.organizationSlug) {
+    organizationWhere = orm.eq(schema.organization.slug, input.organizationSlug);
+  } else {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "Either organizationId or organizationSlug must be provided",
+    });
+  }
 
   const row = await db
     .select({
@@ -78,8 +98,24 @@ const getOrganizationPermissions = async (userId: string, input: z.infer<typeof 
 };
 
 const getProjectPermissions = async (userId: string, input: z.infer<typeof ProjectInputZod>) => {
-  const projectWhere =
-    "projectId" in input ? orm.eq(schema.project.id, input.projectId) : orm.eq(schema.project.slug, input.projectSlug);
+  if (input.projectId && input.projectSlug) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "Only one of projectId or projectSlug must be provided",
+    });
+  }
+
+  let projectWhere = orm.and();
+  if (input.projectId) {
+    projectWhere = orm.eq(schema.project.id, input.projectId);
+  } else if (input.projectSlug) {
+    projectWhere = orm.eq(schema.project.slug, input.projectSlug);
+  } else {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "Either projectId or projectSlug must be provided",
+    });
+  }
 
   const row = await db
     .select({

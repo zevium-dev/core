@@ -61,10 +61,15 @@ export const projectRouter = router({
         });
       }
       const whereClauses = [orm.eq(schema.project.organizationId, ctx.orgId)];
-      if ("projectId" in input) {
+      if ("projectId" in input && input.projectId) {
         whereClauses.push(orm.eq(schema.project.id, input.projectId));
-      } else {
+      } else if ("projectSlug" in input && input.projectSlug) {
         whereClauses.push(orm.eq(schema.project.slug, input.projectSlug));
+      } else {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Either projectId or projectSlug must be provided",
+        });
       }
       const projectsWithTags = await db
         .select()
