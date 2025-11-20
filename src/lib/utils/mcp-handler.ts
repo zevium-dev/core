@@ -62,7 +62,7 @@ export async function handleMcpRequest(
     await serverTransport.close();
 
     // Return the last message for backwards compatibility, but support multiple messages
-    const result = responseData.length > 0 ? responseData[responseData.length - 1] : null;
+    const result = responseData.at(-1) ?? null;
     return Response.json(result, {
       headers: {
         "Content-Type": "application/json",

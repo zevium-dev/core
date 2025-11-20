@@ -8,6 +8,7 @@ import z from "zod/v3";
 
 import { serverEnv } from "~/env/server";
 import { search_embeddings } from "~/lib/server/embeddings";
+import { rerankWithCohere } from "~/lib/server/rerank";
 import { handleMcpRequest } from "~/lib/utils/mcp-handler";
 
 const server = new McpServer({
@@ -29,13 +30,46 @@ server.tool(
     //return a list of food items
     console.log("Search query", search_query);
 
+    const apiKey = serverEnv.COHERE_API_KEY;
+    const recallK = apiKey ? 6 : 3;
+
     // use the search_embeddings function to get the results
-    const results = await search_embeddings({ modelName: "Qwen/Qwen3-Embedding-8B", text: search_query, topK: 3 });
-    console.log(JSON.stringify(results));
+    const results = await search_embeddings({
+      modelName: "Qwen/Qwen3-Embedding-8B",
+      text: search_query,
+      topK: recallK,
+    });
+
+    let finalResults = results;
+
+    if (apiKey && results.length > 0) {
+      try {
+        const documents = results.map((r: any) => r.text);
+
+        const reranked = await rerankWithCohere({
+          query: search_query,
+          documents,
+          topN: 3,
+        });
+
+        console.log("Reranked", reranked);
+
+        if (reranked && reranked.length > 0) {
+          finalResults = reranked.map((r) => results[r.index]).filter(Boolean);
+        }
+      } catch (error) {
+        console.error("Cohere rerank failed, falling back to vector search:", error);
+      
+      }
+    }
+
+    const slicedResults = finalResults.slice(0, 3);
+
+    console.log(JSON.stringify(slicedResults));
     return {
       content: [
         {
-          text: JSON.stringify(results),
+          text: JSON.stringify(slicedResults),
           type: "text",
         },
       ],
