@@ -5,6 +5,7 @@ import { db } from "~/db";
 import { serverEnv } from "~/env/server";
 
 export const EMBEDDING_MODEL = "models/gemini-embedding-001";
+export const EMBEDDING_DIMENSION = 768;
 
 export const getEmbeddings = createServerOnlyFn(
   async (data: { input: string }): Promise<Array<number>> => {
@@ -21,6 +22,7 @@ export const getEmbeddings = createServerOnlyFn(
             ],
           },
           model: EMBEDDING_MODEL,
+          output_dimensionality: EMBEDDING_DIMENSION,
         }),
         headers: {
           "Content-Type": "application/json",
@@ -49,10 +51,7 @@ export const createProjectEmbedding = createServerOnlyFn(
       "and model",
       EMBEDDING_MODEL,
     );
-    const embeddingInput: { input: string } = {
-      input: text,
-    };
-    const embedding = await getEmbeddings(embeddingInput);
+    const embedding = await getEmbeddings({ input: text });
     console.log("Embedding", embedding);
     const statement =
       "INSERT INTO project_embeddings (id,project_id,text,embedding,created_at,updated_at) VALUES (?,?,?,vector32(?),?,?)";

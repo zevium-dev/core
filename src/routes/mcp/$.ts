@@ -39,6 +39,7 @@ server.tool(
       topK: recallK,
     });
 
+    console.log("Results", results);
     let finalResults = results;
 
     if (apiKey && results.length > 0) {
