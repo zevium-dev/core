@@ -1,7 +1,7 @@
 import { createId } from "@paralleldrive/cuid2";
 import { createServerOnlyFn } from "@tanstack/react-start";
 
-import { client } from "~/db";
+import { db } from "~/db";
 import { serverEnv } from "~/env/server";
 
 export const getEmbeddings = createServerOnlyFn(
@@ -37,7 +37,7 @@ export const createProjectEmbedding = createServerOnlyFn(
     console.log("Embedding", embedding);
     const statement =
       "INSERT INTO project_embeddings (id,project_id,text,embedding,model,created_at,updated_at) VALUES (?,?,?,vector32(?),?,?,?)";
-    const result = await client.execute(statement, [
+    const result = await db.$client.execute(statement, [
       createId(),
       projectId,
       text,
@@ -58,9 +58,18 @@ export const search_embeddings = async (data: { modelName: string; text: string;
   //Get the project id , text and schema by joining with openapi schema table with openapi version table to get the schema for the project.
   const sql = `SELECT pe.project_id, pe.text, osv.schema FROM (SELECT pe.id, pe.text, pe.project_id FROM vector_top_k('project_embeddings_idx', vector32(?), ?) AS v JOIN project_embeddings AS pe ON pe.rowid = v.id) as pe JOIN openapi_schema AS os ON os.project_id = pe.project_id JOIN openapi_schema_version AS osv ON osv.openapi_schema_id = os.id`;
 
-  const result = await client.execute({
-    args: [JSON.stringify(embedding), topK],
-    sql,
-  });
-  return result.rows;
+  const result = await db.$client.execute(sql , [JSON.stringify(embedding), topK]);
+  const searchResults: Array<SearchResult> = result.rows.map((row) => ({
+    project_id: row.project_id as string,
+    text: row.text as string,
+    schema: row.schema as string,
+  }));
+  
+  return searchResults;
+};  
+
+export type SearchResult = {
+  project_id: string;
+  text: string;
+  schema: string;
 };
