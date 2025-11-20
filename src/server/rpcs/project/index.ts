@@ -181,6 +181,10 @@ export const projectRouter = router({
           message: "Project not found",
         });
       }
+      
+      // Update embedding for the project asyncronously
+      waitUntil(createProjectEmbedding(project.id, `${project.name}.${project.description}`));
+
       const project_tags = await db
         .select()
         .from(schema.projectTag)

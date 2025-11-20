@@ -1,5 +1,7 @@
 import { serverEnv } from "~/env/server";
 
+export const RERANK_MODEL = "rerank-v3.5";
+
 export async function rerankWithCohere({
   query,
   documents,
@@ -10,20 +12,22 @@ export async function rerankWithCohere({
   topN: number;
 }) {
   const apiKey = serverEnv.COHERE_API_KEY;
-  if (!apiKey) return null;
+  if (!apiKey) {
+    return null;
+  }
 
   const res = await fetch("https://api.cohere.com/v1/rerank", {
-    method: "POST",
+    body: JSON.stringify({
+      documents,
+      model: RERANK_MODEL,
+      query,
+      top_n: topN,
+    }),
     headers: {
       Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
     },
-      body: JSON.stringify({
-        query,
-        documents,
-        top_n: topN,
-        model: "rerank-v3.5",
-      }),
+    method: "POST",
   });
 
   if (!res.ok) {

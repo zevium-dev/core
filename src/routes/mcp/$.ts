@@ -35,7 +35,6 @@ server.tool(
 
     // use the search_embeddings function to get the results
     const results = await search_embeddings({
-      modelName: "Qwen/Qwen3-Embedding-8B",
       text: search_query,
       topK: recallK,
     });
