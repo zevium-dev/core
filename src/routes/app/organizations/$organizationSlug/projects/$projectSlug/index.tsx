@@ -1,15 +1,16 @@
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
-import { Code, FileText, Globe, Lock } from "lucide-react";
+import { createFileRoute, Link } from "@tanstack/react-router";
+import { Code, FileText, Globe, Lock, Settings } from "lucide-react";
 
 import { PageHeaderContent } from "~/components/sidebar";
 import { Badge } from "~/components/ui/badge";
+import { Button } from "~/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "~/components/ui/card";
 import { Typography } from "~/components/ui/typography";
 import { useTRPC } from "~/lib/trpc";
 import { formatDate } from "~/lib/utils";
 
-export const Route = createFileRoute("/app/organizations/$organizationSlug/projects/$projectSlug")({
+export const Route = createFileRoute("/app/organizations/$organizationSlug/projects/$projectSlug/")({
   component: RouteComponent,
   loader: async ({ context, params }) => {
     await context.queryClient.ensureQueryData(
@@ -63,6 +64,18 @@ function RouteComponent() {
                 {visibilityIcon}
                 {project.visibility}
               </Badge>
+              <Button asChild size="sm" variant="outline">
+                <Link
+                  params={{
+                    organizationSlug: params.organizationSlug,
+                    projectSlug: params.projectSlug,
+                  }}
+                  to="/app/organizations/$organizationSlug/projects/$projectSlug/spec"
+                >
+                  <Settings className="mr-2 h-4 w-4" />
+                  Manage Spec
+                </Link>
+              </Button>
             </div>
           </div>
           <div className="mt-4 flex flex-wrap gap-6 border-t pt-4">

@@ -6,7 +6,10 @@ import { db, orm, schema, schemaZod } from "~/db";
 import { secureProcedure } from "~/server/secure-procedure";
 import { router } from "~/server/trpc";
 
-const OrganizationInputZod = z.object({ organizationId: z.string() }).or(z.object({ organizationSlug: z.string() }));
+const OrganizationInputZod = z.object({
+  organizationId: z.string().optional(),
+  organizationSlug: z.string().optional(),
+});
 
 export const projectRouter = router({
   create: secureProcedure
