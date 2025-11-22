@@ -1,9 +1,12 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { ExternalLink, FileText, Settings } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { Button } from "~/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
+import { Input } from "~/components/ui/input";
+import { useTRPC } from "~/lib/trpc";
 
 export const Route = createFileRoute("/app/settings/credits")({
   component: CreditsComponent,
@@ -30,10 +33,27 @@ const recentTransactions = [
 ];
 
 function CreditsComponent() {
+  const trpc = useTRPC();
+  const qc = useQueryClient();
   const [_autoTopUpEnabled, _setAutoTopUpEnabled] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
+  const [amountUsd, setAmountUsd] = useState<string>("10");
 
-  const currentBalance = "$12.26";
+  const balanceQuery = useQuery(trpc.credits.getBalance.queryOptions());
+  const topupMutation = useMutation(
+    trpc.credits.createTopUpCheckout.mutationOptions({
+      async onSuccess(data) {
+        // Redirect to Polar checkout
+        if (data?.url) window.location.assign(data.url);
+        await qc.invalidateQueries(trpc.credits.getBalance.queryOptions());
+      },
+    }),
+  );
+
+  const currentBalance = useMemo(() => {
+    const cents = balanceQuery.data?.balanceCents ?? 0;
+    return new Intl.NumberFormat(undefined, { style: "currency", currency: "USD" }).format(cents / 100);
+  }, [balanceQuery.data]);
 
   return (
     <div className="mx-auto w-full max-w-3xl min-w-0 flex-1 space-y-6 p-6">
@@ -62,9 +82,28 @@ function CreditsComponent() {
             <CardTitle className="text-lg font-semibold">Buy Credits</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <Button className="w-full" size="lg">
-              Add Credits
-            </Button>
+            <div className="flex items-center gap-2">
+              <Input
+                className="w-32"
+                inputMode="numeric"
+                min={1}
+                onChange={(e) => setAmountUsd(e.target.value)}
+                placeholder="Amount (USD)"
+                type="number"
+                value={amountUsd}
+              />
+              <Button
+                className="flex-1"
+                disabled={topupMutation.isPending}
+                onClick={() => {
+                  const amount = Math.max(1, Math.floor(Number(amountUsd)));
+                  topupMutation.mutate({ amountCents: amount * 100 });
+                }}
+                size="lg"
+              >
+                {topupMutation.isPending ? "Redirecting..." : "Add Credits"}
+              </Button>
+            </div>
             <Button
               className={`
               w-full text-sm text-muted-foreground

@@ -1,7 +1,6 @@
 import { QueryClientProvider } from "@tanstack/react-query";
 import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
 import { useLocation } from "@tanstack/react-router";
-import { AutumnProvider } from "autumn-js/react";
 import { Provider as JotaiProvider } from "jotai";
 import { domAnimation, LazyMotion } from "motion/react";
 import { PostHogProvider } from "posthog-js/react";
@@ -46,7 +45,6 @@ export const Providers: React.FC<React.PropsWithChildren> = ({ children }) => {
 
   return (
     <PHProvider>
-      <AutumnProvider betterAuthUrl={clientEnv.VITE_PUBLIC_URL} includeCredentials>
         <QueryClientProvider client={queryClient}>
           <TRPCProvider queryClient={queryClient} trpcClient={trpcClient}>
             <ThemeProvider defaultTheme="dark" storageKey="vite-ui-theme">
@@ -70,7 +68,6 @@ export const Providers: React.FC<React.PropsWithChildren> = ({ children }) => {
             <ReactQueryDevtools />
           </TRPCProvider>
         </QueryClientProvider>
-      </AutumnProvider>
     </PHProvider>
   );
 };

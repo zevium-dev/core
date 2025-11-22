@@ -39,6 +39,7 @@ import { Route as AppOrganizationsOrganizationSlugRouteImport } from './routes/a
 import { Route as ApiTrpcSplatRouteImport } from './routes/api/trpc/$'
 import { Route as ApiProxySplatRouteImport } from './routes/api/proxy/$'
 import { Route as ApiPosthogSplatRouteImport } from './routes/api/posthog/$'
+import { Route as ApiPolarSplatRouteImport } from './routes/api/polar/$'
 import { Route as ApiOpenapiSplatRouteImport } from './routes/api/openapi/$'
 import { Route as ApiCapSplatRouteImport } from './routes/api/cap/$'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
@@ -201,6 +202,11 @@ const ApiPosthogSplatRoute = ApiPosthogSplatRouteImport.update({
   path: '/api/posthog/$',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiPolarSplatRoute = ApiPolarSplatRouteImport.update({
+  id: '/api/polar/$',
+  path: '/api/polar/$',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiOpenapiSplatRoute = ApiOpenapiSplatRouteImport.update({
   id: '/api/openapi/$',
   path: '/api/openapi/$',
@@ -275,6 +281,7 @@ export interface FileRoutesByFullPath {
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/cap/$': typeof ApiCapSplatRoute
   '/api/openapi/$': typeof ApiOpenapiSplatRoute
+  '/api/polar/$': typeof ApiPolarSplatRoute
   '/api/posthog/$': typeof ApiPosthogSplatRoute
   '/api/proxy/$': typeof ApiProxySplatRoute
   '/api/trpc/$': typeof ApiTrpcSplatRoute
@@ -314,6 +321,7 @@ export interface FileRoutesByTo {
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/cap/$': typeof ApiCapSplatRoute
   '/api/openapi/$': typeof ApiOpenapiSplatRoute
+  '/api/polar/$': typeof ApiPolarSplatRoute
   '/api/posthog/$': typeof ApiPosthogSplatRoute
   '/api/proxy/$': typeof ApiProxySplatRoute
   '/api/trpc/$': typeof ApiTrpcSplatRoute
@@ -354,6 +362,7 @@ export interface FileRoutesById {
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/cap/$': typeof ApiCapSplatRoute
   '/api/openapi/$': typeof ApiOpenapiSplatRoute
+  '/api/polar/$': typeof ApiPolarSplatRoute
   '/api/posthog/$': typeof ApiPosthogSplatRoute
   '/api/proxy/$': typeof ApiProxySplatRoute
   '/api/trpc/$': typeof ApiTrpcSplatRoute
@@ -397,6 +406,7 @@ export interface FileRouteTypes {
     | '/api/auth/$'
     | '/api/cap/$'
     | '/api/openapi/$'
+    | '/api/polar/$'
     | '/api/posthog/$'
     | '/api/proxy/$'
     | '/api/trpc/$'
@@ -436,6 +446,7 @@ export interface FileRouteTypes {
     | '/api/auth/$'
     | '/api/cap/$'
     | '/api/openapi/$'
+    | '/api/polar/$'
     | '/api/posthog/$'
     | '/api/proxy/$'
     | '/api/trpc/$'
@@ -475,6 +486,7 @@ export interface FileRouteTypes {
     | '/api/auth/$'
     | '/api/cap/$'
     | '/api/openapi/$'
+    | '/api/polar/$'
     | '/api/posthog/$'
     | '/api/proxy/$'
     | '/api/trpc/$'
@@ -513,6 +525,7 @@ export interface RootRouteChildren {
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
   ApiCapSplatRoute: typeof ApiCapSplatRoute
   ApiOpenapiSplatRoute: typeof ApiOpenapiSplatRoute
+  ApiPolarSplatRoute: typeof ApiPolarSplatRoute
   ApiPosthogSplatRoute: typeof ApiPosthogSplatRoute
   ApiProxySplatRoute: typeof ApiProxySplatRoute
   ApiTrpcSplatRoute: typeof ApiTrpcSplatRoute
@@ -730,6 +743,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPosthogSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/polar/$': {
+      id: '/api/polar/$'
+      path: '/api/polar/$'
+      fullPath: '/api/polar/$'
+      preLoaderRoute: typeof ApiPolarSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/openapi/$': {
       id: '/api/openapi/$'
       path: '/api/openapi/$'
@@ -900,6 +920,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiAuthSplatRoute: ApiAuthSplatRoute,
   ApiCapSplatRoute: ApiCapSplatRoute,
   ApiOpenapiSplatRoute: ApiOpenapiSplatRoute,
+  ApiPolarSplatRoute: ApiPolarSplatRoute,
   ApiPosthogSplatRoute: ApiPosthogSplatRoute,
   ApiProxySplatRoute: ApiProxySplatRoute,
   ApiTrpcSplatRoute: ApiTrpcSplatRoute,

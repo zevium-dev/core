@@ -1,10 +1,14 @@
-import { autumn } from "autumn-js/better-auth";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { apiKey } from "better-auth/plugins";
 import { twoFactor } from "better-auth/plugins";
 import { organization } from "better-auth/plugins/organization";
 import { reactStartCookies } from "better-auth/react-start";
+// Polar + Better Auth integration
+// eslint-disable-next-line import/no-extraneous-dependencies
+import { checkout, polar } from "@polar-sh/better-auth";
+// eslint-disable-next-line import/no-extraneous-dependencies
+import { Polar } from "@polar-sh/sdk";
 
 import { db, schema } from "~/db";
 import { clientEnv } from "~/env/client";
@@ -88,7 +92,15 @@ export const authServer = betterAuth({
     }),
     twoFactor(),
     organization({ requireEmailVerificationOnInvitation: true }),
-    autumn({ customerScope: "organization", secretKey: serverEnv.AUTUMN_SECRET_KEY }),
+    // Polar plugin: creates/links a Polar customer for each user/org and exposes checkout helpers
+    polar({
+      client: new Polar({
+        accessToken: serverEnv.POLAR_ACCESS_TOKEN,
+        server: serverEnv.POLAR_SERVER,
+      }),
+      createCustomerOnSignUp: true,
+      use: [checkout()],
+    }),
     capCaptcha(),
     reactStartCookies(),
   ],
