@@ -47,7 +47,8 @@ import { Route as AppOrganizationsOrganizationSlugProjectsRouteImport } from './
 import { Route as AppOrganizationsOrganizationSlugProjectsIndexRouteImport } from './routes/app/organizations/$organizationSlug/projects/index'
 import { Route as AppOrganizationsOrganizationSlugProjectsChar126RouteImport } from './routes/app/organizations/$organizationSlug/projects/~'
 import { Route as AppOrganizationsOrganizationSlugProjectsCreateRouteImport } from './routes/app/organizations/$organizationSlug/projects/create'
-import { Route as AppOrganizationsOrganizationSlugProjectsProjectSlugRouteImport } from './routes/app/organizations/$organizationSlug/projects/$projectSlug'
+import { Route as AppOrganizationsOrganizationSlugProjectsProjectSlugIndexRouteImport } from './routes/app/organizations/$organizationSlug/projects/$projectSlug/index'
+import { Route as AppOrganizationsOrganizationSlugProjectsProjectSlugSpecRouteImport } from './routes/app/organizations/$organizationSlug/projects/$projectSlug/spec'
 
 const AppRoute = AppRouteImport.update({
   id: '/app',
@@ -246,10 +247,16 @@ const AppOrganizationsOrganizationSlugProjectsCreateRoute =
     path: '/create',
     getParentRoute: () => AppOrganizationsOrganizationSlugProjectsRoute,
   } as any)
-const AppOrganizationsOrganizationSlugProjectsProjectSlugRoute =
-  AppOrganizationsOrganizationSlugProjectsProjectSlugRouteImport.update({
-    id: '/$projectSlug',
-    path: '/$projectSlug',
+const AppOrganizationsOrganizationSlugProjectsProjectSlugIndexRoute =
+  AppOrganizationsOrganizationSlugProjectsProjectSlugIndexRouteImport.update({
+    id: '/$projectSlug/',
+    path: '/$projectSlug/',
+    getParentRoute: () => AppOrganizationsOrganizationSlugProjectsRoute,
+  } as any)
+const AppOrganizationsOrganizationSlugProjectsProjectSlugSpecRoute =
+  AppOrganizationsOrganizationSlugProjectsProjectSlugSpecRouteImport.update({
+    id: '/$projectSlug/spec',
+    path: '/$projectSlug/spec',
     getParentRoute: () => AppOrganizationsOrganizationSlugProjectsRoute,
   } as any)
 
@@ -289,10 +296,11 @@ export interface FileRoutesByFullPath {
   '/app/settings': typeof AppSettingsIndexRoute
   '/app/organizations/$organizationSlug/projects': typeof AppOrganizationsOrganizationSlugProjectsRouteWithChildren
   '/app/organizations/$organizationSlug/': typeof AppOrganizationsOrganizationSlugIndexRoute
-  '/app/organizations/$organizationSlug/projects/$projectSlug': typeof AppOrganizationsOrganizationSlugProjectsProjectSlugRoute
   '/app/organizations/$organizationSlug/projects/create': typeof AppOrganizationsOrganizationSlugProjectsCreateRoute
   '/app/organizations/$organizationSlug/projects/~': typeof AppOrganizationsOrganizationSlugProjectsChar126Route
   '/app/organizations/$organizationSlug/projects/': typeof AppOrganizationsOrganizationSlugProjectsIndexRoute
+  '/app/organizations/$organizationSlug/projects/$projectSlug/spec': typeof AppOrganizationsOrganizationSlugProjectsProjectSlugSpecRoute
+  '/app/organizations/$organizationSlug/projects/$projectSlug': typeof AppOrganizationsOrganizationSlugProjectsProjectSlugIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -326,10 +334,11 @@ export interface FileRoutesByTo {
   '/app/organizations': typeof AppOrganizationsIndexRoute
   '/app/settings': typeof AppSettingsIndexRoute
   '/app/organizations/$organizationSlug': typeof AppOrganizationsOrganizationSlugIndexRoute
-  '/app/organizations/$organizationSlug/projects/$projectSlug': typeof AppOrganizationsOrganizationSlugProjectsProjectSlugRoute
   '/app/organizations/$organizationSlug/projects/create': typeof AppOrganizationsOrganizationSlugProjectsCreateRoute
   '/app/organizations/$organizationSlug/projects/~': typeof AppOrganizationsOrganizationSlugProjectsChar126Route
   '/app/organizations/$organizationSlug/projects': typeof AppOrganizationsOrganizationSlugProjectsIndexRoute
+  '/app/organizations/$organizationSlug/projects/$projectSlug/spec': typeof AppOrganizationsOrganizationSlugProjectsProjectSlugSpecRoute
+  '/app/organizations/$organizationSlug/projects/$projectSlug': typeof AppOrganizationsOrganizationSlugProjectsProjectSlugIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -368,10 +377,11 @@ export interface FileRoutesById {
   '/app/settings/': typeof AppSettingsIndexRoute
   '/app/organizations/$organizationSlug/projects': typeof AppOrganizationsOrganizationSlugProjectsRouteWithChildren
   '/app/organizations/$organizationSlug/': typeof AppOrganizationsOrganizationSlugIndexRoute
-  '/app/organizations/$organizationSlug/projects/$projectSlug': typeof AppOrganizationsOrganizationSlugProjectsProjectSlugRoute
   '/app/organizations/$organizationSlug/projects/create': typeof AppOrganizationsOrganizationSlugProjectsCreateRoute
   '/app/organizations/$organizationSlug/projects/~': typeof AppOrganizationsOrganizationSlugProjectsChar126Route
   '/app/organizations/$organizationSlug/projects/': typeof AppOrganizationsOrganizationSlugProjectsIndexRoute
+  '/app/organizations/$organizationSlug/projects/$projectSlug/spec': typeof AppOrganizationsOrganizationSlugProjectsProjectSlugSpecRoute
+  '/app/organizations/$organizationSlug/projects/$projectSlug/': typeof AppOrganizationsOrganizationSlugProjectsProjectSlugIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -411,10 +421,11 @@ export interface FileRouteTypes {
     | '/app/settings'
     | '/app/organizations/$organizationSlug/projects'
     | '/app/organizations/$organizationSlug/'
-    | '/app/organizations/$organizationSlug/projects/$projectSlug'
     | '/app/organizations/$organizationSlug/projects/create'
     | '/app/organizations/$organizationSlug/projects/~'
     | '/app/organizations/$organizationSlug/projects/'
+    | '/app/organizations/$organizationSlug/projects/$projectSlug/spec'
+    | '/app/organizations/$organizationSlug/projects/$projectSlug'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -448,10 +459,11 @@ export interface FileRouteTypes {
     | '/app/organizations'
     | '/app/settings'
     | '/app/organizations/$organizationSlug'
-    | '/app/organizations/$organizationSlug/projects/$projectSlug'
     | '/app/organizations/$organizationSlug/projects/create'
     | '/app/organizations/$organizationSlug/projects/~'
     | '/app/organizations/$organizationSlug/projects'
+    | '/app/organizations/$organizationSlug/projects/$projectSlug/spec'
+    | '/app/organizations/$organizationSlug/projects/$projectSlug'
   id:
     | '__root__'
     | '/'
@@ -489,10 +501,11 @@ export interface FileRouteTypes {
     | '/app/settings/'
     | '/app/organizations/$organizationSlug/projects'
     | '/app/organizations/$organizationSlug/'
-    | '/app/organizations/$organizationSlug/projects/$projectSlug'
     | '/app/organizations/$organizationSlug/projects/create'
     | '/app/organizations/$organizationSlug/projects/~'
     | '/app/organizations/$organizationSlug/projects/'
+    | '/app/organizations/$organizationSlug/projects/$projectSlug/spec'
+    | '/app/organizations/$organizationSlug/projects/$projectSlug/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -786,33 +799,43 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppOrganizationsOrganizationSlugProjectsCreateRouteImport
       parentRoute: typeof AppOrganizationsOrganizationSlugProjectsRoute
     }
-    '/app/organizations/$organizationSlug/projects/$projectSlug': {
-      id: '/app/organizations/$organizationSlug/projects/$projectSlug'
+    '/app/organizations/$organizationSlug/projects/$projectSlug/': {
+      id: '/app/organizations/$organizationSlug/projects/$projectSlug/'
       path: '/$projectSlug'
       fullPath: '/app/organizations/$organizationSlug/projects/$projectSlug'
-      preLoaderRoute: typeof AppOrganizationsOrganizationSlugProjectsProjectSlugRouteImport
+      preLoaderRoute: typeof AppOrganizationsOrganizationSlugProjectsProjectSlugIndexRouteImport
+      parentRoute: typeof AppOrganizationsOrganizationSlugProjectsRoute
+    }
+    '/app/organizations/$organizationSlug/projects/$projectSlug/spec': {
+      id: '/app/organizations/$organizationSlug/projects/$projectSlug/spec'
+      path: '/$projectSlug/spec'
+      fullPath: '/app/organizations/$organizationSlug/projects/$projectSlug/spec'
+      preLoaderRoute: typeof AppOrganizationsOrganizationSlugProjectsProjectSlugSpecRouteImport
       parentRoute: typeof AppOrganizationsOrganizationSlugProjectsRoute
     }
   }
 }
 
 interface AppOrganizationsOrganizationSlugProjectsRouteChildren {
-  AppOrganizationsOrganizationSlugProjectsProjectSlugRoute: typeof AppOrganizationsOrganizationSlugProjectsProjectSlugRoute
   AppOrganizationsOrganizationSlugProjectsCreateRoute: typeof AppOrganizationsOrganizationSlugProjectsCreateRoute
   AppOrganizationsOrganizationSlugProjectsChar126Route: typeof AppOrganizationsOrganizationSlugProjectsChar126Route
   AppOrganizationsOrganizationSlugProjectsIndexRoute: typeof AppOrganizationsOrganizationSlugProjectsIndexRoute
+  AppOrganizationsOrganizationSlugProjectsProjectSlugSpecRoute: typeof AppOrganizationsOrganizationSlugProjectsProjectSlugSpecRoute
+  AppOrganizationsOrganizationSlugProjectsProjectSlugIndexRoute: typeof AppOrganizationsOrganizationSlugProjectsProjectSlugIndexRoute
 }
 
 const AppOrganizationsOrganizationSlugProjectsRouteChildren: AppOrganizationsOrganizationSlugProjectsRouteChildren =
   {
-    AppOrganizationsOrganizationSlugProjectsProjectSlugRoute:
-      AppOrganizationsOrganizationSlugProjectsProjectSlugRoute,
     AppOrganizationsOrganizationSlugProjectsCreateRoute:
       AppOrganizationsOrganizationSlugProjectsCreateRoute,
     AppOrganizationsOrganizationSlugProjectsChar126Route:
       AppOrganizationsOrganizationSlugProjectsChar126Route,
     AppOrganizationsOrganizationSlugProjectsIndexRoute:
       AppOrganizationsOrganizationSlugProjectsIndexRoute,
+    AppOrganizationsOrganizationSlugProjectsProjectSlugSpecRoute:
+      AppOrganizationsOrganizationSlugProjectsProjectSlugSpecRoute,
+    AppOrganizationsOrganizationSlugProjectsProjectSlugIndexRoute:
+      AppOrganizationsOrganizationSlugProjectsProjectSlugIndexRoute,
   }
 
 const AppOrganizationsOrganizationSlugProjectsRouteWithChildren =

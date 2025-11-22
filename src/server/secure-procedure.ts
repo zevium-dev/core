@@ -157,24 +157,47 @@ const getProjectPermissions = async (userId: string, input: z.infer<typeof Proje
   return { permissions, projectId: row.project.id };
 };
 
+const getUserPermissions = async (userId: string) => {
+  const permissionRows = await db
+    .select({
+      permission: schema.userPermission.permission,
+      value: schema.userPermission.value,
+    })
+    .from(schema.userPermission)
+    .where(orm.eq(schema.userPermission.userId, userId));
+
+  // DEFAULT USER PERMISSIONS
+  const defaultUserPermissions: Permissions = {
+    "dashboard.view": { status: "allow" },
+    "marketplace.view": { status: "allow" },
+    "organization.list": { status: "allow" },
+  };
+
+  const permissions: Permissions = {
+    ...defaultUserPermissions,
+  };
+  // base user permissions
+  for (const permissionRow of permissionRows) {
+    permissions[permissionRow.permission] = permissionRow.value;
+  }
+
+  return { permissions };
+};
+
 export const secureProcedure = protectedProcedure
-  .input(OrganizationInputZod.or(ProjectInputZod).optional())
+  .input(OrganizationInputZod.and(ProjectInputZod).optional())
   .use(async ({ ctx, input, meta, next }) => {
     const requiredPermissions = meta?.requiredPermissions;
     if (!requiredPermissions) {
       throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "No required permissions specified" });
     }
 
-    const userPermissions = await db
-      .select()
-      .from(schema.userPermission)
-      .where(orm.eq(schema.userPermission.userId, ctx.user.id));
-
     let permissions: Permissions = {};
-    // base user permissions
-    for (const permission of userPermissions) {
-      permissions[permission.permission] = permission.value;
-    }
+    const userPermissions = await getUserPermissions(ctx.user.id);
+    permissions = {
+      ...permissions,
+      ...userPermissions.permissions,
+    };
 
     let orgId: string | undefined = undefined;
     let projectId: string | undefined = undefined;

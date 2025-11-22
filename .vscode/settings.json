@@ -9,5 +9,6 @@
     "**/routeTree.gen.ts": true
   },
   "typescript.tsdk": "node_modules/typescript/lib",
-  "typescript.experimental.useTsgo": false
+  "typescript.experimental.useTsgo": false,
+  "cSpell.words": ["zevium"]
 }
