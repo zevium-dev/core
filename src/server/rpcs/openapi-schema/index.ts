@@ -6,10 +6,24 @@ import { db, orm, schema } from "~/db";
 import { secureProcedure } from "~/server/secure-procedure";
 import { router } from "~/server/trpc";
 
+import { parseOpenApiDraft } from "./parse-draft";
+
 const ProjectInputZod = z.object({
   projectId: z.string().optional(),
   projectSlug: z.string().optional(),
 });
+
+const parseDraftOrThrow = (draft: string) => {
+  try {
+    return parseOpenApiDraft(draft);
+  } catch (error) {
+    throw new TRPCError({
+      cause: error instanceof Error ? error : undefined,
+      code: "BAD_REQUEST",
+      message: error instanceof Error ? error.message : "Invalid OpenAPI spec. Provide valid JSON or YAML.",
+    });
+  }
+};
 
 export const openapiSchemaRouter = router({
   getDraft: secureProcedure
@@ -94,15 +108,7 @@ export const openapiSchemaRouter = router({
         });
       }
 
-      let parsedDraft: unknown = {};
-      try {
-        parsedDraft = JSON.parse(input.draft);
-      } catch {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: "Invalid JSON.",
-        });
-      }
+      const parsedDraft = parseDraftOrThrow(input.draft);
 
       // 1. Ensure the parent schema record exists and is up to date
       const openApiSchema = await db
@@ -155,20 +161,7 @@ export const openapiSchemaRouter = router({
         });
       }
 
-      let parsedDraft: unknown = {};
-      try {
-        parsedDraft = JSON.parse(input.draft);
-      } catch {
-        // If it's not valid JSON, we might want to fail or store as is if the column allows?
-        // The column is { mode: "json" }, so it MUST be valid JSON.
-        // If the user is writing YAML, we need to convert it.
-        // For now, let's assume JSON or try to parse.
-        // If we want to support YAML, we should use the 'yaml' package.
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: "Invalid JSON. Please ensure your spec is valid JSON.",
-        });
-      }
+      const parsedDraft = parseDraftOrThrow(input.draft);
 
       await db
         .insert(schema.openAPISchema)
