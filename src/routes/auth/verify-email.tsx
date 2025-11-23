@@ -86,7 +86,13 @@ function RouteComponent() {
                       {...register("email")}
                     />
                     <p
-                      className={cn("text-destructive text-end text-xs", !errors.email && "invisible")}
+                      className={cn(
+                        "text-end text-xs text-destructive",
+                        !errors.email &&
+                          `
+                        invisible
+                      `,
+                      )}
                       id="email-error"
                     >
                       {errors.email?.message ?? "No error"}

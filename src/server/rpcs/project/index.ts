@@ -4,54 +4,29 @@ import z from "zod";
 
 import { db, orm, schema, schemaZod } from "~/db";
 import { getEmbeddings } from "~/lib/server/embeddings";
-import { protectedProcedure, router } from "~/server/trpc";
+import { secureProcedure } from "~/server/secure-procedure";
+import { router } from "~/server/trpc";
 
-const OrganizationInputZod = z.object({ organizationId: z.string() }).or(z.object({ organizationSlug: z.string() }));
-
-const organizationProcedure = protectedProcedure.input(OrganizationInputZod).use(async ({ ctx, input, next }) => {
-  const organizationWhere =
-    "organizationId" in input
-      ? orm.eq(schema.organization.id, input.organizationId)
-      : orm.eq(schema.organization.slug, input.organizationSlug);
-
-  const row = await db
-    .select({
-      memberId: schema.member.id,
-      organization: schema.organization,
-    })
-    .from(schema.organization)
-    .leftJoin(
-      schema.member,
-      orm.and(orm.eq(schema.member.organizationId, schema.organization.id), orm.eq(schema.member.userId, ctx.user.id)),
-    )
-    .where(organizationWhere)
-    .limit(1)
-    .then((rows) => rows.at(0));
-
-  const organization = row?.organization;
-  if (!organization) {
-    throw new TRPCError({
-      code: "NOT_FOUND",
-      message: "Organization not found",
-    });
-  }
-
-  if (!row.memberId) {
-    throw new TRPCError({
-      code: "FORBIDDEN",
-      message: "You do not have access to this organization",
-    });
-  }
-
-  return next({ ctx: { ...ctx, organization } });
+const OrganizationInputZod = z.object({
+  organizationId: z.string().optional(),
+  organizationSlug: z.string().optional(),
 });
 
 export const projectRouter = router({
-  create: organizationProcedure
-    .meta({ route: { path: "/project/create", summary: "Create a new project" } })
-    .input(OrganizationInputZod.and(schemaZod.ProjectZod.pick({ description: true, name: true, slug: true })))
-    .output(schemaZod.ProjectZod)
+  create: secureProcedure
+    .meta({
+      requiredPermissions: ["project.create"],
+      route: { path: "/project/create", summary: "Create a new project" },
+    })
+    .input(OrganizationInputZod.and(schemaZod.ProjectSelectZod.pick({ description: true, name: true, slug: true })))
+    .output(schemaZod.ProjectSelectZod)
     .mutation(async ({ ctx, input }) => {
+      if (!ctx.orgId) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Organization ID not found in context",
+        });
+      }
       const text = `${input.name}.${input.description}`;
       const embedding = await getEmbeddings({ input: text });
 
@@ -65,7 +40,7 @@ export const projectRouter = router({
               createdBy: ctx.user.id,
             },
             name: input.name,
-            organizationId: ctx.organization.id,
+            organizationId: ctx.orgId,
             slug: input.slug,
           })
           .returning()
@@ -91,16 +66,30 @@ export const projectRouter = router({
       return project;
     }),
 
-  get: organizationProcedure
-    .meta({ route: { path: "/project/get", summary: "Get a project by ID or slug" } })
+  get: secureProcedure
+    .meta({
+      requiredPermissions: ["project.view"],
+      route: { path: "/project/get", summary: "Get a project by ID or slug" },
+    })
     .input(OrganizationInputZod.and(z.object({ projectId: z.string() }).or(z.object({ projectSlug: z.string() }))))
-    .output(schemaZod.ProjectZod.and(z.object({ project_tags: z.array(schemaZod.ProjectTagZod) })))
+    .output(schemaZod.ProjectSelectZod.and(z.object({ project_tags: z.array(schemaZod.ProjectTagSelectZod) })))
     .query(async ({ ctx, input }) => {
-      const whereClauses = [orm.eq(schema.project.organizationId, ctx.organization.id)];
-      if ("projectId" in input) {
+      if (!ctx.orgId) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Organization ID not found in context",
+        });
+      }
+      const whereClauses = [orm.eq(schema.project.organizationId, ctx.orgId)];
+      if ("projectId" in input && input.projectId) {
         whereClauses.push(orm.eq(schema.project.id, input.projectId));
-      } else {
+      } else if ("projectSlug" in input && input.projectSlug) {
         whereClauses.push(orm.eq(schema.project.slug, input.projectSlug));
+      } else {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Either projectId or projectSlug must be provided",
+        });
       }
       const projectsWithTags = await db
         .select()
@@ -122,12 +111,21 @@ export const projectRouter = router({
       return projectWithTags;
     }),
 
-  list: organizationProcedure
-    .meta({ route: { path: "/project/list", summary: "List all projects in an organization" } })
+  list: secureProcedure
+    .meta({
+      requiredPermissions: ["project.list"],
+      route: { path: "/project/list", summary: "List all projects in an organization" },
+    })
     .input(OrganizationInputZod.and(z.object({ tagNames: z.array(z.string()).optional() })))
-    .output(z.array(schemaZod.ProjectZod.and(z.object({ project_tags: z.array(schemaZod.ProjectTagZod) }))))
+    .output(z.array(schemaZod.ProjectSelectZod.and(z.object({ project_tags: z.array(schemaZod.ProjectTagSelectZod) }))))
     .query(async ({ ctx, input }) => {
-      const where = [orm.eq(schema.project.organizationId, ctx.organization.id)];
+      if (!ctx.orgId) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Organization ID not found in context",
+        });
+      }
+      const where = [orm.eq(schema.project.organizationId, ctx.orgId)];
       if (input.tagNames && input.tagNames.length > 0) {
         where.push(orm.inArray(schema.projectTag.tagName, input.tagNames));
       }
@@ -158,11 +156,14 @@ export const projectRouter = router({
       return result;
     }),
 
-  update: organizationProcedure
-    .meta({ route: { path: "/project/update", summary: "Update a project" } })
+  update: secureProcedure
+    .meta({
+      requiredPermissions: ["project.edit"],
+      route: { path: "/project/update", summary: "Update a project" },
+    })
     .input(
       OrganizationInputZod.and(
-        schemaZod.ProjectZod.pick({
+        schemaZod.ProjectSelectZod.pick({
           description: true,
           documentation: true,
           id: true,
@@ -172,8 +173,14 @@ export const projectRouter = router({
         }),
       ).and(z.object({ tagNames: z.array(z.string()) })),
     )
-    .output(schemaZod.ProjectZod.and(z.object({ project_tags: z.array(schemaZod.ProjectTagZod) })))
+    .output(schemaZod.ProjectSelectZod.and(z.object({ project_tags: z.array(schemaZod.ProjectTagSelectZod) })))
     .mutation(async ({ ctx, input }) => {
+      if (!ctx.orgId) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Organization ID not found in context",
+        });
+      }
       const text = `${input.name}.${input.description}`;
       const embedding = await getEmbeddings({ input: text });
 
@@ -190,7 +197,7 @@ export const projectRouter = router({
           .where(
             orm.and(
               orm.eq(schema.project.id, input.id),
-              orm.eq(schema.project.organizationId, ctx.organization.id),
+              orm.eq(schema.project.organizationId, ctx.orgId),
             ),
           )
           .returning()
@@ -223,8 +230,11 @@ export const projectRouter = router({
       };
     }),
 
-  updateTags: organizationProcedure
-    .meta({ route: { path: "/project/update-tags", summary: "Update project tags" } })
+  updateTags: secureProcedure
+    .meta({
+      requiredPermissions: ["project.edit"],
+      route: { path: "/project/update-tags", summary: "Update project tags" },
+    })
     .input(
       OrganizationInputZod.and(
         z.object({
@@ -233,17 +243,18 @@ export const projectRouter = router({
         }),
       ),
     )
-    .output(schemaZod.ProjectZod.and(z.object({ project_tags: z.array(schemaZod.ProjectTagZod) })))
+    .output(schemaZod.ProjectSelectZod.and(z.object({ project_tags: z.array(schemaZod.ProjectTagSelectZod) })))
     .mutation(async ({ ctx, input }) => {
+      if (!ctx.orgId) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Organization ID not found in context",
+        });
+      }
       const project = await db
         .select()
         .from(schema.project)
-        .where(
-          orm.and(
-            orm.eq(schema.project.id, input.projectId),
-            orm.eq(schema.project.organizationId, ctx.organization.id),
-          ),
-        )
+        .where(orm.and(orm.eq(schema.project.id, input.projectId), orm.eq(schema.project.organizationId, ctx.orgId)))
         .limit(1)
         .then((v) => v.at(0));
       if (!project) {

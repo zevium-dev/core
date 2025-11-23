@@ -9,6 +9,7 @@ import { ViteUserConfig } from "vitest/config";
 import { nodeBuiltinImportPostprocess } from "./plugins/node-builtin-import-postprocess";
 
 export default defineConfig({
+  // build: { sourcemap: true },
   plugins: [
     tsConfigPaths({ projects: ["./tsconfig.json"] }),
     tailwindcss(),

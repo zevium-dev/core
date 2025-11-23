@@ -12,18 +12,20 @@ function ImageUploadTest() {
   const [aspectRatio, setAspectRatio] = useState(1);
 
   return (
-    <div className="bg-background min-h-screen p-8">
+    <div className="min-h-screen bg-background p-8">
       <div className="mx-auto max-w-2xl space-y-8">
         <div>
           <h1 className="mb-2 text-3xl font-bold">ImageUpload Component Test</h1>
           <p className="text-muted-foreground">Test the image upload, crop, and compression functionality</p>
         </div>
 
-        <div className="border-border space-y-4 rounded-lg border p-6">
+        <div className="space-y-4 rounded-lg border border-border p-6">
           <div>
             <label className="block text-sm font-medium">Aspect Ratio</label>
             <select
-              className="border-border bg-background mt-2 w-full rounded border p-2"
+              className={`
+                mt-2 w-full rounded border border-border bg-background p-2
+              `}
               onChange={(e) => setAspectRatio(parseFloat(e.target.value))}
               value={aspectRatio}
             >
@@ -46,28 +48,28 @@ function ImageUploadTest() {
         </div>
 
         {image && (
-          <div className="border-border space-y-2 rounded-lg border p-6">
+          <div className="space-y-2 rounded-lg border border-border p-6">
             <h2 className="text-lg font-semibold">Output Preview</h2>
             <div className="flex items-center justify-between">
               <div className="space-y-1">
-                <p className="text-muted-foreground text-sm">Base64 Length: {image.length} characters</p>
-                <p className="text-muted-foreground text-sm">
+                <p className="text-sm text-muted-foreground">Base64 Length: {image.length} characters</p>
+                <p className="text-sm text-muted-foreground">
                   Approx Size: {((image.length * 0.75) / 1024).toFixed(2)} KB
                 </p>
               </div>
             </div>
             <img
               alt="Output"
-              className="border-border max-w-full rounded border"
+              className="max-w-full rounded border border-border"
               src={image}
               style={{ maxHeight: "300px", objectFit: "contain" }}
             />
           </div>
         )}
 
-        <div className="border-border space-y-2 rounded-lg border p-6">
+        <div className="space-y-2 rounded-lg border border-border p-6">
           <h2 className="text-lg font-semibold">Test Instructions</h2>
-          <ul className="text-muted-foreground list-inside space-y-1 text-sm">
+          <ul className="list-inside space-y-1 text-sm text-muted-foreground">
             <li>1. Click the upload area or drag an image</li>
             <li>2. A crop dialog should appear</li>
             <li>3. Drag to move the crop box</li>

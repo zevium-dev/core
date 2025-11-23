@@ -477,12 +477,15 @@ function ImageUpload({
           <div className="relative inline-block">
             <img
               alt="Preview"
-              className="border-border max-w-full rounded-lg border"
+              className="max-w-full rounded-lg border border-border"
               src={preview}
               style={{ aspectRatio: aspectRatio }}
             />
             <button
-              className="bg-background/80 hover:bg-background absolute top-2 right-2 rounded-lg p-2"
+              className={`
+                absolute top-2 right-2 rounded-lg bg-background/80 p-2
+                hover:bg-background
+              `}
               disabled={disabled}
               onClick={() => {
                 setPreview("");
@@ -499,7 +502,10 @@ function ImageUpload({
         ) : (
           <div
             className={cn(
-              "border-border relative cursor-pointer rounded-lg border-2 border-dashed p-8 text-center transition-colors",
+              `
+                relative cursor-pointer rounded-lg border-2 border-dashed
+                border-border p-8 text-center transition-colors
+              `,
               isDragActive && "border-primary bg-primary/5",
               disabled && "cursor-not-allowed opacity-50",
             )}
@@ -517,9 +523,9 @@ function ImageUpload({
             tabIndex={0}
           >
             <div>
-              <Upload className="text-muted-foreground mx-auto mb-2 size-8" />
-              <p className="text-foreground text-sm font-medium">{placeholder}</p>
-              <p className="text-muted-foreground text-xs">Image should be less than {maxSizeKb}KB</p>
+              <Upload className="mx-auto mb-2 size-8 text-muted-foreground" />
+              <p className="text-sm font-medium text-foreground">{placeholder}</p>
+              <p className="text-xs text-muted-foreground">Image should be less than {maxSizeKb}KB</p>
             </div>
 
             <input
@@ -545,10 +551,20 @@ function ImageUpload({
 
           <div className="space-y-4">
             <div
-              className="border-border bg-muted relative mx-auto max-h-96 max-w-2xl overflow-hidden rounded-lg border"
+              className={`
+                relative mx-auto max-h-96 max-w-2xl overflow-hidden rounded-lg
+                border border-border bg-muted
+              `}
               ref={containerRef}
             >
-              <img alt="Crop" className="mx-auto h-full max-w-full object-contain" ref={imageRef} src={cropImage} />
+              <img
+                alt="Crop"
+                className={`
+                mx-auto h-full max-w-full object-contain
+              `}
+                ref={imageRef}
+                src={cropImage}
+              />
 
               {/* Crop overlay and handles */}
               <svg className="pointer-events-none absolute inset-0" height="100%" width="100%">
@@ -627,7 +643,10 @@ function ImageUpload({
                 {/* Resize handles */}
                 {["nw", "ne", "sw", "se"].map((corner) => (
                   <div
-                    className="bg-destructive absolute size-3 cursor-nwse-resize rounded-full"
+                    className={`
+                      absolute size-3 cursor-nwse-resize rounded-full
+                      bg-destructive
+                    `}
                     key={corner}
                     onMouseDown={handleCornerResize(corner)}
                     style={{

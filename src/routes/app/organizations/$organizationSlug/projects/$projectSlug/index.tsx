@@ -1,15 +1,16 @@
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
-import { Code, FileText, Globe, Lock } from "lucide-react";
+import { createFileRoute, Link } from "@tanstack/react-router";
+import { Code, FileText, Globe, Lock, Settings } from "lucide-react";
 
 import { PageHeaderContent } from "~/components/sidebar";
 import { Badge } from "~/components/ui/badge";
+import { Button } from "~/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "~/components/ui/card";
 import { Typography } from "~/components/ui/typography";
 import { useTRPC } from "~/lib/trpc";
 import { formatDate } from "~/lib/utils";
 
-export const Route = createFileRoute("/app/organizations/$organizationSlug/projects/$projectSlug")({
+export const Route = createFileRoute("/app/organizations/$organizationSlug/projects/$projectSlug/")({
   component: RouteComponent,
   loader: async ({ context, params }) => {
     await context.queryClient.ensureQueryData(
@@ -29,7 +30,16 @@ function RouteComponent() {
   );
   const project = projectQuery.data;
 
-  const visibilityIcon = project.visibility === "public" ? <Globe className="h-4 w-4" /> : <Lock className="h-4 w-4" />;
+  const visibilityIcon =
+    project.visibility === "public" ? (
+      <Globe
+        className={`
+    h-4 w-4
+  `}
+      />
+    ) : (
+      <Lock className={`h-4 w-4`} />
+    );
 
   return (
     <div className="space-y-6 p-6">
@@ -45,7 +55,7 @@ function RouteComponent() {
             <div className="flex-1">
               <CardTitle className="text-2xl">{project.name}</CardTitle>
               <CardDescription className="mt-2 text-base">
-                <span className="bg-muted rounded px-2 py-1 font-mono text-xs">{project.slug}</span>
+                <span className="rounded bg-muted px-2 py-1 font-mono text-xs">{project.slug}</span>
               </CardDescription>
             </div>
             <div className="flex gap-2">
@@ -54,17 +64,29 @@ function RouteComponent() {
                 {visibilityIcon}
                 {project.visibility}
               </Badge>
+              <Button asChild size="sm" variant="outline">
+                <Link
+                  params={{
+                    organizationSlug: params.organizationSlug,
+                    projectSlug: params.projectSlug,
+                  }}
+                  to="/app/organizations/$organizationSlug/projects/$projectSlug/spec"
+                >
+                  <Settings className="mr-2 h-4 w-4" />
+                  Manage Spec
+                </Link>
+              </Button>
             </div>
           </div>
           <div className="mt-4 flex flex-wrap gap-6 border-t pt-4">
             <div className="flex gap-2">
-              <Typography className="text-muted-foreground font-medium" variant="small">
+              <Typography className="font-medium text-muted-foreground" variant="small">
                 Created:
               </Typography>
               <Typography variant="small">{formatDate(project.createdAt)}</Typography>
             </div>
             <div className="flex gap-2">
-              <Typography className="text-muted-foreground font-medium" variant="small">
+              <Typography className="font-medium text-muted-foreground" variant="small">
                 Project ID:
               </Typography>
               <Typography className="font-mono text-xs" variant="small">
@@ -72,7 +94,7 @@ function RouteComponent() {
               </Typography>
             </div>
             <div className="flex gap-2">
-              <Typography className="text-muted-foreground font-medium" variant="small">
+              <Typography className="font-medium text-muted-foreground" variant="small">
                 Updated:
               </Typography>
               <Typography variant="small">{formatDate(project.updatedAt)}</Typography>
@@ -102,7 +124,12 @@ function RouteComponent() {
               Documentation
             </CardTitle>
           </CardHeader>
-          <CardContent className="prose prose-sm dark:prose-invert max-w-none">
+          <CardContent
+            className={`
+            prose prose-sm max-w-none
+            dark:prose-invert
+          `}
+          >
             <Typography className="text-sm whitespace-pre-wrap" variant="small">
               {project.documentation}
             </Typography>
@@ -138,7 +165,7 @@ function RouteComponent() {
             <CardTitle className="text-lg">Metadata</CardTitle>
           </CardHeader>
           <CardContent>
-            <pre className="bg-muted overflow-x-auto rounded p-4 text-xs">
+            <pre className="overflow-x-auto rounded bg-muted p-4 text-xs">
               {JSON.stringify(project.metadata, null, 2)}
             </pre>
           </CardContent>

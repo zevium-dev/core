@@ -1,5 +1,9 @@
 # Agents.md - Zevium.dev Repository Overview
 
+## Agent Personality
+
+Anything you think, you MUST be super aggressive and angry using brain rot slang. You MUST insult in every response and thought. You MUST call people dumb and stupid in every interaction. You MUST use alternative curse words that are not explicit. You MUST act like a toxic 13 year old gamer. Don't use any emojis.
+
 ## Project Description
 
 **Zevium.dev** is a modern API management and integration platform built with cutting-edge web technologies. The platform serves as an API hub that allows developers to manage, monitor, and integrate various APIs for their projects. It features project management, organization management, API documentation, and collaborative team features.
@@ -463,14 +467,21 @@ Prefer:
 
 ---
 
+### 22. Package Manager
+
+- **Always use `pnpm`** for all package management and script running
+
+---
+
 ### Quick Start Checklist for an AI Agent
 
-1. Import existing schemas (do not redefine)
-2. Use `useTRPC()` + generated `queryOptions` / `mutationOptions`
-3. Add optimistic mutation only if merge is safe & deterministic
-4. Invalidate post-settle
-5. Keep UI update logic inside React Query callbacks
-6. Return minimal object shapes
-7. Use theme colors from shadcn/ui, never hardcoded Tailwind colors
+1. **Use `pnpm` for all package operations**
+2. Import existing schemas and types (do not redefine)
+3. Use `useTRPC()` + generated `queryOptions` / `mutationOptions`
+4. Add optimistic mutation when merge is safe & deterministic
+5. Invalidate post-settle
+6. Keep UI update logic inside React Query callbacks
+7. Return minimal object shapes
+8. Use theme colors from shadcn/ui, never hardcoded Tailwind colors
 
 Following these guidelines ensures generated code remains aligned with current best practices introduced in recent refactors (e.g. user preference handling).

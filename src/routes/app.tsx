@@ -1,17 +1,24 @@
-import { createFileRoute, Outlet } from "@tanstack/react-router";
+import { ClientOnly, createFileRoute, Outlet } from "@tanstack/react-router";
 
 import { Redirect } from "~/components/redirect";
 import { AppSidebar, PageHeader } from "~/components/sidebar";
 import { ScreenCenter } from "~/components/ui/screen-center";
 import { SidebarInset, SidebarProvider } from "~/components/ui/sidebar";
+import { Skeleton } from "~/components/ui/skeleton";
 import { Spinner } from "~/components/ui/spinner";
 import { sessionQueryOptions, useUser } from "~/lib/auth";
 
 export const Route = createFileRoute("/app")({
   component: RouteComponent,
-  loader: ({ context }) => {
+  loader: ({ context, params }) => {
     void context.queryClient.ensureQueryData(sessionQueryOptions());
     void context.queryClient.ensureQueryData(context.trpc.organization.list.queryOptions());
+
+    if ("organizationSlug" in params && typeof params.organizationSlug === "string" && params.organizationSlug) {
+      void context.queryClient.ensureQueryData(
+        context.trpc.project.list.queryOptions({ organizationSlug: params.organizationSlug }),
+      );
+    }
   },
   pendingComponent: PendingComponent,
 });
@@ -19,7 +26,9 @@ export const Route = createFileRoute("/app")({
 function PendingComponent() {
   return (
     <SidebarProvider>
-      <AppSidebar />
+      <ClientOnly fallback={<Skeleton className="h-full w-64" />}>
+        <AppSidebar />
+      </ClientOnly>
       <SidebarInset>
         <PageHeader />
         <ScreenCenter>
@@ -36,7 +45,9 @@ function RouteComponent() {
 
   return (
     <SidebarProvider>
-      <AppSidebar />
+      <ClientOnly fallback={<Skeleton className="h-full w-64" />}>
+        <AppSidebar />
+      </ClientOnly>
       <SidebarInset>
         <PageHeader />
         <Outlet />

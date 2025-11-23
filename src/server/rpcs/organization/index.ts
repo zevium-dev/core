@@ -4,11 +4,15 @@ import { z } from "zod";
 
 import { schemaZod } from "~/db";
 import { authServer } from "~/lib/server/auth";
-import { protectedProcedure, router } from "~/server/trpc";
+import { secureProcedure } from "~/server/secure-procedure";
+import { router } from "~/server/trpc";
 
 export const organizationRouter = router({
-  create: protectedProcedure
-    .meta({ route: { path: "/organization/create", summary: "Create new organization" } })
+  create: secureProcedure
+    .meta({
+      requiredPermissions: ["organization.create"],
+      route: { path: "/organization/create", summary: "Create new organization" },
+    })
     .input(
       z.object({
         logo: z.string().max(128_000).optional(),
@@ -22,7 +26,7 @@ export const organizationRouter = router({
           .toLowerCase(),
       }),
     )
-    .output(schemaZod.OrganizationZod.and(z.object({ members: z.array(schemaZod.MemberZod) })).nullable())
+    .output(schemaZod.OrganizationSelectZod.and(z.object({ members: z.array(schemaZod.MemberSelectZod) })).nullable())
     .mutation(async ({ ctx, input }) => {
       const org = await authServer.api.createOrganization({
         body: {
@@ -41,19 +45,22 @@ export const organizationRouter = router({
       return { ...org, createdAt: org.createdAt, logo: org.logo ?? null, members: org.members.filter(Boolean) };
     }),
 
-  get: protectedProcedure
-    .meta({ route: { path: "/organization/get", summary: "Get organization by ID or slug" } })
+  get: secureProcedure
+    .meta({
+      requiredPermissions: ["organization.view"],
+      route: { path: "/organization/get", summary: "Get organization by ID or slug" },
+    })
     .input(type({ organizationId: "string" }).or(type({ organizationSlug: "string" })))
     .output(
-      schemaZod.OrganizationZod.and(
+      schemaZod.OrganizationSelectZod.and(
         z.object({
           members: z.array(
-            schemaZod.MemberZod.and(
-              z.object({ user: schemaZod.UserZod.pick({ email: true, image: true, name: true }) }),
+            schemaZod.MemberSelectZod.and(
+              z.object({ user: schemaZod.UserSelectZod.pick({ email: true, image: true, name: true }) }),
             ),
           ),
         }),
-      ).and(z.object({ invitations: z.array(schemaZod.InvitationZod) })),
+      ).and(z.object({ invitations: z.array(schemaZod.InvitationSelectZod) })),
     )
     .query(async ({ ctx, input }) => {
       const org = await authServer.api.getFullOrganization({
@@ -72,9 +79,13 @@ export const organizationRouter = router({
       };
     }),
 
-  list: protectedProcedure
-    .meta({ route: { path: "/organization/list", summary: "Get all user organizations" } })
-    .output(z.array(schemaZod.OrganizationZod))
+  // TODO: move this out of this file
+  list: secureProcedure
+    .meta({
+      requiredPermissions: ["organization.list"],
+      route: { path: "/organization/list", summary: "Get all user organizations" },
+    })
+    .output(z.array(schemaZod.OrganizationSelectZod))
     .query(async ({ ctx }) => {
       const orgs = await authServer.api.listOrganizations({ headers: ctx.raw.req.headers });
       return orgs.map((org) => ({

@@ -89,8 +89,21 @@ function RouteComponent() {
                     Sign in with Google
                   </Button>
                 </div>
-                <div className="after:border-border relative text-center text-sm after:absolute after:inset-0 after:top-1/2 after:z-0 after:flex after:items-center after:border-t">
-                  <span className="bg-card text-muted-foreground relative z-10 px-2">Or continue with</span>
+                <div
+                  className={`
+                  relative text-center text-sm
+                  after:absolute after:inset-0 after:top-1/2 after:z-0
+                  after:flex after:items-center after:border-t
+                  after:border-border
+                `}
+                >
+                  <span
+                    className={`
+                    relative z-10 bg-card px-2 text-muted-foreground
+                  `}
+                  >
+                    Or continue with
+                  </span>
                 </div>
                 <div className="grid gap-6">
                   <div className="grid gap-3">
@@ -105,7 +118,13 @@ function RouteComponent() {
                       {...register("email")}
                     />
                     <p
-                      className={cn("text-destructive text-end text-xs", !errors.email && "invisible")}
+                      className={cn(
+                        "text-end text-xs text-destructive",
+                        !errors.email &&
+                          `
+                        invisible
+                      `,
+                      )}
                       id="email-error"
                     >
                       {errors.email?.message ?? "No error"}
@@ -116,7 +135,14 @@ function RouteComponent() {
                       <Label className="mt-0.5" htmlFor="password">
                         Password
                       </Label>
-                      <Link className="ml-auto text-xs hover:underline" tabIndex={-1} to="/auth/forgot-password">
+                      <Link
+                        className={`
+                        ml-auto text-xs
+                        hover:underline
+                      `}
+                        tabIndex={-1}
+                        to="/auth/forgot-password"
+                      >
                         Forgot your password?
                       </Link>
                     </div>
@@ -129,7 +155,13 @@ function RouteComponent() {
                       {...register("password")}
                     />
                     <p
-                      className={cn("text-destructive text-end text-xs", !errors.password && "invisible")}
+                      className={cn(
+                        "text-end text-xs text-destructive",
+                        !errors.password &&
+                          `
+                        invisible
+                      `,
+                      )}
                       id="password-error"
                     >
                       {errors.password?.message ?? "No error"}

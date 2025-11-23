@@ -1,5 +1,8 @@
 import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
+import { DefaultOrganizationRoles } from "./default-roles";
+import { OrganizationUserPermissions, PermissionValue, ProjectUserPermissions, UserPermissions } from "./permission";
+
 type Base64String = {} & string;
 type Metadata = Record<string, unknown>;
 
@@ -172,7 +175,7 @@ export const member = sqliteTable(
     organizationId: text("organization_id")
       .notNull()
       .references(() => organization.id, { onDelete: "cascade" }),
-    role: text("role", { enum: ["owner", "member", "admin", "guest"] })
+    role: text("role", { enum: DefaultOrganizationRoles })
       .notNull()
       .$defaultFn(() => "member"),
     userId: text("user_id")
@@ -198,7 +201,7 @@ export const invitation = sqliteTable(
     organizationId: text("organization_id")
       .notNull()
       .references(() => organization.id, { onDelete: "cascade" }),
-    role: text("role", { enum: ["owner", "member", "admin", "guest"] })
+    role: text("role", { enum: DefaultOrganizationRoles })
       .notNull()
       .$defaultFn(() => "member"),
     status: text("status").default("pending").notNull(),
@@ -382,4 +385,62 @@ export const userPreference = sqliteTable(
   },
   // 1-1 relationship with user
   (self) => [uniqueIndex("user_preference_user_id_index").on(self.userId)],
+);
+
+// ===== Permissions =====
+
+export const userPermission = sqliteTable(
+  "user_permission",
+  {
+    id: text("id").primaryKey(),
+    permission: text("permission", { enum: UserPermissions }).notNull(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    value: text("value", { mode: "json" }).notNull().$type<PermissionValue>(),
+  },
+  (self) => [
+    index("user_permission_user_id_index").on(self.userId),
+    uniqueIndex("user_permission_user_permission_unique_index").on(self.userId, self.permission),
+  ],
+);
+
+export const organizationUserPermission = sqliteTable(
+  "organization_user_permission",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    permission: text("permission", { enum: OrganizationUserPermissions }).notNull(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    value: text("value", { mode: "json" }).notNull().$type<PermissionValue>(),
+  },
+  (self) => [
+    index("organization_user_permission_organization_id_index").on(self.organizationId),
+    index("organization_user_permission_user_id_index").on(self.userId),
+    uniqueIndex("organization_user_permission_unique_index").on(self.organizationId, self.userId, self.permission),
+  ],
+);
+
+export const projectUserPermission = sqliteTable(
+  "project_user_permission",
+  {
+    id: text("id").primaryKey(),
+    permission: text("permission", { enum: ProjectUserPermissions }).notNull(),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => project.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    value: text("value", { mode: "json" }).notNull().$type<PermissionValue>(),
+  },
+  (self) => [
+    index("project_user_permission_project_id_index").on(self.projectId),
+    index("project_user_permission_user_id_index").on(self.userId),
+    uniqueIndex("project_user_permission_unique_index").on(self.projectId, self.userId, self.permission),
+  ],
 );

@@ -203,12 +203,12 @@ function AccountPreferenceComponent() {
     <div className="mx-auto w-full max-w-3xl min-w-0 flex-1 space-y-6 p-6">
       {/* Header */}
       <div className="flex items-center gap-2">
-        <User className="text-muted-foreground h-6 w-6" />
-        <h1 className="text-foreground text-2xl font-bold">Account</h1>
+        <User className="h-6 w-6 text-muted-foreground" />
+        <h1 className="text-2xl font-bold text-foreground">Account</h1>
       </div>
 
       {/* Profile Section */}
-      <Card className="bg-card/50 border-border/50 w-full backdrop-blur-sm">
+      <Card className="w-full border-border/50 bg-card/50 backdrop-blur-sm">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <User className="h-5 w-5" />
@@ -237,7 +237,7 @@ function AccountPreferenceComponent() {
               <h3 className="text-lg font-medium">
                 {name || (userPreferencesQuery.isPending ? "Loading..." : "Unnamed User")}
               </h3>
-              <p className="text-muted-foreground text-sm">
+              <p className="text-sm text-muted-foreground">
                 {email || (userPreferencesQuery.isPending ? "" : "No email")}
               </p>
               <Button disabled size="sm" title="Avatar upload coming soon" variant="outline">
@@ -249,8 +249,18 @@ function AccountPreferenceComponent() {
           <Separator />
 
           {/* Personal Information */}
-          <div className="grid gap-4 md:grid-cols-2">
-            <div className="space-y-2 md:col-span-2">
+          <div
+            className={`
+            grid gap-4
+            md:grid-cols-2
+          `}
+          >
+            <div
+              className={`
+              space-y-2
+              md:col-span-2
+            `}
+            >
               <Label htmlFor="name">Name</Label>
               <Input id="name" onChange={(e) => setName(e.target.value)} placeholder="Enter your name" value={name} />
             </div>
@@ -259,7 +269,7 @@ function AccountPreferenceComponent() {
       </Card>
 
       {/* Contact Information */}
-      <Card className="bg-card/50 border-border/50 w-full backdrop-blur-sm">
+      <Card className="w-full border-border/50 bg-card/50 backdrop-blur-sm">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Mail className="h-5 w-5" />
@@ -274,7 +284,11 @@ function AccountPreferenceComponent() {
             </Label>
             <div className="flex items-center gap-2">
               <div
-                className="border-input text-foreground/90 flex h-10 w-full items-center justify-between rounded-md border bg-transparent px-3 text-sm"
+                className={`
+                  flex h-10 w-full items-center justify-between rounded-md
+                  border border-input bg-transparent px-3 text-sm
+                  text-foreground/90
+                `}
                 id="email"
               >
                 <span className="truncate select-text" title={email}>
@@ -315,7 +329,7 @@ function AccountPreferenceComponent() {
       </Card>
 
       {/* Location & Timezone */}
-      <Card className="bg-card/50 border-border/50 w-full backdrop-blur-sm">
+      <Card className="w-full border-border/50 bg-card/50 backdrop-blur-sm">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <MapPin className="h-5 w-5" />
@@ -365,7 +379,7 @@ function AccountPreferenceComponent() {
       </Card>
 
       {/* Security Section */}
-      <Card className="bg-card/50 border-border/50 w-full backdrop-blur-sm">
+      <Card className="w-full border-border/50 bg-card/50 backdrop-blur-sm">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Shield className="h-5 w-5" />
@@ -376,7 +390,7 @@ function AccountPreferenceComponent() {
           <div className="flex items-start justify-between gap-4">
             <div className="space-y-1">
               <p className="font-medium">Password</p>
-              <p className="text-muted-foreground text-sm">
+              <p className="text-sm text-muted-foreground">
                 {hasPassword === null && "Detecting…"}
                 {hasPassword === true && "A password is set for this account"}
                 {hasPassword === false && "No password set (OAuth only). You can set one."}
@@ -396,11 +410,21 @@ function AccountPreferenceComponent() {
           </div>
           {/* Password Forms (gated) */}
           {showPasswordEditor && (
-            <div className="border-border/60 space-y-3 rounded-md border p-4">
+            <div className="space-y-3 rounded-md border border-border/60 p-4">
               {hasPassword === true && (
                 <div className="space-y-3">
-                  <div className="grid gap-3 md:grid-cols-2">
-                    <div className="space-y-2 md:col-span-2">
+                  <div
+                    className={`
+                    grid gap-3
+                    md:grid-cols-2
+                  `}
+                  >
+                    <div
+                      className={`
+                      space-y-2
+                      md:col-span-2
+                    `}
+                    >
                       <Label htmlFor="currentPassword">Current Password</Label>
                       <div className="flex items-center gap-2">
                         <Input
@@ -423,10 +447,10 @@ function AccountPreferenceComponent() {
                         value={newPassword}
                       />
                       {passwordTooShort && (
-                        <p className="text-destructive text-xs">Minimum {MIN_PASSWORD_LENGTH} characters</p>
+                        <p className="text-xs text-destructive">Minimum {MIN_PASSWORD_LENGTH} characters</p>
                       )}
                       {passwordTooLong && (
-                        <p className="text-destructive text-xs">Maximum {MAX_PASSWORD_LENGTH} characters</p>
+                        <p className="text-xs text-destructive">Maximum {MAX_PASSWORD_LENGTH} characters</p>
                       )}
                     </div>
                     <div className="space-y-2">
@@ -440,7 +464,7 @@ function AccountPreferenceComponent() {
                         value={confirmPassword}
                       />
                       {confirmMismatch && !passwordTooShort && !passwordTooLong && (
-                        <p className="text-destructive text-xs">Passwords do not match</p>
+                        <p className="text-xs text-destructive">Passwords do not match</p>
                       )}
                     </div>
                   </div>
@@ -452,7 +476,15 @@ function AccountPreferenceComponent() {
                       type="button"
                       variant="ghost"
                     >
-                      {showPasswords ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      {showPasswords ? (
+                        <EyeOff className="h-4 w-4" />
+                      ) : (
+                        <Eye
+                          className={`
+                        h-4 w-4
+                      `}
+                        />
+                      )}
                     </Button>
                     <Button
                       onClick={() => {
@@ -478,14 +510,22 @@ function AccountPreferenceComponent() {
                       size="sm"
                       type="button"
                     >
-                      {isChangingPassword ? <Loader2 className="h-4 w-4 animate-spin" /> : "Change Password"}
+                      {isChangingPassword ? (
+                        <Loader2
+                          className={`
+                        h-4 w-4 animate-spin
+                      `}
+                        />
+                      ) : (
+                        "Change Password"
+                      )}
                     </Button>
                   </div>
                 </div>
               )}
               {hasPassword === false && (
                 <div className="space-y-3">
-                  <p className="text-muted-foreground text-sm">
+                  <p className="text-sm text-muted-foreground">
                     You're currently signed in with OAuth only. To change your password in the future, set a password
                     first. We will email a secure link to {email || "your email"} to set it.
                   </p>
@@ -526,7 +566,7 @@ function AccountPreferenceComponent() {
               <div className="flex items-center justify-between">
                 <div className="space-y-1">
                   <p className="font-medium">Two-Factor Authentication</p>
-                  <p className="text-muted-foreground text-sm">
+                  <p className="text-sm text-muted-foreground">
                     {user?.twoFactorEnabled ? "Enabled on this account" : "Add an extra layer of security"}
                   </p>
                 </div>
@@ -549,7 +589,11 @@ function AccountPreferenceComponent() {
               </div>
             </div>
             {user?.twoFactorEnabled && twoFactorOpen && (
-              <div className="border-border/60 mt-2 space-y-4 rounded-md border p-4">
+              <div
+                className={`
+                mt-2 space-y-4 rounded-md border border-border/60 p-4
+              `}
+              >
                 <div className="space-y-2">
                   <Label htmlFor="twoFactorPassword">Account Password</Label>
                   <Input
@@ -563,10 +607,21 @@ function AccountPreferenceComponent() {
                 {Array.isArray(twoFactorCodes) && twoFactorCodes.length > 0 && (
                   <div className="space-y-2">
                     <p className="text-sm font-medium">Backup Codes</p>
-                    <p className="text-muted-foreground text-xs">Store these safely. Each can be used once.</p>
-                    <div className="grid grid-cols-2 gap-2 md:grid-cols-3">
+                    <p className="text-xs text-muted-foreground">Store these safely. Each can be used once.</p>
+                    <div
+                      className={`
+                      grid grid-cols-2 gap-2
+                      md:grid-cols-3
+                    `}
+                    >
                       {twoFactorCodes.map((code) => (
-                        <code className="bg-muted rounded px-2 py-1 text-center font-mono text-xs" key={code}>
+                        <code
+                          className={`
+                          rounded bg-muted px-2 py-1 text-center font-mono
+                          text-xs
+                        `}
+                          key={code}
+                        >
                           {code}
                         </code>
                       ))}
@@ -631,7 +686,7 @@ function AccountPreferenceComponent() {
           <div className="flex items-center justify-between">
             <div className="space-y-1">
               <p className="font-medium">Active Sessions</p>
-              <p className="text-muted-foreground text-sm">Manage your active sessions</p>
+              <p className="text-sm text-muted-foreground">Manage your active sessions</p>
             </div>
             <Button variant="outline">View Sessions</Button>
           </div>
@@ -639,9 +694,9 @@ function AccountPreferenceComponent() {
       </Card>
 
       {/* Danger Zone */}
-      <Card className="bg-card/50 border-border/50 w-full backdrop-blur-sm">
+      <Card className="w-full border-border/50 bg-card/50 backdrop-blur-sm">
         <CardHeader>
-          <CardTitle className="text-destructive flex items-center gap-2">
+          <CardTitle className="flex items-center gap-2 text-destructive">
             <Trash2 className="h-5 w-5" />
             Danger Zone
           </CardTitle>
@@ -650,7 +705,7 @@ function AccountPreferenceComponent() {
           <div className="flex items-center justify-between">
             <div className="space-y-1">
               <p className="font-medium">Delete Account</p>
-              <p className="text-muted-foreground text-sm">Permanently delete your account and all data</p>
+              <p className="text-sm text-muted-foreground">Permanently delete your account and all data</p>
             </div>
             <Button size="sm" variant="destructive">
               Delete Account
