@@ -18,8 +18,7 @@ const formatValidationErrors = (error: OpenApiValidationError) =>
     })
     .join("\n");
 
-const runValidation = (draft: string, fileName: string) =>
-  parseAndValidateOpenApiSpec(draft, fileName).specJson;
+const runValidation = (draft: string, fileName: string) => parseAndValidateOpenApiSpec(draft, fileName).specJson;
 
 const toDraftError = (error: unknown) => {
   if (error instanceof OpenApiValidationError) {
