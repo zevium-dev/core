@@ -41,8 +41,7 @@ const badgeStatusVariants = cva(
 );
 
 export interface BadgeStatusProps
-  extends React.HTMLAttributes<HTMLDivElement>,
-    VariantProps<typeof badgeStatusVariants> {
+  extends React.HTMLAttributes<HTMLDivElement>, VariantProps<typeof badgeStatusVariants> {
   status?: "active" | "archived" | "beta" | "deprecated" | "inactive";
 }
 
