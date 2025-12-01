@@ -171,7 +171,12 @@ export const projectRouter = router({
           status: true,
           visibility: true,
         }),
-      ).and(z.object({ tagNames: z.array(z.string()) })),
+      ).and(
+        z.object({
+          tagNames: z.array(z.string()),
+          variables: z.array(z.object({ name: z.string(), value: z.string() })).optional(),
+        }),
+      ),
     )
     .output(schemaZod.ProjectSelectZod.and(z.object({ project_tags: z.array(schemaZod.ProjectTagSelectZod) })))
     .mutation(async ({ ctx, input }) => {
@@ -192,7 +197,8 @@ export const projectRouter = router({
             documentation: input.documentation,
             name: input.name,
             status: input.status,
-            visibility: input.visibility,
+            variables: input.variables,
+          visibility: input.visibility,
           })
           .where(
             orm.and(

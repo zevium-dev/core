@@ -41,8 +41,24 @@ export const MemberInsertZod = createInsertSchema(schema.member);
 export const InvitationSelectZod = createSelectSchema(schema.invitation);
 export const InvitationInsertZod = createInsertSchema(schema.invitation);
 
-export const ProjectSelectZod = createSelectSchema(schema.project).extend({ metadata: MetadataZod });
-export const ProjectInsertZod = createInsertSchema(schema.project).extend({ metadata: MetadataZod });
+const VariablesZod = z
+  .array(z.object({ name: z.string(), value: z.string() }))
+  .or(
+    z
+      .string()
+      .transform((val) => JSON.parse(val))
+      .pipe(z.array(z.object({ name: z.string(), value: z.string() }))),
+  )
+  .nullable();
+
+export const ProjectSelectZod = createSelectSchema(schema.project).extend({
+  metadata: MetadataZod,
+  variables: VariablesZod,
+});
+export const ProjectInsertZod = createInsertSchema(schema.project).extend({
+  metadata: MetadataZod,
+  variables: VariablesZod,
+});
 
 export const TagSelectZod = createSelectSchema(schema.tag).extend({ metadata: MetadataZod });
 export const TagInsertZod = createInsertSchema(schema.tag).extend({ metadata: MetadataZod });

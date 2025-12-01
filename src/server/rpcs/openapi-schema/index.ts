@@ -69,7 +69,7 @@ export const openapiSchemaRouter = router({
       route: { path: "/openapi-schema/list-versions", summary: "List published versions" },
     })
     .input(ProjectInputZod)
-    .output(z.array(z.object({ createdAt: z.date(), id: z.string(), version: z.string() })))
+    .output(z.array(z.object({ createdAt: z.date(), id: z.string(), schema: z.string(), version: z.string() })))
     .query(async ({ ctx }) => {
       if (!ctx.projectId) {
         throw new TRPCError({
@@ -83,6 +83,7 @@ export const openapiSchemaRouter = router({
         .select({
           createdAt: schema.openAPISchemaVersion.createdAt,
           id: schema.openAPISchemaVersion.id,
+          schema: schema.openAPISchemaVersion.schema,
           version: schema.openAPISchemaVersion.version,
         })
         .from(schema.openAPISchemaVersion)
@@ -90,7 +91,10 @@ export const openapiSchemaRouter = router({
         .where(orm.eq(schema.openAPISchema.projectId, ctx.projectId))
         .orderBy(orm.desc(schema.openAPISchemaVersion.createdAt));
 
-      return versions;
+      return versions.map((versionRecord) => ({
+        ...versionRecord,
+        schema: typeof versionRecord.schema === "string" ? versionRecord.schema : JSON.stringify(versionRecord.schema),
+      }));
     }),
 
   publish: secureProcedure
