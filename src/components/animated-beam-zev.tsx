@@ -20,9 +20,7 @@ const Circle = ({
       )}
       ref={ref}
     >
-      <div className="text-muted-foreground">
-        {children}
-      </div>
+      <div className="text-muted-foreground">{children}</div>
     </div>
   );
 };

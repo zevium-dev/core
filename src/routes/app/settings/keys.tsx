@@ -383,7 +383,10 @@ function ApiKeysComponent() {
                           <DropdownMenuItem className="gap-2" onClick={() => openEditDialog(apiKey)}>
                             <Pencil className="h-4 w-4" /> Rename
                           </DropdownMenuItem>
-                          <DropdownMenuItem className="gap-2 text-destructive" onClick={() => handleDeleteKey(apiKey.id)}>
+                          <DropdownMenuItem
+                            className="gap-2 text-destructive"
+                            onClick={() => handleDeleteKey(apiKey.id)}
+                          >
                             <Trash2 className="h-4 w-4" /> Delete
                           </DropdownMenuItem>
                         </DropdownMenuContent>
