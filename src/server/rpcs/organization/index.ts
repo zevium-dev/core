@@ -471,6 +471,7 @@ export const organizationRouter = router({
           organization: {
             ...row.organization,
             logo: row.organization.logo ?? null,
+            metadata: MetadataZod.parse(row.organization.metadata),
           },
         }));
     }),
