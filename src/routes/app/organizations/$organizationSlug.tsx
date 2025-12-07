@@ -8,14 +8,18 @@ import { useTRPC } from "~/lib/trpc";
 export const Route = createFileRoute("/app/organizations/$organizationSlug")({
   component: RouteComponent,
   loader: ({ context, params }) => {
-    void context.queryClient.ensureQueryData(context.trpc.organization.get.queryOptions(params));
+    void context.queryClient.ensureQueryData(
+      context.trpc.organization.get.queryOptions({ organizationSlug: params.organizationSlug }),
+    );
   },
 });
 
 function RouteComponent() {
-  const { organizationSlug } = Route.useParams();
+  const params = Route.useParams();
   const trpc = useTRPC();
-  const organizationDetailsQuery = useSuspenseQuery(trpc.organization.get.queryOptions({ organizationSlug }));
+  const organizationDetailsQuery = useSuspenseQuery(
+    trpc.organization.get.queryOptions({ organizationSlug: params.organizationSlug }),
+  );
 
   return (
     <>

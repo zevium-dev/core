@@ -1,14 +1,15 @@
 import { createId } from "@paralleldrive/cuid2";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { Plus, Save, Upload, X } from "lucide-react";
-import { useMemo, useState } from "react";
+import { Download, FileUp, Plus, RefreshCw, Save, Wand2, X } from "lucide-react";
+import { type ChangeEvent, useMemo, useRef, useState } from "react";
 import semver from "semver";
 import { toast } from "sonner";
-import YAML from "yaml";
 
+import { OpenApiEditor } from "~/components/api/openapi-editor";
 import { PageHeaderContent } from "~/components/sidebar";
 import { Button } from "~/components/ui/button";
+import { ButtonGroup, ButtonGroupSeparator } from "~/components/ui/button-group";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "~/components/ui/card";
 import {
   Dialog,
@@ -21,14 +22,29 @@ import {
 } from "~/components/ui/dialog";
 import { Input } from "~/components/ui/input";
 import { Label } from "~/components/ui/label";
-import { Textarea } from "~/components/ui/textarea";
 import { Typography } from "~/components/ui/typography";
+import { useDebounce } from "~/hooks/use-debounce";
+import {
+  OpenApiValidationError,
+  validateOpenApiDraft,
+  validationErrorsToDiagnostics,
+} from "~/lib/client/openapi-validator";
 import { useTRPC } from "~/lib/trpc";
 import { formatDate } from "~/lib/utils";
 
 export const Route = createFileRoute("/app/organizations/$organizationSlug/projects/$projectSlug/spec")({
   component: RouteComponent,
+  loader: ({ context, params }) => {
+    void context.queryClient.ensureQueryData(context.trpc.openapiSchema.getDraft.queryOptions(params));
+    void context.queryClient.ensureQueryData(context.trpc.openapiSchema.listVersions.queryOptions(params));
+    void context.queryClient.ensureQueryData(context.trpc.project.get.queryOptions(params));
+  },
 });
+
+interface EditorHandle {
+  editor: import("monaco-editor").editor.IStandaloneCodeEditor;
+  monaco: typeof import("monaco-editor");
+}
 
 interface ProjectVariable {
   name: string;
@@ -52,10 +68,13 @@ function RouteComponent() {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
 
-  const [specContentOverride, setSpecContentOverride] = useState<null | string>(null);
+  const [editorValue, setEditorValue] = useState("");
   const [version, setVersion] = useState("");
   const [isPublishDialogOpen, setIsPublishDialogOpen] = useState(false);
   const [variablesState, setVariablesState] = useState<Array<Variable>>([]);
+  const [isDirty, setIsDirty] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const editorHandleRef = useRef<EditorHandle | null>(null);
 
   const draftQuery = useSuspenseQuery(trpc.openapiSchema.getDraft.queryOptions(params));
   const versionsQuery = useSuspenseQuery(trpc.openapiSchema.listVersions.queryOptions(params));
@@ -82,13 +101,31 @@ function RouteComponent() {
     if (!draft) return "";
     try {
       const jsonObj = JSON.parse(draft);
-      return YAML.stringify(jsonObj);
+      return JSON.stringify(jsonObj, null, 2);
     } catch {
       return draft;
     }
   }, [draftQuery.data.draft]);
 
-  const editorValue = specContentOverride ?? latestDraftContent;
+  const currentContent = isDirty ? editorValue : latestDraftContent;
+  const debouncedEditorValue = useDebounce(currentContent, 400);
+
+  const validationErrors = useMemo(() => {
+    if (!debouncedEditorValue) {
+      return [{ column: 1, line: 1, message: "OpenAPI spec cannot be empty.", path: "" }];
+    }
+
+    try {
+      validateOpenApiDraft(debouncedEditorValue, "draft.json");
+      return [];
+    } catch (error) {
+      if (error instanceof OpenApiValidationError) {
+        return validationErrorsToDiagnostics(error.errors);
+      }
+
+      return [{ column: 1, line: 1, message: error instanceof Error ? error.message : "Validation failed", path: "" }];
+    }
+  }, [debouncedEditorValue]);
 
   const saveDraftMutation = useMutation(
     trpc.openapiSchema.saveDraft.mutationOptions({
@@ -97,22 +134,25 @@ function RouteComponent() {
       },
       onSuccess: async () => {
         toast.success("Draft saved successfully");
-        setSpecContentOverride(null);
+        setIsDirty(false);
         await queryClient.invalidateQueries(trpc.openapiSchema.getDraft.queryOptions(params));
       },
     }),
   );
 
   const handleSaveDraft = () => {
-    let jsonContent = "";
     try {
-      const parsed = YAML.parse(editorValue) as unknown;
-      jsonContent = JSON.stringify(parsed);
-    } catch {
-      toast.error("Invalid YAML content");
-      return;
+      const parsed = validateOpenApiDraft(currentContent, "draft.json");
+      const jsonContent = JSON.stringify(parsed.specJson);
+      saveDraftMutation.mutate({ draft: jsonContent, ...params });
+    } catch (error) {
+      if (error instanceof OpenApiValidationError) {
+        toast.error(error.errors.at(0)?.message ?? "Invalid OpenAPI spec");
+        return;
+      }
+
+      toast.error(error instanceof Error ? error.message : "Invalid OpenAPI spec");
     }
-    saveDraftMutation.mutate({ draft: jsonContent, ...params });
   };
 
   const publishMutation = useMutation(
@@ -124,7 +164,7 @@ function RouteComponent() {
         toast.success("Version published successfully");
         setIsPublishDialogOpen(false);
         setVersion("");
-        setSpecContentOverride(null);
+        setIsDirty(false);
         await Promise.all([
           queryClient.invalidateQueries(trpc.openapiSchema.listVersions.queryOptions(params)),
           queryClient.invalidateQueries(trpc.openapiSchema.getDraft.queryOptions(params)),
@@ -134,15 +174,18 @@ function RouteComponent() {
   );
 
   const handlePublish = () => {
-    let jsonContent = "";
     try {
-      const parsed = YAML.parse(editorValue) as unknown;
-      jsonContent = JSON.stringify(parsed);
-    } catch {
-      toast.error("Invalid YAML content");
-      return;
+      const parsed = validateOpenApiDraft(currentContent, "draft.json");
+      const jsonContent = JSON.stringify(parsed.specJson);
+      publishMutation.mutate({ draft: jsonContent, version, ...params });
+    } catch (error) {
+      if (error instanceof OpenApiValidationError) {
+        toast.error(error.errors.at(0)?.message ?? "Invalid OpenAPI spec");
+        return;
+      }
+
+      toast.error(error instanceof Error ? error.message : "Invalid OpenAPI spec");
     }
-    publishMutation.mutate({ draft: jsonContent, version, ...params });
   };
 
   const handleViewVersion = (versionId: string) => {
@@ -150,9 +193,11 @@ function RouteComponent() {
     if (!versionRecord) return;
     try {
       const jsonObj = JSON.parse(versionRecord.schema);
-      setSpecContentOverride(YAML.stringify(jsonObj));
+      setEditorValue(JSON.stringify(jsonObj, null, 2));
+      setIsDirty(true);
     } catch {
-      setSpecContentOverride(versionRecord.schema);
+      setEditorValue(versionRecord.schema);
+      setIsDirty(true);
     }
   };
 
@@ -164,6 +209,69 @@ function RouteComponent() {
       setVersion("0.0.1");
     }
     setIsPublishDialogOpen(true);
+  };
+
+  const handleFormat = () => {
+    try {
+      const result = validateOpenApiDraft(currentContent, "draft.json");
+      const formatted = JSON.stringify(result.specJson, null, 2);
+      setEditorValue(formatted);
+      setIsDirty(true);
+    } catch (error) {
+      if (error instanceof OpenApiValidationError) {
+        toast.error(error.errors.at(0)?.message ?? "Format failed");
+        return;
+      }
+
+      toast.error(error instanceof Error ? error.message : "Format failed");
+    }
+  };
+
+  const handleImportFile = async (file: File) => {
+    const content = await file.text();
+    setEditorValue(content);
+    setIsDirty(true);
+  };
+
+  const handleFileInputChange = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.item(0);
+    if (!file) return;
+    await handleImportFile(file);
+    event.target.value = "";
+  };
+
+  const handleDownload = () => {
+    const blob = new Blob([currentContent], {
+      type: "application/json",
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "openapi-spec.json";
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleInsertVariable = (variableName: string) => {
+    const name = variableName.trim();
+    if (!name) return;
+
+    const handle = editorHandleRef.current;
+    if (!handle) return;
+
+    const { editor, monaco } = handle;
+    const selection =
+      editor.getSelection() ?? monaco.Selection.fromPositions(editor.getPosition() ?? new monaco.Position(1, 1));
+
+    editor.executeEdits("insert-variable", [
+      {
+        forceMoveMarkers: true,
+        range: selection,
+        text: `%${name}%`,
+      },
+    ]);
+
+    editor.focus();
   };
 
   const saveVariablesMutation = useMutation(
@@ -222,37 +330,50 @@ function RouteComponent() {
   };
 
   return (
-    <div className="flex h-full flex-col space-y-6 p-6">
+    <div className="flex max-h-[calc(100dvh-4rem)] flex-col space-y-6 p-4 sm:p-6">
       <PageHeaderContent>
         <Typography variant="large">{projectQuery.data.name} &gt; OpenAPI Spec</Typography>
       </PageHeaderContent>
 
-      <div className="grid flex-1 gap-6 md:grid-cols-3">
-        <div className="flex flex-col space-y-6 md:col-span-2">
-          <Card className="flex flex-1 flex-col">
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+      <div className="grid gap-4 sm:gap-6 lg:grid-cols-3">
+        <div className="flex flex-col gap-4 sm:gap-6 lg:col-span-2">
+          <Card className="flex flex-col">
+            <CardHeader className="space-y-4 pb-4">
               <div className="space-y-1">
-                <CardTitle>Spec Editor</CardTitle>
+                <CardTitle className="text-lg font-semibold">Spec Editor</CardTitle>
                 <CardDescription>
-                  Edit your OpenAPI specification (YAML or JSON).
+                  Edit your OpenAPI specification (JSON).
                   {draftQuery.data.updatedAt && (
                     <span className="ml-2">Last saved: {formatDate(draftQuery.data.updatedAt)}</span>
                   )}
                 </CardDescription>
               </div>
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
+                <Button onClick={handleFormat} size="sm" variant="outline">
+                  <Wand2 className="mr-2 size-4" />
+                  Format
+                </Button>
+                <Button onClick={() => fileInputRef.current?.click()} size="sm" variant="outline">
+                  <FileUp className="mr-2 size-4" />
+                  Upload
+                </Button>
+                <Button onClick={handleDownload} size="sm" variant="outline">
+                  <Download className="mr-2 size-4" />
+                  Download
+                </Button>
                 <Button
-                  disabled={saveDraftMutation.isPending || !!specContentOverride}
+                  disabled={saveDraftMutation.isPending || validationErrors.length > 0}
                   onClick={handleSaveDraft}
+                  size="sm"
                   variant="outline"
                 >
-                  <Save className="mr-2 h-4 w-4" />
+                  <Save className="mr-2 size-4" />
                   {saveDraftMutation.isPending ? "Saving..." : "Save Draft"}
                 </Button>
                 <Dialog onOpenChange={setIsPublishDialogOpen} open={isPublishDialogOpen}>
                   <DialogTrigger asChild>
-                    <Button onClick={handleOpenPublishDialog}>
-                      <Upload className="mr-2 h-4 w-4" />
+                    <Button onClick={handleOpenPublishDialog} size="sm">
+                      <RefreshCw className="mr-2 size-4" />
                       Publish
                     </Button>
                   </DialogTrigger>
@@ -284,19 +405,104 @@ function RouteComponent() {
                 </Dialog>
               </div>
             </CardHeader>
-            <CardContent className="flex-1 p-0">
-              <Textarea
-                className="h-full w-full resize-none rounded-none border-0 p-4 font-mono focus-visible:ring-0"
-                onChange={(e) => setSpecContentOverride(e.target.value)}
-                placeholder="Paste your OpenAPI spec here (YAML or JSON)..."
-                spellCheck={false}
-                value={editorValue}
-              />
+            <CardContent className="flex flex-1 flex-col p-0">
+              <input className="hidden" onChange={handleFileInputChange} ref={fileInputRef} type="file" />
+              <div className="h-52">
+                <OpenApiEditor
+                  diagnostics={validationErrors}
+                  height="100%"
+                  language="json"
+                  onChange={(value) => {
+                    setEditorValue(value);
+                    setIsDirty(true);
+                  }}
+                  onEditorReady={({ editor, monaco }) => {
+                    editorHandleRef.current = { editor, monaco };
+                  }}
+                  value={currentContent}
+                />
+              </div>
+              {variables.length > 0 && (
+                <div className="border-t bg-muted/40 px-4 py-2 text-sm">
+                  <p className="text-xs text-muted-foreground">Insert variables into your spec:</p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {variables.map((variable) => (
+                      <Button
+                        disabled={!variable.name.trim()}
+                        key={`chip-${variable.clientId}`}
+                        onClick={() => handleInsertVariable(variable.name)}
+                        size="sm"
+                        variant="secondary"
+                      >
+                        {`%${variable.name || "variable"}%`}
+                      </Button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {validationErrors.length > 0 && (
+                <div className="border-t bg-muted/40 px-4 py-3 text-sm text-destructive">
+                  <p className="font-semibold">Fix validation errors before saving or publishing:</p>
+                  <ul className="mt-2 space-y-1">
+                    {validationErrors.map((error, index) => (
+                      // eslint-disable-next-line @eslint-react/no-array-index-key
+                      <li key={`${error.message}-${index}`}>
+                        • {error.message}
+                        {error.path ? ` (${error.path})` : ""}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </CardContent>
           </Card>
         </div>
 
-        <div className="flex flex-col space-y-6">
+        <div className="flex flex-col gap-4 sm:gap-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>Variables</CardTitle>
+              <CardDescription>Define variables to use in your spec, like %BASE_URL% etc.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-3">
+                {variables.map((variable) => (
+                  <div
+                    className="flex flex-col gap-2 rounded-lg border p-3 sm:flex-row sm:items-center sm:border-0 sm:p-0"
+                    key={variable.clientId}
+                  >
+                    <div className="grid flex-1 gap-2 sm:grid-cols-2">
+                      <Input
+                        onChange={(e) => handleVariableNameChange(variable.clientId, e.target.value)}
+                        placeholder="Name"
+                        value={variable.name}
+                      />
+                      <Input
+                        onChange={(e) => handleVariableValueChange(variable.clientId, e.target.value)}
+                        placeholder="Value"
+                        value={variable.value}
+                      />
+                    </div>
+                    <div className="flex items-center justify-end gap-2">
+                      <Button onClick={() => handleRemoveVariable(variable.clientId)} size="icon" variant="ghost">
+                        <X className="size-4" />
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+                <ButtonGroup className="w-full">
+                  <Button className="flex-1" onClick={handleAddVariable} variant="outline">
+                    <Plus className="mr-2 size-4" /> Add Variable
+                  </Button>
+                  <ButtonGroupSeparator />
+                  <Button className="flex-1" loading={saveVariablesMutation.isPending} onClick={handleSaveVariables}>
+                    <Save className="mr-2 size-4" />
+                    {saveVariablesMutation.isPending ? "Saving..." : "Save Variables"}
+                  </Button>
+                </ButtonGroup>
+              </div>
+            </CardContent>
+          </Card>
           <Card>
             <CardHeader>
               <CardTitle>Version History</CardTitle>
@@ -309,7 +515,7 @@ function RouteComponent() {
                 <div className="space-y-4">
                   {versionsQuery.data.map((v) => (
                     <div className="flex items-center justify-between border-b pb-2 last:border-0 last:pb-0" key={v.id}>
-                      <div>
+                      <div className="flex-1">
                         <p className="font-medium">{v.version}</p>
                         <p className="text-xs text-muted-foreground">{formatDate(v.createdAt)}</p>
                       </div>
@@ -321,47 +527,6 @@ function RouteComponent() {
                 </div>
               )}
             </CardContent>
-          </Card>
-          <Card>
-            <CardHeader>
-              <CardTitle>Variables</CardTitle>
-              <CardDescription>Define variables to use in your spec, like {"{{BASE_URL}}"} etc.</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
-                {variables.map((variable) => (
-                  <div className="flex items-center gap-2" key={variable.clientId}>
-                    <Input
-                      onChange={(e) => handleVariableNameChange(variable.clientId, e.target.value)}
-                      placeholder="Name"
-                      value={variable.name}
-                    />
-                    <Input
-                      onChange={(e) => handleVariableValueChange(variable.clientId, e.target.value)}
-                      placeholder="Value"
-                      value={variable.value}
-                    />
-                    <Button onClick={() => handleRemoveVariable(variable.clientId)} size="icon" variant="ghost">
-                      <X className="h-4 w-4" />
-                    </Button>
-                  </div>
-                ))}
-                <Button className="w-full" onClick={handleAddVariable} variant="outline">
-                  <Plus className="mr-2 h-4 w-4" /> Add Variable
-                </Button>
-              </div>
-            </CardContent>
-            <DialogFooter>
-              <Button
-                className="m-6 mt-0"
-                disabled={saveVariablesMutation.isPending}
-                onClick={handleSaveVariables}
-                size="sm"
-              >
-                <Save className="mr-2 h-4 w-4" />
-                {saveVariablesMutation.isPending ? "Saving..." : "Save Variables"}
-              </Button>
-            </DialogFooter>
           </Card>
         </div>
       </div>

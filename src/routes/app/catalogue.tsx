@@ -169,7 +169,7 @@ function CategorySidebar({
               <Icon className="size-4 shrink-0" />
               <span className="flex-1 truncate text-left font-medium">{category.name}</span>
               <Badge
-                className="h-5 min-w-[1.75rem] px-2 py-0.5 text-xs font-medium"
+                className="h-5 min-w-7 px-2 py-0.5 text-xs font-medium"
                 variant={isActive ? "default" : "secondary"}
               >
                 {category.count}
@@ -376,10 +376,7 @@ function RouteComponent() {
                   >
                     <Icon className="size-3" />
                     <span className="text-xs font-medium">{category.name}</span>
-                    <Badge
-                      className="h-4 min-w-[1rem] px-1.5 py-0 text-xs"
-                      variant={isActive ? "secondary" : "outline"}
-                    >
+                    <Badge className="h-4 min-w-4 px-1.5 py-0 text-xs" variant={isActive ? "secondary" : "outline"}>
                       {category.count}
                     </Badge>
                   </Button>
