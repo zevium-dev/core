@@ -175,6 +175,13 @@ cp .env.example .env
 pnpm dev
 ```
 
+#### Dev Server Policy
+
+- Never start the dev server yourself. Ask the user to run it manually.
+- The dev server is expected on [http://localhost:5173](http://localhost:5173) — confirm the user has it running before depending on it.
+- Avoid running `pnpm dev` via automation or agents; delegate to the user when needed.
+- When calling Better Auth organization APIs (e.g., acceptInvitation, cancelInvitation, createInvitation), do not wrap single calls in try/catch; let errors surface through TRPC/Better Auth instead of swallowing them.
+
 ### Code Formatting & Linting
 
 When you encounter **ESLint warnings** or **formatting issues** in files:
@@ -336,7 +343,7 @@ Rules:
   - Use `useQueryClient()` to get the query client
   - In `onSuccess`, call `await queryClient.invalidateQueries(trpc.resource.list.queryOptions())` to refetch fresh data
   - This ensures UI stays in sync with server state after mutations
-  - Example: After creating an org, invalidate the org list query so it refetches
+  - Example: After creating an org, invalidate the org list query so it fetches the updated list
 
 ### 2.1 Loading State Naming
 
@@ -353,6 +360,40 @@ Rules:
 const createMutation = useMutation(...);
 // Use createMutation.isPending directly instead of separate isPending state
 <Button disabled={createMutation.isPending}>Create</Button>
+```
+
+### 2.2 Mutation Invocation Pattern
+
+- **Use `.mutate()` instead of `await .mutateAsync()`** in onClick handlers and event callbacks:
+  - ✅ **Good**: `onClick={() => mutation.mutate({ id: '123' })}`
+  - ❌ **Bad**: `onClick={async () => { await mutation.mutateAsync({ id: '123' }) }}`
+  - Rationale: `.mutate()` is fire-and-forget and handles loading states automatically via `isPending`. The mutation callbacks (`onSuccess`, `onSettled`, etc.) handle side effects like invalidation.
+  - **Only use `.mutateAsync()` when you need the returned promise** (e.g., form submission where you need to wait for completion before resetting the form, or when chaining dependent operations)
+  - React Query's mutation callbacks already handle async operations (invalidation, navigation, etc.) - no need for extra async/await in the onClick handler
+  - Example patterns:
+
+```tsx
+// ✅ Simple button click - use .mutate()
+<Button onClick={() => deleteMutation.mutate({ id: item.id })}>
+  Delete
+</Button>
+
+// ✅ Form submission with reset after success - use .mutateAsync()
+<form onSubmit={form.handleSubmit(async (data) => {
+  await createMutation.mutateAsync(data);
+  form.reset();
+})}>
+
+// ✅ Select onChange - use .mutate()
+<Select
+  onValueChange={(role) => {
+    updateRoleMutation.mutate({
+      memberId: member.id,
+      role: role as Role,
+    });
+  }}
+  value={member.role}
+/>
 ```
 
 ### 3. Local Draft vs Server State

@@ -12,7 +12,7 @@ import { InputOTP, InputOTPGroup, InputOTPSlot } from "~/components/ui/input-otp
 import { Label } from "~/components/ui/label";
 import { Progress } from "~/components/ui/progress";
 import { ScreenCenter } from "~/components/ui/screen-center";
-import { auth, useUser } from "~/lib/auth";
+import { auth, useSession } from "~/lib/auth";
 import { cn } from "~/lib/utils";
 
 export const Route = createFileRoute("/auth/two-factor-auth")({
@@ -21,7 +21,7 @@ export const Route = createFileRoute("/auth/two-factor-auth")({
 
 function RouteComponent() {
   const queryClient = useQueryClient();
-  const user = useUser();
+  const user = useSession().user;
 
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
   const [password, setPassword] = useState("");
