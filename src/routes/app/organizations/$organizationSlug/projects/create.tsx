@@ -59,13 +59,13 @@ function RouteComponent() {
     resolver: zodResolver(FormZod),
   });
 
-  const onSubmit = async (data: FormValues) => {
+  const onSubmit = (data: FormValues) => {
     if (!orgQuery.data) {
       toast.error("Organization not found");
       return;
     }
 
-    await createProjectMutation.mutateAsync({
+    createProjectMutation.mutate({
       description: data.description ?? "",
       name: data.name,
       organizationId: orgQuery.data.id,

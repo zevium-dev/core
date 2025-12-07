@@ -6,7 +6,7 @@ import { ScreenCenter } from "~/components/ui/screen-center";
 import { SidebarInset, SidebarProvider } from "~/components/ui/sidebar";
 import { Skeleton } from "~/components/ui/skeleton";
 import { Spinner } from "~/components/ui/spinner";
-import { sessionQueryOptions, useUser } from "~/lib/auth";
+import { sessionQueryOptions, useSession } from "~/lib/auth";
 
 export const Route = createFileRoute("/app")({
   component: RouteComponent,
@@ -40,7 +40,7 @@ function PendingComponent() {
 }
 
 function RouteComponent() {
-  const user = useUser();
+  const user = useSession().user;
   if (!user) return <Redirect to="/auth/sign-in" />;
 
   return (

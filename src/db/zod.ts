@@ -4,7 +4,7 @@ import { z } from "zod";
 import * as schema from "./schema";
 
 // Helper for metadata field that can be JSON string or object
-const MetadataZod = z
+export const MetadataZod = z
   .record(z.string(), z.unknown())
   .or(
     z
@@ -13,6 +13,8 @@ const MetadataZod = z
       .pipe(z.record(z.string(), z.unknown())),
   )
   .nullable();
+
+export type Metadata = z.infer<typeof MetadataZod>;
 
 export const UserSelectZod = createSelectSchema(schema.user);
 export const UserInsertZod = createInsertSchema(schema.user);

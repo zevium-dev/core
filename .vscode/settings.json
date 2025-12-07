@@ -10,5 +10,5 @@
   },
   "typescript.tsdk": "node_modules/typescript/lib",
   "typescript.experimental.useTsgo": false,
-  "cSpell.words": ["zevium"]
+  "cSpell.words": ["arktype", "magicui", "orpc", "POSTHOG", "shadcn", "totp", "Turso", "typesafe", "zevium"]
 }

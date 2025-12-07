@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { useUser } from "~/lib/auth";
+import { useSession } from "~/lib/auth";
 import { useTRPC } from "~/lib/trpc";
 
 export const useUserPreferencesMutation = () => {
@@ -20,7 +20,7 @@ export const useUserPreferencesMutation = () => {
 };
 
 export const useUserPreferencesQuery = () => {
-  const user = useUser();
+  const user = useSession().user;
   const trpc = useTRPC();
 
   return useQuery(trpc.userPreference.get.queryOptions(undefined, { enabled: !!user?.id }));
