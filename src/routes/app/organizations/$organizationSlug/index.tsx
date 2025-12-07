@@ -55,6 +55,11 @@ function RouteComponent() {
                     src={org.logo}
                   />
                 )}
+                <Button asChild size="sm">
+                  <Link params={{ organizationSlug }} to="/app/organizations/$organizationSlug/settings">
+                    Settings
+                  </Link>
+                </Button>
                 <Button asChild size="sm" variant="outline">
                   <Link params={{ organizationSlug }} to="/app/organizations/$organizationSlug/projects/~">
                     Projects
