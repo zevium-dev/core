@@ -35,7 +35,7 @@ const openApiSchema = z.object({
   externalDocs: z
     .object({
       description: z.string().optional(),
-      url: z.string().url(),
+      url: z.string().min(1, "External docs URL must be a non-empty string"),
     })
     .optional(),
   info: openApiInfoSchema,
@@ -46,7 +46,7 @@ const openApiSchema = z.object({
     .array(
       z.object({
         description: z.string().optional(),
-        url: z.string().url(),
+        url: z.string().min(1, "Server URL must be a non-empty string"),
       }),
     )
     .optional(),

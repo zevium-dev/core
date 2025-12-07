@@ -74,7 +74,7 @@ export function OpenApiEditor({
       severity: monaco.MarkerSeverity.Error,
       startColumn: diagnostic.column,
       startLineNumber: diagnostic.line,
-      tags: diagnostic.path ? [monaco.MarkerTag.Unnecessary] : [],
+      tags: [],
     }));
 
     monaco.editor.setModelMarkers(model, "openapi", markers);

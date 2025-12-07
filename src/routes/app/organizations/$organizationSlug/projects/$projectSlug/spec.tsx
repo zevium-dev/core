@@ -191,10 +191,8 @@ function RouteComponent() {
     try {
       const jsonObj = JSON.parse(versionRecord.schema);
       setEditorValue(JSON.stringify(jsonObj, null, 2));
-      setIsDirty(true);
     } catch {
       setEditorValue(versionRecord.schema);
-      setIsDirty(true);
     }
   };
 
@@ -233,6 +231,23 @@ function RouteComponent() {
   const handleFileInputChange = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.item(0);
     if (!file) return;
+
+    // Validate file type and size
+    const validExtensions = [".json", ".yaml", ".yml"];
+    const extension = file.name.substring(file.name.lastIndexOf(".")).toLowerCase();
+    if (!validExtensions.includes(extension)) {
+      toast.error("Invalid file type. Please upload a JSON, YAML, or YML file.");
+      event.target.value = "";
+      return;
+    }
+
+    const maxSizeInMB = 5;
+    if (file.size > maxSizeInMB * 1024 * 1024) {
+      toast.error(`File size exceeds ${maxSizeInMB}MB limit`);
+      event.target.value = "";
+      return;
+    }
+
     await handleImportFile(file);
     event.target.value = "";
   };
@@ -246,7 +261,7 @@ function RouteComponent() {
     link.href = url;
     link.download = "openapi-spec.json";
     link.click();
-    URL.revokeObjectURL(url);
+    setTimeout(() => URL.revokeObjectURL(url), 100);
   };
 
   const handleInsertVariable = (variableName: string) => {
@@ -257,8 +272,8 @@ function RouteComponent() {
     if (!handle) return;
 
     const { editor, monaco } = handle;
-    const selection =
-      editor.getSelection() ?? monaco.Selection.fromPositions(editor.getPosition() ?? new monaco.Position(1, 1));
+    const position = editor.getPosition() ?? editor.getModel()?.getPositionAt(0) ?? new monaco.Position(1, 1);
+    const selection = editor.getSelection() ?? monaco.Selection.fromPositions(position);
 
     editor.executeEdits("insert-variable", [
       {
@@ -347,7 +362,13 @@ function RouteComponent() {
                   <Wand2 className="mr-2 size-4" />
                   Format
                 </Button>
-                <Button onClick={() => fileInputRef.current?.click()} size="sm" variant="outline">
+                <Button
+                  aria-haspopup="dialog"
+                  aria-label="Upload OpenAPI specification file"
+                  onClick={() => fileInputRef.current?.click()}
+                  size="sm"
+                  variant="outline"
+                >
                   <FileUp className="mr-2 size-4" />
                   Upload
                 </Button>
@@ -400,8 +421,14 @@ function RouteComponent() {
               </div>
             </CardHeader>
             <CardContent className="flex flex-1 flex-col p-0">
-              <input className="hidden" onChange={handleFileInputChange} ref={fileInputRef} type="file" />
-              <div className="h-52">
+              <input
+                aria-label="Upload OpenAPI specification file"
+                className="hidden"
+                onChange={handleFileInputChange}
+                ref={fileInputRef}
+                type="file"
+              />
+              <div className="min-h-52 flex-1">
                 <OpenApiEditor
                   diagnostics={validationErrors}
                   height="100%"
