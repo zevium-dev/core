@@ -13,7 +13,9 @@ import { formatDate } from "~/lib/utils";
 export const Route = createFileRoute("/app/organizations/$organizationSlug/")({
   component: RouteComponent,
   loader: ({ context, params }) => {
-    void context.queryClient.ensureQueryData(context.trpc.organization.get.queryOptions(params));
+    void context.queryClient.ensureQueryData(
+      context.trpc.organization.get.queryOptions({ organizationSlug: params.organizationSlug }),
+    );
   },
 });
 

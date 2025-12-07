@@ -277,8 +277,8 @@ function ApiKeysComponent() {
                     border border-border/40 bg-muted/30 px-3
                     text-muted-foreground transition-colors
                     hover:bg-muted/50 hover:text-foreground
-                    data-copied:bg-emerald-500/20 data-copied:text-emerald-500
-                    data-copied:hover:bg-emerald-500/30
+                    data-copied:bg-chart-2/20 data-copied:text-chart-2
+                    data-copied:hover:bg-chart-2/30
                     dark:hover:bg-muted/60
                   `}
                   data-copied={createdKeyCopied || undefined}
@@ -383,7 +383,7 @@ function ApiKeysComponent() {
                           <DropdownMenuItem className="gap-2" onClick={() => openEditDialog(apiKey)}>
                             <Pencil className="h-4 w-4" /> Rename
                           </DropdownMenuItem>
-                          <DropdownMenuItem className="gap-2 text-red-500" onClick={() => handleDeleteKey(apiKey.id)}>
+                          <DropdownMenuItem className="gap-2 text-destructive" onClick={() => handleDeleteKey(apiKey.id)}>
                             <Trash2 className="h-4 w-4" /> Delete
                           </DropdownMenuItem>
                         </DropdownMenuContent>
@@ -422,8 +422,8 @@ function ApiKeysComponent() {
               h-7 border border-border/40 bg-muted/30 px-2 text-xs
               text-muted-foreground transition-colors
               hover:bg-muted/50 hover:text-foreground
-              data-copied:bg-emerald-500/20 data-copied:text-emerald-500
-              data-copied:hover:bg-emerald-500/30
+              data-copied:bg-chart-2/20 data-copied:text-chart-2
+              data-copied:hover:bg-chart-2/30
               dark:hover:bg-muted/60
             `}
             data-copied={snippetCopied || undefined}

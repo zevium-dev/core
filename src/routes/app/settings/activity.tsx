@@ -207,21 +207,21 @@ function ActivityComponent() {
       >
         <ActivityStatsCard
           avgDay={chartData.spend.avgDay}
-          color="bg-blue-500"
+          color="bg-primary"
           data={chartData.spend.data}
           pastMonth={chartData.spend.pastMonth}
           title="Spend"
         />
         <ActivityStatsCard
           avgDay={chartData.requests.avgDay}
-          color="bg-green-500"
+          color="bg-chart-2"
           data={chartData.requests.data}
           pastMonth={chartData.requests.pastMonth}
           title="Requests"
         />
         <ActivityStatsCard
           avgDay={chartData.dataTransfer.avgDay}
-          color="bg-blue-400"
+          color="bg-chart-1"
           data={chartData.dataTransfer.data}
           pastMonth={chartData.dataTransfer.pastMonth}
           title="Data Transfer"
@@ -400,7 +400,7 @@ function ActivityStatsCard({
   );
 }
 
-function MiniChart({ color = "bg-blue-500", data }: { color?: string; data: Array<{ day: number; value: number }> }) {
+function MiniChart({ color = "bg-primary", data }: { color?: string; data: Array<{ day: number; value: number }> }) {
   const maxValue = Math.max(...data.map((d) => d.value));
 
   return (

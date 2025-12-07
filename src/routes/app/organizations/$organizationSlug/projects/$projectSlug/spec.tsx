@@ -35,9 +35,10 @@ import { formatDate } from "~/lib/utils";
 export const Route = createFileRoute("/app/organizations/$organizationSlug/projects/$projectSlug/spec")({
   component: RouteComponent,
   loader: ({ context, params }) => {
-    void context.queryClient.ensureQueryData(context.trpc.openapiSchema.getDraft.queryOptions(params));
-    void context.queryClient.ensureQueryData(context.trpc.openapiSchema.listVersions.queryOptions(params));
-    void context.queryClient.ensureQueryData(context.trpc.project.get.queryOptions(params));
+    const routeParams = { organizationSlug: params.organizationSlug, projectSlug: params.projectSlug };
+    void context.queryClient.ensureQueryData(context.trpc.openapiSchema.getDraft.queryOptions(routeParams));
+    void context.queryClient.ensureQueryData(context.trpc.openapiSchema.listVersions.queryOptions(routeParams));
+    void context.queryClient.ensureQueryData(context.trpc.project.get.queryOptions(routeParams));
   },
 });
 
@@ -64,7 +65,7 @@ const createVariable = (variable?: ProjectVariable): Variable => ({
 const cloneVariables = (vars: Array<ProjectVariable>) => vars.map((variable) => createVariable(variable));
 
 function RouteComponent() {
-  const params = Route.useParams();
+  const { organizationSlug, projectSlug } = Route.useParams();
   const trpc = useTRPC();
   const queryClient = useQueryClient();
 
@@ -76,9 +77,11 @@ function RouteComponent() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const editorHandleRef = useRef<EditorHandle | null>(null);
 
-  const draftQuery = useSuspenseQuery(trpc.openapiSchema.getDraft.queryOptions(params));
-  const versionsQuery = useSuspenseQuery(trpc.openapiSchema.listVersions.queryOptions(params));
-  const projectQuery = useSuspenseQuery(trpc.project.get.queryOptions(params));
+  const routeParams = { organizationSlug, projectSlug } as const;
+
+  const draftQuery = useSuspenseQuery(trpc.openapiSchema.getDraft.queryOptions(routeParams));
+  const versionsQuery = useSuspenseQuery(trpc.openapiSchema.listVersions.queryOptions(routeParams));
+  const projectQuery = useSuspenseQuery(trpc.project.get.queryOptions(routeParams));
 
   const projectVariables = useMemo(
     () => (projectQuery.data.variables ?? []) as Array<ProjectVariable>,
@@ -129,13 +132,10 @@ function RouteComponent() {
 
   const saveDraftMutation = useMutation(
     trpc.openapiSchema.saveDraft.mutationOptions({
-      onError: (error) => {
-        toast.error(error.message);
-      },
       onSuccess: async () => {
         toast.success("Draft saved successfully");
         setIsDirty(false);
-        await queryClient.invalidateQueries(trpc.openapiSchema.getDraft.queryOptions(params));
+        await queryClient.invalidateQueries(trpc.openapiSchema.getDraft.queryOptions(routeParams));
       },
     }),
   );
@@ -144,7 +144,7 @@ function RouteComponent() {
     try {
       const parsed = validateOpenApiDraft(currentContent, "draft.json");
       const jsonContent = JSON.stringify(parsed.specJson);
-      saveDraftMutation.mutate({ draft: jsonContent, ...params });
+      saveDraftMutation.mutate({ draft: jsonContent, organizationSlug, projectSlug });
     } catch (error) {
       if (error instanceof OpenApiValidationError) {
         toast.error(error.errors.at(0)?.message ?? "Invalid OpenAPI spec");
@@ -157,17 +157,14 @@ function RouteComponent() {
 
   const publishMutation = useMutation(
     trpc.openapiSchema.publish.mutationOptions({
-      onError: (error) => {
-        toast.error(error.message);
-      },
       onSuccess: async () => {
         toast.success("Version published successfully");
         setIsPublishDialogOpen(false);
         setVersion("");
         setIsDirty(false);
         await Promise.all([
-          queryClient.invalidateQueries(trpc.openapiSchema.listVersions.queryOptions(params)),
-          queryClient.invalidateQueries(trpc.openapiSchema.getDraft.queryOptions(params)),
+          queryClient.invalidateQueries(trpc.openapiSchema.listVersions.queryOptions(routeParams)),
+          queryClient.invalidateQueries(trpc.openapiSchema.getDraft.queryOptions(routeParams)),
         ]);
       },
     }),
@@ -177,7 +174,7 @@ function RouteComponent() {
     try {
       const parsed = validateOpenApiDraft(currentContent, "draft.json");
       const jsonContent = JSON.stringify(parsed.specJson);
-      publishMutation.mutate({ draft: jsonContent, version, ...params });
+      publishMutation.mutate({ draft: jsonContent, organizationSlug, projectSlug, version });
     } catch (error) {
       if (error instanceof OpenApiValidationError) {
         toast.error(error.errors.at(0)?.message ?? "Invalid OpenAPI spec");
@@ -276,14 +273,11 @@ function RouteComponent() {
 
   const saveVariablesMutation = useMutation(
     trpc.project.update.mutationOptions({
-      onError: (error) => {
-        toast.error(error.message);
-      },
       onSuccess: async (updatedProject) => {
         toast.success("Variables saved successfully");
         const nextVariables = cloneVariables((updatedProject.variables ?? []) as Array<ProjectVariable>);
         setVariablesState(nextVariables);
-        await queryClient.invalidateQueries(trpc.project.get.queryOptions(params));
+        await queryClient.invalidateQueries(trpc.project.get.queryOptions(routeParams));
       },
     }),
   );
@@ -301,7 +295,7 @@ function RouteComponent() {
       documentation: projectQuery.data.documentation,
       id: projectQuery.data.id,
       name: projectQuery.data.name,
-      organizationSlug: params.organizationSlug,
+      organizationSlug,
       status: projectQuery.data.status,
       tagNames: projectQuery.data.project_tags.map((tag) => tag.tagName),
       variables: normalizedVariables,
