@@ -343,10 +343,10 @@ export const organizationRouter = router({
         slug?: string;
       } = {};
 
-      if (input.name !== undefined) updatePayload.name = input.name;
-      if (input.slug !== undefined) updatePayload.slug = input.slug;
-      if (input.logo !== undefined) updatePayload.logo = input.logo;
-      if (input.metadata !== undefined) updatePayload.metadata = input.metadata;
+      if (input.name) updatePayload.name = input.name;
+      if (input.slug) updatePayload.slug = input.slug;
+      if (input.logo) updatePayload.logo = input.logo;
+      if (input.metadata) updatePayload.metadata = input.metadata;
 
       const org = await authServer.api.updateOrganization({
         body: {
