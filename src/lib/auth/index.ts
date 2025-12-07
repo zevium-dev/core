@@ -71,7 +71,7 @@ export const useSession = () => useSuspenseQuery(sessionQueryOptions()).data;
 export const useUser = () => {
   const location = useLocation();
   if (!location.pathname.startsWith("/app")) {
-    throw new Error("useUser cannot be used in /app routes. Please use useSession instead.");
+    throw new Error("useUser can only be used in /app routes. Please use useSession instead.");
   }
   const user = useSession().user;
   if (!user) {
