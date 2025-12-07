@@ -300,6 +300,57 @@ These rules exist so contributions stay consistent, type-safe, minimal, and easi
 - Keep client state (form drafts) separate from server state (queries)
 - Avoid stale reads: invalidate after mutation (unless mutation result is authoritative)
 
+### 1.1 TanStack Router Params Handling
+
+**Critical:** `Route.useParams()` and loader `params` are **not the same** and contain different scope:
+
+- `loader: ({ context, params }) => { ... }` — `params` contains **all route parameters** from ALL slugs in the URL path (e.g., `organizationSlug`, `projectSlug`, `invoiceId`, etc.)
+- `Route.useParams()` — Returns **only the parameters defined on that specific route** (e.g., only `organizationSlug` if the route is `/app/organizations/$organizationSlug`)
+
+**Always pass the complete, explicitly extracted parameter object** to tRPC queries, never pass `params` directly as a shorthand:
+
+✅ **Good** — Explicit parameters in loader and component:
+
+```ts
+// In loader
+loader: (({ context, params }) => {
+  void context.queryClient.ensureQueryData(
+    context.trpc.organization.get.queryOptions({
+      organizationSlug: params.organizationSlug,
+    }),
+  );
+},
+  // In component
+  function RouteComponent() {
+    const params = Route.useParams();
+    const trpc = useTRPC();
+    const organizationDetailsQuery = useSuspenseQuery(
+      trpc.organization.get.queryOptions({
+        organizationSlug: params.organizationSlug,
+      }),
+    );
+    // ...
+  });
+```
+
+❌ **Bad** — Passing `params` shorthand (breaks if route has multiple slugs):
+
+```ts
+// In loader — works by accident but is brittle
+loader: ({ context, params }) => {
+  void context.queryClient.ensureQueryData(
+    context.trpc.organization.get.queryOptions(params), // params has extra fields!
+  );
+},
+
+// In component — only works because Route.useParams() scopes correctly
+const organizationDetailsQuery = useSuspenseQuery(
+  trpc.organization.get.queryOptions(params), // same issue
+);
+```
+
+**Why it matters:** If your route is `/app/organizations/$organizationSlug/projects/$projectSlug/spec`, the loader's `params` will have both `organizationSlug` AND `projectSlug`. Passing `params` directly to a tRPC procedure that only expects `organizationSlug` causes type mismatches and runtime errors. Always destructure and pass only the fields your procedure needs.
+
 ### 2. React Query + tRPC Usage
 
 DO NOT manually build `queryKey` arrays unless absolutely necessary. Use the generated helpers:
