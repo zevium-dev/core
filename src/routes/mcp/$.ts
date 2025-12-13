@@ -8,10 +8,6 @@ import { rerankWithCohere } from "~/lib/server/rerank";
 import { handleMcpRequest } from "~/lib/utils/mcp-handler";
 
 const server = new McpServer({
-  capabilities: {
-    resources: {},
-    tools: {},
-  },
   name: "Zevium MCP",
   version: "1.0.0",
 });
@@ -39,7 +35,6 @@ const server = new McpServer({
 //   }
 // );
 
-// @ts-expect-error - MCP SDK has excessively deep type instantiation with Zod schemas
 server.tool(
   "search_zevium_api",
   "This tool is used for searching the APIs available in the Zevium platform. It will do a similarity search on the API name and description and return the most relevant APIs.",
@@ -97,27 +92,21 @@ server.tool(
 );
 
 //Tool to execute an API call using the Zevium. It will take url , method, headers, body and return the response.
-// @ts-expect-error - MCP SDK has excessively deep type instantiation with Zod schemas
 server.tool(
   "execute_api_call",
   "Execute an API call using the Zevium. It will take url , method, headers, body and return the response.",
   {
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-call
     body: z.string().describe("The body to send.").optional(),
     headers: z.record(z.string(), z.string()).describe("The headers to send."),
     method: z.string().describe("The method to use."),
     url: z.string().describe("The URL to call."),
   },
   async ({ body, headers, method, url }) => {
-    const typedUrl = url as string;
-    const typedMethod = method as string;
-    const typedHeaders = headers as Record<string, string>;
-    const typedBody = body as string | undefined;
-    console.log("Execute API call", typedUrl, typedMethod, typedHeaders, typedBody);
-    const response = await fetch(typedUrl, {
-      body: typedBody ?? undefined,
-      headers: typedHeaders,
-      method: typedMethod,
+    console.log("Execute API call", url, method, headers, body);
+    const response = await fetch(url, {
+      body: body ?? undefined,
+      headers: headers,
+      method: method,
     });
     return {
       content: [
