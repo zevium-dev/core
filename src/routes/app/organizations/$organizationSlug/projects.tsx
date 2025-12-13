@@ -8,7 +8,9 @@ import { useTRPC } from "~/lib/trpc";
 export const Route = createFileRoute("/app/organizations/$organizationSlug/projects")({
   component: RouteComponent,
   loader: ({ context, params }) => {
-    void context.queryClient.ensureQueryData(context.trpc.organization.get.queryOptions(params));
+    void context.queryClient.ensureQueryData(
+      context.trpc.organization.get.queryOptions({ organizationSlug: params.organizationSlug }),
+    );
   },
 });
 

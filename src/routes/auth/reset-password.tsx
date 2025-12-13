@@ -13,7 +13,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
 import { Input } from "~/components/ui/input";
 import { Label } from "~/components/ui/label";
 import { ScreenCenter } from "~/components/ui/screen-center";
-import { auth, useUser } from "~/lib/auth";
+import { auth, useSession } from "~/lib/auth";
 import { cn } from "~/lib/utils";
 
 const SearchParamsArk = type({
@@ -46,7 +46,7 @@ function RouteComponent() {
     resolver: arktypeResolver(FormValuesArk),
   });
 
-  const user = useUser();
+  const user = useSession().user;
 
   const resetPasswordMutation = useMutation({
     mutationFn: (data: FormValues) => {
@@ -61,8 +61,8 @@ function RouteComponent() {
     },
   });
 
-  const onSubmit = async (data: FormValues) => {
-    await resetPasswordMutation.mutateAsync(data);
+  const onSubmit = (data: FormValues) => {
+    resetPasswordMutation.mutate(data);
   };
 
   if (user) {

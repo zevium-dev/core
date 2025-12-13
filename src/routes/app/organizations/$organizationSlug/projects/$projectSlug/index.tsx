@@ -12,22 +12,25 @@ import { formatDate } from "~/lib/utils";
 
 export const Route = createFileRoute("/app/organizations/$organizationSlug/projects/$projectSlug/")({
   component: RouteComponent,
-  loader: async ({ context, params }) => {
-    await context.queryClient.ensureQueryData(
+  loader: ({ context, params }) => {
+    void context.queryClient.ensureQueryData(
       context.trpc.organization.get.queryOptions({ organizationSlug: params.organizationSlug }),
     );
-    await context.queryClient.ensureQueryData(context.trpc.project.get.queryOptions(params));
+    void context.queryClient.ensureQueryData(
+      context.trpc.project.get.queryOptions({
+        organizationSlug: params.organizationSlug,
+        projectSlug: params.projectSlug,
+      }),
+    );
   },
 });
 
 function RouteComponent() {
-  const params = Route.useParams();
+  const { organizationSlug, projectSlug } = Route.useParams();
   const trpc = useTRPC();
 
-  const projectQuery = useSuspenseQuery(trpc.project.get.queryOptions(params));
-  const organizationDetailsQuery = useSuspenseQuery(
-    trpc.organization.get.queryOptions({ organizationSlug: params.organizationSlug }),
-  );
+  const projectQuery = useSuspenseQuery(trpc.project.get.queryOptions({ organizationSlug, projectSlug }));
+  const organizationDetailsQuery = useSuspenseQuery(trpc.organization.get.queryOptions({ organizationSlug }));
   const project = projectQuery.data;
 
   const visibilityIcon =
@@ -67,8 +70,8 @@ function RouteComponent() {
               <Button asChild size="sm" variant="outline">
                 <Link
                   params={{
-                    organizationSlug: params.organizationSlug,
-                    projectSlug: params.projectSlug,
+                    organizationSlug,
+                    projectSlug,
                   }}
                   to="/app/organizations/$organizationSlug/projects/$projectSlug/spec"
                 >

@@ -14,7 +14,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
 import { Input } from "~/components/ui/input";
 import { Label } from "~/components/ui/label";
 import { ScreenCenter } from "~/components/ui/screen-center";
-import { auth, useUser } from "~/lib/auth";
+import { auth, useSession } from "~/lib/auth";
 import { CAPTCHA_HEADER_KEY } from "~/lib/constants";
 import { cn } from "~/lib/utils";
 
@@ -35,7 +35,7 @@ function RouteComponent() {
   const capRef = useRef<CapWidgetElement>(null);
   const [capToken, setCapToken] = useState<null | string>(null);
 
-  const user = useUser();
+  const user = useSession().user;
   const navigate = useNavigate();
 
   const {
@@ -67,8 +67,8 @@ function RouteComponent() {
     },
   });
 
-  const onSubmit = async (data: FormValues) => {
-    await signUpMutation.mutateAsync(data);
+  const onSubmit = (data: FormValues) => {
+    signUpMutation.mutate(data);
   };
 
   const onGoogle = () => {

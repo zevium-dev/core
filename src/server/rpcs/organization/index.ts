@@ -2,12 +2,84 @@ import { TRPCError } from "@trpc/server";
 import { type } from "arktype";
 import { z } from "zod";
 
-import { schemaZod } from "~/db";
+import { db, orm, schema, schemaZod } from "~/db";
+import { type AssignableOrganizationRole, AssignableOrganizationRoles } from "~/db/default-roles";
+import { MetadataZod } from "~/db/zod";
 import { authServer } from "~/lib/server/auth";
 import { secureProcedure } from "~/server/secure-procedure";
-import { router } from "~/server/trpc";
+import { protectedProcedure, router } from "~/server/trpc";
+
+const OrganizationInputZod = z.object({
+  organizationId: z.string().optional(),
+  organizationSlug: z.string().optional(),
+});
 
 export const organizationRouter = router({
+  acceptInvitation: protectedProcedure
+    .meta({
+      requiredPermissions: ["dashboard.view"],
+      route: { path: "/organization/accept-invitation", summary: "Accept a pending invitation" },
+    })
+    .input(z.object({ invitationId: z.string() }))
+    .output(schemaZod.MemberSelectZod)
+    .mutation(async ({ ctx, input }) => {
+      const result = await authServer.api.acceptInvitation({
+        body: { invitationId: input.invitationId },
+        headers: ctx.raw.req.headers,
+      });
+
+      if (!result?.member) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Invitation not found",
+        });
+      }
+
+      return schemaZod.MemberSelectZod.parse(result.member);
+    }),
+
+  cancelInvitation: secureProcedure
+    .meta({
+      requiredPermissions: ["organization.members.invite"],
+      route: { path: "/organization/cancel-invitation", summary: "Cancel a pending invitation" },
+    })
+    .input(OrganizationInputZod.and(z.object({ invitationId: z.string() })))
+    .output(z.object({ success: z.boolean() }))
+    .mutation(async ({ ctx, input }) => {
+      if (!ctx.orgId) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Organization ID not found in context",
+        });
+      }
+
+      const invitation = await authServer.api.getInvitation({
+        headers: ctx.raw.req.headers,
+        query: { id: input.invitationId },
+      });
+
+      if (invitation.organizationId !== ctx.orgId) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "This invitation does not belong to your organization",
+        });
+      }
+
+      const cancelled = await authServer.api.cancelInvitation({
+        body: { invitationId: input.invitationId },
+        headers: ctx.raw.req.headers,
+      });
+
+      if (!cancelled) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Failed to cancel invitation",
+        });
+      }
+
+      return { success: true };
+    }),
+
   create: secureProcedure
     .meta({
       requiredPermissions: ["organization.create"],
@@ -45,6 +117,26 @@ export const organizationRouter = router({
       return { ...org, createdAt: org.createdAt, logo: org.logo ?? null, members: org.members.filter(Boolean) };
     }),
 
+  delete: secureProcedure
+    .meta({
+      requiredPermissions: ["organization.delete"],
+      route: { path: "/organization/delete", summary: "Delete an organization" },
+    })
+    .input(OrganizationInputZod)
+    .output(z.object({ success: z.boolean() }))
+    .mutation(async ({ ctx }) => {
+      if (!ctx.orgId) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Organization ID not found in context",
+        });
+      }
+
+      await db.delete(schema.organization).where(orm.eq(schema.organization.id, ctx.orgId));
+
+      return { success: true };
+    }),
+
   get: secureProcedure
     .meta({
       requiredPermissions: ["organization.view"],
@@ -73,10 +165,47 @@ export const organizationRouter = router({
       return {
         ...org,
         createdAt: org.createdAt,
+        invitations: org.invitations.filter((inv) => inv.status === "pending"),
         logo: org.logo ?? null,
         members: org.members.map((m) => ({ ...m, user: { ...m.user, image: m.user.image ?? null } })),
-        metadata: org.metadata as Record<string, unknown>,
+        metadata: MetadataZod.parse(org.metadata),
       };
+    }),
+
+  inviteMember: secureProcedure
+    .meta({
+      requiredPermissions: ["organization.members.invite"],
+      route: { path: "/organization/invite-member", summary: "Invite a member to organization" },
+    })
+    .input(
+      OrganizationInputZod.and(
+        z.object({
+          email: z.email({ error: "Invalid email address" }),
+          role: z.enum(AssignableOrganizationRoles).optional(),
+        }),
+      ),
+    )
+    .output(schemaZod.InvitationSelectZod)
+    .mutation(async ({ ctx, input }) => {
+      if (!ctx.orgId) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Organization ID not found in context",
+        });
+      }
+
+      const normalizedRole: AssignableOrganizationRole = input.role ?? "member";
+
+      const invitation = await authServer.api.createInvitation({
+        body: {
+          email: input.email,
+          organizationId: ctx.orgId,
+          role: normalizedRole,
+        },
+        headers: ctx.raw.req.headers,
+      });
+
+      return schemaZod.InvitationSelectZod.parse(invitation);
     }),
 
   // TODO: move this out of this file
@@ -92,7 +221,258 @@ export const organizationRouter = router({
         ...org,
         createdAt: org.createdAt,
         logo: org.logo ?? null,
-        metadata: org.metadata as Record<string, unknown>,
+        metadata: MetadataZod.parse(org.metadata),
       }));
+    }),
+
+  removeMember: secureProcedure
+    .meta({
+      requiredPermissions: ["organization.members.remove"],
+      route: { path: "/organization/remove-member", summary: "Remove a member from organization" },
+    })
+    .input(
+      OrganizationInputZod.and(
+        z.object({
+          memberId: z.string(),
+        }),
+      ),
+    )
+    .output(z.object({ success: z.boolean() }))
+    .mutation(async ({ ctx, input }) => {
+      if (!ctx.orgId) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Organization ID not found in context",
+        });
+      }
+
+      const memberToRemove = await db
+        .select()
+        .from(schema.member)
+        .where(orm.and(orm.eq(schema.member.id, input.memberId), orm.eq(schema.member.organizationId, ctx.orgId)))
+        .then((rows) => rows.at(0));
+
+      if (!memberToRemove) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Member not found" });
+      }
+
+      // Prevent self-removal
+      if (memberToRemove.userId === ctx.user.id) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "You cannot remove yourself from the organization",
+        });
+      }
+
+      const [{ count: totalMembers = 0 } = {}] = await db
+        .select({ count: orm.count() })
+        .from(schema.member)
+        .where(orm.eq(schema.member.organizationId, ctx.orgId));
+
+      if (totalMembers <= 1) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Cannot remove the last member of the organization",
+        });
+      }
+
+      const [{ count: ownerCount = 0 } = {}] = await db
+        .select({ count: orm.count() })
+        .from(schema.member)
+        .where(orm.and(orm.eq(schema.member.organizationId, ctx.orgId), orm.eq(schema.member.role, "owner")));
+
+      if (memberToRemove.role === "owner" && ownerCount <= 1) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "An organization must retain at least one owner",
+        });
+      }
+
+      // Delete the member from the organization
+      await db
+        .delete(schema.member)
+        .where(orm.and(orm.eq(schema.member.id, input.memberId), orm.eq(schema.member.organizationId, ctx.orgId)));
+
+      return { success: true };
+    }),
+
+  update: secureProcedure
+    .meta({
+      requiredPermissions: ["organization.edit"],
+      route: { path: "/organization/update", summary: "Update organization details" },
+    })
+    .input(
+      OrganizationInputZod.and(
+        z
+          .object({
+            logo: z.string().max(128_000).nullable().optional(),
+            metadata: MetadataZod.optional(),
+            name: z.string().min(3).max(96).optional(),
+            slug: z
+              .string()
+              .min(4)
+              .max(64)
+              // URL safe characters only
+              .regex(/^[a-zA-Z0-9-_]+$/)
+              .toLowerCase()
+              .optional(),
+          })
+          .refine(
+            (data) =>
+              data.logo !== undefined ||
+              data.metadata !== undefined ||
+              data.name !== undefined ||
+              data.slug !== undefined,
+            { message: "At least one field must be provided" },
+          ),
+      ),
+    )
+    .output(schemaZod.OrganizationSelectZod)
+    .mutation(async ({ ctx, input }) => {
+      if (!ctx.orgId) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Organization ID not found in context",
+        });
+      }
+
+      const updatePayload: {
+        logo?: string;
+        metadata?: Record<string, unknown>;
+        name?: string;
+        slug?: string;
+      } = {};
+
+      if (input.name) updatePayload.name = input.name;
+      if (input.slug) updatePayload.slug = input.slug;
+      if (input.logo) updatePayload.logo = input.logo;
+      if (input.metadata) updatePayload.metadata = input.metadata;
+
+      const org = await authServer.api.updateOrganization({
+        body: {
+          data: updatePayload,
+          organizationId: ctx.orgId,
+        },
+        headers: ctx.raw.req.headers,
+      });
+
+      if (!org) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Organization not found",
+        });
+      }
+
+      return {
+        ...org,
+        logo: org.logo ?? null,
+        metadata: MetadataZod.parse(org.metadata),
+      };
+    }),
+
+  updateMemberRole: secureProcedure
+    .meta({
+      requiredPermissions: ["organization.members.permission.edit"],
+      route: { path: "/organization/update-member-role", summary: "Update member role" },
+    })
+    .input(OrganizationInputZod.and(z.object({ memberId: z.string(), role: z.enum(AssignableOrganizationRoles) })))
+    .output(schemaZod.MemberSelectZod)
+    .mutation(async ({ ctx, input }) => {
+      if (!ctx.orgId) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Organization ID not found in context",
+        });
+      }
+
+      const members = await db
+        .select()
+        .from(schema.member)
+        .where(orm.and(orm.eq(schema.member.id, input.memberId), orm.eq(schema.member.organizationId, ctx.orgId)));
+
+      const member = members.at(0);
+
+      if (!member) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Member not found" });
+      }
+
+      // Prevent self-role-changes
+      if (member.userId === ctx.user.id) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "You cannot change your own role",
+        });
+      }
+
+      const [{ count: totalMembers = 0 } = {}] = await db
+        .select({ count: orm.count() })
+        .from(schema.member)
+        .where(orm.eq(schema.member.organizationId, ctx.orgId));
+
+      if (totalMembers <= 1 && input.role !== "owner") {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "The sole member of an organization must remain an owner",
+        });
+      }
+
+      const [{ count: ownerCount = 0 } = {}] = await db
+        .select({ count: orm.count() })
+        .from(schema.member)
+        .where(orm.and(orm.eq(schema.member.organizationId, ctx.orgId), orm.eq(schema.member.role, "owner")));
+
+      if (member.role === "owner" && ownerCount <= 1 && input.role !== "owner") {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "An organization must always have at least one owner",
+        });
+      }
+
+      // Update the member's role
+      const updatedMember = await db
+        .update(schema.member)
+        .set({ role: input.role })
+        .where(orm.and(orm.eq(schema.member.id, input.memberId), orm.eq(schema.member.organizationId, ctx.orgId)))
+        .returning()
+        .then((rows) => rows.at(0));
+
+      if (!updatedMember) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Member not found",
+        });
+      }
+
+      return schemaZod.MemberSelectZod.parse(updatedMember);
+    }),
+
+  userInvitations: protectedProcedure
+    .meta({
+      requiredPermissions: ["dashboard.view"],
+      route: { path: "/organization/user-invitations", summary: "Get pending invitations for current user" },
+    })
+    .output(z.array(schemaZod.InvitationSelectZod.and(z.object({ organization: schemaZod.OrganizationSelectZod }))))
+    .query(async ({ ctx }) => {
+      const invitations = await db
+        .select({
+          invitation: schema.invitation,
+          organization: schema.organization,
+        })
+        .from(schema.invitation)
+        .leftJoin(schema.organization, orm.eq(schema.invitation.organizationId, schema.organization.id))
+        .where(orm.and(orm.eq(schema.invitation.email, ctx.user.email), orm.eq(schema.invitation.status, "pending")));
+
+      return invitations
+        .filter((row): row is { organization: NonNullable<(typeof row)["organization"]> } & typeof row =>
+          Boolean(row.organization),
+        )
+        .map((row) => ({
+          ...row.invitation,
+          organization: {
+            ...row.organization,
+            logo: row.organization.logo ?? null,
+            metadata: MetadataZod.parse(row.organization.metadata),
+          },
+        }));
     }),
 });

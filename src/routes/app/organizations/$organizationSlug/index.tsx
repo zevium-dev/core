@@ -13,7 +13,9 @@ import { formatDate } from "~/lib/utils";
 export const Route = createFileRoute("/app/organizations/$organizationSlug/")({
   component: RouteComponent,
   loader: ({ context, params }) => {
-    void context.queryClient.ensureQueryData(context.trpc.organization.get.queryOptions(params));
+    void context.queryClient.ensureQueryData(
+      context.trpc.organization.get.queryOptions({ organizationSlug: params.organizationSlug }),
+    );
   },
 });
 
@@ -55,6 +57,11 @@ function RouteComponent() {
                     src={org.logo}
                   />
                 )}
+                <Button asChild size="sm">
+                  <Link params={{ organizationSlug }} to="/app/organizations/$organizationSlug/settings">
+                    Settings
+                  </Link>
+                </Button>
                 <Button asChild size="sm" variant="outline">
                   <Link params={{ organizationSlug }} to="/app/organizations/$organizationSlug/projects/~">
                     Projects

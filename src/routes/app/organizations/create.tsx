@@ -59,8 +59,8 @@ function RouteComponent() {
     resolver: zodResolver(FormZod),
   });
 
-  const onSubmit = async (data: FormValues) => {
-    await createOrgMutation.mutateAsync({
+  const onSubmit = (data: FormValues) => {
+    createOrgMutation.mutate({
       name: data.name,
       slug: data.slug,
       ...(data.logo && { logo: data.logo }),

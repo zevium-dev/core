@@ -3,6 +3,9 @@ import { Permissions } from "./permission";
 export const DefaultOrganizationRoles = ["owner", "member", "developer", "admin", "guest"] as const;
 export type DefaultOrganizationRole = (typeof DefaultOrganizationRoles)[number];
 
+export const AssignableOrganizationRoles = DefaultOrganizationRoles satisfies ReadonlyArray<DefaultOrganizationRole>;
+export type AssignableOrganizationRole = (typeof AssignableOrganizationRoles)[number];
+
 const guestPermissions: Permissions = { "organization.view": { status: "allow" } };
 
 const memberPermissions: Permissions = {

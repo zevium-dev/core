@@ -16,6 +16,7 @@ import { EmailVerify, EmailVerifySubject } from "../email/templates/email-verify
 import { ResetPasswordEmail, ResetPasswordSubject } from "../email/templates/reset-password";
 import { capCaptcha } from "./better-auth-captcha";
 import { kv } from "./kv";
+import { ac, roles } from "./organization-access";
 
 const BETTER_AUTH_KV_PREFIX = "better-auth:";
 
@@ -87,7 +88,7 @@ export const authServer = betterAuth({
       rateLimit: { enabled: true, maxRequests: 200, timeWindow: 1000 * 60 },
     }),
     twoFactor(),
-    organization({ requireEmailVerificationOnInvitation: true }),
+    organization({ ac, requireEmailVerificationOnInvitation: true, roles }),
     autumn({ customerScope: "organization", secretKey: serverEnv.AUTUMN_SECRET_KEY }),
     capCaptcha(),
     reactStartCookies(),

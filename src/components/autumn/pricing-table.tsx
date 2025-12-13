@@ -22,7 +22,7 @@ export default function PricingTable({ productDetails }: { productDetails?: Arra
         flex h-full min-h-[300px] w-full items-center justify-center
       `}
       >
-        <Loader2 className="h-6 w-6 animate-spin text-zinc-400" />
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
       </div>
     );
   }

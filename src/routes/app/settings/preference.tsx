@@ -23,8 +23,7 @@ function AccountPreferenceComponent() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const user = useUser();
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
+  const [name, setName] = useState(user.name);
   const [phone, setPhone] = useState("");
   const [location, setLocation] = useState("");
   const userPreferencesMutation = useUserPreferencesMutation();
@@ -44,16 +43,6 @@ function AccountPreferenceComponent() {
   const passwordTooShort = newPassword.length > 0 && newPassword.length < MIN_PASSWORD_LENGTH;
   const passwordTooLong = newPassword.length > MAX_PASSWORD_LENGTH;
   const confirmMismatch = confirmPassword.length > 0 && newPassword !== confirmPassword;
-
-  // Initialize from session
-  useEffect(() => {
-    if (user) {
-      // eslint-disable-next-line @eslint-react/hooks-extra/no-direct-set-state-in-use-effect
-      setName(user.name);
-      // eslint-disable-next-line @eslint-react/hooks-extra/no-direct-set-state-in-use-effect
-      setEmail(user.email);
-    }
-  }, [user]);
 
   // Sync timezone from preferences when loaded (only set if empty locally)
   useEffect(() => {
@@ -77,13 +66,11 @@ function AccountPreferenceComponent() {
         setHasPassword(false);
       }
     })();
-  }, [user?.id]);
+  }, [user.id]);
 
   const requestPasswordResetMutation = useMutation({
     mutationFn: async () => {
-      if (!user) return Promise.reject(new Error("User unavailable"));
-      const headers = new Headers();
-      return auth.requestPasswordReset({ email: user.email }, { headers });
+      return auth.requestPasswordReset({ email: user.email });
     },
     onSuccess: () => {
       toast.success("You will receive a password reset link shortly.", { duration: 100 * 1000 });
@@ -124,7 +111,6 @@ function AccountPreferenceComponent() {
   };
 
   const handleSave = useCallback(async () => {
-    if (!user) return;
     setIsSaving(true);
     try {
       // Persist changed profile + preferences in a single user action
@@ -220,14 +206,14 @@ function AccountPreferenceComponent() {
           <div className="flex items-center gap-4">
             <div className="relative">
               <Avatar className="h-20 w-20">
-                <AvatarImage alt={name || "User avatar"} src={user?.image ?? "/placeholder-avatar.jpg"} />
+                <AvatarImage alt={name || "User avatar"} src={user.image ?? "/placeholder-avatar.jpg"} />
                 <AvatarFallback className="text-lg">
                   {(() => {
                     if (name) {
                       const parts = name.trim().split(/\s+/).slice(0, 2);
                       return parts.map((part) => part.at(0)?.toUpperCase() ?? "").join("") || "U";
                     }
-                    if (email) return email.at(0)?.toUpperCase() ?? "";
+                    return user.email.at(0)?.toUpperCase() ?? "";
                     return "U";
                   })()}
                 </AvatarFallback>
@@ -238,7 +224,7 @@ function AccountPreferenceComponent() {
                 {name || (userPreferencesQuery.isPending ? "Loading..." : "Unnamed User")}
               </h3>
               <p className="text-sm text-muted-foreground">
-                {email || (userPreferencesQuery.isPending ? "" : "No email")}
+                {user.email || (userPreferencesQuery.isPending ? "" : "No email")}
               </p>
               <Button disabled size="sm" title="Avatar upload coming soon" variant="outline">
                 Change Photo
@@ -291,15 +277,15 @@ function AccountPreferenceComponent() {
                 `}
                 id="email"
               >
-                <span className="truncate select-text" title={email}>
-                  {email || (userPreferencesQuery.isPending ? "Loading..." : "No email")}
+                <span className="truncate select-text" title={user.email}>
+                  {user.email || (userPreferencesQuery.isPending ? "Loading..." : "No email")}
                 </span>
-                {email && (
+                {user.email && (
                   <Button
                     aria-label="Copy email"
                     className="shrink-0"
                     onClick={() => {
-                      void navigator.clipboard.writeText(email);
+                      void navigator.clipboard.writeText(user.email);
                       toast.success("Email copied");
                     }}
                     size="icon"
@@ -527,7 +513,7 @@ function AccountPreferenceComponent() {
                 <div className="space-y-3">
                   <p className="text-sm text-muted-foreground">
                     You're currently signed in with OAuth only. To change your password in the future, set a password
-                    first. We will email a secure link to {email || "your email"} to set it.
+                    first. We will email a secure link to {user.email} to set it.
                   </p>
                   <div className="flex items-center justify-end gap-2">
                     <Button
@@ -567,10 +553,10 @@ function AccountPreferenceComponent() {
                 <div className="space-y-1">
                   <p className="font-medium">Two-Factor Authentication</p>
                   <p className="text-sm text-muted-foreground">
-                    {user?.twoFactorEnabled ? "Enabled on this account" : "Add an extra layer of security"}
+                    {user.twoFactorEnabled ? "Enabled on this account" : "Add an extra layer of security"}
                   </p>
                 </div>
-                {user?.twoFactorEnabled ? (
+                {user.twoFactorEnabled ? (
                   <div className="flex items-center gap-2">
                     <Button onClick={() => setTwoFactorOpen((p) => !p)} size="sm" type="button" variant="outline">
                       {twoFactorOpen ? "Close" : "Manage"}
@@ -588,7 +574,7 @@ function AccountPreferenceComponent() {
                 )}
               </div>
             </div>
-            {user?.twoFactorEnabled && twoFactorOpen && (
+            {user.twoFactorEnabled && twoFactorOpen && (
               <div
                 className={`
                 mt-2 space-y-4 rounded-md border border-border/60 p-4
@@ -719,7 +705,6 @@ function AccountPreferenceComponent() {
         <Button
           disabled={
             isSaving ||
-            !user ||
             (name.trim() === user.name && (timezone === "" || timezone === (userPreferencesQuery.data?.timezone ?? "")))
           }
           onClick={() => void handleSave()}

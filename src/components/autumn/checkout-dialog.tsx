@@ -356,9 +356,9 @@ const PrepaidItem = ({ checkoutResult, item }: { checkoutResult: CheckoutResult;
 
               <Button
                 className={`
-                  h-7! w-14 items-center border border-zinc-200 bg-white text-sm
+                  h-7! w-14 items-center border border-border bg-background text-sm
                   text-foreground shadow-sm
-                  hover:bg-zinc-100
+                  hover:bg-muted
                 `}
                 disabled={loading}
                 onClick={handleSave}

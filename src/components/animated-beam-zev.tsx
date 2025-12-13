@@ -14,21 +14,13 @@ const Circle = ({
       className={cn(
         `
           z-10 flex size-12 items-center justify-center rounded-full border-2
-          border-gray-300/30 bg-transparent p-3 shadow-lg backdrop-blur-sm
-          dark:border-gray-600/30
+          border-border/30 bg-transparent p-3 shadow-lg backdrop-blur-sm
         `,
         className,
       )}
       ref={ref}
     >
-      <div
-        className={`
-        text-gray-700
-        dark:text-gray-400
-      `}
-      >
-        {children}
-      </div>
+      <div className="text-muted-foreground">{children}</div>
     </div>
   );
 };
@@ -95,7 +87,7 @@ export function AnimatedBeamZev({ className }: { className?: string }) {
         containerRef={containerRef}
         duration={3}
         fromRef={div1Ref}
-        pathColor="rgb(156, 163, 175)"
+        pathColor="hsl(var(--muted-foreground))"
         pathOpacity={0.4}
         toRef={div6Ref}
       />
@@ -103,7 +95,7 @@ export function AnimatedBeamZev({ className }: { className?: string }) {
         containerRef={containerRef}
         duration={3}
         fromRef={div2Ref}
-        pathColor="rgb(156, 163, 175)"
+        pathColor="hsl(var(--muted-foreground))"
         pathOpacity={0.4}
         toRef={div6Ref}
       />
@@ -111,7 +103,7 @@ export function AnimatedBeamZev({ className }: { className?: string }) {
         containerRef={containerRef}
         duration={3}
         fromRef={div3Ref}
-        pathColor="rgb(156, 163, 175)"
+        pathColor="hsl(var(--muted-foreground))"
         pathOpacity={0.4}
         toRef={div6Ref}
       />
@@ -119,7 +111,7 @@ export function AnimatedBeamZev({ className }: { className?: string }) {
         containerRef={containerRef}
         duration={3}
         fromRef={div4Ref}
-        pathColor="rgb(156, 163, 175)"
+        pathColor="hsl(var(--muted-foreground))"
         pathOpacity={0.4}
         toRef={div6Ref}
       />
@@ -127,7 +119,7 @@ export function AnimatedBeamZev({ className }: { className?: string }) {
         containerRef={containerRef}
         duration={3}
         fromRef={div5Ref}
-        pathColor="rgb(156, 163, 175)"
+        pathColor="hsl(var(--muted-foreground))"
         pathOpacity={0.4}
         toRef={div6Ref}
       />
@@ -135,7 +127,7 @@ export function AnimatedBeamZev({ className }: { className?: string }) {
         containerRef={containerRef}
         duration={3}
         fromRef={div6Ref}
-        pathColor="rgb(156, 163, 175)"
+        pathColor="hsl(var(--muted-foreground))"
         pathOpacity={0.4}
         toRef={div7Ref}
       />

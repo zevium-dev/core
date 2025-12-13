@@ -306,15 +306,15 @@ export function ScalarApiReference({ _projectSlug, _specTitle, specId, version }
         </CardHeader>
         <CardContent>
           <div className="flex items-center justify-center py-12">
-            <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-blue-500"></div>
+            <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-primary"></div>
           </div>
           {/* Loading skeleton */}
           <div className="animate-pulse space-y-4">
-            <div className="h-4 w-3/4 rounded bg-gray-200"></div>
-            <div className="h-4 w-1/2 rounded bg-gray-200"></div>
-            <div className="h-32 rounded bg-gray-200"></div>
-            <div className="h-4 w-2/3 rounded bg-gray-200"></div>
-            <div className="h-20 rounded bg-gray-200"></div>
+            <div className="h-4 w-3/4 rounded bg-muted"></div>
+            <div className="h-4 w-1/2 rounded bg-muted"></div>
+            <div className="h-32 rounded bg-muted"></div>
+            <div className="h-4 w-2/3 rounded bg-muted"></div>
+            <div className="h-20 rounded bg-muted"></div>
           </div>
         </CardContent>
       </Card>
@@ -331,8 +331,8 @@ export function ScalarApiReference({ _projectSlug, _specTitle, specId, version }
         </CardHeader>
         <CardContent>
           <div className="py-8 text-center">
-            <p className="text-red-500">Error loading API specification</p>
-            <p className="mt-2 text-sm text-gray-500">{errorMessage}</p>
+            <p className="text-destructive">Error loading API specification</p>
+            <p className="mt-2 text-sm text-muted-foreground">{errorMessage}</p>
           </div>
         </CardContent>
       </Card>

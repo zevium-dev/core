@@ -12,7 +12,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
 import { Input } from "~/components/ui/input";
 import { Label } from "~/components/ui/label";
 import { ScreenCenter } from "~/components/ui/screen-center";
-import { auth, useUser } from "~/lib/auth";
+import { auth, useSession } from "~/lib/auth";
 import { CAPTCHA_HEADER_KEY } from "~/lib/constants";
 import { cn } from "~/lib/utils";
 
@@ -27,7 +27,7 @@ export const Route = createFileRoute("/auth/verify-email")({
 function RouteComponent() {
   const capRef = useRef<CapWidgetElement>(null);
   const [capToken, setCapToken] = useState<null | string>(null);
-  const user = useUser();
+  const user = useSession().user;
 
   const navigate = useNavigate();
 
@@ -55,8 +55,8 @@ function RouteComponent() {
     },
   });
 
-  const onSubmit = async (data: FormValues) => {
-    await requestResendEmailMutation.mutateAsync(data);
+  const onSubmit = (data: FormValues) => {
+    requestResendEmailMutation.mutate(data);
   };
 
   if (user) {

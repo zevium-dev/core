@@ -7,7 +7,7 @@ import { Button } from "~/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
 import { InputOTP, InputOTPGroup, InputOTPSlot } from "~/components/ui/input-otp";
 import { ScreenCenter } from "~/components/ui/screen-center";
-import { auth, useUser } from "~/lib/auth";
+import { auth, useSession } from "~/lib/auth";
 import { cn } from "~/lib/utils";
 
 export const Route = createFileRoute("/auth/two-factor-verify")({
@@ -16,7 +16,7 @@ export const Route = createFileRoute("/auth/two-factor-verify")({
 
 function RouteComponent() {
   const queryClient = useQueryClient();
-  const user = useUser();
+  const user = useSession().user;
   const [code, setCode] = useState("");
   const [error, setError] = useState<null | string>(null);
   const [loading, setLoading] = useState(false);
@@ -32,11 +32,7 @@ function RouteComponent() {
     try {
       const { error: authError } = await auth.twoFactor.verifyTotp({ code, trustDevice: true });
       if (authError) throw new Error(authError.message);
-      try {
-        await queryClient.invalidateQueries({ queryKey: ["session"] });
-      } catch {
-        /* noop */
-      }
+      await queryClient.invalidateQueries({ queryKey: ["session"] }).catch(() => void 0);
       setRedirectHome(true);
     } catch (e) {
       setError((e as Error).message || "Verification failed");
