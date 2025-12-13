@@ -34,6 +34,7 @@ export const projectRouter = router({
         const createdProject = await tx
           .insert(schema.project)
           .values({
+            // @ts-expect-error - Drizzle transaction type inference issue
             description: input.description,
             id: createId(),
             metadata: {
@@ -198,11 +199,12 @@ export const projectRouter = router({
             name: input.name,
             status: input.status,
             variables: input.variables,
-          visibility: input.visibility,
+            visibility: input.visibility,
           })
           .where(
             orm.and(
               orm.eq(schema.project.id, input.id),
+              // @ts-expect-error - Drizzle transaction type inference issue
               orm.eq(schema.project.organizationId, ctx.orgId),
             ),
           )

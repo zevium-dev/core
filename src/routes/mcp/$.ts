@@ -1,10 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { createFileRoute } from "@tanstack/react-router";
-import { getRequest, getResponse } from "@tanstack/react-start/server";
-import { getEventListeners } from "node:events";
-import { IncomingMessage } from "node:http";
-import z from "zod/v3";
+import { z } from "zod/v3";
 
 import { serverEnv } from "~/env/server";
 import { search_embeddings } from "~/lib/server/embeddings";
@@ -20,6 +16,30 @@ const server = new McpServer({
   version: "1.0.0",
 });
 
+//Test tool
+// //Feed Kino pet tool , feed only apple then happy message or else send died message
+// // @ts-expect-error - MCP SDK has excessively deep type instantiation with Zod schemas
+// server.tool(
+//   "feed_kino_pet",
+//   "Feed Kino pet tool",
+//   {
+//     food: z.string().describe("The food to feed Kino."),
+//   },
+//   async ({ food }) => {
+//     const typedFood = food as string;
+//     console.log("Feeding Kino with food", typedFood);
+//     if (typedFood === "apple") {
+//       return {
+//         content: [{ text: "Kino is happy", type: "text" }],
+//       };
+//     }
+//     return {
+//       content: [{ text: "Kino died", type: "text" }],
+//     };
+//   }
+// );
+
+// @ts-expect-error - MCP SDK has excessively deep type instantiation with Zod schemas
 server.tool(
   "search_zevium_api",
   "This tool is used for searching the APIs available in the Zevium platform. It will do a similarity search on the API name and description and return the most relevant APIs.",
@@ -44,11 +64,11 @@ server.tool(
 
     if (apiKey && results.length > 0) {
       try {
-        const documents = results.map((r: any) => r.text);
+        const documents = results.map((r) => r.text);
 
         const reranked = await rerankWithCohere({
-          query: search_query,
           documents,
+          query: search_query,
           topN: 3,
         });
 
@@ -57,9 +77,8 @@ server.tool(
         if (reranked && reranked.length > 0) {
           finalResults = reranked.map((r) => results[r.index]).filter(Boolean);
         }
-      } catch (error) {
+      } catch (error: unknown) {
         console.error("Cohere rerank failed, falling back to vector search:", error);
-      
       }
     }
 
@@ -78,18 +97,28 @@ server.tool(
 );
 
 //Tool to execute an API call using the Zevium. It will take url , method, headers, body and return the response.
+// @ts-expect-error - MCP SDK has excessively deep type instantiation with Zod schemas
 server.tool(
   "execute_api_call",
   "Execute an API call using the Zevium. It will take url , method, headers, body and return the response.",
   {
-    body: z.string().optional().describe("The body to send."),
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-call
+    body: z.string().describe("The body to send.").optional(),
     headers: z.record(z.string(), z.string()).describe("The headers to send."),
     method: z.string().describe("The method to use."),
     url: z.string().describe("The URL to call."),
   },
   async ({ body, headers, method, url }) => {
-    console.log("Execute API call", url, method, headers, body);
-    const response = await fetch(url, { body: body ? body : undefined, headers, method });
+    const typedUrl = url as string;
+    const typedMethod = method as string;
+    const typedHeaders = headers as Record<string, string>;
+    const typedBody = body as string | undefined;
+    console.log("Execute API call", typedUrl, typedMethod, typedHeaders, typedBody);
+    const response = await fetch(typedUrl, {
+      body: typedBody ?? undefined,
+      headers: typedHeaders,
+      method: typedMethod,
+    });
     return {
       content: [
         {

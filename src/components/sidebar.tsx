@@ -186,7 +186,6 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
             </SidebarMenuItem>
 
             {filteredNavData.map((item) => {
-               
               if (!match) return <React.Fragment key={item.title} />;
 
               // Check if current path matches the item URL or starts with it (for nested routes)

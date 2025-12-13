@@ -7,70 +7,53 @@ import { serverEnv } from "~/env/server";
 export const EMBEDDING_MODEL = "models/gemini-embedding-001";
 export const EMBEDDING_DIMENSION = 768;
 
-export const getEmbeddings = createServerOnlyFn(
-  async (data: { input: string }): Promise<Array<number>> => {
-    console.log("Getting embeddings for", data.input, "with model", EMBEDDING_MODEL);
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/${EMBEDDING_MODEL}:embedContent`,
-      {
-        body: JSON.stringify({
-          content: {
-            parts: [
-              {
-                text: data.input,
-              },
-            ],
+export const getEmbeddings = createServerOnlyFn(async (data: { input: string }): Promise<Array<number>> => {
+  console.log("Getting embeddings for", data.input, "with model", EMBEDDING_MODEL);
+  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/${EMBEDDING_MODEL}:embedContent`, {
+    body: JSON.stringify({
+      content: {
+        parts: [
+          {
+            text: data.input,
           },
-          model: EMBEDDING_MODEL,
-          output_dimensionality: EMBEDDING_DIMENSION,
-        }),
-        headers: {
-          "Content-Type": "application/json",
-          "x-goog-api-key": serverEnv.GEMINI_API_KEY,
-        },
-        method: "POST",
+        ],
       },
-    );
-    console.log("Response", response);
-    const result = (await response.json()) as { embedding: { values: Array<number> } };
-    const embeddingData = result.embedding;
-    if (!embeddingData) {
-      throw new Error("No embedding data returned from API");
-    }
-    return embeddingData.values;
-  },
-);
+      model: EMBEDDING_MODEL,
+      output_dimensionality: EMBEDDING_DIMENSION,
+    }),
+    headers: {
+      "Content-Type": "application/json",
+      "x-goog-api-key": serverEnv.GEMINI_API_KEY,
+    },
+    method: "POST",
+  });
+  console.log("Response", response);
+  const result = (await response.json()) as { embedding?: { values: Array<number> } };
+  const embeddingData = result.embedding;
+  if (!embeddingData) {
+    throw new Error("No embedding data returned from API");
+  }
+  return embeddingData.values;
+});
 
-export const createProjectEmbedding = createServerOnlyFn(
-  async (projectId: string, text: string) => {
-    console.log(
-      "Creating project embedding for project",
-      projectId,
-      "with text",
-      text,
-      "and model",
-      EMBEDDING_MODEL,
-    );
-    const embedding = await getEmbeddings({ input: text });
-    console.log("Embedding", embedding);
-    const statement =
-      "INSERT INTO project_embeddings (id,project_id,text,embedding,created_at,updated_at) VALUES (?,?,?,vector32(?),?,?)";
-    const result = await db.$client.execute(statement, [
-      createId(),
-      projectId,
-      text,
-      JSON.stringify(embedding),
-      new Date(),
-      new Date(),
-    ]);
-    return result;
-  },
-);
+export const createProjectEmbedding = createServerOnlyFn(async (projectId: string, text: string) => {
+  console.log("Creating project embedding for project", projectId, "with text", text, "and model", EMBEDDING_MODEL);
+  const embedding = await getEmbeddings({ input: text });
+  console.log("Embedding", embedding);
+  const statement =
+    "INSERT INTO project_embeddings (id,project_id,text,embedding,created_at,updated_at) VALUES (?,?,?,vector32(?),?,?)";
+  const result = await db.$client.execute(statement, [
+    createId(),
+    projectId,
+    text,
+    JSON.stringify(embedding),
+    new Date(),
+    new Date(),
+  ]);
+  return result;
+});
 
-export const search_embeddings = async (data: {
-  text: string;
-  topK: number;
-}) => {
+export const search_embeddings = async (data: { text: string; topK: number }) => {
   const { text, topK = 3 } = data;
   const embedding = await getEmbeddings({ input: text });
   console.log("Embedding", embedding);
@@ -88,8 +71,8 @@ export const search_embeddings = async (data: {
   return searchResults;
 };
 
-export type SearchResult = {
+export interface SearchResult {
   project_id: string;
-  text: string;
   schema: string;
-};
+  text: string;
+}

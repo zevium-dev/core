@@ -3,12 +3,12 @@ import { serverEnv } from "~/env/server";
 export const RERANK_MODEL = "rerank-v3.5";
 
 export async function rerankWithCohere({
-  query,
   documents,
+  query,
   topN,
 }: {
+  documents: Array<string>;
   query: string;
-  documents: string[];
   topN: number;
 }) {
   const apiKey = serverEnv.COHERE_API_KEY;

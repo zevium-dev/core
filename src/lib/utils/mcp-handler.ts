@@ -56,7 +56,7 @@ export async function handleMcpRequest(
         resolve();
       }
     });
-    console.log("responseData", responseData);
+    //console.log("responseData", JSON.stringify(responseData));
 
     await clientTransport.close();
     await serverTransport.close();
