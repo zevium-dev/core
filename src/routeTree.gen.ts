@@ -13,6 +13,7 @@ import { Route as AppRouteImport } from './routes/app'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AuthIndexRouteImport } from './routes/auth/index'
 import { Route as AppIndexRouteImport } from './routes/app/index'
+import { Route as McpSplatRouteImport } from './routes/mcp/$'
 import { Route as AuthVerifyEmailRouteImport } from './routes/auth/verify-email'
 import { Route as AuthTwoFactorVerifyRouteImport } from './routes/auth/two-factor-verify'
 import { Route as AuthTwoFactorAuthRouteImport } from './routes/auth/two-factor-auth'
@@ -71,6 +72,11 @@ const AppIndexRoute = AppIndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => AppRoute,
+} as any)
+const McpSplatRoute = McpSplatRouteImport.update({
+  id: '/mcp/$',
+  path: '/mcp/$',
+  getParentRoute: () => rootRouteImport,
 } as any)
 const AuthVerifyEmailRoute = AuthVerifyEmailRouteImport.update({
   id: '/auth/verify-email',
@@ -291,6 +297,7 @@ export interface FileRoutesByFullPath {
   '/auth/two-factor-auth': typeof AuthTwoFactorAuthRoute
   '/auth/two-factor-verify': typeof AuthTwoFactorVerifyRoute
   '/auth/verify-email': typeof AuthVerifyEmailRoute
+  '/mcp/$': typeof McpSplatRoute
   '/app/': typeof AppIndexRoute
   '/auth': typeof AuthIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
@@ -333,6 +340,7 @@ export interface FileRoutesByTo {
   '/auth/two-factor-auth': typeof AuthTwoFactorAuthRoute
   '/auth/two-factor-verify': typeof AuthTwoFactorVerifyRoute
   '/auth/verify-email': typeof AuthVerifyEmailRoute
+  '/mcp/$': typeof McpSplatRoute
   '/app': typeof AppIndexRoute
   '/auth': typeof AuthIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
@@ -376,6 +384,7 @@ export interface FileRoutesById {
   '/auth/two-factor-auth': typeof AuthTwoFactorAuthRoute
   '/auth/two-factor-verify': typeof AuthTwoFactorVerifyRoute
   '/auth/verify-email': typeof AuthVerifyEmailRoute
+  '/mcp/$': typeof McpSplatRoute
   '/app/': typeof AppIndexRoute
   '/auth/': typeof AuthIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
@@ -422,6 +431,7 @@ export interface FileRouteTypes {
     | '/auth/two-factor-auth'
     | '/auth/two-factor-verify'
     | '/auth/verify-email'
+    | '/mcp/$'
     | '/app/'
     | '/auth'
     | '/api/auth/$'
@@ -464,6 +474,7 @@ export interface FileRouteTypes {
     | '/auth/two-factor-auth'
     | '/auth/two-factor-verify'
     | '/auth/verify-email'
+    | '/mcp/$'
     | '/app'
     | '/auth'
     | '/api/auth/$'
@@ -506,6 +517,7 @@ export interface FileRouteTypes {
     | '/auth/two-factor-auth'
     | '/auth/two-factor-verify'
     | '/auth/verify-email'
+    | '/mcp/$'
     | '/app/'
     | '/auth/'
     | '/api/auth/$'
@@ -547,6 +559,7 @@ export interface RootRouteChildren {
   AuthTwoFactorAuthRoute: typeof AuthTwoFactorAuthRoute
   AuthTwoFactorVerifyRoute: typeof AuthTwoFactorVerifyRoute
   AuthVerifyEmailRoute: typeof AuthVerifyEmailRoute
+  McpSplatRoute: typeof McpSplatRoute
   AuthIndexRoute: typeof AuthIndexRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
   ApiCapSplatRoute: typeof ApiCapSplatRoute
@@ -585,6 +598,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/app/'
       preLoaderRoute: typeof AppIndexRouteImport
       parentRoute: typeof AppRoute
+    }
+    '/mcp/$': {
+      id: '/mcp/$'
+      path: '/mcp/$'
+      fullPath: '/mcp/$'
+      preLoaderRoute: typeof McpSplatRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/auth/verify-email': {
       id: '/auth/verify-email'
@@ -963,6 +983,7 @@ const rootRouteChildren: RootRouteChildren = {
   AuthTwoFactorAuthRoute: AuthTwoFactorAuthRoute,
   AuthTwoFactorVerifyRoute: AuthTwoFactorVerifyRoute,
   AuthVerifyEmailRoute: AuthVerifyEmailRoute,
+  McpSplatRoute: McpSplatRoute,
   AuthIndexRoute: AuthIndexRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
   ApiCapSplatRoute: ApiCapSplatRoute,
