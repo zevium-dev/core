@@ -44,6 +44,7 @@ import { Route as ApiOpenapiSplatRouteImport } from './routes/api/openapi/$'
 import { Route as ApiCapSplatRouteImport } from './routes/api/cap/$'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
 import { Route as AppOrganizationsOrganizationSlugIndexRouteImport } from './routes/app/organizations/$organizationSlug/index'
+import { Route as AppSettingsCreditsSuccessRouteImport } from './routes/app/settings/credits/success'
 import { Route as AppOrganizationsOrganizationSlugProjectsRouteImport } from './routes/app/organizations/$organizationSlug/projects'
 import { Route as AppOrganizationsOrganizationSlugProjectsIndexRouteImport } from './routes/app/organizations/$organizationSlug/projects/index'
 import { Route as AppOrganizationsOrganizationSlugProjectsChar126RouteImport } from './routes/app/organizations/$organizationSlug/projects/~'
@@ -228,6 +229,12 @@ const AppOrganizationsOrganizationSlugIndexRoute =
     path: '/',
     getParentRoute: () => AppOrganizationsOrganizationSlugRoute,
   } as any)
+const AppSettingsCreditsSuccessRoute =
+  AppSettingsCreditsSuccessRouteImport.update({
+    id: '/success',
+    path: '/success',
+    getParentRoute: () => AppSettingsCreditsRoute,
+  } as any)
 const AppOrganizationsOrganizationSlugProjectsRoute =
   AppOrganizationsOrganizationSlugProjectsRouteImport.update({
     id: '/projects',
@@ -289,12 +296,13 @@ export interface FileRoutesByFullPath {
   '/app/organizations/create': typeof AppOrganizationsCreateRoute
   '/app/organizations/~': typeof AppOrganizationsChar126Route
   '/app/settings/activity': typeof AppSettingsActivityRoute
-  '/app/settings/credits': typeof AppSettingsCreditsRoute
+  '/app/settings/credits': typeof AppSettingsCreditsRouteWithChildren
   '/app/settings/keys': typeof AppSettingsKeysRoute
   '/app/settings/preference': typeof AppSettingsPreferenceRoute
   '/app/organizations/': typeof AppOrganizationsIndexRoute
   '/app/settings': typeof AppSettingsIndexRoute
   '/app/organizations/$organizationSlug/projects': typeof AppOrganizationsOrganizationSlugProjectsRouteWithChildren
+  '/app/settings/credits/success': typeof AppSettingsCreditsSuccessRoute
   '/app/organizations/$organizationSlug/': typeof AppOrganizationsOrganizationSlugIndexRoute
   '/app/organizations/$organizationSlug/projects/$projectSlug': typeof AppOrganizationsOrganizationSlugProjectsProjectSlugRoute
   '/app/organizations/$organizationSlug/projects/create': typeof AppOrganizationsOrganizationSlugProjectsCreateRoute
@@ -328,11 +336,12 @@ export interface FileRoutesByTo {
   '/app/organizations/create': typeof AppOrganizationsCreateRoute
   '/app/organizations/~': typeof AppOrganizationsChar126Route
   '/app/settings/activity': typeof AppSettingsActivityRoute
-  '/app/settings/credits': typeof AppSettingsCreditsRoute
+  '/app/settings/credits': typeof AppSettingsCreditsRouteWithChildren
   '/app/settings/keys': typeof AppSettingsKeysRoute
   '/app/settings/preference': typeof AppSettingsPreferenceRoute
   '/app/organizations': typeof AppOrganizationsIndexRoute
   '/app/settings': typeof AppSettingsIndexRoute
+  '/app/settings/credits/success': typeof AppSettingsCreditsSuccessRoute
   '/app/organizations/$organizationSlug': typeof AppOrganizationsOrganizationSlugIndexRoute
   '/app/organizations/$organizationSlug/projects/$projectSlug': typeof AppOrganizationsOrganizationSlugProjectsProjectSlugRoute
   '/app/organizations/$organizationSlug/projects/create': typeof AppOrganizationsOrganizationSlugProjectsCreateRoute
@@ -370,12 +379,13 @@ export interface FileRoutesById {
   '/app/organizations/create': typeof AppOrganizationsCreateRoute
   '/app/organizations/~': typeof AppOrganizationsChar126Route
   '/app/settings/activity': typeof AppSettingsActivityRoute
-  '/app/settings/credits': typeof AppSettingsCreditsRoute
+  '/app/settings/credits': typeof AppSettingsCreditsRouteWithChildren
   '/app/settings/keys': typeof AppSettingsKeysRoute
   '/app/settings/preference': typeof AppSettingsPreferenceRoute
   '/app/organizations/': typeof AppOrganizationsIndexRoute
   '/app/settings/': typeof AppSettingsIndexRoute
   '/app/organizations/$organizationSlug/projects': typeof AppOrganizationsOrganizationSlugProjectsRouteWithChildren
+  '/app/settings/credits/success': typeof AppSettingsCreditsSuccessRoute
   '/app/organizations/$organizationSlug/': typeof AppOrganizationsOrganizationSlugIndexRoute
   '/app/organizations/$organizationSlug/projects/$projectSlug': typeof AppOrganizationsOrganizationSlugProjectsProjectSlugRoute
   '/app/organizations/$organizationSlug/projects/create': typeof AppOrganizationsOrganizationSlugProjectsCreateRoute
@@ -420,6 +430,7 @@ export interface FileRouteTypes {
     | '/app/organizations/'
     | '/app/settings'
     | '/app/organizations/$organizationSlug/projects'
+    | '/app/settings/credits/success'
     | '/app/organizations/$organizationSlug/'
     | '/app/organizations/$organizationSlug/projects/$projectSlug'
     | '/app/organizations/$organizationSlug/projects/create'
@@ -458,6 +469,7 @@ export interface FileRouteTypes {
     | '/app/settings/preference'
     | '/app/organizations'
     | '/app/settings'
+    | '/app/settings/credits/success'
     | '/app/organizations/$organizationSlug'
     | '/app/organizations/$organizationSlug/projects/$projectSlug'
     | '/app/organizations/$organizationSlug/projects/create'
@@ -500,6 +512,7 @@ export interface FileRouteTypes {
     | '/app/organizations/'
     | '/app/settings/'
     | '/app/organizations/$organizationSlug/projects'
+    | '/app/settings/credits/success'
     | '/app/organizations/$organizationSlug/'
     | '/app/organizations/$organizationSlug/projects/$projectSlug'
     | '/app/organizations/$organizationSlug/projects/create'
@@ -778,6 +791,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppOrganizationsOrganizationSlugIndexRouteImport
       parentRoute: typeof AppOrganizationsOrganizationSlugRoute
     }
+    '/app/settings/credits/success': {
+      id: '/app/settings/credits/success'
+      path: '/success'
+      fullPath: '/app/settings/credits/success'
+      preLoaderRoute: typeof AppSettingsCreditsSuccessRouteImport
+      parentRoute: typeof AppSettingsCreditsRoute
+    }
     '/app/organizations/$organizationSlug/projects': {
       id: '/app/organizations/$organizationSlug/projects'
       path: '/projects'
@@ -876,13 +896,24 @@ const AppOrganizationsRouteChildren: AppOrganizationsRouteChildren = {
 const AppOrganizationsRouteWithChildren =
   AppOrganizationsRoute._addFileChildren(AppOrganizationsRouteChildren)
 
+interface AppSettingsCreditsRouteChildren {
+  AppSettingsCreditsSuccessRoute: typeof AppSettingsCreditsSuccessRoute
+}
+
+const AppSettingsCreditsRouteChildren: AppSettingsCreditsRouteChildren = {
+  AppSettingsCreditsSuccessRoute: AppSettingsCreditsSuccessRoute,
+}
+
+const AppSettingsCreditsRouteWithChildren =
+  AppSettingsCreditsRoute._addFileChildren(AppSettingsCreditsRouteChildren)
+
 interface AppRouteChildren {
   AppCatalogueRoute: typeof AppCatalogueRoute
   AppDashboardRoute: typeof AppDashboardRoute
   AppOrganizationsRoute: typeof AppOrganizationsRouteWithChildren
   AppIndexRoute: typeof AppIndexRoute
   AppSettingsActivityRoute: typeof AppSettingsActivityRoute
-  AppSettingsCreditsRoute: typeof AppSettingsCreditsRoute
+  AppSettingsCreditsRoute: typeof AppSettingsCreditsRouteWithChildren
   AppSettingsKeysRoute: typeof AppSettingsKeysRoute
   AppSettingsPreferenceRoute: typeof AppSettingsPreferenceRoute
   AppSettingsIndexRoute: typeof AppSettingsIndexRoute
@@ -894,7 +925,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppOrganizationsRoute: AppOrganizationsRouteWithChildren,
   AppIndexRoute: AppIndexRoute,
   AppSettingsActivityRoute: AppSettingsActivityRoute,
-  AppSettingsCreditsRoute: AppSettingsCreditsRoute,
+  AppSettingsCreditsRoute: AppSettingsCreditsRouteWithChildren,
   AppSettingsKeysRoute: AppSettingsKeysRoute,
   AppSettingsPreferenceRoute: AppSettingsPreferenceRoute,
   AppSettingsIndexRoute: AppSettingsIndexRoute,

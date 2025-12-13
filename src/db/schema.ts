@@ -7,22 +7,6 @@ type Base64String = {} & string;
 type Metadata = Record<string, unknown>;
 
 // ===== Credits =====
-export const creditBalance = sqliteTable(
-  "credit_balance",
-  {
-    // primary key also FK to user
-    userId: text("user_id")
-      .primaryKey()
-      .references(() => user.id, { onDelete: "cascade" }),
-    balanceCents: integer("balance_cents").notNull().default(0),
-    currency: text("currency").notNull().default("usd"),
-    updatedAt: integer("updated_at", { mode: "timestamp" })
-      .$defaultFn(() => new Date())
-      .notNull(),
-  },
-  (self) => [uniqueIndex("credit_balance_user_id_index").on(self.userId)],
-);
-
 export const creditLedger = sqliteTable(
   "credit_ledger",
   {

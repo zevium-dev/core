@@ -3,36 +3,65 @@ import { randomUUID } from "node:crypto";
 
 import { serverEnv } from "~/env/server";
 import { addCreditsTopUp } from "~/lib/server/credits";
+import { kv } from "~/lib/server/kv";
+import { validateEvent } from "@polar-sh/sdk/webhooks";
 
 /**
  * Polar API routes
  * - POST /api/polar/webhook -> webhook handler
  */
-export const Route = createFileRoute("/api/polar/$" as any)({
+export const Route = createFileRoute("/api/polar/$")({
   server: {
     handlers: {
       POST: async ({ request }) => {
         const url = new URL(request.url);
         if (url.pathname.endsWith("/webhook")) {
-          const payload = (await request.json()) as any;
+          // Read raw body for signature verification
+          const raw = await request.text();
+          let payload: any;
           try {
-            const type: string = payload?.type ?? payload?.event ?? "";
-            const data = payload?.data ?? payload;
-            const productId = data?.productId ?? data?.product_id ?? data?.product?.id;
-            const status = data?.status ?? data?.charge?.status ?? data?.checkout?.status;
-            const metadata = data?.metadata ?? data?.checkout?.metadata ?? {};
-            const userId: string | undefined = metadata.userId ?? metadata.user_id;
-            const amountCents: number =
-              data?.amountCents ?? data?.amount_cents ?? data?.subtotal_amount ?? data?.amount ?? 0;
+            // Validate signature; throws if invalid
+            payload = validateEvent(raw, Object.fromEntries(request.headers.entries()), serverEnv.POLAR_WEBHOOK_SECRET);
+          } catch (err) {
+            console.error("[POLAR_WEBHOOK_VERIFY_ERROR]", err);
+            return new Response("invalid signature", { status: 400 });
+          }
 
-            const succeeded =
-              ["payment.succeeded", "checkout.succeeded", "order.paid", "charge.succeeded"].includes(type) ||
-              ["succeeded", "paid"].includes(String(status));
+          try {
+            if (payload?.type === "order.paid") {
+              const order = payload.data as {
+                id: string;
+                productId: string | null;
+                totalAmount: number;
+                currency: string;
+                checkoutId: string | null;
+                metadata?: Record<string, unknown>;
+              };
 
-            const isCreditsProduct = productId === serverEnv.POLAR_PRODUCT_ID_CREDITS;
+              // Only process our credits product
+              if (!order.productId || order.productId !== serverEnv.POLAR_PRODUCT_ID_CREDITS) {
+                return new Response("ignored", { status: 200 });
+              }
 
-            if (succeeded && isCreditsProduct && userId && amountCents > 0) {
-              await addCreditsTopUp(userId, Number(amountCents), data?.id ?? randomUUID(), "Polar top-up");
+              const userId = String(order.metadata?.userId ?? "");
+              if (!userId) {
+                return new Response("ignored: no userId", { status: 200 });
+              }
+
+              // Unified idempotency across checkout + order events
+              const dedupeId = order.checkoutId || order.id;
+              const appliedKey = `polar:credit_applied:${userId}:${dedupeId}`;
+              const applyOk = await kv
+                .set(appliedKey, "1", { nx: true, px: 1000 * 60 * 60 * 24 * 365 })
+                .catch(() => null);
+              if (applyOk !== "OK") {
+                return new Response("ok");
+              }
+
+              const amountCents = Number(order.totalAmount ?? 0);
+              if (amountCents > 0) {
+                await addCreditsTopUp(userId, amountCents, order.id ?? randomUUID(), "Polar top-up");
+              }
               return new Response("ok");
             }
 

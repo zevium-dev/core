@@ -40,12 +40,14 @@ function CreditsComponent() {
   const [amountUsd, setAmountUsd] = useState<string>("10");
 
   const balanceQuery = useQuery(trpc.credits.getBalance.queryOptions());
+  const transactionsQuery = useQuery(trpc.credits.listTransactions.queryOptions({ page: currentPage, pageSize: 3 }));
   const topupMutation = useMutation(
     trpc.credits.createTopUpCheckout.mutationOptions({
       async onSuccess(data) {
         // Redirect to Polar checkout
         if (data?.url) window.location.assign(data.url);
         await qc.invalidateQueries(trpc.credits.getBalance.queryOptions());
+        await qc.invalidateQueries(trpc.credits.listTransactions.queryOptions({ page: 1, pageSize: 3 }));
       },
     }),
   );
@@ -102,7 +104,7 @@ function CreditsComponent() {
                 size="lg"
               >
                 {topupMutation.isPending ? "Redirecting..." : "Add Credits"}
-              </Button>
+            </Button>
             </div>
             <Button
               className={`
@@ -154,30 +156,50 @@ function CreditsComponent() {
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
-            {recentTransactions.map((transaction) => (
+            {(transactionsQuery.data?.items ?? []).map((tx) => {
+              const sign = tx.amountCents >= 0 ? 1 : -1;
+              const amountFmt = new Intl.NumberFormat(undefined, { style: "currency", currency: "USD" }).format(
+                Math.abs(tx.amountCents) / 100,
+              );
+              const dateFmt = new Intl.DateTimeFormat(undefined, {
+                dateStyle: "medium",
+                timeStyle: "short",
+              }).format(new Date(tx.createdAt));
+              return (
               <div
                 className={`
                   flex items-center justify-between border-b border-border/20
                   py-2
                   last:border-b-0
                 `}
-                key={transaction.id}
+                  key={tx.id}
               >
-                <span className="text-sm text-muted-foreground">{transaction.time}</span>
+                  <span className="text-sm text-muted-foreground">{dateFmt}</span>
                 <div className="flex items-center gap-4">
-                  <span className="text-sm font-medium text-primary">{transaction.amount}</span>
                   <span
                     className={`
-                    flex cursor-pointer items-center gap-1 text-xs
-                    text-muted-foreground
-                    hover:text-foreground hover:underline
+                      text-sm font-medium ${sign > 0 ? "text-primary" : "text-destructive"}
                   `}
                   >
-                    Get Invoice <FileText className="h-3 w-3" />
+                      {sign > 0 ? "+" : "-"}
+                      {amountFmt}
                   </span>
+                    <button
+                      className={`
+                      text-xs text-muted-foreground hover:text-foreground hover:underline
+                    `}
+                      onClick={async () => {
+                        const data = await qc.fetchQuery(trpc.credits.getInvoiceUrl.queryOptions({ orderId: tx.id }));
+                        if (data?.url) window.open(data.url, "_blank");
+                      }}
+                      title={String(tx.reference ?? tx.id)}
+                    >
+                      Get Invoice <FileText className="ml-1 inline h-3 w-3" />
+                    </button>
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
 
           {/* Pagination */}
@@ -196,6 +218,7 @@ function CreditsComponent() {
             </Button>
             <Button
               className="text-muted-foreground"
+              disabled={!transactionsQuery.data?.hasNext}
               onClick={() => setCurrentPage((prev) => prev + 1)}
               size="sm"
               variant="ghost"

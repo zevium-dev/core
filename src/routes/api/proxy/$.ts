@@ -65,6 +65,14 @@ function normalizeHostUrl(input: string): null | URL {
   }
 }
 
+class UpstreamNonOK extends Error {
+  response: Response;
+  constructor(response: Response) {
+    super("Upstream response not OK");
+    this.response = response;
+  }
+}
+
 const proxyHandler = async (request: Request) => {
   const requestId = crypto.randomUUID();
 
@@ -136,6 +144,17 @@ const proxyHandler = async (request: Request) => {
   if (proxySecret) outboundHeaders.set("x-zevium-proxy-secret", proxySecret);
 
   try {
+    const { deductCredits } = await import("~/lib/server/credits");
+
+    // Derive userId from verification response (handles different shapes)
+    const vAny = verification as unknown as {
+      user?: { id?: string };
+      key?: { userId?: string };
+      userId?: string;
+      user_id?: string;
+    };
+    const userId = vAny.user?.id ?? vAny.key?.userId ?? vAny.userId ?? vAny.user_id ?? "";
+
     const upstream = await fetch(targetUrl, {
       body: request.body,
       // @ts-expect-error duplex is not in the type definition (Node.js fetch streaming)
@@ -144,6 +163,11 @@ const proxyHandler = async (request: Request) => {
       method: request.method,
     });
 
+    // Not a success → no charge, return upstream as-is
+    if (!upstream.ok) {
+      throw new UpstreamNonOK(upstream);
+    }
+
     const responseHeaders = new Headers(upstream.headers);
     // Ensure request id is included in the client response
     responseHeaders.set("x-zevium-request-id", requestId);
@@ -151,12 +175,77 @@ const proxyHandler = async (request: Request) => {
     // eslint-disable-next-line drizzle/enforce-delete-with-where
     responseHeaders.delete("x-zevium-proxy-secret");
 
-    return new Response(upstream.body, {
-      headers: responseHeaders,
-      status: upstream.status,
-      statusText: upstream.statusText,
-    });
-  } catch (_error) {
+    // Success criteria for charging:
+    // - HTTP 2xx (already checked)
+    // - Stream fully reaches the end to client
+    // - No upstream read error / no cancel
+    if (upstream.body) {
+      const reader = upstream.body.getReader();
+      let aborted = false;
+      const stream = new ReadableStream({
+        async pull(controller) {
+          try {
+            const { value, done } = await reader.read();
+            if (done) {
+              // Stream completed successfully → commit billing
+              try {
+                await deductCredits(userId, 1, "Zevium proxy API call", requestId);
+              } catch {
+                // swallow billing errors to not break the response
+              }
+              controller.close();
+              return;
+            }
+            controller.enqueue(value);
+          } catch (_e) {
+            aborted = true;
+            try {
+              await reader.cancel();
+            } catch {}
+            controller.error(_e);
+          }
+        },
+        async cancel() {
+          aborted = true;
+          try {
+            await reader.cancel();
+          } catch {}
+        },
+      });
+
+      // Streaming response to client; billing is committed on pull() completion
+      return new Response(stream, {
+        headers: responseHeaders,
+        status: upstream.status,
+        statusText: upstream.statusText,
+      });
+    } else {
+      // Non-streaming body: read fully, then bill and return
+      const buf = await upstream.arrayBuffer();
+      try {
+        await deductCredits(userId, 1, "Zevium proxy API call", requestId);
+      } catch {
+        // ignore billing errors
+      }
+      return new Response(buf, {
+        headers: responseHeaders,
+        status: upstream.status,
+        statusText: upstream.statusText,
+      });
+    }
+  } catch (error) {
+    if (error instanceof UpstreamNonOK) {
+      // Return upstream error response without charging (already prevented)
+      const responseHeaders = new Headers(error.response.headers);
+      responseHeaders.set("x-zevium-request-id", requestId);
+      // eslint-disable-next-line drizzle/enforce-delete-with-where
+      responseHeaders.delete("x-zevium-proxy-secret");
+      return new Response(error.response.body, {
+        headers: responseHeaders,
+        status: error.response.status,
+        statusText: error.response.statusText,
+      });
+    }
     return jsonWithRequestId(502, "Upstream request failed", requestId);
   }
 };
