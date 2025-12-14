@@ -1,6 +1,6 @@
 # [zevium.dev](https://zevium.dev)
 
-This repo has all the code for my site [zevium.dev](https://zevium.dev).
+This repo has all the code for [zevium.dev](https://zevium.dev).
 The entire website was made using TanStack Start.
 
 ![TanStack Start](https://img.shields.io/badge/TanStack%20Start-0-c93679?style=for-the-badge&logo=zap)
