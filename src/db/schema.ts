@@ -447,3 +447,32 @@ export const projectUserPermission = sqliteTable(
     uniqueIndex("project_user_permission_unique_index").on(self.projectId, self.userId, self.permission),
   ],
 );
+
+// ===== Project Secrets (encrypted at rest) =====
+
+export const projectSecret = sqliteTable(
+  "project_secret",
+  {
+    /** Encrypted value in format: keyId:base64(iv):base64(ciphertext) */
+    ciphertext: text("ciphertext").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .$defaultFn(() => new Date())
+      .notNull(),
+    id: text("id").primaryKey(),
+    metadata: text("metadata", { mode: "json" })
+      .$defaultFn(() => ({}))
+      .$type<Metadata>(),
+    /** Logical name of the secret (e.g. PAYMENT_API_KEY) */
+    name: text("name").notNull(),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => project.id, { onDelete: "cascade" }),
+    updatedAt: integer("updated_at", { mode: "timestamp" })
+      .$defaultFn(() => new Date())
+      .notNull(),
+  },
+  (self) => [
+    index("project_secret_project_id_index").on(self.projectId),
+    uniqueIndex("project_secret_project_name_unique_index").on(self.projectId, self.name),
+  ],
+);

@@ -88,3 +88,10 @@ export const OrganizationUserPermissionInsertZod = createInsertSchema(schema.org
 
 export const ProjectUserPermissionSelectZod = createSelectSchema(schema.projectUserPermission);
 export const ProjectUserPermissionInsertZod = createInsertSchema(schema.projectUserPermission);
+
+export const ProjectSecretSelectZod = createSelectSchema(schema.projectSecret).extend({
+  metadata: MetadataZod,
+});
+export const ProjectSecretInsertZod = createInsertSchema(schema.projectSecret).extend({
+  metadata: MetadataZod,
+});

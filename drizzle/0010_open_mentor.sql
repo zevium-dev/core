@@ -1,0 +1,1 @@
+ALTER TABLE `project_secret` DROP COLUMN `last_used_at`;
