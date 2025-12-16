@@ -23,8 +23,8 @@ export const Route = createFileRoute("/api/polar/$")({
             // Validate signature; throws if invalid
             payload = validateEvent(raw, Object.fromEntries(request.headers.entries()), serverEnv.POLAR_WEBHOOK_SECRET);
           } catch (err) {
-            console.error("[POLAR_WEBHOOK_VERIFY_ERROR]", err);
-            return new Response("invalid signature", { status: 400 });
+            const error = new Error("Polar webhook signature verification failed", { cause: err });
+            throw error;
           }
 
           try {
@@ -67,8 +67,8 @@ export const Route = createFileRoute("/api/polar/$")({
 
             return new Response("ignored", { status: 200 });
           } catch (err) {
-            console.error("[POLAR_WEBHOOK_ERROR]", err);
-            return new Response("error", { status: 500 });
+            const error = new Error("Polar webhook processing failed", { cause: err });
+            throw error;
           }
         }
         return new Response("Not Found", { status: 404 });
