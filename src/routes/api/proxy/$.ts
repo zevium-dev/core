@@ -201,15 +201,22 @@ const proxyHandler = async (request: Request) => {
             aborted = true;
             try {
               await reader.cancel();
-            } catch {}
-            controller.error(_e);
+            } catch(err) {
+              const error = new Error("Failed to cancel stream after read error", { cause: err });
+              throw error;
+            }
+            const error = new Error("Upstream read failed", { cause: _e });
+            throw error;
           }
         },
         async cancel() {
           aborted = true;
           try {
             await reader.cancel();
-          } catch {}
+          } catch(err) {
+            const error = new Error("Stream cancelled by client", { cause: err });
+            throw error;
+          }
         },
       });
 
