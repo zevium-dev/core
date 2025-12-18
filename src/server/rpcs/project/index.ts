@@ -3,10 +3,14 @@ import { TRPCError } from "@trpc/server";
 import z from "zod";
 
 import { db, orm, schema, schemaZod } from "~/db";
+import { getEmbeddings } from "~/lib/server/embeddings";
 import { secureProcedure } from "~/server/secure-procedure";
 import { router } from "~/server/trpc";
 
-const OrganizationInputZod = z.object({ organizationId: z.string() }).or(z.object({ organizationSlug: z.string() }));
+const OrganizationInputZod = z.object({
+  organizationId: z.string().optional(),
+  organizationSlug: z.string().optional(),
+});
 
 export const projectRouter = router({
   create: secureProcedure
@@ -23,26 +27,43 @@ export const projectRouter = router({
           message: "Organization ID not found in context",
         });
       }
-      const project = await db
-        .insert(schema.project)
-        .values({
-          description: input.description,
-          id: createId(),
-          metadata: {
-            createdBy: ctx.user.id,
-          },
-          name: input.name,
-          organizationId: ctx.orgId,
-          slug: input.slug,
-        })
-        .returning()
-        .then((v) => v.at(0));
-      if (!project) {
-        throw new TRPCError({
-          code: "INTERNAL_SERVER_ERROR",
-          message: "Failed to create project",
-        });
-      }
+      const text = `${input.name}.${input.description}`;
+      const embedding = await getEmbeddings({ input: text });
+
+      const project = await db.transaction(async (tx) => {
+        const createdProject = await tx
+          .insert(schema.project)
+          .values({
+            // @ts-expect-error - Drizzle transaction type inference issue
+            description: input.description,
+            id: createId(),
+            metadata: {
+              createdBy: ctx.user.id,
+            },
+            name: input.name,
+            organizationId: ctx.orgId,
+            slug: input.slug,
+          })
+          .returning()
+          .then((v) => v.at(0));
+
+        if (!createdProject) {
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message: "Failed to create project",
+          });
+        }
+
+        await tx.run(
+          orm.sql`
+            INSERT INTO project_embeddings (id, project_id, text, embedding, created_at, updated_at)
+            VALUES (${createId()}, ${createdProject.id}, ${text}, vector32(${JSON.stringify(embedding)}), ${Date.now()}, ${Date.now()})
+          `,
+        );
+
+        return createdProject;
+      });
+
       return project;
     }),
 
@@ -151,7 +172,12 @@ export const projectRouter = router({
           status: true,
           visibility: true,
         }),
-      ).and(z.object({ tagNames: z.array(z.string()) })),
+      ).and(
+        z.object({
+          tagNames: z.array(z.string()),
+          variables: z.array(z.object({ name: z.string(), value: z.string() })).optional(),
+        }),
+      ),
     )
     .output(schemaZod.ProjectSelectZod.and(z.object({ project_tags: z.array(schemaZod.ProjectTagSelectZod) })))
     .mutation(async ({ ctx, input }) => {
@@ -161,24 +187,47 @@ export const projectRouter = router({
           message: "Organization ID not found in context",
         });
       }
-      const project = await db
-        .update(schema.project)
-        .set({
-          description: input.description,
-          documentation: input.documentation,
-          name: input.name,
-          status: input.status,
-          visibility: input.visibility,
-        })
-        .where(orm.and(orm.eq(schema.project.id, input.id), orm.eq(schema.project.organizationId, ctx.orgId)))
-        .returning()
-        .then((v) => v.at(0));
-      if (!project) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Project not found",
-        });
-      }
+      const text = `${input.name}.${input.description}`;
+      const embedding = await getEmbeddings({ input: text });
+
+      const project = await db.transaction(async (tx) => {
+        const updatedProject = await tx
+          .update(schema.project)
+          .set({
+            description: input.description,
+            documentation: input.documentation,
+            name: input.name,
+            status: input.status,
+            variables: input.variables,
+            visibility: input.visibility,
+          })
+          .where(
+            orm.and(
+              orm.eq(schema.project.id, input.id),
+              // @ts-expect-error - Drizzle transaction type inference issue
+              orm.eq(schema.project.organizationId, ctx.orgId),
+            ),
+          )
+          .returning()
+          .then((v) => v.at(0));
+
+        if (!updatedProject) {
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: "Project not found",
+          });
+        }
+
+        await tx.run(
+          orm.sql`
+            INSERT INTO project_embeddings (id, project_id, text, embedding, created_at, updated_at)
+            VALUES (${createId()}, ${updatedProject.id}, ${text}, vector32(${JSON.stringify(embedding)}), ${Date.now()}, ${Date.now()})
+          `,
+        );
+
+        return updatedProject;
+      });
+
       const project_tags = await db
         .select()
         .from(schema.projectTag)

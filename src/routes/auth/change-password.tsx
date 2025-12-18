@@ -11,7 +11,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
 import { Input } from "~/components/ui/input";
 import { Label } from "~/components/ui/label";
 import { ScreenCenter } from "~/components/ui/screen-center";
-import { auth, useUser } from "~/lib/auth";
+import { auth, useSession } from "~/lib/auth";
 import { cn } from "~/lib/utils";
 
 export const FormValuesArk = type({
@@ -27,7 +27,7 @@ export const Route = createFileRoute("/auth/change-password")({
 });
 
 function RouteComponent() {
-  const user = useUser();
+  const user = useSession().user;
 
   const {
     formState: { errors, isSubmitting },
@@ -51,8 +51,8 @@ function RouteComponent() {
     },
   });
 
-  const onSubmit = async (data: FormValues) => {
-    await resetPasswordMutation.mutateAsync(data);
+  const onSubmit = (data: FormValues) => {
+    resetPasswordMutation.mutate(data);
   };
 
   if (!user) {

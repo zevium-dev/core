@@ -265,6 +265,9 @@ export const project = sqliteTable(
     updatedAt: integer("updated_at", { mode: "timestamp" })
       .$defaultFn(() => new Date())
       .notNull(),
+    variables: text("variables", { mode: "json" })
+      .$defaultFn(() => [])
+      .$type<Array<{ name: string; value: string }>>(),
     visibility: text("visibility", { enum: ["public", "private"] })
       .notNull()
       .$defaultFn(() => "private"),

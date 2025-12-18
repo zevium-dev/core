@@ -1,5 +1,6 @@
 import { Exception } from "@boi.gg/exception";
 import { queryOptions, type QueryOptions, useSuspenseQuery } from "@tanstack/react-query";
+import { useLocation } from "@tanstack/react-router";
 import { createServerOnlyFn } from "@tanstack/react-start";
 import { apiKeyClient } from "better-auth/client/plugins";
 // import { organizationClient } from "better-auth/client/plugins";
@@ -60,4 +61,22 @@ export const sessionQueryOptions = (options?: QueryOptions<SessionQueryFnData>) 
 
 export const useSession = () => useSuspenseQuery(sessionQueryOptions()).data;
 
-export const useUser = () => useSession().user;
+/**
+ * Returns the authenticated user for "/app" routes.
+ *
+ * This hook must only be used within routes whose pathname starts with
+ * "/app". It throws if used elsewhere or if the session does not contain
+ * a user, enforcing that all "/app" routes are authenticated.
+ */
+export const useUser = () => {
+  const location = useLocation();
+  if (!location.pathname.startsWith("/app")) {
+    throw new Error("useUser can only be used in /app routes. Please use useSession instead.");
+  }
+  const user = useSession().user;
+  if (!user) {
+    // User has to exist in /app routes
+    throw new Error("Unexpected: No user found in session");
+  }
+  return user;
+};

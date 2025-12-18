@@ -4,7 +4,7 @@ import { z } from "zod";
 import * as schema from "./schema";
 
 // Helper for metadata field that can be JSON string or object
-const MetadataZod = z
+export const MetadataZod = z
   .record(z.string(), z.unknown())
   .or(
     z
@@ -13,6 +13,8 @@ const MetadataZod = z
       .pipe(z.record(z.string(), z.unknown())),
   )
   .nullable();
+
+export type Metadata = z.infer<typeof MetadataZod>;
 
 export const UserSelectZod = createSelectSchema(schema.user);
 export const UserInsertZod = createInsertSchema(schema.user);
@@ -41,8 +43,24 @@ export const MemberInsertZod = createInsertSchema(schema.member);
 export const InvitationSelectZod = createSelectSchema(schema.invitation);
 export const InvitationInsertZod = createInsertSchema(schema.invitation);
 
-export const ProjectSelectZod = createSelectSchema(schema.project).extend({ metadata: MetadataZod });
-export const ProjectInsertZod = createInsertSchema(schema.project).extend({ metadata: MetadataZod });
+const VariablesZod = z
+  .array(z.object({ name: z.string(), value: z.string() }))
+  .or(
+    z
+      .string()
+      .transform((val) => JSON.parse(val))
+      .pipe(z.array(z.object({ name: z.string(), value: z.string() }))),
+  )
+  .nullable();
+
+export const ProjectSelectZod = createSelectSchema(schema.project).extend({
+  metadata: MetadataZod,
+  variables: VariablesZod,
+});
+export const ProjectInsertZod = createInsertSchema(schema.project).extend({
+  metadata: MetadataZod,
+  variables: VariablesZod,
+});
 
 export const TagSelectZod = createSelectSchema(schema.tag).extend({ metadata: MetadataZod });
 export const TagInsertZod = createInsertSchema(schema.tag).extend({ metadata: MetadataZod });

@@ -57,6 +57,34 @@
       "when": 1763296579532,
       "tag": "0007_outstanding_oracle",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1763958536425,
+      "tag": "0008_little_true_believers",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1765694911143,
+      "tag": "0009_little_boomer",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1765695030043,
+      "tag": "0010_furry_silver_fox",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1766084571409,
+      "tag": "0011_lying_mandarin",
+      "breakpoints": true
     }
   ]
 }

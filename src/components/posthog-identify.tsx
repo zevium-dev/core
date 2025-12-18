@@ -2,11 +2,11 @@ import { usePostHog } from "posthog-js/react";
 import { useEffect } from "react";
 
 import { clientEnv } from "~/env/client";
-import { useUser } from "~/lib/auth";
+import { useSession } from "~/lib/auth";
 
 export const PostHogIdentify = () => {
   const ph = usePostHog();
-  const user = useUser();
+  const user = useSession().user;
 
   useEffect(() => {
     if (!clientEnv.VITE_PUBLIC_POSTHOG_KEY) return;

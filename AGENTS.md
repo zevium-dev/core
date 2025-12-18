@@ -175,6 +175,13 @@ cp .env.example .env
 pnpm dev
 ```
 
+#### Dev Server Policy
+
+- Never start the dev server yourself. Ask the user to run it manually.
+- The dev server is expected on [http://localhost:5173](http://localhost:5173) — confirm the user has it running before depending on it.
+- Avoid running `pnpm dev` via automation or agents; delegate to the user when needed.
+- When calling Better Auth organization APIs (e.g., acceptInvitation, cancelInvitation, createInvitation), do not wrap single calls in try/catch; let errors surface through TRPC/Better Auth instead of swallowing them.
+
 ### Code Formatting & Linting
 
 When you encounter **ESLint warnings** or **formatting issues** in files:
@@ -293,6 +300,57 @@ These rules exist so contributions stay consistent, type-safe, minimal, and easi
 - Keep client state (form drafts) separate from server state (queries)
 - Avoid stale reads: invalidate after mutation (unless mutation result is authoritative)
 
+### 1.1 TanStack Router Params Handling
+
+**Critical:** `Route.useParams()` and loader `params` are **not the same** and contain different scope:
+
+- `loader: ({ context, params }) => { ... }` — `params` contains **all route parameters** from ALL slugs in the URL path (e.g., `organizationSlug`, `projectSlug`, `invoiceId`, etc.)
+- `Route.useParams()` — Returns **only the parameters defined on that specific route** (e.g., only `organizationSlug` if the route is `/app/organizations/$organizationSlug`)
+
+**Always pass the complete, explicitly extracted parameter object** to tRPC queries, never pass `params` directly as a shorthand:
+
+✅ **Good** — Explicit parameters in loader and component:
+
+```ts
+// In loader
+loader: (({ context, params }) => {
+  void context.queryClient.ensureQueryData(
+    context.trpc.organization.get.queryOptions({
+      organizationSlug: params.organizationSlug,
+    }),
+  );
+},
+  // In component
+  function RouteComponent() {
+    const params = Route.useParams();
+    const trpc = useTRPC();
+    const organizationDetailsQuery = useSuspenseQuery(
+      trpc.organization.get.queryOptions({
+        organizationSlug: params.organizationSlug,
+      }),
+    );
+    // ...
+  });
+```
+
+❌ **Bad** — Passing `params` shorthand (breaks if route has multiple slugs):
+
+```ts
+// In loader — works by accident but is brittle
+loader: ({ context, params }) => {
+  void context.queryClient.ensureQueryData(
+    context.trpc.organization.get.queryOptions(params), // params has extra fields!
+  );
+},
+
+// In component — only works because Route.useParams() scopes correctly
+const organizationDetailsQuery = useSuspenseQuery(
+  trpc.organization.get.queryOptions(params), // same issue
+);
+```
+
+**Why it matters:** If your route is `/app/organizations/$organizationSlug/projects/$projectSlug/spec`, the loader's `params` will have both `organizationSlug` AND `projectSlug`. Passing `params` directly to a tRPC procedure that only expects `organizationSlug` causes type mismatches and runtime errors. Always destructure and pass only the fields your procedure needs.
+
 ### 2. React Query + tRPC Usage
 
 DO NOT manually build `queryKey` arrays unless absolutely necessary. Use the generated helpers:
@@ -336,7 +394,7 @@ Rules:
   - Use `useQueryClient()` to get the query client
   - In `onSuccess`, call `await queryClient.invalidateQueries(trpc.resource.list.queryOptions())` to refetch fresh data
   - This ensures UI stays in sync with server state after mutations
-  - Example: After creating an org, invalidate the org list query so it refetches
+  - Example: After creating an org, invalidate the org list query so it fetches the updated list
 
 ### 2.1 Loading State Naming
 
@@ -353,6 +411,40 @@ Rules:
 const createMutation = useMutation(...);
 // Use createMutation.isPending directly instead of separate isPending state
 <Button disabled={createMutation.isPending}>Create</Button>
+```
+
+### 2.2 Mutation Invocation Pattern
+
+- **Use `.mutate()` instead of `await .mutateAsync()`** in onClick handlers and event callbacks:
+  - ✅ **Good**: `onClick={() => mutation.mutate({ id: '123' })}`
+  - ❌ **Bad**: `onClick={async () => { await mutation.mutateAsync({ id: '123' }) }}`
+  - Rationale: `.mutate()` is fire-and-forget and handles loading states automatically via `isPending`. The mutation callbacks (`onSuccess`, `onSettled`, etc.) handle side effects like invalidation.
+  - **Only use `.mutateAsync()` when you need the returned promise** (e.g., form submission where you need to wait for completion before resetting the form, or when chaining dependent operations)
+  - React Query's mutation callbacks already handle async operations (invalidation, navigation, etc.) - no need for extra async/await in the onClick handler
+  - Example patterns:
+
+```tsx
+// ✅ Simple button click - use .mutate()
+<Button onClick={() => deleteMutation.mutate({ id: item.id })}>
+  Delete
+</Button>
+
+// ✅ Form submission with reset after success - use .mutateAsync()
+<form onSubmit={form.handleSubmit(async (data) => {
+  await createMutation.mutateAsync(data);
+  form.reset();
+})}>
+
+// ✅ Select onChange - use .mutate()
+<Select
+  onValueChange={(role) => {
+    updateRoleMutation.mutate({
+      memberId: member.id,
+      role: role as Role,
+    });
+  }}
+  value={member.role}
+/>
 ```
 
 ### 3. Local Draft vs Server State

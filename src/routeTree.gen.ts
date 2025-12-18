@@ -13,6 +13,7 @@ import { Route as AppRouteImport } from './routes/app'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AuthIndexRouteImport } from './routes/auth/index'
 import { Route as AppIndexRouteImport } from './routes/app/index'
+import { Route as McpSplatRouteImport } from './routes/mcp/$'
 import { Route as AuthVerifyEmailRouteImport } from './routes/auth/verify-email'
 import { Route as AuthTwoFactorVerifyRouteImport } from './routes/auth/two-factor-verify'
 import { Route as AuthTwoFactorAuthRouteImport } from './routes/auth/two-factor-auth'
@@ -23,6 +24,7 @@ import { Route as AuthResetPasswordRouteImport } from './routes/auth/reset-passw
 import { Route as AuthForgotPasswordRouteImport } from './routes/auth/forgot-password'
 import { Route as AuthChangePasswordRouteImport } from './routes/auth/change-password'
 import { Route as AppOrganizationsRouteImport } from './routes/app/organizations'
+import { Route as AppInvitationsRouteImport } from './routes/app/invitations'
 import { Route as AppDashboardRouteImport } from './routes/app/dashboard'
 import { Route as AppCatalogueRouteImport } from './routes/app/catalogue'
 import { Route as InternalImageUploadTestRouteImport } from './routes/$internal/image-upload-test'
@@ -44,12 +46,17 @@ import { Route as ApiOpenapiSplatRouteImport } from './routes/api/openapi/$'
 import { Route as ApiCapSplatRouteImport } from './routes/api/cap/$'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
 import { Route as AppOrganizationsOrganizationSlugIndexRouteImport } from './routes/app/organizations/$organizationSlug/index'
+<<<<<<< HEAD
 import { Route as AppSettingsCreditsSuccessRouteImport } from './routes/app/settings/credits/success'
+=======
+import { Route as AppOrganizationsOrganizationSlugSettingsRouteImport } from './routes/app/organizations/$organizationSlug/settings'
+>>>>>>> origin/develop
 import { Route as AppOrganizationsOrganizationSlugProjectsRouteImport } from './routes/app/organizations/$organizationSlug/projects'
 import { Route as AppOrganizationsOrganizationSlugProjectsIndexRouteImport } from './routes/app/organizations/$organizationSlug/projects/index'
 import { Route as AppOrganizationsOrganizationSlugProjectsChar126RouteImport } from './routes/app/organizations/$organizationSlug/projects/~'
 import { Route as AppOrganizationsOrganizationSlugProjectsCreateRouteImport } from './routes/app/organizations/$organizationSlug/projects/create'
-import { Route as AppOrganizationsOrganizationSlugProjectsProjectSlugRouteImport } from './routes/app/organizations/$organizationSlug/projects/$projectSlug'
+import { Route as AppOrganizationsOrganizationSlugProjectsProjectSlugIndexRouteImport } from './routes/app/organizations/$organizationSlug/projects/$projectSlug/index'
+import { Route as AppOrganizationsOrganizationSlugProjectsProjectSlugSpecRouteImport } from './routes/app/organizations/$organizationSlug/projects/$projectSlug/spec'
 
 const AppRoute = AppRouteImport.update({
   id: '/app',
@@ -70,6 +77,11 @@ const AppIndexRoute = AppIndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => AppRoute,
+} as any)
+const McpSplatRoute = McpSplatRouteImport.update({
+  id: '/mcp/$',
+  path: '/mcp/$',
+  getParentRoute: () => rootRouteImport,
 } as any)
 const AuthVerifyEmailRoute = AuthVerifyEmailRouteImport.update({
   id: '/auth/verify-email',
@@ -119,6 +131,11 @@ const AuthChangePasswordRoute = AuthChangePasswordRouteImport.update({
 const AppOrganizationsRoute = AppOrganizationsRouteImport.update({
   id: '/organizations',
   path: '/organizations',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppInvitationsRoute = AppInvitationsRouteImport.update({
+  id: '/invitations',
+  path: '/invitations',
   getParentRoute: () => AppRoute,
 } as any)
 const AppDashboardRoute = AppDashboardRouteImport.update({
@@ -229,11 +246,19 @@ const AppOrganizationsOrganizationSlugIndexRoute =
     path: '/',
     getParentRoute: () => AppOrganizationsOrganizationSlugRoute,
   } as any)
+<<<<<<< HEAD
 const AppSettingsCreditsSuccessRoute =
   AppSettingsCreditsSuccessRouteImport.update({
     id: '/success',
     path: '/success',
     getParentRoute: () => AppSettingsCreditsRoute,
+=======
+const AppOrganizationsOrganizationSlugSettingsRoute =
+  AppOrganizationsOrganizationSlugSettingsRouteImport.update({
+    id: '/settings',
+    path: '/settings',
+    getParentRoute: () => AppOrganizationsOrganizationSlugRoute,
+>>>>>>> origin/develop
   } as any)
 const AppOrganizationsOrganizationSlugProjectsRoute =
   AppOrganizationsOrganizationSlugProjectsRouteImport.update({
@@ -259,10 +284,16 @@ const AppOrganizationsOrganizationSlugProjectsCreateRoute =
     path: '/create',
     getParentRoute: () => AppOrganizationsOrganizationSlugProjectsRoute,
   } as any)
-const AppOrganizationsOrganizationSlugProjectsProjectSlugRoute =
-  AppOrganizationsOrganizationSlugProjectsProjectSlugRouteImport.update({
-    id: '/$projectSlug',
-    path: '/$projectSlug',
+const AppOrganizationsOrganizationSlugProjectsProjectSlugIndexRoute =
+  AppOrganizationsOrganizationSlugProjectsProjectSlugIndexRouteImport.update({
+    id: '/$projectSlug/',
+    path: '/$projectSlug/',
+    getParentRoute: () => AppOrganizationsOrganizationSlugProjectsRoute,
+  } as any)
+const AppOrganizationsOrganizationSlugProjectsProjectSlugSpecRoute =
+  AppOrganizationsOrganizationSlugProjectsProjectSlugSpecRouteImport.update({
+    id: '/$projectSlug/spec',
+    path: '/$projectSlug/spec',
     getParentRoute: () => AppOrganizationsOrganizationSlugProjectsRoute,
   } as any)
 
@@ -273,6 +304,7 @@ export interface FileRoutesByFullPath {
   '/$internal/image-upload-test': typeof InternalImageUploadTestRoute
   '/app/catalogue': typeof AppCatalogueRoute
   '/app/dashboard': typeof AppDashboardRoute
+  '/app/invitations': typeof AppInvitationsRoute
   '/app/organizations': typeof AppOrganizationsRouteWithChildren
   '/auth/change-password': typeof AuthChangePasswordRoute
   '/auth/forgot-password': typeof AuthForgotPasswordRoute
@@ -283,6 +315,7 @@ export interface FileRoutesByFullPath {
   '/auth/two-factor-auth': typeof AuthTwoFactorAuthRoute
   '/auth/two-factor-verify': typeof AuthTwoFactorVerifyRoute
   '/auth/verify-email': typeof AuthVerifyEmailRoute
+  '/mcp/$': typeof McpSplatRoute
   '/app/': typeof AppIndexRoute
   '/auth': typeof AuthIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
@@ -302,12 +335,17 @@ export interface FileRoutesByFullPath {
   '/app/organizations/': typeof AppOrganizationsIndexRoute
   '/app/settings': typeof AppSettingsIndexRoute
   '/app/organizations/$organizationSlug/projects': typeof AppOrganizationsOrganizationSlugProjectsRouteWithChildren
+<<<<<<< HEAD
   '/app/settings/credits/success': typeof AppSettingsCreditsSuccessRoute
+=======
+  '/app/organizations/$organizationSlug/settings': typeof AppOrganizationsOrganizationSlugSettingsRoute
+>>>>>>> origin/develop
   '/app/organizations/$organizationSlug/': typeof AppOrganizationsOrganizationSlugIndexRoute
-  '/app/organizations/$organizationSlug/projects/$projectSlug': typeof AppOrganizationsOrganizationSlugProjectsProjectSlugRoute
   '/app/organizations/$organizationSlug/projects/create': typeof AppOrganizationsOrganizationSlugProjectsCreateRoute
   '/app/organizations/$organizationSlug/projects/~': typeof AppOrganizationsOrganizationSlugProjectsChar126Route
   '/app/organizations/$organizationSlug/projects/': typeof AppOrganizationsOrganizationSlugProjectsIndexRoute
+  '/app/organizations/$organizationSlug/projects/$projectSlug/spec': typeof AppOrganizationsOrganizationSlugProjectsProjectSlugSpecRoute
+  '/app/organizations/$organizationSlug/projects/$projectSlug': typeof AppOrganizationsOrganizationSlugProjectsProjectSlugIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -315,6 +353,7 @@ export interface FileRoutesByTo {
   '/$internal/image-upload-test': typeof InternalImageUploadTestRoute
   '/app/catalogue': typeof AppCatalogueRoute
   '/app/dashboard': typeof AppDashboardRoute
+  '/app/invitations': typeof AppInvitationsRoute
   '/auth/change-password': typeof AuthChangePasswordRoute
   '/auth/forgot-password': typeof AuthForgotPasswordRoute
   '/auth/reset-password': typeof AuthResetPasswordRoute
@@ -324,6 +363,7 @@ export interface FileRoutesByTo {
   '/auth/two-factor-auth': typeof AuthTwoFactorAuthRoute
   '/auth/two-factor-verify': typeof AuthTwoFactorVerifyRoute
   '/auth/verify-email': typeof AuthVerifyEmailRoute
+  '/mcp/$': typeof McpSplatRoute
   '/app': typeof AppIndexRoute
   '/auth': typeof AuthIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
@@ -341,12 +381,17 @@ export interface FileRoutesByTo {
   '/app/settings/preference': typeof AppSettingsPreferenceRoute
   '/app/organizations': typeof AppOrganizationsIndexRoute
   '/app/settings': typeof AppSettingsIndexRoute
+<<<<<<< HEAD
   '/app/settings/credits/success': typeof AppSettingsCreditsSuccessRoute
+=======
+  '/app/organizations/$organizationSlug/settings': typeof AppOrganizationsOrganizationSlugSettingsRoute
+>>>>>>> origin/develop
   '/app/organizations/$organizationSlug': typeof AppOrganizationsOrganizationSlugIndexRoute
-  '/app/organizations/$organizationSlug/projects/$projectSlug': typeof AppOrganizationsOrganizationSlugProjectsProjectSlugRoute
   '/app/organizations/$organizationSlug/projects/create': typeof AppOrganizationsOrganizationSlugProjectsCreateRoute
   '/app/organizations/$organizationSlug/projects/~': typeof AppOrganizationsOrganizationSlugProjectsChar126Route
   '/app/organizations/$organizationSlug/projects': typeof AppOrganizationsOrganizationSlugProjectsIndexRoute
+  '/app/organizations/$organizationSlug/projects/$projectSlug/spec': typeof AppOrganizationsOrganizationSlugProjectsProjectSlugSpecRoute
+  '/app/organizations/$organizationSlug/projects/$projectSlug': typeof AppOrganizationsOrganizationSlugProjectsProjectSlugIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -356,6 +401,7 @@ export interface FileRoutesById {
   '/$internal/image-upload-test': typeof InternalImageUploadTestRoute
   '/app/catalogue': typeof AppCatalogueRoute
   '/app/dashboard': typeof AppDashboardRoute
+  '/app/invitations': typeof AppInvitationsRoute
   '/app/organizations': typeof AppOrganizationsRouteWithChildren
   '/auth/change-password': typeof AuthChangePasswordRoute
   '/auth/forgot-password': typeof AuthForgotPasswordRoute
@@ -366,6 +412,7 @@ export interface FileRoutesById {
   '/auth/two-factor-auth': typeof AuthTwoFactorAuthRoute
   '/auth/two-factor-verify': typeof AuthTwoFactorVerifyRoute
   '/auth/verify-email': typeof AuthVerifyEmailRoute
+  '/mcp/$': typeof McpSplatRoute
   '/app/': typeof AppIndexRoute
   '/auth/': typeof AuthIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
@@ -385,12 +432,17 @@ export interface FileRoutesById {
   '/app/organizations/': typeof AppOrganizationsIndexRoute
   '/app/settings/': typeof AppSettingsIndexRoute
   '/app/organizations/$organizationSlug/projects': typeof AppOrganizationsOrganizationSlugProjectsRouteWithChildren
+<<<<<<< HEAD
   '/app/settings/credits/success': typeof AppSettingsCreditsSuccessRoute
+=======
+  '/app/organizations/$organizationSlug/settings': typeof AppOrganizationsOrganizationSlugSettingsRoute
+>>>>>>> origin/develop
   '/app/organizations/$organizationSlug/': typeof AppOrganizationsOrganizationSlugIndexRoute
-  '/app/organizations/$organizationSlug/projects/$projectSlug': typeof AppOrganizationsOrganizationSlugProjectsProjectSlugRoute
   '/app/organizations/$organizationSlug/projects/create': typeof AppOrganizationsOrganizationSlugProjectsCreateRoute
   '/app/organizations/$organizationSlug/projects/~': typeof AppOrganizationsOrganizationSlugProjectsChar126Route
   '/app/organizations/$organizationSlug/projects/': typeof AppOrganizationsOrganizationSlugProjectsIndexRoute
+  '/app/organizations/$organizationSlug/projects/$projectSlug/spec': typeof AppOrganizationsOrganizationSlugProjectsProjectSlugSpecRoute
+  '/app/organizations/$organizationSlug/projects/$projectSlug/': typeof AppOrganizationsOrganizationSlugProjectsProjectSlugIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -401,6 +453,7 @@ export interface FileRouteTypes {
     | '/$internal/image-upload-test'
     | '/app/catalogue'
     | '/app/dashboard'
+    | '/app/invitations'
     | '/app/organizations'
     | '/auth/change-password'
     | '/auth/forgot-password'
@@ -411,6 +464,7 @@ export interface FileRouteTypes {
     | '/auth/two-factor-auth'
     | '/auth/two-factor-verify'
     | '/auth/verify-email'
+    | '/mcp/$'
     | '/app/'
     | '/auth'
     | '/api/auth/$'
@@ -430,12 +484,17 @@ export interface FileRouteTypes {
     | '/app/organizations/'
     | '/app/settings'
     | '/app/organizations/$organizationSlug/projects'
+<<<<<<< HEAD
     | '/app/settings/credits/success'
+=======
+    | '/app/organizations/$organizationSlug/settings'
+>>>>>>> origin/develop
     | '/app/organizations/$organizationSlug/'
-    | '/app/organizations/$organizationSlug/projects/$projectSlug'
     | '/app/organizations/$organizationSlug/projects/create'
     | '/app/organizations/$organizationSlug/projects/~'
     | '/app/organizations/$organizationSlug/projects/'
+    | '/app/organizations/$organizationSlug/projects/$projectSlug/spec'
+    | '/app/organizations/$organizationSlug/projects/$projectSlug'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -443,6 +502,7 @@ export interface FileRouteTypes {
     | '/$internal/image-upload-test'
     | '/app/catalogue'
     | '/app/dashboard'
+    | '/app/invitations'
     | '/auth/change-password'
     | '/auth/forgot-password'
     | '/auth/reset-password'
@@ -452,6 +512,7 @@ export interface FileRouteTypes {
     | '/auth/two-factor-auth'
     | '/auth/two-factor-verify'
     | '/auth/verify-email'
+    | '/mcp/$'
     | '/app'
     | '/auth'
     | '/api/auth/$'
@@ -469,12 +530,17 @@ export interface FileRouteTypes {
     | '/app/settings/preference'
     | '/app/organizations'
     | '/app/settings'
+<<<<<<< HEAD
     | '/app/settings/credits/success'
+=======
+    | '/app/organizations/$organizationSlug/settings'
+>>>>>>> origin/develop
     | '/app/organizations/$organizationSlug'
-    | '/app/organizations/$organizationSlug/projects/$projectSlug'
     | '/app/organizations/$organizationSlug/projects/create'
     | '/app/organizations/$organizationSlug/projects/~'
     | '/app/organizations/$organizationSlug/projects'
+    | '/app/organizations/$organizationSlug/projects/$projectSlug/spec'
+    | '/app/organizations/$organizationSlug/projects/$projectSlug'
   id:
     | '__root__'
     | '/'
@@ -483,6 +549,7 @@ export interface FileRouteTypes {
     | '/$internal/image-upload-test'
     | '/app/catalogue'
     | '/app/dashboard'
+    | '/app/invitations'
     | '/app/organizations'
     | '/auth/change-password'
     | '/auth/forgot-password'
@@ -493,6 +560,7 @@ export interface FileRouteTypes {
     | '/auth/two-factor-auth'
     | '/auth/two-factor-verify'
     | '/auth/verify-email'
+    | '/mcp/$'
     | '/app/'
     | '/auth/'
     | '/api/auth/$'
@@ -512,12 +580,17 @@ export interface FileRouteTypes {
     | '/app/organizations/'
     | '/app/settings/'
     | '/app/organizations/$organizationSlug/projects'
+<<<<<<< HEAD
     | '/app/settings/credits/success'
+=======
+    | '/app/organizations/$organizationSlug/settings'
+>>>>>>> origin/develop
     | '/app/organizations/$organizationSlug/'
-    | '/app/organizations/$organizationSlug/projects/$projectSlug'
     | '/app/organizations/$organizationSlug/projects/create'
     | '/app/organizations/$organizationSlug/projects/~'
     | '/app/organizations/$organizationSlug/projects/'
+    | '/app/organizations/$organizationSlug/projects/$projectSlug/spec'
+    | '/app/organizations/$organizationSlug/projects/$projectSlug/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -534,6 +607,7 @@ export interface RootRouteChildren {
   AuthTwoFactorAuthRoute: typeof AuthTwoFactorAuthRoute
   AuthTwoFactorVerifyRoute: typeof AuthTwoFactorVerifyRoute
   AuthVerifyEmailRoute: typeof AuthVerifyEmailRoute
+  McpSplatRoute: typeof McpSplatRoute
   AuthIndexRoute: typeof AuthIndexRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
   ApiCapSplatRoute: typeof ApiCapSplatRoute
@@ -573,6 +647,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/app/'
       preLoaderRoute: typeof AppIndexRouteImport
       parentRoute: typeof AppRoute
+    }
+    '/mcp/$': {
+      id: '/mcp/$'
+      path: '/mcp/$'
+      fullPath: '/mcp/$'
+      preLoaderRoute: typeof McpSplatRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/auth/verify-email': {
       id: '/auth/verify-email'
@@ -642,6 +723,13 @@ declare module '@tanstack/react-router' {
       path: '/organizations'
       fullPath: '/app/organizations'
       preLoaderRoute: typeof AppOrganizationsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/app/invitations': {
+      id: '/app/invitations'
+      path: '/invitations'
+      fullPath: '/app/invitations'
+      preLoaderRoute: typeof AppInvitationsRouteImport
       parentRoute: typeof AppRoute
     }
     '/app/dashboard': {
@@ -791,12 +879,21 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppOrganizationsOrganizationSlugIndexRouteImport
       parentRoute: typeof AppOrganizationsOrganizationSlugRoute
     }
+<<<<<<< HEAD
     '/app/settings/credits/success': {
       id: '/app/settings/credits/success'
       path: '/success'
       fullPath: '/app/settings/credits/success'
       preLoaderRoute: typeof AppSettingsCreditsSuccessRouteImport
       parentRoute: typeof AppSettingsCreditsRoute
+=======
+    '/app/organizations/$organizationSlug/settings': {
+      id: '/app/organizations/$organizationSlug/settings'
+      path: '/settings'
+      fullPath: '/app/organizations/$organizationSlug/settings'
+      preLoaderRoute: typeof AppOrganizationsOrganizationSlugSettingsRouteImport
+      parentRoute: typeof AppOrganizationsOrganizationSlugRoute
+>>>>>>> origin/develop
     }
     '/app/organizations/$organizationSlug/projects': {
       id: '/app/organizations/$organizationSlug/projects'
@@ -826,33 +923,43 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppOrganizationsOrganizationSlugProjectsCreateRouteImport
       parentRoute: typeof AppOrganizationsOrganizationSlugProjectsRoute
     }
-    '/app/organizations/$organizationSlug/projects/$projectSlug': {
-      id: '/app/organizations/$organizationSlug/projects/$projectSlug'
+    '/app/organizations/$organizationSlug/projects/$projectSlug/': {
+      id: '/app/organizations/$organizationSlug/projects/$projectSlug/'
       path: '/$projectSlug'
       fullPath: '/app/organizations/$organizationSlug/projects/$projectSlug'
-      preLoaderRoute: typeof AppOrganizationsOrganizationSlugProjectsProjectSlugRouteImport
+      preLoaderRoute: typeof AppOrganizationsOrganizationSlugProjectsProjectSlugIndexRouteImport
+      parentRoute: typeof AppOrganizationsOrganizationSlugProjectsRoute
+    }
+    '/app/organizations/$organizationSlug/projects/$projectSlug/spec': {
+      id: '/app/organizations/$organizationSlug/projects/$projectSlug/spec'
+      path: '/$projectSlug/spec'
+      fullPath: '/app/organizations/$organizationSlug/projects/$projectSlug/spec'
+      preLoaderRoute: typeof AppOrganizationsOrganizationSlugProjectsProjectSlugSpecRouteImport
       parentRoute: typeof AppOrganizationsOrganizationSlugProjectsRoute
     }
   }
 }
 
 interface AppOrganizationsOrganizationSlugProjectsRouteChildren {
-  AppOrganizationsOrganizationSlugProjectsProjectSlugRoute: typeof AppOrganizationsOrganizationSlugProjectsProjectSlugRoute
   AppOrganizationsOrganizationSlugProjectsCreateRoute: typeof AppOrganizationsOrganizationSlugProjectsCreateRoute
   AppOrganizationsOrganizationSlugProjectsChar126Route: typeof AppOrganizationsOrganizationSlugProjectsChar126Route
   AppOrganizationsOrganizationSlugProjectsIndexRoute: typeof AppOrganizationsOrganizationSlugProjectsIndexRoute
+  AppOrganizationsOrganizationSlugProjectsProjectSlugSpecRoute: typeof AppOrganizationsOrganizationSlugProjectsProjectSlugSpecRoute
+  AppOrganizationsOrganizationSlugProjectsProjectSlugIndexRoute: typeof AppOrganizationsOrganizationSlugProjectsProjectSlugIndexRoute
 }
 
 const AppOrganizationsOrganizationSlugProjectsRouteChildren: AppOrganizationsOrganizationSlugProjectsRouteChildren =
   {
-    AppOrganizationsOrganizationSlugProjectsProjectSlugRoute:
-      AppOrganizationsOrganizationSlugProjectsProjectSlugRoute,
     AppOrganizationsOrganizationSlugProjectsCreateRoute:
       AppOrganizationsOrganizationSlugProjectsCreateRoute,
     AppOrganizationsOrganizationSlugProjectsChar126Route:
       AppOrganizationsOrganizationSlugProjectsChar126Route,
     AppOrganizationsOrganizationSlugProjectsIndexRoute:
       AppOrganizationsOrganizationSlugProjectsIndexRoute,
+    AppOrganizationsOrganizationSlugProjectsProjectSlugSpecRoute:
+      AppOrganizationsOrganizationSlugProjectsProjectSlugSpecRoute,
+    AppOrganizationsOrganizationSlugProjectsProjectSlugIndexRoute:
+      AppOrganizationsOrganizationSlugProjectsProjectSlugIndexRoute,
   }
 
 const AppOrganizationsOrganizationSlugProjectsRouteWithChildren =
@@ -862,6 +969,7 @@ const AppOrganizationsOrganizationSlugProjectsRouteWithChildren =
 
 interface AppOrganizationsOrganizationSlugRouteChildren {
   AppOrganizationsOrganizationSlugProjectsRoute: typeof AppOrganizationsOrganizationSlugProjectsRouteWithChildren
+  AppOrganizationsOrganizationSlugSettingsRoute: typeof AppOrganizationsOrganizationSlugSettingsRoute
   AppOrganizationsOrganizationSlugIndexRoute: typeof AppOrganizationsOrganizationSlugIndexRoute
 }
 
@@ -869,6 +977,8 @@ const AppOrganizationsOrganizationSlugRouteChildren: AppOrganizationsOrganizatio
   {
     AppOrganizationsOrganizationSlugProjectsRoute:
       AppOrganizationsOrganizationSlugProjectsRouteWithChildren,
+    AppOrganizationsOrganizationSlugSettingsRoute:
+      AppOrganizationsOrganizationSlugSettingsRoute,
     AppOrganizationsOrganizationSlugIndexRoute:
       AppOrganizationsOrganizationSlugIndexRoute,
   }
@@ -910,6 +1020,7 @@ const AppSettingsCreditsRouteWithChildren =
 interface AppRouteChildren {
   AppCatalogueRoute: typeof AppCatalogueRoute
   AppDashboardRoute: typeof AppDashboardRoute
+  AppInvitationsRoute: typeof AppInvitationsRoute
   AppOrganizationsRoute: typeof AppOrganizationsRouteWithChildren
   AppIndexRoute: typeof AppIndexRoute
   AppSettingsActivityRoute: typeof AppSettingsActivityRoute
@@ -922,6 +1033,7 @@ interface AppRouteChildren {
 const AppRouteChildren: AppRouteChildren = {
   AppCatalogueRoute: AppCatalogueRoute,
   AppDashboardRoute: AppDashboardRoute,
+  AppInvitationsRoute: AppInvitationsRoute,
   AppOrganizationsRoute: AppOrganizationsRouteWithChildren,
   AppIndexRoute: AppIndexRoute,
   AppSettingsActivityRoute: AppSettingsActivityRoute,
@@ -947,6 +1059,7 @@ const rootRouteChildren: RootRouteChildren = {
   AuthTwoFactorAuthRoute: AuthTwoFactorAuthRoute,
   AuthTwoFactorVerifyRoute: AuthTwoFactorVerifyRoute,
   AuthVerifyEmailRoute: AuthVerifyEmailRoute,
+  McpSplatRoute: McpSplatRoute,
   AuthIndexRoute: AuthIndexRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
   ApiCapSplatRoute: ApiCapSplatRoute,
