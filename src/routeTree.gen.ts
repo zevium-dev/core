@@ -46,11 +46,8 @@ import { Route as ApiOpenapiSplatRouteImport } from './routes/api/openapi/$'
 import { Route as ApiCapSplatRouteImport } from './routes/api/cap/$'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
 import { Route as AppOrganizationsOrganizationSlugIndexRouteImport } from './routes/app/organizations/$organizationSlug/index'
-<<<<<<< HEAD
 import { Route as AppSettingsCreditsSuccessRouteImport } from './routes/app/settings/credits/success'
-=======
 import { Route as AppOrganizationsOrganizationSlugSettingsRouteImport } from './routes/app/organizations/$organizationSlug/settings'
->>>>>>> origin/develop
 import { Route as AppOrganizationsOrganizationSlugProjectsRouteImport } from './routes/app/organizations/$organizationSlug/projects'
 import { Route as AppOrganizationsOrganizationSlugProjectsIndexRouteImport } from './routes/app/organizations/$organizationSlug/projects/index'
 import { Route as AppOrganizationsOrganizationSlugProjectsChar126RouteImport } from './routes/app/organizations/$organizationSlug/projects/~'
@@ -246,19 +243,17 @@ const AppOrganizationsOrganizationSlugIndexRoute =
     path: '/',
     getParentRoute: () => AppOrganizationsOrganizationSlugRoute,
   } as any)
-<<<<<<< HEAD
 const AppSettingsCreditsSuccessRoute =
   AppSettingsCreditsSuccessRouteImport.update({
     id: '/success',
     path: '/success',
     getParentRoute: () => AppSettingsCreditsRoute,
-=======
+  } as any)
 const AppOrganizationsOrganizationSlugSettingsRoute =
   AppOrganizationsOrganizationSlugSettingsRouteImport.update({
     id: '/settings',
     path: '/settings',
     getParentRoute: () => AppOrganizationsOrganizationSlugRoute,
->>>>>>> origin/develop
   } as any)
 const AppOrganizationsOrganizationSlugProjectsRoute =
   AppOrganizationsOrganizationSlugProjectsRouteImport.update({
@@ -335,11 +330,8 @@ export interface FileRoutesByFullPath {
   '/app/organizations/': typeof AppOrganizationsIndexRoute
   '/app/settings': typeof AppSettingsIndexRoute
   '/app/organizations/$organizationSlug/projects': typeof AppOrganizationsOrganizationSlugProjectsRouteWithChildren
-<<<<<<< HEAD
-  '/app/settings/credits/success': typeof AppSettingsCreditsSuccessRoute
-=======
   '/app/organizations/$organizationSlug/settings': typeof AppOrganizationsOrganizationSlugSettingsRoute
->>>>>>> origin/develop
+  '/app/settings/credits/success': typeof AppSettingsCreditsSuccessRoute
   '/app/organizations/$organizationSlug/': typeof AppOrganizationsOrganizationSlugIndexRoute
   '/app/organizations/$organizationSlug/projects/create': typeof AppOrganizationsOrganizationSlugProjectsCreateRoute
   '/app/organizations/$organizationSlug/projects/~': typeof AppOrganizationsOrganizationSlugProjectsChar126Route
@@ -381,11 +373,8 @@ export interface FileRoutesByTo {
   '/app/settings/preference': typeof AppSettingsPreferenceRoute
   '/app/organizations': typeof AppOrganizationsIndexRoute
   '/app/settings': typeof AppSettingsIndexRoute
-<<<<<<< HEAD
-  '/app/settings/credits/success': typeof AppSettingsCreditsSuccessRoute
-=======
   '/app/organizations/$organizationSlug/settings': typeof AppOrganizationsOrganizationSlugSettingsRoute
->>>>>>> origin/develop
+  '/app/settings/credits/success': typeof AppSettingsCreditsSuccessRoute
   '/app/organizations/$organizationSlug': typeof AppOrganizationsOrganizationSlugIndexRoute
   '/app/organizations/$organizationSlug/projects/create': typeof AppOrganizationsOrganizationSlugProjectsCreateRoute
   '/app/organizations/$organizationSlug/projects/~': typeof AppOrganizationsOrganizationSlugProjectsChar126Route
@@ -432,11 +421,8 @@ export interface FileRoutesById {
   '/app/organizations/': typeof AppOrganizationsIndexRoute
   '/app/settings/': typeof AppSettingsIndexRoute
   '/app/organizations/$organizationSlug/projects': typeof AppOrganizationsOrganizationSlugProjectsRouteWithChildren
-<<<<<<< HEAD
-  '/app/settings/credits/success': typeof AppSettingsCreditsSuccessRoute
-=======
   '/app/organizations/$organizationSlug/settings': typeof AppOrganizationsOrganizationSlugSettingsRoute
->>>>>>> origin/develop
+  '/app/settings/credits/success': typeof AppSettingsCreditsSuccessRoute
   '/app/organizations/$organizationSlug/': typeof AppOrganizationsOrganizationSlugIndexRoute
   '/app/organizations/$organizationSlug/projects/create': typeof AppOrganizationsOrganizationSlugProjectsCreateRoute
   '/app/organizations/$organizationSlug/projects/~': typeof AppOrganizationsOrganizationSlugProjectsChar126Route
@@ -484,11 +470,8 @@ export interface FileRouteTypes {
     | '/app/organizations/'
     | '/app/settings'
     | '/app/organizations/$organizationSlug/projects'
-<<<<<<< HEAD
-    | '/app/settings/credits/success'
-=======
     | '/app/organizations/$organizationSlug/settings'
->>>>>>> origin/develop
+    | '/app/settings/credits/success'
     | '/app/organizations/$organizationSlug/'
     | '/app/organizations/$organizationSlug/projects/create'
     | '/app/organizations/$organizationSlug/projects/~'
@@ -530,11 +513,8 @@ export interface FileRouteTypes {
     | '/app/settings/preference'
     | '/app/organizations'
     | '/app/settings'
-<<<<<<< HEAD
-    | '/app/settings/credits/success'
-=======
     | '/app/organizations/$organizationSlug/settings'
->>>>>>> origin/develop
+    | '/app/settings/credits/success'
     | '/app/organizations/$organizationSlug'
     | '/app/organizations/$organizationSlug/projects/create'
     | '/app/organizations/$organizationSlug/projects/~'
@@ -580,11 +560,8 @@ export interface FileRouteTypes {
     | '/app/organizations/'
     | '/app/settings/'
     | '/app/organizations/$organizationSlug/projects'
-<<<<<<< HEAD
-    | '/app/settings/credits/success'
-=======
     | '/app/organizations/$organizationSlug/settings'
->>>>>>> origin/develop
+    | '/app/settings/credits/success'
     | '/app/organizations/$organizationSlug/'
     | '/app/organizations/$organizationSlug/projects/create'
     | '/app/organizations/$organizationSlug/projects/~'
@@ -879,21 +856,19 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppOrganizationsOrganizationSlugIndexRouteImport
       parentRoute: typeof AppOrganizationsOrganizationSlugRoute
     }
-<<<<<<< HEAD
     '/app/settings/credits/success': {
       id: '/app/settings/credits/success'
       path: '/success'
       fullPath: '/app/settings/credits/success'
       preLoaderRoute: typeof AppSettingsCreditsSuccessRouteImport
       parentRoute: typeof AppSettingsCreditsRoute
-=======
+    }
     '/app/organizations/$organizationSlug/settings': {
       id: '/app/organizations/$organizationSlug/settings'
       path: '/settings'
       fullPath: '/app/organizations/$organizationSlug/settings'
       preLoaderRoute: typeof AppOrganizationsOrganizationSlugSettingsRouteImport
       parentRoute: typeof AppOrganizationsOrganizationSlugRoute
->>>>>>> origin/develop
     }
     '/app/organizations/$organizationSlug/projects': {
       id: '/app/organizations/$organizationSlug/projects'
