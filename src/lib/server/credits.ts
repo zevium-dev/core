@@ -4,6 +4,28 @@ import { z } from "zod";
 import { db, schema } from "~/db";
 import { kv } from "~/lib/server/kv";
 
+/**
+ * Centralized Redis key generators for credit-related operations.
+ * All credit-related Redis keys should be defined here for consistency and maintainability.
+ */
+export const CreditsRedisKey = {
+  /**
+   * Key for storing user credit balance.
+   * Set by: CreditsManager.add() and CreditsManager.deduct()
+   * Read by: CreditsManager.getBalance()
+   */
+  balance: (userId: string) => `credits:balance:${userId}`,
+
+  /**
+   * Key for tracking if credits have been applied for a Polar checkout/order.
+   * Set by: src/routes/api/polar/$.ts (webhook handler) when order.paid event is processed
+   * Read by: src/routes/app/settings/credits/success.tsx (polling for credit application)
+   * TTL: 1 year (365 days)
+   */
+  creditApplied: ({ userId, checkoutId }: { userId: string; checkoutId: string }) =>
+    `polar:credit_applied:${userId}:${checkoutId}`,
+};
+
 // Validators
 const PositiveIntegerSchema = z
   .number()
@@ -58,7 +80,7 @@ export const CreditsManager = {
    */
   async getBalance(userId: string): Promise<number> {
     UserIdSchema.parse(userId);
-    const key = `credits:balance:${userId}`;
+    const key = CreditsRedisKey.balance(userId);
     const raw = await kv.get<unknown>(key);
     const n = typeof raw === "number" ? raw : Number(raw ?? 0);
     return Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 0;
@@ -74,7 +96,7 @@ export const CreditsManager = {
     OptionalStringSchema.parse(input.reference);
     OptionalStringSchema.parse(input.description);
 
-    const key = `credits:balance:${input.userId}`;
+    const key = CreditsRedisKey.balance(input.userId);
     await kv.incrby(key, input.amountCents);
 
     await appendLedger({
@@ -99,7 +121,7 @@ export const CreditsManager = {
     OptionalStringSchema.parse(input.reason);
     OptionalStringSchema.parse(input.reference);
 
-    const key = `credits:balance:${input.userId}`;
+    const key = CreditsRedisKey.balance(input.userId);
     const script = `
       local k = KEYS[1]
       local dec = tonumber(ARGV[1])

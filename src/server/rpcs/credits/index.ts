@@ -1,22 +1,35 @@
 import { z } from "zod";
-import { Polar } from "@polar-sh/sdk";
 
 import { serverEnv } from "~/env/server";
 import { CreditsManager } from "~/lib/server/credits";
+import { polarClient } from "~/lib/server/polar";
 import { protectedProcedure, router } from "~/server/trpc";
 
-const polarClient = new Polar({
-  accessToken: serverEnv.POLAR_ACCESS_TOKEN,
-  server: serverEnv.POLAR_SERVER,
+const transactionItemSchema = z.object({
+  id: z.string(),
+  userId: z.string(),
+  amountCents: z.number().int(),
+  type: z.literal("topup"),
+  reference: z.string().nullable(),
+  description: z.string().nullable(),
+  createdAt: z.union([z.string(), z.date()]),
 });
 
 export const creditsRouter = router({
-  getBalance: protectedProcedure.query(async ({ ctx }) => {
-    const cents = await CreditsManager.getBalance(ctx.user.id);
-    return { balanceCents: cents, currency: "usd" as const };
-  }),
+  getBalance: protectedProcedure
+    .output(
+      z.object({
+        balanceCents: z.number().int().nonnegative(),
+        currency: z.literal("usd"),
+      }),
+    )
+    .query(async ({ ctx }) => {
+      const cents = await CreditsManager.getBalance(ctx.user.id);
+      return { balanceCents: cents, currency: "usd" as const };
+    }),
   getInvoiceUrl: protectedProcedure
     .input(z.object({ orderId: z.string() }))
+    .output(z.object({ url: z.string() }))
     .query(async ({ input }) => {
       const invoice = await polarClient.orders.invoice({ id: input.orderId });
       return { url: invoice.url };
@@ -26,6 +39,12 @@ export const creditsRouter = router({
       z.object({
         page: z.number().int().positive().default(1),
         pageSize: z.number().int().min(1).max(50).default(3),
+      }),
+    )
+    .output(
+      z.object({
+        items: z.array(transactionItemSchema),
+        hasNext: z.boolean(),
       }),
     )
     .query(async ({ input, ctx }) => {
@@ -60,6 +79,7 @@ export const creditsRouter = router({
         returnUrl: z.url().optional(),
       }),
     )
+    .output(z.object({ url: z.string() }))
     .mutation(async ({ input, ctx }) => {
       const origin = new URL(ctx.raw.req.url).origin;
       // Always redirect to a waiting page that ensures order.paid has been processed
@@ -87,6 +107,12 @@ export const creditsRouter = router({
     }),
   getTopUpFromCheckout: protectedProcedure
     .input(z.object({ checkoutId: z.string() }))
+    .output(
+      z.object({
+        amountCents: z.number().int().nonnegative(),
+        orderId: z.string().nullable(),
+      }),
+    )
     .query(async ({ input }) => {
       const page = await polarClient.orders.list({
         checkoutId: input.checkoutId,

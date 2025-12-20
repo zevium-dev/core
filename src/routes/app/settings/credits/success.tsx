@@ -4,6 +4,7 @@ import { getRequest } from "@tanstack/react-start/server";
 
 import { ScreenCenter } from "~/components/ui/screen-center";
 import { Spinner } from "~/components/ui/spinner";
+import { CreditsRedisKey } from "~/lib/server/credits";
 
 const creditsSuccessSearchSchema = z.object({
   checkout_id: z.string().min(1, "checkout_id is required"),
@@ -30,7 +31,7 @@ export const Route = createFileRoute("/app/settings/credits/success")({
     const startTime = Date.now();
 
     const { kv } = await import("~/lib/server/kv");
-    const appliedKey = `polar:credit_applied:${userId}:${checkoutId}`;
+    const appliedKey = CreditsRedisKey.creditApplied({ userId, checkoutId });
 
     // Poll until credits are applied or timeout
     while (Date.now() - startTime < maxWaitMs) {

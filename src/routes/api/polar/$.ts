@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { randomUUID } from "node:crypto";
 
 import { serverEnv } from "~/env/server";
-import { CreditsManager } from "~/lib/server/credits";
+import { CreditsManager, CreditsRedisKey } from "~/lib/server/credits";
 import { kv } from "~/lib/server/kv";
 import { validateEvent } from "@polar-sh/sdk/webhooks";
 
@@ -50,7 +50,7 @@ export const Route = createFileRoute("/api/polar/$")({
 
               // Unified idempotency across checkout + order events
               const dedupeId = order.checkoutId || order.id;
-              const appliedKey = `polar:credit_applied:${userId}:${dedupeId}`;
+              const appliedKey = CreditsRedisKey.creditApplied({ userId, checkoutId: dedupeId });
               const applyOk = await kv
                 .set(appliedKey, "1", { nx: true, px: 1000 * 60 * 60 * 24 * 365 })
                 .catch(() => null);

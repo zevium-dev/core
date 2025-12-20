@@ -5,7 +5,6 @@ import { twoFactor } from "better-auth/plugins";
 import { organization } from "better-auth/plugins/organization";
 import { reactStartCookies } from "better-auth/react-start";
 import { checkout, polar } from "@polar-sh/better-auth";
-import { Polar } from "@polar-sh/sdk";
 
 import { db, schema } from "~/db";
 import { clientEnv } from "~/env/client";
@@ -17,6 +16,7 @@ import { EmailVerify, EmailVerifySubject } from "../email/templates/email-verify
 import { ResetPasswordEmail, ResetPasswordSubject } from "../email/templates/reset-password";
 import { capCaptcha } from "./better-auth-captcha";
 import { kv } from "./kv";
+import { polarClient } from "./polar";
 
 const BETTER_AUTH_KV_PREFIX = "better-auth:";
 
@@ -90,10 +90,7 @@ export const authServer = betterAuth({
     twoFactor(),
     organization({ requireEmailVerificationOnInvitation: true }),
     polar({
-      client: new Polar({
-        accessToken: serverEnv.POLAR_ACCESS_TOKEN,
-        server: serverEnv.POLAR_SERVER,
-      }),
+      client: polarClient,
       createCustomerOnSignUp: true,
       use: [checkout()],
     }),
