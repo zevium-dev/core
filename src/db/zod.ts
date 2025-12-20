@@ -16,6 +16,9 @@ export const MetadataZod = z
 
 export type Metadata = z.infer<typeof MetadataZod>;
 
+export const CreditLedgerSelectZod = createSelectSchema(schema.creditLedger);
+export const CreditLedgerInsertZod = createInsertSchema(schema.creditLedger);
+
 export const UserSelectZod = createSelectSchema(schema.user);
 export const UserInsertZod = createInsertSchema(schema.user);
 
