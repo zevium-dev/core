@@ -84,7 +84,7 @@ export const creditsRouter = router({
         successUrl,
         metadata: { userId: ctx.user.id, type: "credit-topup" },
       });
-      return { url: (checkout as unknown as { url?: string }).url ?? successUrl };
+      return { url: typeof checkout.url === "string" ? checkout.url : successUrl };
     }),
   getTopUpFromCheckout: protectedProcedure
     .input(z.object({ checkoutId: z.string() }))
