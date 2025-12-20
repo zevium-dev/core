@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import { Link, useMatches, useParams, useRouter } from "@tanstack/react-router";
+import { Link, useLocation, useMatches, useParams, useRouter } from "@tanstack/react-router";
 import { atom, useAtom } from "jotai";
 import {
   Building2Icon,
@@ -13,7 +13,7 @@ import {
   Settings,
   Sun,
 } from "lucide-react";
-import * as React from "react";
+import { useEffect } from "react";
 
 import { useTheme } from "~/components/theme-provider";
 import { Avatar, AvatarFallback, AvatarImage } from "~/components/ui/avatar";
@@ -49,7 +49,7 @@ const headerContentAtom = atom<React.ReactNode>(null);
 
 export const PageHeaderContent: React.FC<React.PropsWithChildren> = ({ children }) => {
   const [, setHeaderContent] = useAtom(headerContentAtom);
-  React.useEffect(() => {
+  useEffect(() => {
     setHeaderContent(children);
   }, [children, setHeaderContent]);
   return null;
@@ -77,6 +77,7 @@ export function PageHeader() {
 const navData = [
   {
     icon: Settings,
+    open: false,
     requiresAuth: true,
     subroutes: [
       { title: "Activity", url: "/app/settings/activity/$" },
@@ -91,21 +92,26 @@ const navData = [
 
 /** Must be wrapped in a ClientOnly cuz of hydration issues */
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
-  const [, match] = useMatches();
-  const params = useParams({ from: "/app/organizations/$organizationSlug", shouldThrow: false });
+  const location = useLocation();
+  const orgParams = useParams({ from: "/app/organizations/$organizationSlug", shouldThrow: false });
+  const projectParams = useParams({
+    from: "/app/organizations/$organizationSlug/projects/$projectSlug/",
+    shouldThrow: false,
+  });
   const trpc = useTRPC();
   const user = useSession().user;
   // Intentionally not using suspense for projects list cuz it causes hydration issues
   const projectsListQuery = useQuery(
     trpc.project.list.queryOptions(
-      { organizationSlug: params?.organizationSlug },
-      { enabled: !!params?.organizationSlug && !!user },
+      { organizationSlug: orgParams?.organizationSlug },
+      { enabled: !!orgParams?.organizationSlug && !!user },
     ),
   );
   const orgListQuery = useSuspenseQuery(trpc.organization.list.queryOptions(undefined, { enabled: !!user }));
 
   const orgNavData = {
     icon: Building2Icon,
+    open: !orgParams?.organizationSlug || undefined,
     requiresAuth: true,
     subroutes: orgListQuery.data.map((org) => ({
       title: org.name,
@@ -117,13 +123,14 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
 
   const projectNavData = projectsListQuery.data && {
     icon: DockIcon,
+    open: !projectParams?.projectSlug || undefined,
     requiresAuth: true,
     subroutes: projectsListQuery.data.map((project) => ({
       title: project.name,
-      url: `/app/organizations/${params?.organizationSlug}/projects/${project.slug}`,
+      url: `/app/organizations/${orgParams?.organizationSlug}/projects/${project.slug}`,
     })),
     title: "Projects",
-    url: `/app/organizations/${params?.organizationSlug}/projects`,
+    url: `/app/organizations/${orgParams?.organizationSlug}/projects`,
   };
 
   const filteredNavData = [orgNavData, projectNavData, ...navData].filter(Boolean);
@@ -186,18 +193,11 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
             </SidebarMenuItem>
 
             {filteredNavData.map((item) => {
-              // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-              if (!match) return <React.Fragment key={item.title} />;
+              const isActive = location.pathname.startsWith(item.url);
 
-              // Check if current path matches the item URL or starts with it (for nested routes)
-              const isActive = match.pathname === item.url || (item.url !== "/" && match.pathname.startsWith(item.url));
-
-              // Collapsible Settings item with subroutes
               if (item.subroutes.length > 0) {
-                const isSettingsActive = match.pathname.startsWith("/settings");
-
                 return (
-                  <Collapsible className="group/collapsible" defaultOpen={isSettingsActive} key={item.title}>
+                  <Collapsible className="group/collapsible" defaultOpen={item.open} key={item.title}>
                     <SidebarMenuItem>
                       <CollapsibleTrigger asChild>
                         <SidebarMenuButton
@@ -205,7 +205,6 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                             data-[active=true]:bg-main
                             data-[active=true]:text-main-foreground
                           `}
-                          isActive={isSettingsActive}
                         >
                           <item.icon />
                           <span>{item.title}</span>
@@ -214,7 +213,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                       <CollapsibleContent>
                         <SidebarMenuSub>
                           {item.subroutes.map((sub) => {
-                            const isSubActive = match.pathname === sub.url || match.pathname.startsWith(sub.url + "/");
+                            const isSubActive = location.pathname.startsWith(sub.url);
                             return (
                               <SidebarMenuSubItem key={sub.title}>
                                 <SidebarMenuSubButton asChild isActive={isSubActive}>

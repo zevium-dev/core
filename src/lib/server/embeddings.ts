@@ -54,7 +54,7 @@ export const createProjectEmbedding = createServerOnlyFn(async (projectId: strin
 });
 
 export const search_embeddings = async (data: { text: string; topK: number }) => {
-  const { text, topK = 3 } = data;
+  const { text, topK } = data;
   const embedding = await getEmbeddings({ input: text });
   console.log("Embedding", embedding);
   // Perform vector similarity search

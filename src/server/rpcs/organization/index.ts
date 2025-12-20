@@ -264,7 +264,7 @@ export const organizationRouter = router({
         });
       }
 
-      const [{ count: totalMembers = 0 } = {}] = await db
+      const [{ count: totalMembers }] = await db
         .select({ count: orm.count() })
         .from(schema.member)
         .where(orm.eq(schema.member.organizationId, ctx.orgId));
@@ -276,7 +276,7 @@ export const organizationRouter = router({
         });
       }
 
-      const [{ count: ownerCount = 0 } = {}] = await db
+      const [{ count: ownerCount }] = await db
         .select({ count: orm.count() })
         .from(schema.member)
         .where(orm.and(orm.eq(schema.member.organizationId, ctx.orgId), orm.eq(schema.member.role, "owner")));
@@ -404,7 +404,7 @@ export const organizationRouter = router({
         });
       }
 
-      const [{ count: totalMembers = 0 } = {}] = await db
+      const [{ count: totalMembers }] = await db
         .select({ count: orm.count() })
         .from(schema.member)
         .where(orm.eq(schema.member.organizationId, ctx.orgId));
@@ -416,7 +416,7 @@ export const organizationRouter = router({
         });
       }
 
-      const [{ count: ownerCount = 0 } = {}] = await db
+      const [{ count: ownerCount }] = await db
         .select({ count: orm.count() })
         .from(schema.member)
         .where(orm.and(orm.eq(schema.member.organizationId, ctx.orgId), orm.eq(schema.member.role, "owner")));
