@@ -1,0 +1,1 @@
+CREATE INDEX `credit_ledger_created_at_index` ON `credit_ledger` (`created_at`);
