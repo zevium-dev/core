@@ -98,14 +98,6 @@ export const creditsRouter = router({
       if (!order) return { amountCents: 0, orderId: null as string | null };
       return { amountCents: order.totalAmount, orderId: order.id };
     }),
-  awaitCreditApplied: protectedProcedure
-    .input(z.object({ checkoutId: z.string() }))
-    .query(async ({ input, ctx }) => {
-      const { kv } = await import("~/lib/server/kv");
-      const key = `polar:credit_applied:${ctx.user.id}:${input.checkoutId}`;
-      const applied = await kv.get<string>(key);
-      return { applied: Boolean(applied) };
-    }),
 });
 
 
