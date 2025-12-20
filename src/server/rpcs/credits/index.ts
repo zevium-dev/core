@@ -2,7 +2,7 @@ import { z } from "zod";
 import { Polar } from "@polar-sh/sdk";
 
 import { serverEnv } from "~/env/server";
-import { getUserBalanceCents } from "~/lib/server/credits";
+import { CreditsManager } from "~/lib/server/credits";
 import { protectedProcedure, router } from "~/server/trpc";
 
 const polarClient = new Polar({
@@ -12,7 +12,7 @@ const polarClient = new Polar({
 
 export const creditsRouter = router({
   getBalance: protectedProcedure.query(async ({ ctx }) => {
-    const cents = await getUserBalanceCents(ctx.user.id);
+    const cents = await CreditsManager.getBalance(ctx.user.id);
     return { balanceCents: cents, currency: "usd" as const };
   }),
   getInvoiceUrl: protectedProcedure

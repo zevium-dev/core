@@ -4,10 +4,7 @@ import { apiKey } from "better-auth/plugins";
 import { twoFactor } from "better-auth/plugins";
 import { organization } from "better-auth/plugins/organization";
 import { reactStartCookies } from "better-auth/react-start";
-// Polar + Better Auth integration
-// eslint-disable-next-line import/no-extraneous-dependencies
 import { checkout, polar } from "@polar-sh/better-auth";
-// eslint-disable-next-line import/no-extraneous-dependencies
 import { Polar } from "@polar-sh/sdk";
 
 import { db, schema } from "~/db";
@@ -20,7 +17,6 @@ import { EmailVerify, EmailVerifySubject } from "../email/templates/email-verify
 import { ResetPasswordEmail, ResetPasswordSubject } from "../email/templates/reset-password";
 import { capCaptcha } from "./better-auth-captcha";
 import { kv } from "./kv";
-import { ac, roles } from "./organization-access";
 
 const BETTER_AUTH_KV_PREFIX = "better-auth:";
 
@@ -93,7 +89,6 @@ export const authServer = betterAuth({
     }),
     twoFactor(),
     organization({ requireEmailVerificationOnInvitation: true }),
-    // Polar plugin: creates/links a Polar customer for each user/org and exposes checkout helpers
     polar({
       client: new Polar({
         accessToken: serverEnv.POLAR_ACCESS_TOKEN,

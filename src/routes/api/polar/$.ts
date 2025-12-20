@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { randomUUID } from "node:crypto";
 
 import { serverEnv } from "~/env/server";
-import { addCreditsTopUp } from "~/lib/server/credits";
+import { CreditsManager } from "~/lib/server/credits";
 import { kv } from "~/lib/server/kv";
 import { validateEvent } from "@polar-sh/sdk/webhooks";
 
@@ -60,7 +60,12 @@ export const Route = createFileRoute("/api/polar/$")({
 
               const amountCents = Number(order.totalAmount ?? 0);
               if (amountCents > 0) {
-                await addCreditsTopUp(userId, amountCents, order.id ?? randomUUID(), "Polar top-up");
+                await CreditsManager.add({
+                  userId,
+                  amountCents,
+                  reference: order.id ?? randomUUID(),
+                  description: "Polar top-up",
+                });
               }
               return new Response("ok");
             }

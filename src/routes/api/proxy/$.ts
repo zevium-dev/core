@@ -144,7 +144,7 @@ const proxyHandler = async (request: Request) => {
   if (proxySecret) outboundHeaders.set("x-zevium-proxy-secret", proxySecret);
 
   try {
-    const { deductCredits } = await import("~/lib/server/credits");
+    const { CreditsManager } = await import("~/lib/server/credits");
 
     // Derive userId from verification response (handles different shapes)
     const vAny = verification as unknown as {
@@ -189,7 +189,12 @@ const proxyHandler = async (request: Request) => {
             if (done) {
               // Stream completed successfully → commit billing
               try {
-                await deductCredits(userId, 1, "Zevium proxy API call", requestId);
+                await CreditsManager.deduct({
+                  userId,
+                  amountCents: 1,
+                  reason: "Zevium proxy API call",
+                  reference: requestId,
+                });
               } catch (err) {
                 const error = new Error("Failed to deduct credits after successful stream", { cause: err });
                 throw error;
@@ -231,7 +236,12 @@ const proxyHandler = async (request: Request) => {
       // Non-streaming body: read fully, then bill and return
       const buf = await upstream.arrayBuffer();
       try {
-        await deductCredits(userId, 1, "Zevium proxy API call", requestId);
+        await CreditsManager.deduct({
+          userId,
+          amountCents: 1,
+          reason: "Zevium proxy API call",
+          reference: requestId,
+        });
       } catch (err) {
         const error = new Error("Failed to deduct credits for non-streaming response", { cause: err });
         throw error;
