@@ -23,7 +23,7 @@ export const creditLedger = sqliteTable(
       .$defaultFn(() => new Date())
       .notNull(),
   },
-  (self) => [index("credit_ledger_user_id_index").on(self.userId)],
+  (self) => [index("credit_ledger_user_id_index").on(self.userId), index("credit_ledger_created_at_index").on(self.createdAt)],
 );
 
 export const user = sqliteTable(
