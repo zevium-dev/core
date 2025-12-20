@@ -2,9 +2,8 @@ import { z } from "zod";
 import { Polar } from "@polar-sh/sdk";
 
 import { serverEnv } from "~/env/server";
-import { addCreditsTopUp, getUserBalanceCents } from "~/lib/server/credits";
+import { getUserBalanceCents } from "~/lib/server/credits";
 import { protectedProcedure, router } from "~/server/trpc";
-import { db, schema, orm } from "~/db";
 
 const polarClient = new Polar({
   accessToken: serverEnv.POLAR_ACCESS_TOKEN,
