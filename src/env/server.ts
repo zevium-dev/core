@@ -24,7 +24,7 @@ export const serverEnv = ServerEnvArk.assert({
   AUTH_GOOGLE_CLIENT_SECRET: process.env.AUTH_GOOGLE_CLIENT_SECRET,
   POLAR_ACCESS_TOKEN: process.env.POLAR_ACCESS_TOKEN,
   POLAR_WEBHOOK_SECRET: process.env.POLAR_WEBHOOK_SECRET,
-  POLAR_SERVER: (process.env.POLAR_SERVER as "sandbox" | "production") ?? "sandbox",
+  POLAR_SERVER: process.env.POLAR_SERVER ?? "sandbox",
   POLAR_ORGANIZATION_ID: process.env.POLAR_ORGANIZATION_ID,
   POLAR_PRODUCT_ID_CREDITS: process.env.POLAR_PRODUCT_ID_CREDITS,
   COHERE_API_KEY: process.env.COHERE_API_KEY,
