@@ -20,10 +20,13 @@ function SuccessComponent() {
 
   const checkoutId = typeof search.checkout_id === "string" ? search.checkout_id : undefined;
 
-  if (!checkoutId) {
-    useEffect(() => {
+
+  useEffect(() => {
+    if (!checkoutId) {
       void navigate({ to: "/app/settings/credits" });
-    }, [navigate]);
+    }
+  }, [navigate]);
+  if (!checkoutId) {
     return (
       <ScreenCenter>
         <div className="flex flex-col items-center gap-3">
