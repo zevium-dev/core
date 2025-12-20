@@ -1,15 +1,6 @@
-import { Exception } from "@boi.gg/exception";
-
 import { db, orm, schema } from "~/db";
 
 import { decryptSecret } from "./crypto-secrets";
-
-interface DecryptSecretFailureMeta {
-  [key: string]: unknown;
-  secretId: string;
-  secretName: string;
-}
-const _DecryptSecretFailure = Exception.kind<DecryptSecretFailureMeta>("DecryptSecretFailure");
 
 /**
  * Loads and decrypts a single secret by name for a project.

@@ -39,7 +39,7 @@ export const projectSecretRouter = router({
       ProjectScopeInputZod.and(
         z.object({
           /** Logical name for the secret (e.g. PAYMENT_API_KEY) */
-          name: z.string().min(1).max(128),
+          name: z.string().min(1).max(256),
           /** Plaintext value - will be encrypted before storage */
           value: z.string().min(1),
         }),
