@@ -585,26 +585,31 @@ function RouteComponent() {
             </CardHeader>
             <CardContent>
               <div className="space-y-3">
-                {secretsQuery.data.map((secret) => (
-                  <div className="flex items-center justify-between rounded-lg border p-3" key={secret.id}>
-                    <div className="flex-1">
-                      <p className="font-mono text-sm font-medium">{secret.name}</p>
-                      <p className="text-xs text-muted-foreground">Updated {formatDate(secret.updatedAt)}</p>
+                {secretsQuery.data.map((secret) => {
+                  const isDeletingThisSecret =
+                    deleteSecretMutation.isPending && deleteSecretMutation.variables === secret.id;
+
+                  return (
+                    <div className="flex items-center justify-between rounded-lg border p-3" key={secret.id}>
+                      <div className="flex-1">
+                        <p className="font-mono text-sm font-medium">{secret.name}</p>
+                        <p className="text-xs text-muted-foreground">Updated {formatDate(secret.updatedAt)}</p>
+                      </div>
+                      <Button
+                        disabled={isDeletingThisSecret}
+                        onClick={() => handleDeleteSecret(secret.id)}
+                        size="icon"
+                        variant="ghost"
+                      >
+                        {isDeletingThisSecret ? (
+                          <RefreshCw className="size-4 animate-spin text-muted-foreground" />
+                        ) : (
+                          <Trash2 className="size-4 text-destructive" />
+                        )}
+                      </Button>
                     </div>
-                    <Button
-                      disabled={deleteSecretMutation.isPending}
-                      onClick={() => handleDeleteSecret(secret.id)}
-                      size="icon"
-                      variant="ghost"
-                    >
-                      {deleteSecretMutation.isPending ? (
-                        <RefreshCw className="size-4 animate-spin text-muted-foreground" />
-                      ) : (
-                        <Trash2 className="size-4 text-destructive" />
-                      )}
-                    </Button>
-                  </div>
-                ))}
+                  );
+                })}
                 {secretsQuery.data.length === 0 && (
                   <p className="text-sm text-muted-foreground">No secrets defined yet.</p>
                 )}
