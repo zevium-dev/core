@@ -91,74 +91,104 @@ export const projectSecretRouter = router({
       // Resolve project
       const project = await resolveProject(ctx.orgId, input);
 
-      // Encrypt the secret value
-      const ciphertext = await encryptSecret(input.value);
       const now = new Date();
 
-      // Check if secret with this name already exists
-      const existingSecret = await db
-        .select({ id: schema.projectSecret.id })
-        .from(schema.projectSecret)
-        .where(
-          orm.and(orm.eq(schema.projectSecret.projectId, project.id), orm.eq(schema.projectSecret.name, input.name)),
-        )
-        .limit(1)
-        .then((v) => v.at(0));
+      return await db.transaction(async (tx) => {
+        // Check if secret with this name already exists
+        const existingSecret = await tx
+          .select({ id: schema.projectSecret.id })
+          .from(schema.projectSecret)
+          .where(
+            orm.and(orm.eq(schema.projectSecret.projectId, project.id), orm.eq(schema.projectSecret.name, input.name)),
+          )
+          .limit(1)
+          .then((v) => v.at(0));
 
-      if (existingSecret) {
-        // Update existing secret
-        const updated = await db
-          .update(schema.projectSecret)
-          .set({
+        // Encrypt the secret value (only after confirming if we need to or what we're updating)
+        // Optimization: move encryption after existence check if possible, but here we need it for both create and update
+        const ciphertext = await encryptSecret(input.value);
+
+        if (existingSecret) {
+          // Update existing secret
+          const updated = await tx
+            .update(schema.projectSecret)
+            .set({
+              ciphertext,
+              updatedAt: now,
+            })
+            .where(orm.eq(schema.projectSecret.id, existingSecret.id))
+            .returning()
+            .then((v) => v.at(0));
+
+          if (!updated) {
+            throw new TRPCError({
+              code: "INTERNAL_SERVER_ERROR",
+              message: "Failed to update secret",
+            });
+          }
+
+          // Audit log: secret update
+          await tx.insert(schema.auditLog).values({
+            action: "secret.update",
+            createdAt: now,
+            id: createId(),
+            metadata: { name: updated.name },
+            organizationId: ctx.orgId,
+            projectId: project.id,
+            resourceId: updated.id,
+            resourceType: "project_secret",
+            userId: ctx.user.id,
+          });
+
+          return {
+            createdAt: updated.createdAt,
+            id: updated.id,
+            name: updated.name,
+            updatedAt: updated.updatedAt,
+          };
+        }
+
+        // Create new secret
+        const newSecret = await tx
+          .insert(schema.projectSecret)
+          .values({
             ciphertext,
+            createdAt: now,
+            id: createId(),
+            name: input.name,
+            projectId: project.id,
             updatedAt: now,
           })
-          .where(orm.eq(schema.projectSecret.id, existingSecret.id))
           .returning()
           .then((v) => v.at(0));
 
-        if (!updated) {
+        if (!newSecret) {
           throw new TRPCError({
             code: "INTERNAL_SERVER_ERROR",
-            message: "Failed to update secret",
+            message: "Failed to create secret",
           });
         }
 
-        return {
-          createdAt: updated.createdAt,
-          id: updated.id,
-          name: updated.name,
-          updatedAt: updated.updatedAt,
-        };
-      }
-
-      // Create new secret
-      const newSecret = await db
-        .insert(schema.projectSecret)
-        .values({
-          ciphertext,
+        // Audit log: secret creation
+        await tx.insert(schema.auditLog).values({
+          action: "secret.create",
           createdAt: now,
           id: createId(),
-          name: input.name,
+          metadata: { name: newSecret.name },
+          organizationId: ctx.orgId,
           projectId: project.id,
-          updatedAt: now,
-        })
-        .returning()
-        .then((v) => v.at(0));
-
-      if (!newSecret) {
-        throw new TRPCError({
-          code: "INTERNAL_SERVER_ERROR",
-          message: "Failed to create secret",
+          resourceId: newSecret.id,
+          resourceType: "project_secret",
+          userId: ctx.user.id,
         });
-      }
 
-      return {
-        createdAt: newSecret.createdAt,
-        id: newSecret.id,
-        name: newSecret.name,
-        updatedAt: newSecret.updatedAt,
-      };
+        return {
+          createdAt: newSecret.createdAt,
+          id: newSecret.id,
+          name: newSecret.name,
+          updatedAt: newSecret.updatedAt,
+        };
+      });
     }),
 
   /**
@@ -182,16 +212,36 @@ export const projectSecretRouter = router({
       // Resolve project
       const project = await resolveProject(ctx.orgId, input);
 
-      // Delete the secret (only if it belongs to this project)
-      const deleted = await db
-        .delete(schema.projectSecret)
-        .where(
-          orm.and(orm.eq(schema.projectSecret.id, input.secretId), orm.eq(schema.projectSecret.projectId, project.id)),
-        )
-        .returning()
-        .then((v) => v.at(0));
+      return await db.transaction(async (tx) => {
+        // Delete the secret (only if it belongs to this project)
+        const deleted = await tx
+          .delete(schema.projectSecret)
+          .where(
+            orm.and(
+              orm.eq(schema.projectSecret.id, input.secretId),
+              orm.eq(schema.projectSecret.projectId, project.id),
+            ),
+          )
+          .returning()
+          .then((v) => v.at(0));
 
-      return { success: !!deleted };
+        if (deleted) {
+          // Audit log: secret deletion
+          await tx.insert(schema.auditLog).values({
+            action: "secret.delete",
+            createdAt: new Date(),
+            id: createId(),
+            metadata: { name: deleted.name },
+            organizationId: ctx.orgId,
+            projectId: project.id,
+            resourceId: deleted.id,
+            resourceType: "project_secret",
+            userId: ctx.user.id,
+          });
+        }
+
+        return { success: !!deleted };
+      });
     }),
 
   /**

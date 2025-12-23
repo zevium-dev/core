@@ -90,13 +90,13 @@ export const ProjectUserPermissionSelectZod = createSelectSchema(schema.projectU
 export const ProjectUserPermissionInsertZod = createInsertSchema(schema.projectUserPermission);
 
 // Ciphertext format: keyId:base64(iv):base64(ciphertext)
-const base64Regex = /^[A-Za-z0-9+/]+={0,2}$/;
+const base64Zod = z.base64();
 export const CiphertextZod = z.string().refine((val) => {
   const parts = val.split(":");
   if (parts.length !== 3) return false;
   const [keyId, ivB64, ctB64] = parts;
-  if (!keyId || !ivB64 || !ctB64) return false;
-  return base64Regex.test(ivB64) && base64Regex.test(ctB64);
+  if (!keyId) return false;
+  return base64Zod.safeParse(ivB64).success && base64Zod.safeParse(ctB64).success;
 }, "Invalid ciphertext format; expected 'keyId:base64(iv):base64(ciphertext)'");
 
 export const ProjectSecretSelectZod = createSelectSchema(schema.projectSecret).extend({

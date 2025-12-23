@@ -37,6 +37,9 @@ export async function decryptSecret(encoded: string): Promise<string> {
   }
 
   const [keyId, ivB64, ctB64] = parts;
+  if (!keyId || !ivB64 || !ctB64) {
+    throw new InvalidSecretFormatError("Failed to decrypt secret");
+  }
 
   // Look up the key used for encryption
   const keyRecord = await getKeyById(keyId);
