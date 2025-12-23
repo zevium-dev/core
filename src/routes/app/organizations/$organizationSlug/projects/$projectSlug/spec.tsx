@@ -616,7 +616,6 @@ function RouteComponent() {
                     value={newSecretName}
                   />
                   <Input
-                    maxLength={256}
                     onChange={(e) => setNewSecretValue(e.target.value)}
                     placeholder="Secret value (will be encrypted)"
                     type="password"
