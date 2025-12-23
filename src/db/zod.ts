@@ -94,7 +94,8 @@ const base64Regex = /^[A-Za-z0-9+/]+={0,2}$/;
 export const CiphertextZod = z.string().refine((val) => {
   const parts = val.split(":");
   if (parts.length !== 3) return false;
-  const [, ivB64, ctB64] = parts;
+  const [keyId, ivB64, ctB64] = parts;
+  if (!keyId || !ivB64 || !ctB64) return false;
   return base64Regex.test(ivB64) && base64Regex.test(ctB64);
 }, "Invalid ciphertext format; expected 'keyId:base64(iv):base64(ciphertext)'");
 

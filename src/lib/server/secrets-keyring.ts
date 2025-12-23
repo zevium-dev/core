@@ -22,8 +22,14 @@ interface InvalidKeyBytesMeta {
 }
 const InvalidKeyBytesError = Exception.kind<InvalidKeyBytesMeta>("InvalidKeyBytesError");
 
+interface DuplicateKeyMeta {
+  [key: string]: unknown;
+  keyId: string;
+}
+const DuplicateKeyError = Exception.kind<DuplicateKeyMeta>("DuplicateKeyError");
+
 let keyRingCache: {
-  keysById: Record<string, KeyRecord>;
+  keysById: Partial<Record<string, KeyRecord>>;
   primaryKeyId: string;
 } | null = null;
 
@@ -55,7 +61,7 @@ export async function getKeyById(id: string): Promise<KeyRecord | undefined> {
  * Uses module-level caching to avoid re-importing keys on every request.
  */
 export async function getKeyRing(): Promise<{
-  keysById: Record<string, KeyRecord>;
+  keysById: Partial<Record<string, KeyRecord>>;
   primaryKeyId: string;
 }> {
   keyRingCache ??= await initializeKeyRing();
@@ -67,9 +73,12 @@ export async function getKeyRing(): Promise<{
  */
 export async function getPrimaryKey(): Promise<KeyRecord> {
   const { keysById, primaryKeyId } = await getKeyRing();
-  const key = keysById[primaryKeyId] as KeyRecord | undefined;
+  const key = keysById[primaryKeyId];
   if (!key) {
-    throw new Error(`Primary key '${primaryKeyId}' not found in key ring`);
+    throw new PrimaryKeyNotFoundError("Primary key not found", {
+      availableKeyIds: Object.keys(keysById),
+      primaryKeyId,
+    });
   }
   return key;
 }
@@ -80,23 +89,19 @@ export async function getPrimaryKey(): Promise<KeyRecord> {
  * The SECRETS_KEYS_JSON is already validated and parsed by arktype.
  */
 async function initializeKeyRing(): Promise<{
-  keysById: Record<string, KeyRecord>;
+  keysById: Partial<Record<string, KeyRecord>>;
   primaryKeyId: string;
 }> {
   const primaryKeyId = serverEnv.SECRETS_PRIMARY_KEY_ID;
   const keyEntries = serverEnv.SECRETS_KEYS_JSON;
 
-  const keysById: Record<string, KeyRecord> = {};
+  const keysById: Partial<Record<string, KeyRecord>> = {};
   const seenIds = new Set<string>();
 
   for (const entry of keyEntries) {
     if (seenIds.has(entry.id)) {
       const error = new Error(`Key '${entry.id}' appears multiple times`);
-      throw new InvalidKeyBytesError(
-        `Duplicate key ID: ${entry.id}`,
-        { actualBytes: 0, expectedBytes: 0, keyId: entry.id },
-        error,
-      );
+      throw new DuplicateKeyError(`Duplicate key ID: ${entry.id}`, { keyId: entry.id }, error);
     }
     seenIds.add(entry.id);
 
@@ -120,7 +125,7 @@ async function initializeKeyRing(): Promise<{
     keysById[entry.id] = { id: entry.id, key: cryptoKey };
   }
 
-  const primaryKey = keysById[primaryKeyId] as KeyRecord | undefined;
+  const primaryKey = keysById[primaryKeyId];
   if (!primaryKey) {
     const error = new Error(
       `Primary key '${primaryKeyId}' not found. Available keys: ${Object.keys(keysById).join(", ")}`,

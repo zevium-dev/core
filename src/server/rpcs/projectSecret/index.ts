@@ -16,6 +16,40 @@ const ProjectScopeInputZod = OrganizationInputZod.and(
   z.object({ projectId: z.string().optional(), projectSlug: z.string().optional() }),
 );
 
+/**
+ * Resolve a project ID from either projectId or projectSlug within an organization.
+ * @throws {TRPCError} if neither is provided or if the project is not found.
+ */
+async function resolveProject(orgId: string, input: { projectId?: string; projectSlug?: string }) {
+  const projectWhere = [orm.eq(schema.project.organizationId, orgId)];
+  if (input.projectId) {
+    projectWhere.push(orm.eq(schema.project.id, input.projectId));
+  } else if (input.projectSlug) {
+    projectWhere.push(orm.eq(schema.project.slug, input.projectSlug));
+  } else {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "Either projectId or projectSlug must be provided",
+    });
+  }
+
+  const project = await db
+    .select({ id: schema.project.id })
+    .from(schema.project)
+    .where(orm.and(...projectWhere))
+    .limit(1)
+    .then((v) => v.at(0));
+
+  if (!project) {
+    throw new TRPCError({
+      code: "NOT_FOUND",
+      message: "Project not found",
+    });
+  }
+
+  return project;
+}
+
 /** Output schema for secret metadata (never includes ciphertext or plaintext value) */
 const SecretMetadataOutputZod = z.object({
   createdAt: z.date(),
@@ -55,31 +89,7 @@ export const projectSecretRouter = router({
       }
 
       // Resolve project
-      const projectWhere = [orm.eq(schema.project.organizationId, ctx.orgId)];
-      if (input.projectId) {
-        projectWhere.push(orm.eq(schema.project.id, input.projectId));
-      } else if (input.projectSlug) {
-        projectWhere.push(orm.eq(schema.project.slug, input.projectSlug));
-      } else {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: "Either projectId or projectSlug must be provided",
-        });
-      }
-
-      const project = await db
-        .select({ id: schema.project.id })
-        .from(schema.project)
-        .where(orm.and(...projectWhere))
-        .limit(1)
-        .then((v) => v.at(0));
-
-      if (!project) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Project not found",
-        });
-      }
+      const project = await resolveProject(ctx.orgId, input);
 
       // Encrypt the secret value
       const ciphertext = await encryptSecret(input.value);
@@ -170,31 +180,7 @@ export const projectSecretRouter = router({
       }
 
       // Resolve project
-      const projectWhere = [orm.eq(schema.project.organizationId, ctx.orgId)];
-      if (input.projectId) {
-        projectWhere.push(orm.eq(schema.project.id, input.projectId));
-      } else if (input.projectSlug) {
-        projectWhere.push(orm.eq(schema.project.slug, input.projectSlug));
-      } else {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: "Either projectId or projectSlug must be provided",
-        });
-      }
-
-      const project = await db
-        .select({ id: schema.project.id })
-        .from(schema.project)
-        .where(orm.and(...projectWhere))
-        .limit(1)
-        .then((v) => v.at(0));
-
-      if (!project) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Project not found",
-        });
-      }
+      const project = await resolveProject(ctx.orgId, input);
 
       // Delete the secret (only if it belongs to this project)
       const deleted = await db
@@ -228,31 +214,7 @@ export const projectSecretRouter = router({
       }
 
       // Resolve project
-      const projectWhere = [orm.eq(schema.project.organizationId, ctx.orgId)];
-      if (input.projectId) {
-        projectWhere.push(orm.eq(schema.project.id, input.projectId));
-      } else if (input.projectSlug) {
-        projectWhere.push(orm.eq(schema.project.slug, input.projectSlug));
-      } else {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: "Either projectId or projectSlug must be provided",
-        });
-      }
-
-      const project = await db
-        .select({ id: schema.project.id })
-        .from(schema.project)
-        .where(orm.and(...projectWhere))
-        .limit(1)
-        .then((v) => v.at(0));
-
-      if (!project) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Project not found",
-        });
-      }
+      const project = await resolveProject(ctx.orgId, input);
 
       // Get all secrets for this project (metadata only, no ciphertext)
       const secrets = await db

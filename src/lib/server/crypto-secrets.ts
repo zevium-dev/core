@@ -33,7 +33,7 @@ const decoder = new TextDecoder();
 export async function decryptSecret(encoded: string): Promise<string> {
   const parts = encoded.split(":");
   if (parts.length !== 3) {
-    throw new InvalidSecretFormatError("Failed to decrypt secret: invalid format", {});
+    throw new InvalidSecretFormatError("Failed to decrypt secret");
   }
 
   const [keyId, ivB64, ctB64] = parts;
@@ -41,7 +41,7 @@ export async function decryptSecret(encoded: string): Promise<string> {
   // Look up the key used for encryption
   const keyRecord = await getKeyById(keyId);
   if (!keyRecord) {
-    throw new UnknownEncryptionKeyError("Failed to decrypt secret: unknown encryption key", { keyId });
+    throw new UnknownEncryptionKeyError("Failed to decrypt secret", { keyId });
   }
 
   try {

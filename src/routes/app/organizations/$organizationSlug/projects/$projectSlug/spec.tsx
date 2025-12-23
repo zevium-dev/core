@@ -1,5 +1,5 @@
 import { createId } from "@paralleldrive/cuid2";
-import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { Download, FileUp, Key, Plus, RefreshCw, Save, Trash2, Wand2, X } from "lucide-react";
 import { type ChangeEvent, useMemo, useRef, useState } from "react";
@@ -83,7 +83,7 @@ function RouteComponent() {
   const draftQuery = useSuspenseQuery(trpc.openapiSchema.getDraft.queryOptions(routeParams));
   const versionsQuery = useSuspenseQuery(trpc.openapiSchema.listVersions.queryOptions(routeParams));
   const projectQuery = useSuspenseQuery(trpc.project.get.queryOptions(routeParams));
-  const secretsQuery = useQuery(trpc.projectSecret.list.queryOptions(routeParams));
+  const secretsQuery = useSuspenseQuery(trpc.projectSecret.list.queryOptions(routeParams));
 
   // Secrets state
   const [newSecretName, setNewSecretName] = useState("");
@@ -367,7 +367,7 @@ function RouteComponent() {
   );
 
   const handleSaveSecret = () => {
-    if (!newSecretName.trim() || !newSecretValue) {
+    if (!newSecretName.trim() || !newSecretValue.trim()) {
       toast.error("Secret name and value are required");
       return;
     }
@@ -585,7 +585,7 @@ function RouteComponent() {
             </CardHeader>
             <CardContent>
               <div className="space-y-3">
-                {secretsQuery.data?.map((secret) => (
+                {secretsQuery.data.map((secret) => (
                   <div className="flex items-center justify-between rounded-lg border p-3" key={secret.id}>
                     <div className="flex-1">
                       <p className="font-mono text-sm font-medium">{secret.name}</p>
@@ -597,20 +597,26 @@ function RouteComponent() {
                       size="icon"
                       variant="ghost"
                     >
-                      <Trash2 className="size-4 text-destructive" />
+                      {deleteSecretMutation.isPending ? (
+                        <RefreshCw className="size-4 animate-spin text-muted-foreground" />
+                      ) : (
+                        <Trash2 className="size-4 text-destructive" />
+                      )}
                     </Button>
                   </div>
                 ))}
-                {(!secretsQuery.data || secretsQuery.data.length === 0) && (
+                {secretsQuery.data.length === 0 && (
                   <p className="text-sm text-muted-foreground">No secrets defined yet.</p>
                 )}
                 <div className="space-y-2 rounded-lg border p-3">
                   <Input
+                    maxLength={256}
                     onChange={(e) => setNewSecretName(e.target.value)}
                     placeholder="SECRET_NAME"
                     value={newSecretName}
                   />
                   <Input
+                    maxLength={256}
                     onChange={(e) => setNewSecretValue(e.target.value)}
                     placeholder="Secret value (will be encrypted)"
                     type="password"
