@@ -75,7 +75,7 @@ export const projectSecretRouter = router({
           /** Logical name for the secret (e.g. PAYMENT_API_KEY) */
           name: z.string().min(1).max(256),
           /** Plaintext value - will be encrypted before storage */
-          value: z.string().min(1),
+          value: z.string().min(1).max(1_000_000),
         }),
       ),
     )

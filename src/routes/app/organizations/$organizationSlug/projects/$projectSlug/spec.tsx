@@ -375,7 +375,7 @@ function RouteComponent() {
       name: newSecretName.trim(),
       organizationSlug,
       projectSlug,
-      value: newSecretValue,
+      value: newSecretValue.trim(),
     });
   };
 
@@ -462,11 +462,7 @@ function RouteComponent() {
                       </div>
                     </div>
                     <DialogFooter>
-                      <Button
-                        disabled={!version}
-                        loading={publishMutation.isPending}
-                        onClick={handlePublish}
-                      >
+                      <Button disabled={!version} loading={publishMutation.isPending} onClick={handlePublish}>
                         {publishMutation.isPending ? "Publishing..." : "Publish"}
                       </Button>
                     </DialogFooter>
@@ -629,7 +625,7 @@ function RouteComponent() {
                   />
                   <Button
                     className="w-full"
-                    disabled={!newSecretName.trim() || !newSecretValue}
+                    disabled={!newSecretName.trim() || !newSecretValue.trim()}
                     loading={createSecretMutation.isPending}
                     onClick={handleSaveSecret}
                   >

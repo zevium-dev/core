@@ -64,6 +64,7 @@ export async function loadProjectSecrets(projectId: string): Promise<Record<stri
       result[row.name] = await decryptSecret(row.ciphertext);
     } catch (error) {
       // Log error but continue - one bad secret shouldn't break everything
+      // TODO: add better notification system for the user
       console.error(
         `Failed to decrypt secret '${row.name}' (id: ${row.id}):`,
         error instanceof Error ? error.message : String(error),
