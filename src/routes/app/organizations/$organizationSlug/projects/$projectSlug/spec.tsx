@@ -426,7 +426,8 @@ function RouteComponent() {
                   Download
                 </Button>
                 <Button
-                  disabled={saveDraftMutation.isPending || validationErrors.length > 0}
+                  disabled={validationErrors.length > 0}
+                  loading={saveDraftMutation.isPending}
                   onClick={handleSaveDraft}
                   size="sm"
                   variant="outline"
@@ -461,7 +462,11 @@ function RouteComponent() {
                       </div>
                     </div>
                     <DialogFooter>
-                      <Button disabled={publishMutation.isPending || !version} onClick={handlePublish}>
+                      <Button
+                        disabled={!version}
+                        loading={publishMutation.isPending}
+                        onClick={handlePublish}
+                      >
                         {publishMutation.isPending ? "Publishing..." : "Publish"}
                       </Button>
                     </DialogFooter>
@@ -587,7 +592,7 @@ function RouteComponent() {
               <div className="space-y-3">
                 {secretsQuery.data.map((secret) => {
                   const isDeletingThisSecret =
-                    deleteSecretMutation.isPending && deleteSecretMutation.variables === secret.id;
+                    deleteSecretMutation.isPending && deleteSecretMutation.variables.secretId === secret.id;
 
                   return (
                     <div className="flex items-center justify-between rounded-lg border p-3" key={secret.id}>
@@ -596,16 +601,12 @@ function RouteComponent() {
                         <p className="text-xs text-muted-foreground">Updated {formatDate(secret.updatedAt)}</p>
                       </div>
                       <Button
-                        disabled={isDeletingThisSecret}
+                        loading={isDeletingThisSecret}
                         onClick={() => handleDeleteSecret(secret.id)}
                         size="icon"
                         variant="ghost"
                       >
-                        {isDeletingThisSecret ? (
-                          <RefreshCw className="size-4 animate-spin text-muted-foreground" />
-                        ) : (
-                          <Trash2 className="size-4 text-destructive" />
-                        )}
+                        <Trash2 className="size-4 text-destructive" />
                       </Button>
                     </div>
                   );
@@ -628,7 +629,8 @@ function RouteComponent() {
                   />
                   <Button
                     className="w-full"
-                    disabled={createSecretMutation.isPending || !newSecretName.trim() || !newSecretValue}
+                    disabled={!newSecretName.trim() || !newSecretValue}
+                    loading={createSecretMutation.isPending}
                     onClick={handleSaveSecret}
                   >
                     <Plus className="mr-2 size-4" />
