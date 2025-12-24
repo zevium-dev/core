@@ -94,19 +94,21 @@ export const projectSecretRouter = router({
       const now = new Date();
 
       return await db.transaction(async (tx) => {
-        // Check if secret with this name already exists
-        const existingSecret = await tx
-          .select({ id: schema.projectSecret.id })
-          .from(schema.projectSecret)
-          .where(
-            orm.and(orm.eq(schema.projectSecret.projectId, project.id), orm.eq(schema.projectSecret.name, input.name)),
-          )
-          .limit(1)
-          .then((v) => v.at(0));
-
-        // Encrypt the secret value (only after confirming if we need to or what we're updating)
-        // Optimization: move encryption after existence check if possible, but here we need it for both create and update
-        const ciphertext = await encryptSecret(input.value);
+        // Check existence and encrypt in parallel for better performance
+        const [existingSecret, ciphertext] = await Promise.all([
+          tx
+            .select({ id: schema.projectSecret.id })
+            .from(schema.projectSecret)
+            .where(
+              orm.and(
+                orm.eq(schema.projectSecret.projectId, project.id),
+                orm.eq(schema.projectSecret.name, input.name),
+              ),
+            )
+            .limit(1)
+            .then((v) => v.at(0)),
+          encryptSecret(input.value),
+        ]);
 
         if (existingSecret) {
           // Update existing secret
