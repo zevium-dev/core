@@ -13,7 +13,7 @@ export default defineConfig({
   plugins: [
     tsConfigPaths({ projects: ["./tsconfig.json"] }),
     tailwindcss(),
-    cloudflare({ viteEnvironment: { name: "ssr" } }),
+    cloudflare({ experimental: { headersAndRedirectsDevModeSupport: true }, viteEnvironment: { name: "ssr" } }),
     tanstackStart(),
     viteReact({ babel: { plugins: ["babel-plugin-react-compiler"] } }),
     nodeBuiltinImportPostprocess(),
