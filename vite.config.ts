@@ -1,3 +1,5 @@
+import type { PluginOption } from "vite";
+
 import { cloudflare } from "@cloudflare/vite-plugin";
 import tailwindcss from "@tailwindcss/vite";
 import { tanstackStart } from "@tanstack/react-start/plugin/vite";
@@ -8,16 +10,21 @@ import { ViteUserConfig } from "vitest/config";
 
 import { nodeBuiltinImportPostprocess } from "./plugins/node-builtin-import-postprocess";
 
+const plugins: Array<PluginOption> = [];
+
+plugins.push(tsConfigPaths({ projects: ["./tsconfig.json"] }));
+plugins.push(tailwindcss());
+if (process.env.VITEST !== "true")
+  plugins.push(
+    cloudflare({ experimental: { headersAndRedirectsDevModeSupport: true }, viteEnvironment: { name: "ssr" } }),
+  );
+plugins.push(tanstackStart());
+plugins.push(viteReact({ babel: { plugins: ["babel-plugin-react-compiler"] } }));
+plugins.push(nodeBuiltinImportPostprocess());
+
 export default defineConfig({
   // build: { sourcemap: true },
-  plugins: [
-    tsConfigPaths({ projects: ["./tsconfig.json"] }),
-    tailwindcss(),
-    cloudflare({ experimental: { headersAndRedirectsDevModeSupport: true }, viteEnvironment: { name: "ssr" } }),
-    tanstackStart(),
-    viteReact({ babel: { plugins: ["babel-plugin-react-compiler"] } }),
-    nodeBuiltinImportPostprocess(),
-  ],
+  plugins,
   // @ts-expect-error - vitest types
   test: {
     coverage: {
