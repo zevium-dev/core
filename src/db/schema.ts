@@ -447,3 +447,62 @@ export const projectUserPermission = sqliteTable(
     uniqueIndex("project_user_permission_unique_index").on(self.projectId, self.userId, self.permission),
   ],
 );
+
+// ===== Project Secrets (encrypted at rest) =====
+
+export const projectSecret = sqliteTable(
+  "project_secret",
+  {
+    /** Encrypted value in format: keyId:base64(iv):base64(ciphertext) */
+    ciphertext: text("ciphertext").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .$defaultFn(() => new Date())
+      .notNull(),
+    id: text("id").primaryKey(),
+    metadata: text("metadata", { mode: "json" })
+      .$defaultFn(() => ({}))
+      .$type<Metadata>(),
+    /** Logical name of the secret (e.g. PAYMENT_API_KEY) */
+    name: text("name").notNull(),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => project.id, { onDelete: "cascade" }),
+    updatedAt: integer("updated_at", { mode: "timestamp" })
+      .$defaultFn(() => new Date())
+      .notNull(),
+  },
+  (self) => [
+    index("project_secret_project_id_index").on(self.projectId),
+    uniqueIndex("project_secret_project_name_unique_index").on(self.projectId, self.name),
+  ],
+);
+
+// ===== Audit Logging =====
+
+export const auditLog = sqliteTable(
+  "audit_log",
+  {
+    action: text("action").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .$defaultFn(() => new Date())
+      .notNull(),
+    id: text("id").primaryKey(),
+    metadata: text("metadata", { mode: "json" })
+      .$defaultFn(() => ({}))
+      .$type<Metadata>(),
+    organizationId: text("organization_id").references(() => organization.id, { onDelete: "set null" }),
+    projectId: text("project_id").references(() => project.id, { onDelete: "set null" }),
+    resourceId: text("resource_id"),
+    resourceType: text("resource_type"),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+  },
+  (self) => [
+    index("audit_log_user_id_index").on(self.userId),
+    index("audit_log_organization_id_index").on(self.organizationId),
+    index("audit_log_project_id_index").on(self.projectId),
+    index("audit_log_resource_index").on(self.resourceType, self.resourceId),
+    index("audit_log_created_at_index").on(self.createdAt),
+  ],
+);

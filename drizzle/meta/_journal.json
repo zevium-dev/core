@@ -78,6 +78,20 @@
       "when": 1765695030043,
       "tag": "0010_furry_silver_fox",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1765940000640,
+      "tag": "0011_silly_supernaut",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1766474462133,
+      "tag": "0012_huge_northstar",
+      "breakpoints": true
     }
   ]
 }

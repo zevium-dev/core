@@ -88,3 +88,22 @@ export const OrganizationUserPermissionInsertZod = createInsertSchema(schema.org
 
 export const ProjectUserPermissionSelectZod = createSelectSchema(schema.projectUserPermission);
 export const ProjectUserPermissionInsertZod = createInsertSchema(schema.projectUserPermission);
+
+// Ciphertext format: keyId:base64(iv):base64(ciphertext)
+const base64Zod = z.base64();
+export const CiphertextZod = z.string().refine((val) => {
+  const parts = val.split(":");
+  if (parts.length !== 3) return false;
+  const [keyId, ivB64, ctB64] = parts;
+  if (!keyId) return false;
+  return base64Zod.safeParse(ivB64).success && base64Zod.safeParse(ctB64).success;
+}, "Invalid ciphertext format; expected 'keyId:base64(iv):base64(ciphertext)'");
+
+export const ProjectSecretSelectZod = createSelectSchema(schema.projectSecret).extend({
+  ciphertext: CiphertextZod,
+  metadata: MetadataZod,
+});
+export const ProjectSecretInsertZod = createInsertSchema(schema.projectSecret).extend({
+  ciphertext: CiphertextZod,
+  metadata: MetadataZod,
+});
