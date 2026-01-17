@@ -88,7 +88,7 @@ const getOrganizationPermissions = async (userId: string, input: z.infer<typeof 
       ),
     );
 
-  const permissions = OrganizationRolePermissions[row.role] ?? {};
+  const permissions = { ...(OrganizationRolePermissions[row.role] ?? {}) };
   // override default role permissions with user-specific permissions
   for (const permissionRow of permissionRows) {
     permissions[permissionRow.permission] = permissionRow.value;

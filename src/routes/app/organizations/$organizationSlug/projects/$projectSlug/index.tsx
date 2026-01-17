@@ -1,4 +1,4 @@
-import { useSuspenseQuery } from "@tanstack/react-query";
+import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { Code, FileText, Globe, Lock, Settings } from "lucide-react";
 
@@ -9,6 +9,24 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "~/com
 import { Typography } from "~/components/ui/typography";
 import { useTRPC } from "~/lib/trpc";
 import { formatDate } from "~/lib/utils";
+
+const useProjectVisibilityMutation = (organizationSlug: string, projectSlug: string) => {
+  const trpc = useTRPC();
+  const qc = useQueryClient();
+
+  return useMutation(
+    trpc.project.update.mutationOptions({
+      onMutate(variables) {
+        qc.setQueryData(trpc.project.get.queryKey({ organizationSlug, projectSlug }), (old) =>
+          old ? { ...old, ...variables } : old,
+        );
+      },
+      async onSettled() {
+        await qc.invalidateQueries(trpc.project.get.queryOptions({ organizationSlug, projectSlug }));
+      },
+    }),
+  );
+};
 
 export const Route = createFileRoute("/app/organizations/$organizationSlug/projects/$projectSlug/")({
   component: RouteComponent,
@@ -32,6 +50,8 @@ function RouteComponent() {
   const projectQuery = useSuspenseQuery(trpc.project.get.queryOptions({ organizationSlug, projectSlug }));
   const organizationDetailsQuery = useSuspenseQuery(trpc.organization.get.queryOptions({ organizationSlug }));
   const project = projectQuery.data;
+
+  const visibilityMutation = useProjectVisibilityMutation(organizationSlug, projectSlug);
 
   const visibilityIcon =
     project.visibility === "public" ? (
@@ -67,6 +87,42 @@ function RouteComponent() {
                 {visibilityIcon}
                 {project.visibility}
               </Badge>
+              <Button
+                disabled={visibilityMutation.isPending}
+                onClick={() => {
+                  visibilityMutation.mutate({
+                    description: project.description,
+                    documentation: project.documentation,
+                    id: project.id,
+                    name: project.name,
+                    organizationSlug,
+                    status: project.status,
+                    tagNames: project.project_tags.map((tag) => tag.tagName),
+                    variables: project.variables ?? undefined,
+                    visibility: project.visibility === "public" ? "private" : "public",
+                  });
+                }}
+                size="sm"
+                variant="outline"
+              >
+                {visibilityMutation.isPending ? (
+                  "Updating..."
+                ) : (
+                  <>
+                    {project.visibility === "public" ? (
+                      <>
+                        <Lock className="mr-2 h-4 w-4" />
+                        Make Private
+                      </>
+                    ) : (
+                      <>
+                        <Globe className="mr-2 h-4 w-4" />
+                        Make Public
+                      </>
+                    )}
+                  </>
+                )}
+              </Button>
               <Button asChild size="sm" variant="outline">
                 <Link
                   params={{
