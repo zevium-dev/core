@@ -18,7 +18,7 @@ const useProjectVisibilityMutation = (organizationSlug: string, projectSlug: str
     trpc.project.update.mutationOptions({
       onMutate(variables) {
         qc.setQueryData(trpc.project.get.queryKey({ organizationSlug, projectSlug }), (old) =>
-          old ? { ...old, ...variables } : old,
+          old ? { ...old, visibility: variables.visibility } : old,
         );
       },
       async onSettled() {
