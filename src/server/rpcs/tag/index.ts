@@ -14,17 +14,14 @@ export const tagRouter = router({
       z
         .object({
           limit: z.number().int().min(1).max(50).default(20),
-          q: z.string().trim().min(1).optional(),
         })
         .optional(),
     )
     .output(z.array(z.object({ name: z.string(), projectCount: z.number().int() })))
     .query(async ({ input }) => {
       const limit = input?.limit ?? 20;
-      const likeQ = input?.q ? `%${input.q}%` : undefined;
 
       const whereClauses: Array<orm.SQL> = [orm.eq(schema.project.visibility, "public")];
-      if (likeQ) whereClauses.push(orm.like(schema.tag.name, likeQ));
 
       const rows = await db
         .select({

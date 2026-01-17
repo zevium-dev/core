@@ -56,7 +56,8 @@ export const projectRouter = router({
       const tag = input?.tag;
       const cursor = input?.cursor;
 
-      const likeQClause = q ? orm.like(schema.project.name, `%${q}%`) : undefined;
+      const escapeLikePattern = (str: string) => str.replace(/[%_\\]/g, "\\$&");
+      const likeQClause = q ? orm.like(schema.project.name, `%${escapeLikePattern(q)}%`) : undefined;
 
       const cursorClause = cursor
         ? orm.or(
@@ -65,72 +66,85 @@ export const projectRouter = router({
           )
         : undefined;
 
-      const tagClause = tag ? orm.eq(schema.projectTag.tagName, tag) : undefined;
-
-      const where = orm.and(
+      const baseWhere = orm.and(
         orm.eq(schema.project.visibility, "public"),
         ...(likeQClause ? [likeQClause] : []),
         ...(cursorClause ? [cursorClause] : []),
-        ...(tagClause ? [tagClause] : []),
+        ...(tag
+          ? [
+              orm.exists(
+                db
+                  .select({ id: orm.sql`1` })
+                  .from(schema.projectTag)
+                  .where(
+                    orm.and(
+                      orm.eq(schema.projectTag.projectId, schema.project.id),
+                      orm.eq(schema.projectTag.tagName, tag),
+                    ),
+                  ),
+              ),
+            ]
+          : []),
       );
 
-      const rows = await db
+      // First, get distinct projects with pagination
+      const projects = await db
         .select({
           description: schema.project.description,
           id: schema.project.id,
           name: schema.project.name,
           organizationName: schema.organization.name,
           organizationSlug: schema.organization.slug,
-          projectTagName: schema.projectTag.tagName,
           slug: schema.project.slug,
           updatedAt: schema.project.updatedAt,
         })
         .from(schema.project)
         .innerJoin(schema.organization, orm.eq(schema.organization.id, schema.project.organizationId))
-        .leftJoin(schema.projectTag, orm.eq(schema.projectTag.projectId, schema.project.id))
-        .where(where)
+        .where(baseWhere)
         .orderBy(orm.desc(schema.project.updatedAt), orm.desc(schema.project.id))
         .limit(limit + 1);
 
-      const grouped = new Map<
-        string,
-        {
-          description: null | string;
-          id: string;
-          name: string;
-          organizationName: string;
-          organizationSlug: string;
-          slug: string;
-          tags: Array<string>;
-          updatedAt: Date;
-        }
-      >();
+      const hasMore = projects.length > limit;
+      const sliced = projects.slice(0, limit);
 
-      for (const row of rows) {
-        const existing = grouped.get(row.id);
+      // Fetch tags for the sliced projects
+      const projectIds = sliced.map((p) => p.id);
+      const tagsRows =
+        projectIds.length > 0
+          ? await db
+              .select({
+                projectId: schema.projectTag.projectId,
+                tagName: schema.projectTag.tagName,
+              })
+              .from(schema.projectTag)
+              .where(orm.inArray(schema.projectTag.projectId, projectIds))
+          : [];
+
+      const tagsByProject = new Map<string, Array<string>>();
+      for (const row of tagsRows) {
+        const existing = tagsByProject.get(row.projectId);
         if (existing) {
-          if (row.projectTagName) existing.tags.push(row.projectTagName);
-          continue;
+          existing.push(row.tagName);
+        } else {
+          tagsByProject.set(row.projectId, [row.tagName]);
         }
-        grouped.set(row.id, {
-          description: row.description,
-          id: row.id,
-          name: row.name,
-          organizationName: row.organizationName,
-          organizationSlug: row.organizationSlug,
-          slug: row.slug,
-          tags: row.projectTagName ? [row.projectTagName] : [],
-          updatedAt: row.updatedAt,
-        });
       }
 
-      const items = Array.from(grouped.values());
-      const hasMore = items.length > limit;
-      const sliced = items.slice(0, limit);
-      const last = sliced.at(-1);
+      const items = sliced.map((p) => ({
+        description: p.description,
+        id: p.id,
+        name: p.name,
+        organizationName: p.organizationName,
+        organizationSlug: p.organizationSlug,
+        slug: p.slug,
+        tags: tagsByProject.get(p.id) ?? [],
+        updatedAt: p.updatedAt,
+      }));
+
+      const last = items.at(-1);
 
       return {
-        items: sliced,
+        items,
         nextCursor: hasMore && last ? { id: last.id, updatedAt: last.updatedAt } : null,
       };
     }),

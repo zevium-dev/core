@@ -40,16 +40,21 @@ function RouteComponent() {
   const [selectedTag, setSelectedTag] = useState<string>("all");
   const debouncedSearchQuery = useDebouncedValue(searchQuery.trim(), 300);
 
-  const popularTagsQuery = useQuery(
-    trpc.tag.popular.queryOptions({
-      limit: 20,
+  const popularTagsQuery = useQuery(trpc.tag.popular.queryOptions({ limit: 20 }));
+
+  const catalogueInput = useMemo(
+    () => ({
+      cursor: undefined as CatalogueCursor | undefined,
+      limit: 24,
       q: debouncedSearchQuery ? debouncedSearchQuery : undefined,
+      tag: selectedTag === "all" ? undefined : selectedTag,
     }),
+    [debouncedSearchQuery, selectedTag],
   );
 
   const catalogueQueryKey = useMemo(
-    () => ["project.catalogue", { q: debouncedSearchQuery, tag: selectedTag }] as const,
-    [debouncedSearchQuery, selectedTag],
+    () => trpc.project.catalogue.getInfiniteQueryKey(catalogueInput),
+    [trpc, catalogueInput],
   );
 
   const catalogueQuery = useInfiniteQuery<{ items: Array<CatalogueItem>; nextCursor: CatalogueCursor | null }>({
@@ -60,10 +65,8 @@ function RouteComponent() {
       const client = getTrpcClient();
       return client.project.catalogue.query(
         {
+          ...catalogueInput,
           cursor: cursor ?? undefined,
-          limit: 24,
-          q: debouncedSearchQuery ? debouncedSearchQuery : undefined,
-          tag: selectedTag === "all" ? undefined : selectedTag,
         },
         { signal },
       );
@@ -100,7 +103,7 @@ function RouteComponent() {
 
     observer.observe(el);
     return () => observer.disconnect();
-  }, [catalogueQuery]);
+  }, [catalogueQuery.hasNextPage, catalogueQuery.isFetchingNextPage, catalogueQuery.fetchNextPage]);
 
   return (
     <div className="min-h-screen bg-background">
@@ -165,7 +168,11 @@ function RouteComponent() {
           </aside>
 
           <section className="min-w-0 flex-1">
-            {catalogueQuery.isPending ? (
+            {catalogueQuery.isError ? (
+              <div className="py-16 text-center">
+                <p className="text-sm text-destructive">Failed to load catalogue. Please try again later.</p>
+              </div>
+            ) : catalogueQuery.isPending ? (
               <div className="py-16 text-center text-sm text-muted-foreground">Loading catalogue…</div>
             ) : projects.length === 0 ? (
               <div className="py-16 text-center">
