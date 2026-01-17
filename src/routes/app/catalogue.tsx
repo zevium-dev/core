@@ -54,7 +54,7 @@ function RouteComponent() {
 
   const catalogueQueryKey = useMemo(
     () => trpc.project.catalogue.infiniteQueryKey(catalogueInput),
-    [catalogueInput],
+    [trpc.project.catalogue, catalogueInput],
   );
 
   const catalogueQuery = useInfiniteQuery<{ items: Array<CatalogueItem>; nextCursor: CatalogueCursor | null }>({
@@ -103,7 +103,7 @@ function RouteComponent() {
 
     observer.observe(el);
     return () => observer.disconnect();
-  }, [catalogueQuery.hasNextPage, catalogueQuery.isFetchingNextPage, catalogueQuery.fetchNextPage]);
+  }, [catalogueQuery.hasNextPage, catalogueQuery.isFetchingNextPage, catalogueQuery.fetchNextPage, catalogueQuery]);
 
   return (
     <div className="min-h-screen bg-background">
