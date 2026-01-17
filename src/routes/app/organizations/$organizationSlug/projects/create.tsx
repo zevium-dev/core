@@ -35,7 +35,6 @@ function RouteComponent() {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
 
-  // Get organization to retrieve organizationId from slug
   const orgQuery = useQuery(trpc.organization.get.queryOptions({ organizationSlug }));
 
   const createProjectMutation = useMutation(
@@ -68,7 +67,7 @@ function RouteComponent() {
     createProjectMutation.mutate({
       description: data.description ?? "",
       name: data.name,
-      organizationId: orgQuery.data.id,
+      organizationSlug,
       slug: data.slug,
     });
   };

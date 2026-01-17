@@ -8,6 +8,7 @@ export const appRouter = router({
   organization: lazy(() => import("./rpcs/organization").then((v) => v.organizationRouter)),
   project: lazy(() => import("./rpcs/project").then((v) => v.projectRouter)),
   projectSecret: lazy(() => import("./rpcs/projectSecret").then((v) => v.projectSecretRouter)),
+  tag: lazy(() => import("./rpcs/tag").then((v) => v.tagRouter)),
   userPreference: lazy(() => import("./rpcs/user-preference").then((v) => v.userPreferenceRouter)),
 });
 
