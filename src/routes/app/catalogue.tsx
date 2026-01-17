@@ -53,7 +53,7 @@ function RouteComponent() {
   );
 
   const catalogueQueryKey = useMemo(
-    () => trpc.project.catalogue.getInfiniteQueryKey(catalogueInput),
+    () => trpc.project.catalogue.infiniteQueryKey(catalogueInput),
     [catalogueInput],
   );
 
