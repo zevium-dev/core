@@ -1,7 +1,7 @@
 import { createId } from "@paralleldrive/cuid2";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { Download, FileUp, Plus, RefreshCw, Save, Wand2, X } from "lucide-react";
+import { Download, FileUp, Key, Plus, RefreshCw, Save, Trash2, Wand2, X } from "lucide-react";
 import { type ChangeEvent, useMemo, useRef, useState } from "react";
 import semver from "semver";
 import { toast } from "sonner";
@@ -39,6 +39,7 @@ export const Route = createFileRoute("/app/organizations/$organizationSlug/proje
     void context.queryClient.ensureQueryData(context.trpc.openapiSchema.getDraft.queryOptions(routeParams));
     void context.queryClient.ensureQueryData(context.trpc.openapiSchema.listVersions.queryOptions(routeParams));
     void context.queryClient.ensureQueryData(context.trpc.project.get.queryOptions(routeParams));
+    void context.queryClient.ensureQueryData(context.trpc.projectSecret.list.queryOptions(routeParams));
   },
 });
 
@@ -82,6 +83,11 @@ function RouteComponent() {
   const draftQuery = useSuspenseQuery(trpc.openapiSchema.getDraft.queryOptions(routeParams));
   const versionsQuery = useSuspenseQuery(trpc.openapiSchema.listVersions.queryOptions(routeParams));
   const projectQuery = useSuspenseQuery(trpc.project.get.queryOptions(routeParams));
+  const secretsQuery = useSuspenseQuery(trpc.projectSecret.list.queryOptions(routeParams));
+
+  // Secrets state
+  const [newSecretName, setNewSecretName] = useState("");
+  const [newSecretValue, setNewSecretValue] = useState("");
 
   const projectVariables = useMemo(
     () => (projectQuery.data.variables ?? []) as Array<ProjectVariable>,
@@ -338,6 +344,49 @@ function RouteComponent() {
     );
   };
 
+  // Secrets mutations
+  const createSecretMutation = useMutation(
+    trpc.projectSecret.createOrUpdateByName.mutationOptions({
+      onSuccess: async () => {
+        toast.success("Secret saved successfully");
+        setNewSecretName("");
+        setNewSecretValue("");
+        await queryClient.invalidateQueries(trpc.projectSecret.list.queryOptions(routeParams));
+      },
+    }),
+  );
+
+  const deleteSecretMutation = useMutation(
+    // eslint-disable-next-line drizzle/enforce-delete-with-where
+    trpc.projectSecret.delete.mutationOptions({
+      onSuccess: async () => {
+        toast.success("Secret deleted");
+        await queryClient.invalidateQueries(trpc.projectSecret.list.queryOptions(routeParams));
+      },
+    }),
+  );
+
+  const handleSaveSecret = () => {
+    if (!newSecretName.trim() || !newSecretValue.trim()) {
+      toast.error("Secret name and value are required");
+      return;
+    }
+    createSecretMutation.mutate({
+      name: newSecretName.trim(),
+      organizationSlug,
+      projectSlug,
+      value: newSecretValue.trim(),
+    });
+  };
+
+  const handleDeleteSecret = (secretId: string) => {
+    deleteSecretMutation.mutate({
+      organizationSlug,
+      projectSlug,
+      secretId,
+    });
+  };
+
   return (
     <div className="flex max-h-[calc(100dvh-4rem)] flex-col space-y-6 p-4 sm:p-6">
       <PageHeaderContent>
@@ -377,7 +426,8 @@ function RouteComponent() {
                   Download
                 </Button>
                 <Button
-                  disabled={saveDraftMutation.isPending || validationErrors.length > 0}
+                  disabled={validationErrors.length > 0}
+                  loading={saveDraftMutation.isPending}
                   onClick={handleSaveDraft}
                   size="sm"
                   variant="outline"
@@ -412,7 +462,7 @@ function RouteComponent() {
                       </div>
                     </div>
                     <DialogFooter>
-                      <Button disabled={publishMutation.isPending || !version} onClick={handlePublish}>
+                      <Button disabled={!version} loading={publishMutation.isPending} onClick={handlePublish}>
                         {publishMutation.isPending ? "Publishing..." : "Publish"}
                       </Button>
                     </DialogFooter>
@@ -521,6 +571,68 @@ function RouteComponent() {
                     {saveVariablesMutation.isPending ? "Saving..." : "Save Variables"}
                   </Button>
                 </ButtonGroup>
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Key className="size-4" />
+                Secrets
+              </CardTitle>
+              <CardDescription>
+                Encrypted secrets for sensitive values. Values are never displayed after saving.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-3">
+                {secretsQuery.data.map((secret) => {
+                  const isDeletingThisSecret =
+                    deleteSecretMutation.isPending && deleteSecretMutation.variables.secretId === secret.id;
+
+                  return (
+                    <div className="flex items-center justify-between rounded-lg border p-3" key={secret.id}>
+                      <div className="flex-1">
+                        <p className="font-mono text-sm font-medium">{secret.name}</p>
+                        <p className="text-xs text-muted-foreground">Updated {formatDate(secret.updatedAt)}</p>
+                      </div>
+                      <Button
+                        loading={isDeletingThisSecret}
+                        onClick={() => handleDeleteSecret(secret.id)}
+                        size="icon"
+                        variant="ghost"
+                      >
+                        <Trash2 className="size-4 text-destructive" />
+                      </Button>
+                    </div>
+                  );
+                })}
+                {secretsQuery.data.length === 0 && (
+                  <p className="text-sm text-muted-foreground">No secrets defined yet.</p>
+                )}
+                <div className="space-y-2 rounded-lg border p-3">
+                  <Input
+                    maxLength={256}
+                    onChange={(e) => setNewSecretName(e.target.value)}
+                    placeholder="SECRET_NAME"
+                    value={newSecretName}
+                  />
+                  <Input
+                    onChange={(e) => setNewSecretValue(e.target.value)}
+                    placeholder="Secret value (will be encrypted)"
+                    type="password"
+                    value={newSecretValue}
+                  />
+                  <Button
+                    className="w-full"
+                    disabled={!newSecretName.trim() || !newSecretValue.trim()}
+                    loading={createSecretMutation.isPending}
+                    onClick={handleSaveSecret}
+                  >
+                    <Plus className="mr-2 size-4" />
+                    {createSecretMutation.isPending ? "Saving..." : "Add Secret"}
+                  </Button>
+                </div>
               </div>
             </CardContent>
           </Card>

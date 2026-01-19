@@ -1,340 +1,126 @@
-// TODO fix
-/* eslint-disable */
-// @ts-nocheck
+import type { inferRouterOutputs } from "@trpc/server";
 
-import { useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { Activity, Database, Globe, Search, Shield, Users, Zap } from "lucide-react";
-import { useMemo, useState } from "react";
+import { Search } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+
+import type { AppRouter } from "~/server";
 
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent, CardHeader } from "~/components/ui/card";
 import { Input } from "~/components/ui/input";
 import { useTRPC } from "~/lib/trpc";
+import { getTrpcClient } from "~/lib/trpc/trpc";
 import { cn } from "~/lib/utils";
 
 export const Route = createFileRoute("/app/catalogue")({
   component: RouteComponent,
+  loader: ({ context }) => {
+    void context.queryClient.ensureQueryData(
+      context.trpc.project.catalogue.queryOptions({ cursor: undefined, limit: 24 }),
+    );
+
+    void context.queryClient.ensureQueryData(context.trpc.tag.popular.queryOptions({ limit: 20 }));
+  },
 });
 
-// Type for category data from TRPC
-interface CategoryData {
-  createdAt: Date;
-  description: null | string;
-  icon: null | string;
-  id: string;
-  name: string;
-  updatedAt: Date;
-  weight: number;
-}
+type CatalogueCursor = NonNullable<inferRouterOutputs<AppRouter>["project"]["catalogue"]["nextCursor"]>;
 
-// Helper function to get category icon
-const getCategoryIcon = (iconName: null | string) => {
-  const iconMap: Record<string, React.ComponentType<{ className?: string }>> = {
-    activity: Activity,
-    database: Database,
-    globe: Globe,
-    shield: Shield,
-    users: Users,
-    zap: Zap,
-  };
+type CatalogueItem = inferRouterOutputs<AppRouter>["project"]["catalogue"]["items"][number];
 
-  return iconMap[iconName?.toLowerCase() ?? ""] ?? Database;
-};
-
-// Type for project data from TRPC
-interface ProjectData {
-  apiSpecCount: number;
-  categoryId: null | string;
-  categoryName: null | string;
-  createdAt: Date;
-  createdBy: string;
-  creatorName: string;
-  description: null | string;
-  id: string;
-  memberCount: number;
-  metadata: Record<string, unknown>;
-  name: string;
-  organizationId: string;
-  organizationName: string;
-  organizationSlug: string;
-  settings: Record<string, unknown>;
-  slug: string;
-  status: "active" | "archived" | "beta" | "deprecated" | "inactive";
-  updatedAt: Date;
-  visibility: "internal" | "private" | "public";
-}
-
-function APICard({ api }: { api: ProjectData }) {
-  return (
-    <Card className="group border-border/40 hover:border-border bg-card/30 hover:bg-card/60 hover:shadow-primary/5 flex h-full cursor-pointer flex-col backdrop-blur-sm transition-all duration-300 hover:shadow-xl">
-      <CardHeader className="">
-        <div className="space-y-4">
-          {/* Title and Category */}
-          <div className="space-y-2">
-            <div className="flex items-start justify-between gap-3">
-              <h3 className="text-foreground group-hover:text-primary line-clamp-2 text-xl leading-tight font-bold transition-colors">
-                {api.name}
-              </h3>
-              {api.categoryName && (
-                <Badge className="shrink-0 text-xs font-medium" variant="secondary">
-                  {api.categoryName}
-                </Badge>
-              )}
-            </div>
-
-            {/* Organization */}
-            <div className="text-muted-foreground text-sm">
-              <span className="text-foreground/80 font-medium">{api.organizationName}</span>
-            </div>
-          </div>
-        </div>
-      </CardHeader>
-
-      <CardContent className="flex flex-1 flex-col pt-0">
-        {/* Description */}
-        <div className="mb-6 flex-1">
-          <p className="text-muted-foreground line-clamp-3 text-sm leading-relaxed">
-            {api.description ?? "No description available"}
-          </p>
-        </div>
-
-        {/* Footer - Updated At */}
-        <div className="border-border/30 mt-auto border-t pt-4">
-          <div className="text-muted-foreground flex items-center justify-between text-xs">
-            <span>Last updated</span>
-            <time className="text-foreground/70 font-medium">
-              {api.updatedAt.toLocaleDateString("en-US", {
-                day: "numeric",
-                month: "short",
-                year: "numeric",
-              })}
-            </time>
-          </div>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-function CategorySidebar({
-  categories,
-  onCategoryChange,
-  projectCounts,
-  selectedCategory,
-}: {
-  categories: Array<CategoryData>;
-  onCategoryChange: (category: string) => void;
-  projectCounts: Record<string, number>;
-  selectedCategory: string;
-}) {
-  // Add "All Projects" as the first option
-  const allCategories = [
-    {
-      count: Object.values(projectCounts).reduce((sum, count) => sum + count, 0),
-      icon: Globe,
-      id: "all",
-      name: "All Projects",
-    },
-    ...categories.map((category) => ({
-      count: projectCounts[category.id] ?? 0,
-      icon: getCategoryIcon(category.icon),
-      id: category.id,
-      name: category.name,
-    })),
-  ];
-
-  return (
-    <aside className="w-64 shrink-0 space-y-3">
-      <h2 className="text-muted-foreground px-3 text-sm font-semibold tracking-wide uppercase">Categories</h2>
-
-      <nav className="scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent max-h-100 space-y-1 overflow-y-auto px-2">
-        {allCategories.map((category) => {
-          const Icon = category.icon;
-          const isActive = selectedCategory === category.id;
-
-          return (
-            <Button
-              className={cn(
-                "h-11 w-full justify-start gap-3 rounded-lg px-3 transition-all duration-200",
-                isActive
-                  ? "bg-primary/10 text-primary border-primary border-r-2 shadow-sm"
-                  : "text-muted-foreground hover:text-foreground hover:bg-accent/50",
-              )}
-              key={category.id}
-              onClick={() => onCategoryChange(category.id)}
-              variant="ghost"
-            >
-              <Icon className="size-4 shrink-0" />
-              <span className="flex-1 truncate text-left font-medium">{category.name}</span>
-              <Badge
-                className="h-5 min-w-7 px-2 py-0.5 text-xs font-medium"
-                variant={isActive ? "default" : "secondary"}
-              >
-                {category.count}
-              </Badge>
-            </Button>
-          );
-        })}
-      </nav>
-    </aside>
-  );
-}
+type TagItem = inferRouterOutputs<AppRouter>["tag"]["popular"][number];
 
 function RouteComponent() {
-  const [searchQuery, setSearchQuery] = useState("");
-  const [selectedCategory, setSelectedCategory] = useState("all");
-
   const trpc = useTRPC();
+  const navigate = Route.useNavigate();
 
-  // Fetch data using React Query
-  const categoriesQuery = useQuery(trpc.projectCategory.getAll.queryOptions({}));
+  const [searchQuery, setSearchQuery] = useState("");
+  const [selectedTag, setSelectedTag] = useState<string>("all");
+  const debouncedSearchQuery = useDebouncedValue(searchQuery.trim(), 300);
 
-  const projectsQuery = useQuery(trpc.project.getUserProjects.queryOptions());
+  const popularTagsQuery = useQuery(trpc.tag.popular.queryOptions({ limit: 20 }));
 
-  // Calculate project counts per category
-  const projectCounts = useMemo(() => {
-    if (!projectsQuery.data) return {};
+  const catalogueInput = useMemo(
+    () => ({
+      cursor: undefined as CatalogueCursor | undefined,
+      limit: 24,
+      q: debouncedSearchQuery ? debouncedSearchQuery : undefined,
+      tag: selectedTag === "all" ? undefined : selectedTag,
+    }),
+    [debouncedSearchQuery, selectedTag],
+  );
 
-    const counts: Record<string, number> = {};
-    projectsQuery.data.projects.forEach((project) => {
-      const categoryId = project.categoryId ?? "uncategorized";
-      counts[categoryId] = (counts[categoryId] || 0) + 1;
-    });
-    return counts;
-  }, [projectsQuery.data]);
+  const catalogueQueryKey = useMemo(
+    () => trpc.project.catalogue.infiniteQueryKey(catalogueInput),
+    [trpc.project.catalogue, catalogueInput],
+  );
 
-  // Filter projects based on category and search
-  const filteredProjects = useMemo(() => {
-    if (!projectsQuery.data) return [];
-
-    let filtered = projectsQuery.data.projects;
-
-    // Filter by category
-    if (selectedCategory !== "all") {
-      filtered = filtered.filter((project) => project.categoryId === selectedCategory);
-    }
-
-    // Filter by search query
-    if (searchQuery) {
-      const query = searchQuery.toLowerCase();
-      filtered = filtered.filter(
-        (project) =>
-          project.name.toLowerCase().includes(query) ||
-          (project.description ?? "").toLowerCase().includes(query) ||
-          project.organizationName.toLowerCase().includes(query) ||
-          (project.categoryName ?? "").toLowerCase().includes(query),
+  const catalogueQuery = useInfiniteQuery<{ items: Array<CatalogueItem>; nextCursor: CatalogueCursor | null }>({
+    getNextPageParam: (lastPage: { nextCursor: CatalogueCursor | null }) => lastPage.nextCursor ?? undefined,
+    initialPageParam: null,
+    queryFn: async ({ pageParam, signal }) => {
+      const cursor = pageParam as CatalogueCursor | null;
+      const client = getTrpcClient();
+      return client.project.catalogue.query(
+        {
+          ...catalogueInput,
+          cursor: cursor ?? undefined,
+        },
+        { signal },
       );
-    }
-
-    return filtered;
-  }, [projectsQuery.data, searchQuery, selectedCategory]);
-
-  // Get category name for display
-  const selectedCategoryName = useMemo(() => {
-    if (selectedCategory === "all") return null;
-    return categoriesQuery.data?.categories.find((c) => c.id === selectedCategory)?.name;
-  }, [categoriesQuery.data, selectedCategory]);
-
-  // Loading states
-  if (categoriesQuery.isLoading || projectsQuery.isLoading) {
-    return (
-      <div className="bg-background min-h-screen">
-        <header className="border-border/50 bg-background/80 sticky top-0 z-10 border-b backdrop-blur-sm">
-          <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6">
-            <div className="space-y-6">
-              <div className="space-y-2">
-                <h1 className="text-foreground text-2xl font-bold tracking-tight sm:text-3xl">API Catalogue</h1>
-                <p className="text-muted-foreground text-sm sm:text-base">
-                  Discover and integrate powerful APIs to enhance your applications
-                </p>
-              </div>
-            </div>
-          </div>
-        </header>
-        <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6">
-          <div className="py-16 text-center">
-            <div className="mx-auto max-w-md">
-              <Database className="text-muted-foreground mx-auto mb-6 size-16" />
-              <h3 className="text-foreground mb-3 text-xl font-semibold">Loading...</h3>
-              <p className="text-muted-foreground text-sm leading-relaxed">
-                Fetching categories and projects from the database.
-              </p>
-            </div>
-          </div>
-        </main>
-      </div>
-    );
-  }
-
-  // Error states
-  if (categoriesQuery.error || projectsQuery.error) {
-    return (
-      <div className="bg-background min-h-screen">
-        <header className="border-border/50 bg-background/80 sticky top-0 z-10 border-b backdrop-blur-sm">
-          <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6">
-            <div className="space-y-6">
-              <div className="space-y-2">
-                <h1 className="text-foreground text-2xl font-bold tracking-tight sm:text-3xl">API Catalogue</h1>
-                <p className="text-muted-foreground text-sm sm:text-base">
-                  Discover and integrate powerful APIs to enhance your applications
-                </p>
-              </div>
-            </div>
-          </div>
-        </header>
-        <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6">
-          <div className="py-16 text-center">
-            <div className="mx-auto max-w-md">
-              <Database className="text-muted-foreground mx-auto mb-6 size-16" />
-              <h3 className="text-foreground mb-3 text-xl font-semibold">Error loading data</h3>
-              <p className="text-muted-foreground text-sm leading-relaxed">
-                Failed to load data from the database. Please try again later.
-              </p>
-            </div>
-          </div>
-        </main>
-      </div>
-    );
-  }
-
-  const categories = categoriesQuery.data?.categories ?? [];
-  const allCategories = [
-    {
-      count: Object.values(projectCounts).reduce((sum, count) => sum + count, 0),
-      icon: Globe,
-      id: "all",
-      name: "All Projects",
     },
-    ...categories.map((category) => ({
-      count: projectCounts[category.id] ?? 0,
-      icon: getCategoryIcon(category.icon),
-      id: category.id,
-      name: category.name,
-    })),
-  ];
+    queryKey: catalogueQueryKey,
+    staleTime: 30_000,
+  });
+
+  const projects = useMemo(() => {
+    const items: Array<CatalogueItem> = [];
+    for (const page of (catalogueQuery.data?.pages ?? []) as Array<{ items: Array<CatalogueItem> }>) {
+      items.push(...page.items);
+    }
+    return items;
+  }, [catalogueQuery.data]);
+
+  const tags: Array<TagItem> = popularTagsQuery.data ?? [];
+
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const el = sentinelRef.current;
+    if (!el) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const entry = entries.at(0);
+        if (!entry?.isIntersecting) return;
+        if (!catalogueQuery.hasNextPage) return;
+        if (catalogueQuery.isFetchingNextPage) return;
+        void catalogueQuery.fetchNextPage();
+      },
+      { rootMargin: "600px" },
+    );
+
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [catalogueQuery.hasNextPage, catalogueQuery.isFetchingNextPage, catalogueQuery.fetchNextPage, catalogueQuery]);
 
   return (
-    <div className="bg-background min-h-screen">
-      {/* Header */}
-      <header className="border-border/50 bg-background/80 sticky top-0 z-10 border-b backdrop-blur-sm">
+    <div className="min-h-screen bg-background">
+      <header className="sticky top-0 z-10 border-b border-border/50 bg-background/80 backdrop-blur-sm">
         <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6">
-          <div className="space-y-6">
-            <div className="space-y-2">
-              <h1 className="text-foreground text-2xl font-bold tracking-tight sm:text-3xl">API Catalogue</h1>
-              <p className="text-muted-foreground text-sm sm:text-base">
-                Discover and integrate powerful APIs to enhance your applications
-              </p>
+          <div className="flex flex-col gap-4">
+            <div className="space-y-1">
+              <h1 className="text-2xl font-bold tracking-tight text-foreground sm:text-3xl">API Catalogue</h1>
+              <p className="text-sm text-muted-foreground">Discover public APIs across Zevium</p>
             </div>
 
-            {/* Search Bar */}
-            <div className="relative max-w-full sm:max-w-md lg:max-w-lg xl:max-w-xl">
-              <Search className="text-muted-foreground absolute top-1/2 left-3 size-4 -translate-y-1/2 transform" />
+            <div className="relative max-w-full sm:max-w-md lg:max-w-lg">
+              <Search className="absolute top-1/2 left-3 size-4 -translate-y-1/2 transform text-muted-foreground" />
               <Input
-                className="bg-background/50 border-border/50 focus:border-primary/50 h-11 pl-10 text-sm"
+                className="h-11 border-border/50 bg-background/50 pl-10 text-sm focus:border-primary/50"
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search projects, organizations, or categories..."
+                placeholder="Search APIs by name..."
                 value={searchQuery}
               />
             </div>
@@ -342,85 +128,131 @@ function RouteComponent() {
         </div>
       </header>
 
-      {/* Main Content */}
       <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6">
         <div className="flex flex-col gap-8 lg:flex-row">
-          {/* Sidebar - Hidden on mobile, shown as drawer if needed */}
-          <div className="hidden lg:block">
-            <CategorySidebar
-              categories={categories}
-              onCategoryChange={setSelectedCategory}
-              projectCounts={projectCounts}
-              selectedCategory={selectedCategory}
-            />
-          </div>
+          <aside className="w-full shrink-0 lg:w-72">
+            <div className="rounded-xl border border-border/50 bg-card/30 p-4">
+              <div className="mb-3 flex items-center justify-between">
+                <h2 className="text-sm font-semibold tracking-wide text-muted-foreground uppercase">Popular tags</h2>
+              </div>
 
-          {/* Mobile Category Filter */}
-          <div className="mb-6 lg:hidden">
-            <div className="scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent flex gap-2 overflow-x-auto pb-2">
-              {allCategories.map((category) => {
-                const Icon = category.icon;
-                const isActive = selectedCategory === category.id;
-
-                return (
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  className="rounded-full"
+                  onClick={() => {
+                    setSelectedTag("all");
+                  }}
+                  size="sm"
+                  variant={selectedTag === "all" ? "default" : "secondary"}
+                >
+                  All
+                </Button>
+                {tags.map((t) => (
                   <Button
-                    className={cn(
-                      "h-9 shrink-0 gap-2 rounded-full px-4",
-                      isActive
-                        ? "bg-primary text-primary-foreground"
-                        : "bg-secondary text-secondary-foreground hover:bg-secondary/80",
-                    )}
-                    key={category.id}
-                    onClick={() => setSelectedCategory(category.id)}
+                    className="rounded-full"
+                    key={t.name}
+                    onClick={() => {
+                      setSelectedTag(t.name);
+                    }}
                     size="sm"
+                    variant={selectedTag === t.name ? "default" : "secondary"}
                   >
-                    <Icon className="size-3" />
-                    <span className="text-xs font-medium">{category.name}</span>
-                    <Badge className="h-4 min-w-4 px-1.5 py-0 text-xs" variant={isActive ? "secondary" : "outline"}>
-                      {category.count}
+                    <span className="max-w-36 truncate">{t.name}</span>
+                    <Badge className={cn("ml-2", selectedTag === t.name ? "bg-primary-foreground/15" : "")}>
+                      {t.projectCount}
                     </Badge>
                   </Button>
-                );
-              })}
+                ))}
+              </div>
             </div>
-          </div>
+          </aside>
 
-          {/* Project Grid */}
-          <div className="min-w-0 flex-1">
-            {filteredProjects.length > 0 ? (
-              <>
-                <div className="mb-6 flex items-center justify-between">
-                  <p className="text-muted-foreground text-sm">
-                    Showing {filteredProjects.length} {filteredProjects.length === 1 ? "project" : "projects"}
-                    {selectedCategoryName && <span className="ml-1">in {selectedCategoryName}</span>}
-                  </p>
-                </div>
-
-                <div className="grid auto-rows-fr grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-3">
-                  {filteredProjects.map((project) => (
-                    <APICard api={project} key={project.id} />
-                  ))}
-                </div>
-              </>
-            ) : (
+          <section className="min-w-0 flex-1">
+            {catalogueQuery.isError ? (
               <div className="py-16 text-center">
-                <div className="mx-auto max-w-md">
-                  <Database className="text-muted-foreground mx-auto mb-6 size-16" />
-                  <h3 className="text-foreground mb-3 text-xl font-semibold">No projects found</h3>
-                  <p className="text-muted-foreground text-sm leading-relaxed">
-                    Try adjusting your search criteria or browse different categories to discover more projects.
-                  </p>
-                  {searchQuery && (
-                    <Button className="mt-4" onClick={() => setSearchQuery("")} variant="outline">
-                      Clear search
-                    </Button>
-                  )}
-                </div>
+                <p className="text-sm text-destructive">Failed to load catalogue. Please try again later.</p>
+              </div>
+            ) : catalogueQuery.isPending ? (
+              <div className="py-16 text-center text-sm text-muted-foreground">Loading catalogue…</div>
+            ) : projects.length === 0 ? (
+              <div className="py-16 text-center">
+                <p className="text-sm text-muted-foreground">No projects found.</p>
+              </div>
+            ) : (
+              <div className="grid auto-rows-fr grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-3">
+                {projects.map((p) => (
+                  <Card
+                    className="group flex h-full cursor-pointer flex-col border-border/40 bg-card/30 backdrop-blur-sm transition-all duration-300 hover:border-border hover:bg-card/60 hover:shadow-xl hover:shadow-primary/5"
+                    key={p.id}
+                    onClick={() =>
+                      navigate({
+                        params: { organizationSlug: p.organizationSlug, projectSlug: p.slug },
+                        to: "/app/organizations/$organizationSlug/projects/$projectSlug",
+                      })
+                    }
+                  >
+                    <CardHeader>
+                      <div className="space-y-2">
+                        <div className="flex items-start justify-between gap-3">
+                          <h3 className="line-clamp-2 text-xl leading-tight font-bold text-foreground transition-colors group-hover:text-primary">
+                            {p.name}
+                          </h3>
+                        </div>
+                        <div className="text-sm text-muted-foreground">
+                          <span className="font-medium text-foreground/80">{p.organizationName}</span>
+                        </div>
+                      </div>
+                    </CardHeader>
+                    <CardContent className="flex flex-1 flex-col pt-0">
+                      <div className="mb-6 flex-1">
+                        <p className="line-clamp-3 text-sm leading-relaxed text-muted-foreground">
+                          {p.description ?? "No description available"}
+                        </p>
+                      </div>
+
+                      {p.tags.length > 0 ? (
+                        <div className="mb-4 flex flex-wrap gap-2">
+                          {p.tags.slice(0, 4).map((tagName) => (
+                            <Badge key={tagName} variant="secondary">
+                              {tagName}
+                            </Badge>
+                          ))}
+                        </div>
+                      ) : null}
+
+                      <div className="mt-auto border-t border-border/30 pt-4">
+                        <div className="flex items-center justify-between text-xs text-muted-foreground">
+                          <span>Updated</span>
+                          <time className="font-medium text-foreground/70" dateTime={p.updatedAt.toISOString()}>
+                            {p.updatedAt.toISOString().slice(0, 10)}
+                          </time>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
               </div>
             )}
-          </div>
+
+            <div className="h-10" ref={sentinelRef} />
+
+            {catalogueQuery.isFetchingNextPage ? (
+              <div className="py-6 text-center text-sm text-muted-foreground">Loading more…</div>
+            ) : null}
+          </section>
         </div>
       </main>
     </div>
   );
+}
+
+function useDebouncedValue<T>(value: T, delayMs: number) {
+  const [debounced, setDebounced] = useState(value);
+
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(value), delayMs);
+    return () => clearTimeout(t);
+  }, [delayMs, value]);
+
+  return debounced;
 }
