@@ -82,8 +82,9 @@ function RouteComponent() {
   };
 
   const handleNameChange = (name: string) => {
-    if (!form.getValues("slug") || form.getValues("slug") === "") {
+    if (!form.getFieldState("slug").isDirty) {
       form.setValue("slug", slugFromName(name));
+      form.clearErrors("slug");
     }
   };
 

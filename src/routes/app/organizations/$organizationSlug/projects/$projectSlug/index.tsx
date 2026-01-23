@@ -54,15 +54,7 @@ function RouteComponent() {
   const visibilityMutation = useProjectVisibilityMutation(organizationSlug, projectSlug);
 
   const visibilityIcon =
-    project.visibility === "public" ? (
-      <Globe
-        className={`
-    h-4 w-4
-  `}
-      />
-    ) : (
-      <Lock className={`h-4 w-4`} />
-    );
+    project.visibility === "public" ? <Globe className={`h-4 w-4`} /> : <Lock className={`h-4 w-4`} />;
 
   return (
     <div className="space-y-6 p-6">
@@ -213,20 +205,6 @@ function RouteComponent() {
                 </Badge>
               ))}
             </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Project Metadata */}
-      {project.metadata && Object.keys(project.metadata).length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg">Metadata</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <pre className="overflow-x-auto rounded bg-muted p-4 text-xs">
-              {JSON.stringify(project.metadata, null, 2)}
-            </pre>
           </CardContent>
         </Card>
       )}
