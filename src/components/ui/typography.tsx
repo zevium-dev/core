@@ -1,8 +1,13 @@
 import { Slot } from "@radix-ui/react-slot";
 import { cva, type VariantProps } from "class-variance-authority";
+import { Check, Copy } from "lucide-react";
 import * as React from "react";
 
+import { useCopy } from "~/hooks/use-copy";
 import { cn } from "~/lib/utils/index";
+
+import { buttonVariants } from "./button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "./tooltip";
 
 const defaultComponents = {
   blockquote: "blockquote",
@@ -68,6 +73,81 @@ const typographyVariants = cva("", {
   },
 });
 
+type CopyTextProps = {
+  buttonSize?: VariantProps<typeof buttonVariants>["size"];
+  buttonVariant?: VariantProps<typeof buttonVariants>["variant"];
+  children: React.ReactNode;
+  copiedLabel?: string;
+  copyLabel?: string;
+  doneTimeout?: number;
+  textClassName?: string;
+  value?: string;
+} & {
+  ref?: React.Ref<HTMLButtonElement>;
+} & Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, "children" | "type"> &
+  VariantProps<typeof typographyVariants>;
+
+function CopyText({
+  buttonSize = "sm",
+  buttonVariant = "ghost",
+  children,
+  className,
+  copiedLabel = "Copied",
+  copyLabel = "Copy",
+  doneTimeout,
+  onClick,
+  ref,
+  textClassName,
+  value,
+  variant,
+  ...props
+}: CopyTextProps) {
+  const [copied, copy] = useCopy({ doneTimeout });
+
+  const { disabled: disabledProp, ...buttonProps } = props;
+
+  const textToCopy = React.useMemo(() => {
+    if (typeof value === "string") return value;
+    if (typeof children === "string" || typeof children === "number") return String(children);
+    return null;
+  }, [children, value]);
+
+  const disabled = (disabledProp ?? false) || !textToCopy;
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          className={cn(
+            buttonVariants({
+              className: "group h-auto min-w-0 max-w-full items-center justify-start gap-2 text-left rounded-sm pt-0.5",
+              size: buttonSize,
+              variant: buttonVariant,
+            }),
+            className,
+          )}
+          data-slot="copy-text"
+          disabled={disabled}
+          onClick={(e) => {
+            onClick?.(e);
+            if (e.defaultPrevented || disabled || !textToCopy) return;
+            copy(textToCopy);
+          }}
+          ref={ref}
+          type="button"
+          {...buttonProps}
+        >
+          <Typography asChild className={cn("min-w-0 flex-1 truncate", textClassName)} variant={variant}>
+            <span>{children}</span>
+          </Typography>
+          {copied ? <Check aria-hidden="true" className="size-3" /> : <Copy aria-hidden="true" className="size-3" />}
+        </button>
+      </TooltipTrigger>
+      <TooltipContent sideOffset={6}>{copied ? copiedLabel : copyLabel}</TooltipContent>
+    </Tooltip>
+  );
+}
+
 function Typography({
   asChild = false,
   className,
@@ -75,7 +155,6 @@ function Typography({
   ...props
 }: {
   asChild?: boolean;
-  loading?: boolean;
 } & React.ComponentPropsWithoutRef<"p"> &
   VariantProps<typeof typographyVariants>) {
   const Comp = asChild ? Slot : defaultComponents[variant ?? "p"];
@@ -83,4 +162,6 @@ function Typography({
   return <Comp className={cn(typographyVariants({ className, variant }))} data-slot="p" {...props} />;
 }
 
-export { Typography, typographyVariants };
+CopyText.displayName = "CopyText";
+
+export { CopyText, Typography, typographyVariants };

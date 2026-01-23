@@ -6,7 +6,7 @@ import { PageHeaderContent } from "~/components/sidebar";
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "~/components/ui/card";
-import { Typography } from "~/components/ui/typography";
+import { CopyText, Typography } from "~/components/ui/typography";
 import { useTRPC } from "~/lib/trpc";
 import { formatDate } from "~/lib/utils";
 
@@ -130,21 +130,21 @@ function RouteComponent() {
             </div>
           </div>
           <div className="mt-4 flex flex-wrap gap-6 border-t pt-4">
-            <div className="flex gap-2">
+            <div className="flex items-center gap-2">
               <Typography className="font-medium text-muted-foreground" variant="small">
                 Created:
               </Typography>
               <Typography variant="small">{formatDate(project.createdAt, { smart: true })}</Typography>
             </div>
-            <div className="flex gap-2">
+            <div className="flex items-center gap-2">
               <Typography className="font-medium text-muted-foreground" variant="small">
                 Project ID:
               </Typography>
-              <Typography className="font-mono text-xs" variant="small">
+              <CopyText textClassName="font-mono text-xs" variant="small">
                 {project.id}
-              </Typography>
+              </CopyText>
             </div>
-            <div className="flex gap-2">
+            <div className="flex items-center gap-2">
               <Typography className="font-medium text-muted-foreground" variant="small">
                 Updated:
               </Typography>
