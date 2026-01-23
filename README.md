@@ -3,7 +3,7 @@
 This repo has all the code for [zevium.dev](https://zevium.dev).
 The entire website was made using TanStack Start.
 
-![TanStack Start](https://img.shields.io/badge/TanStack%20Start-0-c93679?style=for-the-badge&logo=zap)
+![TanStack Start](https://img.shields.io/badge/TanStack%20Start-1-c93679?style=for-the-badge&logo=zap)
 ![shadcn](https://img.shields.io/badge/shadcnui-4-ffffff?style=for-the-badge&logo=shadcnui)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5-4476c0?style=for-the-badge&logo=typescript)
 ![PNPM](https://img.shields.io/badge/pnpm-10-f69220?style=for-the-badge&logo=pnpm)
@@ -11,7 +11,7 @@ The entire website was made using TanStack Start.
 ![Drizzle](https://img.shields.io/badge/Drizzle-ORM-ffffff?style=for-the-badge&logo=drizzle)
 ![Turso](https://img.shields.io/badge/Turso-Database-ffffff?style=for-the-badge&logo=turso)
 ![Workers](https://img.shields.io/badge/Cloudflare-Workers-ffffff?style=for-the-badge&logo=cloudflare)
-![Mise](https://img.shields.io/badge/Mise-2025-ffffff?style=for-the-badge&logo=misskey)
+![Mise](https://img.shields.io/badge/Mise-2026-ffffff?style=for-the-badge&logo=misskey)
 
 ---
 
