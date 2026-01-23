@@ -13,6 +13,7 @@
     "deploy": "pnpm run build && wrangler deploy",
     "dev": "vite dev",
     "dev:workerd": "wrangler dev",
+    "eslint": "pnpm run lint",
     "format": "cross-env NODE_OPTIONS=--max-old-space-size=8192 eslint --cache --cache-location node_modules/.cache/eslint/.eslintcache --cache-strategy content --fix \"src/**/*.{ts,tsx,js,jsx}\" \"scripts/**/*.{ts,tsx,js,jsx}\" \"plugins/**/*.{ts,tsx,js,jsx}\" \"types/**/*.{ts,tsx}\" \"types/**/*.d.ts\" \"*.{ts,tsx,js,jsx,mjs,cjs}\" && prettier --write \"src/**/*.{ts,tsx,js,jsx,json,css,md,yml,yaml}\" \"scripts/**/*.{ts,tsx,js,jsx,mjs,cjs,json,css,md,yml,yaml}\" \"plugins/**/*.{ts,tsx,js,jsx,mjs,cjs,json,css,md,yml,yaml}\" \"types/**/*.{ts,tsx,d.ts,json,css,md,yml,yaml}\" \"*.{ts,tsx,js,jsx,mjs,cjs,json,css,md,yml,yaml}\"",
     "format:changed": "cross-env NODE_OPTIONS=--max-old-space-size=8192 node scripts/run-changed.mjs eslint --ext ts,tsx,js,jsx -- --cache --cache-location node_modules/.cache/eslint/.eslintcache --cache-strategy content --fix && node scripts/run-changed.mjs prettier --ext ts,tsx,js,jsx,mjs,cjs,json,css,md,yml,yaml -- --write",
     "format:check": "prettier --check \"src/**/*.{ts,tsx,js,jsx,json,css,md,yml,yaml}\" \"scripts/**/*.{ts,tsx,js,jsx,mjs,cjs,json,css,md,yml,yaml}\" \"plugins/**/*.{ts,tsx,js,jsx,mjs,cjs,json,css,md,yml,yaml}\" \"types/**/*.{ts,tsx,d.ts,json,css,md,yml,yaml}\" \"*.{ts,tsx,js,jsx,mjs,cjs,json,css,md,yml,yaml}\"",

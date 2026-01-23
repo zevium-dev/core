@@ -5,7 +5,6 @@ import path from "node:path";
 const argv = process.argv.slice(2);
 
 const usage = () => {
-  // eslint-disable-next-line no-console
   console.error(
     "Usage: node scripts/run-changed.mjs <tool> [--base <ref>] [--ext <csv>] -- <tool args...>\n" +
       "Example: node scripts/run-changed.mjs eslint --ext ts,tsx -- --cache\n" +
@@ -23,7 +22,7 @@ let baseRef;
 let exts = [];
 
 while (argv.length > 0) {
-  const token = argv[0];
+  const token = argv.at(0);
   if (token === "--") break;
 
   if (token === "--base") {
@@ -46,7 +45,7 @@ while (argv.length > 0) {
   break;
 }
 
-if (argv[0] !== "--") {
+if (argv.at(0) !== "--") {
   usage();
   process.exit(2);
 }
