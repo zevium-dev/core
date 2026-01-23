@@ -507,7 +507,7 @@ Use `enabled: Boolean(dependency)` inside query options. Do not guard fetches wi
 
 ### 11. Form
 
-Follow react-hook-form's best practices.
+Follow TanStack Form best practices (use `@tanstack/react-form` + Standard Schema validators; prefer `void form.handleSubmit()` in submit handlers; render errors from field meta).
 
 ### 14. Returning Values from Mutations
 

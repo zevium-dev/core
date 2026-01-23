@@ -76,7 +76,7 @@ function Typography({
 }: {
   asChild?: boolean;
   loading?: boolean;
-} & React.ComponentProps<"p"> &
+} & React.ComponentPropsWithoutRef<"p"> &
   VariantProps<typeof typographyVariants>) {
   const Comp = asChild ? Slot : defaultComponents[variant ?? "p"];
 

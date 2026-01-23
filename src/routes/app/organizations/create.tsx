@@ -1,24 +1,24 @@
-import { zodResolver } from "@hookform/resolvers/zod";
+import { useForm } from "@tanstack/react-form";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
-import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import z from "zod";
 
 import { ImageUpload } from "~/components/image-upload";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "~/components/ui/card";
-import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from "~/components/ui/form";
 import { Input } from "~/components/ui/input";
+import { Label } from "~/components/ui/label";
 import { useTRPC } from "~/lib/trpc";
+import { getFormErrorString } from "~/lib/utils";
 
 export const Route = createFileRoute("/app/organizations/create")({
   component: RouteComponent,
 });
 
 const FormZod = z.object({
-  logo: z.string().nullable().optional(),
+  logo: z.string().nullable(),
   name: z.string().min(1, "Organization name is required").max(100, "Name must be less than 100 characters"),
   slug: z
     .string()
@@ -49,27 +49,28 @@ function RouteComponent() {
     }),
   );
 
-  const form = useForm<FormValues>({
+  const form = useForm({
     defaultValues: {
       logo: null,
       name: "",
       slug: "",
+    } as FormValues,
+    onSubmit: ({ value }) => {
+      createOrgMutation.mutate({
+        name: value.name,
+        slug: value.slug,
+        ...(value.logo ? { logo: value.logo } : {}),
+      });
     },
-    mode: "onBlur",
-    resolver: zodResolver(FormZod),
+    validators: {
+      onBlur: FormZod,
+      onSubmit: FormZod,
+    },
   });
-
-  const onSubmit = (data: FormValues) => {
-    createOrgMutation.mutate({
-      name: data.name,
-      slug: data.slug,
-      ...(data.logo && { logo: data.logo }),
-    });
-  };
 
   const handleLogoChange = (base64: string) => {
     setLogoData(base64);
-    form.setValue("logo", base64);
+    form.setFieldValue("logo", base64);
   };
 
   const slugFromName = (name: string) => {
@@ -82,8 +83,9 @@ function RouteComponent() {
   };
 
   const handleNameChange = (name: string) => {
-    if (!form.getValues("slug") || form.getValues("slug") === "") {
-      form.setValue("slug", slugFromName(name));
+    const currentSlug = form.getFieldValue("slug");
+    if (!currentSlug) {
+      form.setFieldValue("slug", slugFromName(name));
     }
   };
 
@@ -95,89 +97,110 @@ function RouteComponent() {
           <CardDescription>Set up a new organization to manage your projects and team</CardDescription>
         </CardHeader>
         <CardContent>
-          <Form {...form}>
-            <form className="space-y-6" onSubmit={form.handleSubmit(onSubmit)}>
-              {/* Logo Upload */}
-              <FormField
-                control={form.control}
-                name="logo"
-                render={() => (
-                  <FormItem>
-                    <FormLabel>Logo</FormLabel>
-                    <FormControl>
-                      <ImageUpload
-                        aspectRatio={1}
-                        disabled={createOrgMutation.isPending}
-                        maxSizeKb={10_000}
-                        onChangeValue={handleLogoChange}
-                        placeholder="Upload organization logo"
-                        previewUrl={logoData ?? undefined}
-                      />
-                    </FormControl>
-                    <FormDescription>Upload a logo for your organization (1:1 aspect ratio, max 10MB)</FormDescription>
-                  </FormItem>
-                )}
-              />
+          <form
+            className="space-y-6"
+            onSubmit={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              void form.handleSubmit();
+            }}
+          >
+            <form.Field
+              children={() => (
+                <div className="grid gap-2">
+                  <Label>Logo</Label>
+                  <ImageUpload
+                    aspectRatio={1}
+                    disabled={createOrgMutation.isPending}
+                    maxSizeKb={10_000}
+                    onChangeValue={handleLogoChange}
+                    placeholder="Upload organization logo"
+                    previewUrl={logoData ?? undefined}
+                  />
+                  <p className="text-sm text-muted-foreground">
+                    Upload a logo for your organization (1:1 aspect ratio, max 10MB)
+                  </p>
+                </div>
+              )}
+              name="logo"
+            />
 
-              {/* Organization Name */}
-              <FormField
-                control={form.control}
-                name="name"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel htmlFor="name">Organization Name</FormLabel>
-                    <FormControl>
-                      <Input
-                        disabled={createOrgMutation.isPending}
-                        id="name"
-                        placeholder="My awesome organization"
-                        {...field}
-                        onChange={(e) => {
-                          field.onChange(e);
-                          handleNameChange(e.target.value);
-                        }}
-                      />
-                    </FormControl>
-                    <FormDescription>The name of your organization (1-100 characters)</FormDescription>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+            <form.Field
+              children={(field) => {
+                const isInvalid = field.state.meta.isTouched && !field.state.meta.isValid;
+                const error = field.state.meta.errors.at(0);
 
-              {/* Slug */}
-              <FormField
-                control={form.control}
-                name="slug"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel htmlFor="slug">Slug</FormLabel>
-                    <FormControl>
-                      <Input
-                        disabled={createOrgMutation.isPending}
-                        id="slug"
-                        placeholder="my-organization"
-                        {...field}
-                      />
-                    </FormControl>
-                    <FormDescription>
+                return (
+                  <div className="grid gap-2">
+                    <Label htmlFor="name">Organization Name</Label>
+                    <Input
+                      aria-describedby={isInvalid ? "name-error" : undefined}
+                      aria-invalid={isInvalid}
+                      disabled={createOrgMutation.isPending}
+                      id="name"
+                      name={field.name}
+                      onBlur={field.handleBlur}
+                      onChange={(e) => {
+                        field.handleChange(e.target.value);
+                        handleNameChange(e.target.value);
+                      }}
+                      placeholder="My awesome organization"
+                      value={field.state.value}
+                    />
+                    <p className="text-sm text-muted-foreground">The name of your organization (1-100 characters)</p>
+                    {isInvalid ? (
+                      <p className="text-sm text-destructive" id="name-error">
+                        {getFormErrorString(error)}
+                      </p>
+                    ) : null}
+                  </div>
+                );
+              }}
+              name="name"
+            />
+
+            <form.Field
+              children={(field) => {
+                const isInvalid = field.state.meta.isTouched && !field.state.meta.isValid;
+                const error = field.state.meta.errors.at(0);
+
+                return (
+                  <div className="grid gap-2">
+                    <Label htmlFor="slug">Slug</Label>
+                    <Input
+                      aria-describedby={isInvalid ? "slug-error" : undefined}
+                      aria-invalid={isInvalid}
+                      disabled={createOrgMutation.isPending}
+                      id="slug"
+                      name={field.name}
+                      onBlur={field.handleBlur}
+                      onChange={(e) => field.handleChange(e.target.value)}
+                      placeholder="my-organization"
+                      value={field.state.value}
+                    />
+                    <p className="text-sm text-muted-foreground">
                       URL-friendly identifier (lowercase, hyphens only, 1-50 characters)
-                    </FormDescription>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+                    </p>
+                    {isInvalid ? (
+                      <p className="text-sm text-destructive" id="slug-error">
+                        {getFormErrorString(error)}
+                      </p>
+                    ) : null}
+                  </div>
+                );
+              }}
+              name="slug"
+            />
 
-              {/* Submit Button */}
-              <Button
-                className="w-full"
-                disabled={createOrgMutation.isPending}
-                loading={createOrgMutation.isPending}
-                type="submit"
-              >
-                Create Organization
-              </Button>
-            </form>
-          </Form>
+            <Button
+              className="w-full"
+              disabled={createOrgMutation.isPending}
+              loading={createOrgMutation.isPending}
+              type="submit"
+            >
+              Create Organization
+            </Button>
+          </form>
         </CardContent>
       </Card>
     </div>
