@@ -402,7 +402,7 @@ function RouteComponent() {
                 <CardDescription>
                   Edit your OpenAPI specification (JSON).
                   {draftQuery.data.updatedAt && (
-                    <span className="ml-2">Last saved: {formatDate(draftQuery.data.updatedAt)}</span>
+                    <span className="ml-2">Last saved: {formatDate(draftQuery.data.updatedAt, { smart: true })}</span>
                   )}
                 </CardDescription>
               </div>
@@ -594,7 +594,9 @@ function RouteComponent() {
                     <div className="flex items-center justify-between rounded-lg border p-3" key={secret.id}>
                       <div className="flex-1">
                         <p className="font-mono text-sm font-medium">{secret.name}</p>
-                        <p className="text-xs text-muted-foreground">Updated {formatDate(secret.updatedAt)}</p>
+                        <p className="text-xs text-muted-foreground">
+                          Updated {formatDate(secret.updatedAt, { smart: true })}
+                        </p>
                       </div>
                       <Button
                         loading={isDeletingThisSecret}
@@ -650,7 +652,7 @@ function RouteComponent() {
                     <div className="flex items-center justify-between border-b pb-2 last:border-0 last:pb-0" key={v.id}>
                       <div className="flex-1">
                         <p className="font-medium">{v.version}</p>
-                        <p className="text-xs text-muted-foreground">{formatDate(v.createdAt)}</p>
+                        <p className="text-xs text-muted-foreground">{formatDate(v.createdAt, { smart: true })}</p>
                       </div>
                       <Button onClick={() => handleViewVersion(v.id)} size="sm" variant="ghost">
                         View

@@ -53,10 +53,18 @@ export const organizationRouter = router({
         });
       }
 
-      const invitation = await authServer.api.getInvitation({
-        headers: ctx.raw.req.headers,
-        query: { id: input.invitationId },
-      });
+      const invitation = await db
+        .select()
+        .from(schema.invitation)
+        .where(orm.eq(schema.invitation.id, input.invitationId))
+        .then((rows) => rows.at(0));
+
+      if (!invitation) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Invitation not found",
+        });
+      }
 
       if (invitation.organizationId !== ctx.orgId) {
         throw new TRPCError({
@@ -65,17 +73,7 @@ export const organizationRouter = router({
         });
       }
 
-      const cancelled = await authServer.api.cancelInvitation({
-        body: { invitationId: input.invitationId },
-        headers: ctx.raw.req.headers,
-      });
-
-      if (!cancelled) {
-        throw new TRPCError({
-          code: "INTERNAL_SERVER_ERROR",
-          message: "Failed to cancel invitation",
-        });
-      }
+      await db.delete(schema.invitation).where(orm.eq(schema.invitation.id, input.invitationId));
 
       return { success: true };
     }),
@@ -162,10 +160,19 @@ export const organizationRouter = router({
       if (!org) throw new TRPCError({ code: "NOT_FOUND", message: "Organization not found" });
 
       // Just some type gymnastics to ensure the output is correctly typed
+      const uniqueInvitationsMap = new Map<string, (typeof org)["invitations"][number]>();
+      for (const inv of org.invitations) {
+        if (inv.status !== "pending") continue;
+        const existing = uniqueInvitationsMap.get(inv.email);
+        if (!existing || new Date(inv.expiresAt) > new Date(existing.expiresAt)) {
+          uniqueInvitationsMap.set(inv.email, inv);
+        }
+      }
+
       return {
         ...org,
         createdAt: org.createdAt,
-        invitations: org.invitations.filter((inv) => inv.status === "pending"),
+        invitations: Array.from(uniqueInvitationsMap.values()),
         logo: org.logo ?? null,
         members: org.members.map((m) => ({ ...m, user: { ...m.user, image: m.user.image ?? null } })),
         metadata: MetadataZod.parse(org.metadata),
@@ -195,6 +202,13 @@ export const organizationRouter = router({
       }
 
       const normalizedRole: AssignableOrganizationRole = input.role ?? "member";
+
+      // Delete all existing invitations for this email and organization to avoid duplicates
+      await db
+        .delete(schema.invitation)
+        .where(
+          orm.and(orm.eq(schema.invitation.organizationId, ctx.orgId), orm.eq(schema.invitation.email, input.email)),
+        );
 
       const invitation = await authServer.api.createInvitation({
         body: {
@@ -462,7 +476,16 @@ export const organizationRouter = router({
         .leftJoin(schema.organization, orm.eq(schema.invitation.organizationId, schema.organization.id))
         .where(orm.and(orm.eq(schema.invitation.email, ctx.user.email), orm.eq(schema.invitation.status, "pending")));
 
-      return invitations
+      const uniqueInvitationsMap = new Map<string, (typeof invitations)[number]>();
+      for (const row of invitations) {
+        if (!row.organization) continue;
+        const existing = uniqueInvitationsMap.get(row.organization.id);
+        if (!existing || row.invitation.expiresAt > existing.invitation.expiresAt) {
+          uniqueInvitationsMap.set(row.organization.id, row);
+        }
+      }
+
+      return Array.from(uniqueInvitationsMap.values())
         .filter((row): row is { organization: NonNullable<(typeof row)["organization"]> } & typeof row =>
           Boolean(row.organization),
         )

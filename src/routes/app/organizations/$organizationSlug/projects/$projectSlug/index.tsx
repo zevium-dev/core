@@ -142,7 +142,7 @@ function RouteComponent() {
               <Typography className="font-medium text-muted-foreground" variant="small">
                 Created:
               </Typography>
-              <Typography variant="small">{formatDate(project.createdAt)}</Typography>
+              <Typography variant="small">{formatDate(project.createdAt, { smart: true })}</Typography>
             </div>
             <div className="flex gap-2">
               <Typography className="font-medium text-muted-foreground" variant="small">
@@ -156,7 +156,7 @@ function RouteComponent() {
               <Typography className="font-medium text-muted-foreground" variant="small">
                 Updated:
               </Typography>
-              <Typography variant="small">{formatDate(project.updatedAt)}</Typography>
+              <Typography variant="small">{formatDate(project.updatedAt, { smart: true })}</Typography>
             </div>
           </div>
         </CardHeader>

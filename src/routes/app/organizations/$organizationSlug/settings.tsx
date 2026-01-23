@@ -1,6 +1,7 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { RotateCcw, X } from "lucide-react";
 import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
@@ -15,6 +16,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "~
 import { type AssignableOrganizationRole, AssignableOrganizationRoles } from "~/db/default-roles";
 import { useUser } from "~/lib/auth";
 import { useTRPC } from "~/lib/trpc";
+import { formatDate } from "~/lib/utils";
 
 export const Route = createFileRoute("/app/organizations/$organizationSlug/settings")({
   component: RouteComponent,
@@ -376,29 +378,68 @@ function RouteComponent() {
               <div className="space-y-3">
                 {org.invitations.map((invitation) => {
                   const isCanceling = cancelingInvitationId === invitation.id && cancelInvitationMutation.isPending;
+                  const isExpired = new Date(invitation.expiresAt) < new Date();
+
                   return (
                     <div className="flex items-center justify-between rounded-md border p-3" key={invitation.id}>
                       <div className="flex-1">
                         <p className="text-sm font-medium">{invitation.email}</p>
                         <p className="text-xs text-muted-foreground">
-                          Role: <span className="capitalize">{invitation.role}</span> • Expires:{" "}
-                          {new Date(invitation.expiresAt).toUTCString()}
+                          Role: <span className="capitalize">{invitation.role}</span> •{" "}
+                          {isExpired ? "Expired" : "Expires"}: {formatDate(invitation.expiresAt, { smart: true })}
                         </p>
                       </div>
-                      <Button
-                        disabled={isCanceling}
-                        loading={isCanceling}
-                        onClick={() => {
-                          cancelInvitationMutation.mutate({
-                            invitationId: invitation.id,
-                            organizationId: org.id,
-                          });
-                        }}
-                        size="sm"
-                        variant="outline"
-                      >
-                        Cancel
-                      </Button>
+                      <div className="flex items-center gap-2">
+                        {isExpired ? (
+                          <>
+                            <Button
+                              disabled={inviteMemberMutation.isPending}
+                              loading={inviteMemberMutation.isPending}
+                              onClick={() => {
+                                inviteMemberMutation.mutate({
+                                  email: invitation.email,
+                                  organizationId: org.id,
+                                  role: invitation.role,
+                                });
+                              }}
+                              size="sm"
+                              variant="outline"
+                            >
+                              <RotateCcw className="mr-2 h-4 w-4" />
+                              Resend
+                            </Button>
+                            <Button
+                              disabled={isCanceling}
+                              loading={isCanceling}
+                              onClick={() => {
+                                cancelInvitationMutation.mutate({
+                                  invitationId: invitation.id,
+                                  organizationId: org.id,
+                                });
+                              }}
+                              size="icon"
+                              variant="ghost"
+                            >
+                              <X className="h-4 w-4" />
+                            </Button>
+                          </>
+                        ) : (
+                          <Button
+                            disabled={isCanceling}
+                            loading={isCanceling}
+                            onClick={() => {
+                              cancelInvitationMutation.mutate({
+                                invitationId: invitation.id,
+                                organizationId: org.id,
+                              });
+                            }}
+                            size="sm"
+                            variant="outline"
+                          >
+                            Cancel
+                          </Button>
+                        )}
+                      </div>
                     </div>
                   );
                 })}

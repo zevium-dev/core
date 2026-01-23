@@ -1,11 +1,13 @@
 import { type CheckoutResult } from "autumn-js";
 
+import { formatDate } from "~/lib/utils";
+
 export const getCheckoutContent = (checkoutResult: CheckoutResult) => {
   const { current_product, next_cycle, product } = checkoutResult;
   const { has_trial, is_free, is_one_off, updateable } = product.properties;
   const scenario = product.scenario;
 
-  const nextCycleAtStr = next_cycle ? new Date(next_cycle.starts_at).toLocaleDateString() : undefined;
+  const nextCycleAtStr = next_cycle ? formatDate(next_cycle.starts_at, { dateOnly: true }) : undefined;
 
   const productName = product.name;
 

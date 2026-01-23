@@ -11,7 +11,7 @@ import { Dialog, DialogContent, DialogFooter, DialogTitle } from "~/components/u
 import { Input } from "~/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "~/components/ui/popover";
 import { getCheckoutContent } from "~/lib/autumn/checkout-content";
-import { cn } from "~/lib/utils/index";
+import { cn, formatDate } from "~/lib/utils/index";
 
 export interface CheckoutDialogProps {
   checkoutParams?: CheckoutParams;
@@ -167,7 +167,7 @@ function CustomAccordionTrigger({
 
 function DueAmounts({ checkoutResult }: { checkoutResult: CheckoutResult }) {
   const { next_cycle, product } = checkoutResult;
-  const nextCycleAtStr = next_cycle ? new Date(next_cycle.starts_at).toLocaleDateString() : undefined;
+  const nextCycleAtStr = next_cycle ? formatDate(next_cycle.starts_at, { dateOnly: true }) : undefined;
 
   const hasUsagePrice = product.items.some((item) => item.usage_model === UsageModel.PayPerUse);
 
