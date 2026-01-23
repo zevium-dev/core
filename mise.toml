@@ -5,4 +5,4 @@ node = "22.16.0"
 postinstall = "yes | npm i -g pnpm && pnpm install"
 
 [tasks]
-ci = "pnpm run ci"
+ci = "pnpm run ci:pr"
