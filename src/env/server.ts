@@ -13,6 +13,7 @@ const ServerEnvArk = type({
   SECRETS_PRIMARY_KEY_ID: "string",
   UPSTASH_REDIS_REST_TOKEN: "string",
   UPSTASH_REDIS_REST_URL: "string.url",
+  VITE_PUBLIC_POSTHOG_KEY: "string | undefined",
 });
 
 export type ServerEnv = typeof ServerEnvArk.infer;
@@ -30,4 +31,5 @@ export const serverEnv = ServerEnvArk.assert({
   SECRETS_PRIMARY_KEY_ID: process.env.SECRETS_PRIMARY_KEY_ID,
   UPSTASH_REDIS_REST_TOKEN: process.env.UPSTASH_REDIS_REST_TOKEN,
   UPSTASH_REDIS_REST_URL: process.env.UPSTASH_REDIS_REST_URL,
+  VITE_PUBLIC_POSTHOG_KEY: process.env.VITE_PUBLIC_POSTHOG_KEY,
 });
