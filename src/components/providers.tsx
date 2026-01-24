@@ -4,7 +4,7 @@ import { useLocation } from "@tanstack/react-router";
 import { AutumnProvider } from "autumn-js/react";
 import { Provider as JotaiProvider } from "jotai";
 import { domAnimation, LazyMotion } from "motion/react";
-import { PostHogProvider } from "posthog-js/react";
+import { PostHogErrorBoundary, PostHogProvider } from "posthog-js/react";
 import React from "react";
 
 import { ThemeProvider } from "~/components/theme-provider";
@@ -29,7 +29,8 @@ const PHProvider: React.FC<React.PropsWithChildren> = ({ children }) => {
         api_host: "/api/posthog",
         capture_exceptions: true,
         debug: import.meta.env.MODE === "development",
-        defaults: "2025-05-24",
+        defaults: "2025-11-30",
+        person_profiles: "identified_only",
         ui_host: "https://us.posthog.com",
       }}
     >
@@ -46,31 +47,33 @@ export const Providers: React.FC<React.PropsWithChildren> = ({ children }) => {
 
   return (
     <PHProvider>
-      <AutumnProvider betterAuthUrl={clientEnv.VITE_PUBLIC_URL} includeCredentials>
-        <QueryClientProvider client={queryClient}>
-          <TRPCProvider queryClient={queryClient} trpcClient={trpcClient}>
-            <ThemeProvider defaultTheme="dark" storageKey="vite-ui-theme">
-              <LazyMotion features={domAnimation} strict>
-                <JotaiProvider>
-                  <Toaster richColors />
-                  <PostHogIdentify />
-                  {!isAppRoute && (
-                    <SidebarProvider>
-                      <MainSidebar />
-                      <SidebarInset>
-                        <PageHeader />
-                        {children}
-                      </SidebarInset>
-                    </SidebarProvider>
-                  )}
-                  {isAppRoute && children}
-                </JotaiProvider>
-              </LazyMotion>
-            </ThemeProvider>
-            <ReactQueryDevtools />
-          </TRPCProvider>
-        </QueryClientProvider>
-      </AutumnProvider>
+      <PostHogErrorBoundary>
+        <AutumnProvider betterAuthUrl={clientEnv.VITE_PUBLIC_URL} includeCredentials>
+          <QueryClientProvider client={queryClient}>
+            <TRPCProvider queryClient={queryClient} trpcClient={trpcClient}>
+              <ThemeProvider defaultTheme="dark" storageKey="vite-ui-theme">
+                <LazyMotion features={domAnimation} strict>
+                  <JotaiProvider>
+                    <Toaster richColors />
+                    <PostHogIdentify />
+                    {!isAppRoute && (
+                      <SidebarProvider>
+                        <MainSidebar />
+                        <SidebarInset>
+                          <PageHeader />
+                          {children}
+                        </SidebarInset>
+                      </SidebarProvider>
+                    )}
+                    {isAppRoute && children}
+                  </JotaiProvider>
+                </LazyMotion>
+              </ThemeProvider>
+              <ReactQueryDevtools />
+            </TRPCProvider>
+          </QueryClientProvider>
+        </AutumnProvider>
+      </PostHogErrorBoundary>
     </PHProvider>
   );
 };
