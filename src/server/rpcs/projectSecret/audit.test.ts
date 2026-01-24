@@ -27,6 +27,10 @@ vi.mock("~/lib/server/crypto-secrets", () => ({
   encryptSecret: vi.fn(() => Promise.resolve("encrypted")),
 }));
 
+vi.mock("cloudflare:workers", () => ({
+  waitUntil: vi.fn(),
+}));
+
 describe("projectSecretRouter audit logging", () => {
   beforeEach(() => {
     vi.clearAllMocks();
