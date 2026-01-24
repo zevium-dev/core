@@ -295,9 +295,7 @@ const createMutation = useMutation(...);
 
 ```tsx
 // ✅ Simple button click - use .mutate()
-<Button onClick={() => deleteMutation.mutate({ id: item.id })}>
-  Delete
-</Button>
+<Button onClick={() => deleteMutation.mutate({ id: item.id })}>Delete</Button>
 ```
 
 ### 3. Local Draft vs Server State
