@@ -1,10 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { randomUUID } from "node:crypto";
 
-import { serverEnv } from "~/env/server";
-import { CreditsManager, CreditsRedisKey } from "~/lib/server/credits";
-import { kv } from "~/lib/server/kv";
-import { validateEvent } from "@polar-sh/sdk/webhooks";
+import { CreditsRedisKey } from "~/lib/shared/credits-keys";
 
 /**
  * Polar API routes
@@ -16,6 +12,15 @@ export const Route = createFileRoute("/api/polar/$")({
       POST: async ({ request }) => {
         const url = new URL(request.url);
         if (url.pathname.endsWith("/webhook")) {
+          // Dynamic imports to avoid bundling server-only code in client
+          const [{ randomUUID }, { serverEnv }, { CreditsManager }, { kv }, { validateEvent }] = await Promise.all([
+            import("node:crypto"),
+            import("~/env/server"),
+            import("~/lib/server/credits"),
+            import("~/lib/server/kv"),
+            import("@polar-sh/sdk/webhooks"),
+          ]);
+
           // Read raw body for signature verification
           const raw = await request.text();
           let payload: any;
@@ -81,5 +86,3 @@ export const Route = createFileRoute("/api/polar/$")({
     },
   },
 });
-
-

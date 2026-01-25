@@ -1,23 +1,26 @@
 import { createFileRoute, redirect } from "@tanstack/react-router";
 import { z } from "zod";
-import { getRequest } from "@tanstack/react-start/server";
 
 import { ScreenCenter } from "~/components/ui/screen-center";
 import { Spinner } from "~/components/ui/spinner";
-import { CreditsRedisKey } from "~/lib/server/credits";
+import { CreditsRedisKey } from "~/lib/shared/credits-keys";
 
-const creditsSuccessSearchSchema = z.object({
-  checkout_id: z.string().min(1, "checkout_id is required"),
-}).strict();
+const creditsSuccessSearchSchema = z
+  .object({
+    checkout_id: z.string().min(1, "checkout_id is required"),
+  })
+  .strict();
 
 export const Route = createFileRoute("/app/settings/credits/success")({
   validateSearch: creditsSuccessSearchSchema,
   beforeLoad: async ({ search }) => {
+    // Dynamic import to avoid bundling server-only code in client
+    const { getRequest } = await import("@tanstack/react-start/server");
     // Get authenticated user from request
     const request = getRequest();
     const { authServer } = await import("~/lib/server/auth");
     const authResponse = await authServer.api.getSession({ headers: request.headers }).catch(() => null);
-    
+
     if (!authResponse?.user?.id) {
       throw redirect({ to: "/app/settings/credits" });
     }
@@ -61,5 +64,3 @@ function SuccessComponent() {
     </ScreenCenter>
   );
 }
-
-
