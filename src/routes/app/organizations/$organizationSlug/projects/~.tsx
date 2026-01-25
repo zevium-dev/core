@@ -95,9 +95,9 @@ function RouteComponent() {
                         flex items-center gap-2 text-xs text-muted-foreground
                       `}
                       >
-                        <span>Created {formatDate(project.createdAt)}</span>
+                        <span>Created {formatDate(project.createdAt, { smart: true })}</span>
                         <span>•</span>
-                        <span>Updated {formatDate(project.updatedAt)}</span>
+                        <span>Updated {formatDate(project.updatedAt, { smart: true })}</span>
                       </div>
                     </div>
                     <div className="ml-4">

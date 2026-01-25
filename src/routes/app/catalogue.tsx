@@ -13,7 +13,7 @@ import { Card, CardContent, CardHeader } from "~/components/ui/card";
 import { Input } from "~/components/ui/input";
 import { useTRPC } from "~/lib/trpc";
 import { getTrpcClient } from "~/lib/trpc/trpc";
-import { cn } from "~/lib/utils";
+import { cn, formatDate } from "~/lib/utils";
 
 export const Route = createFileRoute("/app/catalogue")({
   component: RouteComponent,
@@ -224,7 +224,7 @@ function RouteComponent() {
                         <div className="flex items-center justify-between text-xs text-muted-foreground">
                           <span>Updated</span>
                           <time className="font-medium text-foreground/70" dateTime={p.updatedAt.toISOString()}>
-                            {p.updatedAt.toISOString().slice(0, 10)}
+                            {formatDate(p.updatedAt, { dateOnly: true })}
                           </time>
                         </div>
                       </div>

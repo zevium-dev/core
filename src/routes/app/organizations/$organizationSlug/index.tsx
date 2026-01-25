@@ -74,7 +74,7 @@ function RouteComponent() {
                 <Typography className="font-medium text-muted-foreground" variant="small">
                   Created:
                 </Typography>
-                <Typography variant="small">{formatDate(org.createdAt)}</Typography>
+                <Typography variant="small">{formatDate(org.createdAt, { smart: true })}</Typography>
               </div>
               <div className="flex gap-2">
                 <Typography className="font-medium text-muted-foreground" variant="small">
@@ -163,13 +163,14 @@ function RouteComponent() {
                     <div className="flex-1">
                       <Typography className="font-medium" variant="small">
                         {invitation.email}
-                      </Typography>
+                      </Typography>{" "}
                       <Typography className="text-xs text-muted-foreground" variant="small">
-                        Expires: {formatDate(invitation.expiresAt)}
+                        {new Date(invitation.expiresAt) < new Date() ? "Expired" : "Expires"}:{" "}
+                        {formatDate(invitation.expiresAt, { smart: true })}
                       </Typography>
                     </div>
                     <Badge className="capitalize" variant="outline">
-                      {invitation.status}
+                      {new Date(invitation.expiresAt) < new Date() ? "expired" : invitation.status}
                     </Badge>
                   </div>
                 ))}

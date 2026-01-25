@@ -12,7 +12,6 @@ import reactHooks from "eslint-plugin-react-hooks";
 import { defineConfig } from "eslint/config";
 import tseslint from "typescript-eslint";
 
-// eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- drizzle plugin does not ship types
 const drizzle = /** @type {import("eslint").ESLint.Plugin} */ (drizzlePlugin);
 const drizzleRecommendedConfig = /** @type {import("eslint").Linter.Config} */ (drizzle.configs?.recommended ?? {});
 const drizzleRecommendedRules = /** @type {import("eslint").Linter.RulesRecord} */ (
@@ -29,8 +28,41 @@ const tailwind = defineConfig({
   settings: { "better-tailwindcss": { entryPoint: "./src/styles/app.css" } },
 });
 
+const tsFiles = ["**/*.{ts,tsx}"];
+
+/** @param {import("eslint").Linter.FlatConfig[]} configs */
+const scopeToTs = (configs) => configs.map((config) => (config.files ? config : { ...config, files: tsFiles }));
+
+/** @type {Record<string, "readonly" | "writable">} */
+const nodeGlobals = {
+  Buffer: "readonly",
+  clearInterval: "readonly",
+  clearTimeout: "readonly",
+  console: "readonly",
+  process: "readonly",
+  setInterval: "readonly",
+  setTimeout: "readonly",
+};
+
 export default defineConfig(
   {
+    ignores: [".nitro", ".output", "node_modules", ".tanstack", "dist"],
+  },
+  eslint.configs.recommended,
+  eslintReact.configs.recommended,
+  reactHooks.configs["recommended-latest"],
+  reactCompiler.configs.recommended,
+  perfectionist.configs["recommended-alphabetical"],
+  preferArrayAt.configs.recommended,
+  tailwind,
+  {
+    files: ["scripts/**/*.{js,cjs,mjs}"],
+    languageOptions: {
+      globals: nodeGlobals,
+    },
+  },
+  {
+    files: tsFiles,
     languageOptions: {
       parserOptions: {
         projectService: true,
@@ -38,17 +70,15 @@ export default defineConfig(
       },
     },
   },
-  eslint.configs.recommended,
-  tseslint.configs.strictTypeChecked,
-  tseslint.configs.stylisticTypeChecked,
-  eslintReact.configs["recommended-type-checked"],
-  reactHooks.configs["recommended-latest"],
-  reactCompiler.configs.recommended,
-  ...pluginRouter.configs["flat/recommended"],
-  perfectionist.configs["recommended-alphabetical"],
-  preferArrayAt.configs.recommended,
-  tailwind,
+  ...scopeToTs(tseslint.configs.strictTypeChecked),
+  ...scopeToTs(tseslint.configs.stylisticTypeChecked),
   {
+    ...eslintReact.configs["recommended-type-checked"],
+    files: tsFiles,
+  },
+  ...scopeToTs(pluginRouter.configs["flat/recommended"]),
+  {
+    files: tsFiles,
     plugins: {
       drizzle,
     },
@@ -57,7 +87,7 @@ export default defineConfig(
     },
   },
   {
-    ignores: [".nitro", ".output", "node_modules", ".tanstack", "dist"],
+    files: tsFiles,
     rules: {
       "@eslint-react/no-context-provider": "off",
       "@typescript-eslint/array-type": ["warn", { default: "generic", readonly: "generic" }],

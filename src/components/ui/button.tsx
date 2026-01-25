@@ -73,34 +73,53 @@ const buttonVariants = cva(
   },
 );
 
-function Button({
+type ButtonProps = {
+  asChild?: boolean;
+  loading?: boolean;
+} & React.ComponentPropsWithoutRef<"button"> &
+  VariantProps<typeof buttonVariants>;
+
+const Button = ({
   asChild = false,
   children: _children,
   className,
   disabled: _disabled = false,
   loading = false,
+  ref,
   size,
   variant,
   ...props
-}: {
-  asChild?: boolean;
-  loading?: boolean;
-} & React.ComponentProps<"button"> &
-  VariantProps<typeof buttonVariants>) {
-  const Comp = asChild ? Slot : "button";
-
+}: { ref?: React.Ref<HTMLButtonElement> } & ButtonProps) => {
   const disabled = _disabled || loading;
   const children = loading ? <Spinner /> : _children;
 
+  if (asChild) {
+    return (
+      <Slot
+        aria-disabled={disabled}
+        className={cn(buttonVariants({ className, size, variant }))}
+        data-slot="button"
+        {...props}
+      >
+        {children}
+      </Slot>
+    );
+  }
+
   return (
-    <Comp
-      children={children}
+    <button
       className={cn(buttonVariants({ className, size, variant }))}
       data-slot="button"
       disabled={disabled}
+      ref={ref}
+      type="button"
       {...props}
-    />
+    >
+      {children}
+    </button>
   );
-}
+};
+
+Button.displayName = "Button";
 
 export { Button, buttonVariants };

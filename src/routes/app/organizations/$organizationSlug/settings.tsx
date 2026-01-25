@@ -1,20 +1,21 @@
-import { zodResolver } from "@hookform/resolvers/zod";
+import { useForm } from "@tanstack/react-form";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { RotateCcw, X } from "lucide-react";
 import { useState } from "react";
-import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import z from "zod";
 
 import { ImageUpload } from "~/components/image-upload";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "~/components/ui/card";
-import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from "~/components/ui/form";
 import { Input } from "~/components/ui/input";
+import { Label } from "~/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "~/components/ui/select";
 import { type AssignableOrganizationRole, AssignableOrganizationRoles } from "~/db/default-roles";
 import { useUser } from "~/lib/auth";
 import { useTRPC } from "~/lib/trpc";
+import { formatDate, getFormErrorString } from "~/lib/utils";
 
 export const Route = createFileRoute("/app/organizations/$organizationSlug/settings")({
   component: RouteComponent,
@@ -26,7 +27,7 @@ export const Route = createFileRoute("/app/organizations/$organizationSlug/setti
 });
 
 const FormZod = z.object({
-  logo: z.string().nullable().optional(),
+  logo: z.string().nullable(),
   name: z.string().min(1, "Organization name is required").max(100, "Name must be less than 100 characters"),
   slug: z
     .string()
@@ -65,22 +66,6 @@ function RouteComponent() {
   const [removingId, setRemovingId] = useState<null | string>(null);
   const [cancelingInvitationId, setCancelingInvitationId] = useState<null | string>(null);
 
-  const inviteForm = useForm<InviteFormValues>({
-    defaultValues: { email: "", role: "member" },
-    mode: "onBlur",
-    resolver: zodResolver(InviteFormZod),
-  });
-
-  const form = useForm<FormValues>({
-    defaultValues: {
-      logo: org.logo ?? null,
-      name: org.name,
-      slug: org.slug,
-    },
-    mode: "onBlur",
-    resolver: zodResolver(FormZod),
-  });
-
   const updateOrgMutation = useMutation(
     trpc.organization.update.mutationOptions({
       onSuccess: async (updatedOrg) => {
@@ -108,7 +93,6 @@ function RouteComponent() {
     trpc.organization.inviteMember.mutationOptions({
       onSuccess: async () => {
         toast.success("Invitation sent");
-        inviteForm.reset({ email: "", role: "member" });
         await queryClient.invalidateQueries(trpc.organization.get.queryOptions({ organizationSlug }));
       },
     }),
@@ -163,29 +147,56 @@ function RouteComponent() {
       .replace(/-+/g, "-")
       .replace(/^-|-$/g, "");
 
-  const onSubmit = (data: FormValues) => {
-    updateOrgMutation.mutate({
-      logo: data.logo ?? null,
-      name: data.name,
-      organizationId: org.id,
-      slug: data.slug,
-    });
-  };
+  const form = useForm({
+    defaultValues: {
+      logo: org.logo ?? null,
+      name: org.name,
+      slug: org.slug,
+    } as FormValues,
+    onSubmit: ({ value }) => {
+      updateOrgMutation.mutate({
+        logo: value.logo,
+        name: value.name,
+        organizationId: org.id,
+        slug: value.slug,
+      });
+    },
+    validators: {
+      onBlur: FormZod,
+      onSubmit: FormZod,
+    },
+  });
+
+  const inviteForm = useForm({
+    defaultValues: { email: "", role: "member" } as InviteFormValues,
+    onSubmit: async ({ formApi, value }) => {
+      await inviteMemberMutation.mutateAsync({
+        email: value.email,
+        organizationId: org.id,
+        role: value.role,
+      });
+      formApi.reset({ email: "", role: "member" });
+    },
+    validators: {
+      onBlur: InviteFormZod,
+      onSubmit: InviteFormZod,
+    },
+  });
 
   const handleLogoChange = (base64: string) => {
     setLogoData(base64);
-    form.setValue("logo", base64, { shouldDirty: true });
+    form.setFieldValue("logo", base64);
   };
 
   const handleNameChange = (name: string) => {
     if (!slugManuallyEdited) {
-      form.setValue("slug", slugFromName(name), { shouldDirty: true });
+      form.setFieldValue("slug", slugFromName(name));
     }
   };
 
   const handleSlugChange = (slug: string) => {
     setSlugManuallyEdited(true);
-    form.setValue("slug", slugFromName(slug), { shouldDirty: true });
+    form.setFieldValue("slug", slugFromName(slug));
   };
 
   return (
@@ -196,92 +207,115 @@ function RouteComponent() {
           <CardDescription>Update your organization details, including the slug used in URLs.</CardDescription>
         </CardHeader>
         <CardContent>
-          <Form {...form}>
-            <form className="space-y-6" onSubmit={form.handleSubmit(onSubmit)}>
-              <FormField
-                control={form.control}
-                name="logo"
-                render={() => (
-                  <FormItem>
-                    <FormLabel>Logo</FormLabel>
-                    <FormControl>
-                      <div className="w-32">
-                        <ImageUpload
-                          aspectRatio={1}
-                          disabled={updateOrgMutation.isPending}
-                          maxSizeKb={10_000}
-                          onChangeValue={handleLogoChange}
-                          placeholder="Upload organization logo"
-                          previewUrl={logoData ?? undefined}
-                        />
-                      </div>
-                    </FormControl>
-                    <FormDescription>Upload a logo for your organization (1:1 aspect ratio, max 10MB)</FormDescription>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+          <form
+            className="space-y-6"
+            onSubmit={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              void form.handleSubmit();
+            }}
+          >
+            <form.Field
+              children={() => (
+                <div className="grid gap-2">
+                  <Label>Logo</Label>
+                  <div className="w-32">
+                    <ImageUpload
+                      aspectRatio={1}
+                      disabled={updateOrgMutation.isPending}
+                      maxSizeKb={10_000}
+                      onChangeValue={handleLogoChange}
+                      placeholder="Upload organization logo"
+                      previewUrl={logoData ?? undefined}
+                    />
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    Upload a logo for your organization (1:1 aspect ratio, max 10MB)
+                  </p>
+                </div>
+              )}
+              name="logo"
+            />
 
-              <FormField
-                control={form.control}
-                name="name"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel htmlFor="name">Organization name</FormLabel>
-                    <FormControl>
-                      <Input
-                        disabled={updateOrgMutation.isPending}
-                        id="name"
-                        placeholder="My awesome organization"
-                        {...field}
-                        onChange={(e) => {
-                          field.onChange(e);
-                          handleNameChange(e.target.value);
-                        }}
-                      />
-                    </FormControl>
-                    <FormDescription>The name of your organization (1-100 characters)</FormDescription>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+            <form.Field
+              children={(field) => {
+                const isInvalid = field.state.meta.isTouched && !field.state.meta.isValid;
+                const error = field.state.meta.errors.at(0);
 
-              <FormField
-                control={form.control}
-                name="slug"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel htmlFor="slug">Slug</FormLabel>
-                    <FormControl>
-                      <Input
-                        disabled={updateOrgMutation.isPending}
-                        id="slug"
-                        placeholder="my-organization"
-                        {...field}
-                        onChange={(e) => handleSlugChange(e.target.value)}
-                      />
-                    </FormControl>
-                    <FormDescription>
+                return (
+                  <div className="grid gap-2">
+                    <Label htmlFor="name">Organization name</Label>
+                    <Input
+                      aria-describedby={isInvalid ? "name-error" : undefined}
+                      aria-invalid={isInvalid}
+                      disabled={updateOrgMutation.isPending}
+                      id="name"
+                      name={field.name}
+                      onBlur={field.handleBlur}
+                      onChange={(e) => {
+                        field.handleChange(e.target.value);
+                        handleNameChange(e.target.value);
+                      }}
+                      placeholder="My awesome organization"
+                      value={field.state.value}
+                    />
+                    <p className="text-sm text-muted-foreground">The name of your organization (1-100 characters)</p>
+                    {isInvalid ? (
+                      <p className="text-sm text-destructive" id="name-error">
+                        {getFormErrorString(error)}
+                      </p>
+                    ) : null}
+                  </div>
+                );
+              }}
+              name="name"
+            />
+
+            <form.Field
+              children={(field) => {
+                const isInvalid = field.state.meta.isTouched && !field.state.meta.isValid;
+                const error = field.state.meta.errors.at(0);
+
+                return (
+                  <div className="grid gap-2">
+                    <Label htmlFor="slug">Slug</Label>
+                    <Input
+                      aria-describedby={isInvalid ? "slug-error" : undefined}
+                      aria-invalid={isInvalid}
+                      disabled={updateOrgMutation.isPending}
+                      id="slug"
+                      name={field.name}
+                      onBlur={field.handleBlur}
+                      onChange={(e) => handleSlugChange(e.target.value)}
+                      placeholder="my-organization"
+                      value={field.state.value}
+                    />
+                    <p className="text-sm text-muted-foreground">
                       URL-friendly identifier (lowercase, hyphens only, 1-50 characters). Changing this updates the URL
                       used to access the organization.
-                    </FormDescription>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+                    </p>
+                    {isInvalid ? (
+                      <p className="text-sm text-destructive" id="slug-error">
+                        {getFormErrorString(error)}
+                      </p>
+                    ) : null}
+                  </div>
+                );
+              }}
+              name="slug"
+            />
 
-              <div className="flex items-center justify-end gap-2">
-                <Button
-                  disabled={updateOrgMutation.isPending}
-                  loading={updateOrgMutation.isPending}
-                  type="submit"
-                  variant="default"
-                >
-                  Save changes
-                </Button>
-              </div>
-            </form>
-          </Form>
+            <div className="flex items-center justify-end gap-2">
+              <Button
+                disabled={updateOrgMutation.isPending}
+                loading={updateOrgMutation.isPending}
+                type="submit"
+                variant="default"
+              >
+                Save changes
+              </Button>
+            </div>
+          </form>
         </CardContent>
       </Card>
 
@@ -292,75 +326,87 @@ function RouteComponent() {
             <CardDescription>Send an invitation to join this organization.</CardDescription>
           </CardHeader>
           <CardContent>
-            <Form {...inviteForm}>
-              <form
-                className="space-y-4"
-                onSubmit={inviteForm.handleSubmit((data) => {
-                  inviteMemberMutation.mutate({
-                    email: data.email,
-                    organizationId: org.id,
-                    role: data.role,
-                  });
-                })}
-              >
-                <FormField
-                  control={inviteForm.control}
-                  name="email"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Email</FormLabel>
-                      <FormControl>
-                        <Input
-                          disabled={inviteMemberMutation.isPending}
-                          placeholder="member@example.com"
-                          type="email"
-                          {...field}
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
+            <form
+              className="space-y-4"
+              onSubmit={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                void inviteForm.handleSubmit();
+              }}
+            >
+              <inviteForm.Field
+                children={(field) => {
+                  const isInvalid = field.state.meta.isTouched && !field.state.meta.isValid;
+                  const error = field.state.meta.errors.at(0);
 
-                <FormField
-                  control={inviteForm.control}
-                  name="role"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Role</FormLabel>
-                      <FormControl>
-                        <Select
-                          disabled={inviteMemberMutation.isPending}
-                          onValueChange={field.onChange}
-                          value={field.value}
+                  return (
+                    <div className="grid gap-2">
+                      <Label>Email</Label>
+                      <Input
+                        aria-describedby={isInvalid ? "invite-email-error" : undefined}
+                        aria-invalid={isInvalid}
+                        disabled={inviteMemberMutation.isPending}
+                        name={field.name}
+                        onBlur={field.handleBlur}
+                        onChange={(e) => field.handleChange(e.target.value)}
+                        placeholder="member@example.com"
+                        type="email"
+                        value={field.state.value}
+                      />
+                      {isInvalid ? (
+                        <p className="text-sm text-destructive" id="invite-email-error">
+                          {getFormErrorString(error)}
+                        </p>
+                      ) : null}
+                    </div>
+                  );
+                }}
+                name="email"
+              />
+
+              <inviteForm.Field
+                children={(field) => {
+                  const isInvalid = field.state.meta.isTouched && !field.state.meta.isValid;
+                  const error = field.state.meta.errors.at(0);
+
+                  return (
+                    <div className="grid gap-2">
+                      <Label>Role</Label>
+                      <Select
+                        disabled={inviteMemberMutation.isPending}
+                        onValueChange={(value) => field.handleChange(value as AssignableOrganizationRole)}
+                        value={field.state.value}
+                      >
+                        <SelectTrigger
+                          aria-describedby={isInvalid ? "invite-role-error" : undefined}
+                          aria-invalid={isInvalid}
                         >
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select role" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {memberRoleOptions.map((opt) => (
-                              <SelectItem key={opt.value} value={opt.value}>
-                                {opt.label}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </FormControl>
-                      <FormDescription>Choose the default role for this invite.</FormDescription>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
+                          <SelectValue placeholder="Select role" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {memberRoleOptions.map((opt) => (
+                            <SelectItem key={opt.value} value={opt.value}>
+                              {opt.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <p className="text-sm text-muted-foreground">Choose the default role for this invite.</p>
+                      {isInvalid ? (
+                        <p className="text-sm text-destructive" id="invite-role-error">
+                          {getFormErrorString(error)}
+                        </p>
+                      ) : null}
+                    </div>
+                  );
+                }}
+                name="role"
+              />
 
-                <Button
-                  disabled={inviteMemberMutation.isPending}
-                  loading={inviteMemberMutation.isPending}
-                  type="submit"
-                >
-                  Send invite
-                </Button>
-              </form>
-            </Form>
+              <Button disabled={inviteMemberMutation.isPending} loading={inviteMemberMutation.isPending} type="submit">
+                Send invite
+              </Button>
+            </form>
           </CardContent>
         </Card>
 
@@ -376,29 +422,68 @@ function RouteComponent() {
               <div className="space-y-3">
                 {org.invitations.map((invitation) => {
                   const isCanceling = cancelingInvitationId === invitation.id && cancelInvitationMutation.isPending;
+                  const isExpired = new Date(invitation.expiresAt) < new Date();
+
                   return (
                     <div className="flex items-center justify-between rounded-md border p-3" key={invitation.id}>
                       <div className="flex-1">
                         <p className="text-sm font-medium">{invitation.email}</p>
                         <p className="text-xs text-muted-foreground">
-                          Role: <span className="capitalize">{invitation.role}</span> • Expires:{" "}
-                          {new Date(invitation.expiresAt).toUTCString()}
+                          Role: <span className="capitalize">{invitation.role}</span> •{" "}
+                          {isExpired ? "Expired" : "Expires"}: {formatDate(invitation.expiresAt, { smart: true })}
                         </p>
                       </div>
-                      <Button
-                        disabled={isCanceling}
-                        loading={isCanceling}
-                        onClick={() => {
-                          cancelInvitationMutation.mutate({
-                            invitationId: invitation.id,
-                            organizationId: org.id,
-                          });
-                        }}
-                        size="sm"
-                        variant="outline"
-                      >
-                        Cancel
-                      </Button>
+                      <div className="flex items-center gap-2">
+                        {isExpired ? (
+                          <>
+                            <Button
+                              disabled={inviteMemberMutation.isPending}
+                              loading={inviteMemberMutation.isPending}
+                              onClick={() => {
+                                inviteMemberMutation.mutate({
+                                  email: invitation.email,
+                                  organizationId: org.id,
+                                  role: invitation.role,
+                                });
+                              }}
+                              size="sm"
+                              variant="outline"
+                            >
+                              <RotateCcw className="mr-2 h-4 w-4" />
+                              Resend
+                            </Button>
+                            <Button
+                              disabled={isCanceling}
+                              loading={isCanceling}
+                              onClick={() => {
+                                cancelInvitationMutation.mutate({
+                                  invitationId: invitation.id,
+                                  organizationId: org.id,
+                                });
+                              }}
+                              size="icon"
+                              variant="ghost"
+                            >
+                              <X className="h-4 w-4" />
+                            </Button>
+                          </>
+                        ) : (
+                          <Button
+                            disabled={isCanceling}
+                            loading={isCanceling}
+                            onClick={() => {
+                              cancelInvitationMutation.mutate({
+                                invitationId: invitation.id,
+                                organizationId: org.id,
+                              });
+                            }}
+                            size="sm"
+                            variant="outline"
+                          >
+                            Cancel
+                          </Button>
+                        )}
+                      </div>
                     </div>
                   );
                 })}

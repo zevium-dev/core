@@ -1,10 +1,9 @@
-import { arktypeResolver } from "@hookform/resolvers/arktype";
 import { SiGoogle } from "@icons-pack/react-simple-icons";
+import { useForm } from "@tanstack/react-form";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { type } from "arktype";
 import { useRef, useState } from "react";
-import { useForm } from "react-hook-form";
 
 import { CapWidget, type CapWidgetElement } from "~/components/cap-widget";
 import { Redirect } from "~/components/redirect";
@@ -15,7 +14,7 @@ import { Label } from "~/components/ui/label";
 import { ScreenCenter } from "~/components/ui/screen-center";
 import { auth, useSession } from "~/lib/auth";
 import { CAPTCHA_HEADER_KEY } from "~/lib/constants";
-import { cn } from "~/lib/utils";
+import { cn, getFormErrorString } from "~/lib/utils";
 
 export const FormValuesArk = type({
   email: "string.email",
@@ -36,16 +35,6 @@ function RouteComponent() {
   const user = useSession().user;
   const navigate = Route.useNavigate();
 
-  const {
-    formState: { errors, isSubmitting },
-    handleSubmit,
-    register,
-  } = useForm<FormValues>({
-    defaultValues: { email: "", password: "" },
-    mode: "onBlur",
-    resolver: arktypeResolver(FormValuesArk),
-  });
-
   const signInMutation = useMutation({
     mutationFn: (data: FormValues) => {
       const headers = new Headers();
@@ -61,9 +50,18 @@ function RouteComponent() {
     },
   });
 
-  const onSubmit = (data: FormValues) => {
-    signInMutation.mutate(data);
-  };
+  const form = useForm({
+    defaultValues: { email: "", password: "" } satisfies FormValues,
+    onSubmit: ({ value }) => {
+      signInMutation.mutate(value);
+    },
+    validators: {
+      onBlur: FormValuesArk,
+      onSubmit: FormValuesArk,
+    },
+  });
+
+  const isSubmitting = signInMutation.isPending;
 
   const onGoogle = () => {
     void auth.signIn.social({ provider: "google" });
@@ -81,7 +79,13 @@ function RouteComponent() {
             <CardTitle className="text-xl">Sign in</CardTitle>
           </CardHeader>
           <CardContent>
-            <form onSubmit={handleSubmit(onSubmit)}>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                void form.handleSubmit();
+              }}
+            >
               <div className="grid gap-6">
                 <div className="flex flex-col gap-4">
                   <Button className="w-full" loading={isSubmitting} onClick={onGoogle} type="button" variant="outline">
@@ -106,67 +110,95 @@ function RouteComponent() {
                   </span>
                 </div>
                 <div className="grid gap-6">
-                  <div className="grid gap-3">
-                    <Label htmlFor="email">Email</Label>
-                    <Input
-                      aria-describedby={errors.email ? "email-error" : undefined}
-                      aria-invalid={!!errors.email}
-                      disabled={isSubmitting}
-                      id="email"
-                      placeholder="me@example.com"
-                      type="email"
-                      {...register("email")}
-                    />
-                    <p
-                      className={cn(
-                        "text-end text-xs text-destructive",
-                        !errors.email &&
-                          `
+                  <form.Field
+                    children={(field) => {
+                      const isInvalid = field.state.meta.isTouched && !field.state.meta.isValid;
+                      const error = field.state.meta.errors.at(0);
+
+                      return (
+                        <div className="grid gap-3">
+                          <Label htmlFor="email">Email</Label>
+                          <Input
+                            aria-describedby={isInvalid ? "email-error" : undefined}
+                            aria-invalid={isInvalid}
+                            disabled={isSubmitting}
+                            id="email"
+                            name={field.name}
+                            onBlur={field.handleBlur}
+                            onChange={(e) => field.handleChange(e.target.value)}
+                            placeholder="me@example.com"
+                            type="email"
+                            value={field.state.value}
+                          />
+                          <p
+                            className={cn(
+                              "text-end text-xs text-destructive",
+                              !isInvalid &&
+                                `
                         invisible
                       `,
-                      )}
-                      id="email-error"
-                    >
-                      {errors.email?.message ?? "No error"}
-                    </p>
-                  </div>
-                  <div className="grid gap-3">
-                    <div className="flex items-center">
-                      <Label className="mt-0.5" htmlFor="password">
-                        Password
-                      </Label>
-                      <Link
-                        className={`
+                            )}
+                            id="email-error"
+                          >
+                            {isInvalid ? getFormErrorString(error) : "No error"}
+                          </p>
+                        </div>
+                      );
+                    }}
+                    name="email"
+                  />
+
+                  <form.Field
+                    children={(field) => {
+                      const isInvalid = field.state.meta.isTouched && !field.state.meta.isValid;
+                      const error = field.state.meta.errors.at(0);
+
+                      return (
+                        <div className="grid gap-3">
+                          <div className="flex items-center">
+                            <Label className="mt-0.5" htmlFor="password">
+                              Password
+                            </Label>
+                            <Link
+                              className={`
                         ml-auto text-xs
                         hover:underline
                       `}
-                        tabIndex={-1}
-                        to="/auth/forgot-password"
-                      >
-                        Forgot your password?
-                      </Link>
-                    </div>
-                    <Input
-                      aria-describedby={errors.password ? "password-error" : undefined}
-                      aria-invalid={!!errors.password}
-                      disabled={isSubmitting}
-                      id="password"
-                      type="password"
-                      {...register("password")}
-                    />
-                    <p
-                      className={cn(
-                        "text-end text-xs text-destructive",
-                        !errors.password &&
-                          `
+                              tabIndex={-1}
+                              to="/auth/forgot-password"
+                            >
+                              Forgot your password?
+                            </Link>
+                          </div>
+                          <Input
+                            aria-describedby={isInvalid ? "password-error" : undefined}
+                            aria-invalid={isInvalid}
+                            disabled={isSubmitting}
+                            id="password"
+                            name={field.name}
+                            onBlur={field.handleBlur}
+                            onChange={(e) => field.handleChange(e.target.value)}
+                            type="password"
+                            value={field.state.value}
+                          />
+                          <p
+                            className={cn(
+                              "text-end text-xs text-destructive",
+                              !isInvalid &&
+                                `
                         invisible
                       `,
-                      )}
-                      id="password-error"
-                    >
-                      {errors.password?.message ?? "No error"}
-                    </p>
-                  </div>
+                            )}
+                            id="password-error"
+                          >
+                            {isInvalid ? getFormErrorString(error) : "No error"}
+                          </p>
+                        </div>
+                      );
+                    }}
+                    name="password"
+                  />
+
                   <CapWidget onSolve={setCapToken} ref={capRef} />
                   <Button className="w-full" loading={isSubmitting} type="submit">
                     Sign in

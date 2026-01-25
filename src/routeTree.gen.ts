@@ -29,6 +29,7 @@ import { Route as AppDashboardRouteImport } from './routes/app/dashboard'
 import { Route as AppCatalogueRouteImport } from './routes/app/catalogue'
 import { Route as InternalImageUploadTestRouteImport } from './routes/$internal/image-upload-test'
 import { Route as InternalEmailTemplatesPreviewRouteImport } from './routes/$internal/email-templates-preview'
+import { Route as InternalConfirmTestRouteImport } from './routes/$internal/confirm-test'
 import { Route as AppSettingsIndexRouteImport } from './routes/app/settings/index'
 import { Route as AppOrganizationsIndexRouteImport } from './routes/app/organizations/index'
 import { Route as AppSettingsPreferenceRouteImport } from './routes/app/settings/preference'
@@ -156,6 +157,11 @@ const InternalEmailTemplatesPreviewRoute =
     path: '/$internal/email-templates-preview',
     getParentRoute: () => rootRouteImport,
   } as any)
+const InternalConfirmTestRoute = InternalConfirmTestRouteImport.update({
+  id: '/$internal/confirm-test',
+  path: '/$internal/confirm-test',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AppSettingsIndexRoute = AppSettingsIndexRouteImport.update({
   id: '/settings/',
   path: '/settings/',
@@ -295,6 +301,7 @@ const AppOrganizationsOrganizationSlugProjectsProjectSlugSpecRoute =
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/app': typeof AppRouteWithChildren
+  '/$internal/confirm-test': typeof InternalConfirmTestRoute
   '/$internal/email-templates-preview': typeof InternalEmailTemplatesPreviewRoute
   '/$internal/image-upload-test': typeof InternalImageUploadTestRoute
   '/app/catalogue': typeof AppCatalogueRoute
@@ -341,6 +348,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/$internal/confirm-test': typeof InternalConfirmTestRoute
   '/$internal/email-templates-preview': typeof InternalEmailTemplatesPreviewRoute
   '/$internal/image-upload-test': typeof InternalImageUploadTestRoute
   '/app/catalogue': typeof AppCatalogueRoute
@@ -386,6 +394,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/app': typeof AppRouteWithChildren
+  '/$internal/confirm-test': typeof InternalConfirmTestRoute
   '/$internal/email-templates-preview': typeof InternalEmailTemplatesPreviewRoute
   '/$internal/image-upload-test': typeof InternalImageUploadTestRoute
   '/app/catalogue': typeof AppCatalogueRoute
@@ -435,6 +444,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/app'
+    | '/$internal/confirm-test'
     | '/$internal/email-templates-preview'
     | '/$internal/image-upload-test'
     | '/app/catalogue'
@@ -481,6 +491,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/$internal/confirm-test'
     | '/$internal/email-templates-preview'
     | '/$internal/image-upload-test'
     | '/app/catalogue'
@@ -525,6 +536,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/app'
+    | '/$internal/confirm-test'
     | '/$internal/email-templates-preview'
     | '/$internal/image-upload-test'
     | '/app/catalogue'
@@ -573,6 +585,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AppRoute: typeof AppRouteWithChildren
+  InternalConfirmTestRoute: typeof InternalConfirmTestRoute
   InternalEmailTemplatesPreviewRoute: typeof InternalEmailTemplatesPreviewRoute
   InternalImageUploadTestRoute: typeof InternalImageUploadTestRoute
   AuthChangePasswordRoute: typeof AuthChangePasswordRoute
@@ -735,6 +748,13 @@ declare module '@tanstack/react-router' {
       path: '/$internal/email-templates-preview'
       fullPath: '/$internal/email-templates-preview'
       preLoaderRoute: typeof InternalEmailTemplatesPreviewRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/$internal/confirm-test': {
+      id: '/$internal/confirm-test'
+      path: '/$internal/confirm-test'
+      fullPath: '/$internal/confirm-test'
+      preLoaderRoute: typeof InternalConfirmTestRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/app/settings/': {
@@ -1023,6 +1043,7 @@ const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AppRoute: AppRouteWithChildren,
+  InternalConfirmTestRoute: InternalConfirmTestRoute,
   InternalEmailTemplatesPreviewRoute: InternalEmailTemplatesPreviewRoute,
   InternalImageUploadTestRoute: InternalImageUploadTestRoute,
   AuthChangePasswordRoute: AuthChangePasswordRoute,

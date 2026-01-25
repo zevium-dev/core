@@ -1,24 +1,25 @@
-import { zodResolver } from "@hookform/resolvers/zod";
+import { useForm } from "@tanstack/react-form";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, useNavigate, useParams } from "@tanstack/react-router";
-import { useForm } from "react-hook-form";
+import { useState } from "react";
 import { toast } from "sonner";
 import z from "zod";
 
 import { Button } from "~/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "~/components/ui/card";
-import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from "~/components/ui/form";
 import { Input } from "~/components/ui/input";
+import { Label } from "~/components/ui/label";
 import { ScreenCenter } from "~/components/ui/screen-center";
 import { Textarea } from "~/components/ui/textarea";
 import { useTRPC } from "~/lib/trpc";
+import { getFormErrorString } from "~/lib/utils";
 
 export const Route = createFileRoute("/app/organizations/$organizationSlug/projects/create")({
   component: RouteComponent,
 });
 
 const FormZod = z.object({
-  description: z.string().max(500, "Description must be less than 500 characters").optional(),
+  description: z.string().max(500, "Description must be less than 500 characters"),
   name: z.string().min(1, "Project name is required").max(100, "Name must be less than 100 characters"),
   slug: z
     .string()
@@ -34,6 +35,7 @@ function RouteComponent() {
   const { organizationSlug } = useParams({ from: "/app/organizations/$organizationSlug/projects/create" });
   const trpc = useTRPC();
   const queryClient = useQueryClient();
+  const [slugManuallyEdited, setSlugManuallyEdited] = useState(false);
 
   const orgQuery = useQuery(trpc.organization.get.queryOptions({ organizationSlug }));
 
@@ -48,29 +50,30 @@ function RouteComponent() {
     }),
   );
 
-  const form = useForm<FormValues>({
+  const form = useForm({
     defaultValues: {
       description: "",
       name: "",
       slug: "",
+    } satisfies FormValues,
+    onSubmit: ({ value }) => {
+      if (!orgQuery.data) {
+        toast.error("Organization not found");
+        return;
+      }
+
+      createProjectMutation.mutate({
+        description: value.description,
+        name: value.name,
+        organizationSlug,
+        slug: value.slug,
+      });
     },
-    mode: "onBlur",
-    resolver: zodResolver(FormZod),
+    validators: {
+      onBlur: FormZod,
+      onSubmit: FormZod,
+    },
   });
-
-  const onSubmit = (data: FormValues) => {
-    if (!orgQuery.data) {
-      toast.error("Organization not found");
-      return;
-    }
-
-    createProjectMutation.mutate({
-      description: data.description ?? "",
-      name: data.name,
-      organizationSlug,
-      slug: data.slug,
-    });
-  };
 
   const slugFromName = (name: string) => {
     return name
@@ -82,8 +85,8 @@ function RouteComponent() {
   };
 
   const handleNameChange = (name: string) => {
-    if (!form.getValues("slug") || form.getValues("slug") === "") {
-      form.setValue("slug", slugFromName(name));
+    if (!slugManuallyEdited) {
+      form.setFieldValue("slug", slugFromName(name));
     }
   };
 
@@ -97,79 +100,122 @@ function RouteComponent() {
           <CardDescription>Set up a new project to manage your APIs</CardDescription>
         </CardHeader>
         <CardContent>
-          <Form {...form}>
-            <form className="space-y-6" onSubmit={form.handleSubmit(onSubmit)}>
-              {/* Project Name */}
-              <FormField
-                control={form.control}
-                name="name"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel htmlFor="name">Project Name</FormLabel>
-                    <FormControl>
-                      <Input
-                        disabled={isPending}
-                        id="name"
-                        placeholder="My awesome API project"
-                        {...field}
-                        onChange={(e) => {
-                          field.onChange(e);
-                          handleNameChange(e.target.value);
-                        }}
-                      />
-                    </FormControl>
-                    <FormDescription>The name of your project (1-100 characters)</FormDescription>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+          <form
+            className="space-y-6"
+            onSubmit={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              void form.handleSubmit();
+            }}
+          >
+            <form.Field
+              children={(field) => {
+                const isInvalid = field.state.meta.isTouched && !field.state.meta.isValid;
+                const error = field.state.meta.errors.at(0);
 
-              {/* Slug */}
-              <FormField
-                control={form.control}
-                name="slug"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel htmlFor="slug">Slug</FormLabel>
-                    <FormControl>
-                      <Input disabled={isPending} id="slug" placeholder="my-api-project" {...field} />
-                    </FormControl>
-                    <FormDescription>
+                return (
+                  <div className="grid gap-2">
+                    <Label htmlFor="name">Project Name</Label>
+                    <Input
+                      aria-describedby={isInvalid ? "name-error" : undefined}
+                      aria-invalid={isInvalid}
+                      disabled={isPending}
+                      id="name"
+                      name={field.name}
+                      onBlur={field.handleBlur}
+                      onChange={(e) => {
+                        field.handleChange(e.target.value);
+                        handleNameChange(e.target.value);
+                      }}
+                      placeholder="My awesome API project"
+                      value={field.state.value}
+                    />
+                    <p className="text-sm text-muted-foreground">The name of your project (1-100 characters)</p>
+                    {isInvalid ? (
+                      <p className="text-sm text-destructive" id="name-error">
+                        {getFormErrorString(error)}
+                      </p>
+                    ) : null}
+                  </div>
+                );
+              }}
+              name="name"
+            />
+
+            <form.Field
+              children={(field) => {
+                const isInvalid = field.state.meta.isTouched && !field.state.meta.isValid;
+                const error = field.state.meta.errors.at(0);
+
+                return (
+                  <div className="grid gap-2">
+                    <Label htmlFor="slug">Slug</Label>
+                    <Input
+                      aria-describedby={isInvalid ? "slug-error" : undefined}
+                      aria-invalid={isInvalid}
+                      disabled={isPending}
+                      id="slug"
+                      name={field.name}
+                      onBlur={field.handleBlur}
+                      onChange={(e) => {
+                        setSlugManuallyEdited(true);
+                        field.handleChange(e.target.value);
+                      }}
+                      placeholder="my-api-project"
+                      value={field.state.value}
+                    />
+                    <p className="text-sm text-muted-foreground">
                       URL-friendly identifier (lowercase, hyphens only, 1-50 characters)
-                    </FormDescription>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+                    </p>
+                    {isInvalid ? (
+                      <p className="text-sm text-destructive" id="slug-error">
+                        {getFormErrorString(error)}
+                      </p>
+                    ) : null}
+                  </div>
+                );
+              }}
+              name="slug"
+            />
 
-              {/* Description */}
-              <FormField
-                control={form.control}
-                name="description"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel htmlFor="description">Description</FormLabel>
-                    <FormControl>
-                      <Textarea
-                        className="resize-none"
-                        disabled={isPending}
-                        id="description"
-                        placeholder="A brief description of your project"
-                        {...field}
-                      />
-                    </FormControl>
-                    <FormDescription>A brief description of your project (max 500 characters)</FormDescription>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+            <form.Field
+              children={(field) => {
+                const isInvalid = field.state.meta.isTouched && !field.state.meta.isValid;
+                const error = field.state.meta.errors.at(0);
 
-              {/* Submit Button */}
-              <Button className="w-full" disabled={isPending} loading={isPending} type="submit">
-                Create Project
-              </Button>
-            </form>
-          </Form>
+                return (
+                  <div className="grid gap-2">
+                    <Label htmlFor="description">Description</Label>
+                    <Textarea
+                      aria-describedby={isInvalid ? "description-error" : undefined}
+                      aria-invalid={isInvalid}
+                      className="resize-none"
+                      disabled={isPending}
+                      id="description"
+                      name={field.name}
+                      onBlur={field.handleBlur}
+                      onChange={(e) => field.handleChange(e.target.value)}
+                      placeholder="A brief description of your project"
+                      value={field.state.value}
+                    />
+                    <p className="text-sm text-muted-foreground">
+                      A brief description of your project (max 500 characters)
+                    </p>
+                    {isInvalid ? (
+                      <p className="text-sm text-destructive" id="description-error">
+                        {getFormErrorString(error)}
+                      </p>
+                    ) : null}
+                  </div>
+                );
+              }}
+              name="description"
+            />
+
+            <Button className="w-full" disabled={isPending} loading={isPending} type="submit">
+              Create Project
+            </Button>
+          </form>
         </CardContent>
       </Card>
     </ScreenCenter>

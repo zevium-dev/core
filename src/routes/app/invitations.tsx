@@ -9,6 +9,7 @@ import type { AppRouter } from "~/server";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "~/components/ui/card";
 import { useTRPC } from "~/lib/trpc";
+import { formatDate } from "~/lib/utils";
 
 type Invitation = inferRouterOutputs<AppRouter>["organization"]["userInvitations"][number];
 
@@ -19,6 +20,7 @@ interface InvitationRowProps {
 }
 
 function InvitationRow({ invitation, isPending, onClick }: InvitationRowProps) {
+  const isExpired = new Date(invitation.expiresAt) < new Date();
   return (
     <div className="flex flex-col gap-3 rounded-md border p-3 sm:flex-row sm:items-center sm:justify-between">
       <div className="flex-1">
@@ -27,11 +29,19 @@ function InvitationRow({ invitation, isPending, onClick }: InvitationRowProps) {
         <p className="text-xs text-muted-foreground">
           Role: <span className="font-medium capitalize">{invitation.role}</span>
         </p>
-        <p className="text-xs text-muted-foreground">Expires: {new Date(invitation.expiresAt).toUTCString()}</p>
+        <p className="text-xs text-muted-foreground">
+          {isExpired ? "Expired" : "Expires"}: {formatDate(invitation.expiresAt, { smart: true })}
+        </p>
       </div>
       <div className="flex gap-2">
-        <Button disabled={isPending} loading={isPending} onClick={onClick} size="sm" variant="default">
-          Accept
+        <Button
+          disabled={isPending || isExpired}
+          loading={isPending}
+          onClick={onClick}
+          size="sm"
+          variant={isExpired ? "secondary" : "default"}
+        >
+          {isExpired ? "Expired" : "Accept"}
         </Button>
       </div>
     </div>

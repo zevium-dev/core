@@ -2,11 +2,12 @@ import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-q
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { Code, FileText, Globe, Lock, Settings } from "lucide-react";
 
+import { useConfirm } from "~/components/confirm-dialog";
 import { PageHeaderContent } from "~/components/sidebar";
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "~/components/ui/card";
-import { Typography } from "~/components/ui/typography";
+import { CopyText, Typography } from "~/components/ui/typography";
 import { useTRPC } from "~/lib/trpc";
 import { formatDate } from "~/lib/utils";
 
@@ -46,6 +47,7 @@ export const Route = createFileRoute("/app/organizations/$organizationSlug/proje
 function RouteComponent() {
   const { organizationSlug, projectSlug } = Route.useParams();
   const trpc = useTRPC();
+  const confirm = useConfirm();
 
   const projectQuery = useSuspenseQuery(trpc.project.get.queryOptions({ organizationSlug, projectSlug }));
   const organizationDetailsQuery = useSuspenseQuery(trpc.organization.get.queryOptions({ organizationSlug }));
@@ -54,15 +56,7 @@ function RouteComponent() {
   const visibilityMutation = useProjectVisibilityMutation(organizationSlug, projectSlug);
 
   const visibilityIcon =
-    project.visibility === "public" ? (
-      <Globe
-        className={`
-    h-4 w-4
-  `}
-      />
-    ) : (
-      <Lock className={`h-4 w-4`} />
-    );
+    project.visibility === "public" ? <Globe className={`h-4 w-4`} /> : <Lock className={`h-4 w-4`} />;
 
   return (
     <div className="space-y-6 p-6">
@@ -90,16 +84,29 @@ function RouteComponent() {
               <Button
                 disabled={visibilityMutation.isPending}
                 onClick={() => {
-                  visibilityMutation.mutate({
-                    description: project.description,
-                    documentation: project.documentation,
-                    id: project.id,
-                    name: project.name,
-                    organizationSlug,
-                    status: project.status,
-                    tagNames: project.project_tags.map((tag) => tag.tagName),
-                    variables: project.variables ?? undefined,
-                    visibility: project.visibility === "public" ? "private" : "public",
+                  const nextVisibility = project.visibility === "public" ? "private" : "public";
+
+                  void confirm({
+                    confirmText: nextVisibility === "public" ? "Make Public" : "Make Private",
+                    description:
+                      nextVisibility === "public"
+                        ? "This will make the project visible to anyone with the link."
+                        : "This will hide the project from public access.",
+                    title: nextVisibility === "public" ? "Make project public?" : "Make project private?",
+                  }).then((confirmed) => {
+                    if (!confirmed) return;
+
+                    visibilityMutation.mutate({
+                      description: project.description,
+                      documentation: project.documentation,
+                      id: project.id,
+                      name: project.name,
+                      organizationSlug,
+                      status: project.status,
+                      tagNames: project.project_tags.map((tag) => tag.tagName),
+                      variables: project.variables ?? undefined,
+                      visibility: nextVisibility,
+                    });
                   });
                 }}
                 size="sm"
@@ -138,25 +145,25 @@ function RouteComponent() {
             </div>
           </div>
           <div className="mt-4 flex flex-wrap gap-6 border-t pt-4">
-            <div className="flex gap-2">
+            <div className="flex items-center gap-2">
               <Typography className="font-medium text-muted-foreground" variant="small">
                 Created:
               </Typography>
-              <Typography variant="small">{formatDate(project.createdAt)}</Typography>
+              <Typography variant="small">{formatDate(project.createdAt, { smart: true })}</Typography>
             </div>
-            <div className="flex gap-2">
+            <div className="flex items-center gap-2">
               <Typography className="font-medium text-muted-foreground" variant="small">
                 Project ID:
               </Typography>
-              <Typography className="font-mono text-xs" variant="small">
+              <CopyText textClassName="font-mono text-xs" variant="small">
                 {project.id}
-              </Typography>
+              </CopyText>
             </div>
-            <div className="flex gap-2">
+            <div className="flex items-center gap-2">
               <Typography className="font-medium text-muted-foreground" variant="small">
                 Updated:
               </Typography>
-              <Typography variant="small">{formatDate(project.updatedAt)}</Typography>
+              <Typography variant="small">{formatDate(project.updatedAt, { smart: true })}</Typography>
             </div>
           </div>
         </CardHeader>
@@ -213,20 +220,6 @@ function RouteComponent() {
                 </Badge>
               ))}
             </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Project Metadata */}
-      {project.metadata && Object.keys(project.metadata).length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg">Metadata</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <pre className="overflow-x-auto rounded bg-muted p-4 text-xs">
-              {JSON.stringify(project.metadata, null, 2)}
-            </pre>
           </CardContent>
         </Card>
       )}

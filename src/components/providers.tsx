@@ -3,9 +3,10 @@ import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
 import { useLocation } from "@tanstack/react-router";
 import { Provider as JotaiProvider } from "jotai";
 import { domAnimation, LazyMotion } from "motion/react";
-import { PostHogProvider } from "posthog-js/react";
+import { PostHogErrorBoundary, PostHogProvider } from "posthog-js/react";
 import React from "react";
 
+import { ConfirmProvider } from "~/components/confirm-dialog";
 import { ThemeProvider } from "~/components/theme-provider";
 import { SidebarInset, SidebarProvider } from "~/components/ui/sidebar";
 import { clientEnv } from "~/env/client";
@@ -28,7 +29,8 @@ const PHProvider: React.FC<React.PropsWithChildren> = ({ children }) => {
         api_host: "/api/posthog",
         capture_exceptions: true,
         debug: import.meta.env.MODE === "development",
-        defaults: "2025-05-24",
+        defaults: "2025-11-30",
+        person_profiles: "identified_only",
         ui_host: "https://us.posthog.com",
       }}
     >
@@ -45,11 +47,12 @@ export const Providers: React.FC<React.PropsWithChildren> = ({ children }) => {
 
   return (
     <PHProvider>
-        <QueryClientProvider client={queryClient}>
-          <TRPCProvider queryClient={queryClient} trpcClient={trpcClient}>
-            <ThemeProvider defaultTheme="dark" storageKey="vite-ui-theme">
-              <LazyMotion features={domAnimation} strict>
-                <JotaiProvider>
+      <QueryClientProvider client={queryClient}>
+        <TRPCProvider queryClient={queryClient} trpcClient={trpcClient}>
+          <ThemeProvider defaultTheme="dark" storageKey="vite-ui-theme">
+            <LazyMotion features={domAnimation} strict>
+              <JotaiProvider>
+                <ConfirmProvider>
                   <Toaster richColors />
                   <PostHogIdentify />
                   {!isAppRoute && (
@@ -62,12 +65,13 @@ export const Providers: React.FC<React.PropsWithChildren> = ({ children }) => {
                     </SidebarProvider>
                   )}
                   {isAppRoute && children}
-                </JotaiProvider>
-              </LazyMotion>
-            </ThemeProvider>
-            <ReactQueryDevtools />
-          </TRPCProvider>
-        </QueryClientProvider>
+                </ConfirmProvider>
+              </JotaiProvider>
+            </LazyMotion>
+          </ThemeProvider>
+          <ReactQueryDevtools />
+        </TRPCProvider>
+      </QueryClientProvider>
     </PHProvider>
   );
 };

@@ -215,7 +215,7 @@ function SidebarGroupAction({
   asChild = false,
   className,
   ...props
-}: { asChild?: boolean } & React.ComponentProps<"button">) {
+}: { asChild?: boolean } & React.ComponentPropsWithoutRef<"button">) {
   const Comp = asChild ? Slot : "button";
 
   return (
@@ -259,7 +259,7 @@ function SidebarGroupLabel({
   asChild = false,
   className,
   ...props
-}: { asChild?: boolean } & React.ComponentProps<"div">) {
+}: { asChild?: boolean } & React.ComponentPropsWithoutRef<"div">) {
   const Comp = asChild ? Slot : "div";
 
   return (
@@ -587,7 +587,7 @@ function SidebarMenuAction({
 }: {
   asChild?: boolean;
   showOnHover?: boolean;
-} & React.ComponentProps<"button">) {
+} & React.ComponentPropsWithoutRef<"button">) {
   const Comp = asChild ? Slot : "button";
 
   return (
@@ -666,7 +666,7 @@ function SidebarMenuButton({
   asChild?: boolean;
   isActive?: boolean;
   tooltip?: React.ComponentProps<typeof TooltipContent> | string;
-} & React.ComponentProps<"button"> &
+} & React.ComponentPropsWithoutRef<"button"> &
   VariantProps<typeof sidebarMenuButtonVariants>) {
   const Comp = asChild ? Slot : "button";
   const { isMobile, state } = useSidebar();
@@ -761,7 +761,7 @@ function SidebarMenuSubButton({
   asChild?: boolean;
   isActive?: boolean;
   size?: "md" | "sm";
-} & React.ComponentProps<"a">) {
+} & React.ComponentPropsWithoutRef<"a">) {
   const Comp = asChild ? Slot : "a";
 
   return (
