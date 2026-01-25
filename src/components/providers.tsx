@@ -7,6 +7,7 @@ import { domAnimation, LazyMotion } from "motion/react";
 import { PostHogErrorBoundary, PostHogProvider } from "posthog-js/react";
 import React from "react";
 
+import { ConfirmProvider } from "~/components/confirm-dialog";
 import { ThemeProvider } from "~/components/theme-provider";
 import { SidebarInset, SidebarProvider } from "~/components/ui/sidebar";
 import { clientEnv } from "~/env/client";
@@ -54,18 +55,20 @@ export const Providers: React.FC<React.PropsWithChildren> = ({ children }) => {
               <ThemeProvider defaultTheme="dark" storageKey="vite-ui-theme">
                 <LazyMotion features={domAnimation} strict>
                   <JotaiProvider>
-                    <Toaster richColors />
-                    <PostHogIdentify />
-                    {!isAppRoute && (
-                      <SidebarProvider>
-                        <MainSidebar />
-                        <SidebarInset>
-                          <PageHeader />
-                          {children}
-                        </SidebarInset>
-                      </SidebarProvider>
-                    )}
-                    {isAppRoute && children}
+                    <ConfirmProvider>
+                      <Toaster richColors />
+                      <PostHogIdentify />
+                      {!isAppRoute && (
+                        <SidebarProvider>
+                          <MainSidebar />
+                          <SidebarInset>
+                            <PageHeader />
+                            {children}
+                          </SidebarInset>
+                        </SidebarProvider>
+                      )}
+                      {isAppRoute && children}
+                    </ConfirmProvider>
                   </JotaiProvider>
                 </LazyMotion>
               </ThemeProvider>

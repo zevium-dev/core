@@ -2,6 +2,7 @@ import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-q
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { Code, FileText, Globe, Lock, Settings } from "lucide-react";
 
+import { useConfirm } from "~/components/confirm-dialog";
 import { PageHeaderContent } from "~/components/sidebar";
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
@@ -46,6 +47,7 @@ export const Route = createFileRoute("/app/organizations/$organizationSlug/proje
 function RouteComponent() {
   const { organizationSlug, projectSlug } = Route.useParams();
   const trpc = useTRPC();
+  const confirm = useConfirm();
 
   const projectQuery = useSuspenseQuery(trpc.project.get.queryOptions({ organizationSlug, projectSlug }));
   const organizationDetailsQuery = useSuspenseQuery(trpc.organization.get.queryOptions({ organizationSlug }));
@@ -82,16 +84,29 @@ function RouteComponent() {
               <Button
                 disabled={visibilityMutation.isPending}
                 onClick={() => {
-                  visibilityMutation.mutate({
-                    description: project.description,
-                    documentation: project.documentation,
-                    id: project.id,
-                    name: project.name,
-                    organizationSlug,
-                    status: project.status,
-                    tagNames: project.project_tags.map((tag) => tag.tagName),
-                    variables: project.variables ?? undefined,
-                    visibility: project.visibility === "public" ? "private" : "public",
+                  const nextVisibility = project.visibility === "public" ? "private" : "public";
+
+                  void confirm({
+                    confirmText: nextVisibility === "public" ? "Make Public" : "Make Private",
+                    description:
+                      nextVisibility === "public"
+                        ? "This will make the project visible to anyone with the link."
+                        : "This will hide the project from public access.",
+                    title: nextVisibility === "public" ? "Make project public?" : "Make project private?",
+                  }).then((confirmed) => {
+                    if (!confirmed) return;
+
+                    visibilityMutation.mutate({
+                      description: project.description,
+                      documentation: project.documentation,
+                      id: project.id,
+                      name: project.name,
+                      organizationSlug,
+                      status: project.status,
+                      tagNames: project.project_tags.map((tag) => tag.tagName),
+                      variables: project.variables ?? undefined,
+                      visibility: nextVisibility,
+                    });
                   });
                 }}
                 size="sm"

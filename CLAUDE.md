@@ -131,6 +131,15 @@ pnpm run generate-routes
 - The dev server is expected on [http://localhost:5173](http://localhost:5173).
 - When calling Better Auth organization APIs (e.g., acceptInvitation, cancelInvitation, createInvitation), do not wrap single calls in try/catch; let errors surface through TRPC/Better Auth instead of swallowing them.
 
+#### Internal Dev/Test Routes
+
+Routes under `/$internal/*` are intended for local development/testing.
+
+- `useConfirm` / confirm dialog is implemented via `src/components/confirm-dialog.tsx` (Radix `AlertDialog`) and mounted globally in `src/components/providers.tsx`.
+- `useConfirm()` returns a promise and supports multiple concurrent invocations via an internal FIFO queue.
+- `/$internal/confirm-test` - Manual test page for the global `useConfirm` hook + queue behavior.
+- `/$internal/image-upload-test` - Manual test page for `ImageUpload`.
+
 ### Code Formatting & Linting
 
 When you encounter **ESLint warnings** or **formatting issues** in files:
