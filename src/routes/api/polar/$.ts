@@ -13,8 +13,7 @@ export const Route = createFileRoute("/api/polar/$")({
         const url = new URL(request.url);
         if (url.pathname.endsWith("/webhook")) {
           // Dynamic imports to avoid bundling server-only code in client
-          const [{ randomUUID }, { serverEnv }, { CreditsManager }, { kv }, { validateEvent }] = await Promise.all([
-            import("node:crypto"),
+          const [{ serverEnv }, { CreditsManager }, { kv }, { validateEvent }] = await Promise.all([
             import("~/env/server"),
             import("~/lib/server/credits"),
             import("~/lib/server/kv"),
@@ -23,24 +22,33 @@ export const Route = createFileRoute("/api/polar/$")({
 
           // Read raw body for signature verification
           const raw = await request.text();
-          let payload: any;
-          try {
-            // Validate signature; throws if invalid
-            payload = validateEvent(raw, Object.fromEntries(request.headers.entries()), serverEnv.POLAR_WEBHOOK_SECRET);
-          } catch (err) {
-            const error = new Error("Polar webhook signature verification failed", { cause: err });
-            throw error;
-          }
+          const payloadUnknown: unknown = (() => {
+            try {
+              // Validate signature; throws if invalid
+              return validateEvent(raw, Object.fromEntries(request.headers.entries()), serverEnv.POLAR_WEBHOOK_SECRET);
+            } catch (err) {
+              const error = new Error("Polar webhook signature verification failed", { cause: err });
+              throw error;
+            }
+          })();
+
+          const payload = payloadUnknown as
+            | {
+                data?: unknown;
+                type?: unknown;
+              }
+            | null
+            | undefined;
 
           try {
             if (payload?.type === "order.paid") {
               const order = payload.data as {
-                id: string;
-                productId: string | null;
-                totalAmount: number;
+                checkoutId: null | string;
                 currency: string;
-                checkoutId: string | null;
+                id: string;
                 metadata?: Record<string, unknown>;
+                productId: null | string;
+                totalAmount: number;
               };
 
               // Only process our credits product
@@ -48,14 +56,15 @@ export const Route = createFileRoute("/api/polar/$")({
                 return new Response("ignored", { status: 200 });
               }
 
-              const userId = String(order.metadata?.userId ?? "");
+              const metadataUserId = order.metadata?.userId;
+              const userId = typeof metadataUserId === "string" ? metadataUserId : "";
               if (!userId) {
                 return new Response("ignored: no userId", { status: 200 });
               }
 
               // Unified idempotency across checkout + order events
-              const dedupeId = order.checkoutId || order.id;
-              const appliedKey = CreditsRedisKey.creditApplied({ userId, checkoutId: dedupeId });
+              const dedupeId = order.checkoutId ?? order.id;
+              const appliedKey = CreditsRedisKey.creditApplied({ checkoutId: dedupeId, userId });
               const applyOk = await kv
                 .set(appliedKey, "1", { nx: true, px: 1000 * 60 * 60 * 24 * 365 })
                 .catch(() => null);
@@ -63,13 +72,13 @@ export const Route = createFileRoute("/api/polar/$")({
                 return new Response("ok");
               }
 
-              const amountCents = Number(order.totalAmount ?? 0);
+              const amountCents = order.totalAmount;
               if (amountCents > 0) {
                 await CreditsManager.add({
-                  userId,
                   amountCents,
-                  reference: order.id ?? randomUUID(),
                   description: "Polar top-up",
+                  reference: order.id,
+                  userId,
                 });
               }
               return new Response("ok");

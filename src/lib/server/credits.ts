@@ -9,32 +9,30 @@ import { CreditsRedisKey } from "~/lib/shared/credits-keys";
 export { CreditsRedisKey };
 
 // Validators
+const OptionalStringSchema = z.string().nullable().optional();
 const PositiveIntegerSchema = z.number().int("amountCents must be a whole number").positive("amountCents must be > 0");
-
 const UserIdSchema = z.string().min(1, "userId is required");
 
-const OptionalStringSchema = z.string().nullable().optional();
-
-interface LedgerEntryInput {
-  userId: string;
-  amountCents: number;
-  type: "topup" | "deduct" | "adjust";
-  reference?: string | null;
-  description?: string | null;
-}
-
 interface AddInput {
-  userId: string;
   amountCents: number;
-  reference?: string;
   description?: string;
+  reference?: string;
+  userId: string;
 }
 
 interface DeductInput {
-  userId: string;
   amountCents: number;
   reason?: string;
   reference?: string;
+  userId: string;
+}
+
+interface LedgerEntryInput {
+  amountCents: number;
+  description?: null | string;
+  reference?: null | string;
+  type: "adjust" | "deduct" | "topup";
+  userId: string;
 }
 
 async function appendLedger(entry: LedgerEntryInput) {
@@ -55,38 +53,27 @@ async function appendLedger(entry: LedgerEntryInput) {
  */
 export const CreditsManager = {
   /**
-   * Get the current credit balance for a user in cents.
-   */
-  async getBalance(userId: string): Promise<number> {
-    UserIdSchema.parse(userId);
-    const key = CreditsRedisKey.balance(userId);
-    const raw = await kv.get<unknown>(key);
-    const n = typeof raw === "number" ? raw : Number(raw ?? 0);
-    return Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 0;
-  },
-
-  /**
    * Add credits to a user's balance (e.g., top-up).
    * Returns the new balance.
    */
   async add(input: AddInput): Promise<number> {
     UserIdSchema.parse(input.userId);
     PositiveIntegerSchema.parse(input.amountCents);
-    OptionalStringSchema.parse(input.reference);
     OptionalStringSchema.parse(input.description);
+    OptionalStringSchema.parse(input.reference);
 
     const key = CreditsRedisKey.balance(input.userId);
     await kv.incrby(key, input.amountCents);
 
     await appendLedger({
-      userId: input.userId,
       amountCents: input.amountCents,
-      type: "topup",
-      reference: input.reference,
       description: input.description,
+      reference: input.reference,
+      type: "topup",
+      userId: input.userId,
     });
 
-    return this.getBalance(input.userId);
+    return CreditsManager.getBalance(input.userId);
   },
 
   /**
@@ -116,7 +103,7 @@ export const CreditsManager = {
     const evalResult = (await kv
       // Types from @upstash/redis/cloudflare vary; coerce to broad types safely
       .eval(script as string, [key] as Array<string>, [String(input.amountCents)] as Array<unknown>)
-      .catch(() => -1)) as unknown;
+      .catch(() => -1));
 
     const resultNum = typeof evalResult === "number" ? evalResult : Number(evalResult ?? Number.NaN);
 
@@ -125,13 +112,24 @@ export const CreditsManager = {
     }
 
     await appendLedger({
-      userId: input.userId,
       amountCents: -input.amountCents,
-      type: "deduct",
       description: input.reason,
       reference: input.reference,
+      type: "deduct",
+      userId: input.userId,
     });
 
     return Math.floor(resultNum);
+  },
+
+  /**
+   * Get the current credit balance for a user in cents.
+   */
+  async getBalance(userId: string): Promise<number> {
+    UserIdSchema.parse(userId);
+    const key = CreditsRedisKey.balance(userId);
+    const raw = await kv.get<unknown>(key);
+    const n = typeof raw === "number" ? raw : Number(raw ?? 0);
+    return Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 0;
   },
 };

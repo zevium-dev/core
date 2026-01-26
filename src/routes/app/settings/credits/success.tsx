@@ -34,7 +34,7 @@ export const Route = createFileRoute("/app/settings/credits/success")({
     const startTime = Date.now();
 
     const { kv } = await import("~/lib/server/kv");
-    const appliedKey = CreditsRedisKey.creditApplied({ userId, checkoutId });
+    const appliedKey = CreditsRedisKey.creditApplied({ checkoutId, userId });
 
     // Poll until credits are applied or timeout
     while (Date.now() - startTime < maxWaitMs) {

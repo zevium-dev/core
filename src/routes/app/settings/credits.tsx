@@ -1,7 +1,7 @@
+import { useMutation, useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { ExternalLink, FileText, Settings } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { useMutation, useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { z } from "zod";
 
 import { Button } from "~/components/ui/button";
@@ -14,69 +14,26 @@ const PAGE_SIZE = 3;
 const amountInputSchema = z.number().int().positive().max(100_000);
 
 export const Route = createFileRoute("/app/settings/credits")({
+  validateSearch: z.object({
+    page: z.number().int().positive().optional(),
+  }),
   loader: ({ context }) => {
     void context.queryClient.ensureQueryData(context.trpc.credits.getBalance.queryOptions());
     void context.queryClient.ensureQueryData(
       context.trpc.credits.listTransactions.queryOptions({ page: 1, pageSize: PAGE_SIZE }),
     );
   },
-  validateSearch: z.object({
-    page: z.number().int().positive().optional(),
-  }),
   component: CreditsComponent,
 });
 
 interface TransactionRowProps {
-  transaction: {
-    id: string;
-    amountCents: number;
-    createdAt: string | Date;
-    reference?: string | null;
-  };
   onGetInvoice: (orderId: string) => void;
-}
-
-function TransactionRow({ transaction, onGetInvoice }: TransactionRowProps) {
-  const sign = transaction.amountCents >= 0 ? 1 : -1;
-  const amountFmt = new Intl.NumberFormat(undefined, { style: "currency", currency: "USD" }).format(
-    Math.abs(transaction.amountCents) / 100,
-  );
-  const createdAtDate = typeof transaction.createdAt === "string" ? new Date(transaction.createdAt) : transaction.createdAt;
-  const dateFmt = new Intl.DateTimeFormat(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(createdAtDate);
-
-  return (
-    <div
-      className={`
-        flex items-center justify-between border-b border-border/20
-        py-2
-        last:border-b-0
-      `}
-    >
-      <span className="text-sm text-muted-foreground">{dateFmt}</span>
-      <div className="flex items-center gap-4">
-        <span
-          className={`
-            text-sm font-medium ${sign > 0 ? "text-primary" : "text-destructive"}
-          `}
-        >
-          {sign > 0 ? "+" : "-"}
-          {amountFmt}
-        </span>
-        <button
-          className={`
-            text-xs text-muted-foreground hover:text-foreground hover:underline
-          `}
-          onClick={() => onGetInvoice(transaction.id)}
-          title={String(transaction.reference ?? transaction.id)}
-        >
-          Get Invoice <FileText className="ml-1 inline h-3 w-3" />
-        </button>
-      </div>
-    </div>
-  );
+  transaction: {
+    amountCents: number;
+    createdAt: Date | string;
+    id: string;
+    reference?: null | string;
+  };
 }
 
 function CreditsComponent() {
@@ -86,7 +43,7 @@ function CreditsComponent() {
   const [_autoTopUpEnabled, _setAutoTopUpEnabled] = useState(false);
   const currentPage = search.page ?? 1;
   const [amountUsd, setAmountUsd] = useState<string>("10");
-  const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
+  const [selectedOrderId, setSelectedOrderId] = useState<null | string>(null);
 
   const balanceQuery = useSuspenseQuery(trpc.credits.getBalance.queryOptions());
   const transactionsQuery = useSuspenseQuery(
@@ -95,13 +52,13 @@ function CreditsComponent() {
 
   // Query for invoice URL - enabled only when an order is selected
   const invoiceQuery = useQuery({
-    ...trpc.credits.getInvoiceUrl.queryOptions({ orderId: selectedOrderId! }),
+    ...trpc.credits.getInvoiceUrl.queryOptions({ orderId: selectedOrderId ?? "" }),
     enabled: Boolean(selectedOrderId),
   });
 
   const topupMutation = useMutation(
     trpc.credits.createTopUpCheckout.mutationOptions({
-      async onSuccess(data) {
+      onSuccess(data) {
         if (data?.url) {
           window.location.assign(data.url);
         }
@@ -111,7 +68,7 @@ function CreditsComponent() {
 
   const currentBalance = useMemo(() => {
     const cents = balanceQuery.data.balanceCents;
-    return new Intl.NumberFormat(undefined, { style: "currency", currency: "USD" }).format(cents / 100);
+    return new Intl.NumberFormat(undefined, { currency: "USD", style: "currency" }).format(cents / 100);
   }, [balanceQuery.data.balanceCents]);
 
   const handleTopUp = () => {
@@ -131,14 +88,14 @@ function CreditsComponent() {
   useEffect(() => {
     if (invoiceQuery.data?.url && selectedOrderId) {
       window.open(invoiceQuery.data.url, "_blank");
-      setSelectedOrderId(null);
+      setSelectedOrderId(() => null);
     }
-  }, [invoiceQuery.data?.url, selectedOrderId]);
+  }, [invoiceQuery.data, selectedOrderId]);
 
   const handlePageChange = (newPage: number) => {
-    navigate({
-      search: { page: newPage },
+    void navigate({
       replace: true,
+      search: { page: newPage },
     });
   };
 
@@ -179,12 +136,7 @@ function CreditsComponent() {
                 type="number"
                 value={amountUsd}
               />
-              <Button
-                className="flex-1"
-                disabled={topupMutation.isPending}
-                onClick={handleTopUp}
-                size="lg"
-              >
+              <Button className="flex-1" disabled={topupMutation.isPending} onClick={handleTopUp} size="lg">
                 {topupMutation.isPending ? "Redirecting..." : "Add Credits"}
               </Button>
             </div>
@@ -239,7 +191,7 @@ function CreditsComponent() {
         <CardContent>
           <div className="space-y-4">
             {transactionsQuery.data.items.map((tx) => (
-              <TransactionRow key={tx.id} transaction={tx} onGetInvoice={handleGetInvoice} />
+              <TransactionRow key={tx.id} onGetInvoice={handleGetInvoice} transaction={tx} />
             ))}
           </div>
 
@@ -269,6 +221,51 @@ function CreditsComponent() {
           </div>
         </CardContent>
       </Card>
+    </div>
+  );
+}
+
+function TransactionRow({ onGetInvoice, transaction }: TransactionRowProps) {
+  const sign = transaction.amountCents >= 0 ? 1 : -1;
+  const amountFmt = new Intl.NumberFormat(undefined, { currency: "USD", style: "currency" }).format(
+    Math.abs(transaction.amountCents) / 100,
+  );
+  const createdAtDate =
+    typeof transaction.createdAt === "string" ? new Date(transaction.createdAt) : transaction.createdAt;
+  const dateFmt = new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(createdAtDate);
+
+  return (
+    <div
+      className={`
+        flex items-center justify-between border-b border-border/20
+        py-2
+        last:border-b-0
+      `}
+    >
+      <span className="text-sm text-muted-foreground">{dateFmt}</span>
+      <div className="flex items-center gap-4">
+        <span
+          className={`
+            text-sm font-medium ${sign > 0 ? "text-primary" : "text-destructive"}
+          `}
+        >
+          {sign > 0 ? "+" : "-"}
+          {amountFmt}
+        </span>
+        <button
+          className={`
+            text-xs text-muted-foreground hover:text-foreground hover:underline
+          `}
+          onClick={() => onGetInvoice(transaction.id)}
+          title={transaction.reference ?? transaction.id}
+          type="button"
+        >
+          Get Invoice <FileText className="ml-1 inline h-3 w-3" />
+        </button>
+      </div>
     </div>
   );
 }

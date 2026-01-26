@@ -1,10 +1,10 @@
+import { checkout, polar } from "@polar-sh/better-auth";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { apiKey } from "better-auth/plugins";
 import { twoFactor } from "better-auth/plugins";
 import { organization } from "better-auth/plugins/organization";
 import { reactStartCookies } from "better-auth/react-start";
-import { checkout, polar } from "@polar-sh/better-auth";
 
 import { db, schema } from "~/db";
 import { clientEnv } from "~/env/client";

@@ -2,6 +2,14 @@ import { createFileRoute } from "@tanstack/react-router";
 import { lookup } from "node:dns/promises";
 import isPrivate from "private-ip";
 
+class UpstreamNonOK extends Error {
+  response: Response;
+  constructor(response: Response) {
+    super("Upstream response not OK");
+    this.response = response;
+  }
+}
+
 // Placeholder: Replace with a real DB fetch for the proxy secret
 async function getProxySecretFromDb(): Promise<string> {
   // TODO: Replace with real DB fetch
@@ -42,6 +50,8 @@ function isLoopback(addr: string): boolean {
   );
 }
 
+// (Previous hostname-only private/local checks removed in favor of robust DNS/IP validation.)
+
 function jsonWithRequestId(status: number, message: string, requestId: string) {
   return Response.json(
     { error: message },
@@ -52,8 +62,6 @@ function jsonWithRequestId(status: number, message: string, requestId: string) {
   );
 }
 
-// (Previous hostname-only private/local checks removed in favor of robust DNS/IP validation.)
-
 function normalizeHostUrl(input: string): null | URL {
   try {
     const trimmed = input.trim();
@@ -62,14 +70,6 @@ function normalizeHostUrl(input: string): null | URL {
     return url;
   } catch {
     return null;
-  }
-}
-
-class UpstreamNonOK extends Error {
-  response: Response;
-  constructor(response: Response) {
-    super("Upstream response not OK");
-    this.response = response;
   }
 }
 
@@ -148,10 +148,10 @@ const proxyHandler = async (request: Request) => {
 
     // Derive userId from verification response (handles different shapes)
     const vAny = verification as unknown as {
-      user?: { id?: string };
       key?: { userId?: string };
-      userId?: string;
+      user?: { id?: string };
       user_id?: string;
+      userId?: string;
     };
     const userId = vAny.user?.id ?? vAny.key?.userId ?? vAny.userId ?? vAny.user_id ?? "";
 
@@ -181,19 +181,28 @@ const proxyHandler = async (request: Request) => {
     // - No upstream read error / no cancel
     if (upstream.body) {
       const reader = upstream.body.getReader();
-      let aborted = false;
+      let _aborted = false;
       const stream = new ReadableStream({
+        async cancel() {
+          _aborted = true;
+          try {
+            await reader.cancel();
+          } catch (err) {
+            const error = new Error("Stream cancelled by client", { cause: err });
+            throw error;
+          }
+        },
         async pull(controller) {
           try {
-            const { value, done } = await reader.read();
+            const { done, value } = await reader.read();
             if (done) {
               // Stream completed successfully → commit billing
               try {
                 await CreditsManager.deduct({
-                  userId,
                   amountCents: 1,
                   reason: "Zevium proxy API call",
                   reference: requestId,
+                  userId,
                 });
               } catch (err) {
                 const error = new Error("Failed to deduct credits after successful stream", { cause: err });
@@ -204,23 +213,14 @@ const proxyHandler = async (request: Request) => {
             }
             controller.enqueue(value);
           } catch (_e) {
-            aborted = true;
+            _aborted = true;
             try {
               await reader.cancel();
-            } catch(err) {
+            } catch (err) {
               const error = new Error("Failed to cancel stream after read error", { cause: err });
               throw error;
             }
             const error = new Error("Upstream read failed", { cause: _e });
-            throw error;
-          }
-        },
-        async cancel() {
-          aborted = true;
-          try {
-            await reader.cancel();
-          } catch(err) {
-            const error = new Error("Stream cancelled by client", { cause: err });
             throw error;
           }
         },
@@ -237,10 +237,10 @@ const proxyHandler = async (request: Request) => {
       const buf = await upstream.arrayBuffer();
       try {
         await CreditsManager.deduct({
-          userId,
           amountCents: 1,
           reason: "Zevium proxy API call",
           reference: requestId,
+          userId,
         });
       } catch (err) {
         const error = new Error("Failed to deduct credits for non-streaming response", { cause: err });

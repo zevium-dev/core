@@ -10,18 +10,18 @@ type Metadata = Record<string, unknown>;
 export const creditLedger = sqliteTable(
   "credit_ledger",
   {
-    id: text("id").primaryKey(),
-    userId: text("user_id")
-      .notNull()
-      .references(() => user.id, { onDelete: "cascade" }),
     // positive for top-up, negative for deduction, in cents
     amountCents: integer("amount_cents").notNull(),
-    type: text("type", { enum: ["topup", "deduct", "adjust"] as const }).notNull(),
-    reference: text("reference"),
-    description: text("description"),
     createdAt: integer("created_at", { mode: "timestamp" })
       .$defaultFn(() => new Date())
       .notNull(),
+    description: text("description"),
+    id: text("id").primaryKey(),
+    reference: text("reference"),
+    type: text("type", { enum: ["topup", "deduct", "adjust"] as const }).notNull(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
   },
   (self) => [index("credit_ledger_user_id_index").on(self.userId), index("credit_ledger_created_at_index").on(self.createdAt)],
 );

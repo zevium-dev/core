@@ -19,6 +19,6 @@ export const CreditsRedisKey = {
    * Read by: src/routes/app/settings/credits/success.tsx (polling for credit application)
    * TTL: 1 year (365 days)
    */
-  creditApplied: ({ userId, checkoutId }: { userId: string; checkoutId: string }) =>
+  creditApplied: ({ checkoutId, userId }: { checkoutId: string; userId: string; }) =>
     `polar:credit_applied:${userId}:${checkoutId}`,
 };

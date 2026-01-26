@@ -3,7 +3,7 @@ import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
 import { useLocation } from "@tanstack/react-router";
 import { Provider as JotaiProvider } from "jotai";
 import { domAnimation, LazyMotion } from "motion/react";
-import { PostHogErrorBoundary, PostHogProvider } from "posthog-js/react";
+import { PostHogProvider } from "posthog-js/react";
 import React from "react";
 
 import { ConfirmProvider } from "~/components/confirm-dialog";
