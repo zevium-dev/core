@@ -40,11 +40,16 @@ const PHProvider: React.FC<React.PropsWithChildren> = ({ children }) => {
   );
 };
 
-export const Providers: React.FC<React.PropsWithChildren> = ({ children }) => {
+export const Providers: React.FC<React.PropsWithChildren<{ sidebarDefaultOpen?: boolean }>> = ({
+  children,
+  sidebarDefaultOpen,
+}) => {
   const queryClient = getQueryClient();
   const trpcClient = getTrpcClient();
   const location = useLocation();
   const isAppRoute = location.pathname.startsWith("/app");
+
+  const defaultOpen = sidebarDefaultOpen ?? true;
 
   return (
     <PHProvider>
@@ -59,7 +64,7 @@ export const Providers: React.FC<React.PropsWithChildren> = ({ children }) => {
                       <Toaster richColors />
                       <PostHogIdentify />
                       {!isAppRoute && (
-                        <SidebarProvider>
+                        <SidebarProvider defaultOpen={defaultOpen}>
                           <MainSidebar />
                           <SidebarInset>
                             <PageHeader />

@@ -5,16 +5,19 @@
 {
   "languages": {
     "TSX": {
+      "format_on_save": "off",
       "code_actions_on_format": {
         "source.fixAll.eslint": true,
       },
     },
     "TypeScript": {
+      "format_on_save": "off",
       "code_actions_on_format": {
         "source.fixAll.eslint": true,
       },
     },
     "JavaScript": {
+      "format_on_save": "off",
       "code_actions_on_format": {
         "source.fixAll.eslint": true,
       },

@@ -9,6 +9,7 @@ import type { TrpcOptionsProxy } from "~/router-types";
 import { DefaultCatchBoundary } from "~/components/default-catch-boundary";
 import { NotFound } from "~/components/not-found";
 import { Providers } from "~/components/providers";
+import { getSidebarDefaultOpen } from "~/lib/sidebar-state";
 import { seo } from "~/lib/utils";
 import appCss from "~/styles/app.css?url";
 
@@ -30,18 +31,25 @@ export const Route = createRootRouteWithContext<{
       ...seo({ description: `zevium.dev`, title: "zevium.dev" }),
     ],
   }),
+  loader: async () => {
+    return {
+      sidebarDefaultOpen: await getSidebarDefaultOpen(),
+    };
+  },
   notFoundComponent: () => <NotFound />,
   shellComponent: RootDocument,
 });
 
 function RootDocument({ children }: { children: React.ReactNode }) {
+  const { sidebarDefaultOpen } = Route.useLoaderData();
+
   return (
     <html className="dark" lang="en" suppressHydrationWarning>
       <head>
         <HeadContent />
       </head>
       <body>
-        <Providers>{children}</Providers>
+        <Providers sidebarDefaultOpen={sidebarDefaultOpen}>{children}</Providers>
         <TanStackRouterDevtools position="bottom-right" />
         <Scripts />
       </body>

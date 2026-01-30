@@ -400,7 +400,7 @@ function RouteComponent() {
               <div className="space-y-1">
                 <CardTitle className="text-lg font-semibold">Spec Editor</CardTitle>
                 <CardDescription>
-                  Edit your OpenAPI specification (JSON).
+                  Edit your OpenAPI specification.
                   {draftQuery.data.updatedAt && (
                     <span className="ml-2">Last saved: {formatDate(draftQuery.data.updatedAt, { smart: true })}</span>
                   )}
@@ -614,12 +614,14 @@ function RouteComponent() {
                 )}
                 <div className="space-y-2 rounded-lg border p-3">
                   <Input
+                    autoComplete="off"
                     maxLength={256}
                     onChange={(e) => setNewSecretName(e.target.value)}
                     placeholder="SECRET_NAME"
                     value={newSecretName}
                   />
                   <Input
+                    autoComplete="off"
                     onChange={(e) => setNewSecretValue(e.target.value)}
                     placeholder="Secret value (will be encrypted)"
                     type="password"
