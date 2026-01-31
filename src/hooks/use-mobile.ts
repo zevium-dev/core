@@ -1,22 +1,49 @@
 import * as React from "react";
 
-const MOBILE_BREAKPOINT = 768;
+export const MOBILE_BREAKPOINT = 768;
+
+export function getIsMobileFromWindow() {
+  if (typeof window === "undefined") return false;
+
+  if (typeof window.matchMedia === "function") {
+    return window.matchMedia(getMobileMediaQuery()).matches;
+  }
+
+  if (typeof window.innerWidth === "number") {
+    return window.innerWidth < MOBILE_BREAKPOINT;
+  }
+
+  return false;
+}
 
 export function useIsMobile() {
-  const [isMobile, setIsMobile] = React.useState<boolean>(() => {
-    if (typeof window === "undefined") return false;
-    return window.innerWidth < MOBILE_BREAKPOINT;
-  });
+  // SSR-safe: uses server snapshot during hydration, then subscribes on client.
+  return React.useSyncExternalStore(subscribeToIsMobile, getIsMobileFromWindow, () => false);
+}
 
-  React.useEffect(() => {
-    const mql = window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT - 1}px)`);
-    const onChange = () => {
-      setIsMobile(window.innerWidth < MOBILE_BREAKPOINT);
-    };
-    mql.addEventListener("change", onChange);
+function getMobileMediaQuery() {
+  return `(max-width: ${MOBILE_BREAKPOINT - 1}px)`;
+}
 
-    return () => mql.removeEventListener("change", onChange);
-  }, []);
+function subscribeToIsMobile(callback: () => void) {
+  if (typeof window === "undefined") return () => undefined;
 
-  return isMobile;
+  if (typeof window.matchMedia === "function") {
+    const mql = window.matchMedia(getMobileMediaQuery());
+    const onChange = () => callback();
+
+    // addListener/removeListener are deprecated; fall back to window resize.
+    if (typeof mql.addEventListener === "function") {
+      mql.addEventListener("change", onChange);
+      return () => mql.removeEventListener("change", onChange);
+    }
+  }
+
+  const onResize = () => callback();
+  window.addEventListener("resize", onResize);
+  window.addEventListener("orientationchange", onResize);
+  return () => {
+    window.removeEventListener("resize", onResize);
+    window.removeEventListener("orientationchange", onResize);
+  };
 }

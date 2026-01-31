@@ -31,12 +31,19 @@ export const Route = createFileRoute("/app")({
 function AppSidebarFallback() {
   const { state } = useSidebar();
   return (
-    <Skeleton className={state === "collapsed" ? "h-full w-(--sidebar-width-icon)" : "h-full w-(--sidebar-width)"} />
+    <Skeleton
+      className={`
+        hidden h-full md:block
+        ${state === "collapsed" ? "w-(--sidebar-width-icon)" : "w-(--sidebar-width)"}
+      `}
+      data-collapsible={state === "collapsed" ? "icon" : ""}
+    />
   );
 }
 
 function PendingComponent() {
-  const sidebarDefaultOpen = getSidebarDefaultOpenFromDocument() ?? true;
+  const match = Route.useMatch();
+  const sidebarDefaultOpen = match.loaderData?.sidebarDefaultOpen ?? getSidebarDefaultOpenFromDocument() ?? true;
 
   return (
     <SidebarProvider defaultOpen={sidebarDefaultOpen}>

@@ -11,7 +11,7 @@ import { Separator } from "~/components/ui/separator";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "~/components/ui/sheet";
 import { Skeleton } from "~/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "~/components/ui/tooltip";
-import { useIsMobile } from "~/hooks/use-mobile";
+import { getIsMobileFromWindow, useIsMobile } from "~/hooks/use-mobile";
 import { SIDEBAR_COOKIE_NAME } from "~/lib/sidebar-state";
 import { cn } from "~/lib/utils";
 
@@ -387,8 +387,8 @@ function SidebarProvider({
 
   // Helper to toggle the sidebar.
   const toggleSidebar = React.useCallback(() => {
-    return isMobile ? setOpenMobile((open) => !open) : setOpen((open) => !open);
-  }, [isMobile, setOpen, setOpenMobile]);
+    return getIsMobileFromWindow() ? setOpenMobile((open) => !open) : setOpen((open) => !open);
+  }, [setOpen, setOpenMobile]);
 
   // Adds a keyboard shortcut to toggle the sidebar.
   React.useEffect(() => {
