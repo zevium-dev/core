@@ -1,95 +1,137 @@
-# Usage patterns
+# Usage patterns (repo)
 
-These snippets assume you are using TanStack React Query and the tRPC TanStack integration.
+These snippets match how Zevium uses TanStack Query v5 + tRPC v11.
 
-## Query
+## Loader prefetch (TanStack Router)
+
+In route loaders, use the router context `context.queryClient` + `context.trpc` (options proxy) to prefetch.
+
+Important: the loader `params` object includes _all_ route slugs; always pass an explicit parameter object to each procedure.
 
 ```tsx
-import { useQuery } from '@tanstack/react-query';
+import { createFileRoute } from "@tanstack/react-router";
 
-import { useTRPC } from '../utils/trpc';
+export const Route = createFileRoute("/app/organizations/$organizationSlug/projects/$projectSlug")({
+  loader: ({ context, params }) => {
+    const routeParams = { organizationSlug: params.organizationSlug, projectSlug: params.projectSlug } as const;
 
-export function User() {
+    void context.queryClient.ensureQueryData(context.trpc.project.get.queryOptions(routeParams));
+    void context.queryClient.ensureQueryData(context.trpc.projectSecret.list.queryOptions(routeParams));
+  },
+  component: RouteComponent,
+});
+```
+
+## Suspense query (route component)
+
+When the loader prefetches, prefer `useSuspenseQuery()` in the component.
+
+```tsx
+import { useSuspenseQuery } from "@tanstack/react-query";
+
+import { useTRPC } from "~/lib/trpc";
+
+export function RouteComponent() {
+  const { organizationSlug, projectSlug } = Route.useParams();
   const trpc = useTRPC();
-  const userQuery = useQuery(trpc.getUser.queryOptions({ id: 'id_bilbo' }));
-  return <div>{userQuery.data?.name}</div>;
+
+  const projectQuery = useSuspenseQuery(trpc.project.get.queryOptions({ organizationSlug, projectSlug }));
+
+  return <div>{projectQuery.data.name}</div>;
 }
 ```
 
 ## Mutation + invalidation
 
+Prefer invalidation via `queryOptions()` (no manual queryKey arrays).
+
 ```tsx
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 
-import { useTRPC } from '../utils/trpc';
+import { useTRPC } from "~/lib/trpc";
 
-export function CreateUser() {
+export function RenameProject({ organizationSlug, projectSlug }: { organizationSlug: string; projectSlug: string }) {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
 
-  const createUser = useMutation(
-    trpc.createUser.mutationOptions({
+  const updateProject = useMutation(
+    trpc.project.update.mutationOptions({
       onSuccess: async () => {
-        await queryClient.invalidateQueries({
-          queryKey: trpc.getUser.queryKey(),
-        });
+        await queryClient.invalidateQueries(trpc.project.get.queryOptions({ organizationSlug, projectSlug }));
       },
     }),
   );
 
   return (
-    <button onClick={() => createUser.mutate({ name: 'Frodo' })}>
-      Create Frodo
+    <button
+      disabled={updateProject.isPending}
+      onClick={() => {
+        updateProject.mutate({ organizationSlug, projectSlug, name: "New name" });
+      }}
+    >
+      {updateProject.isPending ? "Saving..." : "Save"}
     </button>
   );
 }
 ```
 
-## Conditional queries (skipToken)
+## Optimistic updates (setQueryData)
+
+Use `queryKey(input)` for type-safe cache updates, then invalidate on settle.
 
 ```tsx
-import { skipToken, useQuery } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 
-import { useTRPC } from '../utils/trpc';
+import { useTRPC } from "~/lib/trpc";
 
-export function MaybeUser({ userId }: { userId?: string }) {
+export function useProjectVisibilityMutation(organizationSlug: string, projectSlug: string) {
   const trpc = useTRPC();
+  const qc = useQueryClient();
 
-  const q = useQuery(
-    trpc.getUser.queryOptions(userId ? { id: userId } : skipToken),
+  return useMutation(
+    trpc.project.update.mutationOptions({
+      onMutate(variables) {
+        qc.setQueryData(trpc.project.get.queryKey({ organizationSlug, projectSlug }), (old) =>
+          old ? { ...old, visibility: variables.visibility } : old,
+        );
+      },
+      async onSettled() {
+        await qc.invalidateQueries(trpc.project.get.queryOptions({ organizationSlug, projectSlug }));
+      },
+    }),
   );
-
-  return <div>{q.data?.name}</div>;
 }
 ```
 
-## Query/mutation key prefixing (multiple providers)
+## Conditional queries
 
-Enable key prefixing when creating a context:
+Prefer `enabled` for non-suspense queries:
 
 ```tsx
-import { createTRPCContext } from '@trpc/tanstack-react-query';
+import { useQuery } from "@tanstack/react-query";
 
-import type { BillingRouter } from '../server/billing';
-import type { AccountRouter } from '../server/account';
+import { useSession } from "~/lib/auth";
+import { useTRPC } from "~/lib/trpc";
 
-const billing = createTRPCContext<BillingRouter, { keyPrefix: true }>();
-export const BillingProvider = billing.TRPCProvider;
-export const useBilling = billing.useTRPC;
+export function useUserPreferencesQuery() {
+  const user = useSession().user;
+  const trpc = useTRPC();
 
-const account = createTRPCContext<AccountRouter, { keyPrefix: true }>();
-export const AccountProvider = account.TRPCProvider;
-export const useAccount = account.useTRPC;
+  return useQuery(trpc.userPreference.get.queryOptions(undefined, { enabled: Boolean(user?.id) }));
+}
 ```
 
-Pass a `keyPrefix` to each provider:
+If you need to skip a query via input, `skipToken` also works:
 
 ```tsx
-<BillingProvider trpcClient={billingClient} queryClient={queryClient} keyPrefix="billing">
-  <AccountProvider trpcClient={accountClient} queryClient={queryClient} keyPrefix="account">
-    {/* ... */}
-  </AccountProvider>
-</BillingProvider>
+import { skipToken, useQuery } from "@tanstack/react-query";
+
+import { useTRPC } from "~/lib/trpc";
+
+export function MaybeUser({ userId }: { userId?: string }) {
+  const trpc = useTRPC();
+  return useQuery(trpc.user.get.queryOptions(userId ? { id: userId } : skipToken));
+}
 ```
 
 ## Infer input/output types
@@ -97,45 +139,25 @@ Pass a `keyPrefix` to each provider:
 Infer types for a whole router:
 
 ```ts
-import type { inferRouterInputs, inferRouterOutputs } from '@trpc/server';
-import type { AppRouter } from '../server/router';
+import type { inferRouterInputs, inferRouterOutputs } from "@trpc/server";
+
+import type { AppRouter } from "~/server";
 
 export type Inputs = inferRouterInputs<AppRouter>;
 export type Outputs = inferRouterOutputs<AppRouter>;
 ```
 
-Infer types for a single procedure (context pattern):
+Infer types for a single procedure (via `useTRPC()`):
 
 ```ts
-import type { inferInput, inferOutput } from '@trpc/tanstack-react-query';
-import { useTRPC } from '../utils/trpc';
+import type { inferInput, inferOutput } from "@trpc/tanstack-react-query";
+
+import { useTRPC } from "~/lib/trpc";
 
 export function TypesExample() {
   const trpc = useTRPC();
-  type Input = inferInput<typeof trpc.getUser>;
-  type Output = inferOutput<typeof trpc.getUser>;
+  type Input = inferInput<typeof trpc.project.get>;
+  type Output = inferOutput<typeof trpc.project.get>;
   return null;
 }
-```
-
-## Call the tRPC client directly
-
-Context pattern:
-
-```ts
-import { useTRPCClient } from '../utils/trpc';
-
-export function Component() {
-  const trpcClient = useTRPCClient();
-  // trpcClient.path.to.procedure.query({ ... })
-  return null;
-}
-```
-
-Singleton pattern:
-
-```ts
-import { client } from '../utils/trpc';
-
-// client.path.to.procedure.query({ ... })
 ```

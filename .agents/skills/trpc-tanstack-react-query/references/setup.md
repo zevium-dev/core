@@ -1,116 +1,257 @@
-# Setup templates
+# Setup templates (TanStack Start + TanStack Router)
 
-Use these as starting points; adapt file paths and the API URL to your app.
+These snippets mirror how this repo wires tRPC v11 + TanStack Query v5.
 
-## A) Setup with React context (SSR-friendly)
+Canonical sources in this repo:
 
-Create `utils/trpc.ts`:
+- `src/lib/query-client/query-client.client.tsx`
+- `src/lib/query-client/query-client.server.ts`
+- `src/lib/query-client/query-client.ts`
+- `src/lib/trpc/trpc.client.ts`
+- `src/lib/trpc/headers.server.ts`
+- `src/lib/trpc/trpc.server.ts`
+- `src/lib/trpc/trpc.ts`
+- `src/lib/trpc/index.ts`
+- `src/components/providers.tsx`
+- `src/router.tsx`
 
-```tsx
-import { createTRPCContext } from '@trpc/tanstack-react-query';
+## 1) QueryClient (SSR-safe)
 
-import type { AppRouter } from '../server/router';
-
-export const { TRPCProvider, useTRPC, useTRPCClient } =
-  createTRPCContext<AppRouter>();
-```
-
-Create a QueryClient helper that is safe for SSR (new per request, stable in browser):
+Client config (defaults + global mutation error handler):
 
 ```ts
-import { QueryClient } from '@tanstack/react-query';
+// src/lib/query-client/query-client.client.tsx
+import { QueryClient } from "@tanstack/react-query";
 
-function makeQueryClient() {
+export const makeQueryClient = () => {
   return new QueryClient({
     defaultOptions: {
       queries: {
-        // With SSR, prefer a staleTime > 0 to avoid immediate refetch on hydration.
-        staleTime: 60 * 1000,
+        networkMode: "offlineFirst",
+        retry: 2,
+        staleTime: 1000 * 60,
+      },
+      mutations: {
+        // Centralized toast/logging; avoid per-mutation onError unless needed.
+        onError: (cause) => {
+          console.error(cause);
+        },
       },
     },
   });
-}
+};
+```
 
-let browserQueryClient: QueryClient | undefined;
+Server-side cache wrapper:
 
-export function getQueryClient() {
-  if (typeof window === 'undefined') return makeQueryClient();
-  if (!browserQueryClient) browserQueryClient = makeQueryClient();
-  return browserQueryClient;
+```ts
+// src/lib/query-client/query-client.server.ts
+import { cache } from "react";
+
+import { makeQueryClient } from "./query-client.client";
+
+export const cachedMakeQueryClient = cache(makeQueryClient);
+```
+
+SSR/client safe accessor (new per request, singleton in browser):
+
+```ts
+// src/lib/query-client/query-client.ts
+import type { QueryClient } from "@tanstack/react-query";
+
+import { makeQueryClient } from "./query-client.client";
+import { cachedMakeQueryClient } from "./query-client.server";
+
+let _queryClientSingleton: null | QueryClient = null;
+
+export const getQueryClient = () => {
+  if (!import.meta.env.SSR || typeof window !== "undefined") {
+    if (_queryClientSingleton) return _queryClientSingleton;
+    _queryClientSingleton = makeQueryClient();
+    return _queryClientSingleton;
+  }
+
+  return cachedMakeQueryClient();
+};
+```
+
+## 2) tRPC client (SSR-safe + header forwarding)
+
+Client factory (SuperJSON + batch stream link):
+
+```ts
+// src/lib/trpc/trpc.client.ts
+import {
+  createTRPCClient as createTRPCClientOriginal,
+  httpBatchStreamLink,
+  httpLink,
+  isNonJsonSerializable,
+  loggerLink,
+  splitLink,
+} from "@trpc/client";
+import SuperJSON from "superjson";
+
+import type { AppRouter } from "~/server";
+
+export const createTRPCClient = (baseUrl = "", getHeaders?: () => Promise<Record<string, string>>) => {
+  return createTRPCClientOriginal<AppRouter>({
+    links: [
+      loggerLink({
+        enabled: (opts) =>
+          (process.env.NODE_ENV === "development" && typeof window !== "undefined") ||
+          (opts.direction === "down" && opts.result instanceof Error),
+      }),
+      splitLink({
+        condition: (op) => isNonJsonSerializable(op.input),
+        false: httpBatchStreamLink({
+          headers: getHeaders,
+          transformer: SuperJSON,
+          url: `${baseUrl}/api/trpc`,
+        }),
+        true: httpLink({
+          headers: getHeaders,
+          transformer: {
+            deserialize: SuperJSON.deserialize,
+            serialize: (d) => d as unknown,
+          },
+          url: `${baseUrl}/api/trpc`,
+        }),
+      }),
+    ],
+  });
+};
+```
+
+Forward request headers on the server:
+
+```ts
+// src/lib/trpc/headers.server.ts
+import { getRequestHeaders } from "@tanstack/react-start/server";
+
+export function getServerHeaders() {
+  return getRequestHeaders();
 }
 ```
 
-Wrap your app:
+Server-side client cache wrapper:
+
+```ts
+// src/lib/trpc/trpc.server.ts
+import { cache } from "react";
+
+import { createTRPCClient } from "./trpc.client";
+
+function getBaseUrl() {
+  if (typeof window !== "undefined") return "";
+  return `http://localhost:${process.env.PORT ?? 5173}`;
+}
+
+async function getHeaders() {
+  if (typeof window !== "undefined") return {};
+  if (!import.meta.env.SSR) return {};
+
+  const { getServerHeaders } = await import("./headers.server");
+  return getServerHeaders();
+}
+
+export const cachedCreateTRPCClient = cache(() => createTRPCClient(getBaseUrl(), getHeaders));
+```
+
+SSR/client safe accessor (new per request, singleton in browser):
+
+```ts
+// src/lib/trpc/trpc.ts
+import { createTRPCClient } from "./trpc.client";
+import { cachedCreateTRPCClient } from "./trpc.server";
+
+let _trpcClientSingleTon: null | ReturnType<typeof createTRPCClient> = null;
+
+export const getTrpcClient = () => {
+  if (!import.meta.env.SSR || typeof window !== "undefined") {
+    if (_trpcClientSingleTon) return _trpcClientSingleTon;
+    _trpcClientSingleTon = createTRPCClient();
+    return _trpcClientSingleTon;
+  }
+
+  return cachedCreateTRPCClient();
+};
+```
+
+## 3) TRPCProvider + useTRPC() (components)
+
+```ts
+// src/lib/trpc/index.ts
+import { createTRPCContext } from "@trpc/tanstack-react-query";
+
+import type { AppRouter } from "~/server";
+
+export const { TRPCProvider, useTRPC } = createTRPCContext<AppRouter>();
+```
+
+## 4) Wire providers (components)
 
 ```tsx
-import { QueryClientProvider } from '@tanstack/react-query';
-import { createTRPCClient, httpBatchLink } from '@trpc/client';
-import { useState } from 'react';
+// src/components/providers.tsx
+import { QueryClientProvider } from "@tanstack/react-query";
 
-import type { AppRouter } from '../server/router';
-import { TRPCProvider } from './utils/trpc';
-import { getQueryClient } from './utils/queryClient';
+import { getQueryClient } from "~/lib/query-client";
+import { TRPCProvider } from "~/lib/trpc";
+import { getTrpcClient } from "~/lib/trpc/trpc";
 
-export function App() {
+export function Providers({ children }: { children: React.ReactNode }) {
   const queryClient = getQueryClient();
-
-  const [trpcClient] = useState(() =>
-    createTRPCClient<AppRouter>({
-      links: [
-        httpBatchLink({
-          url: 'http://localhost:2022/trpc',
-        }),
-      ],
-    }),
-  );
+  const trpcClient = getTrpcClient();
 
   return (
     <QueryClientProvider client={queryClient}>
-      <TRPCProvider trpcClient={trpcClient} queryClient={queryClient}>
-        {/* Your app here */}
+      <TRPCProvider queryClient={queryClient} trpcClient={trpcClient}>
+        {children}
       </TRPCProvider>
     </QueryClientProvider>
   );
 }
 ```
 
-If you already have React Query set up, reuse your existing `QueryClient` and `QueryClientProvider`.
+## 5) Wire router context (loaders)
 
-## B) Setup without React context (SPA singleton)
-
-Create `utils/trpc.ts`:
+TanStack Router loaders need access to `queryClient` and a `trpc` options proxy.
 
 ```ts
-import { QueryClient } from '@tanstack/react-query';
-import { createTRPCClient, httpBatchLink } from '@trpc/client';
-import { createTRPCOptionsProxy } from '@trpc/tanstack-react-query';
+// src/router.tsx (snippet)
+import { createTRPCOptionsProxy } from "@trpc/tanstack-react-query";
 
-import type { AppRouter } from '../server/router';
+import { getQueryClient } from "~/lib/query-client";
+import { getTrpcClient } from "~/lib/trpc/trpc";
 
-export const queryClient = new QueryClient();
-
-export const client = createTRPCClient<AppRouter>({
-  links: [httpBatchLink({ url: 'http://localhost:2022/trpc' })],
-});
-
-export const trpc = createTRPCOptionsProxy<AppRouter>({
-  client,
-  queryClient,
-});
-```
-
-Wrap your app with React Query:
-
-```tsx
-import { QueryClientProvider } from '@tanstack/react-query';
-
-import { queryClient } from './utils/trpc';
-
-export function App() {
-  return (
-    <QueryClientProvider client={queryClient}>
-      {/* Your app here */}
-    </QueryClientProvider>
-  );
+function getTrpcOptionsProxy() {
+  const queryClient = getQueryClient();
+  const trpcClient = getTrpcClient();
+  const trpc = createTRPCOptionsProxy({ client: trpcClient, queryClient });
+  return { queryClient, trpc };
 }
 ```
+
+Then pass `{ queryClient, trpc }` into the router context and enable SSR query integration:
+
+```tsx
+// src/router.tsx (snippet)
+import { createRouter as createTanStackRouter } from "@tanstack/react-router";
+import { setupRouterSsrQueryIntegration } from "@tanstack/react-router-ssr-query";
+
+import { routeTree } from "~/routeTree.gen";
+
+export function getRouter() {
+  const { queryClient, trpc } = getTrpcOptionsProxy();
+
+  const router = createTanStackRouter({
+    context: { queryClient, trpc },
+    routeTree,
+  });
+
+  setupRouterSsrQueryIntegration({ queryClient, router });
+
+  return router;
+}
+```
+
+Tip: if route files need router-context types, keep them in a separate file to avoid circular deps during Vite SSR HMR (see `src/router-types.ts`).

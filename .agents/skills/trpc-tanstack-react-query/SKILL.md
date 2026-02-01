@@ -1,41 +1,51 @@
 ---
 name: trpc-tanstack-react-query
-description: Implement and use the tRPC v11 TanStack React Query client in React apps. Use when wiring @trpc/tanstack-react-query with @tanstack/react-query (QueryClient + TRPCProvider), choosing SSR-friendly context setup vs CSR singleton setup, generating type-safe queryOptions/mutationOptions/queryKey helpers, and doing cache invalidation/prefetch with TanStack Query.
+description: Implement and use the tRPC v11 TanStack React Query client in this repo (TanStack Start + TanStack Router). Covers SSR-safe QueryClient/tRPC client creation, loader prefetching via createTRPCOptionsProxy, and component usage via createTRPCContext.
 ---
 
-# tRPC + TanStack React Query (v11)
+# tRPC + TanStack React Query (Repo Patterns)
+
+**Last Updated**: 2026-02-01
+**Versions**: @trpc/\*@11.8.x, @tanstack/react-query@5.90.x, @tanstack/react-router@1.150.x
 
 Use the new `@trpc/tanstack-react-query` client (recommended in tRPC v11) to generate type-safe TanStack React Query primitives like QueryOptions, MutationOptions, and QueryKeys.
 
+This repo uses both:
+
+- `createTRPCContext<AppRouter>()` for React components (`TRPCProvider` + `useTRPC()`)
+- `createTRPCOptionsProxy<AppRouter>()` for TanStack Router loaders (router `context.trpc`)
+
 ## Workflow
 
-1) Choose a setup style
+1. Follow the repo setup
 
-- Use `createTRPCContext` when you need React context (SSR, full-stack frameworks, or you want `useTRPC()` / `useTRPCClient()`).
-- Use `createTRPCOptionsProxy` when building a client-only SPA and you prefer singletons.
+- QueryClient: `src/lib/query-client/*` (`makeQueryClient()` + SSR-safe `getQueryClient()`)
+- tRPC client: `src/lib/trpc/*` (`createTRPCClient()` + SSR-safe `getTrpcClient()`)
+- Providers: `src/components/providers.tsx` wires `QueryClientProvider` + `TRPCProvider`
+- Router context: `src/router.tsx` wires `{ queryClient, trpc }` and SSR query integration
 
-2) Install dependencies
+2. Wire providers (components)
 
-- Install `@trpc/client`, `@trpc/tanstack-react-query`, `@tanstack/react-query`.
-- Install `@trpc/server` if you need helper types like `inferRouterInputs` / `inferRouterOutputs`.
+- Wrap the app with `QueryClientProvider` then `TRPCProvider` using the same `queryClient`.
 
-3) Create `utils/trpc.ts`
+3. Wire router context (loaders)
 
-- Follow the context-provider or singleton template in `references/setup.md`.
-- Import `AppRouter` using `import type`.
+- Create a `trpc` options proxy with `createTRPCOptionsProxy({ client: trpcClient, queryClient })` and pass it into router `context`.
 
-4) Wire providers
+4. Use in loaders + components
 
-- Context-provider pattern: wrap the app with `QueryClientProvider`, then `TRPCProvider` (same `QueryClient` instance).
-- Singleton pattern: wrap the app with `QueryClientProvider` only.
-
-5) Call procedures via TanStack Query
-
-- Pass `trpc.someProcedure.queryOptions(input, tanstackOptions)` into `useQuery` / `useSuspenseQuery` / `useInfiniteQuery`.
-- Pass `trpc.someProcedure.mutationOptions(tanstackOptions)` into `useMutation`.
-- Use `trpc.someProcedure.queryKey()` with `useQueryClient()` for type-safe invalidation.
+- Loader: `context.queryClient.ensureQueryData(context.trpc.foo.bar.queryOptions(input))`
+- Component: `useSuspenseQuery(trpc.foo.bar.queryOptions(input))`
 
 See `references/usage.md` for copy/paste patterns.
+
+## Conventions / gotchas (repo)
+
+- **Router params**: loader `params` contains _all_ slugs; always pass an explicit `{ ... }` object to each procedure (never `queryOptions(params)`).
+- **Loading state**: prefer `isPending` (not `isLoading`) for queries and mutations.
+- **Errors**: avoid per-mutation `onError` handlers; the QueryClient has a global `mutations.onError` default.
+- **Invalidation**: make `onSuccess` async and `await queryClient.invalidateQueries(trpc.someQuery.queryOptions(input))`.
+- **Mutations**: use `.mutate()` in click handlers; use `.mutateAsync()` only when you need the promise (forms, sequential flows).
 
 ## Rules / gotchas
 
@@ -45,5 +55,5 @@ See `references/usage.md` for copy/paste patterns.
 
 ## Reference files
 
-- `references/setup.md`: Setup templates (context provider + singleton).
-- `references/usage.md`: Query/mutation patterns, invalidation, `skipToken`, key prefixing, and type inference.
+- `references/setup.md`: Repo-style setup (TanStack Start + TanStack Router).
+- `references/usage.md`: Loader prefetching, suspense queries, mutations, invalidation, optimistic updates, and type inference.
