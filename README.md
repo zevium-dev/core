@@ -7,6 +7,7 @@ The entire website was made using TanStack Start.
 ![shadcn](https://img.shields.io/badge/shadcnui-4-ffffff?style=for-the-badge&logo=shadcnui)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5-4476c0?style=for-the-badge&logo=typescript)
 ![PNPM](https://img.shields.io/badge/pnpm-10-f69220?style=for-the-badge&logo=pnpm)
+![WTFPL](https://img.shields.io/badge/license-WTFPL-696969?style=for-the-badge&logo=unlicense)
 
 ![Drizzle](https://img.shields.io/badge/Drizzle-ORM-ffffff?style=for-the-badge&logo=drizzle)
 ![Turso](https://img.shields.io/badge/Turso-Database-ffffff?style=for-the-badge&logo=turso)
@@ -70,3 +71,7 @@ pnpm dev
 
 - [Drizzle ORM](https://orm.drizzle.team/docs/get-started): Database ORM.
 - [Turso (libSQL)](https://docs.turso.tech/libsql): Database (subject to change).
+
+### License
+
+- [WTFPL and 69 other licenses found](./LICENSE)
