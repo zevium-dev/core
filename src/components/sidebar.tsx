@@ -268,7 +268,26 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
 }
 
 export function MainSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
+  const location = useLocation();
   const user = useSession().user;
+  const trpc = useTRPC();
+  const orgListQuery = useQuery(trpc.organization.list.queryOptions(undefined, { enabled: !!user }));
+
+  const orgNavData = user &&
+    orgListQuery.data && {
+      icon: Building2Icon,
+      open: true,
+      requiresAuth: true,
+      subroutes: orgListQuery.data.map((org) => ({
+        title: org.name,
+        url: `/app/organizations/${org.slug}`,
+      })),
+      title: "Organizations",
+      url: "/app/organizations/~",
+    };
+
+  const filteredNavData = [orgNavData, ...navData].filter(Boolean);
+
   return (
     <Sidebar collapsible="icon" {...props}>
       <SidebarHeader>
@@ -325,6 +344,63 @@ export function MainSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) 
                 </Link>
               </SidebarMenuButton>
             </SidebarMenuItem>
+
+            {user &&
+              filteredNavData.map((item) => {
+                const isActive = location.pathname.startsWith(item.url);
+
+                if (item.subroutes.length > 0) {
+                  return (
+                    <Collapsible className="group/collapsible" defaultOpen={item.open} key={item.title}>
+                      <SidebarMenuItem>
+                        <CollapsibleTrigger asChild>
+                          <SidebarMenuButton
+                            className={`
+                            data-[active=true]:bg-main
+                            data-[active=true]:text-main-foreground
+                          `}
+                          >
+                            <item.icon />
+                            <span>{item.title}</span>
+                          </SidebarMenuButton>
+                        </CollapsibleTrigger>
+                        <CollapsibleContent>
+                          <SidebarMenuSub>
+                            {item.subroutes.map((sub) => {
+                              const isSubActive = location.pathname.startsWith(sub.url);
+                              return (
+                                <SidebarMenuSubItem key={sub.title}>
+                                  <SidebarMenuSubButton asChild isActive={isSubActive}>
+                                    <Link to={sub.url}>{sub.title}</Link>
+                                  </SidebarMenuSubButton>
+                                </SidebarMenuSubItem>
+                              );
+                            })}
+                          </SidebarMenuSub>
+                        </CollapsibleContent>
+                      </SidebarMenuItem>
+                    </Collapsible>
+                  );
+                }
+
+                return (
+                  <SidebarMenuItem key={item.title}>
+                    <SidebarMenuButton
+                      asChild
+                      className={`
+                      data-[active=true]:bg-main
+                      data-[active=true]:text-main-foreground
+                    `}
+                      isActive={isActive}
+                    >
+                      <Link to={item.url}>
+                        <item.icon />
+                        <span>{item.title}</span>
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                );
+              })}
           </SidebarMenu>
         </SidebarGroup>
       </SidebarContent>
