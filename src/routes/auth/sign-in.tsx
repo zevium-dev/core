@@ -1,12 +1,12 @@
 import { SiGoogle } from "@icons-pack/react-simple-icons";
+import { arkTypeValidator } from "@tanstack/arktype-adapter";
 import { useForm } from "@tanstack/react-form";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { type } from "arktype";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { CapWidget, type CapWidgetElement } from "~/components/cap-widget";
-import { Redirect } from "~/components/redirect";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
 import { Input } from "~/components/ui/input";
@@ -21,10 +21,15 @@ export const FormValuesArk = type({
   password: "0 < string < 128",
 });
 
+const SearchParamsArk = type({
+  "redirectTo?": "string | undefined",
+});
+
 type FormValues = typeof FormValuesArk.infer;
 
 export const Route = createFileRoute("/auth/sign-in")({
   component: RouteComponent,
+  validateSearch: arkTypeValidator(SearchParamsArk),
 });
 
 function RouteComponent() {
@@ -33,7 +38,9 @@ function RouteComponent() {
   const [capToken, setCapToken] = useState<null | string>(null);
 
   const user = useSession().user;
-  const navigate = Route.useNavigate();
+  const navigate = useNavigate();
+  const { redirectTo } = Route.useSearch();
+  const safeRedirectTo = redirectTo && redirectTo.startsWith("/") && !redirectTo.startsWith("//") ? redirectTo : "/";
 
   const signInMutation = useMutation({
     mutationFn: (data: FormValues) => {
@@ -46,7 +53,7 @@ function RouteComponent() {
     },
     onSuccess: () => {
       void queryClient.invalidateQueries();
-      return navigate({ to: "/" });
+      return navigate({ to: safeRedirectTo });
     },
   });
 
@@ -67,9 +74,13 @@ function RouteComponent() {
     void auth.signIn.social({ provider: "google" });
   };
 
-  if (user) {
-    return <Redirect to="/" />;
-  }
+  useEffect(() => {
+    if (user) {
+      void navigate({ to: safeRedirectTo });
+    }
+  }, [navigate, safeRedirectTo, user]);
+
+  if (user) return null;
 
   return (
     <ScreenCenter>
