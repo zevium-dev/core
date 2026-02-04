@@ -1,4 +1,4 @@
-import { useForm } from "@tanstack/react-form";
+import { useForm, useStore } from "@tanstack/react-form";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
@@ -68,6 +68,8 @@ function RouteComponent() {
     },
   });
 
+  const isSlugDirty = useStore(form.store, (state) => state.fieldMeta.slug?.isDirty ?? false);
+
   const handleLogoChange = (base64: string) => {
     setLogoData(base64);
     form.setFieldValue("logo", base64);
@@ -83,8 +85,7 @@ function RouteComponent() {
   };
 
   const handleNameChange = (name: string) => {
-    const currentSlug = form.getFieldValue("slug");
-    if (!currentSlug) {
+    if (!isSlugDirty) {
       form.setFieldValue("slug", slugFromName(name));
     }
   };
