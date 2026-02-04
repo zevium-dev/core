@@ -2,11 +2,12 @@ import { SiGoogle } from "@icons-pack/react-simple-icons";
 import { arkTypeValidator } from "@tanstack/arktype-adapter";
 import { useForm } from "@tanstack/react-form";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { type } from "arktype";
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 
 import { CapWidget, type CapWidgetElement } from "~/components/cap-widget";
+import { Redirect } from "~/components/redirect";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
 import { Input } from "~/components/ui/input";
@@ -25,6 +26,12 @@ const SearchParamsArk = type({
   "redirectTo?": "string | undefined",
 });
 
+type AllowedRedirectTo = "/" | "/app/invitations";
+
+const getSafeRedirectTo = (redirectTo: string | undefined): AllowedRedirectTo => {
+  return redirectTo === "/app/invitations" ? "/app/invitations" : "/";
+};
+
 type FormValues = typeof FormValuesArk.infer;
 
 export const Route = createFileRoute("/auth/sign-in")({
@@ -38,9 +45,9 @@ function RouteComponent() {
   const [capToken, setCapToken] = useState<null | string>(null);
 
   const user = useSession().user;
-  const navigate = useNavigate();
+  const navigate = Route.useNavigate();
   const { redirectTo } = Route.useSearch();
-  const safeRedirectTo = redirectTo && redirectTo.startsWith("/") && !redirectTo.startsWith("//") ? redirectTo : "/";
+  const safeRedirectTo = getSafeRedirectTo(redirectTo);
 
   const signInMutation = useMutation({
     mutationFn: (data: FormValues) => {
@@ -74,13 +81,7 @@ function RouteComponent() {
     void auth.signIn.social({ provider: "google" });
   };
 
-  useEffect(() => {
-    if (user) {
-      void navigate({ to: safeRedirectTo });
-    }
-  }, [navigate, safeRedirectTo, user]);
-
-  if (user) return null;
+  if (user) return <Redirect to={safeRedirectTo} />;
 
   return (
     <ScreenCenter>
