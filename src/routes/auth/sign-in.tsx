@@ -1,4 +1,5 @@
 import { SiGoogle } from "@icons-pack/react-simple-icons";
+import { arkTypeValidator } from "@tanstack/arktype-adapter";
 import { useForm } from "@tanstack/react-form";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
@@ -21,10 +22,21 @@ export const FormValuesArk = type({
   password: "0 < string < 128",
 });
 
+const SearchParamsArk = type({
+  "redirectTo?": "string | undefined",
+});
+
+type AllowedRedirectTo = "/" | "/app/invitations";
+
+const getSafeRedirectTo = (redirectTo: string | undefined): AllowedRedirectTo => {
+  return redirectTo === "/app/invitations" ? "/app/invitations" : "/";
+};
+
 type FormValues = typeof FormValuesArk.infer;
 
 export const Route = createFileRoute("/auth/sign-in")({
   component: RouteComponent,
+  validateSearch: arkTypeValidator(SearchParamsArk),
 });
 
 function RouteComponent() {
@@ -34,6 +46,8 @@ function RouteComponent() {
 
   const user = useSession().user;
   const navigate = Route.useNavigate();
+  const { redirectTo } = Route.useSearch();
+  const safeRedirectTo = getSafeRedirectTo(redirectTo);
 
   const signInMutation = useMutation({
     mutationFn: (data: FormValues) => {
@@ -46,7 +60,7 @@ function RouteComponent() {
     },
     onSuccess: () => {
       void queryClient.invalidateQueries();
-      return navigate({ to: "/" });
+      return navigate({ to: safeRedirectTo });
     },
   });
 
@@ -67,9 +81,7 @@ function RouteComponent() {
     void auth.signIn.social({ provider: "google" });
   };
 
-  if (user) {
-    return <Redirect to="/" />;
-  }
+  if (user) return <Redirect to={safeRedirectTo} />;
 
   return (
     <ScreenCenter>

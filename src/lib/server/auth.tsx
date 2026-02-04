@@ -13,12 +13,16 @@ import { EMAIL_FROM } from "~/lib/constants";
 
 import { sendEmail } from "../email";
 import { EmailVerify, EmailVerifySubject } from "../email/templates/email-verify";
+import { OrganizationInvitationEmail, organizationInvitationSubject } from "../email/templates/organization-invitation";
 import { ResetPasswordEmail, ResetPasswordSubject } from "../email/templates/reset-password";
 import { capCaptcha } from "./better-auth-captcha";
 import { kv } from "./kv";
 import { ac, roles } from "./organization-access";
 
 const BETTER_AUTH_KV_PREFIX = "better-auth:";
+
+type OrganizationPluginOptions = NonNullable<Parameters<typeof organization>[0]>;
+type OrganizationSendInvitationEmailData = Parameters<NonNullable<OrganizationPluginOptions["sendInvitationEmail"]>>[0];
 
 export const authServer = betterAuth({
   account: {
@@ -88,7 +92,29 @@ export const authServer = betterAuth({
       rateLimit: { enabled: true, maxRequests: 200, timeWindow: 1000 * 60 },
     }),
     twoFactor(),
-    organization({ ac, requireEmailVerificationOnInvitation: true, roles }),
+    organization({
+      ac,
+      requireEmailVerificationOnInvitation: true,
+      roles,
+      async sendInvitationEmail(data: OrganizationSendInvitationEmailData) {
+        const redirectTo = "/app/invitations";
+        const inviteLink = `${clientEnv.VITE_PUBLIC_URL}/auth/sign-in?redirectTo=${encodeURIComponent(redirectTo)}`;
+
+        await sendEmail({
+          from: EMAIL_FROM,
+          react: (
+            <OrganizationInvitationEmail
+              invitedByEmail={data.inviter.user.email}
+              invitedByName={data.inviter.user.name}
+              inviteLink={inviteLink}
+              organizationName={data.organization.name}
+            />
+          ),
+          subject: organizationInvitationSubject(data.organization.name),
+          to: [data.email],
+        });
+      },
+    }),
     autumn({ customerScope: "organization", secretKey: serverEnv.AUTUMN_SECRET_KEY }),
     capCaptcha(),
     reactStartCookies(),
@@ -137,4 +163,4 @@ export const authServer = betterAuth({
 });
 
 // Uncomment this for generating migrations
-//export const auth = authServer;
+// export const auth = authServer;
