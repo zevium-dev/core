@@ -1,4 +1,4 @@
-import { useForm } from "@tanstack/react-form";
+import { useForm, useStore } from "@tanstack/react-form";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { RotateCcw, X } from "lucide-react";
@@ -61,7 +61,6 @@ function RouteComponent() {
   const isSingleMember = org.members.length === 1;
 
   const [logoData, setLogoData] = useState<null | string>(org.logo ?? null);
-  const [slugManuallyEdited, setSlugManuallyEdited] = useState(false);
   const [roleChangingId, setRoleChangingId] = useState<null | string>(null);
   const [removingId, setRemovingId] = useState<null | string>(null);
   const [cancelingInvitationId, setCancelingInvitationId] = useState<null | string>(null);
@@ -167,6 +166,8 @@ function RouteComponent() {
     },
   });
 
+  const isSlugDirty = useStore(form.store, (state) => state.fieldMeta.slug?.isDirty ?? false);
+
   const inviteForm = useForm({
     defaultValues: { email: "", role: "member" } as InviteFormValues,
     onSubmit: async ({ formApi, value }) => {
@@ -189,14 +190,9 @@ function RouteComponent() {
   };
 
   const handleNameChange = (name: string) => {
-    if (!slugManuallyEdited) {
+    if (!isSlugDirty) {
       form.setFieldValue("slug", slugFromName(name));
     }
-  };
-
-  const handleSlugChange = (slug: string) => {
-    setSlugManuallyEdited(true);
-    form.setFieldValue("slug", slugFromName(slug));
   };
 
   return (
@@ -286,7 +282,7 @@ function RouteComponent() {
                       id="slug"
                       name={field.name}
                       onBlur={field.handleBlur}
-                      onChange={(e) => handleSlugChange(e.target.value)}
+                      onChange={(e) => field.handleChange(slugFromName(e.target.value))}
                       placeholder="my-organization"
                       value={field.state.value}
                     />

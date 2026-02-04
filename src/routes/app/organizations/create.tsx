@@ -1,4 +1,4 @@
-import { useForm } from "@tanstack/react-form";
+import { useForm, useStore } from "@tanstack/react-form";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
@@ -34,7 +34,6 @@ function RouteComponent() {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
   const [logoData, setLogoData] = useState<null | string>(null);
-  const [slugManuallyEdited, setSlugManuallyEdited] = useState(false);
 
   const createOrgMutation = useMutation(
     trpc.organization.create.mutationOptions({
@@ -69,6 +68,8 @@ function RouteComponent() {
     },
   });
 
+  const isSlugDirty = useStore(form.store, (state) => state.fieldMeta.slug?.isDirty ?? false);
+
   const handleLogoChange = (base64: string) => {
     setLogoData(base64);
     form.setFieldValue("logo", base64);
@@ -84,7 +85,7 @@ function RouteComponent() {
   };
 
   const handleNameChange = (name: string) => {
-    if (!slugManuallyEdited) {
+    if (!isSlugDirty) {
       form.setFieldValue("slug", slugFromName(name));
     }
   };
@@ -174,10 +175,7 @@ function RouteComponent() {
                       id="slug"
                       name={field.name}
                       onBlur={field.handleBlur}
-                      onChange={(e) => {
-                        setSlugManuallyEdited(true);
-                        field.handleChange(e.target.value);
-                      }}
+                      onChange={(e) => field.handleChange(e.target.value)}
                       placeholder="my-organization"
                       value={field.state.value}
                     />

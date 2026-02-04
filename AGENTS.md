@@ -369,6 +369,8 @@ Use `enabled: Boolean(dependency)` inside query options. Do not guard fetches wi
 
 Follow TanStack Form best practices (use `@tanstack/react-form` + Standard Schema validators; prefer `void form.handleSubmit()` in submit handlers; render errors from field meta).
 
+When auto-filling derived fields (e.g., generating `slug` from `name`), do not add extra React state like `slugManuallyEdited`. Instead, derive the "has the user edited this field" signal from TanStack Form meta (e.g., gate auto-fill on `!state.fieldMeta.slug?.isDirty` via `useStore(form.store, ...)`) and use `field.handleChange(...)` for user input so the field becomes dirty.
+
 ### 14. Returning Values from Mutations
 
 Return exactly what the UI needs for reconciliation (e.g. updated fragment). Avoid large payloads.
