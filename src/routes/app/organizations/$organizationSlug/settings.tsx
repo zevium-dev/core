@@ -191,7 +191,11 @@ function RouteComponent() {
 
   const handleNameChange = (name: string) => {
     if (!isSlugDirty) {
-      form.setFieldValue("slug", slugFromName(name));
+      form.setFieldValue("slug", slugFromName(name), {
+        dontRunListeners: true,
+        dontUpdateMeta: true,
+        dontValidate: true,
+      });
     }
   };
 
