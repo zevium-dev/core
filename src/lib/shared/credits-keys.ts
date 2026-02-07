@@ -19,6 +19,19 @@ export const CreditsRedisKey = {
    * Read by: src/routes/app/settings/credits/success.tsx (polling for credit application)
    * TTL: 1 year (365 days)
    */
-  creditApplied: ({ checkoutId, userId }: { checkoutId: string; userId: string; }) =>
+  creditApplied: ({ checkoutId, userId }: { checkoutId: string; userId: string }) =>
     `polar:credit_applied:${userId}:${checkoutId}`,
+
+  /**
+   * Stream containing all credit ledger events (topups/deductions/adjustments).
+   * Written by: CreditsManager.add() and CreditsManager.deduct()
+   * Read by: /api/credits/flush (cron-triggered batch writer)
+   */
+  ledgerStream: () => "credits:ledger:stream",
+
+  /**
+   * Cursor tracking the last flushed Redis Stream id.
+   * Used by: /api/credits/flush
+   */
+  ledgerStreamCursor: () => "credits:ledger:cursor",
 };

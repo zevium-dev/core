@@ -30,8 +30,7 @@ export const creditsRouter = router({
       const origin = new URL(ctx.raw.req.url).origin;
       // Always redirect to a waiting page that ensures order.paid has been processed
       const successUrl =
-        input.returnUrl ??
-        new URL("/app/settings/credits/success?checkout_id={CHECKOUT_ID}", origin).toString();
+        input.returnUrl ?? new URL("/app/settings/credits/success?checkout_id={CHECKOUT_ID}", origin).toString();
 
       // Use custom price for arbitrary top-up amounts
       const productId = serverEnv.POLAR_PRODUCT_ID_CREDITS;
@@ -125,5 +124,3 @@ export const creditsRouter = router({
       return { hasNext, items };
     }),
 });
-
-

@@ -3,7 +3,7 @@ import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
 import { useLocation } from "@tanstack/react-router";
 import { Provider as JotaiProvider } from "jotai";
 import { domAnimation, LazyMotion } from "motion/react";
-import { PostHogErrorBoundary,PostHogProvider } from "posthog-js/react";
+import { PostHogErrorBoundary, PostHogProvider } from "posthog-js/react";
 import React from "react";
 
 import { ConfirmProvider } from "~/components/confirm-dialog";
@@ -53,31 +53,31 @@ export const Providers: React.FC<React.PropsWithChildren<{ sidebarDefaultOpen?: 
   return (
     <PHProvider>
       <PostHogErrorBoundary>
-          <QueryClientProvider client={queryClient}>
-            <TRPCProvider queryClient={queryClient} trpcClient={trpcClient}>
-              <ThemeProvider defaultTheme="dark" storageKey="vite-ui-theme">
-                <LazyMotion features={domAnimation} strict>
-                  <JotaiProvider>
-                    <ConfirmProvider>
-                      <Toaster richColors />
-                      <PostHogIdentify />
-                      {!isAppRoute && (
-                        <SidebarProvider defaultOpen={defaultOpen}>
-                          <MainSidebar />
-                          <SidebarInset>
-                            <PageHeader />
-                            {children}
-                          </SidebarInset>
-                        </SidebarProvider>
-                      )}
-                      {isAppRoute && children}
-                    </ConfirmProvider>
-                  </JotaiProvider>
-                </LazyMotion>
-              </ThemeProvider>
-              <ReactQueryDevtools />
-            </TRPCProvider>
-          </QueryClientProvider>
+        <QueryClientProvider client={queryClient}>
+          <TRPCProvider queryClient={queryClient} trpcClient={trpcClient}>
+            <ThemeProvider defaultTheme="dark" storageKey="vite-ui-theme">
+              <LazyMotion features={domAnimation} strict>
+                <JotaiProvider>
+                  <ConfirmProvider>
+                    <Toaster richColors />
+                    <PostHogIdentify />
+                    {!isAppRoute && (
+                      <SidebarProvider defaultOpen={defaultOpen}>
+                        <MainSidebar />
+                        <SidebarInset>
+                          <PageHeader />
+                          {children}
+                        </SidebarInset>
+                      </SidebarProvider>
+                    )}
+                    {isAppRoute && children}
+                  </ConfirmProvider>
+                </JotaiProvider>
+              </LazyMotion>
+            </ThemeProvider>
+            <ReactQueryDevtools />
+          </TRPCProvider>
+        </QueryClientProvider>
       </PostHogErrorBoundary>
     </PHProvider>
   );

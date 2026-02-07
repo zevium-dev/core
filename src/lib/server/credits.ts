@@ -1,7 +1,6 @@
 import { createId } from "@paralleldrive/cuid2";
 import { z } from "zod";
 
-import { db, schema } from "~/db";
 import { kv } from "~/lib/server/kv";
 import { CreditsRedisKey } from "~/lib/shared/credits-keys";
 
@@ -35,16 +34,55 @@ interface LedgerEntryInput {
   userId: string;
 }
 
-async function appendLedger(entry: LedgerEntryInput) {
-  await db.insert(schema.creditLedger).values({
-    amountCents: entry.amountCents,
-    createdAt: new Date(),
-    description: entry.description ?? null,
-    id: createId(),
-    reference: entry.reference ?? null,
-    type: entry.type,
-    userId: entry.userId,
-  });
+async function appendLedgerToStream(entry: LedgerEntryInput) {
+  const streamKey = CreditsRedisKey.ledgerStream();
+  const id = createId();
+  const createdAt = Date.now();
+
+  await kv.xadd(
+    streamKey,
+    "*",
+    {
+      amountCents: String(entry.amountCents),
+      createdAt: String(createdAt),
+      description: entry.description ?? "",
+      id,
+      reference: entry.reference ?? "",
+      type: entry.type,
+      userId: entry.userId,
+    },
+    {
+      trim: {
+        comparison: "~",
+        threshold: 100_000,
+        type: "MAXLEN",
+      },
+    },
+  );
+}
+
+async function getBalanceFromBitfield(userId: string): Promise<number> {
+  const key = CreditsRedisKey.balance(userId);
+  // Redis does not support `u64` in BITFIELD, but `u63` is supported and is more than enough.
+  const res = await kv.bitfield(key).get("u63", 0).exec();
+  const raw: unknown = Array.isArray(res) ? res.at(0) : res;
+  if (raw === null || raw === undefined) return 0;
+  const num = typeof raw === "number" ? raw : typeof raw === "string" ? Number(raw) : Number.NaN;
+  return Number.isFinite(num) ? Math.max(0, Math.floor(num)) : 0;
+}
+
+async function migrateBalanceIfNeeded(userId: string) {
+  const key = CreditsRedisKey.balance(userId);
+  const raw = await kv.get<unknown>(key);
+  if (raw === null || raw === undefined) return;
+  const legacyNum =
+    typeof raw === "number" ? raw : typeof raw === "string" && /^-?\d+$/.test(raw) ? Number(raw) : Number.NaN;
+  if (!Number.isFinite(legacyNum)) return;
+
+  // Legacy balances were stored as a numeric string via INCRBY/DECRBY. Replace with a u64 bitfield.
+  const fixed = Math.max(0, Math.floor(legacyNum));
+  await kv.del(key);
+  await kv.bitfield(key).set("u63", 0, fixed).exec();
 }
 
 /**
@@ -62,10 +100,18 @@ export const CreditsManager = {
     OptionalStringSchema.parse(input.description);
     OptionalStringSchema.parse(input.reference);
 
-    const key = CreditsRedisKey.balance(input.userId);
-    await kv.incrby(key, input.amountCents);
+    await migrateBalanceIfNeeded(input.userId);
 
-    await appendLedger({
+    const key = CreditsRedisKey.balance(input.userId);
+    // Atomic increment on an unsigned 63-bit integer stored as a bitfield.
+    // Use OVERFLOW FAIL to avoid wraparound in the extremely unlikely case of overflow.
+    const res = await kv.bitfield(key).overflow("FAIL").incrby("u63", 0, input.amountCents).exec();
+    const raw: unknown = Array.isArray(res) ? res.at(0) : res;
+    if (raw === null || raw === undefined) {
+      throw new Error("Credit balance overflow");
+    }
+
+    await appendLedgerToStream({
       amountCents: input.amountCents,
       description: input.description,
       reference: input.reference,
@@ -73,7 +119,7 @@ export const CreditsManager = {
       userId: input.userId,
     });
 
-    return CreditsManager.getBalance(input.userId);
+    return getBalanceFromBitfield(input.userId);
   },
 
   /**
@@ -87,31 +133,23 @@ export const CreditsManager = {
     OptionalStringSchema.parse(input.reason);
     OptionalStringSchema.parse(input.reference);
 
+    await migrateBalanceIfNeeded(input.userId);
+
     const key = CreditsRedisKey.balance(input.userId);
-    const script = `
-      local k = KEYS[1]
-      local dec = tonumber(ARGV[1])
-      local current = tonumber(redis.call('GET', k) or '0')
-      if current >= dec then
-        local newbal = redis.call('DECRBY', k, dec)
-        return newbal
-      else
-        return -1
-      end
-    `;
+    const res = await kv.bitfield(key).overflow("FAIL").incrby("u63", 0, -input.amountCents).exec();
 
-    const evalResult = (await kv
-      // Types from @upstash/redis/cloudflare vary; coerce to broad types safely
-      .eval(script as string, [key] as Array<string>, [String(input.amountCents)] as Array<unknown>)
-      .catch(() => -1));
-
-    const resultNum = typeof evalResult === "number" ? evalResult : Number(evalResult ?? Number.NaN);
-
-    if (!Number.isFinite(resultNum) || resultNum < 0) {
+    const raw: unknown = Array.isArray(res) ? res.at(0) : res;
+    // On underflow with OVERFLOW FAIL, Redis returns null.
+    if (raw === null || raw === undefined) {
       throw new Error("Insufficient credits");
     }
 
-    await appendLedger({
+    const nextNum = typeof raw === "number" ? raw : typeof raw === "string" ? Number(raw) : Number.NaN;
+    if (!Number.isFinite(nextNum)) {
+      throw new Error("Insufficient credits");
+    }
+
+    await appendLedgerToStream({
       amountCents: -input.amountCents,
       description: input.reason,
       reference: input.reference,
@@ -119,7 +157,7 @@ export const CreditsManager = {
       userId: input.userId,
     });
 
-    return Math.floor(resultNum);
+    return Math.floor(nextNum);
   },
 
   /**
@@ -127,9 +165,7 @@ export const CreditsManager = {
    */
   async getBalance(userId: string): Promise<number> {
     UserIdSchema.parse(userId);
-    const key = CreditsRedisKey.balance(userId);
-    const raw = await kv.get<unknown>(key);
-    const n = typeof raw === "number" ? raw : Number(raw ?? 0);
-    return Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 0;
+    await migrateBalanceIfNeeded(userId);
+    return getBalanceFromBitfield(userId);
   },
 };

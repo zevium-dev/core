@@ -23,7 +23,10 @@ export const creditLedger = sqliteTable(
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
   },
-  (self) => [index("credit_ledger_user_id_index").on(self.userId), index("credit_ledger_created_at_index").on(self.createdAt)],
+  (self) => [
+    index("credit_ledger_user_id_index").on(self.userId),
+    index("credit_ledger_created_at_index").on(self.createdAt),
+  ],
 );
 
 export const user = sqliteTable(

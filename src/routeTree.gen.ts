@@ -44,6 +44,7 @@ import { Route as ApiProxySplatRouteImport } from './routes/api/proxy/$'
 import { Route as ApiPosthogSplatRouteImport } from './routes/api/posthog/$'
 import { Route as ApiPolarSplatRouteImport } from './routes/api/polar/$'
 import { Route as ApiOpenapiSplatRouteImport } from './routes/api/openapi/$'
+import { Route as ApiCreditsSplatRouteImport } from './routes/api/credits/$'
 import { Route as ApiCapSplatRouteImport } from './routes/api/cap/$'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
 import { Route as AppOrganizationsOrganizationSlugIndexRouteImport } from './routes/app/organizations/$organizationSlug/index'
@@ -233,6 +234,11 @@ const ApiOpenapiSplatRoute = ApiOpenapiSplatRouteImport.update({
   path: '/api/openapi/$',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiCreditsSplatRoute = ApiCreditsSplatRouteImport.update({
+  id: '/api/credits/$',
+  path: '/api/credits/$',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiCapSplatRoute = ApiCapSplatRouteImport.update({
   id: '/api/cap/$',
   path: '/api/cap/$',
@@ -322,6 +328,7 @@ export interface FileRoutesByFullPath {
   '/auth/': typeof AuthIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/cap/$': typeof ApiCapSplatRoute
+  '/api/credits/$': typeof ApiCreditsSplatRoute
   '/api/openapi/$': typeof ApiOpenapiSplatRoute
   '/api/polar/$': typeof ApiPolarSplatRoute
   '/api/posthog/$': typeof ApiPosthogSplatRoute
@@ -368,6 +375,7 @@ export interface FileRoutesByTo {
   '/auth': typeof AuthIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/cap/$': typeof ApiCapSplatRoute
+  '/api/credits/$': typeof ApiCreditsSplatRoute
   '/api/openapi/$': typeof ApiOpenapiSplatRoute
   '/api/polar/$': typeof ApiPolarSplatRoute
   '/api/posthog/$': typeof ApiPosthogSplatRoute
@@ -415,6 +423,7 @@ export interface FileRoutesById {
   '/auth/': typeof AuthIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/cap/$': typeof ApiCapSplatRoute
+  '/api/credits/$': typeof ApiCreditsSplatRoute
   '/api/openapi/$': typeof ApiOpenapiSplatRoute
   '/api/polar/$': typeof ApiPolarSplatRoute
   '/api/posthog/$': typeof ApiPosthogSplatRoute
@@ -465,6 +474,7 @@ export interface FileRouteTypes {
     | '/auth/'
     | '/api/auth/$'
     | '/api/cap/$'
+    | '/api/credits/$'
     | '/api/openapi/$'
     | '/api/polar/$'
     | '/api/posthog/$'
@@ -511,6 +521,7 @@ export interface FileRouteTypes {
     | '/auth'
     | '/api/auth/$'
     | '/api/cap/$'
+    | '/api/credits/$'
     | '/api/openapi/$'
     | '/api/polar/$'
     | '/api/posthog/$'
@@ -557,6 +568,7 @@ export interface FileRouteTypes {
     | '/auth/'
     | '/api/auth/$'
     | '/api/cap/$'
+    | '/api/credits/$'
     | '/api/openapi/$'
     | '/api/polar/$'
     | '/api/posthog/$'
@@ -601,6 +613,7 @@ export interface RootRouteChildren {
   AuthIndexRoute: typeof AuthIndexRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
   ApiCapSplatRoute: typeof ApiCapSplatRoute
+  ApiCreditsSplatRoute: typeof ApiCreditsSplatRoute
   ApiOpenapiSplatRoute: typeof ApiOpenapiSplatRoute
   ApiPolarSplatRoute: typeof ApiPolarSplatRoute
   ApiPosthogSplatRoute: typeof ApiPosthogSplatRoute
@@ -855,6 +868,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiOpenapiSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/credits/$': {
+      id: '/api/credits/$'
+      path: '/api/credits/$'
+      fullPath: '/api/credits/$'
+      preLoaderRoute: typeof ApiCreditsSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/cap/$': {
       id: '/api/cap/$'
       path: '/api/cap/$'
@@ -1059,6 +1079,7 @@ const rootRouteChildren: RootRouteChildren = {
   AuthIndexRoute: AuthIndexRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
   ApiCapSplatRoute: ApiCapSplatRoute,
+  ApiCreditsSplatRoute: ApiCreditsSplatRoute,
   ApiOpenapiSplatRoute: ApiOpenapiSplatRoute,
   ApiPolarSplatRoute: ApiPolarSplatRoute,
   ApiPosthogSplatRoute: ApiPosthogSplatRoute,
