@@ -25,9 +25,6 @@ plugins.push(nodeBuiltinImportPostprocess());
 export default defineConfig({
   plugins,
   // build: { sourcemap: true },
-  server: {
-    allowedHosts: ["afraid-knives-learn.loca.lt"]
-  },
   // @ts-expect-error - vitest types
   test: {
     coverage: {
