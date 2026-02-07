@@ -1,18 +1,7 @@
 import { useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { Link, useLocation, useParams, useRouter } from "@tanstack/react-router";
 import { atom, useAtom } from "jotai";
-import {
-  Building2Icon,
-  Database,
-  DockIcon,
-  LayoutDashboardIcon,
-  LogIn,
-  LogOut,
-  Moon,
-  Palette,
-  Settings,
-  Sun,
-} from "lucide-react";
+import { Database, DockIcon, LayoutDashboardIcon, LogIn, LogOut, Moon, Palette, Settings, Sun } from "lucide-react";
 import { useEffect } from "react";
 
 import { useTheme } from "~/components/theme-provider";
@@ -26,6 +15,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "~/components/ui/dropdown-menu";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "~/components/ui/select";
 import {
   Sidebar,
   SidebarContent,
@@ -90,6 +80,11 @@ const navData = [
   },
 ];
 
+interface OrganizationRoute {
+  title: string;
+  url: string;
+}
+
 /** Must be wrapped in a ClientOnly cuz of hydration issues */
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const location = useLocation();
@@ -100,63 +95,49 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   });
   const trpc = useTRPC();
   const user = useSession().user;
+  const orgListQuery = useSuspenseQuery(trpc.organization.list.queryOptions(undefined, { enabled: !!user }));
+  const selectedOrganizationSlug = orgParams?.organizationSlug;
+  const activeOrganization = orgListQuery.data.find((org) => org.slug === orgParams?.organizationSlug);
+
   // Intentionally not using suspense for projects list cuz it causes hydration issues
   const projectsListQuery = useQuery(
     trpc.project.list.queryOptions(
-      { organizationSlug: orgParams?.organizationSlug },
-      { enabled: !!orgParams?.organizationSlug && !!user },
+      { organizationSlug: selectedOrganizationSlug },
+      { enabled: !!selectedOrganizationSlug && !!user },
     ),
   );
-  const orgListQuery = useSuspenseQuery(trpc.organization.list.queryOptions(undefined, { enabled: !!user }));
 
   const orgNavData = {
-    icon: Building2Icon,
-    open: !orgParams?.organizationSlug || undefined,
-    requiresAuth: true,
     subroutes: orgListQuery.data.map((org) => ({
       title: org.name,
       url: `/app/organizations/${org.slug}`,
     })),
-    title: "Organizations",
-    url: "/app/organizations/~",
   };
 
-  const projectNavData = projectsListQuery.data && {
-    icon: DockIcon,
-    open: !projectParams?.projectSlug || undefined,
-    requiresAuth: true,
-    subroutes: projectsListQuery.data.map((project) => ({
-      title: project.name,
-      url: `/app/organizations/${orgParams?.organizationSlug}/projects/${project.slug}`,
-    })),
-    title: "Projects",
-    url: `/app/organizations/${orgParams?.organizationSlug}/projects`,
-  };
+  const projectNavData = selectedOrganizationSlug &&
+    projectsListQuery.data && {
+      icon: DockIcon,
+      open: !projectParams?.projectSlug || undefined,
+      requiresAuth: true,
+      subroutes: projectsListQuery.data.map((project) => ({
+        title: project.name,
+        url: `/app/organizations/${selectedOrganizationSlug}/projects/${project.slug}`,
+      })),
+      title: "Projects",
+      url: `/app/organizations/${selectedOrganizationSlug}/projects`,
+    };
 
-  const filteredNavData = [orgNavData, projectNavData, ...navData].filter(Boolean);
+  const filteredNavData = [projectNavData, ...navData].filter(Boolean);
 
   return (
     <Sidebar collapsible="icon" {...props}>
       <SidebarHeader>
         <SidebarMenu>
-          <SidebarMenuItem>
-            <Link to="/">
-              <SidebarMenuButton size="lg">
-                <div
-                  className={`
-                    flex aspect-square size-8 items-center justify-center
-                    rounded-full bg-black
-                  `}
-                >
-                  <img alt="zevium" className="size-7" src="/icon.png" />
-                </div>
-                <div className="grid flex-1 text-left text-sm leading-tight">
-                  <span className="font-heading truncate">zevium.dev</span>
-                  <span className="truncate text-xs">a place to share</span>
-                </div>
-              </SidebarMenuButton>
-            </Link>
-          </SidebarMenuItem>
+          <OrganizationSelectorMenu
+            organizationName={activeOrganization?.name}
+            pathname={location.pathname}
+            routes={orgNavData.subroutes}
+          />
         </SidebarMenu>
       </SidebarHeader>
       <SidebarContent>
@@ -269,47 +250,51 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
 
 export function MainSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const location = useLocation();
+  const orgParams = useParams({ from: "/app/organizations/$organizationSlug", shouldThrow: false });
   const user = useSession().user;
   const trpc = useTRPC();
   const orgListQuery = useQuery(trpc.organization.list.queryOptions(undefined, { enabled: !!user }));
 
-  const orgNavData = user &&
-    orgListQuery.data && {
-      icon: Building2Icon,
-      open: true,
-      requiresAuth: true,
-      subroutes: orgListQuery.data.map((org) => ({
-        title: org.name,
-        url: `/app/organizations/${org.slug}`,
-      })),
-      title: "Organizations",
-      url: "/app/organizations/~",
-    };
+  const orgNavData = user && {
+    subroutes: (orgListQuery.data ?? []).map((org) => ({
+      title: org.name,
+      url: `/app/organizations/${org.slug}`,
+    })),
+  };
+  const activeOrganization = orgListQuery.data?.find((org) => org.slug === orgParams?.organizationSlug);
 
-  const filteredNavData = [orgNavData, ...navData].filter(Boolean);
+  const filteredNavData = [...navData];
 
   return (
     <Sidebar collapsible="icon" {...props}>
       <SidebarHeader>
         <SidebarMenu>
-          <SidebarMenuItem>
-            <Link to="/">
-              <SidebarMenuButton size="lg">
-                <div
-                  className={`
-                    flex aspect-square size-8 items-center justify-center
-                    rounded-full bg-black
-                  `}
-                >
-                  <img alt="zevium" className="size-7" src="/icon.png" />
-                </div>
-                <div className="grid flex-1 text-left text-sm leading-tight">
-                  <span className="font-heading truncate">zevium.dev</span>
-                  <span className="truncate text-xs">a place to share</span>
-                </div>
-              </SidebarMenuButton>
-            </Link>
-          </SidebarMenuItem>
+          {user && orgNavData ? (
+            <OrganizationSelectorMenu
+              organizationName={activeOrganization?.name}
+              pathname={location.pathname}
+              routes={orgNavData.subroutes}
+            />
+          ) : (
+            <SidebarMenuItem>
+              <Link to="/">
+                <SidebarMenuButton size="lg">
+                  <div
+                    className={`
+                      flex aspect-square size-8 items-center justify-center
+                      rounded-full bg-black
+                    `}
+                  >
+                    <img alt="zevium" className="size-7" src="/icon.png" />
+                  </div>
+                  <div className="grid flex-1 text-left text-sm leading-tight">
+                    <span className="font-heading truncate">zevium.dev</span>
+                    <span className="truncate text-xs">a place to share</span>
+                  </div>
+                </SidebarMenuButton>
+              </Link>
+            </SidebarMenuItem>
+          )}
         </SidebarMenu>
       </SidebarHeader>
       <SidebarContent>
@@ -548,6 +533,73 @@ function AccountSection() {
       </SidebarMenuButton>
     );
   }
+}
+
+function OrganizationSelectorMenu({
+  organizationName,
+  pathname,
+  routes,
+}: {
+  organizationName?: string;
+  pathname: string;
+  routes: Array<OrganizationRoute>;
+}) {
+  const router = useRouter();
+  const routeOptions: Array<OrganizationRoute> = [
+    {
+      title: "All organizations",
+      url: "/app/organizations/~",
+    },
+    ...routes,
+  ];
+  const selectedValue = routeOptions.some((route) => route.url === pathname) ? pathname : undefined;
+
+  return (
+    <SidebarMenuItem>
+      <div
+        className={`
+          flex h-12 items-center gap-2 overflow-hidden rounded-md p-2
+          group-data-[collapsible=icon]:size-8 group-data-[collapsible=icon]:justify-center
+          group-data-[collapsible=icon]:p-2
+          hover:bg-sidebar-accent
+          hover:text-sidebar-accent-foreground
+        `}
+      >
+        <div
+          className={`
+            flex aspect-square size-8 items-center justify-center
+            rounded-full bg-black
+          `}
+        >
+          <img alt="zevium" className="size-7" src="/icon.png" />
+        </div>
+        <div className="min-w-0 flex-1 group-data-[collapsible=icon]:hidden">
+          <Select
+            onValueChange={(url) => {
+              void router.navigate({ to: url });
+            }}
+            value={selectedValue}
+          >
+            <SelectTrigger
+              className={`
+                h-8 w-full border-none bg-transparent px-0 py-0 text-left shadow-none
+                focus-visible:ring-0 dark:bg-transparent dark:hover:bg-transparent
+              `}
+            >
+              <SelectValue placeholder={organizationName ?? "Select organization"} />
+            </SelectTrigger>
+            <SelectContent>
+              {routeOptions.map((route) => (
+                <SelectItem key={route.url} value={route.url}>
+                  {route.title}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+    </SidebarMenuItem>
+  );
 }
 
 // Theme Selector Component
