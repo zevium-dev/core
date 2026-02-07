@@ -170,6 +170,7 @@ const getUserPermissions = async (userId: string) => {
   const defaultUserPermissions: Permissions = {
     "dashboard.view": { status: "allow" },
     "marketplace.view": { status: "allow" },
+    "organization.create": { status: "allow" },
     "organization.list": { status: "allow" },
   };
 

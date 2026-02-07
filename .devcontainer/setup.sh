@@ -13,7 +13,7 @@ command_exists() {
 if ! command_exists mise; then
     echo "📦 Adding mise to PATH..."
     export PATH="$HOME/.local/bin:$PATH"
-    
+
     # Add to shell profiles
     for profile in ~/.bashrc ~/.zshrc ~/.profile; do
         if [[ -f "$profile" ]]; then
@@ -22,7 +22,7 @@ if ! command_exists mise; then
             fi
         fi
     done
-    
+
     # Source the current shell
     if [[ -f ~/.bashrc ]]; then
         source ~/.bashrc
@@ -41,7 +41,7 @@ fi
 if command_exists mise; then
     echo "🔧 Trusting mise configuration..."
     mise trust
-    
+
     # Install tools (Node.js and other tools defined in mise.toml)
     echo "📦 Installing tools via mise..."
     mise install

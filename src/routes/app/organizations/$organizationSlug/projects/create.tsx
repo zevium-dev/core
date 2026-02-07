@@ -1,7 +1,6 @@
-import { useForm } from "@tanstack/react-form";
+import { useForm, useStore } from "@tanstack/react-form";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, useNavigate, useParams } from "@tanstack/react-router";
-import { useState } from "react";
 import { toast } from "sonner";
 import z from "zod";
 
@@ -35,7 +34,6 @@ function RouteComponent() {
   const { organizationSlug } = useParams({ from: "/app/organizations/$organizationSlug/projects/create" });
   const trpc = useTRPC();
   const queryClient = useQueryClient();
-  const [slugManuallyEdited, setSlugManuallyEdited] = useState(false);
 
   const orgQuery = useQuery(trpc.organization.get.queryOptions({ organizationSlug }));
 
@@ -75,6 +73,8 @@ function RouteComponent() {
     },
   });
 
+  const isSlugDirty = useStore(form.store, (state) => state.fieldMeta.slug?.isDirty ?? false);
+
   const slugFromName = (name: string) => {
     return name
       .toLowerCase()
@@ -85,8 +85,12 @@ function RouteComponent() {
   };
 
   const handleNameChange = (name: string) => {
-    if (!slugManuallyEdited) {
-      form.setFieldValue("slug", slugFromName(name));
+    if (!isSlugDirty) {
+      form.setFieldValue("slug", slugFromName(name), {
+        dontRunListeners: true,
+        dontUpdateMeta: true,
+        dontValidate: true,
+      });
     }
   };
 
@@ -158,7 +162,6 @@ function RouteComponent() {
                       name={field.name}
                       onBlur={field.handleBlur}
                       onChange={(e) => {
-                        setSlugManuallyEdited(true);
                         field.handleChange(e.target.value);
                       }}
                       placeholder="my-api-project"

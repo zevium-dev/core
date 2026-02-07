@@ -23,8 +23,11 @@ plugins.push(viteReact({ babel: { plugins: ["babel-plugin-react-compiler"] } }))
 plugins.push(nodeBuiltinImportPostprocess());
 
 export default defineConfig({
-  // build: { sourcemap: true },
   plugins,
+  // build: { sourcemap: true },
+  server: {
+    allowedHosts: ["afraid-knives-learn.loca.lt"]
+  },
   // @ts-expect-error - vitest types
   test: {
     coverage: {

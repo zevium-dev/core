@@ -63,7 +63,7 @@ export function PageHeader() {
       className={`
       sticky top-0 z-10 flex h-16 shrink-0 items-center gap-2 backdrop-blur-xs
       transition-[width,height] ease-linear
-      group-has-data-[collapsible=icon]/sidebar-wrapper:h-12
+      md:group-has-data-[collapsible=icon]/sidebar-wrapper:h-12
     `}
     >
       <div className="flex w-full items-center gap-2 px-4">
@@ -144,9 +144,9 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
               <SidebarMenuButton size="lg">
                 <div
                   className={`
-                  flex aspect-square size-8 items-center justify-center
-                  rounded-full bg-black
-                `}
+                    flex aspect-square size-8 items-center justify-center
+                    rounded-full bg-black
+                  `}
                 >
                   <img alt="zevium" className="size-7" src="/icon.png" />
                 </div>
@@ -166,9 +166,9 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
               <SidebarMenuButton
                 asChild
                 className={`
-                data-[active=true]:bg-main
-                data-[active=true]:text-main-foreground
-              `}
+                  data-[active=true]:bg-main
+                  data-[active=true]:text-main-foreground
+                `}
               >
                 <Link to="/app/dashboard">
                   <LayoutDashboardIcon />
@@ -181,9 +181,9 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
               <SidebarMenuButton
                 asChild
                 className={`
-                data-[active=true]:bg-main
-                data-[active=true]:text-main-foreground
-              `}
+                  data-[active=true]:bg-main
+                  data-[active=true]:text-main-foreground
+                `}
               >
                 <Link to="/app/catalogue">
                   <Database />
@@ -268,7 +268,26 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
 }
 
 export function MainSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
+  const location = useLocation();
   const user = useSession().user;
+  const trpc = useTRPC();
+  const orgListQuery = useQuery(trpc.organization.list.queryOptions(undefined, { enabled: !!user }));
+
+  const orgNavData = user &&
+    orgListQuery.data && {
+      icon: Building2Icon,
+      open: true,
+      requiresAuth: true,
+      subroutes: orgListQuery.data.map((org) => ({
+        title: org.name,
+        url: `/app/organizations/${org.slug}`,
+      })),
+      title: "Organizations",
+      url: "/app/organizations/~",
+    };
+
+  const filteredNavData = [orgNavData, ...navData].filter(Boolean);
+
   return (
     <Sidebar collapsible="icon" {...props}>
       <SidebarHeader>
@@ -278,9 +297,9 @@ export function MainSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) 
               <SidebarMenuButton size="lg">
                 <div
                   className={`
-                  flex aspect-square size-8 items-center justify-center
-                  rounded-full bg-black
-                `}
+                    flex aspect-square size-8 items-center justify-center
+                    rounded-full bg-black
+                  `}
                 >
                   <img alt="zevium" className="size-7" src="/icon.png" />
                 </div>
@@ -300,9 +319,9 @@ export function MainSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) 
               <SidebarMenuButton
                 asChild
                 className={`
-                data-[active=true]:bg-main
-                data-[active=true]:text-main-foreground
-              `}
+                  data-[active=true]:bg-main
+                  data-[active=true]:text-main-foreground
+                `}
               >
                 <Link to={user ? "/app/dashboard" : "/auth/sign-in"}>
                   <LayoutDashboardIcon />
@@ -315,9 +334,9 @@ export function MainSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) 
               <SidebarMenuButton
                 asChild
                 className={`
-                data-[active=true]:bg-main
-                data-[active=true]:text-main-foreground
-              `}
+                  data-[active=true]:bg-main
+                  data-[active=true]:text-main-foreground
+                `}
               >
                 <Link to={user ? "/app/catalogue" : "/auth/sign-in"}>
                   <Database />
@@ -325,6 +344,63 @@ export function MainSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) 
                 </Link>
               </SidebarMenuButton>
             </SidebarMenuItem>
+
+            {user &&
+              filteredNavData.map((item) => {
+                const isActive = location.pathname.startsWith(item.url);
+
+                if (item.subroutes.length > 0) {
+                  return (
+                    <Collapsible className="group/collapsible" defaultOpen={item.open} key={item.title}>
+                      <SidebarMenuItem>
+                        <CollapsibleTrigger asChild>
+                          <SidebarMenuButton
+                            className={`
+                            data-[active=true]:bg-main
+                            data-[active=true]:text-main-foreground
+                          `}
+                          >
+                            <item.icon />
+                            <span>{item.title}</span>
+                          </SidebarMenuButton>
+                        </CollapsibleTrigger>
+                        <CollapsibleContent>
+                          <SidebarMenuSub>
+                            {item.subroutes.map((sub) => {
+                              const isSubActive = location.pathname.startsWith(sub.url);
+                              return (
+                                <SidebarMenuSubItem key={sub.title}>
+                                  <SidebarMenuSubButton asChild isActive={isSubActive}>
+                                    <Link to={sub.url}>{sub.title}</Link>
+                                  </SidebarMenuSubButton>
+                                </SidebarMenuSubItem>
+                              );
+                            })}
+                          </SidebarMenuSub>
+                        </CollapsibleContent>
+                      </SidebarMenuItem>
+                    </Collapsible>
+                  );
+                }
+
+                return (
+                  <SidebarMenuItem key={item.title}>
+                    <SidebarMenuButton
+                      asChild
+                      className={`
+                      data-[active=true]:bg-main
+                      data-[active=true]:text-main-foreground
+                    `}
+                      isActive={isActive}
+                    >
+                      <Link to={item.url}>
+                        <item.icon />
+                        <span>{item.title}</span>
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                );
+              })}
           </SidebarMenu>
         </SidebarGroup>
       </SidebarContent>
@@ -380,7 +456,7 @@ function AccountSection() {
               `}
               size="default"
             >
-              <Avatar className="size-6">
+              <Avatar className="-ml-1 size-6">
                 <AvatarImage alt={user.name || "User"} src={user.image ?? ""} />
                 <AvatarFallback className="text-xs">{getUserInitials(user)}</AvatarFallback>
               </Avatar>
@@ -391,7 +467,6 @@ function AccountSection() {
             <DropdownMenuLabel className="font-normal">
               <div className="flex flex-col space-y-1">
                 <p className="text-sm leading-none font-medium">{user.name}</p>
-                <p className="text-xs leading-none text-muted-foreground">{user.email}</p>
               </div>
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
@@ -428,18 +503,17 @@ function AccountSection() {
         <DropdownMenuTrigger asChild>
           <SidebarMenuButton
             className={`
-            transition-colors
-            group-data-[state=expanded]:hover:bg-sidebar-accent
-            group-data-[state=expanded]:hover:text-sidebar-accent-foreground
-          `}
+              transition-colors
+              group-data-[state=expanded]:hover:bg-sidebar-accent
+              group-data-[state=expanded]:hover:text-sidebar-accent-foreground
+            `}
           >
-            <Avatar className="size-6">
+            <Avatar className="-ml-1 size-6">
               <AvatarImage alt={user.name || "User"} src={user.image ?? ""} />
               <AvatarFallback className="text-xs">{getUserInitials(user)}</AvatarFallback>
             </Avatar>
             <div className="grid flex-1 text-left text-sm leading-tight">
               <span className="truncate font-medium">{user.name}</span>
-              <span className="truncate text-xs text-muted-foreground">{user.email}</span>
             </div>
           </SidebarMenuButton>
         </DropdownMenuTrigger>
@@ -531,36 +605,36 @@ function ThemeSelector() {
       <DropdownMenuTrigger asChild>
         <SidebarMenuButton
           className={`
-          transition-colors
-          group-data-[state=expanded]:hover:bg-sidebar-accent
-          group-data-[state=expanded]:hover:text-sidebar-accent-foreground
-        `}
+            transition-colors
+            group-data-[state=expanded]:hover:bg-sidebar-accent
+            group-data-[state=expanded]:hover:text-sidebar-accent-foreground
+          `}
         >
           <Sun
             className={`
-            size-4 scale-100 rotate-0 transition-all
-            dark:scale-0 dark:-rotate-90
-          `}
+              size-4 scale-100 rotate-0 transition-all
+              dark:scale-0 dark:-rotate-90
+            `}
           />
           <span
             className={`
-            font-medium opacity-100
-            dark:opacity-0
-          `}
+              font-medium opacity-100
+              dark:opacity-0
+            `}
           >
             Light
           </span>
           <Moon
             className={`
-            absolute size-4 scale-0 rotate-90 transition-all
-            dark:scale-100 dark:rotate-0
-          `}
+              absolute size-4 scale-0 rotate-90 transition-all
+              dark:scale-100 dark:rotate-0
+            `}
           />
           <span
             className={`
-            absolute ml-6 font-medium opacity-0
-            dark:opacity-100
-          `}
+              absolute ml-6 font-medium opacity-0
+              dark:opacity-100
+            `}
           >
             Dark
           </span>
