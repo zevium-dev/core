@@ -1,6 +1,6 @@
 import Editor from "@monaco-editor/react";
 import Monaco from "monaco-editor";
-import { useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 
 import { useTheme } from "~/components/theme-provider";
 
@@ -49,9 +49,11 @@ export function OpenApiEditor({
       cursorSmoothCaretAnimation: "on" as const,
       fontFamily: 'SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace',
       fontSize: 13,
+      glyphMargin: true,
       lineNumbers: "on" as const,
       minimap: { enabled: false },
       readOnly,
+      renderValidationDecorations: "on" as const,
       scrollBeyondLastLine: false,
       "semanticHighlighting.enabled": true,
       smoothScrolling: true,
@@ -60,25 +62,35 @@ export function OpenApiEditor({
     [readOnly],
   );
 
-  useEffect(() => {
+  const syncMarkersWithDiagnostics = useCallback(() => {
     const monaco = monacoRef.current;
     if (!monaco || !editorRef.current) return;
 
     const model = editorRef.current.getModel();
     if (!model) return;
 
-    const markers = diagnostics.map((diagnostic) => ({
-      endColumn: diagnostic.column,
-      endLineNumber: diagnostic.line,
-      message: diagnostic.message,
-      severity: monaco.MarkerSeverity.Error,
-      startColumn: diagnostic.column,
-      startLineNumber: diagnostic.line,
-      tags: [],
-    }));
+    const markers = diagnostics.map((diagnostic) => {
+      const clampedLineNumber = Math.min(Math.max(diagnostic.line, 1), model.getLineCount());
+      const maxColumn = model.getLineMaxColumn(clampedLineNumber);
+      const startColumn = maxColumn > 1 ? Math.min(Math.max(diagnostic.column, 1), Math.max(maxColumn - 1, 1)) : 1;
+      const endColumn = maxColumn > 1 ? Math.min(startColumn + 1, maxColumn) : startColumn;
+
+      return {
+        endColumn,
+        endLineNumber: clampedLineNumber,
+        message: diagnostic.path ? `${diagnostic.message}\n\nPath: ${diagnostic.path}` : diagnostic.message,
+        severity: monaco.MarkerSeverity.Error,
+        startColumn,
+        startLineNumber: clampedLineNumber,
+      };
+    });
 
     monaco.editor.setModelMarkers(model, "openapi", markers);
   }, [diagnostics]);
+
+  useEffect(() => {
+    syncMarkersWithDiagnostics();
+  }, [syncMarkersWithDiagnostics]);
 
   return (
     <Editor
@@ -270,7 +282,8 @@ export function OpenApiEditor({
                 uri: "http://openapi.local/schema.json",
               },
             ],
-            schemaValidation: "error",
+            schemaValidation: "ignore",
+            validate: false,
           });
         }
       }}
@@ -279,6 +292,7 @@ export function OpenApiEditor({
       onChange={(nextValue) => onChange(nextValue ?? "")}
       onMount={(editor) => {
         editorRef.current = editor;
+        syncMarkersWithDiagnostics();
         if (onEditorReady && monacoRef.current) {
           onEditorReady({ editor, monaco: monacoRef.current });
         }

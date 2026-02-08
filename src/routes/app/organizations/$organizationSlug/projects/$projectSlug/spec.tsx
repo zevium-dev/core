@@ -169,7 +169,7 @@ function RouteComponent() {
       return [];
     } catch (error) {
       if (error instanceof OpenApiValidationError) {
-        return validationErrorsToDiagnostics(error.errors);
+        return validationErrorsToDiagnostics(error.errors, debouncedEditorValue);
       }
 
       return [{ column: 1, line: 1, message: error instanceof Error ? error.message : "Validation failed", path: "" }];
@@ -354,6 +354,23 @@ function RouteComponent() {
       },
     ]);
 
+    editor.focus();
+  };
+
+  const handleJumpToIssue = (line: number, column: number) => {
+    const handle = editorHandleRef.current;
+    if (!handle) return;
+
+    const { editor, monaco } = handle;
+    const model = editor.getModel();
+    if (!model) return;
+
+    const lineNumber = Math.min(Math.max(line, 1), model.getLineCount());
+    const columnNumber = Math.min(Math.max(column, 1), model.getLineMaxColumn(lineNumber));
+    const position = new monaco.Position(lineNumber, columnNumber);
+
+    editor.setPosition(position);
+    editor.revealPositionInCenter(position);
     editor.focus();
   };
 
@@ -819,11 +836,20 @@ function RouteComponent() {
               {validationErrors.map((error, index) => (
                 // eslint-disable-next-line @eslint-react/no-array-index-key
                 <li className="rounded-lg border p-3" key={`${error.message}-${index}`}>
-                  <div className="font-medium">{error.message}</div>
-                  <div className="mt-1 text-xs text-muted-foreground">
-                    Line {error.line}, Column {error.column}
-                    {error.path ? ` • ${error.path}` : ""}
-                  </div>
+                  <button
+                    className="w-full text-left"
+                    onClick={() => {
+                      handleJumpToIssue(error.line, error.column);
+                      setIsIssuesDialogOpen(false);
+                    }}
+                    type="button"
+                  >
+                    <div className="font-medium">{error.message}</div>
+                    <div className="mt-1 text-xs text-muted-foreground">
+                      Line {error.line}, Column {error.column}
+                      {error.path ? ` • ${error.path}` : ""}
+                    </div>
+                  </button>
                 </li>
               ))}
             </ul>

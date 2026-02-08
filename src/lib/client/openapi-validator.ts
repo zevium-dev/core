@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { parseJsonPath, resolveJsonParseErrorPosition, resolveJsonPathPosition } from "./json-position";
+
 const openApiInfoSchema = z.object({
   contact: z
     .object({
@@ -70,24 +72,29 @@ export interface ValidationError {
   line?: number;
   message: string;
   path?: string;
+  pathSegments?: Array<number | string>;
 }
 
 export class OpenApiValidationError extends Error {
   public readonly errors: Array<ValidationError>;
 
   constructor(errors: Array<ValidationError>) {
-    super(`OpenAPI validation failed: ${errors.map((e) => e.message).join(", ")}`);
+    super(`OpenAPI validation failed: ${errors.map((error) => error.message).join(", ")}`);
     this.name = "OpenApiValidationError";
     this.errors = errors;
   }
 }
 
-const buildParseError = (message: string, line?: number, column?: number): ValidationError => ({
-  code: "PARSE_ERROR",
-  column,
-  line,
-  message,
-});
+const buildParseError = (message: string, rawDraft?: string): ValidationError => {
+  const position = rawDraft ? resolveJsonParseErrorPosition(rawDraft, message) : null;
+
+  return {
+    code: "PARSE_ERROR",
+    column: position?.column,
+    line: position?.line,
+    message,
+  };
+};
 
 const additionalSemanticErrors = (spec: Record<string, unknown>) => {
   const errors: Array<ValidationError> = [];
@@ -98,6 +105,7 @@ const additionalSemanticErrors = (spec: Record<string, unknown>) => {
       code: "EMPTY_PATHS",
       message: "OpenAPI specification must contain at least one path",
       path: "paths",
+      pathSegments: ["paths"],
     });
   }
 
@@ -108,6 +116,7 @@ const additionalSemanticErrors = (spec: Record<string, unknown>) => {
           code: "INVALID_PATH_FORMAT",
           message: `Path "${path}" must start with "/"`,
           path: `paths.${path}`,
+          pathSegments: ["paths", path],
         });
       }
     }
@@ -133,7 +142,7 @@ export function validateOpenApiDraft(rawDraft: string, _filenameHint: string): V
     parsedContent = JSON.parse(draft);
   } catch (parseError) {
     throw new OpenApiValidationError([
-      buildParseError(parseError instanceof Error ? parseError.message : "Failed to parse JSON specification"),
+      buildParseError(parseError instanceof Error ? parseError.message : "Failed to parse JSON specification", draft),
     ]);
   }
 
@@ -145,8 +154,10 @@ export function validateOpenApiDraft(rawDraft: string, _filenameHint: string): V
         code: issue.code,
         message: issue.message,
         path: issue.path.join("."),
+        pathSegments: issue.path as Array<number | string>,
       });
     }
+
     throw new OpenApiValidationError(errors);
   }
 
@@ -162,10 +173,33 @@ export function validateOpenApiDraft(rawDraft: string, _filenameHint: string): V
   };
 }
 
-export const validationErrorsToDiagnostics = (errors: Array<ValidationError>) =>
-  errors.map((error) => ({
-    column: error.column ?? 1,
-    line: error.line ?? 1,
-    message: error.message,
-    path: error.path,
-  }));
+export const validationErrorsToDiagnostics = (errors: Array<ValidationError>, rawDraft?: string) =>
+  errors.map((error) => {
+    if (typeof error.line === "number" && typeof error.column === "number") {
+      return {
+        column: error.column,
+        line: error.line,
+        message: error.message,
+        path: error.path,
+      };
+    }
+
+    if (!rawDraft) {
+      return {
+        column: 1,
+        line: 1,
+        message: error.message,
+        path: error.path,
+      };
+    }
+
+    const pathSegments = error.pathSegments ?? (error.path ? parseJsonPath(error.path) : []);
+    const mappedPosition = resolveJsonPathPosition(rawDraft, pathSegments);
+
+    return {
+      column: mappedPosition?.column ?? 1,
+      line: mappedPosition?.line ?? 1,
+      message: error.message,
+      path: error.path,
+    };
+  });
