@@ -131,6 +131,13 @@ pnpm run generate-routes
 - The dev server is expected on [http://localhost:5173](http://localhost:5173).
 - When calling Better Auth organization APIs (e.g., acceptInvitation, cancelInvitation, createInvitation), do not wrap single calls in try/catch; let errors surface through TRPC/Better Auth instead of swallowing them.
 
+#### Browser Testing Login (Local)
+
+- For manual browser testing on localhost, use `http://localhost:5173`.
+- Test login credentials:
+  - Email: `tnfssc@gmail.com`
+  - Password: `1234qwer`
+
 #### Internal Dev/Test Routes
 
 Routes under `/$internal/*` are intended for local development/testing.
