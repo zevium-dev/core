@@ -3,14 +3,14 @@ name: pr-description-generator
 description: Generate a copy-pastable GitHub PR description by comparing the current git branch against the develop branch (or origin/develop). Use when preparing a PR and you want an accurate summary based on commits + file diffs.
 ---
 
-# PR Description Generator
+# PR Description Generator (Node.js)
 
 Generate a PR description from real git deltas (commit subjects + file changes) so the PR body stays accurate and easy to review.
 
 ## Quick Start
 
 ```bash
-python3 .agents/skills/pr-description-generator/scripts/generate_pr_description.py
+node .agents/skills/pr-description-generator/scripts/generate_pr_description.mjs
 ```
 
 ## Options
@@ -18,20 +18,20 @@ python3 .agents/skills/pr-description-generator/scripts/generate_pr_description.
 - Use a different base branch:
 
 ```bash
-python3 .agents/skills/pr-description-generator/scripts/generate_pr_description.py --base develop
-python3 .agents/skills/pr-description-generator/scripts/generate_pr_description.py --base origin/develop
+node .agents/skills/pr-description-generator/scripts/generate_pr_description.mjs --base develop
+node .agents/skills/pr-description-generator/scripts/generate_pr_description.mjs --base origin/develop
 ```
 
 - Provide an explicit title:
 
 ```bash
-python3 .agents/skills/pr-description-generator/scripts/generate_pr_description.py --title "<your title>"
+node .agents/skills/pr-description-generator/scripts/generate_pr_description.mjs --title "<your title>"
 ```
 
 - Avoid fetching (offline / no remote access):
 
 ```bash
-python3 .agents/skills/pr-description-generator/scripts/generate_pr_description.py --no-fetch
+node .agents/skills/pr-description-generator/scripts/generate_pr_description.mjs --no-fetch
 ```
 
 ## Output Contract
