@@ -604,108 +604,51 @@ function OrganizationSelectorMenu({
 
 // Theme Selector Component
 function ThemeSelector() {
-  const { setTheme } = useTheme();
+  const { setTheme, theme } = useTheme();
   const { state } = useSidebar();
+  const themeCycle = ["system", "dark", "light"] as const;
+
+  const currentTheme =
+    theme === "dark"
+      ? { Icon: Moon, label: "Dark" }
+      : theme === "light"
+        ? { Icon: Sun, label: "Light" }
+        : { Icon: Palette, label: "System" };
+
+  const toggleTheme = () => {
+    const currentIndex = themeCycle.indexOf(theme);
+    const nextTheme = themeCycle[(currentIndex + 1) % themeCycle.length] ?? "system";
+    setTheme(nextTheme);
+  };
 
   if (state === "collapsed") {
     return (
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <SidebarMenuButton
-            className={`
-              transition-colors
-              group-data-[state=collapsed]:hover:bg-sidebar-accent
-              group-data-[state=collapsed]:hover:text-sidebar-accent-foreground
-            `}
-            size="default"
-          >
-            <Sun
-              className={`
-              size-4 scale-100 rotate-0 transition-all
-              dark:scale-0 dark:-rotate-90
-            `}
-            />
-            <Moon
-              className={`
-              absolute size-4 scale-0 rotate-90 transition-all
-              dark:scale-100 dark:rotate-0
-            `}
-            />
-            <span className="sr-only">Toggle theme</span>
-          </SidebarMenuButton>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="center" side="right" sideOffset={4}>
-          <DropdownMenuItem onClick={() => setTheme("light")}>
-            <Sun className="mr-2 size-4" />
-            Light
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => setTheme("dark")}>
-            <Moon className="mr-2 size-4" />
-            Dark
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => setTheme("system")}>
-            <Palette className="mr-2 size-4" />
-            System
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+      <SidebarMenuButton
+        className={`
+          transition-colors
+          group-data-[state=collapsed]:hover:bg-sidebar-accent
+          group-data-[state=collapsed]:hover:text-sidebar-accent-foreground
+        `}
+        onClick={toggleTheme}
+        size="default"
+      >
+        <currentTheme.Icon className="size-4 transition-all" />
+        <span className="sr-only">Cycle theme, current: {currentTheme.label}</span>
+      </SidebarMenuButton>
     );
   }
 
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <SidebarMenuButton
-          className={`
-            transition-colors
-            group-data-[state=expanded]:hover:bg-sidebar-accent
-            group-data-[state=expanded]:hover:text-sidebar-accent-foreground
-          `}
-        >
-          <Sun
-            className={`
-              size-4 scale-100 rotate-0 transition-all
-              dark:scale-0 dark:-rotate-90
-            `}
-          />
-          <span
-            className={`
-              font-medium opacity-100
-              dark:opacity-0
-            `}
-          >
-            Light
-          </span>
-          <Moon
-            className={`
-              absolute size-4 scale-0 rotate-90 transition-all
-              dark:scale-100 dark:rotate-0
-            `}
-          />
-          <span
-            className={`
-              absolute ml-6 font-medium opacity-0
-              dark:opacity-100
-            `}
-          >
-            Dark
-          </span>
-        </SidebarMenuButton>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" side="right" sideOffset={4}>
-        <DropdownMenuItem onClick={() => setTheme("light")}>
-          <Sun className="mr-2 size-4" />
-          Light
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => setTheme("dark")}>
-          <Moon className="mr-2 size-4" />
-          Dark
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => setTheme("system")}>
-          <Palette className="mr-2 size-4" />
-          System
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <SidebarMenuButton
+      className={`
+        transition-colors
+        group-data-[state=expanded]:hover:bg-sidebar-accent
+        group-data-[state=expanded]:hover:text-sidebar-accent-foreground
+      `}
+      onClick={toggleTheme}
+    >
+      <currentTheme.Icon className="size-4 transition-all" />
+      <span className="font-medium">{currentTheme.label}</span>
+    </SidebarMenuButton>
   );
 }
