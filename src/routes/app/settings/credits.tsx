@@ -1,7 +1,7 @@
-import { useMutation, useQuery, useSuspenseQuery } from "@tanstack/react-query";
+import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { ExternalLink, FileText, Settings } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { z } from "zod";
 
 import { Button } from "~/components/ui/button";
@@ -13,6 +13,7 @@ const PAGE_SIZE = 3;
 
 const amountInputSchema = z.number().int().positive().max(100_000);
 
+/* eslint-disable perfectionist/sort-objects */
 export const Route = createFileRoute("/app/settings/credits")({
   validateSearch: z.object({
     page: z.number().int().positive().optional(),
@@ -25,6 +26,7 @@ export const Route = createFileRoute("/app/settings/credits")({
   },
   component: CreditsComponent,
 });
+/* eslint-enable perfectionist/sort-objects */
 
 interface TransactionRowProps {
   onGetInvoice: (orderId: string) => void;
@@ -38,30 +40,22 @@ interface TransactionRowProps {
 
 function CreditsComponent() {
   const trpc = useTRPC();
+  const queryClient = useQueryClient();
   const navigate = Route.useNavigate();
   const search = Route.useSearch();
   const [_autoTopUpEnabled, _setAutoTopUpEnabled] = useState(false);
   const currentPage = search.page ?? 1;
   const [amountUsd, setAmountUsd] = useState<string>("10");
-  const [selectedOrderId, setSelectedOrderId] = useState<null | string>(null);
 
   const balanceQuery = useSuspenseQuery(trpc.credits.getBalance.queryOptions());
   const transactionsQuery = useSuspenseQuery(
     trpc.credits.listTransactions.queryOptions({ page: currentPage, pageSize: PAGE_SIZE }),
   );
 
-  // Query for invoice URL - enabled only when an order is selected
-  const invoiceQuery = useQuery({
-    ...trpc.credits.getInvoiceUrl.queryOptions({ orderId: selectedOrderId ?? "" }),
-    enabled: Boolean(selectedOrderId),
-  });
-
   const topupMutation = useMutation(
     trpc.credits.createTopUpCheckout.mutationOptions({
       onSuccess(data) {
-        if (data?.url) {
-          window.location.assign(data.url);
-        }
+        window.location.assign(data.url);
       },
     }),
   );
@@ -81,16 +75,11 @@ function CreditsComponent() {
   };
 
   const handleGetInvoice = (orderId: string) => {
-    setSelectedOrderId(orderId);
+    void (async () => {
+      const data = await queryClient.fetchQuery(trpc.credits.getInvoiceUrl.queryOptions({ orderId }));
+      window.open(data.url, "_blank");
+    })();
   };
-
-  // Open invoice when query completes
-  useEffect(() => {
-    if (invoiceQuery.data?.url && selectedOrderId) {
-      window.open(invoiceQuery.data.url, "_blank");
-      setSelectedOrderId(() => null);
-    }
-  }, [invoiceQuery.data, selectedOrderId]);
 
   const handlePageChange = (newPage: number) => {
     void navigate({

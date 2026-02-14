@@ -199,7 +199,7 @@ const proxyHandler = async (request: Request) => {
               // Stream completed successfully → commit billing
               try {
                 await CreditsManager.deduct({
-                  amountCents: 1,
+                  amountCents: 2,
                   reason: "Zevium proxy API call",
                   reference: requestId,
                   userId,

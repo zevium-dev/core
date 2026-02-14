@@ -13,21 +13,36 @@ export const Route = createFileRoute("/api/polar/$")({
         const url = new URL(request.url);
         if (url.pathname.endsWith("/webhook")) {
           // Dynamic imports to avoid bundling server-only code in client
-          const [{ serverEnv }, { CreditsManager }, { kv }, { validateEvent }] = await Promise.all([
-            import("~/env/server"),
-            import("~/lib/server/credits"),
-            import("~/lib/server/kv"),
-            import("@polar-sh/sdk/webhooks"),
-          ]);
+          const [{ serverEnv }, { CreditsManager }, { kv }, { validateEvent }, { createPostHogClient }] =
+            await Promise.all([
+              import("~/env/server"),
+              import("~/lib/server/credits"),
+              import("~/lib/server/kv"),
+              import("@polar-sh/sdk/webhooks"),
+              import("~/lib/server/posthog"),
+            ]);
+
+          const posthog = createPostHogClient();
 
           // Read raw body for signature verification
           const raw = await request.text();
+
           const payloadUnknown: unknown = (() => {
             try {
               // Validate signature; throws if invalid
-              return validateEvent(raw, Object.fromEntries(request.headers.entries()), serverEnv.POLAR_WEBHOOK_SECRET);
+              const validated = validateEvent(
+                raw,
+                Object.fromEntries(request.headers.entries()),
+                serverEnv.POLAR_WEBHOOK_SECRET,
+              );
+              return validated;
             } catch (err) {
               const error = new Error("Polar webhook signature verification failed", { cause: err });
+              posthog?.captureException(error, undefined, {
+                bodyLength: raw.length,
+                source: "polar_webhook",
+              });
+              void posthog?.shutdown();
               throw error;
             }
           })();
@@ -57,22 +72,63 @@ export const Route = createFileRoute("/api/polar/$")({
 
               // Only process our credits product
               if (!order.productId || order.productId !== serverEnv.POLAR_PRODUCT_ID_CREDITS) {
+                posthog?.capture({
+                  distinctId: "system",
+                  event: "polar_webhook_ignored",
+                  properties: {
+                    expectedProductId: serverEnv.POLAR_PRODUCT_ID_CREDITS,
+                    orderId: order.id,
+                    productId: order.productId,
+                    reason: "product_id_mismatch",
+                  },
+                });
+                void posthog?.shutdown();
                 return new Response("ignored", { status: 200 });
               }
 
               const metadataUserId = order.metadata?.userId;
               const userId = typeof metadataUserId === "string" ? metadataUserId : "";
+
               if (!userId) {
+                posthog?.capture({
+                  distinctId: "system",
+                  event: "polar_webhook_ignored",
+                  properties: {
+                    metadata: order.metadata,
+                    orderId: order.id,
+                    reason: "no_user_id",
+                  },
+                });
+                void posthog?.shutdown();
                 return new Response("ignored: no userId", { status: 200 });
               }
 
               // Unified idempotency across checkout + order events
               const dedupeId = order.checkoutId ?? order.id;
               const appliedKey = CreditsRedisKey.creditApplied({ checkoutId: dedupeId, userId });
+
               const applyOk = await kv
                 .set(appliedKey, "1", { nx: true, px: 1000 * 60 * 60 * 24 * 365 })
-                .catch(() => null);
+                .catch((err) => {
+                  posthog?.captureException(err, userId, {
+                    appliedKey,
+                    operation: "redis_set_idempotency",
+                    source: "polar_webhook",
+                  });
+                  return null;
+                });
+
               if (applyOk !== "OK") {
+                posthog?.capture({
+                  distinctId: userId,
+                  event: "polar_webhook_duplicate",
+                  properties: {
+                    appliedKey,
+                    checkoutId: order.checkoutId,
+                    orderId: order.id,
+                  },
+                });
+                void posthog?.shutdown();
                 return new Response("ok");
               }
 
@@ -87,19 +143,49 @@ export const Route = createFileRoute("/api/polar/$")({
                     : typeof order.taxAmount === "number"
                       ? Math.max(0, order.totalAmount - order.taxAmount)
                       : order.totalAmount;
+
               if (amountCents > 0) {
-                await CreditsManager.add({
+                const newBalance = await CreditsManager.add({
                   amountCents,
                   description: "Polar top-up",
                   reference: order.id,
                   userId,
                 });
+
+                posthog?.capture({
+                  distinctId: userId,
+                  event: "polar_webhook_credits_added",
+                  properties: {
+                    amountCents,
+                    checkoutId: order.checkoutId,
+                    newBalance,
+                    orderId: order.id,
+                  },
+                });
+              } else {
+                posthog?.capture({
+                  distinctId: userId,
+                  event: "polar_webhook_skipped",
+                  properties: {
+                    amountCents,
+                    orderId: order.id,
+                    reason: "zero_or_negative_amount",
+                  },
+                });
               }
+
+              void posthog?.shutdown();
               return new Response("ok");
             }
 
+            void posthog?.shutdown();
             return new Response("ignored", { status: 200 });
           } catch (err) {
+            posthog?.captureException(err, undefined, {
+              eventType: payload?.type,
+              source: "polar_webhook",
+            });
+            void posthog?.shutdown();
             const error = new Error("Polar webhook processing failed", { cause: err });
             throw error;
           }

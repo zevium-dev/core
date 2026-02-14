@@ -11,6 +11,7 @@ const creditsSuccessSearchSchema = z
   })
   .strict();
 
+/* eslint-disable perfectionist/sort-objects */
 export const Route = createFileRoute("/app/settings/credits/success")({
   validateSearch: creditsSuccessSearchSchema,
   beforeLoad: async ({ search }) => {
@@ -21,7 +22,7 @@ export const Route = createFileRoute("/app/settings/credits/success")({
     const { authServer } = await import("~/lib/server/auth");
     const authResponse = await authServer.api.getSession({ headers: request.headers }).catch(() => null);
 
-    if (!authResponse?.user?.id) {
+    if (!authResponse?.user.id) {
       throw redirect({ to: "/app/settings/credits" });
     }
 
@@ -51,6 +52,7 @@ export const Route = createFileRoute("/app/settings/credits/success")({
   },
   component: SuccessComponent,
 });
+/* eslint-enable perfectionist/sort-objects */
 
 function SuccessComponent() {
   // This component should never actually render because beforeLoad redirects
