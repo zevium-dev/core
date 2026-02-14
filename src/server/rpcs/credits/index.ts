@@ -85,7 +85,7 @@ export const creditsRouter = router({
       });
       const order = page.result.items.at(0);
       if (!order) return { amountCents: 0, orderId: null as null | string };
-      return { amountCents: order.totalAmount, orderId: order.id };
+      return { amountCents: order.subtotalAmount, orderId: order.id };
     }),
   listTransactions: protectedProcedure
     .input(
@@ -112,7 +112,7 @@ export const creditsRouter = router({
       });
 
       const items = page.result.items.map((o) => ({
-        amountCents: o.totalAmount,
+        amountCents: o.subtotalAmount,
         createdAt: o.createdAt,
         description: "Polar top-up",
         id: o.id,

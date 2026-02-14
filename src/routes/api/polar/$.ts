@@ -45,9 +45,13 @@ export const Route = createFileRoute("/api/polar/$")({
               const order = payload.data as {
                 checkoutId: null | string;
                 currency: string;
+                discountAmount?: number;
                 id: string;
                 metadata?: Record<string, unknown>;
+                netAmount?: number;
                 productId: null | string;
+                subtotalAmount?: number;
+                taxAmount?: number;
                 totalAmount: number;
               };
 
@@ -72,7 +76,17 @@ export const Route = createFileRoute("/api/polar/$")({
                 return new Response("ok");
               }
 
-              const amountCents = order.totalAmount;
+              // Credit the intended top-up amount (pre-discount, pre-tax).
+              // Polar exposes this as `subtotalAmount`.
+              // Fallbacks are defensive in case payload shape changes.
+              const amountCents =
+                typeof order.subtotalAmount === "number"
+                  ? order.subtotalAmount
+                  : typeof order.netAmount === "number" && typeof order.discountAmount === "number"
+                    ? Math.max(0, order.netAmount + order.discountAmount)
+                    : typeof order.taxAmount === "number"
+                      ? Math.max(0, order.totalAmount - order.taxAmount)
+                      : order.totalAmount;
               if (amountCents > 0) {
                 await CreditsManager.add({
                   amountCents,
