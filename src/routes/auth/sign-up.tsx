@@ -6,6 +6,7 @@ import { TRPCClientError } from "@trpc/client";
 import { type } from "arktype";
 import { useRef, useState } from "react";
 
+import { AuthFormClientOnly } from "~/components/auth-form-client-only";
 import { CapWidget, type CapWidgetElement } from "~/components/cap-widget";
 import { Redirect } from "~/components/redirect";
 import { Button } from "~/components/ui/button";
@@ -115,162 +116,176 @@ function RouteComponent() {
                     Or continue with
                   </span>
                 </div>
-                <div className="grid gap-6">
-                  <form.Field
-                    children={(field) => {
-                      const isInvalid = field.state.meta.isTouched && !field.state.meta.isValid;
-                      const error = field.state.meta.errors.at(0);
+                <AuthFormClientOnly
+                  fields={[
+                    { labelWidthClass: "w-12" },
+                    { labelWidthClass: "w-12" },
+                    { labelWidthClass: "w-16" },
+                    { labelWidthClass: "w-28" },
+                  ]}
+                  showCaptcha
+                >
+                  <div className="grid gap-6">
+                    <form.Field
+                      children={(field) => {
+                        const isInvalid = field.state.meta.isTouched && !field.state.meta.isValid;
+                        const error = field.state.meta.errors.at(0);
 
-                      return (
-                        <div className="grid gap-3">
-                          <Label htmlFor="name">Name</Label>
-                          <Input
-                            aria-describedby={isInvalid ? "name-error" : undefined}
-                            aria-invalid={isInvalid}
-                            disabled={isSubmitting}
-                            id="name"
-                            name={field.name}
-                            onBlur={field.handleBlur}
-                            onChange={(e) => field.handleChange(e.target.value)}
-                            placeholder="Your Name"
-                            type="text"
-                            value={field.state.value}
-                          />
-                          <p
-                            className={cn(
-                              "text-end text-xs text-destructive",
-                              !isInvalid &&
-                                `
+                        return (
+                          <div className="grid gap-3">
+                            <Label htmlFor="name">Name</Label>
+                            <Input
+                              aria-describedby={isInvalid ? "name-error" : undefined}
+                              aria-invalid={isInvalid}
+                              autoComplete="name"
+                              disabled={isSubmitting}
+                              id="name"
+                              name={field.name}
+                              onBlur={field.handleBlur}
+                              onChange={(e) => field.handleChange(e.target.value)}
+                              placeholder="Your Name"
+                              type="text"
+                              value={field.state.value}
+                            />
+                            <p
+                              className={cn(
+                                "text-end text-xs text-destructive",
+                                !isInvalid &&
+                                  `
                       invisible
                     `,
-                            )}
-                            id="name-error"
-                          >
-                            {isInvalid ? getFormErrorString(error) : "No error"}
-                          </p>
-                        </div>
-                      );
-                    }}
-                    name="name"
-                  />
+                              )}
+                              id="name-error"
+                            >
+                              {isInvalid ? getFormErrorString(error) : "No error"}
+                            </p>
+                          </div>
+                        );
+                      }}
+                      name="name"
+                    />
 
-                  <form.Field
-                    children={(field) => {
-                      const isInvalid = field.state.meta.isTouched && !field.state.meta.isValid;
-                      const error = field.state.meta.errors.at(0);
+                    <form.Field
+                      children={(field) => {
+                        const isInvalid = field.state.meta.isTouched && !field.state.meta.isValid;
+                        const error = field.state.meta.errors.at(0);
 
-                      return (
-                        <div className="grid gap-3">
-                          <Label htmlFor="email">Email</Label>
-                          <Input
-                            aria-describedby={isInvalid ? "email-error" : undefined}
-                            aria-invalid={isInvalid}
-                            disabled={isSubmitting}
-                            id="email"
-                            name={field.name}
-                            onBlur={field.handleBlur}
-                            onChange={(e) => field.handleChange(e.target.value)}
-                            placeholder="me@example.com"
-                            type="email"
-                            value={field.state.value}
-                          />
-                          <p
-                            className={cn(
-                              "text-end text-xs text-destructive",
-                              !isInvalid &&
-                                `
+                        return (
+                          <div className="grid gap-3">
+                            <Label htmlFor="email">Email</Label>
+                            <Input
+                              aria-describedby={isInvalid ? "email-error" : undefined}
+                              aria-invalid={isInvalid}
+                              autoComplete="email"
+                              disabled={isSubmitting}
+                              id="email"
+                              name={field.name}
+                              onBlur={field.handleBlur}
+                              onChange={(e) => field.handleChange(e.target.value)}
+                              placeholder="me@example.com"
+                              type="email"
+                              value={field.state.value}
+                            />
+                            <p
+                              className={cn(
+                                "text-end text-xs text-destructive",
+                                !isInvalid &&
+                                  `
                         invisible
                       `,
-                            )}
-                            id="email-error"
-                          >
-                            {isInvalid ? getFormErrorString(error) : "No error"}
-                          </p>
-                        </div>
-                      );
-                    }}
-                    name="email"
-                  />
+                              )}
+                              id="email-error"
+                            >
+                              {isInvalid ? getFormErrorString(error) : "No error"}
+                            </p>
+                          </div>
+                        );
+                      }}
+                      name="email"
+                    />
 
-                  <form.Field
-                    children={(field) => {
-                      const isInvalid = field.state.meta.isTouched && !field.state.meta.isValid;
-                      const error = field.state.meta.errors.at(0);
+                    <form.Field
+                      children={(field) => {
+                        const isInvalid = field.state.meta.isTouched && !field.state.meta.isValid;
+                        const error = field.state.meta.errors.at(0);
 
-                      return (
-                        <div className="grid gap-3">
-                          <Label htmlFor="password">Password</Label>
-                          <Input
-                            aria-describedby={isInvalid ? "password-error" : undefined}
-                            aria-invalid={isInvalid}
-                            disabled={isSubmitting}
-                            id="password"
-                            name={field.name}
-                            onBlur={field.handleBlur}
-                            onChange={(e) => field.handleChange(e.target.value)}
-                            type="password"
-                            value={field.state.value}
-                          />
-                          <p
-                            className={cn(
-                              "text-end text-xs text-destructive",
-                              !isInvalid &&
-                                `
+                        return (
+                          <div className="grid gap-3">
+                            <Label htmlFor="password">Password</Label>
+                            <Input
+                              aria-describedby={isInvalid ? "password-error" : undefined}
+                              aria-invalid={isInvalid}
+                              autoComplete="new-password"
+                              disabled={isSubmitting}
+                              id="password"
+                              name={field.name}
+                              onBlur={field.handleBlur}
+                              onChange={(e) => field.handleChange(e.target.value)}
+                              type="password"
+                              value={field.state.value}
+                            />
+                            <p
+                              className={cn(
+                                "text-end text-xs text-destructive",
+                                !isInvalid &&
+                                  `
                         invisible
                       `,
-                            )}
-                            id="password-error"
-                          >
-                            {isInvalid ? getFormErrorString(error) : "No error"}
-                          </p>
-                        </div>
-                      );
-                    }}
-                    name="password"
-                  />
+                              )}
+                              id="password-error"
+                            >
+                              {isInvalid ? getFormErrorString(error) : "No error"}
+                            </p>
+                          </div>
+                        );
+                      }}
+                      name="password"
+                    />
 
-                  <form.Field
-                    children={(field) => {
-                      const isInvalid = field.state.meta.isTouched && !field.state.meta.isValid;
-                      const error = field.state.meta.errors.at(0);
+                    <form.Field
+                      children={(field) => {
+                        const isInvalid = field.state.meta.isTouched && !field.state.meta.isValid;
+                        const error = field.state.meta.errors.at(0);
 
-                      return (
-                        <div className="grid gap-3">
-                          <Label htmlFor="password-confirm">Confirm password</Label>
-                          <Input
-                            aria-describedby={isInvalid ? "password-confirm-error" : undefined}
-                            aria-invalid={isInvalid}
-                            disabled={isSubmitting}
-                            id="password-confirm"
-                            name={field.name}
-                            onBlur={field.handleBlur}
-                            onChange={(e) => field.handleChange(e.target.value)}
-                            type="password"
-                            value={field.state.value}
-                          />
-                          <p
-                            className={cn(
-                              "text-end text-xs text-destructive",
-                              !isInvalid &&
-                                `
+                        return (
+                          <div className="grid gap-3">
+                            <Label htmlFor="password-confirm">Confirm password</Label>
+                            <Input
+                              aria-describedby={isInvalid ? "password-confirm-error" : undefined}
+                              aria-invalid={isInvalid}
+                              autoComplete="new-password"
+                              disabled={isSubmitting}
+                              id="password-confirm"
+                              name={field.name}
+                              onBlur={field.handleBlur}
+                              onChange={(e) => field.handleChange(e.target.value)}
+                              type="password"
+                              value={field.state.value}
+                            />
+                            <p
+                              className={cn(
+                                "text-end text-xs text-destructive",
+                                !isInvalid &&
+                                  `
                         invisible
                       `,
-                            )}
-                            id="password-confirm-error"
-                          >
-                            {isInvalid ? getFormErrorString(error) : "No error"}
-                          </p>
-                        </div>
-                      );
-                    }}
-                    name="passwordConfirm"
-                  />
+                              )}
+                              id="password-confirm-error"
+                            >
+                              {isInvalid ? getFormErrorString(error) : "No error"}
+                            </p>
+                          </div>
+                        );
+                      }}
+                      name="passwordConfirm"
+                    />
 
-                  <CapWidget onSolve={setCapToken} ref={capRef} />
-                  <Button className="w-full" loading={isSubmitting} type="submit">
-                    Sign up
-                  </Button>
-                </div>
+                    <CapWidget onSolve={setCapToken} ref={capRef} />
+                    <Button className="w-full" loading={isSubmitting} type="submit">
+                      Sign up
+                    </Button>
+                  </div>
+                </AuthFormClientOnly>
                 <div className="text-center text-sm">
                   Already have an account?{" "}
                   <Link className="underline underline-offset-4" to="/auth/sign-in">
