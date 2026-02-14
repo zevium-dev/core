@@ -1,1 +1,1 @@
-CREATE INDEX project_embeddings_idx ON project_embeddings(libsql_vector_idx(embedding));
+CREATE INDEX IF NOT EXISTS project_embeddings_idx ON project_embeddings (libsql_vector_idx (embedding));
