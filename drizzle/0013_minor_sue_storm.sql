@@ -1,0 +1,1 @@
+DROP INDEX `apikey_prefix_index`;

@@ -127,7 +127,6 @@ export const apikey = sqliteTable(
   (self) => [
     index("apikey_user_id_index").on(self.userId),
     uniqueIndex("apikey_key_index").on(self.key),
-    uniqueIndex("apikey_prefix_index").on(self.prefix),
   ],
 );
 
