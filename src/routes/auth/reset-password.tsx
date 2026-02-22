@@ -6,6 +6,7 @@ import { TRPCClientError } from "@trpc/client";
 import { type } from "arktype";
 import { toast } from "sonner";
 
+import { AuthFormClientOnly } from "~/components/auth-form-client-only";
 import { Redirect } from "~/components/redirect";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
@@ -83,85 +84,89 @@ function RouteComponent() {
               }}
             >
               <div className="grid gap-6">
-                <div className="grid gap-6">
-                  <form.Field
-                    children={(field) => {
-                      const isInvalid = field.state.meta.isTouched && !field.state.meta.isValid;
-                      const error = field.state.meta.errors.at(0);
+                <AuthFormClientOnly fields={[{ labelWidthClass: "w-16" }, { labelWidthClass: "w-28" }]}>
+                  <div className="grid gap-6">
+                    <form.Field
+                      children={(field) => {
+                        const isInvalid = field.state.meta.isTouched && !field.state.meta.isValid;
+                        const error = field.state.meta.errors.at(0);
 
-                      return (
-                        <div className="grid gap-3">
-                          <Label htmlFor="password">Password</Label>
-                          <Input
-                            aria-describedby={isInvalid ? "password-error" : undefined}
-                            aria-invalid={isInvalid}
-                            disabled={isSubmitting}
-                            id="password"
-                            name={field.name}
-                            onBlur={field.handleBlur}
-                            onChange={(e) => field.handleChange(e.target.value)}
-                            type="password"
-                            value={field.state.value}
-                          />
-                          <p
-                            className={cn(
-                              "text-end text-xs text-destructive",
-                              !isInvalid &&
-                                `
+                        return (
+                          <div className="grid gap-3">
+                            <Label htmlFor="password">Password</Label>
+                            <Input
+                              aria-describedby={isInvalid ? "password-error" : undefined}
+                              aria-invalid={isInvalid}
+                              autoComplete="new-password"
+                              disabled={isSubmitting}
+                              id="password"
+                              name={field.name}
+                              onBlur={field.handleBlur}
+                              onChange={(e) => field.handleChange(e.target.value)}
+                              type="password"
+                              value={field.state.value}
+                            />
+                            <p
+                              className={cn(
+                                "text-end text-xs text-destructive",
+                                !isInvalid &&
+                                  `
                         invisible
                       `,
-                            )}
-                            id="password-error"
-                          >
-                            {isInvalid ? getFormErrorString(error) : "No error"}
-                          </p>
-                        </div>
-                      );
-                    }}
-                    name="password"
-                  />
+                              )}
+                              id="password-error"
+                            >
+                              {isInvalid ? getFormErrorString(error) : "No error"}
+                            </p>
+                          </div>
+                        );
+                      }}
+                      name="password"
+                    />
 
-                  <form.Field
-                    children={(field) => {
-                      const isInvalid = field.state.meta.isTouched && !field.state.meta.isValid;
-                      const error = field.state.meta.errors.at(0);
+                    <form.Field
+                      children={(field) => {
+                        const isInvalid = field.state.meta.isTouched && !field.state.meta.isValid;
+                        const error = field.state.meta.errors.at(0);
 
-                      return (
-                        <div className="grid gap-3">
-                          <Label htmlFor="password-confirm">Confirm password</Label>
-                          <Input
-                            aria-describedby={isInvalid ? "password-confirm-error" : undefined}
-                            aria-invalid={isInvalid}
-                            disabled={isSubmitting}
-                            id="password-confirm"
-                            name={field.name}
-                            onBlur={field.handleBlur}
-                            onChange={(e) => field.handleChange(e.target.value)}
-                            type="password"
-                            value={field.state.value}
-                          />
-                          <p
-                            className={cn(
-                              "text-end text-xs text-destructive",
-                              !isInvalid &&
-                                `
+                        return (
+                          <div className="grid gap-3">
+                            <Label htmlFor="password-confirm">Confirm password</Label>
+                            <Input
+                              aria-describedby={isInvalid ? "password-confirm-error" : undefined}
+                              aria-invalid={isInvalid}
+                              autoComplete="new-password"
+                              disabled={isSubmitting}
+                              id="password-confirm"
+                              name={field.name}
+                              onBlur={field.handleBlur}
+                              onChange={(e) => field.handleChange(e.target.value)}
+                              type="password"
+                              value={field.state.value}
+                            />
+                            <p
+                              className={cn(
+                                "text-end text-xs text-destructive",
+                                !isInvalid &&
+                                  `
                         invisible
                       `,
-                            )}
-                            id="password-confirm-error"
-                          >
-                            {isInvalid ? getFormErrorString(error) : "No error"}
-                          </p>
-                        </div>
-                      );
-                    }}
-                    name="passwordConfirm"
-                  />
+                              )}
+                              id="password-confirm-error"
+                            >
+                              {isInvalid ? getFormErrorString(error) : "No error"}
+                            </p>
+                          </div>
+                        );
+                      }}
+                      name="passwordConfirm"
+                    />
 
-                  <Button className="w-full" loading={isSubmitting} type="submit">
-                    Reset password
-                  </Button>
-                </div>
+                    <Button className="w-full" loading={isSubmitting} type="submit">
+                      Reset password
+                    </Button>
+                  </div>
+                </AuthFormClientOnly>
               </div>
             </form>
           </CardContent>

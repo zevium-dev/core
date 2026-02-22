@@ -147,10 +147,7 @@ export const apikey = sqliteTable(
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
   },
-  (self) => [
-    index("apikey_user_id_index").on(self.userId),
-    uniqueIndex("apikey_key_index").on(self.key),
-  ],
+  (self) => [index("apikey_user_id_index").on(self.userId), uniqueIndex("apikey_key_index").on(self.key)],
 );
 
 // === Two-Factor Authentication =====
