@@ -10,6 +10,8 @@ class UpstreamNonOK extends Error {
   }
 }
 
+const PROXY_CALL_COST_CENTS = 1;
+
 // Placeholder: Replace with a real DB fetch for the proxy secret
 async function getProxySecretFromDb(): Promise<string> {
   // TODO: Replace with real DB fetch
@@ -153,18 +155,63 @@ const proxyHandler = async (request: Request) => {
       user_id?: string;
       userId?: string;
     };
-    const userId = vAny.user?.id ?? vAny.key?.userId ?? vAny.userId ?? vAny.user_id ?? "";
+    const userId = vAny.user?.id ?? vAny.key?.userId ?? vAny.userId ?? vAny.user_id;
+    if (!userId) {
+      return jsonWithRequestId(401, "API key verification did not include a user id", requestId);
+    }
 
-    const upstream = await fetch(targetUrl, {
-      body: request.body,
-      // @ts-expect-error duplex is not in the type definition (Node.js fetch streaming)
-      duplex: "half",
-      headers: outboundHeaders,
-      method: request.method,
-    });
+    let isChargeReserved = false;
+    const refundReservedCharge = async () => {
+      if (!isChargeReserved) return;
+      await CreditsManager.add({
+        amountCents: PROXY_CALL_COST_CENTS,
+        description: "Refund for failed Zevium proxy API call",
+        reference: requestId,
+        userId,
+      });
+      isChargeReserved = false;
+    };
+
+    try {
+      await CreditsManager.deduct({
+        amountCents: PROXY_CALL_COST_CENTS,
+        reason: "Zevium proxy API call",
+        reference: requestId,
+        userId,
+      });
+      isChargeReserved = true;
+    } catch (err) {
+      if (err instanceof Error && err.message === "Insufficient credits") {
+        return jsonWithRequestId(402, "Insufficient credits", requestId);
+      }
+      return jsonWithRequestId(503, "Billing is temporarily unavailable", requestId);
+    }
+
+    let upstream: Response;
+    try {
+      upstream = await fetch(targetUrl, {
+        body: request.body,
+        // @ts-expect-error duplex is not in the type definition (Node.js fetch streaming)
+        duplex: "half",
+        headers: outboundHeaders,
+        method: request.method,
+      });
+    } catch {
+      try {
+        await refundReservedCharge();
+      } catch {
+        return jsonWithRequestId(503, "Billing is temporarily unavailable", requestId);
+      }
+      return jsonWithRequestId(502, "Upstream request failed", requestId);
+    }
 
     // Not a success → no charge, return upstream as-is
     if (!upstream.ok) {
+      try {
+        await refundReservedCharge();
+      } catch {
+        return jsonWithRequestId(503, "Billing is temporarily unavailable", requestId);
+      }
       throw new UpstreamNonOK(upstream);
     }
 
@@ -175,83 +222,48 @@ const proxyHandler = async (request: Request) => {
     // eslint-disable-next-line drizzle/enforce-delete-with-where
     responseHeaders.delete("x-zevium-proxy-secret");
 
-    // Success criteria for charging:
-    // - HTTP 2xx (already checked)
-    // - Stream fully reaches the end to client
-    // - No upstream read error / no cancel
-    if (upstream.body) {
-      const reader = upstream.body.getReader();
-      let _aborted = false;
-      const stream = new ReadableStream({
-        async cancel() {
-          _aborted = true;
-          try {
-            await reader.cancel();
-          } catch (err) {
-            const error = new Error("Stream cancelled by client", { cause: err });
-            throw error;
-          }
-        },
-        async pull(controller) {
-          try {
-            const { done, value } = await reader.read();
-            if (done) {
-              // Stream completed successfully → commit billing
-              try {
-                await CreditsManager.deduct({
-                  amountCents: 2,
-                  reason: "Zevium proxy API call",
-                  reference: requestId,
-                  userId,
-                });
-              } catch (err) {
-                const error = new Error("Failed to deduct credits after successful stream", { cause: err });
-                throw error;
-              }
-              controller.close();
-              return;
-            }
-            controller.enqueue(value);
-          } catch (_e) {
-            _aborted = true;
-            try {
-              await reader.cancel();
-            } catch (err) {
-              const error = new Error("Failed to cancel stream after read error", { cause: err });
-              throw error;
-            }
-            const error = new Error("Upstream read failed", { cause: _e });
-            throw error;
-          }
-        },
-      });
-
-      // Streaming response to client; billing is committed on pull() completion
-      return new Response(stream, {
-        headers: responseHeaders,
-        status: upstream.status,
-        statusText: upstream.statusText,
-      });
-    } else {
-      // Non-streaming body: read fully, then bill and return
-      const buf = await upstream.arrayBuffer();
-      try {
-        await CreditsManager.deduct({
-          amountCents: 1,
-          reason: "Zevium proxy API call",
-          reference: requestId,
-          userId,
-        });
-      } catch (err) {
-        const error = new Error("Failed to deduct credits for non-streaming response", { cause: err });
-        throw error;
-      }
-      return new Response(buf, {
+    if (!upstream.body) {
+      isChargeReserved = false;
+      return new Response(null, {
         headers: responseHeaders,
         status: upstream.status,
         statusText: upstream.statusText,
       });
     }
+
+    const reader = upstream.body.getReader();
+    const stream = new ReadableStream({
+      async cancel() {
+        await reader.cancel().catch(() => undefined);
+        await refundReservedCharge().catch(() => undefined);
+      },
+      async pull(controller) {
+        try {
+          const { done, value } = await reader.read();
+          if (done) {
+            isChargeReserved = false;
+            controller.close();
+            return;
+          }
+          controller.enqueue(value);
+        } catch (readErr) {
+          await reader.cancel().catch(() => undefined);
+          try {
+            await refundReservedCharge();
+          } catch (refundErr) {
+            controller.error(new Error("Failed to refund credits after upstream read error", { cause: refundErr }));
+            return;
+          }
+          controller.error(new Error("Upstream read failed", { cause: readErr }));
+        }
+      },
+    });
+
+    return new Response(stream, {
+      headers: responseHeaders,
+      status: upstream.status,
+      statusText: upstream.statusText,
+    });
   } catch (error) {
     if (error instanceof UpstreamNonOK) {
       // Return upstream error response without charging (already prevented)

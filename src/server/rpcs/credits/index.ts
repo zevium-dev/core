@@ -28,7 +28,7 @@ export const creditsRouter = router({
     .output(z.object({ url: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const origin = new URL(ctx.raw.req.url).origin;
-      // Always redirect to a waiting page that ensures order.paid has been processed
+      // Default to a waiting page that ensures order.paid has been processed.
       const successUrl =
         input.returnUrl ?? new URL("/app/settings/credits/success?checkout_id={CHECKOUT_ID}", origin).toString();
 

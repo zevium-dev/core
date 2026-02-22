@@ -107,16 +107,18 @@ export const Route = createFileRoute("/api/polar/$")({
               const dedupeId = order.checkoutId ?? order.id;
               const appliedKey = CreditsRedisKey.creditApplied({ checkoutId: dedupeId, userId });
 
-              const applyOk = await kv
-                .set(appliedKey, "1", { nx: true, px: 1000 * 60 * 60 * 24 * 365 })
-                .catch((err) => {
-                  posthog?.captureException(err, userId, {
-                    appliedKey,
-                    operation: "redis_set_idempotency",
-                    source: "polar_webhook",
-                  });
-                  return null;
+              let applyOk: null | string = null;
+              try {
+                applyOk = await kv.set(appliedKey, "1", { nx: true, px: 1000 * 60 * 60 * 24 * 365 });
+              } catch (err) {
+                posthog?.captureException(err, userId, {
+                  appliedKey,
+                  operation: "redis_set_idempotency",
+                  source: "polar_webhook",
                 });
+                void posthog?.shutdown();
+                return new Response("temporary failure", { status: 500 });
+              }
 
               if (applyOk !== "OK") {
                 posthog?.capture({
@@ -145,12 +147,24 @@ export const Route = createFileRoute("/api/polar/$")({
                       : order.totalAmount;
 
               if (amountCents > 0) {
-                const newBalance = await CreditsManager.add({
-                  amountCents,
-                  description: "Polar top-up",
-                  reference: order.id,
-                  userId,
-                });
+                let newBalance = 0;
+                try {
+                  newBalance = await CreditsManager.add({
+                    amountCents,
+                    description: "Polar top-up",
+                    reference: order.id,
+                    userId,
+                  });
+                } catch (err) {
+                  await kv.del(appliedKey).catch((rollbackErr) => {
+                    posthog?.captureException(rollbackErr, userId, {
+                      appliedKey,
+                      operation: "redis_clear_idempotency_after_failed_apply",
+                      source: "polar_webhook",
+                    });
+                  });
+                  throw err;
+                }
 
                 posthog?.capture({
                   distinctId: userId,

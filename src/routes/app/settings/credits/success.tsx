@@ -15,6 +15,10 @@ const creditsSuccessSearchSchema = z
 export const Route = createFileRoute("/app/settings/credits/success")({
   validateSearch: creditsSuccessSearchSchema,
   beforeLoad: async ({ search }) => {
+    if (!import.meta.env.SSR) {
+      throw redirect({ to: "/app/settings/credits" });
+    }
+
     // Dynamic import to avoid bundling server-only code in client
     const { getRequest } = await import("@tanstack/react-start/server");
     // Get authenticated user from request

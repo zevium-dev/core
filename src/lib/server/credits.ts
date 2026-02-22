@@ -12,6 +12,32 @@ const OptionalStringSchema = z.string().nullable().optional();
 const PositiveIntegerSchema = z.number().int("amountCents must be a whole number").positive("amountCents must be > 0");
 const UserIdSchema = z.string().min(1, "userId is required");
 
+const MIGRATE_LEGACY_BALANCE_SCRIPT = `
+  local key = KEYS[1]
+  local raw = redis.call('GET', key)
+  if not raw then
+    return 0
+  end
+
+  if string.match(raw, '^%-?%d+$') == nil then
+    return 0
+  end
+
+  local num = tonumber(raw)
+  if not num then
+    return 0
+  end
+
+  if num < 0 then
+    num = 0
+  end
+
+  num = math.floor(num)
+  redis.call('DEL', key)
+  redis.call('BITFIELD', key, 'SET', 'u63', 0, num)
+  return 1
+`;
+
 interface AddInput {
   amountCents: number;
   description?: string;
@@ -73,16 +99,7 @@ async function getBalanceFromBitfield(userId: string): Promise<number> {
 
 async function migrateBalanceIfNeeded(userId: string) {
   const key = CreditsRedisKey.balance(userId);
-  const raw = await kv.get<unknown>(key);
-  if (raw === null || raw === undefined) return;
-  const legacyNum =
-    typeof raw === "number" ? raw : typeof raw === "string" && /^-?\d+$/.test(raw) ? Number(raw) : Number.NaN;
-  if (!Number.isFinite(legacyNum)) return;
-
-  // Legacy balances were stored as a numeric string via INCRBY/DECRBY. Replace with a u64 bitfield.
-  const fixed = Math.max(0, Math.floor(legacyNum));
-  await kv.del(key);
-  await kv.bitfield(key).set("u63", 0, fixed).exec();
+  await kv.eval(MIGRATE_LEGACY_BALANCE_SCRIPT, [key], []);
 }
 
 /**
@@ -111,15 +128,24 @@ export const CreditsManager = {
       throw new Error("Credit balance overflow");
     }
 
-    await appendLedgerToStream({
-      amountCents: input.amountCents,
-      description: input.description,
-      reference: input.reference,
-      type: "topup",
-      userId: input.userId,
-    });
+    const nextNum = typeof raw === "number" ? raw : typeof raw === "string" ? Number(raw) : Number.NaN;
+    if (!Number.isFinite(nextNum) || nextNum < 0) {
+      throw new Error("Credit balance overflow");
+    }
 
-    return getBalanceFromBitfield(input.userId);
+    try {
+      await appendLedgerToStream({
+        amountCents: input.amountCents,
+        description: input.description,
+        reference: input.reference,
+        type: "topup",
+        userId: input.userId,
+      });
+    } catch {
+      // Ignore ledger stream write failure to avoid reporting failed top-ups after balance already changed.
+    }
+
+    return Math.floor(nextNum);
   },
 
   /**
@@ -149,13 +175,17 @@ export const CreditsManager = {
       throw new Error("Insufficient credits");
     }
 
-    await appendLedgerToStream({
-      amountCents: -input.amountCents,
-      description: input.reason,
-      reference: input.reference,
-      type: "deduct",
-      userId: input.userId,
-    });
+    try {
+      await appendLedgerToStream({
+        amountCents: -input.amountCents,
+        description: input.reason,
+        reference: input.reference,
+        type: "deduct",
+        userId: input.userId,
+      });
+    } catch {
+      // Ignore ledger stream write failure to avoid reporting failed deductions after balance already changed.
+    }
 
     return Math.floor(nextNum);
   },
