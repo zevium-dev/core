@@ -1,6 +1,6 @@
 // src/hooks/useOptimisticTodoMutations.ts
-import { useMutation, useQueryClient } from '@tanstack/react-query'
-import type { Todo } from './useTodos'
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import type { Todo } from "./useTodos";
 
 /**
  * Optimistic Update Pattern
@@ -19,13 +19,13 @@ import type { Todo } from './useTodos'
  */
 
 type AddTodoInput = {
-  title: string
-}
+  title: string;
+};
 
 type UpdateTodoInput = {
-  id: number
-  completed: boolean
-}
+  id: number;
+  completed: boolean;
+};
 
 /**
  * Optimistic Add Todo
@@ -33,33 +33,30 @@ type UpdateTodoInput = {
  * Immediately shows new todo in UI, then confirms with server
  */
 export function useOptimisticAddTodo() {
-  const queryClient = useQueryClient()
+  const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: async (newTodo: AddTodoInput) => {
-      const response = await fetch(
-        'https://jsonplaceholder.typicode.com/todos',
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ...newTodo, userId: 1, completed: false }),
-        }
-      )
+      const response = await fetch("https://jsonplaceholder.typicode.com/todos", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...newTodo, userId: 1, completed: false }),
+      });
 
-      if (!response.ok) throw new Error('Failed to add todo')
-      return response.json()
+      if (!response.ok) throw new Error("Failed to add todo");
+      return response.json();
     },
 
     // Before mutation runs
     onMutate: async (newTodo) => {
       // Cancel outgoing refetches (so they don't overwrite our optimistic update)
-      await queryClient.cancelQueries({ queryKey: ['todos'] })
+      await queryClient.cancelQueries({ queryKey: ["todos"] });
 
       // Snapshot current value
-      const previousTodos = queryClient.getQueryData<Todo[]>(['todos'])
+      const previousTodos = queryClient.getQueryData<Todo[]>(["todos"]);
 
       // Optimistically update cache
-      queryClient.setQueryData<Todo[]>(['todos'], (old = []) => [
+      queryClient.setQueryData<Todo[]>(["todos"], (old = []) => [
         ...old,
         {
           id: Date.now(), // Temporary ID
@@ -67,28 +64,28 @@ export function useOptimisticAddTodo() {
           completed: false,
           userId: 1,
         },
-      ])
+      ]);
 
       // Return context with snapshot (used for rollback)
-      return { previousTodos }
+      return { previousTodos };
     },
 
     // If mutation fails, rollback using context
     onError: (err, newTodo, context) => {
-      console.error('Failed to add todo:', err)
+      console.error("Failed to add todo:", err);
 
       // Restore previous state
       if (context?.previousTodos) {
-        queryClient.setQueryData(['todos'], context.previousTodos)
+        queryClient.setQueryData(["todos"], context.previousTodos);
       }
     },
 
     // Always refetch after mutation settles (success or error)
     // Ensures cache matches server state
     onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: ['todos'] })
+      queryClient.invalidateQueries({ queryKey: ["todos"] });
     },
-  })
+  });
 }
 
 /**
@@ -97,51 +94,46 @@ export function useOptimisticAddTodo() {
  * Immediately toggles todo in UI, confirms with server
  */
 export function useOptimisticUpdateTodo() {
-  const queryClient = useQueryClient()
+  const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: async ({ id, completed }: UpdateTodoInput) => {
-      const response = await fetch(
-        `https://jsonplaceholder.typicode.com/todos/${id}`,
-        {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ completed }),
-        }
-      )
+      const response = await fetch(`https://jsonplaceholder.typicode.com/todos/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ completed }),
+      });
 
-      if (!response.ok) throw new Error('Failed to update todo')
-      return response.json()
+      if (!response.ok) throw new Error("Failed to update todo");
+      return response.json();
     },
 
     onMutate: async ({ id, completed }) => {
-      await queryClient.cancelQueries({ queryKey: ['todos'] })
+      await queryClient.cancelQueries({ queryKey: ["todos"] });
 
       // Snapshot
-      const previousTodos = queryClient.getQueryData<Todo[]>(['todos'])
+      const previousTodos = queryClient.getQueryData<Todo[]>(["todos"]);
 
       // Optimistic update
-      queryClient.setQueryData<Todo[]>(['todos'], (old = []) =>
-        old.map((todo) =>
-          todo.id === id ? { ...todo, completed } : todo
-        )
-      )
+      queryClient.setQueryData<Todo[]>(["todos"], (old = []) =>
+        old.map((todo) => (todo.id === id ? { ...todo, completed } : todo)),
+      );
 
-      return { previousTodos }
+      return { previousTodos };
     },
 
     onError: (err, variables, context) => {
-      console.error('Failed to update todo:', err)
+      console.error("Failed to update todo:", err);
       if (context?.previousTodos) {
-        queryClient.setQueryData(['todos'], context.previousTodos)
+        queryClient.setQueryData(["todos"], context.previousTodos);
       }
     },
 
     onSettled: (data, error, variables) => {
-      queryClient.invalidateQueries({ queryKey: ['todos'] })
-      queryClient.invalidateQueries({ queryKey: ['todos', variables.id] })
+      queryClient.invalidateQueries({ queryKey: ["todos"] });
+      queryClient.invalidateQueries({ queryKey: ["todos", variables.id] });
     },
-  })
+  });
 }
 
 /**
@@ -150,52 +142,47 @@ export function useOptimisticUpdateTodo() {
  * Immediately removes todo from UI, confirms with server
  */
 export function useOptimisticDeleteTodo() {
-  const queryClient = useQueryClient()
+  const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: async (id: number) => {
-      const response = await fetch(
-        `https://jsonplaceholder.typicode.com/todos/${id}`,
-        {
-          method: 'DELETE',
-        }
-      )
+      const response = await fetch(`https://jsonplaceholder.typicode.com/todos/${id}`, {
+        method: "DELETE",
+      });
 
-      if (!response.ok) throw new Error('Failed to delete todo')
+      if (!response.ok) throw new Error("Failed to delete todo");
     },
 
     onMutate: async (deletedId) => {
-      await queryClient.cancelQueries({ queryKey: ['todos'] })
+      await queryClient.cancelQueries({ queryKey: ["todos"] });
 
-      const previousTodos = queryClient.getQueryData<Todo[]>(['todos'])
+      const previousTodos = queryClient.getQueryData<Todo[]>(["todos"]);
 
       // Optimistically remove from cache
-      queryClient.setQueryData<Todo[]>(['todos'], (old = []) =>
-        old.filter((todo) => todo.id !== deletedId)
-      )
+      queryClient.setQueryData<Todo[]>(["todos"], (old = []) => old.filter((todo) => todo.id !== deletedId));
 
-      return { previousTodos }
+      return { previousTodos };
     },
 
     onError: (err, variables, context) => {
-      console.error('Failed to delete todo:', err)
+      console.error("Failed to delete todo:", err);
       if (context?.previousTodos) {
-        queryClient.setQueryData(['todos'], context.previousTodos)
+        queryClient.setQueryData(["todos"], context.previousTodos);
       }
     },
 
     onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: ['todos'] })
+      queryClient.invalidateQueries({ queryKey: ["todos"] });
     },
-  })
+  });
 }
 
 /**
  * Component usage example:
  */
 export function OptimisticTodoItem({ todo }: { todo: Todo }) {
-  const { mutate: updateTodo, isPending: isUpdating } = useOptimisticUpdateTodo()
-  const { mutate: deleteTodo, isPending: isDeleting } = useOptimisticDeleteTodo()
+  const { mutate: updateTodo, isPending: isUpdating } = useOptimisticUpdateTodo();
+  const { mutate: deleteTodo, isPending: isDeleting } = useOptimisticDeleteTodo();
 
   return (
     <li style={{ opacity: isUpdating || isDeleting ? 0.5 : 1 }}>
@@ -206,14 +193,11 @@ export function OptimisticTodoItem({ todo }: { todo: Todo }) {
         disabled={isUpdating || isDeleting}
       />
       <span>{todo.title}</span>
-      <button
-        onClick={() => deleteTodo(todo.id)}
-        disabled={isUpdating || isDeleting}
-      >
-        {isDeleting ? 'Deleting...' : 'Delete'}
+      <button onClick={() => deleteTodo(todo.id)} disabled={isUpdating || isDeleting}>
+        {isDeleting ? "Deleting..." : "Delete"}
       </button>
     </li>
-  )
+  );
 }
 
 /**

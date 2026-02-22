@@ -7,6 +7,7 @@
 ## Error #1: Object Syntax Required
 
 **Error Message**:
+
 ```
 TypeError: useQuery is not a function
 Property 'queryKey' does not exist on type...
@@ -16,12 +17,13 @@ Property 'queryKey' does not exist on type...
 v5 removed function overloads, only object syntax works
 
 **Fix**:
+
 ```tsx
 // ❌ v4 syntax
-useQuery(['todos'], fetchTodos)
+useQuery(["todos"], fetchTodos);
 
 // ✅ v5 syntax
-useQuery({ queryKey: ['todos'], queryFn: fetchTodos })
+useQuery({ queryKey: ["todos"], queryFn: fetchTodos });
 ```
 
 **Source**: [v5 Migration Guide](https://tanstack.com/query/latest/docs/framework/react/guides/migrating-to-v5#removed-overloads-in-favor-of-object-syntax)
@@ -31,6 +33,7 @@ useQuery({ queryKey: ['todos'], queryFn: fetchTodos })
 ## Error #2: Query Callbacks Not Working
 
 **Error Message**:
+
 ```
 Property 'onSuccess' does not exist on type 'UseQueryOptions'
 ```
@@ -39,19 +42,20 @@ Property 'onSuccess' does not exist on type 'UseQueryOptions'
 `onSuccess`, `onError`, `onSettled` removed from queries (still work in mutations)
 
 **Fix**:
+
 ```tsx
 // ❌ v4
 useQuery({
-  queryKey: ['todos'],
+  queryKey: ["todos"],
   queryFn: fetchTodos,
-  onSuccess: (data) => console.log(data)
-})
+  onSuccess: (data) => console.log(data),
+});
 
 // ✅ v5 - Use useEffect
-const { data } = useQuery({ queryKey: ['todos'], queryFn: fetchTodos })
+const { data } = useQuery({ queryKey: ["todos"], queryFn: fetchTodos });
 useEffect(() => {
-  if (data) console.log(data)
-}, [data])
+  if (data) console.log(data);
+}, [data]);
 ```
 
 **Source**: [v5 Breaking Changes](https://tanstack.com/query/latest/docs/framework/react/guides/migrating-to-v5#callbacks-on-usequery-and-queryobserver-have-been-removed)
@@ -67,6 +71,7 @@ No error, but `isLoading` is false during initial fetch
 v5 changed `isLoading` meaning: now `isPending && isFetching`
 
 **Fix**:
+
 ```tsx
 // ❌ v4
 const { isLoading } = useQuery(...)
@@ -84,6 +89,7 @@ if (isPending) return <Loading />
 ## Error #4: cacheTime Not Recognized
 
 **Error Message**:
+
 ```
 Property 'cacheTime' does not exist on type 'UseQueryOptions'
 ```
@@ -92,12 +98,13 @@ Property 'cacheTime' does not exist on type 'UseQueryOptions'
 Renamed to `gcTime` (garbage collection time)
 
 **Fix**:
+
 ```tsx
 // ❌ v4
-cacheTime: 1000 * 60 * 60
+cacheTime: 1000 * 60 * 60;
 
 // ✅ v5
-gcTime: 1000 * 60 * 60
+gcTime: 1000 * 60 * 60;
 ```
 
 **Source**: [v5 Migration](https://tanstack.com/query/latest/docs/framework/react/guides/migrating-to-v5#cachetime-has-been-replaced-by-gcTime)
@@ -107,6 +114,7 @@ gcTime: 1000 * 60 * 60
 ## Error #5: useSuspenseQuery + enabled
 
 **Error Message**:
+
 ```
 Property 'enabled' does not exist on type 'UseSuspenseQueryOptions'
 ```
@@ -115,16 +123,19 @@ Property 'enabled' does not exist on type 'UseSuspenseQueryOptions'
 Suspense guarantees data is available, can't conditionally disable
 
 **Fix**:
+
 ```tsx
 // ❌ Wrong
 useSuspenseQuery({
-  queryKey: ['todo', id],
+  queryKey: ["todo", id],
   queryFn: () => fetchTodo(id),
   enabled: !!id,
-})
+});
 
 // ✅ Correct: Conditional rendering
-{id ? <TodoComponent id={id} /> : <div>No ID</div>}
+{
+  id ? <TodoComponent id={id} /> : <div>No ID</div>;
+}
 ```
 
 **Source**: [GitHub Discussion #6206](https://github.com/TanStack/query/discussions/6206)
@@ -134,6 +145,7 @@ useSuspenseQuery({
 ## Error #6: initialPageParam Required
 
 **Error Message**:
+
 ```
 Property 'initialPageParam' is missing in type 'UseInfiniteQueryOptions'
 ```
@@ -142,21 +154,22 @@ Property 'initialPageParam' is missing in type 'UseInfiniteQueryOptions'
 v5 requires explicit `initialPageParam` for infinite queries
 
 **Fix**:
+
 ```tsx
 // ❌ v4
 useInfiniteQuery({
-  queryKey: ['projects'],
+  queryKey: ["projects"],
   queryFn: ({ pageParam = 0 }) => fetchProjects(pageParam),
   getNextPageParam: (lastPage) => lastPage.nextCursor,
-})
+});
 
 // ✅ v5
 useInfiniteQuery({
-  queryKey: ['projects'],
+  queryKey: ["projects"],
   queryFn: ({ pageParam }) => fetchProjects(pageParam),
   initialPageParam: 0, // Required
   getNextPageParam: (lastPage) => lastPage.nextCursor,
-})
+});
 ```
 
 **Source**: [v5 Migration](https://tanstack.com/query/latest/docs/framework/react/guides/migrating-to-v5#new-required-initialPageParam-option)
@@ -166,6 +179,7 @@ useInfiniteQuery({
 ## Error #7: keepPreviousData Not Working
 
 **Error Message**:
+
 ```
 Property 'keepPreviousData' does not exist on type 'UseQueryOptions'
 ```
@@ -174,14 +188,15 @@ Property 'keepPreviousData' does not exist on type 'UseQueryOptions'
 Replaced with `placeholderData` function
 
 **Fix**:
+
 ```tsx
 // ❌ v4
-keepPreviousData: true
+keepPreviousData: true;
 
 // ✅ v5
-import { keepPreviousData } from '@tanstack/react-query'
+import { keepPreviousData } from "@tanstack/react-query";
 
-placeholderData: keepPreviousData
+placeholderData: keepPreviousData;
 ```
 
 **Source**: [v5 Migration](https://tanstack.com/query/latest/docs/framework/react/guides/migrating-to-v5#removed-keeppreviousdata-in-favor-of-placeholderdata-identity-function)
@@ -197,18 +212,19 @@ Type errors when handling non-Error objects
 v5 defaults to `Error` type instead of `unknown`
 
 **Fix**:
+
 ```tsx
 // If throwing non-Error types, specify explicitly:
 const { error } = useQuery<DataType, string>({
-  queryKey: ['data'],
+  queryKey: ["data"],
   queryFn: async () => {
-    if (fail) throw 'custom error string'
-    return data
+    if (fail) throw "custom error string";
+    return data;
   },
-})
+});
 
 // Better: Always throw Error objects
-throw new Error('Custom error')
+throw new Error("Custom error");
 ```
 
 **Source**: [v5 Migration](https://tanstack.com/query/latest/docs/framework/react/guides/migrating-to-v5#typeerror-is-now-the-default-error)
@@ -224,6 +240,7 @@ Data never updates even when stale
 Usually config issue - check staleTime, refetch options
 
 **Fix**:
+
 ```tsx
 // Check these settings
 useQuery({
@@ -254,13 +271,14 @@ UI doesn't update after mutation
 Forgot to invalidate queries
 
 **Fix**:
+
 ```tsx
 useMutation({
   mutationFn: addTodo,
   onSuccess: () => {
-    queryClient.invalidateQueries({ queryKey: ['todos'] }) // ✅ Required
+    queryClient.invalidateQueries({ queryKey: ["todos"] }); // ✅ Required
   },
-})
+});
 ```
 
 ---
@@ -274,20 +292,21 @@ App crashes on network errors
 Not handling errors properly
 
 **Fix**:
+
 ```tsx
 // Always handle errors
 const { data, error, isError } = useQuery({
-  queryKey: ['todos'],
+  queryKey: ["todos"],
   queryFn: async () => {
-    const response = await fetch('/api/todos')
+    const response = await fetch("/api/todos");
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`) // ✅ Throw errors
+      throw new Error(`HTTP ${response.status}`); // ✅ Throw errors
     }
-    return response.json()
+    return response.json();
   },
-})
+});
 
-if (isError) return <div>Error: {error.message}</div>
+if (isError) return <div>Error: {error.message}</div>;
 ```
 
 ---
@@ -301,21 +320,22 @@ Mutation callbacks use old data
 Closure captures stale values
 
 **Fix**:
+
 ```tsx
 // ❌ Stale closure
-const [value, setValue] = useState(0)
+const [value, setValue] = useState(0);
 useMutation({
   onSuccess: () => {
-    console.log(value) // Stale!
+    console.log(value); // Stale!
   },
-})
+});
 
 // ✅ Use functional update
 useMutation({
   onSuccess: () => {
-    setValue(prev => prev + 1) // Fresh value
+    setValue((prev) => prev + 1); // Fresh value
   },
-})
+});
 ```
 
 ---

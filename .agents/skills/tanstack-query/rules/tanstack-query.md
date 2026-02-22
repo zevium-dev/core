@@ -10,14 +10,14 @@ Claude's training may reference TanStack Query v4 patterns. This project uses **
 
 ```typescript
 /* ❌ v4 array syntax (removed in v5) */
-useQuery(['todos'], fetchTodos, { staleTime: 5000 })
+useQuery(["todos"], fetchTodos, { staleTime: 5000 });
 
 /* ✅ v5 object syntax only */
 useQuery({
-  queryKey: ['todos'],
+  queryKey: ["todos"],
   queryFn: fetchTodos,
-  staleTime: 5000
-})
+  staleTime: 5000,
+});
 ```
 
 ## Query Callbacks Removed
@@ -25,22 +25,22 @@ useQuery({
 ```typescript
 /* ❌ v5 removed onSuccess/onError/onSettled from queries */
 useQuery({
-  queryKey: ['todos'],
+  queryKey: ["todos"],
   queryFn: fetchTodos,
   onSuccess: (data) => console.log(data), // Removed!
-})
+});
 
 /* ✅ Use useEffect instead */
-const { data } = useQuery({ queryKey: ['todos'], queryFn: fetchTodos })
+const { data } = useQuery({ queryKey: ["todos"], queryFn: fetchTodos });
 useEffect(() => {
-  if (data) console.log(data)
-}, [data])
+  if (data) console.log(data);
+}, [data]);
 
 /* Note: Mutations still support callbacks */
 useMutation({
   mutationFn: addTodo,
   onSuccess: () => {}, // Still works!
-})
+});
 ```
 
 ## isPending vs isLoading
@@ -61,17 +61,17 @@ if (isPending) return <Loading />
 ```typescript
 /* ❌ Renamed in v5 */
 useQuery({
-  queryKey: ['todos'],
+  queryKey: ["todos"],
   queryFn: fetchTodos,
   cacheTime: 1000 * 60 * 60, // Error!
-})
+});
 
 /* ✅ Use gcTime */
 useQuery({
-  queryKey: ['todos'],
+  queryKey: ["todos"],
   queryFn: fetchTodos,
   gcTime: 1000 * 60 * 60,
-})
+});
 ```
 
 ## keepPreviousData → placeholderData
@@ -79,19 +79,19 @@ useQuery({
 ```typescript
 /* ❌ Removed in v5 */
 useQuery({
-  queryKey: ['todos', page],
+  queryKey: ["todos", page],
   queryFn: () => fetchTodos(page),
   keepPreviousData: true, // Error!
-})
+});
 
 /* ✅ Use placeholderData helper */
-import { keepPreviousData } from '@tanstack/react-query'
+import { keepPreviousData } from "@tanstack/react-query";
 
 useQuery({
-  queryKey: ['todos', page],
+  queryKey: ["todos", page],
   queryFn: () => fetchTodos(page),
   placeholderData: keepPreviousData,
-})
+});
 ```
 
 ## Infinite Queries: initialPageParam Required
@@ -99,28 +99,28 @@ useQuery({
 ```typescript
 /* ❌ v4 used undefined as first pageParam */
 useInfiniteQuery({
-  queryKey: ['projects'],
+  queryKey: ["projects"],
   queryFn: ({ pageParam = 0 }) => fetchProjects(pageParam),
   getNextPageParam: (lastPage) => lastPage.nextCursor,
-})
+});
 
 /* ✅ v5 requires explicit initialPageParam */
 useInfiniteQuery({
-  queryKey: ['projects'],
+  queryKey: ["projects"],
   queryFn: ({ pageParam }) => fetchProjects(pageParam),
   initialPageParam: 0, // Required!
   getNextPageParam: (lastPage) => lastPage.nextCursor,
-})
+});
 ```
 
 ## Quick Fixes
 
-| If Claude suggests... | Use instead... |
-|----------------------|----------------|
-| `useQuery(['key'], fn, opts)` | `useQuery({ queryKey, queryFn, ...opts })` |
-| `onSuccess` in useQuery | `useEffect` watching data |
-| `cacheTime` | `gcTime` |
-| `isLoading` for initial load | `isPending` |
-| `keepPreviousData: true` | `placeholderData: keepPreviousData` |
-| Missing `initialPageParam` | Add `initialPageParam: 0` (or appropriate value) |
-| `useErrorBoundary` | `throwOnError` |
+| If Claude suggests...         | Use instead...                                   |
+| ----------------------------- | ------------------------------------------------ |
+| `useQuery(['key'], fn, opts)` | `useQuery({ queryKey, queryFn, ...opts })`       |
+| `onSuccess` in useQuery       | `useEffect` watching data                        |
+| `cacheTime`                   | `gcTime`                                         |
+| `isLoading` for initial load  | `isPending`                                      |
+| `keepPreviousData: true`      | `placeholderData: keepPreviousData`              |
+| Missing `initialPageParam`    | Add `initialPageParam: 0` (or appropriate value) |
+| `useErrorBoundary`            | `throwOnError`                                   |

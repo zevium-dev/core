@@ -46,7 +46,7 @@ const nodeGlobals = {
 
 export default defineConfig(
   {
-    ignores: [".nitro", ".output", "node_modules", ".tanstack", "dist"],
+    ignores: [".agents", ".nitro", ".output", "node_modules", ".tanstack", "dist"],
   },
   eslint.configs.recommended,
   eslintReact.configs.recommended,
