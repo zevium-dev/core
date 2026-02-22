@@ -23,6 +23,8 @@ export const Route = createFileRoute("/api/polar/$")({
             ]);
 
           const posthog = createPostHogClient();
+          const IDEMPOTENCY_APPLIED_TTL_MS = 1000 * 60 * 60 * 24 * 365;
+          const IDEMPOTENCY_PENDING_TTL_MS = 1000 * 60 * 5;
 
           // Read raw body for signature verification
           const raw = await request.text();
@@ -109,7 +111,7 @@ export const Route = createFileRoute("/api/polar/$")({
 
               let applyOk: null | string = null;
               try {
-                applyOk = await kv.set(appliedKey, "1", { nx: true, px: 1000 * 60 * 60 * 24 * 365 });
+                applyOk = await kv.set(appliedKey, "pending", { nx: true, px: IDEMPOTENCY_PENDING_TTL_MS });
               } catch (err) {
                 posthog?.captureException(err, userId, {
                   appliedKey,
@@ -121,6 +123,34 @@ export const Route = createFileRoute("/api/polar/$")({
               }
 
               if (applyOk !== "OK") {
+                let idempotencyState: null | string = null;
+                try {
+                  idempotencyState = await kv.get<string>(appliedKey);
+                } catch (err) {
+                  posthog?.captureException(err, userId, {
+                    appliedKey,
+                    operation: "redis_get_idempotency_state",
+                    source: "polar_webhook",
+                  });
+                  void posthog?.shutdown();
+                  return new Response("temporary failure", { status: 500 });
+                }
+
+                if (idempotencyState !== "applied" && idempotencyState !== "1") {
+                  posthog?.capture({
+                    distinctId: userId,
+                    event: "polar_webhook_in_progress",
+                    properties: {
+                      appliedKey,
+                      checkoutId: order.checkoutId,
+                      idempotencyState,
+                      orderId: order.id,
+                    },
+                  });
+                  void posthog?.shutdown();
+                  return new Response("temporary failure", { status: 500 });
+                }
+
                 posthog?.capture({
                   distinctId: userId,
                   event: "polar_webhook_duplicate",
@@ -186,6 +216,43 @@ export const Route = createFileRoute("/api/polar/$")({
                     reason: "zero_or_negative_amount",
                   },
                 });
+              }
+
+              let isIdempotencyFinalized = false;
+              try {
+                const finalized = await kv.set(appliedKey, "applied", {
+                  px: IDEMPOTENCY_APPLIED_TTL_MS,
+                  xx: true,
+                });
+                if (finalized !== "OK") {
+                  const fallbackFinalized = await kv.set(appliedKey, "applied", {
+                    px: IDEMPOTENCY_APPLIED_TTL_MS,
+                  });
+                  isIdempotencyFinalized = fallbackFinalized === "OK";
+                } else {
+                  isIdempotencyFinalized = true;
+                }
+              } catch (err) {
+                posthog?.captureException(err, userId, {
+                  appliedKey,
+                  operation: "redis_finalize_idempotency",
+                  source: "polar_webhook",
+                });
+              }
+
+              if (!isIdempotencyFinalized) {
+                try {
+                  await kv.set(appliedKey, "pending", {
+                    px: IDEMPOTENCY_APPLIED_TTL_MS,
+                    xx: true,
+                  });
+                } catch (err) {
+                  posthog?.captureException(err, userId, {
+                    appliedKey,
+                    operation: "redis_extend_pending_idempotency",
+                    source: "polar_webhook",
+                  });
+                }
               }
 
               void posthog?.shutdown();

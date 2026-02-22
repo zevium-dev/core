@@ -43,8 +43,8 @@ export const Route = createFileRoute("/app/settings/credits/success")({
 
     // Poll until credits are applied or timeout
     while (Date.now() - startTime < maxWaitMs) {
-      const applied = await kv.get<string>(appliedKey);
-      if (applied) {
+      const idempotencyState = await kv.get<string>(appliedKey);
+      if (idempotencyState === "applied" || idempotencyState === "1") {
         // Credits have been applied, redirect to credits page
         throw redirect({ to: "/app/settings/credits" });
       }

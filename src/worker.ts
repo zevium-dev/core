@@ -31,8 +31,16 @@ export default {
             typeof (json as { flushed?: unknown }).flushed === "number"
               ? (json as { flushed: number }).flushed
               : 0;
+          const skipped =
+            typeof json === "object" &&
+            json &&
+            "skipped" in json &&
+            typeof (json as { skipped?: unknown }).skipped === "number"
+              ? (json as { skipped: number }).skipped
+              : 0;
+          const processed = flushed + skipped;
 
-          if (flushed <= 0) break;
+          if (processed <= 0) break;
         }
       })(),
     );

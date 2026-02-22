@@ -1,3 +1,4 @@
+import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 
 import { serverEnv } from "~/env/server";
@@ -14,6 +15,21 @@ const transactionItemSchema = z.object({
   type: z.literal("topup"),
   userId: z.string(),
 });
+
+function isCreditsOrderForUser(
+  order: {
+    metadata?: Record<string, boolean | number | string>;
+    productId: null | string;
+  },
+  userId: string,
+): boolean {
+  const metadataUserId = order.metadata?.userId;
+  return (
+    order.productId === serverEnv.POLAR_PRODUCT_ID_CREDITS &&
+    typeof metadataUserId === "string" &&
+    metadataUserId === userId
+  );
+}
 
 export const creditsRouter = router({
   createTopUpCheckout: protectedProcedure
@@ -64,7 +80,11 @@ export const creditsRouter = router({
   getInvoiceUrl: protectedProcedure
     .input(z.object({ orderId: z.string() }))
     .output(z.object({ url: z.string() }))
-    .query(async ({ input }) => {
+    .query(async ({ ctx, input }) => {
+      const order = await polarClient.orders.get({ id: input.orderId });
+      if (!isCreditsOrderForUser(order, ctx.user.id)) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Order not found" });
+      }
       const invoice = await polarClient.orders.invoice({ id: input.orderId });
       return { url: invoice.url };
     }),
@@ -76,7 +96,7 @@ export const creditsRouter = router({
         orderId: z.string().nullable(),
       }),
     )
-    .query(async ({ input }) => {
+    .query(async ({ ctx, input }) => {
       const page = await polarClient.orders.list({
         checkoutId: input.checkoutId,
         limit: 1,
@@ -85,6 +105,9 @@ export const creditsRouter = router({
       });
       const order = page.result.items.at(0);
       if (!order) return { amountCents: 0, orderId: null as null | string };
+      if (!isCreditsOrderForUser(order, ctx.user.id)) {
+        return { amountCents: 0, orderId: null as null | string };
+      }
       return { amountCents: order.subtotalAmount, orderId: order.id };
     }),
   listTransactions: protectedProcedure
@@ -103,7 +126,6 @@ export const creditsRouter = router({
     .query(async ({ ctx, input }) => {
       // Pull from Polar orders by metadata userId and the credits product
       const page = await polarClient.orders.list({
-        customerId: null, // we're relying on metadata to avoid any customer mismatch
         limit: input.pageSize,
         metadata: { userId: ctx.user.id },
         page: input.page,

@@ -1,6 +1,12 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { lookup } from "node:dns/promises";
-import isPrivate from "private-ip";
+import { z } from "zod";
+
+import {
+  isHostAllowlisted,
+  isLocalOrPrivateHost,
+  normalizeProxySecret,
+  parseProxyAllowlist,
+} from "~/lib/server/proxy-security";
 
 class UpstreamNonOK extends Error {
   response: Response;
@@ -12,47 +18,20 @@ class UpstreamNonOK extends Error {
 
 const PROXY_CALL_COST_CENTS = 1;
 
-// Placeholder: Replace with a real DB fetch for the proxy secret
-async function getProxySecretFromDb(): Promise<string> {
-  // TODO: Replace with real DB fetch
-  return await Promise.resolve("replace-me-with-secret-from-db");
-}
-
-// Placeholder: Replace with a real DB lookup for host allowlist
-async function isHostAllowlistedInDb(_hostname: string): Promise<boolean> {
-  // TODO: Replace with real DB lookup
-  return await Promise.resolve(true);
-}
-
-// Robust local/private host detection using DNS resolution and IP checks
-async function isLocalOrPrivateHost(hostname: string): Promise<boolean> {
-  const lower = hostname.toLowerCase();
-  if (lower === "localhost" || lower === "127.0.0.1" || lower === "::1") return true;
-  try {
-    //I think this is slowlying down the proxy . TODO: Find a way to cache this.
-    const results = await lookup(hostname, { all: true, verbatim: true });
-    for (const { address } of results) {
-      if (isPrivate(address) || isLoopback(address)) return true;
-    }
-    return false;
-  } catch (_error) {
-    // Fail closed: treat as local/private on resolution error
-    return true;
-  }
-}
-
-function isLoopback(addr: string): boolean {
-  return (
-    /^(::f{4}:)?127\.([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})/.test(addr) ||
-    addr.startsWith("0177.") ||
-    /^0x7f\./i.test(addr) ||
-    /^fe80::1$/i.test(addr) ||
-    /^::1$/.test(addr) ||
-    /^::$/.test(addr)
-  );
-}
-
-// (Previous hostname-only private/local checks removed in favor of robust DNS/IP validation.)
+const ApiKeyVerificationUserShapeZod = z.object({
+  key: z
+    .object({
+      userId: z.string().optional(),
+    })
+    .optional(),
+  user: z
+    .object({
+      id: z.string().optional(),
+    })
+    .optional(),
+  user_id: z.string().optional(),
+  userId: z.string().optional(),
+});
 
 function jsonWithRequestId(status: number, message: string, requestId: string) {
   return Response.json(
@@ -112,15 +91,26 @@ const proxyHandler = async (request: Request) => {
   if (normalized.protocol !== "https:") {
     return jsonWithRequestId(400, "Only HTTPS hosts are allowed", requestId);
   }
-  // Additional robust DNS/IP-based private/local check
+
+  // Fail closed for local/private or unresolvable hostnames.
   if (await isLocalOrPrivateHost(normalized.hostname)) {
     return jsonWithRequestId(403, "Host not allowed", requestId);
   }
 
-  // Allowlist check (placeholder)
-  const isAllowlisted = await isHostAllowlistedInDb(normalized.hostname);
-  if (!isAllowlisted) {
+  const { serverEnv } = await import("~/env/server");
+
+  // Runtime allowlist is required for proxy safety.
+  const allowlist = parseProxyAllowlist(serverEnv.PROXY_ALLOWED_HOSTS);
+  if (allowlist.length === 0) {
+    return jsonWithRequestId(503, "Proxy host allowlist is not configured", requestId);
+  }
+  if (!isHostAllowlisted(normalized.hostname, allowlist)) {
     return jsonWithRequestId(403, "Host not allowed", requestId);
+  }
+
+  const proxySecret = normalizeProxySecret(serverEnv.PROXY_UPSTREAM_SECRET);
+  if (!proxySecret) {
+    return jsonWithRequestId(503, "Proxy secret is not configured", requestId);
   }
 
   // Build target URL by rewriting the incoming URL
@@ -142,26 +132,27 @@ const proxyHandler = async (request: Request) => {
   outboundHeaders.set("host", normalized.hostname);
   outboundHeaders.set("x-zevium-request-id", requestId);
   outboundHeaders.set("x-zevium-host", normalized.hostname);
-  const proxySecret = await getProxySecretFromDb();
-  if (proxySecret) outboundHeaders.set("x-zevium-proxy-secret", proxySecret);
+  outboundHeaders.set("x-zevium-proxy-secret", proxySecret);
+
+  let refundReservedCharge: (() => Promise<void>) | null = null;
 
   try {
     const { CreditsManager } = await import("~/lib/server/credits");
 
-    // Derive userId from verification response (handles different shapes)
-    const vAny = verification as unknown as {
-      key?: { userId?: string };
-      user?: { id?: string };
-      user_id?: string;
-      userId?: string;
-    };
-    const userId = vAny.user?.id ?? vAny.key?.userId ?? vAny.userId ?? vAny.user_id;
+    // Derive userId from verification response (handles different response shapes)
+    const verificationShape = ApiKeyVerificationUserShapeZod.safeParse(verification);
+    const userId = verificationShape.success
+      ? (verificationShape.data.user?.id ??
+        verificationShape.data.key?.userId ??
+        verificationShape.data.userId ??
+        verificationShape.data.user_id)
+      : undefined;
     if (!userId) {
       return jsonWithRequestId(401, "API key verification did not include a user id", requestId);
     }
 
     let isChargeReserved = false;
-    const refundReservedCharge = async () => {
+    const refundReservedChargeInternal = async () => {
       if (!isChargeReserved) return;
       await CreditsManager.add({
         amountCents: PROXY_CALL_COST_CENTS,
@@ -171,6 +162,7 @@ const proxyHandler = async (request: Request) => {
       });
       isChargeReserved = false;
     };
+    refundReservedCharge = refundReservedChargeInternal;
 
     try {
       await CreditsManager.deduct({
@@ -198,7 +190,7 @@ const proxyHandler = async (request: Request) => {
       });
     } catch {
       try {
-        await refundReservedCharge();
+        await refundReservedChargeInternal();
       } catch {
         return jsonWithRequestId(503, "Billing is temporarily unavailable", requestId);
       }
@@ -208,7 +200,7 @@ const proxyHandler = async (request: Request) => {
     // Not a success → no charge, return upstream as-is
     if (!upstream.ok) {
       try {
-        await refundReservedCharge();
+        await refundReservedChargeInternal();
       } catch {
         return jsonWithRequestId(503, "Billing is temporarily unavailable", requestId);
       }
@@ -235,7 +227,7 @@ const proxyHandler = async (request: Request) => {
     const stream = new ReadableStream({
       async cancel() {
         await reader.cancel().catch(() => undefined);
-        await refundReservedCharge().catch(() => undefined);
+        await refundReservedChargeInternal().catch(() => undefined);
       },
       async pull(controller) {
         try {
@@ -249,7 +241,7 @@ const proxyHandler = async (request: Request) => {
         } catch (readErr) {
           await reader.cancel().catch(() => undefined);
           try {
-            await refundReservedCharge();
+            await refundReservedChargeInternal();
           } catch (refundErr) {
             controller.error(new Error("Failed to refund credits after upstream read error", { cause: refundErr }));
             return;
@@ -277,6 +269,15 @@ const proxyHandler = async (request: Request) => {
         statusText: error.response.statusText,
       });
     }
+
+    if (refundReservedCharge) {
+      try {
+        await refundReservedCharge();
+      } catch {
+        return jsonWithRequestId(503, "Billing is temporarily unavailable", requestId);
+      }
+    }
+
     return jsonWithRequestId(502, "Upstream request failed", requestId);
   }
 };

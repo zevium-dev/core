@@ -106,11 +106,11 @@ export const Route = createFileRoute("/api/credits/$")({
               const amountCentsRaw = typeof e.amountCents === "number" ? e.amountCents : Number(e.amountCents);
               const amountCents = Number.isFinite(amountCentsRaw) ? Math.trunc(amountCentsRaw) : null;
               const createdAtRaw = typeof e.createdAt === "number" ? e.createdAt : Number(e.createdAt);
-              const createdAt = Number.isFinite(createdAtRaw) ? new Date(createdAtRaw) : new Date();
+              const createdAt = Number.isFinite(createdAtRaw) ? new Date(createdAtRaw) : null;
               const description = typeof e.description === "string" && e.description.length > 0 ? e.description : null;
               const reference = typeof e.reference === "string" && e.reference.length > 0 ? e.reference : null;
 
-              if (!id || !userId || !type || amountCents === null) return null;
+              if (!id || !userId || !type || amountCents === null || !createdAt) return null;
               return {
                 amountCents,
                 createdAt,
@@ -124,10 +124,10 @@ export const Route = createFileRoute("/api/credits/$")({
             .filter((r): r is NonNullable<typeof r> => Boolean(r));
 
           const lastId = sortedIds.at(-1) ?? currentCursor;
+          const skippedInBatch = sortedIds.length - rows.length;
+          skippedTotal += skippedInBatch;
 
-          if (rows.length === 0) {
-            skippedTotal += sortedIds.length;
-          } else {
+          if (rows.length > 0) {
             await db.insert(schema.creditLedger).values(rows).onConflictDoNothing({ target: schema.creditLedger.id });
             flushedTotal += rows.length;
           }
