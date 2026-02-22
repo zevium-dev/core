@@ -51,8 +51,10 @@ import { Route as AppOrganizationsOrganizationSlugProjectsRouteImport } from './
 import { Route as AppOrganizationsOrganizationSlugProjectsIndexRouteImport } from './routes/app/organizations/$organizationSlug/projects/index'
 import { Route as AppOrganizationsOrganizationSlugProjectsChar126RouteImport } from './routes/app/organizations/$organizationSlug/projects/~'
 import { Route as AppOrganizationsOrganizationSlugProjectsCreateRouteImport } from './routes/app/organizations/$organizationSlug/projects/create'
+import { Route as ApiProjectsOrganizationSlugProjectSlugOpenapiRouteImport } from './routes/api/projects/$organizationSlug/$projectSlug/openapi'
 import { Route as AppOrganizationsOrganizationSlugProjectsProjectSlugIndexRouteImport } from './routes/app/organizations/$organizationSlug/projects/$projectSlug/index'
 import { Route as AppOrganizationsOrganizationSlugProjectsProjectSlugSpecRouteImport } from './routes/app/organizations/$organizationSlug/projects/$projectSlug/spec'
+import { Route as AppOrganizationsOrganizationSlugProjectsProjectSlugExplorerRouteImport } from './routes/app/organizations/$organizationSlug/projects/$projectSlug/explorer'
 
 const AppRoute = AppRouteImport.update({
   id: '/app',
@@ -272,6 +274,12 @@ const AppOrganizationsOrganizationSlugProjectsCreateRoute =
     path: '/create',
     getParentRoute: () => AppOrganizationsOrganizationSlugProjectsRoute,
   } as any)
+const ApiProjectsOrganizationSlugProjectSlugOpenapiRoute =
+  ApiProjectsOrganizationSlugProjectSlugOpenapiRouteImport.update({
+    id: '/api/projects/$organizationSlug/$projectSlug/openapi',
+    path: '/api/projects/$organizationSlug/$projectSlug/openapi',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const AppOrganizationsOrganizationSlugProjectsProjectSlugIndexRoute =
   AppOrganizationsOrganizationSlugProjectsProjectSlugIndexRouteImport.update({
     id: '/$projectSlug/',
@@ -284,6 +292,14 @@ const AppOrganizationsOrganizationSlugProjectsProjectSlugSpecRoute =
     path: '/$projectSlug/spec',
     getParentRoute: () => AppOrganizationsOrganizationSlugProjectsRoute,
   } as any)
+const AppOrganizationsOrganizationSlugProjectsProjectSlugExplorerRoute =
+  AppOrganizationsOrganizationSlugProjectsProjectSlugExplorerRouteImport.update(
+    {
+      id: '/$projectSlug/explorer',
+      path: '/$projectSlug/explorer',
+      getParentRoute: () => AppOrganizationsOrganizationSlugProjectsRoute,
+    } as any,
+  )
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -325,9 +341,11 @@ export interface FileRoutesByFullPath {
   '/app/organizations/$organizationSlug/projects': typeof AppOrganizationsOrganizationSlugProjectsRouteWithChildren
   '/app/organizations/$organizationSlug/settings': typeof AppOrganizationsOrganizationSlugSettingsRoute
   '/app/organizations/$organizationSlug/': typeof AppOrganizationsOrganizationSlugIndexRoute
+  '/api/projects/$organizationSlug/$projectSlug/openapi': typeof ApiProjectsOrganizationSlugProjectSlugOpenapiRoute
   '/app/organizations/$organizationSlug/projects/create': typeof AppOrganizationsOrganizationSlugProjectsCreateRoute
   '/app/organizations/$organizationSlug/projects/~': typeof AppOrganizationsOrganizationSlugProjectsChar126Route
   '/app/organizations/$organizationSlug/projects/': typeof AppOrganizationsOrganizationSlugProjectsIndexRoute
+  '/app/organizations/$organizationSlug/projects/$projectSlug/explorer': typeof AppOrganizationsOrganizationSlugProjectsProjectSlugExplorerRoute
   '/app/organizations/$organizationSlug/projects/$projectSlug/spec': typeof AppOrganizationsOrganizationSlugProjectsProjectSlugSpecRoute
   '/app/organizations/$organizationSlug/projects/$projectSlug': typeof AppOrganizationsOrganizationSlugProjectsProjectSlugIndexRoute
 }
@@ -367,9 +385,11 @@ export interface FileRoutesByTo {
   '/app/settings': typeof AppSettingsIndexRoute
   '/app/organizations/$organizationSlug/settings': typeof AppOrganizationsOrganizationSlugSettingsRoute
   '/app/organizations/$organizationSlug': typeof AppOrganizationsOrganizationSlugIndexRoute
+  '/api/projects/$organizationSlug/$projectSlug/openapi': typeof ApiProjectsOrganizationSlugProjectSlugOpenapiRoute
   '/app/organizations/$organizationSlug/projects/create': typeof AppOrganizationsOrganizationSlugProjectsCreateRoute
   '/app/organizations/$organizationSlug/projects/~': typeof AppOrganizationsOrganizationSlugProjectsChar126Route
   '/app/organizations/$organizationSlug/projects': typeof AppOrganizationsOrganizationSlugProjectsIndexRoute
+  '/app/organizations/$organizationSlug/projects/$projectSlug/explorer': typeof AppOrganizationsOrganizationSlugProjectsProjectSlugExplorerRoute
   '/app/organizations/$organizationSlug/projects/$projectSlug/spec': typeof AppOrganizationsOrganizationSlugProjectsProjectSlugSpecRoute
   '/app/organizations/$organizationSlug/projects/$projectSlug': typeof AppOrganizationsOrganizationSlugProjectsProjectSlugIndexRoute
 }
@@ -414,9 +434,11 @@ export interface FileRoutesById {
   '/app/organizations/$organizationSlug/projects': typeof AppOrganizationsOrganizationSlugProjectsRouteWithChildren
   '/app/organizations/$organizationSlug/settings': typeof AppOrganizationsOrganizationSlugSettingsRoute
   '/app/organizations/$organizationSlug/': typeof AppOrganizationsOrganizationSlugIndexRoute
+  '/api/projects/$organizationSlug/$projectSlug/openapi': typeof ApiProjectsOrganizationSlugProjectSlugOpenapiRoute
   '/app/organizations/$organizationSlug/projects/create': typeof AppOrganizationsOrganizationSlugProjectsCreateRoute
   '/app/organizations/$organizationSlug/projects/~': typeof AppOrganizationsOrganizationSlugProjectsChar126Route
   '/app/organizations/$organizationSlug/projects/': typeof AppOrganizationsOrganizationSlugProjectsIndexRoute
+  '/app/organizations/$organizationSlug/projects/$projectSlug/explorer': typeof AppOrganizationsOrganizationSlugProjectsProjectSlugExplorerRoute
   '/app/organizations/$organizationSlug/projects/$projectSlug/spec': typeof AppOrganizationsOrganizationSlugProjectsProjectSlugSpecRoute
   '/app/organizations/$organizationSlug/projects/$projectSlug/': typeof AppOrganizationsOrganizationSlugProjectsProjectSlugIndexRoute
 }
@@ -462,9 +484,11 @@ export interface FileRouteTypes {
     | '/app/organizations/$organizationSlug/projects'
     | '/app/organizations/$organizationSlug/settings'
     | '/app/organizations/$organizationSlug/'
+    | '/api/projects/$organizationSlug/$projectSlug/openapi'
     | '/app/organizations/$organizationSlug/projects/create'
     | '/app/organizations/$organizationSlug/projects/~'
     | '/app/organizations/$organizationSlug/projects/'
+    | '/app/organizations/$organizationSlug/projects/$projectSlug/explorer'
     | '/app/organizations/$organizationSlug/projects/$projectSlug/spec'
     | '/app/organizations/$organizationSlug/projects/$projectSlug'
   fileRoutesByTo: FileRoutesByTo
@@ -504,9 +528,11 @@ export interface FileRouteTypes {
     | '/app/settings'
     | '/app/organizations/$organizationSlug/settings'
     | '/app/organizations/$organizationSlug'
+    | '/api/projects/$organizationSlug/$projectSlug/openapi'
     | '/app/organizations/$organizationSlug/projects/create'
     | '/app/organizations/$organizationSlug/projects/~'
     | '/app/organizations/$organizationSlug/projects'
+    | '/app/organizations/$organizationSlug/projects/$projectSlug/explorer'
     | '/app/organizations/$organizationSlug/projects/$projectSlug/spec'
     | '/app/organizations/$organizationSlug/projects/$projectSlug'
   id:
@@ -550,9 +576,11 @@ export interface FileRouteTypes {
     | '/app/organizations/$organizationSlug/projects'
     | '/app/organizations/$organizationSlug/settings'
     | '/app/organizations/$organizationSlug/'
+    | '/api/projects/$organizationSlug/$projectSlug/openapi'
     | '/app/organizations/$organizationSlug/projects/create'
     | '/app/organizations/$organizationSlug/projects/~'
     | '/app/organizations/$organizationSlug/projects/'
+    | '/app/organizations/$organizationSlug/projects/$projectSlug/explorer'
     | '/app/organizations/$organizationSlug/projects/$projectSlug/spec'
     | '/app/organizations/$organizationSlug/projects/$projectSlug/'
   fileRoutesById: FileRoutesById
@@ -580,6 +608,7 @@ export interface RootRouteChildren {
   ApiPosthogSplatRoute: typeof ApiPosthogSplatRoute
   ApiProxySplatRoute: typeof ApiProxySplatRoute
   ApiTrpcSplatRoute: typeof ApiTrpcSplatRoute
+  ApiProjectsOrganizationSlugProjectSlugOpenapiRoute: typeof ApiProjectsOrganizationSlugProjectSlugOpenapiRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -878,6 +907,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppOrganizationsOrganizationSlugProjectsCreateRouteImport
       parentRoute: typeof AppOrganizationsOrganizationSlugProjectsRoute
     }
+    '/api/projects/$organizationSlug/$projectSlug/openapi': {
+      id: '/api/projects/$organizationSlug/$projectSlug/openapi'
+      path: '/api/projects/$organizationSlug/$projectSlug/openapi'
+      fullPath: '/api/projects/$organizationSlug/$projectSlug/openapi'
+      preLoaderRoute: typeof ApiProjectsOrganizationSlugProjectSlugOpenapiRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/app/organizations/$organizationSlug/projects/$projectSlug/': {
       id: '/app/organizations/$organizationSlug/projects/$projectSlug/'
       path: '/$projectSlug'
@@ -892,6 +928,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppOrganizationsOrganizationSlugProjectsProjectSlugSpecRouteImport
       parentRoute: typeof AppOrganizationsOrganizationSlugProjectsRoute
     }
+    '/app/organizations/$organizationSlug/projects/$projectSlug/explorer': {
+      id: '/app/organizations/$organizationSlug/projects/$projectSlug/explorer'
+      path: '/$projectSlug/explorer'
+      fullPath: '/app/organizations/$organizationSlug/projects/$projectSlug/explorer'
+      preLoaderRoute: typeof AppOrganizationsOrganizationSlugProjectsProjectSlugExplorerRouteImport
+      parentRoute: typeof AppOrganizationsOrganizationSlugProjectsRoute
+    }
   }
 }
 
@@ -899,6 +942,7 @@ interface AppOrganizationsOrganizationSlugProjectsRouteChildren {
   AppOrganizationsOrganizationSlugProjectsCreateRoute: typeof AppOrganizationsOrganizationSlugProjectsCreateRoute
   AppOrganizationsOrganizationSlugProjectsChar126Route: typeof AppOrganizationsOrganizationSlugProjectsChar126Route
   AppOrganizationsOrganizationSlugProjectsIndexRoute: typeof AppOrganizationsOrganizationSlugProjectsIndexRoute
+  AppOrganizationsOrganizationSlugProjectsProjectSlugExplorerRoute: typeof AppOrganizationsOrganizationSlugProjectsProjectSlugExplorerRoute
   AppOrganizationsOrganizationSlugProjectsProjectSlugSpecRoute: typeof AppOrganizationsOrganizationSlugProjectsProjectSlugSpecRoute
   AppOrganizationsOrganizationSlugProjectsProjectSlugIndexRoute: typeof AppOrganizationsOrganizationSlugProjectsProjectSlugIndexRoute
 }
@@ -911,6 +955,8 @@ const AppOrganizationsOrganizationSlugProjectsRouteChildren: AppOrganizationsOrg
       AppOrganizationsOrganizationSlugProjectsChar126Route,
     AppOrganizationsOrganizationSlugProjectsIndexRoute:
       AppOrganizationsOrganizationSlugProjectsIndexRoute,
+    AppOrganizationsOrganizationSlugProjectsProjectSlugExplorerRoute:
+      AppOrganizationsOrganizationSlugProjectsProjectSlugExplorerRoute,
     AppOrganizationsOrganizationSlugProjectsProjectSlugSpecRoute:
       AppOrganizationsOrganizationSlugProjectsProjectSlugSpecRoute,
     AppOrganizationsOrganizationSlugProjectsProjectSlugIndexRoute:
@@ -1012,6 +1058,8 @@ const rootRouteChildren: RootRouteChildren = {
   ApiPosthogSplatRoute: ApiPosthogSplatRoute,
   ApiProxySplatRoute: ApiProxySplatRoute,
   ApiTrpcSplatRoute: ApiTrpcSplatRoute,
+  ApiProjectsOrganizationSlugProjectSlugOpenapiRoute:
+    ApiProjectsOrganizationSlugProjectSlugOpenapiRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
