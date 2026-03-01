@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 import { ArrowRight, BarChart3, Code, Globe, TrendingUp, Users, Zap } from "lucide-react";
 
 import { AnimatedBeamZev } from "~/components/animated-beam-zev";
@@ -10,9 +10,16 @@ import { PageHeaderContent } from "~/components/sidebar";
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent, CardHeader } from "~/components/ui/card";
+import { sessionQueryOptions } from "~/lib/auth";
 
 export const Route = createFileRoute("/")({
   component: Home,
+  loader: async ({ context }) => {
+    const session = await context.queryClient.ensureQueryData(sessionQueryOptions());
+    if (session.user) {
+      throw redirect({ to: "/app" });
+    }
+  },
 });
 
 function Home() {
