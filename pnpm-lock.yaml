@@ -9,8 +9,8 @@ importers:
   .:
     devDependencies:
       '@boi.gg/eslint-plugin-prefer-array-at':
-        specifier: ^0.0.1
-        version: 0.0.1
+        specifier: ^0.1.1
+        version: 0.1.1
       '@boi.gg/exception':
         specifier: ^0.0.2
         version: 0.0.2
@@ -593,8 +593,8 @@ packages:
   '@better-fetch/fetch@1.1.18':
     resolution: {integrity: sha512-rEFOE1MYIsBmoMJtQbl32PGHHXuG2hDxvEd7rUHE0vCBoFQVSDqaVs9hkZEtHCxRoY+CljXKFCOuJ8uxqw1LcA==}
 
-  '@boi.gg/eslint-plugin-prefer-array-at@0.0.1':
-    resolution: {integrity: sha512-/clwlhsJEXdrR/mHs7S92JHjDflB+5kug5Hy6qda1lGsZs7lAmkPl1oGfBUPGO7ovEPqqfV7UB8HMJtcvlbzQA==}
+  '@boi.gg/eslint-plugin-prefer-array-at@0.1.1':
+    resolution: {integrity: sha512-8xQDnkO6C7cwqNn5kdfIJ1PTE4G4fkbyS2/4MP5gkQjG2cCbR/h14Io7EW0TYYFnZVK/LqJCbO1WYC7I5krzTQ==}
 
   '@boi.gg/exception@0.0.2':
     resolution: {integrity: sha512-cwfBICJb8Vla5cl7DoNkEWbJ17ulu6gLpaadr5Oa6cY1JjmfFNPFgv+KgTNsISAwCLs3O2KU731Zney4dhUg3A==}
@@ -7645,7 +7645,7 @@ snapshots:
 
   '@better-fetch/fetch@1.1.18': {}
 
-  '@boi.gg/eslint-plugin-prefer-array-at@0.0.1': {}
+  '@boi.gg/eslint-plugin-prefer-array-at@0.1.1': {}
 
   '@boi.gg/exception@0.0.2': {}
 

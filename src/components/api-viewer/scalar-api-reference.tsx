@@ -25,7 +25,7 @@ export function ScalarApiReference(props: ScalarApiReferenceProps) {
   return (
     <ClientOnly
       fallback={
-        <div className="flex min-h-[640px] items-center justify-center rounded-lg border border-dashed">
+        <div className="flex min-h-160 items-center justify-center rounded-lg border border-dashed">
           <div className="h-8 w-8 animate-spin rounded-full border-2 border-border border-b-primary" />
         </div>
       }
