@@ -5,6 +5,7 @@ import { type } from "arktype";
 import { useRef, useState } from "react";
 import { toast } from "sonner";
 
+import { AuthFormClientOnly } from "~/components/auth-form-client-only";
 import { CapWidget, type CapWidgetElement } from "~/components/cap-widget";
 import { Redirect } from "~/components/redirect";
 import { Button } from "~/components/ui/button";
@@ -81,49 +82,52 @@ function RouteComponent() {
               }}
             >
               <div className="grid gap-6">
-                <div className="grid gap-6">
-                  <form.Field
-                    children={(field) => {
-                      const isInvalid = field.state.meta.isTouched && !field.state.meta.isValid;
-                      const error = field.state.meta.errors.at(0);
+                <AuthFormClientOnly fields={[{ labelWidthClass: "w-12" }]} showCaptcha>
+                  <div className="grid gap-6">
+                    <form.Field
+                      children={(field) => {
+                        const isInvalid = field.state.meta.isTouched && !field.state.meta.isValid;
+                        const error = field.state.meta.errors.at(0);
 
-                      return (
-                        <div className="grid gap-3">
-                          <Label htmlFor="email">Email</Label>
-                          <Input
-                            aria-describedby={isInvalid ? "email-error" : undefined}
-                            aria-invalid={isInvalid}
-                            disabled={isSubmitting}
-                            id="email"
-                            name={field.name}
-                            onBlur={field.handleBlur}
-                            onChange={(e) => field.handleChange(e.target.value)}
-                            placeholder="me@example.com"
-                            type="email"
-                            value={field.state.value}
-                          />
-                          <p
-                            className={cn(
-                              "text-end text-xs text-destructive",
-                              !isInvalid &&
-                                `
+                        return (
+                          <div className="grid gap-3">
+                            <Label htmlFor="email">Email</Label>
+                            <Input
+                              aria-describedby={isInvalid ? "email-error" : undefined}
+                              aria-invalid={isInvalid}
+                              autoComplete="email"
+                              disabled={isSubmitting}
+                              id="email"
+                              name={field.name}
+                              onBlur={field.handleBlur}
+                              onChange={(e) => field.handleChange(e.target.value)}
+                              placeholder="me@example.com"
+                              type="email"
+                              value={field.state.value}
+                            />
+                            <p
+                              className={cn(
+                                "text-end text-xs text-destructive",
+                                !isInvalid &&
+                                  `
                         invisible
                       `,
-                            )}
-                            id="email-error"
-                          >
-                            {isInvalid ? getFormErrorString(error) : "No error"}
-                          </p>
-                        </div>
-                      );
-                    }}
-                    name="email"
-                  />
-                  <CapWidget onSolve={setCapToken} ref={capRef} />
-                  <Button className="w-full" loading={isSubmitting} type="submit">
-                    Reset password
-                  </Button>
-                </div>
+                              )}
+                              id="email-error"
+                            >
+                              {isInvalid ? getFormErrorString(error) : "No error"}
+                            </p>
+                          </div>
+                        );
+                      }}
+                      name="email"
+                    />
+                    <CapWidget onSolve={setCapToken} ref={capRef} />
+                    <Button className="w-full" loading={isSubmitting} type="submit">
+                      Reset password
+                    </Button>
+                  </div>
+                </AuthFormClientOnly>
               </div>
             </form>
           </CardContent>

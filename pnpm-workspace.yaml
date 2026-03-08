@@ -1,7 +1,8 @@
 onlyBuiltDependencies:
-  - "@tailwindcss/oxide"
+  - '@tailwindcss/oxide'
   - core-js
   - esbuild
   - protobufjs
   - sharp
+  - vue-demi
   - workerd

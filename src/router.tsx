@@ -19,7 +19,9 @@ export function getRouter() {
     defaultNotFoundComponent: () => <NotFound />,
     defaultPreload: "intent",
     routeTree,
-    scrollRestoration: true,
+    scrollRestoration: (opts) => {
+      return !opts.location.pathname.endsWith("/explorer");
+    },
   });
 
   setupRouterSsrQueryIntegration({ queryClient, router });

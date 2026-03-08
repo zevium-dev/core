@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { Code, FileText, Globe, Lock, Settings } from "lucide-react";
+import { Code, FileText, FlaskConical, Globe, Lock, Settings } from "lucide-react";
 
 import { useConfirm } from "~/components/confirm-dialog";
 import { PageHeaderContent } from "~/components/sidebar";
@@ -140,6 +140,18 @@ function RouteComponent() {
                 >
                   <Settings className="mr-2 h-4 w-4" />
                   Manage Spec
+                </Link>
+              </Button>
+              <Button asChild size="sm" variant="outline">
+                <Link
+                  params={{
+                    organizationSlug,
+                    projectSlug,
+                  }}
+                  to="/app/organizations/$organizationSlug/projects/$projectSlug/explorer"
+                >
+                  <FlaskConical className="mr-2 h-4 w-4" />
+                  API Explorer
                 </Link>
               </Button>
             </div>

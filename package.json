@@ -28,7 +28,7 @@
     "typecheck": "tsgo --noEmit"
   },
   "devDependencies": {
-    "@boi.gg/eslint-plugin-prefer-array-at": "^0.0.1",
+    "@boi.gg/eslint-plugin-prefer-array-at": "^0.1.1",
     "@boi.gg/exception": "^0.0.2",
     "@cap.js/server": "^3.0.1",
     "@cap.js/widget": "^0.1.33",
@@ -75,6 +75,7 @@
     "@radix-ui/react-tooltip": "^1.2.8",
     "@react-email/components": "^0.5.7",
     "@react-email/tailwind": "^1.2.2",
+    "@scalar/api-reference-react": "^0.8.62",
     "@tailwindcss/typography": "^0.5.19",
     "@tailwindcss/vite": "^4.1.18",
     "@tanstack/arktype-adapter": "^1.150.0",
