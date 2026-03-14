@@ -15,13 +15,9 @@ const creditsSuccessSearchSchema = z
 export const Route = createFileRoute("/app/settings/credits/success")({
   validateSearch: creditsSuccessSearchSchema,
   beforeLoad: async ({ search }) => {
-    const result = await waitForCreditsApplication({
+    await waitForCreditsApplication({
       data: { checkoutId: search.checkout_id },
     });
-
-    if (!result.isAuthenticated) {
-      throw redirect({ to: "/app/settings/credits" });
-    }
 
     throw redirect({ to: "/app/settings/credits" });
   },
