@@ -9,7 +9,7 @@ const ServerEnvArk = type({
   LIBSQL_SECRET: "string",
   LIBSQL_URL: "string",
   POLAR_ACCESS_TOKEN: "string",
-  POLAR_ORGANIZATION_ID: "string",
+  POLAR_ORGANIZATION_ID: "string | undefined",
   POLAR_PRODUCT_ID_CREDITS: "string",
   POLAR_SERVER: "'sandbox' | 'production'",
   POLAR_WEBHOOK_SECRET: "string",

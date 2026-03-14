@@ -71,20 +71,6 @@ async function getBalanceFromBitfield(userId: string): Promise<number> {
   return Number.isFinite(num) ? Math.max(0, Math.floor(num)) : 0;
 }
 
-async function migrateBalanceIfNeeded(userId: string) {
-  const key = CreditsRedisKey.balance(userId);
-  const raw = await kv.get<unknown>(key);
-  if (raw === null || raw === undefined) return;
-  const legacyNum =
-    typeof raw === "number" ? raw : typeof raw === "string" && /^-?\d+$/.test(raw) ? Number(raw) : Number.NaN;
-  if (!Number.isFinite(legacyNum)) return;
-
-  // Legacy balances were stored as a numeric string via INCRBY/DECRBY. Replace with a u64 bitfield.
-  const fixed = Math.max(0, Math.floor(legacyNum));
-  await kv.del(key);
-  await kv.bitfield(key).set("u63", 0, fixed).exec();
-}
-
 /**
  * CreditsManager handles the mechanical operations of credit balance management.
  * It deals with the "how" (incrementing, decrementing, fetching) but not the "why" (business logic).
@@ -99,8 +85,6 @@ export const CreditsManager = {
     PositiveIntegerSchema.parse(input.amountCents);
     OptionalStringSchema.parse(input.description);
     OptionalStringSchema.parse(input.reference);
-
-    await migrateBalanceIfNeeded(input.userId);
 
     const key = CreditsRedisKey.balance(input.userId);
     // Atomic increment on an unsigned 63-bit integer stored as a bitfield.
@@ -133,8 +117,6 @@ export const CreditsManager = {
     OptionalStringSchema.parse(input.reason);
     OptionalStringSchema.parse(input.reference);
 
-    await migrateBalanceIfNeeded(input.userId);
-
     const key = CreditsRedisKey.balance(input.userId);
     const res = await kv.bitfield(key).overflow("FAIL").incrby("u63", 0, -input.amountCents).exec();
 
@@ -165,7 +147,6 @@ export const CreditsManager = {
    */
   async getBalance(userId: string): Promise<number> {
     UserIdSchema.parse(userId);
-    await migrateBalanceIfNeeded(userId);
     return getBalanceFromBitfield(userId);
   },
 };
