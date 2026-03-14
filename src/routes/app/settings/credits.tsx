@@ -16,7 +16,7 @@ const amountInputSchema = z.number().int().positive().max(100_000);
 /* eslint-disable perfectionist/sort-objects */
 export const Route = createFileRoute("/app/settings/credits")({
   validateSearch: z.object({
-    page: z.number().int().positive().optional(),
+    page: z.coerce.number().int().positive().optional(),
   }),
   loader: ({ context }) => {
     void context.queryClient.ensureQueryData(context.trpc.credits.getBalance.queryOptions());
