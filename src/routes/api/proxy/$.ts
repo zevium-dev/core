@@ -146,14 +146,10 @@ const proxyHandler = async (request: Request) => {
   try {
     const { CreditsManager } = await import("~/lib/server/credits");
 
-    // Derive userId from verification response (handles different shapes)
-    const vAny = verification as unknown as {
-      key?: { userId?: string };
-      user?: { id?: string };
-      user_id?: string;
-      userId?: string;
-    };
-    const userId = vAny.user?.id ?? vAny.key?.userId ?? vAny.userId ?? vAny.user_id ?? "";
+    const userId = verification.key?.userId;
+    if (!userId) {
+      return jsonWithRequestId(401, "Failed to verify API key", requestId);
+    }
 
     const upstream = await fetch(targetUrl, {
       body: request.body,
