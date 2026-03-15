@@ -105,16 +105,20 @@ export const Route = createFileRoute("/api/polar/webhook")({
             const dedupeId = order.checkoutId ?? order.id;
             const appliedKey = CreditsRedisKey.creditApplied({ checkoutId: dedupeId, userId });
 
-            const applyOk = await kv.set(appliedKey, "1", { nx: true, px: 1000 * 60 * 60 * 24 * 365 }).catch((err) => {
+            let applyOk: null | string;
+            try {
+              applyOk = await kv.set(appliedKey, "1", { nx: true, px: 1000 * 60 * 60 * 24 * 365 });
+            } catch (err) {
               posthog?.captureException(err, userId, {
                 appliedKey,
                 operation: "redis_set_idempotency",
                 source: "polar_webhook",
               });
-              return null;
-            });
+              const error = new Error("Failed to acquire Polar webhook idempotency lock", { cause: err });
+              throw error;
+            }
 
-            if (applyOk !== "OK") {
+            if (applyOk === null) {
               posthog?.capture({
                 distinctId: userId,
                 event: "polar_webhook_duplicate",
@@ -126,6 +130,16 @@ export const Route = createFileRoute("/api/polar/webhook")({
               });
               void posthog?.shutdown();
               return new Response("ok");
+            }
+
+            if (applyOk !== "OK") {
+              const error = new Error("Unexpected Redis SET response for Polar webhook idempotency");
+              posthog?.captureException(error, userId, {
+                appliedKey,
+                applyOk,
+                source: "polar_webhook",
+              });
+              throw error;
             }
 
             // Credit the intended top-up amount (pre-discount, pre-tax).
