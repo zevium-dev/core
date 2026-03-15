@@ -42,7 +42,7 @@ import { Route as AppOrganizationsOrganizationSlugRouteImport } from './routes/a
 import { Route as ApiTrpcSplatRouteImport } from './routes/api/trpc/$'
 import { Route as ApiProxySplatRouteImport } from './routes/api/proxy/$'
 import { Route as ApiPosthogSplatRouteImport } from './routes/api/posthog/$'
-import { Route as ApiPolarSplatRouteImport } from './routes/api/polar/$'
+import { Route as ApiPolarWebhookRouteImport } from './routes/api/polar/webhook'
 import { Route as ApiOpenapiSplatRouteImport } from './routes/api/openapi/$'
 import { Route as ApiCreditsSplatRouteImport } from './routes/api/credits/$'
 import { Route as ApiCapSplatRouteImport } from './routes/api/cap/$'
@@ -226,9 +226,9 @@ const ApiPosthogSplatRoute = ApiPosthogSplatRouteImport.update({
   path: '/api/posthog/$',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApiPolarSplatRoute = ApiPolarSplatRouteImport.update({
-  id: '/api/polar/$',
-  path: '/api/polar/$',
+const ApiPolarWebhookRoute = ApiPolarWebhookRouteImport.update({
+  id: '/api/polar/webhook',
+  path: '/api/polar/webhook',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiOpenapiSplatRoute = ApiOpenapiSplatRouteImport.update({
@@ -346,7 +346,7 @@ export interface FileRoutesByFullPath {
   '/api/cap/$': typeof ApiCapSplatRoute
   '/api/credits/$': typeof ApiCreditsSplatRoute
   '/api/openapi/$': typeof ApiOpenapiSplatRoute
-  '/api/polar/$': typeof ApiPolarSplatRoute
+  '/api/polar/webhook': typeof ApiPolarWebhookRoute
   '/api/posthog/$': typeof ApiPosthogSplatRoute
   '/api/proxy/$': typeof ApiProxySplatRoute
   '/api/trpc/$': typeof ApiTrpcSplatRoute
@@ -395,7 +395,7 @@ export interface FileRoutesByTo {
   '/api/cap/$': typeof ApiCapSplatRoute
   '/api/credits/$': typeof ApiCreditsSplatRoute
   '/api/openapi/$': typeof ApiOpenapiSplatRoute
-  '/api/polar/$': typeof ApiPolarSplatRoute
+  '/api/polar/webhook': typeof ApiPolarWebhookRoute
   '/api/posthog/$': typeof ApiPosthogSplatRoute
   '/api/proxy/$': typeof ApiProxySplatRoute
   '/api/trpc/$': typeof ApiTrpcSplatRoute
@@ -445,7 +445,7 @@ export interface FileRoutesById {
   '/api/cap/$': typeof ApiCapSplatRoute
   '/api/credits/$': typeof ApiCreditsSplatRoute
   '/api/openapi/$': typeof ApiOpenapiSplatRoute
-  '/api/polar/$': typeof ApiPolarSplatRoute
+  '/api/polar/webhook': typeof ApiPolarWebhookRoute
   '/api/posthog/$': typeof ApiPosthogSplatRoute
   '/api/proxy/$': typeof ApiProxySplatRoute
   '/api/trpc/$': typeof ApiTrpcSplatRoute
@@ -498,7 +498,7 @@ export interface FileRouteTypes {
     | '/api/cap/$'
     | '/api/credits/$'
     | '/api/openapi/$'
-    | '/api/polar/$'
+    | '/api/polar/webhook'
     | '/api/posthog/$'
     | '/api/proxy/$'
     | '/api/trpc/$'
@@ -547,7 +547,7 @@ export interface FileRouteTypes {
     | '/api/cap/$'
     | '/api/credits/$'
     | '/api/openapi/$'
-    | '/api/polar/$'
+    | '/api/polar/webhook'
     | '/api/posthog/$'
     | '/api/proxy/$'
     | '/api/trpc/$'
@@ -596,7 +596,7 @@ export interface FileRouteTypes {
     | '/api/cap/$'
     | '/api/credits/$'
     | '/api/openapi/$'
-    | '/api/polar/$'
+    | '/api/polar/webhook'
     | '/api/posthog/$'
     | '/api/proxy/$'
     | '/api/trpc/$'
@@ -643,7 +643,7 @@ export interface RootRouteChildren {
   ApiCapSplatRoute: typeof ApiCapSplatRoute
   ApiCreditsSplatRoute: typeof ApiCreditsSplatRoute
   ApiOpenapiSplatRoute: typeof ApiOpenapiSplatRoute
-  ApiPolarSplatRoute: typeof ApiPolarSplatRoute
+  ApiPolarWebhookRoute: typeof ApiPolarWebhookRoute
   ApiPosthogSplatRoute: typeof ApiPosthogSplatRoute
   ApiProxySplatRoute: typeof ApiProxySplatRoute
   ApiTrpcSplatRoute: typeof ApiTrpcSplatRoute
@@ -883,11 +883,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPosthogSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api/polar/$': {
-      id: '/api/polar/$'
-      path: '/api/polar/$'
-      fullPath: '/api/polar/$'
-      preLoaderRoute: typeof ApiPolarSplatRouteImport
+    '/api/polar/webhook': {
+      id: '/api/polar/webhook'
+      path: '/api/polar/webhook'
+      fullPath: '/api/polar/webhook'
+      preLoaderRoute: typeof ApiPolarWebhookRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/openapi/$': {
@@ -1127,7 +1127,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiCapSplatRoute: ApiCapSplatRoute,
   ApiCreditsSplatRoute: ApiCreditsSplatRoute,
   ApiOpenapiSplatRoute: ApiOpenapiSplatRoute,
-  ApiPolarSplatRoute: ApiPolarSplatRoute,
+  ApiPolarWebhookRoute: ApiPolarWebhookRoute,
   ApiPosthogSplatRoute: ApiPosthogSplatRoute,
   ApiProxySplatRoute: ApiProxySplatRoute,
   ApiTrpcSplatRoute: ApiTrpcSplatRoute,
