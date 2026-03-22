@@ -3,6 +3,7 @@ import { Link, useLocation, useParams, useRouter } from "@tanstack/react-router"
 import { atom, useAtom } from "jotai";
 import {
   Building2,
+  Check,
   ChevronDown,
   Database,
   DockIcon,
@@ -25,8 +26,6 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "~/components/ui/dropdown-menu";
@@ -690,9 +689,15 @@ function OrganizationSelectorMenu({
               <DropdownMenuLabel>Organizations</DropdownMenuLabel>
               {hasOrganizations ? (
                 <>
-                  <DropdownMenuRadioGroup onValueChange={handleNavigation} value={selectedValue}>
-                    {organizationOptions.map((route) => (
-                      <DropdownMenuRadioItem key={route.url} className="justify-start pr-2 text-left" value={route.url}>
+                  {organizationOptions.map((route) => {
+                    const isSelected = route.url === selectedValue;
+
+                    return (
+                      <DropdownMenuItem
+                        key={route.url}
+                        className="w-full justify-start px-2 text-left"
+                        onClick={() => handleNavigation(route.url)}
+                      >
                         <Avatar className="size-5 border border-border/60">
                           <AvatarImage alt={route.title} src={route.logo ?? ""} />
                           <AvatarFallback className="text-[10px]">
@@ -700,12 +705,13 @@ function OrganizationSelectorMenu({
                           </AvatarFallback>
                         </Avatar>
                         <span className="flex-1 truncate text-left">{route.title}</span>
-                      </DropdownMenuRadioItem>
-                    ))}
-                  </DropdownMenuRadioGroup>
+                        {isSelected ? <Check className="size-4 text-muted-foreground" /> : null}
+                      </DropdownMenuItem>
+                    );
+                  })}
                   <DropdownMenuSeparator />
                   <DropdownMenuItem
-                    className="justify-start text-left"
+                    className="w-full justify-start px-2 text-left"
                     onClick={() => handleNavigation("/app/organizations/~")}
                   >
                     <Building2 className="size-4" />
@@ -714,7 +720,7 @@ function OrganizationSelectorMenu({
                 </>
               ) : (
                 <DropdownMenuItem
-                  className="justify-start text-left"
+                  className="w-full justify-start px-2 text-left"
                   onClick={() => handleNavigation("/app/organizations/create")}
                 >
                   <Plus className="size-4" />
