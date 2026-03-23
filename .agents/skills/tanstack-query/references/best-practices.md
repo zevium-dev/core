@@ -61,7 +61,9 @@ function GoodUserProfile({ userId }) {
 
 ```tsx
 // Global
-["todos"][("todos", { status: "done" })][("todos", 123)]; // All todos // Filtered todos // Single todo
+["todos"]; // All todos
+["todos", { status: "done" }]; // Filtered todos
+["todos", 123]; // Single todo
 
 // Invalidation hierarchy
 queryClient.invalidateQueries({ queryKey: ["todos"] }); // Invalidates ALL todos
@@ -72,13 +74,13 @@ queryClient.invalidateQueries({ queryKey: ["todos", { status: "done" }] }); // O
 
 ```tsx
 // ✅ Good: Stable, serializable keys
-["users", userId, { sort: "name", filter: "active" }][
-  // ❌ Bad: Functions in keys (not serializable)
-  ("users", () => userId)
-][
-  // ❌ Bad: Changing order
-  ("users", { filter: "active", sort: "name" })
-]; // Different key!
+["users", userId, { sort: "name", filter: "active" }];
+
+// ❌ Bad: Functions in keys (not serializable)
+["users", () => userId];
+
+// ❌ Bad: Changing order
+["users", { filter: "active", sort: "name" }]; // Different key!
 
 // ✅ Good: Consistent ordering
 const userFilters = { filter: "active", sort: "name" };

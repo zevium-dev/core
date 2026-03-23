@@ -108,10 +108,7 @@ const proxyHandler = async (request: Request) => {
     return jsonWithRequestId(403, "Host not allowed", requestId);
   }
 
-  const proxySecret = normalizeProxySecret(serverEnv.PROXY_UPSTREAM_SECRET);
-  if (!proxySecret) {
-    return jsonWithRequestId(503, "Proxy secret is not configured", requestId);
-  }
+  const proxySecret = normalizeProxySecret(serverEnv.PROXY_UPSTREAM_SECRET) ?? serverEnv.PROXY_UPSTREAM_SECRET;
 
   // Build target URL by rewriting the incoming URL
   const originalUrl = new URL(request.url);
@@ -151,16 +148,26 @@ const proxyHandler = async (request: Request) => {
       return jsonWithRequestId(401, "API key verification did not include a user id", requestId);
     }
 
-    let isChargeReserved = false;
+    let chargeState: "committed" | "not_reserved" | "refunded" | "reserved" = "not_reserved";
     const refundReservedChargeInternal = async () => {
-      if (!isChargeReserved) return;
-      await CreditsManager.add({
-        amountCents: PROXY_CALL_COST_CENTS,
-        description: "Refund for failed Zevium proxy API call",
-        reference: requestId,
-        userId,
-      });
-      isChargeReserved = false;
+      if (chargeState !== "reserved") return;
+
+      chargeState = "refunded";
+      try {
+        await CreditsManager.add({
+          amountCents: PROXY_CALL_COST_CENTS,
+          description: "Refund for failed Zevium proxy API call",
+          reference: requestId,
+          userId,
+        });
+      } catch (error) {
+        chargeState = "reserved";
+        throw error;
+      }
+    };
+    const commitReservedCharge = () => {
+      if (chargeState !== "reserved") return;
+      chargeState = "committed";
     };
     refundReservedCharge = refundReservedChargeInternal;
 
@@ -171,7 +178,7 @@ const proxyHandler = async (request: Request) => {
         reference: requestId,
         userId,
       });
-      isChargeReserved = true;
+      chargeState = "reserved";
     } catch (err) {
       if (err instanceof Error && err.message === "Insufficient credits") {
         return jsonWithRequestId(402, "Insufficient credits", requestId);
@@ -215,7 +222,7 @@ const proxyHandler = async (request: Request) => {
     responseHeaders.delete("x-zevium-proxy-secret");
 
     if (!upstream.body) {
-      isChargeReserved = false;
+      commitReservedCharge();
       return new Response(null, {
         headers: responseHeaders,
         status: upstream.status,
@@ -233,7 +240,7 @@ const proxyHandler = async (request: Request) => {
         try {
           const { done, value } = await reader.read();
           if (done) {
-            isChargeReserved = false;
+            commitReservedCharge();
             controller.close();
             return;
           }

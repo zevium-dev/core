@@ -134,9 +134,9 @@ pnpm run generate-routes
 #### Browser Testing Login (Local)
 
 - For manual browser testing on localhost, use `http://localhost:5173`.
-- Test login credentials:
-  - Email: `tnfssc@gmail.com`
-  - Password: `1234qwer`
+- Configure test login credentials locally instead of committing real secrets:
+  - Email: `user@example.com`
+  - Password: `<set locally>`
 
 #### Internal Dev/Test Routes
 

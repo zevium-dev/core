@@ -17,7 +17,9 @@ async function Page() {
   return <Profile user={user} />;
 }
 
+// Profile.client.tsx
 ("use client");
+
 function Profile({ user }: { user: User }) {
   return <div>{user.name}</div>; // uses 1 field
 }
@@ -31,7 +33,9 @@ async function Page() {
   return <Profile name={user.name} />;
 }
 
+// Profile.client.tsx
 ("use client");
+
 function Profile({ name }: { name: string }) {
   return <div>{name}</div>;
 }

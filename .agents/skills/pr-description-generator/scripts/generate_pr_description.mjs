@@ -54,9 +54,11 @@ function ensureFetched(base, { noFetch }) {
   if (noFetch) return;
   if (!base.startsWith("origin/")) return;
 
+  const remoteRef = base.slice("origin/".length) || "develop";
+
   // Best-effort fetch; non-fatal for offline use.
   try {
-    runGit(["fetch", "origin", "develop"], { check: false });
+    runGit(["fetch", "origin", remoteRef], { check: false });
   } catch {
     // ignore
   }

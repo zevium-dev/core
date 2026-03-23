@@ -28,7 +28,7 @@
     "typecheck": "tsgo --noEmit"
   },
   "devDependencies": {
-    "@boi.gg/eslint-plugin-prefer-array-at": "^0.0.1",
+    "@boi.gg/eslint-plugin-prefer-array-at": "^0.1.1",
     "@boi.gg/exception": "^0.0.2",
     "@cap.js/server": "^3.0.1",
     "@cap.js/widget": "^0.1.33",

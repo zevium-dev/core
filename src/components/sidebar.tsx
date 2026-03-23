@@ -1,7 +1,19 @@
 import { useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { Link, useLocation, useParams, useRouter } from "@tanstack/react-router";
 import { atom, useAtom } from "jotai";
-import { Database, DockIcon, LayoutDashboardIcon, LogIn, LogOut, Moon, Palette, Settings, Sun } from "lucide-react";
+import {
+  Building2,
+  Database,
+  DockIcon,
+  LayoutDashboardIcon,
+  LogIn,
+  LogOut,
+  Moon,
+  Palette,
+  Plus,
+  Settings,
+  Sun,
+} from "lucide-react";
 import { useEffect } from "react";
 
 import { useTheme } from "~/components/theme-provider";
@@ -85,6 +97,9 @@ interface OrganizationRoute {
   url: string;
 }
 
+const isRouteActive = (pathname: string, route: string) => pathname === route || pathname.startsWith(`${route}/`);
+const isDashboardActive = (pathname: string) => pathname === "/app" || pathname === "/app/dashboard";
+
 /** Must be wrapped in a ClientOnly cuz of hydration issues */
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const location = useLocation();
@@ -127,6 +142,8 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
       url: `/app/organizations/${selectedOrganizationSlug}/projects`,
     };
 
+  const hasOrganizations = orgListQuery.data.length > 0;
+  const needsOrganizationSelection = hasOrganizations && !selectedOrganizationSlug;
   const filteredNavData = [projectNavData, ...navData].filter(Boolean);
 
   return (
@@ -150,8 +167,9 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                   data-[active=true]:bg-main
                   data-[active=true]:text-main-foreground
                 `}
+                isActive={isDashboardActive(location.pathname)}
               >
-                <Link to="/app/dashboard">
+                <Link to="/app">
                   <LayoutDashboardIcon />
                   <span>Dashboard</span>
                 </Link>
@@ -165,6 +183,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                   data-[active=true]:bg-main
                   data-[active=true]:text-main-foreground
                 `}
+                isActive={isRouteActive(location.pathname, "/app/catalogue")}
               >
                 <Link to="/app/catalogue">
                   <Database />
@@ -173,12 +192,52 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
               </SidebarMenuButton>
             </SidebarMenuItem>
 
+            {needsOrganizationSelection ? (
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  asChild
+                  className={`
+                    data-[active=true]:bg-main
+                    data-[active=true]:text-main-foreground
+                  `}
+                  isActive={location.pathname.startsWith("/app/organizations")}
+                >
+                  <Link to="/app/organizations/~">
+                    <Building2 />
+                    <span>Choose Organization</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            ) : null}
+
+            {!hasOrganizations ? (
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  asChild
+                  className={`
+                    data-[active=true]:bg-main
+                    data-[active=true]:text-main-foreground
+                  `}
+                  isActive={location.pathname.startsWith("/app/organizations/create")}
+                >
+                  <Link to="/app/organizations/create">
+                    <Plus />
+                    <span>Create Organization</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            ) : null}
+
             {filteredNavData.map((item) => {
-              const isActive = location.pathname.startsWith(item.url);
+              const isActive = isRouteActive(location.pathname, item.url);
 
               if (item.subroutes.length > 0) {
                 return (
-                  <Collapsible className="group/collapsible" defaultOpen={item.open} key={item.title}>
+                  <Collapsible
+                    className="group/collapsible"
+                    defaultOpen={isActive || item.open}
+                    key={`${item.title}-${isActive ? "active" : "inactive"}`}
+                  >
                     <SidebarMenuItem>
                       <CollapsibleTrigger asChild>
                         <SidebarMenuButton
@@ -186,6 +245,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                             data-[active=true]:bg-main
                             data-[active=true]:text-main-foreground
                           `}
+                          isActive={isActive}
                         >
                           <item.icon />
                           <span>{item.title}</span>
@@ -194,7 +254,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                       <CollapsibleContent>
                         <SidebarMenuSub>
                           {item.subroutes.map((sub) => {
-                            const isSubActive = location.pathname.startsWith(sub.url);
+                            const isSubActive = isRouteActive(location.pathname, sub.url);
                             return (
                               <SidebarMenuSubItem key={sub.title}>
                                 <SidebarMenuSubButton asChild isActive={isSubActive}>
@@ -307,8 +367,9 @@ export function MainSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) 
                   data-[active=true]:bg-main
                   data-[active=true]:text-main-foreground
                 `}
+                isActive={user ? isDashboardActive(location.pathname) : false}
               >
-                <Link to={user ? "/app/dashboard" : "/auth/sign-in"}>
+                <Link to={user ? "/app" : "/auth/sign-in"}>
                   <LayoutDashboardIcon />
                   <span>Dashboard</span>
                 </Link>
@@ -322,6 +383,7 @@ export function MainSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) 
                   data-[active=true]:bg-main
                   data-[active=true]:text-main-foreground
                 `}
+                isActive={user ? isRouteActive(location.pathname, "/app/catalogue") : false}
               >
                 <Link to={user ? "/app/catalogue" : "/auth/sign-in"}>
                   <Database />
@@ -332,11 +394,15 @@ export function MainSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) 
 
             {user &&
               filteredNavData.map((item) => {
-                const isActive = location.pathname.startsWith(item.url);
+                const isActive = isRouteActive(location.pathname, item.url);
 
                 if (item.subroutes.length > 0) {
                   return (
-                    <Collapsible className="group/collapsible" defaultOpen={item.open} key={item.title}>
+                    <Collapsible
+                      className="group/collapsible"
+                      defaultOpen={isActive || item.open}
+                      key={`${item.title}-${isActive ? "active" : "inactive"}`}
+                    >
                       <SidebarMenuItem>
                         <CollapsibleTrigger asChild>
                           <SidebarMenuButton
@@ -344,6 +410,7 @@ export function MainSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) 
                             data-[active=true]:bg-main
                             data-[active=true]:text-main-foreground
                           `}
+                            isActive={isActive}
                           >
                             <item.icon />
                             <span>{item.title}</span>
@@ -352,7 +419,7 @@ export function MainSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) 
                         <CollapsibleContent>
                           <SidebarMenuSub>
                             {item.subroutes.map((sub) => {
-                              const isSubActive = location.pathname.startsWith(sub.url);
+                              const isSubActive = isRouteActive(location.pathname, sub.url);
                               return (
                                 <SidebarMenuSubItem key={sub.title}>
                                   <SidebarMenuSubButton asChild isActive={isSubActive}>
@@ -545,14 +612,25 @@ function OrganizationSelectorMenu({
   routes: Array<OrganizationRoute>;
 }) {
   const router = useRouter();
+  const hasOrganizations = routes.length > 0;
   const routeOptions: Array<OrganizationRoute> = [
-    {
-      title: "All organizations",
-      url: "/app/organizations/~",
-    },
-    ...routes,
+    ...(hasOrganizations
+      ? [
+          {
+            title: "All organizations",
+            url: "/app/organizations/~",
+          },
+          ...routes,
+        ]
+      : [
+          {
+            title: "Create organization",
+            url: "/app/organizations/create",
+          },
+        ]),
   ];
-  const selectedValue = routeOptions.some((route) => route.url === pathname) ? pathname : undefined;
+  const selectedRoute = routeOptions.find((route) => pathname === route.url || pathname.startsWith(`${route.url}/`));
+  const selectedValue = selectedRoute?.url;
 
   return (
     <SidebarMenuItem>
@@ -586,7 +664,9 @@ function OrganizationSelectorMenu({
                 focus-visible:ring-0 dark:bg-transparent dark:hover:bg-transparent
               `}
             >
-              <SelectValue placeholder={organizationName ?? "Select organization"} />
+              <SelectValue
+                placeholder={organizationName ?? (hasOrganizations ? "Choose organization" : "Create organization")}
+              />
             </SelectTrigger>
             <SelectContent>
               {routeOptions.map((route) => (

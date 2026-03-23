@@ -27,10 +27,10 @@ const SearchParamsArk = type({
   "redirectTo?": "string | undefined",
 });
 
-type AllowedRedirectTo = "/" | "/app/invitations";
+type AllowedRedirectTo = "/app" | "/app/invitations";
 
 const getSafeRedirectTo = (redirectTo: string | undefined): AllowedRedirectTo => {
-  return redirectTo === "/app/invitations" ? "/app/invitations" : "/";
+  return redirectTo === "/app/invitations" ? "/app/invitations" : "/app";
 };
 
 type FormValues = typeof FormValuesArk.infer;

@@ -3,7 +3,7 @@ import { z } from "zod";
 
 import { ScreenCenter } from "~/components/ui/screen-center";
 import { Spinner } from "~/components/ui/spinner";
-import { CreditsRedisKey } from "~/lib/shared/credits-keys";
+import { waitForCreditsApplication } from "~/lib/server/credits-success";
 
 const creditsSuccessSearchSchema = z
   .object({
@@ -15,43 +15,10 @@ const creditsSuccessSearchSchema = z
 export const Route = createFileRoute("/app/settings/credits/success")({
   validateSearch: creditsSuccessSearchSchema,
   beforeLoad: async ({ search }) => {
-    if (!import.meta.env.SSR) {
-      throw redirect({ to: "/app/settings/credits" });
-    }
+    await waitForCreditsApplication({
+      data: { checkoutId: search.checkout_id },
+    });
 
-    // Dynamic import to avoid bundling server-only code in client
-    const { getRequest } = await import("@tanstack/react-start/server");
-    // Get authenticated user from request
-    const request = getRequest();
-    const { authServer } = await import("~/lib/server/auth");
-    const authResponse = await authServer.api.getSession({ headers: request.headers }).catch(() => null);
-
-    if (!authResponse?.user.id) {
-      throw redirect({ to: "/app/settings/credits" });
-    }
-
-    const userId = authResponse.user.id;
-    const checkoutId = search.checkout_id;
-
-    // Poll on the server for credit application with timeout
-    const maxWaitMs = 30_000; // 30 second timeout
-    const pollIntervalMs = 500;
-    const startTime = Date.now();
-
-    const { kv } = await import("~/lib/server/kv");
-    const appliedKey = CreditsRedisKey.creditApplied({ checkoutId, userId });
-
-    // Poll until credits are applied or timeout
-    while (Date.now() - startTime < maxWaitMs) {
-      const idempotencyState = await kv.get<string>(appliedKey);
-      if (idempotencyState === "applied" || idempotencyState === "1") {
-        // Credits have been applied, redirect to credits page
-        throw redirect({ to: "/app/settings/credits" });
-      }
-      await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
-    }
-
-    // Timeout reached - redirect anyway (webhook may have processed but key expired)
     throw redirect({ to: "/app/settings/credits" });
   },
   component: SuccessComponent,

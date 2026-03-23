@@ -53,7 +53,7 @@ export default defineConfig(
   reactHooks.configs["recommended-latest"],
   reactCompiler.configs.recommended,
   perfectionist.configs["recommended-alphabetical"],
-  preferArrayAt.configs.recommended,
+  preferArrayAt.configs.all,
   tailwind,
   {
     files: ["scripts/**/*.{js,cjs,mjs}"],
