@@ -3,6 +3,8 @@ import { Link, useLocation, useParams, useRouter } from "@tanstack/react-router"
 import { atom, useAtom } from "jotai";
 import {
   Building2,
+  Check,
+  ChevronDown,
   Database,
   DockIcon,
   LayoutDashboardIcon,
@@ -27,7 +29,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "~/components/ui/dropdown-menu";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "~/components/ui/select";
 import {
   Sidebar,
   SidebarContent,
@@ -93,6 +94,7 @@ const navData = [
 ];
 
 interface OrganizationRoute {
+  logo?: string | null;
   title: string;
   url: string;
 }
@@ -124,6 +126,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
 
   const orgNavData = {
     subroutes: orgListQuery.data.map((org) => ({
+      logo: org.logo,
       title: org.name,
       url: `/app/organizations/${org.slug}`,
     })),
@@ -317,6 +320,7 @@ export function MainSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) 
 
   const orgNavData = user && {
     subroutes: (orgListQuery.data ?? []).map((org) => ({
+      logo: org.logo,
       title: org.name,
       url: `/app/organizations/${org.slug}`,
     })),
@@ -613,24 +617,30 @@ function OrganizationSelectorMenu({
 }) {
   const router = useRouter();
   const hasOrganizations = routes.length > 0;
-  const routeOptions: Array<OrganizationRoute> = [
-    ...(hasOrganizations
-      ? [
-          {
-            title: "All organizations",
-            url: "/app/organizations/~",
-          },
-          ...routes,
-        ]
-      : [
-          {
-            title: "Create organization",
-            url: "/app/organizations/create",
-          },
-        ]),
-  ];
-  const selectedRoute = routeOptions.find((route) => pathname === route.url || pathname.startsWith(`${route.url}/`));
-  const selectedValue = selectedRoute?.url;
+  const organizationOptions = routes;
+  const selectedOrganization = organizationOptions.find(
+    (route) => pathname === route.url || pathname.startsWith(`${route.url}/`),
+  );
+  const selectedValue = selectedOrganization?.url;
+  const triggerLabel =
+    organizationName ??
+    selectedOrganization?.title ??
+    (hasOrganizations ? "Choose organization" : "Create organization");
+
+  const handleNavigation = (url: string) => {
+    void router.navigate({ to: url });
+  };
+
+  const getOrganizationInitials = (name: string) => {
+    const initials = name
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((part) => part.charAt(0).toUpperCase())
+      .join("");
+
+    return initials || "O";
+  };
 
   return (
     <SidebarMenuItem>
@@ -652,30 +662,73 @@ function OrganizationSelectorMenu({
           <img alt="zevium" className="size-7" src="/icon.png" />
         </div>
         <div className="min-w-0 flex-1 group-data-[collapsible=icon]:hidden">
-          <Select
-            onValueChange={(url) => {
-              void router.navigate({ to: url });
-            }}
-            value={selectedValue}
-          >
-            <SelectTrigger
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                className={`
+                  flex h-8 w-full items-center justify-between gap-2 rounded-md border-none
+                  bg-transparent px-0 py-0 text-left text-sm shadow-none outline-none
+                  transition-colors focus-visible:ring-0
+                  hover:text-sidebar-accent-foreground
+                  dark:bg-transparent dark:hover:bg-transparent
+                `}
+              >
+                <span className="min-w-0 flex-1 truncate">
+                  <span className="truncate">{triggerLabel}</span>
+                </span>
+                <ChevronDown className="size-4 shrink-0 text-muted-foreground opacity-50" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              align="start"
               className={`
-                h-8 w-full border-none bg-transparent px-0 py-0 text-left shadow-none
-                focus-visible:ring-0 dark:bg-transparent dark:hover:bg-transparent
+                min-w-56
               `}
             >
-              <SelectValue
-                placeholder={organizationName ?? (hasOrganizations ? "Choose organization" : "Create organization")}
-              />
-            </SelectTrigger>
-            <SelectContent>
-              {routeOptions.map((route) => (
-                <SelectItem key={route.url} value={route.url}>
-                  {route.title}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+              <DropdownMenuLabel>Organizations</DropdownMenuLabel>
+              {hasOrganizations ? (
+                <>
+                  {organizationOptions.map((route) => {
+                    const isSelected = route.url === selectedValue;
+
+                    return (
+                      <DropdownMenuItem
+                        key={route.url}
+                        className="w-full justify-start px-2 text-left"
+                        onClick={() => handleNavigation(route.url)}
+                      >
+                        <Avatar className="size-5 border border-border/60">
+                          <AvatarImage alt={route.title} src={route.logo ?? ""} />
+                          <AvatarFallback className="text-[10px]">
+                            {getOrganizationInitials(route.title)}
+                          </AvatarFallback>
+                        </Avatar>
+                        <span className="flex-1 truncate text-left">{route.title}</span>
+                        {isSelected ? <Check className="size-4 text-muted-foreground" /> : null}
+                      </DropdownMenuItem>
+                    );
+                  })}
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    className="w-full justify-start px-2 text-left"
+                    onClick={() => handleNavigation("/app/organizations/~")}
+                  >
+                    <Building2 className="size-4" />
+                    <span className="flex-1 text-left">All organizations</span>
+                  </DropdownMenuItem>
+                </>
+              ) : (
+                <DropdownMenuItem
+                  className="w-full justify-start px-2 text-left"
+                  onClick={() => handleNavigation("/app/organizations/create")}
+                >
+                  <Plus className="size-4" />
+                  <span className="flex-1 text-left">Create organization</span>
+                </DropdownMenuItem>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
     </SidebarMenuItem>
