@@ -13,6 +13,7 @@ import { Input } from "~/components/ui/input";
 import { Label } from "~/components/ui/label";
 import { ScreenCenter } from "~/components/ui/screen-center";
 import { auth, useSession } from "~/lib/auth";
+import { getSafeRedirectTo } from "~/lib/auth/redirect";
 import { solveCap } from "~/lib/client/cap";
 import { CAPTCHA_HEADER_KEY } from "~/lib/constants";
 import { cn, getFormErrorString } from "~/lib/utils";
@@ -25,12 +26,6 @@ export const FormValuesArk = type({
 const SearchParamsArk = type({
   "redirectTo?": "string | undefined",
 });
-
-type AllowedRedirectTo = "/app" | "/app/invitations";
-
-const getSafeRedirectTo = (redirectTo: string | undefined): AllowedRedirectTo => {
-  return redirectTo === "/app/invitations" ? "/app/invitations" : "/app";
-};
 
 type FormValues = typeof FormValuesArk.infer;
 
