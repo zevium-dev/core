@@ -72,7 +72,7 @@ Answer:
 
 ### Styling & UI
 
-- **Tailwind CSS 4.1.11**: Utility-first CSS framework with latest features
+- **Tailwind CSS 4**: Utility-first CSS framework with latest features
 - **shadcn/ui**: High-quality component library built on Radix UI
 - **Radix UI**: Accessible, unstyled component primitives
 - **Motion**: Animation library for smooth interactions
@@ -106,22 +106,44 @@ src/
 ├── components/           # React components
 │   ├── ui/              # shadcn/ui components
 │   ├── magicui/         # Enhanced UI components with animations
-│   └── shared/          # Reusable business components
+│   ├── api/             # API-related components
+│   ├── api-viewer/      # API documentation viewers
+│   └── autumn/          # Billing/checkout components
 ├── routes/              # TanStack Router file-based routing
-│   ├── api/             # API routes
-│   └── settings/        # Settings pages
+│   ├── api/             # API routes (auth, tRPC, proxy, etc.)
+│   ├── app/             # Authenticated app pages
+│   │   ├── organizations/
+│   │   └── settings/    # Settings pages
+│   ├── auth/            # Auth pages (sign-in, sign-up, etc.)
+│   ├── $internal/       # Dev/test routes
+│   ├── embed/           # Embed routes
+│   ├── mcp/             # MCP routes
+│   └── p/               # Public organization pages
 ├── server/              # Backend logic
-│   ├── rpcs/            # tRPC procedures organized by feature
+│   ├── rpcs/            # tRPC routers (audit, example, organization, project, projectSecret, request, tag, user-preference, openapi-schema)
 │   ├── context.ts       # Request context creation
 │   └── orpc.tsx         # OpenAPI documentation generation
-├── db/                  # Database schema and configuration
+├── db/                  # Database schema, permissions, roles, Zod helpers
 ├── lib/                 # Utility libraries
 │   ├── auth/            # Authentication client
 │   ├── trpc/            # tRPC client configuration
-│   └── utils/           # Helper functions and mock data
+│   ├── cache/           # Caching utilities
+│   ├── client/          # Client-side utilities
+│   ├── email/           # Email templates and sending
+│   ├── hash/            # Hashing utilities
+│   ├── polyfill/        # Polyfills
+│   ├── query-client/    # React Query client setup
+│   ├── server/          # Server-side utilities
+│   └── utils/           # Helper functions
 ├── hooks/               # Custom React hooks
 ├── env/                 # Environment variable validation
 └── styles/              # CSS files and styling
+
+drizzle/                 # Database migrations
+scripts/                 # Build and automation scripts
+plugins/                 # Vite plugins
+types/                   # TypeScript type declarations
+public/                  # Static assets
 ```
 
 ### Key Components
