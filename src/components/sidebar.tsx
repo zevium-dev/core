@@ -96,7 +96,12 @@ interface OrganizationRoute {
 const isRouteActive = (pathname: string, route: string) => pathname === route || pathname.startsWith(`${route}/`);
 const isDashboardActive = (pathname: string) => pathname === "/app" || pathname === "/app/dashboard";
 
-/** Must be wrapped in a ClientOnly cuz of hydration issues */
+/**
+ * Renders the authenticated app sidebar. Safe to SSR: the `/app` route loader
+ * prefetches (await) the org list so the `useSuspenseQuery` below never
+ * suspends during server render, which keeps the sidebar in the SSR output
+ * and avoids a hydration mismatch / re-mount flash.
+ */
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const location = useLocation();
   const orgParams = useParams({ from: "/app/organizations/$organizationSlug", shouldThrow: false });

@@ -1,4 +1,4 @@
-import { ClientOnly, createFileRoute, Outlet } from "@tanstack/react-router";
+import { createFileRoute, Outlet } from "@tanstack/react-router";
 
 import { Redirect } from "~/components/redirect";
 import { AppSidebar, PageHeader } from "~/components/sidebar";
@@ -8,18 +8,18 @@ import { Skeleton } from "~/components/ui/skeleton";
 import { Spinner } from "~/components/ui/spinner";
 import { sessionQueryOptions, useSession } from "~/lib/auth";
 import { getSidebarDefaultOpen, getSidebarDefaultOpenFromDocument } from "~/lib/sidebar-state";
+import { cn } from "~/lib/utils";
 
 export const Route = createFileRoute("/app")({
   component: RouteComponent,
   loader: async ({ context, params }) => {
-    void context.queryClient.ensureQueryData(sessionQueryOptions());
+    await context.queryClient.ensureQueryData(sessionQueryOptions());
+    await context.queryClient.ensureQueryData(context.trpc.organization.list.queryOptions());
 
     // @ts-expect-error - user is added by auth middleware but not typed in router context
     if (context.user) {
-      void context.queryClient.ensureQueryData(context.trpc.organization.list.queryOptions());
-
       if ("organizationSlug" in params && typeof params.organizationSlug === "string" && params.organizationSlug) {
-        void context.queryClient.ensureQueryData(
+        await context.queryClient.ensureQueryData(
           context.trpc.project.list.queryOptions({ organizationSlug: params.organizationSlug }),
         );
       }
@@ -36,10 +36,10 @@ function AppSidebarFallback() {
   const { state } = useSidebar();
   return (
     <Skeleton
-      className={`
-        hidden h-full md:block
-        ${state === "collapsed" ? "w-(--sidebar-width-icon)" : "w-(--sidebar-width)"}
-      `}
+      className={cn(
+        "hidden h-full md:block",
+        state === "collapsed" ? "w-(--sidebar-width-icon)" : "w-(--sidebar-width)",
+      )}
       data-collapsible={state === "collapsed" ? "icon" : ""}
     />
   );
@@ -51,9 +51,7 @@ function PendingComponent() {
 
   return (
     <SidebarProvider defaultOpen={sidebarDefaultOpen}>
-      <ClientOnly fallback={<AppSidebarFallback />}>
-        <AppSidebar />
-      </ClientOnly>
+      <AppSidebarFallback />
       <SidebarInset>
         <PageHeader />
         <ScreenCenter>
@@ -71,9 +69,7 @@ function RouteComponent() {
 
   return (
     <SidebarProvider defaultOpen={sidebarDefaultOpen}>
-      <ClientOnly fallback={<AppSidebarFallback />}>
-        <AppSidebar />
-      </ClientOnly>
+      <AppSidebar />
       <SidebarInset>
         <PageHeader />
         <Outlet />

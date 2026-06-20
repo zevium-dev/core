@@ -20,3 +20,13 @@ yarn.lock
 .tanstack
 .wrangler/
 /dist
+
+# agent-browser debug artifacts (frames, recordings, screenshots)
+*.webm
+*-frames/
+frames/
+before-reload.png
+after-reload.png
+error.png
+reload-*.png
+reload-*.webm
