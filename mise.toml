@@ -1,8 +1,9 @@
-[tools]
-node = "22.16.0"
 
 [hooks]
 postinstall = "yes | npm i -g pnpm && pnpm install"
 
 [tasks]
 ci = "pnpm run ci:pr"
+
+[tools]
+node = "lts"

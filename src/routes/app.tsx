@@ -13,12 +13,15 @@ export const Route = createFileRoute("/app")({
   component: RouteComponent,
   loader: async ({ context, params }) => {
     void context.queryClient.ensureQueryData(sessionQueryOptions());
-    void context.queryClient.ensureQueryData(context.trpc.organization.list.queryOptions());
 
-    if ("organizationSlug" in params && typeof params.organizationSlug === "string" && params.organizationSlug) {
-      void context.queryClient.ensureQueryData(
-        context.trpc.project.list.queryOptions({ organizationSlug: params.organizationSlug }),
-      );
+    if (context.user) {
+      void context.queryClient.ensureQueryData(context.trpc.organization.list.queryOptions());
+
+      if ("organizationSlug" in params && typeof params.organizationSlug === "string" && params.organizationSlug) {
+        void context.queryClient.ensureQueryData(
+          context.trpc.project.list.queryOptions({ organizationSlug: params.organizationSlug }),
+        );
+      }
     }
 
     return {
