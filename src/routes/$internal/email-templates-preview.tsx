@@ -1,5 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 
+import { render } from "react-email";
+
 export const Route = createFileRoute("/$internal/email-templates-preview")({
   server: {
     handlers: {
@@ -58,11 +60,9 @@ export const Route = createFileRoute("/$internal/email-templates-preview")({
           });
         }
 
-        const { renderToStaticMarkup } = await import("react-dom/server");
-
         if (template === "reset-password") {
           const { ResetPasswordEmail } = await import("~/lib/email/templates/reset-password");
-          const html = renderToStaticMarkup(
+          const html = await render(
             <ResetPasswordEmail fullUrl="https://www.zevium.dev/auth/reset-password?token=example" name="John Doe" />,
           );
           return new Response(`<!doctype html>${html}`, {
@@ -74,7 +74,7 @@ export const Route = createFileRoute("/$internal/email-templates-preview")({
 
         if (template === "email-verify") {
           const { EmailVerify } = await import("~/lib/email/templates/email-verify");
-          const html = renderToStaticMarkup(
+          const html = await render(
             <EmailVerify fullUrl="https://www.zevium.dev/auth/verify-email?token=example" name="John Doe" />,
           );
           return new Response(`<!doctype html>${html}`, {
@@ -86,7 +86,7 @@ export const Route = createFileRoute("/$internal/email-templates-preview")({
 
         if (template === "organization-invitation") {
           const { OrganizationInvitationEmail } = await import("~/lib/email/templates/organization-invitation");
-          const html = renderToStaticMarkup(
+          const html = await render(
             <OrganizationInvitationEmail
               invitedByEmail="john.doe@zevium.dev"
               invitedByName="John Doe"
