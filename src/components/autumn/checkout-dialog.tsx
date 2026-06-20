@@ -77,7 +77,7 @@ export default function CheckoutDialog(params: CheckoutDialogProps) {
             size="sm"
           >
             {loading ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
+              <Loader2 className="size-4 animate-spin" />
             ) : (
               <>
                 <span className="flex gap-1 whitespace-nowrap">Confirm</span>
@@ -366,7 +366,7 @@ const PrepaidItem = ({ checkoutResult, item }: { checkoutResult: CheckoutResult;
                 {loading ? (
                   <Loader2
                     className={`
-                  h-4! w-4! animate-spin text-muted-foreground
+                  size-4! animate-spin text-muted-foreground
                 `}
                   />
                 ) : (

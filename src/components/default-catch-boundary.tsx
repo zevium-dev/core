@@ -21,7 +21,7 @@ export function DefaultCatchBoundary({ error }: ErrorComponentProps) {
       <div className="flex flex-wrap items-center gap-2">
         <button
           className={`
-            rounded bg-secondary px-2 py-1 font-extrabold text-secondary-foreground uppercase
+            rounded-sm bg-secondary px-2 py-1 font-extrabold text-secondary-foreground uppercase
           `}
           onClick={() => {
             void router.invalidate();
@@ -33,7 +33,7 @@ export function DefaultCatchBoundary({ error }: ErrorComponentProps) {
         {isRoot ? (
           <Link
             className={`
-            rounded bg-secondary px-2 py-1 font-extrabold text-secondary-foreground uppercase
+            rounded-sm bg-secondary px-2 py-1 font-extrabold text-secondary-foreground uppercase
           `}
             to="/"
           >
@@ -42,7 +42,7 @@ export function DefaultCatchBoundary({ error }: ErrorComponentProps) {
         ) : (
           <a
             className={`
-              rounded bg-secondary px-2 py-1 font-extrabold text-secondary-foreground uppercase
+              rounded-sm bg-secondary px-2 py-1 font-extrabold text-secondary-foreground uppercase
             `}
             href="/"
             onClick={(e) => {

@@ -44,7 +44,7 @@ function RouteComponent() {
               <div className="flex-1">
                 <CardTitle className="text-2xl">{org.name}</CardTitle>
                 <CardDescription className="mt-2 text-base">
-                  <span className="rounded bg-muted px-2 py-1 font-mono text-xs">{org.slug}</span>
+                  <span className="rounded-sm bg-muted px-2 py-1 font-mono text-xs">{org.slug}</span>
                 </CardDescription>
               </div>
               <div className="ml-4 flex flex-col gap-2">
@@ -52,7 +52,7 @@ function RouteComponent() {
                   <img
                     alt={org.name}
                     className={`
-                  h-16 w-16 rounded-lg object-cover
+                  size-16 rounded-lg object-cover
                 `}
                     src={org.logo}
                   />
@@ -92,7 +92,7 @@ function RouteComponent() {
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <Users className="h-5 w-5" />
+              <Users className="size-5" />
               Members ({org.members.length})
             </CardTitle>
             <CardDescription>Team members and their roles</CardDescription>
@@ -108,7 +108,7 @@ function RouteComponent() {
                     key={member.id}
                   >
                     <div className="flex flex-1 items-center gap-3">
-                      <Avatar className="h-10 w-10">
+                      <Avatar className="size-10">
                         {member.user.image && <AvatarImage src={member.user.image} />}
                         <AvatarFallback>{getInitials(member.user.name)}</AvatarFallback>
                       </Avatar>
@@ -122,7 +122,7 @@ function RouteComponent() {
                         `}
                           variant="small"
                         >
-                          <Mail className="h-3 w-3" />
+                          <Mail className="size-3" />
                           {member.user.email}
                         </Typography>
                       </div>
@@ -146,7 +146,7 @@ function RouteComponent() {
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
-                <Mail className="h-5 w-5" />
+                <Mail className="size-5" />
                 Pending Invitations ({org.invitations.length})
               </CardTitle>
               <CardDescription>Invites awaiting acceptance</CardDescription>

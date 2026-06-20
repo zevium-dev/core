@@ -201,7 +201,7 @@ function ApiKeysComponent() {
           <h1 className="text-2xl font-bold text-foreground">API Keys</h1>
           <div className="flex items-center gap-2">
             <p className="text-sm text-muted-foreground">Manage your API keys to access all Zevium-integrated APIs</p>
-            <Info className="h-4 w-4 text-muted-foreground" />
+            <Info className="size-4 text-muted-foreground" />
           </div>
         </div>
 
@@ -209,7 +209,7 @@ function ApiKeysComponent() {
         <Dialog onOpenChange={setIsCreateDialogOpen} open={isCreateDialogOpen}>
           <DialogTrigger asChild>
             <Button className="gap-2">
-              <Plus className="h-4 w-4" />
+              <Plus className="size-4" />
               Create API Key
             </Button>
           </DialogTrigger>
@@ -294,11 +294,11 @@ function ApiKeysComponent() {
                   variant="ghost"
                 >
                   {createdKeyCopied ? (
-                    <Check className="mr-1 h-3 w-3" />
+                    <Check className="mr-1 size-3" />
                   ) : (
                     <Copy
                       className={`
-                    mr-1 h-3 w-3
+                    mr-1 size-3
                   `}
                     />
                   )}{" "}
@@ -338,7 +338,7 @@ function ApiKeysComponent() {
                       <div className="flex flex-col items-center gap-2">
                         <span className="text-sm text-muted-foreground">No API keys yet.</span>
                         <Button className="gap-2" onClick={() => setIsCreateDialogOpen(true)} size="sm">
-                          <Plus className="h-4 w-4" /> Create your first key
+                          <Plus className="size-4" /> Create your first key
                         </Button>
                       </div>
                     </TableCell>
@@ -355,7 +355,7 @@ function ApiKeysComponent() {
                         <div className="flex items-center gap-2">
                           <code
                             className={`
-                            rounded bg-muted px-2 py-1 font-mono text-xs
+                            rounded-sm bg-muted px-2 py-1 font-mono text-xs
                             text-muted-foreground
                           `}
                           >
@@ -375,19 +375,19 @@ function ApiKeysComponent() {
                     <TableCell>
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
-                          <Button className="h-8 w-8 p-0" size="sm" variant="ghost">
-                            <MoreHorizontal className="h-4 w-4" />
+                          <Button className="size-8 p-0" size="sm" variant="ghost">
+                            <MoreHorizontal className="size-4" />
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end" className="w-40">
                           <DropdownMenuItem className="gap-2" onClick={() => openEditDialog(apiKey)}>
-                            <Pencil className="h-4 w-4" /> Rename
+                            <Pencil className="size-4" /> Rename
                           </DropdownMenuItem>
                           <DropdownMenuItem
                             className="gap-2 text-destructive"
                             onClick={() => handleDeleteKey(apiKey.id)}
                           >
-                            <Trash2 className="h-4 w-4" /> Delete
+                            <Trash2 className="size-4" /> Delete
                           </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
@@ -436,11 +436,11 @@ function ApiKeysComponent() {
             variant="ghost"
           >
             {snippetCopied ? (
-              <Check className="mr-1 h-3 w-3" />
+              <Check className="mr-1 size-3" />
             ) : (
               <Copy
                 className={`
-              mr-1 h-3 w-3
+              mr-1 size-3
             `}
               />
             )}{" "}
@@ -452,7 +452,7 @@ function ApiKeysComponent() {
             <pre
               className={`
               overflow-x-auto rounded-md border border-border/50 bg-muted/50 p-4
-              font-mono text-xs leading-relaxed whitespace-pre
+              font-mono text-xs/relaxed whitespace-pre
               selection:bg-primary/30 selection:text-primary-foreground
             `}
             >

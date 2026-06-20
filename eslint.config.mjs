@@ -1,4 +1,3 @@
-// @ts-check
 import preferArrayAt from "@boi.gg/eslint-plugin-prefer-array-at";
 import eslintReact from "@eslint-react/eslint-plugin";
 import eslint from "@eslint/js";
@@ -56,7 +55,9 @@ export default defineConfig(
 
   {
     plugins: { "react-hooks": reactHooks },
-    rules: reactHooks.configs["recommended-latest"].rules,
+    rules:
+      /** @type {import("eslint").Linter.RulesRecord} */
+      (reactHooks.configs["recommended-latest"].rules),
   },
 
   perfectionist.configs["recommended-alphabetical"],

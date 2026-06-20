@@ -72,9 +72,9 @@ export const OrganizationInvitationEmail: React.FC<OrganizationInvitationEmailPr
                       If you didn&apos;t expect this invitation, you can safely ignore this email.
                     </Text>
 
-                    <Hr className="my-[16px] mt-[32px] !border-gray-300" />
+                    <Hr className="my-[16px] mt-[32px] border-gray-300!" />
                     <Section className="text-center">
-                      <Heading as="h3" className="m-[0px] text-[14px] leading-[20px] font-medium text-gray-200">
+                      <Heading as="h3" className="m-0 text-[14px] leading-[20px] font-medium text-gray-200">
                         <Link className="text-inherit" href={clientEnv.VITE_PUBLIC_URL}>
                           Zevium.dev
                         </Link>

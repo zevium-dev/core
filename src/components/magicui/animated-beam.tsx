@@ -30,6 +30,7 @@ export const AnimatedBeam: React.FC<AnimatedBeamProps> = ({
   containerRef,
   curvature = 0,
   delay = 0,
+  // eslint-disable-next-line react-hooks/purity
   duration = Math.random() * 3 + 4,
   endXOffset = 0,
   endYOffset = 0,

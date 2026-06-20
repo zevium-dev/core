@@ -94,7 +94,7 @@ function RouteComponent() {
               <div className="grid gap-6">
                 <div className="grid gap-2 text-center">
                   <div className="flex justify-center">
-                    <Avatar className="h-14 w-14">
+                    <Avatar className="size-14">
                       <AvatarImage alt={user.name} src={user.image ?? undefined} />
                       <AvatarFallback>
                         {(user.name.trim().split(/\s+/).at(0)?.at(0) ?? user.email.at(0) ?? "U").toUpperCase()}
@@ -138,7 +138,7 @@ function RouteComponent() {
               <div className="grid gap-6">
                 {totpUri && (
                   <div className="flex flex-col items-center gap-2">
-                    <QRCode className="rounded bg-white p-3" value={totpUri} />
+                    <QRCode className="rounded-sm bg-white p-3" value={totpUri} />
                     <p
                       className={`
                       text-center text-xs break-all text-muted-foreground
@@ -201,7 +201,7 @@ function RouteComponent() {
                       {backupCodes.map((code) => (
                         <code
                           className={`
-                          rounded bg-muted px-2 py-1 text-center font-mono
+                          rounded-sm bg-muted px-2 py-1 text-center font-mono
                           text-xs
                         `}
                           key={code}
@@ -239,7 +239,7 @@ function RouteComponent() {
 
             {step === 4 && (
               <div className="grid place-items-center gap-4 py-4 text-center">
-                <img alt="Zevium" className="h-12 w-12" src="/icon.png" />
+                <img alt="Zevium" className="size-12" src="/icon.png" />
                 <div className="space-y-1">
                   <p className="text-lg font-semibold">You're all set!</p>
                   <p className="text-sm text-muted-foreground">

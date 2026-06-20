@@ -34,7 +34,7 @@ const typographyVariants = cva("", {
     variant: {
       blockquote: "mt-6 border-l-2 pl-6 italic",
       code: `
-        relative rounded bg-muted px-[0.3rem] py-[0.2rem] font-mono text-sm
+        relative rounded-sm bg-muted px-[0.3rem] py-[0.2rem] font-mono text-sm
         font-semibold
       `,
       h1: `
@@ -52,18 +52,18 @@ const typographyVariants = cva("", {
       muted: "text-sm text-muted-foreground",
       p: `
         leading-7
-        [&:not(:first-child)]:mt-6
+        not-first:mt-6
       `,
       small: "text-sm leading-none font-medium",
       td: `
         border px-4 py-2 text-left
-        [&[align=center]]:text-center
-        [&[align=right]]:text-right
+        [[align=center]]:text-center
+        [[align=right]]:text-right
       `,
       th: `
         border px-4 py-2 text-left font-bold
-        [&[align=center]]:text-center
-        [&[align=right]]:text-right
+        [[align=center]]:text-center
+        [[align=right]]:text-right
       `,
       ul: `
         my-6 ml-6 list-disc

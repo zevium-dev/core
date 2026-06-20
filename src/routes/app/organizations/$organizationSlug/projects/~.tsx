@@ -35,13 +35,13 @@ function RouteComponent() {
   const getVisibilityIcon = (visibility: string) => {
     switch (visibility) {
       case "internal":
-        return <Building2 className="h-3 w-3" />;
+        return <Building2 className="size-3" />;
       case "private":
-        return <Shield className="h-3 w-3" />;
+        return <Shield className="size-3" />;
       case "public":
-        return <Globe className="h-3 w-3" />;
+        return <Globe className="size-3" />;
       default:
-        return <Building2 className="h-3 w-3" />;
+        return <Building2 className="size-3" />;
     }
   };
 
@@ -56,7 +56,7 @@ function RouteComponent() {
             </div>
             <Button asChild size="sm">
               <Link params={{ organizationSlug }} to="/app/organizations/$organizationSlug/projects/create">
-                <Plus className="mr-2 h-4 w-4" />
+                <Plus className="mr-2 size-4" />
                 New Project
               </Link>
             </Button>

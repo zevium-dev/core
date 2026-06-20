@@ -48,7 +48,7 @@ export interface BadgeStatusProps
 const StatusIndicator = ({ status }: { status: "active" | "archived" | "beta" | "deprecated" | "inactive" }) => (
   <div
     className={cn(
-      "h-1.5 w-1.5 rounded-full",
+      "size-1.5 rounded-full",
       status === "active" && "bg-green-500",
       status === "archived" && "bg-gray-500",
       status === "beta" && "bg-orange-500",

@@ -29,7 +29,7 @@ function Home() {
       <PageHeaderContent>
         <div className="flex w-full items-center gap-4">
           <div className="flex items-center space-x-2">
-            <Globe className="h-5 w-5 text-primary" />
+            <Globe className="size-5 text-primary" />
             <span className="font-semibold">API Hub Dashboard</span>
           </div>
         </div>
@@ -54,7 +54,7 @@ function Home() {
             <div className="mx-auto max-w-4xl space-y-6 text-center">
               <h1
                 className={`
-                text-4xl leading-tight font-bold text-foreground
+                text-4xl/tight font-bold text-foreground
                 lg:text-6xl
               `}
               >
@@ -89,7 +89,7 @@ function Home() {
               </h1>
               <p
                 className={`
-                mx-auto max-w-3xl text-lg leading-relaxed text-muted-foreground
+                mx-auto max-w-3xl text-lg/relaxed text-muted-foreground
               `}
               >
                 Connect any API faster, securely, and reliably through Zevium.
@@ -107,7 +107,7 @@ function Home() {
                 size="lg"
               >
                 API hub
-                <ArrowRight className="ml-2 h-4 w-4" />
+                <ArrowRight className="ml-2 size-4" />
               </Button>
             </div>
             <div className="flex justify-center">
@@ -146,13 +146,13 @@ function Home() {
               <div className="group cursor-pointer text-center">
                 <div
                   className={`
-                  mb-6 inline-flex h-20 w-20 items-center justify-center
+                  mb-6 inline-flex size-20 items-center justify-center
                   rounded-full bg-chart-1/10 transition-transform duration-300
                   group-hover:scale-110
                   dark:bg-chart-1/20
                 `}
                 >
-                  <Users className="h-10 w-10 text-chart-1" />
+                  <Users className="size-10 text-chart-1" />
                 </div>
                 <div
                   className={`
@@ -168,13 +168,13 @@ function Home() {
               <div className="group cursor-pointer text-center">
                 <div
                   className={`
-                  mb-6 inline-flex h-20 w-20 items-center justify-center
+                  mb-6 inline-flex size-20 items-center justify-center
                   rounded-full bg-chart-4/10 transition-transform duration-300
                   group-hover:scale-110
                   dark:bg-chart-4/20
                 `}
                 >
-                  <Code className="h-10 w-10 text-chart-4" />
+                  <Code className="size-10 text-chart-4" />
                 </div>
                 <div
                   className={`
@@ -190,13 +190,13 @@ function Home() {
               <div className="group cursor-pointer text-center">
                 <div
                   className={`
-                  mb-6 inline-flex h-20 w-20 items-center justify-center
+                  mb-6 inline-flex size-20 items-center justify-center
                   rounded-full bg-chart-5/10 transition-transform duration-300
                   group-hover:scale-110
                   dark:bg-chart-5/20
                 `}
                 >
-                  <TrendingUp className="h-10 w-10 text-chart-5" />
+                  <TrendingUp className="size-10 text-chart-5" />
                 </div>
                 <div
                   className={`
@@ -276,11 +276,11 @@ function Home() {
                   dark:bg-chart-1/20
                 `}
                 >
-                  <Zap className="h-8 w-8 text-chart-1" />
+                  <Zap className="size-8 text-chart-1" />
                 </div>
                 <h3 className="text-4xl font-bold text-foreground">Publish APIs</h3>
               </div>
-              <p className="text-lg leading-relaxed text-muted-foreground">
+              <p className="text-lg/relaxed text-muted-foreground">
                 Track subscriptions, highlight instructional content. Drive engagement.
                 <strong className="text-foreground"> Monetize APIs</strong>
               </p>
@@ -307,11 +307,11 @@ function Home() {
                   dark:bg-chart-4/20
                 `}
                 >
-                  <Globe className="h-8 w-8 text-chart-4" />
+                  <Globe className="size-8 text-chart-4" />
                 </div>
                 <h3 className="text-4xl font-bold text-foreground">Consume APIs</h3>
               </div>
-              <p className="text-lg leading-relaxed text-muted-foreground">
+              <p className="text-lg/relaxed text-muted-foreground">
                 With indexed search functionality, discovering the perfect API match for your product roadmap is easier
                 than ever.
               </p>
@@ -332,43 +332,43 @@ function Home() {
                 <CardContent className="p-8">
                   <div className="space-y-6">
                     <div className="flex items-center gap-3">
-                      <div className="h-4 w-4 rounded-full bg-red-500 shadow-sm"></div>
+                      <div className="size-4 rounded-full bg-red-500 shadow-sm"></div>
                       <div
                         className={`
-                        h-4 w-4 rounded-full bg-yellow-500 shadow-sm
+                        size-4 rounded-full bg-yellow-500 shadow-sm
                       `}
                       ></div>
                       <div
                         className={`
-                        h-4 w-4 rounded-full bg-green-500 shadow-sm
+                        size-4 rounded-full bg-green-500 shadow-sm
                       `}
                       ></div>
                       <div className="ml-auto text-xs text-muted-foreground">API Browser</div>
                     </div>
                     <div className="space-y-4">
                       <div className="flex items-center gap-3">
-                        <div className="h-5 w-5 rounded bg-muted-foreground/30"></div>
+                        <div className="size-5 rounded-sm bg-muted-foreground/30"></div>
                         <div
                           className={`
-                          h-3 flex-1 rounded bg-muted-foreground/30
+                          h-3 flex-1 rounded-sm bg-muted-foreground/30
                         `}
                         ></div>
                       </div>
                       <div className="flex items-center gap-3">
-                        <div className="h-5 w-5 rounded bg-chart-1"></div>
-                        <div className="h-3 w-2/3 rounded bg-chart-1"></div>
+                        <div className="size-5 rounded-sm bg-chart-1"></div>
+                        <div className="h-3 w-2/3 rounded-sm bg-chart-1"></div>
                       </div>
                       <div className="flex items-center gap-3">
-                        <div className="h-5 w-5 rounded bg-muted-foreground/30"></div>
+                        <div className="size-5 rounded-sm bg-muted-foreground/30"></div>
                         <div
                           className={`
-                          h-3 w-1/2 rounded bg-muted-foreground/30
+                          h-3 w-1/2 rounded-sm bg-muted-foreground/30
                         `}
                         ></div>
                       </div>
                       <div className="flex items-center gap-3">
-                        <div className="h-5 w-5 rounded bg-chart-5"></div>
-                        <div className="h-3 w-3/4 rounded bg-chart-5"></div>
+                        <div className="size-5 rounded-sm bg-chart-5"></div>
+                        <div className="h-3 w-3/4 rounded-sm bg-chart-5"></div>
                       </div>
                     </div>
                   </div>
@@ -464,11 +464,11 @@ function Home() {
                   dark:bg-chart-5/20
                 `}
                 >
-                  <BarChart3 className="h-8 w-8 text-chart-5" />
+                  <BarChart3 className="size-8 text-chart-5" />
                 </div>
                 <h3 className="text-4xl font-bold text-foreground">Manage APIs</h3>
               </div>
-              <p className="text-lg leading-relaxed text-muted-foreground">
+              <p className="text-lg/relaxed text-muted-foreground">
                 Never wonder how many APIs you have or how they're being used. Instead, surface performance and usage
                 patterns instantly and keep a birds-eye view of your{" "}
                 <strong className="text-foreground">API ecosystem</strong>.
@@ -487,7 +487,7 @@ function Home() {
           >
             <div className="col-span-2 space-y-6">
               <div className="flex items-center space-x-3">
-                <Globe className="h-8 w-8 text-primary" />
+                <Globe className="size-8 text-primary" />
                 <span className="text-2xl font-bold">Zevium API Hub</span>
               </div>
               <p className="max-w-md leading-relaxed text-muted-foreground">
@@ -496,13 +496,13 @@ function Home() {
               </p>
               <div className="flex space-x-3">
                 <Button className="hover:border-chart-1/20 hover:bg-chart-1/5" size="icon" variant="outline">
-                  <Globe className="h-5 w-5" />
+                  <Globe className="size-5" />
                 </Button>
                 <Button className="hover:border-chart-4/20 hover:bg-chart-4/5" size="icon" variant="outline">
-                  <Code className="h-5 w-5" />
+                  <Code className="size-5" />
                 </Button>
                 <Button className="hover:border-chart-5/20 hover:bg-chart-5/5" size="icon" variant="outline">
-                  <Users className="h-5 w-5" />
+                  <Users className="size-5" />
                 </Button>
               </div>
             </div>

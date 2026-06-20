@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { Calendar, Copy, Eye, EyeOff, Loader2, Mail, MapPin, Phone, Shield, Trash2, User } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 // 2FA moved to dedicated component
 import { toast } from "sonner";
 
@@ -44,12 +44,13 @@ function AccountPreferenceComponent() {
   const passwordTooLong = newPassword.length > MAX_PASSWORD_LENGTH;
   const confirmMismatch = confirmPassword.length > 0 && newPassword !== confirmPassword;
 
-  // Sync timezone from preferences when loaded (only set if empty locally)
+  const hasSyncedTimezone = useRef(false);
   useEffect(() => {
-    if (userPreferencesQuery.data?.timezone && !timezone) {
+    if (userPreferencesQuery.data?.timezone && !hasSyncedTimezone.current) {
+      hasSyncedTimezone.current = true;
       setTimezone(userPreferencesQuery.data.timezone);
     }
-  }, [userPreferencesQuery.data?.timezone, timezone]);
+  }, [userPreferencesQuery.data?.timezone]);
 
   // Detect whether user already has a password-based (credential) account.
   // Better Auth exposes listAccounts() on client per docs (listAccounts not yet imported in codebase, so we feature-detect)
@@ -109,6 +110,7 @@ function AccountPreferenceComponent() {
     }
   };
 
+  const savedTimezone = userPreferencesQuery.data?.timezone ?? "";
   const handleSave = useCallback(async () => {
     setIsSaving(true);
     try {
@@ -119,7 +121,7 @@ function AccountPreferenceComponent() {
         if (error) throw new Error(error.message);
       }
       // 2. Update timezone preference only if it changed (was previously saved on each select)
-      if (timezone && timezone !== (userPreferencesQuery.data?.timezone ?? "")) {
+      if (timezone && timezone !== savedTimezone) {
         await userPreferencesMutation.mutateAsync({ timezone });
       }
       toast.success("Changes saved");
@@ -128,7 +130,7 @@ function AccountPreferenceComponent() {
     } finally {
       setIsSaving(false);
     }
-  }, [name, timezone, user, userPreferencesQuery.data?.timezone, userPreferencesMutation]);
+  }, [name, timezone, user, savedTimezone, userPreferencesMutation]);
 
   // 2FA manage (enabled state) - inline controls
   const [twoFactorOpen, setTwoFactorOpen] = useState(false);
@@ -188,7 +190,7 @@ function AccountPreferenceComponent() {
     <div className="mx-auto w-full max-w-3xl min-w-0 flex-1 space-y-6 p-6">
       {/* Header */}
       <div className="flex items-center gap-2">
-        <User className="h-6 w-6 text-muted-foreground" />
+        <User className="size-6 text-muted-foreground" />
         <h1 className="text-2xl font-bold text-foreground">Account</h1>
       </div>
 
@@ -196,7 +198,7 @@ function AccountPreferenceComponent() {
       <Card className="w-full border-border/50 bg-card/50 backdrop-blur-sm">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <User className="h-5 w-5" />
+            <User className="size-5" />
             Profile Information
           </CardTitle>
         </CardHeader>
@@ -204,7 +206,7 @@ function AccountPreferenceComponent() {
           {/* Avatar Section */}
           <div className="flex items-center gap-4">
             <div className="relative">
-              <Avatar className="h-20 w-20">
+              <Avatar className="size-20">
                 <AvatarImage alt={name || "User avatar"} src={user.image ?? "/placeholder-avatar.jpg"} />
                 <AvatarFallback className="text-lg">
                   {(() => {
@@ -256,14 +258,14 @@ function AccountPreferenceComponent() {
       <Card className="w-full border-border/50 bg-card/50 backdrop-blur-sm">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <Mail className="h-5 w-5" />
+            <Mail className="size-5" />
             Contact Information
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="space-y-2">
             <Label className="flex items-center gap-2" htmlFor="email">
-              <Mail className="h-4 w-4" />
+              <Mail className="size-4" />
               Email Address
             </Label>
             <div className="flex items-center gap-2">
@@ -290,7 +292,7 @@ function AccountPreferenceComponent() {
                     type="button"
                     variant="ghost"
                   >
-                    <Copy className="h-4 w-4" />
+                    <Copy className="size-4" />
                   </Button>
                 )}
               </div>
@@ -298,7 +300,7 @@ function AccountPreferenceComponent() {
           </div>
           <div className="space-y-2">
             <Label className="flex items-center gap-2" htmlFor="phone">
-              <Phone className="h-4 w-4" />
+              <Phone className="size-4" />
               Phone Number
             </Label>
             <Input
@@ -316,14 +318,14 @@ function AccountPreferenceComponent() {
       <Card className="w-full border-border/50 bg-card/50 backdrop-blur-sm">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <MapPin className="h-5 w-5" />
+            <MapPin className="size-5" />
             Location & Timezone
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="space-y-2">
             <Label className="flex items-center gap-2" htmlFor="location">
-              <MapPin className="h-4 w-4" />
+              <MapPin className="size-4" />
               Location
             </Label>
             <Input
@@ -335,7 +337,7 @@ function AccountPreferenceComponent() {
           </div>
           <div className="space-y-2">
             <Label className="flex items-center gap-2" htmlFor="timezone">
-              <Calendar className="h-4 w-4" />
+              <Calendar className="size-4" />
               Timezone
             </Label>
             <Select
@@ -366,7 +368,7 @@ function AccountPreferenceComponent() {
       <Card className="w-full border-border/50 bg-card/50 backdrop-blur-sm">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <Shield className="h-5 w-5" />
+            <Shield className="size-5" />
             Security
           </CardTitle>
         </CardHeader>
@@ -461,11 +463,11 @@ function AccountPreferenceComponent() {
                       variant="ghost"
                     >
                       {showPasswords ? (
-                        <EyeOff className="h-4 w-4" />
+                        <EyeOff className="size-4" />
                       ) : (
                         <Eye
                           className={`
-                        h-4 w-4
+                        size-4
                       `}
                         />
                       )}
@@ -497,7 +499,7 @@ function AccountPreferenceComponent() {
                       {isChangingPassword ? (
                         <Loader2
                           className={`
-                        h-4 w-4 animate-spin
+                        size-4 animate-spin
                       `}
                         />
                       ) : (
@@ -532,7 +534,7 @@ function AccountPreferenceComponent() {
                       type="button"
                     >
                       {requestPasswordResetMutation.isPending ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
+                        <Loader2 className="size-4 animate-spin" />
                       ) : (
                         "Email set-password link"
                       )}
@@ -601,7 +603,7 @@ function AccountPreferenceComponent() {
                       {twoFactorCodes.map((code) => (
                         <code
                           className={`
-                          rounded bg-muted px-2 py-1 text-center font-mono
+                          rounded-sm bg-muted px-2 py-1 text-center font-mono
                           text-xs
                         `}
                           key={code}
@@ -651,7 +653,7 @@ function AccountPreferenceComponent() {
                     type="button"
                     variant="outline"
                   >
-                    {regenerating2FA ? <Loader2 className="h-4 w-4 animate-spin" /> : "Regenerate Codes"}
+                    {regenerating2FA ? <Loader2 className="size-4 animate-spin" /> : "Regenerate Codes"}
                   </Button>
                   <Button
                     disabled={disabling2FA || !twoFactorPassword}
@@ -660,7 +662,7 @@ function AccountPreferenceComponent() {
                     type="button"
                     variant="destructive"
                   >
-                    {disabling2FA ? <Loader2 className="h-4 w-4 animate-spin" /> : "Disable 2FA"}
+                    {disabling2FA ? <Loader2 className="size-4 animate-spin" /> : "Disable 2FA"}
                   </Button>
                 </div>
               </div>
@@ -681,7 +683,7 @@ function AccountPreferenceComponent() {
       <Card className="w-full border-border/50 bg-card/50 backdrop-blur-sm">
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-destructive">
-            <Trash2 className="h-5 w-5" />
+            <Trash2 className="size-5" />
             Danger Zone
           </CardTitle>
         </CardHeader>

@@ -304,6 +304,7 @@ const TextAnimateBase = ({
   variants,
   ...props
 }: TextAnimateProps) => {
+  // eslint-disable-next-line react-hooks/static-components
   const MotionComponent = m.create(Component);
 
   let segments: Array<string>;
@@ -372,6 +373,7 @@ const TextAnimateBase = ({
 
   return (
     <AnimatePresence mode="popLayout">
+      {/* eslint-disable-next-line react-hooks/static-components */}
       <MotionComponent
         animate={startOnView ? undefined : "show"}
         aria-label={accessible ? children : undefined}

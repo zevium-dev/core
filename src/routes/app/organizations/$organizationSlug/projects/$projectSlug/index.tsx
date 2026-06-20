@@ -56,7 +56,7 @@ function RouteComponent() {
   const visibilityMutation = useProjectVisibilityMutation(organizationSlug, projectSlug);
 
   const visibilityIcon =
-    project.visibility === "public" ? <Globe className={`h-4 w-4`} /> : <Lock className={`h-4 w-4`} />;
+    project.visibility === "public" ? <Globe className={`size-4`} /> : <Lock className={`size-4`} />;
 
   return (
     <div className="space-y-6 p-6">
@@ -72,7 +72,7 @@ function RouteComponent() {
             <div className="flex-1">
               <CardTitle className="text-2xl">{project.name}</CardTitle>
               <CardDescription className="mt-2 text-base">
-                <span className="rounded bg-muted px-2 py-1 font-mono text-xs">{project.slug}</span>
+                <span className="rounded-sm bg-muted px-2 py-1 font-mono text-xs">{project.slug}</span>
               </CardDescription>
             </div>
             <div className="flex gap-2">
@@ -118,12 +118,12 @@ function RouteComponent() {
                   <>
                     {project.visibility === "public" ? (
                       <>
-                        <Lock className="mr-2 h-4 w-4" />
+                        <Lock className="mr-2 size-4" />
                         Make Private
                       </>
                     ) : (
                       <>
-                        <Globe className="mr-2 h-4 w-4" />
+                        <Globe className="mr-2 size-4" />
                         Make Public
                       </>
                     )}
@@ -138,7 +138,7 @@ function RouteComponent() {
                   }}
                   to="/app/organizations/$organizationSlug/projects/$projectSlug/spec"
                 >
-                  <Settings className="mr-2 h-4 w-4" />
+                  <Settings className="mr-2 size-4" />
                   Manage Spec
                 </Link>
               </Button>
@@ -150,7 +150,7 @@ function RouteComponent() {
                   }}
                   to="/app/organizations/$organizationSlug/projects/$projectSlug/explorer"
                 >
-                  <FlaskConical className="mr-2 h-4 w-4" />
+                  <FlaskConical className="mr-2 size-4" />
                   API Explorer
                 </Link>
               </Button>
@@ -198,7 +198,7 @@ function RouteComponent() {
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <FileText className="h-5 w-5" />
+              <FileText className="size-5" />
               Documentation
             </CardTitle>
           </CardHeader>
@@ -220,7 +220,7 @@ function RouteComponent() {
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <Code className="h-5 w-5" />
+              <Code className="size-5" />
               Tags ({project.project_tags.length})
             </CardTitle>
           </CardHeader>

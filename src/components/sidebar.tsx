@@ -351,7 +351,7 @@ export function MainSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) 
                   >
                     <img alt="zevium" className="size-7" src="/icon.png" />
                   </div>
-                  <div className="grid flex-1 text-left text-sm leading-tight">
+                  <div className="grid flex-1 text-left text-sm/tight">
                     <span className="font-heading truncate">zevium.dev</span>
                     <span className="truncate text-xs">a place to share</span>
                   </div>
@@ -568,7 +568,7 @@ function AccountSection() {
               <AvatarImage alt={user.name || "User"} src={user.image ?? ""} />
               <AvatarFallback className="text-xs">{getUserInitials(user)}</AvatarFallback>
             </Avatar>
-            <div className="grid flex-1 text-left text-sm leading-tight">
+            <div className="grid flex-1 text-left text-sm/tight">
               <span className="truncate font-medium">{user.name}</span>
             </div>
           </SidebarMenuButton>
@@ -667,7 +667,7 @@ function OrganizationSelectorMenu({
               <button
                 className={`
                   flex h-8 w-full items-center justify-between gap-2 rounded-md border-none
-                  bg-transparent px-0 py-0 text-left text-sm shadow-none transition-colors
+                  bg-transparent p-0 text-left text-sm shadow-none transition-colors
                   outline-none hover:text-sidebar-accent-foreground
                   focus-visible:ring-0
                   dark:bg-transparent dark:hover:bg-transparent

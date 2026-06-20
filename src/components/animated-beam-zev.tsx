@@ -55,29 +55,29 @@ export function AnimatedBeamZev({ className }: { className?: string }) {
       >
         <div className="flex flex-col justify-center">
           <Circle ref={div7Ref}>
-            <Users className="h-6 w-6" />
+            <Users className="size-6" />
           </Circle>
         </div>
         <div className="flex flex-col justify-center">
           <Circle className="size-16" ref={div6Ref}>
-            <img alt="Zevium" className="h-8 w-8" src="/icon.png" />
+            <img alt="Zevium" className="size-8" src="/icon.png" />
           </Circle>
         </div>
         <div className="flex flex-col justify-center gap-2">
           <Circle ref={div1Ref}>
-            <Folder className="h-6 w-6" />
+            <Folder className="size-6" />
           </Circle>
           <Circle ref={div2Ref}>
-            <FileText className="h-6 w-6" />
+            <FileText className="size-6" />
           </Circle>
           <Circle ref={div3Ref}>
-            <MessageSquare className="h-6 w-6" />
+            <MessageSquare className="size-6" />
           </Circle>
           <Circle ref={div4Ref}>
-            <Globe className="h-6 w-6" />
+            <Globe className="size-6" />
           </Circle>
           <Circle ref={div5Ref}>
-            <Code className="h-6 w-6" />
+            <Code className="size-6" />
           </Circle>
         </div>
       </div>

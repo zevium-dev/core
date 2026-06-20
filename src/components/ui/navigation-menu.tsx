@@ -89,7 +89,7 @@ function NavigationMenuContent({ className, ...props }: React.ComponentProps<typ
           group-data-[viewport=false]/navigation-menu:border
           group-data-[viewport=false]/navigation-menu:bg-popover
           group-data-[viewport=false]/navigation-menu:text-popover-foreground
-          group-data-[viewport=false]/navigation-menu:shadow
+          group-data-[viewport=false]/navigation-menu:shadow-sm
           group-data-[viewport=false]/navigation-menu:duration-200
           **:data-[slot=navigation-menu-link]:focus:ring-0
           **:data-[slot=navigation-menu-link]:focus:outline-none
@@ -127,7 +127,7 @@ function NavigationMenuIndicator({
     >
       <div
         className={`
-        relative top-[60%] h-2 w-2 rotate-45 rounded-tl-sm bg-border shadow-md
+        relative top-[60%] size-2 rotate-45 rounded-tl-sm bg-border shadow-md
       `}
       />
     </NavigationMenuPrimitive.Indicator>
@@ -197,7 +197,7 @@ function NavigationMenuViewport({
             origin-top-center relative mt-1.5
             h-(--radix-navigation-menu-viewport-height) w-full
             overflow-hidden rounded-md border bg-popover text-popover-foreground
-            shadow
+            shadow-sm
             data-[state=closed]:animate-out data-[state=closed]:zoom-out-95
             data-[state=open]:animate-in data-[state=open]:zoom-in-90
             md:w-(--radix-navigation-menu-viewport-width)

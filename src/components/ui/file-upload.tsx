@@ -136,7 +136,7 @@ function FileUpload({
           <m.div animate={{ rotate: dragActive ? 360 : 0 }} transition={{ duration: 0.6 }}>
             <Upload
               className={cn(
-                "h-8 w-8",
+                "size-8",
                 dragActive
                   ? "text-blue-500"
                   : `
@@ -190,7 +190,7 @@ function FileUpload({
               transition={{ delay: index * 0.1 }}
             >
               <div className="flex items-center space-x-3">
-                <FileText className="h-4 w-4 text-blue-500" />
+                <FileText className="size-4 text-blue-500" />
                 <div>
                   <p
                     className={`
@@ -213,7 +213,7 @@ function FileUpload({
 
               <div className="flex items-center space-x-2">
                 <div className="flex items-center space-x-1 text-green-600">
-                  <Check className="h-3 w-3" />
+                  <Check className="size-3" />
                   <span className="text-xs">Ready</span>
                 </div>
                 <Button
@@ -224,7 +224,7 @@ function FileUpload({
                   size="sm"
                   variant="ghost"
                 >
-                  <X className="h-3 w-3" />
+                  <X className="size-3" />
                 </Button>
               </div>
             </m.div>

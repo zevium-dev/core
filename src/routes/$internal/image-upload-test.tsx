@@ -24,7 +24,7 @@ function ImageUploadTest() {
             <label className="block text-sm font-medium">Aspect Ratio</label>
             <select
               className={`
-                mt-2 w-full rounded border border-border bg-background p-2
+                mt-2 w-full rounded-sm border border-border bg-background p-2
               `}
               onChange={(e) => setAspectRatio(parseFloat(e.target.value))}
               value={aspectRatio}
@@ -60,7 +60,7 @@ function ImageUploadTest() {
             </div>
             <img
               alt="Output"
-              className="max-w-full rounded border border-border"
+              className="max-w-full rounded-sm border border-border"
               src={image}
               style={{ maxHeight: "300px", objectFit: "contain" }}
             />

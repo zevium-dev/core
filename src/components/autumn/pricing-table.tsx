@@ -19,10 +19,10 @@ export default function PricingTable({ productDetails }: { productDetails?: Arra
     return (
       <div
         className={`
-        flex h-full min-h-[300px] w-full items-center justify-center
+        flex size-full min-h-[300px] items-center justify-center
       `}
       >
-        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+        <Loader2 className="size-6 animate-spin text-muted-foreground" />
       </div>
     );
   }
@@ -192,7 +192,7 @@ export const PricingCard = ({ buttonProps, className, productId }: PricingCardPr
     <div
       className={cn(
         `
-          h-full w-full max-w-xl rounded-lg border py-6 text-foreground
+          size-full max-w-xl rounded-lg border py-6 text-foreground
           shadow-sm
         `,
         isRecommended &&
@@ -333,7 +333,7 @@ export const PricingCardButton = ({
       variant={recommended ? "default" : "secondary"}
     >
       {loading ? (
-        <Loader2 className="h-4 w-4 animate-spin" />
+        <Loader2 className="size-4 animate-spin" />
       ) : (
         <>
           <div

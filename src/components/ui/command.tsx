@@ -12,7 +12,7 @@ function Command({ className, ...props }: React.ComponentProps<typeof CommandPri
     <CommandPrimitive
       className={cn(
         `
-          flex h-full w-full flex-col overflow-hidden rounded-md bg-popover
+          flex size-full flex-col overflow-hidden rounded-md bg-popover
           text-popover-foreground
         `,
         className,
@@ -46,10 +46,10 @@ function CommandDialog({
         <Command
           className={`
           **:data-[slot=command-input-wrapper]:h-12
-          [&_[cmdk-group]:not([hidden])_~[cmdk-group]]:pt-0 [&_[cmdk-input-wrapper]_svg]:h-5
-          [&_[cmdk-input-wrapper]_svg]:w-5
-          [&_[cmdk-item]_svg]:h-5
-          [&_[cmdk-item]_svg]:w-5
+          [&_[cmdk-group]:not([hidden])_~[cmdk-group]]:pt-0 [&_[cmdk-input-wrapper]_svg]:size-5
+          
+          [&_[cmdk-item]_svg]:size-5
+          
           **:[[cmdk-group-heading]]:px-2 **:[[cmdk-group-heading]]:font-medium
           **:[[cmdk-group-heading]]:text-muted-foreground
           **:[[cmdk-group]]:px-2 **:[[cmdk-input]]:h-12

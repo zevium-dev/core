@@ -194,7 +194,7 @@ function RouteComponent() {
                     <CardHeader>
                       <div className="space-y-2">
                         <div className="flex items-start justify-between gap-3">
-                          <h3 className="line-clamp-2 text-xl leading-tight font-bold text-foreground transition-colors group-hover:text-primary">
+                          <h3 className="line-clamp-2 text-xl/tight font-bold text-foreground transition-colors group-hover:text-primary">
                             {p.name}
                           </h3>
                         </div>
@@ -205,7 +205,7 @@ function RouteComponent() {
                     </CardHeader>
                     <CardContent className="flex flex-1 flex-col pt-0">
                       <div className="mb-6 flex-1">
-                        <p className="line-clamp-3 text-sm leading-relaxed text-muted-foreground">
+                        <p className="line-clamp-3 text-sm/relaxed text-muted-foreground">
                           {p.description ?? "No description available"}
                         </p>
                       </div>

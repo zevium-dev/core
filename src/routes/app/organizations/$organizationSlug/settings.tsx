@@ -151,7 +151,7 @@ function RouteComponent() {
       logo: org.logo ?? null,
       name: org.name,
       slug: org.slug,
-    } as FormValues,
+    },
     onSubmit: ({ value }) => {
       updateOrgMutation.mutate({
         logo: value.logo,
@@ -374,7 +374,7 @@ function RouteComponent() {
                       <Label>Role</Label>
                       <Select
                         disabled={inviteMemberMutation.isPending}
-                        onValueChange={(value) => field.handleChange(value as AssignableOrganizationRole)}
+                        onValueChange={(value) => field.handleChange(value as InviteFormValues["role"])}
                         value={field.state.value}
                       >
                         <SelectTrigger
@@ -449,7 +449,7 @@ function RouteComponent() {
                               size="sm"
                               variant="outline"
                             >
-                              <RotateCcw className="mr-2 h-4 w-4" />
+                              <RotateCcw className="mr-2 size-4" />
                               Resend
                             </Button>
                             <Button
@@ -464,7 +464,7 @@ function RouteComponent() {
                               size="icon"
                               variant="ghost"
                             >
-                              <X className="h-4 w-4" />
+                              <X className="size-4" />
                             </Button>
                           </>
                         ) : (

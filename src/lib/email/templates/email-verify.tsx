@@ -71,12 +71,12 @@ export const EmailVerify: React.FC<EmailVerifyProps> = ({ fullUrl, name }) => {
                     </Button>
 
                     {/* footer */}
-                    <Hr className="my-[16px] mt-[32px] !border-gray-300" />
+                    <Hr className="my-[16px] mt-[32px] border-gray-300!" />
                     <Section className="text-center">
                       <Heading
                         as="h3"
                         className={`
-                        m-[0px] text-[14px] leading-[20px] font-medium
+                        m-0 text-[14px] leading-[20px] font-medium
                         text-gray-200
                       `}
                       >

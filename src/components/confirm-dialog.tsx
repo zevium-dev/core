@@ -140,6 +140,7 @@ export const ConfirmProvider = ({ children }: PropsWithChildren) => {
   }, []);
 
   const activeRequest = state.active;
+  // eslint-disable-next-line react-hooks/refs
   const renderedRequest = activeRequest ?? renderedRequestRef.current;
   const open = !!activeRequest;
 

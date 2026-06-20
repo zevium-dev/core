@@ -107,7 +107,7 @@ function Calendar({
         ),
         day: cn(
           `
-            group/day relative aspect-square h-full w-full p-0 text-center
+            group/day relative aspect-square size-full p-0 text-center
             select-none
             [&:first-child[data-selected=true]_button]:rounded-l-md
             [&:last-child[data-selected=true]_button]:rounded-r-md

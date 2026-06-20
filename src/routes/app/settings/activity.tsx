@@ -260,11 +260,11 @@ function ActivityComponent() {
 
             <div className="flex gap-2">
               <Button className="gap-2" size="sm" variant="outline">
-                <Filter className="h-4 w-4" />
+                <Filter className="size-4" />
                 Filters
               </Button>
               <Button className="gap-2" size="sm" variant="outline">
-                <Download className="h-4 w-4" />
+                <Download className="size-4" />
                 Export
               </Button>
             </div>
@@ -293,7 +293,7 @@ function ActivityComponent() {
                       <div className="flex items-center gap-2">
                         <div
                           className={`
-                          h-4 w-4 shrink-0 rounded-sm bg-muted
+                          size-4 shrink-0 rounded-sm bg-muted
                         `}
                         />
                         <div className="flex flex-col">
@@ -380,7 +380,7 @@ function ActivityStatsCard({
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between">
           <CardTitle className="text-sm font-medium text-muted-foreground">{title}</CardTitle>
-          <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
+          <MoreHorizontal className="size-4 text-muted-foreground" />
         </div>
       </CardHeader>
       <CardContent className="pt-0">

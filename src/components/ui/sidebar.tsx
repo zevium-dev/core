@@ -87,7 +87,7 @@ function Sidebar({
             <SheetTitle>Sidebar</SheetTitle>
             <SheetDescription>Displays the mobile sidebar.</SheetDescription>
           </SheetHeader>
-          <div className="flex h-full w-full flex-col">{children}</div>
+          <div className="flex size-full flex-col">{children}</div>
         </SheetContent>
       </Sheet>
     );
@@ -132,11 +132,11 @@ function Sidebar({
           side === "left"
             ? `
               left-0
-              group-data-[collapsible=offcanvas]:left-[calc(var(--sidebar-width)*-1)]
+              group-data-[collapsible=offcanvas]:-left-(--sidebar-width)
             `
             : `
               right-0
-              group-data-[collapsible=offcanvas]:right-[calc(var(--sidebar-width)*-1)]
+              group-data-[collapsible=offcanvas]:-right-(--sidebar-width)
             `,
           // Adjust the padding for floating and inset variants.
           variant === "floating" || variant === "inset"
@@ -156,7 +156,7 @@ function Sidebar({
       >
         <div
           className={`
-            flex h-full w-full flex-col bg-sidebar
+            flex size-full flex-col bg-sidebar
             group-data-[variant=floating]:rounded-lg
             group-data-[variant=floating]:border
             group-data-[variant=floating]:border-sidebar-border
@@ -708,9 +708,7 @@ function SidebarMenuSkeleton({
   showIcon?: boolean;
 } & React.ComponentProps<"div">) {
   // Random width between 50 to 90%.
-  const width = React.useMemo(() => {
-    return `${Math.floor(Math.random() * 40) + 50}%`;
-  }, []);
+  const [width] = React.useState(() => `${Math.floor(Math.random() * 40) + 50}%`);
 
   return (
     <div

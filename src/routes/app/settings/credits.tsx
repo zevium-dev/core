@@ -72,7 +72,7 @@ function CreditsComponent() {
             `}
               variant="ghost"
             >
-              View Usage <ExternalLink className="ml-1 h-3 w-3" />
+              View Usage <ExternalLink className="ml-1 size-3" />
             </Button>
           </CardContent>
         </Card>
@@ -83,7 +83,7 @@ function CreditsComponent() {
             <div className="flex items-center justify-between">
               <CardTitle className="text-lg font-semibold">Auto Top-Up</CardTitle>
               <div className="flex items-center gap-2">
-                <Settings className="h-4 w-4 text-muted-foreground" />
+                <Settings className="size-4 text-muted-foreground" />
                 <span className="text-sm text-muted-foreground">Enable</span>
               </div>
             </div>
@@ -109,7 +109,7 @@ function CreditsComponent() {
             `}
               variant="ghost"
             >
-              Payment History <ExternalLink className="ml-1 h-3 w-3" />
+              Payment History <ExternalLink className="ml-1 size-3" />
             </Button>
           </div>
         </CardHeader>
@@ -134,7 +134,7 @@ function CreditsComponent() {
                     hover:text-foreground hover:underline
                   `}
                   >
-                    Get Invoice <FileText className="h-3 w-3" />
+                    Get Invoice <FileText className="size-3" />
                   </span>
                 </div>
               </div>

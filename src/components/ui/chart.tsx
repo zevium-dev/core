@@ -88,7 +88,6 @@ const ChartStyle = ({ config, id }: { config: ChartConfig; id: string }) => {
 
   return (
     <style
-      // eslint-disable-next-line @eslint-react/dom-no-dangerously-set-innerhtml
       dangerouslySetInnerHTML={{
         __html: Object.entries(THEMES)
           .map(
@@ -126,16 +125,16 @@ function ChartTooltipContent({
   nameKey,
   payload,
 }: {
+  color?: string;
+  formatter?: RechartsPrimitive.TooltipProps["formatter"];
   hideIndicator?: boolean;
   hideLabel?: boolean;
   indicator?: "dashed" | "dot" | "line";
+  labelClassName?: string;
+  labelFormatter?: (label: number | string, payload: RechartsPrimitive.TooltipPayload) => React.ReactNode;
   labelKey?: string;
   nameKey?: string;
-  color?: string;
-  formatter?: RechartsPrimitive.TooltipProps["formatter"];
-  labelClassName?: string;
-  labelFormatter?: (label: string | number, payload: RechartsPrimitive.TooltipPayload) => React.ReactNode;
-} & Pick<RechartsPrimitive.TooltipContentProps, "active" | "payload" | "label"> &
+} & Pick<RechartsPrimitive.TooltipContentProps, "active" | "label" | "payload"> &
   React.ComponentProps<"div">) {
   const { config } = useChart();
 
@@ -151,7 +150,7 @@ function ChartTooltipContent({
 
     if (labelFormatter) {
       return (
-        <div className={cn("font-medium", labelClassName)}>{labelFormatter(value as string | number, payload)}</div>
+        <div className={cn("font-medium", labelClassName)}>{labelFormatter(value as number | string, payload)}</div>
       );
     }
 
@@ -191,7 +190,7 @@ function ChartTooltipContent({
               className={cn(
                 `
                   flex w-full flex-wrap items-stretch gap-2
-                  [&>svg]:h-2.5 [&>svg]:w-2.5 [&>svg]:text-muted-foreground
+                  [&>svg]:size-2.5 [&>svg]:text-muted-foreground
                 `,
                 indicator === "dot" && "items-center",
               )}
@@ -209,12 +208,12 @@ function ChartTooltipContent({
                       <div
                         className={cn(
                           `
-                          shrink-0 rounded-[2px] border-(--color-border)
+                          shrink-0 rounded-[2px] border-border
                           bg-(--color-bg)
                         `,
                           {
-                            "h-2.5 w-2.5": indicator === "dot",
                             "my-0.5": nestLabel && indicator === "dashed",
+                            "size-2.5": indicator === "dot",
                             "w-0 border-[1.5px] border-dashed bg-transparent": indicator === "dashed",
                             "w-1": indicator === "line",
                           },
@@ -301,15 +300,15 @@ function ChartLegendContent({
           <div
             className={cn(`
               flex items-center gap-1.5
-              [&>svg]:h-3 [&>svg]:w-3 [&>svg]:text-muted-foreground
+              [&>svg]:size-3 [&>svg]:text-muted-foreground
             `)}
-            key={item.value as string}
+            key={item.value}
           >
             {itemConfig?.icon && !hideIcon ? (
               <itemConfig.icon />
             ) : (
               <div
-                className="h-2 w-2 shrink-0 rounded-[2px]"
+                className="size-2 shrink-0 rounded-[2px]"
                 style={{
                   backgroundColor: item.color,
                 }}

@@ -55,7 +55,7 @@ function RouteComponent() {
       <div className={cn("flex max-w-sm min-w-sm flex-col gap-6")}>
         <Card>
           <CardHeader className="space-y-2 text-center">
-            <img alt="Zevium" className="mx-auto h-10 w-10" src="/icon.png" />
+            <img alt="Zevium" className="mx-auto size-10" src="/icon.png" />
             <CardTitle className="text-xl">Verify two-factor code</CardTitle>
             <p className="text-sm text-muted-foreground">Enter the code from your two-factor authentication app</p>
           </CardHeader>
