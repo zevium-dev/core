@@ -164,7 +164,6 @@ function Calendar({
         range_middle: cn("rounded-none", defaultClassNames.range_middle),
         range_start: cn("rounded-l-md bg-accent", defaultClassNames.range_start),
         root: cn("w-fit", defaultClassNames.root),
-        table: "w-full border-collapse",
         today: cn(
           `
             rounded-md bg-accent text-accent-foreground

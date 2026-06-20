@@ -131,8 +131,12 @@ function ChartTooltipContent({
   indicator?: "dashed" | "dot" | "line";
   labelKey?: string;
   nameKey?: string;
-} & React.ComponentProps<"div"> &
-  React.ComponentProps<typeof RechartsPrimitive.Tooltip>) {
+  color?: string;
+  formatter?: RechartsPrimitive.TooltipProps["formatter"];
+  labelClassName?: string;
+  labelFormatter?: (label: string | number, payload: RechartsPrimitive.TooltipPayload) => React.ReactNode;
+} & Pick<RechartsPrimitive.TooltipContentProps, "active" | "payload" | "label"> &
+  React.ComponentProps<"div">) {
   const { config } = useChart();
 
   const tooltipLabel = React.useMemo(() => {
@@ -146,7 +150,9 @@ function ChartTooltipContent({
     const value = !labelKey && typeof label === "string" ? (config[label]?.label ?? label) : itemConfig?.label;
 
     if (labelFormatter) {
-      return <div className={cn("font-medium", labelClassName)}>{labelFormatter(value, payload)}</div>;
+      return (
+        <div className={cn("font-medium", labelClassName)}>{labelFormatter(value as string | number, payload)}</div>
+      );
     }
 
     if (!value) {
@@ -189,7 +195,7 @@ function ChartTooltipContent({
                 `,
                 indicator === "dot" && "items-center",
               )}
-              key={item.dataKey}
+              key={String(item.dataKey)}
             >
               {formatter && item.value !== undefined && item.name ? (
                 // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
@@ -267,7 +273,7 @@ function ChartLegendContent({
 }: {
   hideIcon?: boolean;
   nameKey?: string;
-} & Pick<RechartsPrimitive.LegendProps, "payload" | "verticalAlign"> &
+} & Pick<RechartsPrimitive.DefaultLegendContentProps, "payload" | "verticalAlign"> &
   React.ComponentProps<"div">) {
   const { config } = useChart();
 

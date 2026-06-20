@@ -1,6 +1,6 @@
 import { GripVerticalIcon } from "lucide-react";
 import * as React from "react";
-import * as ResizablePrimitive from "react-resizable-panels";
+import { Group, Panel, Separator } from "react-resizable-panels";
 
 import { cn } from "~/lib/utils";
 
@@ -10,9 +10,9 @@ function ResizableHandle({
   ...props
 }: {
   withHandle?: boolean;
-} & React.ComponentProps<typeof ResizablePrimitive.PanelResizeHandle>) {
+} & React.ComponentProps<typeof Separator>) {
   return (
-    <ResizablePrimitive.PanelResizeHandle
+    <Separator
       className={cn(
         `
           relative flex w-px items-center justify-center bg-border
@@ -44,17 +44,17 @@ function ResizableHandle({
           <GripVerticalIcon className="size-2.5" />
         </div>
       )}
-    </ResizablePrimitive.PanelResizeHandle>
+    </Separator>
   );
 }
 
-function ResizablePanel({ ...props }: React.ComponentProps<typeof ResizablePrimitive.Panel>) {
-  return <ResizablePrimitive.Panel data-slot="resizable-panel" {...props} />;
+function ResizablePanel({ ...props }: React.ComponentProps<typeof Panel>) {
+  return <Panel data-slot="resizable-panel" {...props} />;
 }
 
-function ResizablePanelGroup({ className, ...props }: React.ComponentProps<typeof ResizablePrimitive.PanelGroup>) {
+function ResizablePanelGroup({ className, ...props }: React.ComponentProps<typeof Group>) {
   return (
-    <ResizablePrimitive.PanelGroup
+    <Group
       className={cn(
         `
         flex h-full w-full

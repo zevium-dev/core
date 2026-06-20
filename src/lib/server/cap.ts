@@ -13,9 +13,7 @@ export const cap = new Cap({
       delete: async (token) => {
         await kv.del(CAP_KV_PREFIX + token);
       },
-      listExpired: async () => {
-        return await Promise.resolve([]); // No need to clean up since we're using KV which has its own TTL mechanism
-      },
+      deleteExpired: async () => {}, // KV has its own TTL, no cleanup needed
       read: async (token) => {
         const data = await kv.get<Cap.ChallengeData>(CAP_KV_PREFIX + token);
         if (!data) return null;
@@ -29,13 +27,11 @@ export const cap = new Cap({
       delete: async (tokenKey) => {
         await kv.del(CAP_KV_PREFIX + tokenKey);
       },
+      deleteExpired: async () => {}, // KV has its own TTL, no cleanup needed
       get: async (tokenKey) => {
         const data = await kv.get<string>(CAP_KV_PREFIX + tokenKey);
         if (!data) return null;
         return parseInt(data, 10);
-      },
-      listExpired: async () => {
-        return await Promise.resolve([]); // No need to clean up since we're using KV which has its own TTL mechanism
       },
       store: async (tokenKey, expires) => {
         await kv.set(CAP_KV_PREFIX + tokenKey, expires.toString(), { pxat: expires });
