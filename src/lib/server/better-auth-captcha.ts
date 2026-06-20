@@ -1,4 +1,4 @@
-import type { BetterAuthPlugin } from "better-auth/plugins";
+import type { BetterAuthPlugin } from "better-auth";
 
 import { CAPTCHA_HEADER_KEY } from "~/lib/constants";
 

@@ -1,0 +1,161 @@
+diff --git a/dist/libraries/backend/better-auth.js b/dist/libraries/backend/better-auth.js
+index 5bb0e0c274706b682a80304f0c0d73975c9e1201..a461571de547ba4b732e8059c4ec1c09d39bb16b 100644
+--- a/dist/libraries/backend/better-auth.js
++++ b/dist/libraries/backend/better-auth.js
+@@ -1788,7 +1788,6 @@ var V2FinalizeLockResponseSchema = import_v413.z.object({
+ 
+ // src/libraries/backend/better-auth.ts
+ var import_api2 = require("better-auth/api");
+-var import_plugins = require("better-auth/plugins");
+ var import_better_call = require("better-call");
+ var import_rou37 = require("rou3");
+ var import_v419 = require("zod/v4");
+@@ -2712,7 +2711,7 @@ var autumn = (options) => {
+         },
+         async (ctx) => await handleReq({ ctx, options, method: "POST" })
+       ),
+-      listProducts: (0, import_plugins.createAuthEndpoint)(
++      listProducts: (0, import_api2.createAuthEndpoint)(
+         "/autumn/products",
+         {
+           method: "GET",
+@@ -2720,7 +2719,7 @@ var autumn = (options) => {
+         },
+         async (ctx) => await handleReq({ ctx, options, method: "GET" })
+       ),
+-      checkout: (0, import_plugins.createAuthEndpoint)(
++      checkout: (0, import_api2.createAuthEndpoint)(
+         "/autumn/checkout",
+         {
+           method: "POST",
+@@ -2731,7 +2730,7 @@ var autumn = (options) => {
+           return await handleReq({ ctx, options, method: "POST" });
+         }
+       ),
+-      attach: (0, import_plugins.createAuthEndpoint)(
++      attach: (0, import_api2.createAuthEndpoint)(
+         "/autumn/attach",
+         {
+           method: "POST",
+@@ -2740,7 +2739,7 @@ var autumn = (options) => {
+         },
+         async (ctx) => await handleReq({ ctx, options, method: "POST" })
+       ),
+-      check: (0, import_plugins.createAuthEndpoint)(
++      check: (0, import_api2.createAuthEndpoint)(
+         "/autumn/check",
+         {
+           method: "POST",
+@@ -2751,7 +2750,7 @@ var autumn = (options) => {
+           return await handleReq({ ctx, options, method: "POST" });
+         }
+       ),
+-      track: (0, import_plugins.createAuthEndpoint)(
++      track: (0, import_api2.createAuthEndpoint)(
+         "/autumn/track",
+         {
+           method: "POST",
+@@ -2762,7 +2761,7 @@ var autumn = (options) => {
+           return await handleReq({ ctx, options, method: "POST" });
+         }
+       ),
+-      cancel: (0, import_plugins.createAuthEndpoint)(
++      cancel: (0, import_api2.createAuthEndpoint)(
+         "/autumn/cancel",
+         {
+           method: "POST",
+@@ -2771,7 +2770,7 @@ var autumn = (options) => {
+         },
+         async (ctx) => await handleReq({ ctx, options, method: "POST" })
+       ),
+-      query: (0, import_plugins.createAuthEndpoint)(
++      query: (0, import_api2.createAuthEndpoint)(
+         "/autumn/query",
+         {
+           method: "POST",
+@@ -2780,7 +2779,7 @@ var autumn = (options) => {
+         },
+         async (ctx) => await handleReq({ ctx, options, method: "POST" })
+       ),
+-      createReferralCode: (0, import_plugins.createAuthEndpoint)(
++      createReferralCode: (0, import_api2.createAuthEndpoint)(
+         "/autumn/referrals/code",
+         {
+           method: "POST",
+@@ -2791,7 +2790,7 @@ var autumn = (options) => {
+           return await handleReq({ ctx, options, method: "POST" });
+         }
+       ),
+-      redeemReferralCode: (0, import_plugins.createAuthEndpoint)(
++      redeemReferralCode: (0, import_api2.createAuthEndpoint)(
+         "/autumn/referrals/redeem",
+         {
+           method: "POST",
+@@ -2802,7 +2801,7 @@ var autumn = (options) => {
+           return await handleReq({ ctx, options, method: "POST" });
+         }
+       ),
+-      billingPortal: (0, import_plugins.createAuthEndpoint)(
++      billingPortal: (0, import_api2.createAuthEndpoint)(
+         "/autumn/billing_portal",
+         {
+           method: "POST",
+@@ -2816,7 +2815,7 @@ var autumn = (options) => {
+           return await handleReq({ ctx, options, method: "POST" });
+         }
+       ),
+-      createEntity: (0, import_plugins.createAuthEndpoint)(
++      createEntity: (0, import_api2.createAuthEndpoint)(
+         "/autumn/entities",
+         {
+           method: "POST",
+@@ -2827,7 +2826,7 @@ var autumn = (options) => {
+           return await handleReq({ ctx, options, method: "POST" });
+         }
+       ),
+-      getEntity: (0, import_plugins.createAuthEndpoint)(
++      getEntity: (0, import_api2.createAuthEndpoint)(
+         "/autumn/entities/:entityId",
+         {
+           method: "GET",
+@@ -2837,7 +2836,7 @@ var autumn = (options) => {
+           return await handleReq({ ctx, options, method: "GET" });
+         }
+       ),
+-      deleteEntity: (0, import_plugins.createAuthEndpoint)(
++      deleteEntity: (0, import_api2.createAuthEndpoint)(
+         "/autumn/entities/:entityId",
+         {
+           method: "DELETE",
+@@ -2845,7 +2844,7 @@ var autumn = (options) => {
+         },
+         async (ctx) => await handleReq({ ctx, options, method: "DELETE" })
+       ),
+-      listEvents: (0, import_plugins.createAuthEndpoint)(
++      listEvents: (0, import_api2.createAuthEndpoint)(
+         "/autumn/events/list",
+         {
+           method: "POST",
+@@ -2854,7 +2853,7 @@ var autumn = (options) => {
+         },
+         async (ctx) => await handleReq({ ctx, options, method: "POST" })
+       ),
+-      aggregateEvents: (0, import_plugins.createAuthEndpoint)(
++      aggregateEvents: (0, import_api2.createAuthEndpoint)(
+         "/autumn/events/aggregate",
+         {
+           method: "POST",
+diff --git a/dist/libraries/backend/better-auth.mjs b/dist/libraries/backend/better-auth.mjs
+index a552e658fbb9730d45f5dd8c25f0ac6d0ba90e75..277632a12e995cce1335c60d0e753770dc596c46 100644
+--- a/dist/libraries/backend/better-auth.mjs
++++ b/dist/libraries/backend/better-auth.mjs
+@@ -24,8 +24,7 @@ import "./chunk-SGEUXFOF.mjs";
+ import "./chunk-KSG3E4Q2.mjs";
+ 
+ // src/libraries/backend/better-auth.ts
+-import { getSessionFromCtx } from "better-auth/api";
+-import { createAuthEndpoint } from "better-auth/plugins";
++import { createAuthEndpoint, getSessionFromCtx } from "better-auth/api";
+ import {
+   APIError,
+   createEndpoint

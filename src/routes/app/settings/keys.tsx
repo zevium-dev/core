@@ -59,7 +59,7 @@ interface BetterAuthApiKey {
   requestCount?: number;
   start: null | string;
   updatedAt: Date;
-  userId: string;
+  userId?: string;
 }
 
 export const Route = createFileRoute("/app/settings/keys")({
@@ -83,7 +83,7 @@ function ApiKeysComponent() {
     queryFn: async () => {
       const { data, error } = await auth.apiKey.list();
       if (error) throw new Error(error.message);
-      return data;
+      return data?.apiKeys ?? [];
     },
     queryKey: ["apiKeys"],
   });

@@ -90,7 +90,9 @@ const proxyHandler = async (request: Request) => {
   }
 
   if (verification.error) {
-    const errorMessage = verification.error.message ?? "Failed to verify API key";
+    const rawMessage = verification.error.message;
+    const errorMessage =
+      typeof rawMessage === "string" ? rawMessage : (rawMessage?.message ?? "Failed to verify API key");
     return jsonWithRequestId(500, errorMessage, requestId);
   }
 

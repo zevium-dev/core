@@ -1,10 +1,10 @@
 import { autumn } from "autumn-js/better-auth";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
-import { apiKey } from "better-auth/plugins";
+import { apiKey } from "@better-auth/api-key";
 import { twoFactor } from "better-auth/plugins";
 import { organization } from "better-auth/plugins/organization";
-import { reactStartCookies } from "better-auth/react-start";
+import { tanstackStartCookies } from "better-auth/tanstack-start";
 
 import { db, schema } from "~/db";
 import { clientEnv } from "~/env/client";
@@ -117,7 +117,7 @@ export const authServer = betterAuth({
     }),
     autumn({ customerScope: "organization", secretKey: serverEnv.AUTUMN_SECRET_KEY }),
     capCaptcha(),
-    reactStartCookies(),
+    tanstackStartCookies(),
   ],
   rateLimit: {
     // 60 requests per minute

@@ -1,7 +1,3 @@
-overrides:
-  kysely: ~0.28.17
-  vite: ^8.0.16
-
 allowBuilds:
   core-js: true
   esbuild: true
@@ -16,3 +12,8 @@ onlyBuiltDependencies:
   - sharp
   - vue-demi
   - workerd
+overrides:
+  kysely: ~0.28.17
+  vite: ^8.0.16
+patchedDependencies:
+  autumn-js@0.1.85: patches/autumn-js@0.1.85.patch
