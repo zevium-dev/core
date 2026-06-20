@@ -8,19 +8,19 @@
 
 ```tsx
 type Todo = {
-  id: number
-  title: string
-  completed: boolean
-}
+  id: number;
+  title: string;
+  completed: boolean;
+};
 
 // ✅ Automatic type inference
 const { data } = useQuery({
-  queryKey: ['todos'],
+  queryKey: ["todos"],
   queryFn: async (): Promise<Todo[]> => {
-    const response = await fetch('/api/todos')
-    return response.json()
+    const response = await fetch("/api/todos");
+    return response.json();
   },
-})
+});
 // data is typed as Todo[] | undefined
 ```
 
@@ -29,21 +29,18 @@ const { data } = useQuery({
 ## 2. Generic Query Hook
 
 ```tsx
-function useEntity<T>(
-  endpoint: string,
-  id: number
-) {
+function useEntity<T>(endpoint: string, id: number) {
   return useQuery({
     queryKey: [endpoint, id],
     queryFn: async (): Promise<T> => {
-      const response = await fetch(`/api/${endpoint}/${id}`)
-      return response.json()
+      const response = await fetch(`/api/${endpoint}/${id}`);
+      return response.json();
     },
-  })
+  });
 }
 
 // Usage
-const { data } = useEntity<User>('users', 1)
+const { data } = useEntity<User>("users", 1);
 // data: User | undefined
 ```
 
@@ -53,18 +50,18 @@ const { data } = useEntity<User>('users', 1)
 
 ```tsx
 export const todosQueryOptions = queryOptions({
-  queryKey: ['todos'],
+  queryKey: ["todos"],
   queryFn: async (): Promise<Todo[]> => {
-    const response = await fetch('/api/todos')
-    return response.json()
+    const response = await fetch("/api/todos");
+    return response.json();
   },
   staleTime: 1000 * 60,
-})
+});
 
 // Perfect type inference everywhere
-useQuery(todosQueryOptions)
-useSuspenseQuery(todosQueryOptions)
-queryClient.prefetchQuery(todosQueryOptions)
+useQuery(todosQueryOptions);
+useSuspenseQuery(todosQueryOptions);
+queryClient.prefetchQuery(todosQueryOptions);
 ```
 
 ---
@@ -73,10 +70,10 @@ queryClient.prefetchQuery(todosQueryOptions)
 
 ```tsx
 type CreateTodoInput = {
-  title: string
-}
+  title: string;
+};
 
-type CreateTodoResponse = Todo
+type CreateTodoResponse = Todo;
 
 const { mutate } = useMutation<
   CreateTodoResponse, // TData
@@ -85,16 +82,16 @@ const { mutate } = useMutation<
   { previous?: Todo[] } // TContext
 >({
   mutationFn: async (input) => {
-    const response = await fetch('/api/todos', {
-      method: 'POST',
+    const response = await fetch("/api/todos", {
+      method: "POST",
       body: JSON.stringify(input),
-    })
-    return response.json()
+    });
+    return response.json();
   },
-})
+});
 
 // Type-safe mutation
-mutate({ title: 'New todo' })
+mutate({ title: "New todo" });
 ```
 
 ---
@@ -106,26 +103,22 @@ class ApiError extends Error {
   constructor(
     message: string,
     public status: number,
-    public code: string
+    public code: string,
   ) {
-    super(message)
+    super(message);
   }
 }
 
 const { data, error } = useQuery<Todo[], ApiError>({
-  queryKey: ['todos'],
+  queryKey: ["todos"],
   queryFn: async () => {
-    const response = await fetch('/api/todos')
+    const response = await fetch("/api/todos");
     if (!response.ok) {
-      throw new ApiError(
-        'Failed to fetch',
-        response.status,
-        'FETCH_ERROR'
-      )
+      throw new ApiError("Failed to fetch", response.status, "FETCH_ERROR");
     }
-    return response.json()
+    return response.json();
   },
-})
+});
 
 if (error) {
   // error.status and error.code are typed
@@ -137,24 +130,24 @@ if (error) {
 ## 6. Zod Schema Validation
 
 ```tsx
-import { z } from 'zod'
+import { z } from "zod";
 
 const TodoSchema = z.object({
   id: z.number(),
   title: z.string(),
   completed: z.boolean(),
-})
+});
 
-type Todo = z.infer<typeof TodoSchema>
+type Todo = z.infer<typeof TodoSchema>;
 
 const { data } = useQuery({
-  queryKey: ['todos'],
+  queryKey: ["todos"],
   queryFn: async () => {
-    const response = await fetch('/api/todos')
-    const json = await response.json()
-    return TodoSchema.array().parse(json) // Runtime + compile time safety
+    const response = await fetch("/api/todos");
+    const json = await response.json();
+    return TodoSchema.array().parse(json); // Runtime + compile time safety
   },
-})
+});
 ```
 
 ---
@@ -163,33 +156,30 @@ const { data } = useQuery({
 
 ```tsx
 type QueryState<T> =
-  | { status: 'pending'; data: undefined; error: null }
-  | { status: 'error'; data: undefined; error: Error }
-  | { status: 'success'; data: T; error: null }
+  | { status: "pending"; data: undefined; error: null }
+  | { status: "error"; data: undefined; error: Error }
+  | { status: "success"; data: T; error: null };
 
-function useTypedQuery<T>(
-  queryKey: string[],
-  queryFn: () => Promise<T>
-): QueryState<T> {
-  const { data, status, error } = useQuery({ queryKey, queryFn })
+function useTypedQuery<T>(queryKey: string[], queryFn: () => Promise<T>): QueryState<T> {
+  const { data, status, error } = useQuery({ queryKey, queryFn });
 
   return {
     status,
     data: data as any,
     error: error as any,
-  }
+  };
 }
 
 // Usage with exhaustive checking
-const result = useTypedQuery(['todos'], fetchTodos)
+const result = useTypedQuery(["todos"], fetchTodos);
 
 switch (result.status) {
-  case 'pending':
-    return <Loading />
-  case 'error':
-    return <Error error={result.error} /> // error is typed
-  case 'success':
-    return <TodoList todos={result.data} /> // data is typed
+  case "pending":
+    return <Loading />;
+  case "error":
+    return <Error error={result.error} />; // error is typed
+  case "success":
+    return <TodoList todos={result.data} />; // data is typed
 }
 ```
 
@@ -201,25 +191,23 @@ switch (result.status) {
 // Define all query keys in one place
 const queryKeys = {
   todos: {
-    all: ['todos'] as const,
-    lists: () => [...queryKeys.todos.all, 'list'] as const,
-    list: (filters: TodoFilters) =>
-      [...queryKeys.todos.lists(), filters] as const,
-    details: () => [...queryKeys.todos.all, 'detail'] as const,
-    detail: (id: number) =>
-      [...queryKeys.todos.details(), id] as const,
+    all: ["todos"] as const,
+    lists: () => [...queryKeys.todos.all, "list"] as const,
+    list: (filters: TodoFilters) => [...queryKeys.todos.lists(), filters] as const,
+    details: () => [...queryKeys.todos.all, "detail"] as const,
+    detail: (id: number) => [...queryKeys.todos.details(), id] as const,
   },
-}
+};
 
 // Usage
 useQuery({
   queryKey: queryKeys.todos.detail(1),
   queryFn: () => fetchTodo(1),
-})
+});
 
 queryClient.invalidateQueries({
-  queryKey: queryKeys.todos.all
-})
+  queryKey: queryKeys.todos.all,
+});
 ```
 
 ---
@@ -227,18 +215,14 @@ queryClient.invalidateQueries({
 ## 9. Utility Types
 
 ```tsx
-import type { UseQueryResult, UseMutationResult } from '@tanstack/react-query'
+import type { UseQueryResult, UseMutationResult } from "@tanstack/react-query";
 
 // Extract query data type
-type TodosQuery = UseQueryResult<Todo[]>
-type TodoData = TodosQuery['data'] // Todo[] | undefined
+type TodosQuery = UseQueryResult<Todo[]>;
+type TodoData = TodosQuery["data"]; // Todo[] | undefined
 
 // Extract mutation types
-type AddTodoMutation = UseMutationResult<
-  Todo,
-  Error,
-  CreateTodoInput
->
+type AddTodoMutation = UseMutationResult<Todo, Error, CreateTodoInput>;
 ```
 
 ---
@@ -247,19 +231,19 @@ type AddTodoMutation = UseMutationResult<
 
 ```tsx
 const { data } = useQuery({
-  queryKey: ['todo', id],
+  queryKey: ["todo", id],
   queryFn: () => fetchTodo(id),
-})
+});
 
 // ❌ TypeScript error if strictNullChecks enabled
-const title = data.title
+const title = data.title;
 
 // ✅ Proper null handling
-const title = data?.title ?? 'No title'
+const title = data?.title ?? "No title";
 
 // ✅ Type guard
 if (data) {
-  const title = data.title // data is Todo, not undefined
+  const title = data.title; // data is Todo, not undefined
 }
 ```
 
@@ -269,13 +253,13 @@ if (data) {
 
 ```tsx
 const { data } = useSuspenseQuery({
-  queryKey: ['todos'],
+  queryKey: ["todos"],
   queryFn: fetchTodos,
-})
+});
 
 // data is ALWAYS Todo[], never undefined
 // No need for undefined checks with suspense
-data.map(todo => todo.title) // ✅ Safe
+data.map((todo) => todo.title); // ✅ Safe
 ```
 
 ---

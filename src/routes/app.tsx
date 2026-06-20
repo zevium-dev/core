@@ -14,6 +14,7 @@ export const Route = createFileRoute("/app")({
   loader: async ({ context, params }) => {
     void context.queryClient.ensureQueryData(sessionQueryOptions());
 
+    // @ts-expect-error - user is added by auth middleware but not typed in router context
     if (context.user) {
       void context.queryClient.ensureQueryData(context.trpc.organization.list.queryOptions());
 

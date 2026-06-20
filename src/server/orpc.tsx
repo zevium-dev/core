@@ -109,7 +109,6 @@ const createScalarHtml = memoryCached(
           <body>
             <div id="app" />
             <script
-              // eslint-disable-next-line @eslint-react/dom/no-dangerously-set-innerhtml
               dangerouslySetInnerHTML={{
                 __html: dedent`
                 Scalar.createApiReference('#app', {

@@ -19,7 +19,7 @@ vi.mock("~/env/server", () => ({
 }));
 
 // Cast to ServerEnv because the mock is not typed and you're too lazy to do it right
-const mockServerEnv = serverEnv as unknown as ServerEnv;
+const mockServerEnv = serverEnv;
 
 describe("secrets-keyring", () => {
   beforeEach(() => {

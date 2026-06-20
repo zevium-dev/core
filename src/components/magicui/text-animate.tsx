@@ -306,7 +306,7 @@ const TextAnimateBase = ({
 }: TextAnimateProps) => {
   const MotionComponent = m.create(Component);
 
-  let segments: Array<string> = [];
+  let segments: Array<string>;
   switch (by) {
     case "character":
       segments = children.split("");
@@ -378,7 +378,7 @@ const TextAnimateBase = ({
         className={cn("whitespace-pre-wrap", className)}
         exit="exit"
         initial="hidden"
-        variants={finalVariants.container as Variants}
+        variants={finalVariants.container}
         viewport={{ once }}
         whileInView={startOnView ? "show" : undefined}
         {...props}

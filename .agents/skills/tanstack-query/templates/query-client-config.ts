@@ -1,5 +1,5 @@
 // src/lib/query-client.ts
-import { QueryClient } from '@tanstack/react-query'
+import { QueryClient } from "@tanstack/react-query";
 
 /**
  * QueryClient configuration for TanStack Query v5
@@ -23,10 +23,10 @@ export const queryClient = new QueryClient({
       retry: (failureCount, error) => {
         // Don't retry on 404s
         if (error instanceof Response && error.status === 404) {
-          return false
+          return false;
         }
         // Retry up to 3 times for other errors
-        return failureCount < 3
+        return failureCount < 3;
       },
 
       // Don't refetch on window focus (can be annoying during dev)
@@ -45,12 +45,12 @@ export const queryClient = new QueryClient({
 
       // Global mutation error handler (optional)
       onError: (error) => {
-        console.error('Mutation error:', error)
+        console.error("Mutation error:", error);
         // Add global error handling here (toast, alert, etc.)
       },
     },
   },
-})
+});
 
 /**
  * Adjust these settings based on your needs:

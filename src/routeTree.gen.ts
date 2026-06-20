@@ -322,7 +322,7 @@ export interface FileRoutesByFullPath {
   '/auth/verify-email': typeof AuthVerifyEmailRoute
   '/mcp/$': typeof McpSplatRoute
   '/app/': typeof AppIndexRoute
-  '/auth': typeof AuthIndexRoute
+  '/auth/': typeof AuthIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/cap/$': typeof ApiCapSplatRoute
   '/api/openapi/$': typeof ApiOpenapiSplatRoute
@@ -337,7 +337,7 @@ export interface FileRoutesByFullPath {
   '/app/settings/keys': typeof AppSettingsKeysRoute
   '/app/settings/preference': typeof AppSettingsPreferenceRoute
   '/app/organizations/': typeof AppOrganizationsIndexRoute
-  '/app/settings': typeof AppSettingsIndexRoute
+  '/app/settings/': typeof AppSettingsIndexRoute
   '/app/organizations/$organizationSlug/projects': typeof AppOrganizationsOrganizationSlugProjectsRouteWithChildren
   '/app/organizations/$organizationSlug/settings': typeof AppOrganizationsOrganizationSlugSettingsRoute
   '/app/organizations/$organizationSlug/': typeof AppOrganizationsOrganizationSlugIndexRoute
@@ -347,7 +347,7 @@ export interface FileRoutesByFullPath {
   '/app/organizations/$organizationSlug/projects/': typeof AppOrganizationsOrganizationSlugProjectsIndexRoute
   '/app/organizations/$organizationSlug/projects/$projectSlug/explorer': typeof AppOrganizationsOrganizationSlugProjectsProjectSlugExplorerRoute
   '/app/organizations/$organizationSlug/projects/$projectSlug/spec': typeof AppOrganizationsOrganizationSlugProjectsProjectSlugSpecRoute
-  '/app/organizations/$organizationSlug/projects/$projectSlug': typeof AppOrganizationsOrganizationSlugProjectsProjectSlugIndexRoute
+  '/app/organizations/$organizationSlug/projects/$projectSlug/': typeof AppOrganizationsOrganizationSlugProjectsProjectSlugIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -465,7 +465,7 @@ export interface FileRouteTypes {
     | '/auth/verify-email'
     | '/mcp/$'
     | '/app/'
-    | '/auth'
+    | '/auth/'
     | '/api/auth/$'
     | '/api/cap/$'
     | '/api/openapi/$'
@@ -480,7 +480,7 @@ export interface FileRouteTypes {
     | '/app/settings/keys'
     | '/app/settings/preference'
     | '/app/organizations/'
-    | '/app/settings'
+    | '/app/settings/'
     | '/app/organizations/$organizationSlug/projects'
     | '/app/organizations/$organizationSlug/settings'
     | '/app/organizations/$organizationSlug/'
@@ -490,7 +490,7 @@ export interface FileRouteTypes {
     | '/app/organizations/$organizationSlug/projects/'
     | '/app/organizations/$organizationSlug/projects/$projectSlug/explorer'
     | '/app/organizations/$organizationSlug/projects/$projectSlug/spec'
-    | '/app/organizations/$organizationSlug/projects/$projectSlug'
+    | '/app/organizations/$organizationSlug/projects/$projectSlug/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -630,7 +630,7 @@ declare module '@tanstack/react-router' {
     '/auth/': {
       id: '/auth/'
       path: '/auth'
-      fullPath: '/auth'
+      fullPath: '/auth/'
       preLoaderRoute: typeof AuthIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
@@ -763,7 +763,7 @@ declare module '@tanstack/react-router' {
     '/app/settings/': {
       id: '/app/settings/'
       path: '/settings'
-      fullPath: '/app/settings'
+      fullPath: '/app/settings/'
       preLoaderRoute: typeof AppSettingsIndexRouteImport
       parentRoute: typeof AppRoute
     }
@@ -917,7 +917,7 @@ declare module '@tanstack/react-router' {
     '/app/organizations/$organizationSlug/projects/$projectSlug/': {
       id: '/app/organizations/$organizationSlug/projects/$projectSlug/'
       path: '/$projectSlug'
-      fullPath: '/app/organizations/$organizationSlug/projects/$projectSlug'
+      fullPath: '/app/organizations/$organizationSlug/projects/$projectSlug/'
       preLoaderRoute: typeof AppOrganizationsOrganizationSlugProjectsProjectSlugIndexRouteImport
       parentRoute: typeof AppOrganizationsOrganizationSlugProjectsRoute
     }

@@ -47,7 +47,6 @@ function AccountPreferenceComponent() {
   // Sync timezone from preferences when loaded (only set if empty locally)
   useEffect(() => {
     if (userPreferencesQuery.data?.timezone && !timezone) {
-      // eslint-disable-next-line @eslint-react/hooks-extra/no-direct-set-state-in-use-effect
       setTimezone(userPreferencesQuery.data.timezone);
     }
   }, [userPreferencesQuery.data?.timezone, timezone]);
@@ -214,7 +213,6 @@ function AccountPreferenceComponent() {
                       return parts.map((part) => part.at(0)?.toUpperCase() ?? "").join("") || "U";
                     }
                     return user.email.at(0)?.toUpperCase() ?? "";
-                    return "U";
                   })()}
                 </AvatarFallback>
               </Avatar>

@@ -1,5 +1,4 @@
 // @ts-check
-
 import preferArrayAt from "@boi.gg/eslint-plugin-prefer-array-at";
 import eslintReact from "@eslint-react/eslint-plugin";
 import eslint from "@eslint/js";
@@ -7,9 +6,8 @@ import pluginRouter from "@tanstack/eslint-plugin-router";
 import tailwindcss from "eslint-plugin-better-tailwindcss";
 import drizzlePlugin from "eslint-plugin-drizzle";
 import perfectionist from "eslint-plugin-perfectionist";
-import reactCompiler from "eslint-plugin-react-compiler";
 import reactHooks from "eslint-plugin-react-hooks";
-import { defineConfig } from "eslint/config";
+import { defineConfig, globalIgnores } from "eslint/config";
 import tseslint from "typescript-eslint";
 
 const drizzle = /** @type {import("eslint").ESLint.Plugin} */ (drizzlePlugin);
@@ -45,22 +43,32 @@ const nodeGlobals = {
 };
 
 export default defineConfig(
-  {
-    ignores: [".nitro", ".output", "node_modules", ".tanstack", "dist"],
-  },
+  globalIgnores([
+    "**/.nitro/**",
+    "**/.output/**",
+    "**/node_modules/**",
+    "**/.tanstack/**",
+    "**/dist/**",
+    "**/.agents/**",
+  ]),
+
   eslint.configs.recommended,
-  eslintReact.configs.recommended,
-  reactHooks.configs["recommended-latest"],
-  reactCompiler.configs.recommended,
+
+  {
+    plugins: { "react-hooks": reactHooks },
+    rules: reactHooks.configs["recommended-latest"].rules,
+  },
+
   perfectionist.configs["recommended-alphabetical"],
-  preferArrayAt.configs.all,
   tailwind,
+
   {
     files: ["scripts/**/*.{js,cjs,mjs}"],
     languageOptions: {
       globals: nodeGlobals,
     },
   },
+
   {
     files: tsFiles,
     languageOptions: {
@@ -70,13 +78,25 @@ export default defineConfig(
       },
     },
   },
+
   ...scopeToTs(tseslint.configs.strictTypeChecked),
   ...scopeToTs(tseslint.configs.stylisticTypeChecked),
+
   {
     ...eslintReact.configs["recommended-type-checked"],
     files: tsFiles,
   },
+
   ...scopeToTs(pluginRouter.configs["flat/recommended"]),
+
+  {
+    files: tsFiles,
+    plugins: { "prefer-array-at": preferArrayAt },
+    rules: {
+      "prefer-array-at/prefer-array-at": ["warn", { warnOnUnsupportedArrayLike: true }],
+    },
+  },
+
   {
     files: tsFiles,
     plugins: {
@@ -86,6 +106,7 @@ export default defineConfig(
       ...drizzleRecommendedRules,
     },
   },
+
   {
     files: tsFiles,
     rules: {
@@ -117,6 +138,15 @@ export default defineConfig(
       "perfectionist/sort-named-imports": "warn",
       "perfectionist/sort-object-types": "warn",
       "perfectionist/sort-objects": "warn",
+    },
+  },
+
+  {
+    rules: {
+      "@eslint-react/dom-no-dangerously-set-innerhtml": "off",
+      "@eslint-react/static-components": "off",
+      "@eslint-react/unsupported-syntax": "off",
+      "@typescript-eslint/prefer-promise-reject-errors": "off",
     },
   },
 );

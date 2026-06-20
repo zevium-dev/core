@@ -72,7 +72,7 @@ export const AnimatedBeam: React.FC<AnimatedBeamProps> = ({
 
         const svgWidth = containerRect.width;
         const svgHeight = containerRect.height;
-        // eslint-disable-next-line @eslint-react/hooks-extra/no-direct-set-state-in-use-effect
+
         setSvgDimensions({ height: svgHeight, width: svgWidth });
 
         const startX = rectA.left - containerRect.left + rectA.width / 2 + startXOffset;
@@ -82,7 +82,7 @@ export const AnimatedBeam: React.FC<AnimatedBeamProps> = ({
 
         const controlY = startY - curvature;
         const d = `M ${startX},${startY} Q ${(startX + endX) / 2},${controlY} ${endX},${endY}`;
-        // eslint-disable-next-line @eslint-react/hooks-extra/no-direct-set-state-in-use-effect
+
         setPathD(d);
       }
     };

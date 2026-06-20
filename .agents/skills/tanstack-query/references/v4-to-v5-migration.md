@@ -9,22 +9,25 @@
 ### 1. Object Syntax Required ⚠️
 
 **v4** allowed multiple signatures:
+
 ```tsx
-useQuery(['todos'], fetchTodos, { staleTime: 5000 })
-useQuery(['todos'], fetchTodos)
-useQuery(queryOptions)
+useQuery(["todos"], fetchTodos, { staleTime: 5000 });
+useQuery(["todos"], fetchTodos);
+useQuery(queryOptions);
 ```
 
 **v5** only supports object syntax:
+
 ```tsx
 useQuery({
-  queryKey: ['todos'],
+  queryKey: ["todos"],
   queryFn: fetchTodos,
-  staleTime: 5000
-})
+  staleTime: 5000,
+});
 ```
 
 **Migration**: Use codemod or manual update
+
 ```bash
 npx @tanstack/react-query-codemod v5/remove-overloads
 ```
@@ -32,36 +35,40 @@ npx @tanstack/react-query-codemod v5/remove-overloads
 ### 2. Query Callbacks Removed ⚠️
 
 **Removed from queries** (still work in mutations):
+
 - `onSuccess`
 - `onError`
 - `onSettled`
 
 **v4**:
+
 ```tsx
 useQuery({
-  queryKey: ['todos'],
+  queryKey: ["todos"],
   queryFn: fetchTodos,
-  onSuccess: (data) => console.log(data) // ❌ Removed
-})
+  onSuccess: (data) => console.log(data), // ❌ Removed
+});
 ```
 
 **v5** - Use `useEffect`:
+
 ```tsx
-const { data } = useQuery({ queryKey: ['todos'], queryFn: fetchTodos })
+const { data } = useQuery({ queryKey: ["todos"], queryFn: fetchTodos });
 
 useEffect(() => {
   if (data) {
-    console.log(data)
+    console.log(data);
   }
-}, [data])
+}, [data]);
 ```
 
 **Mutation callbacks still work**:
+
 ```tsx
 useMutation({
   mutationFn: addTodo,
-  onSuccess: () => {} // ✅ Still works
-})
+  onSuccess: () => {}, // ✅ Still works
+});
 ```
 
 ### 3. `isLoading` → `isPending` ⚠️
@@ -83,10 +90,10 @@ if (isPending) return <Loading />
 
 ```tsx
 // v4
-cacheTime: 1000 * 60 * 60
+cacheTime: 1000 * 60 * 60;
 
 // v5
-gcTime: 1000 * 60 * 60
+gcTime: 1000 * 60 * 60;
 ```
 
 ### 5. `initialPageParam` Required for Infinite Queries ⚠️
@@ -94,43 +101,43 @@ gcTime: 1000 * 60 * 60
 ```tsx
 // v4
 useInfiniteQuery({
-  queryKey: ['projects'],
+  queryKey: ["projects"],
   queryFn: ({ pageParam = 0 }) => fetchProjects(pageParam),
   getNextPageParam: (lastPage) => lastPage.nextCursor,
-})
+});
 
 // v5
 useInfiniteQuery({
-  queryKey: ['projects'],
+  queryKey: ["projects"],
   queryFn: ({ pageParam }) => fetchProjects(pageParam),
   initialPageParam: 0, // ✅ Required
   getNextPageParam: (lastPage) => lastPage.nextCursor,
-})
+});
 ```
 
 ### 6. `keepPreviousData` → `placeholderData` ⚠️
 
 ```tsx
 // v4
-keepPreviousData: true
+keepPreviousData: true;
 
 // v5
-import { keepPreviousData } from '@tanstack/react-query'
+import { keepPreviousData } from "@tanstack/react-query";
 
-placeholderData: keepPreviousData
+placeholderData: keepPreviousData;
 ```
 
 ### 7. `useErrorBoundary` → `throwOnError` ⚠️
 
 ```tsx
 // v4
-useErrorBoundary: true
+useErrorBoundary: true;
 
 // v5
-throwOnError: true
+throwOnError: true;
 
 // Or conditional:
-throwOnError: (error) => error.status >= 500
+throwOnError: (error) => error.status >= 500;
 ```
 
 ### 8. Error Type Default Changed
@@ -139,14 +146,15 @@ throwOnError: (error) => error.status >= 500
 **v5**: `error: Error`
 
 If throwing non-Error types:
+
 ```tsx
 const { error } = useQuery<DataType, string>({
-  queryKey: ['data'],
+  queryKey: ["data"],
   queryFn: async () => {
-    if (fail) throw 'custom string error'
-    return data
+    if (fail) throw "custom string error";
+    return data;
   },
-})
+});
 ```
 
 ---
@@ -181,12 +189,13 @@ npx @tanstack/react-query-codemod v5/rename-properties
 ### Step 4: TypeScript Fixes
 
 Update type imports:
+
 ```tsx
 // v4
-import type { UseQueryResult } from 'react-query'
+import type { UseQueryResult } from "react-query";
 
 // v5
-import type { UseQueryResult } from '@tanstack/react-query'
+import type { UseQueryResult } from "@tanstack/react-query";
 ```
 
 ### Step 5: Test Thoroughly
@@ -202,18 +211,22 @@ import type { UseQueryResult } from '@tanstack/react-query'
 ## Common Migration Issues
 
 ### Issue: Callbacks not firing
+
 **Cause**: Query callbacks removed
 **Fix**: Use useEffect or move to mutations
 
 ### Issue: isLoading always false
+
 **Cause**: Meaning changed
 **Fix**: Use isPending for initial load
 
 ### Issue: cacheTime not recognized
+
 **Cause**: Renamed
 **Fix**: Use gcTime
 
 ### Issue: infinite query type error
+
 **Cause**: initialPageParam required
 **Fix**: Add initialPageParam
 

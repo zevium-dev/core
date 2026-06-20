@@ -27,7 +27,7 @@ const getOrganizationPermissions = async (userId: string, input: z.infer<typeof 
     });
   }
 
-  let organizationWhere = orm.and();
+  let organizationWhere;
   if (input.organizationId) {
     organizationWhere = orm.eq(schema.organization.id, input.organizationId);
   } else if (input.organizationSlug) {
@@ -105,7 +105,7 @@ const getProjectPermissions = async (userId: string, input: z.infer<typeof Proje
     });
   }
 
-  let projectWhere = orm.and();
+  let projectWhere;
   if (input.projectId) {
     projectWhere = orm.eq(schema.project.id, input.projectId);
   } else if (input.projectSlug) {

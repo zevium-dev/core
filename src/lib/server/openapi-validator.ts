@@ -219,7 +219,7 @@ export function parseAndValidateOpenApiSpec(fileContent: string, fileName: strin
     format,
     hash,
     originalRaw: fileContent,
-    specJson: spec as Record<string, unknown>,
+    specJson: spec,
     title: spec.info.title,
     version: spec.info.version,
   };

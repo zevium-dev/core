@@ -31,7 +31,7 @@ export async function handleMcpRequest(
 
     await new Promise<void>((resolve, reject) => {
       const timeout = setTimeout(() => {
-        reject(new MCPTimeoutException("MCP request timeout", { timeoutMs }) as Error);
+        reject(new MCPTimeoutException("MCP request timeout", { timeoutMs }));
       }, timeoutMs);
 
       clientTransport.onmessage = (message: JSONRPCMessage) => {
@@ -42,13 +42,13 @@ export async function handleMcpRequest(
 
       clientTransport.onerror = (error: Error) => {
         clearTimeout(timeout);
-        reject(new MCPTransportException("MCP transport error", { originalError: error }, error) as Error);
+        reject(new MCPTransportException("MCP transport error", { originalError: error }, error));
       };
 
       clientTransport.send(jsonRpcRequest).catch((error: unknown) => {
         clearTimeout(timeout);
         const err = error instanceof Error ? error : new Error(String(error));
-        reject(new MCPSendException("Failed to send MCP request", { originalError: err }, err) as Error);
+        reject(new MCPSendException("Failed to send MCP request", { originalError: err }, err));
       });
       // @ts-expect-error - method may not exist on all request types
       if (jsonRpcRequest.method === "notifications/initialized") {

@@ -94,7 +94,7 @@ const navData = [
 ];
 
 interface OrganizationRoute {
-  logo?: string | null;
+  logo?: null | string;
   title: string;
   url: string;
 }
@@ -665,14 +665,14 @@ function OrganizationSelectorMenu({
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
-                type="button"
                 className={`
                   flex h-8 w-full items-center justify-between gap-2 rounded-md border-none
-                  bg-transparent px-0 py-0 text-left text-sm shadow-none outline-none
-                  transition-colors focus-visible:ring-0
-                  hover:text-sidebar-accent-foreground
+                  bg-transparent px-0 py-0 text-left text-sm shadow-none transition-colors
+                  outline-none hover:text-sidebar-accent-foreground
+                  focus-visible:ring-0
                   dark:bg-transparent dark:hover:bg-transparent
                 `}
+                type="button"
               >
                 <span className="min-w-0 flex-1 truncate">
                   <span className="truncate">{triggerLabel}</span>
@@ -694,8 +694,8 @@ function OrganizationSelectorMenu({
 
                     return (
                       <DropdownMenuItem
-                        key={route.url}
                         className="w-full justify-start px-2 text-left"
+                        key={route.url}
                         onClick={() => handleNavigation(route.url)}
                       >
                         <Avatar className="size-5 border border-border/60">

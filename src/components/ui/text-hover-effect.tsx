@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 
 export const TextHoverEffect = ({ duration, text }: { automatic?: boolean; duration?: number; text: string }) => {
   const svgRef = useRef<SVGSVGElement>(null);
-  const [cursor, setCursor] = useState({ x: 0 as null | number, y: 0 as null | number });
+  const [cursor, setCursor] = useState({ x: 0, y: 0 });
   const [hovered, setHovered] = useState(false);
   const [maskPosition, setMaskPosition] = useState({ cx: "50%", cy: "50%" });
 
@@ -13,7 +13,7 @@ export const TextHoverEffect = ({ duration, text }: { automatic?: boolean; durat
       const svgRect = svgRef.current.getBoundingClientRect();
       const cxPercentage = ((cursor.x - svgRect.left) / svgRect.width) * 100;
       const cyPercentage = ((cursor.y - svgRect.top) / svgRect.height) * 100;
-      // eslint-disable-next-line @eslint-react/hooks-extra/no-direct-set-state-in-use-effect
+
       setMaskPosition({
         cx: `${cxPercentage}%`,
         cy: `${cyPercentage}%`,

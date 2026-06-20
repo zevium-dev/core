@@ -1,5 +1,14 @@
+overrides:
+  kysely: ~0.28.17
+
+allowBuilds:
+  core-js: true
+  esbuild: true
+  sharp: true
+  workerd: true
+
 onlyBuiltDependencies:
-  - '@tailwindcss/oxide'
+  - "@tailwindcss/oxide"
   - core-js
   - esbuild
   - protobufjs

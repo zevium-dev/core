@@ -247,9 +247,9 @@ function ImageUpload({
     const { cropBox: newCropBox, imageData: newImageData } = initializeCropBox(imageRef.current, containerRef.current);
 
     // Image load is async - we need to update state when image dimensions become available
-    // eslint-disable-next-line @eslint-react/hooks-extra/no-direct-set-state-in-use-effect
+
     setCropBox(newCropBox);
-    // eslint-disable-next-line @eslint-react/hooks-extra/no-direct-set-state-in-use-effect
+
     setImageData(newImageData);
   }, [initializeCropBox]);
 

@@ -378,7 +378,7 @@ function RouteComponent() {
     trpc.project.update.mutationOptions({
       onSuccess: async (updatedProject) => {
         toast.success("Variables saved successfully");
-        const nextVariables = cloneVariables((updatedProject.variables ?? []) as Array<ProjectVariable>);
+        const nextVariables = cloneVariables(updatedProject.variables ?? []);
         setVariablesState(nextVariables);
         await queryClient.invalidateQueries(trpc.project.get.queryOptions(routeParams));
       },
