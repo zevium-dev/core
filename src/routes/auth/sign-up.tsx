@@ -35,12 +35,13 @@ function RouteComponent() {
   const navigate = useNavigate();
 
   const signUpMutation = useMutation({
-    mutationFn: ({ data, token }: { data: FormValues; token: string }) => {
+    mutationFn: async (data: FormValues) => {
       const email = data.email.trim();
       const name = data.name?.trim() ?? email.split("@").at(0) ?? crypto.randomUUID();
       const password = data.password;
       const passwordConfirm = data.passwordConfirm;
       if (password !== passwordConfirm) throw new TRPCClientError("Passwords do not match");
+      const token = await solveCap();
       const headers = new Headers();
       headers.set(CAPTCHA_HEADER_KEY, token);
       return auth.signUp.email({ email, name, password }, { headers });
@@ -52,9 +53,8 @@ function RouteComponent() {
 
   const form = useForm({
     defaultValues: { email: "", name: "", password: "", passwordConfirm: "" } satisfies FormValues,
-    onSubmit: async ({ value }) => {
-      const token = await solveCap();
-      signUpMutation.mutate({ data: value, token });
+    onSubmit: ({ value }) => {
+      signUpMutation.mutate(value);
     },
     validators: {
       onBlur: FormValuesArk,

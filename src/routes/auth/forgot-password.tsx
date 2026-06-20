@@ -32,7 +32,8 @@ function RouteComponent() {
   const user = useSession().user;
 
   const requestPasswordResetMutation = useMutation({
-    mutationFn: ({ data, token }: { data: FormValues; token: string }) => {
+    mutationFn: async (data: FormValues) => {
+      const token = await solveCap();
       const headers = new Headers();
       headers.set(CAPTCHA_HEADER_KEY, token);
       return auth.requestPasswordReset({ email: data.email }, { headers });
@@ -45,9 +46,8 @@ function RouteComponent() {
 
   const form = useForm({
     defaultValues: { email: "" } satisfies FormValues,
-    onSubmit: async ({ value }) => {
-      const token = await solveCap();
-      requestPasswordResetMutation.mutate({ data: value, token });
+    onSubmit: ({ value }) => {
+      requestPasswordResetMutation.mutate(value);
     },
     validators: {
       onBlur: FormValuesArk,

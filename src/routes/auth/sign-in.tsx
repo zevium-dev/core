@@ -48,7 +48,8 @@ function RouteComponent() {
   const safeRedirectTo = getSafeRedirectTo(redirectTo);
 
   const signInMutation = useMutation({
-    mutationFn: ({ data, token }: { data: FormValues; token: string }) => {
+    mutationFn: async (data: FormValues) => {
+      const token = await solveCap();
       const headers = new Headers();
       headers.set(CAPTCHA_HEADER_KEY, token);
       return auth.signIn.email({ email: data.email, password: data.password }, { headers });
@@ -61,9 +62,8 @@ function RouteComponent() {
 
   const form = useForm({
     defaultValues: { email: "", password: "" } satisfies FormValues,
-    onSubmit: async ({ value }) => {
-      const token = await solveCap();
-      signInMutation.mutate({ data: value, token });
+    onSubmit: ({ value }) => {
+      signInMutation.mutate(value);
     },
     validators: {
       onBlur: FormValuesArk,

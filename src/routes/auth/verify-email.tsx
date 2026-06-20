@@ -28,7 +28,8 @@ function RouteComponent() {
   const navigate = useNavigate();
 
   const requestResendEmailMutation = useMutation({
-    mutationFn: ({ data, token }: { data: FormValues; token: string }) => {
+    mutationFn: async (data: FormValues) => {
+      const token = await solveCap();
       const headers = new Headers();
       headers.set(CAPTCHA_HEADER_KEY, token);
       return auth.sendVerificationEmail({ email: data.email }, { headers });
@@ -40,9 +41,8 @@ function RouteComponent() {
 
   const form = useForm({
     defaultValues: { email: "" } satisfies FormValues,
-    onSubmit: async ({ value }) => {
-      const token = await solveCap();
-      requestResendEmailMutation.mutate({ data: value, token });
+    onSubmit: ({ value }) => {
+      requestResendEmailMutation.mutate(value);
     },
     validators: {
       onBlur: FormValuesArk,
