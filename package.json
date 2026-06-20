@@ -159,7 +159,6 @@
     "typescript-eslint": "^8.61.1",
     "vaul": "^1.1.2",
     "vite": "^8.0.16",
-    "vite-tsconfig-paths": "^6.1.1",
     "vitest": "^3.2.6",
     "wrangler": "^4.103.0",
     "yaml": "^2.9.0",

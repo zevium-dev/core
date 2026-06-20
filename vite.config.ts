@@ -5,13 +5,11 @@ import tailwindcss from "@tailwindcss/vite";
 import { tanstackStart } from "@tanstack/react-start/plugin/vite";
 import viteReact from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
-import tsConfigPaths from "vite-tsconfig-paths";
 import { ViteUserConfig } from "vitest/config";
 
 import { nodeBuiltinImportPostprocess } from "./plugins/node-builtin-import-postprocess";
 const plugins: Array<PluginOption> = [];
 
-plugins.push(tsConfigPaths({ projects: ["./tsconfig.json"] }));
 plugins.push(tailwindcss());
 if (process.env.VITEST !== "true")
   plugins.push(
@@ -24,10 +22,9 @@ plugins.push(nodeBuiltinImportPostprocess());
 
 export default defineConfig({
   // build: { sourcemap: true },
-
   plugins,
+  resolve: { tsconfigPaths: true },
 
-  // @ts-expect-error - vitest types
   test: {
     coverage: {
       provider: "istanbul",

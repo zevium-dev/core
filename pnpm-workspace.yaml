@@ -1,5 +1,6 @@
 overrides:
   kysely: ~0.28.17
+  vite: ^8.0.16
 
 allowBuilds:
   core-js: true
