@@ -2,11 +2,9 @@ import { useForm } from "@tanstack/react-form";
 import { useMutation } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { type } from "arktype";
-import { useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { AuthFormClientOnly } from "~/components/auth-form-client-only";
-import { CapWidget, type CapWidgetElement } from "~/components/cap-widget";
 import { Redirect } from "~/components/redirect";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
@@ -14,6 +12,7 @@ import { Input } from "~/components/ui/input";
 import { Label } from "~/components/ui/label";
 import { ScreenCenter } from "~/components/ui/screen-center";
 import { auth, useSession } from "~/lib/auth";
+import { solveCap } from "~/lib/client/cap";
 import { CAPTCHA_HEADER_KEY } from "~/lib/constants";
 import { cn, getFormErrorString } from "~/lib/utils";
 
@@ -29,19 +28,14 @@ export const Route = createFileRoute("/auth/forgot-password")({
 
 function RouteComponent() {
   const navigate = Route.useNavigate();
-  const capRef = useRef<CapWidgetElement>(null);
-  const [capToken, setCapToken] = useState<null | string>(null);
 
   const user = useSession().user;
 
   const requestPasswordResetMutation = useMutation({
-    mutationFn: (data: FormValues) => {
+    mutationFn: ({ data, token }: { data: FormValues; token: string }) => {
       const headers = new Headers();
-      if (capToken) headers.set(CAPTCHA_HEADER_KEY, capToken);
+      headers.set(CAPTCHA_HEADER_KEY, token);
       return auth.requestPasswordReset({ email: data.email }, { headers });
-    },
-    onSettled: () => {
-      capRef.current?.reset();
     },
     onSuccess: async () => {
       await navigate({ to: "/auth/sign-in" });
@@ -51,8 +45,9 @@ function RouteComponent() {
 
   const form = useForm({
     defaultValues: { email: "" } satisfies FormValues,
-    onSubmit: ({ value }) => {
-      requestPasswordResetMutation.mutate(value);
+    onSubmit: async ({ value }) => {
+      const token = await solveCap();
+      requestPasswordResetMutation.mutate({ data: value, token });
     },
     validators: {
       onBlur: FormValuesArk,
@@ -82,7 +77,7 @@ function RouteComponent() {
               }}
             >
               <div className="grid gap-6">
-                <AuthFormClientOnly fields={[{ labelWidthClass: "w-12" }]} showCaptcha>
+                <AuthFormClientOnly fields={[{ labelWidthClass: "w-12" }]}>
                   <div className="grid gap-6">
                     <form.Field
                       children={(field) => {
@@ -122,7 +117,6 @@ function RouteComponent() {
                       }}
                       name="email"
                     />
-                    <CapWidget onSolve={setCapToken} ref={capRef} />
                     <Button className="w-full" loading={isSubmitting} type="submit">
                       Reset password
                     </Button>

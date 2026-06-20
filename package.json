@@ -29,10 +29,12 @@
     "test:ui": "vitest --ui",
     "typecheck": "tsgo --noEmit"
   },
+  "dependencies": {
+    "capjs-core": "^0.1.1"
+  },
   "devDependencies": {
     "@boi.gg/eslint-plugin-prefer-array-at": "^1.0.0",
     "@boi.gg/exception": "^0.0.3",
-    "@cap.js/server": "^4.0.5",
     "@cap.js/widget": "^0.1.56",
     "@cloudflare/vite-plugin": "^1.42.1",
     "@eslint-react/eslint-plugin": "^5.9.1",

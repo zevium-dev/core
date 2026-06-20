@@ -7,7 +7,6 @@ import { cn } from "~/lib/utils";
 
 interface AuthFormClientOnlyProps extends PropsWithChildren {
   fields: Array<AuthFormFieldSkeleton>;
-  showCaptcha?: boolean;
 }
 
 interface AuthFormFieldSkeleton {
@@ -32,13 +31,12 @@ const renderFieldSkeleton = (field: AuthFormFieldSkeleton, index: number) => {
   );
 };
 
-export function AuthFormClientOnly({ children, fields, showCaptcha }: AuthFormClientOnlyProps) {
+export function AuthFormClientOnly({ children, fields }: AuthFormClientOnlyProps) {
   return (
     <ClientOnly
       fallback={
         <div className="grid gap-6">
           {fields.map(renderFieldSkeleton)}
-          {showCaptcha && <Skeleton className="h-8 w-full" />}
           <Skeleton className="h-9 w-full" />
         </div>
       }

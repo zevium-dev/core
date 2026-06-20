@@ -1,45 +1,54 @@
-import Cap from "@cap.js/server";
+import { createHash } from "node:crypto";
 
+import {
+  generateChallenge,
+  validateChallenge,
+  type ChallengeResult,
+  type ValidateChallengeBody,
+  type ValidateChallengeResult,
+} from "capjs-core";
+
+import { serverEnv } from "~/env/server";
 import { kv } from "~/lib/server/kv";
 
-export type Solution = Cap.Solution;
-
 const CAP_KV_PREFIX = "cap:";
+const CAP_SECRET = serverEnv.CAP_SECRET;
 
-export const cap = new Cap({
-  noFSState: true,
-  storage: {
-    challenges: {
-      delete: async (token) => {
-        await kv.del(CAP_KV_PREFIX + token);
-      },
-      deleteExpired: async () => {
-        // KV has its own TTL, no cleanup needed
-      },
-      read: async (token) => {
-        const data = await kv.get<Cap.ChallengeData>(CAP_KV_PREFIX + token);
-        if (!data) return null;
-        return data;
-      },
-      store: async (token, challengeData) => {
-        await kv.set(CAP_KV_PREFIX + token, challengeData, { pxat: challengeData.expires });
-      },
+export type Solution = ValidateChallengeBody;
+
+export const createChallenge = (): Promise<ChallengeResult> => {
+  return generateChallenge(CAP_SECRET);
+};
+
+export const redeemChallenge = async (body: Solution): Promise<ValidateChallengeResult> => {
+  const result = await validateChallenge(CAP_SECRET, body, {
+    consumeNonce: async (sigHex, ttlMs) => {
+      const key = CAP_KV_PREFIX + sigHex;
+      const existing = await kv.get(key);
+      if (existing) return false;
+      await kv.set(key, "1", { pxat: Date.now() + ttlMs });
+      return true;
     },
-    tokens: {
-      delete: async (tokenKey) => {
-        await kv.del(CAP_KV_PREFIX + tokenKey);
-      },
-      deleteExpired: async () => {
-        // KV has its own TTL, no cleanup needed
-      },
-      get: async (tokenKey) => {
-        const data = await kv.get<string>(CAP_KV_PREFIX + tokenKey);
-        if (!data) return null;
-        return parseInt(data, 10);
-      },
-      store: async (tokenKey, expires) => {
-        await kv.set(CAP_KV_PREFIX + tokenKey, expires.toString(), { pxat: expires });
-      },
-    },
-  },
-});
+  });
+
+  if (!result.success) return result;
+
+  const tokenKey = getTokenKey(result.token);
+  await kv.set(CAP_KV_PREFIX + tokenKey, result.expires.toString(), { pxat: result.expires });
+
+  return result;
+};
+
+export const validateToken = async (token: string): Promise<{ success: boolean }> => {
+  const tokenKey = getTokenKey(token);
+  const expires = await kv.get<string>(CAP_KV_PREFIX + tokenKey);
+  if (!expires) return { success: false };
+  if (Date.now() > parseInt(expires, 10)) return { success: false };
+  return { success: true };
+};
+
+function getTokenKey(token: string): string {
+  const [id, verToken] = token.split(":");
+  if (!id || !verToken) return token;
+  return `${id}:${createHash("sha256").update(verToken).digest("hex")}`;
+}

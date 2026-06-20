@@ -11,7 +11,6 @@ export const defaultEndpoints = ["/sign-up/email", "/sign-in/email", "/forget-pa
 export const capCaptcha = (options?: BaseCaptchaOptions): BetterAuthPlugin => ({
   id: "cap-captcha",
   onRequest: async (request, ctx) => {
-    const { cap } = await import("~/lib/server/cap");
     try {
       const endpoints = options?.endpoints?.length ? options.endpoints : defaultEndpoints;
       if (!endpoints.some((endpoint) => request.url.includes(endpoint))) return undefined;
@@ -23,7 +22,8 @@ export const capCaptcha = (options?: BaseCaptchaOptions): BetterAuthPlugin => ({
         };
       }
 
-      const challengeValid = await cap.validateToken(captchaToken);
+      const { validateToken } = await import("~/lib/server/cap");
+      const challengeValid = await validateToken(captchaToken);
 
       if (!challengeValid.success) {
         return {
