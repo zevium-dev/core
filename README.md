@@ -4,9 +4,9 @@ This repo has all the code for [zevium.dev](https://zevium.dev).
 The entire website was made using TanStack Start.
 
 ![TanStack Start](https://img.shields.io/badge/TanStack%20Start-1-c93679?style=for-the-badge&logo=zap)
-![shadcn](https://img.shields.io/badge/shadcnui-4-ffffff?style=for-the-badge&logo=shadcnui)
+![shadcn](https://img.shields.io/badge/shadcn-ui-ffffff?style=for-the-badge&logo=shadcnui)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5-4476c0?style=for-the-badge&logo=typescript)
-![PNPM](https://img.shields.io/badge/pnpm-10-f69220?style=for-the-badge&logo=pnpm)
+![PNPM](https://img.shields.io/badge/pnpm-11-f69220?style=for-the-badge&logo=pnpm)
 ![WTFPL](https://img.shields.io/badge/license-WTFPL-696969?style=for-the-badge&logo=unlicense)
 
 ![Drizzle](https://img.shields.io/badge/Drizzle-ORM-ffffff?style=for-the-badge&logo=drizzle)
