@@ -108,7 +108,9 @@ function RouteComponent() {
                   <div className="grid gap-6">
                     <form.Field
                       children={(field) => {
-                        const isInvalid = field.state.meta.isTouched && !field.state.meta.isValid;
+                        const isInvalid =
+                          (field.state.meta.isBlurred || field.form.state.isSubmitted) &&
+                          field.state.meta.errors.length > 0;
                         const error = field.state.meta.errors.at(0);
 
                         return (
@@ -128,13 +130,7 @@ function RouteComponent() {
                               value={field.state.value}
                             />
                             <p
-                              className={cn(
-                                "text-end text-xs text-destructive",
-                                !isInvalid &&
-                                  `
-                      invisible
-                    `,
-                              )}
+                              className={cn("text-end text-xs text-destructive", !isInvalid && "invisible")}
                               id="name-error"
                             >
                               {isInvalid ? getFormErrorString(error) : "No error"}
@@ -147,7 +143,9 @@ function RouteComponent() {
 
                     <form.Field
                       children={(field) => {
-                        const isInvalid = field.state.meta.isTouched && !field.state.meta.isValid;
+                        const isInvalid =
+                          (field.state.meta.isBlurred || field.form.state.isSubmitted) &&
+                          field.state.meta.errors.length > 0;
                         const error = field.state.meta.errors.at(0);
 
                         return (
@@ -167,13 +165,7 @@ function RouteComponent() {
                               value={field.state.value}
                             />
                             <p
-                              className={cn(
-                                "text-end text-xs text-destructive",
-                                !isInvalid &&
-                                  `
-                        invisible
-                      `,
-                              )}
+                              className={cn("text-end text-xs text-destructive", !isInvalid && "invisible")}
                               id="email-error"
                             >
                               {isInvalid ? getFormErrorString(error) : "No error"}
@@ -186,7 +178,9 @@ function RouteComponent() {
 
                     <form.Field
                       children={(field) => {
-                        const isInvalid = field.state.meta.isTouched && !field.state.meta.isValid;
+                        const isInvalid =
+                          (field.state.meta.isBlurred || field.form.state.isSubmitted) &&
+                          field.state.meta.errors.length > 0;
                         const error = field.state.meta.errors.at(0);
 
                         return (
@@ -205,13 +199,7 @@ function RouteComponent() {
                               value={field.state.value}
                             />
                             <p
-                              className={cn(
-                                "text-end text-xs text-destructive",
-                                !isInvalid &&
-                                  `
-                        invisible
-                      `,
-                              )}
+                              className={cn("text-end text-xs text-destructive", !isInvalid && "invisible")}
                               id="password-error"
                             >
                               {isInvalid ? getFormErrorString(error) : "No error"}
@@ -224,7 +212,9 @@ function RouteComponent() {
 
                     <form.Field
                       children={(field) => {
-                        const isInvalid = field.state.meta.isTouched && !field.state.meta.isValid;
+                        const isInvalid =
+                          (field.state.meta.isBlurred || field.form.state.isSubmitted) &&
+                          field.state.meta.errors.length > 0;
                         const error = field.state.meta.errors.at(0);
 
                         return (
@@ -243,13 +233,7 @@ function RouteComponent() {
                               value={field.state.value}
                             />
                             <p
-                              className={cn(
-                                "text-end text-xs text-destructive",
-                                !isInvalid &&
-                                  `
-                        invisible
-                      `,
-                              )}
+                              className={cn("text-end text-xs text-destructive", !isInvalid && "invisible")}
                               id="password-confirm-error"
                             >
                               {isInvalid ? getFormErrorString(error) : "No error"}
