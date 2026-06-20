@@ -53,12 +53,7 @@ export default defineConfig(
 
   eslint.configs.recommended,
 
-  {
-    plugins: { "react-hooks": reactHooks },
-    rules:
-      /** @type {import("eslint").Linter.RulesRecord} */
-      (reactHooks.configs["recommended-latest"].rules),
-  },
+  reactHooks.configs.flat["recommended-latest"],
 
   perfectionist.configs["recommended-alphabetical"],
   tailwind,

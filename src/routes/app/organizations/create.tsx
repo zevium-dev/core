@@ -49,12 +49,13 @@ function RouteComponent() {
     }),
   );
 
+  const defaultValues: FormValues = {
+    logo: null,
+    name: "",
+    slug: "",
+  };
   const form = useForm({
-    defaultValues: {
-      logo: null,
-      name: "",
-      slug: "",
-    } as FormValues,
+    defaultValues,
     onSubmit: ({ value }) => {
       createOrgMutation.mutate({
         name: value.name,

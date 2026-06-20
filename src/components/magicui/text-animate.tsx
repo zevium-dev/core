@@ -1,7 +1,7 @@
 "use client";
 
 import { AnimatePresence, m, MotionProps, Variants } from "motion/react";
-import { ElementType, memo } from "react";
+import { createElement, ElementType, memo, useMemo } from "react";
 
 import { cn } from "~/lib/utils/index";
 
@@ -304,8 +304,7 @@ const TextAnimateBase = ({
   variants,
   ...props
 }: TextAnimateProps) => {
-  // eslint-disable-next-line react-hooks/static-components
-  const MotionComponent = m.create(Component);
+  const MotionComponent = useMemo(() => m.create(Component), [Component]);
 
   let segments: Array<string>;
   switch (by) {
@@ -373,20 +372,21 @@ const TextAnimateBase = ({
 
   return (
     <AnimatePresence mode="popLayout">
-      {/* eslint-disable-next-line react-hooks/static-components */}
-      <MotionComponent
-        animate={startOnView ? undefined : "show"}
-        aria-label={accessible ? children : undefined}
-        className={cn("whitespace-pre-wrap", className)}
-        exit="exit"
-        initial="hidden"
-        variants={finalVariants.container}
-        viewport={{ once }}
-        whileInView={startOnView ? "show" : undefined}
-        {...props}
-      >
-        {accessible && <span className="sr-only">{children}</span>}
-        {segments.map((segment, i) => (
+      {createElement(
+        MotionComponent,
+        {
+          animate: startOnView ? undefined : "show",
+          "aria-label": accessible ? children : undefined,
+          className: cn("whitespace-pre-wrap", className),
+          exit: "exit",
+          initial: "hidden",
+          variants: finalVariants.container,
+          viewport: { once },
+          whileInView: startOnView ? "show" : undefined,
+          ...props,
+        },
+        accessible && <span className="sr-only">{children}</span>,
+        segments.map((segment, i) => (
           <m.span
             aria-hidden={accessible ? true : undefined}
             className={cn(
@@ -401,8 +401,8 @@ const TextAnimateBase = ({
           >
             {segment}
           </m.span>
-        ))}
-      </MotionComponent>
+        )),
+      )}
     </AnimatePresence>
   );
 };

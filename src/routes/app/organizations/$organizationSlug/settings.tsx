@@ -41,7 +41,6 @@ const InviteFormZod = z.object({
   role: z.enum(AssignableOrganizationRoles),
 });
 
-type FormValues = z.infer<typeof FormZod>;
 type InviteFormValues = z.infer<typeof InviteFormZod>;
 
 const memberRoleOptions = AssignableOrganizationRoles.map((role) => ({
@@ -168,8 +167,9 @@ function RouteComponent() {
 
   const isSlugDirty = useStore(form.store, (state) => state.fieldMeta.slug?.isDirty ?? false);
 
+  const inviteDefaultValues: InviteFormValues = { email: "", role: "member" };
   const inviteForm = useForm({
-    defaultValues: { email: "", role: "member" } as InviteFormValues,
+    defaultValues: inviteDefaultValues,
     onSubmit: async ({ formApi, value }) => {
       await inviteMemberMutation.mutateAsync({
         email: value.email,

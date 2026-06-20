@@ -53,6 +53,7 @@ interface ConfirmRequest {
 
 interface ConfirmState {
   active: ConfirmRequest | null;
+  lastActive: ConfirmRequest | null;
   queue: Array<ConfirmRequest>;
 }
 
@@ -86,30 +87,26 @@ const confirmReducer = (state: ConfirmState, action: ConfirmAction): ConfirmStat
     case "dequeue": {
       const next = state.queue.at(0);
       if (!next) {
-        return { active: null, queue: [] };
+        return { ...state, active: null, queue: [] };
       }
-      return { active: next, queue: state.queue.slice(1) };
+      return { ...state, active: next, lastActive: next, queue: state.queue.slice(1) };
     }
     case "enqueue": {
       if (state.active) {
         return { ...state, queue: [...state.queue, action.request] };
       }
-      return { ...state, active: action.request };
+      return { ...state, active: action.request, lastActive: action.request };
     }
   }
 };
 
 export const ConfirmProvider = ({ children }: PropsWithChildren) => {
   const nextIdRef = useRef(1);
-  const renderedRequestRef = useRef<ConfirmRequest | null>(null);
   const resolvingRef = useRef(false);
 
-  const [state, dispatch] = useReducer(confirmReducer, { active: null, queue: [] });
+  const [state, dispatch] = useReducer(confirmReducer, { active: null, lastActive: null, queue: [] });
 
   useEffect(() => {
-    if (state.active) {
-      renderedRequestRef.current = state.active;
-    }
     resolvingRef.current = false;
   }, [state.active]);
 
@@ -140,8 +137,7 @@ export const ConfirmProvider = ({ children }: PropsWithChildren) => {
   }, []);
 
   const activeRequest = state.active;
-  // eslint-disable-next-line react-hooks/refs
-  const renderedRequest = activeRequest ?? renderedRequestRef.current;
+  const renderedRequest = activeRequest ?? state.lastActive;
   const open = !!activeRequest;
 
   const cancelText = renderedRequest ? renderedRequest.options.cancelText : defaultOptions.cancelText;
