@@ -46,13 +46,7 @@ export default function CheckoutDialog(params: CheckoutDialogProps) {
 
         {isPaid && <PriceInformation checkoutResult={checkoutResult} />}
 
-        <DialogFooter
-          className={`
-          flex flex-col justify-between gap-x-4 border-t bg-secondary py-2 pr-3
-          pl-6 shadow-inner
-          sm:flex-row
-        `}
-        >
+        <DialogFooter className="flex flex-col justify-between gap-x-4 border-t bg-secondary py-2 pr-3 pl-6 shadow-inner sm:flex-row">
           <Button
             className="flex min-w-16 items-center gap-2"
             disabled={loading}
@@ -94,22 +88,11 @@ function CheckoutLines({ checkoutResult }: { checkoutResult: CheckoutResult }) {
   return (
     <Accordion collapsible type="single">
       <AccordionItem className="border-b-0" value="total">
-        <CustomAccordionTrigger
-          className={`
-          my-0 w-full justify-between border-none py-0
-        `}
-        >
-          <div
-            className={`
-            flex w-full cursor-pointer items-center justify-end gap-1
-          `}
-          >
+        <CustomAccordionTrigger className="my-0 w-full justify-between border-none py-0">
+          <div className="flex w-full cursor-pointer items-center justify-end gap-1">
             <p className="font-light text-muted-foreground">View details</p>
             <ChevronDown
-              className={`
-                mt-0.5 rotate-90 text-muted-foreground transition-transform
-                duration-200 ease-in-out
-              `}
+              className="mt-0.5 rotate-90 text-muted-foreground transition-transform duration-200 ease-in-out"
               size={14}
             />
           </div>
@@ -325,12 +308,7 @@ const PrepaidItem = ({ checkoutResult, item }: { checkoutResult: CheckoutResult;
             Qty: {quantity}
             <ChevronDown size={12} />
           </PopoverTrigger>
-          <PopoverContent
-            align="start"
-            className={`
-            flex w-80 flex-col gap-4 p-4 pt-3 text-sm
-          `}
-          >
+          <PopoverContent align="start" className="flex w-80 flex-col gap-4 p-4 pt-3 text-sm">
             <div className="flex flex-col gap-1">
               <p className="text-sm font-medium">{item.feature?.name ?? "Feature"}</p>
               <p className="text-muted-foreground">
@@ -341,10 +319,7 @@ const PrepaidItem = ({ checkoutResult, item }: { checkoutResult: CheckoutResult;
             <div className="flex items-end justify-between">
               <div className="flex items-center gap-2">
                 <Input
-                  className={`
-                    h-7 w-16
-                    focus:ring-2!
-                  `}
+                  className="h-7 w-16 focus:ring-2!"
                   onChange={(e) => setQuantityInput(e.target.value)}
                   value={quantityInput}
                 />
@@ -355,23 +330,11 @@ const PrepaidItem = ({ checkoutResult, item }: { checkoutResult: CheckoutResult;
               </div>
 
               <Button
-                className={`
-                  h-7! w-14 items-center border border-border bg-background text-sm
-                  text-foreground shadow-sm
-                  hover:bg-muted
-                `}
+                className="h-7! w-14 items-center border border-border bg-background text-sm text-foreground shadow-sm hover:bg-muted"
                 disabled={loading}
                 onClick={handleSave}
               >
-                {loading ? (
-                  <Loader2
-                    className={`
-                  size-4! animate-spin text-muted-foreground
-                `}
-                  />
-                ) : (
-                  "Save"
-                )}
+                {loading ? <Loader2 className="size-4! animate-spin text-muted-foreground" /> : "Save"}
               </Button>
             </div>
           </PopoverContent>

@@ -125,11 +125,7 @@ function NavigationMenuIndicator({
       data-slot="navigation-menu-indicator"
       {...props}
     >
-      <div
-        className={`
-        relative top-[60%] size-2 rotate-45 rounded-tl-sm bg-border shadow-md
-      `}
-      />
+      <div className="relative top-[60%] size-2 rotate-45 rounded-tl-sm bg-border shadow-md" />
     </NavigationMenuPrimitive.Indicator>
   );
 }
@@ -172,10 +168,7 @@ function NavigationMenuTrigger({
       {children}{" "}
       <ChevronDownIcon
         aria-hidden="true"
-        className={`
-          relative top-px ml-1 size-3 transition duration-300
-          group-data-[state=open]:rotate-180
-        `}
+        className="relative top-px ml-1 size-3 transition duration-300 group-data-[state=open]:rotate-180"
       />
     </NavigationMenuPrimitive.Trigger>
   );

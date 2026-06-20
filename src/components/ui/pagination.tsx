@@ -75,14 +75,7 @@ function PaginationNext({ className, ...props }: React.ComponentProps<typeof Pag
       size="default"
       {...props}
     >
-      <span
-        className={`
-        hidden
-        sm:block
-      `}
-      >
-        Next
-      </span>
+      <span className="hidden sm:block">Next</span>
       <ChevronRightIcon />
     </PaginationLink>
   );
@@ -103,14 +96,7 @@ function PaginationPrevious({ className, ...props }: React.ComponentProps<typeof
       {...props}
     >
       <ChevronLeftIcon />
-      <span
-        className={`
-        hidden
-        sm:block
-      `}
-      >
-        Previous
-      </span>
+      <span className="hidden sm:block">Previous</span>
     </PaginationLink>
   );
 }

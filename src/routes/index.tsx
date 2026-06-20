@@ -35,35 +35,17 @@ function Home() {
         </div>
       </PageHeaderContent>
 
-      <div
-        className={`
-        flex-1 space-y-8 p-4 pt-6
-        md:p-8
-      `}
-      >
+      <div className="flex-1 space-y-8 p-4 pt-6 md:p-8">
         {/* Hero Section */}
         <section className="relative overflow-hidden py-16">
           <Ripple />
-          <div
-            className={`
-            absolute inset-0 bg-linear-to-br from-chart-1/5 via-transparent
-            to-chart-3/5
-          `}
-          ></div>
+          <div className="absolute inset-0 bg-linear-to-br from-chart-1/5 via-transparent to-chart-3/5"></div>
           <div className="relative z-10 space-y-12">
             <div className="mx-auto max-w-4xl space-y-6 text-center">
-              <h1
-                className={`
-                text-4xl/tight font-bold text-foreground
-                lg:text-6xl
-              `}
-              >
+              <h1 className="text-4xl/tight font-bold text-foreground lg:text-6xl">
                 Integrate{" "}
                 <WordRotate
-                  className={`
-                    inline text-4xl font-bold text-primary
-                    lg:text-6xl
-                  `}
+                  className="inline text-4xl font-bold text-primary lg:text-6xl"
                   duration={2500}
                   words={[
                     "payments",
@@ -87,22 +69,14 @@ function Home() {
                 />{" "}
                 in one click
               </h1>
-              <p
-                className={`
-                mx-auto max-w-3xl text-lg/relaxed text-muted-foreground
-              `}
-              >
+              <p className="mx-auto max-w-3xl text-lg/relaxed text-muted-foreground">
                 Connect any API faster, securely, and reliably through Zevium.
                 <br />
                 Our unified gateway simplifies integration, reduces complexity, and accelerates your development
                 workflow.
               </p>
               <Button
-                className={`
-                  cursor-pointer bg-linear-to-r from-chart-1 to-chart-3
-                  text-primary-foreground shadow-lg
-                  hover:from-chart-1/90 hover:to-chart-3/90
-                `}
+                className="cursor-pointer bg-linear-to-r from-chart-1 to-chart-3 text-primary-foreground shadow-lg hover:from-chart-1/90 hover:to-chart-3/90"
                 onClick={() => navigate({ to: "/app/catalogue" })}
                 size="lg"
               >
@@ -117,93 +91,44 @@ function Home() {
         </section>
 
         {/* Stats Section */}
-        <section
-          className={`
-          rounded-2xl bg-linear-to-r from-chart-1/5 via-muted/30 to-chart-4/5
-          py-20
-        `}
-        >
+        <section className="rounded-2xl bg-linear-to-r from-chart-1/5 via-muted/30 to-chart-4/5 py-20">
           <div className="space-y-16 text-center">
             <div className="space-y-4">
               <TextAnimate
                 animation="blurInUp"
                 by="character"
-                className={`
-                  text-4xl font-bold text-foreground
-                  lg:text-6xl
-                `}
+                className="text-4xl font-bold text-foreground lg:text-6xl"
               >
                 World's largest public API Hub
               </TextAnimate>
             </div>
 
-            <div
-              className={`
-              grid gap-12
-              md:grid-cols-3
-            `}
-            >
+            <div className="grid gap-12 md:grid-cols-3">
               <div className="group cursor-pointer text-center">
-                <div
-                  className={`
-                  mb-6 inline-flex size-20 items-center justify-center
-                  rounded-full bg-chart-1/10 transition-transform duration-300
-                  group-hover:scale-110
-                  dark:bg-chart-1/20
-                `}
-                >
+                <div className="mb-6 inline-flex size-20 items-center justify-center rounded-full bg-chart-1/10 transition-transform duration-300 group-hover:scale-110 dark:bg-chart-1/20">
                   <Users className="size-10 text-chart-1" />
                 </div>
-                <div
-                  className={`
-                  mb-3 text-5xl font-bold text-foreground
-                  lg:text-7xl
-                `}
-                >
+                <div className="mb-3 text-5xl font-bold text-foreground lg:text-7xl">
                   <NumberTicker value={7} />
                   M+
                 </div>
                 <p className="text-lg font-semibold text-chart-1">Developers</p>
               </div>
               <div className="group cursor-pointer text-center">
-                <div
-                  className={`
-                  mb-6 inline-flex size-20 items-center justify-center
-                  rounded-full bg-chart-4/10 transition-transform duration-300
-                  group-hover:scale-110
-                  dark:bg-chart-4/20
-                `}
-                >
+                <div className="mb-6 inline-flex size-20 items-center justify-center rounded-full bg-chart-4/10 transition-transform duration-300 group-hover:scale-110 dark:bg-chart-4/20">
                   <Code className="size-10 text-chart-4" />
                 </div>
-                <div
-                  className={`
-                  mb-3 text-5xl font-bold text-foreground
-                  lg:text-7xl
-                `}
-                >
+                <div className="mb-3 text-5xl font-bold text-foreground lg:text-7xl">
                   <NumberTicker value={75} />
                   K+
                 </div>
                 <p className="text-lg font-semibold text-chart-4">APIs in the Hub</p>
               </div>
               <div className="group cursor-pointer text-center">
-                <div
-                  className={`
-                  mb-6 inline-flex size-20 items-center justify-center
-                  rounded-full bg-chart-5/10 transition-transform duration-300
-                  group-hover:scale-110
-                  dark:bg-chart-5/20
-                `}
-                >
+                <div className="mb-6 inline-flex size-20 items-center justify-center rounded-full bg-chart-5/10 transition-transform duration-300 group-hover:scale-110 dark:bg-chart-5/20">
                   <TrendingUp className="size-10 text-chart-5" />
                 </div>
-                <div
-                  className={`
-                  mb-3 text-5xl font-bold text-foreground
-                  lg:text-7xl
-                `}
-                >
+                <div className="mb-3 text-5xl font-bold text-foreground lg:text-7xl">
                   <NumberTicker value={8} />
                   B+
                 </div>
@@ -216,32 +141,15 @@ function Home() {
         {/* Features Section */}
         <section className="space-y-24 py-20">
           {/* Publish APIs */}
-          <div
-            className={`
-            grid items-center gap-16
-            lg:grid-cols-2
-          `}
-          >
+          <div className="grid items-center gap-16 lg:grid-cols-2">
             <div>
-              <Card
-                className={`
-                border-chart-2/20 bg-linear-to-br from-gray-900 via-chart-2/5
-                to-gray-950 text-white shadow-2xl
-              `}
-              >
+              <Card className="border-chart-2/20 bg-linear-to-br from-gray-900 via-chart-2/5 to-gray-950 text-white shadow-2xl">
                 <CardHeader className="pb-4">
                   <div className="mb-4 flex items-center gap-3">
                     <Badge className="bg-chart-1/10 px-3 py-1 text-chart-1" variant="secondary">
                       Node.js Axios
                     </Badge>
-                    <Button
-                      className={`
-                      text-chart-3
-                      hover:text-chart-3/80
-                    `}
-                      size="sm"
-                      variant="ghost"
-                    >
+                    <Button className="text-chart-3 hover:text-chart-3/80" size="sm" variant="ghost">
                       Copy Code
                     </Button>
                   </div>
@@ -270,12 +178,7 @@ function Home() {
             </div>
             <div className="space-y-6">
               <div className="flex items-center gap-4">
-                <div
-                  className={`
-                  rounded-xl bg-chart-1/10 p-3
-                  dark:bg-chart-1/20
-                `}
-                >
+                <div className="rounded-xl bg-chart-1/10 p-3 dark:bg-chart-1/20">
                   <Zap className="size-8 text-chart-1" />
                 </div>
                 <h3 className="text-4xl font-bold text-foreground">Publish APIs</h3>
@@ -288,25 +191,10 @@ function Home() {
           </div>
 
           {/* Consume APIs */}
-          <div
-            className={`
-            grid items-center gap-16
-            lg:grid-cols-2
-          `}
-          >
-            <div
-              className={`
-              order-2 space-y-6
-              lg:order-1
-            `}
-            >
+          <div className="grid items-center gap-16 lg:grid-cols-2">
+            <div className="order-2 space-y-6 lg:order-1">
               <div className="flex items-center gap-4">
-                <div
-                  className={`
-                  rounded-xl bg-chart-4/10 p-3
-                  dark:bg-chart-4/20
-                `}
-                >
+                <div className="rounded-xl bg-chart-4/10 p-3 dark:bg-chart-4/20">
                   <Globe className="size-8 text-chart-4" />
                 </div>
                 <h3 className="text-4xl font-bold text-foreground">Consume APIs</h3>
@@ -316,43 +204,20 @@ function Home() {
                 than ever.
               </p>
             </div>
-            <div
-              className={`
-              order-1
-              lg:order-2
-            `}
-            >
-              <Card
-                className={`
-                border-chart-4/20 bg-linear-to-br from-white via-chart-4/5
-                to-white shadow-2xl
-                dark:from-gray-900 dark:via-chart-4/10 dark:to-gray-900
-              `}
-              >
+            <div className="order-1 lg:order-2">
+              <Card className="border-chart-4/20 bg-linear-to-br from-white via-chart-4/5 to-white shadow-2xl dark:from-gray-900 dark:via-chart-4/10 dark:to-gray-900">
                 <CardContent className="p-8">
                   <div className="space-y-6">
                     <div className="flex items-center gap-3">
                       <div className="size-4 rounded-full bg-red-500 shadow-sm"></div>
-                      <div
-                        className={`
-                        size-4 rounded-full bg-yellow-500 shadow-sm
-                      `}
-                      ></div>
-                      <div
-                        className={`
-                        size-4 rounded-full bg-green-500 shadow-sm
-                      `}
-                      ></div>
+                      <div className="size-4 rounded-full bg-yellow-500 shadow-sm"></div>
+                      <div className="size-4 rounded-full bg-green-500 shadow-sm"></div>
                       <div className="ml-auto text-xs text-muted-foreground">API Browser</div>
                     </div>
                     <div className="space-y-4">
                       <div className="flex items-center gap-3">
                         <div className="size-5 rounded-sm bg-muted-foreground/30"></div>
-                        <div
-                          className={`
-                          h-3 flex-1 rounded-sm bg-muted-foreground/30
-                        `}
-                        ></div>
+                        <div className="h-3 flex-1 rounded-sm bg-muted-foreground/30"></div>
                       </div>
                       <div className="flex items-center gap-3">
                         <div className="size-5 rounded-sm bg-chart-1"></div>
@@ -360,11 +225,7 @@ function Home() {
                       </div>
                       <div className="flex items-center gap-3">
                         <div className="size-5 rounded-sm bg-muted-foreground/30"></div>
-                        <div
-                          className={`
-                          h-3 w-1/2 rounded-sm bg-muted-foreground/30
-                        `}
-                        ></div>
+                        <div className="h-3 w-1/2 rounded-sm bg-muted-foreground/30"></div>
                       </div>
                       <div className="flex items-center gap-3">
                         <div className="size-5 rounded-sm bg-chart-5"></div>
@@ -378,28 +239,14 @@ function Home() {
           </div>
 
           {/* Manage APIs */}
-          <div
-            className={`
-            grid items-center gap-16
-            lg:grid-cols-2
-          `}
-          >
+          <div className="grid items-center gap-16 lg:grid-cols-2">
             <div>
-              <Card
-                className={`
-                border-chart-5/20 bg-linear-to-br from-white via-chart-5/5
-                to-white shadow-2xl
-                dark:from-gray-900 dark:via-chart-5/10 dark:to-gray-900
-              `}
-              >
+              <Card className="border-chart-5/20 bg-linear-to-br from-white via-chart-5/5 to-white shadow-2xl dark:from-gray-900 dark:via-chart-5/10 dark:to-gray-900">
                 <CardContent className="p-8">
                   <div className="space-y-6">
                     <div className="flex items-center justify-between">
                       <Badge
-                        className={`
-                          border-chart-1/20 bg-linear-to-r from-chart-1/10
-                          to-chart-3/10 px-3 py-1 text-chart-1
-                        `}
+                        className="border-chart-1/20 bg-linear-to-r from-chart-1/10 to-chart-3/10 px-3 py-1 text-chart-1"
                         variant="outline"
                       >
                         General Settings
@@ -414,10 +261,7 @@ function Home() {
                         </div>
                         <div className="h-3 w-full rounded-full bg-muted">
                           <div
-                            className={`
-                              h-3 rounded-full bg-chart-4 transition-all
-                              duration-500
-                            `}
+                            className="h-3 rounded-full bg-chart-4 transition-all duration-500"
                             style={{ width: "88%" }}
                           ></div>
                         </div>
@@ -428,12 +272,7 @@ function Home() {
                           <span className="text-sm font-bold">100%</span>
                         </div>
                         <div className="h-3 w-full rounded-full bg-muted">
-                          <div
-                            className={`
-                            h-3 w-full rounded-full bg-chart-4 transition-all
-                            duration-500
-                          `}
-                          ></div>
+                          <div className="h-3 w-full rounded-full bg-chart-4 transition-all duration-500"></div>
                         </div>
                       </div>
                       <div className="space-y-2">
@@ -443,10 +282,7 @@ function Home() {
                         </div>
                         <div className="h-3 w-full rounded-full bg-muted">
                           <div
-                            className={`
-                              h-3 rounded-full bg-chart-1 transition-all
-                              duration-500
-                            `}
+                            className="h-3 rounded-full bg-chart-1 transition-all duration-500"
                             style={{ width: "99%" }}
                           ></div>
                         </div>
@@ -458,12 +294,7 @@ function Home() {
             </div>
             <div className="space-y-6">
               <div className="flex items-center gap-4">
-                <div
-                  className={`
-                  rounded-xl bg-chart-5/10 p-3
-                  dark:bg-chart-5/20
-                `}
-                >
+                <div className="rounded-xl bg-chart-5/10 p-3 dark:bg-chart-5/20">
                   <BarChart3 className="size-8 text-chart-5" />
                 </div>
                 <h3 className="text-4xl font-bold text-foreground">Manage APIs</h3>
@@ -479,12 +310,7 @@ function Home() {
 
         {/* Footer */}
         <footer className="mt-20 border-t border-border/40 to-chart-2/5 py-10">
-          <div
-            className={`
-            grid gap-12
-            md:grid-cols-4
-          `}
-          >
+          <div className="grid gap-12 md:grid-cols-4">
             <div className="col-span-2 space-y-6">
               <div className="flex items-center space-x-3">
                 <Globe className="size-8 text-primary" />
@@ -510,46 +336,22 @@ function Home() {
               <h4 className="text-lg font-semibold text-foreground">Platform</h4>
               <ul className="space-y-3 text-muted-foreground">
                 <li>
-                  <a
-                    className={`
-                    transition-colors
-                    hover:text-foreground
-                  `}
-                    href="#"
-                  >
+                  <a className="transition-colors hover:text-foreground" href="#">
                     Browse APIs
                   </a>
                 </li>
                 <li>
-                  <a
-                    className={`
-                    transition-colors
-                    hover:text-foreground
-                  `}
-                    href="#"
-                  >
+                  <a className="transition-colors hover:text-foreground" href="#">
                     Publish API
                   </a>
                 </li>
                 <li>
-                  <a
-                    className={`
-                    transition-colors
-                    hover:text-foreground
-                  `}
-                    href="#"
-                  >
+                  <a className="transition-colors hover:text-foreground" href="#">
                     API Testing
                   </a>
                 </li>
                 <li>
-                  <a
-                    className={`
-                    transition-colors
-                    hover:text-foreground
-                  `}
-                    href="#"
-                  >
+                  <a className="transition-colors hover:text-foreground" href="#">
                     Documentation
                   </a>
                 </li>
@@ -559,91 +361,38 @@ function Home() {
               <h4 className="text-lg font-semibold text-foreground">Company</h4>
               <ul className="space-y-3 text-muted-foreground">
                 <li>
-                  <a
-                    className={`
-                    transition-colors
-                    hover:text-foreground
-                  `}
-                    href="#"
-                  >
+                  <a className="transition-colors hover:text-foreground" href="#">
                     About
                   </a>
                 </li>
                 <li>
-                  <a
-                    className={`
-                    transition-colors
-                    hover:text-foreground
-                  `}
-                    href="#"
-                  >
+                  <a className="transition-colors hover:text-foreground" href="#">
                     Careers
                   </a>
                 </li>
                 <li>
-                  <a
-                    className={`
-                    transition-colors
-                    hover:text-foreground
-                  `}
-                    href="#"
-                  >
+                  <a className="transition-colors hover:text-foreground" href="#">
                     Contact
                   </a>
                 </li>
                 <li>
-                  <a
-                    className={`
-                    transition-colors
-                    hover:text-foreground
-                  `}
-                    href="#"
-                  >
+                  <a className="transition-colors hover:text-foreground" href="#">
                     Blog
                   </a>
                 </li>
               </ul>
             </div>
           </div>
-          <div
-            className={`
-            mt-16 flex flex-col items-center justify-between border-t
-            border-border/40 pt-8
-            md:flex-row
-          `}
-          >
+          <div className="mt-16 flex flex-col items-center justify-between border-t border-border/40 pt-8 md:flex-row">
             <p className="text-muted-foreground">© 2025 Zevium API Hub. All rights reserved.</p>
-            <div
-              className={`
-              mt-4 flex space-x-8 text-muted-foreground
-              md:mt-0
-            `}
-            >
-              <a
-                className={`
-                transition-colors
-                hover:text-foreground
-              `}
-                href="#"
-              >
+            <div className="mt-4 flex space-x-8 text-muted-foreground md:mt-0">
+              <a className="transition-colors hover:text-foreground" href="#">
                 Privacy Policy
               </a>
-              <a
-                className={`
-                transition-colors
-                hover:text-foreground
-              `}
-                href="#"
-              >
+              <a className="transition-colors hover:text-foreground" href="#">
                 Terms of Service
               </a>
-              <a
-                className={`
-                transition-colors
-                hover:text-foreground
-              `}
-                href="#"
-              >
+              <a className="transition-colors hover:text-foreground" href="#">
                 Support
               </a>
             </div>

@@ -139,11 +139,7 @@ function RouteComponent() {
                 {totpUri && (
                   <div className="flex flex-col items-center gap-2">
                     <QRCode className="rounded-sm bg-white p-3" value={totpUri} />
-                    <p
-                      className={`
-                      text-center text-xs break-all text-muted-foreground
-                    `}
-                    >
+                    <p className="text-center text-xs break-all text-muted-foreground">
                       Can't scan? Use this key/URL: {totpUri}
                     </p>
                   </div>
@@ -192,20 +188,9 @@ function RouteComponent() {
                 </div>
                 {Array.isArray(backupCodes) && backupCodes.length > 0 ? (
                   <>
-                    <div
-                      className={`
-                      grid grid-cols-2 gap-2
-                      md:grid-cols-3
-                    `}
-                    >
+                    <div className="grid grid-cols-2 gap-2 md:grid-cols-3">
                       {backupCodes.map((code) => (
-                        <code
-                          className={`
-                          rounded-sm bg-muted px-2 py-1 text-center font-mono
-                          text-xs
-                        `}
-                          key={code}
-                        >
+                        <code className="rounded-sm bg-muted px-2 py-1 text-center font-mono text-xs" key={code}>
                           {code}
                         </code>
                       ))}

@@ -17,11 +17,7 @@ export default function PricingTable({ productDetails }: { productDetails?: Arra
 
   if (isLoading) {
     return (
-      <div
-        className={`
-        flex size-full min-h-[300px] items-center justify-center
-      `}
-      >
+      <div className="flex size-full min-h-[300px] items-center justify-center">
         <Loader2 className="size-6 animate-spin text-muted-foreground" />
       </div>
     );
@@ -225,12 +221,7 @@ export const PricingCard = ({ buttonProps, className, productId }: PricingCardPr
               )}
             </div>
             <div className="mb-2">
-              <h3
-                className={`
-                mb-4 flex h-16 items-center border-y bg-secondary/40 px-6
-                font-semibold
-              `}
-              >
+              <h3 className="mb-4 flex h-16 items-center border-y bg-secondary/40 px-6 font-semibold">
                 <div className="line-clamp-2">
                   {mainPriceDisplay.primary_text}{" "}
                   {mainPriceDisplay.secondary_text && (
@@ -336,23 +327,11 @@ export const PricingCardButton = ({
         <Loader2 className="size-4 animate-spin" />
       ) : (
         <>
-          <div
-            className={`
-            flex w-full items-center justify-between transition-transform
-            duration-300
-            group-hover:translate-y-[-130%]
-          `}
-          >
+          <div className="flex w-full items-center justify-between transition-transform duration-300 group-hover:translate-y-[-130%]">
             <span>{children}</span>
             <span className="text-sm">→</span>
           </div>
-          <div
-            className={`
-            absolute mt-2 flex w-full translate-y-[130%] items-center
-            justify-between px-4 transition-transform duration-300
-            group-hover:mt-0 group-hover:translate-y-0
-          `}
-          >
+          <div className="absolute mt-2 flex w-full translate-y-[130%] items-center justify-between px-4 transition-transform duration-300 group-hover:mt-0 group-hover:translate-y-0">
             <span>{children}</span>
             <span className="text-sm">→</span>
           </div>
@@ -382,13 +361,7 @@ export const AnnualSwitch = ({
 
 export const RecommendedBadge = ({ recommended }: { recommended: string }) => {
   return (
-    <div
-      className={`
-      absolute -top-px -right-px rounded-bl-lg border bg-secondary px-3
-      text-sm font-medium text-muted-foreground
-      lg:top-4 lg:right-4 lg:rounded-full lg:py-0.5
-    `}
-    >
+    <div className="absolute -top-px -right-px rounded-bl-lg border bg-secondary px-3 text-sm font-medium text-muted-foreground lg:top-4 lg:right-4 lg:rounded-full lg:py-0.5">
       {recommended}
     </div>
   );

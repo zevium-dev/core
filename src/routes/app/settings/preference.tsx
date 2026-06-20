@@ -235,18 +235,8 @@ function AccountPreferenceComponent() {
           <Separator />
 
           {/* Personal Information */}
-          <div
-            className={`
-            grid gap-4
-            md:grid-cols-2
-          `}
-          >
-            <div
-              className={`
-              space-y-2
-              md:col-span-2
-            `}
-            >
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="space-y-2 md:col-span-2">
               <Label htmlFor="name">Name</Label>
               <Input id="name" onChange={(e) => setName(e.target.value)} placeholder="Enter your name" value={name} />
             </div>
@@ -270,11 +260,7 @@ function AccountPreferenceComponent() {
             </Label>
             <div className="flex items-center gap-2">
               <div
-                className={`
-                  flex h-10 w-full items-center justify-between rounded-md
-                  border border-input bg-transparent px-3 text-sm
-                  text-foreground/90
-                `}
+                className="flex h-10 w-full items-center justify-between rounded-md border border-input bg-transparent px-3 text-sm text-foreground/90"
                 id="email"
               >
                 <span className="truncate select-text" title={user.email}>
@@ -399,18 +385,8 @@ function AccountPreferenceComponent() {
             <div className="space-y-3 rounded-md border border-border/60 p-4">
               {hasPassword === true && (
                 <div className="space-y-3">
-                  <div
-                    className={`
-                    grid gap-3
-                    md:grid-cols-2
-                  `}
-                  >
-                    <div
-                      className={`
-                      space-y-2
-                      md:col-span-2
-                    `}
-                    >
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <div className="space-y-2 md:col-span-2">
                       <Label htmlFor="currentPassword">Current Password</Label>
                       <div className="flex items-center gap-2">
                         <Input
@@ -462,15 +438,7 @@ function AccountPreferenceComponent() {
                       type="button"
                       variant="ghost"
                     >
-                      {showPasswords ? (
-                        <EyeOff className="size-4" />
-                      ) : (
-                        <Eye
-                          className={`
-                        size-4
-                      `}
-                        />
-                      )}
+                      {showPasswords ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
                     </Button>
                     <Button
                       onClick={() => {
@@ -496,15 +464,7 @@ function AccountPreferenceComponent() {
                       size="sm"
                       type="button"
                     >
-                      {isChangingPassword ? (
-                        <Loader2
-                          className={`
-                        size-4 animate-spin
-                      `}
-                        />
-                      ) : (
-                        "Change Password"
-                      )}
+                      {isChangingPassword ? <Loader2 className="size-4 animate-spin" /> : "Change Password"}
                     </Button>
                   </div>
                 </div>
@@ -575,11 +535,7 @@ function AccountPreferenceComponent() {
               </div>
             </div>
             {user.twoFactorEnabled && twoFactorOpen && (
-              <div
-                className={`
-                mt-2 space-y-4 rounded-md border border-border/60 p-4
-              `}
-              >
+              <div className="mt-2 space-y-4 rounded-md border border-border/60 p-4">
                 <div className="space-y-2">
                   <Label htmlFor="twoFactorPassword">Account Password</Label>
                   <Input
@@ -594,20 +550,9 @@ function AccountPreferenceComponent() {
                   <div className="space-y-2">
                     <p className="text-sm font-medium">Backup Codes</p>
                     <p className="text-xs text-muted-foreground">Store these safely. Each can be used once.</p>
-                    <div
-                      className={`
-                      grid grid-cols-2 gap-2
-                      md:grid-cols-3
-                    `}
-                    >
+                    <div className="grid grid-cols-2 gap-2 md:grid-cols-3">
                       {twoFactorCodes.map((code) => (
-                        <code
-                          className={`
-                          rounded-sm bg-muted px-2 py-1 text-center font-mono
-                          text-xs
-                        `}
-                          key={code}
-                        >
+                        <code className="rounded-sm bg-muted px-2 py-1 text-center font-mono text-xs" key={code}>
                           {code}
                         </code>
                       ))}

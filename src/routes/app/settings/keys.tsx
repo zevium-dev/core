@@ -273,14 +273,7 @@ function ApiKeysComponent() {
                 <Input readOnly value={newlyCreatedKey ?? ""} />
                 <Button
                   aria-live="polite"
-                  className={`
-                    border border-border/40 bg-muted/30 px-3
-                    text-muted-foreground transition-colors
-                    hover:bg-muted/50 hover:text-foreground
-                    data-copied:bg-chart-2/20 data-copied:text-chart-2
-                    data-copied:hover:bg-chart-2/30
-                    dark:hover:bg-muted/60
-                  `}
+                  className="border border-border/40 bg-muted/30 px-3 text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground data-copied:bg-chart-2/20 data-copied:text-chart-2 data-copied:hover:bg-chart-2/30 dark:hover:bg-muted/60"
                   data-copied={createdKeyCopied || undefined}
                   onClick={() => {
                     if (newlyCreatedKey) {
@@ -293,15 +286,7 @@ function ApiKeysComponent() {
                   title={createdKeyCopied ? "Copied" : "Copy key"}
                   variant="ghost"
                 >
-                  {createdKeyCopied ? (
-                    <Check className="mr-1 size-3" />
-                  ) : (
-                    <Copy
-                      className={`
-                    mr-1 size-3
-                  `}
-                    />
-                  )}{" "}
+                  {createdKeyCopied ? <Check className="mr-1 size-3" /> : <Copy className="mr-1 size-3" />}{" "}
                   {createdKeyCopied ? "Copied" : "Copy"}
                 </Button>
               </div>
@@ -353,12 +338,7 @@ function ApiKeysComponent() {
                           {/* No secondary line now; rate limit displayed in column */}
                         </div>
                         <div className="flex items-center gap-2">
-                          <code
-                            className={`
-                            rounded-sm bg-muted px-2 py-1 font-mono text-xs
-                            text-muted-foreground
-                          `}
-                          >
+                          <code className="rounded-sm bg-muted px-2 py-1 font-mono text-xs text-muted-foreground">
                             {apiKey.key
                               ? formatKey(apiKey.key)
                               : `${apiKey.prefix ?? "sk"}...${apiKey.start ?? "xxxx"}`}
@@ -399,11 +379,7 @@ function ApiKeysComponent() {
           </div>
           {hasKeys && (
             <div className="flex items-center justify-end px-4 py-2">
-              <span
-                className={`
-                text-[10px] tracking-wide text-muted-foreground uppercase
-              `}
-              >
+              <span className="text-[10px] tracking-wide text-muted-foreground uppercase">
                 Total Usage: <span className="font-medium text-foreground">${totalUsage.toFixed(3)} used</span>
               </span>
             </div>
@@ -413,49 +389,24 @@ function ApiKeysComponent() {
 
       {/* Quick Start Snippet */}
       <Card className="border-border/50 bg-card/50 backdrop-blur-sm">
-        <CardHeader
-          className={`
-          flex flex-row items-center justify-between space-y-0 pb-2
-        `}
-        >
+        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
           <CardTitle className="text-sm font-medium">Quick Start (cURL)</CardTitle>
           <Button
             aria-live="polite"
-            className={`
-              h-7 border border-border/40 bg-muted/30 px-2 text-xs
-              text-muted-foreground transition-colors
-              hover:bg-muted/50 hover:text-foreground
-              data-copied:bg-chart-2/20 data-copied:text-chart-2
-              data-copied:hover:bg-chart-2/30
-              dark:hover:bg-muted/60
-            `}
+            className="h-7 border border-border/40 bg-muted/30 px-2 text-xs text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground data-copied:bg-chart-2/20 data-copied:text-chart-2 data-copied:hover:bg-chart-2/30 dark:hover:bg-muted/60"
             data-copied={snippetCopied || undefined}
             onClick={handleCopySnippet}
             size="sm"
             title={snippetCopied ? "Copied" : "Copy snippet"}
             variant="ghost"
           >
-            {snippetCopied ? (
-              <Check className="mr-1 size-3" />
-            ) : (
-              <Copy
-                className={`
-              mr-1 size-3
-            `}
-              />
-            )}{" "}
+            {snippetCopied ? <Check className="mr-1 size-3" /> : <Copy className="mr-1 size-3" />}{" "}
             {snippetCopied ? "Copied" : "Copy"}
           </Button>
         </CardHeader>
         <CardContent className="pt-0">
           <div className="relative">
-            <pre
-              className={`
-              overflow-x-auto rounded-md border border-border/50 bg-muted/50 p-4
-              font-mono text-xs/relaxed whitespace-pre
-              selection:bg-primary/30 selection:text-primary-foreground
-            `}
-            >
+            <pre className="overflow-x-auto rounded-md border border-border/50 bg-muted/50 p-4 font-mono text-xs/relaxed whitespace-pre selection:bg-primary/30 selection:text-primary-foreground">
               {snippet}
             </pre>
             <p className="mt-2 text-[11px] text-muted-foreground">

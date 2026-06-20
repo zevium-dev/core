@@ -23,9 +23,7 @@ function ImageUploadTest() {
           <div>
             <label className="block text-sm font-medium">Aspect Ratio</label>
             <select
-              className={`
-                mt-2 w-full rounded-sm border border-border bg-background p-2
-              `}
+              className="mt-2 w-full rounded-sm border border-border bg-background p-2"
               onChange={(e) => setAspectRatio(parseFloat(e.target.value))}
               value={aspectRatio}
             >

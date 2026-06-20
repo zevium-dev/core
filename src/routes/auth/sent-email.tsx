@@ -23,13 +23,7 @@ function RouteComponent() {
             <div className="flex flex-col gap-4">
               <p className="text-center text-sm text-muted-foreground">
                 Didn&apos;t receive the email? You can{" "}
-                <Link
-                  className={`
-                  text-accent-foreground
-                  hover:underline
-                `}
-                  to="/auth/verify-email"
-                >
+                <Link className="text-accent-foreground hover:underline" to="/auth/verify-email">
                   try resending
                 </Link>{" "}
                 the verification email.

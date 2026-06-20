@@ -482,10 +482,7 @@ function ImageUpload({
               style={{ aspectRatio: aspectRatio }}
             />
             <button
-              className={`
-                absolute top-2 right-2 rounded-lg bg-background/80 p-2
-                hover:bg-background
-              `}
+              className="absolute top-2 right-2 rounded-lg bg-background/80 p-2 hover:bg-background"
               disabled={disabled}
               onClick={() => {
                 setPreview("");
@@ -551,20 +548,10 @@ function ImageUpload({
 
           <div className="space-y-4">
             <div
-              className={`
-                relative mx-auto max-h-96 max-w-2xl overflow-hidden rounded-lg
-                border border-border bg-muted
-              `}
+              className="relative mx-auto max-h-96 max-w-2xl overflow-hidden rounded-lg border border-border bg-muted"
               ref={containerRef}
             >
-              <img
-                alt="Crop"
-                className={`
-                mx-auto h-full max-w-full object-contain
-              `}
-                ref={imageRef}
-                src={cropImage}
-              />
+              <img alt="Crop" className="mx-auto h-full max-w-full object-contain" ref={imageRef} src={cropImage} />
 
               {/* Crop overlay and handles */}
               <svg className="pointer-events-none absolute inset-0" height="100%" width="100%">
@@ -643,10 +630,7 @@ function ImageUpload({
                 {/* Resize handles */}
                 {["nw", "ne", "sw", "se"].map((corner) => (
                   <div
-                    className={`
-                      absolute size-3 cursor-nwse-resize rounded-full
-                      bg-destructive
-                    `}
+                    className="absolute size-3 cursor-nwse-resize rounded-full bg-destructive"
                     key={corner}
                     onMouseDown={handleCornerResize(corner)}
                     style={{

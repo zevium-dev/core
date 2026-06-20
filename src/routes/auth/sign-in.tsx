@@ -106,21 +106,8 @@ function RouteComponent() {
                     Sign in with Google
                   </Button>
                 </div>
-                <div
-                  className={`
-                  relative text-center text-sm
-                  after:absolute after:inset-0 after:top-1/2 after:z-0
-                  after:flex after:items-center after:border-t
-                  after:border-border
-                `}
-                >
-                  <span
-                    className={`
-                    relative z-10 bg-card px-2 text-muted-foreground
-                  `}
-                  >
-                    Or continue with
-                  </span>
+                <div className="relative text-center text-sm after:absolute after:inset-0 after:top-1/2 after:z-0 after:flex after:items-center after:border-t after:border-border">
+                  <span className="relative z-10 bg-card px-2 text-muted-foreground">Or continue with</span>
                 </div>
                 <AuthFormClientOnly
                   fields={[{ labelWidthClass: "w-12" }, { hasTopRightAction: true, labelWidthClass: "w-16" }]}
@@ -178,10 +165,7 @@ function RouteComponent() {
                                 Password
                               </Label>
                               <Link
-                                className={`
-                        ml-auto text-xs
-                        hover:underline
-                      `}
+                                className="ml-auto text-xs hover:underline"
                                 tabIndex={-1}
                                 to="/auth/forgot-password"
                               >

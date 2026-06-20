@@ -62,13 +62,7 @@ export function PageHeader() {
   const [headerContent] = useAtom(headerContentAtom);
 
   return (
-    <header
-      className={`
-      sticky top-0 z-10 flex h-16 shrink-0 items-center gap-2 backdrop-blur-xs
-      transition-[width,height] ease-linear
-      md:group-has-data-[collapsible=icon]/sidebar-wrapper:h-12
-    `}
-    >
+    <header className="sticky top-0 z-10 flex h-16 shrink-0 items-center gap-2 backdrop-blur-xs transition-[width,height] ease-linear md:group-has-data-[collapsible=icon]/sidebar-wrapper:h-12">
       <div className="flex w-full items-center gap-2 px-4">
         <SidebarTrigger className="-ml-1 size-8" />
         {headerContent}
@@ -166,10 +160,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
             <SidebarMenuItem>
               <SidebarMenuButton
                 asChild
-                className={`
-                  data-[active=true]:bg-main
-                  data-[active=true]:text-main-foreground
-                `}
+                className="data-[active=true]:bg-main data-[active=true]:text-main-foreground"
                 isActive={isDashboardActive(location.pathname)}
               >
                 <Link to="/app">
@@ -182,10 +173,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
             <SidebarMenuItem>
               <SidebarMenuButton
                 asChild
-                className={`
-                  data-[active=true]:bg-main
-                  data-[active=true]:text-main-foreground
-                `}
+                className="data-[active=true]:bg-main data-[active=true]:text-main-foreground"
                 isActive={isRouteActive(location.pathname, "/app/catalogue")}
               >
                 <Link to="/app/catalogue">
@@ -199,10 +187,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
               <SidebarMenuItem>
                 <SidebarMenuButton
                   asChild
-                  className={`
-                    data-[active=true]:bg-main
-                    data-[active=true]:text-main-foreground
-                  `}
+                  className="data-[active=true]:bg-main data-[active=true]:text-main-foreground"
                   isActive={location.pathname.startsWith("/app/organizations")}
                 >
                   <Link to="/app/organizations/~">
@@ -217,10 +202,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
               <SidebarMenuItem>
                 <SidebarMenuButton
                   asChild
-                  className={`
-                    data-[active=true]:bg-main
-                    data-[active=true]:text-main-foreground
-                  `}
+                  className="data-[active=true]:bg-main data-[active=true]:text-main-foreground"
                   isActive={location.pathname.startsWith("/app/organizations/create")}
                 >
                   <Link to="/app/organizations/create">
@@ -244,10 +226,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                     <SidebarMenuItem>
                       <CollapsibleTrigger asChild>
                         <SidebarMenuButton
-                          className={`
-                            data-[active=true]:bg-main
-                            data-[active=true]:text-main-foreground
-                          `}
+                          className="data-[active=true]:bg-main data-[active=true]:text-main-foreground"
                           isActive={isActive}
                         >
                           <item.icon />
@@ -277,10 +256,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                 <SidebarMenuItem key={item.title}>
                   <SidebarMenuButton
                     asChild
-                    className={`
-                      data-[active=true]:bg-main
-                      data-[active=true]:text-main-foreground
-                    `}
+                    className="data-[active=true]:bg-main data-[active=true]:text-main-foreground"
                     isActive={isActive}
                   >
                     <Link to={item.url}>
@@ -343,12 +319,7 @@ export function MainSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) 
             <SidebarMenuItem>
               <Link to="/">
                 <SidebarMenuButton size="lg">
-                  <div
-                    className={`
-                      flex aspect-square size-8 items-center justify-center
-                      rounded-full bg-black
-                    `}
-                  >
+                  <div className="flex aspect-square size-8 items-center justify-center rounded-full bg-black">
                     <img alt="zevium" className="size-7" src="/icon.png" />
                   </div>
                   <div className="grid flex-1 text-left text-sm/tight">
@@ -367,10 +338,7 @@ export function MainSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) 
             <SidebarMenuItem>
               <SidebarMenuButton
                 asChild
-                className={`
-                  data-[active=true]:bg-main
-                  data-[active=true]:text-main-foreground
-                `}
+                className="data-[active=true]:bg-main data-[active=true]:text-main-foreground"
                 isActive={user ? isDashboardActive(location.pathname) : false}
               >
                 <Link to={user ? "/app" : "/auth/sign-in"}>
@@ -383,10 +351,7 @@ export function MainSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) 
             <SidebarMenuItem>
               <SidebarMenuButton
                 asChild
-                className={`
-                  data-[active=true]:bg-main
-                  data-[active=true]:text-main-foreground
-                `}
+                className="data-[active=true]:bg-main data-[active=true]:text-main-foreground"
                 isActive={user ? isRouteActive(location.pathname, "/app/catalogue") : false}
               >
                 <Link to={user ? "/app/catalogue" : "/auth/sign-in"}>
@@ -410,10 +375,7 @@ export function MainSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) 
                       <SidebarMenuItem>
                         <CollapsibleTrigger asChild>
                           <SidebarMenuButton
-                            className={`
-                            data-[active=true]:bg-main
-                            data-[active=true]:text-main-foreground
-                          `}
+                            className="data-[active=true]:bg-main data-[active=true]:text-main-foreground"
                             isActive={isActive}
                           >
                             <item.icon />
@@ -443,10 +405,7 @@ export function MainSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) 
                   <SidebarMenuItem key={item.title}>
                     <SidebarMenuButton
                       asChild
-                      className={`
-                      data-[active=true]:bg-main
-                      data-[active=true]:text-main-foreground
-                    `}
+                      className="data-[active=true]:bg-main data-[active=true]:text-main-foreground"
                       isActive={isActive}
                     >
                       <Link to={item.url}>
@@ -505,11 +464,7 @@ function AccountSection() {
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <SidebarMenuButton
-              className={`
-                transition-colors
-                group-data-[state=collapsed]:hover:bg-sidebar-accent
-                group-data-[state=collapsed]:hover:text-sidebar-accent-foreground
-              `}
+              className="transition-colors group-data-[state=collapsed]:hover:bg-sidebar-accent group-data-[state=collapsed]:hover:text-sidebar-accent-foreground"
               size="default"
             >
               <Avatar className="-ml-1 size-6">
@@ -537,11 +492,7 @@ function AccountSection() {
       // Not signed in - show sign in icon
       return (
         <SidebarMenuButton
-          className={`
-            transition-colors
-            group-data-[state=collapsed]:hover:bg-sidebar-accent
-            group-data-[state=collapsed]:hover:text-sidebar-accent-foreground
-          `}
+          className="transition-colors group-data-[state=collapsed]:hover:bg-sidebar-accent group-data-[state=collapsed]:hover:text-sidebar-accent-foreground"
           onClick={handleSignIn}
           size="default"
         >
@@ -557,13 +508,7 @@ function AccountSection() {
     return (
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <SidebarMenuButton
-            className={`
-              transition-colors
-              group-data-[state=expanded]:hover:bg-sidebar-accent
-              group-data-[state=expanded]:hover:text-sidebar-accent-foreground
-            `}
-          >
+          <SidebarMenuButton className="transition-colors group-data-[state=expanded]:hover:bg-sidebar-accent group-data-[state=expanded]:hover:text-sidebar-accent-foreground">
             <Avatar className="-ml-1 size-6">
               <AvatarImage alt={user.name || "User"} src={user.image ?? ""} />
               <AvatarFallback className="text-xs">{getUserInitials(user)}</AvatarFallback>
@@ -592,11 +537,7 @@ function AccountSection() {
     // Not signed in - show sign in button
     return (
       <SidebarMenuButton
-        className={`
-          transition-colors
-          group-data-[state=expanded]:hover:bg-sidebar-accent
-          group-data-[state=expanded]:hover:text-sidebar-accent-foreground
-        `}
+        className="transition-colors group-data-[state=expanded]:hover:bg-sidebar-accent group-data-[state=expanded]:hover:text-sidebar-accent-foreground"
         onClick={handleSignIn}
       >
         <LogIn className="size-4" />
@@ -644,34 +585,15 @@ function OrganizationSelectorMenu({
 
   return (
     <SidebarMenuItem>
-      <div
-        className={`
-          flex h-12 items-center gap-2 overflow-hidden rounded-md p-2
-          group-data-[collapsible=icon]:size-8 group-data-[collapsible=icon]:justify-center
-          group-data-[collapsible=icon]:p-2
-          hover:bg-sidebar-accent
-          hover:text-sidebar-accent-foreground
-        `}
-      >
-        <div
-          className={`
-            flex aspect-square size-8 items-center justify-center
-            rounded-full bg-black
-          `}
-        >
+      <div className="flex h-12 items-center gap-2 overflow-hidden rounded-md p-2 group-data-[collapsible=icon]:size-8 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:p-2 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground">
+        <div className="flex aspect-square size-8 items-center justify-center rounded-full bg-black">
           <img alt="zevium" className="size-7" src="/icon.png" />
         </div>
         <div className="min-w-0 flex-1 group-data-[collapsible=icon]:hidden">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
-                className={`
-                  flex h-8 w-full items-center justify-between gap-2 rounded-md border-none
-                  bg-transparent p-0 text-left text-sm shadow-none transition-colors
-                  outline-none hover:text-sidebar-accent-foreground
-                  focus-visible:ring-0
-                  dark:bg-transparent dark:hover:bg-transparent
-                `}
+                className="flex h-8 w-full items-center justify-between gap-2 rounded-md border-none bg-transparent p-0 text-left text-sm shadow-none transition-colors outline-none hover:text-sidebar-accent-foreground focus-visible:ring-0 dark:bg-transparent dark:hover:bg-transparent"
                 type="button"
               >
                 <span className="min-w-0 flex-1 truncate">
@@ -680,12 +602,7 @@ function OrganizationSelectorMenu({
                 <ChevronDown className="size-4 shrink-0 text-muted-foreground opacity-50" />
               </button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent
-              align="start"
-              className={`
-                min-w-56
-              `}
-            >
+            <DropdownMenuContent align="start" className="min-w-56">
               <DropdownMenuLabel>Organizations</DropdownMenuLabel>
               {hasOrganizations ? (
                 <>
@@ -757,11 +674,7 @@ function ThemeSelector() {
   if (state === "collapsed") {
     return (
       <SidebarMenuButton
-        className={`
-          transition-colors
-          group-data-[state=collapsed]:hover:bg-sidebar-accent
-          group-data-[state=collapsed]:hover:text-sidebar-accent-foreground
-        `}
+        className="transition-colors group-data-[state=collapsed]:hover:bg-sidebar-accent group-data-[state=collapsed]:hover:text-sidebar-accent-foreground"
         onClick={toggleTheme}
         size="default"
       >
@@ -773,11 +686,7 @@ function ThemeSelector() {
 
   return (
     <SidebarMenuButton
-      className={`
-        transition-colors
-        group-data-[state=expanded]:hover:bg-sidebar-accent
-        group-data-[state=expanded]:hover:text-sidebar-accent-foreground
-      `}
+      className="transition-colors group-data-[state=expanded]:hover:bg-sidebar-accent group-data-[state=expanded]:hover:text-sidebar-accent-foreground"
       onClick={toggleTheme}
     >
       <currentTheme.Icon className="size-4 transition-all" />

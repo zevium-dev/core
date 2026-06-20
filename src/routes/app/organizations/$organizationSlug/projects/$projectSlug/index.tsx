@@ -202,12 +202,7 @@ function RouteComponent() {
               Documentation
             </CardTitle>
           </CardHeader>
-          <CardContent
-            className={`
-            prose prose-sm max-w-none
-            dark:prose-invert
-          `}
-          >
+          <CardContent className="prose prose-sm max-w-none dark:prose-invert">
             <Typography className="text-sm whitespace-pre-wrap" variant="small">
               {project.documentation}
             </Typography>

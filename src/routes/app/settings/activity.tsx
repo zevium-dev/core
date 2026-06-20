@@ -199,12 +199,7 @@ function ActivityComponent() {
       </div>
 
       {/* Stats Cards */}
-      <div
-        className={`
-        grid grid-cols-1 gap-6
-        md:grid-cols-3
-      `}
-      >
+      <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
         <ActivityStatsCard
           avgDay={chartData.spend.avgDay}
           color="bg-primary"
@@ -231,12 +226,7 @@ function ActivityComponent() {
       {/* Filters and Table */}
       <Card className="border-border/50 bg-card/50 backdrop-blur-sm">
         <CardHeader>
-          <div
-            className={`
-            flex flex-col items-start justify-between gap-4
-            sm:flex-row sm:items-center
-          `}
-          >
+          <div className="flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-center">
             <div className="flex gap-2">
               <div className="flex items-center gap-2">
                 <span className="text-sm text-muted-foreground">From:</span>
@@ -291,18 +281,9 @@ function ActivityComponent() {
                     <TableCell className="text-xs text-muted-foreground">{activity.timestamp}</TableCell>
                     <TableCell>
                       <div className="flex items-center gap-2">
-                        <div
-                          className={`
-                          size-4 shrink-0 rounded-sm bg-muted
-                        `}
-                        />
+                        <div className="size-4 shrink-0 rounded-sm bg-muted" />
                         <div className="flex flex-col">
-                          <span
-                            className={`
-                            cursor-pointer text-xs font-medium text-primary
-                            hover:underline
-                          `}
-                          >
+                          <span className="cursor-pointer text-xs font-medium text-primary hover:underline">
                             {activity.api}
                           </span>
                           <span className="text-xs text-muted-foreground">{activity.provider}</span>

@@ -11,11 +11,7 @@ function Accordion({ ...props }: React.ComponentProps<typeof AccordionPrimitive.
 function AccordionContent({ children, className, ...props }: React.ComponentProps<typeof AccordionPrimitive.Content>) {
   return (
     <AccordionPrimitive.Content
-      className={`
-        overflow-hidden text-sm
-        data-[state=closed]:animate-accordion-up
-        data-[state=open]:animate-accordion-down
-      `}
+      className="overflow-hidden text-sm data-[state=closed]:animate-accordion-up data-[state=open]:animate-accordion-down"
       data-slot="accordion-content"
       {...props}
     >
@@ -60,12 +56,7 @@ function AccordionTrigger({ children, className, ...props }: React.ComponentProp
         {...props}
       >
         {children}
-        <ChevronDownIcon
-          className={`
-          pointer-events-none size-4 shrink-0 translate-y-0.5
-          text-muted-foreground transition-transform duration-200
-        `}
-        />
+        <ChevronDownIcon className="pointer-events-none size-4 shrink-0 translate-y-0.5 text-muted-foreground transition-transform duration-200" />
       </AccordionPrimitive.Trigger>
     </AccordionPrimitive.Header>
   );

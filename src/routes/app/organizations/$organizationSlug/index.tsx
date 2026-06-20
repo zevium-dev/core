@@ -48,15 +48,7 @@ function RouteComponent() {
                 </CardDescription>
               </div>
               <div className="ml-4 flex flex-col gap-2">
-                {org.logo && (
-                  <img
-                    alt={org.name}
-                    className={`
-                  size-16 rounded-lg object-cover
-                `}
-                    src={org.logo}
-                  />
-                )}
+                {org.logo && <img alt={org.name} className="size-16 rounded-lg object-cover" src={org.logo} />}
                 <Button asChild size="sm">
                   <Link params={{ organizationSlug }} to="/app/organizations/$organizationSlug/settings">
                     Settings
@@ -101,12 +93,7 @@ function RouteComponent() {
             {org.members.length > 0 ? (
               <div className="space-y-4">
                 {org.members.map((member) => (
-                  <div
-                    className={`
-                    flex items-center justify-between rounded-lg border p-3
-                  `}
-                    key={member.id}
-                  >
+                  <div className="flex items-center justify-between rounded-lg border p-3" key={member.id}>
                     <div className="flex flex-1 items-center gap-3">
                       <Avatar className="size-10">
                         {member.user.image && <AvatarImage src={member.user.image} />}
@@ -116,12 +103,7 @@ function RouteComponent() {
                         <Typography className="font-medium" variant="small">
                           {member.user.name}
                         </Typography>
-                        <Typography
-                          className={`
-                          flex items-center gap-1 truncate text-muted-foreground
-                        `}
-                          variant="small"
-                        >
+                        <Typography className="flex items-center gap-1 truncate text-muted-foreground" variant="small">
                           <Mail className="size-3" />
                           {member.user.email}
                         </Typography>
@@ -154,12 +136,7 @@ function RouteComponent() {
             <CardContent>
               <div className="space-y-4">
                 {org.invitations.map((invitation) => (
-                  <div
-                    className={`
-                    flex items-center justify-between rounded-lg border p-3
-                  `}
-                    key={invitation.id}
-                  >
+                  <div className="flex items-center justify-between rounded-lg border p-3" key={invitation.id}>
                     <div className="flex-1">
                       <Typography className="font-medium" variant="small">
                         {invitation.email}

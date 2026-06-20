@@ -147,30 +147,9 @@ function FileUpload({
           </m.div>
 
           <div className="text-center">
-            <p
-              className={`
-              text-sm font-medium text-gray-900
-              dark:text-gray-100
-            `}
-            >
-              {placeholder}
-            </p>
-            <p
-              className={`
-              text-xs text-gray-500
-              dark:text-gray-400
-            `}
-            >
-              Drag and drop files here, or click to browse
-            </p>
-            <p
-              className={`
-              mt-1 text-xs text-gray-400
-              dark:text-gray-500
-            `}
-            >
-              Supports JSON, YAML files up to {maxSize}MB
-            </p>
+            <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{placeholder}</p>
+            <p className="text-xs text-gray-500 dark:text-gray-400">Drag and drop files here, or click to browse</p>
+            <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">Supports JSON, YAML files up to {maxSize}MB</p>
           </div>
         </div>
       </m.div>
@@ -180,11 +159,7 @@ function FileUpload({
           {files.map((file, index) => (
             <m.div
               animate={{ opacity: 1, x: 0 }}
-              className={`
-                flex items-center justify-between rounded-md border bg-gray-50
-                p-3
-                dark:bg-gray-900
-              `}
+              className="flex items-center justify-between rounded-md border bg-gray-50 p-3 dark:bg-gray-900"
               initial={{ opacity: 0, x: -10 }}
               key={`${file.name}-${String(file.size)}-${String(file.lastModified)}`}
               transition={{ delay: index * 0.1 }}
@@ -192,22 +167,8 @@ function FileUpload({
               <div className="flex items-center space-x-3">
                 <FileText className="size-4 text-blue-500" />
                 <div>
-                  <p
-                    className={`
-                    text-sm font-medium text-gray-900
-                    dark:text-gray-100
-                  `}
-                  >
-                    {file.name}
-                  </p>
-                  <p
-                    className={`
-                    text-xs text-gray-500
-                    dark:text-gray-400
-                  `}
-                  >
-                    {(file.size / 1024 / 1024).toFixed(2)} MB
-                  </p>
+                  <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{file.name}</p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
                 </div>
               </div>
 

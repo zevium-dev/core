@@ -50,12 +50,7 @@ function CreditsComponent() {
       </Card>
 
       {/* Main Actions Grid */}
-      <div
-        className={`
-        grid w-full grid-cols-1 gap-6
-        lg:grid-cols-2
-      `}
-      >
+      <div className="grid w-full grid-cols-1 gap-6 lg:grid-cols-2">
         {/* Buy Credits */}
         <Card className="w-full border-border/50 bg-card/50 backdrop-blur-sm">
           <CardHeader className="pb-4">
@@ -65,13 +60,7 @@ function CreditsComponent() {
             <Button className="w-full" size="lg">
               Add Credits
             </Button>
-            <Button
-              className={`
-              w-full text-sm text-muted-foreground
-              hover:text-foreground
-            `}
-              variant="ghost"
-            >
+            <Button className="w-full text-sm text-muted-foreground hover:text-foreground" variant="ghost">
               View Usage <ExternalLink className="ml-1 size-3" />
             </Button>
           </CardContent>
@@ -102,13 +91,7 @@ function CreditsComponent() {
         <CardHeader className="pb-4">
           <div className="flex items-center justify-between">
             <CardTitle className="text-lg font-semibold">Recent Transactions</CardTitle>
-            <Button
-              className={`
-              text-sm text-muted-foreground
-              hover:text-foreground
-            `}
-              variant="ghost"
-            >
+            <Button className="text-sm text-muted-foreground hover:text-foreground" variant="ghost">
               Payment History <ExternalLink className="ml-1 size-3" />
             </Button>
           </div>
@@ -117,23 +100,13 @@ function CreditsComponent() {
           <div className="space-y-4">
             {recentTransactions.map((transaction) => (
               <div
-                className={`
-                  flex items-center justify-between border-b border-border/20
-                  py-2
-                  last:border-b-0
-                `}
+                className="flex items-center justify-between border-b border-border/20 py-2 last:border-b-0"
                 key={transaction.id}
               >
                 <span className="text-sm text-muted-foreground">{transaction.time}</span>
                 <div className="flex items-center gap-4">
                   <span className="text-sm font-medium text-primary">{transaction.amount}</span>
-                  <span
-                    className={`
-                    flex cursor-pointer items-center gap-1 text-xs
-                    text-muted-foreground
-                    hover:text-foreground hover:underline
-                  `}
-                  >
+                  <span className="flex cursor-pointer items-center gap-1 text-xs text-muted-foreground hover:text-foreground hover:underline">
                     Get Invoice <FileText className="size-3" />
                   </span>
                 </div>

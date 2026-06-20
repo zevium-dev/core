@@ -70,10 +70,7 @@ export const TextHoverEffect = ({ duration, text }: { automatic?: boolean; durat
         </mask>
       </defs>
       <text
-        className={`
-          fill-transparent stroke-neutral-50 font-[helvetica] text-7xl font-bold
-          dark:stroke-neutral-700
-        `}
+        className="fill-transparent stroke-neutral-50 font-[helvetica] text-7xl font-bold dark:stroke-neutral-700"
         dominantBaseline="middle"
         strokeWidth="1"
         style={{ opacity: hovered ? 0.7 : 0 }}
@@ -88,11 +85,7 @@ export const TextHoverEffect = ({ duration, text }: { automatic?: boolean; durat
           strokeDasharray: 1000,
           strokeDashoffset: 0,
         }}
-        className={`
-          fill-transparent stroke-neutral-200 font-[helvetica] text-7xl
-          font-bold
-          dark:stroke-neutral-800
-        `}
+        className="fill-transparent stroke-neutral-200 font-[helvetica] text-7xl font-bold dark:stroke-neutral-800"
         dominantBaseline="middle"
         initial={{ strokeDasharray: 1000, strokeDashoffset: 1000 }}
         strokeWidth="1"
