@@ -12,6 +12,9 @@ importers:
 
   .:
     dependencies:
+      cap-widget:
+        specifier: ^0.1.56
+        version: 0.1.56
       capjs-core:
         specifier: ^0.1.1
         version: 0.1.1
@@ -22,9 +25,6 @@ importers:
       '@boi.gg/exception':
         specifier: ^0.0.3
         version: 0.0.3
-      '@cap.js/widget':
-        specifier: ^0.1.56
-        version: 0.1.56
       '@cloudflare/vite-plugin':
         specifier: ^1.42.1
         version: 1.42.1(vite@8.0.16(@types/node@22.20.0)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.43.1)(tsx@4.22.4)(yaml@2.9.0))(workerd@1.20260617.1)(wrangler@4.103.0)
@@ -604,9 +604,6 @@ packages:
 
   '@boi.gg/exception@0.0.3':
     resolution: {integrity: sha512-au87YmfgcCAAcni+czk1ePvz40Th/ixgr2SKIRvBqcbCzRc7zAc7EqAacX1VKNDxbtHkBm4pJ+eE6lI0lxJzVA==}
-
-  '@cap.js/widget@0.1.56':
-    resolution: {integrity: sha512-j640dNNNIF8IWmwqmSx0ihgU8sz/6Jm9mHveeDWUk8aXVqFm+2TSsp5bawtMtgf0aa7rFkmT9p76jrqO1uSEpQ==}
 
   '@chainsafe/is-ip@2.1.0':
     resolution: {integrity: sha512-KIjt+6IfysQ4GCv66xihEitBjvhU/bixbbbFxdJ1sqCp4uJ0wuZiYBPhksZoy4lfaF0k9cwNzY5upEW/VWdw3w==}
@@ -4447,6 +4444,9 @@ packages:
   caniuse-lite@1.0.30001799:
     resolution: {integrity: sha512-hG1bReV+OUU+MOqK4t/ZWI0tZOyz3rqS9XuhOUz1cIcbwBKjOyJEJuw9ER5JuNyqxNk8u/JUVbGibBOL1yrjFw==}
 
+  cap-widget@0.1.56:
+    resolution: {integrity: sha512-mAoFWzouxCjvi0B0Y0s7cRGGaLvJxifMVeNIHiFCkZme/9BOASWliN0aqz9wTUdlrt3Awm0UEA8h8DV1IDUuug==}
+
   capjs-core@0.1.1:
     resolution: {integrity: sha512-I5ZAsG6avdMFs3RxEbNFj9VggWMV6JEUIUvKFCOLR2Q9plxrEe+i4515ejtkCP6nkyE8b75L81ygjYZKmugWMg==}
 
@@ -7712,8 +7712,6 @@ snapshots:
   '@boi.gg/eslint-plugin-prefer-array-at@1.0.0': {}
 
   '@boi.gg/exception@0.0.3': {}
-
-  '@cap.js/widget@0.1.56': {}
 
   '@chainsafe/is-ip@2.1.0': {}
 
@@ -11617,6 +11615,8 @@ snapshots:
   caniuse-lite@1.0.30001761: {}
 
   caniuse-lite@1.0.30001799: {}
+
+  cap-widget@0.1.56: {}
 
   capjs-core@0.1.1:
     dependencies:

@@ -30,12 +30,12 @@
     "typecheck": "tsgo --noEmit"
   },
   "dependencies": {
+    "cap-widget": "^0.1.56",
     "capjs-core": "^0.1.1"
   },
   "devDependencies": {
     "@boi.gg/eslint-plugin-prefer-array-at": "^1.0.0",
     "@boi.gg/exception": "^0.0.3",
-    "@cap.js/widget": "^0.1.56",
     "@cloudflare/vite-plugin": "^1.42.1",
     "@eslint-react/eslint-plugin": "^5.9.1",
     "@eslint/js": "^10.0.1",
