@@ -1,14 +1,13 @@
 export const SIDEBAR_COOKIE_NAME = "sidebar_state";
 
-export async function getSidebarDefaultOpen(): Promise<boolean> {
-  // Client bundle: never import server modules.
-  if (!import.meta.env.SSR) {
-    return getSidebarDefaultOpenFromDocument() ?? true;
-  }
+import { createIsomorphicFn } from "@tanstack/react-start";
 
-  const { getCookie } = await import("@tanstack/react-start/server");
-  return parseSidebarCookieValue(getCookie(SIDEBAR_COOKIE_NAME)) ?? true;
-}
+export const getSidebarDefaultOpen = createIsomorphicFn()
+  .client(() => getSidebarDefaultOpenFromDocument() ?? true)
+  .server(async () => {
+    const { getCookie } = await import("@tanstack/react-start/server");
+    return parseSidebarCookieValue(getCookie(SIDEBAR_COOKIE_NAME)) ?? true;
+  });
 
 export function getSidebarDefaultOpenFromDocument(): boolean | undefined {
   if (typeof document === "undefined") return undefined;
