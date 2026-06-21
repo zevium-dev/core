@@ -163,7 +163,7 @@ Flat `/app/settings/keys` → cross-org view listing the user's keys across all 
 
 **Upstream non-2xx → refund both gates:**
 
-- **Refund `apikey.remaining`**: plugin auto-decremented it on `verifyApiKey`. Use **atomic** `incrementOne(remaining: 1)` via the adapter — **not** `updateApiKey({remaining: stale+1})` which races under concurrency and loses increments.
+- **Refund `apikey.remaining`**: plugin auto-decremented it on `verifyApiKey`. Use **atomic drizzle** `db.update(apikey).set({ remaining: sql`remaining + 1` }).where(...)` (§3.15) — the plugin's `incrementOne` is internal-only; `updateApiKey({remaining: stale+1})` races under concurrency and loses increments.
 - **Refund `orgConsumed`**: decrement it back atomically.
 - **No Polar event ingested** → no Polar charge. Polar is unaffected on failure.
 
@@ -257,7 +257,7 @@ reserve = orgPoolGate.reserve({ orgId: key.referenceId, cost })   // 402 if insu
 fetch upstream
 if !upstream.ok:
   orgPoolGate.refund({...})                                         // refund money gate
-  incrementOne(apikey, key.id, { remaining: 1 })                    // refund plugin quota
+  db.update(apikey).set({ remaining: sql`remaining + 1` }).where(eq(apikey.id, key.id))   // drizzle atomic refund
   throw new UpstreamNonOK(upstream)
 stream response
 on 2xx complete:
@@ -323,7 +323,7 @@ const refundBoth = () => {
   if (refunded) return
   refunded = true
   orgPoolGate.refund(orgId, cost)
-  incrementOne(apikey, verification.key.id, { remaining: 1 })  // atomic, NOT stale+1
+  db.update(apikey).set({ remaining: sql`remaining + 1` }).where(eq(apikey.id, verification.key.id))  // drizzle atomic refund
 }
 try:
   upstream = await fetch(targetUrl, { body, duplex: "half", headers, method })
