@@ -1,8 +1,24 @@
 allowBuilds:
+  "@tailwindcss/oxide": true
   core-js: true
   esbuild: true
+  protobufjs: true
   sharp: true
+  vue-demi: true
   workerd: true
+
+minimumReleaseAge: 1440
+minimumReleaseAgeExclude:
+  - "@types/node"
+  - "@typescript/native-preview"
+  - "@typescript/native-preview-darwin-arm64"
+  - "@typescript/native-preview-darwin-x64"
+  - "@typescript/native-preview-linux-arm"
+  - "@typescript/native-preview-linux-arm64"
+  - "@typescript/native-preview-linux-x64"
+  - "@typescript/native-preview-win32-arm64"
+  - "@typescript/native-preview-win32-x64"
+  - "nanoid"
 
 onlyBuiltDependencies:
   - "@tailwindcss/oxide"
