@@ -13,21 +13,16 @@ Zevium.dev is an **API hub / gateway + marketplace**. Orgs publish API **project
 Two-sided:
 
 - **Consumer org** pays Zevium for proxy throughput (prepaid credits).
-- **Publisher org** (the org that published the API) earns a share per call.
-- **Zevium** keeps the spread (markup).
+- Zevium's spread vs upstream cost is handled outside the app (publisher/marketplace tracking is cut for v1 — see §3.10).
 
 Confirmed billing model:
 
-1. **Billing unit = organization.** Consumer org recharges a credit pool; allocates
-   sub-budgets to its members (users) and to API keys.
+1. **Billing unit = organization.** Consumer org recharges a credit pool. Per-user limits are enforced via per-key plugin quotas (§3.4).
 2. **Consumer pays.** The org owning the API key is billed.
-3. **Polar meter/credits** is the sole prepaid-credit mechanism. `@better-auth/api-key`'s
-   `remaining`/`refill*`/`requestCount` are **not** the billing mechanism.
-4. **Variable cost: per-host unit rate** (`api1` = 3 units/call, `api2` = 1, `api3` = 50).
-   Per-token dynamic pricing later.
-5. **Charge only on upstream 2xx.** Non-2xx → no charge, no event.
-6. **Markup**: consumer pays rate R; publisher earns R − M; Zevium keeps M. Consumers
-   never see the cut — they pay the published rate. (See §5 for publisher payout.)
+3. **Polar meter/credits** is the prepaid-credit mechanism. `@better-auth/api-key`'s `remaining`/`refillAmount`/`refillInterval` are **repurposed** as the per-key request quota (per-user cap). `requestCount` is dead.
+4. **Variable cost: per-host unit rate** (`api1` = 3 units/call, `api2` = 1, `api3` = 50). Per-token dynamic pricing later.
+5. **Charge only on upstream 2xx.** Non-2xx → refund both gates (plugin `remaining` + `orgConsumed`), no event ingested.
+6. **Top-up: min $20, up to any amount** the consumer wants.
 7. **Top-up: min $20, up to any amount** the consumer wants.
 
 ## 2. Research findings
@@ -88,32 +83,28 @@ the key ownership model freely (§3.4).
 
 ### 2.7 The gap (current merged code)
 
-| Concern          | Current (#127/#147)             | Target                                          |
-| ---------------- | ------------------------------- | ----------------------------------------------- |
-| Billing unit     | per-user (wrong)                | **org pool + per-user allocation**              |
-| Balance          | Redis BITFIELD per user         | Polar meter credits (org) + local allocations   |
-| Cost             | flat 1 cent/call                | **per-host unit rate, 2xx-only**                |
-| Spend            | `CreditsManager.deduct` (Redis) | `polar.events.ingest` (auto-deduct)             |
-| Top-up           | webhook→`CreditsManager.add`    | Polar meter_credit benefit (auto on purchase)   |
-| Customer         | none (Polar as checkout only)   | Polar customer per org                          |
-| Markup/publisher | none                            | **track publisher earnings (v1), payout later** |
-| Key ownership    | `apikey.userId` only            | **org-owned or user-owned**                     |
-| Overspend gate   | n/a                             | **local atomic counter** (no TTL cache)         |
+| Concern          | Current (#127/#147)             | Target                                                                |
+| ---------------- | ------------------------------- | --------------------------------------------------------------------- |
+| Billing unit     | per-user (wrong)                | **org pool + per-user allocation**                                    |
+| Balance          | Redis BITFIELD per user         | Polar meter credits (org) + local allocations                         |
+| Cost             | flat 1 cent/call                | **per-host unit rate, 2xx-only**                                      |
+| Spend            | `CreditsManager.deduct` (Redis) | `polar.events.ingest` (auto-deduct)                                   |
+| Top-up           | webhook→`CreditsManager.add`    | Polar meter_credit benefit (auto on purchase)                         |
+| Customer         | none (Polar as checkout only)   | Polar customer per org                                                |
+| Markup/publisher | none                            | **cut** (no publisher accounting; spread external)                    |
+| Key ownership    | `apikey.userId` only            | **org-scoped** (`apikey.organizationId`); per-key quota via plugin    |
+| Overspend gate   | n/a                             | **local atomic counter** (`orgConsumed`) — the only custom gate state |
 
 ## 3. Decisions
 
-### 3.1 Two-tier credit hierarchy
+### 3.1 Two-tier gate (plugin-native + Polar-native)
 
-- **Org pool** = Polar meter credit balance (the wallet). Recharged via Polar checkout.
-  Source of truth for _purchased_ credits = Polar `creditedUnits`.
-- **User allocation** = a local sub-budget the org grants a member
-  (`creditAllocation` table: `orgId`, `userId`, `allocatedUnits`). The org can grant,
-  increase, or revoke. **Local-only** — not in Polar.
-- **API key ownership** determines which pool a call draws from:
-  - **User-owned key** → draws from that user's allocation (local gate).
-  - **Org-owned key** → draws from the org pool directly (local mirror gate).
-- Both ultimately consume the org's Polar credits: a user-key call ingests an event to
-  Polar (decrementing the org pool) AND decrements the user's local allocation.
+Two gates per proxy call. Each uses a native mechanism — **zero custom Lua** for the per-key gate.
+
+- **Per-key request quota** = `@better-auth/api-key` plugin's `remaining` / `refillAmount` / `refillInterval`. `verifyApiKey` runs `consumeRemaining()` — an atomic guarded decrement (`incrementOne({ where: { remaining: { gt: 0 } }, increment: -1 })`) with CAS refill on `lastRefillAt`. Throws `USAGE_EXCEEDED` at 0. **Plugin-native. We write no gate code** — just handle the thrown error.
+- **Org pool money gate** = Polar meter credits (`sum` over `cost_units`). Polar auto-deducts on ingested events. The pool balance = `creditedUnits − consumedUnits`. We gate against this with **one local atomic counter** (`orgConsumed`, Redis Lua): `creditedUnits − orgConsumed ≥ cost_units` then increment `orgConsumed`. This is the **only irreducible local gate state** (one Redis key per org). Alternative: live `getStateExternal` per call (drops the counter, adds per-call Polar latency).
+- **A call passes only if both gates pass.** Per-key quota = per-user limit (one user, one key, one quota). Org pool = prepaid money (Polar).
+- **Cuts** (to kill state): no `creditAllocation` table (per-key plugin quota replaces it); no `ownerType` / `ownerUserId` on apikey (plugin's `organizationId` scopes keys to orgs); no publisher earnings (publisher/marketplace cut — see §3.5).
 
 ### 3.2 Polar-native, org-scoped, direct SDK
 
@@ -124,62 +115,51 @@ body / flush cron.
 ### 3.3 Meter: `sum` over `cost_units`, event `proxy_call`
 
 - Meter `proxy_calls`: filter `name = proxy_call`, aggregation `sum` over `cost_units`.
-- Event: `{ name: "proxy_call", externalCustomerId: orgId, externalId: requestId,
-metadata: { cost_units, host, method, status, publisherOrgId? } }`.
+
+- Event: `{ name: "proxy_call", externalCustomerId: orgId, externalId: requestId, metadata: { cost_units, host, method, status } }`.
 - Polar auto-deducts `cost_units` from the org's meter credit balance on ingest.
 - Forward-compatible with per-token: add a `tokens` metadata field + a second meter later.
 
-### 3.4 API key ownership redesign (no backward compat — new app, no users)
+### 3.4 API key schema — minimal (plugin-native)
 
-`apikey` table: replace flat `userId` ownership with:
+`apikey` table is the `@better-auth/api-key` plugin's table. New app, no backward compat.
 
-- `ownerType: "org" | "user"` (not null)
-- `ownerUserId: text` (nullable; set when `ownerType = "user"`)
-- `orgId: text` (not null, FK→organization) — the org the key belongs to (always set;
-  user-owned keys still belong to an org).
-- Drop `remaining`/`refillAmount`/`refillInterval`/`requestCount` (dead for billing).
-  Keep `rateLimit*` for rate-limiting.
-- Migration: new table or alter. Since no data, a clean migration.
-  Key creation UI moves org-scoped; the flat `/app/settings/keys` becomes a cross-org view
-  gated by permission (§3.7).
+- **Add** `organizationId` (plugin already supports on create/list; our table currently lacks it). All keys org-scoped.
+- **Repurpose** `remaining` / `refillAmount` / `refillInterval` as the **per-key request quota** (per-user spending cap). Plugin handles atomic decrement + auto-refill natively (§3.1).
+- **Keep** `rateLimit*` for rate-limiting.
+- **Drop** `requestCount` (dead). No `ownerType` / `ownerUserId`.
+- Key creation UI org-scoped. Flat `/app/settings/keys` → cross-org view of the user's keys.
 
-### 3.5 Per-host unit cost + markup config
+### 3.5 Per-host unit cost (consumer rate only — publisher cut)
 
-- `PROXY_HOST_UNIT_COSTS` env: CSV `host:consumerUnits:publisherUnits`, e.g.
-  `api.openai.com:3:2,api.anthropic.com:1:0.7,api.example.com:50:40`.
-  - `consumerUnits` (R) = what the consumer is charged.
-  - `publisherUnits` (R−M) = what the publisher earns. Omit `:publisherUnits` for hosts
-    with no in-system publisher (Zevium keeps 100%).
+Publisher/marketplace tracking is **cut** (§3.10). The proxy charges the consumer rate per-host; Zevium's spread vs the upstream's actual cost is handled outside the app.
+
+- `PROXY_HOST_UNIT_COSTS` env: CSV `host:units`, e.g. `api.openai.com:3,api.anthropic.com:1,api.example.com:50`. Units = what the consumer pays per call.
 - Unpriced host → **403 fail-closed** (no free rides). No default fallback.
-- Units ↔ USD: set by the meter_credit benefit. e.g. product $20 grants 2000 units ⇒
-  1 unit = $0.01 ⇒ `api1` (3 units) = $0.03/call consumer, $0.02 publisher earn.
+- Units ↔ USD: set by the meter_credit benefit. e.g. product $20 grants 2000 units → 1 unit = $0.01 → `api1` (3 units) = $0.03/call.
 
-### 3.6 Local atomic gate (no overspend, no TTL cache)
+### 3.6 Local atomic gate (the only custom gate code)
 
-- **User-owned key**: atomic Lua decrement on the user's local allocation counter;
-  `if allocationRemaining < costUnits → 402`. Atomic ⇒ no overspend.
-- **Org-owned key**: atomic check on `orgPoolRemaining = polarCredited − orgConsumed`.
-  `polarCredited` = cached `creditedUnits` (invalidated on `customer.state_changed`
-  webhook / purchase). `orgConsumed` = local atomic counter. Atomic ⇒ no overspend.
-- No Polar-balance TTL cache, no stale-read overspend. (This is why we "won't need to
-  touch" overspend — not because Polar blocks it, but because the local gate is atomic.)
-- Ingest the event to Polar **after** a 2xx upstream response via `waitUntil`
-  (non-blocking), `externalId = requestId` for dedup. Polar then auto-deducts; local
-  counter already decremented at gate time ⇒ they stay in sync (reconcile periodically).
+Per-key quota gate is plugin-native (§3.1). The only custom gate is the **org-pool money gate**:
 
-### 3.7 Cross-org keys view + permissions
+- One Redis key per org: `orgConsumed` (atomic counter). One Lua: `if creditedUnits − orgConsumed ≥ cost_units then incrby(orgConsumed, cost_units); return ok else insufficient`.
+- `creditedUnits` cached (Redis), invalidated on `customer.state_changed` webhook / purchase. Polar is source of truth.
+- No Polar-balance TTL cache for the gate decision. No overspend — the Lua is atomic.
+- Event ingest **after** 2xx upstream response via `waitUntil` (non-blocking), `externalId = requestId` for dedup. Polar auto-deducts → org pool decrements at Polar. Local `orgConsumed` already incremented at gate time → stay in sync (reconcile via webhook `customer.state_changed`).
 
-Flat `/app/settings/keys` → cross-org view listing the user's keys across all orgs they
-belong to, gated by org membership/permissions. Key creation stays org-scoped (in org
-settings). (Open: which permission grants org-owned key creation? Default: org
-`owner`/`admin`.)
+### 3.7 Cross-org keys view
 
-### 3.8 Charge rule: 2xx only
+Flat `/app/settings/keys` → cross-org view listing the user's keys across all orgs they belong to (derived query, no new state). Key creation remains org-scoped (org settings). Any org member can create keys (default; tighten later if needed).
 
-Upstream non-2xx → no event ingested, no local decrement, no charge. (Gate decrements
-happen post-success, so a failed call never decrements.) Refunds (Polar order refund) →
-Polar reverses the meter credit natively; local counters reconcile via the
-`customer.state_changed` webhook or a scheduled reconciliation.
+### 3.8 Charge rule: 2xx only (refund both gates on failure)
+
+Upstream non-2xx → **refund both gates**:
+
+- **Refund `apikey.remaining`**: plugin auto-decremented it on `verifyApiKey`. Increment it back via `auth.api.updateApiKey({ keyId, remaining: remaining + 1 })` (or direct `incrementOne(remaining: 1)`).
+- **Refund `orgConsumed`**: decrement it back atomically.
+- **No Polar event ingested** → no Polar charge. Polar is unaffected on failure.
+
+Polar order refunds (consumer-initiated) → Polar reverses the meter credit natively; local `orgConsumed` reconciles via the `customer.state_changed` webhook.
 
 ### 3.9 Credit purchase: variable amount ≥ $20
 
@@ -192,15 +172,11 @@ Polar reverses the meter credit natively; local counters reconcile via the
   for v1, variable later. (Default plan: assume proportional is possible; fall back to
   tiers if the dashboard/SDK doesn't allow it.)
 
-### 3.10 Publisher earnings (v1: track only, no payout)
+### 3.10 Publisher earnings — CUT
 
-- On each successful consumer call to a host that has a publisher, record a
-  `publisherEarning` ledger row: `publisherOrgId`, `consumerOrgId`, `host`, `units`
-  (publisherUnits), `costUsd?`, `callId`, `createdAt`.
-- **No payout in v1.** Payout to publishers via Stripe Connect (the standard marketplace
-  mechanism — platform charges buyer, takes fee, pays connected account) is a follow-up.
-- v1 keeps the ledger so earnings are queryable; settlement is manual until Stripe
-  Connect lands.
+Publisher/marketplace tracking is **cut** for v1. Rationale: the proxy is host-based (not project-based), there's no in-app publisher org to route earnings to, and the marketplace/payout story (Stripe Connect) is a separate large feature. Zevium keeps the spread between consumer rate and upstream cost by paying upstreams externally (outside the app).
+
+Consequences: no `publisherOrgId`, no markup config, no `publisherEarning` ledger, no host→publisher mapping, no publisher payout flow. The `metadata.publisherOrgId?` field on the proxy_call event (§3.3) is removed. Pure consumer-pays-per-host.
 
 ### 3.11 Polar customer created on org creation
 
@@ -233,135 +209,117 @@ the meter itself via the meter_credit benefit on purchase.
    `POLAR_ORGANIZATION_ID`, `POLAR_SERVER`, `POLAR_WEBHOOK_SECRET`,
    `PROXY_HOST_UNIT_COSTS`. Drop `CREDITS_FLUSH_SECRET`.
 
-### 4.2 Schema + env
+### 4.2 Schema + env (minimal)
 
-- `organization`: add `polarCustomerId`, `billingEmail`.
-- `apikey`: `ownerType`, `ownerUserId`, `orgId`; drop `remaining`/`refill*`/`requestCount`.
-- New tables: `creditAllocation` (orgId, userId, allocatedUnits), `publisherEarning`
-  (publisherOrgId, consumerOrgId, host, units, callId, createdAt).
-- Drop `creditLedger` from schema; migration `0014` (credit_ledger) → replaced by `0015`
-  (org cols + apikey redesign + new tables).
-- `src/env/server.ts`: add `POLAR_METER_ID`, `PROXY_HOST_UNIT_COSTS`; drop
-  `CREDITS_FLUSH_SECRET`.
+- `organization`: add `polarCustomerId: text`, `billingEmail: text`.
+- `apikey`: add `organizationId: text` (plugin-native field, FK→organization). Repurpose `remaining` / `refillAmount` / `refillInterval` as the per-key request quota. Drop `requestCount` (dead). No `ownerType` / `ownerUserId`. Keep `rateLimit*`.
+- **No new tables.** `creditAllocation` and `publisherEarning` are gone. `creditLedger` already gone.
+- Migration `0014` (credit_ledger) → replaced by `0015`: `organization.polarCustomerId`, `organization.billingEmail`, `apikey.organizationId` (quota fields already in plugin schema).
+- `src/env/server.ts`: add `POLAR_METER_ID`, `PROXY_HOST_UNIT_COSTS`. Drop `CREDITS_FLUSH_SECRET`.
 
-### 4.3 Code changes
+### 4.3 Code changes (minimal)
 
-**`src/lib/server/polar.ts`** — org-scoped direct-SDK helpers:
+**`src/lib/server/polar.ts`** — org-scoped direct-SDK helpers (small):
 
-- `ensureOrgCustomer(org)` — create Polar customer if missing, persist `polarCustomerId`.
-- `getOrgCreditedUnits(orgId): Promise<number>` — `getStateExternal({ externalId })` →
-  meter `creditedUnits`. Cached; invalidated by webhook.
-- `createCreditsCheckout({ orgId, amountUsd, successUrl })` — Polar checkout (variable
-  amount if supported, else tier product). `metadata: { orgId }`.
-- `ingestProxyCall({ orgId, requestId, host, method, status, costUnits })` —
-  `events.ingest(...)`.
-- `getHostCost(host)` — parse `PROXY_HOST_UNIT_COSTS` → `{ consumerUnits, publisherUnits }`
-  or throw (fail-closed).
+- `ensureOrgCustomer(org)` — `polar.customers.create({ externalId: org.id, email: org.billingEmail, name: org.name, metadata: { orgId } })` if missing; persist `polarCustomerId`.
+- `getOrgCreditedUnits(orgId): Promise<number>` — `getStateExternal({ externalId: orgId })` → meter `creditedUnits`. Redis-cached; invalidated by `customer.state_changed` webhook.
+- `createCreditsCheckout({ orgId, amountUsd, successUrl })` — Polar checkout (variable amount if Polar supports proportional crediting on one-time, else tier product). `metadata: { orgId }`.
+- `ingestProxyCall({ orgId, requestId, host, method, status, costUnits })` — `events.ingest(...)`. Polar auto-deducts.
+- `getHostCost(host)` — parse `PROXY_HOST_UNIT_COSTS` → `{ costUnits }` or throw (fail-closed 403).
 
-**`src/lib/server/credits-gate.ts`** (new) — local atomic gate:
+**`src/lib/server/org-pool-gate.ts`** (new, tiny) — the **only** custom gate code:
 
-- `reserveUserCall({ orgId, userId, costUnits })` — Lua: decrement user allocation if ≥
-  cost; return ok/insufficient.
-- `reserveOrgCall({ orgId, costUnits })` — Lua: check `credited − consumed ≥ cost`,
-  increment `orgConsumed`; return ok/insufficient.
-- `commitOnSuccess(...)` / `rollbackOnFailure(...)` — for user keys, the reservation IS
-  the spend (no refund on failure since we only charge 2xx). For org keys, decrement
-  `orgConsumed` only on success (reserve-then-commit) OR decrement at gate and refund on
-  non-2xx. (Decision: decrement at gate, refund on non-2xx — simpler, atomic.)
+- One Lua script: `if creditedUnits − orgConsumed ≥ costUnits then incrby(orgConsumed, costUnits); return ok else insufficient`.
+- Helpers: `reserve({ orgId, costUnits })`, `refund({ orgId, costUnits })` (decrement `orgConsumed` back on non-2xx).
 
-**`src/routes/api/proxy/$.ts`** — full rewrite of the billing block:
+**`src/routes/api/proxy/$.ts`** — billing block (minimal):
 
 ```
-verifyApiKey → key (ownerType, ownerUserId, orgId)
-cost = getHostCost(host)               // fail-closed 403 if unpriced
-reserve = ownerType=user ? reserveUserCall : reserveOrgCall
-if !reserve.ok: return 402 "Insufficient credits"
+verifyApiKey({ body: { key, permissions: { api: ["read"] } } })
+  // plugin atomic-guarded decrements remaining; throws USAGE_EXCEEDED at 0
+if USAGE_EXCEEDED: return 429
+cost = getHostCost(host)                                            // 403 if unpriced
+reserve = orgPoolGate.reserve({ orgId: key.organizationId, cost })   // 402 if insufficient
 fetch upstream
-if !upstream.ok: rollback reservation; throw UpstreamNonOK   // no charge
+if !upstream.ok:
+  orgPoolGate.refund({...})                                         // refund money gate
+  incrementOne(apikey, key.id, { remaining: 1 })                    // refund plugin quota
+  throw new UpstreamNonOK(upstream)
 stream response
 on 2xx complete:
-  waitUntil(ingestProxyCall({ orgId, requestId, host, method, status, costUnits: cost.consumerUnits }))
-  if cost.publisherUnits: waitUntil(recordPublisherEarning({...}))
+  waitUntil(ingestProxyCall({ orgId, requestId, host, method, status, costUnits: cost }))
+  // no refund — both gates consumed stand
 ```
 
-**`src/server/rpcs/credits/index.ts`** — org-scoped:
+**`src/server/rpcs/credits/index.ts`** — org-scoped (small):
 
-- `getBalance` → `{ orgPool: credited−consumed, userAllocation: alloc−consumed }`.
+- `getBalance` → `{ orgPool: creditedUnits − orgConsumed }`.
 - `createTopUp` → `createCreditsCheckout({ amountUsd ≥ 20 })`.
-- `listTransactions` → Polar orders + local allocation history.
-- `grantAllocation` / `revokeAllocation` (org admin) → mutate `creditAllocation`.
+- `listTransactions` → `polar.orders.list({ customerId: org.polarCustomerId })`.
 
-**`src/routes/app/.../credits.tsx`** — show org pool + the current user's allocation;
-buy credits (min $20 input); transaction list.
+**`src/routes/app/.../credits.tsx`** — org pool + buy-credits input (min $20) + Polar order history.
 
-**API keys** — org-scoped creation (ownerType picker), cross-org list view (§3.7).
+**`src/routes/app/settings/keys.tsx`** (or org-scoped `/app/organizations/$org/settings/keys`) — org-scoped key create with `refillAmount`/`refillInterval`. Cross-org view at flat `/app/settings/keys`.
 
-**`src/lib/server/auth.tsx`** — remove `polar()` plugin. Keep `apiKey`+`capCaptcha`+
-`twoFactor`+`organization`. Org creation → `ensureOrgCustomer`.
+**`src/lib/server/auth.tsx`** — keep `apiKey` + `capCaptcha` + `twoFactor` + `organization` plugins. No `polar()` plugin. Hook org creation → `ensureOrgCustomer`.
 
-**Delete:** `src/lib/server/credits.ts`, `credits-success.ts`, custom webhook body,
-`src/routes/api/credits/$.ts` flush + wrangler cron + `src/worker.ts` scheduled handler,
-`credit_ledger`, `CREDITS_FLUSH_SECRET`, `CreditsRedisKey` ledger/balance keys (keep a
-cache key for `creditedUnits`).
+**Delete:**
 
-**Tests** — `getHostCost` (fail-closed), gate (user vs org, insufficient → 402, 2xx
-ingest, non-2xx no-charge + refund), `ensureOrgCustomer` (idempotent), allocation
-grant/revoke.
+- `src/lib/server/credits.ts` (CreditsManager), `credits-success.ts`, `CreditsRedisKey` (ledger/balance keys).
+- `src/routes/api/credits/$.ts` (flush) + wrangler cron + `src/worker.ts` scheduled handler.
+- `creditLedger` from schema (migration `0014` replaced by `0015`).
+- `CREDITS_FLUSH_SECRET` env.
+- Custom webhook body — replace with thin `validateEvent` handler that invalidates `creditedUnits` cache on `customer.state_changed`.
+- No `creditAllocation` table. No `publisherEarning` table.
 
-### 4.4 Proxy gate flow (final)
+**Tests:**
+
+- `getHostCost` (fail-closed on unpriced host).
+- `orgPoolGate` Lua (reserve OK / insufficient / refund).
+- Proxy: 2xx → ingest called + no refund; non-2xx → no ingest + both refunds (plugin `remaining` + `orgConsumed`); unpriced host → 403; exhausted key → 429 (plugin throws USAGE_EXCEEDED).
+- `ensureOrgCustomer` idempotent.
+
+### 4.4 Proxy gate flow (final, minimal)
 
 ```
-verifyApiKey → key{ownerType,ownerUserId,orgId}
-cost = getHostCost(host)                          // 403 if unpriced
-reserve (user-allocation OR org-pool, atomic)     // 402 if insufficient
+verifyApiKey → key{organizationId, remaining}
+  (plugin atomic-guarded decrements remaining; throws USAGE_EXCEEDED at 0)
+if USAGE_EXCEEDED: return 429
+cost = getHostCost(host)                                    // 403 if unpriced
+reserve = orgPoolGate.reserve(orgId, cost)                  // 402 if insufficient
 fetch upstream
-if !upstream.ok: rollback reservation; throw UpstreamNonOK
+if !upstream.ok:
+  orgPoolGate.refund(orgId, cost)                          // refund money gate
+  incrementOne(apikey, key.id, { remaining: 1 })           // refund plugin quota
+  throw new UpstreamNonOK(upstream)
 stream response
 on 2xx complete:
-  waitUntil(ingestProxyCall({…, costUnits: cost.consumerUnits}))   // Polar auto-deducts org pool
-  if cost.publisherUnits: waitUntil(recordPublisherEarning({…}))
+  waitUntil(ingestProxyCall({ orgId, requestId, host, method, status, costUnits: cost }))
+  // no refund — both gates consumed stand
 ```
 
 ### 4.5 CI / verification
 
 - `pnpm run ci` green; new tests pass.
-- Manual (blocked on secrets/dashboard): org recharge (min $20) → pool increments →
-  user allocation grant → user-key call → allocation decrements + org pool event
-  ingested → org-key call → org pool decrements → 2xx only (non-2xx no charge) →
-  unpriced host 403 → publisher earning recorded → 402 at 0.
+- Manual (blocked on secrets/dashboard):
+  - Org created → Polar customer created (`polarCustomerId` persisted).
+  - Org recharges (min $20) → Polar `creditedUnits` increments → webhook invalidates cache.
+  - Org member creates a key with `refillAmount`/`refillInterval` (e.g. 100/month).
+  - User key call: `verifyApiKey` auto-decrements `remaining`; org pool reserves `cost_units` → 2xx → ingest → Polar auto-deducts; non-2xx → both refunded.
+  - Unpriced host → 403.
+  - `remaining` exhausted → 429 (USAGE_EXCEEDED).
+  - Org pool exhausted → 402.
 
 ## 5. Open questions / blockers
 
-1. **Variable-amount crediting** (§3.9): does Polar support proportional meter credits
-   on a one-time checkout (min $20, any amount)? Verify in sandbox; fallback = fixed
-   tiers.
-2. **Publisher model confirmation** (§3.10): is the "publisher" the org that published
-   the API project? Does the proxy know which publisher org owns a host? (Currently
-   proxy is host-based, not project-based — need host→publisherOrg mapping, or route
-   calls via project.) **Biggest open question.**
-3. **Markup config granularity** (§3.5): per-host `consumerUnits:publisherUnits` in env,
-   or a DB table for runtime edits? Default: env for v1.
-4. **Host→publisher mapping** (§5.2): if publishers are orgs, how does the proxy resolve
-   `x-zevium-host` → publisherOrgId? Via the project the call belongs to? Needs the
-   proxy to be project-aware (currently it's host-only). **May require proxy routing
-   change.**
-5. **Cross-org keys permission** (§3.7): which org role can create org-owned keys?
-   Default: owner/admin.
-6. **Reservation refund semantics** (§4.3): decrement-at-gate + refund-on-non-2xx vs
-   reserve-then-commit. Default: decrement-at-gate + refund-on-non-2xx.
-7. **Polar customer email uniqueness** (§2.4): `billingEmail` per org, default creator
-   email. Confirm Polar accepts it / no collision. Default: yes.
-8. **Overspend**: solved by local atomic gate (§3.6). Confirmed not a concern.
-9. **Refund reversal** (§3.8): verify in sandbox that refunding a one-time order
-   reverses the meter credit.
-10. **Secrets** (blocks testing): `POLAR_METER_ID`, `POLAR_PRODUCT_ID_CREDITS`,
-    `POLAR_ACCESS_TOKEN`, `POLAR_WEBHOOK_SECRET`, `POLAR_ORGANIZATION_ID`,
-    `POLAR_SERVER`, `PROXY_HOST_UNIT_COSTS`, `UPSTASH_REDIS_REST_URL/TOKEN`. Drop
-    `CREDITS_FLUSH_SECRET`.
+1. **Variable-amount crediting** (§3.9): does Polar support proportional meter credits on a one-time checkout (min $20, any amount)? Verify in sandbox; fallback = fixed tiers.
+2. **Polar customer email uniqueness** (§2.4): `billingEmail` per org, default creator email. Confirm Polar accepts it / no collision. Default: yes.
+3. **Refund reversal** (§3.8): verify in sandbox that refunding a one-time order reverses the meter credit.
+4. **Secrets** (blocks testing): `POLAR_METER_ID`, `POLAR_PRODUCT_ID_CREDITS`, `POLAR_ACCESS_TOKEN`, `POLAR_WEBHOOK_SECRET`, `POLAR_ORGANIZATION_ID`, `POLAR_SERVER`, `PROXY_HOST_UNIT_COSTS`, `UPSTASH_REDIS_REST_URL/TOKEN`. Drop `CREDITS_FLUSH_SECRET`.
 
 ## 6. Out of scope (follow-ups)
 
-- Publisher payouts via Stripe Connect (v1 tracks earnings only).
+- Publisher payouts (Stripe Connect) — deferred to a follow-up. For now, no publisher accounting; Zevium keeps the spread externally.
 - Per-token dynamic pricing (event metadata already forward-compatible).
 - Volume pricing (Polar: "coming soon").
 - Polar customer portal deep-link (build our own UI for now).
