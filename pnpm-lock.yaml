@@ -309,9 +309,6 @@ importers:
       oxlint-tsgolint:
         specifier: ^0.23.0
         version: 0.23.0
-      postcss:
-        specifier: ^8.5.15
-        version: 8.5.15
       posthog-js:
         specifier: ^1.391.2
         version: 1.391.2

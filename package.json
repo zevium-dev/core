@@ -131,7 +131,6 @@
     "oxfmt": "^0.55.0",
     "oxlint": "^1.70.0",
     "oxlint-tsgolint": "^0.23.0",
-    "postcss": "^8.5.15",
     "posthog-js": "^1.391.2",
     "posthog-node": "^5.38.2",
     "private-ip": "^3.0.2",
