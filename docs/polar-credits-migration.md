@@ -307,9 +307,9 @@ Sequence: request A → reserve Lua increments `orgConsumed` by cost → fetch u
 
 The current proxy (`src/routes/api/proxy/$.ts`) already uses the `x-zevium-key` header for auth (line 60) and **strips it from the outbound** request before forwarding to the upstream (line 125) — no leak/conflict with the upstream's own `Authorization` header. The header design is correct; the migration must preserve it. Specify in the §4.4 flow: read `x-zevium-key` for `verifyApiKey`, strip from outbound headers. (No `Authorization`-header design needed — `x-zevium-key` avoids the dual-bearer conflict.)
 
-### 3.30 Checkout needs `POLAR_PRICE_ID_CREDITS`, not just product ID
+### 3.30 Checkout uses custom price inline (product ID only, no `productPriceId`)
 
-`CheckoutCreate` requires `productPriceId` (the specific price on the product), not `productId` (verified in SDK). For a one-time product with a custom (variable-amount) price, the product has one "custom" price; the env must hold that price's ID. Fix the env list: `POLAR_PRODUCT_ID_CREDITS` (for the dashboard reference) **and** `POLAR_PRICE_ID_CREDITS` (passed to checkout). The product ID alone is not enough.
+The implemented `createCreditsCheckout` passes `products: [POLAR_PRODUCT_ID_CREDITS]` **plus** a `prices` map carrying a `custom` amount type (`presetAmount: amountUsd * 100`, `priceCurrency: "usd"`). Polar creates the one-off price inline at checkout — no pre-made `productPriceId` env var is needed. So the env holds **only** `POLAR_PRODUCT_ID_CREDITS`; there is no `POLAR_PRICE_ID_CREDITS`. (Verified against `src/lib/server/polar.ts`.)
 
 ### 3.31 No refill by default (one-shot keys)
 
@@ -349,18 +349,22 @@ Both belong in the cheap-checks step (§4.4 line 1) — before any DB/Redis hit,
 
 ### 3.37 `createCreditsCheckout` needs `amount` + `currency` (verified)
 
-For a one-time product with a **custom** (variable-amount) price, `CheckoutCreate` requires `productPriceId` (§3.30) **plus** the `amount` (in smallest currency unit, e.g. cents) **plus** the `currency` (e.g. `"usd"`). Fix the helper:
+For a one-time product with a **custom** (variable-amount) price, `CheckoutCreate` takes the product ID **plus** a `prices` entry declaring the custom amount (smallest currency unit, e.g. cents) **plus** `priceCurrency`. The implemented helper (`src/lib/server/polar.ts`):
 
 ```ts
-polar.checkouts.create({
-  productPriceId: POLAR_PRICE_ID_CREDITS,
-  customerId: org.polarCustomerId, // §3.20
-  amount: amountUsd * 100, // cents
-  currency: "usd",
-  successUrl, // optional: append {CHECKOUT_ID}
-  metadata: { orgId }, // copied to order.metadata.orgId
-  customerIpAddress: request.cf?.clientIp, // fraud signal (optional)
+const productId = serverEnv.POLAR_PRODUCT_ID_CREDITS;
+const checkout = await polarClient.checkouts.create({
+  customerId,
+  metadata: { orgId: input.orgId },
+  prices: {
+    [productId]: [{ amountType: "custom", presetAmount: input.amountUsd * 100, priceCurrency: "usd" }],
+  },
+  products: [productId],
+  successUrl: input.successUrl,
 });
+```
+
+Min $20 enforced server-side BEFORE calling Polar (reject if `amountUsd < 20`).
 ```
 
 Min $20 enforced server-side BEFORE calling Polar (reject if `amountUsd < 20`).
@@ -383,7 +387,7 @@ The doc said "delete the flush cron + worker handler" generically. Concrete file
 - **`src/routes/app/settings/credits/success.tsx`**: delete (old checkout success page). The rewritten credits page handles success inline.
 - **`src/server/rpcs/credits/index.ts`**: rewrite (org-scoped, not user-scoped).
 - **`src/routes/app/settings/credits.tsx`**: verify no stale `CreditsManager` imports.
-- **`src/env/server.ts`**: drop `CREDITS_FLUSH_SECRET`. Add `POLAR_METER_ID`, `POLAR_PRODUCT_ID_CREDITS`, `POLAR_PRICE_ID_CREDITS`, `POLAR_WEBHOOK_SECRET`, `POLAR_ACCESS_TOKEN`, `POLAR_ORGANIZATION_ID`, `POLAR_SERVER`, `PROXY_PUBLIC_HOST` (for §3.36), `PROXY_HOST_UNIT_COSTS`.
+- **`src/env/server.ts`**: drop `CREDITS_FLUSH_SECRET`. Add `POLAR_METER_ID`, `POLAR_PRODUCT_ID_CREDITS`, `POLAR_WEBHOOK_SECRET`, `POLAR_ACCESS_TOKEN`, `POLAR_ORGANIZATION_ID`, `POLAR_SERVER`, `PROXY_PUBLIC_HOST` (for §3.36), `PROXY_HOST_UNIT_COSTS`. (No `POLAR_PRICE_ID_CREDITS` — custom price is created inline at checkout, §3.30.)
 
 ### 3.40 `waitUntil` NOT available in TanStack Start route handlers (architectural)
 
@@ -604,7 +608,7 @@ Remove:
 Add required:
 
 - `POLAR_METER_ID`
-- `POLAR_PRICE_ID_CREDITS`
+- ~~`POLAR_PRICE_ID_CREDITS`~~ not needed (custom price inline, §3.30)
 - `PROXY_HOST_UNIT_COSTS`
 - `PROXY_PUBLIC_HOST`
 
@@ -616,7 +620,7 @@ Already present, keep:
 - `POLAR_WEBHOOK_SECRET`
 - `POLAR_ORGANIZATION_ID` (optional is okay if the SDK uses an org-scoped token; require it only if direct SDK calls need it).
 
-Also update `.env.example` and Cloudflare secrets. Without `POLAR_METER_ID`/`POLAR_PRICE_ID_CREDITS`/`PROXY_HOST_UNIT_COSTS`, code compiles but billing fails at runtime.
+Also update `.env.example` and Cloudflare secrets. Without `POLAR_METER_ID`/`POLAR_PRODUCT_ID_CREDITS`/`PROXY_HOST_UNIT_COSTS`, code compiles but billing fails at runtime.
 
 ### 3.57 Current credits page is user-scoped and wrong route
 
@@ -726,7 +730,7 @@ Current `auth.tsx` already sets `permissions: { defaultPermissions: { api: ["rea
 - `apikey`: no new columns for billing. Create all proxy keys via a **server-side** tRPC mutation `orgKey.create` (§3.21) — NOT the client `auth.apiKey.create` — with `references` from plugin config, `organizationId` from URL, `metadata.creatorUserId` set server-side from the session, explicit `permissions: { api: ["read"] }`, `remaining`, no refill, and rate-limit defaults. Store `metadata.creatorUserId` for attribution + one-key-per-user check (enforced by **unique partial index**, §3.22). Drop `requestCount` from UI/logic (plugin may keep internal field). No `ownerType` / `ownerUserId` / `organizationId` / `kind` columns. Keep plugin `rateLimit*` columns.
 - **No new tables.** `creditAllocation` and `publisherEarning` do not exist in current schema. `creditLedger` exists via `0014_empty_plazm.sql` and must be dropped by a new `0015` migration (§3.61).
 - Migration `0015`: `DROP TABLE credit_ledger`; add `organization.polarCustomerId`, `organization.billingEmail`; add unique partial index on `organization.polarCustomerId`; add unique functional partial index `apikey_one_per_org_creator ON apikey(reference_id, json_extract(metadata,'$.creatorUserId')) WHERE reference_id IS NOT NULL` (§3.22/§3.26). Update `schema.ts` and `db/zod.ts` too (§3.55/§3.64).
-- `src/env/server.ts`: add `POLAR_METER_ID`, `POLAR_PRICE_ID_CREDITS`, `PROXY_HOST_UNIT_COSTS`, `PROXY_PUBLIC_HOST`; drop required `CREDITS_FLUSH_SECRET` (§3.56).
+- `src/env/server.ts`: add `POLAR_METER_ID`, `POLAR_PRODUCT_ID_CREDITS`, `PROXY_HOST_UNIT_COSTS`, `PROXY_PUBLIC_HOST`; drop required `CREDITS_FLUSH_SECRET` (§3.56).
 
 ### 4.3 Code changes (minimal)
 
@@ -734,7 +738,7 @@ Current `auth.tsx` already sets `permissions: { defaultPermissions: { api: ["rea
 
 - `ensureOrgCustomer(org)` — `customers.getExternal({ externalId: org.id })` first (§3.42), else `polar.customers.create({ externalId: org.id, email: org.billingEmail (formula in §3.24), name: org.name, metadata: { orgId } })`; persist `polarCustomerId`. Lazy-call from checkout/getOrgCreditedUnits if `polarCustomerId === null` (§3.23).
 - `getOrgCreditedUnits(orgId): Promise<number>` — `polar.customerMeters.getStateExternal({ externalCustomerId: orgId, meterId: POLAR_METER_ID })` → meter `creditedUnits`. Redis-cached (TTL 5min, §3.18); invalidated by `order.paid` + `order.refunded` webhooks (primary) and `customer.state_changed` (secondary). Return 0 on no-active-meter / Polar error (gate → 402, do not throw).
-- `createCreditsCheckout({ orgId, amountUsd, successUrl })` — `checkouts.create({ productPriceId: POLAR_PRICE_ID_CREDITS, customerId: org.polarCustomerId, amount: amountUsd * 100, currency: "usd", metadata: { orgId }, successUrl })` (§3.20/§3.37).
+- `createCreditsCheckout({ orgId, amountUsd, successUrl })` — `checkouts.create({ products: [POLAR_PRODUCT_ID_CREDITS], prices: { [productId]: [{ amountType: "custom", presetAmount: amountUsd * 100, priceCurrency: "usd" }] }, customerId, metadata: { orgId }, successUrl })` (§3.20/§3.30/§3.37).
 - `ingestProxyCall({ orgId, requestId, host, method, status, costUnits })` — `events.ingest({ events: [{ name: "proxy_call", externalCustomerId: orgId, externalId: requestId, metadata: { cost_units: costUnits, host, method, status } }] })`. Polar auto-deducts.
 - `getHostCost(host)` — parse `PROXY_HOST_UNIT_COSTS` JSON → positive integer `costUnits`; exact host only; throw fail-closed 403 on unpriced/zero/invalid.
 
