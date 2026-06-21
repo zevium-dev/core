@@ -49,6 +49,13 @@ pnpm dev
 
 - Open `http://localhost:5173` in your browser to view the website.
 
+### Proxy security config
+
+- The `/api/proxy/*` endpoint requires explicit runtime security config:
+  - `PROXY_UPSTREAM_SECRET`: shared secret forwarded to upstreams as `x-zevium-proxy-secret`
+  - `PROXY_ALLOWED_HOSTS`: allowlist for `x-zevium-host` (supports exact hosts and `*.example.com`)
+- If either value is missing, proxy requests fail closed.
+
 ---
 
 ## Docs

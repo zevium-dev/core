@@ -1,38 +1,91 @@
+import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { ExternalLink, FileText, Settings } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import { z } from "zod";
 
 import { Button } from "~/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
+import { Input } from "~/components/ui/input";
+import { useTRPC } from "~/lib/trpc";
 
+const PAGE_SIZE = 3;
+
+const amountInputSchema = z.number().int().positive().max(100_000);
+
+/* eslint-disable perfectionist/sort-objects */
 export const Route = createFileRoute("/app/settings/credits")({
+  validateSearch: z.object({
+    page: z.coerce.number().int().positive().optional(),
+  }),
+  loader: ({ context }) => {
+    void context.queryClient.ensureQueryData(context.trpc.credits.getBalance.queryOptions());
+    void context.queryClient.ensureQueryData(
+      context.trpc.credits.listTransactions.queryOptions({ page: 1, pageSize: PAGE_SIZE }),
+    );
+  },
   component: CreditsComponent,
 });
+/* eslint-enable perfectionist/sort-objects */
 
-// TODO: Replace with API call to fetch real credits data
-// Mock data for recent transactions
-const recentTransactions = [
-  {
-    amount: "$10",
-    id: 1,
-    time: "2 months ago",
-  },
-  {
-    amount: "$3.75",
-    id: 2,
-    time: "2 months ago",
-  },
-  {
-    amount: "$10",
-    id: 3,
-    time: "4 months ago",
-  },
-];
+interface TransactionRowProps {
+  onGetInvoice: (orderId: string) => void;
+  transaction: {
+    amountCents: number;
+    createdAt: Date | string;
+    id: string;
+    reference?: null | string;
+  };
+}
 
 function CreditsComponent() {
-  const [currentPage, setCurrentPage] = useState(1);
+  const trpc = useTRPC();
+  const queryClient = useQueryClient();
+  const navigate = Route.useNavigate();
+  const search = Route.useSearch();
+  const currentPage = search.page ?? 1;
+  const [amountUsd, setAmountUsd] = useState<string>("10");
 
-  const currentBalance = "$12.26";
+  const balanceQuery = useSuspenseQuery(trpc.credits.getBalance.queryOptions());
+  const transactionsQuery = useSuspenseQuery(
+    trpc.credits.listTransactions.queryOptions({ page: currentPage, pageSize: PAGE_SIZE }),
+  );
+
+  const topupMutation = useMutation(
+    trpc.credits.createTopUpCheckout.mutationOptions({
+      onSuccess(data) {
+        window.location.assign(data.url);
+      },
+    }),
+  );
+
+  const currentBalance = useMemo(() => {
+    const cents = balanceQuery.data.balanceCents;
+    return new Intl.NumberFormat(undefined, { currency: "USD", style: "currency" }).format(cents / 100);
+  }, [balanceQuery.data.balanceCents]);
+
+  const handleTopUp = () => {
+    const parsed = amountInputSchema.safeParse(Number(amountUsd));
+    if (!parsed.success) {
+      // Invalid input - could show error toast here
+      return;
+    }
+    topupMutation.mutate({ amountCents: parsed.data * 100 });
+  };
+
+  const handleGetInvoice = (orderId: string) => {
+    void (async () => {
+      const data = await queryClient.fetchQuery(trpc.credits.getInvoiceUrl.queryOptions({ orderId }));
+      window.open(data.url, "_blank");
+    })();
+  };
+
+  const handlePageChange = (newPage: number) => {
+    void navigate({
+      replace: true,
+      search: { page: newPage },
+    });
+  };
 
   return (
     <div className="mx-auto w-full max-w-3xl min-w-0 flex-1 space-y-6 p-6">
@@ -56,9 +109,20 @@ function CreditsComponent() {
             <CardTitle className="text-lg font-semibold">Buy Credits</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <Button className="w-full" size="lg">
-              Add Credits
-            </Button>
+            <div className="flex items-center gap-2">
+              <Input
+                className="w-32"
+                inputMode="numeric"
+                min={1}
+                onChange={(e) => setAmountUsd(e.target.value)}
+                placeholder="Amount (USD)"
+                type="number"
+                value={amountUsd}
+              />
+              <Button className="flex-1" disabled={topupMutation.isPending} onClick={handleTopUp} size="lg">
+                {topupMutation.isPending ? "Redirecting..." : "Add Credits"}
+              </Button>
+            </div>
             <Button className="w-full text-sm text-muted-foreground hover:text-foreground" variant="ghost">
               View Usage <ExternalLink className="ml-1 size-3" />
             </Button>
@@ -97,19 +161,8 @@ function CreditsComponent() {
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
-            {recentTransactions.map((transaction) => (
-              <div
-                className="flex items-center justify-between border-b border-border/20 py-2 last:border-b-0"
-                key={transaction.id}
-              >
-                <span className="text-sm text-muted-foreground">{transaction.time}</span>
-                <div className="flex items-center gap-4">
-                  <span className="text-sm font-medium text-primary">{transaction.amount}</span>
-                  <span className="flex cursor-pointer items-center gap-1 text-xs text-muted-foreground hover:text-foreground hover:underline">
-                    Get Invoice <FileText className="size-3" />
-                  </span>
-                </div>
-              </div>
+            {transactionsQuery.data.items.map((tx) => (
+              <TransactionRow key={tx.id} onGetInvoice={handleGetInvoice} transaction={tx} />
             ))}
           </div>
 
@@ -118,7 +171,7 @@ function CreditsComponent() {
             <Button
               className="text-muted-foreground"
               disabled={currentPage === 1}
-              onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
+              onClick={() => handlePageChange(Math.max(currentPage - 1, 1))}
               size="sm"
               variant="ghost"
             >
@@ -129,7 +182,8 @@ function CreditsComponent() {
             </Button>
             <Button
               className="text-muted-foreground"
-              onClick={() => setCurrentPage((prev) => prev + 1)}
+              disabled={!transactionsQuery.data.hasNext}
+              onClick={() => handlePageChange(currentPage + 1)}
               size="sm"
               variant="ghost"
             >
@@ -138,6 +192,39 @@ function CreditsComponent() {
           </div>
         </CardContent>
       </Card>
+    </div>
+  );
+}
+
+function TransactionRow({ onGetInvoice, transaction }: TransactionRowProps) {
+  const sign = transaction.amountCents >= 0 ? 1 : -1;
+  const amountFmt = new Intl.NumberFormat(undefined, { currency: "USD", style: "currency" }).format(
+    Math.abs(transaction.amountCents) / 100,
+  );
+  const createdAtDate =
+    typeof transaction.createdAt === "string" ? new Date(transaction.createdAt) : transaction.createdAt;
+  const dateFmt = new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(createdAtDate);
+
+  return (
+    <div className="flex items-center justify-between border-b border-border/20 py-2 last:border-b-0">
+      <span className="text-sm text-muted-foreground">{dateFmt}</span>
+      <div className="flex items-center gap-4">
+        <span className={`text-sm font-medium ${sign > 0 ? "text-primary" : "text-destructive"}`}>
+          {sign > 0 ? "+" : "-"}
+          {amountFmt}
+        </span>
+        <button
+          className="text-xs text-muted-foreground hover:text-foreground hover:underline"
+          onClick={() => onGetInvoice(transaction.id)}
+          title={transaction.reference ?? transaction.id}
+          type="button"
+        >
+          Get Invoice <FileText className="ml-1 inline size-3" />
+        </button>
+      </div>
     </div>
   );
 }

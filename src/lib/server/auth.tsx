@@ -1,5 +1,5 @@
 import { apiKey } from "@better-auth/api-key";
-import { autumn } from "autumn-js/better-auth";
+import { checkout, polar } from "@polar-sh/better-auth";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { twoFactor } from "better-auth/plugins";
@@ -18,6 +18,7 @@ import { ResetPasswordEmail, ResetPasswordSubject } from "../email/templates/res
 import { capCaptcha } from "./better-auth-captcha";
 import { kv } from "./kv";
 import { ac, roles } from "./organization-access";
+import { polarClient } from "./polar";
 
 const BETTER_AUTH_KV_PREFIX = "better-auth:";
 
@@ -115,7 +116,11 @@ export const authServer = betterAuth({
         });
       },
     }),
-    autumn({ customerScope: "organization", secretKey: serverEnv.AUTUMN_SECRET_KEY }),
+    polar({
+      client: polarClient,
+      createCustomerOnSignUp: true,
+      use: [checkout()],
+    }),
     capCaptcha(),
     tanstackStartCookies(),
   ],

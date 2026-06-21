@@ -9,6 +9,3 @@ allowBuilds:
   workerd: true
 
 minimumReleaseAge: 720
-
-patchedDependencies:
-  autumn-js@0.1.85: patches/autumn-js@0.1.85.patch

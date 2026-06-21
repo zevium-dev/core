@@ -1,8 +1,11 @@
 "$schema" = "node_modules/wrangler/config-schema.json"
-main = "@tanstack/react-start/server-entry"
+main = "src/worker.ts"
 name = "zevium-dev"
 compatibility_date = "2025-09-02"
 compatibility_flags = ["nodejs_compat", "no_handle_cross_request_promise_resolution"]
 
 [observability]
 enabled = true
+
+[triggers]
+crons = ["0 0 * * *"]
