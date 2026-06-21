@@ -661,6 +661,49 @@ Current proxy does not set timeout or pass an abort signal. Migration should add
 
 This prevents hung upstreams from pinning worker resources and holding a reserved org balance indefinitely until the platform kills the request.
 
+### 3.61 Migration numbering: `0014` exists; create `0015` to drop it
+
+Verified `drizzle/0014_empty_plazm.sql`: it **creates** `credit_ledger`. So older wording "migration `0014` replaced by `0015`" is wrong. Do NOT edit/delete an existing migration already in the journal. Create a new migration after it:
+
+- `0015_*`: `DROP TABLE credit_ledger`; add `organization.polar_customer_id`; add `organization.billing_email`; add unique indexes from §3.22/§3.26.
+- Update `drizzle/meta/_journal.json` via `pnpm drizzle-kit generate` or a proper Drizzle migration workflow. Do not hand-edit the journal unless unavoidable.
+- Since this is a new app/no users, dropping `credit_ledger` is fine. If any local dev DB has rows, they get discarded.
+
+### 3.62 Current Polar webhook is old model and must be rewritten, not tweaked
+
+Current `src/routes/api/polar/webhook.ts` is user-scoped and self-managed-credits scoped:
+
+- imports `CreditsManager` and `CreditsRedisKey`
+- only handles `order.paid`; no `order.refunded`, no `customer.state_changed`
+- reads `metadata.userId`, not `metadata.orgId`
+- increments local Redis credits via `CreditsManager.add`
+- uses checkout/order id idempotency keys from `CreditsRedisKey`, not `webhook-id`
+- filters by `productId` only, not org/customer identity
+- returns 500 for pending idempotency, causing retries; okay for old apply-once semantics, wrong for thin invalidation-only handler
+
+New handler is a **rewrite**: signature verify raw body, dedup by `webhook-id`, event-type filter (§3.44), derive org (`metadata.orgId` or `polarCustomerId` reverse lookup), invalidate `zevium:credited:${orgId}`, return 200. No `CreditsManager.add`; Polar credits itself via meter_credit benefit.
+
+### 3.63 Current credits RPC uses old Polar checkout payload shape
+
+Current `src/server/rpcs/credits/index.ts` calls `polarClient.checkouts.create({ products, prices })`, stores `metadata.userId`, takes `amountCents`, returns `balanceCents`, and lists transactions by `metadata.userId`. This is old user-credit model. New SDK plan uses `productPriceId`, `customerId`, `amount`, `currency`, and `metadata.orgId`. Do not patch old procedures in place blindly; rewrite router to §3.46 surface.
+
+Also note current RPC has `getTopUpFromCheckout` and `getInvoiceUrl`. Decide v1 behavior:
+
+- `getInvoiceUrl(orderId)` can stay only if rewritten org-scoped (`order.customerId === org.polarCustomerId` or `metadata.orgId === orgId`).
+- `getTopUpFromCheckout(checkoutId)` likely disappears if the credits page polls `getBalance` after redirect (§3.47). If kept, it must be org-scoped and use order metadata/customerId, not `userId`.
+
+### 3.64 Drizzle Zod exports must remove `CreditLedger*`
+
+Current `src/db/zod.ts` exports `CreditLedgerSelectZod` and `CreditLedgerInsertZod` from `schema.creditLedger`. Once `creditLedger` is removed from `schema.ts`, those exports break typecheck. Remove them or replace with new org-balance schemas if needed. Grep found this, not obvious from schema alone.
+
+### 3.65 Org-owned apikey schema still says `userId` in generated OpenAPI docs — ignore, but don't code against it
+
+Plugin OpenAPI/types still expose legacy-looking `userId` properties in some list/get schemas, but the actual table ownership field is `referenceId` (verified in `types-BR70O3Q3.d.mts`: `referenceId` is "userId or organizationId based on config's references setting"). For org-owned keys, **never** use `userId` from plugin responses. Use `referenceId` for org, `metadata.creatorUserId` for attribution.
+
+### 3.66 Existing `apiKey` default permissions reduce blast radius, but server create still explicit
+
+Current `auth.tsx` already sets `permissions: { defaultPermissions: { api: ["read"] } }`. That means missing `permissions` in `orgKey.create` might still work. But keep §3.27: pass permissions explicitly in the server tRPC mutation. Reason: future config edits won't silently turn every proxy key into a 401 machine.
+
 ## 4. Plan
 
 ### 4.1 Polar dashboard setup (manual, blocks testing)
@@ -676,64 +719,47 @@ This prevents hung upstreams from pinning worker resources and holding a reserve
 
 ### 4.2 Schema + env (minimal)
 
-- `apikey`: no new columns for billing. Create all proxy keys via a **server-side** tRPC mutation `orgKey.create` (§3.21) — NOT the client `auth.apiKey.create` — with `referencesType` from config, `organizationId` from URL, `metadata.creatorUserId` set server-side from the session. Store `metadata.creatorUserId` for attribution + one-key-per-user check (enforced by **unique partial index**, §3.22). Repurpose `remaining` / `refillAmount` / `refillInterval` as the per-key request quota. Drop `requestCount` (dead). No `ownerType` / `ownerUserId` / `organizationId` / `kind` columns. Keep `rateLimit*`.
-- **No new tables.** `creditAllocation` and `publisherEarning` are gone. `creditLedger` already gone.
-- Migration `0014` (credit_ledger) → replaced by `0015`: `organization.polarCustomerId`, `organization.billingEmail` + **unique partial index** `apikey_one_per_org_creator ON apikey(reference_id, json_extract(metadata,'$.creatorUserId')) WHERE reference_id IS NOT NULL` (§3.22). (apikey itself: no new columns — we use the plugin's existing `referenceId` + `metadata`.)
-- `src/env/server.ts`: add `POLAR_METER_ID`, `PROXY_HOST_UNIT_COSTS`. Drop `CREDITS_FLUSH_SECRET`.
+- `apikey`: no new columns for billing. Create all proxy keys via a **server-side** tRPC mutation `orgKey.create` (§3.21) — NOT the client `auth.apiKey.create` — with `references` from plugin config, `organizationId` from URL, `metadata.creatorUserId` set server-side from the session, explicit `permissions: { api: ["read"] }`, `remaining`, no refill, and rate-limit defaults. Store `metadata.creatorUserId` for attribution + one-key-per-user check (enforced by **unique partial index**, §3.22). Drop `requestCount` from UI/logic (plugin may keep internal field). No `ownerType` / `ownerUserId` / `organizationId` / `kind` columns. Keep plugin `rateLimit*` columns.
+- **No new tables.** `creditAllocation` and `publisherEarning` do not exist in current schema. `creditLedger` exists via `0014_empty_plazm.sql` and must be dropped by a new `0015` migration (§3.61).
+- Migration `0015`: `DROP TABLE credit_ledger`; add `organization.polarCustomerId`, `organization.billingEmail`; add unique partial index on `organization.polarCustomerId`; add unique functional partial index `apikey_one_per_org_creator ON apikey(reference_id, json_extract(metadata,'$.creatorUserId')) WHERE reference_id IS NOT NULL` (§3.22/§3.26). Update `schema.ts` and `db/zod.ts` too (§3.55/§3.64).
+- `src/env/server.ts`: add `POLAR_METER_ID`, `POLAR_PRICE_ID_CREDITS`, `PROXY_HOST_UNIT_COSTS`, `PROXY_PUBLIC_HOST`; drop required `CREDITS_FLUSH_SECRET` (§3.56).
 
 ### 4.3 Code changes (minimal)
 
-**`src/lib/server/polar.ts`** — org-scoped direct-SDK helpers (small):
+**`src/lib/server/polar.ts`** — rewrite from bare `polarClient` export to org-scoped direct-SDK helpers:
 
-- `ensureOrgCustomer(org)` — `polar.customers.create({ externalId: org.id, email: org.billingEmail (= \`org-${orgId}@billing.zevium.dev\`, §3.24), name: org.name, metadata: { orgId } })`if missing; persist`polarCustomerId`. Idempotent: if `externalId`already exists in Polar (retry), fetch by externalId and reuse — don't create a duplicate. Lazy-call from checkout/getOrgCreditedUnits if`polarCustomerId === null` (§3.23).
+- `ensureOrgCustomer(org)` — list first by `externalId: org.id` (§3.42), else `polar.customers.create({ externalId: org.id, email: org.billingEmail (= \`org-${orgId}@billing.zevium.dev\`, §3.24), name: org.name, metadata: { orgId } })`; persist `polarCustomerId`. Lazy-call from checkout/getOrgCreditedUnits if `polarCustomerId === null` (§3.23).
 - `getOrgCreditedUnits(orgId): Promise<number>` — `polar.customerMeters.getStateExternal({ externalCustomerId: orgId, meterId: POLAR_METER_ID })` → meter `creditedUnits`. Redis-cached (TTL 5min, §3.18); invalidated by `order.paid` + `order.refunded` webhooks (primary) and `customer.state_changed` (secondary). Return 0 on no-active-meter / Polar error (gate → 402, do not throw).
-- `createCreditsCheckout({ orgId, amountUsd, successUrl })` — Polar checkout. `metadata: { orgId }`. **Must pass `customerId: org.polarCustomerId`** to link to the existing customer (§3.20) — otherwise the purchased meter credits land on a new customer and never reach the org. If `polarCustomerId` is null, lazy `ensureOrgCustomer` first.
-- `ingestProxyCall({ orgId, requestId, host, method, status, costUnits })` — `events.ingest(...)`. Polar auto-deducts.
-- `getHostCost(host)` — parse `PROXY_HOST_UNIT_COSTS` → `{ costUnits }` or throw (fail-closed 403).
+- `createCreditsCheckout({ orgId, amountUsd, successUrl })` — `checkouts.create({ productPriceId: POLAR_PRICE_ID_CREDITS, customerId: org.polarCustomerId, amount: amountUsd * 100, currency: "usd", metadata: { orgId }, successUrl })` (§3.20/§3.37).
+- `ingestProxyCall({ orgId, requestId, host, method, status, costUnits })` — `events.ingest({ events: [{ name: "proxy_call", externalCustomerId: orgId, externalId: requestId, metadata: { cost_units: costUnits, host, method, status } }] })`. Polar auto-deducts.
+- `getHostCost(host)` — parse `PROXY_HOST_UNIT_COSTS` JSON → positive integer `costUnits`; exact host only; throw fail-closed 403 on unpriced/zero/invalid.
 
 **`src/lib/server/org-pool-gate.ts`** (new, tiny) — the **only** custom gate code:
 
-- One Lua script: `if creditedUnits − orgConsumed ≥ costUnits then incrby(orgConsumed, costUnits); return ok else insufficient`.
-- Helpers: `reserve({ orgId, costUnits })`, `refund({ orgId, costUnits })` (decrement `orgConsumed` back on non-2xx).
+- Redis keys use existing `kv` client and `zevium:` namespace (§3.34/§3.54).
+- Reserve Lua: nil-safe, negative self-heal, cost > 0, check `creditedUnits - orgConsumed >= costUnits`, increment on success.
+- Refund Lua: validates `cur >= cost` before decrementing (§3.50).
+- Helpers: `reserve({ orgId, costUnits })`, `refund({ orgId, costUnits })`, `peek({ orgId, creditedUnits })`.
 
-**`src/routes/api/proxy/$.ts`** — billing block (minimal):
+**`src/routes/api/proxy/$.ts`** — rewrite billing block: cheap host checks + self-loop/DNS/private + allowlist + cost lookup before DB/Redis; verify org-owned key; map API-key errors; reserve org pool; fetch with `redirect: "error"`, timeout, `duplex: "half"`; charge only after 2xx + body complete (§3.59); synchronously await `ingestProxyCall` because `waitUntil` is unavailable (§3.40); preserve current stream cancel/read-error refund patterns (§3.51).
 
-```
-verifyApiKey({ body: { key, permissions: { api: ["read"] } } })
-  // plugin atomic-guarded decrements remaining; throws USAGE_EXCEEDED at 0
-if USAGE_EXCEEDED: return 429
-cost = getHostCost(host)                                            // 403 if unpriced
-reserve = orgPoolGate.reserve({ orgId: key.referenceId, cost })   // 402 if insufficient  // referenceId = orgId (org-owned key)
-fetch upstream
-if !upstream.ok:
-  orgPoolGate.refund({...})                                         // refund money gate
-  db.update(apikey).set({ remaining: sql`remaining + 1` }).where(eq(apikey.id, key.id))   // drizzle atomic refund
-  throw new UpstreamNonOK(upstream)
-stream response
-on 2xx complete:
-  waitUntil(ingestProxyCall({ orgId, requestId, host, method, status, costUnits: cost }))
-  // no refund — both gates consumed stand
-```
+**`src/server/rpcs/credits/index.ts`** — rewrite to §3.46 surface: `getBalance`, `createTopUp`, `listTopUps`, `listCharges`, `listPerKeyUsage`; remove user-scoped `balanceCents`, `listTransactions`, `createTopUpCheckout`, `getTopUpFromCheckout` unless rewritten org-scoped (§3.63).
 
-**`src/server/rpcs/credits/index.ts`** — org-scoped (small):
+**`src/routes/app/.../credits.tsx`** — org route/context, min $20, no auto-topup, balance from `getBalance`, top-up via `createTopUp`, checkout polling, top-ups/charges views (§3.57).
 
-- `getBalance` → `{ orgPool: creditedUnits − orgConsumed }`.
-- `createTopUp` → `createCreditsCheckout({ amountUsd ≥ 20 })`.
-- `listTransactions` → `polar.orders.list({ customerId: org.polarCustomerId })`.
+**`src/routes/app/settings/keys.tsx`** (or org-scoped `/app/organizations/$org/settings/keys`) — replace client `auth.apiKey.*` with server-side org-key tRPC; fix snippet to `x-zevium-key` + `x-zevium-host`; remove misleading dollar credit limit (§3.58). Cross-org view may remain flat if it explicitly groups by org.
 
-**`src/routes/app/.../credits.tsx`** — org pool + buy-credits input (min $20) + Polar order history.
+**`src/lib/server/auth.tsx`** — remove `polar()` plugin; configure `apiKey` exactly per §3.52; keep `capCaptcha` + `twoFactor` + `organization`; add org creation hook/wrapper to lazy/create Polar customer (§3.23).
 
-**`src/routes/app/settings/keys.tsx`** (or org-scoped `/app/organizations/$org/settings/keys`) — org-scoped key create with `refillAmount`/`refillInterval`. Cross-org view at flat `/app/settings/keys`.
-
-**`src/lib/server/auth.tsx`** — keep `apiKey` + `capCaptcha` + `twoFactor` + `organization` plugins. **Configure `apiKey({ references: "organization", ... })`** (§3.16, BLOCKER) so all keys are org-owned. No `polar()` plugin. Hook org creation → `ensureOrgCustomer`.
+**`src/routes/api/polar/webhook.ts`** — rewrite old user-credit handler completely (§3.62): validate raw body, dedup by `webhook-id`, event-type filter, org extraction, cache invalidation. No `CreditsManager.add`.
 
 **Delete:**
 
-- `src/lib/server/credits.ts` (CreditsManager), `credits-success.ts`, `CreditsRedisKey` (ledger/balance keys).
+- `src/lib/server/credits.ts` (CreditsManager), `credits-success.ts`, `src/lib/server/credits.test.ts`, `src/lib/shared/credits-keys.ts`.
 - `src/routes/api/credits/$.ts` (flush) + wrangler cron + `src/worker.ts` scheduled handler.
-- `creditLedger` from schema (migration `0014` replaced by `0015`).
+- `creditLedger` from schema and `CreditLedger*` Zod exports (§3.64).
 - `CREDITS_FLUSH_SECRET` env.
-- Custom webhook body — replace with thin `validateEvent` handler that invalidates `creditedUnits` cache on `customer.state_changed`.
+- Old webhook idempotency/body code.
 - No `creditAllocation` table. No `publisherEarning` table.
 
 **Tests:**
