@@ -98,7 +98,7 @@ Plugin source (`apiKeySchema`, lines 2135-2259) declares `referenceId` (indexed)
 
 Two gates per proxy call. Each uses a native mechanism — **zero custom Lua** for the per-key gate.
 
-- **Per-key request quota** = `@better-auth/api-key` plugin's `remaining` / `refillAmount` / `refillInterval`. `verifyApiKey` runs `consumeRemaining()` — an atomic guarded decrement (`incrementOne({ where: { remaining: { gt: 0 } }, increment: -1 })`) with CAS refill on `lastRefillAt`. Throws `USAGE_EXCEEDED` at 0. **Plugin-native. We write no gate code** — just handle the thrown error.
+- **Per-key request quota** = `@better-auth/api-key` plugin's `remaining` counter (v1: no refill; `refillAmount = null`, `refillInterval = null`). `verifyApiKey` runs `consumeRemaining()` — an atomic guarded decrement (`incrementOne({ where: { remaining: { gt: 0 } }, increment: -1 })`). Throws/returns `USAGE_EXCEEDED` at 0. **Plugin-native. We write no gate code** — just handle the returned/thrown error. The plugin supports CAS refill later, but v1 deliberately avoids refill windows (§3.31).
 - **Org pool money gate** = Polar meter credits (`sum` over `cost_units`). Polar auto-deducts on ingested events. The pool balance = `creditedUnits − consumedUnits`. We gate against this with **one local atomic counter** (`orgConsumed`, Redis Lua): `creditedUnits − orgConsumed ≥ cost_units` then increment `orgConsumed`. This is the **only irreducible local gate state** (one Redis key per org). Alternative: live `getStateExternal` per call (drops the counter, adds per-call Polar latency).
 - **A call passes only if both gates pass.** Per-key quota = per-user limit (one user, one key, one quota). Org pool = prepaid money (Polar).
 - **Cuts** (to kill state): no `creditAllocation` table (per-key plugin quota replaces it); no `ownerType` / `ownerUserId` / `organizationId` columns on apikey (plugin's `referenceId` = orgId for org-owned keys); no publisher earnings (publisher/marketplace cut — see §3.5).
@@ -119,9 +119,9 @@ body / flush cron.
 
 ### 3.4 API key schema — minimal (plugin-native)
 
-- **All proxy keys are org-owned** — create with `referencesType: "organization"`, so the plugin sets `referenceId = orgId` (verified in plugin source, create flow line 753-764). The proxy reads `referenceId` → bills that org. **No dedicated `organizationId` column needed for billing** (the plugin does NOT declare one in `apiKeySchema`; its `organizationId` create param is for permission scoping only, persisted into `referenceId`). This collapses the user-owned-vs-org-owned billing split — there's only the org pool now (we cut user allocations in §3.1).
+- **All proxy keys are org-owned** — configure the api-key plugin with `references: "organization"` (§3.16), so the plugin sets `referenceId = orgId` on create (verified in plugin source, create flow line 753-764). This is a per-config plugin option, not a per-request `referencesType` body field. The proxy reads `referenceId` → bills that org. **No dedicated `organizationId` column needed for billing** (the plugin does NOT declare one in `apiKeySchema`; its `organizationId` create param is for permission scoping only, persisted into `referenceId`). This collapses the user-owned-vs-org-owned billing split — there's only the org pool now (we cut user allocations in §3.1).
 - **Track creator via `metadata.creatorUserId`** for attribution + the one-key-per-user constraint. The plugin's `metadata` column accepts arbitrary JSON.
-- **Repurpose** `remaining` / `refillAmount` / `refillInterval` as the **per-key request quota** (per-user call cap). Plugin handles atomic decrement + auto-refill natively (§3.1). **Important:** this is request-count, not unit-cost. An expensive host (50 units/call) burns the same quota as a cheap one (1 unit/call).
+- **Repurpose** `remaining` as the **per-key request quota** (per-user call cap). v1 sets `refillAmount = null` and `refillInterval = null` (one-shot keys; user creates a new key when exhausted). **Important:** this is request-count, not unit-cost. An expensive host (50 units/call) burns the same quota as a cheap one (1 unit/call).
 - **Keep** `rateLimit*` for rate-limiting.
 - **Drop** `requestCount` (dead; do not surface as billed usage). No `ownerType` / `ownerUserId` / `organizationId` columns — `referenceId` is the billing org.
 - **One personal key per user per org** — server-side check at create: count keys where `referenceId = orgId AND metadata.creatorUserId = userId`. Prevents users stacking keys to bypass the per-user cap. (JSON-path count query is acceptable here — it's at create time, not per-proxy-call.)
@@ -130,7 +130,7 @@ body / flush cron.
 
 Publisher/marketplace tracking is **cut** (§3.10). The proxy charges the consumer rate per-host; Zevium's spread vs the upstream's actual cost is handled outside the app.
 
-- `PROXY_HOST_UNIT_COSTS` env: CSV `host:units`, e.g. `api.openai.com:3,api.anthropic.com:1,api.example.com:50`. Units = what the consumer pays per call.
+- `PROXY_HOST_UNIT_COSTS` env: JSON object, e.g. `{"api.openai.com":3,"api.anthropic.com":1,"api.example.com":50}`. Keys are normalized exact hosts (lowercase, no trailing dot/port). Units = what the consumer pays per call. Wildcard allowlist entries require explicit per-host costs in v1 (fail-closed if unpriced).
 - Unpriced host → **403 fail-closed** (no free rides). No default fallback.
 - Units ↔ USD: set by the meter_credit benefit. e.g. product $20 grants 2000 units → 1 unit = $0.01 → `api1` (3 units) = $0.03/call.
 
@@ -140,12 +140,12 @@ Per-key quota gate is plugin-native (§3.1). The only custom gate is the **org-p
 
 - One Redis key per org: `orgConsumed` (atomic counter). One Lua: `if creditedUnits − orgConsumed ≥ cost_units then incrby(orgConsumed, cost_units); return ok else insufficient`.
 - `creditedUnits` cached (Redis) **with a TTL fallback (e.g. 5 min) + webhook invalidation** (§3.18). A missed webhook self-heals via TTL; webhooks keep it fresh. Polar is source of truth. (Earlier text said webhook-only — corrected: pure webhook invalidation risks permanent staleness on a dropped webhook.)
-- No Polar-balance TTL cache for the gate decision. No overspend — the Lua is atomic.
-- Event ingest **after** 2xx upstream response via `waitUntil` (non-blocking), `externalId = requestId` for dedup. Polar auto-deducts → org pool decrements at Polar. Local `orgConsumed` already incremented at gate time → stay in sync (reconcile via webhook `customer.state_changed`).
+- `creditedUnits` uses a short Redis TTL cache for the gate decision (e.g. 5 min). This is intentional: avoids a Polar API call on every proxy request while self-healing missed webhooks. No overspend beyond `creditedUnits` because the reserve Lua is atomic against local `orgConsumed`.
+- Event ingest happens **after 2xx + body-complete** and is awaited synchronously before returning the response (§3.40/§3.59). `externalId = requestId` for Polar dedup. Polar auto-deducts → org pool decrements at Polar. Local `orgConsumed` already incremented at reserve time → usually stays in sync; drift is handled as v1 limitation (§5).
 
 ### 3.7 Cross-org keys view
 
-Flat `/app/settings/keys` → cross-org view listing the user's keys across all orgs they belong to (derived query, no new state). Key creation remains org-scoped (org settings). Any org member can create keys (default; tighten later if needed).
+Flat `/app/settings/keys` may remain as a cross-org view listing the user's keys across all orgs they belong to (derived query, no new state), but creation/update/delete must be org-scoped server tRPC (§3.58). Which roles can create keys is controlled by the `apiKey` grants in §3.14 (owner/admin/developer/member is a product decision; org creator always bypasses via Better Auth).
 
 ### 3.8 Charge rule: 2xx only (refund both gates on failure)
 
@@ -239,7 +239,7 @@ Consequence: with `references: "organization"`, **every** key create requires `o
 
 ### 3.17 Rate-limited calls burn `remaining` (refund on RATE_LIMITED too)
 
-Verified in plugin source (`claimUsageInDatabase`, lines 1734-1737): `consumeRemaining` runs **before** `consumeRateLimit`. So a call that hits the rate limit has **already** decremented `remaining` before `RATE_LIMITED` throws. The 2xx-only refund model must refund `remaining` when `verifyApiKey` throws `RATE_LIMITED` — not only on upstream non-2xx. The proxy catch block should refund both gates on ANY post-verify failure path (rate-limit, org-pool insufficient, upstream non-2xx, fetch throw).
+Verified in plugin source (`claimUsageInDatabase`, lines 1734-1737): `consumeRemaining` runs **before** `consumeRateLimit`. So a call that hits the rate limit has **already** decremented `remaining` before the verify endpoint returns/throws `RATE_LIMITED`. The proxy must refund `remaining` when `verifyApiKey` reports `RATE_LIMITED`. Since org-pool reserve happens after verify, there is no org-pool refund on this path.
 
 ### 3.18 `creditedUnits` cache needs a TTL fallback
 
@@ -259,7 +259,7 @@ Fix: `createCreditsCheckout` must pass `customerId: org.polarCustomerId` explici
 
 Verified in plugin source (create flow line 746): `metadata` is read from `ctx.body` and stored verbatim. The plugin does **not** validate that `metadata.creatorUserId` matches the session. A client could pass `metadata: { creatorUserId: "other-user-id" }` to bypass the one-key-per-user count check (the count queries by the real session userId, finds 0, allows the create). The limit is a UX guard, not a security boundary — but to be meaningful, `creatorUserId` must be set **server-side from the session**, not accepted from the client body.
 
-Fix: do NOT use the client's `auth.apiKey.create` for org-owned keys. Add a server-side tRPC mutation (e.g. `orgKey.create`) that reads the session, then calls `auth.api.createApiKey` (server-side call, not client plugin) with: `referencesType` from config, `organizationId` from URL, `metadata: { creatorUserId: session.user.id }` **set by the server**, plus `permissions`, `rateLimit`, `prefix`, `name` from validated input. The client UI calls this tRPC mutation, not the auth client plugin. (Server-side calls are NOT subject to the `SERVER_ONLY_PROPERTY` check at line 751, so refill/permissions/remaining are settable from server.)
+Fix: do NOT use the client's `auth.apiKey.create` for org-owned keys. Add a server-side tRPC mutation (e.g. `orgKey.create`) that reads the session, then calls `auth.api.createApiKey` (server-side call, not client plugin) with: `organizationId` from URL, `metadata: { creatorUserId: session.user.id }` **set by the server**, explicit `permissions`, explicit `rateLimit`, explicit `remaining`, `expiresIn: null`, and `name` from validated input. Do **not** pass `referencesType`/`references` per request — org ownership comes from the plugin config (`references: "organization"`, §3.16). Do **not** pass `prefix` per key — the plugin config's `defaultPrefix` applies (§3.38/§3.52). The client UI calls this tRPC mutation, not the auth client plugin. (Server-side calls are NOT subject to the `SERVER_ONLY_PROPERTY` check at line 751, so refill/permissions/remaining are settable from server.)
 
 ### 3.22 One-key-per-user race → unique partial index
 
@@ -301,7 +301,7 @@ Verified in plugin source (lines 1680-1684): if `verifyApiKey` is called with a 
 
 ### 3.28 Worker death between reserve and response = local double-charge
 
-Sequence: request A → reserve Lua increments `orgConsumed` by cost → fetch upstream → upstream returns 2xx → `waitUntil(ingest)` queued → **worker killed before response sent or ingest completes** (Cloudflare worker shutdown, CPU limit). Client retries with a NEW request (new requestId) → reserve Lua increments `orgConsumed` again (no Polar dedup across requests because requestId is new) → second call succeeds, second ingest fires. Net: `orgConsumed` is 2× the actual Polar-side consumed, and Polar has 2 events for what the client intended as 1 call (or 1 event if the first ingest also completed). Bounded by retry count; the next reconcile (§3.19) corrects it. v1 accepts; document. v2: client-supplied `Idempotency-Key` header used as the Polar `externalId` so retries dedupe (requires SDK change).
+Sequence: request A → reserve Lua increments `orgConsumed` by cost → fetch upstream → upstream returns 2xx → body stream starts → **worker killed before body-complete/commit+ingest** (Cloudflare worker shutdown, CPU limit). Client retries with a NEW request (new requestId) → reserve Lua increments `orgConsumed` again → second call succeeds. Net: `orgConsumed` can be higher than Polar consumed (over-reserved locally). Bounded by in-flight retry count; the next reconcile (§3.19/v2) corrects it. v1 accepts. v2: client-supplied `Idempotency-Key` header used as the Polar `externalId` so retries dedupe (requires SDK change).
 
 ### 3.29 Proxy auth header = `x-zevium-key` (verified against current impl)
 
@@ -407,16 +407,20 @@ Fix: pass `redirect: "error"` to `fetch` in the proxy. Any redirect causes `fetc
 
 ### 3.42 `ensureOrgCustomer` — check for existing customer first
 
-Current spec: `if missing, polar.customers.create(...)`. But: how do we know if it's missing? The doc assumed "check first, create if missing" but didn't specify the check API. Real impl:
+Current spec: `if missing, polar.customers.create(...)`. But: how do we know if it's missing? The doc assumed "check first, create if missing" but named the wrong API. The SDK does **not** support `customers.list({ externalId })`; instead it exposes `customers.getExternal({ externalId })`. Real impl:
 
 ```ts
-const list = await polar.customers.list({ externalId: orgId });
-const existing = list.result.items[0];
-const customer = existing ?? (await polar.customers.create({ externalId: orgId, email, name, metadata: { orgId } }));
+let customer;
+try {
+  customer = await polar.customers.getExternal({ externalId: orgId });
+} catch (err) {
+  // Only create on true not-found; rethrow other SDK/network errors
+  customer = await polar.customers.create({ externalId: orgId, email, name, metadata: { orgId } });
+}
 // persist customer.id as org.polarCustomerId
 ```
 
-`externalId` is unique within the Polar org, so `list` returns at most one. Idempotent: safe to call repeatedly. Avoids the "create and catch duplicate" race (which may not be supported and could leak partial customers).
+`externalId` is unique within the Polar org, so `getExternal` is the right idempotent lookup. Avoids the unsupported `list({ externalId })` shape and avoids a create-and-catch-duplicate race. If the SDK exposes a typed not-found error/status, branch on that explicitly; do not create on arbitrary network/500 errors.
 
 ### 3.43 Lua must reject `cost = 0`
 
@@ -728,7 +732,7 @@ Current `auth.tsx` already sets `permissions: { defaultPermissions: { api: ["rea
 
 **`src/lib/server/polar.ts`** — rewrite from bare `polarClient` export to org-scoped direct-SDK helpers:
 
-- `ensureOrgCustomer(org)` — list first by `externalId: org.id` (§3.42), else `polar.customers.create({ externalId: org.id, email: org.billingEmail (= \`org-${orgId}@billing.zevium.dev\`, §3.24), name: org.name, metadata: { orgId } })`; persist `polarCustomerId`. Lazy-call from checkout/getOrgCreditedUnits if `polarCustomerId === null` (§3.23).
+- `ensureOrgCustomer(org)` — `customers.getExternal({ externalId: org.id })` first (§3.42), else `polar.customers.create({ externalId: org.id, email: org.billingEmail (formula in §3.24), name: org.name, metadata: { orgId } })`; persist `polarCustomerId`. Lazy-call from checkout/getOrgCreditedUnits if `polarCustomerId === null` (§3.23).
 - `getOrgCreditedUnits(orgId): Promise<number>` — `polar.customerMeters.getStateExternal({ externalCustomerId: orgId, meterId: POLAR_METER_ID })` → meter `creditedUnits`. Redis-cached (TTL 5min, §3.18); invalidated by `order.paid` + `order.refunded` webhooks (primary) and `customer.state_changed` (secondary). Return 0 on no-active-meter / Polar error (gate → 402, do not throw).
 - `createCreditsCheckout({ orgId, amountUsd, successUrl })` — `checkouts.create({ productPriceId: POLAR_PRICE_ID_CREDITS, customerId: org.polarCustomerId, amount: amountUsd * 100, currency: "usd", metadata: { orgId }, successUrl })` (§3.20/§3.37).
 - `ingestProxyCall({ orgId, requestId, host, method, status, costUnits })` — `events.ingest({ events: [{ name: "proxy_call", externalCustomerId: orgId, externalId: requestId, metadata: { cost_units: costUnits, host, method, status } }] })`. Polar auto-deducts.
@@ -764,62 +768,88 @@ Current `auth.tsx` already sets `permissions: { defaultPermissions: { api: ["rea
 
 **Tests:**
 
-- `getHostCost` (fail-closed on unpriced host).
-- `orgPoolGate` Lua (reserve OK / insufficient / refund).
-- Proxy: 2xx → ingest called + no refund; non-2xx → no ingest + both refunds; unpriced host → 403; exhausted key → 429 (USAGE_EXCEEDED); invalid key → 401.
-- **Refund idempotency**: concurrent error paths (fetch throw + stream cancel) trigger refundBoth exactly once.
-- Streaming cancel after 2xx headers → still charges (no refund).
-- `ensureOrgCustomer` idempotent.
-- One-key-per-user: creating a second org-owned key with the same `metadata.creatorUserId` under the same org fails (server-side count check).
-- Rate-limited call: `verifyApiKey` throws `RATE_LIMITED` after burning `remaining`; proxy refunds `remaining` (§3.17).
+- `getHostCost` (fail-closed on unpriced host, zero/negative cost rejected).
+- `orgPoolGate` Lua (reserve OK / insufficient / nil-safe / negative self-heal / refund refuses negative / peek).
+- Proxy: 2xx + body-complete → synchronous ingest called + no refund; upstream non-2xx → no ingest + both refunds; stream cancel/read error → both refunds; unpriced host → 403; exhausted key → 429 (USAGE_EXCEEDED); invalid key → 401.
+- **Refund idempotency**: concurrent error paths (fetch throw + stream cancel/read error) trigger refundBoth exactly once.
+- `ensureOrgCustomer` idempotent (list-first + create fallback).
+- One-key-per-user: creating a second org-owned key with the same `metadata.creatorUserId` under the same org fails (DB unique index, not only server count check).
+- Rate-limited key: `verifyApiKey` returns/throws `RATE_LIMITED` after burning `remaining`; proxy refunds `remaining` only (org pool not reserved yet).
 
-### 4.4 Proxy gate flow (final, minimal)
+### 4.4 Proxy gate flow (final, body-complete + synchronous ingest)
 
-```
+```ts
 // 1. Cheap checks first — reject bad hosts before any DB / Redis hit
 normalize x-zevium-host
-if !https or isPrivate or !PROXY_ALLOWED_HOSTS.includes or !PROXY_HOST_UNIT_COSTS[host]:
+if !https or selfHost or dnsPrivate or !allowlisted or !priced:
   return 403
 
 // 2. Plugin gate (atomic guarded decrement on remaining > 0)
-try:
-  verification = await verifyApiKey({ key, permissions: { api: ["read"] } })
-catch e:
-  // verifyApiKey already decremented remaining (consumeRemaining runs before consumeRateLimit)
-  if e.code === "RATE_LIMITED":
-    // verification is undefined (threw before assignment); resolve key id from the raw key
-    const row = await db.select({id}).from(apikey).where(eq(apikey.key, hashKey(zeviumKey))).limit(1)
-    if (row) refundRemaining(row.id)  // §3.17 — rate-limited call burned a unit
-    return 429  // with Retry-After
-  if e.code === "USAGE_EXCEEDED": return 429  // remaining was 0, nothing consumed
-  return 401  // KEY_NOT_FOUND / INVALID_API_KEY / disabled / expired
-const orgId = verification.key.referenceId  // org-owned key → referenceId = orgId
+// NOTE: auth.api.verifyApiKey returns { valid, error, key } in this plugin version;
+// it may also throw for transport/unexpected failures. Handle both.
+verification = await verifyApiKey({ body: { key: zeviumKey, permissions: { api: ["read"] } } })
+if !verification.valid:
+  if verification.error?.code === "RATE_LIMITED":
+    // consumeRemaining already ran before consumeRateLimit; key id unavailable from verification
+    const hashed = await defaultKeyHasher(zeviumKey)
+    const row = await db.select({ id: apikey.id }).from(apikey).where(eq(apikey.key, hashed)).limit(1)
+    if (row) refundRemaining(row.id)
+    return 429  // with Retry-After when available
+  if verification.error?.code === "USAGE_EXCEEDED": return 429  // nothing consumed
+  return 401  // KEY_NOT_FOUND / INVALID_API_KEY / disabled / expired / permission fail
+
+const key = verification.key
+if !key?.referenceId: return 401
+const orgId = key.referenceId  // org-owned key → referenceId = orgId
 
 // 3. Org-pool money gate (atomic Lua)
 cost = getHostCost(host)
 reserve = orgPoolGate.reserve(orgId, cost)
-if !reserve.ok: return 402
+if !reserve.ok:
+  refundRemaining(key.id) // plugin remaining already decremented, org pool not reserved
+  return 402
 
-// 4. Fetch + stream (with idempotent refund guard)
-let refunded = false
-const refundBoth = () => {
-  if (refunded) return
-  refunded = true
+// 4. Fetch + stream (state machine prevents double refund/commit)
+state = "reserved"
+refundBoth = once(() => {
   orgPoolGate.refund(orgId, cost)
-  db.update(apikey).set({ remaining: sql`remaining + 1` }).where(eq(apikey.id, verification.key.id))  // drizzle atomic refund
-}
-try:
-  upstream = await fetch(targetUrl, { body, duplex: "half", headers, method })
-  if !upstream.ok:
-    refundBoth()
-    throw new UpstreamNonOK(upstream)
-  return new Response(streamWithCancelHook(upstream, refundBoth), { ... })
-catch e:
-  if !(e instanceof UpstreamNonOK): refundBoth()
-  throw e
+  refundRemaining(key.id)
+  state = "refunded"
+})
+commitAndIngest = once(async () => {
+  // synchronous because route handlers cannot access Cloudflare waitUntil (§3.40)
+  await ingestProxyCall({ orgId, requestId, host, method, status, costUnits: cost })
+  state = "committed"
+})
 
-// 5. Post-2xx ingest (best-effort; non-blocking)
-waitUntil(ingestProxyCall({ orgId, requestId, host, method, status, costUnits: cost }))
+try:
+  upstream = await fetch(targetUrl, {
+    body,
+    duplex: "half",
+    headers,
+    method,
+    redirect: "error",
+    signal: timeoutOrRequestAbortSignal,
+  })
+  if !upstream.ok:
+    await refundBoth()
+    throw new UpstreamNonOK(upstream)
+
+  if !upstream.body:
+    await commitAndIngest()
+    return upstream response
+
+  return new Response(
+    streamWithCancelHook(
+      upstream.body,
+      onDone: commitAndIngest,
+      onCancelOrReadError: refundBoth,
+    ),
+    { headers, status: upstream.status, statusText: upstream.statusText },
+  )
+catch e:
+  if !(e instanceof UpstreamNonOK) and state === "reserved": await refundBoth()
+  throw e
 ```
 
 ### 4.5 CI / verification
@@ -828,18 +858,18 @@ waitUntil(ingestProxyCall({ orgId, requestId, host, method, status, costUnits: c
 - Manual (blocked on secrets/dashboard):
   - Org created → Polar customer created (`polarCustomerId` persisted).
   - Org recharges (min $20) → Polar `creditedUnits` increments → webhook invalidates cache.
-  - Org member creates a key with `refillAmount`/`refillInterval` (e.g. 100/month).
-  - User key call: `verifyApiKey` auto-decrements `remaining`; org pool reserves `cost_units` → 2xx → ingest → Polar auto-deducts; non-2xx → both refunded.
-  - Unpriced host → 403.
+  - Org member creates an org-owned key with `remaining` default (e.g. 1000), no refill, `permissions: { api: ["read"] }`, and metadata `creatorUserId`.
+  - Proxy call: `verifyApiKey` auto-decrements `remaining`; org pool reserves `cost_units`; upstream 2xx + body-complete → synchronous ingest → Polar auto-deducts; non-2xx/cancel/read-error → both refunded.
+  - Unpriced host / self-host / private DNS / redirect → 403 or 502 according to failure path.
   - `remaining` exhausted → 429 (USAGE_EXCEEDED).
-  - Org pool exhausted → 402.
+  - Org pool exhausted → 402 and plugin `remaining` is refunded.
 
 ## 5. Known v1 limitations
 
-- **`orgConsumed` is authoritative for gating; Polar is purchase ledger + external mirror.** Local `orgConsumed` and Polar's consumed drift if `events.ingest` fails post-2xx (network blip, outage). For v1 we accept drift — the gate never lets the org spend more than `creditedUnits`, and Polar's customer portal may briefly show a higher balance than reality. No reconcile/queue for v1. If drift becomes a problem: durable outbox for ingest + periodic reconcile job (v2).
+- **`orgConsumed` is authoritative for gating; Polar is purchase ledger + external mirror.** Local `orgConsumed` and Polar consumed drift if `events.ingest` fails after body-complete (Polar outage/network blip). For v1 we accept drift — the gate never lets the org spend more than `creditedUnits`, and Polar's customer portal may briefly show a higher balance than reality. No durable outbox/reconcile for v1. If drift becomes a problem: durable outbox for ingest + periodic reconcile job (v2).
 - **`customer.state_changed` does NOT reconcile usage.** Per docs it fires on customer/subscription/benefit changes, not per ingested event. Use it to invalidate the `creditedUnits` cache after top-ups/refunds, not to reconcile `orgConsumed`.
-- **Worker death between reserve and response = local double-charge (§3.28).** Cloudflare worker can be killed after the reserve Lua increments `orgConsumed` but before the response is sent or the `events.ingest` completes. Client retry uses a new requestId → second reserve + second ingest → `orgConsumed` is 2× actual Polar consumed. Bounded by retry count; corrected by the reconcile job (§3.19). v1 accepts.
-- **Streaming cancel after 2xx headers → still charges.** Upstream returned success headers; client cancels the body stream. Polar event is ingested (2xx was sent). v1 documents as gray area; refund path does NOT cover client-side stream cancel.
+- **Worker death between reserve and body-complete = local over-reserve (§3.28).** If the worker is killed after reserve but before refund/commit, `orgConsumed` may remain too high. Bounded by in-flight request count; corrected by v2 reconcile. v1 accepts.
+- **Client cancels / upstream body read error before body-complete → refund.** This is the chosen v1 rule (§3.59), matching current proxy stream cancel behavior. We do NOT charge at headers-only.
 - **Webhook handler must read RAW request body.** `validateEvent` from `@polar-sh/sdk/webhooks` needs the raw bytes (not parsed JSON). In TanStack Start, read via `await request.text()` or `request.arrayBuffer()` BEFORE any framework parsing. Easy to get wrong; the handler will silently fail signature verification if the body is re-serialized.
 
 ## 6. Open questions / blockers
