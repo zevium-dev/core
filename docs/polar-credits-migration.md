@@ -139,7 +139,7 @@ Publisher/marketplace tracking is **cut** (§3.10). The proxy charges the consum
 Per-key quota gate is plugin-native (§3.1). The only custom gate is the **org-pool money gate**:
 
 - One Redis key per org: `orgConsumed` (atomic counter). One Lua: `if creditedUnits − orgConsumed ≥ cost_units then incrby(orgConsumed, cost_units); return ok else insufficient`.
-- `creditedUnits` cached (Redis), invalidated on `customer.state_changed` webhook / purchase. Polar is source of truth.
+- `creditedUnits` cached (Redis) **with a TTL fallback (e.g. 5 min) + webhook invalidation** (§3.18). A missed webhook self-heals via TTL; webhooks keep it fresh. Polar is source of truth. (Earlier text said webhook-only — corrected: pure webhook invalidation risks permanent staleness on a dropped webhook.)
 - No Polar-balance TTL cache for the gate decision. No overspend — the Lua is atomic.
 - Event ingest **after** 2xx upstream response via `waitUntil` (non-blocking), `externalId = requestId` for dedup. Polar auto-deducts → org pool decrements at Polar. Local `orgConsumed` already incremented at gate time → stay in sync (reconcile via webhook `customer.state_changed`).
 
@@ -155,7 +155,7 @@ Flat `/app/settings/keys` → cross-org view listing the user's keys across all 
 
 - `KEY_NOT_FOUND` / `INVALID_API_KEY` / disabled / expired → **401**
 - `USAGE_EXCEEDED` (quota exhausted) → **429**
-- Rate limit exceeded → **429** with `Retry-After`
+- Rate limit exceeded → **429** with `Retry-After`. **Also refund `remaining`** — `verifyApiKey` runs `consumeRemaining` _before_ `consumeRateLimit`, so a rate-limited call already burned a unit (§3.17).
 
 `verifyApiKey` returns `key: Omit<ApiKey, "key"> | null` including `referenceId` (= orgId for org-owned keys) — **no extra lookup needed** for orgId in the proxy.
 
@@ -210,6 +210,24 @@ The doc previously claimed `customer.state_changed` covers purchase — **wrong*
 Signature verification via `@polar-sh/sdk/webhooks` `validateEvent(raw, headers, POLAR_WEBHOOK_SECRET)`. **No `CreditsManager.add`** — Polar credits the meter itself via the meter_credit benefit. Handler is thin: validate, parse type. **OrgId extraction:** `order.paid`/`order.refunded` payloads carry Polar's internal `customerId` + `metadata` (NOT `externalId`). Read `data.metadata.orgId` (set at checkout, copied to the order); fallback to DB reverse-lookup by `organization.polarCustomerId === data.customerId`. `customer.state_changed` carries `data.externalId` (= orgId) directly.
 
 ### 3.13 `@polar-sh/sdk` pinned 0.41.5 through this migration.
+
+### 3.16 api-key plugin config: `references: "organization"` (BLOCKER)
+
+`referencesType` is read from `opts.references` — a **per-config plugin option** (default `"user"`), NOT a per-request body field (verified in plugin source, `claimUsageInDatabase` / create flow line 753). To make all keys org-owned (`referenceId = orgId`), set `references: "organization"` on the `apiKey(...)` plugin config in `src/lib/server/auth.tsx`. Without this, creates default to user-keys (`referenceId = userId`) and the org-billing model breaks (proxy can't resolve the billing org from a user-scoped `referenceId`).
+
+Consequence: with `references: "organization"`, **every** key create requires `organizationId` in the body (plugin throws `ORGANIZATION_ID_REQUIRED` otherwise) + the `apiKey:["create"]` permission (§3.14). There are no user-owned keys under this config — which is exactly what we want (only the org pool exists). Set `metadata.creatorUserId` server-side for attribution + the one-key-per-user check.
+
+### 3.17 Rate-limited calls burn `remaining` (refund on RATE_LIMITED too)
+
+Verified in plugin source (`claimUsageInDatabase`, lines 1734-1737): `consumeRemaining` runs **before** `consumeRateLimit`. So a call that hits the rate limit has **already** decremented `remaining` before `RATE_LIMITED` throws. The 2xx-only refund model must refund `remaining` when `verifyApiKey` throws `RATE_LIMITED` — not only on upstream non-2xx. The proxy catch block should refund both gates on ANY post-verify failure path (rate-limit, org-pool insufficient, upstream non-2xx, fetch throw).
+
+### 3.18 `creditedUnits` cache needs a TTL fallback
+
+Webhook-only invalidation means a **missed** `order.paid` webhook = permanent stale cache (org can't spend newly purchased credits). Add a TTL safety net (e.g. 5 min) so the cache self-heals even if every webhook is dropped. Webhook invalidation stays for freshness; TTL is the floor.
+
+### 3.19 `orgConsumed` durability
+
+`orgConsumed` (Redis) is authoritative for the gate. If Redis loses it (flush/restart without persistence), the counter resets to 0 → the gate thinks nothing was consumed → the org can spend its full `creditedUnits` again (overspend). Mitigations: (a) confirm Upstash persistence (AOF) is on for the credits Redis instance, (b) periodic reconcile job that recomputes `orgConsumed` from Polar's `consumedUnits` (v2). For v1: require Upstash persistence + document the risk.
 
 ## 4. Plan
 
@@ -275,7 +293,7 @@ on 2xx complete:
 
 **`src/routes/app/settings/keys.tsx`** (or org-scoped `/app/organizations/$org/settings/keys`) — org-scoped key create with `refillAmount`/`refillInterval`. Cross-org view at flat `/app/settings/keys`.
 
-**`src/lib/server/auth.tsx`** — keep `apiKey` + `capCaptcha` + `twoFactor` + `organization` plugins. No `polar()` plugin. Hook org creation → `ensureOrgCustomer`.
+**`src/lib/server/auth.tsx`** — keep `apiKey` + `capCaptcha` + `twoFactor` + `organization` plugins. **Configure `apiKey({ references: "organization", ... })`** (§3.16, BLOCKER) so all keys are org-owned. No `polar()` plugin. Hook org creation → `ensureOrgCustomer`.
 
 **Delete:**
 
@@ -295,6 +313,7 @@ on 2xx complete:
 - Streaming cancel after 2xx headers → still charges (no refund).
 - `ensureOrgCustomer` idempotent.
 - One-key-per-user: creating a second org-owned key with the same `metadata.creatorUserId` under the same org fails (server-side count check).
+- Rate-limited call: `verifyApiKey` throws `RATE_LIMITED` after burning `remaining`; proxy refunds `remaining` (§3.17).
 
 ### 4.4 Proxy gate flow (final, minimal)
 
@@ -308,7 +327,13 @@ if !https or isPrivate or !PROXY_ALLOWED_HOSTS.includes or !PROXY_HOST_UNIT_COST
 try:
   verification = await verifyApiKey({ key, permissions: { api: ["read"] } })
 catch e:
-  if e.code === "USAGE_EXCEEDED": return 429
+  // verifyApiKey already decremented remaining (consumeRemaining runs before consumeRateLimit)
+  if e.code === "RATE_LIMITED":
+    // verification is undefined (threw before assignment); resolve key id from the raw key
+    const row = await db.select({id}).from(apikey).where(eq(apikey.key, hashKey(zeviumKey))).limit(1)
+    if (row) refundRemaining(row.id)  // §3.17 — rate-limited call burned a unit
+    return 429  // with Retry-After
+  if e.code === "USAGE_EXCEEDED": return 429  // remaining was 0, nothing consumed
   return 401  // KEY_NOT_FOUND / INVALID_API_KEY / disabled / expired
 const orgId = verification.key.referenceId  // org-owned key → referenceId = orgId
 
