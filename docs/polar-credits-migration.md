@@ -263,6 +263,26 @@ Failure handling: if `ensureOrgCustomer` fails (Polar API down, network), the or
 
 Polar requires `email` unique within the org (Zevium's Polar org). Defaulting to the creator's email collides when one user creates multiple Zevium orgs. Concrete formula: `billingEmail = \`org-${org.id}@billing.zevium.dev\``— deterministic, unique per org (orgId is a cuid), and clearly non-personal (no real inbox). Set in the org-create tRPC mutation (same place that calls`auth.api.createOrganization`) and persist on `organization.billingEmail`. Used by `ensureOrgCustomer` as the Polar customer email.
 
+### 3.25 Lua must default nil `orgConsumed` to 0 + init at org creation
+
+On the first-ever call for an org, `GET orgConsumed` returns `nil`. In Redis Lua, `tonumber(nil)` is `nil`, and `nil + cost` **throws a Lua error** → the gate errors → proxy 500 (or crashes the worker). Two fixes required:
+
+1. **Lua script**: use `local cur = tonumber(redis.call('GET', KEYS[1])) or 0` (defaults nil to 0). All reserve/refund scripts must apply this.
+
+2. **Init at org creation**: in the tRPC org-create mutation (same place that calls `ensureOrgCustomer`), after the org row is persisted, run `redis.set(\`orgConsumed:${orgId}\`, 0, { nx: true })`. Idempotent. Guarantees the key exists. Also run on first `getOrgCreditedUnits` if missing (defense in depth).
+
+### 3.26 Unique index on `organization.polarCustomerId`
+
+Add `UNIQUE INDEX org_polar_customer_id_idx ON organization(polar_customer_id) WHERE polar_customer_id IS NOT NULL` in migration `0015`. Prevents two orgs pointing to the same Polar customer (would happen if `ensureOrgCustomer` races + the unique-email trick fails, or if someone manually edits the column). Also makes the `order.paid` reverse-lookup (`WHERE polarCustomerId = data.customerId`) safely assume at most one match.
+
+### 3.27 Key create must set `permissions: { api: ["read"] }` (verified)
+
+Verified in plugin source (lines 1680-1684): if `verifyApiKey` is called with a `permissions` argument, the key's `permissions` column MUST be populated + parseable as JSON, otherwise it throws `KEY_NOT_FOUND` (401). Our proxy passes `permissions: { api: ["read"] }` to verify, so every key MUST be created with `permissions: { api: ["read"] }` — the absence of which would cause every proxy call to 401. The `orgKey.create` tRPC mutation must hardcode `permissions: { api: ["read"] }` (server-side, §3.21). Also set a default `prefix` (e.g. `zevium`) + `rateLimit` (e.g. `{ enabled: true, max: 60, timeWindow: "1m" }`) so rate limiting is on by default and keys are identifiable.
+
+### 3.28 Worker death between reserve and response = local double-charge
+
+Sequence: request A → reserve Lua increments `orgConsumed` by cost → fetch upstream → upstream returns 2xx → `waitUntil(ingest)` queued → **worker killed before response sent or ingest completes** (Cloudflare worker shutdown, CPU limit). Client retries with a NEW request (new requestId) → reserve Lua increments `orgConsumed` again (no Polar dedup across requests because requestId is new) → second call succeeds, second ingest fires. Net: `orgConsumed` is 2× the actual Polar-side consumed, and Polar has 2 events for what the client intended as 1 call (or 1 event if the first ingest also completed). Bounded by retry count; the next reconcile (§3.19) corrects it. v1 accepts; document. v2: client-supplied `Idempotency-Key` header used as the Polar `externalId` so retries dedupe (requires SDK change).
+
 ## 4. Plan
 
 ### 4.1 Polar dashboard setup (manual, blocks testing)
@@ -288,7 +308,7 @@ Polar requires `email` unique within the org (Zevium's Polar org). Defaulting to
 **`src/lib/server/polar.ts`** — org-scoped direct-SDK helpers (small):
 
 - `ensureOrgCustomer(org)` — `polar.customers.create({ externalId: org.id, email: org.billingEmail (= \`org-${orgId}@billing.zevium.dev\`, §3.24), name: org.name, metadata: { orgId } })`if missing; persist`polarCustomerId`. Idempotent: if `externalId`already exists in Polar (retry), fetch by externalId and reuse — don't create a duplicate. Lazy-call from checkout/getOrgCreditedUnits if`polarCustomerId === null` (§3.23).
-- `getOrgCreditedUnits(orgId): Promise<number>` — `getStateExternal({ externalId: orgId })` → meter `creditedUnits`. Redis-cached; invalidated by `order.paid` + `order.refunded` webhooks (primary) and `customer.state_changed` (secondary).
+- `getOrgCreditedUnits(orgId): Promise<number>` — `polar.customerMeters.getStateExternal({ externalCustomerId: orgId, meterId: POLAR_METER_ID })` → meter `creditedUnits`. Redis-cached (TTL 5min, §3.18); invalidated by `order.paid` + `order.refunded` webhooks (primary) and `customer.state_changed` (secondary). Return 0 on no-active-meter / Polar error (gate → 402, do not throw).
 - `createCreditsCheckout({ orgId, amountUsd, successUrl })` — Polar checkout. `metadata: { orgId }`. **Must pass `customerId: org.polarCustomerId`** to link to the existing customer (§3.20) — otherwise the purchased meter credits land on a new customer and never reach the org. If `polarCustomerId` is null, lazy `ensureOrgCustomer` first.
 - `ingestProxyCall({ orgId, requestId, host, method, status, costUnits })` — `events.ingest(...)`. Polar auto-deducts.
 - `getHostCost(host)` — parse `PROXY_HOST_UNIT_COSTS` → `{ costUnits }` or throw (fail-closed 403).
@@ -414,6 +434,9 @@ waitUntil(ingestProxyCall({ orgId, requestId, host, method, status, costUnits: c
 
 - **`orgConsumed` is authoritative for gating; Polar is purchase ledger + external mirror.** Local `orgConsumed` and Polar's consumed drift if `events.ingest` fails post-2xx (network blip, outage). For v1 we accept drift — the gate never lets the org spend more than `creditedUnits`, and Polar's customer portal may briefly show a higher balance than reality. No reconcile/queue for v1. If drift becomes a problem: durable outbox for ingest + periodic reconcile job (v2).
 - **`customer.state_changed` does NOT reconcile usage.** Per docs it fires on customer/subscription/benefit changes, not per ingested event. Use it to invalidate the `creditedUnits` cache after top-ups/refunds, not to reconcile `orgConsumed`.
+- **Worker death between reserve and response = local double-charge (§3.28).** Cloudflare worker can be killed after the reserve Lua increments `orgConsumed` but before the response is sent or the `events.ingest` completes. Client retry uses a new requestId → second reserve + second ingest → `orgConsumed` is 2× actual Polar consumed. Bounded by retry count; corrected by the reconcile job (§3.19). v1 accepts.
+- **Streaming cancel after 2xx headers → still charges.** Upstream returned success headers; client cancels the body stream. Polar event is ingested (2xx was sent). v1 documents as gray area; refund path does NOT cover client-side stream cancel.
+- **Webhook handler must read RAW request body.** `validateEvent` from `@polar-sh/sdk/webhooks` needs the raw bytes (not parsed JSON). In TanStack Start, read via `await request.text()` or `request.arrayBuffer()` BEFORE any framework parsing. Easy to get wrong; the handler will silently fail signature verification if the body is re-serialized.
 
 ## 6. Open questions / blockers
 
