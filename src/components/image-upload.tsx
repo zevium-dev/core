@@ -241,48 +241,30 @@ function ImageUpload({
     [aspectRatio],
   );
 
-  const handleImageLoad = useCallback(() => {
-    if (!imageRef.current || !containerRef.current) return;
+  const handleImageLoad = useCallback(
+    (event: React.SyntheticEvent<HTMLImageElement>) => {
+      const img = event.currentTarget;
+      if (!containerRef.current) return;
 
-    const { cropBox: newCropBox, imageData: newImageData } = initializeCropBox(imageRef.current, containerRef.current);
+      const { cropBox: newCropBox, imageData: newImageData } = initializeCropBox(img, containerRef.current);
 
-    // Image load is async - we need to update state when image dimensions become available
-    // eslint-disable-next-line @eslint-react/set-state-in-effect -- DOM measurement requires state sync on image load
-    setCropBox(newCropBox);
+      setCropBox(newCropBox);
+      setImageData(newImageData);
+    },
+    [initializeCropBox],
+  );
 
-    // eslint-disable-next-line @eslint-react/set-state-in-effect -- DOM measurement requires state sync on image load
-    setImageData(newImageData);
-  }, [initializeCropBox]);
-
-  useEffect(() => {
-    if (!imageRef.current) return;
-
-    const img = imageRef.current;
-
-    // Check if image is already cached and loaded
-    if (img.complete && img.naturalHeight > 0) {
-      handleImageLoad();
-    } else {
-      img.addEventListener("load", handleImageLoad);
-    }
-
-    return () => img.removeEventListener("load", handleImageLoad);
-  }, [cropImage, handleImageLoad]);
-
-  /**
-   * Force re-measure image dimensions when dialog opens
-   * This ensures crop box is properly initialized even if load event already fired
-   */
-  useEffect(() => {
-    if (!showCropDialog) return;
-
-    // Use setTimeout to ensure the dialog is fully rendered
-    const timer = setTimeout(() => {
-      handleImageLoad();
-    }, 100);
-
-    return () => clearTimeout(timer);
-  }, [showCropDialog, handleImageLoad]);
+  const imageCallbackRef = useCallback(
+    (img: HTMLImageElement | null) => {
+      imageRef.current = img;
+      if (img && img.complete && img.naturalHeight > 0 && containerRef.current) {
+        const { cropBox: newCropBox, imageData: newImageData } = initializeCropBox(img, containerRef.current);
+        setCropBox(newCropBox);
+        setImageData(newImageData);
+      }
+    },
+    [initializeCropBox],
+  );
 
   /**
    * Handles crop box movement via mouse drag
@@ -552,7 +534,13 @@ function ImageUpload({
               className="relative mx-auto max-h-96 max-w-2xl overflow-hidden rounded-lg border border-border bg-muted"
               ref={containerRef}
             >
-              <img alt="Crop" className="mx-auto h-full max-w-full object-contain" ref={imageRef} src={cropImage} />
+              <img
+                alt="Crop"
+                className="mx-auto h-full max-w-full object-contain"
+                onLoad={handleImageLoad}
+                ref={imageCallbackRef}
+                src={cropImage}
+              />
 
               {/* Crop overlay and handles */}
               <svg className="pointer-events-none absolute inset-0" height="100%" width="100%">

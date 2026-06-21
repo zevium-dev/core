@@ -1,7 +1,7 @@
 "use client";
 
 import { m } from "motion/react";
-import { RefObject, useEffect, useId, useState } from "react";
+import { RefObject, useEffect, useId, useRef, useState } from "react";
 
 import { cn } from "~/lib/utils/index";
 
@@ -45,8 +45,9 @@ export const AnimatedBeam: React.FC<AnimatedBeamProps> = ({
   toRef,
 }) => {
   const id = useId();
-  const [pathD, setPathD] = useState("");
-  const [svgDimensions, setSvgDimensions] = useState({ height: 0, width: 0 });
+  const pathRef = useRef<SVGPathElement>(null);
+  const path2Ref = useRef<SVGPathElement>(null);
+  const svgRef = useRef<SVGSVGElement>(null);
   const [duration] = useState(() => durationProp ?? Math.random() * 3 + 4);
 
   // Calculate the gradient coordinates based on the reverse prop
@@ -66,48 +67,49 @@ export const AnimatedBeam: React.FC<AnimatedBeamProps> = ({
 
   useEffect(() => {
     const updatePath = () => {
-      if (containerRef.current && fromRef.current && toRef.current) {
-        const containerRect = containerRef.current.getBoundingClientRect();
-        const rectA = fromRef.current.getBoundingClientRect();
-        const rectB = toRef.current.getBoundingClientRect();
-
-        const svgWidth = containerRect.width;
-        const svgHeight = containerRect.height;
-
-        // eslint-disable-next-line @eslint-react/set-state-in-effect -- DOM measurement requires state sync on resize
-        setSvgDimensions({ height: svgHeight, width: svgWidth });
-
-        const startX = rectA.left - containerRect.left + rectA.width / 2 + startXOffset;
-        const startY = rectA.top - containerRect.top + rectA.height / 2 + startYOffset;
-        const endX = rectB.left - containerRect.left + rectB.width / 2 + endXOffset;
-        const endY = rectB.top - containerRect.top + rectB.height / 2 + endYOffset;
-
-        const controlY = startY - curvature;
-        const d = `M ${startX},${startY} Q ${(startX + endX) / 2},${controlY} ${endX},${endY}`;
-
-        // eslint-disable-next-line @eslint-react/set-state-in-effect -- DOM measurement requires state sync on resize
-        setPathD(d);
+      if (
+        !containerRef.current ||
+        !fromRef.current ||
+        !toRef.current ||
+        !svgRef.current ||
+        !pathRef.current ||
+        !path2Ref.current
+      ) {
+        return;
       }
+      const containerRect = containerRef.current.getBoundingClientRect();
+      const rectA = fromRef.current.getBoundingClientRect();
+      const rectB = toRef.current.getBoundingClientRect();
+
+      const svgWidth = containerRect.width;
+      const svgHeight = containerRect.height;
+
+      svgRef.current.setAttribute("width", String(svgWidth));
+      svgRef.current.setAttribute("height", String(svgHeight));
+      svgRef.current.setAttribute("viewBox", `0 0 ${svgWidth} ${svgHeight}`);
+
+      const startX = rectA.left - containerRect.left + rectA.width / 2 + startXOffset;
+      const startY = rectA.top - containerRect.top + rectA.height / 2 + startYOffset;
+      const endX = rectB.left - containerRect.left + rectB.width / 2 + endXOffset;
+      const endY = rectB.top - containerRect.top + rectB.height / 2 + endYOffset;
+
+      const controlY = startY - curvature;
+      const d = `M ${startX},${startY} Q ${(startX + endX) / 2},${controlY} ${endX},${endY}`;
+
+      pathRef.current.setAttribute("d", d);
+      path2Ref.current.setAttribute("d", d);
     };
 
-    // Initialize ResizeObserver
-    const resizeObserver = new ResizeObserver((entries) => {
-      // For all entries, recalculate the path
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      for (const entry of entries) {
-        updatePath();
-      }
+    const resizeObserver = new ResizeObserver(() => {
+      updatePath();
     });
 
-    // Observe the container element
     if (containerRef.current) {
       resizeObserver.observe(containerRef.current);
     }
 
-    // Call the updatePath initially to set the initial path
     updatePath();
 
-    // Clean up the observer on component unmount
     return () => {
       resizeObserver.disconnect();
     };
@@ -122,13 +124,28 @@ export const AnimatedBeam: React.FC<AnimatedBeamProps> = ({
         className,
       )}
       fill="none"
-      height={svgDimensions.height}
-      viewBox={`0 0 ${svgDimensions.width} ${svgDimensions.height}`}
-      width={svgDimensions.width}
+      height={0}
+      ref={svgRef}
+      viewBox="0 0 0 0"
+      width={0}
       xmlns="http://www.w3.org/2000/svg"
     >
-      <path d={pathD} stroke={pathColor} strokeLinecap="round" strokeOpacity={pathOpacity} strokeWidth={pathWidth} />
-      <path d={pathD} stroke={`url(#${id})`} strokeLinecap="round" strokeOpacity="1" strokeWidth={pathWidth} />
+      <path
+        d=""
+        ref={pathRef}
+        stroke={pathColor}
+        strokeLinecap="round"
+        strokeOpacity={pathOpacity}
+        strokeWidth={pathWidth}
+      />
+      <path
+        d=""
+        ref={path2Ref}
+        stroke={`url(#${id})`}
+        strokeLinecap="round"
+        strokeOpacity="1"
+        strokeWidth={pathWidth}
+      />
       <defs>
         <m.linearGradient
           animate={{

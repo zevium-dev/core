@@ -23,20 +23,12 @@ export const organizationRouter = router({
     .input(z.object({ invitationId: z.string() }))
     .output(schemaZod.MemberSelectZod)
     .mutation(async ({ ctx, input }) => {
-      const result = await authServer.api.acceptInvitation({
+      const member = await authServer.api.acceptInvitation({
         body: { invitationId: input.invitationId },
         headers: ctx.raw.req.headers,
       });
 
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- better-auth return type is loosely typed; member can be undefined on failure
-      if (!result.member) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Invitation not found",
-        });
-      }
-
-      return schemaZod.MemberSelectZod.parse(result.member);
+      return schemaZod.MemberSelectZod.parse(member);
     }),
 
   cancelInvitation: secureProcedure
