@@ -120,7 +120,7 @@ src/
 │   ├── mcp/             # MCP routes
 │   └── p/               # Public organization pages
 ├── server/              # Backend logic
-│   ├── rpcs/            # tRPC routers (audit, example, organization, project, projectSecret, request, tag, user-preference, openapi-schema)
+│   ├── rpcs/            # tRPC routers (audit, credits, example, orgKey, organization, project, projectSecret, request, tag, user-preference, openapi-schema)
 │   ├── context.ts       # Request context creation
 │   └── orpc.tsx         # OpenAPI documentation generation
 ├── db/                  # Database schema, permissions, roles, Zod helpers
@@ -133,7 +133,7 @@ src/
 │   ├── hash/            # Hashing utilities
 │   ├── polyfill/        # Polyfills
 │   ├── query-client/    # React Query client setup
-│   ├── server/          # Server-side utilities
+│   ├── server/          # Server-side utilities (polar, org-pool-gate, proxy-cost, proxy-security, redis-keys, kv, auth)
 │   └── utils/           # Helper functions
 ├── hooks/               # Custom React hooks
 ├── env/                 # Environment variable validation
@@ -162,6 +162,17 @@ public/                  # Static assets
 - Automatic documentation with Scalar API reference
 - Error handling with proper HTTP status codes
 - Input validation using Zod schemas
+
+#### Billing (Polar Credits)
+
+- **Org-scoped prepaid credits** via Polar meter credits (one Polar customer per org, `externalId = orgId`)
+- **Per-call credit reserve**: org pool gate with Redis Lua atomic check (`creditedUnits - orgConsumed >= cost`)
+- **Per-key rate limiting**: `@better-auth/api-key` plugin (60 req/min, `remaining` quota, no refill)
+- **Proxy billing flow**: host cost lookup → verify API key → reserve org pool → fetch upstream → ingest `proxy_call` event on 2xx + body-complete
+- **Top-up**: min $20 via Polar checkout, balance polling after redirect
+- **Key files**: `src/lib/server/polar.ts`, `src/lib/server/org-pool-gate.ts`, `src/lib/server/proxy-cost.ts`
+- **RPCs**: `credits` (getBalance, createTopUp, listTopUps, listCharges, listPerKeyUsage), `orgKey` (create, list, update, delete)
+- **Webhook**: `/api/polar/webhook` — `order.paid`, `order.refunded`, `customer.state_changed` invalidate credited-units cache
 
 #### Database Layer
 

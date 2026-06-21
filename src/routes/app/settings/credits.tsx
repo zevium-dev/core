@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { z } from "zod";
 
 import { Button } from "~/components/ui/button";
@@ -11,12 +11,15 @@ import { useTRPC } from "~/lib/trpc";
 const PAGE_SIZE = 20;
 const MIN_TOP_UP_USD = 20;
 const DEFAULT_TOP_UP_USD = 20;
+const POLL_INTERVAL_MS = 2000;
+const POLL_TIMEOUT_MS = 30_000;
 
 const amountInputSchema = z.number().int().min(MIN_TOP_UP_USD).max(100_000);
 
 /* eslint-disable perfectionist/sort-objects */
 export const Route = createFileRoute("/app/settings/credits")({
   validateSearch: z.object({
+    checkout_id: z.string().optional(),
     page: z.coerce.number().int().positive().optional(),
   }),
   loader: ({ context }) => {
@@ -33,6 +36,13 @@ function CreditsComponent() {
   const search = Route.useSearch();
   const currentPage = search.page ?? 1;
   const [amountUsd, setAmountUsd] = useState<string>(String(DEFAULT_TOP_UP_USD));
+
+  // Polling state for post-checkout balance sync (§3.47)
+  const checkoutId = search.checkout_id;
+  const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [isPolling, setIsPolling] = useState(!!checkoutId);
+  const [balanceSnapshot, setBalanceSnapshot] = useState<number | null>(null);
 
   const orgListQuery = useSuspenseQuery(trpc.organization.list.queryOptions());
   const activeOrg = orgListQuery.data[0];
@@ -64,6 +74,50 @@ function CreditsComponent() {
     }),
   );
 
+  // Balance polling after Polar checkout redirect
+  useEffect(() => {
+    if (!checkoutId || !orgId) return;
+
+    setIsPolling(true);
+    setBalanceSnapshot(balanceQuery.data.available);
+
+    pollTimerRef.current = setInterval(() => {
+      queryClient
+        .invalidateQueries(trpc.credits.getBalance.queryOptions({ organizationId: orgId }))
+        .catch(() => {});
+    }, POLL_INTERVAL_MS);
+
+    pollTimeoutRef.current = setTimeout(() => {
+      clearPolling();
+      // Clean up the checkout_id from URL after timeout
+      void navigate({ replace: true, search: { page: currentPage } });
+    }, POLL_TIMEOUT_MS);
+
+    return clearPolling;
+  }, [checkoutId, orgId]);
+
+  // Detect balance change while polling → stop + clean URL
+  useEffect(() => {
+    if (!isPolling || balanceSnapshot === null) return;
+    const current = balanceQuery.data.available;
+    if (current > balanceSnapshot) {
+      clearPolling();
+      setIsPolling(false);
+      void navigate({ replace: true, search: { page: currentPage } });
+    }
+  }, [balanceQuery.data.available, isPolling, balanceSnapshot]);
+
+  function clearPolling() {
+    if (pollTimerRef.current) {
+      clearInterval(pollTimerRef.current);
+      pollTimerRef.current = null;
+    }
+    if (pollTimeoutRef.current) {
+      clearTimeout(pollTimeoutRef.current);
+      pollTimeoutRef.current = null;
+    }
+  }
+
   const handleTopUp = () => {
     const parsed = amountInputSchema.safeParse(Number(amountUsd));
     if (!parsed.success || !orgId) return;
@@ -93,6 +147,21 @@ function CreditsComponent() {
   return (
     <div className="mx-auto w-full max-w-3xl min-w-0 flex-1 space-y-6 p-6">
       <h1 className="text-2xl font-bold text-foreground">Credits</h1>
+
+      {/* Post-checkout polling banner */}
+      {isPolling && (
+        <Card className="w-full border-primary/30 bg-primary/5 backdrop-blur-sm">
+          <CardContent className="flex items-center gap-3 p-4">
+            <div className="size-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+            <div>
+              <p className="text-sm font-medium text-foreground">Processing top-up…</p>
+              <p className="text-[11px] text-muted-foreground">
+                Waiting for Polar to confirm your payment. This may take a few seconds.
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       <Card className="w-full border-border/50 bg-card/50 backdrop-blur-sm">
         <CardContent className="p-6">

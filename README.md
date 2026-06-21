@@ -56,6 +56,13 @@ pnpm dev
   - `PROXY_ALLOWED_HOSTS`: allowlist for `x-zevium-host` (supports exact hosts and `*.example.com`)
 - If either value is missing, proxy requests fail closed.
 
+### Credits billing (Polar)
+
+- Org-scoped prepaid credits via Polar meter credits (`POLAR_METER_ID` + `POLAR_PRODUCT_ID_CREDITS`)
+- Per-call billing: host unit cost from `PROXY_HOST_UNIT_COSTS` (JSON `{"host": units}`)
+- Min $20 top-up via Polar checkout, balance polling after redirect
+- See `docs/polar-credits-migration.md` for architecture details
+
 ---
 
 ## Docs
