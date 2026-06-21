@@ -29,12 +29,9 @@
     "test:ui": "vitest --ui",
     "typecheck": "tsgo --noEmit"
   },
-  "dependencies": {
-    "@better-auth/api-key": "1.6.20",
-    "cap-widget": "^0.1.56",
-    "capjs-core": "^0.1.1"
-  },
+  "dependencies": {},
   "devDependencies": {
+    "@better-auth/api-key": "1.6.20",
     "@boi.gg/eslint-plugin-prefer-array-at": "^1.0.0",
     "@boi.gg/exception": "^0.0.3",
     "@cloudflare/vite-plugin": "^1.42.1",
@@ -106,6 +103,8 @@
     "autumn-js": "^0.1.85",
     "babel-plugin-react-compiler": "19.1.0-rc.2",
     "better-auth": "1.6.20",
+    "cap-widget": "^0.1.56",
+    "capjs-core": "^0.1.1",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
