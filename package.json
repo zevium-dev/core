@@ -7,7 +7,7 @@
   "scripts": {
     "build": "cross-env NODE_OPTIONS=--max-old-space-size=8192 vite build",
     "cf-typegen": "wrangler types --env-interface Env",
-    "ci": "pnpm run typecheck && pnpm run lint && pnpm run lint:eslint && pnpm run test && pnpm run format:check",
+    "ci": "node scripts/ci.mjs",
     "ci:pr": "pnpm run typecheck && pnpm run lint:changed && pnpm run test && pnpm run format:check:changed",
     "coverage": "vitest run --coverage",
     "deploy": "pnpm run build && wrangler deploy",
