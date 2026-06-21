@@ -74,12 +74,9 @@ The better-auth `polar()` plugin links `external_id = userId` and its `usage`/`p
 use it. Go direct `@polar-sh/sdk`, org-scoped. Keep `@polar-sh/sdk/webhooks`
 `validateEvent` only.
 
-### 2.6 `@better-auth/api-key` supports metadata + organizationId
+### 2.6 `@better-auth/api-key` org model (referenceId, NOT a organizationId column)
 
-Plugin `create`/`list` accept `organizationId` + `metadata`; `verifyApiKey` returns
-`key.metadata`. Our `apikey` table has a `metadata` JSON column already but no
-`organizationId` column. Since this is a new app with no users (confirmed), we redesign
-the key ownership model freely (§3.4).
+Plugin source (`apiKeySchema`, lines 2135-2259) declares `referenceId` (indexed) but **no `organizationId` column**. The create flow (line 753-764) stores the owner in `referenceId`: org key → `referenceId = orgId`; user key → `referenceId = userId`. The `organizationId` param on create/list is for **permission scoping** (`checkOrgApiKeyPermission` queries the _member_ table, not apikey) and is NOT persisted as a dedicated column. `verifyApiKey` returns `key` including `referenceId` + `metadata`. Conclusion: for billing we use `referenceId` (make all proxy keys org-owned) — see §3.4.
 
 ### 2.7 The gap (current merged code)
 
@@ -92,7 +89,7 @@ the key ownership model freely (§3.4).
 | Top-up           | webhook→`CreditsManager.add`    | Polar meter_credit benefit (auto on purchase)                         |
 | Customer         | none (Polar as checkout only)   | Polar customer per org                                                |
 | Markup/publisher | none                            | **cut** (no publisher accounting; spread external)                    |
-| Key ownership    | `apikey.userId` only            | **org-scoped** (`apikey.organizationId`); per-key quota via plugin    |
+| Key ownership    | `apikey.userId` only            | **org-owned keys** (`referenceId = orgId`); per-key quota via plugin  |
 | Overspend gate   | n/a                             | **local atomic counter** (`orgConsumed`) — the only custom gate state |
 
 ## 3. Decisions
@@ -104,7 +101,7 @@ Two gates per proxy call. Each uses a native mechanism — **zero custom Lua** f
 - **Per-key request quota** = `@better-auth/api-key` plugin's `remaining` / `refillAmount` / `refillInterval`. `verifyApiKey` runs `consumeRemaining()` — an atomic guarded decrement (`incrementOne({ where: { remaining: { gt: 0 } }, increment: -1 })`) with CAS refill on `lastRefillAt`. Throws `USAGE_EXCEEDED` at 0. **Plugin-native. We write no gate code** — just handle the thrown error.
 - **Org pool money gate** = Polar meter credits (`sum` over `cost_units`). Polar auto-deducts on ingested events. The pool balance = `creditedUnits − consumedUnits`. We gate against this with **one local atomic counter** (`orgConsumed`, Redis Lua): `creditedUnits − orgConsumed ≥ cost_units` then increment `orgConsumed`. This is the **only irreducible local gate state** (one Redis key per org). Alternative: live `getStateExternal` per call (drops the counter, adds per-call Polar latency).
 - **A call passes only if both gates pass.** Per-key quota = per-user limit (one user, one key, one quota). Org pool = prepaid money (Polar).
-- **Cuts** (to kill state): no `creditAllocation` table (per-key plugin quota replaces it); no `ownerType` / `ownerUserId` on apikey (plugin's `organizationId` scopes keys to orgs); no publisher earnings (publisher/marketplace cut — see §3.5).
+- **Cuts** (to kill state): no `creditAllocation` table (per-key plugin quota replaces it); no `ownerType` / `ownerUserId` / `organizationId` columns on apikey (plugin's `referenceId` = orgId for org-owned keys); no publisher earnings (publisher/marketplace cut — see §3.5).
 
 ### 3.2 Polar-native, org-scoped, direct SDK
 
@@ -122,13 +119,12 @@ body / flush cron.
 
 ### 3.4 API key schema — minimal (plugin-native)
 
-`apikey` table is the `@better-auth/api-key` plugin's table. New app, no backward compat.
-
-- **Add** `organizationId` (plugin already supports on create/list; our table currently lacks it). All keys org-scoped.
+- **All proxy keys are org-owned** — create with `referencesType: "organization"`, so the plugin sets `referenceId = orgId` (verified in plugin source, create flow line 753-764). The proxy reads `referenceId` → bills that org. **No dedicated `organizationId` column needed for billing** (the plugin does NOT declare one in `apiKeySchema`; its `organizationId` create param is for permission scoping only, persisted into `referenceId`). This collapses the user-owned-vs-org-owned billing split — there's only the org pool now (we cut user allocations in §3.1).
+- **Track creator via `metadata.creatorUserId`** for attribution + the one-key-per-user constraint. The plugin's `metadata` column accepts arbitrary JSON.
 - **Repurpose** `remaining` / `refillAmount` / `refillInterval` as the **per-key request quota** (per-user call cap). Plugin handles atomic decrement + auto-refill natively (§3.1). **Important:** this is request-count, not unit-cost. An expensive host (50 units/call) burns the same quota as a cheap one (1 unit/call).
 - **Keep** `rateLimit*` for rate-limiting.
-- **Drop** `requestCount` (dead; do not surface as billed usage). No `ownerType` / `ownerUserId`.
-- **One personal key per user per org** — add `kind: text` column on apikey (values: `'personal'` | `'shared'`). Unique constraint on `(organizationId, userId) WHERE kind = 'personal'` (drizzle partial unique index, or server-side check at create). Prevents users stacking keys to bypass the per-user cap. Without this, the per-key-quota-as-per-user-budget model collapses. **Avoid `metadata.kind`** — drizzle JSON-path queries for the uniqueness check are awkward; a real column is cleaner and indexable.
+- **Drop** `requestCount` (dead; do not surface as billed usage). No `ownerType` / `ownerUserId` / `organizationId` columns — `referenceId` is the billing org.
+- **One personal key per user per org** — server-side check at create: count keys where `referenceId = orgId AND metadata.creatorUserId = userId`. Prevents users stacking keys to bypass the per-user cap. (JSON-path count query is acceptable here — it's at create time, not per-proxy-call.)
 
 ### 3.5 Per-host unit cost (consumer rate only — publisher cut)
 
@@ -161,7 +157,7 @@ Flat `/app/settings/keys` → cross-org view listing the user's keys across all 
 - `USAGE_EXCEEDED` (quota exhausted) → **429**
 - Rate limit exceeded → **429** with `Retry-After`
 
-`verifyApiKey` returns `key: Omit<ApiKey, "key"> | null` including `organizationId` — **no extra lookup needed** for orgId in the proxy.
+`verifyApiKey` returns `key: Omit<ApiKey, "key"> | null` including `referenceId` (= orgId for org-owned keys) — **no extra lookup needed** for orgId in the proxy.
 
 **Refund idempotency:** use a request-scoped `let refunded = false` guard. Multiple error paths (fetch throw, upstream non-2xx, stream `cancel()`) can fire; without the guard, double-refund on retry/cancel+error would over-credit the org.
 
@@ -211,7 +207,7 @@ Webhook subscriptions + triggers:
 
 The doc previously claimed `customer.state_changed` covers purchase — **wrong**. Per Polar SDK source (`WebhookCustomerStateChangedPayload`): fires on customer create/update/delete, subscription create/update, benefit grant/revoke — **not** on `order.paid`. Need `order.paid` as the primary trigger for cache invalidation after a top-up.
 
-Signature verification via `@polar-sh/sdk/webhooks` `validateEvent(raw, headers, POLAR_WEBHOOK_SECRET)`. **No `CreditsManager.add`** — Polar credits the meter itself via the meter_credit benefit. Handler is thin: validate, parse type, invalidate cache by `orgId` from `data.externalId`.
+Signature verification via `@polar-sh/sdk/webhooks` `validateEvent(raw, headers, POLAR_WEBHOOK_SECRET)`. **No `CreditsManager.add`** — Polar credits the meter itself via the meter_credit benefit. Handler is thin: validate, parse type. **OrgId extraction:** `order.paid`/`order.refunded` payloads carry Polar's internal `customerId` + `metadata` (NOT `externalId`). Read `data.metadata.orgId` (set at checkout, copied to the order); fallback to DB reverse-lookup by `organization.polarCustomerId === data.customerId`. `customer.state_changed` carries `data.externalId` (= orgId) directly.
 
 ### 3.13 `@polar-sh/sdk` pinned 0.41.5 through this migration.
 
@@ -230,9 +226,9 @@ Signature verification via `@polar-sh/sdk/webhooks` `validateEvent(raw, headers,
 
 ### 4.2 Schema + env (minimal)
 
-- `apikey`: add `organizationId: text` (FK→organization), `kind: text` (`'personal'` | `'shared'`). Partial unique index on `(organizationId, userId) WHERE kind = 'personal'`. Repurpose `remaining` / `refillAmount` / `refillInterval` as the per-key request quota. Drop `requestCount` (dead). No `ownerType` / `ownerUserId`. Keep `rateLimit*`.
+- `apikey`: no new columns for billing. Create all proxy keys with `referencesType: "organization"` so `referenceId = orgId`. Store `metadata.creatorUserId` for attribution + one-key-per-user check. Repurpose `remaining` / `refillAmount` / `refillInterval` as the per-key request quota. Drop `requestCount` (dead). No `ownerType` / `ownerUserId` / `organizationId` / `kind` columns. Keep `rateLimit*`.
 - **No new tables.** `creditAllocation` and `publisherEarning` are gone. `creditLedger` already gone.
-- Migration `0014` (credit_ledger) → replaced by `0015`: `organization.polarCustomerId`, `organization.billingEmail`, `apikey.organizationId`, `apikey.kind`, partial unique index on `(organizationId, userId) WHERE kind = 'personal'`.
+- Migration `0014` (credit_ledger) → replaced by `0015`: `organization.polarCustomerId`, `organization.billingEmail`. (apikey unchanged — we use the plugin's existing `referenceId` + `metadata` columns; no new apikey columns.)
 - `src/env/server.ts`: add `POLAR_METER_ID`, `PROXY_HOST_UNIT_COSTS`. Drop `CREDITS_FLUSH_SECRET`.
 
 ### 4.3 Code changes (minimal)
@@ -257,7 +253,7 @@ verifyApiKey({ body: { key, permissions: { api: ["read"] } } })
   // plugin atomic-guarded decrements remaining; throws USAGE_EXCEEDED at 0
 if USAGE_EXCEEDED: return 429
 cost = getHostCost(host)                                            // 403 if unpriced
-reserve = orgPoolGate.reserve({ orgId: key.organizationId, cost })   // 402 if insufficient
+reserve = orgPoolGate.reserve({ orgId: key.referenceId, cost })   // 402 if insufficient  // referenceId = orgId (org-owned key)
 fetch upstream
 if !upstream.ok:
   orgPoolGate.refund({...})                                         // refund money gate
@@ -298,7 +294,7 @@ on 2xx complete:
 - **Refund idempotency**: concurrent error paths (fetch throw + stream cancel) trigger refundBoth exactly once.
 - Streaming cancel after 2xx headers → still charges (no refund).
 - `ensureOrgCustomer` idempotent.
-- One-key-per-user: creating a second `'personal'` key for the same `(org, user)` fails (unique constraint).
+- One-key-per-user: creating a second org-owned key with the same `metadata.creatorUserId` under the same org fails (server-side count check).
 
 ### 4.4 Proxy gate flow (final, minimal)
 
@@ -314,11 +310,11 @@ try:
 catch e:
   if e.code === "USAGE_EXCEEDED": return 429
   return 401  // KEY_NOT_FOUND / INVALID_API_KEY / disabled / expired
-const { organizationId } = verification.key
+const orgId = verification.key.referenceId  // org-owned key → referenceId = orgId
 
 // 3. Org-pool money gate (atomic Lua)
 cost = getHostCost(host)
-reserve = orgPoolGate.reserve(organizationId, cost)
+reserve = orgPoolGate.reserve(orgId, cost)
 if !reserve.ok: return 402
 
 // 4. Fetch + stream (with idempotent refund guard)
@@ -326,7 +322,7 @@ let refunded = false
 const refundBoth = () => {
   if (refunded) return
   refunded = true
-  orgPoolGate.refund(organizationId, cost)
+  orgPoolGate.refund(orgId, cost)
   incrementOne(apikey, verification.key.id, { remaining: 1 })  // atomic, NOT stale+1
 }
 try:
@@ -340,9 +336,7 @@ catch e:
   throw e
 
 // 5. Post-2xx ingest (best-effort; non-blocking)
-waitUntil(ingestProxyCall({ orgId: organizationId, requestId, host, method, status, costUnits: cost }))
-```
-
+waitUntil(ingestProxyCall({ orgId, requestId, host, method, status, costUnits: cost }))
 ```
 
 ### 4.5 CI / verification
@@ -370,4 +364,7 @@ waitUntil(ingestProxyCall({ orgId: organizationId, requestId, host, method, stat
 - Per-token dynamic pricing (event metadata already forward-compatible).
 - Volume pricing (Polar: "coming soon").
 - Polar customer portal deep-link (build our own UI for now).
+
+```
+
 ```
