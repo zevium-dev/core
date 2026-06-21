@@ -10,7 +10,10 @@
  */
 import { spawn } from "node:child_process";
 
-const STEPS = ["typecheck", "lint", "lint:eslint", "test", "build", "format:check"];
+const changed = process.argv.includes("--changed");
+const STEPS = changed
+  ? ["typecheck", "lint:changed", "lint:eslint:changed", "test", "build", "format:check:changed"]
+  : ["typecheck", "lint", "lint:eslint", "test", "build", "format:check"];
 
 const COLORS = [
   ["\x1b[36m", "cyan"],
