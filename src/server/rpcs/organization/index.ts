@@ -28,7 +28,8 @@ export const organizationRouter = router({
         headers: ctx.raw.req.headers,
       });
 
-      if (!result?.member) {
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- better-auth return type is loosely typed; member can be undefined on failure
+      if (!result.member) {
         throw new TRPCError({
           code: "NOT_FOUND",
           message: "Invitation not found",
@@ -111,7 +112,6 @@ export const organizationRouter = router({
         },
         headers: ctx.raw.req.headers,
       });
-      if (!org) return null;
       return { ...org, createdAt: org.createdAt, logo: org.logo ?? null, members: org.members.filter(Boolean) };
     }),
 

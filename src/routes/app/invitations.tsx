@@ -2,6 +2,7 @@ import type { inferRouterOutputs } from "@trpc/server";
 
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
+import { useState } from "react";
 import { toast } from "sonner";
 
 import type { AppRouter } from "~/server";
@@ -20,7 +21,8 @@ interface InvitationRowProps {
 }
 
 function InvitationRow({ invitation, isPending, onClick }: InvitationRowProps) {
-  const isExpired = new Date(invitation.expiresAt) < new Date();
+  const [now] = useState(() => new Date());
+  const isExpired = new Date(invitation.expiresAt) < now;
   return (
     <div className="flex flex-col gap-3 rounded-md border p-3 sm:flex-row sm:items-center sm:justify-between">
       <div className="flex-1">

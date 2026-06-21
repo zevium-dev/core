@@ -44,10 +44,10 @@ function AccountPreferenceComponent() {
   const passwordTooLong = newPassword.length > MAX_PASSWORD_LENGTH;
   const confirmMismatch = confirmPassword.length > 0 && newPassword !== confirmPassword;
 
-  const hasSyncedTimezone = useRef(false);
+  const hasSyncedTimezoneRef = useRef(false);
   useEffect(() => {
-    if (userPreferencesQuery.data?.timezone && !hasSyncedTimezone.current) {
-      hasSyncedTimezone.current = true;
+    if (userPreferencesQuery.data?.timezone && !hasSyncedTimezoneRef.current) {
+      hasSyncedTimezoneRef.current = true;
       setTimezone(userPreferencesQuery.data.timezone);
     }
   }, [userPreferencesQuery.data?.timezone]);

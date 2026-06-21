@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { type ServerEnv, serverEnv } from "~/env/server";
+import { serverEnv } from "~/env/server";
 
 import { clearKeyRingCache, getAllKeyIds, getKeyById, getKeyRing, getPrimaryKey } from "./secrets-keyring";
 

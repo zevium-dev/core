@@ -20,6 +20,7 @@ const tailwind = defineConfig({
   rules: {
     ...tailwindcss.configs["recommended-warn"].rules,
     "better-tailwindcss/enforce-consistent-line-wrapping": "off",
+    "better-tailwindcss/no-unknown-classes": "off",
     "better-tailwindcss/no-unregistered-classes": "off",
   },
   settings: { "better-tailwindcss": { entryPoint: "./src/styles/app.css" } },
@@ -86,6 +87,13 @@ export default defineConfig(
   ...scopeToTs(pluginRouter.configs["flat/recommended"]),
 
   {
+    files: ["src/routes/**/*.{ts,tsx}"],
+    rules: {
+      "@tanstack/router/create-route-property-order": "off",
+    },
+  },
+
+  {
     files: tsFiles,
     plugins: { "prefer-array-at": preferArrayAt },
     rules: {
@@ -106,6 +114,7 @@ export default defineConfig(
   {
     files: tsFiles,
     rules: {
+      "@eslint-react/jsx-no-children-prop": "off",
       "@eslint-react/no-context-provider": "off",
       "@typescript-eslint/array-type": ["warn", { default: "generic", readonly: "generic" }],
       "@typescript-eslint/no-confusing-void-expression": "off",

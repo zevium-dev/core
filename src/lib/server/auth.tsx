@@ -1,7 +1,7 @@
+import { apiKey } from "@better-auth/api-key";
 import { autumn } from "autumn-js/better-auth";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
-import { apiKey } from "@better-auth/api-key";
 import { twoFactor } from "better-auth/plugins";
 import { organization } from "better-auth/plugins/organization";
 import { tanstackStartCookies } from "better-auth/tanstack-start";

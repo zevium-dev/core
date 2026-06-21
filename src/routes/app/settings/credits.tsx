@@ -30,7 +30,6 @@ const recentTransactions = [
 ];
 
 function CreditsComponent() {
-  const [_autoTopUpEnabled, _setAutoTopUpEnabled] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
 
   const currentBalance = "$12.26";

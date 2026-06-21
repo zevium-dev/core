@@ -83,7 +83,7 @@ function ApiKeysComponent() {
     queryFn: async () => {
       const { data, error } = await auth.apiKey.list();
       if (error) throw new Error(error.message);
-      return data?.apiKeys ?? [];
+      return data.apiKeys;
     },
     queryKey: ["apiKeys"],
   });
@@ -380,7 +380,7 @@ function ApiKeysComponent() {
           {hasKeys && (
             <div className="flex items-center justify-end px-4 py-2">
               <span className="text-[10px] tracking-wide text-muted-foreground uppercase">
-                Total Usage: <span className="font-medium text-foreground">${totalUsage.toFixed(3)} used</span>
+                Total Usage: <span className="font-medium text-foreground">{`$${totalUsage.toFixed(3)} used`}</span>
               </span>
             </div>
           )}

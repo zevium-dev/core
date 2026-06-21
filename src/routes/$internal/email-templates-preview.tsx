@@ -1,5 +1,4 @@
 import { createFileRoute } from "@tanstack/react-router";
-
 import { render } from "react-email";
 
 export const Route = createFileRoute("/$internal/email-templates-preview")({

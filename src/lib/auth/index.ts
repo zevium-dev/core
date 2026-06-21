@@ -1,8 +1,8 @@
+import { apiKeyClient } from "@better-auth/api-key/client";
 import { Exception } from "@boi.gg/exception";
 import { queryOptions, type QueryOptions, useSuspenseQuery } from "@tanstack/react-query";
 import { useLocation } from "@tanstack/react-router";
 import { createServerOnlyFn } from "@tanstack/react-start";
-import { apiKeyClient } from "@better-auth/api-key/client";
 // import { organizationClient } from "better-auth/client/plugins";
 import { twoFactorClient } from "better-auth/client/plugins";
 import { createAuthClient, ErrorContext } from "better-auth/react";

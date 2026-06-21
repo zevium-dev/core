@@ -10,6 +10,7 @@ export function getFormErrorString(error: unknown) {
     return (error as { summary: string }).summary;
   }
   if (error && typeof error === "object" && "toString" in error && typeof error.toString === "function") {
+    // eslint-disable-next-line @typescript-eslint/no-base-to-string -- intentionally stringifying arbitrary validation error objects; we discard [object Object] below
     const str = error.toString();
     if (str !== "[object Object]") return str;
   }

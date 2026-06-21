@@ -6,7 +6,7 @@ export const Route = createFileRoute("/app/")({
   component: RouteComponent,
   loader: async ({ context }) => {
     const session = await context.queryClient.ensureQueryData(sessionQueryOptions());
-    if (!session?.user) throw redirect({ to: "/auth/sign-in" });
+    if (!session.user) throw redirect({ to: "/auth/sign-in" });
 
     const organizations = await context.queryClient.ensureQueryData(context.trpc.organization.list.queryOptions());
 

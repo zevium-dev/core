@@ -1,7 +1,7 @@
 import { ApiReferenceReact } from "@scalar/api-reference-react";
 import "@scalar/api-reference-react/style.css";
 import { ClientOnly } from "@tanstack/react-router";
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { useTheme } from "~/components/theme-provider";
 
@@ -44,6 +44,18 @@ function ScalarApiReferenceClient({
 }: ScalarApiReferenceProps) {
   const { theme } = useTheme();
 
+  const [isSystemDark, setIsSystemDark] = useState(() =>
+    typeof window !== "undefined" ? window.matchMedia("(prefers-color-scheme: dark)").matches : false,
+  );
+  useEffect(() => {
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    const handler = (event: MediaQueryListEvent) => setIsSystemDark(event.matches);
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+  }, []);
+
+  const isDarkMode = theme === "dark" || (theme === "system" && isSystemDark);
+
   const apiKeyRef = useRef(apiKey);
   const upstreamHostRef = useRef(upstreamHost);
 
@@ -54,10 +66,6 @@ function ScalarApiReferenceClient({
   useEffect(() => {
     upstreamHostRef.current = upstreamHost;
   }, [upstreamHost]);
-
-  const isDarkMode =
-    theme === "dark" ||
-    (theme === "system" && typeof window !== "undefined" && window.matchMedia("(prefers-color-scheme: dark)").matches);
 
   const configuration = useMemo<ScalarConfiguration>(() => {
     return {

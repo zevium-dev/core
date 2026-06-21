@@ -247,9 +247,10 @@ function ImageUpload({
     const { cropBox: newCropBox, imageData: newImageData } = initializeCropBox(imageRef.current, containerRef.current);
 
     // Image load is async - we need to update state when image dimensions become available
-
+    // eslint-disable-next-line @eslint-react/set-state-in-effect -- DOM measurement requires state sync on image load
     setCropBox(newCropBox);
 
+    // eslint-disable-next-line @eslint-react/set-state-in-effect -- DOM measurement requires state sync on image load
     setImageData(newImageData);
   }, [initializeCropBox]);
 
