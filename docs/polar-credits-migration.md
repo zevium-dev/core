@@ -511,6 +511,24 @@ if cur < 0 then cur = 0; redis.call('SET', KEYS[1], 0) end  -- self-heal negativ
 
 Both fixes are one-liners. The peek Lua (§3.45) already clamps `available` to `>= 0`, so the UI is safe even if `orgConsumed` is briefly negative.
 
+### 3.51 Current proxy patterns to preserve (verified against `src/routes/api/proxy/$.ts`)
+
+Verified the current proxy implementation has patterns the migration must preserve:
+
+1. **`userId` derivation breaks with org-owned keys (lines 138-148).** The current proxy derives `userId` from `verification.key.userId` / `verification.userId` / etc. With `references: "organization"`, the key has NO `userId` (it has `referenceId = orgId`). The `ApiKeyVerificationUserShapeZod` + safeParse dance will fail → the proxy returns 401 "API key verification did not include a user id." Fix: remove the `userId` derivation entirely. The billing unit is the org (`referenceId`), not the user. The `metadata.creatorUserId` is only for the one-key-per-user check (at create time), not at proxy time.
+
+2. **Stream cancel handler must refund (lines 230-235).** The current proxy wraps `upstream.body` in a `ReadableStream` with a `cancel` callback that calls `refundReservedChargeInternal()`. This handles the "streaming cancel after 2xx" case (§5): the client cancels the body stream after the 2xx headers, the proxy refunds the charge. The migration must preserve this pattern — replace `refundReservedChargeInternal` (which calls `CreditsManager.add`) with the new `refundBoth` that calls `orgPoolGate.refund` + `db.update(apikey).set({remaining: sql\`remaining+1\`})`.
+
+3. **Outbound header stripping (lines 125-127).** The current proxy strips `x-zevium-key`, `content-length`, and `cookie` from the outbound request. Preserve all three. `cookie` stripping is a privacy decision (don't leak the client's cookies to the upstream). `content-length` is set by `fetch` automatically.
+
+4. **Response header stripping (line 219).** Strip `x-zevium-proxy-secret` from the response (don't leak the internal proxy secret to the client). Preserve.
+
+5. **`UpstreamNonOK` custom error (line 212).** The current proxy throws a custom `UpstreamNonOK(upstream)` error after the refund. Preserve the pattern (it bubbles to the response handler which returns the upstream's status + body).
+
+6. **Flat `PROXY_CALL_COST_CENTS` cost (line 157).** The current proxy uses a flat cost per call. The migration replaces with `cost = getHostCost(host)` (per-host variable). The `CreditsManager.add` refund (which takes `amountCents`) is replaced with `orgPoolGate.refund(orgId, cost)` + `apikey.remaining` refund (which take `costUnits`).
+
+7. **`refundReservedCharge` state machine (lines 150-169).** The current proxy uses a `chargeState` state machine (`"not_reserved"` → `"reserved"` → `"refunded"` / `"committed"`) to prevent double-refund and double-commit. The migration must preserve this pattern with the new gate logic.
+
 ## 4. Plan
 
 ### 4.1 Polar dashboard setup (manual, blocks testing)
