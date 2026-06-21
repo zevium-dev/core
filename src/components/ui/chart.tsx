@@ -182,6 +182,8 @@ function ChartTooltipContent({
         {payload.map((item, index) => {
           const key = nameKey ?? String(item.name ?? item.dataKey ?? "value");
           const itemConfig = getPayloadConfigFromPayload(config, item, key);
+          // recharts types item.payload as `unknown`, so we narrow to read the optional
+          // `fill` color. The cast is unavoidable given recharts' untyped payload.
           const itemFill =
             typeof item.payload === "object" && item.payload !== null && "fill" in item.payload
               ? (item.payload as { fill?: string }).fill
