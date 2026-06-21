@@ -167,8 +167,5 @@
     "yaml": "^2.9.0",
     "zod": "^4.4.3"
   },
-  "packageManager": "pnpm@11.8.0",
-  "trustedDependencies": [
-    "@parcel/watcher"
-  ]
+  "packageManager": "pnpm@11.8.0"
 }
