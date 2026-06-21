@@ -211,6 +211,26 @@ Signature verification via `@polar-sh/sdk/webhooks` `validateEvent(raw, headers,
 
 ### 3.13 `@polar-sh/sdk` pinned 0.41.5 through this migration.
 
+### 3.14 Org access control must grant `apiKey` permissions (BLOCKER)
+
+The api-key plugin's org-key creation calls `checkOrgApiKeyPermission(ctx, userId, orgId, "create")`, which delegates to the org plugin's `hasPermission({ permissions: { apiKey: [action] } })` (verified in plugin source `checkPermission`, line 558-567). The org's `apiKey` statement must include `"create"` (and `"read"`, `"update"`, `"delete"` for full UX). Our `organization-access.ts` statement set (`ac`, `invitation`, `member`, `organization`, `team`) has **no `apiKey` statement** — and the plugin does **not** export `defaultStatements.apiKey` (it only uses the org plugin's defaults, which don't include `apiKey`). So **no role can create org-owned keys** until we add one.
+
+Required: add `apiKey: ["create", "read", "update", "delete"]` to the statement set in `src/lib/server/organization-access.ts`, and grant the same set to `owner` + `admin` (+ optionally `developer`). **Include `"update"`** — needed for the key enable/disable UX. Without this, every org-owned key create throws a permission error. Verified against `src/lib/server/organization-access.ts`.
+
+**Note — org creator bypass:** the plugin's permission check passes `allowCreatorAllPermissions: true` (line 566), so the user who created the org automatically gets all `apiKey` actions regardless of role grants. The role grants matter for _non-creator_ members. So: a member with the `member` role can create keys only if we grant `apiKey:["create"]` to `member`; the org creator can always. Decide based on UX (do we want all members to create keys, or only owner/admin?).
+
+### 3.15 Refund path: drizzle atomic, not plugin adapter
+
+The plugin's `incrementOne` is `ctx.context.adapter.incrementOne` — **plugin-internal**, not exposed via `auth.api`. For the `remaining` refund, use drizzle directly with an atomic SQL increment:
+
+```ts
+db.update(apikey)
+  .set({ remaining: sql`remaining + 1` })
+  .where(eq(apikey.id, keyId));
+```
+
+Atomic at the SQL layer (same guarantees as the plugin's guarded decrement). Do NOT use `auth.api.updateApiKey({ remaining: stale + 1 })` — races under concurrency. (Earlier doc text said "via the adapter" — corrected to drizzle direct.)
+
 ### 3.16 api-key plugin config: `references: "organization"` (BLOCKER)
 
 `referencesType` is read from `opts.references` — a **per-config plugin option** (default `"user"`), NOT a per-request body field (verified in plugin source, `claimUsageInDatabase` / create flow line 753). To make all keys org-owned (`referenceId = orgId`), set `references: "organization"` on the `apiKey(...)` plugin config in `src/lib/server/auth.tsx`. Without this, creates default to user-keys (`referenceId = userId`) and the org-billing model breaks (proxy can't resolve the billing org from a user-scoped `referenceId`).
@@ -282,6 +302,26 @@ Verified in plugin source (lines 1680-1684): if `verifyApiKey` is called with a 
 ### 3.28 Worker death between reserve and response = local double-charge
 
 Sequence: request A → reserve Lua increments `orgConsumed` by cost → fetch upstream → upstream returns 2xx → `waitUntil(ingest)` queued → **worker killed before response sent or ingest completes** (Cloudflare worker shutdown, CPU limit). Client retries with a NEW request (new requestId) → reserve Lua increments `orgConsumed` again (no Polar dedup across requests because requestId is new) → second call succeeds, second ingest fires. Net: `orgConsumed` is 2× the actual Polar-side consumed, and Polar has 2 events for what the client intended as 1 call (or 1 event if the first ingest also completed). Bounded by retry count; the next reconcile (§3.19) corrects it. v1 accepts; document. v2: client-supplied `Idempotency-Key` header used as the Polar `externalId` so retries dedupe (requires SDK change).
+
+### 3.29 Proxy auth header = `x-zevium-key` (verified against current impl)
+
+The current proxy (`src/routes/api/proxy/$.ts`) already uses the `x-zevium-key` header for auth (line 60) and **strips it from the outbound** request before forwarding to the upstream (line 125) — no leak/conflict with the upstream's own `Authorization` header. The header design is correct; the migration must preserve it. Specify in the §4.4 flow: read `x-zevium-key` for `verifyApiKey`, strip from outbound headers. (No `Authorization`-header design needed — `x-zevium-key` avoids the dual-bearer conflict.)
+
+### 3.30 Checkout needs `POLAR_PRICE_ID_CREDITS`, not just product ID
+
+`CheckoutCreate` requires `productPriceId` (the specific price on the product), not `productId` (verified in SDK). For a one-time product with a custom (variable-amount) price, the product has one "custom" price; the env must hold that price's ID. Fix the env list: `POLAR_PRODUCT_ID_CREDITS` (for the dashboard reference) **and** `POLAR_PRICE_ID_CREDITS` (passed to checkout). The product ID alone is not enough.
+
+### 3.31 No refill by default (one-shot keys)
+
+The doc never specified the default `refillAmount` / `refillInterval`. For v1, **no refill**: `refillAmount: null`, `refillInterval: null` (server-side in `orgKey.create`). The key is consumed until `remaining = 0`, then `USAGE_EXCEEDED` → the user creates a new key. Simpler than quota windows; no CAS-refill races to reason about. If we want periodic refill later, the plugin supports it per-key. Set a reasonable `remaining` default (e.g. `1000`) — configurable per key on create.
+
+### 3.32 Refund of an already-spent order → org locked out until reconcile
+
+When a one-time order is refunded, Polar reverses the meter credit grant. If the org already spent some of those credits, Polar's view is `creditedUnits = 0` (grant removed), `consumedUnits = X` (unchanged). The org's `getStateExternal` returns `max(0, creditedUnits - consumedUnits) = 0`. The local `orgConsumed` is still `X` (we never decrement on refund). The gate: `0 - X < cost` → 402. The org is **locked out** of all proxy calls until either (a) the reconcile job (v2) resets `orgConsumed` to match Polar's consumed, or (b) the org buys more credits (which sets `creditedUnits > 0` and the gate passes again). v1 accepts the temporary lockout; document. To avoid lockout: on `order.refunded`, cap `orgConsumed` to the new `creditedUnits` (best-effort, may over-clamp if consume happens concurrently). Defer to v2.
+
+### 3.33 Webhook idempotency by `webhook-id` header (future-proofing)
+
+Polar sends a `webhook-id` header on every delivery for dedup. Our current handler is idempotent (cache invalidation is safe to repeat), so redelivery is harmless. But once we add real side effects (PostHog events, DB writes per top-up), dedup by `webhook-id` in a Redis SET with TTL (e.g. 24h) to prevent double-processing. Build the dedup scaffolding now (cheap) so we don't bolt it on later. Not blocking for v1.
 
 ## 4. Plan
 
