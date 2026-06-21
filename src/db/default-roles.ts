@@ -6,7 +6,10 @@ export type DefaultOrganizationRole = (typeof DefaultOrganizationRoles)[number];
 export const AssignableOrganizationRoles = DefaultOrganizationRoles satisfies ReadonlyArray<DefaultOrganizationRole>;
 export type AssignableOrganizationRole = (typeof AssignableOrganizationRoles)[number];
 
-const guestPermissions: Permissions = { "organization.view": { status: "allow" } };
+const guestPermissions: Permissions = {
+  "apiKey.read": { status: "allow" },
+  "organization.view": { status: "allow" },
+};
 
 const memberPermissions: Permissions = {
   ...guestPermissions,
@@ -28,6 +31,10 @@ const developerPermissions: Permissions = {
 
 const adminPermissions: Permissions = {
   ...developerPermissions,
+  "apiKey.create": { status: "allow" },
+  "apiKey.delete": { status: "allow" },
+  "apiKey.read": { status: "allow" },
+  "apiKey.update": { status: "allow" },
   "organization.delete": { status: "allow" },
   "organization.edit": { status: "allow" },
   "organization.members.invite": { limit: 500, status: "limited" },

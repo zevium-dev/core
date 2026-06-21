@@ -1,274 +1,96 @@
 import { createFileRoute } from "@tanstack/react-router";
 
-import { CreditsRedisKey } from "~/lib/shared/credits-keys";
-
-const IDEMPOTENCY_APPLIED_TTL_MS = 1000 * 60 * 60 * 24 * 365;
-const IDEMPOTENCY_PENDING_TTL_MS = 1000 * 60 * 5;
+import { db, schema } from "~/db";
+import { invalidateOrgCreditedCache, getOrgIdByPolarCustomerId } from "~/lib/server/polar";
+import { RedisKeys } from "~/lib/server/redis-keys";
+import { kv } from "~/lib/server/kv";
 
 /**
- * Polar API routes
- * - POST /api/polar/webhook -> webhook handler
+ * Polar webhook handler.
+ *
+ * Polar verifies the signature via the `Webhook-*` headers; we read the
+ * raw body and call `validateEvent`. We:
+ *   1. Dedup by `webhook-id` header (24h TTL Redis SET).
+ *   2. Filter by event type — ignore anything we don't care about.
+ *   3. For relevant events, derive the org and invalidate the
+ *      `creditedUnits` cache so the next proxy gate sees fresh data.
+ *
+ * The meter_credit benefit on the credits product grants credits on
+ * `order.paid`; `order.refunded` reverses; `customer.state_changed`
+ * covers benefit grants/revocations made outside the checkout flow.
  */
 export const Route = createFileRoute("/api/polar/webhook")({
   server: {
     handlers: {
       POST: async ({ request }) => {
-        // Dynamic imports to avoid bundling server-only code in client
-        const [{ serverEnv }, { CreditsManager }, { kv }, { validateEvent }, { createPostHogClient }] =
-          await Promise.all([
-            import("~/env/server"),
-            import("~/lib/server/credits"),
-            import("~/lib/server/kv"),
-            import("@polar-sh/sdk/webhooks"),
-            import("~/lib/server/posthog"),
-          ]);
-
-        const posthog = createPostHogClient();
-
-        // Read raw body for signature verification
+        const { validateEvent } = await import("@polar-sh/sdk/webhooks");
         const raw = await request.text();
+        const { serverEnv } = await import("~/env/server");
+        const { eq } = await import("drizzle-orm");
 
-        const payloadUnknown: unknown = (() => {
-          try {
-            // Validate signature; throws if invalid
-            const validated = validateEvent(
-              raw,
-              Object.fromEntries(request.headers.entries()),
-              serverEnv.POLAR_WEBHOOK_SECRET,
-            );
-            return validated;
-          } catch (err) {
-            const error = new Error("Polar webhook signature verification failed", { cause: err });
-            posthog?.captureException(error, undefined, {
-              bodyLength: raw.length,
-              source: "polar_webhook",
-            });
-            void posthog?.shutdown();
-            throw error;
-          }
-        })();
-
-        const payload = payloadUnknown as
-          | {
-              data?: unknown;
-              type?: unknown;
-            }
-          | null
-          | undefined;
-
+        let payload: { type?: string; data?: unknown };
         try {
-          if (payload?.type === "order.paid") {
-            const order = payload.data as {
-              checkoutId: null | string;
-              currency: string;
-              discountAmount?: number;
-              id: string;
-              metadata?: Record<string, unknown>;
-              netAmount?: number;
-              productId: null | string;
-              subtotalAmount?: number;
-              taxAmount?: number;
-              totalAmount: number;
-            };
-
-            // Only process our credits product
-            if (!order.productId || order.productId !== serverEnv.POLAR_PRODUCT_ID_CREDITS) {
-              posthog?.capture({
-                distinctId: "system",
-                event: "polar_webhook_ignored",
-                properties: {
-                  expectedProductId: serverEnv.POLAR_PRODUCT_ID_CREDITS,
-                  orderId: order.id,
-                  productId: order.productId,
-                  reason: "product_id_mismatch",
-                },
-              });
-              void posthog?.shutdown();
-              return new Response("ignored", { status: 200 });
-            }
-
-            const metadataUserId = order.metadata?.userId;
-            const userId = typeof metadataUserId === "string" ? metadataUserId : "";
-
-            if (!userId) {
-              posthog?.capture({
-                distinctId: "system",
-                event: "polar_webhook_ignored",
-                properties: {
-                  metadata: order.metadata,
-                  orderId: order.id,
-                  reason: "no_user_id",
-                },
-              });
-              void posthog?.shutdown();
-              return new Response("ignored: no userId", { status: 200 });
-            }
-
-            // Unified idempotency across checkout + order events
-            const dedupeId = order.checkoutId ?? order.id;
-            const appliedKey = CreditsRedisKey.creditApplied({ checkoutId: dedupeId, userId });
-
-            let applyOk: null | string = null;
-            try {
-              applyOk = await kv.set(appliedKey, "pending", { nx: true, px: IDEMPOTENCY_PENDING_TTL_MS });
-            } catch (err) {
-              posthog?.captureException(err, userId, {
-                appliedKey,
-                operation: "redis_set_idempotency",
-                source: "polar_webhook",
-              });
-              void posthog?.shutdown();
-              return new Response("temporary failure", { status: 500 });
-            }
-
-            if (applyOk !== "OK") {
-              let idempotencyState: null | string = null;
-              try {
-                idempotencyState = await kv.get<string>(appliedKey);
-              } catch (err) {
-                posthog?.captureException(err, userId, {
-                  appliedKey,
-                  operation: "redis_get_idempotency_state",
-                  source: "polar_webhook",
-                });
-                void posthog?.shutdown();
-                return new Response("temporary failure", { status: 500 });
-              }
-
-              if (idempotencyState !== "applied") {
-                posthog?.capture({
-                  distinctId: userId,
-                  event: "polar_webhook_in_progress",
-                  properties: {
-                    appliedKey,
-                    checkoutId: order.checkoutId,
-                    idempotencyState,
-                    orderId: order.id,
-                  },
-                });
-                void posthog?.shutdown();
-                return new Response("temporary failure", { status: 500 });
-              }
-
-              posthog?.capture({
-                distinctId: userId,
-                event: "polar_webhook_duplicate",
-                properties: {
-                  appliedKey,
-                  checkoutId: order.checkoutId,
-                  orderId: order.id,
-                },
-              });
-              void posthog?.shutdown();
-              return new Response("ok");
-            }
-
-            // Credit the intended top-up amount (pre-discount, pre-tax).
-            // Polar exposes this as `subtotalAmount`.
-            // Fallbacks are defensive in case payload shape changes.
-            const amountCents =
-              typeof order.subtotalAmount === "number"
-                ? order.subtotalAmount
-                : typeof order.netAmount === "number" && typeof order.discountAmount === "number"
-                  ? Math.max(0, order.netAmount + order.discountAmount)
-                  : typeof order.taxAmount === "number"
-                    ? Math.max(0, order.totalAmount - order.taxAmount)
-                    : order.totalAmount;
-
-            if (amountCents > 0) {
-              let newBalance = 0;
-              try {
-                newBalance = await CreditsManager.add({
-                  amountCents,
-                  description: "Polar top-up",
-                  reference: order.id,
-                  userId,
-                });
-              } catch (err) {
-                await kv.del(appliedKey).catch((rollbackErr) => {
-                  posthog?.captureException(rollbackErr, userId, {
-                    appliedKey,
-                    operation: "redis_clear_idempotency_after_failed_apply",
-                    source: "polar_webhook",
-                  });
-                });
-                throw err;
-              }
-
-              posthog?.capture({
-                distinctId: userId,
-                event: "polar_webhook_credits_added",
-                properties: {
-                  amountCents,
-                  checkoutId: order.checkoutId,
-                  newBalance,
-                  orderId: order.id,
-                },
-              });
-            } else {
-              posthog?.capture({
-                distinctId: userId,
-                event: "polar_webhook_skipped",
-                properties: {
-                  amountCents,
-                  orderId: order.id,
-                  reason: "zero_or_negative_amount",
-                },
-              });
-            }
-
-            let isIdempotencyFinalized = false;
-            try {
-              const finalized = await kv.set(appliedKey, "applied", {
-                px: IDEMPOTENCY_APPLIED_TTL_MS,
-                xx: true,
-              });
-              if (finalized !== "OK") {
-                const fallbackFinalized = await kv.set(appliedKey, "applied", {
-                  px: IDEMPOTENCY_APPLIED_TTL_MS,
-                });
-                isIdempotencyFinalized = fallbackFinalized === "OK";
-              } else {
-                isIdempotencyFinalized = true;
-              }
-            } catch (err) {
-              posthog?.captureException(err, userId, {
-                appliedKey,
-                operation: "redis_finalize_idempotency",
-                source: "polar_webhook",
-              });
-            }
-
-            if (!isIdempotencyFinalized) {
-              try {
-                await kv.set(appliedKey, "pending", {
-                  px: IDEMPOTENCY_APPLIED_TTL_MS,
-                  xx: true,
-                });
-              } catch (err) {
-                posthog?.captureException(err, userId, {
-                  appliedKey,
-                  operation: "redis_extend_pending_idempotency",
-                  source: "polar_webhook",
-                });
-              }
-            }
-
-            void posthog?.shutdown();
-            return new Response("ok");
-          }
-
-          void posthog?.shutdown();
-          return new Response("ignored", { status: 200 });
+          payload = (await validateEvent(
+            raw,
+            Object.fromEntries(request.headers.entries()),
+            serverEnv.POLAR_WEBHOOK_SECRET,
+          )) as { type?: string; data?: unknown };
         } catch (err) {
-          posthog?.captureException(err, undefined, {
-            eventType: payload?.type,
-            source: "polar_webhook",
+          return new Response(`signature verification failed: ${(err as Error).message}`, {
+            status: 401,
           });
-          void posthog?.shutdown();
-          const error = new Error("Polar webhook processing failed", { cause: err });
-          throw error;
         }
+
+        // 1. Dedup by webhook-id.
+        const webhookId = request.headers.get("webhook-id") ?? `${payload.type}-${Date.now()}`;
+        const alreadyProcessed = await kv.sismember(RedisKeys.webhookIds(), webhookId);
+        if (alreadyProcessed) {
+          return new Response("ok (duplicate)");
+        }
+        await kv.sadd(RedisKeys.webhookIds(), webhookId);
+        // Refresh 24h TTL on the SET so the dedup window doesn't grow forever.
+        await kv.expire(RedisKeys.webhookIds(), 60 * 60 * 24);
+
+        // 2. Filter by event type.
+        switch (payload.type) {
+          case "order.paid":
+          case "order.refunded":
+          case "customer.state_changed":
+            break;
+          default:
+            return new Response("ok (ignored)");
+        }
+
+        // 3. Derive the org and invalidate the cache.
+        const data = payload.data as {
+          customerId?: string;
+          externalCustomerId?: string | null;
+          metadata?: Record<string, unknown>;
+        };
+
+        let orgId: string | null = null;
+        const orgIdFromMetadata =
+          typeof data.metadata?.["orgId"] === "string" ? (data.metadata["orgId"] as string) : null;
+        if (orgIdFromMetadata) {
+          orgId = orgIdFromMetadata;
+        } else if (data.externalCustomerId) {
+          // customer.state_changed payloads carry externalCustomerId directly.
+          // First, look up the org by externalCustomerId.
+          const rows = await db
+            .select({ id: schema.organization.id })
+            .from(schema.organization)
+            .where(eq(schema.organization.polarCustomerId, data.externalCustomerId))
+            .limit(1);
+          orgId = rows[0]?.id ?? null;
+        } else if (data.customerId) {
+          orgId = await getOrgIdByPolarCustomerId(data.customerId);
+        }
+
+        if (orgId) {
+          await invalidateOrgCreditedCache(orgId);
+        }
+
+        return new Response("ok");
       },
     },
   },

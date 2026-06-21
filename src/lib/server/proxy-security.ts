@@ -82,6 +82,15 @@ export function normalizeProxySecret(rawSecret: string | undefined): null | stri
   return normalized;
 }
 
+/**
+ * Returns true if `hostname` is the proxy's own public host (self-loop).
+ * Caller is expected to pass the already-normalized hostname.
+ */
+export function isSelfHost(hostname: string, publicHost: string): boolean {
+  if (!publicHost) return false;
+  return hostname.toLowerCase() === publicHost.toLowerCase();
+}
+
 export function isLoopbackAddress(addr: string): boolean {
   return (
     /^(::f{4}:)?127\.([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})/.test(addr) ||

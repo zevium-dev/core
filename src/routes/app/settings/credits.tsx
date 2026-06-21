@@ -1,6 +1,5 @@
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { ExternalLink, FileText, Settings } from "lucide-react";
 import { useMemo, useState } from "react";
 import { z } from "zod";
 
@@ -9,9 +8,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
 import { Input } from "~/components/ui/input";
 import { useTRPC } from "~/lib/trpc";
 
-const PAGE_SIZE = 3;
+const PAGE_SIZE = 20;
+const MIN_TOP_UP_USD = 20;
+const DEFAULT_TOP_UP_USD = 20;
 
-const amountInputSchema = z.number().int().positive().max(100_000);
+const amountInputSchema = z.number().int().min(MIN_TOP_UP_USD).max(100_000);
 
 /* eslint-disable perfectionist/sort-objects */
 export const Route = createFileRoute("/app/settings/credits")({
@@ -19,24 +20,11 @@ export const Route = createFileRoute("/app/settings/credits")({
     page: z.coerce.number().int().positive().optional(),
   }),
   loader: ({ context }) => {
-    void context.queryClient.ensureQueryData(context.trpc.credits.getBalance.queryOptions());
-    void context.queryClient.ensureQueryData(
-      context.trpc.credits.listTransactions.queryOptions({ page: 1, pageSize: PAGE_SIZE }),
-    );
+    void context.queryClient.ensureQueryData(context.trpc.organization.list.queryOptions());
   },
   component: CreditsComponent,
 });
 /* eslint-enable perfectionist/sort-objects */
-
-interface TransactionRowProps {
-  onGetInvoice: (orderId: string) => void;
-  transaction: {
-    amountCents: number;
-    createdAt: Date | string;
-    id: string;
-    reference?: null | string;
-  };
-}
 
 function CreditsComponent() {
   const trpc = useTRPC();
@@ -44,187 +32,154 @@ function CreditsComponent() {
   const navigate = Route.useNavigate();
   const search = Route.useSearch();
   const currentPage = search.page ?? 1;
-  const [amountUsd, setAmountUsd] = useState<string>("10");
+  const [amountUsd, setAmountUsd] = useState<string>(String(DEFAULT_TOP_UP_USD));
 
-  const balanceQuery = useSuspenseQuery(trpc.credits.getBalance.queryOptions());
-  const transactionsQuery = useSuspenseQuery(
-    trpc.credits.listTransactions.queryOptions({ page: currentPage, pageSize: PAGE_SIZE }),
+  const orgListQuery = useSuspenseQuery(trpc.organization.list.queryOptions());
+  const activeOrg = orgListQuery.data[0];
+  const orgId = activeOrg?.id ?? "";
+
+  const balanceQuery = useSuspenseQuery(
+    trpc.credits.getBalance.queryOptions({ organizationId: orgId }),
+  );
+  const topUpsQuery = useSuspenseQuery(
+    trpc.credits.listTopUps.queryOptions({
+      organizationId: orgId,
+      page: currentPage,
+      pageSize: PAGE_SIZE,
+    }),
+  );
+  const chargesQuery = useSuspenseQuery(
+    trpc.credits.listCharges.queryOptions({
+      organizationId: orgId,
+      page: currentPage,
+      pageSize: PAGE_SIZE,
+    }),
   );
 
   const topupMutation = useMutation(
-    trpc.credits.createTopUpCheckout.mutationOptions({
+    trpc.credits.createTopUp.mutationOptions({
       onSuccess(data) {
         window.location.assign(data.url);
       },
     }),
   );
 
-  const currentBalance = useMemo(() => {
-    const cents = balanceQuery.data.balanceCents;
-    return new Intl.NumberFormat(undefined, { currency: "USD", style: "currency" }).format(cents / 100);
-  }, [balanceQuery.data.balanceCents]);
-
   const handleTopUp = () => {
     const parsed = amountInputSchema.safeParse(Number(amountUsd));
-    if (!parsed.success) {
-      // Invalid input - could show error toast here
-      return;
-    }
-    topupMutation.mutate({ amountCents: parsed.data * 100 });
-  };
-
-  const handleGetInvoice = (orderId: string) => {
-    void (async () => {
-      const data = await queryClient.fetchQuery(trpc.credits.getInvoiceUrl.queryOptions({ orderId }));
-      window.open(data.url, "_blank");
-    })();
+    if (!parsed.success || !orgId) return;
+    topupMutation.mutate({ amountUsd: parsed.data, organizationId: orgId });
   };
 
   const handlePageChange = (newPage: number) => {
-    void navigate({
-      replace: true,
-      search: { page: newPage },
-    });
+    void navigate({ replace: true, search: { page: newPage } });
   };
+
+  const currentBalance = useMemo(() => {
+    const credits = balanceQuery.data.available;
+    return new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(credits);
+  }, [balanceQuery.data.available]);
+
+  if (!activeOrg) {
+    return (
+      <div className="mx-auto w-full max-w-3xl min-w-0 flex-1 space-y-6 p-6">
+        <h1 className="text-2xl font-bold text-foreground">Credits</h1>
+        <p className="text-sm text-muted-foreground">
+          You need an organization before you can buy or use credits. Create one in the dashboard.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="mx-auto w-full max-w-3xl min-w-0 flex-1 space-y-6 p-6">
-      {/* Header */}
-      <div className="flex items-center gap-2">
-        <h1 className="text-2xl font-bold text-foreground">Credits</h1>
-      </div>
+      <h1 className="text-2xl font-bold text-foreground">Credits</h1>
 
-      {/* Current Balance */}
       <Card className="w-full border-border/50 bg-card/50 backdrop-blur-sm">
         <CardContent className="p-6">
-          <div className="text-4xl font-bold text-foreground">{currentBalance}</div>
+          <div className="text-4xl font-bold text-foreground">{currentBalance} credits</div>
+          <div className="mt-2 text-xs text-muted-foreground">
+            {balanceQuery.data.consumed} consumed / {balanceQuery.data.creditedUnits} total
+          </div>
         </CardContent>
       </Card>
 
-      {/* Main Actions Grid */}
-      <div className="grid w-full grid-cols-1 gap-6 lg:grid-cols-2">
-        {/* Buy Credits */}
-        <Card className="w-full border-border/50 bg-card/50 backdrop-blur-sm">
-          <CardHeader className="pb-4">
-            <CardTitle className="text-lg font-semibold">Buy Credits</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex items-center gap-2">
-              <Input
-                className="w-32"
-                inputMode="numeric"
-                min={1}
-                onChange={(e) => setAmountUsd(e.target.value)}
-                placeholder="Amount (USD)"
-                type="number"
-                value={amountUsd}
-              />
-              <Button className="flex-1" disabled={topupMutation.isPending} onClick={handleTopUp} size="lg">
-                {topupMutation.isPending ? "Redirecting..." : "Add Credits"}
-              </Button>
-            </div>
-            <Button className="w-full text-sm text-muted-foreground hover:text-foreground" variant="ghost">
-              View Usage <ExternalLink className="ml-1 size-3" />
-            </Button>
-          </CardContent>
-        </Card>
-
-        {/* Auto Top-Up */}
-        <Card className="w-full border-border/50 bg-card/50 backdrop-blur-sm">
-          <CardHeader className="pb-4">
-            <div className="flex items-center justify-between">
-              <CardTitle className="text-lg font-semibold">Auto Top-Up</CardTitle>
-              <div className="flex items-center gap-2">
-                <Settings className="size-4 text-muted-foreground" />
-                <span className="text-sm text-muted-foreground">Enable</span>
-              </div>
-            </div>
-          </CardHeader>
-          <CardContent>
-            <p className="text-sm text-muted-foreground">
-              Automatically purchase credits when your balance is below a certain threshold. Your most recent payment
-              method will be used.
-            </p>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Recent Transactions */}
       <Card className="w-full border-border/50 bg-card/50 backdrop-blur-sm">
         <CardHeader className="pb-4">
-          <div className="flex items-center justify-between">
-            <CardTitle className="text-lg font-semibold">Recent Transactions</CardTitle>
-            <Button className="text-sm text-muted-foreground hover:text-foreground" variant="ghost">
-              Payment History <ExternalLink className="ml-1 size-3" />
-            </Button>
-          </div>
+          <CardTitle className="text-lg font-semibold">Buy Credits</CardTitle>
         </CardHeader>
-        <CardContent>
-          <div className="space-y-4">
-            {transactionsQuery.data.items.map((tx) => (
-              <TransactionRow key={tx.id} onGetInvoice={handleGetInvoice} transaction={tx} />
-            ))}
-          </div>
-
-          {/* Pagination */}
-          <div className="mt-6 flex items-center justify-center gap-2">
+        <CardContent className="space-y-4">
+          <div className="flex items-center gap-2">
+            <Input
+              className="w-32"
+              inputMode="numeric"
+              min={MIN_TOP_UP_USD}
+              onChange={(e) => setAmountUsd(e.target.value)}
+              placeholder="Amount (USD)"
+              type="number"
+              value={amountUsd}
+            />
             <Button
-              className="text-muted-foreground"
-              disabled={currentPage === 1}
-              onClick={() => handlePageChange(Math.max(currentPage - 1, 1))}
-              size="sm"
-              variant="ghost"
+              className="flex-1"
+              disabled={topupMutation.isPending}
+              onClick={handleTopUp}
+              size="lg"
             >
-              ‹
-            </Button>
-            <Button className="bg-muted text-foreground" size="sm" variant="ghost">
-              {currentPage}
-            </Button>
-            <Button
-              className="text-muted-foreground"
-              disabled={!transactionsQuery.data.hasNext}
-              onClick={() => handlePageChange(currentPage + 1)}
-              size="sm"
-              variant="ghost"
-            >
-              ›
+              {topupMutation.isPending ? "Redirecting..." : "Add Credits"}
             </Button>
           </div>
+          <p className="text-[11px] text-muted-foreground">Minimum ${MIN_TOP_UP_USD} per top-up.</p>
         </CardContent>
       </Card>
-    </div>
-  );
-}
 
-function TransactionRow({ onGetInvoice, transaction }: TransactionRowProps) {
-  const sign = transaction.amountCents >= 0 ? 1 : -1;
-  const amountFmt = new Intl.NumberFormat(undefined, { currency: "USD", style: "currency" }).format(
-    Math.abs(transaction.amountCents) / 100,
-  );
-  const createdAtDate =
-    typeof transaction.createdAt === "string" ? new Date(transaction.createdAt) : transaction.createdAt;
-  const dateFmt = new Intl.DateTimeFormat(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(createdAtDate);
+      <Card className="w-full border-border/50 bg-card/50 backdrop-blur-sm">
+        <CardHeader className="pb-4">
+          <CardTitle className="text-lg font-semibold">Recent Top-Ups</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {topUpsQuery.data.items.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No top-ups yet.</p>
+          ) : (
+            topUpsQuery.data.items.map((tx) => (
+              <div
+                className="flex items-center justify-between border-b border-border/20 py-2 last:border-b-0"
+                key={tx.id}
+              >
+                <span className="text-sm text-muted-foreground">
+                  {new Date(tx.createdAt).toLocaleString()}
+                </span>
+                <span className="text-sm font-medium text-primary">
+                  +${(tx.amountCents / 100).toFixed(2)}
+                </span>
+              </div>
+            ))
+          )}
+        </CardContent>
+      </Card>
 
-  return (
-    <div className="flex items-center justify-between border-b border-border/20 py-2 last:border-b-0">
-      <span className="text-sm text-muted-foreground">{dateFmt}</span>
-      <div className="flex items-center gap-4">
-        <span className={`text-sm font-medium ${sign > 0 ? "text-primary" : "text-destructive"}`}>
-          {sign > 0 ? "+" : "-"}
-          {amountFmt}
-        </span>
-        <button
-          className="text-xs text-muted-foreground hover:text-foreground hover:underline"
-          onClick={() => onGetInvoice(transaction.id)}
-          title={transaction.reference ?? transaction.id}
-          type="button"
-        >
-          Get Invoice <FileText className="ml-1 inline size-3" />
-        </button>
-      </div>
+      <Card className="w-full border-border/50 bg-card/50 backdrop-blur-sm">
+        <CardHeader className="pb-4">
+          <CardTitle className="text-lg font-semibold">Recent Charges</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {chargesQuery.data.items.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No charges yet.</p>
+          ) : (
+            chargesQuery.data.items.map((tx) => (
+              <div
+                className="flex items-center justify-between border-b border-border/20 py-2 last:border-b-0"
+                key={`${tx.requestId ?? "noid"}-${tx.createdAt}`}
+              >
+                <span className="text-sm text-muted-foreground">
+                  {new Date(tx.createdAt).toLocaleString()}
+                </span>
+                <span className="text-sm font-medium text-destructive">
+                  -{tx.costUnits} credits
+                </span>
+              </div>
+            ))
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }

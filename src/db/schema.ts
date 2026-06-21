@@ -1,33 +1,12 @@
 import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
+
 import { DefaultOrganizationRoles } from "./default-roles";
 import { OrganizationUserPermissions, PermissionValue, ProjectUserPermissions, UserPermissions } from "./permission";
 
 type Base64String = {} & string;
 type Metadata = Record<string, unknown>;
 
-// ===== Credits =====
-export const creditLedger = sqliteTable(
-  "credit_ledger",
-  {
-    // positive for top-up, negative for deduction, in cents
-    amountCents: integer("amount_cents").notNull(),
-    createdAt: integer("created_at", { mode: "timestamp" })
-      .$defaultFn(() => new Date())
-      .notNull(),
-    description: text("description"),
-    id: text("id").primaryKey(),
-    reference: text("reference"),
-    type: text("type", { enum: ["topup", "deduct", "adjust"] as const }).notNull(),
-    userId: text("user_id")
-      .notNull()
-      .references(() => user.id, { onDelete: "cascade" }),
-  },
-  (self) => [
-    index("credit_ledger_user_id_index").on(self.userId),
-    index("credit_ledger_created_at_index").on(self.createdAt),
-  ],
-);
 
 export const user = sqliteTable(
   "user",
@@ -137,6 +116,7 @@ export const apikey = sqliteTable(
     rateLimitTimeWindow: integer("rate_limit_time_window").default(86400000).notNull(),
     refillAmount: integer("refill_amount"),
     refillInterval: integer("refill_interval"),
+    referenceId: text("reference_id").notNull(), // orgId or userId
     remaining: integer("remaining"),
     requestCount: integer("request_count").default(0).notNull(),
     start: text("start"),
@@ -147,7 +127,11 @@ export const apikey = sqliteTable(
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
   },
-  (self) => [index("apikey_user_id_index").on(self.userId), uniqueIndex("apikey_key_index").on(self.key)],
+  (self) => [
+    index("apikey_user_id_index").on(self.userId),
+    index("apikey_reference_id_index").on(self.referenceId),
+    uniqueIndex("apikey_key_index").on(self.key),
+  ],
 );
 
 // === Two-Factor Authentication =====
@@ -179,9 +163,14 @@ export const organization = sqliteTable(
       .$defaultFn(() => ({}))
       .$type<Metadata>(),
     name: text("name").notNull(),
+    polarBillingEmail: text("polar_billing_email"),
+    polarCustomerId: text("polar_customer_id"),
     slug: text("slug").unique().notNull(),
   },
-  (self) => [uniqueIndex("organization_slug_index").on(self.slug)],
+  (self) => [
+    index("organization_polar_customer_id_index").on(self.polarCustomerId),
+    uniqueIndex("organization_slug_index").on(self.slug),
+  ],
 );
 
 export const member = sqliteTable(

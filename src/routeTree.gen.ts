@@ -44,11 +44,9 @@ import { Route as ApiProxySplatRouteImport } from './routes/api/proxy/$'
 import { Route as ApiPosthogSplatRouteImport } from './routes/api/posthog/$'
 import { Route as ApiPolarWebhookRouteImport } from './routes/api/polar/webhook'
 import { Route as ApiOpenapiSplatRouteImport } from './routes/api/openapi/$'
-import { Route as ApiCreditsSplatRouteImport } from './routes/api/credits/$'
 import { Route as ApiCapSplatRouteImport } from './routes/api/cap/$'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
 import { Route as AppOrganizationsOrganizationSlugIndexRouteImport } from './routes/app/organizations/$organizationSlug/index'
-import { Route as AppSettingsCreditsSuccessRouteImport } from './routes/app/settings/credits/success'
 import { Route as AppOrganizationsOrganizationSlugSettingsRouteImport } from './routes/app/organizations/$organizationSlug/settings'
 import { Route as AppOrganizationsOrganizationSlugProjectsRouteImport } from './routes/app/organizations/$organizationSlug/projects'
 import { Route as AppOrganizationsOrganizationSlugProjectsIndexRouteImport } from './routes/app/organizations/$organizationSlug/projects/index'
@@ -236,11 +234,6 @@ const ApiOpenapiSplatRoute = ApiOpenapiSplatRouteImport.update({
   path: '/api/openapi/$',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApiCreditsSplatRoute = ApiCreditsSplatRouteImport.update({
-  id: '/api/credits/$',
-  path: '/api/credits/$',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const ApiCapSplatRoute = ApiCapSplatRouteImport.update({
   id: '/api/cap/$',
   path: '/api/cap/$',
@@ -256,12 +249,6 @@ const AppOrganizationsOrganizationSlugIndexRoute =
     id: '/',
     path: '/',
     getParentRoute: () => AppOrganizationsOrganizationSlugRoute,
-  } as any)
-const AppSettingsCreditsSuccessRoute =
-  AppSettingsCreditsSuccessRouteImport.update({
-    id: '/success',
-    path: '/success',
-    getParentRoute: () => AppSettingsCreditsRoute,
   } as any)
 const AppOrganizationsOrganizationSlugSettingsRoute =
   AppOrganizationsOrganizationSlugSettingsRouteImport.update({
@@ -344,7 +331,6 @@ export interface FileRoutesByFullPath {
   '/auth/': typeof AuthIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/cap/$': typeof ApiCapSplatRoute
-  '/api/credits/$': typeof ApiCreditsSplatRoute
   '/api/openapi/$': typeof ApiOpenapiSplatRoute
   '/api/polar/webhook': typeof ApiPolarWebhookRoute
   '/api/posthog/$': typeof ApiPosthogSplatRoute
@@ -354,14 +340,13 @@ export interface FileRoutesByFullPath {
   '/app/organizations/create': typeof AppOrganizationsCreateRoute
   '/app/organizations/~': typeof AppOrganizationsChar126Route
   '/app/settings/activity': typeof AppSettingsActivityRoute
-  '/app/settings/credits': typeof AppSettingsCreditsRouteWithChildren
+  '/app/settings/credits': typeof AppSettingsCreditsRoute
   '/app/settings/keys': typeof AppSettingsKeysRoute
   '/app/settings/preference': typeof AppSettingsPreferenceRoute
   '/app/organizations/': typeof AppOrganizationsIndexRoute
   '/app/settings/': typeof AppSettingsIndexRoute
   '/app/organizations/$organizationSlug/projects': typeof AppOrganizationsOrganizationSlugProjectsRouteWithChildren
   '/app/organizations/$organizationSlug/settings': typeof AppOrganizationsOrganizationSlugSettingsRoute
-  '/app/settings/credits/success': typeof AppSettingsCreditsSuccessRoute
   '/app/organizations/$organizationSlug/': typeof AppOrganizationsOrganizationSlugIndexRoute
   '/api/projects/$organizationSlug/$projectSlug/openapi': typeof ApiProjectsOrganizationSlugProjectSlugOpenapiRoute
   '/app/organizations/$organizationSlug/projects/create': typeof AppOrganizationsOrganizationSlugProjectsCreateRoute
@@ -393,7 +378,6 @@ export interface FileRoutesByTo {
   '/auth': typeof AuthIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/cap/$': typeof ApiCapSplatRoute
-  '/api/credits/$': typeof ApiCreditsSplatRoute
   '/api/openapi/$': typeof ApiOpenapiSplatRoute
   '/api/polar/webhook': typeof ApiPolarWebhookRoute
   '/api/posthog/$': typeof ApiPosthogSplatRoute
@@ -402,13 +386,12 @@ export interface FileRoutesByTo {
   '/app/organizations/create': typeof AppOrganizationsCreateRoute
   '/app/organizations/~': typeof AppOrganizationsChar126Route
   '/app/settings/activity': typeof AppSettingsActivityRoute
-  '/app/settings/credits': typeof AppSettingsCreditsRouteWithChildren
+  '/app/settings/credits': typeof AppSettingsCreditsRoute
   '/app/settings/keys': typeof AppSettingsKeysRoute
   '/app/settings/preference': typeof AppSettingsPreferenceRoute
   '/app/organizations': typeof AppOrganizationsIndexRoute
   '/app/settings': typeof AppSettingsIndexRoute
   '/app/organizations/$organizationSlug/settings': typeof AppOrganizationsOrganizationSlugSettingsRoute
-  '/app/settings/credits/success': typeof AppSettingsCreditsSuccessRoute
   '/app/organizations/$organizationSlug': typeof AppOrganizationsOrganizationSlugIndexRoute
   '/api/projects/$organizationSlug/$projectSlug/openapi': typeof ApiProjectsOrganizationSlugProjectSlugOpenapiRoute
   '/app/organizations/$organizationSlug/projects/create': typeof AppOrganizationsOrganizationSlugProjectsCreateRoute
@@ -443,7 +426,6 @@ export interface FileRoutesById {
   '/auth/': typeof AuthIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/cap/$': typeof ApiCapSplatRoute
-  '/api/credits/$': typeof ApiCreditsSplatRoute
   '/api/openapi/$': typeof ApiOpenapiSplatRoute
   '/api/polar/webhook': typeof ApiPolarWebhookRoute
   '/api/posthog/$': typeof ApiPosthogSplatRoute
@@ -453,14 +435,13 @@ export interface FileRoutesById {
   '/app/organizations/create': typeof AppOrganizationsCreateRoute
   '/app/organizations/~': typeof AppOrganizationsChar126Route
   '/app/settings/activity': typeof AppSettingsActivityRoute
-  '/app/settings/credits': typeof AppSettingsCreditsRouteWithChildren
+  '/app/settings/credits': typeof AppSettingsCreditsRoute
   '/app/settings/keys': typeof AppSettingsKeysRoute
   '/app/settings/preference': typeof AppSettingsPreferenceRoute
   '/app/organizations/': typeof AppOrganizationsIndexRoute
   '/app/settings/': typeof AppSettingsIndexRoute
   '/app/organizations/$organizationSlug/projects': typeof AppOrganizationsOrganizationSlugProjectsRouteWithChildren
   '/app/organizations/$organizationSlug/settings': typeof AppOrganizationsOrganizationSlugSettingsRoute
-  '/app/settings/credits/success': typeof AppSettingsCreditsSuccessRoute
   '/app/organizations/$organizationSlug/': typeof AppOrganizationsOrganizationSlugIndexRoute
   '/api/projects/$organizationSlug/$projectSlug/openapi': typeof ApiProjectsOrganizationSlugProjectSlugOpenapiRoute
   '/app/organizations/$organizationSlug/projects/create': typeof AppOrganizationsOrganizationSlugProjectsCreateRoute
@@ -496,7 +477,6 @@ export interface FileRouteTypes {
     | '/auth/'
     | '/api/auth/$'
     | '/api/cap/$'
-    | '/api/credits/$'
     | '/api/openapi/$'
     | '/api/polar/webhook'
     | '/api/posthog/$'
@@ -513,7 +493,6 @@ export interface FileRouteTypes {
     | '/app/settings/'
     | '/app/organizations/$organizationSlug/projects'
     | '/app/organizations/$organizationSlug/settings'
-    | '/app/settings/credits/success'
     | '/app/organizations/$organizationSlug/'
     | '/api/projects/$organizationSlug/$projectSlug/openapi'
     | '/app/organizations/$organizationSlug/projects/create'
@@ -545,7 +524,6 @@ export interface FileRouteTypes {
     | '/auth'
     | '/api/auth/$'
     | '/api/cap/$'
-    | '/api/credits/$'
     | '/api/openapi/$'
     | '/api/polar/webhook'
     | '/api/posthog/$'
@@ -560,7 +538,6 @@ export interface FileRouteTypes {
     | '/app/organizations'
     | '/app/settings'
     | '/app/organizations/$organizationSlug/settings'
-    | '/app/settings/credits/success'
     | '/app/organizations/$organizationSlug'
     | '/api/projects/$organizationSlug/$projectSlug/openapi'
     | '/app/organizations/$organizationSlug/projects/create'
@@ -594,7 +571,6 @@ export interface FileRouteTypes {
     | '/auth/'
     | '/api/auth/$'
     | '/api/cap/$'
-    | '/api/credits/$'
     | '/api/openapi/$'
     | '/api/polar/webhook'
     | '/api/posthog/$'
@@ -611,7 +587,6 @@ export interface FileRouteTypes {
     | '/app/settings/'
     | '/app/organizations/$organizationSlug/projects'
     | '/app/organizations/$organizationSlug/settings'
-    | '/app/settings/credits/success'
     | '/app/organizations/$organizationSlug/'
     | '/api/projects/$organizationSlug/$projectSlug/openapi'
     | '/app/organizations/$organizationSlug/projects/create'
@@ -641,7 +616,6 @@ export interface RootRouteChildren {
   AuthIndexRoute: typeof AuthIndexRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
   ApiCapSplatRoute: typeof ApiCapSplatRoute
-  ApiCreditsSplatRoute: typeof ApiCreditsSplatRoute
   ApiOpenapiSplatRoute: typeof ApiOpenapiSplatRoute
   ApiPolarWebhookRoute: typeof ApiPolarWebhookRoute
   ApiPosthogSplatRoute: typeof ApiPosthogSplatRoute
@@ -897,13 +871,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiOpenapiSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api/credits/$': {
-      id: '/api/credits/$'
-      path: '/api/credits/$'
-      fullPath: '/api/credits/$'
-      preLoaderRoute: typeof ApiCreditsSplatRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/api/cap/$': {
       id: '/api/cap/$'
       path: '/api/cap/$'
@@ -924,13 +891,6 @@ declare module '@tanstack/react-router' {
       fullPath: '/app/organizations/$organizationSlug/'
       preLoaderRoute: typeof AppOrganizationsOrganizationSlugIndexRouteImport
       parentRoute: typeof AppOrganizationsOrganizationSlugRoute
-    }
-    '/app/settings/credits/success': {
-      id: '/app/settings/credits/success'
-      path: '/success'
-      fullPath: '/app/settings/credits/success'
-      preLoaderRoute: typeof AppSettingsCreditsSuccessRouteImport
-      parentRoute: typeof AppSettingsCreditsRoute
     }
     '/app/organizations/$organizationSlug/settings': {
       id: '/app/organizations/$organizationSlug/settings'
@@ -1067,17 +1027,6 @@ const AppOrganizationsRouteChildren: AppOrganizationsRouteChildren = {
 const AppOrganizationsRouteWithChildren =
   AppOrganizationsRoute._addFileChildren(AppOrganizationsRouteChildren)
 
-interface AppSettingsCreditsRouteChildren {
-  AppSettingsCreditsSuccessRoute: typeof AppSettingsCreditsSuccessRoute
-}
-
-const AppSettingsCreditsRouteChildren: AppSettingsCreditsRouteChildren = {
-  AppSettingsCreditsSuccessRoute: AppSettingsCreditsSuccessRoute,
-}
-
-const AppSettingsCreditsRouteWithChildren =
-  AppSettingsCreditsRoute._addFileChildren(AppSettingsCreditsRouteChildren)
-
 interface AppRouteChildren {
   AppCatalogueRoute: typeof AppCatalogueRoute
   AppDashboardRoute: typeof AppDashboardRoute
@@ -1085,7 +1034,7 @@ interface AppRouteChildren {
   AppOrganizationsRoute: typeof AppOrganizationsRouteWithChildren
   AppIndexRoute: typeof AppIndexRoute
   AppSettingsActivityRoute: typeof AppSettingsActivityRoute
-  AppSettingsCreditsRoute: typeof AppSettingsCreditsRouteWithChildren
+  AppSettingsCreditsRoute: typeof AppSettingsCreditsRoute
   AppSettingsKeysRoute: typeof AppSettingsKeysRoute
   AppSettingsPreferenceRoute: typeof AppSettingsPreferenceRoute
   AppSettingsIndexRoute: typeof AppSettingsIndexRoute
@@ -1098,7 +1047,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppOrganizationsRoute: AppOrganizationsRouteWithChildren,
   AppIndexRoute: AppIndexRoute,
   AppSettingsActivityRoute: AppSettingsActivityRoute,
-  AppSettingsCreditsRoute: AppSettingsCreditsRouteWithChildren,
+  AppSettingsCreditsRoute: AppSettingsCreditsRoute,
   AppSettingsKeysRoute: AppSettingsKeysRoute,
   AppSettingsPreferenceRoute: AppSettingsPreferenceRoute,
   AppSettingsIndexRoute: AppSettingsIndexRoute,
@@ -1125,7 +1074,6 @@ const rootRouteChildren: RootRouteChildren = {
   AuthIndexRoute: AuthIndexRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
   ApiCapSplatRoute: ApiCapSplatRoute,
-  ApiCreditsSplatRoute: ApiCreditsSplatRoute,
   ApiOpenapiSplatRoute: ApiOpenapiSplatRoute,
   ApiPolarWebhookRoute: ApiPolarWebhookRoute,
   ApiPosthogSplatRoute: ApiPosthogSplatRoute,

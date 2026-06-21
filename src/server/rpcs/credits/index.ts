@@ -1,148 +1,244 @@
 import { TRPCError } from "@trpc/server";
+import { eq } from "drizzle-orm";
 import { z } from "zod";
 
+import { db, schema } from "~/db";
 import { serverEnv } from "~/env/server";
-import { CreditsManager } from "~/lib/server/credits";
-import { polarClient } from "~/lib/server/polar";
-import { protectedProcedure, router } from "~/server/trpc";
+import {
+  createCreditsCheckout,
+  ensureOrgCustomer,
+  getOrgCreditedUnits,
+} from "~/lib/server/polar";
+import { readConsumed } from "~/lib/server/org-pool-gate";
+import { secureProcedure } from "~/server/secure-procedure";
+import { router } from "~/server/trpc";
 
-const transactionItemSchema = z.object({
-  amountCents: z.number().int(),
-  createdAt: z.union([z.string(), z.date()]),
-  description: z.string().nullable(),
-  id: z.string(),
-  reference: z.string().nullable(),
-  type: z.literal("topup"),
-  userId: z.string(),
+const MIN_TOP_UP_USD = 20;
+
+const CreateTopUpInput = z.object({
+  amountUsd: z.number().int().min(MIN_TOP_UP_USD).max(100_000),
+  organizationId: z.string(),
+  returnUrl: z.string().url().optional(),
 });
 
-function isCreditsOrderForUser(
-  order: {
-    metadata?: Record<string, boolean | number | string>;
-    productId: null | string;
-  },
-  userId: string,
-): boolean {
-  const metadataUserId = order.metadata?.userId;
-  return (
-    order.productId === serverEnv.POLAR_PRODUCT_ID_CREDITS &&
-    typeof metadataUserId === "string" &&
-    metadataUserId === userId
-  );
-}
+const ListByOrgInput = z.object({
+  organizationId: z.string(),
+  page: z.number().int().min(1).max(1000).optional(),
+  pageSize: z.number().int().min(1).max(100).optional(),
+});
+
+const ListPerKeyInput = z.object({
+  organizationId: z.string(),
+});
+
+const ListTopUpOutput = z.object({
+  hasNext: z.boolean(),
+  items: z.array(
+    z.object({
+      amountCents: z.number().int(),
+      checkoutId: z.string().nullable(),
+      createdAt: z.union([z.string(), z.date()]),
+      id: z.string(),
+    }),
+  ),
+});
+
+const ListChargesOutput = z.object({
+  hasNext: z.boolean(),
+  items: z.array(
+    z.object({
+      costUnits: z.number().int(),
+      createdAt: z.union([z.string(), z.date()]),
+      host: z.string().nullable(),
+      method: z.string().nullable(),
+      requestId: z.string().nullable(),
+      status: z.number().int().nullable(),
+    }),
+  ),
+});
+
+const ListPerKeyOutput = z.object({
+  hasNext: z.boolean(),
+  items: z.array(
+    z.object({
+      createdAt: z.union([z.string(), z.date()]),
+      enabled: z.boolean().nullable(),
+      id: z.string(),
+      lastRequest: z.union([z.string(), z.date()]).nullable(),
+      name: z.string().nullable(),
+      prefix: z.string().nullable(),
+      referenceId: z.string(),
+      remaining: z.number().int().nullable(),
+      requestCount: z.number().int().nullable(),
+    }),
+  ),
+});
+
+const GetBalanceOutput = z.object({
+  available: z.number().int(),
+  consumed: z.number().int(),
+  creditedUnits: z.number().int(),
+  currency: z.literal("credits"),
+});
 
 export const creditsRouter = router({
-  createTopUpCheckout: protectedProcedure
-    .input(
-      z.object({
-        // amount in USD cents
-        amountCents: z.number().int().positive().max(100_000_00),
-        // optional metadata
-        returnUrl: z.url().optional(),
-      }),
-    )
-    .output(z.object({ url: z.string() }))
+  createTopUp: secureProcedure
+    .meta({
+      requiredPermissions: ["organization.view"],
+      route: { path: "/credits/create-top-up", summary: "Create a Polar checkout for a top-up" },
+    })
+    .input(CreateTopUpInput)
+    .output(z.object({ checkoutId: z.string(), url: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      const origin = new URL(ctx.raw.req.url).origin;
-      // Default to a waiting page that ensures order.paid has been processed.
+      if (!ctx.orgId || ctx.orgId !== input.organizationId) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Organization ID mismatch" });
+      }
+      const org = await db
+        .select({
+          id: schema.organization.id,
+          name: schema.organization.name,
+          polarCustomerId: schema.organization.polarCustomerId,
+          polarBillingEmail: schema.organization.polarBillingEmail,
+        })
+        .from(schema.organization)
+        .where(eq(schema.organization.id, input.organizationId))
+        .limit(1)
+        .then((r) => r.at(0));
+      if (!org) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Organization not found" });
+      }
       const successUrl =
-        input.returnUrl ?? new URL("/app/settings/credits/success?checkout_id={CHECKOUT_ID}", origin).toString();
-
-      // Use custom price for arbitrary top-up amounts
-      const productId = serverEnv.POLAR_PRODUCT_ID_CREDITS;
-      const checkout = await polarClient.checkouts.create({
-        metadata: { type: "credit-topup", userId: ctx.user.id },
-        prices: {
-          [productId]: [
-            {
-              amountType: "custom",
-              presetAmount: input.amountCents,
-              priceCurrency: "usd",
-            },
-          ],
-        },
-        products: [productId],
+        input.returnUrl ??
+        `${new URL(ctx.raw.req.url).origin}/app/settings/credits?checkout_id={CHECKOUT_ID}`;
+      await ensureOrgCustomer(org);
+      return createCreditsCheckout({
+        orgId: org.id,
+        amountUsd: input.amountUsd,
         successUrl,
       });
-      return { url: typeof checkout.url === "string" ? checkout.url : successUrl };
     }),
-  getBalance: protectedProcedure
-    .output(
-      z.object({
-        balanceCents: z.number().int().nonnegative(),
-        currency: z.literal("usd"),
-      }),
-    )
-    .query(async ({ ctx }) => {
-      const cents = await CreditsManager.getBalance(ctx.user.id);
-      return { balanceCents: cents, currency: "usd" as const };
-    }),
-  getInvoiceUrl: protectedProcedure
-    .input(z.object({ orderId: z.string() }))
-    .output(z.object({ url: z.string() }))
-    .query(async ({ ctx, input }) => {
-      const order = await polarClient.orders.get({ id: input.orderId });
-      if (!isCreditsOrderForUser(order, ctx.user.id)) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "Order not found" });
-      }
-      const invoice = await polarClient.orders.invoice({ id: input.orderId });
-      return { url: invoice.url };
-    }),
-  getTopUpFromCheckout: protectedProcedure
-    .input(z.object({ checkoutId: z.string() }))
-    .output(
-      z.object({
-        amountCents: z.number().int().nonnegative(),
-        orderId: z.string().nullable(),
-      }),
-    )
-    .query(async ({ ctx, input }) => {
-      const page = await polarClient.orders.list({
-        checkoutId: input.checkoutId,
-        limit: 1,
-        productId: serverEnv.POLAR_PRODUCT_ID_CREDITS,
-        sorting: ["-created_at"],
-      });
-      const order = page.result.items.at(0);
-      if (!order) return { amountCents: 0, orderId: null as null | string };
-      if (!isCreditsOrderForUser(order, ctx.user.id)) {
-        return { amountCents: 0, orderId: null as null | string };
-      }
-      return { amountCents: order.subtotalAmount, orderId: order.id };
-    }),
-  listTransactions: protectedProcedure
-    .input(
-      z.object({
-        page: z.number().int().positive().default(1),
-        pageSize: z.number().int().min(1).max(50).default(3),
-      }),
-    )
-    .output(
-      z.object({
-        hasNext: z.boolean(),
-        items: z.array(transactionItemSchema),
-      }),
-    )
-    .query(async ({ ctx, input }) => {
-      // Pull from Polar orders by metadata userId and the credits product
-      const page = await polarClient.orders.list({
-        limit: input.pageSize,
-        metadata: { userId: ctx.user.id },
-        page: input.page,
-        productId: serverEnv.POLAR_PRODUCT_ID_CREDITS,
-        sorting: ["-created_at"],
-      });
 
-      const items = page.result.items.map((o) => ({
-        amountCents: o.subtotalAmount,
+  getBalance: secureProcedure
+    .meta({
+      requiredPermissions: ["organization.view"],
+      route: { path: "/credits/get-balance", summary: "Get the org's credit pool balance" },
+    })
+    .input(z.object({ organizationId: z.string() }))
+    .output(GetBalanceOutput)
+    .query(async ({ input }) => {
+      const [credited, consumed] = await Promise.all([
+        getOrgCreditedUnits(input.organizationId),
+        readConsumed(input.organizationId),
+      ]);
+      const available = Math.max(0, credited - consumed);
+      return { available, consumed, creditedUnits: credited, currency: "credits" as const };
+    }),
+
+  listCharges: secureProcedure
+    .meta({
+      requiredPermissions: ["organization.view"],
+      route: { path: "/credits/list-charges", summary: "List recent proxy charge events from Polar" },
+    })
+    .input(ListByOrgInput)
+    .output(ListChargesOutput)
+    .query(async ({ input }) => {
+      const page = input.page ?? 1;
+      const pageSize = input.pageSize ?? 20;
+      const { polarClient } = await import("~/lib/server/polar");
+      const result = await polarClient.events.list({
+        externalCustomerId: input.organizationId,
+        limit: pageSize,
+        name: "proxy_call",
+        page,
+      });
+      const items = result.result.items.map(
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (e: any) => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const md: any = e.metadata ?? {};
+          return {
+            costUnits: typeof md.cost_units === "number" ? md.cost_units : 0,
+            createdAt: e.createdAt,
+            host: typeof md.host === "string" ? md.host : null,
+            method: typeof md.method === "string" ? md.method : null,
+            requestId: e.externalId ?? null,
+            status: typeof md.status === "number" ? md.status : null,
+          };
+        },
+      );
+      const hasNext = page < result.result.pagination.maxPage;
+      return { hasNext, items };
+    }),
+
+  listPerKeyUsage: secureProcedure
+    .meta({
+      requiredPermissions: ["apiKey.read"],
+      route: { path: "/credits/list-per-key-usage", summary: "List API keys with their quota" },
+    })
+    .input(ListPerKeyInput)
+    .output(ListPerKeyOutput)
+    .query(async ({ ctx, input }) => {
+      if (!ctx.orgId || ctx.orgId !== input.organizationId) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Organization ID mismatch" });
+      }
+      const { authServer } = await import("~/lib/server/auth");
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const result: any = await authServer.api.listApiKeys({
+        headers: ctx.raw.req.headers,
+        query: { organizationId: input.organizationId },
+      });
+      const list = Array.isArray(result) ? result : (result?.apiKeys ?? []);
+      const items = list.map(
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (k: any) => ({
+          createdAt: k.createdAt,
+          enabled: k.enabled,
+          id: k.id,
+          lastRequest: k.lastRequest,
+          name: k.name,
+          prefix: k.prefix,
+          referenceId: k.referenceId,
+          remaining: k.remaining,
+          requestCount: k.requestCount,
+        }),
+      );
+      return { hasNext: false, items };
+    }),
+
+  listTopUps: secureProcedure
+    .meta({
+      requiredPermissions: ["organization.view"],
+      route: { path: "/credits/list-top-ups", summary: "List recent top-up orders from Polar" },
+    })
+    .input(ListByOrgInput)
+    .output(ListTopUpOutput)
+    .query(async ({ input }) => {
+      const page = input.page ?? 1;
+      const pageSize = input.pageSize ?? 20;
+      const { polarClient } = await import("~/lib/server/polar");
+      const org = await db
+        .select({ polarCustomerId: schema.organization.polarCustomerId })
+        .from(schema.organization)
+        .where(eq(schema.organization.id, input.organizationId))
+        .limit(1)
+        .then((r) => r.at(0));
+      if (!org?.polarCustomerId) {
+        return { hasNext: false, items: [] };
+      }
+      const result = await polarClient.orders.list({
+        customerId: org.polarCustomerId,
+        limit: pageSize,
+        page,
+        productId: serverEnv.POLAR_PRODUCT_ID_CREDITS,
+        sorting: ["-created_at"],
+      });
+      const items = result.result.items.map((o) => ({
+        amountCents: o.subtotalAmount ?? o.totalAmount,
+        checkoutId: o.checkoutId,
         createdAt: o.createdAt,
-        description: "Polar top-up",
         id: o.id,
-        reference: o.id,
-        type: "topup" as const,
-        userId: ctx.user.id,
       }));
-      const hasNext = input.page < page.result.pagination.maxPage;
+      const hasNext = page < result.result.pagination.maxPage;
       return { hasNext, items };
     }),
 });

@@ -1,5 +1,4 @@
 import { apiKey } from "@better-auth/api-key";
-import { checkout, polar } from "@polar-sh/better-auth";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { twoFactor } from "better-auth/plugins";
@@ -18,7 +17,6 @@ import { ResetPasswordEmail, ResetPasswordSubject } from "../email/templates/res
 import { capCaptcha } from "./better-auth-captcha";
 import { kv } from "./kv";
 import { ac, roles } from "./organization-access";
-import { polarClient } from "./polar";
 
 const BETTER_AUTH_KV_PREFIX = "better-auth:";
 
@@ -83,14 +81,13 @@ export const authServer = betterAuth({
     apiKey({
       defaultPrefix: "zev_",
       enableMetadata: true,
-      keyExpiration: {
-        defaultExpiresIn: 30 * 24 * 60 * 60, // 30 days
-        maxExpiresIn: 365 * 24 * 60 * 60, // 1 year
-        minExpiresIn: 24 * 60 * 60, // 1 day
-      },
+      // No expiry by default (v1).
+      keyExpiration: { defaultExpiresIn: null },
       permissions: { defaultPermissions: { api: ["read"] } },
-      // 200 requests per minute
-      rateLimit: { enabled: true, maxRequests: 200, timeWindow: 1000 * 60 },
+      // 60 requests per minute per key.
+      rateLimit: { enabled: true, maxRequests: 60, timeWindow: 60_000 },
+      // All proxy keys are org-owned; referenceId = orgId on create.
+      references: "organization",
     }),
     twoFactor(),
     organization({
@@ -115,11 +112,6 @@ export const authServer = betterAuth({
           to: [data.email],
         });
       },
-    }),
-    polar({
-      client: polarClient,
-      createCustomerOnSignUp: true,
-      use: [checkout()],
     }),
     capCaptcha(),
     tanstackStartCookies(),
