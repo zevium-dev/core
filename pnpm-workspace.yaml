@@ -18,8 +18,6 @@ onlyBuiltDependencies:
   - vue-demi
   - workerd
 overrides:
-  kysely: ~0.28.17
-  vite: ^8.0.16
   "nanoid": "~3.3.13"
 patchedDependencies:
   autumn-js@0.1.85: patches/autumn-js@0.1.85.patch

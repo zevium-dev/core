@@ -5,8 +5,6 @@ settings:
   excludeLinksFromLockfile: false
 
 overrides:
-  kysely: ~0.28.17
-  vite: ^8.0.16
   nanoid: ~3.3.13
 
 patchedDependencies:
@@ -586,7 +584,7 @@ packages:
       '@opentelemetry/api': ^1.9.0
       better-call: 1.3.6
       jose: ^6.1.0
-      kysely: ~0.28.17
+      kysely: ^0.28.5 || ^0.29.0
       nanostores: ^1.0.1
     peerDependenciesMeta:
       '@cloudflare/workers-types':
@@ -609,7 +607,7 @@ packages:
     peerDependencies:
       '@better-auth/core': ^1.6.20
       '@better-auth/utils': 0.4.2
-      kysely: ~0.28.17
+      kysely: ^0.28.17 || ^0.29.0
     peerDependenciesMeta:
       kysely:
         optional: true
@@ -682,7 +680,7 @@ packages:
     resolution: {integrity: sha512-G7JZL7lIOcNK4mOM/uYSh3c5tNC8mdNWTmM9I/9OIruzkenWIkHqmYR/Z1XiLMNUITXcYkbf71RD19rIb4Fx/w==}
     hasBin: true
     peerDependencies:
-      vite: ^8.0.16
+      vite: ^6.1.0 || ^7.0.0 || ^8.0.0
       wrangler: ^4.103.0
 
   '@cloudflare/workerd-darwin-64@1.20260617.1':
@@ -3344,7 +3342,7 @@ packages:
   '@tailwindcss/vite@4.3.1':
     resolution: {integrity: sha512-hItDHuIIlEV61R+faXu66s1K36aTurO/Qw0e45Vskz57gXl9pWOT6eg3zmcEui6CZXddbN7zd41bwmvag4JGwQ==}
     peerDependencies:
-      vite: ^8.0.16
+      vite: ^5.2.0 || ^6 || ^7 || ^8
 
   '@tanstack/arktype-adapter@1.167.0':
     resolution: {integrity: sha512-o9znQ9DqeodlYfadFypBJWBcW/eJB0FVWgjpwKUklkBI5Wf1Fc2ko50DSgqfPxt3j+bm8sTL9SP82HRV+SdLWw==}
@@ -3468,7 +3466,7 @@ packages:
       '@vitejs/plugin-rsc': '*'
       react: '>=18.0.0 || >=19.0.0'
       react-dom: '>=18.0.0 || >=19.0.0'
-      vite: ^8.0.16
+      vite: '>=7.0.0'
     peerDependenciesMeta:
       '@rsbuild/core':
         optional: true
@@ -3513,7 +3511,7 @@ packages:
     peerDependencies:
       '@rsbuild/core': '>=1.0.2 || ^2.0.0'
       '@tanstack/react-router': ^1.170.15
-      vite: ^8.0.16
+      vite: '>=5.0.0 || >=6.0.0 || >=7.0.0 || >=8.0.0'
       vite-plugin-solid: ^2.11.10 || ^3.0.0-0
       webpack: '>=5.92.0'
     peerDependenciesMeta:
@@ -3552,7 +3550,7 @@ packages:
     engines: {node: '>=22.12.0'}
     peerDependencies:
       '@rsbuild/core': ^2.0.0
-      vite: ^8.0.16
+      vite: '>=7.0.0'
     peerDependenciesMeta:
       '@rsbuild/core':
         optional: true
@@ -3851,7 +3849,7 @@ packages:
     peerDependencies:
       '@rolldown/plugin-babel': ^0.1.7 || ^0.2.0
       babel-plugin-react-compiler: ^1.0.0
-      vite: ^8.0.16
+      vite: ^8.0.0
     peerDependenciesMeta:
       '@rolldown/plugin-babel':
         optional: true
@@ -3865,7 +3863,7 @@ packages:
     resolution: {integrity: sha512-EVkXzBjrPGM+cK8/ANWgBrkUCfJfb38/EfTSO8h7pWvKkyPkpWxvR7BkD2MyItMF62C97zAEoqdpUixwR/e+Rw==}
     peerDependencies:
       msw: ^2.4.9
-      vite: ^8.0.16
+      vite: ^6.0.0 || ^7.0.0 || ^8.0.0
     peerDependenciesMeta:
       msw:
         optional: true
@@ -4664,7 +4662,7 @@ packages:
       expo-sqlite: '>=14.0.0'
       gel: '>=2'
       knex: '*'
-      kysely: ~0.28.17
+      kysely: '*'
       mysql2: '>=2'
       pg: '>=8'
       postgres: '>=3'
@@ -7009,7 +7007,7 @@ packages:
   vitefu@1.1.3:
     resolution: {integrity: sha512-ub4okH7Z5KLjb6hDyjqrGXqWtWvoYdU3IGm/NorpgHncKoLTCfRIbvlhBm7r0YstIaQRYlp4yEbFqDcKSzXSSg==}
     peerDependencies:
-      vite: ^8.0.16
+      vite: ^3.0.0 || ^4.0.0 || ^5.0.0 || ^6.0.0 || ^7.0.0 || ^8.0.0
     peerDependenciesMeta:
       vite:
         optional: true
@@ -7030,7 +7028,7 @@ packages:
       '@vitest/ui': 4.1.9
       happy-dom: '*'
       jsdom: '*'
-      vite: ^8.0.16
+      vite: ^6.0.0 || ^7.0.0 || ^8.0.0
     peerDependenciesMeta:
       '@edge-runtime/vm':
         optional: true
