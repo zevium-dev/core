@@ -485,6 +485,32 @@ The migration changes the architecture. Update:
 
 Not blocking for v1 — can ship the code first, update docs in a follow-up commit. But list here so it's not forgotten.
 
+### 3.50 Refund Lua must validate `cur >= cost` to prevent negative `orgConsumed`
+
+If the refund Lua does `INCRBY -cost` without validation, a bug or concurrent issue can drive `orgConsumed` below 0. Once negative, the reserve Lua computes `creditedUnits - (-X) = creditedUnits + X` → the gate **always passes** (the org appears to have unlimited credits). The org can overspend until the next reconcile resets `orgConsumed` to match Polar.
+
+Fix: the refund Lua must validate before decrementing:
+
+```lua
+-- refund.lua
+local cost = tonumber(ARGV[1])
+if cost == nil or cost <= 0 then return redis.error_reply('invalid cost') end
+local cur = tonumber(redis.call('GET', KEYS[1])) or 0
+if cur < cost then return 0 end  -- refuse: would go negative; caller logs + reconciles
+redis.call('INCRBY', KEYS[1], -cost)
+return 1
+```
+
+Defense in depth: the reserve Lua should also clamp `cur` to `>= 0` so a pre-existing negative value can't break the gate:
+
+```lua
+-- reserve.lua (add to §3.25's `or 0` pattern)
+local cur = tonumber(redis.call('GET', KEYS[1])) or 0
+if cur < 0 then cur = 0; redis.call('SET', KEYS[1], 0) end  -- self-heal negative
+```
+
+Both fixes are one-liners. The peek Lua (§3.45) already clamps `available` to `>= 0`, so the UI is safe even if `orgConsumed` is briefly negative.
+
 ## 4. Plan
 
 ### 4.1 Polar dashboard setup (manual, blocks testing)
