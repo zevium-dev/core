@@ -128,7 +128,7 @@ body / flush cron.
 - **Repurpose** `remaining` / `refillAmount` / `refillInterval` as the **per-key request quota** (per-user call cap). Plugin handles atomic decrement + auto-refill natively (§3.1). **Important:** this is request-count, not unit-cost. An expensive host (50 units/call) burns the same quota as a cheap one (1 unit/call).
 - **Keep** `rateLimit*` for rate-limiting.
 - **Drop** `requestCount` (dead; do not surface as billed usage). No `ownerType` / `ownerUserId`.
-- **One personal key per user per org** — unique constraint (or server-side check at create) on `(organizationId, userId, metadata.kind='personal')`. Prevents users stacking keys to bypass the per-user cap. Without this, the per-key-quota-as-per-user-budget model collapses.
+- **One personal key per user per org** — add `kind: text` column on apikey (values: `'personal'` | `'shared'`). Unique constraint on `(organizationId, userId) WHERE kind = 'personal'` (drizzle partial unique index, or server-side check at create). Prevents users stacking keys to bypass the per-user cap. Without this, the per-key-quota-as-per-user-budget model collapses. **Avoid `metadata.kind`** — drizzle JSON-path queries for the uniqueness check are awkward; a real column is cleaner and indexable.
 
 ### 3.5 Per-host unit cost (consumer rate only — publisher cut)
 
@@ -153,14 +153,27 @@ Flat `/app/settings/keys` → cross-org view listing the user's keys across all 
 
 ### 3.8 Charge rule: 2xx only (refund both gates on failure)
 
-**Validation ordering matters:** cheap checks first (normalize `x-zevium-host`, https-only, not private, in `PROXY_ALLOWED_HOSTS`, has a price), then `verifyApiKey`, then `orgPoolGate.reserve`, then fetch. Bad hosts / unpriced hosts never burn plugin quota or org pool.
+**Validation ordering matters:** cheap checks first (normalize `x-zevium-host`, https-only, not private, in `PROXY_ALLOWED_HOSTS`, has a price), then `verifyApiKey`, then `orgPoolGate.reserve`, then fetch. Bad hosts / unpriced hosts never burn plugin quota or org pool. This also limits pre-verification DoS surface (invalid hosts rejected before plugin DB hit).
 
-Upstream non-2xx → **refund both gates**:
+**`verifyApiKey` error differentiation:**
+
+- `KEY_NOT_FOUND` / `INVALID_API_KEY` / disabled / expired → **401**
+- `USAGE_EXCEEDED` (quota exhausted) → **429**
+- Rate limit exceeded → **429** with `Retry-After`
+
+`verifyApiKey` returns `key: Omit<ApiKey, "key"> | null` including `organizationId` — **no extra lookup needed** for orgId in the proxy.
+
+**Refund idempotency:** use a request-scoped `let refunded = false` guard. Multiple error paths (fetch throw, upstream non-2xx, stream `cancel()`) can fire; without the guard, double-refund on retry/cancel+error would over-credit the org.
+
+**Upstream non-2xx → refund both gates:**
 
 - **Refund `apikey.remaining`**: plugin auto-decremented it on `verifyApiKey`. Use **atomic** `incrementOne(remaining: 1)` via the adapter — **not** `updateApiKey({remaining: stale+1})` which races under concurrency and loses increments.
 - **Refund `orgConsumed`**: decrement it back atomically.
 - **No Polar event ingested** → no Polar charge. Polar is unaffected on failure.
-  Polar order refunds (consumer-initiated) → Polar reverses the meter credit natively; local `orgConsumed` reconciles via the `customer.state_changed` webhook.
+
+**Streaming cancel mid-body:** if upstream already returned 2xx (status sent + headers received) and the client cancels before reading the full body, we **still charge**. The upstream responded successfully; the client chose not to read. This is the gray area — documented as v1 behavior. If the fetch throws before any response is received, the catch block fires and we refund (no charge).
+
+Polar order refunds (consumer-initiated) → Polar reverses the meter credit natively; `order.refunded` webhook invalidates the `creditedUnits` cache.
 
 ### 3.9 Credit purchase: variable amount ≥ $20
 
@@ -190,9 +203,15 @@ org.billingEmail, name: org.name, metadata: { orgId } })`; store returned id as
 
 ### 3.12 Webhook: thin `validateEvent` handler
 
-Handle `customer.state_changed` → invalidate `polarCredited` cache for that org. Optional
-logging of `order.paid`/`order.refunded`. **No `CreditsManager.add`** — Polar credits
-the meter itself via the meter_credit benefit on purchase.
+Webhook subscriptions + triggers:
+
+- **`order.paid`** (primary): invalidates `creditedUnits` cache for the org. Fires when a top-up purchase completes. **Required for cache invalidation after purchase.**
+- **`order.refunded`**: invalidates `creditedUnits` cache (refund restores credited units at Polar).
+- **`customer.state_changed`** (secondary): may also invalidate cache as a safety net (meter_credit benefit grant on purchase can trigger this, but not guaranteed synchronous with `order.paid`).
+
+The doc previously claimed `customer.state_changed` covers purchase — **wrong**. Per Polar SDK source (`WebhookCustomerStateChangedPayload`): fires on customer create/update/delete, subscription create/update, benefit grant/revoke — **not** on `order.paid`. Need `order.paid` as the primary trigger for cache invalidation after a top-up.
+
+Signature verification via `@polar-sh/sdk/webhooks` `validateEvent(raw, headers, POLAR_WEBHOOK_SECRET)`. **No `CreditsManager.add`** — Polar credits the meter itself via the meter_credit benefit. Handler is thin: validate, parse type, invalidate cache by `orgId` from `data.externalId`.
 
 ### 3.13 `@polar-sh/sdk` pinned 0.41.5 through this migration.
 
@@ -204,18 +223,16 @@ the meter itself via the meter_credit benefit on purchase.
 2. One-time product "Credits" (credits-only: NO metered price).
 3. Meter_credit benefit on product: `units`, `rollover = true`, `meterId = proxy_calls`.
    (Verify variable-amount crediting — §3.9.)
-4. Webhook → `https://zevium.dev/api/polar/webhook`; subscribe to
-   `customer.state_changed` (+ `order.paid`/`order.refunded` logging). Copy secret.
+4. Webhook → `https://zevium.dev/api/polar/webhook`; subscribe to **`order.paid`** + **`order.refunded`** (primary cache-invalidation triggers) + `customer.state_changed` (secondary safety net). Copy secret.
 5. Env: `POLAR_METER_ID`, `POLAR_PRODUCT_ID_CREDITS`, `POLAR_ACCESS_TOKEN`,
    `POLAR_ORGANIZATION_ID`, `POLAR_SERVER`, `POLAR_WEBHOOK_SECRET`,
    `PROXY_HOST_UNIT_COSTS`. Drop `CREDITS_FLUSH_SECRET`.
 
 ### 4.2 Schema + env (minimal)
 
-- `organization`: add `polarCustomerId: text`, `billingEmail: text`.
-- `apikey`: add `organizationId: text` (plugin-native field, FK→organization). Repurpose `remaining` / `refillAmount` / `refillInterval` as the per-key request quota. Drop `requestCount` (dead). No `ownerType` / `ownerUserId`. Keep `rateLimit*`.
+- `apikey`: add `organizationId: text` (FK→organization), `kind: text` (`'personal'` | `'shared'`). Partial unique index on `(organizationId, userId) WHERE kind = 'personal'`. Repurpose `remaining` / `refillAmount` / `refillInterval` as the per-key request quota. Drop `requestCount` (dead). No `ownerType` / `ownerUserId`. Keep `rateLimit*`.
 - **No new tables.** `creditAllocation` and `publisherEarning` are gone. `creditLedger` already gone.
-- Migration `0014` (credit_ledger) → replaced by `0015`: `organization.polarCustomerId`, `organization.billingEmail`, `apikey.organizationId` (quota fields already in plugin schema).
+- Migration `0014` (credit_ledger) → replaced by `0015`: `organization.polarCustomerId`, `organization.billingEmail`, `apikey.organizationId`, `apikey.kind`, partial unique index on `(organizationId, userId) WHERE kind = 'personal'`.
 - `src/env/server.ts`: add `POLAR_METER_ID`, `PROXY_HOST_UNIT_COSTS`. Drop `CREDITS_FLUSH_SECRET`.
 
 ### 4.3 Code changes (minimal)
@@ -223,7 +240,7 @@ the meter itself via the meter_credit benefit on purchase.
 **`src/lib/server/polar.ts`** — org-scoped direct-SDK helpers (small):
 
 - `ensureOrgCustomer(org)` — `polar.customers.create({ externalId: org.id, email: org.billingEmail, name: org.name, metadata: { orgId } })` if missing; persist `polarCustomerId`.
-- `getOrgCreditedUnits(orgId): Promise<number>` — `getStateExternal({ externalId: orgId })` → meter `creditedUnits`. Redis-cached; invalidated by `customer.state_changed` webhook.
+- `getOrgCreditedUnits(orgId): Promise<number>` — `getStateExternal({ externalId: orgId })` → meter `creditedUnits`. Redis-cached; invalidated by `order.paid` + `order.refunded` webhooks (primary) and `customer.state_changed` (secondary).
 - `createCreditsCheckout({ orgId, amountUsd, successUrl })` — Polar checkout (variable amount if Polar supports proportional crediting on one-time, else tier product). `metadata: { orgId }`.
 - `ingestProxyCall({ orgId, requestId, host, method, status, costUnits })` — `events.ingest(...)`. Polar auto-deducts.
 - `getHostCost(host)` — parse `PROXY_HOST_UNIT_COSTS` → `{ costUnits }` or throw (fail-closed 403).
@@ -277,26 +294,55 @@ on 2xx complete:
 
 - `getHostCost` (fail-closed on unpriced host).
 - `orgPoolGate` Lua (reserve OK / insufficient / refund).
-- Proxy: 2xx → ingest called + no refund; non-2xx → no ingest + both refunds (plugin `remaining` + `orgConsumed`); unpriced host → 403; exhausted key → 429 (plugin throws USAGE_EXCEEDED).
+- Proxy: 2xx → ingest called + no refund; non-2xx → no ingest + both refunds; unpriced host → 403; exhausted key → 429 (USAGE_EXCEEDED); invalid key → 401.
+- **Refund idempotency**: concurrent error paths (fetch throw + stream cancel) trigger refundBoth exactly once.
+- Streaming cancel after 2xx headers → still charges (no refund).
 - `ensureOrgCustomer` idempotent.
+- One-key-per-user: creating a second `'personal'` key for the same `(org, user)` fails (unique constraint).
 
 ### 4.4 Proxy gate flow (final, minimal)
 
 ```
-verifyApiKey → key{organizationId, remaining}
-  (plugin atomic-guarded decrements remaining; throws USAGE_EXCEEDED at 0)
-if USAGE_EXCEEDED: return 429
-cost = getHostCost(host)                                    // 403 if unpriced
-reserve = orgPoolGate.reserve(orgId, cost)                  // 402 if insufficient
-fetch upstream
-if !upstream.ok:
-  orgPoolGate.refund(orgId, cost)                          // refund money gate
-  incrementOne(apikey, key.id, { remaining: 1 })           // refund plugin quota
-  throw new UpstreamNonOK(upstream)
-stream response
-on 2xx complete:
-  waitUntil(ingestProxyCall({ orgId, requestId, host, method, status, costUnits: cost }))
-  // no refund — both gates consumed stand
+// 1. Cheap checks first — reject bad hosts before any DB / Redis hit
+normalize x-zevium-host
+if !https or isPrivate or !PROXY_ALLOWED_HOSTS.includes or !PROXY_HOST_UNIT_COSTS[host]:
+  return 403
+
+// 2. Plugin gate (atomic guarded decrement on remaining > 0)
+try:
+  verification = await verifyApiKey({ key, permissions: { api: ["read"] } })
+catch e:
+  if e.code === "USAGE_EXCEEDED": return 429
+  return 401  // KEY_NOT_FOUND / INVALID_API_KEY / disabled / expired
+const { organizationId } = verification.key
+
+// 3. Org-pool money gate (atomic Lua)
+cost = getHostCost(host)
+reserve = orgPoolGate.reserve(organizationId, cost)
+if !reserve.ok: return 402
+
+// 4. Fetch + stream (with idempotent refund guard)
+let refunded = false
+const refundBoth = () => {
+  if (refunded) return
+  refunded = true
+  orgPoolGate.refund(organizationId, cost)
+  incrementOne(apikey, verification.key.id, { remaining: 1 })  // atomic, NOT stale+1
+}
+try:
+  upstream = await fetch(targetUrl, { body, duplex: "half", headers, method })
+  if !upstream.ok:
+    refundBoth()
+    throw new UpstreamNonOK(upstream)
+  return new Response(streamWithCancelHook(upstream, refundBoth), { ... })
+catch e:
+  if !(e instanceof UpstreamNonOK): refundBoth()
+  throw e
+
+// 5. Post-2xx ingest (best-effort; non-blocking)
+waitUntil(ingestProxyCall({ orgId: organizationId, requestId, host, method, status, costUnits: cost }))
+```
+
 ```
 
 ### 4.5 CI / verification
@@ -324,3 +370,4 @@ on 2xx complete:
 - Per-token dynamic pricing (event metadata already forward-compatible).
 - Volume pricing (Polar: "coming soon").
 - Polar customer portal deep-link (build our own UI for now).
+```
