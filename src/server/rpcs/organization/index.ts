@@ -104,7 +104,14 @@ export const organizationRouter = router({
         },
         headers: ctx.raw.req.headers,
       });
-return { ...org, createdAt: org.createdAt, logo: org.logo ?? null, members: org.members.filter(Boolean), polarBillingEmail: null, polarCustomerId: null } as never;
+      return {
+        ...org,
+        createdAt: org.createdAt,
+        logo: org.logo ?? null,
+        members: org.members.filter(Boolean),
+        polarBillingEmail: null,
+        polarCustomerId: null,
+      } as never;
     }),
 
   delete: secureProcedure
@@ -167,12 +174,12 @@ return { ...org, createdAt: org.createdAt, logo: org.logo ?? null, members: org.
         invitations: Array.from(uniqueInvitationsMap.values()),
         logo: org.logo ?? null,
         members: org.members.map((m) => ({ ...m, user: { ...m.user, image: m.user.image ?? null } })),
-metadata: MetadataZod.parse(org.metadata),
+        metadata: MetadataZod.parse(org.metadata),
         name: org.name,
         polarBillingEmail: null,
         polarCustomerId: null,
         slug: org.slug,
-      } as never;
+      };
     }),
 
   inviteMember: secureProcedure
@@ -232,7 +239,11 @@ metadata: MetadataZod.parse(org.metadata),
         createdAt: org.createdAt,
         logo: org.logo ?? null,
         metadata: MetadataZod.parse(org.metadata),
-} as never));
+        name: org.name,
+        polarBillingEmail: null,
+        polarCustomerId: null,
+        slug: org.slug,
+      }));
     }),
 
   removeMember: secureProcedure
@@ -376,12 +387,12 @@ metadata: MetadataZod.parse(org.metadata),
       return {
         ...org,
         logo: org.logo ?? null,
-metadata: MetadataZod.parse(org.metadata),
+        metadata: MetadataZod.parse(org.metadata),
         name: org.name,
         polarBillingEmail: null,
         polarCustomerId: null,
         slug: org.slug,
-      } as never;
+      };
     }),
 
   updateMemberRole: secureProcedure
@@ -494,9 +505,8 @@ metadata: MetadataZod.parse(org.metadata),
           organization: {
             ...row.organization,
             logo: row.organization.logo ?? null,
-metadata: MetadataZod.parse(row.organization.metadata),
+            metadata: MetadataZod.parse(row.organization.metadata),
           },
-        })) as never[];
+        }));
     }),
-
 });

@@ -8,25 +8,40 @@ const mockPolar: Record<string, any> = {
 };
 
 vi.mock("@polar-sh/sdk", () => ({
-  Polar: class { customers: any; checkouts: any; events: any;
-    constructor() { this.customers = mockPolar.customers; this.checkouts = mockPolar.checkouts; this.events = mockPolar.events; }
+  Polar: class {
+    customers: any;
+    checkouts: any;
+    events: any;
+    constructor() {
+      this.customers = mockPolar.customers;
+      this.checkouts = mockPolar.checkouts;
+      this.events = mockPolar.events;
+    }
   },
 }));
 
 vi.mock("~/env/server", () => ({
   serverEnv: {
-    POLAR_ACCESS_TOKEN: "test", POLAR_METER_ID: "mtr_test",
-    POLAR_ORGANIZATION_ID: "org_test", POLAR_PRODUCT_ID_CREDITS: "prd_test",
-    POLAR_SERVER: "sandbox", POLAR_WEBHOOK_SECRET: "test",
+    POLAR_ACCESS_TOKEN: "test",
+    POLAR_METER_ID: "mtr_test",
+    POLAR_ORGANIZATION_ID: "org_test",
+    POLAR_PRODUCT_ID_CREDITS: "prd_test",
+    POLAR_SERVER: "sandbox",
+    POLAR_WEBHOOK_SECRET: "test",
     PROXY_HOST_UNIT_COSTS: { "api.openai.com": 3 },
-    PROXY_PUBLIC_HOST: "localhost:5173", PROXY_REQUEST_TIMEOUT_MS: 30000,
-    PROXY_ALLOWED_HOSTS: "api.openai.com", PROXY_UPSTREAM_SECRET: "test",
-    LIBSQL_URL: "libsql://test.turso.io", LIBSQL_SECRET: "test",
+    PROXY_PUBLIC_HOST: "localhost:5173",
+    PROXY_REQUEST_TIMEOUT_MS: 30000,
+    PROXY_ALLOWED_HOSTS: "api.openai.com",
+    PROXY_UPSTREAM_SECRET: "test",
+    LIBSQL_URL: "libsql://test.turso.io",
+    LIBSQL_SECRET: "test",
   },
 }));
 
 const chain = () => ({
-  from: vi.fn(chain), where: vi.fn(chain), set: vi.fn(chain),
+  from: vi.fn(chain),
+  where: vi.fn(chain),
+  set: vi.fn(chain),
   limit: vi.fn(() => ({ then: vi.fn((cb: any) => cb([{ polarCustomerId: "cust_123" }])) })),
   then: vi.fn((cb: any) => cb([{ polarCustomerId: "cust_123" }])),
 });
@@ -46,7 +61,11 @@ describe("polar helpers", () => {
     vi.clearAllMocks();
     vi.resetModules();
     // Reset mockPolar internals since polarClient is a module-level singleton
-    Object.values(mockPolar).forEach((v: any) => Object.values(v).forEach((m: any) => { if (typeof m === "function") m.mockReset(); }));
+    Object.values(mockPolar).forEach((v: any) =>
+      Object.values(v).forEach((m: any) => {
+        if (typeof m === "function") m.mockReset();
+      }),
+    );
   });
 
   const org = { id: "org1", name: "Test Org", slug: "test-org" };
@@ -108,7 +127,14 @@ describe("polar helpers", () => {
     it("calls events.ingest", async () => {
       mockPolar.events.ingest.mockResolvedValueOnce({});
       const { ingestProxyCall } = await import("./polar");
-      await ingestProxyCall({ orgId: "org1", requestId: "r1", host: "api.openai.com", method: "POST", status: 200, costUnits: 3 });
+      await ingestProxyCall({
+        orgId: "org1",
+        requestId: "r1",
+        host: "api.openai.com",
+        method: "POST",
+        status: 200,
+        costUnits: 3,
+      });
       expect(mockPolar.events.ingest).toHaveBeenCalled();
     });
   });

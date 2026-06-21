@@ -24,10 +24,7 @@ class UpstreamNonOK extends Error {
 }
 
 function jsonWithRequestId(status: number, message: string, requestId: string) {
-  return Response.json(
-    { error: message },
-    { headers: { "x-zevium-request-id": requestId }, status },
-  );
+  return Response.json({ error: message }, { headers: { "x-zevium-request-id": requestId }, status });
 }
 
 function proxySecretHeader(): string {
@@ -83,30 +80,20 @@ const proxyHandler = async (request: Request) => {
       body: { key: zeviumKey, permissions: { api: ["read"] } },
     });
   } catch (err) {
-    return jsonWithRequestId(
-      500,
-      err instanceof Error ? err.message : "verifyApiKey failed",
-      requestId,
-    );
+    return jsonWithRequestId(500, err instanceof Error ? err.message : "verifyApiKey failed", requestId);
   }
 
   if (!verification.valid) {
     const code = verification.error?.code as string | undefined;
     if (code === "RATE_LIMITED") {
-      // consumeRemaining already ran before consumeRateLimit; refund.
+      // consumeRemaining already ran before consumeRateLimit; refund the
+      // decrement in a single UPDATE-by-hash to avoid the select→update race
+      // (two concurrent rate-limited calls both refunding the same row).
       const hashed = await defaultKeyHasher(zeviumKey);
-      const row = await db
-        .select({ id: schema.apikey.id })
-        .from(schema.apikey)
-        .where(eq(schema.apikey.key, hashed))
-        .limit(1)
-        .then((r) => r.at(0));
-      if (row) {
-        await db
-          .update(schema.apikey)
-          .set({ remaining: sql`${schema.apikey.remaining} + 1` })
-          .where(eq(schema.apikey.id, row.id));
-      }
+      await db
+        .update(schema.apikey)
+        .set({ remaining: sql`${schema.apikey.remaining} + 1` })
+        .where(eq(schema.apikey.key, hashed));
       return jsonWithRequestId(429, "Rate limit exceeded", requestId);
     }
     if (code === "USAGE_EXCEEDED") return jsonWithRequestId(429, "Usage exceeded", requestId);
@@ -123,8 +110,9 @@ const proxyHandler = async (request: Request) => {
   }
   const orgId = key.referenceId;
 
-  // 3. Org-pool money gate (atomic Lua). Lazy-create Polar customer on
-  //    first call so the org always has one before the gate runs.
+  // 3. Org-pool money gate (Redis SDK; non-atomic check+increment — §3.28).
+  //    Lazy-create the Polar customer on first call so the org always has
+  //    one before the gate runs.
   await ensureOrgPool(orgId);
 
   const credited = await getOrgCreditedUnits(orgId);

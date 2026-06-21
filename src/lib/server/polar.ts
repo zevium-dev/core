@@ -142,7 +142,6 @@ export async function createCreditsCheckout(input: {
     url: typeof checkout.url === "string" ? checkout.url : input.successUrl,
     checkoutId: checkout.id,
   };
-
 }
 
 /**

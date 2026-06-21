@@ -48,9 +48,7 @@ function CreditsComponent() {
   const activeOrg = orgListQuery.data[0];
   const orgId = activeOrg?.id ?? "";
 
-  const balanceQuery = useSuspenseQuery(
-    trpc.credits.getBalance.queryOptions({ organizationId: orgId }),
-  );
+  const balanceQuery = useSuspenseQuery(trpc.credits.getBalance.queryOptions({ organizationId: orgId }));
   const topUpsQuery = useSuspenseQuery(
     trpc.credits.listTopUps.queryOptions({
       organizationId: orgId,
@@ -82,9 +80,7 @@ function CreditsComponent() {
     setBalanceSnapshot(balanceQuery.data.available);
 
     pollTimerRef.current = setInterval(() => {
-      queryClient
-        .invalidateQueries(trpc.credits.getBalance.queryOptions({ organizationId: orgId }))
-        .catch(() => {});
+      queryClient.invalidateQueries(trpc.credits.getBalance.queryOptions({ organizationId: orgId })).catch(() => {});
     }, POLL_INTERVAL_MS);
 
     pollTimeoutRef.current = setTimeout(() => {
@@ -187,12 +183,7 @@ function CreditsComponent() {
               type="number"
               value={amountUsd}
             />
-            <Button
-              className="flex-1"
-              disabled={topupMutation.isPending}
-              onClick={handleTopUp}
-              size="lg"
-            >
+            <Button className="flex-1" disabled={topupMutation.isPending} onClick={handleTopUp} size="lg">
               {topupMutation.isPending ? "Redirecting..." : "Add Credits"}
             </Button>
           </div>
@@ -213,12 +204,8 @@ function CreditsComponent() {
                 className="flex items-center justify-between border-b border-border/20 py-2 last:border-b-0"
                 key={tx.id}
               >
-                <span className="text-sm text-muted-foreground">
-                  {new Date(tx.createdAt).toLocaleString()}
-                </span>
-                <span className="text-sm font-medium text-primary">
-                  +${(tx.amountCents / 100).toFixed(2)}
-                </span>
+                <span className="text-sm text-muted-foreground">{new Date(tx.createdAt).toLocaleString()}</span>
+                <span className="text-sm font-medium text-primary">+${(tx.amountCents / 100).toFixed(2)}</span>
               </div>
             ))
           )}
@@ -238,12 +225,8 @@ function CreditsComponent() {
                 className="flex items-center justify-between border-b border-border/20 py-2 last:border-b-0"
                 key={`${tx.requestId ?? "noid"}-${tx.createdAt}`}
               >
-                <span className="text-sm text-muted-foreground">
-                  {new Date(tx.createdAt).toLocaleString()}
-                </span>
-                <span className="text-sm font-medium text-destructive">
-                  -{tx.costUnits} credits
-                </span>
+                <span className="text-sm text-muted-foreground">{new Date(tx.createdAt).toLocaleString()}</span>
+                <span className="text-sm font-medium text-destructive">-{tx.costUnits} credits</span>
               </div>
             ))
           )}

@@ -88,9 +88,7 @@ function ApiKeysComponent() {
   const org = (orgListQuery.data ?? [])[0];
 
   // Queries
-  const listQuery = useQuery(
-    trpc.orgKey.list.queryOptions({ organizationId: org?.id ?? "" }, { enabled: !!org }),
-  );
+  const listQuery = useQuery(trpc.orgKey.list.queryOptions({ organizationId: org?.id ?? "" }, { enabled: !!org }));
   const apiKeys: Array<ApiKeyRecord> = (listQuery.data ?? []).map(formatApiKeyData as any);
 
   // Mutations
@@ -209,10 +207,7 @@ function ApiKeysComponent() {
               >
                 Cancel
               </Button>
-              <Button
-                disabled={!newKeyName.trim() || createMutation.isPending}
-                onClick={handleCreateKey}
-              >
+              <Button disabled={!newKeyName.trim() || createMutation.isPending} onClick={handleCreateKey}>
                 {createMutation.isPending ? "Creating..." : "Create Key"}
               </Button>
             </DialogFooter>
@@ -395,17 +390,10 @@ function ApiKeysComponent() {
             </div>
           </div>
           <DialogFooter>
-            <Button
-              disabled={updateMutation.isPending}
-              onClick={() => setIsEditDialogOpen(false)}
-              variant="outline"
-            >
+            <Button disabled={updateMutation.isPending} onClick={() => setIsEditDialogOpen(false)} variant="outline">
               Cancel
             </Button>
-            <Button
-              disabled={!newKeyName.trim() || updateMutation.isPending}
-              onClick={handleSaveEdit}
-            >
+            <Button disabled={!newKeyName.trim() || updateMutation.isPending} onClick={handleSaveEdit}>
               {updateMutation.isPending ? "Saving..." : "Save"}
             </Button>
           </DialogFooter>

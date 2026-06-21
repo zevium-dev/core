@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const mockEval = vi.fn();
 const mockGet = vi.fn();
 const mockSet = vi.fn();
+const mockIncrby = vi.fn();
 vi.mock("~/lib/server/kv", () => ({
-  kv: { eval: mockEval, get: mockGet, set: mockSet },
+  kv: { get: mockGet, incrby: mockIncrby, set: mockSet },
 }));
 
 describe("org-pool-gate", () => {
@@ -19,67 +19,73 @@ describe("org-pool-gate", () => {
   const ORG = "org_abc123";
   const COST = 5;
   const CREDITED = 100;
-
-  describe("reserve", () => {
-    it("returns true when lua returns 1", async () => {
-      mockEval.mockResolvedValueOnce(1);
-      const ok = await gate.reserve(ORG, COST);
-      expect(ok).toBe(true);
-      expect(mockEval).toHaveBeenCalledTimes(1);
-      const [, keys, args] = mockEval.mock.calls[0];
-      expect(keys).toContain(`zevium:orgConsumed:${ORG}`);
-      expect(args).toContain(COST);
-    });
-
-    it("returns false when lua returns 0", async () => {
-      mockEval.mockResolvedValueOnce(0);
-      const ok = await gate.reserve(ORG, COST);
-      expect(ok).toBe(false);
-    });
-
-    it("propagates Redis errors (no try/catch in reserve)", async () => {
-      mockEval.mockRejectedValueOnce(new Error("connection refused"));
-      await expect(gate.reserve(ORG, COST)).rejects.toThrow("connection refused");
-    });
-  });
+  const KEY = `zevium:orgConsumed:${ORG}`;
 
   describe("reserveWithCredits", () => {
-    it("returns true when creditedUnits - consumed >= cost", async () => {
-      mockEval.mockResolvedValueOnce(1);
+    it("increments and returns true when creditedUnits - consumed >= cost", async () => {
+      mockGet.mockResolvedValueOnce(10);
       const ok = await gate.reserveWithCredits(ORG, CREDITED, COST);
+      expect(ok).toBe(true);
+      expect(mockGet).toHaveBeenCalledWith(KEY);
+      expect(mockIncrby).toHaveBeenCalledWith(KEY, COST);
+    });
+
+    it("returns false (no increment) when insufficient", async () => {
+      mockGet.mockResolvedValueOnce(98); // credited 100 - 98 = 2 < cost 5
+      const ok = await gate.reserveWithCredits(ORG, CREDITED, COST);
+      expect(ok).toBe(false);
+      expect(mockIncrby).not.toHaveBeenCalled();
+    });
+
+    it("treats a missing consumed key as 0", async () => {
+      mockGet.mockResolvedValueOnce(null);
+      const ok = await gate.reserveWithCredits(ORG, COST, COST);
       expect(ok).toBe(true);
     });
 
-    it("returns false when insufficient", async () => {
-      mockEval.mockResolvedValueOnce(0);
-      const ok = await gate.reserveWithCredits(ORG, 2, COST);
+    it("rejects non-positive cost without touching Redis", async () => {
+      const ok = await gate.reserveWithCredits(ORG, CREDITED, 0);
       expect(ok).toBe(false);
+      expect(mockGet).not.toHaveBeenCalled();
+    });
+
+    it("propagates Redis errors", async () => {
+      mockGet.mockRejectedValueOnce(new Error("connection refused"));
+      await expect(gate.reserveWithCredits(ORG, CREDITED, COST)).rejects.toThrow("connection refused");
     });
   });
 
   describe("refund", () => {
-    it("returns true on success", async () => {
-      mockEval.mockResolvedValueOnce(1);
+    it("decrements and returns true when consumed >= cost", async () => {
+      mockGet.mockResolvedValueOnce(10);
       const ok = await gate.refund(ORG, COST);
       expect(ok).toBe(true);
+      expect(mockIncrby).toHaveBeenCalledWith(KEY, -COST);
     });
 
-    it("returns false when cur < cost", async () => {
-      mockEval.mockResolvedValueOnce(0);
+    it("returns false (no decrement) when consumed < cost", async () => {
+      mockGet.mockResolvedValueOnce(2);
       const ok = await gate.refund(ORG, COST);
       expect(ok).toBe(false);
+      expect(mockIncrby).not.toHaveBeenCalled();
     });
   });
 
   describe("peek", () => {
-    it("returns available units", async () => {
-      mockEval.mockResolvedValueOnce(80);
+    it("returns creditedUnits - consumed", async () => {
+      mockGet.mockResolvedValueOnce(20);
       const available = await gate.peek(ORG, CREDITED);
       expect(available).toBe(80);
     });
 
+    it("clamps to 0 when consumed exceeds creditedUnits", async () => {
+      mockGet.mockResolvedValueOnce(150);
+      const available = await gate.peek(ORG, CREDITED);
+      expect(available).toBe(0);
+    });
+
     it("propagates Redis errors", async () => {
-      mockEval.mockRejectedValueOnce(new Error("oom"));
+      mockGet.mockRejectedValueOnce(new Error("oom"));
       await expect(gate.peek(ORG, CREDITED)).rejects.toThrow("oom");
     });
   });
@@ -87,21 +93,19 @@ describe("org-pool-gate", () => {
   describe("readConsumed", () => {
     it("reads consumed from kv.get", async () => {
       mockGet.mockResolvedValueOnce(42);
-      const consumed = await gate.readConsumed(ORG);
-      expect(consumed).toBe(42);
-      expect(mockGet).toHaveBeenCalledWith(`zevium:orgConsumed:${ORG}`);
+      expect(await gate.readConsumed(ORG)).toBe(42);
+      expect(mockGet).toHaveBeenCalledWith(KEY);
     });
 
     it("returns 0 when key missing", async () => {
       mockGet.mockResolvedValueOnce(null);
-      const consumed = await gate.readConsumed(ORG);
-      expect(consumed).toBe(0);
+      expect(await gate.readConsumed(ORG)).toBe(0);
     });
 
-    it("returns 0 when value is undefined", async () => {
-      mockGet.mockResolvedValueOnce(undefined);
-      const consumed = await gate.readConsumed(ORG);
-      expect(consumed).toBe(0);
+    it("self-heals a negative counter to 0", async () => {
+      mockGet.mockResolvedValueOnce(-5);
+      expect(await gate.readConsumed(ORG)).toBe(0);
+      expect(mockSet).toHaveBeenCalledWith(KEY, 0);
     });
   });
 
@@ -109,11 +113,7 @@ describe("org-pool-gate", () => {
     it("calls kv.set with nx option", async () => {
       mockSet.mockResolvedValueOnce("OK");
       await gate.initOrgConsumed(ORG);
-      expect(mockSet).toHaveBeenCalledWith(
-        `zevium:orgConsumed:${ORG}`,
-        0,
-        { nx: true },
-      );
+      expect(mockSet).toHaveBeenCalledWith(KEY, 0, { nx: true });
     });
   });
 });

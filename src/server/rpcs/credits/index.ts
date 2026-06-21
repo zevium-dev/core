@@ -4,11 +4,7 @@ import { z } from "zod";
 
 import { db, schema } from "~/db";
 import { serverEnv } from "~/env/server";
-import {
-  createCreditsCheckout,
-  ensureOrgCustomer,
-  getOrgCreditedUnits,
-} from "~/lib/server/polar";
+import { createCreditsCheckout, ensureOrgCustomer, getOrgCreditedUnits } from "~/lib/server/polar";
 import { readConsumed } from "~/lib/server/org-pool-gate";
 import { secureProcedure } from "~/server/secure-procedure";
 import { router } from "~/server/trpc";
@@ -108,8 +104,7 @@ export const creditsRouter = router({
         throw new TRPCError({ code: "NOT_FOUND", message: "Organization not found" });
       }
       const successUrl =
-        input.returnUrl ??
-        `${new URL(ctx.raw.req.url).origin}/app/settings/credits?checkout_id={CHECKOUT_ID}`;
+        input.returnUrl ?? `${new URL(ctx.raw.req.url).origin}/app/settings/credits?checkout_id={CHECKOUT_ID}`;
       await ensureOrgCustomer(org);
       return createCreditsCheckout({
         orgId: org.id,
@@ -172,7 +167,7 @@ export const creditsRouter = router({
 
   listPerKeyUsage: secureProcedure
     .meta({
-      requiredPermissions: ["apiKey.read"],
+      requiredPermissions: ["apikey.read"],
       route: { path: "/credits/list-per-key-usage", summary: "List API keys with their quota" },
     })
     .input(ListPerKeyInput)

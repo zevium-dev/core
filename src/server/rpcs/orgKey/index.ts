@@ -82,7 +82,7 @@ async function findKeyForOrg(keyId: string, organizationId: string) {
 export const orgKeyRouter = router({
   create: secureProcedure
     .meta({
-      requiredPermissions: ["apiKey.create"],
+      requiredPermissions: ["apikey.create"],
       route: { path: "/orgKey/create", summary: "Create an org-owned API key" },
     })
     .input(CreateKeyInput)
@@ -108,8 +108,7 @@ export const orgKeyRouter = router({
         });
       }
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const created: any = await authServer.api.createApiKey({
+      const created = await authServer.api.createApiKey({
         body: {
           expiresIn: null,
           metadata: { creatorUserId: ctx.user.id },
@@ -131,7 +130,7 @@ export const orgKeyRouter = router({
 
   delete: secureProcedure
     .meta({
-      requiredPermissions: ["apiKey.delete"],
+      requiredPermissions: ["apikey.delete"],
       route: { path: "/orgKey/delete", summary: "Delete an org-owned API key" },
     })
     .input(DeleteKeyInput)
@@ -148,7 +147,7 @@ export const orgKeyRouter = router({
 
   list: secureProcedure
     .meta({
-      requiredPermissions: ["apiKey.read"],
+      requiredPermissions: ["apikey.read"],
       route: { path: "/orgKey/list", summary: "List org-owned API keys" },
     })
     .input(ListKeysInput)
@@ -167,7 +166,7 @@ export const orgKeyRouter = router({
 
   update: secureProcedure
     .meta({
-      requiredPermissions: ["apiKey.update"],
+      requiredPermissions: ["apikey.update"],
       route: { path: "/orgKey/update", summary: "Update an org-owned API key" },
     })
     .input(UpdateKeyInput)

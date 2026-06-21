@@ -1,12 +1,10 @@
 import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
-
 import { DefaultOrganizationRoles } from "./default-roles";
 import { OrganizationUserPermissions, PermissionValue, ProjectUserPermissions, UserPermissions } from "./permission";
 
 type Base64String = {} & string;
 type Metadata = Record<string, unknown>;
-
 
 export const user = sqliteTable(
   "user",
@@ -168,7 +166,7 @@ export const organization = sqliteTable(
     slug: text("slug").unique().notNull(),
   },
   (self) => [
-uniqueIndex("organization_polar_customer_id_index").on(self.polarCustomerId),
+    uniqueIndex("organization_polar_customer_id_index").on(self.polarCustomerId),
     uniqueIndex("organization_slug_index").on(self.slug),
   ],
 );

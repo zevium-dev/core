@@ -7,7 +7,7 @@ export const AssignableOrganizationRoles = DefaultOrganizationRoles satisfies Re
 export type AssignableOrganizationRole = (typeof AssignableOrganizationRoles)[number];
 
 const guestPermissions: Permissions = {
-  "apiKey.read": { status: "allow" },
+  "apikey.read": { status: "allow" },
   "organization.view": { status: "allow" },
 };
 
@@ -31,10 +31,10 @@ const developerPermissions: Permissions = {
 
 const adminPermissions: Permissions = {
   ...developerPermissions,
-  "apiKey.create": { status: "allow" },
-  "apiKey.delete": { status: "allow" },
-  "apiKey.read": { status: "allow" },
-  "apiKey.update": { status: "allow" },
+  "apikey.create": { status: "allow" },
+  "apikey.delete": { status: "allow" },
+  "apikey.read": { status: "allow" },
+  "apikey.update": { status: "allow" },
   "organization.delete": { status: "allow" },
   "organization.edit": { status: "allow" },
   "organization.members.invite": { limit: 500, status: "limited" },

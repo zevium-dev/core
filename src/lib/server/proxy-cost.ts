@@ -3,18 +3,23 @@ import { serverEnv } from "~/env/server";
 /**
  * Per-host cost lookup.
  *
- * `PROXY_HOST_UNIT_COSTS` is a JSON object of `{ host: costUnits }` in env
- * (declared as an arktype record in `src/env/server.ts`). The map is
- * parsed once at module load and frozen. Normalization of the requested
- * host (lowercase, no port, no trailing dot) is applied before lookup.
+ * `PROXY_HOST_UNIT_COSTS` is a JSON object of `{ host: costUnits }` (declared
+ * as an arktype record in `src/env/server.ts`). The map is rebuilt on EVERY
+ * call from `serverEnv` — we deliberately do NOT cache it at module scope.
  *
- * Fail-closed: an unpriced host throws. Caller (proxy) translates to 403.
+ * Why no cache: this is a serverless environment. A module-level cache would
+ * live for the lifetime of a warm isolate with no invalidation path, so a
+ * rotated `PROXY_HOST_UNIT_COSTS` secret would stay stale until the isolate
+ * is recycled. Rebuilding each call is cheap (a tiny JSON parse + Map build)
+ * relative to the Redis + Polar round-trips the proxy already makes, and it
+ * keeps the cost map always consistent with the currently-loaded env.
+ *
+ * Normalization of the requested host (lowercase, no port, no trailing dot)
+ * is applied before lookup. Fail-closed: an unpriced host throws; the caller
+ * (proxy) translates that to 403.
  */
 
-let costs: ReadonlyMap<string, number> | null = null;
-
-function parseCosts(): ReadonlyMap<string, number> {
-  if (costs) return costs;
+function buildCostMap(): ReadonlyMap<string, number> {
   const out = new Map<string, number>();
   const raw = serverEnv.PROXY_HOST_UNIT_COSTS;
   for (const [host, value] of Object.entries(raw)) {
@@ -27,13 +32,12 @@ function parseCosts(): ReadonlyMap<string, number> {
   if (out.size === 0) {
     throw new Error("PROXY_HOST_UNIT_COSTS is empty. At least one host is required.");
   }
-  costs = out;
-  return costs;
+  return out;
 }
 
 /**
  * Normalize a host header value to the form used as a key in the cost map.
- * Throws if the value is not a parseable host.
+ * Throws if the value is not a parseable HTTPS host.
  */
 export function normalizeHost(input: string): string {
   const trimmed = input.trim();
@@ -55,15 +59,9 @@ export function normalizeHost(input: string): string {
  * Look up the cost for a (normalized) host. Throws on miss or invalid cost.
  */
 export function getHostCost(normalizedHost: string): number {
-  const map = parseCosts();
-  const cost = map.get(normalizedHost);
+  const cost = buildCostMap().get(normalizedHost);
   if (cost === undefined) {
     throw new Error(`Unpriced host: ${normalizedHost}. Add it to PROXY_HOST_UNIT_COSTS.`);
   }
   return cost;
-}
-
-/** Test helper: reset the cached cost map. */
-export function clearCostCacheForTests(): void {
-  costs = null;
 }

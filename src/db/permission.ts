@@ -33,30 +33,32 @@ export type ProjectUserPermission = (typeof ProjectUserPermissions)[number];
 
 // Organization-specific user permissions.
 export const OrganizationUserPermissions = [
-  "apiKey.create",
-  "apiKey.delete",
-  "apiKey.read",
-  "apiKey.update",
-  "organization.delete",
-  "organization.edit",
-  "organization.members.invite",
-  "organization.members.remove",
-  "organization.members.view",
-  "organization.members.permission.edit",
-  "organization.view",
-  "organization.owner.add",
-  "organization.owner.remove",
-  "organization.owner.edit",
-  "project.create",
-  "project.delete",
-  "project.edit",
-  "project.list",
-  "project.price.edit",
-  "project.publish",
-  "project.spec.edit",
-  "project.spec.view",
-  "project.unpublish",
-  "project.view",
+  "apikey.create", // ability to create org-owned API keys
+  "apikey.delete", // ability to delete org-owned API keys
+  "apikey.read", // ability to read/view org-owned API keys
+  "apikey.update", // ability to update org-owned API keys
+  "organization.delete", // ability to delete the organization
+  "organization.edit", // ability to edit the organization details like name, logo, slug etc
+  "organization.members.invite", // ability to invite members to the organization
+  "organization.members.remove", // ability to remove members from the organization
+  "organization.members.view", // ability to view other members in the organization
+  "organization.members.permission.edit", // ability to edit other members' permissions in the organization
+  "organization.view", // ability to view the organization details
+  "organization.owner.add", // ability to add owners to the organization
+  "organization.owner.remove", // ability to remove owners from the organization
+  "organization.owner.edit", // ability to edit owners' permissions in the organization
+
+  // Project permissions within the organization
+  "project.create", // ability to create projects
+  "project.delete", // ability to delete projects
+  "project.edit", // ability to edit projects
+  "project.list", // ability to list projects
+  "project.price.edit", // ability to edit project pricing
+  "project.publish", // ability to publish projects
+  "project.spec.edit", // ability to edit project specifications
+  "project.spec.view", // ability to view project specifications
+  "project.unpublish", // ability to unpublish projects
+  "project.view", // ability to view projects
 ] as const;
 export type OrganizationUserPermission = (typeof OrganizationUserPermissions)[number];
 
