@@ -433,6 +433,58 @@ Polar's webhook endpoint receives ALL event types for the org (not just ours). O
 
 This filters out webhooks for other products/customers in the same Polar org before doing any work. Avoids log noise + wasted cache invalidations.
 
+### 3.45 UI needs `getOrgBalance` RPC + same `orgConsumed` key as the gate
+
+The credits page UI must show the **available balance** (= `creditedUnits - orgConsumed`). But `orgConsumed` is server-side Redis state — the UI can't read it directly. The doc never specified how the UI computes the available balance.
+
+**Fix:** add a `getOrgBalance(orgId)` RPC in `src/server/rpcs/credits/index.ts` (the rewritten credits RPC). It does the SAME computation as the gate's reserve Lua, but read-only:
+
+```ts
+// peek.lua — read-only, no increment
+const cur = tonumber(redis.call('GET', KEYS[1])) or 0  // KEYS[1] = zevium:orgConsumed:ORG_ID
+local credited = tonumber(ARGV[1])                       // ARGV[1] = creditedUnits (from cache/Polar)
+local available = credited - cur
+if available < 0 then available = 0 end                // clamp for refund-lockout (§3.32)
+return available
+```
+
+The UI calls `getOrgBalance(orgId)` → displays `available` as "X credits remaining." The gate's reserve Lua does the same computation atomically and increments on success. Both read/write the SAME `zevium:orgConsumed:ORG_ID` key → no drift between UI and gate. Refetch on mount + manual refresh button. The RPC lives in the same `credits` tRPC router that gets rewritten (§3.39).
+
+### 3.46 Credits RPC surface (concrete list)
+
+The doc said "rewrite `src/server/rpcs/credits/index.ts`" but never listed the procedures. Concrete list:
+
+- `getBalance(orgId)` — returns `{ available, creditedUnits, consumedUnits }` via the peek Lua (§3.45).
+- `createTopUp({ orgId, amountUsd, successUrl })` — validates `amountUsd >= 20`, lazy `ensureOrgCustomer` if needed, calls `createCreditsCheckout` (§3.37), returns the checkout URL for redirect.
+- `listTopUps(orgId)` — recent top-ups. v1: query Polar's `orders.list({ customerId: org.polarCustomerId, productId: POLAR_PRODUCT_ID_CREDITS })`. Returns up to N recent. v2: local mirror table.
+- `listCharges(orgId)` — recent charges (events.ingest). v1: query Polar's `events.list({ externalCustomerId: orgId, name: 'proxy_call' })`. Returns up to N recent. v2: local mirror.
+- `listPerKeyUsage(orgId)` — per-key usage. Query the apikey table for the org's keys, join with the `kind` column... wait, we cut `kind`. Use `metadata.creatorUserId` for attribution. Returns keys with `remaining` + `name` + `creatorUserId`.
+
+### 3.47 UI must poll balance after Polar checkout redirect
+
+After Polar redirects the user back to `successUrl`, the `order.paid` webhook may not have fired yet (Polar webhook latency is typically < 5s but can be longer). The UI must poll `getOrgBalance` every 2s for up to 30s after returning, showing a "Processing top-up..." state until the balance updates. Then show the new balance + a success toast. Without polling, the user sees the stale balance and thinks the top-up failed.
+
+### 3.48 Test plan (replaces deleted `credits.test.ts`)
+
+Deleting `src/lib/server/credits.test.ts` (per §3.39) drops the existing test coverage. The migration introduces new billing logic that MUST be tested. Add:
+
+- **`src/lib/server/org-pool-gate.test.ts`**: unit tests for the Lua scripts (mock `@upstash/redis`). Cover: reserve success, reserve insufficient, reserve nil orgConsumed, refund, refund idempotency, peek.
+- **`src/lib/server/polar.test.ts`**: unit tests for the SDK helpers (mock `@polar-sh/sdk`). Cover: `ensureOrgCustomer` (list-first + create), `getOrgCreditedUnits` (cache miss + hit + no-active-meter), `createCreditsCheckout` (with `customerId` + `amount` + `currency`), `ingestProxyCall`.
+- **`src/server/rpcs/credits/index.test.ts`**: RPC tests (mock the helpers). Cover: `getBalance`, `createTopUp` (validation + lazy `ensureOrgCustomer`), `listTopUps`, `listCharges`.
+- **`src/routes/api/proxy/$.test.ts`**: proxy flow tests (mock `auth.api`, Redis, Polar). Cover: happy path 2xx, non-2xx refund, `RATE_LIMITED` refund, `USAGE_EXCEEDED` no-refund, insufficient org pool 402, invalid host 403, self-loop 403, DNS-rebinding 403, missing `x-zevium-key` 401, missing `x-zevium-host` 400.
+- **`src/routes/api/polar/webhook.test.ts`**: webhook tests (mock `validateEvent`). Cover: signature fail 401, unknown event type 200, `order.paid` cache invalidation, `order.refunded` cache invalidation, `customer.state_changed` cache invalidation, non-our-org skip 200, idempotent redelivery.
+
+Update `vitest.config.ts` if needed (the existing config covers `src/**/*.test.ts`). Fine.
+
+### 3.49 AGENTS.md + README.md updates (follow-up)
+
+The migration changes the architecture. Update:
+
+- **`AGENTS.md`**: directory structure (add `src/lib/server/polar.ts`, `org-pool-gate.ts`, `redis.ts`; remove `credits.ts`, `credits-success.ts`); RPC list (rewrite `credits` RPC entry to org-scoped + list procedures from §3.46); env vars (add `POLAR_*` + `PROXY_PUBLIC_HOST` + `PROXY_HOST_UNIT_COSTS`; remove `CREDITS_FLUSH_SECRET`).
+- **`README.md`**: proxy section (auth via `x-zevium-key`, pricing model); credits section (Polar-native, org pool, no metered price).
+
+Not blocking for v1 — can ship the code first, update docs in a follow-up commit. But list here so it's not forgotten.
+
 ## 4. Plan
 
 ### 4.1 Polar dashboard setup (manual, blocks testing)
