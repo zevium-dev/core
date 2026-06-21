@@ -168,7 +168,7 @@ export const organization = sqliteTable(
     slug: text("slug").unique().notNull(),
   },
   (self) => [
-    index("organization_polar_customer_id_index").on(self.polarCustomerId),
+uniqueIndex("organization_polar_customer_id_index").on(self.polarCustomerId),
     uniqueIndex("organization_slug_index").on(self.slug),
   ],
 );

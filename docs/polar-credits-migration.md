@@ -1,6 +1,6 @@
 # Polar-native credits migration (hierarchical, org-scoped)
 
-Status: **planned** — implementation pending.
+Status: **implemented** — typecheck passes, 92 tests pass. Branch: `feat/polar-credits-combined`.
 Branch: `feat/polar-credits-combined` (carries merged PR #127 + #147 onto refactored `develop`).
 Supersedes the self-managed Redis credits model shipped in #127/#147.
 

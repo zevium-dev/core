@@ -1,4 +1,5 @@
 import { TRPCError } from "@trpc/server";
+import { sql } from "drizzle-orm";
 import { z } from "zod";
 
 import { db, orm, schema } from "~/db";
@@ -88,6 +89,25 @@ export const orgKeyRouter = router({
     .output(apiKeyWithSecret)
     .mutation(async ({ ctx, input }) => {
       assertOrgMatch(ctx, input.organizationId);
+
+      // One-key-per-user guard: prevent user from stacking keys in same org.
+      // The DB unique partial index (§3.22) catches races; this count check
+      // gives a clean error message for the common case.
+      const existingCount = await db
+        .select({ count: orm.count() })
+        .from(schema.apikey)
+        .where(
+          sql`${schema.apikey.referenceId} = ${input.organizationId} AND json_extract(${schema.apikey.metadata}, '$.creatorUserId') = ${ctx.user.id}`,
+        )
+        .then((r) => r.at(0)?.count ?? 0);
+
+      if (existingCount > 0) {
+        throw new TRPCError({
+          code: "CONFLICT",
+          message: "You already have an API key for this organization. Delete the existing key first.",
+        });
+      }
+
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const created: any = await authServer.api.createApiKey({
         body: {

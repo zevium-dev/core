@@ -36,6 +36,7 @@ interface ApiKeyRecord {
   lastUsed: Date | null;
   name: null | string;
   prefix: null | string;
+  remaining: number | null;
   requestCount: number;
   start: null | string;
 }
@@ -316,7 +317,7 @@ function ApiKeysComponent() {
                       <span className="text-sm text-muted-foreground">60 req/min</span>
                     </TableCell>
                     <TableCell>
-                      <span className="text-sm font-medium">{apiKey.requestCount} used</span>
+                      <span className="text-sm font-medium">{apiKey.remaining ?? "∞"}</span>
                     </TableCell>
                     <TableCell>
                       <DropdownMenu>
@@ -424,6 +425,7 @@ function formatApiKeyData(key: OrgKeyData): ApiKeyRecord {
     lastUsed: key.lastUsed ?? null,
     name: key.name,
     prefix: key.prefix,
+    remaining: key.remaining ?? null,
     requestCount: key.requestCount,
     start: key.start,
   };
