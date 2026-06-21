@@ -94,6 +94,13 @@ export default defineConfig(
   },
 
   {
+    files: ["src/components/magicui/**/*.{ts,tsx}"],
+    rules: {
+      "@eslint-react/no-array-index-key": "off",
+    },
+  },
+
+  {
     files: tsFiles,
     plugins: { "prefer-array-at": preferArrayAt },
     rules: {
@@ -108,6 +115,7 @@ export default defineConfig(
     },
     rules: {
       ...drizzleRecommendedRules,
+      "drizzle/enforce-delete-with-where": "off",
     },
   },
 

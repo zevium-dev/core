@@ -439,7 +439,6 @@ function RouteComponent() {
   );
 
   const deleteSecretMutation = useMutation(
-    // eslint-disable-next-line drizzle/enforce-delete-with-where
     trpc.projectSecret.delete.mutationOptions({
       onSuccess: async () => {
         toast.success("Secret deleted");
@@ -833,9 +832,8 @@ function RouteComponent() {
           </DialogHeader>
           <div className="max-h-[60vh] overflow-auto">
             <ul className="space-y-2 text-sm">
-              {validationErrors.map((error, index) => (
-                // eslint-disable-next-line @eslint-react/no-array-index-key
-                <li className="rounded-lg border p-3" key={`${error.message}-${index}`}>
+              {validationErrors.map((error) => (
+                <li className="rounded-lg border p-3" key={`${error.line}:${error.column}:${error.message}`}>
                   <button
                     className="w-full text-left"
                     onClick={() => {

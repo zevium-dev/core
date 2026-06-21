@@ -182,8 +182,11 @@ function ChartTooltipContent({
         {payload.map((item, index) => {
           const key = nameKey ?? String(item.name ?? item.dataKey ?? "value");
           const itemConfig = getPayloadConfigFromPayload(config, item, key);
-          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
-          const indicatorColor = color ?? item.payload?.fill ?? item.color;
+          const itemFill =
+            typeof item.payload === "object" && item.payload !== null && "fill" in item.payload
+              ? (item.payload as { fill?: string }).fill
+              : undefined;
+          const indicatorColor = color ?? itemFill ?? item.color;
 
           return (
             <div
@@ -197,8 +200,7 @@ function ChartTooltipContent({
               key={String(item.dataKey)}
             >
               {formatter && item.value !== undefined && item.name ? (
-                // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
-                formatter(item.value, item.name, item, index, item.payload)
+                formatter(item.value, item.name, item, index, payload)
               ) : (
                 <>
                   {itemConfig?.icon ? (
@@ -220,8 +222,8 @@ function ChartTooltipContent({
                         )}
                         style={
                           {
-                            "--color-bg": indicatorColor as string,
-                            "--color-border": indicatorColor as string,
+                            "--color-bg": indicatorColor ?? "",
+                            "--color-border": indicatorColor ?? "",
                           } as React.CSSProperties
                         }
                       />

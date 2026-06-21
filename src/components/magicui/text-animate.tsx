@@ -395,7 +395,6 @@ const TextAnimateBase = ({
               segmentClassName,
             )}
             custom={i * staggerTimings[by]}
-            // eslint-disable-next-line @eslint-react/no-array-index-key
             key={`${by}-segment-${segment.trim() || "space"}-${i}`}
             variants={finalVariants.item}
           >

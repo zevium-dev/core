@@ -125,7 +125,6 @@ function ApiKeysComponent() {
   const handleDeleteKey = async (keyId: string) => {
     setIsPending(true);
     try {
-      // eslint-disable-next-line drizzle/enforce-delete-with-where
       const { error } = await auth.apiKey.delete({ keyId });
       if (error) throw new Error(error.message);
       void refetch();

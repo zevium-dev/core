@@ -18,7 +18,6 @@ const posthogProxy = async (request: Request) => {
 
   const response = await fetch(newUrl, {
     body: request.body,
-    // @ts-expect-error duplex is not in the type definition # broken nodejs types
     duplex: "half",
     headers,
     method: request.method,

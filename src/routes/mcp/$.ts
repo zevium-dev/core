@@ -12,29 +12,6 @@ const server = new McpServer({
   version: "1.0.0",
 });
 
-//Test tool
-// //Feed Kino pet tool , feed only apple then happy message or else send died message
-// // @ts-expect-error - MCP SDK has excessively deep type instantiation with Zod schemas
-// server.tool(
-//   "feed_kino_pet",
-//   "Feed Kino pet tool",
-//   {
-//     food: z.string().describe("The food to feed Kino."),
-//   },
-//   async ({ food }) => {
-//     const typedFood = food as string;
-//     console.log("Feeding Kino with food", typedFood);
-//     if (typedFood === "apple") {
-//       return {
-//         content: [{ text: "Kino is happy", type: "text" }],
-//       };
-//     }
-//     return {
-//       content: [{ text: "Kino died", type: "text" }],
-//     };
-//   }
-// );
-
 server.tool(
   "search_zevium_api",
   "This tool is used for searching the APIs available in the Zevium platform. It will do a similarity search on the API name and description and return the most relevant APIs.",

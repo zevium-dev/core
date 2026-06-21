@@ -13,11 +13,10 @@ import { cn } from "~/lib/utils";
 export const Route = createFileRoute("/app")({
   component: RouteComponent,
   loader: async ({ context, params }) => {
-    await context.queryClient.ensureQueryData(sessionQueryOptions());
+    const sessionData = await context.queryClient.ensureQueryData(sessionQueryOptions());
     await context.queryClient.ensureQueryData(context.trpc.organization.list.queryOptions());
 
-    // @ts-expect-error - user is added by auth middleware but not typed in router context
-    if (context.user) {
+    if (sessionData.user) {
       if ("organizationSlug" in params && typeof params.organizationSlug === "string" && params.organizationSlug) {
         await context.queryClient.ensureQueryData(
           context.trpc.project.list.queryOptions({ organizationSlug: params.organizationSlug }),
@@ -29,6 +28,7 @@ export const Route = createFileRoute("/app")({
       sidebarDefaultOpen: await getSidebarDefaultOpen(),
     };
   },
+
   pendingComponent: PendingComponent,
 });
 

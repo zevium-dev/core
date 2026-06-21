@@ -30,7 +30,6 @@ export const memoryCached = <Args extends Array<unknown>, Result>(
       if (cacheRow.expiresAt > new Date()) {
         return cacheRow.value as Result;
       }
-      // eslint-disable-next-line drizzle/enforce-delete-with-where
       memoryCacheMap.delete(cacheKey);
     }
 

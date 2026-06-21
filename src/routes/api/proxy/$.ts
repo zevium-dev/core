@@ -125,11 +125,8 @@ const proxyHandler = async (request: Request) => {
 
   // Prepare outbound headers
   const outboundHeaders = new Headers(request.headers);
-  // eslint-disable-next-line drizzle/enforce-delete-with-where
   outboundHeaders.delete("x-zevium-key");
-  // eslint-disable-next-line drizzle/enforce-delete-with-where
   outboundHeaders.delete("content-length");
-  // eslint-disable-next-line drizzle/enforce-delete-with-where
   outboundHeaders.delete("cookie");
   outboundHeaders.set("host", normalized.hostname);
   outboundHeaders.set("x-zevium-request-id", requestId);
@@ -140,7 +137,6 @@ const proxyHandler = async (request: Request) => {
   try {
     const upstream = await fetch(targetUrl, {
       body: request.body,
-      // @ts-expect-error duplex is not in the type definition (Node.js fetch streaming)
       duplex: "half",
       headers: outboundHeaders,
       method: request.method,
@@ -150,7 +146,6 @@ const proxyHandler = async (request: Request) => {
     // Ensure request id is included in the client response
     responseHeaders.set("x-zevium-request-id", requestId);
     // Never leak the proxy secret back to the client
-    // eslint-disable-next-line drizzle/enforce-delete-with-where
     responseHeaders.delete("x-zevium-proxy-secret");
 
     return new Response(upstream.body, {

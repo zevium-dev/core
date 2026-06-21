@@ -127,7 +127,6 @@ function RouteComponent() {
   );
 
   const deleteOrgMutation = useMutation(
-    // eslint-disable-next-line drizzle/enforce-delete-with-where
     trpc.organization.delete.mutationOptions({
       onSuccess: async () => {
         toast.success("Organization deleted");

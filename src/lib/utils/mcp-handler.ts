@@ -50,8 +50,7 @@ export async function handleMcpRequest(
         const err = error instanceof Error ? error : new Error(String(error));
         reject(new MCPSendException("Failed to send MCP request", { originalError: err }, err));
       });
-      // @ts-expect-error - method may not exist on all request types
-      if (jsonRpcRequest.method === "notifications/initialized") {
+      if ("method" in jsonRpcRequest && jsonRpcRequest.method === "notifications/initialized") {
         clearTimeout(timeout);
         resolve();
       }
