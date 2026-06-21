@@ -125,10 +125,10 @@ body / flush cron.
 `apikey` table is the `@better-auth/api-key` plugin's table. New app, no backward compat.
 
 - **Add** `organizationId` (plugin already supports on create/list; our table currently lacks it). All keys org-scoped.
-- **Repurpose** `remaining` / `refillAmount` / `refillInterval` as the **per-key request quota** (per-user spending cap). Plugin handles atomic decrement + auto-refill natively (§3.1).
+- **Repurpose** `remaining` / `refillAmount` / `refillInterval` as the **per-key request quota** (per-user call cap). Plugin handles atomic decrement + auto-refill natively (§3.1). **Important:** this is request-count, not unit-cost. An expensive host (50 units/call) burns the same quota as a cheap one (1 unit/call).
 - **Keep** `rateLimit*` for rate-limiting.
-- **Drop** `requestCount` (dead). No `ownerType` / `ownerUserId`.
-- Key creation UI org-scoped. Flat `/app/settings/keys` → cross-org view of the user's keys.
+- **Drop** `requestCount` (dead; do not surface as billed usage). No `ownerType` / `ownerUserId`.
+- **One personal key per user per org** — unique constraint (or server-side check at create) on `(organizationId, userId, metadata.kind='personal')`. Prevents users stacking keys to bypass the per-user cap. Without this, the per-key-quota-as-per-user-budget model collapses.
 
 ### 3.5 Per-host unit cost (consumer rate only — publisher cut)
 
@@ -153,13 +153,14 @@ Flat `/app/settings/keys` → cross-org view listing the user's keys across all 
 
 ### 3.8 Charge rule: 2xx only (refund both gates on failure)
 
+**Validation ordering matters:** cheap checks first (normalize `x-zevium-host`, https-only, not private, in `PROXY_ALLOWED_HOSTS`, has a price), then `verifyApiKey`, then `orgPoolGate.reserve`, then fetch. Bad hosts / unpriced hosts never burn plugin quota or org pool.
+
 Upstream non-2xx → **refund both gates**:
 
-- **Refund `apikey.remaining`**: plugin auto-decremented it on `verifyApiKey`. Increment it back via `auth.api.updateApiKey({ keyId, remaining: remaining + 1 })` (or direct `incrementOne(remaining: 1)`).
+- **Refund `apikey.remaining`**: plugin auto-decremented it on `verifyApiKey`. Use **atomic** `incrementOne(remaining: 1)` via the adapter — **not** `updateApiKey({remaining: stale+1})` which races under concurrency and loses increments.
 - **Refund `orgConsumed`**: decrement it back atomically.
 - **No Polar event ingested** → no Polar charge. Polar is unaffected on failure.
-
-Polar order refunds (consumer-initiated) → Polar reverses the meter credit natively; local `orgConsumed` reconciles via the `customer.state_changed` webhook.
+  Polar order refunds (consumer-initiated) → Polar reverses the meter credit natively; local `orgConsumed` reconciles via the `customer.state_changed` webhook.
 
 ### 3.9 Credit purchase: variable amount ≥ $20
 
@@ -310,14 +311,14 @@ on 2xx complete:
   - `remaining` exhausted → 429 (USAGE_EXCEEDED).
   - Org pool exhausted → 402.
 
-## 5. Open questions / blockers
+## 5. Known v1 limitations
 
-1. **Variable-amount crediting** (§3.9): does Polar support proportional meter credits on a one-time checkout (min $20, any amount)? Verify in sandbox; fallback = fixed tiers.
-2. **Polar customer email uniqueness** (§2.4): `billingEmail` per org, default creator email. Confirm Polar accepts it / no collision. Default: yes.
-3. **Refund reversal** (§3.8): verify in sandbox that refunding a one-time order reverses the meter credit.
-4. **Secrets** (blocks testing): `POLAR_METER_ID`, `POLAR_PRODUCT_ID_CREDITS`, `POLAR_ACCESS_TOKEN`, `POLAR_WEBHOOK_SECRET`, `POLAR_ORGANIZATION_ID`, `POLAR_SERVER`, `PROXY_HOST_UNIT_COSTS`, `UPSTASH_REDIS_REST_URL/TOKEN`. Drop `CREDITS_FLUSH_SECRET`.
+- **`orgConsumed` is authoritative for gating; Polar is purchase ledger + external mirror.** Local `orgConsumed` and Polar's consumed drift if `events.ingest` fails post-2xx (network blip, outage). For v1 we accept drift — the gate never lets the org spend more than `creditedUnits`, and Polar's customer portal may briefly show a higher balance than reality. No reconcile/queue for v1. If drift becomes a problem: durable outbox for ingest + periodic reconcile job (v2).
+- **`customer.state_changed` does NOT reconcile usage.** Per docs it fires on customer/subscription/benefit changes, not per ingested event. Use it to invalidate the `creditedUnits` cache after top-ups/refunds, not to reconcile `orgConsumed`.
 
-## 6. Out of scope (follow-ups)
+## 6. Open questions / blockers
+
+## 7. Out of scope (follow-ups)
 
 - Publisher payouts (Stripe Connect) — deferred to a follow-up. For now, no publisher accounting; Zevium keeps the spread externally.
 - Per-token dynamic pricing (event metadata already forward-compatible).
