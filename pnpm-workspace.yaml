@@ -8,17 +8,6 @@ allowBuilds:
   workerd: true
 
 minimumReleaseAge: 1440
-minimumReleaseAgeExclude:
-  - "@types/node"
-  - "@typescript/native-preview"
-  - "@typescript/native-preview-darwin-arm64"
-  - "@typescript/native-preview-darwin-x64"
-  - "@typescript/native-preview-linux-arm"
-  - "@typescript/native-preview-linux-arm64"
-  - "@typescript/native-preview-linux-x64"
-  - "@typescript/native-preview-win32-arm64"
-  - "@typescript/native-preview-win32-x64"
-  - "nanoid"
 
 onlyBuiltDependencies:
   - "@tailwindcss/oxide"
@@ -31,5 +20,6 @@ onlyBuiltDependencies:
 overrides:
   kysely: ~0.28.17
   vite: ^8.0.16
+  "nanoid": "~3.3.13"
 patchedDependencies:
   autumn-js@0.1.85: patches/autumn-js@0.1.85.patch
