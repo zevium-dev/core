@@ -385,6 +385,54 @@ The doc said "delete the flush cron + worker handler" generically. Concrete file
 - **`src/routes/app/settings/credits.tsx`**: verify no stale `CreditsManager` imports.
 - **`src/env/server.ts`**: drop `CREDITS_FLUSH_SECRET`. Add `POLAR_METER_ID`, `POLAR_PRODUCT_ID_CREDITS`, `POLAR_PRICE_ID_CREDITS`, `POLAR_WEBHOOK_SECRET`, `POLAR_ACCESS_TOKEN`, `POLAR_ORGANIZATION_ID`, `POLAR_SERVER`, `PROXY_PUBLIC_HOST` (for §3.36), `PROXY_HOST_UNIT_COSTS`.
 
+### 3.40 `waitUntil` NOT available in TanStack Start route handlers (architectural)
+
+Verified in `src/worker.ts` line 7: the Cloudflare `ExecutionContext` is dropped (`_ctx: ExecutionContext` → unused). The `defaultServerEntry.fetch(request)` call only receives the `Request` — no context is threaded into the TanStack Start app. So **route handlers (including the proxy) cannot call `ctx.waitUntil`**. The `waitUntil` API exists in the `scheduled` handler (line 9) but is unreachable from inside a route.
+
+**Impact on the ingest path:** the proxy was designed to `waitUntil(events.ingest(...))` after a 2xx response to keep the worker alive for the background ingest. Without `waitUntil`, the worker may be killed after the response is sent → ingest lost → local `orgConsumed` up but Polar not charged (drift). The reconcile job corrects it, but the drift window is real.
+
+**Options for v1:**
+
+- **(a) Synchronous ingest (recommended for v1).** `await events.ingest(...)` BEFORE returning the response. Adds ~50-200ms latency per 2xx call. Guarantees the ingest completes. Simplest, no architectural change. **Pick this for v1.**
+- **(b) Fire-and-forget.** `void events.ingest(...).catch(log)` — no await, no `waitUntil`. Worker may be killed before completion. Drift risk. Not recommended.
+- **(c) Thread `ctx` through.** Modify `src/worker.ts` to pass `ctx` to a custom server entry that threads it into route handlers via a Hono middleware or a request-scoped AsyncLocalStorage. Architectural change, bigger surface. v2.
+
+Update §4.4 flow: the proxy awaits `ingestProxyCall(...)` before returning the 2xx response. The refund path is unchanged. Document the latency cost.
+
+### 3.41 Redirect bypass (SSRF) — `redirect: "error"`
+
+The `fetch` API in Cloudflare Workers follows redirects by default (up to 20). If the upstream returns a 3xx with `Location: http://169.254.169.254/...` (AWS metadata) or `Location: http://zevium.dev/...` (self-loop), `fetch` follows it, **bypassing our allowlist + private-IP check** (which only ran on the initial host). Real SSRF bypass.
+
+Fix: pass `redirect: "error"` to `fetch` in the proxy. Any redirect causes `fetch` to throw → proxy returns 502. Simple, no allowlist maintenance for redirect targets. Trade-off: upstreams that use 3xx for legitimate flows (e.g., auth redirects) will break. For an API proxy, this is acceptable — APIs rarely redirect. If a specific upstream needs redirect support, handle it per-host later.
+
+### 3.42 `ensureOrgCustomer` — check for existing customer first
+
+Current spec: `if missing, polar.customers.create(...)`. But: how do we know if it's missing? The doc assumed "check first, create if missing" but didn't specify the check API. Real impl:
+
+```ts
+const list = await polar.customers.list({ externalId: orgId });
+const existing = list.result.items[0];
+const customer = existing ?? (await polar.customers.create({ externalId: orgId, email, name, metadata: { orgId } }));
+// persist customer.id as org.polarCustomerId
+```
+
+`externalId` is unique within the Polar org, so `list` returns at most one. Idempotent: safe to call repeatedly. Avoids the "create and catch duplicate" race (which may not be supported and could leak partial customers).
+
+### 3.43 Lua must reject `cost = 0`
+
+The reserve script should reject `cost <= 0` to prevent no-op reserves (which would silently let a call through without consuming `orgConsumed`). The `getHostCost` function guarantees `cost > 0` (or throws 403), so `cost = 0` shouldn't reach the Lua — but defense in depth. Reject in the Lua: `if tonumber(ARGV[1]) <= 0 then return redis.error_reply('invalid cost') end`.
+
+### 3.44 Webhook handler: filter by event type FIRST, then orgId
+
+Polar's webhook endpoint receives ALL event types for the org (not just ours). Our handler should:
+
+1. Validate signature (always).
+2. Parse event type. If unknown (`subscription.created`, `benefit.updated`, etc.) → return 200 immediately (acknowledge to prevent retries, but do no work).
+3. For `order.paid` / `order.refunded`: check `data.metadata.orgId` FIRST. If missing or not a valid org in our DB → return 200 (not our order, skip).
+4. For `customer.state_changed`: check `data.externalId` FIRST. If missing or not a valid org → return 200 (not our customer, skip).
+
+This filters out webhooks for other products/customers in the same Polar org before doing any work. Avoids log noise + wasted cache invalidations.
+
 ## 4. Plan
 
 ### 4.1 Polar dashboard setup (manual, blocks testing)
