@@ -9,13 +9,5 @@ allowBuilds:
 
 minimumReleaseAge: 720
 
-onlyBuiltDependencies:
-  - "@tailwindcss/oxide"
-  - core-js
-  - esbuild
-  - protobufjs
-  - sharp
-  - vue-demi
-  - workerd
 patchedDependencies:
   autumn-js@0.1.85: patches/autumn-js@0.1.85.patch
