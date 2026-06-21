@@ -323,6 +323,68 @@ When a one-time order is refunded, Polar reverses the meter credit grant. If the
 
 Polar sends a `webhook-id` header on every delivery for dedup. Our current handler is idempotent (cache invalidation is safe to repeat), so redelivery is harmless. But once we add real side effects (PostHog events, DB writes per top-up), dedup by `webhook-id` in a Redis SET with TTL (e.g. 24h) to prevent double-processing. Build the dedup scaffolding now (cheap) so we don't bolt it on later. Not blocking for v1.
 
+### 3.34 Redis key namespace: `zevium:*`
+
+All Redis keys the migration creates MUST be namespaced to avoid collision with other apps sharing the same Upstash Redis instance (the existing cache module uses `${namespace}:...` — e.g. `cache:fnName:hash`). Use:
+
+- `zevium:orgConsumed:${orgId}` — the atomic counter
+- `zevium:credited:${orgId}` — the `creditedUnits` cache (TTL 5min)
+- `zevium:webhookIds` (SET) — the dedup set (§3.33)
+
+Add a single `REDIS_NAMESPACE = "zevium"` constant in `src/lib/server/redis.ts` (new tiny file) and prefix every key. Easy to forget when scattering `SET`/`GET` calls.
+
+### 3.35 `rateLimit.timeWindow` is a NUMBER (ms), not a string
+
+Correction: the api-key plugin reads `rateLimitTimeWindow` as a number (milliseconds) from the create body (verified in plugin source line 746). The `orgKey.create` spec in §3.27 said `timeWindow: "1m"` — **wrong**. Use `timeWindow: 60000` (number). Same for `expiresIn` (ms). All durations in the plugin are numbers in ms.
+
+### 3.36 SSRF self-loop + DNS rebinding guards (security)
+
+The proxy fetches whatever `x-zevium-host` says. Two real attack vectors the existing `isPrivate` check does NOT cover:
+
+1. **Self-loop.** `x-zevium-host: zevium.dev` → the proxy fetches itself → infinite loop / recursive proxy. Add: reject if the normalized host equals the proxy's own hostname (from env, e.g. `PROXY_PUBLIC_HOST`).
+
+2. **DNS rebinding.** A public hostname (e.g. `attacker.com`) resolves to a private IP (e.g. `169.254.169.254` AWS metadata). The `isPrivate` check is on the hostname string, not the resolved IP. Fix: `dns.resolve(host)` before `fetch`, reject if any resolved IP is private/loopback/link-local. Cache the resolution for the request (or short TTL) to avoid per-byte lookups.
+
+Both belong in the cheap-checks step (§4.4 line 1) — before any DB/Redis hit, so they also limit DoS surface.
+
+### 3.37 `createCreditsCheckout` needs `amount` + `currency` (verified)
+
+For a one-time product with a **custom** (variable-amount) price, `CheckoutCreate` requires `productPriceId` (§3.30) **plus** the `amount` (in smallest currency unit, e.g. cents) **plus** the `currency` (e.g. `"usd"`). Fix the helper:
+
+```ts
+polar.checkouts.create({
+  productPriceId: POLAR_PRICE_ID_CREDITS,
+  customerId: org.polarCustomerId, // §3.20
+  amount: amountUsd * 100, // cents
+  currency: "usd",
+  successUrl, // optional: append {CHECKOUT_ID}
+  metadata: { orgId }, // copied to order.metadata.orgId
+  customerIpAddress: request.cf?.clientIp, // fraud signal (optional)
+});
+```
+
+Min $20 enforced server-side BEFORE calling Polar (reject if `amountUsd < 20`).
+
+### 3.38 `prefix` set per-config in `auth.tsx`, not per-key
+
+For consistency, set the api-key plugin's `prefix: "zevium"` in the plugin config in `auth.tsx` (alongside `references: "organization"` from §3.16), NOT per-key in `orgKey.create`. One place to change. All keys get `zevium_abc...` identifiers. The `orgKey.create` server-side call does NOT pass `prefix` (uses the config default).
+
+### 3.39 Concrete deletion list (flush cron + worker + old credits files)
+
+The doc said "delete the flush cron + worker handler" generically. Concrete files to delete (verified against the repo):
+
+- **`wrangler.toml`**: remove `crons = ["0 0 * * *"]` (or the whole `[triggers]` block).
+- **`src/worker.ts`**: remove the `scheduled` handler (lines 5-47). The whole file becomes a re-export of the TanStack Start server entry — can be deleted entirely if nothing else needs it.
+- **`src/routes/api/credits/$.ts`**: delete (the flush endpoint hit by the cron).
+- **`src/lib/server/credits.ts`**: delete (the `CreditsManager`).
+- **`src/lib/server/credits-success.ts`**: delete (the old Polar checkout success redirect handler).
+- **`src/lib/server/credits.test.ts`**: delete (tests for `CreditsManager`).
+- **`src/lib/shared/credits-keys.ts`**: delete (shared key constants).
+- **`src/routes/app/settings/credits/success.tsx`**: delete (old checkout success page). The rewritten credits page handles success inline.
+- **`src/server/rpcs/credits/index.ts`**: rewrite (org-scoped, not user-scoped).
+- **`src/routes/app/settings/credits.tsx`**: verify no stale `CreditsManager` imports.
+- **`src/env/server.ts`**: drop `CREDITS_FLUSH_SECRET`. Add `POLAR_METER_ID`, `POLAR_PRODUCT_ID_CREDITS`, `POLAR_PRICE_ID_CREDITS`, `POLAR_WEBHOOK_SECRET`, `POLAR_ACCESS_TOKEN`, `POLAR_ORGANIZATION_ID`, `POLAR_SERVER`, `PROXY_PUBLIC_HOST` (for §3.36), `PROXY_HOST_UNIT_COSTS`.
+
 ## 4. Plan
 
 ### 4.1 Polar dashboard setup (manual, blocks testing)
