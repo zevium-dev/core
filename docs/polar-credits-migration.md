@@ -367,7 +367,7 @@ Min $20 enforced server-side BEFORE calling Polar (reject if `amountUsd < 20`).
 
 ### 3.38 `prefix` set per-config in `auth.tsx`, not per-key
 
-For consistency, set the api-key plugin's `prefix: "zevium"` in the plugin config in `auth.tsx` (alongside `references: "organization"` from §3.16), NOT per-key in `orgKey.create`. One place to change. All keys get `zevium_abc...` identifiers. The `orgKey.create` server-side call does NOT pass `prefix` (uses the config default).
+For consistency, set the api-key plugin's `defaultPrefix: "zev_"` in the plugin config in `auth.tsx` (alongside `references: "organization"` from §3.16), NOT per-key in `orgKey.create`. This preserves the existing repo convention (`src/lib/server/auth.tsx` currently uses `defaultPrefix: "zev_"`) and follows the plugin docs' recommendation to include a trailing underscore. The `orgKey.create` server-side call does NOT pass `prefix` (uses the config default).
 
 ### 3.39 Concrete deletion list (flush cron + worker + old credits files)
 
@@ -528,6 +528,138 @@ Verified the current proxy implementation has patterns the migration must preser
 6. **Flat `PROXY_CALL_COST_CENTS` cost (line 157).** The current proxy uses a flat cost per call. The migration replaces with `cost = getHostCost(host)` (per-host variable). The `CreditsManager.add` refund (which takes `amountCents`) is replaced with `orgPoolGate.refund(orgId, cost)` + `apikey.remaining` refund (which take `costUnits`).
 
 7. **`refundReservedCharge` state machine (lines 150-169).** The current proxy uses a `chargeState` state machine (`"not_reserved"` → `"reserved"` → `"refunded"` / `"committed"`) to prevent double-refund and double-commit. The migration must preserve this pattern with the new gate logic.
+
+### 3.52 Exact `auth.tsx` plugin delta (current config conflicts with plan)
+
+Current `src/lib/server/auth.tsx` has several settings that conflict with the migration plan. Exact changes:
+
+```ts
+apiKey({
+  defaultPrefix: "zev_", // keep existing prefix; §3.38
+  enableMetadata: true,
+  keyExpiration: { defaultExpiresIn: null }, // no expiry by default; §3.31
+  permissions: { defaultPermissions: { api: ["read"] } },
+  rateLimit: { enabled: true, maxRequests: 60, timeWindow: 60_000 },
+  references: "organization", // BLOCKER; §3.16
+});
+```
+
+Specific conflicts verified in current file:
+
+- Current config has **no `references: "organization"`** → defaults to user-owned keys (blocker).
+- Current config has `keyExpiration.defaultExpiresIn = 30 days` → conflicts with §3.31 no-expiry keys. Set `defaultExpiresIn: null` or explicitly pass `expiresIn: null` on every server-side create. Prefer config default null.
+- Current config has `rateLimit.maxRequests = 200` per minute → plan says default 60/min. Pick one. Current doc now specifies **60/min** (`maxRequests`, not `max`).
+- Current config already has `permissions.defaultPermissions = { api: ["read"] }` and `enableMetadata: true` — keep them. Still pass permissions explicitly in `orgKey.create` for defense in depth (§3.27).
+- Current config uses `defaultPrefix: "zev_"` — keep it; prior doc text said `prefix: "zevium"`, which is wrong for this plugin (`defaultPrefix` is the config key).
+
+### 3.53 Remove `@polar-sh/better-auth` plugin from `auth.tsx` completely
+
+Current `auth.tsx` still imports and uses:
+
+```ts
+import { checkout, polar } from "@polar-sh/better-auth";
+// ...
+polar({
+  client: polarClient,
+  createCustomerOnSignUp: true,
+  use: [checkout()],
+});
+```
+
+This is user-scoped and conflicts with org billing. Remove the import and plugin entirely. Consequences:
+
+- No customer creation on user signup (correct; customers are org-scoped via `ensureOrgCustomer`).
+- No Better Auth checkout helper (correct; `createCreditsCheckout` uses direct SDK).
+- `src/lib/server/polar.ts` stops being a bare client export and becomes the helper module (`ensureOrgCustomer`, `getOrgCreditedUnits`, `createCreditsCheckout`, `ingestProxyCall`, `getHostCost`).
+- Remove `@polar-sh/better-auth` dependency if nothing else imports it after migration; keep only `@polar-sh/sdk`.
+
+### 3.54 Reuse existing `kv` module, don't add a parallel Redis client
+
+The repo already has `src/lib/server/kv/index.ts` exporting `kv = new Redis({ automaticDeserialization: true, enableAutoPipelining: false, ... })`. The doc previously said "new `src/lib/server/redis.ts`" (§3.34). Better fix: reuse `kv` for `org-pool-gate`, credited cache, and webhook-id dedup. Add only a tiny key-builder module if needed (e.g. `src/lib/server/redis-keys.ts` with `REDIS_NAMESPACE = "zevium"`). Do NOT instantiate a second Upstash client.
+
+`enableAutoPipelining: false` is important because this repo already documented that Upstash auto-pipelining breaks chainable helpers like `bitfield()`. Preserve it.
+
+### 3.55 Schema file changes, not just migrations
+
+The plan listed migrations, but implementation must update `src/db/schema.ts` too. Concrete schema deltas:
+
+- Remove `creditLedger` table from `schema.ts` (currently lines 9-30). The migration drops `credit_ledger`; the schema must stop exporting it.
+- Add `organization.polarCustomerId` (`text("polar_customer_id")`) and `organization.billingEmail` (`text("billing_email")`). Nullable because lazy `ensureOrgCustomer` may fill after org creation / after Polar outage.
+- Add unique partial index on `organization.polarCustomerId`: `WHERE polar_customer_id IS NOT NULL`.
+- Add unique partial/functional index on `apikey`: `(reference_id, json_extract(metadata, '$.creatorUserId')) WHERE reference_id IS NOT NULL`. This belongs in both the SQL migration and the Drizzle schema definition so future migrations don't try to re-add/drop it incorrectly.
+- No `creditAllocation` / `publisherEarning` tables exist in current schema (verified); nothing to drop there.
+
+### 3.56 Env file exact delta (`src/env/server.ts`)
+
+Current `src/env/server.ts` still requires `CREDITS_FLUSH_SECRET` and lacks required new envs. Exact delta:
+
+Remove:
+
+- `CREDITS_FLUSH_SECRET` (currently required; app will keep demanding it unless removed).
+
+Add required:
+
+- `POLAR_METER_ID`
+- `POLAR_PRICE_ID_CREDITS`
+- `PROXY_HOST_UNIT_COSTS`
+- `PROXY_PUBLIC_HOST`
+
+Already present, keep:
+
+- `POLAR_ACCESS_TOKEN`
+- `POLAR_PRODUCT_ID_CREDITS`
+- `POLAR_SERVER`
+- `POLAR_WEBHOOK_SECRET`
+- `POLAR_ORGANIZATION_ID` (optional is okay if the SDK uses an org-scoped token; require it only if direct SDK calls need it).
+
+Also update `.env.example` and Cloudflare secrets. Without `POLAR_METER_ID`/`POLAR_PRICE_ID_CREDITS`/`PROXY_HOST_UNIT_COSTS`, code compiles but billing fails at runtime.
+
+### 3.57 Current credits page is user-scoped and wrong route
+
+Current `src/routes/app/settings/credits.tsx` is still `/app/settings/credits`, calls user-scoped `credits.getBalance`, uses `balanceCents`, uses min `$1` UI (`min={1}` and default state `"10"`), shows Auto Top-Up placeholder, and calls `createTopUpCheckout({ amountCents })`. All conflict with org-pool Polar billing.
+
+Required UI rewrite:
+
+- Move/replace route under org context (e.g. `/app/organizations/$organizationSlug/settings/credits`) so billing unit is explicit.
+- Loader/query must pass explicit `{ organizationSlug }` / org id, never global user state.
+- Replace `balanceCents` with `available`, `creditedUnits`, `consumedUnits` from §3.45/§3.46.
+- Enforce min `$20` in UI and server. Default input should be `20`, `min={20}`.
+- Remove Auto Top-Up card for v1 (out of scope).
+- Replace `listTransactions` with `listTopUps` + `listCharges` or a combined server-side view built from those.
+- After checkout return, poll `getBalance` (§3.47).
+
+### 3.58 Current keys page is client-auth/user-scoped and wrong snippet
+
+Current `src/routes/app/settings/keys.tsx` is still `/app/settings/keys`, calls `auth.apiKey.list/create/update/delete` directly from the client, creates user-owned keys, and its snippet uses `Authorization: Bearer YOUR_API_KEY` against `https://zevium.dev/api/v1/scrapperApi/`. All wrong for org-owned proxy keys.
+
+Required rewrite:
+
+- Move/replace route under org context or make explicit cross-org view with org selector.
+- Replace client `auth.apiKey.*` calls with server-side tRPC procedures (`orgKey.create/list/update/delete`) so `metadata.creatorUserId`, `organizationId`, `remaining`, `permissions`, and rate limit are server-controlled (§3.21).
+- Pass `organizationId`/slug explicitly; do not rely on active organization state.
+- Snippet must use `/api/proxy/...`, `x-zevium-key: <key>`, and `x-zevium-host: <target-host>`; keep upstream `Authorization` separate for the real API.
+- Remove the "Credit Limit" input unless it maps to `remaining` (request quota) with clear wording. Do not imply dollar spend limit; org pool handles money.
+- Add enable/disable toggle using `apiKey:["update"]` permission (hence §3.14 includes `update`).
+- Use `useMutation` (`isPending`) instead of manual `useState(isPending)` per project convention.
+
+### 3.59 Proxy response/body semantics need one decision: full-body success vs header success
+
+Current proxy charges/commits when the upstream stream reaches `done` (line 240), and refunds on stream `cancel()` (lines 232-235) or read error. Earlier doc text sometimes says "charge after 2xx headers" and sometimes preserves cancel refund. Pick one precise v1 rule:
+
+**Recommended v1 rule:** charge only after upstream returns 2xx **and** the upstream body stream completes successfully. If the client cancels the body stream or the upstream body read errors, refund both gates. This matches current proxy behavior and avoids charging for incomplete streamed responses. For no-body 2xx (204/HEAD), commit immediately.
+
+If we instead charge at 2xx headers, delete/refactor the current cancel refund logic. Do not leave doc/code split-brained.
+
+### 3.60 Proxy fetch timeout + abort signal
+
+Current proxy does not set timeout or pass an abort signal. Migration should add:
+
+- `AbortController` timeout (e.g. 25s or env-configurable) → upstream timeout returns 504/502 and refunds.
+- Client disconnect should abort upstream fetch. In Workers, use `request.signal` if available; otherwise combine timeout signal with request abort signal where supported.
+- Keep `duplex: "half"` for streaming request bodies.
+- Keep `redirect: "error"` (§3.41).
+
+This prevents hung upstreams from pinning worker resources and holding a reserved org balance indefinitely until the platform kills the request.
 
 ## 4. Plan
 
