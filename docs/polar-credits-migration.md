@@ -229,6 +229,40 @@ Webhook-only invalidation means a **missed** `order.paid` webhook = permanent st
 
 `orgConsumed` (Redis) is authoritative for the gate. If Redis loses it (flush/restart without persistence), the counter resets to 0 → the gate thinks nothing was consumed → the org can spend its full `creditedUnits` again (overspend). Mitigations: (a) confirm Upstash persistence (AOF) is on for the credits Redis instance, (b) periodic reconcile job that recomputes `orgConsumed` from Polar's `consumedUnits` (v2). For v1: require Upstash persistence + document the risk.
 
+### 3.20 Checkout MUST pass `customerId` (critical)
+
+Verified in `CheckoutCreate` (Polar SDK): `customerId` is optional; if omitted + `customerEmail` is passed, Polar find-or-creates a customer by email. Since we use a **unique per-org billing email** (no collision), Polar would create a **new** customer for the checkout (no match). The purchased meter credits would be granted to the **new** customer, not the one we created in `ensureOrgCustomer` (which holds the org's `externalId` + meter state). Result: org's `getStateExternal({ externalId: orgId })` keeps returning 0; credits appear to vanish.
+
+Fix: `createCreditsCheckout` must pass `customerId: org.polarCustomerId` explicitly. This links the checkout to the existing customer (carrying the meter_credit benefit + correct externalId). The `customerEmail` field is then unnecessary on the checkout (leave default).
+
+### 3.21 Key create must be server-side (creatorUserId is client-trusted)
+
+Verified in plugin source (create flow line 746): `metadata` is read from `ctx.body` and stored verbatim. The plugin does **not** validate that `metadata.creatorUserId` matches the session. A client could pass `metadata: { creatorUserId: "other-user-id" }` to bypass the one-key-per-user count check (the count queries by the real session userId, finds 0, allows the create). The limit is a UX guard, not a security boundary — but to be meaningful, `creatorUserId` must be set **server-side from the session**, not accepted from the client body.
+
+Fix: do NOT use the client's `auth.apiKey.create` for org-owned keys. Add a server-side tRPC mutation (e.g. `orgKey.create`) that reads the session, then calls `auth.api.createApiKey` (server-side call, not client plugin) with: `referencesType` from config, `organizationId` from URL, `metadata: { creatorUserId: session.user.id }` **set by the server**, plus `permissions`, `rateLimit`, `prefix`, `name` from validated input. The client UI calls this tRPC mutation, not the auth client plugin. (Server-side calls are NOT subject to the `SERVER_ONLY_PROPERTY` check at line 751, so refill/permissions/remaining are settable from server.)
+
+### 3.22 One-key-per-user race → unique partial index
+
+The create-time count check (server-side, §3.21) has a TOCTOU race: two concurrent creates both see count=0, both pass, both insert. Need a DB-level guard. Turso (libSQL/SQLite) supports functional indexes on JSON paths:
+
+```sql
+CREATE UNIQUE INDEX apikey_one_per_org_creator
+  ON apikey (reference_id, json_extract(metadata, '$.creatorUserId'))
+  WHERE reference_id IS NOT NULL;
+```
+
+This enforces one key per `(orgId, creatorUserId)` at the DB level. The second concurrent insert throws a unique-constraint error → the tRPC mutation maps it to a clean "you already have a key" error. Apply in the same `0015` migration that adds the org columns. (The plugin's apikey table accepts extra indexes via Drizzle.)
+
+### 3.23 Org creation hook: mechanism + failure handling
+
+Mechanism: orgs are created via `auth.api.createOrganization` (called from a tRPC mutation). Wrap that tRPC mutation (or use a `databaseHooks` `organization.create.after` hook) to call `ensureOrgCustomer(org)` after the org row is persisted. The doc previously said "hook org creation" generically — the concrete mechanism is the tRPC wrapper, since `databaseHooks` for org create have less control over the return value needed for the org id.
+
+Failure handling: if `ensureOrgCustomer` fails (Polar API down, network), the org row exists with `polarCustomerId = null`. Do NOT roll back the org (the user already saw success). Add a **lazy fallback**: in `createCreditsCheckout` and `getOrgCreditedUnits`, if `org.polarCustomerId === null`, call `ensureOrgCustomer(org)` first, then proceed. Self-heals on next interaction. Log to PostHog for visibility.
+
+### 3.24 Unique billing email formula
+
+Polar requires `email` unique within the org (Zevium's Polar org). Defaulting to the creator's email collides when one user creates multiple Zevium orgs. Concrete formula: `billingEmail = \`org-${org.id}@billing.zevium.dev\``— deterministic, unique per org (orgId is a cuid), and clearly non-personal (no real inbox). Set in the org-create tRPC mutation (same place that calls`auth.api.createOrganization`) and persist on `organization.billingEmail`. Used by `ensureOrgCustomer` as the Polar customer email.
+
 ## 4. Plan
 
 ### 4.1 Polar dashboard setup (manual, blocks testing)
@@ -244,18 +278,18 @@ Webhook-only invalidation means a **missed** `order.paid` webhook = permanent st
 
 ### 4.2 Schema + env (minimal)
 
-- `apikey`: no new columns for billing. Create all proxy keys with `referencesType: "organization"` so `referenceId = orgId`. Store `metadata.creatorUserId` for attribution + one-key-per-user check. Repurpose `remaining` / `refillAmount` / `refillInterval` as the per-key request quota. Drop `requestCount` (dead). No `ownerType` / `ownerUserId` / `organizationId` / `kind` columns. Keep `rateLimit*`.
+- `apikey`: no new columns for billing. Create all proxy keys via a **server-side** tRPC mutation `orgKey.create` (§3.21) — NOT the client `auth.apiKey.create` — with `referencesType` from config, `organizationId` from URL, `metadata.creatorUserId` set server-side from the session. Store `metadata.creatorUserId` for attribution + one-key-per-user check (enforced by **unique partial index**, §3.22). Repurpose `remaining` / `refillAmount` / `refillInterval` as the per-key request quota. Drop `requestCount` (dead). No `ownerType` / `ownerUserId` / `organizationId` / `kind` columns. Keep `rateLimit*`.
 - **No new tables.** `creditAllocation` and `publisherEarning` are gone. `creditLedger` already gone.
-- Migration `0014` (credit_ledger) → replaced by `0015`: `organization.polarCustomerId`, `organization.billingEmail`. (apikey unchanged — we use the plugin's existing `referenceId` + `metadata` columns; no new apikey columns.)
+- Migration `0014` (credit_ledger) → replaced by `0015`: `organization.polarCustomerId`, `organization.billingEmail` + **unique partial index** `apikey_one_per_org_creator ON apikey(reference_id, json_extract(metadata,'$.creatorUserId')) WHERE reference_id IS NOT NULL` (§3.22). (apikey itself: no new columns — we use the plugin's existing `referenceId` + `metadata`.)
 - `src/env/server.ts`: add `POLAR_METER_ID`, `PROXY_HOST_UNIT_COSTS`. Drop `CREDITS_FLUSH_SECRET`.
 
 ### 4.3 Code changes (minimal)
 
 **`src/lib/server/polar.ts`** — org-scoped direct-SDK helpers (small):
 
-- `ensureOrgCustomer(org)` — `polar.customers.create({ externalId: org.id, email: org.billingEmail, name: org.name, metadata: { orgId } })` if missing; persist `polarCustomerId`.
+- `ensureOrgCustomer(org)` — `polar.customers.create({ externalId: org.id, email: org.billingEmail (= \`org-${orgId}@billing.zevium.dev\`, §3.24), name: org.name, metadata: { orgId } })`if missing; persist`polarCustomerId`. Idempotent: if `externalId`already exists in Polar (retry), fetch by externalId and reuse — don't create a duplicate. Lazy-call from checkout/getOrgCreditedUnits if`polarCustomerId === null` (§3.23).
 - `getOrgCreditedUnits(orgId): Promise<number>` — `getStateExternal({ externalId: orgId })` → meter `creditedUnits`. Redis-cached; invalidated by `order.paid` + `order.refunded` webhooks (primary) and `customer.state_changed` (secondary).
-- `createCreditsCheckout({ orgId, amountUsd, successUrl })` — Polar checkout (variable amount if Polar supports proportional crediting on one-time, else tier product). `metadata: { orgId }`.
+- `createCreditsCheckout({ orgId, amountUsd, successUrl })` — Polar checkout. `metadata: { orgId }`. **Must pass `customerId: org.polarCustomerId`** to link to the existing customer (§3.20) — otherwise the purchased meter credits land on a new customer and never reach the org. If `polarCustomerId` is null, lazy `ensureOrgCustomer` first.
 - `ingestProxyCall({ orgId, requestId, host, method, status, costUnits })` — `events.ingest(...)`. Polar auto-deducts.
 - `getHostCost(host)` — parse `PROXY_HOST_UNIT_COSTS` → `{ costUnits }` or throw (fail-closed 403).
 
