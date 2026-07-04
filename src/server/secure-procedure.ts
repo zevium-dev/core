@@ -168,6 +168,10 @@ const getUserPermissions = async (userId: string) => {
 
   // DEFAULT USER PERMISSIONS
   const defaultUserPermissions: Permissions = {
+    "apikey.create": { status: "allow" },
+    "apikey.delete": { status: "allow" },
+    "apikey.read": { status: "allow" },
+    "apikey.update": { status: "allow" },
     "dashboard.view": { status: "allow" },
     "marketplace.view": { status: "allow" },
     "organization.create": { status: "allow" },

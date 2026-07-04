@@ -109,8 +109,6 @@ export const organizationRouter = router({
         createdAt: org.createdAt,
         logo: org.logo ?? null,
         members: org.members.filter(Boolean),
-        polarBillingEmail: null,
-        polarCustomerId: null,
       } as never;
     }),
 
@@ -176,8 +174,6 @@ export const organizationRouter = router({
         members: org.members.map((m) => ({ ...m, user: { ...m.user, image: m.user.image ?? null } })),
         metadata: MetadataZod.parse(org.metadata),
         name: org.name,
-        polarBillingEmail: null,
-        polarCustomerId: null,
         slug: org.slug,
       };
     }),
@@ -240,8 +236,6 @@ export const organizationRouter = router({
         logo: org.logo ?? null,
         metadata: MetadataZod.parse(org.metadata),
         name: org.name,
-        polarBillingEmail: null,
-        polarCustomerId: null,
         slug: org.slug,
       }));
     }),
@@ -389,8 +383,6 @@ export const organizationRouter = router({
         logo: org.logo ?? null,
         metadata: MetadataZod.parse(org.metadata),
         name: org.name,
-        polarBillingEmail: null,
-        polarCustomerId: null,
         slug: org.slug,
       };
     }),

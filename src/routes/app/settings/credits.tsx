@@ -1,20 +1,16 @@
-import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { z } from "zod";
 
 import { Button } from "~/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
-import { Input } from "~/components/ui/input";
+import { auth } from "~/lib/auth";
+import { POLAR_TOPUP_PRODUCTS } from "~/env/client";
 import { useTRPC } from "~/lib/trpc";
 
-const PAGE_SIZE = 20;
-const MIN_TOP_UP_USD = 20;
-const DEFAULT_TOP_UP_USD = 20;
 const POLL_INTERVAL_MS = 2000;
 const POLL_TIMEOUT_MS = 30_000;
-
-const amountInputSchema = z.number().int().min(MIN_TOP_UP_USD).max(100_000);
 
 /* eslint-disable perfectionist/sort-objects */
 export const Route = createFileRoute("/app/settings/credits")({
@@ -22,9 +18,6 @@ export const Route = createFileRoute("/app/settings/credits")({
     checkout_id: z.string().optional(),
     page: z.coerce.number().int().positive().optional(),
   }),
-  loader: ({ context }) => {
-    void context.queryClient.ensureQueryData(context.trpc.organization.list.queryOptions());
-  },
   component: CreditsComponent,
 });
 /* eslint-enable perfectionist/sort-objects */
@@ -35,72 +28,69 @@ function CreditsComponent() {
   const navigate = Route.useNavigate();
   const search = Route.useSearch();
   const currentPage = search.page ?? 1;
-  const [amountUsd, setAmountUsd] = useState<string>(String(DEFAULT_TOP_UP_USD));
 
-  // Polling state for post-checkout balance sync (§3.47)
+  // Polling state for post-checkout balance sync.
   const checkoutId = search.checkout_id;
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [isPolling, setIsPolling] = useState(!!checkoutId);
   const [balanceSnapshot, setBalanceSnapshot] = useState<number | null>(null);
+  const [redirectingProductId, setRedirectingProductId] = useState<string | null>(null);
 
-  const orgListQuery = useSuspenseQuery(trpc.organization.list.queryOptions());
-  const activeOrg = orgListQuery.data[0];
-  const orgId = activeOrg?.id ?? "";
+  // User-scoped balance + history. No organizationId.
+  const balanceQuery = useSuspenseQuery(trpc.credits.getBalance.queryOptions(undefined));
+  const topUpsQuery = useSuspenseQuery(trpc.credits.listTopUps.queryOptions({ page: currentPage, pageSize: 20 }));
+  const chargesQuery = useSuspenseQuery(trpc.credits.listCharges.queryOptions({ page: currentPage, pageSize: 20 }));
 
-  const balanceQuery = useSuspenseQuery(trpc.credits.getBalance.queryOptions({ organizationId: orgId }));
-  const topUpsQuery = useSuspenseQuery(
-    trpc.credits.listTopUps.queryOptions({
-      organizationId: orgId,
-      page: currentPage,
-      pageSize: PAGE_SIZE,
-    }),
-  );
-  const chargesQuery = useSuspenseQuery(
-    trpc.credits.listCharges.queryOptions({
-      organizationId: orgId,
-      page: currentPage,
-      pageSize: PAGE_SIZE,
-    }),
-  );
+  const handlePageChange = (newPage: number) => {
+    void navigate({ replace: true, search: { page: newPage } });
+  };
 
-  const topupMutation = useMutation(
-    trpc.credits.createTopUp.mutationOptions({
-      onSuccess(data) {
-        window.location.assign(data.url);
-      },
-    }),
-  );
+  const handleTopUp = (productId: string) => {
+    // Polar-native checkout via the `@polar-sh/better-auth` plugin endpoint.
+    // Plugin auto-binds the Polar customer to `session.user.id` and returns
+    // a Polar checkout URL. We navigate the browser there.
+    setRedirectingProductId(productId);
+    auth
+      .checkout({ products: [productId] })
+      .then((res) => {
+        const url = res?.data?.url;
+        if (url) window.location.assign(url);
+      })
+      .catch(() => {
+        setRedirectingProductId(null);
+      });
+  };
 
-  // Balance polling after Polar checkout redirect
+  // Balance polling after Polar checkout redirect.
   useEffect(() => {
-    if (!checkoutId || !orgId) return;
+    if (!checkoutId) return;
 
     setIsPolling(true);
     setBalanceSnapshot(balanceQuery.data.available);
 
     pollTimerRef.current = setInterval(() => {
-      queryClient.invalidateQueries(trpc.credits.getBalance.queryOptions({ organizationId: orgId })).catch(() => {});
+      queryClient.invalidateQueries(trpc.credits.getBalance.queryOptions(undefined)).catch(() => {});
     }, POLL_INTERVAL_MS);
 
     pollTimeoutRef.current = setTimeout(() => {
       clearPolling();
-      // Clean up the checkout_id from URL after timeout
       void navigate({ replace: true, search: { page: currentPage } });
     }, POLL_TIMEOUT_MS);
 
     return clearPolling;
-  }, [checkoutId, orgId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [checkoutId]);
 
-  // Detect balance change while polling → stop + clean URL
+  // Detect balance change while polling -> stop + clean URL.
   useEffect(() => {
     if (!isPolling || balanceSnapshot === null) return;
-    const current = balanceQuery.data.available;
-    if (current > balanceSnapshot) {
+    if (balanceQuery.data.available > balanceSnapshot) {
       clearPolling();
       setIsPolling(false);
       void navigate({ replace: true, search: { page: currentPage } });
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [balanceQuery.data.available, isPolling, balanceSnapshot]);
 
   function clearPolling() {
@@ -114,37 +104,17 @@ function CreditsComponent() {
     }
   }
 
-  const handleTopUp = () => {
-    const parsed = amountInputSchema.safeParse(Number(amountUsd));
-    if (!parsed.success || !orgId) return;
-    topupMutation.mutate({ amountUsd: parsed.data, organizationId: orgId });
-  };
-
-  const handlePageChange = (newPage: number) => {
-    void navigate({ replace: true, search: { page: newPage } });
-  };
-
   const currentBalance = useMemo(() => {
     const credits = balanceQuery.data.available;
     return new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(credits);
   }, [balanceQuery.data.available]);
 
-  if (!activeOrg) {
-    return (
-      <div className="mx-auto w-full max-w-3xl min-w-0 flex-1 space-y-6 p-6">
-        <h1 className="text-2xl font-bold text-foreground">Credits</h1>
-        <p className="text-sm text-muted-foreground">
-          You need an organization before you can buy or use credits. Create one in the dashboard.
-        </p>
-      </div>
-    );
-  }
+  const hasTopUpProducts = POLAR_TOPUP_PRODUCTS.length > 0;
 
   return (
-    <div className="mx-auto w-full max-w-3xl min-w-0 flex-1 space-y-6 p-6">
+    <div className="mx-auto w-full min-w-0 max-w-3xl flex-1 space-y-6 p-6">
       <h1 className="text-2xl font-bold text-foreground">Credits</h1>
 
-      {/* Post-checkout polling banner */}
       {isPolling && (
         <Card className="w-full border-primary/30 bg-primary/5 backdrop-blur-sm">
           <CardContent className="flex items-center gap-3 p-4">
@@ -173,21 +143,27 @@ function CreditsComponent() {
           <CardTitle className="text-lg font-semibold">Buy Credits</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="flex items-center gap-2">
-            <Input
-              className="w-32"
-              inputMode="numeric"
-              min={MIN_TOP_UP_USD}
-              onChange={(e) => setAmountUsd(e.target.value)}
-              placeholder="Amount (USD)"
-              type="number"
-              value={amountUsd}
-            />
-            <Button className="flex-1" disabled={topupMutation.isPending} onClick={handleTopUp} size="lg">
-              {topupMutation.isPending ? "Redirecting..." : "Add Credits"}
-            </Button>
-          </div>
-          <p className="text-[11px] text-muted-foreground">Minimum ${MIN_TOP_UP_USD} per top-up.</p>
+          {hasTopUpProducts ? (
+            <div className="flex flex-wrap gap-3">
+              {POLAR_TOPUP_PRODUCTS.map((product) => (
+                <Button
+                  className="flex-1"
+                  disabled={redirectingProductId === product.id}
+                  key={product.id}
+                  onClick={() => handleTopUp(product.id)}
+                  size="lg"
+                >
+                  {redirectingProductId === product.id
+                    ? "Redirecting..."
+                    : `${product.label} (${product.units} credits)`}
+                </Button>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              Top-up products are not configured. Set <code>VITE_PUBLIC_POLAR_TOPUP_PRODUCTS</code> in your environment.
+            </p>
+          )}
         </CardContent>
       </Card>
 
@@ -223,7 +199,7 @@ function CreditsComponent() {
             chargesQuery.data.items.map((tx) => (
               <div
                 className="flex items-center justify-between border-b border-border/20 py-2 last:border-b-0"
-                key={`${tx.requestId ?? "noid"}-${tx.createdAt}`}
+                key={`${tx.requestId ?? "noid"}-${String(tx.createdAt)}`}
               >
                 <span className="text-sm text-muted-foreground">{new Date(tx.createdAt).toLocaleString()}</span>
                 <span className="text-sm font-medium text-destructive">-{tx.costUnits} credits</span>
@@ -232,6 +208,22 @@ function CreditsComponent() {
           )}
         </CardContent>
       </Card>
+
+      {/* Pager */}
+      {(topUpsQuery.data.hasNext || chargesQuery.data.hasNext) && (
+        <div className="flex justify-center gap-2">
+          <Button disabled={currentPage <= 1} onClick={() => handlePageChange(currentPage - 1)} variant="outline">
+            Previous
+          </Button>
+          <Button
+            disabled={!topUpsQuery.data.hasNext && !chargesQuery.data.hasNext}
+            onClick={() => handlePageChange(currentPage + 1)}
+            variant="outline"
+          >
+            Next
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

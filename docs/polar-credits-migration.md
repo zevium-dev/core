@@ -1,8 +1,55 @@
-# Polar-native credits migration (hierarchical, org-scoped)
+# Polar-native credits migration (user-scoped)
 
-Status: **implemented** — typecheck passes, 92 tests pass. Branch: `feat/polar-credits-combined`.
-Branch: `feat/polar-credits-combined` (carries merged PR #127 + #147 onto refactored `develop`).
-Supersedes the self-managed Redis credits model shipped in #127/#147.
+Status: **implemented (v2)** — typecheck + 92 tests pass. Branch: `feat/polar-credits-combined`.
+
+## v2 — user-scoped rewrite (supersedes v1)
+
+v1 (below) wired Polar credits as org-scoped (one Polar customer per org,
+`externalId = orgId`) and side-stepped the `@polar-sh/better-auth` plugin
+because the plugin is unambiguously user-scoped. v2 reverses that: billing
+now follows the Polar-native model the plugin enforces.
+
+### What changed
+
+- **Billing unit = user, not org.** The `@polar-sh/better-auth` `polar()`
+  plugin is mounted in `auth.tsx` with `createCustomerOnSignUp: true`; Polar
+  customer `externalId = userId`. `organization.polarCustomerId` and
+  `organization.polarBillingEmail` columns are dropped (migration `0015`).
+- **Top-ups via the plugin checkout endpoint** (`POST /api/auth/checkout`)
+  with FIXED one-time Polar products (each grants fixed `units` via a
+  `meter_credit` benefit). Variable-amount top-ups are gone — this kills
+  the §3.9 "can a one-time product grant variable units" unknown entirely.
+  Product IDs are exposed to the browser via
+  `VITE_PUBLIC_POLAR_TOPUP_PRODUCTS` (JSON array of `{id,label,priceCents,units}`).
+- **Webhook via the plugin** (`POST /api/auth/polar/webhooks`) with typed
+  `onOrderPaid`/`onOrderRefunded`/`onCustomerStateChanged` callbacks that
+  invalidate the per-user `creditedUnits` cache. The hand-rolled
+  `/api/polar/webhook` route is deleted. Update the Polar dashboard webhook
+  URL to `https://zevium.dev/api/auth/polar/webhooks`.
+- **API keys are user-owned** (`apiKey` plugin `references: "user"`); the
+  one-key-per-user guard replaces the one-key-per-org-creator index
+  (`apikey_one_per_user` unique partial index on `reference_id`). The
+  `orgKey` tRPC router is renamed `userKey`.
+- **Local gate is per-user**: `userConsumed` Redis counter
+  (`user-pool-gate.ts`), `creditedUnits` cached per user. Same non-atomic
+  SDK-only reserve/refund as v1 (no Redis Lua). v2 reconcile job remains
+  future work.
+- **Proxy route resolves `userId` from the API key's `referenceId`** and
+  gates against that user's meter + `userConsumed`. `ingestProxyCall` uses
+  `externalCustomerId = userId`.
+- **Permissions**: `apikey.*` added to the default user permissions in
+  `secure-procedure.ts` (key management is a user-level concern now, not
+  an org-role concern).
+- **Reading balance in-app**: the plugin `customer.state` endpoint is
+  mounted (`/api/auth/customer/state`); the tRPC `credits.getBalance`
+  RPC still exists for the settings page, reading
+  `polarClient.customers.getStateExternal({ externalId: userId })` +
+  `readConsumedUser(userId)` (same shape as v1, just user-keyed).
+
+### v1 doc (org-scoped, superseded)
+
+The remainder of this document describes the v1 org-scoped design. It is
+kept for historical context; the v2 changes above are the source of truth.
 
 ## 1. Product context
 
@@ -365,7 +412,8 @@ const checkout = await polarClient.checkouts.create({
 ```
 
 Min $20 enforced server-side BEFORE calling Polar (reject if `amountUsd < 20`).
-```
+
+````
 
 Min $20 enforced server-side BEFORE calling Polar (reject if `amountUsd < 20`).
 
@@ -422,7 +470,7 @@ try {
   customer = await polar.customers.create({ externalId: orgId, email, name, metadata: { orgId } });
 }
 // persist customer.id as org.polarCustomerId
-```
+````
 
 `externalId` is unique within the Polar org, so `getExternal` is the right idempotent lookup. Avoids the unsupported `list({ externalId })` shape and avoids a create-and-catch-duplicate race. If the SDK exposes a typed not-found error/status, branch on that explicitly; do not create on arbitrary network/500 errors.
 

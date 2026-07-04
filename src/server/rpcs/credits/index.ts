@@ -1,30 +1,14 @@
-import { TRPCError } from "@trpc/server";
-import { eq } from "drizzle-orm";
 import { z } from "zod";
 
-import { db, schema } from "~/db";
-import { serverEnv } from "~/env/server";
-import { createCreditsCheckout, ensureOrgCustomer, getOrgCreditedUnits } from "~/lib/server/polar";
-import { readConsumed } from "~/lib/server/org-pool-gate";
+import { authServer } from "~/lib/server/auth";
+import { polarClient, getUserCreditedUnits } from "~/lib/server/polar";
+import { readConsumedUser } from "~/lib/server/user-pool-gate";
 import { secureProcedure } from "~/server/secure-procedure";
 import { router } from "~/server/trpc";
 
-const MIN_TOP_UP_USD = 20;
-
-const CreateTopUpInput = z.object({
-  amountUsd: z.number().int().min(MIN_TOP_UP_USD).max(100_000),
-  organizationId: z.string(),
-  returnUrl: z.string().url().optional(),
-});
-
-const ListByOrgInput = z.object({
-  organizationId: z.string(),
+const ListInput = z.object({
   page: z.number().int().min(1).max(1000).optional(),
   pageSize: z.number().int().min(1).max(100).optional(),
-});
-
-const ListPerKeyInput = z.object({
-  organizationId: z.string(),
 });
 
 const ListTopUpOutput = z.object({
@@ -53,21 +37,21 @@ const ListChargesOutput = z.object({
   ),
 });
 
+const KeyRow = z.object({
+  createdAt: z.union([z.string(), z.date()]),
+  enabled: z.boolean().nullable(),
+  id: z.string(),
+  lastRequest: z.union([z.string(), z.date()]).nullable(),
+  name: z.string().nullable(),
+  prefix: z.string().nullable(),
+  referenceId: z.string(),
+  remaining: z.number().int().nullable(),
+  requestCount: z.number().int().nullable(),
+});
+
 const ListPerKeyOutput = z.object({
   hasNext: z.boolean(),
-  items: z.array(
-    z.object({
-      createdAt: z.union([z.string(), z.date()]),
-      enabled: z.boolean().nullable(),
-      id: z.string(),
-      lastRequest: z.union([z.string(), z.date()]).nullable(),
-      name: z.string().nullable(),
-      prefix: z.string().nullable(),
-      referenceId: z.string(),
-      remaining: z.number().int().nullable(),
-      requestCount: z.number().int().nullable(),
-    }),
-  ),
+  items: z.array(KeyRow),
 });
 
 const GetBalanceOutput = z.object({
@@ -77,154 +61,110 @@ const GetBalanceOutput = z.object({
   currency: z.literal("credits"),
 });
 
-export const creditsRouter = router({
-  createTopUp: secureProcedure
-    .meta({
-      requiredPermissions: ["organization.view"],
-      route: { path: "/credits/create-top-up", summary: "Create a Polar checkout for a top-up" },
-    })
-    .input(CreateTopUpInput)
-    .output(z.object({ checkoutId: z.string(), url: z.string() }))
-    .mutation(async ({ ctx, input }) => {
-      if (!ctx.orgId || ctx.orgId !== input.organizationId) {
-        throw new TRPCError({ code: "FORBIDDEN", message: "Organization ID mismatch" });
-      }
-      const org = await db
-        .select({
-          id: schema.organization.id,
-          name: schema.organization.name,
-          polarCustomerId: schema.organization.polarCustomerId,
-          polarBillingEmail: schema.organization.polarBillingEmail,
-        })
-        .from(schema.organization)
-        .where(eq(schema.organization.id, input.organizationId))
-        .limit(1)
-        .then((r) => r.at(0));
-      if (!org) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "Organization not found" });
-      }
-      const successUrl =
-        input.returnUrl ?? `${new URL(ctx.raw.req.url).origin}/app/settings/credits?checkout_id={CHECKOUT_ID}`;
-      await ensureOrgCustomer(org);
-      return createCreditsCheckout({
-        orgId: org.id,
-        amountUsd: input.amountUsd,
-        successUrl,
-      });
-    }),
+const EMPTY_LIST: { hasNext: boolean; items: never[] } = { hasNext: false, items: [] };
 
+/**
+ * User-scoped billing router.
+ *
+ * Billing unit = authenticated user (Polar customer externalId = userId).
+ * Top-ups are created via the `@polar-sh/better-auth` `checkout` plugin
+ * endpoint (POST /api/auth/checkout) — there is no `createTopUp` here.
+ * This router covers the read surfaces the plugin does not expose:
+ * balance, recent top-up orders, recent proxy charges, and per-key quota.
+ */
+export const creditsRouter = router({
   getBalance: secureProcedure
     .meta({
-      requiredPermissions: ["organization.view"],
-      route: { path: "/credits/get-balance", summary: "Get the org's credit pool balance" },
+      requiredPermissions: ["apikey.read"],
+      route: { path: "/credits/get-balance", summary: "Get the user's credit balance" },
     })
-    .input(z.object({ organizationId: z.string() }))
+    .input(z.object({}).optional())
     .output(GetBalanceOutput)
-    .query(async ({ input }) => {
-      const [credited, consumed] = await Promise.all([
-        getOrgCreditedUnits(input.organizationId),
-        readConsumed(input.organizationId),
-      ]);
-      const available = Math.max(0, credited - consumed);
-      return { available, consumed, creditedUnits: credited, currency: "credits" as const };
+    .query(async ({ ctx }) => {
+      const userId = ctx.user.id;
+      const [credited, consumed] = await Promise.all([getUserCreditedUnits(userId), readConsumedUser(userId)]);
+      return {
+        available: Math.max(0, credited - consumed),
+        consumed,
+        creditedUnits: credited,
+        currency: "credits" as const,
+      };
     }),
 
   listCharges: secureProcedure
     .meta({
-      requiredPermissions: ["organization.view"],
+      requiredPermissions: ["apikey.read"],
       route: { path: "/credits/list-charges", summary: "List recent proxy charge events from Polar" },
     })
-    .input(ListByOrgInput)
+    .input(ListInput.optional())
     .output(ListChargesOutput)
-    .query(async ({ input }) => {
-      const page = input.page ?? 1;
-      const pageSize = input.pageSize ?? 20;
-      const { polarClient } = await import("~/lib/server/polar");
+    .query(async ({ ctx, input }) => {
+      const userId = ctx.user.id;
+      const page = input?.page ?? 1;
+      const pageSize = input?.pageSize ?? 20;
       const result = await polarClient.events.list({
-        externalCustomerId: input.organizationId,
+        externalCustomerId: userId,
         limit: pageSize,
         name: "proxy_call",
         page,
       });
-      const items = result.result.items.map(
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (e: any) => {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const md: any = e.metadata ?? {};
-          return {
-            costUnits: typeof md.cost_units === "number" ? md.cost_units : 0,
-            createdAt: e.createdAt,
-            host: typeof md.host === "string" ? md.host : null,
-            method: typeof md.method === "string" ? md.method : null,
-            requestId: e.externalId ?? null,
-            status: typeof md.status === "number" ? md.status : null,
-          };
-        },
-      );
-      const hasNext = page < result.result.pagination.maxPage;
-      return { hasNext, items };
+      const ChargeMetadata = z.object({
+        cost_units: z.number().optional(),
+        host: z.string().optional(),
+        method: z.string().optional(),
+        status: z.number().optional(),
+      });
+      const items = result.result.items.map((e) => {
+        const md = ChargeMetadata.parse(e.metadata ?? {});
+        return {
+          costUnits: md.cost_units ?? 0,
+          createdAt: e.timestamp,
+          host: md.host ?? null,
+          method: md.method ?? null,
+          requestId: e.id,
+          status: md.status ?? null,
+        };
+      });
+      return { hasNext: page < result.result.pagination.maxPage, items };
     }),
-
   listPerKeyUsage: secureProcedure
     .meta({
       requiredPermissions: ["apikey.read"],
-      route: { path: "/credits/list-per-key-usage", summary: "List API keys with their quota" },
+      route: { path: "/credits/list-per-key-usage", summary: "List the user's API keys with their quota" },
     })
-    .input(ListPerKeyInput)
+    .input(z.object({}).optional())
     .output(ListPerKeyOutput)
-    .query(async ({ ctx, input }) => {
-      if (!ctx.orgId || ctx.orgId !== input.organizationId) {
-        throw new TRPCError({ code: "FORBIDDEN", message: "Organization ID mismatch" });
-      }
-      const { authServer } = await import("~/lib/server/auth");
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const result: any = await authServer.api.listApiKeys({
+    .query(async ({ ctx }) => {
+      // No organizationId: keys are user-owned (referenceId = userId).
+      // The plugin returns { apiKeys: ApiKey[], total, limit, offset } but
+      // better-auth types it loosely; parse with Zod to validate shape.
+      const raw = await authServer.api.listApiKeys({
         headers: ctx.raw.req.headers,
-        query: { organizationId: input.organizationId },
       });
-      const list = Array.isArray(result) ? result : (result?.apiKeys ?? []);
-      const items = list.map(
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (k: any) => ({
-          createdAt: k.createdAt,
-          enabled: k.enabled,
-          id: k.id,
-          lastRequest: k.lastRequest,
-          name: k.name,
-          prefix: k.prefix,
-          referenceId: k.referenceId,
-          remaining: k.remaining,
-          requestCount: k.requestCount,
-        }),
-      );
-      return { hasNext: false, items };
+      const parsed = z.object({ apiKeys: KeyRow.array() }).parse(raw);
+      return { hasNext: false, items: parsed.apiKeys };
     }),
 
   listTopUps: secureProcedure
     .meta({
-      requiredPermissions: ["organization.view"],
+      requiredPermissions: ["apikey.read"],
       route: { path: "/credits/list-top-ups", summary: "List recent top-up orders from Polar" },
     })
-    .input(ListByOrgInput)
+    .input(ListInput.optional())
     .output(ListTopUpOutput)
-    .query(async ({ input }) => {
-      const page = input.page ?? 1;
-      const pageSize = input.pageSize ?? 20;
-      const { polarClient } = await import("~/lib/server/polar");
-      const org = await db
-        .select({ polarCustomerId: schema.organization.polarCustomerId })
-        .from(schema.organization)
-        .where(eq(schema.organization.id, input.organizationId))
-        .limit(1)
-        .then((r) => r.at(0));
-      if (!org?.polarCustomerId) {
-        return { hasNext: false, items: [] };
-      }
+    .query(async ({ ctx, input }) => {
+      const userId = ctx.user.id;
+      const page = input?.page ?? 1;
+      const pageSize = input?.pageSize ?? 20;
+      // Polar customer is addressable by externalId = userId; list orders
+      // for that customer. If the customer doesn't exist yet (no top-up
+      // performed), Polar returns an empty list.
+      const customer = await polarClient.customers.getExternal({ externalId: userId }).catch(() => null);
+      if (!customer) return EMPTY_LIST;
       const result = await polarClient.orders.list({
-        customerId: org.polarCustomerId,
+        customerId: customer.id,
         limit: pageSize,
         page,
-        productId: serverEnv.POLAR_PRODUCT_ID_CREDITS,
         sorting: ["-created_at"],
       });
       const items = result.result.items.map((o) => ({
@@ -233,7 +173,6 @@ export const creditsRouter = router({
         createdAt: o.createdAt,
         id: o.id,
       }));
-      const hasNext = page < result.result.pagination.maxPage;
-      return { hasNext, items };
+      return { hasNext: page < result.result.pagination.maxPage, items };
     }),
 });

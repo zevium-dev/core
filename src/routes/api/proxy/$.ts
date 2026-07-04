@@ -5,8 +5,8 @@ import { eq, sql } from "drizzle-orm";
 import { db, schema } from "~/db";
 import { serverEnv } from "~/env/server";
 import { getHostCost, normalizeHost } from "~/lib/server/proxy-cost";
-import { refund as gateRefund, reserveWithCredits } from "~/lib/server/org-pool-gate";
-import { ingestProxyCall, getOrgCreditedUnits, ensureOrgCustomer } from "~/lib/server/polar";
+import { refundCredits, reserveCredits } from "~/lib/server/user-pool-gate";
+import { ensureUserCustomer, getUserCreditedUnits, ingestProxyCall } from "~/lib/server/polar";
 import {
   isHostAllowlisted,
   isLocalOrPrivateHost,
@@ -106,17 +106,18 @@ const proxyHandler = async (request: Request) => {
 
   const key = verification.key as { id: string; referenceId?: string } | null;
   if (!key?.referenceId) {
-    return jsonWithRequestId(401, "API key has no organization", requestId);
+    return jsonWithRequestId(401, "API key has no owning user", requestId);
   }
-  const orgId = key.referenceId;
+  const userId = key.referenceId;
 
-  // 3. Org-pool money gate (Redis SDK; non-atomic check+increment — §3.28).
-  //    Lazy-create the Polar customer on first call so the org always has
-  //    one before the gate runs.
-  await ensureOrgPool(orgId);
+  // 3. User-pool money gate (Redis SDK; non-atomic check+increment).
+  //    Lazy-create the Polar customer on first call so the user always has
+  //    one before the gate runs (covers users created before the plugin was
+  //    wired). If Polar is down, the gate surfaces 0 credits (which 402s).
+  await ensureUserPool(userId);
 
-  const credited = await getOrgCreditedUnits(orgId);
-  const reserved = await reserveWithCredits(orgId, credited, cost);
+  const credited = await getUserCreditedUnits(userId);
+  const reserved = await reserveCredits(userId, credited, cost);
   if (!reserved) {
     // Refund the plugin's `remaining` decrement we already consumed.
     await db
@@ -145,11 +146,12 @@ const proxyHandler = async (request: Request) => {
 
   // 5. State machine: reserve -> commit (2xx + body-complete) | refund (non-2xx / cancel / read err).
   let phase: "reserved" | "committed" | "refunded" = "reserved";
+
   const refundBoth = async () => {
     if (phase !== "reserved") return;
     phase = "refunded";
     await Promise.allSettled([
-      gateRefund(orgId, cost),
+      refundCredits(userId, cost),
       db
         .update(schema.apikey)
         .set({ remaining: sql`${schema.apikey.remaining} + 1` })
@@ -162,15 +164,15 @@ const proxyHandler = async (request: Request) => {
     phase = "committed";
     try {
       // Synchronous because route handlers cannot reach Cloudflare's
-      // ExecutionContext for `waitUntil` (§3.40). Adds ~50-200 ms of
-      // Polar latency per 2xx call.
+      // ExecutionContext for `waitUntil`. Adds ~50-200 ms of Polar
+      // latency per 2xx call.
       await ingestProxyCall({
         costUnits: cost,
         host: normalized.hostname,
         method: request.method,
-        orgId,
         requestId,
         status,
+        userId,
       });
     } catch {
       // Ingest failure is drift; the gate is already past. A periodic
@@ -250,25 +252,14 @@ const proxyHandler = async (request: Request) => {
   });
 };
 
-/** Best-effort idempotency for the lazy Polar customer creation. */
-async function ensureOrgPool(orgId: string): Promise<void> {
-  const rows = await db
-    .select({
-      id: schema.organization.id,
-      name: schema.organization.name,
-      polarCustomerId: schema.organization.polarCustomerId,
-      polarBillingEmail: schema.organization.polarBillingEmail,
-    })
-    .from(schema.organization)
-    .where(eq(schema.organization.id, orgId))
-    .limit(1)
-    .then((r) => r.at(0));
-  if (!rows) return;
-  if (rows.polarCustomerId) return;
-  // Lazy create on first proxy call. If Polar is down, the next gate
-  // call will retry.
+/** Best-effort lazy Polar customer creation for legacy users. */
+async function ensureUserPool(userId: string): Promise<void> {
+  // The `@polar-sh/better-auth` plugin auto-creates the Polar customer on
+  // signup; this is only a backfill for users created before the plugin
+  // was wired. If Polar is down, the next gate call will retry. Errors
+  // are swallowed: the gate then sees 0 `creditedUnits` and returns 402.
   try {
-    await ensureOrgCustomer(rows);
+    await ensureUserCustomer({ userId });
   } catch {
     // Swallowed: gate will surface 0 credits (which 402s) on failure.
   }

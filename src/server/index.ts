@@ -7,7 +7,7 @@ export const appRouter = router({
   example: lazy(() => import("./rpcs/example").then((v) => v.exampleRouter)),
   openapiSchema: lazy(() => import("./rpcs/openapi-schema").then((v) => v.openapiSchemaRouter)),
   organization: lazy(() => import("./rpcs/organization").then((v) => v.organizationRouter)),
-  orgKey: lazy(() => import("./rpcs/orgKey").then((v) => v.orgKeyRouter)),
+  userKey: lazy(() => import("./rpcs/userKey").then((v) => v.userKeyRouter)),
   project: lazy(() => import("./rpcs/project").then((v) => v.projectRouter)),
   projectSecret: lazy(() => import("./rpcs/projectSecret").then((v) => v.projectSecretRouter)),
   tag: lazy(() => import("./rpcs/tag").then((v) => v.tagRouter)),

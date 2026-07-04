@@ -3,10 +3,6 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("~/env/server", () => ({
   serverEnv: {
     PROXY_HOST_UNIT_COSTS: { "api.openai.com": 3, "api.anthropic.com": 2 },
-    POLAR_ACCESS_TOKEN: "test",
-    POLAR_METER_ID: "mtr_test",
-    POLAR_ORGANIZATION_ID: "org_test",
-    POLAR_PRODUCT_ID_CREDITS: "prd_test",
     POLAR_SERVER: "sandbox",
     POLAR_WEBHOOK_SECRET: "test",
     PROXY_PUBLIC_HOST: "localhost:5173",

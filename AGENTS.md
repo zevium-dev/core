@@ -133,7 +133,7 @@ src/
 │   ├── hash/            # Hashing utilities
 │   ├── polyfill/        # Polyfills
 │   ├── query-client/    # React Query client setup
-│   ├── server/          # Server-side utilities (polar, org-pool-gate, proxy-cost, proxy-security, redis-keys, kv, auth)
+│   ├── server/          # Server-side utilities (polar, user-pool-gate, proxy-cost, proxy-security, redis-keys, kv, auth)
 │   └── utils/           # Helper functions
 ├── hooks/               # Custom React hooks
 ├── env/                 # Environment variable validation
@@ -163,16 +163,16 @@ public/                  # Static assets
 - Error handling with proper HTTP status codes
 - Input validation using Zod schemas
 
-#### Billing (Polar Credits)
+#### Billing (Polar Credits, user-scoped)
 
-- **Org-scoped prepaid credits** via Polar meter credits (one Polar customer per org, `externalId = orgId`)
-- **Per-call credit reserve**: org pool gate with Redis Lua atomic check (`creditedUnits - orgConsumed >= cost`)
-- **Per-key rate limiting**: `@better-auth/api-key` plugin (60 req/min, `remaining` quota, no refill)
-- **Proxy billing flow**: host cost lookup → verify API key → reserve org pool → fetch upstream → ingest `proxy_call` event on 2xx + body-complete
-- **Top-up**: min $20 via Polar checkout, balance polling after redirect
-- **Key files**: `src/lib/server/polar.ts`, `src/lib/server/org-pool-gate.ts`, `src/lib/server/proxy-cost.ts`
-- **RPCs**: `credits` (getBalance, createTopUp, listTopUps, listCharges, listPerKeyUsage), `orgKey` (create, list, update, delete)
-- **Webhook**: `/api/polar/webhook` — `order.paid`, `order.refunded`, `customer.state_changed` invalidate credited-units cache
+- **User-scoped prepaid credits** via `@polar-sh/better-auth` `polar()` plugin; Polar customer `externalId = userId`, auto-created on signup
+- **Top-up via plugin checkout** (`POST /api/auth/checkout`) with FIXED one-time Polar products (each grants fixed `units` via a `meter_credit` benefit). Product IDs exposed to the browser via `VITE_PUBLIC_POLAR_TOPUP_PRODUCTS`.
+- **Per-call credit reserve**: per-user Redis gate (SDK-only, no Lua) `creditedUnits - userConsumed >= cost`
+- **Per-key rate limiting**: `@better-auth/api-key` plugin (60 req/min, `remaining` quota, no refill, `references: "user"` → keys user-owned, one key per user enforced via `apikey_one_per_user` unique index)
+- **Proxy billing flow**: host cost lookup → verify API key → resolve `userId` from `key.referenceId` → reserve user pool → fetch upstream → ingest `proxy_call` event (`externalCustomerId = userId`) on 2xx + body-complete
+- **Key files**: `src/lib/server/polar.ts`, `src/lib/server/user-pool-gate.ts`, `src/lib/server/proxy-cost.ts`, `src/lib/server/auth.tsx` (plugin wiring)
+- **RPCs**: `credits` (getBalance, listTopUps, listCharges, listPerKeyUsage — all user-scoped, no `organizationId`), `userKey` (create, list, update, delete)
+- **Webhook**: `POST /api/auth/polar/webhooks` (plugin-mounted) — `order.paid`, `order.refunded`, `customer.state_changed` invalidate the per-user `creditedUnits` cache
 
 #### Database Layer
 

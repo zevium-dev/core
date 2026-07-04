@@ -7,15 +7,21 @@ import { kv } from "~/lib/server/kv";
 import { RedisKeys } from "~/lib/server/redis-keys";
 
 /**
- * Polar SDK client + org-scoped helpers.
+ * Polar SDK client + user-scoped helpers.
  *
- * Replaces the user-scoped `polar()` Better Auth plugin and the
- * self-managed `CreditsManager`. Every operation is org-scoped; each
- * org has one Polar customer (externalId = orgId) and a per-org credit
- * meter pool. The proxy charges by ingesting `proxy_call` events with
- * a `cost_units` metadata; the meter_credit benefit grants credits on
- * `order.paid`.
+ * Polar customer = authenticated user (`externalId = userId`); the
+ * `@polar-sh/better-auth` plugin auto-creates the customer on signup. These
+ * helpers cover the surfaces the plugin doesn't expose: the proxy route (no
+ * auth session, just an API key → userId) needs to read the user's meter
+ * `creditedUnits` and ingest `proxy_call` events.
+ *
+ * The plugin handles: top-up checkout (`/api/auth/checkout`), customer
+ * portal/state (`/api/auth/customer/state`), usage meters
+ * (`/api/auth/usage/meters/list`), and webhook signature verification
+ * (`/api/auth/polar/webhooks`). Use the plugin endpoints everywhere the
+ * session user is available; use these helpers only for server-side work.
  */
+
 export const polarClient = new Polar({
   accessToken: serverEnv.POLAR_ACCESS_TOKEN,
   server: serverEnv.POLAR_SERVER,
@@ -25,132 +31,97 @@ export const polarClient = new Polar({
 const CREDITED_CACHE_TTL_MS = 5 * 60 * 1000;
 
 /**
- * Per-org deterministic email so we never collide on the org-scoped
- * Polar org's email-uniqueness rule. Not a real inbox.
+ * Idempotently ensure a Polar customer exists for the user and return the
+ * Polar internal customer id. Used by the proxy route (no session) and as a
+ * lazy backfill for users created before the plugin was wired. Caller can
+ * pass a pre-fetched email/name to skip the DB read; otherwise we look up
+ * the user table.
  */
-function orgBillingEmail(orgId: string): string {
-  return `org-${orgId}@billing.zevium.dev`;
-}
-
-/**
- * Idempotently ensure a Polar customer exists for the org. Sets
- * `organization.polarCustomerId` on success.
- *
- * Strategy: list first by `externalId`. If found, persist the
- * existing Polar customer id (covers a previous run that created
- * the customer but failed to persist the id). If not found, create
- * and persist. The "getExternal" call is cheap and reliable;
- * we do not rely on race-prone create-then-catch-duplicate.
- */
-export async function ensureOrgCustomer(org: {
-  id: string;
-  name: string;
-  polarCustomerId: string | null;
-  polarBillingEmail: string | null;
-}): Promise<{ id: string; email: string }> {
-  if (org.polarCustomerId) {
-    return { id: org.polarCustomerId, email: org.polarBillingEmail ?? orgBillingEmail(org.id) };
-  }
-
-  let customerId: string;
-  let email = org.polarBillingEmail ?? orgBillingEmail(org.id);
-
+export async function ensureUserCustomer(input: {
+  userId: string;
+  email?: string;
+  name?: string | null;
+}): Promise<string> {
   try {
-    const existing = await polarClient.customers.getExternal({ externalId: org.id });
-    customerId = existing.id;
+    const existing = await polarClient.customers.getExternal({ externalId: input.userId });
+    return existing.id;
   } catch {
+    // 404 / not found → create.
+    const email = input.email ?? (await readUserForPolar(input.userId)).email;
     const created = await polarClient.customers.create({
-      externalId: org.id,
       email,
-      metadata: { orgId: org.id },
-      name: org.name,
+      externalId: input.userId,
+      metadata: { userId: input.userId },
+      name: input.name ?? undefined,
     });
-    customerId = created.id;
+    return created.id;
   }
-
-  await db
-    .update(schema.organization)
-    .set({ polarCustomerId: customerId, polarBillingEmail: email })
-    .where(eq(schema.organization.id, org.id));
-
-  return { id: customerId, email };
 }
 
 /**
- * Read the org's total `creditedUnits` from Polar, with a 5-min Redis
+ * Read the user's total `creditedUnits` from Polar, with a 5-min Redis
  * cache. Returns 0 if no active meter or any error (the gate then
- * produces 402, not a 500).
+ * produces 402, not a 500). Lazy-creates the Polar customer for legacy
+ * users so the proxy route works without a session.
  */
-export async function getOrgCreditedUnits(orgId: string): Promise<number> {
-  const cacheKey = RedisKeys.creditedUnits(orgId);
+export async function getUserCreditedUnits(userId: string): Promise<number> {
+  const cacheKey = RedisKeys.creditedUnits(userId);
   const cached = await kv.get<number>(cacheKey);
   if (typeof cached === "number" && Number.isFinite(cached)) {
     return cached;
   }
-  const state = await polarClient.customers.getStateExternal({
-    externalId: orgId,
-  });
-  const meter = state.activeMeters.find(
-    (m: { meterId: string; creditedUnits: number }) => m.meterId === serverEnv.POLAR_METER_ID,
-  );
-  const credited = meter?.creditedUnits ?? 0;
+  let credited = 0;
+  try {
+    const state = await polarClient.customers.getStateExternal({
+      externalId: userId,
+    });
+    const meter = state.activeMeters.find(
+      (m: { meterId: string; creditedUnits: number }) => m.meterId === serverEnv.POLAR_METER_ID,
+    );
+    credited = meter?.creditedUnits ?? 0;
+  } catch {
+    // No Polar customer (legacy user) or Polar outage → treat as 0 so the
+    // gate produces 402, not 500. The webhook will refresh the cache once
+    // the customer is created (via plugin signup or first successful top-up).
+    return 0;
+  }
   await kv.set(cacheKey, credited, { ex: Math.ceil(CREDITED_CACHE_TTL_MS / 1000) });
   return credited;
 }
 
 /**
- * Invalidate the `creditedUnits` cache for an org. Call from the webhook
- * handler on `order.paid`, `order.refunded`, and `customer.state_changed`
- * so the next gate read sees fresh data.
+ * Invalidate the `creditedUnits` cache for a user. Call from the Polar
+ * webhook handler on `order.paid`, `order.refunded`, and
+ * `customer.state_changed` so the next gate read sees fresh data.
  */
-export async function invalidateOrgCreditedCache(orgId: string): Promise<void> {
-  await kv.del(RedisKeys.creditedUnits(orgId));
+export async function invalidateUserCreditedCache(userId: string): Promise<void> {
+  await kv.del(RedisKeys.creditedUnits(userId));
 }
 
 /**
- * Create a Polar checkout for a top-up. Uses the per-org customer so
- * the meter_credit benefit on the credits product lands on the org's
- * customer. Variable amount: caller passes the USD amount (>= 20).
+ * Resolve the user's email/name for the lazy-create path. The Polar
+ * plugin auto-creates on signup; this is only used as a fallback for
+ * proxy-route calls on users created before the plugin was wired.
  */
-export async function createCreditsCheckout(input: {
-  orgId: string;
-  amountUsd: number;
-  successUrl: string;
-}): Promise<{ url: string; checkoutId: string }> {
-  if (input.amountUsd < 20) {
-    throw new Error("Minimum top-up is $20.");
-  }
-
-  const { id: customerId } = await ensureOrgCustomer({
-    id: input.orgId,
-    name: input.orgId,
-    polarCustomerId: await getOrgCustomerId(input.orgId),
-    polarBillingEmail: null,
-  });
-  const productId = serverEnv.POLAR_PRODUCT_ID_CREDITS;
-  const checkout = await polarClient.checkouts.create({
-    customerId,
-    metadata: { orgId: input.orgId },
-    prices: {
-      [productId]: [{ amountType: "custom", presetAmount: input.amountUsd * 100, priceCurrency: "usd" }],
-    },
-    products: [productId],
-    successUrl: input.successUrl,
-  });
-
-  return {
-    url: typeof checkout.url === "string" ? checkout.url : input.successUrl,
-    checkoutId: checkout.id,
-  };
+async function readUserForPolar(userId: string): Promise<{ email: string; name: string | null }> {
+  const rows = await db
+    .select({ email: schema.user.email, name: schema.user.name })
+    .from(schema.user)
+    .where(eq(schema.user.id, userId))
+    .limit(1);
+  const row = rows.at(0);
+  return { email: row?.email ?? `${userId}@billing.zevium.dev`, name: row?.name ?? null };
 }
 
 /**
- * Ingest a `proxy_call` event so Polar auto-deducts `cost_units`
- * from the org's meter balance. `externalId = requestId` for
- * dedup.
+ * Ingest a `proxy_call` event so Polar auto-deducts `cost_units` from the
+ * user's meter balance. `externalId = requestId` for dedup.
+ *
+ * Used by the proxy route (API-key auth, no session). In-app usage that
+ * has a session should use the plugin's `usage.ingest` endpoint instead.
  */
 export async function ingestProxyCall(input: {
-  orgId: string;
+  userId: string;
   requestId: string;
   host: string;
   method: string;
@@ -160,8 +131,7 @@ export async function ingestProxyCall(input: {
   await polarClient.events.ingest({
     events: [
       {
-        name: "proxy_call",
-        externalCustomerId: input.orgId,
+        externalCustomerId: input.userId,
         externalId: input.requestId,
         metadata: {
           cost_units: input.costUnits,
@@ -169,34 +139,8 @@ export async function ingestProxyCall(input: {
           method: input.method,
           status: input.status,
         },
+        name: "proxy_call",
       } as never,
     ],
   });
-}
-
-/**
- * Resolve the Polar customer id for an org. Returns null if not yet
- * linked (caller decides whether to lazy-create).
- */
-async function getOrgCustomerId(orgId: string): Promise<string | null> {
-  const rows = await db
-    .select({ polarCustomerId: schema.organization.polarCustomerId })
-    .from(schema.organization)
-    .where(eq(schema.organization.id, orgId))
-    .limit(1);
-  return rows[0]?.polarCustomerId ?? null;
-}
-
-/**
- * Resolve the orgId from a Polar customerId. Used by the webhook
- * handler to map `order.paid` / `order.refunded` payloads (which
- * carry the Polar customer id, not our externalId) to the org.
- */
-export async function getOrgIdByPolarCustomerId(polarCustomerId: string): Promise<string | null> {
-  const rows = await db
-    .select({ id: schema.organization.id })
-    .from(schema.organization)
-    .where(eq(schema.organization.polarCustomerId, polarCustomerId))
-    .limit(1);
-  return rows[0]?.id ?? null;
 }

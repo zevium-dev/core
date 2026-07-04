@@ -1,4 +1,5 @@
 import { apiKeyClient } from "@better-auth/api-key/client";
+import { polarClient } from "@polar-sh/better-auth/client";
 import { Exception } from "@boi.gg/exception";
 import { queryOptions, type QueryOptions, useSuspenseQuery } from "@tanstack/react-query";
 import { useLocation } from "@tanstack/react-router";
@@ -17,6 +18,7 @@ export const auth = createAuthClient({
   },
   plugins: [
     apiKeyClient(),
+    polarClient(),
     twoFactorClient({
       onTwoFactorRedirect() {
         if (typeof window !== "undefined") {

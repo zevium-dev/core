@@ -161,14 +161,9 @@ export const organization = sqliteTable(
       .$defaultFn(() => ({}))
       .$type<Metadata>(),
     name: text("name").notNull(),
-    polarBillingEmail: text("polar_billing_email"),
-    polarCustomerId: text("polar_customer_id"),
     slug: text("slug").unique().notNull(),
   },
-  (self) => [
-    uniqueIndex("organization_polar_customer_id_index").on(self.polarCustomerId),
-    uniqueIndex("organization_slug_index").on(self.slug),
-  ],
+  (self) => [uniqueIndex("organization_slug_index").on(self.slug)],
 );
 
 export const member = sqliteTable(

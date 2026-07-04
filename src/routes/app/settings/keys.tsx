@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { Check, Copy, Info, MoreHorizontal, Pencil, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
@@ -26,48 +26,22 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "~
 import { useCopy } from "~/hooks/use-copy";
 import { useTRPC } from "~/lib/trpc";
 
-// Types
+export const Route = createFileRoute("/app/settings/keys")({
+  component: ApiKeysComponent,
+});
+
 interface ApiKeyRecord {
-  createdAt: Date;
+  createdAt: Date | string;
   enabled: boolean | null;
   id: string;
   key?: string; // full key value (only available on creation)
-  lastRequest: Date | null;
-  lastUsed: Date | null;
+  lastRequest: Date | string | null;
   name: null | string;
   prefix: null | string;
   remaining: number | null;
-  requestCount: number;
+  requestCount: number | null;
   start: null | string;
 }
-
-interface OrgKeyData {
-  createdAt: Date;
-  enabled: boolean | null;
-  expiresAt: Date | null;
-  id: string;
-  key?: string;
-  lastRequest?: Date | null;
-  lastUsed?: Date | null;
-  metadata: null | Record<string, unknown>;
-  name: null | string;
-  permissions: null | Record<string, Array<string>>;
-  prefix: null | string;
-  rateLimitEnabled: boolean | null;
-  rateLimitMax: number | null;
-  rateLimitTimeWindow: number | null;
-  remaining: number | null;
-  requestCount: number;
-  start: null | string;
-  updatedAt: Date;
-}
-
-export const Route = createFileRoute("/app/settings/keys")({
-  component: ApiKeysComponent,
-  loader: ({ context }) => {
-    void context.queryClient.ensureQueryData(context.trpc.organization.list.queryOptions());
-  },
-});
 
 function ApiKeysComponent() {
   const trpc = useTRPC();
@@ -83,50 +57,57 @@ function ApiKeysComponent() {
   const [createdKeyCopied, setCreatedKeyCopied] = useState(false);
   const [snippetCopied, setSnippetCopied] = useState(false);
 
-  // Get org for the keys context
-  const orgListQuery = useSuspenseQuery(trpc.organization.list.queryOptions());
-  const org = (orgListQuery.data ?? [])[0];
+  // Keys are user-owned: no organizationId.
+  const listQuery = useQuery(trpc.userKey.list.queryOptions(undefined));
 
-  // Queries
-  const listQuery = useQuery(trpc.orgKey.list.queryOptions({ organizationId: org?.id ?? "" }, { enabled: !!org }));
-  const apiKeys: Array<ApiKeyRecord> = (listQuery.data ?? []).map(formatApiKeyData as any);
+  const apiKeys: Array<ApiKeyRecord> = (listQuery.data ?? []).map((k) => ({
+    createdAt: k.createdAt,
+    enabled: k.enabled,
+    id: k.id,
+    lastRequest: k.lastRequest,
+    name: k.name,
+    prefix: k.prefix,
+    remaining: k.remaining,
+    requestCount: k.requestCount,
+    start: k.start,
+  }));
 
   // Mutations
   const createMutation = useMutation(
-    trpc.orgKey.create.mutationOptions({
+    trpc.userKey.create.mutationOptions({
       async onSuccess(data) {
         setNewlyCreatedKey(data.key);
         setNewKeyName("");
         setIsCreateDialogOpen(false);
-        await queryClient.invalidateQueries(trpc.orgKey.list.queryOptions({ organizationId: org?.id ?? "" }));
+        await queryClient.invalidateQueries(trpc.userKey.list.queryOptions(undefined));
       },
     }),
   );
   const updateMutation = useMutation(
-    trpc.orgKey.update.mutationOptions({
+    trpc.userKey.update.mutationOptions({
       async onSuccess() {
         setIsEditDialogOpen(false);
         setEditingKey(null);
         setNewKeyName("");
-        await queryClient.invalidateQueries(trpc.orgKey.list.queryOptions({ organizationId: org?.id ?? "" }));
+        await queryClient.invalidateQueries(trpc.userKey.list.queryOptions(undefined));
       },
     }),
   );
   const deleteMutation = useMutation(
-    trpc.orgKey.delete.mutationOptions({
+    trpc.userKey.delete.mutationOptions({
       async onSettled() {
-        await queryClient.invalidateQueries(trpc.orgKey.list.queryOptions({ organizationId: org?.id ?? "" }));
+        await queryClient.invalidateQueries(trpc.userKey.list.queryOptions(undefined));
       },
     }),
   );
 
   const handleCreateKey = () => {
     if (!newKeyName.trim()) return;
-    createMutation.mutate({ name: newKeyName.trim(), organizationId: org?.id ?? "" });
+    createMutation.mutate({ name: newKeyName.trim() });
   };
 
   const handleDeleteKey = (keyId: string) => {
-    deleteMutation.mutate({ keyId, organizationId: org?.id ?? "" });
+    deleteMutation.mutate({ keyId });
   };
 
   const openEditDialog = (record: ApiKeyRecord) => {
@@ -137,7 +118,7 @@ function ApiKeysComponent() {
 
   const handleSaveEdit = () => {
     if (!editingKey || !newKeyName.trim()) return;
-    updateMutation.mutate({ keyId: editingKey.id, name: newKeyName.trim(), organizationId: org?.id ?? "" });
+    updateMutation.mutate({ keyId: editingKey.id, name: newKeyName.trim() });
   };
 
   const formatKey = (key: string) => {
@@ -167,7 +148,7 @@ function ApiKeysComponent() {
           <h1 className="text-2xl font-bold text-foreground">API Keys</h1>
           <div className="flex items-center gap-2">
             <p className="text-sm text-muted-foreground">
-              Manage your organization's API keys to access all Zevium-integrated APIs
+              Manage your personal API keys to access all Zevium-integrated APIs
             </p>
             <Info className="size-4 text-muted-foreground" />
           </div>
@@ -185,7 +166,8 @@ function ApiKeysComponent() {
             <DialogHeader>
               <DialogTitle>Create API Key</DialogTitle>
               <DialogDescription>
-                Create a new API key to access Zevium APIs. Keep your key secure and never share it publicly.
+                Create a new API key to access Zevium APIs. You can have one active key at a time. Keep your key secure
+                and never share it publicly.
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-4">
@@ -401,20 +383,4 @@ function ApiKeysComponent() {
       </Dialog>
     </div>
   );
-}
-
-function formatApiKeyData(key: OrgKeyData): ApiKeyRecord {
-  return {
-    createdAt: key.createdAt,
-    enabled: key.enabled ?? null,
-    id: key.id,
-    key: key.key,
-    lastRequest: key.lastRequest ?? null,
-    lastUsed: key.lastUsed ?? null,
-    name: key.name,
-    prefix: key.prefix,
-    remaining: key.remaining ?? null,
-    requestCount: key.requestCount,
-    start: key.start,
-  };
 }

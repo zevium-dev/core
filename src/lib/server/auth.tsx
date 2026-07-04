@@ -17,6 +17,8 @@ import { ResetPasswordEmail, ResetPasswordSubject } from "../email/templates/res
 import { capCaptcha } from "./better-auth-captcha";
 import { kv } from "./kv";
 import { ac, roles } from "./organization-access";
+import { checkout, polar, portal, usage, webhooks } from "@polar-sh/better-auth";
+import { polarClient, invalidateUserCreditedCache } from "./polar";
 
 const BETTER_AUTH_KV_PREFIX = "better-auth:";
 
@@ -86,8 +88,47 @@ export const authServer = betterAuth({
       permissions: { defaultPermissions: { api: ["read"] } },
       // 60 requests per minute per key.
       rateLimit: { enabled: true, maxRequests: 60, timeWindow: 60_000 },
-      // All proxy keys are org-owned; referenceId = orgId on create.
-      references: "organization",
+      // User-owned keys: referenceId = userId (Polar-native billing unit).
+      references: "user",
+    }),
+    polar({
+      client: polarClient,
+      // Auto-create the Polar customer (externalId = userId) on signup so
+      // the meter credits balance exists before the first top-up.
+      createCustomerOnSignUp: true,
+      use: [
+        // Mounts POST /api/auth/checkout — accepts a fixed-product top-up.
+        // Polar-native model: each top-up is a fixed-price one-time product
+        // that grants fixed units via a meter_credit benefit. The
+        // dashboard-provided product IDs are passed by the client from env.
+        checkout({
+          authenticatedUsersOnly: true,
+          successUrl: `${clientEnv.VITE_PUBLIC_URL}/app/settings/credits?checkout_id={CHECKOUT_ID}`,
+          returnUrl: `${clientEnv.VITE_PUBLIC_URL}/app/settings/credits`,
+        }),
+        // Mounts GET /api/auth/customer/state — the user's active meters,
+        // balance, and consumed. Used by the balance RPC as the source of
+        // truth when a session is available.
+        portal(),
+        usage(),
+        // Mounts POST /api/auth/polar/webhooks — signature verification +
+        // typed callbacks. Replaces the hand-rolled /api/polar/webhook route.
+        webhooks({
+          secret: serverEnv.POLAR_WEBHOOK_SECRET,
+          onOrderPaid: async (payload) => {
+            const userId = payload.data.customer.externalId;
+            if (userId) await invalidateUserCreditedCache(userId);
+          },
+          onOrderRefunded: async (payload) => {
+            const userId = payload.data.customer.externalId;
+            if (userId) await invalidateUserCreditedCache(userId);
+          },
+          onCustomerStateChanged: async (payload) => {
+            const userId = payload.data.externalId;
+            if (userId) await invalidateUserCreditedCache(userId);
+          },
+        }),
+      ],
     }),
     twoFactor(),
     organization({
