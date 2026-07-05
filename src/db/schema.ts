@@ -478,6 +478,33 @@ export const projectSecret = sqliteTable(
   ],
 );
 
+// ===== Proxy Hosts (user-scoped upstream API config) =====
+
+export const proxyHost = sqliteTable(
+  "proxy_host",
+  {
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .$defaultFn(() => new Date())
+      .notNull(),
+    host: text("host").notNull(),
+    id: text("id").primaryKey(),
+    /** Credits deducted per successful proxy call to this host. */
+    unitCost: integer("unit_cost")
+      .notNull()
+      .$defaultFn(() => 1),
+    updatedAt: integer("updated_at", { mode: "timestamp" })
+      .$defaultFn(() => new Date())
+      .notNull(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+  },
+  (self) => [
+    index("proxy_host_user_id_index").on(self.userId),
+    uniqueIndex("proxy_host_user_host_unique_index").on(self.userId, self.host),
+  ],
+);
+
 // ===== Audit Logging =====
 
 export const auditLog = sqliteTable(

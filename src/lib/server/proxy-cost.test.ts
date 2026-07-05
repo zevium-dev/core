@@ -1,20 +1,23 @@
 import { describe, expect, it, vi } from "vitest";
 
-vi.mock("~/env/server", () => ({
-  serverEnv: {
-    PROXY_HOST_UNIT_COSTS: { "api.openai.com": 3, "api.anthropic.com": 2 },
-    POLAR_SERVER: "sandbox",
-    POLAR_WEBHOOK_SECRET: "test",
-    PROXY_PUBLIC_HOST: "localhost:5173",
-    PROXY_REQUEST_TIMEOUT_MS: 30000,
-    PROXY_ALLOWED_HOSTS: "api.openai.com",
-    PROXY_UPSTREAM_SECRET: "test",
-    LIBSQL_URL: "libsql://test.turso.io",
-    LIBSQL_SECRET: "test",
+const mockQuery = vi.hoisted(() => vi.fn());
+
+vi.mock("~/db", () => ({
+  db: {
+    select: vi.fn(() => ({
+      from: vi.fn(() => ({
+        where: vi.fn(() => ({
+          limit: vi.fn(() => mockQuery()),
+        })),
+      })),
+    })),
+  },
+  schema: {
+    proxyHost: { host: "host", unitCost: "unit_cost", userId: "user_id" },
   },
 }));
 
-import { getHostCost, normalizeHost } from "./proxy-cost";
+import { getProxyHostConfig, normalizeHost } from "./proxy-cost";
 
 describe("proxy-cost", () => {
   describe("normalizeHost", () => {
@@ -25,16 +28,23 @@ describe("proxy-cost", () => {
     it("throws on empty input", () => {
       expect(() => normalizeHost("")).toThrow("Empty host header");
     });
+
+    it("rejects non-HTTPS protocol", () => {
+      expect(() => normalizeHost("http://api.openai.com")).toThrow("Only HTTPS hosts are allowed");
+    });
   });
 
-  describe("getHostCost", () => {
-    it("returns correct cost for priced host", () => {
-      expect(getHostCost("api.openai.com")).toBe(3);
-      expect(getHostCost("api.anthropic.com")).toBe(2);
+  describe("getProxyHostConfig", () => {
+    it("returns host config when row exists", async () => {
+      mockQuery.mockResolvedValueOnce([{ host: "api.openai.com", unitCost: 3 }]);
+      const result = await getProxyHostConfig("user_123", "api.openai.com");
+      expect(result).toEqual({ host: "api.openai.com", unitCost: 3 });
     });
 
-    it("throws for unpriced host", () => {
-      expect(() => getHostCost("this-host-does-not-exist.example")).toThrow();
+    it("returns null when host not configured for user", async () => {
+      mockQuery.mockResolvedValueOnce([]);
+      const result = await getProxyHostConfig("user_123", "evil.com");
+      expect(result).toBeNull();
     });
   });
 });
