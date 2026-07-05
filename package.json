@@ -10,6 +10,8 @@
     "ci": "node scripts/ci.mjs",
     "ci:pr": "node scripts/ci.mjs --changed",
     "coverage": "vitest run --coverage",
+    "db:migrate": "drizzle-kit migrate",
+    "db:seed": "tsx scripts/seed.ts",
     "deploy": "pnpm run build && wrangler deploy",
     "dev": "vite dev",
     "dev:workerd": "wrangler dev",
