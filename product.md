@@ -9,6 +9,7 @@ Zevium is a **per-call API marketplace** — like RapidAPI, but consumers pay pe
 ## Two-sided platform
 
 ### Publishers (API sellers)
+
 - Organizations that publish their APIs on Zevium
 - Each API = a `project` with an OpenAPI spec
 - Publishers set **per-endpoint pricing** (credits per call) in the OpenAPI spec
@@ -16,6 +17,7 @@ Zevium is a **per-call API marketplace** — like RapidAPI, but consumers pay pe
 - The upstream server URL lives in the OpenAPI spec's `servers` field
 
 ### Consumers (API buyers)
+
 - Users who browse the API catalog and call endpoints through our proxy
 - Pre-pay for credits (Polar meter credits, user-scoped)
 - Each API call deducts credits based on the endpoint's price
@@ -58,6 +60,7 @@ paths:
 ```
 
 No separate pricing table. The OpenAPI spec IS the source of truth for:
+
 - Upstream server URL (`servers[0].url`)
 - Available endpoints (`paths`)
 - Per-endpoint pricing (`x-zevium-cost` on each operation)
@@ -65,15 +68,15 @@ No separate pricing table. The OpenAPI spec IS the source of truth for:
 
 ## Data model mapping
 
-| Concept | DB table | Notes |
-|---|---|---|
-| Publisher | `organization` | An org that publishes APIs |
-| Published API | `project` | Has `status`, `visibility`, `organizationId` |
-| API spec (draft + published) | `openapi_schema` + `openapi_schema_version` | 1:1 with project |
-| Endpoint pricing | OpenAPI `x-zevium-cost` extension | Lives IN the spec, not a separate table |
-| Consumer credits | Polar meter credits | User-scoped, prepaid via Polar checkout |
-| Consumer API keys | `apikey` (better-auth plugin) | User-scoped, one key per user |
-| Proxy call logging | Polar `proxy_call` events | Ingested for billing + analytics |
+| Concept                      | DB table                                    | Notes                                        |
+| ---------------------------- | ------------------------------------------- | -------------------------------------------- |
+| Publisher                    | `organization`                              | An org that publishes APIs                   |
+| Published API                | `project`                                   | Has `status`, `visibility`, `organizationId` |
+| API spec (draft + published) | `openapi_schema` + `openapi_schema_version` | 1:1 with project                             |
+| Endpoint pricing             | OpenAPI `x-zevium-cost` extension           | Lives IN the spec, not a separate table      |
+| Consumer credits             | Polar meter credits                         | User-scoped, prepaid via Polar checkout      |
+| Consumer API keys            | `apikey` (better-auth plugin)               | User-scoped, one key per user                |
+| Proxy call logging           | Polar `proxy_call` events                   | Ingested for billing + analytics             |
 
 ## Proxy call flow
 

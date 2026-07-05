@@ -2,18 +2,20 @@ import { defaultKeyHasher } from "@better-auth/api-key";
 import { createFileRoute } from "@tanstack/react-router";
 import { eq, sql } from "drizzle-orm";
 
+import { authServer } from "~/lib/server/auth";
 import { db, schema } from "~/db";
 import { serverEnv } from "~/env/server";
-import { getHostCost, normalizeHost } from "~/lib/server/proxy-cost";
-import { refundCredits, reserveCredits } from "~/lib/server/user-pool-gate";
+import { extractHostname, resolveProxyTarget } from "~/lib/server/proxy-cost";
 import { ensureUserCustomer, getUserCreditedUnits, ingestProxyCall } from "~/lib/server/polar";
-import {
-  isHostAllowlisted,
-  isLocalOrPrivateHost,
-  isSelfHost,
-  normalizeProxySecret,
-  parseProxyAllowlist,
-} from "~/lib/server/proxy-security";
+import { isLocalOrPrivateHost, isSelfHost, normalizeProxySecret } from "~/lib/server/proxy-security";
+import { refundCredits, reserveCredits } from "~/lib/server/user-pool-gate";
+
+/** Shape consumed from better-auth's verifyApiKey result. */
+interface VerifyResult {
+  error: { code?: string; message?: unknown } | null;
+  key: { id: string; referenceId?: string } | null;
+  valid: boolean;
+}
 
 class UpstreamNonOK extends Error {
   response: Response;
@@ -27,54 +29,45 @@ function jsonWithRequestId(status: number, message: string, requestId: string) {
   return Response.json({ error: message }, { headers: { "x-zevium-request-id": requestId }, status });
 }
 
-function proxySecretHeader(): string {
-  return normalizeProxySecret(serverEnv.PROXY_UPSTREAM_SECRET) ?? serverEnv.PROXY_UPSTREAM_SECRET;
-}
-
 const proxyHandler = async (request: Request) => {
   const requestId = crypto.randomUUID();
   const zeviumKey = request.headers.get("x-zevium-key");
   if (!zeviumKey) return jsonWithRequestId(401, "Missing X-Zevium-Key", requestId);
-  const zeviumHostHeader = request.headers.get("x-zevium-host");
-  if (!zeviumHostHeader) return jsonWithRequestId(400, "Missing X-Zevium-Host", requestId);
 
-  // 1. Cheap host checks (before any DB / Redis / network).
-  let normalized: { hostname: string; port: string };
-  try {
-    const host = normalizeHost(zeviumHostHeader);
-    const url = new URL(`https://${host}`);
-    normalized = { hostname: host, port: url.port || "443" };
-  } catch {
-    return jsonWithRequestId(400, "Invalid X-Zevium-Host", requestId);
+  // 1. Parse {orgSlug}/{projectSlug}/{endpoint...} from the URL.
+  const originalUrl = new URL(request.url);
+  const pathAfterProxy = originalUrl.pathname.replace(/^\/*api\/*proxy\/*/i, "");
+  const segments = pathAfterProxy.split("/").filter(Boolean);
+  if (segments.length < 3) {
+    return jsonWithRequestId(400, "Expected /api/proxy/{orgSlug}/{projectSlug}/{endpoint...}", requestId);
   }
-  if (isSelfHost(normalized.hostname, serverEnv.PROXY_PUBLIC_HOST)) {
-    return jsonWithRequestId(403, "Host not allowed", requestId);
-  }
-  if (await isLocalOrPrivateHost(normalized.hostname)) {
-    return jsonWithRequestId(403, "Host not allowed", requestId);
-  }
+  const orgSlug = segments[0]!;
+  const projectSlug = segments[1]!;
+  const endpointPath = `/${segments.slice(2).join("/")}`;
 
-  const allowlist = parseProxyAllowlist(serverEnv.PROXY_ALLOWED_HOSTS);
-  if (allowlist.length === 0) {
-    return jsonWithRequestId(503, "Proxy host allowlist is not configured", requestId);
-  }
-  if (!isHostAllowlisted(normalized.hostname, allowlist)) {
-    return jsonWithRequestId(403, "Host not allowed", requestId);
+  // 2. Resolve project → OpenAPI spec → upstream URL + cost.
+  const target = await resolveProxyTarget(orgSlug, projectSlug, request.method, endpointPath);
+  if (!target) {
+    return jsonWithRequestId(404, "API not found or not published", requestId);
   }
 
-  let cost: number;
-  try {
-    cost = getHostCost(normalized.hostname);
-  } catch {
+  // 3. SSRF protection: reject local/private/self-host upstreams.
+  const upstreamHostname = extractHostname(target.upstreamUrl);
+  if (!upstreamHostname) {
+    return jsonWithRequestId(502, "Invalid upstream URL in API spec", requestId);
+  }
+  if (isSelfHost(upstreamHostname, serverEnv.PROXY_PUBLIC_HOST)) {
+    return jsonWithRequestId(403, "Host not allowed", requestId);
+  }
+  if (await isLocalOrPrivateHost(upstreamHostname)) {
     return jsonWithRequestId(403, "Host not allowed", requestId);
   }
 
-  const upstreamSecret = proxySecretHeader();
+  const cost = target.cost;
+  const upstreamSecret = normalizeProxySecret(serverEnv.PROXY_UPSTREAM_SECRET) ?? serverEnv.PROXY_UPSTREAM_SECRET;
 
-  // 2. Plugin gate (atomic guarded decrement on remaining > 0).
-  const { authServer } = await import("~/lib/server/auth");
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let verification: any;
+  // 4. Plugin gate (atomic guarded decrement on remaining > 0).
+  let verification: VerifyResult;
   try {
     verification = await authServer.api.verifyApiKey({
       body: { key: zeviumKey, permissions: { api: ["read"] } },
@@ -84,11 +77,8 @@ const proxyHandler = async (request: Request) => {
   }
 
   if (!verification.valid) {
-    const code = verification.error?.code as string | undefined;
+    const code = verification.error?.code;
     if (code === "RATE_LIMITED") {
-      // consumeRemaining already ran before consumeRateLimit; refund the
-      // decrement in a single UPDATE-by-hash to avoid the select→update race
-      // (two concurrent rate-limited calls both refunding the same row).
       const hashed = await defaultKeyHasher(zeviumKey);
       await db
         .update(schema.apikey)
@@ -97,29 +87,26 @@ const proxyHandler = async (request: Request) => {
       return jsonWithRequestId(429, "Rate limit exceeded", requestId);
     }
     if (code === "USAGE_EXCEEDED") return jsonWithRequestId(429, "Usage exceeded", requestId);
-    return jsonWithRequestId(
-      401,
-      (verification.error?.message as string | undefined) ?? "Failed to verify API key",
-      requestId,
-    );
+    const rawMessage = verification.error?.message;
+    return jsonWithRequestId(401, typeof rawMessage === "string" ? rawMessage : "Failed to verify API key", requestId);
   }
 
-  const key = verification.key as { id: string; referenceId?: string } | null;
+  const key = verification.key;
   if (!key?.referenceId) {
     return jsonWithRequestId(401, "API key has no owning user", requestId);
   }
   const userId = key.referenceId;
 
-  // 3. User-pool money gate (Redis SDK; non-atomic check+increment).
-  //    Lazy-create the Polar customer on first call so the user always has
-  //    one before the gate runs (covers users created before the plugin was
-  //    wired). If Polar is down, the gate surfaces 0 credits (which 402s).
-  await ensureUserPool(userId);
+  // 5. User-pool money gate.
+  try {
+    await ensureUserCustomer({ userId });
+  } catch {
+    // Swallowed: gate surfaces 0 credits (402) if Polar is down.
+  }
 
   const credited = await getUserCreditedUnits(userId);
   const reserved = await reserveCredits(userId, credited, cost);
   if (!reserved) {
-    // Refund the plugin's `remaining` decrement we already consumed.
     await db
       .update(schema.apikey)
       .set({ remaining: sql`${schema.apikey.remaining} + 1` })
@@ -127,24 +114,19 @@ const proxyHandler = async (request: Request) => {
     return jsonWithRequestId(402, "Insufficient credits", requestId);
   }
 
-  // 4. Build target URL and fetch.
-  const originalUrl = new URL(request.url);
-  const targetUrl = new URL(originalUrl);
-  targetUrl.protocol = "https:";
-  targetUrl.hostname = normalized.hostname;
-  targetUrl.port = normalized.port;
-  targetUrl.pathname = targetUrl.pathname.replace(/^\/*api\/*proxy/i, "");
+  // 6. Build target URL and fetch.
+  const targetUrl = new URL(target.upstreamUrl + originalUrl.search);
 
   const outboundHeaders = new Headers(request.headers);
   outboundHeaders.delete("x-zevium-key");
   outboundHeaders.delete("content-length");
   outboundHeaders.delete("cookie");
-  outboundHeaders.set("host", normalized.hostname);
+  outboundHeaders.set("host", upstreamHostname);
   outboundHeaders.set("x-zevium-request-id", requestId);
-  outboundHeaders.set("x-zevium-host", normalized.hostname);
+  outboundHeaders.set("x-zevium-host", upstreamHostname);
   outboundHeaders.set("x-zevium-proxy-secret", upstreamSecret);
 
-  // 5. State machine: reserve -> commit (2xx + body-complete) | refund (non-2xx / cancel / read err).
+  // 7. State machine: reserve -> commit (2xx) | refund (non-2xx / cancel).
   let phase: "reserved" | "committed" | "refunded" = "reserved";
 
   const refundBoth = async () => {
@@ -163,20 +145,16 @@ const proxyHandler = async (request: Request) => {
     if (phase !== "reserved") return;
     phase = "committed";
     try {
-      // Synchronous because route handlers cannot reach Cloudflare's
-      // ExecutionContext for `waitUntil`. Adds ~50-200 ms of Polar
-      // latency per 2xx call.
       await ingestProxyCall({
         costUnits: cost,
-        host: normalized.hostname,
+        host: upstreamHostname,
         method: request.method,
         requestId,
         status,
         userId,
       });
     } catch {
-      // Ingest failure is drift; the gate is already past. A periodic
-      // reconcile (v2) corrects the drift.
+      // Ingest failure is drift; periodic reconcile corrects it.
     }
   };
 
@@ -252,29 +230,14 @@ const proxyHandler = async (request: Request) => {
   });
 };
 
-/** Best-effort lazy Polar customer creation for legacy users. */
-async function ensureUserPool(userId: string): Promise<void> {
-  // The `@polar-sh/better-auth` plugin auto-creates the Polar customer on
-  // signup; this is only a backfill for users created before the plugin
-  // was wired. If Polar is down, the next gate call will retry. Errors
-  // are swallowed: the gate then sees 0 `creditedUnits` and returns 402.
-  try {
-    await ensureUserCustomer({ userId });
-  } catch {
-    // Swallowed: gate will surface 0 credits (which 402s) on failure.
-  }
-}
-
 export const Route = createFileRoute("/api/proxy/$")({
   server: {
     handlers: {
-      DELETE: ({ request }) => proxyHandler(request),
       GET: ({ request }) => proxyHandler(request),
-      HEAD: ({ request }) => proxyHandler(request),
-      OPTIONS: ({ request }) => proxyHandler(request),
-      PATCH: ({ request }) => proxyHandler(request),
       POST: ({ request }) => proxyHandler(request),
       PUT: ({ request }) => proxyHandler(request),
+      PATCH: ({ request }) => proxyHandler(request),
+      DELETE: ({ request }) => proxyHandler(request),
     },
   },
 });
