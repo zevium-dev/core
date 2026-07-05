@@ -47,7 +47,7 @@ Answer:
 
 ## Project Description
 
-**Zevium.dev** is a per-call API marketplace (RapidAPI model). Publishers publish APIs via projects with OpenAPI specs. Consumers pre-pay credits and are charged per API call through the proxy. Platform takes a cut, publishers earn the rest. See `product.md` for the full product spec.
+**Zevium.dev** is a per-call API marketplace (RapidAPI model). Publishers publish APIs via projects with OpenAPI specs. Consumers pre-pay credits and are charged per API call through the proxy. Platform takes a cut, publishers earn the rest. See `PRODUCT.md` for the full product spec.
 
 ## Technology Stack
 
