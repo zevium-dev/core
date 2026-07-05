@@ -2,20 +2,18 @@ import { defaultKeyHasher } from "@better-auth/api-key";
 import { createFileRoute } from "@tanstack/react-router";
 import { eq, sql } from "drizzle-orm";
 
-import { authServer } from "~/lib/server/auth";
 import { db, schema } from "~/db";
 import { serverEnv } from "~/env/server";
-import { getProxyHostConfig, normalizeHost } from "~/lib/server/proxy-cost";
-import { ensureUserCustomer, getUserCreditedUnits, ingestProxyCall } from "~/lib/server/polar";
-import { isLocalOrPrivateHost, isSelfHost, normalizeProxySecret } from "~/lib/server/proxy-security";
+import { getHostCost, normalizeHost } from "~/lib/server/proxy-cost";
 import { refundCredits, reserveCredits } from "~/lib/server/user-pool-gate";
-
-/** Shape consumed from better-auth's verifyApiKey result. */
-interface VerifyResult {
-  error: { code?: string; message?: unknown } | null;
-  key: { id: string; referenceId?: string } | null;
-  valid: boolean;
-}
+import { ensureUserCustomer, getUserCreditedUnits, ingestProxyCall } from "~/lib/server/polar";
+import {
+  isHostAllowlisted,
+  isLocalOrPrivateHost,
+  isSelfHost,
+  normalizeProxySecret,
+  parseProxyAllowlist,
+} from "~/lib/server/proxy-security";
 
 class UpstreamNonOK extends Error {
   response: Response;
@@ -27,6 +25,10 @@ class UpstreamNonOK extends Error {
 
 function jsonWithRequestId(status: number, message: string, requestId: string) {
   return Response.json({ error: message }, { headers: { "x-zevium-request-id": requestId }, status });
+}
+
+function proxySecretHeader(): string {
+  return normalizeProxySecret(serverEnv.PROXY_UPSTREAM_SECRET) ?? serverEnv.PROXY_UPSTREAM_SECRET;
 }
 
 const proxyHandler = async (request: Request) => {
@@ -51,10 +53,28 @@ const proxyHandler = async (request: Request) => {
   if (await isLocalOrPrivateHost(normalized.hostname)) {
     return jsonWithRequestId(403, "Host not allowed", requestId);
   }
-  const upstreamSecret = normalizeProxySecret(serverEnv.PROXY_UPSTREAM_SECRET) ?? serverEnv.PROXY_UPSTREAM_SECRET;
+
+  const allowlist = parseProxyAllowlist(serverEnv.PROXY_ALLOWED_HOSTS);
+  if (allowlist.length === 0) {
+    return jsonWithRequestId(503, "Proxy host allowlist is not configured", requestId);
+  }
+  if (!isHostAllowlisted(normalized.hostname, allowlist)) {
+    return jsonWithRequestId(403, "Host not allowed", requestId);
+  }
+
+  let cost: number;
+  try {
+    cost = getHostCost(normalized.hostname);
+  } catch {
+    return jsonWithRequestId(403, "Host not allowed", requestId);
+  }
+
+  const upstreamSecret = proxySecretHeader();
 
   // 2. Plugin gate (atomic guarded decrement on remaining > 0).
-  let verification: VerifyResult;
+  const { authServer } = await import("~/lib/server/auth");
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let verification: any;
   try {
     verification = await authServer.api.verifyApiKey({
       body: { key: zeviumKey, permissions: { api: ["read"] } },
@@ -64,8 +84,11 @@ const proxyHandler = async (request: Request) => {
   }
 
   if (!verification.valid) {
-    const code = verification.error?.code;
+    const code = verification.error?.code as string | undefined;
     if (code === "RATE_LIMITED") {
+      // consumeRemaining already ran before consumeRateLimit; refund the
+      // decrement in a single UPDATE-by-hash to avoid the select→update race
+      // (two concurrent rate-limited calls both refunding the same row).
       const hashed = await defaultKeyHasher(zeviumKey);
       await db
         .update(schema.apikey)
@@ -74,24 +97,20 @@ const proxyHandler = async (request: Request) => {
       return jsonWithRequestId(429, "Rate limit exceeded", requestId);
     }
     if (code === "USAGE_EXCEEDED") return jsonWithRequestId(429, "Usage exceeded", requestId);
-    const rawMessage = verification.error?.message;
-    return jsonWithRequestId(401, typeof rawMessage === "string" ? rawMessage : "Failed to verify API key", requestId);
+    return jsonWithRequestId(
+      401,
+      (verification.error?.message as string | undefined) ?? "Failed to verify API key",
+      requestId,
+    );
   }
 
-  const key = verification.key;
+  const key = verification.key as { id: string; referenceId?: string } | null;
   if (!key?.referenceId) {
     return jsonWithRequestId(401, "API key has no owning user", requestId);
   }
   const userId = key.referenceId;
 
-  // 3. DB-backed host config: is this host allowed for this user + what's the cost?
-  const hostConfig = await getProxyHostConfig(userId, normalized.hostname);
-  if (!hostConfig) {
-    return jsonWithRequestId(403, "Host not allowed", requestId);
-  }
-  const cost = hostConfig.unitCost;
-
-  // 4. User-pool money gate (Redis SDK; non-atomic check+increment).
+  // 3. User-pool money gate (Redis SDK; non-atomic check+increment).
   //    Lazy-create the Polar customer on first call so the user always has
   //    one before the gate runs (covers users created before the plugin was
   //    wired). If Polar is down, the gate surfaces 0 credits (which 402s).
