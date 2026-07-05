@@ -1,173 +1,243 @@
+import { defaultKeyHasher } from "@better-auth/api-key";
 import { createFileRoute } from "@tanstack/react-router";
-import { lookup } from "node:dns/promises";
-import isPrivate from "private-ip";
+import { eq, sql } from "drizzle-orm";
 
-// Placeholder: Replace with a real DB fetch for the proxy secret
-async function getProxySecretFromDb(): Promise<string> {
-  // TODO: Replace with real DB fetch
-  return await Promise.resolve("replace-me-with-secret-from-db");
+import { authServer } from "~/lib/server/auth";
+import { db, schema } from "~/db";
+import { serverEnv } from "~/env/server";
+import { extractHostname, resolveProxyTarget } from "~/lib/server/proxy-cost";
+import { ensureUserCustomer, getUserCreditedUnits, ingestProxyCall } from "~/lib/server/polar";
+import { isLocalOrPrivateHost, isSelfHost, normalizeProxySecret } from "~/lib/server/proxy-security";
+import { refundCredits, reserveCredits } from "~/lib/server/user-pool-gate";
+
+/** Shape consumed from better-auth's verifyApiKey result. */
+interface VerifyResult {
+  error: { code?: string; message?: unknown } | null;
+  key: { id: string; referenceId?: string } | null;
+  valid: boolean;
 }
 
-// Placeholder: Replace with a real DB lookup for host allowlist
-async function isHostAllowlistedInDb(_hostname: string): Promise<boolean> {
-  // TODO: Replace with real DB lookup
-  return await Promise.resolve(true);
-}
-
-// Robust local/private host detection using DNS resolution and IP checks
-async function isLocalOrPrivateHost(hostname: string): Promise<boolean> {
-  const lower = hostname.toLowerCase();
-  if (lower === "localhost" || lower === "127.0.0.1" || lower === "::1") return true;
-  try {
-    //I think this is slowlying down the proxy . TODO: Find a way to cache this.
-    const results = await lookup(hostname, { all: true, verbatim: true });
-    for (const { address } of results) {
-      if (isPrivate(address) || isLoopback(address)) return true;
-    }
-    return false;
-  } catch (_error) {
-    // Fail closed: treat as local/private on resolution error
-    return true;
+class UpstreamNonOK extends Error {
+  response: Response;
+  constructor(response: Response) {
+    super("Upstream response not OK");
+    this.response = response;
   }
-}
-
-function isLoopback(addr: string): boolean {
-  return (
-    /^(::f{4}:)?127\.([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})/.test(addr) ||
-    addr.startsWith("0177.") ||
-    /^0x7f\./i.test(addr) ||
-    /^fe80::1$/i.test(addr) ||
-    /^::1$/.test(addr) ||
-    /^::$/.test(addr)
-  );
 }
 
 function jsonWithRequestId(status: number, message: string, requestId: string) {
-  return Response.json(
-    { error: message },
-    {
-      headers: { "x-zevium-request-id": requestId },
-      status,
-    },
-  );
-}
-
-// (Previous hostname-only private/local checks removed in favor of robust DNS/IP validation.)
-
-function normalizeHostUrl(input: string): null | URL {
-  try {
-    const trimmed = input.trim();
-    const withScheme = /^(https?:)?\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
-    const url = new URL(withScheme);
-    return url;
-  } catch {
-    return null;
-  }
+  return Response.json({ error: message }, { headers: { "x-zevium-request-id": requestId }, status });
 }
 
 const proxyHandler = async (request: Request) => {
   const requestId = crypto.randomUUID();
-
   const zeviumKey = request.headers.get("x-zevium-key");
-  if (!zeviumKey) {
-    return jsonWithRequestId(401, "Missing X-Zevium-Key", requestId);
+  if (!zeviumKey) return jsonWithRequestId(401, "Missing X-Zevium-Key", requestId);
+
+  // 1. Parse {orgSlug}/{projectSlug}/{endpoint...} from the URL.
+  const originalUrl = new URL(request.url);
+  const pathAfterProxy = originalUrl.pathname.replace(/^\/*api\/*proxy\/*/i, "");
+  const segments = pathAfterProxy.split("/").filter(Boolean);
+  if (segments.length < 3) {
+    return jsonWithRequestId(400, "Expected /api/proxy/{orgSlug}/{projectSlug}/{endpoint...}", requestId);
+  }
+  const orgSlug = segments[0]!;
+  const projectSlug = segments[1]!;
+  const endpointPath = `/${segments.slice(2).join("/")}`;
+
+  // 2. Resolve project → OpenAPI spec → upstream URL + cost.
+  const target = await resolveProxyTarget(orgSlug, projectSlug, request.method, endpointPath);
+  if (!target) {
+    return jsonWithRequestId(404, "API not found or not published", requestId);
   }
 
-  const zeviumHostHeader = request.headers.get("x-zevium-host");
-  if (!zeviumHostHeader) {
-    return jsonWithRequestId(400, "Missing X-Zevium-Host", requestId);
+  // 3. SSRF protection: reject local/private/self-host upstreams.
+  const upstreamHostname = extractHostname(target.upstreamUrl);
+  if (!upstreamHostname) {
+    return jsonWithRequestId(502, "Invalid upstream URL in API spec", requestId);
+  }
+  if (isSelfHost(upstreamHostname, serverEnv.PROXY_PUBLIC_HOST)) {
+    return jsonWithRequestId(403, "Host not allowed", requestId);
+  }
+  if (await isLocalOrPrivateHost(upstreamHostname)) {
+    return jsonWithRequestId(403, "Host not allowed", requestId);
   }
 
-  // Verify API key with Better Auth
+  const cost = target.cost;
+  const upstreamSecret = normalizeProxySecret(serverEnv.PROXY_UPSTREAM_SECRET) ?? serverEnv.PROXY_UPSTREAM_SECRET;
 
-  const { authServer } = await import("~/lib/server/auth");
-  const verification = await authServer.api.verifyApiKey({
-    body: { key: zeviumKey, permissions: { api: ["read"] } },
-  });
+  // 4. Plugin gate (atomic guarded decrement on remaining > 0).
+  let verification: VerifyResult;
+  try {
+    verification = await authServer.api.verifyApiKey({
+      body: { key: zeviumKey, permissions: { api: ["read"] } },
+    });
+  } catch (err) {
+    return jsonWithRequestId(500, err instanceof Error ? err.message : "verifyApiKey failed", requestId);
+  }
 
   if (!verification.valid) {
-    return jsonWithRequestId(401, "Failed to verify API key", requestId);
+    const code = verification.error?.code;
+    if (code === "RATE_LIMITED") {
+      const hashed = await defaultKeyHasher(zeviumKey);
+      await db
+        .update(schema.apikey)
+        .set({ remaining: sql`${schema.apikey.remaining} + 1` })
+        .where(eq(schema.apikey.key, hashed));
+      return jsonWithRequestId(429, "Rate limit exceeded", requestId);
+    }
+    if (code === "USAGE_EXCEEDED") return jsonWithRequestId(429, "Usage exceeded", requestId);
+    const rawMessage = verification.error?.message;
+    return jsonWithRequestId(401, typeof rawMessage === "string" ? rawMessage : "Failed to verify API key", requestId);
   }
 
-  if (verification.error) {
-    const rawMessage = verification.error.message;
-    const errorMessage =
-      typeof rawMessage === "string" ? rawMessage : (rawMessage?.message ?? "Failed to verify API key");
-    return jsonWithRequestId(500, errorMessage, requestId);
+  const key = verification.key;
+  if (!key?.referenceId) {
+    return jsonWithRequestId(401, "API key has no owning user", requestId);
+  }
+  const userId = key.referenceId;
+
+  // 5. User-pool money gate.
+  try {
+    await ensureUserCustomer({ userId });
+  } catch {
+    // Swallowed: gate surfaces 0 credits (402) if Polar is down.
   }
 
-  // Normalize and validate host
-  const normalized = normalizeHostUrl(zeviumHostHeader);
-  if (!normalized) {
-    return jsonWithRequestId(400, "Invalid X-Zevium-Host", requestId);
-  }
-  if (normalized.protocol !== "https:") {
-    return jsonWithRequestId(400, "Only HTTPS hosts are allowed", requestId);
-  }
-  // Additional robust DNS/IP-based private/local check
-  if (await isLocalOrPrivateHost(normalized.hostname)) {
-    return jsonWithRequestId(403, "Host not allowed", requestId);
+  const credited = await getUserCreditedUnits(userId);
+  const reserved = await reserveCredits(userId, credited, cost);
+  if (!reserved) {
+    await db
+      .update(schema.apikey)
+      .set({ remaining: sql`${schema.apikey.remaining} + 1` })
+      .where(eq(schema.apikey.id, key.id));
+    return jsonWithRequestId(402, "Insufficient credits", requestId);
   }
 
-  // Allowlist check (placeholder)
-  const isAllowlisted = await isHostAllowlistedInDb(normalized.hostname);
-  if (!isAllowlisted) {
-    return jsonWithRequestId(403, "Host not allowed", requestId);
-  }
+  // 6. Build target URL and fetch.
+  const targetUrl = new URL(target.upstreamUrl + originalUrl.search);
 
-  // Build target URL by rewriting the incoming URL
-  const originalUrl = new URL(request.url);
-  const targetUrl = new URL(originalUrl);
-  targetUrl.protocol = "https";
-  targetUrl.hostname = normalized.hostname;
-  targetUrl.port = normalized.port || "443";
-  targetUrl.pathname = targetUrl.pathname.replace(/^\/*api\/*proxy/i, "");
-
-  // Prepare outbound headers
   const outboundHeaders = new Headers(request.headers);
   outboundHeaders.delete("x-zevium-key");
   outboundHeaders.delete("content-length");
   outboundHeaders.delete("cookie");
-  outboundHeaders.set("host", normalized.hostname);
+  outboundHeaders.set("host", upstreamHostname);
   outboundHeaders.set("x-zevium-request-id", requestId);
-  outboundHeaders.set("x-zevium-host", normalized.hostname);
-  const proxySecret = await getProxySecretFromDb();
-  if (proxySecret) outboundHeaders.set("x-zevium-proxy-secret", proxySecret);
+  outboundHeaders.set("x-zevium-host", upstreamHostname);
+  outboundHeaders.set("x-zevium-proxy-secret", upstreamSecret);
 
+  // 7. State machine: reserve -> commit (2xx) | refund (non-2xx / cancel).
+  let phase: "reserved" | "committed" | "refunded" = "reserved";
+
+  const refundBoth = async () => {
+    if (phase !== "reserved") return;
+    phase = "refunded";
+    await Promise.allSettled([
+      refundCredits(userId, cost),
+      db
+        .update(schema.apikey)
+        .set({ remaining: sql`${schema.apikey.remaining} + 1` })
+        .where(eq(schema.apikey.id, key.id)),
+    ]);
+  };
+
+  const commitAndIngest = async (status: number) => {
+    if (phase !== "reserved") return;
+    phase = "committed";
+    try {
+      await ingestProxyCall({
+        costUnits: cost,
+        host: upstreamHostname,
+        method: request.method,
+        requestId,
+        status,
+        userId,
+      });
+    } catch {
+      // Ingest failure is drift; periodic reconcile corrects it.
+    }
+  };
+
+  const timeoutSignal = AbortSignal.timeout(serverEnv.PROXY_REQUEST_TIMEOUT_MS);
+  const combinedSignal = AbortSignal.any([timeoutSignal, request.signal]);
+
+  let upstream: Response;
   try {
-    const upstream = await fetch(targetUrl, {
+    upstream = await fetch(targetUrl, {
       body: request.body,
       duplex: "half",
       headers: outboundHeaders,
       method: request.method,
+      redirect: "error",
+      signal: combinedSignal,
     });
+  } catch (err) {
+    await refundBoth();
+    if (err instanceof Error && err.name === "TimeoutError") {
+      return jsonWithRequestId(504, "Upstream request timed out", requestId);
+    }
+    if (err instanceof Error && err.name === "TypeError" && /redirect/i.test(err.message)) {
+      return jsonWithRequestId(502, "Upstream redirected (not allowed)", requestId);
+    }
+    return jsonWithRequestId(502, "Upstream request failed", requestId);
+  }
 
-    const responseHeaders = new Headers(upstream.headers);
-    // Ensure request id is included in the client response
-    responseHeaders.set("x-zevium-request-id", requestId);
-    // Never leak the proxy secret back to the client
-    responseHeaders.delete("x-zevium-proxy-secret");
+  if (!upstream.ok) {
+    await refundBoth();
+    throw new UpstreamNonOK(upstream);
+  }
 
-    return new Response(upstream.body, {
+  const responseHeaders = new Headers(upstream.headers);
+  responseHeaders.set("x-zevium-request-id", requestId);
+  responseHeaders.delete("x-zevium-proxy-secret");
+
+  if (!upstream.body) {
+    await commitAndIngest(upstream.status);
+    return new Response(null, {
       headers: responseHeaders,
       status: upstream.status,
       statusText: upstream.statusText,
     });
-  } catch (_error) {
-    return jsonWithRequestId(502, "Upstream request failed", requestId);
   }
+
+  const reader = upstream.body.getReader();
+  const stream = new ReadableStream<Uint8Array>({
+    async cancel() {
+      await reader.cancel().catch(() => undefined);
+      await refundBoth();
+    },
+    async pull(controller) {
+      try {
+        const { done, value } = await reader.read();
+        if (done) {
+          await commitAndIngest(upstream.status);
+          controller.close();
+          return;
+        }
+        if (value) controller.enqueue(value);
+      } catch (err) {
+        await reader.cancel().catch(() => undefined);
+        await refundBoth();
+        controller.error(err instanceof Error ? err : new Error(String(err)));
+      }
+    },
+  });
+
+  return new Response(stream, {
+    headers: responseHeaders,
+    status: upstream.status,
+    statusText: upstream.statusText,
+  });
 };
 
 export const Route = createFileRoute("/api/proxy/$")({
   server: {
     handlers: {
-      DELETE: ({ request }) => proxyHandler(request),
       GET: ({ request }) => proxyHandler(request),
-      HEAD: ({ request }) => proxyHandler(request),
-      OPTIONS: ({ request }) => proxyHandler(request),
-      PATCH: ({ request }) => proxyHandler(request),
       POST: ({ request }) => proxyHandler(request),
       PUT: ({ request }) => proxyHandler(request),
+      PATCH: ({ request }) => proxyHandler(request),
+      DELETE: ({ request }) => proxyHandler(request),
     },
   },
 });

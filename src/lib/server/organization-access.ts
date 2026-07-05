@@ -5,6 +5,7 @@ import { defaultStatements } from "better-auth/plugins/organization/access";
 // satisfy Better Auth's Subset typing (it expects non-readonly arrays).
 const statement = {
   ac: [...defaultStatements.ac],
+  apiKey: ["create", "read", "update", "delete"],
   invitation: [...defaultStatements.invitation],
   member: [...defaultStatements.member],
   organization: [...defaultStatements.organization],
@@ -19,13 +20,17 @@ export const ac = createAccessControl(statement);
 export const owner = ac.newRole(statement);
 export const admin = ac.newRole(statement);
 export const developer = ac.newRole({
+  apiKey: ["read"],
   invitation: ["create", "cancel"],
   team: ["create", "update"],
 });
 export const member = ac.newRole({
+  apiKey: ["read"],
   invitation: ["create", "cancel"],
 });
-export const guest = member;
+export const guest = ac.newRole({
+  apiKey: ["read"],
+});
 
 export const roles = {
   admin,

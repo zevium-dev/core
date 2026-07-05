@@ -24,6 +24,7 @@ export default defineConfig({
   // build: { sourcemap: true },
   plugins,
   resolve: { tsconfigPaths: true },
+  server: { allowedHosts: true },
 
   test: {
     coverage: {

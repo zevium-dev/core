@@ -34,8 +34,12 @@ export const ApiKeyInsertZod = createInsertSchema(schema.apikey).extend({ metada
 export const TwoFactorSelectZod = createSelectSchema(schema.twoFactor);
 export const TwoFactorInsertZod = createInsertSchema(schema.twoFactor);
 
-export const OrganizationSelectZod = createSelectSchema(schema.organization).extend({ metadata: MetadataZod });
-export const OrganizationInsertZod = createInsertSchema(schema.organization).extend({ metadata: MetadataZod });
+export const OrganizationSelectZod = createSelectSchema(schema.organization).extend({
+  metadata: MetadataZod,
+});
+export const OrganizationInsertZod = createInsertSchema(schema.organization).extend({
+  metadata: MetadataZod,
+});
 
 export const MemberSelectZod = createSelectSchema(schema.member);
 export const MemberInsertZod = createInsertSchema(schema.member);
@@ -71,8 +75,12 @@ export const ProjectTagInsertZod = createInsertSchema(schema.projectTag);
 export const OrganizationTagSelectZod = createSelectSchema(schema.organizationTag);
 export const OrganizationTagInsertZod = createInsertSchema(schema.organizationTag);
 
-export const OpenAPISchemaSelectZod = createSelectSchema(schema.openAPISchema).extend({ metadata: MetadataZod });
-export const OpenAPISchemaInsertZod = createInsertSchema(schema.openAPISchema).extend({ metadata: MetadataZod });
+export const OpenAPISchemaSelectZod = createSelectSchema(schema.openAPISchema).extend({
+  metadata: MetadataZod,
+});
+export const OpenAPISchemaInsertZod = createInsertSchema(schema.openAPISchema).extend({
+  metadata: MetadataZod,
+});
 
 export const OpenAPISchemaVersionSelectZod = createSelectSchema(schema.openAPISchemaVersion);
 export const OpenAPISchemaVersionInsertZod = createInsertSchema(schema.openAPISchemaVersion);

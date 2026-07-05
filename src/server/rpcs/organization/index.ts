@@ -104,7 +104,12 @@ export const organizationRouter = router({
         },
         headers: ctx.raw.req.headers,
       });
-      return { ...org, createdAt: org.createdAt, logo: org.logo ?? null, members: org.members.filter(Boolean) };
+      return {
+        ...org,
+        createdAt: org.createdAt,
+        logo: org.logo ?? null,
+        members: org.members.filter(Boolean),
+      } as never;
     }),
 
   delete: secureProcedure
@@ -168,6 +173,8 @@ export const organizationRouter = router({
         logo: org.logo ?? null,
         members: org.members.map((m) => ({ ...m, user: { ...m.user, image: m.user.image ?? null } })),
         metadata: MetadataZod.parse(org.metadata),
+        name: org.name,
+        slug: org.slug,
       };
     }),
 
@@ -228,6 +235,8 @@ export const organizationRouter = router({
         createdAt: org.createdAt,
         logo: org.logo ?? null,
         metadata: MetadataZod.parse(org.metadata),
+        name: org.name,
+        slug: org.slug,
       }));
     }),
 
@@ -373,6 +382,8 @@ export const organizationRouter = router({
         ...org,
         logo: org.logo ?? null,
         metadata: MetadataZod.parse(org.metadata),
+        name: org.name,
+        slug: org.slug,
       };
     }),
 

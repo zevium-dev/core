@@ -13,11 +13,16 @@ import { getSidebarDefaultOpen } from "~/lib/sidebar-state";
 import { seo } from "~/lib/utils";
 import appCss from "~/styles/app.css?url";
 
+/* eslint-disable perfectionist/sort-objects */
 export const Route = createRootRouteWithContext<{
   queryClient: QueryClient;
   trpc: TrpcOptionsProxy;
 }>()({
+  loader: async () => ({
+    sidebarDefaultOpen: await getSidebarDefaultOpen(),
+  }),
   errorComponent: DefaultCatchBoundary,
+  notFoundComponent: () => <NotFound />,
   head: () => ({
     links: [
       { href: appCss, rel: "stylesheet" },
@@ -31,14 +36,9 @@ export const Route = createRootRouteWithContext<{
       ...seo({ description: `zevium.dev`, title: "zevium.dev" }),
     ],
   }),
-  loader: async () => {
-    return {
-      sidebarDefaultOpen: await getSidebarDefaultOpen(),
-    };
-  },
-  notFoundComponent: () => <NotFound />,
   shellComponent: RootDocument,
 });
+/* eslint-enable perfectionist/sort-objects */
 
 function RootDocument({ children }: { children: React.ReactNode }) {
   const { sidebarDefaultOpen } = Route.useLoaderData();

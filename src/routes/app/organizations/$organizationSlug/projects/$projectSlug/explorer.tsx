@@ -1,7 +1,7 @@
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { ClientOnly, createFileRoute, Link } from "@tanstack/react-router";
 import { KeyRound, Link2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 import { ScalarApiReference } from "~/components/api-viewer/scalar-api-reference";
 import { PageHeaderContent } from "~/components/sidebar";
@@ -18,9 +18,19 @@ interface OpenApiServer {
   url?: string;
 }
 
-const getStorageValue = (key: string) => {
-  if (typeof window === "undefined") return "";
-  return localStorage.getItem(key) ?? "";
+const getStorageValue = (storage: null | Storage, key: string) => {
+  return storage?.getItem(key) ?? "";
+};
+
+const setStorageValue = (storage: null | Storage, key: string, value: string) => {
+  if (!storage) return;
+
+  if (value.trim().length === 0) {
+    storage.removeItem(key);
+    return;
+  }
+
+  storage.setItem(key, value);
 };
 
 const getHostFromServerUrl = (serverUrl?: string) => {
@@ -54,25 +64,11 @@ export const Route = createFileRoute("/app/organizations/$organizationSlug/proje
   },
 });
 
-function RouteComponent() {
-  const { organizationSlug, projectSlug } = Route.useParams();
-  const trpc = useTRPC();
-
-  const projectQuery = useSuspenseQuery(
-    trpc.project.get.queryOptions({
-      organizationSlug,
-      projectSlug,
-    }),
-  );
-
-  const specUrl = `/api/projects/${encodeURIComponent(organizationSlug)}/${encodeURIComponent(projectSlug)}/openapi`;
-  const hostStorageKey = `zevium:api-explorer:host:${organizationSlug}:${projectSlug}`;
-
-  const [apiKey, setApiKey] = useState(() => getStorageValue(API_KEY_STORAGE_KEY));
-  const [upstreamHost, setUpstreamHost] = useState(() => getStorageValue(hostStorageKey));
+function ExplorerClientContent({ hostStorageKey, specUrl }: { hostStorageKey: string; specUrl: string }) {
+  const [apiKey, setApiKey] = useState(() => getStorageValue(window.sessionStorage, API_KEY_STORAGE_KEY));
+  const [upstreamHost, setUpstreamHost] = useState(() => getStorageValue(window.localStorage, hostStorageKey));
 
   const detectedHostQuery = useQuery({
-    enabled: typeof window !== "undefined",
     queryFn: async () => {
       const response = await fetch(specUrl, { credentials: "include" });
       if (!response.ok) {
@@ -82,7 +78,7 @@ function RouteComponent() {
       const body = (await response.json()) as { servers?: Array<OpenApiServer> };
       return getHostFromServerUrl(body.servers?.at(0)?.url);
     },
-    queryKey: ["api-explorer-detected-host", organizationSlug, projectSlug],
+    queryKey: ["api-explorer-detected-host", specUrl],
     staleTime: 60_000,
   });
 
@@ -90,22 +86,8 @@ function RouteComponent() {
   const hostPlaceholder =
     detectedHostQuery.data && detectedHostQuery.data.length > 0 ? detectedHostQuery.data : "api.example.com";
 
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    localStorage.setItem(API_KEY_STORAGE_KEY, apiKey);
-  }, [apiKey]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    localStorage.setItem(hostStorageKey, upstreamHost);
-  }, [hostStorageKey, upstreamHost]);
-
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-6 p-4 sm:p-6">
-      <PageHeaderContent>
-        <Typography variant="large">{projectQuery.data.name} &gt; API Explorer</Typography>
-      </PageHeaderContent>
-
+    <>
       <Card className="shrink-0">
         <CardHeader>
           <CardTitle>Try Requests</CardTitle>
@@ -122,6 +104,7 @@ function RouteComponent() {
                 autoComplete="off"
                 className="pl-9"
                 id="zevium-api-key"
+                onBlur={(event) => setStorageValue(window.sessionStorage, API_KEY_STORAGE_KEY, event.target.value)}
                 onChange={(event) => setApiKey(event.target.value)}
                 placeholder="zev_..."
                 type="password"
@@ -138,6 +121,7 @@ function RouteComponent() {
                 autoComplete="off"
                 className="pl-9"
                 id="upstream-host"
+                onBlur={(event) => setStorageValue(window.localStorage, hostStorageKey, event.target.value)}
                 onChange={(event) => setUpstreamHost(event.target.value)}
                 placeholder={hostPlaceholder}
                 value={upstreamHost}
@@ -175,6 +159,69 @@ function RouteComponent() {
           />
         </CardContent>
       </Card>
+    </>
+  );
+}
+
+function ExplorerFallback() {
+  return (
+    <>
+      <Card className="shrink-0">
+        <CardHeader>
+          <CardTitle>Try Requests</CardTitle>
+          <CardDescription>
+            Set your API key and upstream host once, then use Scalar&apos;s request panel to test endpoints.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-4 sm:grid-cols-2">
+          <div className="space-y-2">
+            <Label htmlFor="zevium-api-key-fallback">Zevium API Key</Label>
+            <Input autoComplete="off" className="pl-9" disabled id="zevium-api-key-fallback" placeholder="zev_..." />
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="upstream-host-fallback">Upstream Host</Label>
+            <Input
+              autoComplete="off"
+              className="pl-9"
+              disabled
+              id="upstream-host-fallback"
+              placeholder="api.example.com"
+            />
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="overflow-hidden">
+        <CardContent className="min-h-[70vh] p-0" />
+      </Card>
+    </>
+  );
+}
+
+function RouteComponent() {
+  const { organizationSlug, projectSlug } = Route.useParams();
+  const trpc = useTRPC();
+
+  const projectQuery = useSuspenseQuery(
+    trpc.project.get.queryOptions({
+      organizationSlug,
+      projectSlug,
+    }),
+  );
+
+  const specUrl = `/api/projects/${encodeURIComponent(organizationSlug)}/${encodeURIComponent(projectSlug)}/openapi`;
+  const hostStorageKey = `zevium:api-explorer:host:${organizationSlug}:${projectSlug}`;
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col gap-6 p-4 sm:p-6">
+      <PageHeaderContent>
+        <Typography variant="large">{projectQuery.data.name} &gt; API Explorer</Typography>
+      </PageHeaderContent>
+
+      <ClientOnly fallback={<ExplorerFallback />}>
+        <ExplorerClientContent hostStorageKey={hostStorageKey} key={hostStorageKey} specUrl={specUrl} />
+      </ClientOnly>
     </div>
   );
 }

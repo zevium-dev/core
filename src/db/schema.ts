@@ -114,6 +114,7 @@ export const apikey = sqliteTable(
     rateLimitTimeWindow: integer("rate_limit_time_window").default(86400000).notNull(),
     refillAmount: integer("refill_amount"),
     refillInterval: integer("refill_interval"),
+    referenceId: text("reference_id").notNull(), // orgId or userId
     remaining: integer("remaining"),
     requestCount: integer("request_count").default(0).notNull(),
     start: text("start"),
@@ -124,7 +125,11 @@ export const apikey = sqliteTable(
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
   },
-  (self) => [index("apikey_user_id_index").on(self.userId), uniqueIndex("apikey_key_index").on(self.key)],
+  (self) => [
+    index("apikey_user_id_index").on(self.userId),
+    index("apikey_reference_id_index").on(self.referenceId),
+    uniqueIndex("apikey_key_index").on(self.key),
+  ],
 );
 
 // === Two-Factor Authentication =====

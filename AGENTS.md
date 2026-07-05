@@ -47,7 +47,7 @@ Answer:
 
 ## Project Description
 
-**Zevium.dev** is a modern API management and integration platform built with cutting-edge web technologies. The platform serves as an API hub that allows developers to manage, monitor, and integrate various APIs for their projects. It features project management, organization management, API documentation, and collaborative team features.
+**Zevium.dev** is a per-call API marketplace (RapidAPI model). Publishers publish APIs via projects with OpenAPI specs. Consumers pre-pay credits and are charged per API call through the proxy. Platform takes a cut, publishers earn the rest. See `PRODUCT.md` for the full product spec.
 
 ## Technology Stack
 
@@ -120,7 +120,7 @@ src/
 │   ├── mcp/             # MCP routes
 │   └── p/               # Public organization pages
 ├── server/              # Backend logic
-│   ├── rpcs/            # tRPC routers (audit, example, organization, project, projectSecret, request, tag, user-preference, openapi-schema)
+│   ├── rpcs/            # tRPC routers (audit, credits, example, orgKey, organization, project, projectSecret, request, tag, user-preference, openapi-schema)
 │   ├── context.ts       # Request context creation
 │   └── orpc.tsx         # OpenAPI documentation generation
 ├── db/                  # Database schema, permissions, roles, Zod helpers
@@ -133,7 +133,7 @@ src/
 │   ├── hash/            # Hashing utilities
 │   ├── polyfill/        # Polyfills
 │   ├── query-client/    # React Query client setup
-│   ├── server/          # Server-side utilities
+│   ├── server/          # Server-side utilities (polar, user-pool-gate, proxy-cost, proxy-security, redis-keys, kv, auth)
 │   └── utils/           # Helper functions
 ├── hooks/               # Custom React hooks
 ├── env/                 # Environment variable validation
@@ -162,6 +162,17 @@ public/                  # Static assets
 - Automatic documentation with Scalar API reference
 - Error handling with proper HTTP status codes
 - Input validation using Zod schemas
+
+#### Billing (Polar Credits, user-scoped)
+
+- **User-scoped prepaid credits** via `@polar-sh/better-auth` `polar()` plugin; Polar customer `externalId = userId`, auto-created on signup
+- **Top-up via plugin checkout** (`POST /api/auth/checkout`) with FIXED one-time Polar products (each grants fixed `units` via a `meter_credit` benefit). Product IDs exposed to the browser via `VITE_PUBLIC_POLAR_TOPUP_PRODUCTS`.
+- **Per-call credit reserve**: per-user Redis gate (SDK-only, no Lua) `creditedUnits - userConsumed >= cost`
+- **Per-key rate limiting**: `@better-auth/api-key` plugin (60 req/min, `remaining` quota, no refill, `references: "user"` → keys user-owned, one key per user enforced via `apikey_one_per_user` unique index)
+- **Proxy billing flow**: resolve `{orgSlug}/{projectSlug}` from URL → load published OpenAPI spec → extract `servers[0].url` (upstream) + `x-zevium-cost` (per-endpoint pricing) → verify API key → resolve `userId` from `key.referenceId` → reserve user pool → fetch upstream → ingest `proxy_call` event (`externalCustomerId = userId`) on 2xx + body-complete
+- **Key files**: `src/lib/server/polar.ts`, `src/lib/server/user-pool-gate.ts`, `src/lib/server/proxy-cost.ts`, `src/lib/server/auth.tsx` (plugin wiring)
+- **RPCs**: `credits` (getBalance, listTopUps, listCharges, listPerKeyUsage — all user-scoped, no `organizationId`), `userKey` (create, list, update, delete)
+- **Webhook**: `POST /api/auth/polar/webhooks` (plugin-mounted) — `order.paid`, `order.refunded`, `customer.state_changed` invalidate the per-user `creditedUnits` cache
 
 #### Database Layer
 
@@ -197,9 +208,10 @@ pnpm run generate-routes
 #### Browser Testing Login (Local)
 
 - For manual browser testing on localhost, use `http://localhost:5173`.
-- Test login credentials:
-  - Email: `tnfssc@gmail.com`
-  - Password: `1234qwer`
+- Seed credentials (run `pnpm db:seed` first):
+  - Email: `user@example.com`
+  - Password: `password`
+- These are created by `scripts/seed.ts` — idempotent, safe to re-run.
 
 #### Internal Dev/Test Routes
 
@@ -228,11 +240,16 @@ This command runs Prettier and ESLint fixes across the codebase to ensure:
 ### Database Management
 
 ```bash
-# Generate migrations
+# Generate migrations (after schema changes)
 pnpm drizzle-kit generate
 
-# Apply migrations
-pnpm drizzle-kit migrate
+# Apply migrations to the database
+pnpm db:migrate
+
+# Seed default user + organization (idempotent, safe to re-run)
+# Creates: user@example.com / password + test-org organization + owner membership
+# Used for: local dev, CI test setup, fresh environments
+pnpm db:seed
 ```
 
 ## Contribution Guidelines

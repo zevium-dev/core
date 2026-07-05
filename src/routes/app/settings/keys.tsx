@@ -1,7 +1,7 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { Check, Copy, Info, MoreHorizontal, Pencil, Plus, Trash2 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 
 import { Button } from "~/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
@@ -24,182 +24,132 @@ import { Input } from "~/components/ui/input";
 import { Label } from "~/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "~/components/ui/table";
 import { useCopy } from "~/hooks/use-copy";
-import { auth } from "~/lib/auth";
-
-// Types
-interface ApiKeyRecord {
-  createdAt: Date;
-  enabled: boolean | null;
-  id: string;
-  key?: string; // full key value (only available on creation)
-  lastRequest: Date | null;
-  lastUsed: Date | null;
-  limit: string; // e.g. "Unlimited" or custom string like "1000 req/day"
-  name: null | string;
-  prefix: null | string;
-  requestCount: number;
-  start: null | string;
-  usage: string; // formatted usage string
-}
-
-interface BetterAuthApiKey {
-  createdAt: Date;
-  enabled: boolean;
-  expiresAt: Date | null;
-  id: string;
-  key?: string;
-  lastRequest?: Date | null;
-  lastUsed?: Date | null;
-  metadata: null | Record<string, unknown>;
-  name: null | string;
-  permissions: null | Record<string, Array<string>>;
-  prefix: null | string;
-  refillAmount: null | number;
-  refillInterval: null | number;
-  requestCount?: number;
-  start: null | string;
-  updatedAt: Date;
-  userId?: string;
-}
+import { useTRPC } from "~/lib/trpc";
 
 export const Route = createFileRoute("/app/settings/keys")({
   component: ApiKeysComponent,
 });
 
+interface ApiKeyRecord {
+  createdAt: Date | string;
+  enabled: boolean | null;
+  id: string;
+  key?: string; // full key value (only available on creation)
+  lastRequest: Date | string | null;
+  name: null | string;
+  prefix: null | string;
+  remaining: number | null;
+  requestCount: number | null;
+  start: null | string;
+}
+
 function ApiKeysComponent() {
-  // State
+  const trpc = useTRPC();
+  const queryClient = useQueryClient();
+  const [, copy] = useCopy();
+
+  // UI state
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [editingKey, setEditingKey] = useState<ApiKeyRecord | null>(null);
   const [newKeyName, setNewKeyName] = useState("");
-  const [newKeyLimit, setNewKeyLimit] = useState(""); // user input for credit limit (money)
-  const [, copy] = useCopy();
-  const [isPending, setIsPending] = useState(false);
   const [newlyCreatedKey, setNewlyCreatedKey] = useState<null | string>(null);
   const [createdKeyCopied, setCreatedKeyCopied] = useState(false);
+  const [snippetCopied, setSnippetCopied] = useState(false);
 
-  // Queries using Better Auth client
-  const { data: rawApiKeys = [], refetch } = useQuery({
-    queryFn: async () => {
-      const { data, error } = await auth.apiKey.list();
-      if (error) throw new Error(error.message);
-      return data.apiKeys;
-    },
-    queryKey: ["apiKeys"],
-  });
+  // Keys are user-owned: no organizationId.
+  const listQuery = useQuery(trpc.userKey.list.queryOptions(undefined));
 
-  // Convert raw API keys to display format
-  const apiKeys: Array<ApiKeyRecord> = rawApiKeys.map(formatApiKeyData);
+  const apiKeys: Array<ApiKeyRecord> = (listQuery.data ?? []).map((k) => ({
+    createdAt: k.createdAt,
+    enabled: k.enabled,
+    id: k.id,
+    lastRequest: k.lastRequest,
+    name: k.name,
+    prefix: k.prefix,
+    remaining: k.remaining,
+    requestCount: k.requestCount,
+    start: k.start,
+  }));
 
-  // Helpers
-  const handleCreateKey = async () => {
+  // Mutations
+  const createMutation = useMutation(
+    trpc.userKey.create.mutationOptions({
+      async onSuccess(data) {
+        setNewlyCreatedKey(data.key);
+        setNewKeyName("");
+        setIsCreateDialogOpen(false);
+        await queryClient.invalidateQueries(trpc.userKey.list.queryOptions(undefined));
+      },
+    }),
+  );
+  const updateMutation = useMutation(
+    trpc.userKey.update.mutationOptions({
+      async onSuccess() {
+        setIsEditDialogOpen(false);
+        setEditingKey(null);
+        setNewKeyName("");
+        await queryClient.invalidateQueries(trpc.userKey.list.queryOptions(undefined));
+      },
+    }),
+  );
+  const deleteMutation = useMutation(
+    trpc.userKey.delete.mutationOptions({
+      async onSettled() {
+        await queryClient.invalidateQueries(trpc.userKey.list.queryOptions(undefined));
+      },
+    }),
+  );
+
+  const handleCreateKey = () => {
     if (!newKeyName.trim()) return;
-
-    setIsPending(true);
-    try {
-      const { data, error } = await auth.apiKey.create({
-        expiresIn: undefined, // TODO: Add expiry support
-        name: newKeyName.trim(),
-      });
-
-      if (error) throw new Error(error.message);
-
-      // Show plaintext key once for copying
-      setNewlyCreatedKey(data.key);
-
-      void refetch();
-      setNewKeyName("");
-      setNewKeyLimit("");
-      setIsCreateDialogOpen(false);
-    } catch (error) {
-      console.error("Failed to create API key:", error);
-    } finally {
-      setIsPending(false);
-    }
+    createMutation.mutate({ name: newKeyName.trim() });
   };
 
-  const handleCopyKey = (value: string) => {
-    copy(value);
-  };
-
-  const handleDeleteKey = async (keyId: string) => {
-    setIsPending(true);
-    try {
-      const { error } = await auth.apiKey.delete({ keyId });
-      if (error) throw new Error(error.message);
-      void refetch();
-    } catch (error) {
-      console.error("Failed to delete API key:", error);
-    } finally {
-      setIsPending(false);
-    }
+  const handleDeleteKey = (keyId: string) => {
+    deleteMutation.mutate({ keyId });
   };
 
   const openEditDialog = (record: ApiKeyRecord) => {
     setEditingKey(record);
     setNewKeyName(record.name ?? "");
-    setNewKeyLimit(record.limit === "Unlimited" ? "" : record.limit.replace(/^[^0-9$]*/, ""));
     setIsEditDialogOpen(true);
   };
 
-  const handleSaveEdit = async () => {
+  const handleSaveEdit = () => {
     if (!editingKey || !newKeyName.trim()) return;
-
-    setIsPending(true);
-    try {
-      const { error } = await auth.apiKey.update({
-        keyId: editingKey.id,
-        name: newKeyName.trim(),
-      });
-
-      if (error) throw new Error(error.message);
-
-      void refetch();
-      setIsEditDialogOpen(false);
-      setEditingKey(null);
-      setNewKeyName("");
-      setNewKeyLimit("");
-    } catch (error) {
-      console.error("Failed to update API key:", error);
-    } finally {
-      setIsPending(false);
-    }
+    updateMutation.mutate({ keyId: editingKey.id, name: newKeyName.trim() });
   };
 
   const formatKey = (key: string) => {
-    // Permanent mask: show prefix identifier & last 4
     const first = key.slice(0, 8);
     const last = key.slice(-4);
     return `${first}…${last}`;
   };
 
   const hasKeys = apiKeys.length > 0;
-  const totalUsage = useMemo(
-    () => apiKeys.reduce((acc, k) => acc + (parseFloat(k.usage.replace(/[^0-9.]/g, "")) || 0), 0),
-    [apiKeys],
-  );
-  const [snippetCopied, setSnippetCopied] = useState(false);
-  const snippet = `curl -X POST https://zevium.dev/api/v1/scrapperApi/ \\
+  const snippet = `curl -X POST https://zevium.dev/api/proxy/ \\
   -H 'Content-Type: application/json' \\
-  -H 'Authorization: Bearer YOUR_API_KEY' \\
-  -d '{\n    "model": "openai/gpt-4o-mini",\n    "messages": [{"role":"user","content":"Explain how AI works in a few words"}]\n  }'`;
+  -H 'x-zevium-key: YOUR_API_KEY' \\
+  -H 'x-zevium-host: api.example.com' \\
+  -d '{}'`;
 
   const handleCopySnippet = () => {
-    handleCopyKey(snippet);
+    copy(snippet);
     setSnippetCopied(true);
     window.setTimeout(() => setSnippetCopied(false), 2500);
   };
 
   return (
     <div className="mx-auto w-full max-w-3xl min-w-0 flex-1 space-y-6 p-6">
-      {/* (Optional) Settings navigation placeholder – removed due to missing component */}
-
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="space-y-2">
           <h1 className="text-2xl font-bold text-foreground">API Keys</h1>
           <div className="flex items-center gap-2">
-            <p className="text-sm text-muted-foreground">Manage your API keys to access all Zevium-integrated APIs</p>
+            <p className="text-sm text-muted-foreground">
+              Manage your personal API keys to access all Zevium-integrated APIs
+            </p>
             <Info className="size-4 text-muted-foreground" />
           </div>
         </div>
@@ -216,7 +166,8 @@ function ApiKeysComponent() {
             <DialogHeader>
               <DialogTitle>Create API Key</DialogTitle>
               <DialogDescription>
-                Create a new API key to access Zevium APIs. Keep your key secure and never share it publicly.
+                Create a new API key to access Zevium APIs. You can have one active key at a time. Keep your key secure
+                and never share it publicly.
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-4">
@@ -229,22 +180,17 @@ function ApiKeysComponent() {
                   value={newKeyName}
                 />
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="key-limit">Credit Limit (Optional)</Label>
-                <Input
-                  id="key-limit"
-                  onChange={(e) => setNewKeyLimit(e.target.value)}
-                  placeholder="e.g. 50 or $50"
-                  value={newKeyLimit}
-                />
-              </div>
             </div>
             <DialogFooter>
-              <Button disabled={isPending} onClick={() => setIsCreateDialogOpen(false)} variant="outline">
+              <Button
+                disabled={createMutation.isPending}
+                onClick={() => setIsCreateDialogOpen(false)}
+                variant="outline"
+              >
                 Cancel
               </Button>
-              <Button disabled={!newKeyName.trim() || isPending} onClick={handleCreateKey}>
-                {isPending ? "Creating..." : "Create Key"}
+              <Button disabled={!newKeyName.trim() || createMutation.isPending} onClick={handleCreateKey}>
+                {createMutation.isPending ? "Creating..." : "Create Key"}
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -310,8 +256,8 @@ function ApiKeysComponent() {
               <TableHeader>
                 <TableRow className="bg-muted/30">
                   <TableHead className="text-xs font-medium">Key</TableHead>
-                  <TableHead className="text-xs font-medium">Credit Limit</TableHead>
-                  <TableHead className="text-xs font-medium">Usage</TableHead>
+                  <TableHead className="text-xs font-medium">Rate Limit</TableHead>
+                  <TableHead className="text-xs font-medium">Remaining</TableHead>
                   <TableHead className="w-12"></TableHead>
                 </TableRow>
               </TableHeader>
@@ -334,22 +280,21 @@ function ApiKeysComponent() {
                       <div className="space-y-1">
                         <div className="flex items-center gap-2">
                           <span className="text-sm font-medium">{apiKey.name}</span>
-                          {/* No secondary line now; rate limit displayed in column */}
                         </div>
                         <div className="flex items-center gap-2">
                           <code className="rounded-sm bg-muted px-2 py-1 font-mono text-xs text-muted-foreground">
                             {apiKey.key
                               ? formatKey(apiKey.key)
-                              : `${apiKey.prefix ?? "sk"}...${apiKey.start ?? "xxxx"}`}
+                              : `${apiKey.prefix ?? "zev"}...${apiKey.start ?? "xxxx"}`}
                           </code>
                         </div>
                       </div>
                     </TableCell>
                     <TableCell>
-                      <span className="text-sm text-muted-foreground">{apiKey.limit}</span>
+                      <span className="text-sm text-muted-foreground">60 req/min</span>
                     </TableCell>
                     <TableCell>
-                      <span className="text-sm font-medium">{apiKey.usage}</span>
+                      <span className="text-sm font-medium">{apiKey.remaining ?? "∞"}</span>
                     </TableCell>
                     <TableCell>
                       <DropdownMenu>
@@ -376,13 +321,6 @@ function ApiKeysComponent() {
               </TableBody>
             </Table>
           </div>
-          {hasKeys && (
-            <div className="flex items-center justify-end px-4 py-2">
-              <span className="text-[10px] tracking-wide text-muted-foreground uppercase">
-                Total Usage: <span className="font-medium text-foreground">{`$${totalUsage.toFixed(3)} used`}</span>
-              </span>
-            </div>
-          )}
         </CardContent>
       </Card>
 
@@ -420,7 +358,7 @@ function ApiKeysComponent() {
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Edit API Key</DialogTitle>
-            <DialogDescription>Update the display name or credit (spend) limit for this key.</DialogDescription>
+            <DialogDescription>Update the display name for this key.</DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <div className="space-y-2">
@@ -432,43 +370,17 @@ function ApiKeysComponent() {
                 value={newKeyName}
               />
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="edit-key-limit">Credit Limit (Optional)</Label>
-              <Input
-                id="edit-key-limit"
-                onChange={(e) => setNewKeyLimit(e.target.value)}
-                placeholder="e.g. 50 or $50"
-                value={newKeyLimit}
-              />
-            </div>
           </div>
           <DialogFooter>
-            <Button disabled={isPending} onClick={() => setIsEditDialogOpen(false)} variant="outline">
+            <Button disabled={updateMutation.isPending} onClick={() => setIsEditDialogOpen(false)} variant="outline">
               Cancel
             </Button>
-            <Button disabled={!newKeyName.trim() || isPending} onClick={handleSaveEdit}>
-              {isPending ? "Saving..." : "Save"}
+            <Button disabled={!newKeyName.trim() || updateMutation.isPending} onClick={handleSaveEdit}>
+              {updateMutation.isPending ? "Saving..." : "Save"}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
   );
-}
-
-function formatApiKeyData(key: BetterAuthApiKey): ApiKeyRecord {
-  return {
-    createdAt: key.createdAt,
-    enabled: key.enabled,
-    id: key.id,
-    key: key.key, // Only available on creation
-    lastRequest: key.lastRequest ?? null,
-    lastUsed: key.lastUsed ?? null,
-    limit: "Unlimited", // TODO: Add credit limit logic
-    name: key.name,
-    prefix: key.prefix,
-    requestCount: key.requestCount ?? 0,
-    start: key.start,
-    usage: key.requestCount ? `${key.requestCount} requests` : "$0 used", // Show request count if available
-  };
 }

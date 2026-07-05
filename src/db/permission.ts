@@ -31,8 +31,12 @@ export const ProjectUserPermissions = [
 ] as const;
 export type ProjectUserPermission = (typeof ProjectUserPermissions)[number];
 
-// Organization-specific user permissions
+// Organization-specific user permissions.
 export const OrganizationUserPermissions = [
+  "apikey.create", // ability to create org-owned API keys
+  "apikey.delete", // ability to delete org-owned API keys
+  "apikey.read", // ability to read/view org-owned API keys
+  "apikey.update", // ability to update org-owned API keys
   "organization.delete", // ability to delete the organization
   "organization.edit", // ability to edit the organization details like name, logo, slug etc
   "organization.members.invite", // ability to invite members to the organization
@@ -44,12 +48,17 @@ export const OrganizationUserPermissions = [
   "organization.owner.remove", // ability to remove owners from the organization
   "organization.owner.edit", // ability to edit owners' permissions in the organization
 
-  //
-  "project.create", // ability to create projects in the organization
-  "project.list", // ability to list projects in the organization
-
-  // default project permissions for organization users
-  ...ProjectUserPermissions,
+  // Project permissions within the organization
+  "project.create", // ability to create projects
+  "project.delete", // ability to delete projects
+  "project.edit", // ability to edit projects
+  "project.list", // ability to list projects
+  "project.price.edit", // ability to edit project pricing
+  "project.publish", // ability to publish projects
+  "project.spec.edit", // ability to edit project specifications
+  "project.spec.view", // ability to view project specifications
+  "project.unpublish", // ability to unpublish projects
+  "project.view", // ability to view projects
 ] as const;
 export type OrganizationUserPermission = (typeof OrganizationUserPermissions)[number];
 
@@ -60,6 +69,6 @@ export const UserPermissions = [
   "organization.create", // ability to create organizations
   "organization.list", // ability to list organizations
 ] as const;
+export type UserPermission = (typeof UserPermissions)[number];
 export type AnyUserPermission = OrganizationUserPermission | ProjectUserPermission | UserPermission;
 export type Permissions = Partial<Record<AnyUserPermission, PermissionValue>>;
-export type UserPermission = (typeof UserPermissions)[number];
