@@ -47,10 +47,10 @@
 - Docs: in-app /docs routes. Prod deploy: NOT yet.
 - omp fallback chain exhausted 2026-07-12 early AM (xai spending cap, glm 5h cap, opencode monthly cap) — wave 9b built with native Claude subagents per omp-delegate exception.
 
-## User check (dev-only nag)
+## User check
 
-- Clerk dev overlay "Organizations feature required" started appearing (orgs still work). Check Clerk dashboard → Organizations toggle. Dev keys only; prod unaffected.
 - ADMIN_USER_IDS convex env currently = seed test user. Set real admin Clerk user ids for prod.
+- ~~Clerk "Organizations feature required" nag~~ — RESOLVED, not a config issue: clerk-js cached a degraded environment fetch (dev-instance usage limits under e2e hammering) inside a long-lived tab and disabled org components client-side. Both Clerk APIs confirmed orgs enabled the whole time. Hard reload refetches and clears it. Prod keys unaffected.
 
 ## Decisions (user, 2026-07-11)
 

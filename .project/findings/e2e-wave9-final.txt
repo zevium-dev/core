@@ -1,0 +1,26 @@
+=== Zevium E2E ===
+base: http://localhost:3000
+artifacts: /home/tnfssc/Code/zevium/e2e/artifacts
+
+── 01-auth.sh ──
+[e2e] → wait for base url
+[e2e] wait_for_url http://localhost:3000/ (timeout=90s)
+[e2e] wait_for_url ok code=200
+[e2e] → anonymous landing /
+[e2e] → anonymous /app redirects to sign-in
+[e2e] → sign_in with seed credentials
+[e2e] → sign_in
+[e2e] filled identifier — submit via Enter
+[e2e] filled password — submit via Enter
+[e2e] OTP screen detected — entering 424242
+[e2e] Clerk user present (user_3GLqr2ul5Xjik1tWZvkJK8KhsqF) — signed in
+[e2e] signed in → http://localhost:3000/app
+[e2e] → signed-in /app/projects loads
+[e2e] FAIL: projects page missing expected chrome (Projects / New project / org)
+[e2e] screenshot: /home/tnfssc/Code/zevium/e2e/artifacts/20260711-223859-signed-in_app_projects_loads.png
+FAIL 01-auth.sh exit=1 (181s)
+
+=== summary (181s) ===
+  FAIL  01-auth.sh  (181s) exit=1
+  (remaining scripts skipped after first failure)
+suite exit=1
