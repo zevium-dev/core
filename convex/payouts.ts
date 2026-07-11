@@ -4,6 +4,15 @@ import { mutation, query } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import type { QueryCtx } from "./_generated/server";
 import { requireOrgMemberBySlug } from "./lib/auth";
+import { createNotification } from "./lib/notifications";
+
+/** 10,000 credits = $1 publisher conversion (see MIN_PAYOUT_CREDITS). */
+const CREDITS_PER_DOLLAR = 10_000;
+
+/** Shared by admin.resolvePayout for the payout_resolved notification body. */
+export function formatUsd(credits: number): string {
+  return (credits / CREDITS_PER_DOLLAR).toFixed(2);
+}
 
 /**
  * Platform cut 5% -> publishers keep 95%.
@@ -100,11 +109,8 @@ export const redeemableCredits = query({
 
 /**
  * Request a payout. Org member only. Validates 0 < credits <= redeemable and
- * credits >= MIN_PAYOUT_CREDITS ($10). Inserts a pending request.
- *
- * No notification on request in this cut — notifications.kind union has no
- * payout kind and schema.ts is out of scope. Follow-up: extend the union with
- * payout_requested/payout_resolved kinds and notify here + on admin resolve.
+ * credits >= MIN_PAYOUT_CREDITS ($10). Inserts a pending request and notifies
+ * the requesting org (idempotent by requestId-scoped refId).
  */
 export const requestPayout = mutation({
   args: {
@@ -138,13 +144,23 @@ export const requestPayout = mutation({
       throw new Error("Requested credits exceed your redeemable balance.");
     }
 
-    return await ctx.db.insert("payoutRequests", {
+    const requestId = await ctx.db.insert("payoutRequests", {
       clerkOrgId: org.clerkOrgId,
       credits: args.credits,
       destination,
       status: "pending",
       createdAt: Date.now(),
     });
+
+    await createNotification(ctx, {
+      clerkOrgId: org.clerkOrgId,
+      kind: "payout_requested",
+      title: "Payout requested",
+      body: `Payout requested for ${args.credits.toLocaleString()} credits ($${formatUsd(args.credits)}).`,
+      refId: `payout_requested:${requestId}`,
+    });
+
+    return requestId;
   },
 });
 

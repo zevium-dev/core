@@ -132,8 +132,12 @@ function LandingPage() {
   const catalogueQuery = useQuery(convexQuery(api.catalogue.listPublic, {}));
   const liveItems = catalogueQuery.data?.items ?? [];
   const teasers = pickLandingTeasers(liveItems, FALLBACK_TEASERS);
+  // Hero stat: true catalogue size (listPublic.total), not the teaser slice
+  // length — falls back to the static teaser count while pending / empty.
   const apiCount =
-    liveItems.length > 0 ? liveItems.length : FALLBACK_TEASERS.length;
+    catalogueQuery.data && catalogueQuery.data.total > 0
+      ? catalogueQuery.data.total
+      : FALLBACK_TEASERS.length;
   const showSkeleton = catalogueQuery.isPending && liveItems.length === 0;
 
   const gatewayOrigin = resolveGatewayOrigin(

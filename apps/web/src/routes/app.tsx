@@ -1,4 +1,16 @@
-import { Outlet, createFileRoute, redirect } from "@tanstack/react-router";
+import {
+  useAuth,
+  useOrganization,
+  useOrganizationList,
+} from "@clerk/tanstack-react-start";
+import {
+  Outlet,
+  createFileRoute,
+  redirect,
+  useNavigate,
+  useRouterState,
+} from "@tanstack/react-router";
+import { useEffect } from "react";
 
 import { AppHeader } from "#/components/app-header";
 import { AppSidebar } from "#/components/app-sidebar";
@@ -37,6 +49,7 @@ export const Route = createFileRoute("/app")({
 
 function AppLayout() {
   useEnsureMirror();
+  useOrgLessGuard();
 
   return (
     <SidebarProvider>
@@ -52,4 +65,44 @@ function AppLayout() {
       </SidebarInset>
     </SidebarProvider>
   );
+}
+
+/**
+ * Belt-and-braces guard for pre-existing org-less users. Clerk
+ * auto-org-creation is now enabled instance-wide for new signups, but users
+ * created before that flip can still land with no active org and zero
+ * memberships. When that happens, push them to /app/org/create.
+ *
+ * Guards against a redirect loop by skipping entirely under /app/org — that
+ * subtree (including the create screen itself) must always render.
+ */
+function useOrgLessGuard() {
+  const navigate = useNavigate();
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const { isLoaded: authLoaded, isSignedIn } = useAuth();
+  const { isLoaded: orgLoaded, organization } = useOrganization();
+  const { isLoaded: membershipsLoaded, userMemberships } = useOrganizationList({
+    userMemberships: { infinite: false },
+  });
+
+  const underOrgSubtree = pathname.startsWith("/app/org");
+
+  useEffect(() => {
+    if (underOrgSubtree) return;
+    if (!authLoaded || !isSignedIn) return;
+    if (!orgLoaded || !membershipsLoaded) return;
+    if (organization) return;
+    if (userMemberships.count > 0) return;
+
+    void navigate({ to: "/app/org/create" });
+  }, [
+    underOrgSubtree,
+    authLoaded,
+    isSignedIn,
+    orgLoaded,
+    membershipsLoaded,
+    organization,
+    userMemberships.count,
+    navigate,
+  ]);
 }

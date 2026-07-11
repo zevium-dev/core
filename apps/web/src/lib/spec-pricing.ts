@@ -1,5 +1,7 @@
 import { extractPricing, parseSpec } from "@zevium/shared";
 
+import { creditsLabel } from "./credits-label";
+
 export type PricingSummary = {
   endpointCount: number;
   minCredits: number | null;
@@ -54,7 +56,7 @@ export function formatPricingSummary(summary: PricingSummary): string {
   }
   const range =
     summary.minCredits === summary.maxCredits
-      ? `${summary.minCredits} credits`
+      ? creditsLabel(summary.minCredits)
       : `${summary.minCredits}–${summary.maxCredits} credits`;
   const free = summary.freeTier > 0 ? `, free tier on ${summary.freeTier}` : "";
   return `${summary.endpointCount} endpoints, ${range}${free}`;

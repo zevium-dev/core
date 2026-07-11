@@ -99,6 +99,8 @@ export const listPublic = query({
   ): Promise<{
     items: PublicListing[];
     nextCursor: string | null;
+    /** Total public+published projects, uncapped by search/tag/price filters. */
+    total: number;
   }> => {
     const search =
       args.search === undefined ? "" : args.search.trim().toLowerCase();
@@ -126,6 +128,18 @@ export const listPublic = query({
         q.eq("visibility", "public").eq("status", "published"),
       )
       .collect();
+
+    // Total public+published count, decoupled from search/tag/price filtering
+    // below — the landing "APIs listed" stat wants the whole catalogue size,
+    // not a filtered subset. Bounded at 1000 docs (noted in the return type
+    // comment); catalogue growth past that undercounts the stat.
+    const totalDocs = await ctx.db
+      .query("projects")
+      .withIndex("by_visibility_status", (q) =>
+        q.eq("visibility", "public").eq("status", "published"),
+      )
+      .take(1000);
+    const total = totalDocs.length;
 
     const filtered: Array<{
       project: Doc<"projects">;
@@ -221,6 +235,7 @@ export const listPublic = query({
         pricing,
       })),
       nextCursor,
+      total,
     };
   },
 });

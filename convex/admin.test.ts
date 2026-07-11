@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { api } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import schema from "./schema";
+import { createNotification } from "./lib/notifications";
 
 const modules = import.meta.glob("./**/*.ts");
 
@@ -486,5 +487,94 @@ describe("admin.resolvePayout", () => {
         status: "paid",
       }),
     ).rejects.toThrow(/Payout request not found/);
+  });
+
+  it("notifies the owning org with a payout_resolved notification (paid)", async () => {
+    const t = convexTest(schema, modules);
+    await seedWorld(t);
+    const requestId = await seedPayoutRequest(t, {
+      clerkOrgId: "org_a",
+      credits: 100_000,
+    });
+
+    await asAdmin(t).mutation(api.admin.resolvePayout, {
+      requestId,
+      status: "paid",
+      note: "wired 2026-07-11",
+    });
+
+    const notif = await t.run(async (ctx) => {
+      return await ctx.db
+        .query("notifications")
+        .withIndex("by_ref", (q) =>
+          q.eq("refId", `payout_resolved:${requestId}`),
+        )
+        .unique();
+    });
+    expect(notif).not.toBeNull();
+    expect(notif?.kind).toBe("payout_resolved");
+    expect(notif?.clerkOrgId).toBe("org_a");
+    expect(notif?.body).toContain("100,000 credits");
+    expect(notif?.body).toContain("$10.00");
+    expect(notif?.body).toContain("paid out");
+    expect(notif?.body).toContain("wired 2026-07-11");
+  });
+
+  it("notifies the owning org with a payout_resolved notification (rejected)", async () => {
+    const t = convexTest(schema, modules);
+    await seedWorld(t);
+    const requestId = await seedPayoutRequest(t, { clerkOrgId: "org_a" });
+
+    await asAdmin(t).mutation(api.admin.resolvePayout, {
+      requestId,
+      status: "rejected",
+    });
+
+    const notif = await t.run(async (ctx) => {
+      return await ctx.db
+        .query("notifications")
+        .withIndex("by_ref", (q) =>
+          q.eq("refId", `payout_resolved:${requestId}`),
+        )
+        .unique();
+    });
+    expect(notif?.kind).toBe("payout_resolved");
+    expect(notif?.body).toContain("rejected");
+  });
+
+  it("payout_resolved notification is idempotent by refId", async () => {
+    const t = convexTest(schema, modules);
+    const refId = "payout_resolved:idempotency-check";
+
+    const r1 = await t.run(async (ctx) => {
+      return await createNotification(ctx, {
+        clerkOrgId: "org_a",
+        kind: "payout_resolved",
+        title: "Payout paid out",
+        body: "Your payout request for 100,000 credits ($10.00) was paid out.",
+        refId,
+      });
+    });
+    expect(r1.created).toBe(true);
+
+    const r2 = await t.run(async (ctx) => {
+      return await createNotification(ctx, {
+        clerkOrgId: "org_a",
+        kind: "payout_resolved",
+        title: "Payout paid out",
+        body: "Your payout request for 100,000 credits ($10.00) was paid out.",
+        refId,
+      });
+    });
+    expect(r2.created).toBe(false);
+    expect(r2.id).toBe(r1.id);
+
+    const rows = await t.run(async (ctx) => {
+      return await ctx.db
+        .query("notifications")
+        .withIndex("by_ref", (q) => q.eq("refId", refId))
+        .collect();
+    });
+    expect(rows).toHaveLength(1);
   });
 });

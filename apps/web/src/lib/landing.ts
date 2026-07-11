@@ -26,8 +26,8 @@ export function discoveryEndpointUrl(gatewayOrigin: string): string {
 
 /**
  * Try-it playground base URL. `mock` swaps `/gateway` for `/mock` — same
- * key-authenticated route shape, but the gateway serves a generated example
- * body at 0 credits instead of proxying upstream.
+ * URL shape, but `/mock` is public and keyless: the gateway serves a
+ * generated example body at 0 credits instead of proxying upstream.
  */
 export function tryItBaseUrl(gatewayBaseUrl: string, mock: boolean): string {
   const trimmed = gatewayBaseUrl.replace(/\/+$/, "");

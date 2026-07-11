@@ -4,6 +4,7 @@ import { mutation, query } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { isAdmin, requireAdmin } from "./lib/auth";
 import { createNotification } from "./lib/notifications";
+import { formatUsd } from "./payouts";
 import { fireWebhookEvent } from "./webhooks";
 
 /** Cap for month-to-date usage count (by_at index range scan). */
@@ -308,9 +309,7 @@ export const listPayoutRequests = query({
 /**
  * Admin resolve a pending payout request: mark paid or rejected, stamp
  * resolvedAt, attach optional note. Only pending requests are resolvable.
- *
- * No notification in this cut — notifications.kind union lacks a payout kind.
- * Follow-up: add payout_resolved kind + notify the owning org.
+ * Notifies the owning org (idempotent by requestId-scoped refId).
  */
 export const resolvePayout = mutation({
   args: {
@@ -331,10 +330,22 @@ export const resolvePayout = mutation({
       );
     }
 
+    const note = args.note?.trim() || undefined;
     await ctx.db.patch(args.requestId, {
       status: args.status,
-      note: args.note?.trim() || undefined,
+      note,
       resolvedAt: Date.now(),
+    });
+
+    const statusLabel = args.status === "paid" ? "paid out" : "rejected";
+    await createNotification(ctx, {
+      clerkOrgId: request.clerkOrgId,
+      kind: "payout_resolved",
+      title: `Payout ${statusLabel}`,
+      body: `Your payout request for ${request.credits.toLocaleString()} credits ($${formatUsd(
+        request.credits,
+      )}) was ${statusLabel}${note !== undefined ? `: ${note}` : "."}`,
+      refId: `payout_resolved:${args.requestId}`,
     });
 
     const updated = await ctx.db.get(args.requestId);

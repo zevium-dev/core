@@ -159,6 +159,23 @@ if [[ -n "${GATEWAY_URL:-}" ]]; then
     fail "missing x-zevium-cost response header (see $headers_file)"
   fi
   log "gateway call ok cost=$(printf '%s' "$hdrs" | grep -i '^x-zevium-cost:' | head -1)"
+
+  step "anonymous browser mock call (CORS regression canary)"
+  # /mock/:org/:project is PUBLIC (no key) — browser fetch from the app origin
+  # to GATEWAY_URL is cross-origin, so this also proves CORS is wired.
+  mock_url="${GATEWAY_URL%/}/mock/${org_slug}/${api_slug}/get"
+  mock_status="$(ab eval "fetch('${mock_url}').then((r) => r.status)" 2>/dev/null || true)"
+  mock_status="$(printf '%s' "$mock_status" | tr -d '"[:space:]')"
+  assert_eq "$mock_status" "200" "anonymous browser mock call expected 200 (url=$mock_url)"
+  log "anonymous browser mock call ok status=$mock_status"
+
+  if [[ -n "${E2E_API_KEY:-}" ]]; then
+    step "browser paid call with Authorization header"
+    paid_status="$(ab eval "fetch('${call_url}', { headers: { Authorization: 'Bearer ${E2E_API_KEY}' } }).then((r) => r.status)" 2>/dev/null || true)"
+    paid_status="$(printf '%s' "$paid_status" | tr -d '"[:space:]')"
+    assert_eq "$paid_status" "200" "browser paid call expected 200 (url=$call_url)"
+    log "browser paid call ok status=$paid_status"
+  fi
 else
   log "GATEWAY_URL unset — skip paid call (browse-only consumer path)"
 fi

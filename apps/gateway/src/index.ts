@@ -145,7 +145,7 @@ function timingSafeEqual(a: string, b: string): boolean {
 /**
  * Worker entry:
  * - /gateway/:orgSlug/:projectSlug/* — metered proxy
- * - /mock/:orgSlug/:projectSlug/* — key-authenticated example responses, 0 credits
+ * - /mock/:orgSlug/:projectSlug/* — public keyless example responses, 0 credits
  * - /discovery — machine-readable catalogue + pricing index
  * - /mcp — MCP Streamable HTTP (search / docs / metered call_api)
  * - /wallet/:clerkOrgId/* — wallet DO HTTP surface (grants/tests)
@@ -216,14 +216,22 @@ export default {
     if (route) {
       const deps = buildDeps(env);
       return withCors(
-        await handleGatewayRequest(request, env, pipelineOnly(deps), ctx, route),
+        await handleGatewayRequest(
+          request,
+          env,
+          pipelineOnly(deps),
+          ctx,
+          route,
+        ),
       );
     }
 
     const mockRoute = parseMockPath(url.pathname);
     if (mockRoute) {
       const deps = buildDeps(env);
-      return withCors(await handleMockRequest(request, mockDeps(deps), mockRoute));
+      return withCors(
+        await handleMockRequest(request, mockDeps(deps), mockRoute),
+      );
     }
 
     return withCors(Response.json({ error: "not found" }, { status: 404 }));

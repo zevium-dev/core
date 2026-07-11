@@ -4,6 +4,7 @@ import { Link, useRouterState } from "@tanstack/react-router";
 import {
   Banknote,
   BookOpen,
+  BookText,
   Building2,
   CreditCard,
   FolderKanban,
@@ -35,6 +36,7 @@ const navItems = [
   { title: "Billing", to: "/app/billing", icon: CreditCard, exact: false },
   { title: "Earnings", to: "/app/earnings", icon: Banknote, exact: false },
   { title: "Settings", to: "/app/settings", icon: Settings, exact: false },
+  { title: "Docs", to: "/docs", icon: BookText, exact: false },
 ] as const;
 
 export function AppSidebar() {

@@ -1,3 +1,4 @@
+import { Show } from "@clerk/tanstack-react-start";
 import { convexQuery } from "@convex-dev/react-query";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { Link, createFileRoute } from "@tanstack/react-router";
@@ -34,6 +35,7 @@ import { Skeleton } from "#/components/ui/skeleton";
 import { Switch } from "#/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "#/components/ui/tabs";
 import { api } from "#/lib/convex-api";
+import { creditsLabel } from "#/lib/credits-label";
 import { humanError } from "#/lib/human-error";
 import {
   buildMcpConfigSnippet,
@@ -232,7 +234,7 @@ function ApiDetailBody({
       min = Math.min(min, ep.cost);
       max = Math.max(max, ep.cost);
     }
-    return min === max ? `${min} credits` : `${min}–${max} credits`;
+    return min === max ? creditsLabel(min) : `${min}–${max} credits`;
   }, [endpoints]);
 
   if (data === null) {
@@ -445,7 +447,7 @@ function EndpointDocs({ endpoints }: { endpoints: EndpointRow[] }) {
               ) : null}
             </div>
             <Badge variant="secondary" className="tabular-nums">
-              {ep.cost} credit{ep.cost === 1 ? "" : "s"}
+              {creditsLabel(ep.cost)}
             </Badge>
           </div>
         ))}
@@ -686,8 +688,8 @@ function TryItPanel({
               >
                 {endpoints.map((ep) => (
                   <option key={ep.id} value={ep.id}>
-                    {ep.method.toUpperCase()} {ep.path} · {ep.cost} credit
-                    {ep.cost === 1 ? "" : "s"}
+                    {ep.method.toUpperCase()} {ep.path} ·{" "}
+                    {creditsLabel(ep.cost)}
                   </option>
                 ))}
               </select>
@@ -726,6 +728,24 @@ function TryItPanel({
               />
               <p className="text-xs text-muted-foreground">
                 Stored in this browser session only. Never sent to Convex.
+              </p>
+              <p className="text-xs text-muted-foreground">
+                <Show when="signed-in">
+                  <Link
+                    to="/app/settings/keys"
+                    className="underline underline-offset-2 hover:text-foreground"
+                  >
+                    Manage keys →
+                  </Link>
+                </Show>
+                <Show when="signed-out">
+                  <Link
+                    to="/sign-up/$"
+                    className="underline underline-offset-2 hover:text-foreground"
+                  >
+                    Create a free key →
+                  </Link>
+                </Show>
               </p>
             </div>
 

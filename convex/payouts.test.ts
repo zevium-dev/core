@@ -5,6 +5,7 @@ import { api } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import schema from "./schema";
 import { MIN_PAYOUT_CREDITS } from "./payouts";
+import { createNotification } from "./lib/notifications";
 
 const modules = import.meta.glob("./**/*.ts");
 
@@ -260,6 +261,67 @@ describe("payouts.requestPayout", () => {
     expect(request?.status).toBe("pending");
     expect(request?.credits).toBe(MIN_PAYOUT_CREDITS);
     expect(request?.clerkOrgId).toBe("org_pub");
+  });
+
+  it("notifies the requesting org with a payout_requested notification", async () => {
+    const t = convexTest(schema, modules);
+    await seedEarningOrg(t);
+    const asPub = asPublisher(t);
+    const requestId = await asPub.mutation(api.payouts.requestPayout, {
+      orgSlug: "publisher-co",
+      credits: MIN_PAYOUT_CREDITS,
+      destination: "bank: 1234",
+    });
+
+    const notif = await t.run(async (ctx) => {
+      return await ctx.db
+        .query("notifications")
+        .withIndex("by_ref", (q) =>
+          q.eq("refId", `payout_requested:${requestId}`),
+        )
+        .unique();
+    });
+    expect(notif).not.toBeNull();
+    expect(notif?.kind).toBe("payout_requested");
+    expect(notif?.clerkOrgId).toBe("org_pub");
+    expect(notif?.body).toContain("100,000 credits");
+    expect(notif?.body).toContain("$10.00");
+  });
+
+  it("payout_requested notification is idempotent by refId", async () => {
+    const t = convexTest(schema, modules);
+    const refId = "payout_requested:idempotency-check";
+
+    const r1 = await t.run(async (ctx) => {
+      return await createNotification(ctx, {
+        clerkOrgId: "org_pub",
+        kind: "payout_requested",
+        title: "Payout requested",
+        body: "Payout requested for 100,000 credits ($10.00).",
+        refId,
+      });
+    });
+    expect(r1.created).toBe(true);
+
+    const r2 = await t.run(async (ctx) => {
+      return await createNotification(ctx, {
+        clerkOrgId: "org_pub",
+        kind: "payout_requested",
+        title: "Payout requested",
+        body: "Payout requested for 100,000 credits ($10.00).",
+        refId,
+      });
+    });
+    expect(r2.created).toBe(false);
+    expect(r2.id).toBe(r1.id);
+
+    const rows = await t.run(async (ctx) => {
+      return await ctx.db
+        .query("notifications")
+        .withIndex("by_ref", (q) => q.eq("refId", refId))
+        .collect();
+    });
+    expect(rows).toHaveLength(1);
   });
 });
 

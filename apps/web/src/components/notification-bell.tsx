@@ -1,5 +1,6 @@
 import { convexQuery, useConvexMutation } from "@convex-dev/react-query";
 import { useMutation, useQuery } from "@tanstack/react-query";
+import { useNavigate } from "@tanstack/react-router";
 import {
   Archive,
   Bell,
@@ -42,6 +43,30 @@ const KIND_ICON: Record<string, LucideIcon> = {
   visibility_changed: Eye,
 };
 
+/**
+ * kind → destination route, for click-through navigation. `payout_requested`
+ * / `payout_resolved` may not exist in the schema union yet (another lane
+ * adds them) — the lookup tolerates unknown kinds by returning `undefined`,
+ * which means "mark read, don't navigate."
+ */
+const KIND_DESTINATION = {
+  low_balance: "/app/billing",
+  spec_published: "/app/projects",
+  version_deprecated: "/app/projects",
+  webhook_failed: "/app/projects",
+  visibility_changed: "/app/projects",
+  payout_requested: "/app/earnings",
+  payout_resolved: "/app/earnings",
+} as const;
+
+function destinationForKind(
+  kind: string,
+): (typeof KIND_DESTINATION)[keyof typeof KIND_DESTINATION] | undefined {
+  return kind in KIND_DESTINATION
+    ? KIND_DESTINATION[kind as keyof typeof KIND_DESTINATION]
+    : undefined;
+}
+
 const TIME_TICK_MS = 60_000;
 
 export function NotificationBell() {
@@ -70,6 +95,7 @@ function DisabledBell({ ready }: { ready: boolean }) {
 
 function BellWithOrg({ orgSlug }: { orgSlug: string }) {
   const reduce = useReducedMotion();
+  const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   // Keep relative timestamps fresh while the bell is mounted.
   const [now, setNow] = useState(() => Date.now());
@@ -106,6 +132,15 @@ function BellWithOrg({ orgSlug }: { orgSlug: string }) {
 
   const page = data?.page ?? [];
   const unreadLabel = unread > 99 ? "99+" : String(unread);
+
+  function onRowClick(notificationId: Id<"notifications">, kind: string) {
+    markRead(notificationId);
+    const destination = destinationForKind(kind);
+    if (destination !== undefined) {
+      void navigate({ to: destination });
+    }
+    setOpen(false);
+  }
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -165,7 +200,7 @@ function BellWithOrg({ orgSlug }: { orgSlug: string }) {
                 now={now}
                 index={i}
                 reduce={Boolean(reduce)}
-                onClick={() => markRead(n._id)}
+                onClick={() => onRowClick(n._id, n.kind)}
               />
             ))}
           </ul>
@@ -211,7 +246,7 @@ function NotificationRow({
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: DUR.fast, ease: EASE, delay }}
         onClick={onClick}
-        className="flex w-full items-start gap-2.5 border-b px-3 py-2.5 text-left transition-[background-color] duration-[var(--dur-instant)] ease-[var(--ease)] hover:bg-accent focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 data-[read=true]:opacity-60 last:border-b-0"
+        className="flex w-full cursor-pointer items-start gap-2.5 border-b px-3 py-2.5 text-left transition-[background-color] duration-[var(--dur-instant)] ease-[var(--ease)] hover:bg-accent focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 data-[read=true]:opacity-60 last:border-b-0"
         data-read={read}
       >
         <span className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">

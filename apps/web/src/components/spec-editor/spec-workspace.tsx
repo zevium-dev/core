@@ -1,5 +1,6 @@
 import { convexQuery, useConvexMutation } from "@convex-dev/react-query";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { Link } from "@tanstack/react-router";
 import { collectOpenApiSpecIssues, type SpecIssue } from "@zevium/shared";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -48,6 +49,8 @@ export type SpecWorkspaceProps = {
   orgSlug: string;
   projectSlug: string;
   visibility: "public" | "private";
+  /** Nudges the publish flow to remind publishers to fill this in. */
+  description: string | undefined;
   savedDraft: string;
   lastSavedAt: number | null;
   versions: Array<{
@@ -102,6 +105,7 @@ export function SpecWorkspace({
   orgSlug,
   projectSlug,
   visibility,
+  description,
   savedDraft,
   lastSavedAt: initialLastSavedAt,
   versions,
@@ -318,6 +322,8 @@ export function SpecWorkspace({
     setText(next);
   }
 
+  const hasDescription = description !== undefined && description.trim() !== "";
+
   const publishSlot = (
     <div className="space-y-3">
       <SpecRailVisibilityNudge
@@ -325,6 +331,19 @@ export function SpecWorkspace({
         onMakePublic={() => makePublic()}
         pending={visibilityPending}
       />
+      {!hasDescription ? (
+        <p className="rounded-md border border-dashed px-3 py-2 text-xs text-muted-foreground">
+          No description — catalogue card will look empty.{" "}
+          <Link
+            to="/app/projects/$projectSlug"
+            params={{ projectSlug }}
+            className="underline underline-offset-2 hover:text-foreground"
+          >
+            Add one in Settings
+          </Link>
+          .
+        </p>
+      ) : null}
       <Dialog open={publishOpen} onOpenChange={setPublishOpen}>
         <DialogTrigger asChild>
           <Button

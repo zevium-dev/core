@@ -100,6 +100,7 @@ function SpecEditor({
         orgSlug={orgSlug}
         projectSlug={projectSlug}
         visibility={project.visibility}
+        description={project.description}
       />
     </Suspense>
   );
@@ -110,11 +111,13 @@ function SpecEditorInner({
   orgSlug,
   projectSlug,
   visibility,
+  description,
 }: {
   projectId: Id<"projects">;
   orgSlug: string;
   projectSlug: string;
   visibility: "public" | "private";
+  description: string | undefined;
 }) {
   const { data: draftRow } = useSuspenseQuery(
     convexQuery(api.specs.getDraft, { projectId }),
@@ -129,6 +132,7 @@ function SpecEditorInner({
       orgSlug={orgSlug}
       projectSlug={projectSlug}
       visibility={visibility}
+      description={description}
       savedDraft={draftRow?.draft ?? ""}
       lastSavedAt={draftRow?.lastSavedAt ?? null}
       versions={versions.map((v) => ({

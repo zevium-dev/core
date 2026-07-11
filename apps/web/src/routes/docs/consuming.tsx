@@ -84,6 +84,21 @@ path    — endpoint path from the spec (e.g. /v1/summarize)`}
       </p>
       <DocsCodeBlock lang="bash" code={CALL_EXAMPLE} />
 
+      <h2>Mock calls (no key needed)</h2>
+      <p>
+        Swap <code>/gateway</code> for <code>/mock</code> to get a free,
+        spec-generated example response — live, keyless, and <code>0</code>{" "}
+        credits. Same URL shape, no <code>Authorization</code> header required:
+      </p>
+      <DocsCodeBlock
+        lang="text"
+        code={`${GATEWAY}/mock/{org}/{project}/{path}`}
+      />
+      <p>
+        Responses carry <code>x-zevium-mock: 1</code>. Use it to exercise an
+        API's shape before spending credits.
+      </p>
+
       <h2>Response headers</h2>
       <p>
         Every gateway response carries metering headers so you can log cost and

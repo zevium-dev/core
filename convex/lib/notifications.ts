@@ -7,7 +7,9 @@ export type NotificationKind =
   | "spec_published"
   | "version_deprecated"
   | "webhook_failed"
-  | "visibility_changed";
+  | "visibility_changed"
+  | "payout_requested"
+  | "payout_resolved";
 
 export type CreateNotificationArgs = {
   clerkOrgId: string;

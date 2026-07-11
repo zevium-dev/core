@@ -106,6 +106,8 @@ export default defineSchema({
       v.literal("version_deprecated"),
       v.literal("webhook_failed"),
       v.literal("visibility_changed"),
+      v.literal("payout_requested"),
+      v.literal("payout_resolved"),
     ),
     title: v.string(),
     body: v.string(),

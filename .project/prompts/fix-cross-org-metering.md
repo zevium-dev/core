@@ -5,6 +5,7 @@ Write scope: apps/gateway/src/**, apps/gateway/test/**, convex/specs.ts (getPubl
 Read first: AGENTS.md (product rules: zero balance blocks, no unmetered paths, never trust client identifiers), apps/gateway/src/pipeline.ts, spec-source.ts, wallet.ts (SettlementUsage, pendingToUsageRecord), usage.ts (ConvexUsageRecord), convex/specs.ts getPublishedForGateway, convex/wallets.ts recordUsage, convex/http.ts /ingest-usage, apps/gateway/test/pipeline.test.ts.
 
 DESIGN (exact):
+
 1. convex/specs.ts getPublishedForGateway: add `visibility: project.visibility` to the return payload. Additive.
 2. gateway spec-source.ts: PublishedSpec gains `visibility: "public" | "private"`. parsePublishedSpecPayload: parse it; when absent, default "private" (fail closed). Update FixtureSpecSource fixtures/tests to set visibility explicitly.
 3. pipeline.ts:

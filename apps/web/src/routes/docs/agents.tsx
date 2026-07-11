@@ -91,9 +91,18 @@ function DocsAgentsPage() {
 
       <h2>Mock mode</h2>
       <p>
-        Free, spec-generated mock responses are coming. You will be able to
-        exercise an API's shape through the gateway without spending credits —
-        useful for agent evaluation and integration testing.
+        Every published API also serves free, spec-generated mock responses —
+        live and keyless. Swap <code>/gateway</code> for <code>/mock</code> in
+        the call path:
+      </p>
+      <DocsCodeBlock
+        lang="text"
+        code={`${GATEWAY}/mock/{org}/{project}/{path}`}
+      />
+      <p>
+        No API key, no upstream call, <code>0</code> credits. Responses carry{" "}
+        <code>x-zevium-mock: 1</code> — useful for agent evaluation and
+        integration testing before spending credits.
       </p>
     </DocsPage>
   );
