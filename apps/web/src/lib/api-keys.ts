@@ -47,11 +47,15 @@ function toRow(key: {
   };
 }
 
-/** List non-revoked API keys for the signed-in user (subject = userId). */
+/** List non-revoked API keys for signed-in user in active org. */
 export const listKeys = createServerFn({ method: "GET" }).handler(
   async (): Promise<ApiKeyRow[]> => {
     const session = await auth();
     const userId = requireUserId(session.userId);
+    const orgId = session.orgId;
+    if (typeof orgId !== "string" || orgId.length === 0) {
+      throw new Error("Select an organization before managing API keys");
+    }
     const client = await clerkClient();
     const page = await client.apiKeys.list({
       subject: userId,
@@ -60,6 +64,15 @@ export const listKeys = createServerFn({ method: "GET" }).handler(
     });
     return page.data
       .filter((k) => !k.revoked && !k.expired)
+      .filter((k) => {
+        const claims = k.claims;
+        if (!claims || typeof claims !== "object") return false;
+        return (
+          "org_id" in claims &&
+          typeof claims.org_id === "string" &&
+          claims.org_id === orgId
+        );
+      })
       .map((k) => toRow(k));
   },
 );
@@ -86,22 +99,38 @@ export const createKey = createServerFn({ method: "POST" })
   .handler(async ({ data }): Promise<CreateApiKeyResult> => {
     const session = await auth();
     const userId = requireUserId(session.userId);
+    const orgId = session.orgId;
+    if (typeof orgId !== "string" || orgId.length === 0) {
+      throw new Error("Select an organization before creating an API key");
+    }
     const client = await clerkClient();
 
     const existing = await client.apiKeys.list({
       subject: userId,
       includeInvalid: false,
-      limit: 1,
+      limit: 100,
     });
-    const active = existing.data.some((k) => !k.revoked && !k.expired);
+    const active = existing.data.some((k) => {
+      if (k.revoked || k.expired) return false;
+      const claims = k.claims;
+      if (!claims || typeof claims !== "object") return false;
+      return (
+        "org_id" in claims &&
+        typeof claims.org_id === "string" &&
+        claims.org_id === orgId
+      );
+    });
     if (active) {
-      throw new Error("Only one API key per user. Revoke the existing key first.");
+      throw new Error(
+        "Only one API key per organization. Revoke the existing key first.",
+      );
     }
 
     const created = await client.apiKeys.create({
       name: data.name,
       subject: userId,
       createdBy: userId,
+      claims: { org_id: orgId },
     });
 
     const secret = created.secret;

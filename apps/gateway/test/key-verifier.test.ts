@@ -57,6 +57,48 @@ describe("parseClerkVerifyResponse", () => {
     });
   });
 
+  it("prefers claims.org_id over user subject", () => {
+    expect(
+      parseClerkVerifyResponse({
+        subject: "user_abc",
+        id: "ak_2",
+        claims: { org_id: "org_claimed" },
+        scopes: [],
+      }),
+    ).toEqual({
+      orgId: "org_claimed",
+      keyId: "ak_2",
+      scopes: [],
+    });
+  });
+
+  it("uses org subject when claims absent", () => {
+    expect(
+      parseClerkVerifyResponse({
+        subject: "org_direct",
+        id: "ak_3",
+        claims: null,
+      }),
+    ).toEqual({
+      orgId: "org_direct",
+      keyId: "ak_3",
+      scopes: [],
+    });
+  });
+
+  it("falls back to user subject without claims (legacy)", () => {
+    expect(
+      parseClerkVerifyResponse({
+        subject: "user_legacy",
+        id: "ak_4",
+      }),
+    ).toEqual({
+      orgId: "user_legacy",
+      keyId: "ak_4",
+      scopes: [],
+    });
+  });
+
   it("rejects revoked", () => {
     expect(
       parseClerkVerifyResponse({

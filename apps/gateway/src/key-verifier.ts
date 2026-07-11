@@ -56,7 +56,10 @@ export class ClerkKeyVerifier implements KeyVerifier {
 
   constructor(opts: ClerkKeyVerifierOptions) {
     this.#secretKey = opts.secretKey;
-    this.#fetch = opts.fetchImpl ?? fetch;
+    // workerd fetch is not free-callable; bind or wrap so stored ref keeps `this`.
+    this.#fetch =
+      opts.fetchImpl ??
+      ((input: RequestInfo | URL, init?: RequestInit) => fetch(input, init));
     this.#now = opts.now ?? Date.now;
     this.#useCacheApi = opts.useCacheApi !== false;
     this.#caches =
@@ -197,7 +200,8 @@ function parseCachedVerified(json: unknown): VerifiedKey | null | undefined {
 
 /**
  * Clerk verify response (subset). Fields observed in spike:
- * subject (org_/user_), id / api_key_id, scopes, revoked, expiration.
+ * subject (org_/user_), claims.org_id (user-subject keys), id / api_key_id, scopes, revoked, expiration.
+ * orgId prefers claims.org_id when present so user-subject keys route to org wallet.
  */
 export function parseClerkVerifyResponse(json: unknown): VerifiedKey | null {
   if (!json || typeof json !== "object") return null;
@@ -212,8 +216,14 @@ export function parseClerkVerifyResponse(json: unknown): VerifiedKey | null {
       : null;
   if (!subject) return null;
 
-  // Prefer org subject; user keys still carry subject as org or user id.
-  const orgId = subject;
+  let claimOrgId: string | null = null;
+  if ("claims" in json && json.claims && typeof json.claims === "object") {
+    const claims = json.claims as Record<string, unknown>;
+    if (typeof claims.org_id === "string" && claims.org_id.length > 0) {
+      claimOrgId = claims.org_id;
+    }
+  }
+  const orgId = claimOrgId ?? subject;
 
   let keyId: string | null = null;
   if ("id" in json && typeof json.id === "string") keyId = json.id;

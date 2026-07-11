@@ -21,12 +21,34 @@
 | 1 | gateway | /gateway routing, key-verify cache module, spec resolution, wallet integration | done |
 | 2 | convex | projects + specs CRUD functions, publish pipeline, catalogue query | done |
 | 2 | web | projects screens + spec editor | done |
-| 2 | gateway | end-to-end proxy against Convex-backed spec + Clerk key verify | done |
-| 3 | web | catalogue (public SSR) + API detail + playground | done |
-| 3 | convex | wallets ledger functions + Polar webhook + usage rollups | done |
-| 3 | web | keys screens + billing/wallet screens | done |
-| 4 | all | analytics dashboards, MCP endpoint, landing page | done |
-| 5 | all | DESIGN.md motion pass, E2E tests, fixes | done |
+| 2 | gateway | end-to-end proxy against Convex-backed spec + Clerk key verify | done (committed 8ba0b86) |
+| 2 | e2e | agent-browser scripts in e2e/ | fix lane in flight (sign_in recipe: Enter-submit, not click) |
+| 3 | web | catalogue (public SSR) + API detail + playground | staged (.project/prompts/wave3-web-catalogue.md) |
+| 3 | convex+web | billing/wallet screens + Polar webhook | staged (wave3-billing.md) |
+| 3 | web | keys screens (/app/settings) | staged (wave3-keys.md) |
+| 4 | web+convex | analytics dashboards | staged (wave4-analytics.md) |
+| 4 | gateway | MCP endpoint + discovery | staged (wave4-mcp.md) |
+| 5 | all | DESIGN.md motion pass, E2E full suite green, visual-review-1 fixes | not started |
+
+## User action needed
+
+- Clerk: enable **API Keys** feature in dashboard (Configure → API keys) — `/api_keys` returns `feature_not_enabled`; /app/settings/keys shows "Forbidden" until then. API PATCH can't enable it.
+
+- Polar sandbox token lacks `products:write` + webhook scopes. To finish billing: (1) create token with full scopes or use dashboard, (2) register webhook `https://doting-warbler-454.convex.site/polar-webhook` for `order.paid`, (3) put its secret in Convex env `POLAR_WEBHOOK_SECRET` (current one is from legacy endpoint — stale), (4) optionally real credit-pack products (billing.ts falls back to ad-hoc prices).
+
+## Known facts (hard-won, keep)
+
+- Gateway dev: `npx wrangler dev --port 8787` in apps/gateway; env in `apps/gateway/.dev.vars` (gitignored): CLERK_SECRET_KEY, CONVEX_URL, GATEWAY_INTERNAL_SECRET=dev-internal-secret-1
+- Test org wallet funded 10,000 credits on BOTH planes (convex grantCredits + gateway /internal/grant, refId e2e:manual:grant:1)
+- Clerk API keys: real prefix `ak_`; user-created keys have subject=user_… — org routing needs claims.org_id (fix lane b2vkaiep7); E2E key in .project/e2e-key.env (gitignored)
+
+- Clerk sign-in automation: name-find "Continue" hits "Continue with Google"; CSS click on Clerk submit is inert → focus input + press Enter. OTP 424242 auto-submits on fill. Flow: /sign-in → factor-one → client-trust.
+- agent-browser click does NOT scroll target into view — below-fold clicks silently no-op (✓ Done, nothing happens). Always `eval scrollIntoView({block:'center'})` first, or `form.requestSubmit()` for submits.
+- Clerk password reset REVOKES existing sessions — re-sign-in all browser sessions after.
+- Seed user password drifted once; reset via `clerk api /users/<id> -X PATCH -d '{"password":..., "skip_password_checks": true}'`
+- agent-browser sessions isolate via `AGENT_BROWSER_SESSION` env; e2e suite uses its own, orchestrator default session stays signed in
+- OpenCode Go weekly quota was exhausted — provider-qualify `--model xai-oauth/grok-4.5` on omp calls until reset
+- Visual debt (`.project/findings/visual-review-1.md`): header not session-aware; hero right half empty (needs proof strip + stagger + magnetic CTA); verify skeleton crossfades once data flows
 
 ## Verification protocol (after every wave)
 
