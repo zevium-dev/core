@@ -19,6 +19,7 @@ import {
 } from "./pipeline";
 import { handleDiscoveryRequest, type DiscoveryDeps } from "./discovery";
 import { handleMcpRequest, type McpDeps } from "./mcp";
+import { corsPreflight, withCors } from "./cors";
 import { handleMockRequest, parseMockPath, type MockDeps } from "./mock";
 
 export { WalletDO };
@@ -160,8 +161,13 @@ export default {
     const url = new URL(request.url);
     const parts = url.pathname.split("/").filter(Boolean);
 
+    // Public API: browsers preflight cross-origin calls with Authorization.
+    if (request.method === "OPTIONS") {
+      return corsPreflight();
+    }
+
     if (url.pathname === "/" || url.pathname === "/health") {
-      return Response.json({ ok: true, service: "zevium-gateway" });
+      return withCors(Response.json({ ok: true, service: "zevium-gateway" }));
     }
 
     // POST /internal/grant { clerkOrgId, amount, refId }
@@ -187,34 +193,40 @@ export default {
         init.body = await request.arrayBuffer();
       }
 
-      return stub.fetch(new Request(doUrl.toString(), init));
+      return withCors(await stub.fetch(new Request(doUrl.toString(), init)));
     }
 
     // GET /discovery — public machine-readable index
     if (parts[0] === "discovery" && parts.length === 1) {
       const deps = buildDeps(env);
-      return handleDiscoveryRequest(request, discoveryDeps(deps, request));
+      return withCors(
+        await handleDiscoveryRequest(request, discoveryDeps(deps, request)),
+      );
     }
 
     // /mcp — MCP Streamable HTTP
     if (parts[0] === "mcp" && parts.length === 1) {
       const deps = buildDeps(env);
-      return handleMcpRequest(request, mcpDeps(deps, env, request), ctx);
+      return withCors(
+        await handleMcpRequest(request, mcpDeps(deps, env, request), ctx),
+      );
     }
 
     const route = parseGatewayPath(url.pathname);
     if (route) {
       const deps = buildDeps(env);
-      return handleGatewayRequest(request, env, pipelineOnly(deps), ctx, route);
+      return withCors(
+        await handleGatewayRequest(request, env, pipelineOnly(deps), ctx, route),
+      );
     }
 
     const mockRoute = parseMockPath(url.pathname);
     if (mockRoute) {
       const deps = buildDeps(env);
-      return handleMockRequest(request, mockDeps(deps), mockRoute);
+      return withCors(await handleMockRequest(request, mockDeps(deps), mockRoute));
     }
 
-    return Response.json({ error: "not found" }, { status: 404 });
+    return withCors(Response.json({ error: "not found" }, { status: 404 }));
   },
 } satisfies ExportedHandler<Env>;
 

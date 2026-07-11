@@ -272,6 +272,7 @@ export const getPublishedForGateway = query({
     projectId: string;
     organizationId: string;
     clerkOrgId: string;
+    visibility: Doc<"projects">["visibility"];
     deprecatedAt: number | undefined;
     sunsetAt: number | undefined;
     deprecationMessage: string | undefined;
@@ -301,6 +302,7 @@ export const getPublishedForGateway = query({
       projectId: project._id,
       organizationId: org._id,
       clerkOrgId: org.clerkOrgId,
+      visibility: project.visibility,
       deprecatedAt: latest.deprecatedAt,
       sunsetAt: latest.sunsetAt,
       deprecationMessage: latest.deprecationMessage,

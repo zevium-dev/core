@@ -282,6 +282,7 @@ export const ensureWallet = mutation({
 });
 
 const usageEventArg = v.object({
+  /** Publisher's Convex org id — kept for compatibility; superseded by consumerClerkOrgId when present. */
   organizationId: v.id("organizations"),
   projectId: v.id("projects"),
   endpoint: v.string(),
@@ -293,12 +294,20 @@ const usageEventArg = v.object({
   at: v.number(),
   /** Settlement ledger ref — stable settle:{reservationId} */
   settleRefId: v.string(),
+  /**
+   * Marketplace calls: the CONSUMER org's Clerk org id — the wallet that
+   * actually pays. Absent on legacy events (pre-marketplace gateway builds).
+   */
+  consumerClerkOrgId: v.optional(v.string()),
 });
 
 /**
  * Gateway flush: batch usage events + settle ledger rows.
  * Each settleRefId is idempotent; usage events always insert when new settle applies.
  * balance never goes negative from this path — gateway already reserved.
+ * Marketplace calls: the wallet debited is always the CONSUMER's
+ * (consumerClerkOrgId), resolved server-side — never trust the client-
+ * supplied organizationId alone once a consumer identity is present.
  */
 export const recordUsage = internalMutation({
   args: {
@@ -338,13 +347,32 @@ export const recordUsage = internalMutation({
         continue;
       }
 
-      const wallet = await getOrCreateWallet(ctx, event.organizationId);
+      // Marketplace calls carry the consumer's Clerk org id — resolve it to
+      // the Convex org that actually owns the wallet being debited. Legacy
+      // events without it fall back to the client-supplied organizationId.
+      let walletOrgId = event.organizationId;
+      if (event.consumerClerkOrgId !== undefined) {
+        const consumerOrg = await ctx.db
+          .query("organizations")
+          .withIndex("by_clerk_org", (q) =>
+            q.eq("clerkOrgId", event.consumerClerkOrgId as string),
+          )
+          .unique();
+        if (consumerOrg === null) {
+          // Unresolvable consumer org — skip this row, never throw the batch.
+          skipped += 1;
+          continue;
+        }
+        walletOrgId = consumerOrg._id;
+      }
+
+      const wallet = await getOrCreateWallet(ctx, walletOrgId);
       // Free-tier (credits 0): still ledger a settle row for idempotency + audit.
       const nextBalance = wallet.balance - event.credits;
       if (nextBalance < 0) {
         // Do not invent balance. Skip settle but still record usage for forensics.
         await ctx.db.insert("usageEvents", {
-          organizationId: event.organizationId,
+          organizationId: walletOrgId,
           projectId: event.projectId,
           endpoint: event.endpoint,
           method: event.method,
@@ -370,7 +398,7 @@ export const recordUsage = internalMutation({
       await ctx.db.patch(wallet._id, { balance: nextBalance });
 
       await ctx.db.insert("usageEvents", {
-        organizationId: event.organizationId,
+        organizationId: walletOrgId,
         projectId: event.projectId,
         endpoint: event.endpoint,
         method: event.method,

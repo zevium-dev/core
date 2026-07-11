@@ -9,7 +9,10 @@ import { makeFunctionReference } from "convex/server";
 /** Hot-path event emitted by the pipeline (tests / optional logging). */
 export type UsageEvent = {
   requestId: string;
+  /** Publisher's Convex org id — kept for compatibility. */
   organizationId: string;
+  /** Consumer's Clerk org id — the org whose wallet actually pays. */
+  consumerClerkOrgId: string;
   projectId: string;
   keyId: string;
   orgSlug: string;
@@ -26,7 +29,10 @@ export type UsageEvent = {
 
 /** Shape stored on pending settlements and sent to wallets:recordUsage. */
 export type ConvexUsageRecord = {
+  /** Publisher's Convex org id — kept for compatibility. */
   organizationId: string;
+  /** Consumer's Clerk org id — recordUsage resolves this to the wallet debited. */
+  consumerClerkOrgId: string;
   projectId: string;
   endpoint: string;
   method: string;
@@ -301,6 +307,7 @@ export class ConvexUsageSink implements UsageSink {
 export function usageEventToRecord(event: UsageEvent): ConvexUsageRecord {
   return {
     organizationId: event.organizationId,
+    consumerClerkOrgId: event.consumerClerkOrgId,
     projectId: event.projectId,
     endpoint: event.pathTemplate,
     method: event.method,
@@ -318,6 +325,7 @@ export function pendingToUsageRecord(input: {
   cost: number;
   settledAt: number;
   organizationId: string;
+  consumerClerkOrgId: string;
   projectId: string;
   endpoint: string;
   method: string;
@@ -327,6 +335,7 @@ export function pendingToUsageRecord(input: {
 }): ConvexUsageRecord {
   return {
     organizationId: input.organizationId,
+    consumerClerkOrgId: input.consumerClerkOrgId,
     projectId: input.projectId,
     endpoint: input.endpoint,
     method: input.method,

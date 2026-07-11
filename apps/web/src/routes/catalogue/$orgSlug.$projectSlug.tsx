@@ -661,8 +661,8 @@ function TryItPanel({
             >
               <Badge variant="secondary">mock response · 0 credits</Badge>
               <span>
-                Calls hit <span className="font-mono text-xs">/mock</span> —
-                key-authenticated, never touches upstream.
+                Calls hit <span className="font-mono text-xs">/mock</span> — no
+                API key needed, never touches upstream.
               </span>
             </div>
           ) : (

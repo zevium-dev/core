@@ -78,6 +78,7 @@ async function installFixtures(opts: { clerkOrgId: string; credits?: number }) {
     projectId: "proj_demo",
     organizationId: opts.clerkOrgId,
     clerkOrgId: opts.clerkOrgId,
+    visibility: "private",
   });
 
   __setTestPipelineDeps({
@@ -160,30 +161,8 @@ describe("mock gateway route", () => {
     expect(state.balance).toBe(0);
   });
 
-  it("402 payment_required shape on bad key", async () => {
-    await installFixtures({ clerkOrgId: "org_mock_badkey", credits: 10 });
-
-    const res = await mockFetch(`/mock/${ORG_SLUG}/${PROJECT_SLUG}/users/1`, {
-      headers: { authorization: "Bearer zev_wrong" },
-    });
-
-    expect(res.status).toBe(402);
-    expect(res.headers.get("www-authenticate")).toBe('Bearer realm="zevium"');
-    const body: unknown = await res.json();
-    expect(
-      body && typeof body === "object" && "error" in body && body.error,
-    ).toBe("payment_required");
-    expect(
-      body && typeof body === "object" && "actions" in body && body.actions,
-    ).toMatchObject({
-      createKey: "https://zevium.dev/app/settings/keys",
-      topUp: "https://zevium.dev/app/billing",
-      docs: "https://zevium.dev/docs/consuming",
-    });
-  });
-
-  it("402 payment_required shape on missing key", async () => {
-    await installFixtures({ clerkOrgId: "org_mock_missingkey", credits: 10 });
+  it("keyless request serves mock (public try-before-buy surface)", async () => {
+    await installFixtures({ clerkOrgId: "org_mock_keyless", credits: 10 });
 
     const request = new Request(
       `https://gateway.test/mock/${ORG_SLUG}/${PROJECT_SLUG}/users/1`,
@@ -192,8 +171,23 @@ describe("mock gateway route", () => {
     const res = await worker.fetch(request, env as Env, ctx);
     await waitOnExecutionContext(ctx);
 
-    expect(res.status).toBe(402);
-    expect(res.headers.get("www-authenticate")).toBe('Bearer realm="zevium"');
+    expect(res.status).toBe(200);
+    expect(res.headers.get("x-zevium-mock")).toBe("1");
+    expect(res.headers.get("x-zevium-cost")).toBe("0");
+  });
+
+  it("garbage key is ignored — mock is auth-free", async () => {
+    await installFixtures({ clerkOrgId: "org_mock_badkey", credits: 10 });
+
+    const res = await mockFetch(`/mock/${ORG_SLUG}/${PROJECT_SLUG}/users/1`, {
+      headers: { authorization: "Bearer zev_wrong" },
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get("x-zevium-mock")).toBe("1");
+
+    const state = await walletStub("org_mock_badkey").getState();
+    expect(state.balance).toBe(10);
   });
 
   it("404 on unknown operation", async () => {

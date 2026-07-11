@@ -59,6 +59,23 @@ function makeEvent(
   };
 }
 
+/** Seed a second org (marketplace consumer) with its own wallet. */
+async function seedConsumerOrg(
+  t: ReturnType<typeof convexTest>,
+  clerkOrgId: string,
+  balance = 50,
+): Promise<Id<"organizations">> {
+  return await t.run(async (ctx) => {
+    const organizationId = await ctx.db.insert("organizations", {
+      clerkOrgId,
+      name: "Consumer Co",
+      slug: `consumer-${clerkOrgId}`,
+    });
+    await ctx.db.insert("wallets", { organizationId, balance });
+    return organizationId;
+  });
+}
+
 describe("parseIngestUsageBody", () => {
   it("rejects non-object and missing events", () => {
     expect(parseIngestUsageBody(null).ok).toBe(false);
@@ -209,5 +226,112 @@ describe("POST /ingest-usage", () => {
     expect(res.status).toBe(400);
     const body = (await res.json()) as { error: string };
     expect(body.error).toBe("invalid event");
+  });
+
+  it("marketplace: consumerClerkOrgId resolves to the consumer's wallet, publisher's untouched", async () => {
+    const t = convexTest(schema, modules);
+    const seed = await seedOrgAndProject(t); // publisher org, wallet balance 100
+    const consumerClerkOrgId = "org_clerk_consumer_1";
+    const consumerOrgId = await seedConsumerOrg(t, consumerClerkOrgId, 50);
+
+    const event = {
+      ...makeEvent(seed.organizationId, seed.projectId, "settle:mkt-1", 7),
+      consumerClerkOrgId,
+    };
+
+    const res = await t.fetch("/ingest-usage", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-internal-secret": SECRET,
+      },
+      body: JSON.stringify({ events: [event] }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      applied: number;
+      skipped: number;
+      balances: Record<string, number>;
+    };
+    expect(body.applied).toBe(1);
+    expect(body.skipped).toBe(0);
+    expect(body.balances[consumerOrgId]).toBe(43); // 50 - 7
+    expect(body.balances[seed.organizationId]).toBeUndefined();
+
+    const consumerWallet = await t.run(async (ctx) =>
+      ctx.db
+        .query("wallets")
+        .withIndex("by_organization", (q) =>
+          q.eq("organizationId", consumerOrgId),
+        )
+        .unique(),
+    );
+    expect(consumerWallet?.balance).toBe(43);
+
+    const publisherWallet = await t.run(async (ctx) =>
+      ctx.db
+        .query("wallets")
+        .withIndex("by_organization", (q) =>
+          q.eq("organizationId", seed.organizationId),
+        )
+        .unique(),
+    );
+    expect(publisherWallet?.balance).toBe(100); // publisher wallet untouched
+
+    const usageRows = await t.run(async (ctx) =>
+      ctx.db.query("usageEvents").collect(),
+    );
+    expect(usageRows).toHaveLength(1);
+    expect(usageRows[0]!.organizationId).toBe(consumerOrgId);
+    expect(usageRows[0]!.projectId).toBe(seed.projectId);
+  });
+
+  it("marketplace: unresolvable consumerClerkOrgId is skipped, batch does not throw", async () => {
+    const t = convexTest(schema, modules);
+    const seed = await seedOrgAndProject(t);
+
+    const unresolved = {
+      ...makeEvent(seed.organizationId, seed.projectId, "settle:mkt-bad", 4),
+      consumerClerkOrgId: "org_clerk_does_not_exist",
+    };
+    // Legacy event (no consumerClerkOrgId) in the same batch must still apply.
+    const legacy = makeEvent(
+      seed.organizationId,
+      seed.projectId,
+      "settle:mkt-good",
+      3,
+    );
+
+    const res = await t.fetch("/ingest-usage", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-internal-secret": SECRET,
+      },
+      body: JSON.stringify({ events: [unresolved, legacy] }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      applied: number;
+      skipped: number;
+      balances: Record<string, number>;
+    };
+    expect(body.applied).toBe(1);
+    expect(body.skipped).toBe(1);
+
+    const usageRows = await t.run(async (ctx) =>
+      ctx.db.query("usageEvents").collect(),
+    );
+    expect(usageRows).toHaveLength(1);
+
+    const publisherWallet = await t.run(async (ctx) =>
+      ctx.db
+        .query("wallets")
+        .withIndex("by_organization", (q) =>
+          q.eq("organizationId", seed.organizationId),
+        )
+        .unique(),
+    );
+    expect(publisherWallet?.balance).toBe(97); // 100 - 3 (only the legacy event applied)
   });
 });

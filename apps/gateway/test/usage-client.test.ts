@@ -7,6 +7,7 @@ import {
 
 const sampleEvent: ConvexUsageRecord = {
   organizationId: "org_1",
+  consumerClerkOrgId: "org_clerk_consumer_1",
   projectId: "proj_1",
   endpoint: "/echo",
   method: "POST",

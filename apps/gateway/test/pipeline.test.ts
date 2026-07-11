@@ -84,6 +84,9 @@ async function installFixtures(opts: {
   credits?: number;
   usage?: CollectingUsageSink;
   keyOrgId?: string;
+  /** Grant credits to this org's wallet instead of clerkOrgId (cross-org tests). */
+  creditOrgId?: string;
+  visibility?: "public" | "private";
   deprecatedAt?: number;
   sunsetAt?: number;
   deprecationMessage?: string;
@@ -103,6 +106,7 @@ async function installFixtures(opts: {
     projectId: "proj_demo",
     organizationId,
     clerkOrgId: opts.clerkOrgId,
+    visibility: opts.visibility ?? "private",
     deprecatedAt: opts.deprecatedAt,
     sunsetAt: opts.sunsetAt,
     deprecationMessage: opts.deprecationMessage,
@@ -118,7 +122,7 @@ async function installFixtures(opts: {
   });
 
   if (opts.credits && opts.credits > 0) {
-    await walletStub(opts.clerkOrgId).grant(
+    await walletStub(opts.creditOrgId ?? opts.clerkOrgId).grant(
       `grant_${crypto.randomUUID()}`,
       opts.credits,
     );
@@ -700,5 +704,104 @@ describe("gateway pipeline", () => {
 
     const convexNamed = await walletStub(CONVEX_ORG).getState();
     expect(convexNamed.balance).toBe(0);
+  });
+
+  it("marketplace: consumer key calls a PUBLIC project in another org, consumer wallet pays", async () => {
+    const publisherOrg = "org_pipe_publisher_b";
+    const consumerOrg = "org_pipe_consumer_a";
+    const { fetchImpl, calls } = makeFetchMock(
+      () => new Response("ok", { status: 200 }),
+    );
+
+    const { usage } = await installFixtures({
+      clerkOrgId: publisherOrg,
+      keyOrgId: consumerOrg,
+      visibility: "public",
+      fetchImpl,
+      credits: 20,
+      creditOrgId: consumerOrg,
+    });
+
+    const res = await gatewayFetch(
+      `/gateway/${ORG_SLUG}/${PROJECT_SLUG}/stream`,
+    );
+    expect(res.status).toBe(200);
+    expect(calls).toHaveLength(1);
+
+    // Consumer's wallet is debited, not the publisher's.
+    const consumerState = await walletStub(consumerOrg).getState();
+    expect(consumerState.balance).toBe(18); // 20 - 2 (stream cost)
+    expect(consumerState.pendingSettlements).toHaveLength(1);
+
+    const publisherState = await walletStub(publisherOrg).getState();
+    expect(publisherState.balance).toBe(0);
+    expect(publisherState.pendingSettlements).toHaveLength(0);
+
+    expect(usage.events).toHaveLength(1);
+    expect(usage.events[0]!.outcome).toBe("settled");
+    expect(usage.events[0]!.cost).toBe(2);
+    expect(usage.events[0]!.consumerClerkOrgId).toBe(consumerOrg);
+  });
+
+  it("marketplace: PRIVATE project, foreign key → 404 project_not_found, no wallet activity", async () => {
+    const publisherOrg = "org_pipe_private_pub";
+    const foreignOrg = "org_pipe_private_foreign";
+    const { fetchImpl, calls } = makeFetchMock(() => {
+      throw new Error("upstream should not be called");
+    });
+
+    const { usage } = await installFixtures({
+      clerkOrgId: publisherOrg,
+      keyOrgId: foreignOrg,
+      visibility: "private",
+      fetchImpl,
+      credits: 20,
+      creditOrgId: foreignOrg,
+    });
+
+    const res = await gatewayFetch(
+      `/gateway/${ORG_SLUG}/${PROJECT_SLUG}/stream`,
+    );
+    expect(res.status).toBe(404);
+    const body: unknown = await res.json();
+    expect(
+      body && typeof body === "object" && "error" in body && body.error,
+    ).toBe("project_not_found");
+    // Never leak that the private project exists via a 401/403.
+    expect(res.status).not.toBe(401);
+    expect(res.status).not.toBe(403);
+    expect(calls).toHaveLength(0);
+    expect(usage.events).toHaveLength(0);
+
+    const foreignState = await walletStub(foreignOrg).getState();
+    expect(foreignState.balance).toBe(20); // untouched
+    expect(foreignState.inFlightTotal).toBe(0);
+    expect(foreignState.pendingSettlements).toHaveLength(0);
+
+    const publisherState = await walletStub(publisherOrg).getState();
+    expect(publisherState.balance).toBe(0);
+    expect(publisherState.pendingSettlements).toHaveLength(0);
+  });
+
+  it("marketplace: PRIVATE project, owner key → 200", async () => {
+    const publisherOrg = "org_pipe_private_owner";
+    const { fetchImpl } = makeFetchMock(
+      () => new Response("ok", { status: 200 }),
+    );
+
+    await installFixtures({
+      clerkOrgId: publisherOrg,
+      visibility: "private",
+      fetchImpl,
+      credits: 10,
+    });
+
+    const res = await gatewayFetch(
+      `/gateway/${ORG_SLUG}/${PROJECT_SLUG}/stream`,
+    );
+    expect(res.status).toBe(200);
+
+    const state = await walletStub(publisherOrg).getState();
+    expect(state.balance).toBe(8); // 10 - 2 (stream cost)
   });
 });

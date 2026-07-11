@@ -98,6 +98,7 @@ async function installAgentFixtures(opts: {
     projectId: "proj_demo",
     organizationId: CONVEX_ORG,
     clerkOrgId: opts.clerkOrgId,
+    visibility: "private",
   });
   const catalogue = new FixtureCatalogueSource(opts.listings ?? [LISTING]);
 

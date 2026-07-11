@@ -243,6 +243,8 @@ type IngestUsageEvent = {
   keyId: string;
   at: number;
   settleRefId: string;
+  /** Marketplace calls: consumer's Clerk org id — the wallet that pays. */
+  consumerClerkOrgId?: string;
 };
 
 /**
@@ -280,6 +282,7 @@ export function parseIngestUsageBody(
     const keyId = e.keyId;
     const at = e.at;
     const settleRefId = e.settleRefId;
+    const consumerClerkOrgIdRaw = e.consumerClerkOrgId;
 
     if (typeof organizationId !== "string" || organizationId.length === 0) {
       return { ok: false, status: 400, error: "invalid event" };
@@ -311,6 +314,16 @@ export function parseIngestUsageBody(
     if (typeof settleRefId !== "string" || settleRefId.trim() === "") {
       return { ok: false, status: 400, error: "invalid event" };
     }
+    let consumerClerkOrgId: string | undefined;
+    if (consumerClerkOrgIdRaw !== undefined) {
+      if (
+        typeof consumerClerkOrgIdRaw !== "string" ||
+        consumerClerkOrgIdRaw.trim() === ""
+      ) {
+        return { ok: false, status: 400, error: "invalid event" };
+      }
+      consumerClerkOrgId = consumerClerkOrgIdRaw;
+    }
 
     events.push({
       organizationId,
@@ -323,6 +336,7 @@ export function parseIngestUsageBody(
       keyId,
       at,
       settleRefId,
+      consumerClerkOrgId,
     });
   }
 
@@ -380,6 +394,7 @@ http.route({
           keyId: e.keyId,
           at: e.at,
           settleRefId: e.settleRefId,
+          consumerClerkOrgId: e.consumerClerkOrgId,
         })),
       });
       return new Response(JSON.stringify(result), {

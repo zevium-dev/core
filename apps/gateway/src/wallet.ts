@@ -42,7 +42,10 @@ export type InFlightEntry = {
 
 /** Usage metadata required to flush a settlement to Convex. */
 export type SettlementUsage = {
+  /** Publisher's Convex org id — kept for compatibility. */
   organizationId: string;
+  /** Consumer's Clerk org id — the org whose wallet actually pays. */
+  consumerClerkOrgId: string;
   projectId: string;
   endpoint: string;
   method: string;
@@ -654,6 +657,7 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
           cost: s.cost,
           settledAt: s.settledAt,
           organizationId: usage.organizationId,
+          consumerClerkOrgId: usage.consumerClerkOrgId,
           projectId: usage.projectId,
           endpoint: usage.endpoint,
           method: usage.method,

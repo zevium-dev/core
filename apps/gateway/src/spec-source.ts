@@ -15,6 +15,11 @@ export type PublishedSpec = {
   organizationId: string;
   /** Clerk org id — wallet DO idFromName key. */
   clerkOrgId: string;
+  /**
+   * Marketplace access: "public" projects accept any authenticated key;
+   * "private" projects only accept keys whose org owns the project.
+   */
+  visibility: "public" | "private";
   /** Epoch seconds when this spec version was deprecated (RFC 8594). Undefined when active. */
   deprecatedAt?: number;
   /** Epoch seconds when this spec version is scheduled for removal (RFC 8594 Sunset). */
@@ -41,6 +46,7 @@ const getPublishedForGatewayRef = makeFunctionReference<
     projectId: string;
     organizationId: string;
     clerkOrgId: string;
+    visibility?: "public" | "private";
     deprecatedAt?: number;
     sunsetAt?: number;
     deprecationMessage?: string;
@@ -166,11 +172,21 @@ export function parsePublishedSpecPayload(json: unknown): PublishedSpec | null {
     clerkOrgId = candidate.organizationId;
   }
 
+  // Fail closed: unknown/absent visibility is never treated as public.
+  let visibility: "public" | "private" = "private";
+  if (
+    "visibility" in candidate &&
+    (candidate.visibility === "public" || candidate.visibility === "private")
+  ) {
+    visibility = candidate.visibility;
+  }
+
   const published: PublishedSpec = {
     spec: candidate.spec,
     projectId: candidate.projectId,
     organizationId: candidate.organizationId,
     clerkOrgId,
+    visibility,
   };
   if (
     "deprecatedAt" in candidate &&

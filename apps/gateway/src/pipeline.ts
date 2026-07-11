@@ -84,14 +84,14 @@ export async function handleGatewayRequest(
     return jsonError(404, "project_not_found", "Unknown project", requestId);
   }
 
-  // Key subject must match project Clerk org id (wallet DO routing key).
-  if (verified.orgId !== published.clerkOrgId) {
-    return jsonError(
-      401,
-      "org_mismatch",
-      "Key not authorized for this org",
-      requestId,
-    );
+  // Marketplace access: public projects accept any authenticated key.
+  // Private projects only accept keys whose org owns the project — foreign
+  // keys get 404 (never leak that a private project exists) not 401/403.
+  if (
+    published.visibility !== "public" &&
+    verified.orgId !== published.clerkOrgId
+  ) {
+    return jsonError(404, "project_not_found", "Unknown project", requestId);
   }
 
   let parsed;
@@ -124,8 +124,9 @@ export async function handleGatewayRequest(
   const freeTier = matched.pricing.freeTier;
   const reservationId = requestId;
 
-  // Wallet DO keyed by Clerk org id (idFromName(clerkOrgId)).
-  const walletId = env.WALLET.idFromName(published.clerkOrgId);
+  // Wallet DO keyed by the CONSUMER's Clerk org id — the caller's org pays,
+  // never the publisher's, even when they differ (marketplace calls).
+  const walletId = env.WALLET.idFromName(verified.orgId);
   const wallet = env.WALLET.get(walletId);
 
   let usedFree = false;
@@ -143,12 +144,13 @@ export async function handleGatewayRequest(
   if (!usedFree) {
     const reserve = await wallet.reserve(reservationId, cost, {
       keyId: verified.keyId,
-      clerkOrgId: published.clerkOrgId,
+      clerkOrgId: verified.orgId,
     });
     if (reserve.status === "insufficient") {
       emitUsage(ctx, deps, {
         requestId,
         organizationId: published.organizationId,
+        consumerClerkOrgId: verified.orgId,
         projectId: published.projectId,
         keyId: verified.keyId,
         orgSlug: route.orgSlug,
@@ -177,6 +179,7 @@ export async function handleGatewayRequest(
       emitUsage(ctx, deps, {
         requestId,
         organizationId: published.organizationId,
+        consumerClerkOrgId: verified.orgId,
         projectId: published.projectId,
         keyId: verified.keyId,
         orgSlug: route.orgSlug,
@@ -236,6 +239,7 @@ export async function handleGatewayRequest(
     emitUsage(ctx, deps, {
       requestId,
       organizationId: published.organizationId,
+      consumerClerkOrgId: verified.orgId,
       projectId: published.projectId,
       keyId: verified.keyId,
       orgSlug: route.orgSlug,
@@ -255,6 +259,7 @@ export async function handleGatewayRequest(
   const latencyMs = (deps.now ?? Date.now)() - started;
   const usageMeta: SettlementUsage = {
     organizationId: published.organizationId,
+    consumerClerkOrgId: verified.orgId,
     projectId: published.projectId,
     endpoint: matched.pathTemplate,
     method: matched.method,
@@ -270,6 +275,7 @@ export async function handleGatewayRequest(
       emitUsage(ctx, deps, {
         requestId,
         organizationId: published.organizationId,
+        consumerClerkOrgId: verified.orgId,
         projectId: published.projectId,
         keyId: verified.keyId,
         orgSlug: route.orgSlug,
@@ -291,6 +297,7 @@ export async function handleGatewayRequest(
       emitUsage(ctx, deps, {
         requestId,
         organizationId: published.organizationId,
+        consumerClerkOrgId: verified.orgId,
         projectId: published.projectId,
         keyId: verified.keyId,
         orgSlug: route.orgSlug,
@@ -309,6 +316,7 @@ export async function handleGatewayRequest(
     emitUsage(ctx, deps, {
       requestId,
       organizationId: published.organizationId,
+      consumerClerkOrgId: verified.orgId,
       projectId: published.projectId,
       keyId: verified.keyId,
       orgSlug: route.orgSlug,
@@ -326,6 +334,7 @@ export async function handleGatewayRequest(
     emitUsage(ctx, deps, {
       requestId,
       organizationId: published.organizationId,
+      consumerClerkOrgId: verified.orgId,
       projectId: published.projectId,
       keyId: verified.keyId,
       orgSlug: route.orgSlug,

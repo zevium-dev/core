@@ -1,8 +1,9 @@
 /**
- * Mock gateway route: /mock/:orgSlug/:projectSlug/* — same key auth as
- * /gateway (product rule: no unauthenticated execution paths), but costs
- * 0 credits: no reserve/settle, never touches upstream. Serves a generated
- * example body from the published spec's response schema.
+ * Mock gateway route: /mock/:orgSlug/:projectSlug/* — PUBLIC, no API key.
+ * Mock never executes the upstream API, so the "no unmetered execution"
+ * product rule does not apply: responses are synthesized from the published
+ * spec's response schema at 0 credits. This is the anonymous try-before-buy
+ * surface for the catalogue and agent onboarding.
  */
 
 import {
@@ -10,13 +11,13 @@ import {
   matchOperation,
   parseSpec,
 } from "@zevium/shared";
-import { extractApiKey, type KeyVerifier } from "./key-verifier";
+import type { KeyVerifier } from "./key-verifier";
 import type { SpecSource } from "./spec-source";
 import { jsonError } from "./errors";
-import { paymentRequiredResponse } from "./x402";
 
 export type MockDeps = {
-  keyVerifier: KeyVerifier;
+  /** Unused since mock went keyless; kept so test deps stay uniform. */
+  keyVerifier?: KeyVerifier;
   specSource: SpecSource;
   idGenerator?: () => string;
 };
@@ -51,36 +52,12 @@ export async function handleMockRequest(
 ): Promise<Response> {
   const requestId = (deps.idGenerator ?? defaultId)();
 
-  const secret = extractApiKey(request);
-  if (!secret) {
-    return paymentRequiredResponse(requestId, "API key required", {
-      reason: "missing_api_key",
-    });
-  }
-
-  const verified = await deps.keyVerifier.verify(secret);
-  if (!verified) {
-    return paymentRequiredResponse(requestId, "Invalid API key", {
-      reason: "invalid_api_key",
-    });
-  }
-
   const published = await deps.specSource.getPublishedSpec(
     route.orgSlug,
     route.projectSlug,
   );
   if (!published) {
     return jsonError(404, "project_not_found", "Unknown project", requestId);
-  }
-
-  // Same subject-must-match-project rule as /gateway.
-  if (verified.orgId !== published.clerkOrgId) {
-    return jsonError(
-      401,
-      "org_mismatch",
-      "Key not authorized for this org",
-      requestId,
-    );
   }
 
   let parsed;
