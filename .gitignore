@@ -34,3 +34,4 @@ reload-*.webm
 .env.local
 
 # convex
+.turbo
