@@ -4,54 +4,9 @@ import {
   mutation,
   query,
   type MutationCtx,
-  type QueryCtx,
 } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
-
-type OrgIdentityClaims = {
-  subject: string;
-  orgId: string | undefined;
-  orgSlug: string | undefined;
-  orgRole: string | undefined;
-};
-
-async function requireIdentity(
-  ctx: QueryCtx | MutationCtx,
-): Promise<OrgIdentityClaims> {
-  const identity = await ctx.auth.getUserIdentity();
-  if (identity === null) {
-    throw new Error("Not authenticated");
-  }
-
-  // Clerk JWT template "convex" maps org claims as org_id / org_slug / org_role.
-  // Convex flattens custom claims onto the identity object.
-  const raw = identity as Record<string, unknown>;
-  const orgId =
-    typeof raw.org_id === "string"
-      ? raw.org_id
-      : typeof raw.orgId === "string"
-        ? raw.orgId
-        : undefined;
-  const orgSlug =
-    typeof raw.org_slug === "string"
-      ? raw.org_slug
-      : typeof raw.orgSlug === "string"
-        ? raw.orgSlug
-        : undefined;
-  const orgRole =
-    typeof raw.org_role === "string"
-      ? raw.org_role
-      : typeof raw.orgRole === "string"
-        ? raw.orgRole
-        : undefined;
-
-  return {
-    subject: identity.subject,
-    orgId,
-    orgSlug,
-    orgRole,
-  };
-}
+import { requireIdentity } from "./lib/auth";
 
 async function ensureWallet(
   ctx: MutationCtx,

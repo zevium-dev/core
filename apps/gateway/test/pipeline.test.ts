@@ -1,13 +1,21 @@
 import {
   createExecutionContext,
   env,
+  runDurableObjectAlarm,
   waitOnExecutionContext,
 } from "cloudflare:test";
 import { afterEach, describe, expect, it } from "vitest";
-import worker, { __setTestPipelineDeps, type Env } from "../src/index";
+import worker, {
+  __setTestPipelineDeps,
+  __setTestUsageMutation,
+  type Env,
+} from "../src/index";
 import { FixtureKeyVerifier } from "../src/key-verifier";
 import { FixtureSpecSource } from "../src/spec-source";
-import { CollectingUsageSink } from "../src/usage";
+import {
+  CollectingUsageSink,
+  FakeConvexUsageSink,
+} from "../src/usage";
 import type { WalletDO } from "../src/wallet";
 
 type WalletStub = DurableObjectStub<WalletDO>;
@@ -16,6 +24,8 @@ const ORG_SLUG = "acme";
 const PROJECT_SLUG = "demo";
 const KEY_SECRET = "zev_test_secret_pipeline_1";
 const KEY_ID = "ak_test_1";
+const CLERK_ORG = "org_clerk_pipe";
+const CONVEX_ORG = "org_convex_pipe";
 
 const SPEC = JSON.stringify({
   openapi: "3.1.0",
@@ -42,11 +52,17 @@ const SPEC = JSON.stringify({
         "x-zevium-cost": 1,
       },
     },
+    "/free": {
+      get: {
+        "x-zevium-cost": 5,
+        "x-zevium-free-tier": 2,
+      },
+    },
   },
 });
 
-function walletStub(orgId: string): WalletStub {
-  const id = env.WALLET.idFromName(orgId);
+function walletStub(clerkOrgId: string): WalletStub {
+  const id = env.WALLET.idFromName(clerkOrgId);
   return env.WALLET.get(id);
 }
 
@@ -62,20 +78,28 @@ function makeFetchMock(handler: (req: Request) => Promise<Response> | Response) 
 }
 
 async function installFixtures(opts: {
-  orgId: string;
+  clerkOrgId: string;
+  organizationId?: string;
   fetchImpl: typeof fetch;
   credits?: number;
   usage?: CollectingUsageSink;
+  keyOrgId?: string;
 }) {
   const usage = opts.usage ?? new CollectingUsageSink();
+  const organizationId = opts.organizationId ?? opts.clerkOrgId;
   const keys = new FixtureKeyVerifier({
-    [KEY_SECRET]: { orgId: opts.orgId, keyId: KEY_ID, scopes: ["read"] },
+    [KEY_SECRET]: {
+      orgId: opts.keyOrgId ?? opts.clerkOrgId,
+      keyId: KEY_ID,
+      scopes: ["read"],
+    },
   });
   const specs = new FixtureSpecSource();
   specs.set(ORG_SLUG, PROJECT_SLUG, {
     spec: SPEC,
     projectId: "proj_demo",
-    organizationId: opts.orgId,
+    organizationId,
+    clerkOrgId: opts.clerkOrgId,
   });
 
   __setTestPipelineDeps({
@@ -87,13 +111,13 @@ async function installFixtures(opts: {
   });
 
   if (opts.credits && opts.credits > 0) {
-    await walletStub(opts.orgId).grant(
+    await walletStub(opts.clerkOrgId).grant(
       `grant_${crypto.randomUUID()}`,
       opts.credits,
     );
   }
 
-  return { usage, keys, specs };
+  return { usage, keys, specs, organizationId };
 }
 
 async function gatewayFetch(
@@ -116,11 +140,12 @@ async function gatewayFetch(
 
 afterEach(() => {
   __setTestPipelineDeps(null);
+  __setTestUsageMutation(null);
 });
 
 describe("gateway pipeline", () => {
   it("happy path: reserves, proxies, settles, sets headers", async () => {
-    const orgId = "org_pipe_happy";
+    const clerkOrgId = "org_pipe_happy";
     const { fetchImpl, calls } = makeFetchMock(async (req) => {
       expect(req.method).toBe("POST");
       expect(new URL(req.url).pathname).toBe("/v1/echo");
@@ -134,7 +159,7 @@ describe("gateway pipeline", () => {
     });
 
     const { usage } = await installFixtures({
-      orgId,
+      clerkOrgId,
       fetchImpl,
       credits: 100,
     });
@@ -152,10 +177,11 @@ describe("gateway pipeline", () => {
     expect(res.headers.get("x-upstream")).toBe("yes");
     expect(calls).toHaveLength(1);
 
-    const state = await walletStub(orgId).getState();
+    const state = await walletStub(clerkOrgId).getState();
     expect(state.balance).toBe(97);
     expect(state.inFlightTotal).toBe(0);
     expect(state.pendingSettlements).toHaveLength(1);
+    expect(state.pendingSettlements[0]!.usage).toBeTruthy();
 
     expect(usage.events).toHaveLength(1);
     expect(usage.events[0]!.outcome).toBe("settled");
@@ -164,13 +190,13 @@ describe("gateway pipeline", () => {
   });
 
   it("insufficient credits → 402 and no upstream call", async () => {
-    const orgId = "org_pipe_insufficient";
+    const clerkOrgId = "org_pipe_insufficient";
     const { fetchImpl, calls } = makeFetchMock(() => {
       throw new Error("upstream should not be called");
     });
 
     const { usage } = await installFixtures({
-      orgId,
+      clerkOrgId,
       fetchImpl,
       credits: 0,
     });
@@ -182,38 +208,38 @@ describe("gateway pipeline", () => {
 
     expect(res.status).toBe(402);
     const body: unknown = await res.json();
-    expect(body && typeof body === "object" && "error" in body && body.error).toBe(
-      "insufficient_credits",
-    );
+    expect(
+      body && typeof body === "object" && "error" in body && body.error,
+    ).toBe("insufficient_credits");
     expect(calls).toHaveLength(0);
     expect(usage.events[0]!.outcome).toBe("blocked");
 
-    const state = await walletStub(orgId).getState();
+    const state = await walletStub(clerkOrgId).getState();
     expect(state.balance).toBe(0);
     expect(state.inFlightTotal).toBe(0);
   });
 
   it("non-2xx upstream → refund, credits restored", async () => {
-    const orgId = "org_pipe_refund";
+    const clerkOrgId = "org_pipe_refund";
     const { fetchImpl } = makeFetchMock(
       () => new Response("boom", { status: 500 }),
     );
 
-    await installFixtures({ orgId, fetchImpl, credits: 50 });
+    await installFixtures({ clerkOrgId, fetchImpl, credits: 50 });
 
     const res = await gatewayFetch(`/gateway/${ORG_SLUG}/${PROJECT_SLUG}/fail`);
     expect(res.status).toBe(500);
     expect(res.headers.get("x-zevium-cost")).toBe("4");
     expect(await res.text()).toBe("boom");
 
-    const state = await walletStub(orgId).getState();
+    const state = await walletStub(clerkOrgId).getState();
     expect(state.balance).toBe(50);
     expect(state.inFlightTotal).toBe(0);
     expect(state.pendingSettlements).toHaveLength(0);
   });
 
   it("streaming body passthrough integrity", async () => {
-    const orgId = "org_pipe_stream";
+    const clerkOrgId = "org_pipe_stream";
     const chunks = ["alpha-", "beta-", "gamma"];
     const { fetchImpl } = makeFetchMock(() => {
       const stream = new ReadableStream<Uint8Array>({
@@ -229,18 +255,20 @@ describe("gateway pipeline", () => {
       });
     });
 
-    await installFixtures({ orgId, fetchImpl, credits: 20 });
+    await installFixtures({ clerkOrgId, fetchImpl, credits: 20 });
 
-    const res = await gatewayFetch(`/gateway/${ORG_SLUG}/${PROJECT_SLUG}/stream`);
+    const res = await gatewayFetch(
+      `/gateway/${ORG_SLUG}/${PROJECT_SLUG}/stream`,
+    );
     expect(res.status).toBe(200);
     expect(await res.text()).toBe("alpha-beta-gamma");
 
-    const state = await walletStub(orgId).getState();
+    const state = await walletStub(clerkOrgId).getState();
     expect(state.balance).toBe(18);
   });
 
   it("path template match + x-api-key auth", async () => {
-    const orgId = "org_pipe_path";
+    const clerkOrgId = "org_pipe_path";
     const { fetchImpl, calls } = makeFetchMock(
       (req) =>
         new Response(new URL(req.url).pathname, {
@@ -249,7 +277,7 @@ describe("gateway pipeline", () => {
         }),
     );
 
-    await installFixtures({ orgId, fetchImpl, credits: 10 });
+    await installFixtures({ clerkOrgId, fetchImpl, credits: 10 });
 
     const headers = new Headers({ "x-api-key": KEY_SECRET });
     const request = new Request(
@@ -266,9 +294,9 @@ describe("gateway pipeline", () => {
   });
 
   it("401 on bad key", async () => {
-    const orgId = "org_pipe_badkey";
+    const clerkOrgId = "org_pipe_badkey";
     const { fetchImpl, calls } = makeFetchMock(() => new Response("x"));
-    await installFixtures({ orgId, fetchImpl, credits: 10 });
+    await installFixtures({ clerkOrgId, fetchImpl, credits: 10 });
 
     const res = await gatewayFetch(`/gateway/${ORG_SLUG}/${PROJECT_SLUG}/echo`, {
       method: "POST",
@@ -280,9 +308,9 @@ describe("gateway pipeline", () => {
   });
 
   it("404 unknown project", async () => {
-    const orgId = "org_pipe_missing";
+    const clerkOrgId = "org_pipe_missing";
     const { fetchImpl } = makeFetchMock(() => new Response("x"));
-    await installFixtures({ orgId, fetchImpl, credits: 10 });
+    await installFixtures({ clerkOrgId, fetchImpl, credits: 10 });
 
     const res = await gatewayFetch(`/gateway/${ORG_SLUG}/missing/echo`, {
       method: "POST",
@@ -324,5 +352,244 @@ describe("gateway pipeline", () => {
 
     const state = await stub.getState();
     expect(state.balance).toBe(25);
+  });
+
+  it("free-tier path skips reserve, costs 0, still enqueues usage", async () => {
+    const clerkOrgId = "org_pipe_free";
+    const organizationId = "org_convex_free";
+    const { fetchImpl, calls } = makeFetchMock(
+      () => new Response("free-ok", { status: 200 }),
+    );
+
+    // Zero credits — free path must still work.
+    const { usage } = await installFixtures({
+      clerkOrgId,
+      organizationId,
+      fetchImpl,
+      credits: 0,
+    });
+
+    const res1 = await gatewayFetch(`/gateway/${ORG_SLUG}/${PROJECT_SLUG}/free`);
+    expect(res1.status).toBe(200);
+    expect(res1.headers.get("x-zevium-cost")).toBe("0");
+    expect(res1.headers.get("x-zevium-free-tier")).toBe("1");
+    expect(await res1.text()).toBe("free-ok");
+
+    const res2 = await gatewayFetch(`/gateway/${ORG_SLUG}/${PROJECT_SLUG}/free`);
+    expect(res2.status).toBe(200);
+    expect(res2.headers.get("x-zevium-free-tier")).toBe("1");
+
+    // Free tier exhausted (limit 2) → paid path → 402 at zero balance.
+    const res3 = await gatewayFetch(`/gateway/${ORG_SLUG}/${PROJECT_SLUG}/free`);
+    expect(res3.status).toBe(402);
+
+    expect(calls).toHaveLength(2);
+
+    const state = await walletStub(clerkOrgId).getState();
+    expect(state.balance).toBe(0);
+    expect(state.inFlightTotal).toBe(0);
+    expect(state.pendingSettlements).toHaveLength(2);
+    expect(state.pendingSettlements.every((s) => s.cost === 0)).toBe(true);
+
+    const freeEvents = usage.events.filter((e) => e.outcome === "free");
+    expect(freeEvents).toHaveLength(2);
+    expect(freeEvents.every((e) => e.cost === 0)).toBe(true);
+  });
+
+  it("flush batching with ack via DO alarm + fake convex sink", async () => {
+    const clerkOrgId = "org_pipe_flush";
+    const organizationId = "org_convex_flush";
+    const fake = new FakeConvexUsageSink();
+    __setTestUsageMutation(fake.asMutationFn());
+
+    const { fetchImpl } = makeFetchMock(
+      () => new Response("ok", { status: 200 }),
+    );
+    await installFixtures({
+      clerkOrgId,
+      organizationId,
+      fetchImpl,
+      credits: 50,
+    });
+
+    await gatewayFetch(`/gateway/${ORG_SLUG}/${PROJECT_SLUG}/echo`, {
+      method: "POST",
+      body: "a",
+    });
+    await gatewayFetch(`/gateway/${ORG_SLUG}/${PROJECT_SLUG}/stream`);
+
+    const stub = walletStub(clerkOrgId);
+    let state = await stub.getState();
+    expect(state.pendingSettlements).toHaveLength(2);
+    expect(state.balance).toBe(45); // 50 - 3 - 2
+
+    // Drive alarm-based flush.
+    const ran = await runDurableObjectAlarm(stub);
+    expect(ran).toBe(true);
+
+    state = await stub.getState();
+    expect(state.pendingSettlements).toHaveLength(0);
+    expect(fake.batches.length).toBeGreaterThanOrEqual(1);
+    expect(fake.records).toHaveLength(2);
+    expect(fake.records.map((r) => r.credits).sort()).toEqual([2, 3]);
+    expect(fake.records.every((r) => r.organizationId === organizationId)).toBe(
+      true,
+    );
+
+    // Second flush sees empty pending, no extra records.
+    const again = await stub.flushToConvex();
+    expect(again.flushed).toBe(0);
+    expect(fake.records).toHaveLength(2);
+  });
+
+  it("flush fails without convex then succeeds after sink wired", async () => {
+    const clerkOrgId = "org_pipe_flush_retry";
+    const organizationId = "org_convex_flush_retry";
+    const fake = new FakeConvexUsageSink();
+
+    const { fetchImpl } = makeFetchMock(
+      () => new Response("ok", { status: 200 }),
+    );
+    await installFixtures({
+      clerkOrgId,
+      organizationId,
+      fetchImpl,
+      credits: 20,
+    });
+
+    await gatewayFetch(`/gateway/${ORG_SLUG}/${PROJECT_SLUG}/stream`);
+    const stub = walletStub(clerkOrgId);
+
+    // No mutation hook + no CONVEX_URL → soft error, pending kept.
+    const fail = await stub.flushToConvex();
+    expect(fail.error).toBe("convex client not configured");
+    expect(fail.acked).toBe(0);
+    expect((await stub.getState()).pendingSettlements).toHaveLength(1);
+
+    __setTestUsageMutation(fake.asMutationFn());
+    const ok = await stub.flushToConvex();
+    expect(ok.error).toBeUndefined();
+    expect(ok.acked).toBe(1);
+    expect((await stub.getState()).pendingSettlements).toHaveLength(0);
+    expect(fake.records).toHaveLength(1);
+    expect(fake.records[0]!.credits).toBe(2);
+  });
+
+  it("internal grant endpoint auth + DO credit", async () => {
+    const clerkOrgId = "org_internal_grant";
+    const secret = "test-internal-secret";
+    const testEnv = {
+      ...env,
+      GATEWAY_INTERNAL_SECRET: secret,
+    } as Env;
+
+    const unauth = await worker.fetch(
+      new Request("https://gateway.test/internal/grant", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          clerkOrgId,
+          amount: 10,
+          refId: "ref-1",
+        }),
+      }),
+      testEnv,
+      createExecutionContext(),
+    );
+    expect(unauth.status).toBe(401);
+
+    const badSecret = await worker.fetch(
+      new Request("https://gateway.test/internal/grant", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-gateway-secret": "wrong",
+        },
+        body: JSON.stringify({
+          clerkOrgId,
+          amount: 10,
+          refId: "ref-1",
+        }),
+      }),
+      testEnv,
+      createExecutionContext(),
+    );
+    expect(badSecret.status).toBe(401);
+
+    const okCtx = createExecutionContext();
+    const ok = await worker.fetch(
+      new Request("https://gateway.test/internal/grant", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-gateway-secret": secret,
+        },
+        body: JSON.stringify({
+          clerkOrgId,
+          amount: 42,
+          refId: "ref-grant-1",
+        }),
+      }),
+      testEnv,
+      okCtx,
+    );
+    await waitOnExecutionContext(okCtx);
+    expect(ok.status).toBe(200);
+    const body: unknown = await ok.json();
+    expect(
+      body && typeof body === "object" && "status" in body && body.status,
+    ).toBe("applied");
+    expect(
+      body && typeof body === "object" && "balance" in body && body.balance,
+    ).toBe(42);
+
+    // Idempotent on refId
+    const dup = await worker.fetch(
+      new Request("https://gateway.test/internal/grant", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-gateway-secret": secret,
+        },
+        body: JSON.stringify({
+          clerkOrgId,
+          amount: 42,
+          refId: "ref-grant-1",
+        }),
+      }),
+      testEnv,
+      createExecutionContext(),
+    );
+    const dupBody: unknown = await dup.json();
+    expect(
+      dupBody &&
+        typeof dupBody === "object" &&
+        "status" in dupBody &&
+        dupBody.status,
+    ).toBe("duplicate");
+
+    const state = await walletStub(clerkOrgId).getState();
+    expect(state.balance).toBe(42);
+  });
+
+  it("wallet DO uses clerkOrgId not convex organizationId", async () => {
+    const { fetchImpl } = makeFetchMock(
+      () => new Response("ok", { status: 200 }),
+    );
+    await installFixtures({
+      clerkOrgId: CLERK_ORG,
+      organizationId: CONVEX_ORG,
+      fetchImpl,
+      credits: 10,
+    });
+
+    await gatewayFetch(`/gateway/${ORG_SLUG}/${PROJECT_SLUG}/stream`);
+
+    // Credits landed on clerk-named DO, not convex id DO.
+    const clerkState = await walletStub(CLERK_ORG).getState();
+    expect(clerkState.balance).toBe(8);
+
+    const convexNamed = await walletStub(CONVEX_ORG).getState();
+    expect(convexNamed.balance).toBe(0);
   });
 });

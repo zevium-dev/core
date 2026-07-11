@@ -1,6 +1,6 @@
 /**
  * Metered gateway pipeline:
- * verify key → load spec → match op → reserve → proxy stream → settle/refund → usage.
+ * verify key → load spec → match op → free-tier or reserve → proxy → settle/refund → usage.
  */
 
 import {
@@ -8,7 +8,7 @@ import {
   matchOperation,
   parseSpec,
 } from "@zevium/shared";
-import type { WalletDO } from "./wallet";
+import type { SettlementUsage, WalletDO } from "./wallet";
 import { extractApiKey, type KeyVerifier } from "./key-verifier";
 import type { SpecSource } from "./spec-source";
 import { filterRequestHeaders, filterResponseHeaders } from "./headers";
@@ -81,9 +81,14 @@ export async function handleGatewayRequest(
     return jsonError(404, "project_not_found", "Unknown project", requestId);
   }
 
-  // Key org must match project org (Clerk subject vs Convex org id).
-  if (verified.orgId !== published.organizationId) {
-    return jsonError(401, "org_mismatch", "Key not authorized for this org", requestId);
+  // Key subject must match project Clerk org id (wallet DO routing key).
+  if (verified.orgId !== published.clerkOrgId) {
+    return jsonError(
+      401,
+      "org_mismatch",
+      "Key not authorized for this org",
+      requestId,
+    );
   }
 
   let parsed;
@@ -103,46 +108,59 @@ export async function handleGatewayRequest(
   }
 
   const cost = matched.pricing.cost;
+  const freeTier = matched.pricing.freeTier;
   const reservationId = requestId;
 
-  const walletId = env.WALLET.idFromName(published.organizationId);
+  // Wallet DO keyed by Clerk org id (idFromName(clerkOrgId)).
+  const walletId = env.WALLET.idFromName(published.clerkOrgId);
   const wallet = env.WALLET.get(walletId);
 
-  const reserve = await wallet.reserve(reservationId, cost);
-  if (reserve.status === "insufficient") {
-    emitUsage(ctx, deps, {
-      requestId,
-      organizationId: published.organizationId,
-      projectId: published.projectId,
-      keyId: verified.keyId,
-      orgSlug: route.orgSlug,
-      projectSlug: route.projectSlug,
-      method: matched.method,
-      pathTemplate: matched.pathTemplate,
-      cost,
-      status: 402,
-      outcome: "blocked",
-      latencyMs: (deps.now ?? Date.now)() - started,
-      reservationId,
-    });
-    return jsonError(
-      402,
-      "insufficient_credits",
-      "Insufficient credits",
-      requestId,
-      { available: reserve.available, cost: reserve.cost },
+  let usedFree = false;
+  if (freeTier !== undefined && freeTier > 0) {
+    const freeResult = await wallet.consumeFreeTier(
+      verified.keyId,
+      freeTier,
+      (deps.now ?? Date.now)(),
     );
+    if (freeResult.status === "consumed") {
+      usedFree = true;
+    }
   }
-  if (
-    reserve.status !== "reserved" &&
-    reserve.status !== "duplicate"
-  ) {
-    return jsonError(
-      500,
-      "reserve_failed",
-      "Credit reservation failed",
-      requestId,
-    );
+
+  if (!usedFree) {
+    const reserve = await wallet.reserve(reservationId, cost);
+    if (reserve.status === "insufficient") {
+      emitUsage(ctx, deps, {
+        requestId,
+        organizationId: published.organizationId,
+        projectId: published.projectId,
+        keyId: verified.keyId,
+        orgSlug: route.orgSlug,
+        projectSlug: route.projectSlug,
+        method: matched.method,
+        pathTemplate: matched.pathTemplate,
+        cost,
+        status: 402,
+        outcome: "blocked",
+        latencyMs: (deps.now ?? Date.now)() - started,
+        reservationId,
+      });
+      return jsonError(
+        402,
+        "insufficient_credits",
+        "Insufficient credits",
+        requestId,
+        { available: reserve.available, cost: reserve.cost },
+      );
+    }
+    if (reserve.status !== "reserved" && reserve.status !== "duplicate") {
+      return jsonError(
+        500,
+        "reserve_failed",
+        "Credit reservation failed",
+        requestId,
+      );
+    }
   }
 
   const upstreamUrl = new URL(
@@ -166,7 +184,9 @@ export async function handleGatewayRequest(
   try {
     upstreamRes = await fetchImpl(upstreamUrl.toString(), init);
   } catch (err) {
-    await wallet.refund(reservationId);
+    if (!usedFree) {
+      await wallet.refund(reservationId);
+    }
     const message = err instanceof Error ? err.message : "upstream error";
     emitUsage(ctx, deps, {
       requestId,
@@ -177,7 +197,7 @@ export async function handleGatewayRequest(
       projectSlug: route.projectSlug,
       method: matched.method,
       pathTemplate: matched.pathTemplate,
-      cost,
+      cost: usedFree ? 0 : cost,
       status: 502,
       outcome: "refunded",
       latencyMs: (deps.now ?? Date.now)() - started,
@@ -187,8 +207,60 @@ export async function handleGatewayRequest(
   }
 
   const status = upstreamRes.status;
-  if (status >= 200 && status < 300) {
-    await wallet.settle(reservationId);
+  const latencyMs = (deps.now ?? Date.now)() - started;
+  const usageMeta: SettlementUsage = {
+    organizationId: published.organizationId,
+    projectId: published.projectId,
+    endpoint: matched.pathTemplate,
+    method: matched.method,
+    status,
+    latencyMs,
+    keyId: verified.keyId,
+  };
+
+  if (usedFree) {
+    // Free path: no reserve/settle; still emit usage with credits 0.
+    if (status >= 200 && status < 300) {
+      await wallet.enqueueFreeUsage(reservationId, usageMeta);
+      emitUsage(ctx, deps, {
+        requestId,
+        organizationId: published.organizationId,
+        projectId: published.projectId,
+        keyId: verified.keyId,
+        orgSlug: route.orgSlug,
+        projectSlug: route.projectSlug,
+        method: matched.method,
+        pathTemplate: matched.pathTemplate,
+        cost: 0,
+        status,
+        outcome: "free",
+        latencyMs,
+        reservationId,
+      });
+    } else {
+      // Free unit already consumed; non-2xx still records usage at 0 credits.
+      await wallet.enqueueFreeUsage(reservationId, {
+        ...usageMeta,
+        status,
+      });
+      emitUsage(ctx, deps, {
+        requestId,
+        organizationId: published.organizationId,
+        projectId: published.projectId,
+        keyId: verified.keyId,
+        orgSlug: route.orgSlug,
+        projectSlug: route.projectSlug,
+        method: matched.method,
+        pathTemplate: matched.pathTemplate,
+        cost: 0,
+        status,
+        outcome: "free",
+        latencyMs,
+        reservationId,
+      });
+    }
+  } else if (status >= 200 && status < 300) {
+    await wallet.settle(reservationId, usageMeta);
     emitUsage(ctx, deps, {
       requestId,
       organizationId: published.organizationId,
@@ -201,7 +273,7 @@ export async function handleGatewayRequest(
       cost,
       status,
       outcome: "settled",
-      latencyMs: (deps.now ?? Date.now)() - started,
+      latencyMs,
       reservationId,
     });
   } else {
@@ -218,16 +290,18 @@ export async function handleGatewayRequest(
       cost,
       status,
       outcome: "refunded",
-      latencyMs: (deps.now ?? Date.now)() - started,
+      latencyMs,
       reservationId,
     });
   }
 
   const outHeaders = filterResponseHeaders(upstreamRes.headers);
   outHeaders.set("x-zevium-request-id", requestId);
-  outHeaders.set("x-zevium-cost", String(cost));
+  outHeaders.set("x-zevium-cost", String(usedFree ? 0 : cost));
+  if (usedFree) {
+    outHeaders.set("x-zevium-free-tier", "1");
+  }
 
-  // 429 passthrough as-is (already refunded as non-2xx).
   return new Response(upstreamRes.body, {
     status: upstreamRes.status,
     statusText: upstreamRes.statusText,

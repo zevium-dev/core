@@ -35,3 +35,6 @@ reload-*.webm
 
 # convex
 .turbo
+
+# browser e2e
+e2e/artifacts/

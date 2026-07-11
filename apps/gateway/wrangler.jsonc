@@ -8,6 +8,8 @@
     // Documented runtime vars (override via wrangler secret / dashboard):
     // CLERK_SECRET_KEY — Clerk secret for POST /v1/api_keys/verify
     // CONVEX_URL — control-plane HTTP base for published-spec lookup
+    // CONVEX_DEPLOY_KEY — admin key for internalMutation wallets:recordUsage
+    // GATEWAY_INTERNAL_SECRET — shared secret for POST /internal/grant
     // GATEWAY_TEST_MODE — "1" only in vitest (see vitest config)
   },
   "durable_objects": {

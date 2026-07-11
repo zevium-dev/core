@@ -9,7 +9,8 @@
     "typecheck": "turbo typecheck",
     "lint": "turbo lint",
     "format": "prettier --write .",
-    "seed": "node --experimental-strip-types scripts/seed.ts"
+    "seed": "node --experimental-strip-types scripts/seed.ts",
+    "e2e": "bash e2e/run-all.sh"
   },
   "devDependencies": {
     "@clerk/backend": "^3.11.4",

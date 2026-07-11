@@ -15,6 +15,9 @@
  * - flush/ack: flush returns all pending settlements (stable ids). After the
  *   ledger appends them, ack removes them. If ack is lost, re-flush yields the
  *   same settlement ids; the ledger dedupes by settlementId.
+ * - free tier: per-key per-UTC-day counters; free calls skip reserve/settle
+ *   but still enqueue pending usage with credits 0.
+ * - alarm (~5s): when pending non-empty, batch → wallets:recordUsage → ack.
  *
  * Crash-safety: multi-key updates go through storage.transaction. State is
  * loaded in the constructor under blockConcurrencyWhile so concurrent
@@ -22,6 +25,11 @@
  */
 
 import { DurableObject } from "cloudflare:workers";
+import {
+  ConvexUsageClient,
+  pendingToUsageRecord,
+  type ConvexUsageRecord,
+} from "./usage";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -32,15 +40,28 @@ export type InFlightEntry = {
   createdAt: number;
 };
 
+/** Usage metadata required to flush a settlement to Convex. */
+export type SettlementUsage = {
+  organizationId: string;
+  projectId: string;
+  endpoint: string;
+  method: string;
+  status: number;
+  latencyMs: number;
+  keyId: string;
+};
+
 export type PendingSettlement = {
   settlementId: string;
   reservationId: string;
   cost: number;
   settledAt: number;
+  /** Present for production flush path; unit tests may omit. */
+  usage?: SettlementUsage;
 };
 
 /** Terminal outcome of a reservation once it leaves inFlight. */
-export type TerminalStatus = "settled" | "refunded";
+export type TerminalStatus = "settled" | "refunded" | "free";
 
 export type WalletState = {
   balance: number;
@@ -67,13 +88,25 @@ export type SettleResult =
   | { status: "settled"; settlementId: string; balance: number }
   | { status: "already_settled"; settlementId: string }
   | { status: "already_refunded" }
+  | { status: "already_free" }
   | { status: "unknown" };
 
 export type RefundResult =
   | { status: "refunded"; available: number }
   | { status: "already_refunded" }
   | { status: "already_settled"; settlementId: string }
+  | { status: "already_free" }
   | { status: "unknown" };
+
+export type FreeTierResult =
+  | { status: "consumed"; used: number; limit: number }
+  | { status: "exhausted"; used: number; limit: number }
+  | { status: "rejected"; reason: string };
+
+export type EnqueueFreeResult =
+  | { status: "enqueued"; settlementId: string }
+  | { status: "duplicate"; settlementId: string }
+  | { status: "rejected"; reason: string };
 
 export type FlushResult = {
   batchId: string;
@@ -85,6 +118,13 @@ export type AckFlushResult = {
   remaining: number;
 };
 
+export type FlushToConvexResult = {
+  flushed: number;
+  acked: number;
+  remaining: number;
+  error?: string;
+};
+
 // Storage keys
 const K_BALANCE = "balance";
 const K_IN_FLIGHT = "inFlight";
@@ -92,6 +132,9 @@ const K_APPLIED_GRANTS = "appliedGrantIds";
 const K_PENDING = "pendingSettlements";
 const K_TERMINAL = "terminalReservations";
 const K_FLUSH_SEQ = "flushSeq";
+const K_FREE_PREFIX = "free:";
+
+const FLUSH_ALARM_MS = 5_000;
 
 function settlementIdFor(reservationId: string): string {
   return `settle:${reservationId}`;
@@ -105,11 +148,20 @@ function sumInFlight(inFlight: Record<string, InFlightEntry>): number {
   return total;
 }
 
+/** UTC calendar day key YYYY-MM-DD. */
+export function utcDayKey(ms: number = Date.now()): string {
+  return new Date(ms).toISOString().slice(0, 10);
+}
+
+function freeStorageKey(keyId: string, day: string): string {
+  return `${K_FREE_PREFIX}${keyId}:${day}`;
+}
+
 // ---------------------------------------------------------------------------
 // WalletDO
 // ---------------------------------------------------------------------------
 
-export class WalletDO extends DurableObject {
+export class WalletDO extends DurableObject<Cloudflare.Env> {
   #balance = 0;
   #inFlight: Record<string, InFlightEntry> = {};
   #appliedGrantIds: Set<string> = new Set();
@@ -128,18 +180,31 @@ export class WalletDO extends DurableObject {
 
   async #load(): Promise<void> {
     const stored = await this.ctx.storage.get<
-      number | Record<string, InFlightEntry> | string[] | PendingSettlement[] | Record<string, TerminalStatus>
-    >([K_BALANCE, K_IN_FLIGHT, K_APPLIED_GRANTS, K_PENDING, K_TERMINAL, K_FLUSH_SEQ]);
+      | number
+      | Record<string, InFlightEntry>
+      | string[]
+      | PendingSettlement[]
+      | Record<string, TerminalStatus>
+    >([
+      K_BALANCE,
+      K_IN_FLIGHT,
+      K_APPLIED_GRANTS,
+      K_PENDING,
+      K_TERMINAL,
+      K_FLUSH_SEQ,
+    ]);
 
     this.#balance = (stored.get(K_BALANCE) as number | undefined) ?? 0;
     this.#inFlight =
-      (stored.get(K_IN_FLIGHT) as Record<string, InFlightEntry> | undefined) ?? {};
+      (stored.get(K_IN_FLIGHT) as Record<string, InFlightEntry> | undefined) ??
+      {};
     const grants = (stored.get(K_APPLIED_GRANTS) as string[] | undefined) ?? [];
     this.#appliedGrantIds = new Set(grants);
     this.#pendingSettlements =
       (stored.get(K_PENDING) as PendingSettlement[] | undefined) ?? [];
     this.#terminal =
-      (stored.get(K_TERMINAL) as Record<string, TerminalStatus> | undefined) ?? {};
+      (stored.get(K_TERMINAL) as Record<string, TerminalStatus> | undefined) ??
+      {};
     this.#flushSeq = (stored.get(K_FLUSH_SEQ) as number | undefined) ?? 0;
     this.#loaded = true;
   }
@@ -180,6 +245,13 @@ export class WalletDO extends DurableObject {
       if (keys.terminal !== undefined) await txn.put(K_TERMINAL, keys.terminal);
       if (keys.flushSeq !== undefined) await txn.put(K_FLUSH_SEQ, keys.flushSeq);
     });
+  }
+
+  async #scheduleFlushAlarm(): Promise<void> {
+    if (this.#pendingSettlements.length === 0) return;
+    const existing = await this.ctx.storage.getAlarm();
+    if (existing !== null && existing !== undefined) return;
+    await this.ctx.storage.setAlarm(Date.now() + FLUSH_ALARM_MS);
   }
 
   // -------------------------------------------------------------------------
@@ -228,7 +300,6 @@ export class WalletDO extends DurableObject {
       };
     }
 
-    // Already terminal — treat same cost as no-op-ish conflict surface; reject re-reserve.
     const terminal = this.#terminal[reservationId];
     if (terminal) {
       return {
@@ -248,7 +319,10 @@ export class WalletDO extends DurableObject {
     return { status: "reserved", available: this.#available() };
   }
 
-  async settle(reservationId: string): Promise<SettleResult> {
+  async settle(
+    reservationId: string,
+    usage?: SettlementUsage,
+  ): Promise<SettleResult> {
     if (!reservationId) return { status: "unknown" };
 
     const terminal = this.#terminal[reservationId];
@@ -261,6 +335,9 @@ export class WalletDO extends DurableObject {
     if (terminal === "refunded") {
       return { status: "already_refunded" };
     }
+    if (terminal === "free") {
+      return { status: "already_free" };
+    }
 
     const entry = this.#inFlight[reservationId];
     if (!entry) {
@@ -271,16 +348,17 @@ export class WalletDO extends DurableObject {
     const settledAt = Date.now();
     const { cost } = entry;
 
-    // Atomic: remove hold, debit balance, enqueue settlement, mark terminal.
     delete this.#inFlight[reservationId];
     this.#balance -= cost;
     this.#terminal[reservationId] = "settled";
-    this.#pendingSettlements.push({
+    const pending: PendingSettlement = {
       settlementId,
       reservationId,
       cost,
       settledAt,
-    });
+    };
+    if (usage) pending.usage = usage;
+    this.#pendingSettlements.push(pending);
 
     await this.#persist({
       balance: this.#balance,
@@ -288,6 +366,7 @@ export class WalletDO extends DurableObject {
       pendingSettlements: this.#pendingSettlements.map((s) => ({ ...s })),
       terminal: { ...this.#terminal },
     });
+    await this.#scheduleFlushAlarm();
 
     return { status: "settled", settlementId, balance: this.#balance };
   }
@@ -305,13 +384,15 @@ export class WalletDO extends DurableObject {
         settlementId: settlementIdFor(reservationId),
       };
     }
+    if (terminal === "free") {
+      return { status: "already_free" };
+    }
 
     const entry = this.#inFlight[reservationId];
     if (!entry) {
       return { status: "unknown" };
     }
 
-    // Remove hold only — balance unchanged, credit returns to available.
     delete this.#inFlight[reservationId];
     this.#terminal[reservationId] = "refunded";
 
@@ -321,6 +402,77 @@ export class WalletDO extends DurableObject {
     });
 
     return { status: "refunded", available: this.#available() };
+  }
+
+  /**
+   * Consume one free-tier unit for keyId on the current UTC day.
+   * Does not touch balance / inFlight.
+   */
+  async consumeFreeTier(
+    keyId: string,
+    limit: number,
+    nowMs: number = Date.now(),
+  ): Promise<FreeTierResult> {
+    if (!keyId || typeof keyId !== "string") {
+      return { status: "rejected", reason: "keyId required" };
+    }
+    if (!(limit > 0) || !Number.isFinite(limit)) {
+      return { status: "rejected", reason: "limit must be > 0" };
+    }
+
+    const day = utcDayKey(nowMs);
+    const storageKey = freeStorageKey(keyId, day);
+    const used = (await this.ctx.storage.get<number>(storageKey)) ?? 0;
+    if (used >= limit) {
+      return { status: "exhausted", used, limit };
+    }
+
+    const next = used + 1;
+    await this.ctx.storage.put(storageKey, next);
+    return { status: "consumed", used: next, limit };
+  }
+
+  /**
+   * Enqueue a free-tier usage row (credits 0) for Convex flush.
+   * Marks reservation terminal=free for idempotency.
+   */
+  async enqueueFreeUsage(
+    reservationId: string,
+    usage: SettlementUsage,
+  ): Promise<EnqueueFreeResult> {
+    if (!reservationId || typeof reservationId !== "string") {
+      return { status: "rejected", reason: "reservationId required" };
+    }
+
+    const settlementId = settlementIdFor(reservationId);
+    const terminal = this.#terminal[reservationId];
+    if (terminal === "free" || terminal === "settled") {
+      return { status: "duplicate", settlementId };
+    }
+    if (terminal === "refunded") {
+      return { status: "rejected", reason: "already refunded" };
+    }
+    if (this.#inFlight[reservationId]) {
+      return { status: "rejected", reason: "reservation in flight" };
+    }
+
+    const settledAt = Date.now();
+    this.#terminal[reservationId] = "free";
+    this.#pendingSettlements.push({
+      settlementId,
+      reservationId,
+      cost: 0,
+      settledAt,
+      usage,
+    });
+
+    await this.#persist({
+      pendingSettlements: this.#pendingSettlements.map((s) => ({ ...s })),
+      terminal: { ...this.#terminal },
+    });
+    await this.#scheduleFlushAlarm();
+
+    return { status: "enqueued", settlementId };
   }
 
   async flush(): Promise<FlushResult> {
@@ -354,8 +506,125 @@ export class WalletDO extends DurableObject {
     return { removed, remaining: this.#pendingSettlements.length };
   }
 
+  /**
+   * Flush pending settlements that have usage metadata to Convex, then ack.
+   * Rows without usage are left for the SimulatedLedger-style test path.
+   */
+  async flushToConvex(): Promise<FlushToConvexResult> {
+    if (this.#pendingSettlements.length === 0) {
+      return { flushed: 0, acked: 0, remaining: 0 };
+    }
+
+    const flushable = this.#pendingSettlements.filter(
+      (s) => s.usage !== undefined,
+    );
+    if (flushable.length === 0) {
+      return {
+        flushed: 0,
+        acked: 0,
+        remaining: this.#pendingSettlements.length,
+      };
+    }
+
+    const events: ConvexUsageRecord[] = [];
+    for (const s of flushable) {
+      const usage = s.usage;
+      if (!usage) continue;
+      events.push(
+        pendingToUsageRecord({
+          settlementId: s.settlementId,
+          cost: s.cost,
+          settledAt: s.settledAt,
+          organizationId: usage.organizationId,
+          projectId: usage.projectId,
+          endpoint: usage.endpoint,
+          method: usage.method,
+          status: usage.status,
+          latencyMs: usage.latencyMs,
+          keyId: usage.keyId,
+        }),
+      );
+    }
+
+    const client = this.#buildUsageClient();
+    if (!client) {
+      return {
+        flushed: 0,
+        acked: 0,
+        remaining: this.#pendingSettlements.length,
+        error: "convex client not configured",
+      };
+    }
+
+    const usageResult = await client.recordUsage(events).then(
+      (r) => ({ ok: true as const, value: r }),
+      (err: unknown) => ({ ok: false as const, err }),
+    );
+    if (!usageResult.ok) {
+      const message =
+        usageResult.err instanceof Error
+          ? usageResult.err.message
+          : String(usageResult.err);
+      return {
+        flushed: 0,
+        acked: 0,
+        remaining: this.#pendingSettlements.length,
+        error: message,
+      };
+    }
+
+    const ids = flushable.map((s) => s.settlementId);
+    const ack = await this.ackFlush(ids);
+    return {
+      flushed: events.length,
+      acked: ack.removed,
+      remaining: ack.remaining,
+    };
+  }
+
+  #buildUsageClient(): ConvexUsageClient | null {
+    // Test hook: module-level mutation override.
+    const testFn = getTestUsageMutation();
+    if (testFn) {
+      return new ConvexUsageClient({
+        convexUrl: "https://test.invalid",
+        mutationFn: testFn,
+      });
+    }
+
+    const env = this.env as Cloudflare.Env;
+    const url = env.CONVEX_URL;
+    if (!url) return null;
+    return new ConvexUsageClient({
+      convexUrl: url,
+      adminKey: env.CONVEX_DEPLOY_KEY,
+    });
+  }
+
   async getState(): Promise<WalletState> {
     return this.#snapshot();
+  }
+
+  async getFreeTierUsed(keyId: string, nowMs: number = Date.now()): Promise<number> {
+    const day = utcDayKey(nowMs);
+    return (await this.ctx.storage.get<number>(freeStorageKey(keyId, day))) ?? 0;
+  }
+
+  /**
+   * Alarm: batch-flush pending usage to Convex when configured.
+   * Re-arms while pending remains.
+   */
+  async alarm(): Promise<void> {
+    if (this.#pendingSettlements.length === 0) return;
+
+    const hasUsage = this.#pendingSettlements.some((s) => s.usage !== undefined);
+    if (hasUsage) {
+      await this.flushToConvex();
+    }
+
+    if (this.#pendingSettlements.length > 0) {
+      await this.ctx.storage.setAlarm(Date.now() + FLUSH_ALARM_MS);
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -406,10 +675,13 @@ export class WalletDO extends DurableObject {
         case "/flush": {
           return Response.json(await this.flush());
         }
+        case "/flushToConvex": {
+          return Response.json(await this.flushToConvex());
+        }
         case "/ack":
         case "/ackFlush": {
           const ids = Array.isArray(body.settlementIds)
-            ? (body.settlementIds as string[])
+            ? body.settlementIds.filter((id): id is string => typeof id === "string")
             : [];
           return Response.json(await this.ackFlush(ids));
         }
@@ -421,4 +693,27 @@ export class WalletDO extends DurableObject {
       return Response.json({ error: message }, { status: 500 });
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// Test hook for DO → Convex flush without network
+// ---------------------------------------------------------------------------
+
+type TestUsageMutation = (
+  name: string,
+  args: { events: ConvexUsageRecord[] },
+) => Promise<{
+  applied: number;
+  skipped: number;
+  balances: Record<string, number>;
+}>;
+
+let testUsageMutation: TestUsageMutation | null = null;
+
+export function __setTestUsageMutation(fn: TestUsageMutation | null): void {
+  testUsageMutation = fn;
+}
+
+function getTestUsageMutation(): TestUsageMutation | null {
+  return testUsageMutation;
 }

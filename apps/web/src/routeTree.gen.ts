@@ -18,6 +18,10 @@ import { Route as SignInSplatRouteImport } from './routes/sign-in.$'
 import { Route as AppSettingsRouteImport } from './routes/app/settings'
 import { Route as AppProjectsRouteImport } from './routes/app/projects'
 import { Route as AppSettingsIndexRouteImport } from './routes/app/settings/index'
+import { Route as AppProjectsIndexRouteImport } from './routes/app/projects/index'
+import { Route as AppProjectsCreateRouteImport } from './routes/app/projects/create'
+import { Route as AppProjectsProjectSlugRouteImport } from './routes/app/projects/$projectSlug'
+import { Route as AppProjectsProjectSlugSpecRouteImport } from './routes/app/projects/$projectSlug/spec'
 
 const CatalogueRoute = CatalogueRouteImport.update({
   id: '/catalogue',
@@ -64,38 +68,70 @@ const AppSettingsIndexRoute = AppSettingsIndexRouteImport.update({
   path: '/',
   getParentRoute: () => AppSettingsRoute,
 } as any)
+const AppProjectsIndexRoute = AppProjectsIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AppProjectsRoute,
+} as any)
+const AppProjectsCreateRoute = AppProjectsCreateRouteImport.update({
+  id: '/create',
+  path: '/create',
+  getParentRoute: () => AppProjectsRoute,
+} as any)
+const AppProjectsProjectSlugRoute = AppProjectsProjectSlugRouteImport.update({
+  id: '/$projectSlug',
+  path: '/$projectSlug',
+  getParentRoute: () => AppProjectsRoute,
+} as any)
+const AppProjectsProjectSlugSpecRoute =
+  AppProjectsProjectSlugSpecRouteImport.update({
+    id: '/spec',
+    path: '/spec',
+    getParentRoute: () => AppProjectsProjectSlugRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/app': typeof AppRouteWithChildren
   '/catalogue': typeof CatalogueRoute
-  '/app/projects': typeof AppProjectsRoute
+  '/app/projects': typeof AppProjectsRouteWithChildren
   '/app/settings': typeof AppSettingsRouteWithChildren
   '/sign-in/$': typeof SignInSplatRoute
   '/sign-up/$': typeof SignUpSplatRoute
   '/app/': typeof AppIndexRoute
+  '/app/projects/$projectSlug': typeof AppProjectsProjectSlugRouteWithChildren
+  '/app/projects/create': typeof AppProjectsCreateRoute
+  '/app/projects/': typeof AppProjectsIndexRoute
   '/app/settings/': typeof AppSettingsIndexRoute
+  '/app/projects/$projectSlug/spec': typeof AppProjectsProjectSlugSpecRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/catalogue': typeof CatalogueRoute
-  '/app/projects': typeof AppProjectsRoute
   '/sign-in/$': typeof SignInSplatRoute
   '/sign-up/$': typeof SignUpSplatRoute
   '/app': typeof AppIndexRoute
+  '/app/projects/$projectSlug': typeof AppProjectsProjectSlugRouteWithChildren
+  '/app/projects/create': typeof AppProjectsCreateRoute
+  '/app/projects': typeof AppProjectsIndexRoute
   '/app/settings': typeof AppSettingsIndexRoute
+  '/app/projects/$projectSlug/spec': typeof AppProjectsProjectSlugSpecRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/app': typeof AppRouteWithChildren
   '/catalogue': typeof CatalogueRoute
-  '/app/projects': typeof AppProjectsRoute
+  '/app/projects': typeof AppProjectsRouteWithChildren
   '/app/settings': typeof AppSettingsRouteWithChildren
   '/sign-in/$': typeof SignInSplatRoute
   '/sign-up/$': typeof SignUpSplatRoute
   '/app/': typeof AppIndexRoute
+  '/app/projects/$projectSlug': typeof AppProjectsProjectSlugRouteWithChildren
+  '/app/projects/create': typeof AppProjectsCreateRoute
+  '/app/projects/': typeof AppProjectsIndexRoute
   '/app/settings/': typeof AppSettingsIndexRoute
+  '/app/projects/$projectSlug/spec': typeof AppProjectsProjectSlugSpecRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -108,16 +144,23 @@ export interface FileRouteTypes {
     | '/sign-in/$'
     | '/sign-up/$'
     | '/app/'
+    | '/app/projects/$projectSlug'
+    | '/app/projects/create'
+    | '/app/projects/'
     | '/app/settings/'
+    | '/app/projects/$projectSlug/spec'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/catalogue'
-    | '/app/projects'
     | '/sign-in/$'
     | '/sign-up/$'
     | '/app'
+    | '/app/projects/$projectSlug'
+    | '/app/projects/create'
+    | '/app/projects'
     | '/app/settings'
+    | '/app/projects/$projectSlug/spec'
   id:
     | '__root__'
     | '/'
@@ -128,7 +171,11 @@ export interface FileRouteTypes {
     | '/sign-in/$'
     | '/sign-up/$'
     | '/app/'
+    | '/app/projects/$projectSlug'
+    | '/app/projects/create'
+    | '/app/projects/'
     | '/app/settings/'
+    | '/app/projects/$projectSlug/spec'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -204,8 +251,66 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppSettingsIndexRouteImport
       parentRoute: typeof AppSettingsRoute
     }
+    '/app/projects/': {
+      id: '/app/projects/'
+      path: '/'
+      fullPath: '/app/projects/'
+      preLoaderRoute: typeof AppProjectsIndexRouteImport
+      parentRoute: typeof AppProjectsRoute
+    }
+    '/app/projects/create': {
+      id: '/app/projects/create'
+      path: '/create'
+      fullPath: '/app/projects/create'
+      preLoaderRoute: typeof AppProjectsCreateRouteImport
+      parentRoute: typeof AppProjectsRoute
+    }
+    '/app/projects/$projectSlug': {
+      id: '/app/projects/$projectSlug'
+      path: '/$projectSlug'
+      fullPath: '/app/projects/$projectSlug'
+      preLoaderRoute: typeof AppProjectsProjectSlugRouteImport
+      parentRoute: typeof AppProjectsRoute
+    }
+    '/app/projects/$projectSlug/spec': {
+      id: '/app/projects/$projectSlug/spec'
+      path: '/spec'
+      fullPath: '/app/projects/$projectSlug/spec'
+      preLoaderRoute: typeof AppProjectsProjectSlugSpecRouteImport
+      parentRoute: typeof AppProjectsProjectSlugRoute
+    }
   }
 }
+
+interface AppProjectsProjectSlugRouteChildren {
+  AppProjectsProjectSlugSpecRoute: typeof AppProjectsProjectSlugSpecRoute
+}
+
+const AppProjectsProjectSlugRouteChildren: AppProjectsProjectSlugRouteChildren =
+  {
+    AppProjectsProjectSlugSpecRoute: AppProjectsProjectSlugSpecRoute,
+  }
+
+const AppProjectsProjectSlugRouteWithChildren =
+  AppProjectsProjectSlugRoute._addFileChildren(
+    AppProjectsProjectSlugRouteChildren,
+  )
+
+interface AppProjectsRouteChildren {
+  AppProjectsProjectSlugRoute: typeof AppProjectsProjectSlugRouteWithChildren
+  AppProjectsCreateRoute: typeof AppProjectsCreateRoute
+  AppProjectsIndexRoute: typeof AppProjectsIndexRoute
+}
+
+const AppProjectsRouteChildren: AppProjectsRouteChildren = {
+  AppProjectsProjectSlugRoute: AppProjectsProjectSlugRouteWithChildren,
+  AppProjectsCreateRoute: AppProjectsCreateRoute,
+  AppProjectsIndexRoute: AppProjectsIndexRoute,
+}
+
+const AppProjectsRouteWithChildren = AppProjectsRoute._addFileChildren(
+  AppProjectsRouteChildren,
+)
 
 interface AppSettingsRouteChildren {
   AppSettingsIndexRoute: typeof AppSettingsIndexRoute
@@ -220,13 +325,13 @@ const AppSettingsRouteWithChildren = AppSettingsRoute._addFileChildren(
 )
 
 interface AppRouteChildren {
-  AppProjectsRoute: typeof AppProjectsRoute
+  AppProjectsRoute: typeof AppProjectsRouteWithChildren
   AppSettingsRoute: typeof AppSettingsRouteWithChildren
   AppIndexRoute: typeof AppIndexRoute
 }
 
 const AppRouteChildren: AppRouteChildren = {
-  AppProjectsRoute: AppProjectsRoute,
+  AppProjectsRoute: AppProjectsRouteWithChildren,
   AppSettingsRoute: AppSettingsRouteWithChildren,
   AppIndexRoute: AppIndexRoute,
 }

@@ -29,7 +29,8 @@ export default defineSchema({
     tags: v.array(v.string()),
   })
     .index("by_org", ["organizationId"])
-    .index("by_org_slug", ["organizationId", "slug"]),
+    .index("by_org_slug", ["organizationId", "slug"])
+    .index("by_visibility_status", ["visibility", "status"]),
 
   // Mutable draft OpenAPI document per project
   specs: defineTable({
@@ -44,7 +45,9 @@ export default defineSchema({
     version: v.string(),
     spec: v.string(),
     publishedAt: v.number(),
-  }).index("by_project", ["projectId"]),
+  }).index("by_project", ["projectId"])
+    .index("by_project_version", ["projectId", "version"])
+    .index("by_project_published", ["projectId", "publishedAt"]),
 
   // One wallet per org; balance is materialized from ledger entries
   wallets: defineTable({

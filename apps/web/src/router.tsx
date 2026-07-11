@@ -12,6 +12,10 @@ import { routeTree } from "./routeTree.gen";
 
 export interface RouterContext {
   queryClient: QueryClient;
+  /** Clerk user id from root beforeLoad; null when signed out. */
+  userId: string | null;
+  /** Clerk JWT for Convex template; used to auth SSR HTTP client. */
+  token: string | null;
 }
 
 const convexUrl = import.meta.env.VITE_CONVEX_URL;
@@ -20,7 +24,12 @@ if (typeof convexUrl !== "string" || convexUrl.length === 0) {
 }
 
 /** Shared Convex + React Query clients; wired once, consumed by root providers + getRouter. */
-export const convexQueryClient = new ConvexQueryClient(convexUrl);
+export const convexQueryClient = new ConvexQueryClient(convexUrl, {
+  // Module-scoped HttpClient is long-lived across SSR requests. consistentQuery
+  // pins a timestamp; rows created mid-request (ensureMirror) would be invisible
+  // → "Organization not found" InternalServerError. Inconsistent is correct here.
+  dangerouslyUseInconsistentQueriesDuringSSR: true,
+});
 export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
@@ -39,6 +48,8 @@ export function getRouter(): AnyRouter {
     defaultPreloadStaleTime: 0,
     context: {
       queryClient,
+      userId: null,
+      token: null,
     } satisfies RouterContext,
     defaultViewTransition: {
       types: ({ fromLocation, toLocation }) => {

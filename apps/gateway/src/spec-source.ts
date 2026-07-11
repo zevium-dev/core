@@ -1,13 +1,20 @@
 /**
  * Published OpenAPI spec resolution for the gateway.
- * ConvexSpecSource is a stub until wave-2 functions land; FixtureSpecSource for tests.
+ * ConvexSpecSource calls public query specs:getPublishedForGateway.
+ * CachedSpecSource wraps any source with a 30s TTL.
  */
+
+import { ConvexHttpClient } from "convex/browser";
+import { makeFunctionReference } from "convex/server";
 
 export type PublishedSpec = {
   /** Raw OpenAPI JSON string. */
   spec: string;
   projectId: string;
+  /** Convex organizations table id (ledger / usage). */
   organizationId: string;
+  /** Clerk org id — wallet DO idFromName key. */
+  clerkOrgId: string;
 };
 
 export interface SpecSource {
@@ -19,6 +26,17 @@ export interface SpecSource {
 
 const DEFAULT_TTL_MS = 30_000;
 const MEMORY_MAX = 256;
+
+const getPublishedForGatewayRef = makeFunctionReference<
+  "query",
+  { orgSlug: string; projectSlug: string },
+  {
+    spec: string;
+    projectId: string;
+    organizationId: string;
+    clerkOrgId: string;
+  } | null
+>("specs:getPublishedForGateway");
 
 type CacheEntry = {
   value: PublishedSpec | null;
@@ -67,81 +85,83 @@ export type ConvexSpecSourceOptions = {
   convexUrl: string;
   /** Injected for tests. */
   fetchImpl?: typeof fetch;
+  /** Injected client (tests). */
+  client?: ConvexHttpClient;
 };
 
 /**
- * Stub: hits `${CONVEX_URL}` with a placeholder path.
- * Real Convex function arrives wave 2 — until then returns null on any response
- * that is not the expected shape (or always null in prod without the function).
+ * Control-plane published-spec lookup via Convex HTTP client.
+ * Function: specs:getPublishedForGateway (public query).
  */
 export class ConvexSpecSource implements SpecSource {
-  readonly #baseUrl: string;
-  readonly #fetch: typeof fetch;
+  readonly #client: ConvexHttpClient;
 
   constructor(opts: ConvexSpecSourceOptions) {
-    this.#baseUrl = opts.convexUrl.replace(/\/+$/, "");
-    this.#fetch = opts.fetchImpl ?? fetch;
+    if (opts.client) {
+      this.#client = opts.client;
+    } else {
+      this.#client = new ConvexHttpClient(opts.convexUrl, {
+        skipConvexDeploymentUrlCheck: true,
+        logger: false,
+        fetch: opts.fetchImpl,
+      });
+    }
   }
 
   async getPublishedSpec(
     orgSlug: string,
     projectSlug: string,
   ): Promise<PublishedSpec | null> {
-    // Placeholder HTTP action path — wave 2 replaces with real Convex query URL.
-    const url = `${this.#baseUrl}/api/query`;
-    let res: Response;
     try {
-      res = await this.#fetch(url, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          path: "projects:getPublishedSpec",
-          args: { orgSlug, projectSlug },
-          format: "json",
-        }),
+      const value = await this.#client.query(getPublishedForGatewayRef, {
+        orgSlug,
+        projectSlug,
       });
-    } catch {
+      return parsePublishedSpecPayload(value);
+    } catch (err) {
+      console.error("ConvexSpecSource.getPublishedSpec failed", err);
       return null;
     }
-    if (!res.ok) return null;
-
-    let json: unknown;
-    try {
-      json = await res.json();
-    } catch {
-      return null;
-    }
-
-    return parsePublishedSpecPayload(json);
   }
 }
 
-/** Accepts either raw PublishedSpec or Convex { value: PublishedSpec | null }. */
+/** Accepts raw PublishedSpec, null, or Convex-shaped payloads. */
 export function parsePublishedSpecPayload(json: unknown): PublishedSpec | null {
-  if (!json || typeof json !== "object") return null;
+  if (json === null || json === undefined) return null;
+  if (typeof json !== "object") return null;
 
   let candidate: unknown = json;
   if ("value" in json) {
     candidate = json.value;
-  } else if ("status" in json && "value" in json) {
-    candidate = json.value;
   }
 
-  if (candidate === null) return null;
-  if (!candidate || typeof candidate !== "object") return null;
+  if (candidate === null || candidate === undefined) return null;
+  if (typeof candidate !== "object") return null;
+
   if (!("spec" in candidate) || typeof candidate.spec !== "string") return null;
-  if (!("projectId" in candidate) || typeof candidate.projectId !== "string")
+  if (!("projectId" in candidate) || typeof candidate.projectId !== "string") {
     return null;
+  }
   if (
     !("organizationId" in candidate) ||
     typeof candidate.organizationId !== "string"
-  )
+  ) {
     return null;
+  }
+
+  // Prefer clerkOrgId; fall back to organizationId only when absent (legacy fixtures).
+  let clerkOrgId: string;
+  if ("clerkOrgId" in candidate && typeof candidate.clerkOrgId === "string") {
+    clerkOrgId = candidate.clerkOrgId;
+  } else {
+    clerkOrgId = candidate.organizationId;
+  }
 
   return {
     spec: candidate.spec,
     projectId: candidate.projectId,
     organizationId: candidate.organizationId,
+    clerkOrgId,
   };
 }
 

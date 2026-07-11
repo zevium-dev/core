@@ -8,9 +8,15 @@
  * @module
  */
 
+import type * as catalogue from "../catalogue.js";
 import type * as http from "../http.js";
+import type * as lib_auth from "../lib/auth.js";
+import type * as lib_validate from "../lib/validate.js";
 import type * as organizations from "../organizations.js";
+import type * as projects from "../projects.js";
+import type * as specs from "../specs.js";
 import type * as users from "../users.js";
+import type * as wallets from "../wallets.js";
 
 import type {
   ApiFromModules,
@@ -19,9 +25,15 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  catalogue: typeof catalogue;
   http: typeof http;
+  "lib/auth": typeof lib_auth;
+  "lib/validate": typeof lib_validate;
   organizations: typeof organizations;
+  projects: typeof projects;
+  specs: typeof specs;
   users: typeof users;
+  wallets: typeof wallets;
 }>;
 
 /**

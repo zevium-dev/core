@@ -5,7 +5,7 @@ import {
   ConvexSpecSource,
   FixtureSpecSource,
 } from "./spec-source";
-import { ConsoleUsageSink } from "./usage";
+import { ConsoleUsageSink, ConvexUsageSink, NoopUsageSink } from "./usage";
 import {
   handleGatewayRequest,
   parseGatewayPath,
@@ -13,11 +13,16 @@ import {
 } from "./pipeline";
 
 export { WalletDO };
+export { __setTestUsageMutation } from "./wallet";
 
 export interface Env {
   WALLET: DurableObjectNamespace<WalletDO>;
   CLERK_SECRET_KEY?: string;
   CONVEX_URL?: string;
+  /** Deploy/admin key for internalMutation wallets:recordUsage. */
+  CONVEX_DEPLOY_KEY?: string;
+  /** Shared secret for POST /internal/grant. */
+  GATEWAY_INTERNAL_SECRET?: string;
   /**
    * Test-only: when set, Worker uses fixture key/spec sources populated via
    * internal test helpers (see test/pipeline.test.ts). Not for production.
@@ -51,17 +56,35 @@ function buildDeps(env: Env): PipelineDeps {
     ? new ConvexSpecSource({ convexUrl: env.CONVEX_URL })
     : new FixtureSpecSource();
 
+  const usageSink = env.CONVEX_URL
+    ? // Pipeline emit is best-effort logging; authoritative flush is DO alarm.
+      new ConsoleUsageSink()
+    : new NoopUsageSink();
+
+  // Keep ConvexUsageSink constructable for tests / future dual-write.
+  void ConvexUsageSink;
+
   return {
     keyVerifier,
     specSource: new CachedSpecSource({ inner: innerSpec }),
-    usageSink: new ConsoleUsageSink(),
+    usageSink,
   };
+}
+
+function timingSafeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let out = 0;
+  for (let i = 0; i < a.length; i++) {
+    out |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  }
+  return out === 0;
 }
 
 /**
  * Worker entry:
  * - /gateway/:orgSlug/:projectSlug/* — metered proxy
- * - /wallet/:orgId/* — wallet DO HTTP surface (grants/tests)
+ * - /wallet/:clerkOrgId/* — wallet DO HTTP surface (grants/tests)
+ * - /internal/grant — control-plane grant push (shared secret)
  * - /health
  */
 export default {
@@ -77,11 +100,16 @@ export default {
       return Response.json({ ok: true, service: "zevium-gateway" });
     }
 
-    // /wallet/:orgId[/*] — DO grant/reserve surface for ops + tests
+    // POST /internal/grant { clerkOrgId, amount, refId }
+    if (parts[0] === "internal" && parts[1] === "grant") {
+      return handleInternalGrant(request, env);
+    }
+
+    // /wallet/:clerkOrgId[/*] — DO grant/reserve surface for ops + tests
     if (parts[0] === "wallet" && parts[1]) {
-      const orgId = parts[1];
+      const clerkOrgId = parts[1];
       const rest = "/" + parts.slice(2).join("/");
-      const id = env.WALLET.idFromName(orgId);
+      const id = env.WALLET.idFromName(clerkOrgId);
       const stub = env.WALLET.get(id);
 
       const doUrl = new URL(rest === "/" ? "/state" : rest, url.origin);
@@ -107,3 +135,63 @@ export default {
     return Response.json({ error: "not found" }, { status: 404 });
   },
 } satisfies ExportedHandler<Env>;
+
+async function handleInternalGrant(
+  request: Request,
+  env: Env,
+): Promise<Response> {
+  if (request.method !== "POST") {
+    return Response.json({ error: "method not allowed" }, { status: 405 });
+  }
+
+  const secret = env.GATEWAY_INTERNAL_SECRET;
+  if (!secret) {
+    return Response.json(
+      { error: "misconfigured", message: "GATEWAY_INTERNAL_SECRET not set" },
+      { status: 500 },
+    );
+  }
+
+  const provided =
+    request.headers.get("x-gateway-secret") ??
+    request.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ??
+    "";
+  if (!provided || !timingSafeEqual(provided, secret)) {
+    return Response.json({ error: "unauthorized" }, { status: 401 });
+  }
+
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return Response.json({ error: "invalid_json" }, { status: 400 });
+  }
+
+  if (!body || typeof body !== "object") {
+    return Response.json({ error: "invalid_body" }, { status: 400 });
+  }
+
+  const clerkOrgId =
+    "clerkOrgId" in body && typeof body.clerkOrgId === "string"
+      ? body.clerkOrgId
+      : "";
+  const amount =
+    "amount" in body && typeof body.amount === "number" ? body.amount : NaN;
+  const refId =
+    "refId" in body && typeof body.refId === "string" ? body.refId : "";
+
+  if (!clerkOrgId || !refId || !(amount > 0) || !Number.isFinite(amount)) {
+    return Response.json(
+      {
+        error: "invalid_body",
+        message: "clerkOrgId, amount (>0), refId required",
+      },
+      { status: 400 },
+    );
+  }
+
+  const id = env.WALLET.idFromName(clerkOrgId);
+  const stub = env.WALLET.get(id);
+  const result = await stub.grant(refId, amount);
+  return Response.json(result);
+}

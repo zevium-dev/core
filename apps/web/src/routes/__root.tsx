@@ -1,4 +1,5 @@
 import { ClerkProvider, useAuth } from "@clerk/tanstack-react-start";
+import { auth } from "@clerk/tanstack-react-start/server";
 import { shadcn } from "@clerk/ui/themes";
 import { TanStackDevtools } from "@tanstack/react-devtools";
 import {
@@ -8,6 +9,7 @@ import {
   createRootRouteWithContext,
 } from "@tanstack/react-router";
 import { TanStackRouterDevtoolsPanel } from "@tanstack/react-router-devtools";
+import { createServerFn } from "@tanstack/react-start";
 import { ConvexProviderWithClerk } from "convex/react-clerk";
 
 import { ThemeProvider } from "#/components/theme-provider";
@@ -18,9 +20,40 @@ import { convexQueryClient, type RouterContext } from "#/router";
 import appCss from "../styles.css?url";
 import clerkShadcnCss from "@clerk/ui/themes/shadcn.css?url";
 
+/**
+ * SSR: pull Clerk session + Convex JWT template so authed loaders
+ * can hit Convex via serverHttpClient with identity.
+ */
+const fetchConvexAuth = createServerFn({ method: "GET" }).handler(
+  async (): Promise<{ userId: string | null; token: string | null }> => {
+    const session = await auth();
+    const userId = session.userId ?? null;
+    if (!userId) {
+      return { userId: null, token: null };
+    }
+    const token = (await session.getToken({ template: "convex" })) ?? null;
+    return { userId, token };
+  },
+);
+
 const themeInitScript = `(function(){try{var k='zevium-theme';var t=localStorage.getItem(k);var d=window.matchMedia('(prefers-color-scheme: dark)').matches;var dark=t==='dark'||(t!=='light'&&d);var r=document.documentElement;r.classList.toggle('dark',dark);r.style.colorScheme=dark?'dark':'light';}catch(e){}})();`;
 
 export const Route = createRootRouteWithContext<RouterContext>()({
+  beforeLoad: async () => {
+    const { userId, token } = await fetchConvexAuth();
+
+    // SSR only: forward JWT into Convex HTTP client used by loaders.
+    // Browser auth stays on ConvexProviderWithClerk.
+    if (typeof window === "undefined") {
+      if (token) {
+        convexQueryClient.serverHttpClient?.setAuth(token);
+      } else {
+        convexQueryClient.serverHttpClient?.clearAuth();
+      }
+    }
+
+    return { userId, token };
+  },
   head: () => ({
     meta: [
       { charSet: "utf-8" },
