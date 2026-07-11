@@ -1,0 +1,70 @@
+=== Zevium E2E ===
+base: http://localhost:3000
+artifacts: /home/tnfssc/Code/zevium/e2e/artifacts
+
+── 01-auth.sh ──
+[e2e] → wait for base url
+[e2e] wait_for_url http://localhost:3000/ (timeout=90s)
+[e2e] wait_for_url ok code=200
+[e2e] → anonymous landing /
+[e2e] → anonymous /app redirects to sign-in
+[e2e] → sign_in with seed credentials
+[e2e] → sign_in
+[e2e] filled identifier — submit via Enter
+[e2e] filled password — submit via Enter
+[e2e] OTP screen detected — entering 424242
+[e2e] Clerk user present (user_3GLqr2ul5Xjik1tWZvkJK8KhsqF) — signed in
+[e2e] signed in → http://localhost:3000/app
+[e2e] → signed-in /app/projects loads
+[e2e] 01-auth PASS
+OK 01-auth.sh (177s)
+
+── 02-publisher.sh ──
+[e2e] → wait for base url
+[e2e] wait_for_url http://localhost:3000/ (timeout=90s)
+[e2e] wait_for_url ok code=200
+[e2e] → sign_in
+[e2e] → sign_in
+[e2e] filled identifier — submit via Enter
+[e2e] filled password — submit via Enter
+[e2e] OTP screen detected — entering 424242
+[e2e] Clerk user present (user_3GLqr2ul5Xjik1tWZvkJK8KhsqF) — signed in
+[e2e] signed in → http://localhost:3000/app
+[e2e] → open /app/projects
+[e2e] → create project E2E Weather 20260711212758
+[e2e] → open spec editor
+[e2e] → paste minimal OpenAPI JSON
+[e2e] → save draft
+[e2e] draft saved (or no error toast)
+[e2e] → publish 0.0.1
+Publish version
+[e2e] published 0.0.1
+[e2e] → make public
+Make project public
+[e2e] → assert catalogue lists project
+[e2e] 02-publisher PASS name=E2E Weather 20260711212758 slug=e2e-weather-20260711212758
+OK 02-publisher.sh (221s)
+
+── 03-consumer.sh ──
+[e2e] → wait for base url
+[e2e] wait_for_url http://localhost:3000/ (timeout=90s)
+[e2e] wait_for_url ok code=200
+[e2e] → anonymous /catalogue lists published project
+[e2e] found project listing: E2E Weather 20260711212758
+[e2e] → open API detail page
+[e2e] → pricing table shows credits
+[e2e] pricing/credits signal present
+[e2e] → try-it panel renders
+[e2e] try-it panel signal present
+[e2e] → paid try-it call via GATEWAY_URL
+[e2e] curl http://localhost:8787/gateway/test-org/e2e-weather-20260711212758/get
+[e2e] gateway call ok cost=x-zevium-cost: 1
+[e2e] 03-consumer PASS
+OK 03-consumer.sh (35s)
+
+=== summary (433s) ===
+  PASS  01-auth.sh  (177s)
+  PASS  02-publisher.sh  (221s)
+  PASS  03-consumer.sh  (35s)
+ALL PASS
+suite exit=0
