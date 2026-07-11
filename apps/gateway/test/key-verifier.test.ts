@@ -13,6 +13,13 @@ describe("extractApiKey", () => {
     expect(extractApiKey(req)).toBe("zev_abc");
   });
 
+  it("reads Bearer ak_ token (Clerk default)", () => {
+    const req = new Request("https://x.test", {
+      headers: { authorization: "Bearer ak_live_clerk_secret" },
+    });
+    expect(extractApiKey(req)).toBe("ak_live_clerk_secret");
+  });
+
   it("reads x-api-key", () => {
     const req = new Request("https://x.test", {
       headers: { "x-api-key": "zev_xyz" },
@@ -20,7 +27,14 @@ describe("extractApiKey", () => {
     expect(extractApiKey(req)).toBe("zev_xyz");
   });
 
-  it("rejects non-zev keys", () => {
+  it("reads x-api-key with ak_ prefix", () => {
+    const req = new Request("https://x.test", {
+      headers: { "x-api-key": "ak_xyz" },
+    });
+    expect(extractApiKey(req)).toBe("ak_xyz");
+  });
+
+  it("rejects non-ak/zev keys", () => {
     const req = new Request("https://x.test", {
       headers: { authorization: "Bearer sk_live_nope" },
     });
@@ -71,15 +85,15 @@ describe("ClerkKeyVerifier", () => {
       useCacheApi: false,
     });
 
-    const a = await verifier.verify("zev_secret");
-    const b = await verifier.verify("zev_secret");
+    const a = await verifier.verify("ak_secret");
+    const b = await verifier.verify("ak_secret");
     expect(a).toEqual({ orgId: "org_1", keyId: "ak_9", scopes: [] });
     expect(b).toEqual(a);
     expect(fetchImpl).toHaveBeenCalledTimes(1);
 
     // After TTL, re-fetch
     now += 61_000;
-    const c = await verifier.verify("zev_secret");
+    const c = await verifier.verify("ak_secret");
     expect(c?.keyId).toBe("ak_9");
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
@@ -93,6 +107,6 @@ describe("ClerkKeyVerifier", () => {
       fetchImpl: fetchImpl as unknown as typeof fetch,
       useCacheApi: false,
     });
-    expect(await verifier.verify("zev_bad")).toBeNull();
+    expect(await verifier.verify("ak_bad")).toBeNull();
   });
 });

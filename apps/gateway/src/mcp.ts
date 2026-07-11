@@ -106,7 +106,7 @@ const TOOLS: ToolDef[] = [
   {
     name: "call_api",
     description:
-      "Execute a metered API call through the Zevium gateway. Requires a consumer API key (Authorization: Bearer zev_… on the MCP request, or key argument). Credits are reserved and settled like any gateway call — zero balance blocks.",
+      "Execute a metered API call through the Zevium gateway. Requires a consumer API key (Authorization: Bearer ak_…/zev_… on the MCP request, or key argument). Credits are reserved and settled like any gateway call — zero balance blocks.",
     inputSchema: {
       type: "object",
       properties: {
@@ -131,7 +131,7 @@ const TOOLS: ToolDef[] = [
         key: {
           type: "string",
           description:
-            "Optional API key override (zev_…). Prefer Authorization on the MCP request.",
+            "Optional API key override (ak_… or zev_…). Prefer Authorization on the MCP request.",
         },
       },
       required: ["org", "project", "method", "path"],
@@ -277,7 +277,7 @@ async function handleGetApiDocs(
     version,
     gatewayBaseUrl: `${origin}/gateway/${org}/${project}`,
     usageNotes: [
-      "Authenticate every call with Authorization: Bearer <zev_…> or x-api-key.",
+      "Authenticate every call with Authorization: Bearer <ak_…|zev_…> or x-api-key.",
       "Credits are prepaid on the consumer org wallet; zero balance returns 402.",
       "Non-2xx upstream responses refund the reservation — consumer pays only on success.",
       "Pricing is declared per-operation as x-zevium-cost in the OpenAPI spec.",
@@ -311,11 +311,11 @@ async function handleCallApi(
   }
   if (!key) {
     return toolError(
-      "API key required: set Authorization: Bearer zev_… on the MCP request, or pass key in tool arguments",
+      "API key required: set Authorization: Bearer ak_…/zev_… on the MCP request, or pass key in tool arguments",
     );
   }
-  if (!key.startsWith("zev_")) {
-    return toolError("API key must start with zev_");
+  if (!key.startsWith("ak_") && !key.startsWith("zev_")) {
+    return toolError("API key must start with ak_ or zev_");
   }
 
   const method = methodRaw.toUpperCase();

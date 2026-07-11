@@ -43,7 +43,7 @@ export type ClerkKeyVerifierOptions = {
  * Clerk Machine API Keys verify:
  * POST https://api.clerk.com/v1/api_keys/verify
  * Authorization: Bearer <CLERK_SECRET_KEY>
- * body: { secret: "zev_..." }
+ * body: { secret: "ak_..." | "zev_..." }
  */
 export class ClerkKeyVerifier implements KeyVerifier {
   readonly #secretKey: string;
@@ -70,7 +70,7 @@ export class ClerkKeyVerifier implements KeyVerifier {
   }
 
   async verify(secret: string): Promise<VerifiedKey | null> {
-    if (!secret || !secret.startsWith("zev_")) return null;
+    if (!secret || !isApiKeySecret(secret)) return null;
 
     const cacheKey = await sha256Hex(secret);
     const now = this.#now();
@@ -246,17 +246,25 @@ function parseVerifiedKey(value: unknown): VerifiedKey | null {
   return { orgId: value.orgId, keyId: value.keyId, scopes };
 }
 
-/** Extract API key from Authorization: Bearer zev_... or x-api-key. */
+/** True for Clerk default `ak_` or future custom `zev_` secrets. */
+export function isApiKeySecret(secret: string): boolean {
+  return secret.startsWith("ak_") || secret.startsWith("zev_");
+}
+
+/** Extract API key from Authorization: Bearer ak_/zev_... or x-api-key. */
 export function extractApiKey(request: Request): string | null {
   const xApiKey = request.headers.get("x-api-key");
-  if (xApiKey && xApiKey.startsWith("zev_")) return xApiKey.trim();
+  if (xApiKey) {
+    const trimmed = xApiKey.trim();
+    if (isApiKeySecret(trimmed)) return trimmed;
+  }
 
   const auth = request.headers.get("authorization");
   if (!auth) return null;
   const match = /^Bearer\s+(\S+)/i.exec(auth);
   if (!match) return null;
   const token = match[1]!;
-  if (!token.startsWith("zev_")) return null;
+  if (!isApiKeySecret(token)) return null;
   return token;
 }
 
