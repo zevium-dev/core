@@ -191,4 +191,20 @@
   ::view-transition-group(*) {
     animation: none !important;
   }
+
+  /* Keep opacity usable; kill transforms on interactive chrome */
+  .group-hover\:-translate-y-0\.5:hover,
+  .group-active\:scale-\[0\.98\]:active,
+  .active\:scale-\[0\.97\]:active {
+    transform: none !important;
+  }
+
+  .animate-pulse {
+    animation: none !important;
+  }
+}
+
+/* Skeleton → content: opacity crossfade helper (paired with FadeIn) */
+.skeleton-crossfade {
+  transition: opacity var(--dur-fast) var(--ease);
 }

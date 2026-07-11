@@ -4,7 +4,8 @@ import { Link, createFileRoute } from "@tanstack/react-router";
 import { PackageSearch } from "lucide-react";
 import { Suspense, useEffect, useMemo, useState } from "react";
 
-import { ThemeToggle } from "#/components/theme-toggle";
+import { FadeIn } from "#/components/motion/fade-in";
+import { PublicHeader } from "#/components/public-header";
 import { Badge } from "#/components/ui/badge";
 import { Button } from "#/components/ui/button";
 import {
@@ -54,30 +55,7 @@ function CataloguePage() {
 
   return (
     <div className="min-h-screen bg-background">
-      <header className="border-b">
-        <div className="mx-auto flex h-14 max-w-6xl items-center justify-between gap-4 px-4">
-          <div className="flex items-center gap-6">
-            <Link to="/" className="text-sm font-semibold tracking-tight">
-              Zevium
-            </Link>
-            <nav className="hidden items-center gap-4 text-sm text-muted-foreground sm:flex">
-              <Link
-                to="/catalogue"
-                className="text-foreground"
-                style={{ viewTransitionName: "catalogue-heading" }}
-              >
-                Catalogue
-              </Link>
-            </nav>
-          </div>
-          <div className="flex items-center gap-2">
-            <ThemeToggle />
-            <Button asChild variant="outline" size="sm">
-              <Link to="/sign-in/$">Sign in</Link>
-            </Button>
-          </div>
-        </div>
-      </header>
+      <PublicHeader maxWidthClass="max-w-6xl" active="catalogue" />
 
       <main className="mx-auto max-w-6xl px-4 py-8 content-enter">
         <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
@@ -140,7 +118,7 @@ function CatalogueList({
   }, [data.items, activeTag]);
 
   return (
-    <div className="flex flex-col gap-6">
+    <FadeIn className="flex flex-col gap-6">
       {tags.length > 0 ? (
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-xs font-medium text-muted-foreground">
@@ -191,6 +169,8 @@ function CatalogueList({
                 <CardHeader className="gap-3">
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
+                      {/* VT morph: catalogue card → API detail title (api-title-{slug})
+                          No api-logo/api-price morph: listPublic has no logo/price fields yet. */}
                       <CardTitle
                         className="text-base"
                         style={{
@@ -231,7 +211,7 @@ function CatalogueList({
           ))}
         </div>
       )}
-    </div>
+    </FadeIn>
   );
 }
 

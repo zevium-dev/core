@@ -9,6 +9,11 @@ export type NumberTickerProps = {
   /** Fraction digits for display (default 0). */
   decimals?: number;
   format?: (n: number) => string;
+  /**
+   * Optional view-transition-name (e.g. "credit-balance").
+   * Only set on the single shared element that morphs — never on every ticker.
+   */
+  viewTransitionName?: string;
 };
 
 function defaultFormat(n: number, decimals: number): string {
@@ -34,6 +39,7 @@ export function NumberTicker({
   className,
   decimals = 0,
   format,
+  viewTransitionName,
 }: NumberTickerProps) {
   const [display, setDisplay] = useState(value);
   const fromRef = useRef(value);
@@ -91,7 +97,11 @@ export function NumberTicker({
   return (
     <span
       className={cn("tabular-nums", className)}
-      style={{ viewTransitionName: "credit-balance" }}
+      style={
+        viewTransitionName
+          ? { viewTransitionName }
+          : undefined
+      }
     >
       {text}
     </span>

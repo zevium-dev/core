@@ -18,7 +18,7 @@ import {
 } from "react";
 import { toast } from "sonner";
 
-import { ThemeToggle } from "#/components/theme-toggle";
+import { PublicHeader } from "#/components/public-header";
 import { Badge } from "#/components/ui/badge";
 import { Button } from "#/components/ui/button";
 import {
@@ -179,26 +179,7 @@ function ApiDetailPage() {
 
   return (
     <div className="min-h-screen bg-background">
-      <header className="border-b">
-        <div className="mx-auto flex h-14 max-w-6xl items-center justify-between gap-4 px-4">
-          <div className="flex items-center gap-6">
-            <Link to="/" className="text-sm font-semibold tracking-tight">
-              Zevium
-            </Link>
-            <nav className="hidden items-center gap-4 text-sm text-muted-foreground sm:flex">
-              <Link to="/catalogue" className="hover:text-foreground">
-                Catalogue
-              </Link>
-            </nav>
-          </div>
-          <div className="flex items-center gap-2">
-            <ThemeToggle />
-            <Button asChild variant="outline" size="sm">
-              <Link to="/sign-in/$">Sign in</Link>
-            </Button>
-          </div>
-        </div>
-      </header>
+      <PublicHeader maxWidthClass="max-w-6xl" active="catalogue" />
 
       <main className="mx-auto max-w-6xl px-4 py-8 content-enter">
         <Suspense fallback={<ApiDetailBodySkeleton />}>

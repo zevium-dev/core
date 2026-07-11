@@ -6,6 +6,7 @@ import { useConvexAuth } from "convex/react";
 import { FolderPlus, Plus } from "lucide-react";
 import { Suspense } from "react";
 
+import { FadeIn } from "#/components/motion/fade-in";
 import { Badge } from "#/components/ui/badge";
 import { Button } from "#/components/ui/button";
 import {
@@ -85,7 +86,7 @@ function ProjectsList({ orgSlug }: { orgSlug: string }) {
   );
 
   return (
-    <div className="flex flex-col gap-6">
+    <FadeIn className="flex flex-col gap-6">
       <div className="flex items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Projects</h1>
@@ -127,6 +128,7 @@ function ProjectsList({ orgSlug }: { orgSlug: string }) {
                     </Badge>
                     <Badge variant="outline">{project.visibility}</Badge>
                   </div>
+                  {/* VT morph: projects list → project page (project-title/status-{slug}) */}
                   <CardTitle
                     className="text-base"
                     style={{
@@ -149,7 +151,7 @@ function ProjectsList({ orgSlug }: { orgSlug: string }) {
           ))}
         </div>
       )}
-    </div>
+    </FadeIn>
   );
 }
 
