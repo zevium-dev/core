@@ -1,6 +1,7 @@
 import { convexQuery, useConvexMutation } from "@convex-dev/react-query";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
+import { Check, Copy, Eye, EyeOff, Webhook } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import { toast } from "sonner";
 
@@ -23,12 +24,16 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "#/components/ui/dialog";
+import { Switch } from "#/components/ui/switch";
 import { Input } from "#/components/ui/input";
 import { Label } from "#/components/ui/label";
 import { api } from "#/lib/convex-api";
 import type { Doc } from "#/lib/convex-data-model";
 import { humanError } from "#/lib/human-error";
 import { parseTagsInput } from "#/lib/project-helpers";
+import { deliveryStatusView, truncateError } from "#/lib/webhook-delivery";
+import { maskSecret } from "#/lib/webhook-secret";
+import { formatRelativeTime } from "#/lib/relative-time";
 
 export function ProjectSettingsPanel({
   project,
@@ -307,6 +312,8 @@ export function ProjectSettingsPanel({
         </CardContent>
       </Card>
 
+      <WebhooksCard project={project} />
+
       <Card className="border-destructive/40">
         <CardHeader>
           <CardTitle className="text-destructive">Danger zone</CardTitle>
@@ -375,4 +382,258 @@ export function ProjectSettingsPanel({
       </Card>
     </div>
   );
+}
+
+// ---------------------------------------------------------------------------
+// Webhooks — endpoint config + recent deliveries.
+// The signing secret is generated server-side by webhooks.upsertEndpoint and
+// returned in the endpoint doc; we surface it here (masked by default) with a
+// copy + reveal toggle. Deliveries come from webhooks.listDeliveries.
+// ---------------------------------------------------------------------------
+function WebhooksCard({ project }: { project: Doc<"projects"> }) {
+  const endpointQuery = useQuery(
+    convexQuery(api.webhooks.getEndpoint, { projectId: project._id }),
+  );
+  const deliveriesQuery = useQuery(
+    convexQuery(api.webhooks.listDeliveries, {
+      projectId: project._id,
+      paginationOpts: { numItems: 10, cursor: null },
+    }),
+  );
+
+  const endpoint = endpointQuery.data ?? null;
+  const deliveries = deliveriesQuery.data?.page ?? [];
+
+  const [url, setUrl] = useState("");
+  const [active, setActive] = useState(true);
+  const [revealSecret, setRevealSecret] = useState(false);
+  const [copiedSecret, setCopiedSecret] = useState(false);
+
+  // Sync local form from the realtime endpoint doc once it loads.
+  useEffect(() => {
+    if (endpoint !== null) {
+      setUrl(endpoint.url);
+      setActive(endpoint.active);
+    }
+  }, [endpoint?._id, endpoint?.url, endpoint?.active]);
+
+  const upsertMut = useConvexMutation(api.webhooks.upsertEndpoint);
+
+  const { mutate: saveEndpoint, isPending: saving } = useMutation({
+    mutationFn: (input: { url: string; active: boolean }) =>
+      upsertMut({
+        projectId: project._id,
+        url: input.url,
+        active: input.active,
+      }),
+    onSuccess: () => toast.success("Webhook endpoint saved"),
+    onError: (err: unknown) =>
+      toast.error(humanError(err, "Could not save webhook endpoint")),
+  });
+
+  const trimmedUrl = url.trim();
+  const urlValid = isValidWebhookUrl(trimmedUrl);
+  const dirty =
+    endpoint === null
+      ? trimmedUrl.length > 0
+      : trimmedUrl !== endpoint.url || active !== endpoint.active;
+
+  function onSave(e: FormEvent) {
+    e.preventDefault();
+    if (saving || !urlValid) return;
+    saveEndpoint({ url: trimmedUrl, active });
+  }
+
+  async function copySecret() {
+    if (!endpoint?.secret) return;
+    try {
+      await navigator.clipboard.writeText(endpoint.secret);
+      setCopiedSecret(true);
+      setTimeout(() => setCopiedSecret(false), 1500);
+    } catch {
+      toast.error("Could not copy secret");
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Webhook className="size-4 text-muted-foreground" />
+          Webhooks
+        </CardTitle>
+        <CardDescription>
+          Receive spec lifecycle events (publish, deprecate) at your endpoint.
+          One endpoint per project.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-5">
+        <form onSubmit={onSave} className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="webhook-url">Endpoint URL</Label>
+            <Input
+              id="webhook-url"
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              placeholder="https://example.com/hooks/zevium"
+              className="font-mono text-sm"
+              disabled={saving}
+              spellCheck={false}
+              autoComplete="url"
+            />
+            {trimmedUrl.length > 0 && !urlValid ? (
+              <p className="text-xs text-destructive">
+                URL must be https (http://localhost allowed for dev).
+              </p>
+            ) : null}
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="webhook-secret">Signing secret</Label>
+            {endpoint?.secret ? (
+              <div className="flex items-center gap-2">
+                <Input
+                  id="webhook-secret"
+                  readOnly
+                  value={
+                    revealSecret ? endpoint.secret : maskSecret(endpoint.secret)
+                  }
+                  className="font-mono text-sm"
+                  aria-label="Webhook signing secret"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  onClick={() => setRevealSecret((v) => !v)}
+                  aria-label={revealSecret ? "Hide secret" : "Reveal secret"}
+                >
+                  {revealSecret ? (
+                    <EyeOff className="size-4" />
+                  ) : (
+                    <Eye className="size-4" />
+                  )}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  onClick={copySecret}
+                  aria-label="Copy secret"
+                >
+                  {copiedSecret ? (
+                    <Check className="size-4 text-success-foreground" />
+                  ) : (
+                    <Copy className="size-4" />
+                  )}
+                </Button>
+              </div>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                Save an endpoint to generate a signing secret.
+              </p>
+            )}
+          </div>
+
+          <div className="flex items-center justify-between gap-3 rounded-md border border-border p-3">
+            <div className="space-y-0.5">
+              <Label htmlFor="webhook-active" className="text-sm">
+                Active
+              </Label>
+              <p className="text-xs text-muted-foreground">
+                Inactive endpoints skip delivery entirely.
+              </p>
+            </div>
+            <Switch
+              id="webhook-active"
+              checked={active}
+              onCheckedChange={setActive}
+              disabled={saving}
+            />
+          </div>
+
+          <div className="flex justify-end">
+            <Button type="submit" disabled={saving || !urlValid || !dirty}>
+              {saving
+                ? "Saving…"
+                : endpoint === null
+                  ? "Create endpoint"
+                  : "Save changes"}
+            </Button>
+          </div>
+        </form>
+
+        <div className="space-y-2 border-t pt-4">
+          <div className="flex items-center justify-between">
+            <h4 className="text-sm font-medium">Recent deliveries</h4>
+            {endpoint === null ? null : (
+              <Badge variant="outline">{deliveries.length}</Badge>
+            )}
+          </div>
+          {endpoint === null ? (
+            <p className="text-xs text-muted-foreground">
+              Create an endpoint to start receiving deliveries.
+            </p>
+          ) : deliveries.length === 0 ? (
+            <p className="text-xs text-muted-foreground">
+              No deliveries yet. Events appear here after a publish or
+              deprecate.
+            </p>
+          ) : (
+            <ul className="space-y-1.5">
+              {deliveries.map((d) => {
+                const view = deliveryStatusView(d.status);
+                const err = truncateError(d.lastError);
+                return (
+                  <li
+                    key={d._id}
+                    className="flex items-start justify-between gap-2 rounded-md border border-border px-2.5 py-2 text-sm"
+                  >
+                    <div className="min-w-0 space-y-0.5">
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono text-xs">{d.event}</span>
+                        <Badge
+                          variant={view.badgeVariant}
+                          className={view.className}
+                        >
+                          {view.dotClassName.length > 0 ? (
+                            <span
+                              className={`size-1.5 rounded-full ${view.dotClassName}`}
+                            />
+                          ) : null}
+                          {view.label}
+                        </Badge>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        {d.attempts} attempt{d.attempts === 1 ? "" : "s"}
+                        {err.length > 0 ? ` · ${err}` : ""}
+                      </p>
+                    </div>
+                    <span className="shrink-0 text-[11px] text-muted-foreground tabular-nums">
+                      {formatRelativeTime(d.createdAt)}
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+/** Mirrors convex/webhooks.ts validateWebhookUrl (https or http://localhost). */
+function isValidWebhookUrl(url: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol === "https:") return true;
+  if (parsed.protocol === "http:" && parsed.hostname === "localhost") {
+    return true;
+  }
+  return false;
 }

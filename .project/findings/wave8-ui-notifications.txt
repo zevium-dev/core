@@ -1,0 +1,38 @@
+ALL GREEN. DONE.
+
+## VERIFY
+
+```
+pnpm --filter web typecheck   →  $ tsc --noEmit   CLEAN (0 errors)
+pnpm --filter web test        →  16 files, 119 passed  (incl. 3 new helper suites)
+pnpm --filter web build       →  ✓ built in 2.42s
+```
+
+## CHANGED
+
+**NEW (in-scope)**
+- `apps/web/src/components/ui/popover.tsx` — stock shadcn Popover (radix-ui)
+- `apps/web/src/components/ui/switch.tsx` — stock shadcn Switch (radix-ui)
+- `apps/web/src/components/notification-bell.tsx` — unread badge (realtime `notifications.listForOrg`), popover list (kind icon + title + body + relative time), mark-read on click, mark-all-read, empty state. SPRING.pop badge, staggered row enter, reduced-motion + vtState gated
+- `apps/web/src/lib/relative-time.ts` + `.test.ts` — `formatRelativeTime` (just now→m→h→d→w→date), 8 tests
+- `apps/web/src/lib/webhook-secret.ts` + `.test.ts` — `toHex`/`generateWebhookSecret`/`isHexSecret`/`maskSecret`, 13 tests
+- `apps/web/src/lib/webhook-delivery.ts` + `.test.ts` — `deliveryStatusView` (ok/failed/pending → semantic tokens, zero raw colors), `truncateError`, 10 tests
+
+**MODIFIED (in-scope)**
+- `apps/web/src/components/app-header.tsx` — bell slotted right of breadcrumbs
+- `apps/web/src/components/project-settings-panel.tsx` — Webhooks card: URL + server-returned secret (mask/reveal/copy), active Switch, save via `webhooks.upsertEndpoint`, recent deliveries via `webhooks.listDeliveries` (status badge + attempts + truncated error + time)
+- `apps/web/src/components/spec-editor/spec-rail.tsx` — versions card: per-row overflow menu → Deprecate dialog (optional sunset date + message) / Undeprecate; deprecated rows muted + warning badge. Mutations `specs.deprecateVersion` / `specs.undeprecateVersion`
+- `apps/web/src/routes/catalogue/$orgSlug.$projectSlug.tsx` — deprecation banner ("Deprecated — sunset <date>: <message>"), warning semantic tokens
+
+**MODIFIED (necessary additions outside strict scope — flagged)**
+- `apps/web/src/styles.css` — added `--success`/`--warning`/`--destructive-foreground` semantic tokens (light+dark) + `@theme inline` mappings. No raw Tailwind colors possible without these; deprecation banner + delivery badges require warning/success semantics
+- `convex/specs.ts` — `listVersions` returns `deprecatedAt`/`sunsetAt`/`deprecationMessage` (additive, non-breaking). The card badge MUST reflect persisted deprecation state on reload — without this the feature is broken
+- `apps/web/src/components/spec-editor/spec-workspace.tsx` — `SpecWorkspaceProps.versions` extended; pass `projectId` to card (mutation invalidation)
+- `apps/web/src/routes/app/projects/$projectSlug/spec.tsx` — thread deprecation fields into workspace
+
+## DIVERGENCES (backend truth > task prose)
+1. **Webhook secret is server-generated.** `upsertEndpoint` ignores any client secret (`{projectId,url,active?}`); secret auto-generated server-side, returned in endpoint doc. Built + tested `generateWebhookSecret` helper per spec, but the card displays the **backend-returned** secret (masked/reveal/copy). Client-gen would never persist — would be a bug.
+2. **`listVersions` had no deprecation metadata.** Extended it (additive) so the deprecated badge survives reload. Verified Convex `_generated/api.d.ts` infers from source → no regen needed.
+
+## BOUNDARIES RESPECTED
+No admin routes, no billing, no settings route touched. Stock shadcn unmodified (popover/switch are fresh stock files). All motion via `motion.ts`/CSS vars, `m.` components, `useReducedMotion` gated. Semantic tokens only.

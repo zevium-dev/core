@@ -1,5 +1,9 @@
 import type { SpecIssue } from "@zevium/shared";
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { convexQuery, useConvexMutation } from "@convex-dev/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { Archive, MoreHorizontal, RotateCcw } from "lucide-react";
+import { toast } from "sonner";
 
 import { Badge } from "#/components/ui/badge";
 import { Button } from "#/components/ui/button";
@@ -11,6 +15,24 @@ import {
   CardTitle,
 } from "#/components/ui/card";
 import { Input } from "#/components/ui/input";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "#/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "#/components/ui/dropdown-menu";
+import { Label } from "#/components/ui/label";
+import { api } from "#/lib/convex-api";
+import type { Id } from "#/lib/convex-data-model";
+import { humanError } from "#/lib/human-error";
 import type { SpecEndpointRow } from "#/lib/spec-endpoints";
 import type { PricingEdit } from "#/lib/spec-pricing-edit";
 
@@ -295,19 +317,67 @@ export type SpecVersionRow = {
   _id: string;
   version: string;
   publishedAt: number;
+  deprecatedAt: number | undefined;
+  sunsetAt: number | undefined;
+  deprecationMessage: string | undefined;
 };
 
 export type SpecRailVersionsProps = {
   versions: SpecVersionRow[];
   publishSlot: ReactNode;
+  projectId: Id<"projects">;
   onSelectVersion?: (versionId: SpecVersionRow["_id"]) => void;
 };
 
 export function SpecRailVersions({
   versions,
   publishSlot,
+  projectId,
   onSelectVersion,
 }: SpecRailVersionsProps) {
+  const queryClient = useQueryClient();
+  const [deprecateTarget, setDeprecateTarget] = useState<SpecVersionRow | null>(
+    null,
+  );
+  const [undeprecateTarget, setUndeprecateTarget] =
+    useState<SpecVersionRow | null>(null);
+
+  const deprecateMut = useConvexMutation(api.specs.deprecateVersion);
+  const undeprecateMut = useConvexMutation(api.specs.undeprecateVersion);
+
+  async function invalidateVersions() {
+    await queryClient.invalidateQueries({
+      queryKey: convexQuery(api.specs.listVersions, { projectId }).queryKey,
+    });
+  }
+
+  const { mutate: confirmDeprecate, isPending: deprecating } = useMutation({
+    mutationFn: (input: {
+      versionId: Id<"specVersions">;
+      sunsetAt?: number;
+      message?: string;
+    }) => deprecateMut(input),
+    onSuccess: async () => {
+      toast.success("Version deprecated");
+      setDeprecateTarget(null);
+      await invalidateVersions();
+    },
+    onError: (err: unknown) =>
+      toast.error(humanError(err, "Could not deprecate version")),
+  });
+
+  const { mutate: confirmUndeprecate, isPending: undeprecating } = useMutation({
+    mutationFn: (versionId: Id<"specVersions">) =>
+      undeprecateMut({ versionId }),
+    onSuccess: async () => {
+      toast.success("Version restored");
+      setUndeprecateTarget(null);
+      await invalidateVersions();
+    },
+    onError: (err: unknown) =>
+      toast.error(humanError(err, "Could not restore version")),
+  });
+
   return (
     <Card>
       <CardHeader className="pb-3">
@@ -325,23 +395,262 @@ export function SpecRailVersions({
         ) : (
           <ul className="space-y-1">
             {versions.map((v) => (
-              <li key={v._id}>
-                <button
-                  type="button"
-                  onClick={() => onSelectVersion?.(v._id)}
-                  className="flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-[background-color] duration-[var(--dur-instant)] ease-[var(--ease)] hover:bg-accent focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
-                >
-                  <span className="font-mono">v{v.version}</span>
-                  <span className="text-xs text-muted-foreground">
-                    {new Date(v.publishedAt).toLocaleDateString()}
-                  </span>
-                </button>
-              </li>
+              <VersionRow
+                key={v._id}
+                version={v}
+                onSelect={onSelectVersion}
+                onDeprecate={setDeprecateTarget}
+                onUndeprecate={setUndeprecateTarget}
+                busy={
+                  (deprecating && deprecateTarget?._id === v._id) ||
+                  (undeprecating && undeprecateTarget?._id === v._id)
+                }
+              />
             ))}
           </ul>
         )}
       </CardContent>
+
+      <DeprecateDialog
+        target={deprecateTarget}
+        pending={deprecating}
+        onConfirm={(input) => confirmDeprecate(input)}
+        onOpenChange={(open) => {
+          if (!open && !deprecating) setDeprecateTarget(null);
+        }}
+      />
+      <UndeprecateDialog
+        target={undeprecateTarget}
+        pending={undeprecating}
+        onConfirm={() => {
+          if (undeprecateTarget !== null) {
+            confirmUndeprecate(undeprecateTarget._id as Id<"specVersions">);
+          }
+        }}
+        onOpenChange={(open) => {
+          if (!open && !undeprecating) setUndeprecateTarget(null);
+        }}
+      />
     </Card>
+  );
+}
+
+function VersionRow({
+  version,
+  onSelect,
+  onDeprecate,
+  onUndeprecate,
+  busy,
+}: {
+  version: SpecVersionRow;
+  onSelect?: (versionId: SpecVersionRow["_id"]) => void;
+  onDeprecate: (row: SpecVersionRow) => void;
+  onUndeprecate: (row: SpecVersionRow) => void;
+  busy: boolean;
+}) {
+  const deprecated = version.deprecatedAt !== undefined;
+
+  return (
+    <li>
+      <div
+        data-dep={deprecated}
+        className="group flex items-center gap-1 rounded-md pl-2 pr-1 py-1.5 text-sm transition-[background-color] duration-[var(--dur-instant)] ease-[var(--ease)] hover:bg-accent data-[dep=true]:opacity-70"
+      >
+        <button
+          type="button"
+          onClick={() => onSelect?.(version._id)}
+          className="flex min-w-0 flex-1 items-center gap-2 py-0.5 text-left focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 rounded-sm"
+        >
+          <span className="font-mono">{version.version}</span>
+          {deprecated ? (
+            <Badge
+              variant="outline"
+              className="border-warning/40 bg-warning/10 text-warning-foreground"
+            >
+              Deprecated
+            </Badge>
+          ) : null}
+        </button>
+        <span className="shrink-0 text-xs text-muted-foreground">
+          {new Date(version.publishedAt).toLocaleDateString()}
+        </span>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-7 shrink-0 opacity-0 transition-opacity duration-[var(--dur-instant)] ease-[var(--ease)] group-hover:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100"
+              disabled={busy}
+              aria-label={`Actions for version ${version.version}`}
+            >
+              <MoreHorizontal className="size-4" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-40">
+            {deprecated ? (
+              <DropdownMenuItem onClick={() => onUndeprecate(version)}>
+                <RotateCcw className="size-4" />
+                Undeprecate
+              </DropdownMenuItem>
+            ) : (
+              <DropdownMenuItem onClick={() => onDeprecate(version)}>
+                <Archive className="size-4" />
+                Deprecate…
+              </DropdownMenuItem>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+    </li>
+  );
+}
+
+function DeprecateDialog({
+  target,
+  pending,
+  onConfirm,
+  onOpenChange,
+}: {
+  target: SpecVersionRow | null;
+  pending: boolean;
+  onConfirm: (input: {
+    versionId: Id<"specVersions">;
+    sunsetAt?: number;
+    message?: string;
+  }) => void;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const [sunsetDate, setSunsetDate] = useState("");
+  const [message, setMessage] = useState("");
+
+  // Reset the form whenever a new target opens.
+  useEffect(() => {
+    if (target !== null) {
+      setSunsetDate("");
+      setMessage("");
+    }
+  }, [target]);
+
+  // Date.parse yields NaN on garbage; coerce to undefined for the mutation.
+  const parsedSunset =
+    sunsetDate.length > 0 ? Date.parse(`${sunsetDate}T00:00:00Z`) : NaN;
+  const sunsetAt: number | undefined = Number.isNaN(parsedSunset)
+    ? undefined
+    : parsedSunset;
+  const sunsetValid = sunsetDate.length === 0 || !Number.isNaN(parsedSunset);
+
+  return (
+    <Dialog
+      open={target !== null}
+      onOpenChange={(open) => {
+        if (!pending) onOpenChange(open);
+      }}
+    >
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Deprecate version {target?.version ?? ""}</DialogTitle>
+          <DialogDescription>
+            Marks this published version as deprecated. The spec body stays
+            immutable; only deprecation metadata changes. Consumers see a
+            warning banner.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4 py-2">
+          <div className="space-y-2">
+            <Label htmlFor="deprecate-sunset">Sunset date (optional)</Label>
+            <Input
+              id="deprecate-sunset"
+              type="date"
+              value={sunsetDate}
+              onChange={(e) => setSunsetDate(e.target.value)}
+              disabled={pending}
+            />
+            {!sunsetValid ? (
+              <p className="text-xs text-destructive">Invalid date.</p>
+            ) : null}
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="deprecate-message">Message (optional)</Label>
+            <textarea
+              id="deprecate-message"
+              value={message}
+              onChange={(e) => setMessage(e.target.value)}
+              maxLength={500}
+              rows={3}
+              disabled={pending}
+              placeholder="Migration guidance or replacement version."
+              className="flex min-h-20 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs transition-[color,box-shadow] outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50"
+            />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button
+            variant="ghost"
+            onClick={() => onOpenChange(false)}
+            disabled={pending}
+          >
+            Cancel
+          </Button>
+          <Button
+            variant="destructive"
+            disabled={pending || !sunsetValid}
+            onClick={() => {
+              if (target === null) return;
+              onConfirm({
+                versionId: target._id as Id<"specVersions">,
+                sunsetAt,
+                message: message.trim().length > 0 ? message.trim() : undefined,
+              });
+            }}
+          >
+            {pending ? "Deprecating…" : "Deprecate version"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function UndeprecateDialog({
+  target,
+  pending,
+  onConfirm,
+  onOpenChange,
+}: {
+  target: SpecVersionRow | null;
+  pending: boolean;
+  onConfirm: () => void;
+  onOpenChange: (open: boolean) => void;
+}) {
+  return (
+    <Dialog
+      open={target !== null}
+      onOpenChange={(open) => {
+        if (!pending) onOpenChange(open);
+      }}
+    >
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Restore version {target?.version ?? ""}?</DialogTitle>
+          <DialogDescription>
+            Clears deprecation metadata. The version returns to normal in the
+            catalogue and consumer banner.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button
+            variant="ghost"
+            onClick={() => onOpenChange(false)}
+            disabled={pending}
+          >
+            Cancel
+          </Button>
+          <Button onClick={onConfirm} disabled={pending}>
+            {pending ? "Restoring…" : "Restore version"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

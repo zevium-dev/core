@@ -135,6 +135,9 @@ function SpecEditorInner({
         _id: v._id,
         version: v.version,
         publishedAt: v.publishedAt,
+        deprecatedAt: v.deprecatedAt,
+        sunsetAt: v.sunsetAt,
+        deprecationMessage: v.deprecationMessage,
       }))}
     />
   );

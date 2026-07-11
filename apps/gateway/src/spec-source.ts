@@ -15,6 +15,12 @@ export type PublishedSpec = {
   organizationId: string;
   /** Clerk org id — wallet DO idFromName key. */
   clerkOrgId: string;
+  /** Epoch seconds when this spec version was deprecated (RFC 8594). Undefined when active. */
+  deprecatedAt?: number;
+  /** Epoch seconds when this spec version is scheduled for removal (RFC 8594 Sunset). */
+  sunsetAt?: number;
+  /** Human-readable deprecation reason surfaced to consumers (optional). */
+  deprecationMessage?: string;
 };
 
 export interface SpecSource {
@@ -35,6 +41,9 @@ const getPublishedForGatewayRef = makeFunctionReference<
     projectId: string;
     organizationId: string;
     clerkOrgId: string;
+    deprecatedAt?: number;
+    sunsetAt?: number;
+    deprecationMessage?: string;
   } | null
 >("specs:getPublishedForGateway");
 
@@ -157,12 +166,33 @@ export function parsePublishedSpecPayload(json: unknown): PublishedSpec | null {
     clerkOrgId = candidate.organizationId;
   }
 
-  return {
+  const published: PublishedSpec = {
     spec: candidate.spec,
     projectId: candidate.projectId,
     organizationId: candidate.organizationId,
     clerkOrgId,
   };
+  if (
+    "deprecatedAt" in candidate &&
+    typeof candidate.deprecatedAt === "number" &&
+    Number.isFinite(candidate.deprecatedAt)
+  ) {
+    published.deprecatedAt = candidate.deprecatedAt;
+  }
+  if (
+    "sunsetAt" in candidate &&
+    typeof candidate.sunsetAt === "number" &&
+    Number.isFinite(candidate.sunsetAt)
+  ) {
+    published.sunsetAt = candidate.sunsetAt;
+  }
+  if (
+    "deprecationMessage" in candidate &&
+    typeof candidate.deprecationMessage === "string"
+  ) {
+    published.deprecationMessage = candidate.deprecationMessage;
+  }
+  return published;
 }
 
 /** In-memory fixture for workerd tests. */

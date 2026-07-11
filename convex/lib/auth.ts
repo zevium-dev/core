@@ -116,9 +116,7 @@ export async function requireProjectMember(
  * Platform admin gate. Reads ADMIN_USER_IDS env (comma-separated Clerk user ids).
  * Fails closed when env unset — nobody is admin.
  */
-export async function requireAdmin(
-  ctx: DbCtx,
-): Promise<OrgIdentityClaims> {
+export async function requireAdmin(ctx: DbCtx): Promise<OrgIdentityClaims> {
   const claims = await requireIdentity(ctx);
   const raw = process.env.ADMIN_USER_IDS;
   if (raw === undefined || raw.trim() === "") {

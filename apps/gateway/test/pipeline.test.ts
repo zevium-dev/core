@@ -84,6 +84,9 @@ async function installFixtures(opts: {
   credits?: number;
   usage?: CollectingUsageSink;
   keyOrgId?: string;
+  deprecatedAt?: number;
+  sunsetAt?: number;
+  deprecationMessage?: string;
 }) {
   const usage = opts.usage ?? new CollectingUsageSink();
   const organizationId = opts.organizationId ?? opts.clerkOrgId;
@@ -100,6 +103,9 @@ async function installFixtures(opts: {
     projectId: "proj_demo",
     organizationId,
     clerkOrgId: opts.clerkOrgId,
+    deprecatedAt: opts.deprecatedAt,
+    sunsetAt: opts.sunsetAt,
+    deprecationMessage: opts.deprecationMessage,
   });
 
   __setTestPipelineDeps({
@@ -179,6 +185,10 @@ describe("gateway pipeline", () => {
     expect(res.headers.get("x-zevium-cost")).toBe("3");
     expect(res.headers.get("x-zevium-request-id")).toBeTruthy();
     expect(res.headers.get("x-upstream")).toBe("yes");
+    // Non-deprecated spec: no RFC 8594 deprecation signalling.
+    expect(res.headers.get("Deprecation")).toBeNull();
+    expect(res.headers.get("Sunset")).toBeNull();
+    expect(res.headers.get("Link")).toBeNull();
     expect(calls).toHaveLength(1);
 
     const state = await walletStub(clerkOrgId).getState();
@@ -191,6 +201,48 @@ describe("gateway pipeline", () => {
     expect(usage.events[0]!.outcome).toBe("settled");
     expect(usage.events[0]!.cost).toBe(3);
     expect(usage.events[0]!.status).toBe(200);
+  });
+
+  it("deprecated spec → RFC 8594 deprecation/sunset/link headers", async () => {
+    const clerkOrgId = "org_pipe_deprecated";
+    const { fetchImpl } = makeFetchMock(
+      () =>
+        new Response("ok", {
+          status: 200,
+          headers: { "content-type": "text/plain" },
+        }),
+    );
+    // Convex stamps epoch milliseconds (Date.now()); gateway converts.
+    const deprecatedAt = 1_750_000_000_000;
+    const sunsetAt = 1_800_000_000_000;
+    await installFixtures({
+      clerkOrgId,
+      fetchImpl,
+      credits: 50,
+      deprecatedAt,
+      sunsetAt,
+      deprecationMessage: "v1 is setting sun",
+    });
+
+    const res = await gatewayFetch(
+      `/gateway/${ORG_SLUG}/${PROJECT_SLUG}/stream`,
+    );
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe("ok");
+
+    expect(res.headers.get("Deprecation")).toBe(
+      `@${Math.floor(deprecatedAt / 1000)}`,
+    );
+    expect(res.headers.get("Sunset")).toBe(new Date(sunsetAt).toUTCString());
+    const link = res.headers.get("Link");
+    expect(link).toContain(
+      `<https://zevium.dev/catalogue/${ORG_SLUG}/${PROJECT_SLUG}>`,
+    );
+    expect(link).toContain('rel="deprecation"');
+
+    // Billing unaffected by deprecation signalling.
+    const state = await walletStub(clerkOrgId).getState();
+    expect(state.balance).toBe(48); // 50 - 2 (stream cost)
   });
 
   it("insufficient credits → 402 and no upstream call", async () => {

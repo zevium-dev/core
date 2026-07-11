@@ -202,6 +202,9 @@ export const listVersions = query({
       _id: Doc<"specVersions">["_id"];
       version: string;
       publishedAt: number;
+      deprecatedAt: number | undefined;
+      sunsetAt: number | undefined;
+      deprecationMessage: string | undefined;
     }>
   > => {
     await requireProjectMember(ctx, args.projectId);
@@ -216,6 +219,9 @@ export const listVersions = query({
       _id: r._id,
       version: r.version,
       publishedAt: r.publishedAt,
+      deprecatedAt: r.deprecatedAt,
+      sunsetAt: r.sunsetAt,
+      deprecationMessage: r.deprecationMessage,
     }));
   },
 });

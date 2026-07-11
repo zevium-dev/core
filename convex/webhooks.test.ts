@@ -4,10 +4,7 @@ import { describe, expect, it } from "vitest";
 import { api, internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import schema from "./schema";
-import {
-  computeSignature,
-  postWebhook,
-} from "./lib/webhookDelivery";
+import { computeSignature, postWebhook } from "./lib/webhookDelivery";
 import { validateWebhookUrl } from "./webhooks";
 const modules = import.meta.glob("./**/*.ts");
 
@@ -160,9 +157,7 @@ type Seeded = {
   projectId: Id<"projects">;
 };
 
-async function seedWorld(
-  t: ReturnType<typeof convexTest>,
-): Promise<Seeded> {
+async function seedWorld(t: ReturnType<typeof convexTest>): Promise<Seeded> {
   return await t.run(async (ctx) => {
     const orgId = await ctx.db.insert("organizations", {
       clerkOrgId: "org_pub",

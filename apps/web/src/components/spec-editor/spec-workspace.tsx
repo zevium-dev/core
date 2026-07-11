@@ -50,7 +50,14 @@ export type SpecWorkspaceProps = {
   visibility: "public" | "private";
   savedDraft: string;
   lastSavedAt: number | null;
-  versions: Array<{ _id: string; version: string; publishedAt: number }>;
+  versions: Array<{
+    _id: string;
+    version: string;
+    publishedAt: number;
+    deprecatedAt: number | undefined;
+    sunsetAt: number | undefined;
+    deprecationMessage: string | undefined;
+  }>;
 };
 
 function defaultNextVersion(existing: string[]): string {
@@ -425,6 +432,7 @@ export function SpecWorkspace({
           <SpecRailVersions
             versions={versions}
             publishSlot={publishSlot}
+            projectId={projectId}
             onSelectVersion={(id) =>
               setVersionDialogId(id as Id<"specVersions">)
             }

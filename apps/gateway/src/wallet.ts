@@ -691,9 +691,7 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
    * Returns null on any failure (misconfig, non-2xx, bad JSON) so callers
    * degrade gracefully. Test hook overrides the network path entirely.
    */
-  async #fetchGrantsFromConvex(
-    clerkOrgId: string,
-  ): Promise<{
+  async #fetchGrantsFromConvex(clerkOrgId: string): Promise<{
     grants: { refId: string; amount: number }[];
     balance: number;
   } | null> {

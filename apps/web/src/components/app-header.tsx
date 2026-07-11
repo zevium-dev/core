@@ -1,4 +1,5 @@
 import { Link, useRouterState } from "@tanstack/react-router";
+import { NotificationBell } from "#/components/notification-bell";
 import { Fragment } from "react";
 
 import {
@@ -61,6 +62,9 @@ export function AppHeader() {
           ))}
         </BreadcrumbList>
       </Breadcrumb>
+      <div className="ml-auto flex items-center gap-1">
+        <NotificationBell />
+      </div>
     </header>
   );
 }

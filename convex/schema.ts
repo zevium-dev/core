@@ -129,11 +129,7 @@ export default defineSchema({
   webhookDeliveries: defineTable({
     endpointId: v.id("webhookEndpoints"),
     event: v.string(),
-    status: v.union(
-      v.literal("pending"),
-      v.literal("ok"),
-      v.literal("failed"),
-    ),
+    status: v.union(v.literal("pending"), v.literal("ok"), v.literal("failed")),
     attempts: v.number(),
     lastError: v.optional(v.string()),
     createdAt: v.number(),

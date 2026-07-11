@@ -15,9 +15,7 @@ type Seeded = {
   projectId: Id<"projects">;
 };
 
-async function seedWorld(
-  t: ReturnType<typeof convexTest>,
-): Promise<Seeded> {
+async function seedWorld(t: ReturnType<typeof convexTest>): Promise<Seeded> {
   return await t.run(async (ctx) => {
     const orgId = await ctx.db.insert("organizations", {
       clerkOrgId: "org_a",
@@ -103,9 +101,9 @@ describe("admin gate", () => {
     delete process.env.ADMIN_USER_IDS;
     const t = convexTest(schema, modules);
     await seedWorld(t);
-    await expect(
-      asAdmin(t).query(api.admin.platformStats, {}),
-    ).rejects.toThrow(/Admin access not configured/);
+    await expect(asAdmin(t).query(api.admin.platformStats, {})).rejects.toThrow(
+      /Admin access not configured/,
+    );
   });
 });
 
@@ -305,13 +303,10 @@ describe("admin.setProjectVisibility", () => {
     const t = convexTest(schema, modules);
     const seed = await seedWorld(t);
 
-    const updated = await asAdmin(t).mutation(
-      api.admin.setProjectVisibility,
-      {
-        projectId: seed.projectId,
-        visibility: "private",
-      },
-    );
+    const updated = await asAdmin(t).mutation(api.admin.setProjectVisibility, {
+      projectId: seed.projectId,
+      visibility: "private",
+    });
 
     expect(updated.visibility).toBe("private");
 

@@ -104,9 +104,7 @@ export const upsertEndpoint = mutation({
 
     const url = args.url.trim();
     if (!validateWebhookUrl(url)) {
-      throw new Error(
-        "URL must be https (http://localhost allowed for dev)",
-      );
+      throw new Error("URL must be https (http://localhost allowed for dev)");
     }
 
     const existing = await ctx.db
@@ -140,10 +138,7 @@ export const upsertEndpoint = mutation({
 /** Fetch the webhook endpoint for a project (null if none). */
 export const getEndpoint = query({
   args: { projectId: v.id("projects") },
-  handler: async (
-    ctx,
-    args,
-  ): Promise<Doc<"webhookEndpoints"> | null> => {
+  handler: async (ctx, args): Promise<Doc<"webhookEndpoints"> | null> => {
     await requireProjectMember(ctx, args.projectId);
     return await ctx.db
       .query("webhookEndpoints")
@@ -180,7 +175,11 @@ export const listDeliveries = query({
       .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
       .unique();
     if (endpoint === null) {
-      return { page: [] as Doc<"webhookDeliveries">[], isDone: true, continueCursor: "" };
+      return {
+        page: [] as Doc<"webhookDeliveries">[],
+        isDone: true,
+        continueCursor: "",
+      };
     }
     return await ctx.db
       .query("webhookDeliveries")
@@ -253,8 +252,7 @@ export const recordDeliveryAttempt = internalMutation({
         lastError: args.error,
       });
       const backoffIndex = nextAttempts - 1;
-      const backoffSec =
-        WEBHOOK_BACKOFF_SECONDS[backoffIndex] ?? 300;
+      const backoffSec = WEBHOOK_BACKOFF_SECONDS[backoffIndex] ?? 300;
       await ctx.scheduler.runAfter(
         backoffSec * 1000,
         internal.webhooks.deliverWebhook,
@@ -294,10 +292,9 @@ export const recordDeliveryAttempt = internalMutation({
 export const deliverWebhook = internalAction({
   args: { deliveryId: v.id("webhookDeliveries") },
   handler: async (ctx, args): Promise<void> => {
-    const info = await ctx.runQuery(
-      internal.webhooks.getDeliveryForAction,
-      { deliveryId: args.deliveryId },
-    );
+    const info = await ctx.runQuery(internal.webhooks.getDeliveryForAction, {
+      deliveryId: args.deliveryId,
+    });
     if (info === null) return;
 
     if (!info.active) {

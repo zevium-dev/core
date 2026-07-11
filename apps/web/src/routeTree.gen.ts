@@ -11,15 +11,19 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as CatalogueRouteImport } from './routes/catalogue'
 import { Route as AppRouteImport } from './routes/app'
+import { Route as AdminRouteImport } from './routes/admin'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as CatalogueIndexRouteImport } from './routes/catalogue/index'
 import { Route as AppIndexRouteImport } from './routes/app/index'
+import { Route as AdminIndexRouteImport } from './routes/admin/index'
 import { Route as SignUpSplatRouteImport } from './routes/sign-up.$'
 import { Route as SignInSplatRouteImport } from './routes/sign-in.$'
 import { Route as AppSettingsRouteImport } from './routes/app/settings'
 import { Route as AppProjectsRouteImport } from './routes/app/projects'
 import { Route as AppOrgRouteImport } from './routes/app/org'
 import { Route as AppBillingRouteImport } from './routes/app/billing'
+import { Route as AdminProjectsRouteImport } from './routes/admin/projects'
+import { Route as AdminOrgsRouteImport } from './routes/admin/orgs'
 import { Route as AppSettingsIndexRouteImport } from './routes/app/settings/index'
 import { Route as AppProjectsIndexRouteImport } from './routes/app/projects/index'
 import { Route as AppOrgIndexRouteImport } from './routes/app/org/index'
@@ -41,6 +45,11 @@ const AppRoute = AppRouteImport.update({
   path: '/app',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AdminRoute = AdminRouteImport.update({
+  id: '/admin',
+  path: '/admin',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
@@ -55,6 +64,11 @@ const AppIndexRoute = AppIndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => AppRoute,
+} as any)
+const AdminIndexRoute = AdminIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AdminRoute,
 } as any)
 const SignUpSplatRoute = SignUpSplatRouteImport.update({
   id: '/sign-up/$',
@@ -85,6 +99,16 @@ const AppBillingRoute = AppBillingRouteImport.update({
   id: '/billing',
   path: '/billing',
   getParentRoute: () => AppRoute,
+} as any)
+const AdminProjectsRoute = AdminProjectsRouteImport.update({
+  id: '/projects',
+  path: '/projects',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminOrgsRoute = AdminOrgsRouteImport.update({
+  id: '/orgs',
+  path: '/orgs',
+  getParentRoute: () => AdminRoute,
 } as any)
 const AppSettingsIndexRoute = AppSettingsIndexRouteImport.update({
   id: '/',
@@ -141,14 +165,18 @@ const AppProjectsProjectSlugSpecRoute =
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/admin': typeof AdminRouteWithChildren
   '/app': typeof AppRouteWithChildren
   '/catalogue': typeof CatalogueRouteWithChildren
+  '/admin/orgs': typeof AdminOrgsRoute
+  '/admin/projects': typeof AdminProjectsRoute
   '/app/billing': typeof AppBillingRoute
   '/app/org': typeof AppOrgRouteWithChildren
   '/app/projects': typeof AppProjectsRouteWithChildren
   '/app/settings': typeof AppSettingsRouteWithChildren
   '/sign-in/$': typeof SignInSplatRoute
   '/sign-up/$': typeof SignUpSplatRoute
+  '/admin/': typeof AdminIndexRoute
   '/app/': typeof AppIndexRoute
   '/catalogue/': typeof CatalogueIndexRoute
   '/app/org/create': typeof AppOrgCreateRoute
@@ -164,9 +192,12 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/admin/orgs': typeof AdminOrgsRoute
+  '/admin/projects': typeof AdminProjectsRoute
   '/app/billing': typeof AppBillingRoute
   '/sign-in/$': typeof SignInSplatRoute
   '/sign-up/$': typeof SignUpSplatRoute
+  '/admin': typeof AdminIndexRoute
   '/app': typeof AppIndexRoute
   '/catalogue': typeof CatalogueIndexRoute
   '/app/org/create': typeof AppOrgCreateRoute
@@ -183,14 +214,18 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/admin': typeof AdminRouteWithChildren
   '/app': typeof AppRouteWithChildren
   '/catalogue': typeof CatalogueRouteWithChildren
+  '/admin/orgs': typeof AdminOrgsRoute
+  '/admin/projects': typeof AdminProjectsRoute
   '/app/billing': typeof AppBillingRoute
   '/app/org': typeof AppOrgRouteWithChildren
   '/app/projects': typeof AppProjectsRouteWithChildren
   '/app/settings': typeof AppSettingsRouteWithChildren
   '/sign-in/$': typeof SignInSplatRoute
   '/sign-up/$': typeof SignUpSplatRoute
+  '/admin/': typeof AdminIndexRoute
   '/app/': typeof AppIndexRoute
   '/catalogue/': typeof CatalogueIndexRoute
   '/app/org/create': typeof AppOrgCreateRoute
@@ -208,14 +243,18 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/admin'
     | '/app'
     | '/catalogue'
+    | '/admin/orgs'
+    | '/admin/projects'
     | '/app/billing'
     | '/app/org'
     | '/app/projects'
     | '/app/settings'
     | '/sign-in/$'
     | '/sign-up/$'
+    | '/admin/'
     | '/app/'
     | '/catalogue/'
     | '/app/org/create'
@@ -231,9 +270,12 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/admin/orgs'
+    | '/admin/projects'
     | '/app/billing'
     | '/sign-in/$'
     | '/sign-up/$'
+    | '/admin'
     | '/app'
     | '/catalogue'
     | '/app/org/create'
@@ -249,14 +291,18 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
+    | '/admin'
     | '/app'
     | '/catalogue'
+    | '/admin/orgs'
+    | '/admin/projects'
     | '/app/billing'
     | '/app/org'
     | '/app/projects'
     | '/app/settings'
     | '/sign-in/$'
     | '/sign-up/$'
+    | '/admin/'
     | '/app/'
     | '/catalogue/'
     | '/app/org/create'
@@ -273,6 +319,7 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AdminRoute: typeof AdminRouteWithChildren
   AppRoute: typeof AppRouteWithChildren
   CatalogueRoute: typeof CatalogueRouteWithChildren
   SignInSplatRoute: typeof SignInSplatRoute
@@ -295,6 +342,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/admin': {
+      id: '/admin'
+      path: '/admin'
+      fullPath: '/admin'
+      preLoaderRoute: typeof AdminRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/': {
       id: '/'
       path: '/'
@@ -315,6 +369,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/app/'
       preLoaderRoute: typeof AppIndexRouteImport
       parentRoute: typeof AppRoute
+    }
+    '/admin/': {
+      id: '/admin/'
+      path: '/'
+      fullPath: '/admin/'
+      preLoaderRoute: typeof AdminIndexRouteImport
+      parentRoute: typeof AdminRoute
     }
     '/sign-up/$': {
       id: '/sign-up/$'
@@ -357,6 +418,20 @@ declare module '@tanstack/react-router' {
       fullPath: '/app/billing'
       preLoaderRoute: typeof AppBillingRouteImport
       parentRoute: typeof AppRoute
+    }
+    '/admin/projects': {
+      id: '/admin/projects'
+      path: '/projects'
+      fullPath: '/admin/projects'
+      preLoaderRoute: typeof AdminProjectsRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/orgs': {
+      id: '/admin/orgs'
+      path: '/orgs'
+      fullPath: '/admin/orgs'
+      preLoaderRoute: typeof AdminOrgsRouteImport
+      parentRoute: typeof AdminRoute
     }
     '/app/settings/': {
       id: '/app/settings/'
@@ -430,6 +505,20 @@ declare module '@tanstack/react-router' {
     }
   }
 }
+
+interface AdminRouteChildren {
+  AdminOrgsRoute: typeof AdminOrgsRoute
+  AdminProjectsRoute: typeof AdminProjectsRoute
+  AdminIndexRoute: typeof AdminIndexRoute
+}
+
+const AdminRouteChildren: AdminRouteChildren = {
+  AdminOrgsRoute: AdminOrgsRoute,
+  AdminProjectsRoute: AdminProjectsRoute,
+  AdminIndexRoute: AdminIndexRoute,
+}
+
+const AdminRouteWithChildren = AdminRoute._addFileChildren(AdminRouteChildren)
 
 interface AppOrgRouteChildren {
   AppOrgCreateRoute: typeof AppOrgCreateRoute
@@ -524,6 +613,7 @@ const CatalogueRouteWithChildren = CatalogueRoute._addFileChildren(
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AdminRoute: AdminRouteWithChildren,
   AppRoute: AppRouteWithChildren,
   CatalogueRoute: CatalogueRouteWithChildren,
   SignInSplatRoute: SignInSplatRoute,

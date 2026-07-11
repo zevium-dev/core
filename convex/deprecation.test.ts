@@ -24,9 +24,7 @@ type Seeded = {
   versionId: Id<"specVersions">;
 };
 
-async function seedWorld(
-  t: ReturnType<typeof convexTest>,
-): Promise<Seeded> {
+async function seedWorld(t: ReturnType<typeof convexTest>): Promise<Seeded> {
   return await t.run(async (ctx) => {
     const orgId = await ctx.db.insert("organizations", {
       clerkOrgId: "org_pub",
@@ -282,9 +280,7 @@ describe("specs.publish — fires spec_published notification", () => {
     const notifs = await t.run(async (ctx) => {
       return await ctx.db.query("notifications").collect();
     });
-    const publishedNotif = notifs.find(
-      (n) => n.kind === "spec_published",
-    );
+    const publishedNotif = notifs.find((n) => n.kind === "spec_published");
     expect(publishedNotif).toBeDefined();
     expect(publishedNotif!.title).toBe("Spec published");
     expect(publishedNotif!.refId).toMatch(/spec_published:/);

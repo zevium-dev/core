@@ -92,9 +92,7 @@ export const listOrgs = query({
     for (const org of result.page) {
       const wallet = await ctx.db
         .query("wallets")
-        .withIndex("by_organization", (q) =>
-          q.eq("organizationId", org._id),
-        )
+        .withIndex("by_organization", (q) => q.eq("organizationId", org._id))
         .unique();
       page.push({
         _id: org._id,
@@ -121,12 +119,8 @@ export type AdminProjectView = {
 export const listProjects = query({
   args: {
     paginationOpts: paginationOptsValidator,
-    status: v.optional(
-      v.union(v.literal("draft"), v.literal("published")),
-    ),
-    visibility: v.optional(
-      v.union(v.literal("private"), v.literal("public")),
-    ),
+    status: v.optional(v.union(v.literal("draft"), v.literal("published"))),
+    visibility: v.optional(v.union(v.literal("private"), v.literal("public"))),
   },
   handler: async (ctx, args) => {
     await requireAdmin(ctx);
@@ -220,10 +214,7 @@ export const recentUsage = query({
 export const setProjectVisibility = mutation({
   args: {
     projectId: v.id("projects"),
-    visibility: v.union(
-      v.literal("private"),
-      v.literal("public"),
-    ),
+    visibility: v.union(v.literal("private"), v.literal("public")),
   },
   handler: async (ctx, args): Promise<Doc<"projects">> => {
     await requireAdmin(ctx);
@@ -246,12 +237,10 @@ export const setProjectVisibility = mutation({
       });
     }
 
-    await fireWebhookEvent(
-      ctx,
-      args.projectId,
-      "project.visibility_changed",
-      { projectId: args.projectId, visibility: args.visibility },
-    );
+    await fireWebhookEvent(ctx, args.projectId, "project.visibility_changed", {
+      projectId: args.projectId,
+      visibility: args.visibility,
+    });
 
     const updated = await ctx.db.get(args.projectId);
     if (updated === null) {

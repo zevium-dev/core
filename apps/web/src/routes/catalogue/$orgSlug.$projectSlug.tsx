@@ -7,7 +7,7 @@ import {
   type HttpMethod,
   type OpenApiOperation,
 } from "@zevium/shared";
-import { Check, Copy, PackageX, Terminal } from "lucide-react";
+import { Check, Copy, PackageX, Terminal, TriangleAlert } from "lucide-react";
 import {
   Suspense,
   useCallback,
@@ -297,6 +297,25 @@ function ApiDetailBody({
           </div>
         ) : null}
       </div>
+
+      {data.latestVersion?.deprecatedAt !== undefined ? (
+        <div className="flex items-start gap-2.5 rounded-md border border-warning/40 bg-warning/10 px-3.5 py-3 text-sm">
+          <TriangleAlert className="mt-0.5 size-4 shrink-0 text-warning-foreground" />
+          <div className="min-w-0 space-y-0.5">
+            <p className="font-medium text-warning-foreground">
+              Deprecated
+              {data.latestVersion.sunsetAt !== undefined
+                ? ` — sunset ${new Date(data.latestVersion.sunsetAt).toLocaleDateString()}`
+                : ""}
+            </p>
+            {data.latestVersion.deprecationMessage ? (
+              <p className="text-muted-foreground">
+                {data.latestVersion.deprecationMessage}
+              </p>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
 
       <PricingTable endpoints={endpoints} />
 

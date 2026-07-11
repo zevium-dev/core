@@ -308,6 +308,22 @@ export async function handleGatewayRequest(
     outHeaders.set("x-zevium-free-tier", "1");
   }
 
+  // RFC 8594 deprecation signalling — headers only, never blocks the proxied body.
+  if (published.deprecatedAt !== undefined) {
+    // Convex timestamps are epoch milliseconds; Deprecation wants @<seconds>.
+    outHeaders.set(
+      "Deprecation",
+      `@${Math.floor(published.deprecatedAt / 1000)}`,
+    );
+    outHeaders.append(
+      "Link",
+      `<https://zevium.dev/catalogue/${route.orgSlug}/${route.projectSlug}>; rel="deprecation"`,
+    );
+    if (published.sunsetAt !== undefined) {
+      outHeaders.set("Sunset", new Date(published.sunsetAt).toUTCString());
+    }
+  }
+
   return new Response(upstreamRes.body, {
     status: upstreamRes.status,
     statusText: upstreamRes.statusText,
