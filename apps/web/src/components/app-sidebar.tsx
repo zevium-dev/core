@@ -6,6 +6,7 @@ import { shadcn } from "@clerk/ui/themes";
 import { Link, useRouterState } from "@tanstack/react-router";
 import {
   BookOpen,
+  CreditCard,
   FolderKanban,
   LayoutDashboard,
   Settings,
@@ -31,6 +32,7 @@ const navItems = [
   { title: "Dashboard", to: "/app", icon: LayoutDashboard, exact: true },
   { title: "Catalogue", to: "/catalogue", icon: BookOpen, exact: false },
   { title: "Projects", to: "/app/projects", icon: FolderKanban, exact: false },
+  { title: "Billing", to: "/app/billing", icon: CreditCard, exact: false },
   { title: "Settings", to: "/app/settings", icon: Settings, exact: false },
 ] as const;
 

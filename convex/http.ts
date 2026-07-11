@@ -1,7 +1,15 @@
 import { httpRouter } from "convex/server";
+import {
+  validateEvent,
+  WebhookVerificationError,
+} from "@polar-sh/sdk/webhooks";
 import { Webhook } from "svix";
 import { internal } from "./_generated/api";
 import { httpAction } from "./_generated/server";
+import {
+  resolveOrderClerkOrgId,
+  resolveOrderCredits,
+} from "./billing";
 
 const http = httpRouter();
 
@@ -117,6 +125,103 @@ http.route({
       default:
         // Ignore unhandled event types — ack so Svix does not retry forever.
         break;
+    }
+
+    return new Response(null, { status: 200 });
+  }),
+});
+
+http.route({
+  path: "/polar-webhook",
+  method: "POST",
+  handler: httpAction(async (ctx, request) => {
+    const secret = process.env.POLAR_WEBHOOK_SECRET;
+    if (secret === undefined || secret.length === 0) {
+      return new Response("POLAR_WEBHOOK_SECRET not configured", {
+        status: 503,
+      });
+    }
+
+    const payload = await request.text();
+    const headers: Record<string, string> = {};
+    request.headers.forEach((value, key) => {
+      headers[key] = value;
+    });
+
+    let eventType: string;
+    let orderData: {
+      id: string;
+      metadata: Record<string, unknown>;
+      product: { metadata: Record<string, unknown> } | null;
+      totalAmount: number;
+      netAmount: number;
+    } | null = null;
+
+    try {
+      const event = validateEvent(payload, headers, secret);
+      eventType = event.type;
+      if (event.type === "order.paid") {
+        const order = event.data;
+        orderData = {
+          id: order.id,
+          metadata: order.metadata as Record<string, unknown>,
+          product:
+            order.product === null || order.product === undefined
+              ? null
+              : {
+                  metadata: order.product.metadata as Record<string, unknown>,
+                },
+          totalAmount: order.totalAmount,
+          netAmount: order.netAmount,
+        };
+      }
+    } catch (err) {
+      if (err instanceof WebhookVerificationError) {
+        return new Response("Invalid signature", { status: 403 });
+      }
+      return new Response("Webhook verification failed", { status: 400 });
+    }
+
+    if (eventType === "order.paid" && orderData !== null) {
+      const clerkOrgId = resolveOrderClerkOrgId({
+        metadata: orderData.metadata,
+      });
+      if (clerkOrgId === null) {
+        // Not our checkout (missing metadata) — ack, skip grant.
+        return new Response(null, { status: 200 });
+      }
+
+      const credits = resolveOrderCredits({
+        metadata: orderData.metadata,
+        product: orderData.product,
+        totalAmount: orderData.totalAmount,
+        netAmount: orderData.netAmount,
+      });
+
+      if (credits === null || credits <= 0) {
+        console.error("polar-webhook: could not resolve credits for order", {
+          orderId: orderData.id,
+        });
+        // Ack to avoid infinite retry; ops can re-grant manually.
+        return new Response(null, { status: 200 });
+      }
+
+      try {
+        await ctx.runMutation(internal.wallets.grantCredits, {
+          clerkOrgId,
+          amount: credits,
+          grantRefId: `polar:order:${orderData.id}`,
+        });
+      } catch (err) {
+        // Org not mirrored yet — fail so Polar retries after ensureOrganization.
+        const message = err instanceof Error ? err.message : "grant failed";
+        console.error("polar-webhook: grantCredits failed", {
+          orderId: orderData.id,
+          clerkOrgId,
+          message,
+        });
+        return new Response(message, { status: 500 });
+      }
     }
 
     return new Response(null, { status: 200 });

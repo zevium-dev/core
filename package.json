@@ -20,6 +20,7 @@
     "typescript": "^5.9.0"
   },
   "dependencies": {
+    "@polar-sh/sdk": "^0.48.1",
     "convex": "^1.42.1",
     "svix": "^1.96.1"
   },

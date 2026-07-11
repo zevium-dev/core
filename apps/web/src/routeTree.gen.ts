@@ -17,8 +17,11 @@ import { Route as SignUpSplatRouteImport } from './routes/sign-up.$'
 import { Route as SignInSplatRouteImport } from './routes/sign-in.$'
 import { Route as AppSettingsRouteImport } from './routes/app/settings'
 import { Route as AppProjectsRouteImport } from './routes/app/projects'
+import { Route as AppBillingRouteImport } from './routes/app/billing'
 import { Route as AppSettingsIndexRouteImport } from './routes/app/settings/index'
 import { Route as AppProjectsIndexRouteImport } from './routes/app/projects/index'
+import { Route as AppSettingsKeysRouteImport } from './routes/app/settings/keys'
+import { Route as AppSettingsActivityRouteImport } from './routes/app/settings/activity'
 import { Route as AppProjectsCreateRouteImport } from './routes/app/projects/create'
 import { Route as AppProjectsProjectSlugRouteImport } from './routes/app/projects/$projectSlug'
 import { Route as AppProjectsProjectSlugSpecRouteImport } from './routes/app/projects/$projectSlug/spec'
@@ -63,6 +66,11 @@ const AppProjectsRoute = AppProjectsRouteImport.update({
   path: '/projects',
   getParentRoute: () => AppRoute,
 } as any)
+const AppBillingRoute = AppBillingRouteImport.update({
+  id: '/billing',
+  path: '/billing',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppSettingsIndexRoute = AppSettingsIndexRouteImport.update({
   id: '/',
   path: '/',
@@ -72,6 +80,16 @@ const AppProjectsIndexRoute = AppProjectsIndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => AppProjectsRoute,
+} as any)
+const AppSettingsKeysRoute = AppSettingsKeysRouteImport.update({
+  id: '/keys',
+  path: '/keys',
+  getParentRoute: () => AppSettingsRoute,
+} as any)
+const AppSettingsActivityRoute = AppSettingsActivityRouteImport.update({
+  id: '/activity',
+  path: '/activity',
+  getParentRoute: () => AppSettingsRoute,
 } as any)
 const AppProjectsCreateRoute = AppProjectsCreateRouteImport.update({
   id: '/create',
@@ -94,6 +112,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/app': typeof AppRouteWithChildren
   '/catalogue': typeof CatalogueRoute
+  '/app/billing': typeof AppBillingRoute
   '/app/projects': typeof AppProjectsRouteWithChildren
   '/app/settings': typeof AppSettingsRouteWithChildren
   '/sign-in/$': typeof SignInSplatRoute
@@ -101,6 +120,8 @@ export interface FileRoutesByFullPath {
   '/app/': typeof AppIndexRoute
   '/app/projects/$projectSlug': typeof AppProjectsProjectSlugRouteWithChildren
   '/app/projects/create': typeof AppProjectsCreateRoute
+  '/app/settings/activity': typeof AppSettingsActivityRoute
+  '/app/settings/keys': typeof AppSettingsKeysRoute
   '/app/projects/': typeof AppProjectsIndexRoute
   '/app/settings/': typeof AppSettingsIndexRoute
   '/app/projects/$projectSlug/spec': typeof AppProjectsProjectSlugSpecRoute
@@ -108,11 +129,14 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/catalogue': typeof CatalogueRoute
+  '/app/billing': typeof AppBillingRoute
   '/sign-in/$': typeof SignInSplatRoute
   '/sign-up/$': typeof SignUpSplatRoute
   '/app': typeof AppIndexRoute
   '/app/projects/$projectSlug': typeof AppProjectsProjectSlugRouteWithChildren
   '/app/projects/create': typeof AppProjectsCreateRoute
+  '/app/settings/activity': typeof AppSettingsActivityRoute
+  '/app/settings/keys': typeof AppSettingsKeysRoute
   '/app/projects': typeof AppProjectsIndexRoute
   '/app/settings': typeof AppSettingsIndexRoute
   '/app/projects/$projectSlug/spec': typeof AppProjectsProjectSlugSpecRoute
@@ -122,6 +146,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/app': typeof AppRouteWithChildren
   '/catalogue': typeof CatalogueRoute
+  '/app/billing': typeof AppBillingRoute
   '/app/projects': typeof AppProjectsRouteWithChildren
   '/app/settings': typeof AppSettingsRouteWithChildren
   '/sign-in/$': typeof SignInSplatRoute
@@ -129,6 +154,8 @@ export interface FileRoutesById {
   '/app/': typeof AppIndexRoute
   '/app/projects/$projectSlug': typeof AppProjectsProjectSlugRouteWithChildren
   '/app/projects/create': typeof AppProjectsCreateRoute
+  '/app/settings/activity': typeof AppSettingsActivityRoute
+  '/app/settings/keys': typeof AppSettingsKeysRoute
   '/app/projects/': typeof AppProjectsIndexRoute
   '/app/settings/': typeof AppSettingsIndexRoute
   '/app/projects/$projectSlug/spec': typeof AppProjectsProjectSlugSpecRoute
@@ -139,6 +166,7 @@ export interface FileRouteTypes {
     | '/'
     | '/app'
     | '/catalogue'
+    | '/app/billing'
     | '/app/projects'
     | '/app/settings'
     | '/sign-in/$'
@@ -146,6 +174,8 @@ export interface FileRouteTypes {
     | '/app/'
     | '/app/projects/$projectSlug'
     | '/app/projects/create'
+    | '/app/settings/activity'
+    | '/app/settings/keys'
     | '/app/projects/'
     | '/app/settings/'
     | '/app/projects/$projectSlug/spec'
@@ -153,11 +183,14 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/catalogue'
+    | '/app/billing'
     | '/sign-in/$'
     | '/sign-up/$'
     | '/app'
     | '/app/projects/$projectSlug'
     | '/app/projects/create'
+    | '/app/settings/activity'
+    | '/app/settings/keys'
     | '/app/projects'
     | '/app/settings'
     | '/app/projects/$projectSlug/spec'
@@ -166,6 +199,7 @@ export interface FileRouteTypes {
     | '/'
     | '/app'
     | '/catalogue'
+    | '/app/billing'
     | '/app/projects'
     | '/app/settings'
     | '/sign-in/$'
@@ -173,6 +207,8 @@ export interface FileRouteTypes {
     | '/app/'
     | '/app/projects/$projectSlug'
     | '/app/projects/create'
+    | '/app/settings/activity'
+    | '/app/settings/keys'
     | '/app/projects/'
     | '/app/settings/'
     | '/app/projects/$projectSlug/spec'
@@ -244,6 +280,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppProjectsRouteImport
       parentRoute: typeof AppRoute
     }
+    '/app/billing': {
+      id: '/app/billing'
+      path: '/billing'
+      fullPath: '/app/billing'
+      preLoaderRoute: typeof AppBillingRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/app/settings/': {
       id: '/app/settings/'
       path: '/'
@@ -257,6 +300,20 @@ declare module '@tanstack/react-router' {
       fullPath: '/app/projects/'
       preLoaderRoute: typeof AppProjectsIndexRouteImport
       parentRoute: typeof AppProjectsRoute
+    }
+    '/app/settings/keys': {
+      id: '/app/settings/keys'
+      path: '/keys'
+      fullPath: '/app/settings/keys'
+      preLoaderRoute: typeof AppSettingsKeysRouteImport
+      parentRoute: typeof AppSettingsRoute
+    }
+    '/app/settings/activity': {
+      id: '/app/settings/activity'
+      path: '/activity'
+      fullPath: '/app/settings/activity'
+      preLoaderRoute: typeof AppSettingsActivityRouteImport
+      parentRoute: typeof AppSettingsRoute
     }
     '/app/projects/create': {
       id: '/app/projects/create'
@@ -313,10 +370,14 @@ const AppProjectsRouteWithChildren = AppProjectsRoute._addFileChildren(
 )
 
 interface AppSettingsRouteChildren {
+  AppSettingsActivityRoute: typeof AppSettingsActivityRoute
+  AppSettingsKeysRoute: typeof AppSettingsKeysRoute
   AppSettingsIndexRoute: typeof AppSettingsIndexRoute
 }
 
 const AppSettingsRouteChildren: AppSettingsRouteChildren = {
+  AppSettingsActivityRoute: AppSettingsActivityRoute,
+  AppSettingsKeysRoute: AppSettingsKeysRoute,
   AppSettingsIndexRoute: AppSettingsIndexRoute,
 }
 
@@ -325,12 +386,14 @@ const AppSettingsRouteWithChildren = AppSettingsRoute._addFileChildren(
 )
 
 interface AppRouteChildren {
+  AppBillingRoute: typeof AppBillingRoute
   AppProjectsRoute: typeof AppProjectsRouteWithChildren
   AppSettingsRoute: typeof AppSettingsRouteWithChildren
   AppIndexRoute: typeof AppIndexRoute
 }
 
 const AppRouteChildren: AppRouteChildren = {
+  AppBillingRoute: AppBillingRoute,
   AppProjectsRoute: AppProjectsRouteWithChildren,
   AppSettingsRoute: AppSettingsRouteWithChildren,
   AppIndexRoute: AppIndexRoute,

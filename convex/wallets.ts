@@ -2,7 +2,9 @@ import { v } from "convex/values";
 import {
   internalMutation,
   mutation,
+  query,
   type MutationCtx,
+  type QueryCtx,
 } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { requireOrgMemberBySlug } from "./lib/auth";
@@ -25,6 +27,16 @@ async function getOrCreateWallet(
     throw new Error("Failed to create wallet");
   }
   return created;
+}
+
+async function getWalletForOrg(
+  ctx: QueryCtx,
+  organizationId: Id<"organizations">,
+): Promise<Doc<"wallets"> | null> {
+  return await ctx.db
+    .query("wallets")
+    .withIndex("by_organization", (q) => q.eq("organizationId", organizationId))
+    .unique();
 }
 
 /**
@@ -96,22 +108,64 @@ export const grantCredits = internalMutation({
   },
 });
 
-export const getMyWallet = mutation({
+export type WalletEntryView = {
+  _id: Id<"walletEntries">;
+  kind: Doc<"walletEntries">["kind"];
+  amount: number;
+  refId: string;
+  createdAt: number;
+};
+
+export type WalletView = {
+  balance: number;
+  walletId: Id<"wallets"> | null;
+  entries: WalletEntryView[];
+};
+
+/**
+ * Live org wallet for billing UI. Realtime via Convex query subscription.
+ * Creates nothing — returns zero balance if wallet row missing.
+ */
+export const getMyWallet = query({
   args: { orgSlug: v.string() },
-  handler: async (
-    ctx,
-    args,
-  ): Promise<{
-    balance: number;
-    walletId: Id<"wallets">;
-    entries: Array<{
-      _id: Id<"walletEntries">;
-      kind: Doc<"walletEntries">["kind"];
-      amount: number;
-      refId: string;
-      createdAt: number;
-    }>;
-  }> => {
+  handler: async (ctx, args): Promise<WalletView> => {
+    const { org } = await requireOrgMemberBySlug(ctx, args.orgSlug);
+    const wallet = await getWalletForOrg(ctx, org._id);
+
+    if (wallet === null) {
+      return {
+        balance: 0,
+        walletId: null,
+        entries: [],
+      };
+    }
+
+    const entries = await ctx.db
+      .query("walletEntries")
+      .withIndex("by_wallet", (q) => q.eq("walletId", wallet._id))
+      .order("desc")
+      .take(50);
+
+    return {
+      balance: wallet.balance,
+      walletId: wallet._id,
+      entries: entries.map((e) => ({
+        _id: e._id,
+        kind: e.kind,
+        amount: e.amount,
+        refId: e.refId,
+        createdAt: e.createdAt,
+      })),
+    };
+  },
+});
+
+/**
+ * Ensure wallet row exists (e.g. after first visit to billing).
+ */
+export const ensureWallet = mutation({
+  args: { orgSlug: v.string() },
+  handler: async (ctx, args): Promise<WalletView> => {
     const { org } = await requireOrgMemberBySlug(ctx, args.orgSlug);
     const wallet = await getOrCreateWallet(ctx, org._id);
 
