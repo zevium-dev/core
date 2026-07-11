@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as CatalogueRouteImport } from './routes/catalogue'
 import { Route as AppRouteImport } from './routes/app'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as CatalogueIndexRouteImport } from './routes/catalogue/index'
 import { Route as AppIndexRouteImport } from './routes/app/index'
 import { Route as SignUpSplatRouteImport } from './routes/sign-up.$'
 import { Route as SignInSplatRouteImport } from './routes/sign-in.$'
@@ -20,6 +21,7 @@ import { Route as AppProjectsRouteImport } from './routes/app/projects'
 import { Route as AppBillingRouteImport } from './routes/app/billing'
 import { Route as AppSettingsIndexRouteImport } from './routes/app/settings/index'
 import { Route as AppProjectsIndexRouteImport } from './routes/app/projects/index'
+import { Route as CatalogueOrgSlugProjectSlugRouteImport } from './routes/catalogue/$orgSlug.$projectSlug'
 import { Route as AppSettingsKeysRouteImport } from './routes/app/settings/keys'
 import { Route as AppSettingsActivityRouteImport } from './routes/app/settings/activity'
 import { Route as AppProjectsCreateRouteImport } from './routes/app/projects/create'
@@ -40,6 +42,11 @@ const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
+} as any)
+const CatalogueIndexRoute = CatalogueIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => CatalogueRoute,
 } as any)
 const AppIndexRoute = AppIndexRouteImport.update({
   id: '/',
@@ -81,6 +88,12 @@ const AppProjectsIndexRoute = AppProjectsIndexRouteImport.update({
   path: '/',
   getParentRoute: () => AppProjectsRoute,
 } as any)
+const CatalogueOrgSlugProjectSlugRoute =
+  CatalogueOrgSlugProjectSlugRouteImport.update({
+    id: '/$orgSlug/$projectSlug',
+    path: '/$orgSlug/$projectSlug',
+    getParentRoute: () => CatalogueRoute,
+  } as any)
 const AppSettingsKeysRoute = AppSettingsKeysRouteImport.update({
   id: '/keys',
   path: '/keys',
@@ -111,32 +124,35 @@ const AppProjectsProjectSlugSpecRoute =
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/app': typeof AppRouteWithChildren
-  '/catalogue': typeof CatalogueRoute
+  '/catalogue': typeof CatalogueRouteWithChildren
   '/app/billing': typeof AppBillingRoute
   '/app/projects': typeof AppProjectsRouteWithChildren
   '/app/settings': typeof AppSettingsRouteWithChildren
   '/sign-in/$': typeof SignInSplatRoute
   '/sign-up/$': typeof SignUpSplatRoute
   '/app/': typeof AppIndexRoute
+  '/catalogue/': typeof CatalogueIndexRoute
   '/app/projects/$projectSlug': typeof AppProjectsProjectSlugRouteWithChildren
   '/app/projects/create': typeof AppProjectsCreateRoute
   '/app/settings/activity': typeof AppSettingsActivityRoute
   '/app/settings/keys': typeof AppSettingsKeysRoute
+  '/catalogue/$orgSlug/$projectSlug': typeof CatalogueOrgSlugProjectSlugRoute
   '/app/projects/': typeof AppProjectsIndexRoute
   '/app/settings/': typeof AppSettingsIndexRoute
   '/app/projects/$projectSlug/spec': typeof AppProjectsProjectSlugSpecRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/catalogue': typeof CatalogueRoute
   '/app/billing': typeof AppBillingRoute
   '/sign-in/$': typeof SignInSplatRoute
   '/sign-up/$': typeof SignUpSplatRoute
   '/app': typeof AppIndexRoute
+  '/catalogue': typeof CatalogueIndexRoute
   '/app/projects/$projectSlug': typeof AppProjectsProjectSlugRouteWithChildren
   '/app/projects/create': typeof AppProjectsCreateRoute
   '/app/settings/activity': typeof AppSettingsActivityRoute
   '/app/settings/keys': typeof AppSettingsKeysRoute
+  '/catalogue/$orgSlug/$projectSlug': typeof CatalogueOrgSlugProjectSlugRoute
   '/app/projects': typeof AppProjectsIndexRoute
   '/app/settings': typeof AppSettingsIndexRoute
   '/app/projects/$projectSlug/spec': typeof AppProjectsProjectSlugSpecRoute
@@ -145,17 +161,19 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/app': typeof AppRouteWithChildren
-  '/catalogue': typeof CatalogueRoute
+  '/catalogue': typeof CatalogueRouteWithChildren
   '/app/billing': typeof AppBillingRoute
   '/app/projects': typeof AppProjectsRouteWithChildren
   '/app/settings': typeof AppSettingsRouteWithChildren
   '/sign-in/$': typeof SignInSplatRoute
   '/sign-up/$': typeof SignUpSplatRoute
   '/app/': typeof AppIndexRoute
+  '/catalogue/': typeof CatalogueIndexRoute
   '/app/projects/$projectSlug': typeof AppProjectsProjectSlugRouteWithChildren
   '/app/projects/create': typeof AppProjectsCreateRoute
   '/app/settings/activity': typeof AppSettingsActivityRoute
   '/app/settings/keys': typeof AppSettingsKeysRoute
+  '/catalogue/$orgSlug/$projectSlug': typeof CatalogueOrgSlugProjectSlugRoute
   '/app/projects/': typeof AppProjectsIndexRoute
   '/app/settings/': typeof AppSettingsIndexRoute
   '/app/projects/$projectSlug/spec': typeof AppProjectsProjectSlugSpecRoute
@@ -172,25 +190,28 @@ export interface FileRouteTypes {
     | '/sign-in/$'
     | '/sign-up/$'
     | '/app/'
+    | '/catalogue/'
     | '/app/projects/$projectSlug'
     | '/app/projects/create'
     | '/app/settings/activity'
     | '/app/settings/keys'
+    | '/catalogue/$orgSlug/$projectSlug'
     | '/app/projects/'
     | '/app/settings/'
     | '/app/projects/$projectSlug/spec'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
-    | '/catalogue'
     | '/app/billing'
     | '/sign-in/$'
     | '/sign-up/$'
     | '/app'
+    | '/catalogue'
     | '/app/projects/$projectSlug'
     | '/app/projects/create'
     | '/app/settings/activity'
     | '/app/settings/keys'
+    | '/catalogue/$orgSlug/$projectSlug'
     | '/app/projects'
     | '/app/settings'
     | '/app/projects/$projectSlug/spec'
@@ -205,10 +226,12 @@ export interface FileRouteTypes {
     | '/sign-in/$'
     | '/sign-up/$'
     | '/app/'
+    | '/catalogue/'
     | '/app/projects/$projectSlug'
     | '/app/projects/create'
     | '/app/settings/activity'
     | '/app/settings/keys'
+    | '/catalogue/$orgSlug/$projectSlug'
     | '/app/projects/'
     | '/app/settings/'
     | '/app/projects/$projectSlug/spec'
@@ -217,7 +240,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AppRoute: typeof AppRouteWithChildren
-  CatalogueRoute: typeof CatalogueRoute
+  CatalogueRoute: typeof CatalogueRouteWithChildren
   SignInSplatRoute: typeof SignInSplatRoute
   SignUpSplatRoute: typeof SignUpSplatRoute
 }
@@ -244,6 +267,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/catalogue/': {
+      id: '/catalogue/'
+      path: '/'
+      fullPath: '/catalogue/'
+      preLoaderRoute: typeof CatalogueIndexRouteImport
+      parentRoute: typeof CatalogueRoute
     }
     '/app/': {
       id: '/app/'
@@ -300,6 +330,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/app/projects/'
       preLoaderRoute: typeof AppProjectsIndexRouteImport
       parentRoute: typeof AppProjectsRoute
+    }
+    '/catalogue/$orgSlug/$projectSlug': {
+      id: '/catalogue/$orgSlug/$projectSlug'
+      path: '/$orgSlug/$projectSlug'
+      fullPath: '/catalogue/$orgSlug/$projectSlug'
+      preLoaderRoute: typeof CatalogueOrgSlugProjectSlugRouteImport
+      parentRoute: typeof CatalogueRoute
     }
     '/app/settings/keys': {
       id: '/app/settings/keys'
@@ -401,10 +438,24 @@ const AppRouteChildren: AppRouteChildren = {
 
 const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)
 
+interface CatalogueRouteChildren {
+  CatalogueIndexRoute: typeof CatalogueIndexRoute
+  CatalogueOrgSlugProjectSlugRoute: typeof CatalogueOrgSlugProjectSlugRoute
+}
+
+const CatalogueRouteChildren: CatalogueRouteChildren = {
+  CatalogueIndexRoute: CatalogueIndexRoute,
+  CatalogueOrgSlugProjectSlugRoute: CatalogueOrgSlugProjectSlugRoute,
+}
+
+const CatalogueRouteWithChildren = CatalogueRoute._addFileChildren(
+  CatalogueRouteChildren,
+)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AppRoute: AppRouteWithChildren,
-  CatalogueRoute: CatalogueRoute,
+  CatalogueRoute: CatalogueRouteWithChildren,
   SignInSplatRoute: SignInSplatRoute,
   SignUpSplatRoute: SignUpSplatRoute,
 }
