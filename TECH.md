@@ -51,6 +51,19 @@
 - Polar loses: meters, meter-credit benefits, customer-state as balance authority. Verified: Polar never enforces balances anyway and metered prices attach to subscriptions only — the machinery fought our model
 - Flow: Polar checkout success → webhook → Convex mutation grants credits to org ledger. One direction, one seam
 
+## Repo shape
+
+pnpm workspace + **Turborepo** (same pattern as sharath.ai):
+
+```
+apps/web/        # TanStack Start app (all screens)
+apps/gateway/    # CF Worker: proxy, wallet DO, agent endpoint
+convex/          # Convex schema + functions (control plane)
+packages/shared/ # spec parsing, x-zevium-* extraction, types shared web↔gateway
+```
+
+Turborepo drives build/typecheck/test/lint pipelines with caching; each app deploys independently (web → its host, gateway → Cloudflare, convex → `npx convex deploy`).
+
 ## Architecture
 
 ```

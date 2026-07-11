@@ -62,7 +62,7 @@ The repo currently contains the **legacy implementation** (TanStack Start + tRPC
 - **Payments**: Polar checkout + merchant-of-record for credit top-ups ONLY. No Polar meters/benefits. Webhook → Convex grant
 - **Language**: TypeScript everywhere, strict
 
-Target layout (pnpm workspace):
+Target layout (pnpm workspace + Turborepo):
 
 ```
 apps/web/        # TanStack Start app (all screens)

@@ -46,6 +46,7 @@ Publisher earns:    95 credits (95% revenue share)
 ```
 
 - **Publishers keep 95%.** 20-30% take rates made horizontal marketplaces economically unsustainable for high-volume AI workloads. Market benchmarks: Apify keeps 20%, MCPize 15%, AWS Marketplace ~3-5%. At 5%, Zevium matches cloud-marketplace economics while offering full marketplace features — the strongest possible publisher acquisition pitch
+- **Exchange rate: $1 = 10,000 credits** (1 credit = $0.0001). Market per-call pricing of $0.002–$0.05 maps to 20–500 credits. Rate is a launch default, revisitable — but one global constant, never per-API
 - Credits are prepaid by consumer organizations via one-time top-up purchases
 - Platform cut + publisher share are calculated per call at charge time
 - Publisher earnings accumulate and are settled via payouts (see roadmap)
@@ -105,7 +106,7 @@ Consumers see: one gateway URL per API, one key, one wallet, itemized charges. P
 ## Consumer experience requirements
 
 - **Catalogue with quality signals**: semantic search + tag filters derived from spec metadata, plus latency, success rate, and freshness badges per listing (recently-updated listings rank higher)
-- **Playground**: in-docs test console hitting real endpoints in an explicit test mode; try-before-buy via a free mock mode generated from the spec
+- **Playground**: in-docs test console. A playground call is a normal metered call — free when it costs nothing (mock mode generated from the spec, or the publisher's free tier covers it), charged like any other call when it hits a paid upstream. No special playground billing
 - **Billing transparency**: usage dashboard with current-cycle consumption + projected cost, per-key and per-endpoint breakdown; spend alerts at 50/75/100% thresholds; budget webhooks
 - **Key management**: per-key spend limits with daily/weekly/monthly resets and auto-disable, programmatic key provisioning, zero-downtime rotation (roll-key with grace period)
 
