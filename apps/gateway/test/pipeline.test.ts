@@ -11,6 +11,7 @@ import worker, {
   type Env,
 } from "../src/index";
 import { FixtureKeyVerifier } from "../src/key-verifier";
+import { FixtureCatalogueSource } from "../src/catalogue-source";
 import { FixtureSpecSource } from "../src/spec-source";
 import {
   CollectingUsageSink,
@@ -105,6 +106,7 @@ async function installFixtures(opts: {
   __setTestPipelineDeps({
     keyVerifier: keys,
     specSource: specs,
+    catalogueSource: new FixtureCatalogueSource(),
     usageSink: usage,
     fetchImpl: opts.fetchImpl,
     idGenerator: () => `req_${crypto.randomUUID()}`,

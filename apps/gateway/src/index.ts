@@ -5,12 +5,20 @@ import {
   ConvexSpecSource,
   FixtureSpecSource,
 } from "./spec-source";
+import {
+  CachedCatalogueSource,
+  ConvexCatalogueSource,
+  FixtureCatalogueSource,
+  type CatalogueSource,
+} from "./catalogue-source";
 import { ConsoleUsageSink, ConvexUsageSink, NoopUsageSink } from "./usage";
 import {
   handleGatewayRequest,
   parseGatewayPath,
   type PipelineDeps,
 } from "./pipeline";
+import { handleDiscoveryRequest, type DiscoveryDeps } from "./discovery";
+import { handleMcpRequest, type McpDeps } from "./mcp";
 
 export { WalletDO };
 export { __setTestUsageMutation } from "./wallet";
@@ -30,19 +38,24 @@ export interface Env {
   GATEWAY_TEST_MODE?: string;
 }
 
+/** Full worker deps: pipeline + catalogue for discovery/MCP. */
+export type WorkerDeps = PipelineDeps & {
+  catalogueSource: CatalogueSource;
+};
+
 // Test-mode singletons (module scope per isolate). Production never sets GATEWAY_TEST_MODE.
-let testDeps: PipelineDeps | null = null;
+let testDeps: WorkerDeps | null = null;
 
 /** Test harness installs fixture deps before calling fetch. */
-export function __setTestPipelineDeps(deps: PipelineDeps | null): void {
+export function __setTestPipelineDeps(deps: WorkerDeps | null): void {
   testDeps = deps;
 }
 
-export function __getTestPipelineDeps(): PipelineDeps | null {
+export function __getTestPipelineDeps(): WorkerDeps | null {
   return testDeps;
 }
 
-function buildDeps(env: Env): PipelineDeps {
+function buildDeps(env: Env): WorkerDeps {
   // Module-scoped test harness wins when installed (vitest-pool-workers).
   if (testDeps) {
     return testDeps;
@@ -56,6 +69,10 @@ function buildDeps(env: Env): PipelineDeps {
     ? new ConvexSpecSource({ convexUrl: env.CONVEX_URL })
     : new FixtureSpecSource();
 
+  const innerCatalogue = env.CONVEX_URL
+    ? new ConvexCatalogueSource({ convexUrl: env.CONVEX_URL })
+    : new FixtureCatalogueSource();
+
   const usageSink = env.CONVEX_URL
     ? // Pipeline emit is best-effort logging; authoritative flush is DO alarm.
       new ConsoleUsageSink()
@@ -67,7 +84,44 @@ function buildDeps(env: Env): PipelineDeps {
   return {
     keyVerifier,
     specSource: new CachedSpecSource({ inner: innerSpec }),
+    catalogueSource: new CachedCatalogueSource({
+      inner: innerCatalogue,
+      ttlMs: 60_000,
+    }),
     usageSink,
+  };
+}
+
+function pipelineOnly(deps: WorkerDeps): PipelineDeps {
+  return {
+    keyVerifier: deps.keyVerifier,
+    specSource: deps.specSource,
+    usageSink: deps.usageSink,
+    fetchImpl: deps.fetchImpl,
+    idGenerator: deps.idGenerator,
+    now: deps.now,
+  };
+}
+
+function discoveryDeps(deps: WorkerDeps, request: Request): DiscoveryDeps {
+  return {
+    catalogueSource: deps.catalogueSource,
+    specSource: deps.specSource,
+    gatewayOrigin: new URL(request.url).origin,
+  };
+}
+
+function mcpDeps(
+  deps: WorkerDeps,
+  env: Env,
+  request: Request,
+): McpDeps {
+  return {
+    catalogueSource: deps.catalogueSource,
+    specSource: deps.specSource,
+    pipeline: pipelineOnly(deps),
+    pipelineEnv: { WALLET: env.WALLET },
+    gatewayOrigin: new URL(request.url).origin,
   };
 }
 
@@ -83,6 +137,8 @@ function timingSafeEqual(a: string, b: string): boolean {
 /**
  * Worker entry:
  * - /gateway/:orgSlug/:projectSlug/* — metered proxy
+ * - /discovery — machine-readable catalogue + pricing index
+ * - /mcp — MCP Streamable HTTP (search / docs / metered call_api)
  * - /wallet/:clerkOrgId/* — wallet DO HTTP surface (grants/tests)
  * - /internal/grant — control-plane grant push (shared secret)
  * - /health
@@ -126,10 +182,28 @@ export default {
       return stub.fetch(new Request(doUrl.toString(), init));
     }
 
+    // GET /discovery — public machine-readable index
+    if (parts[0] === "discovery" && parts.length === 1) {
+      const deps = buildDeps(env);
+      return handleDiscoveryRequest(request, discoveryDeps(deps, request));
+    }
+
+    // /mcp — MCP Streamable HTTP
+    if (parts[0] === "mcp" && parts.length === 1) {
+      const deps = buildDeps(env);
+      return handleMcpRequest(request, mcpDeps(deps, env, request), ctx);
+    }
+
     const route = parseGatewayPath(url.pathname);
     if (route) {
       const deps = buildDeps(env);
-      return handleGatewayRequest(request, env, deps, ctx, route);
+      return handleGatewayRequest(
+        request,
+        env,
+        pipelineOnly(deps),
+        ctx,
+        route,
+      );
     }
 
     return Response.json({ error: "not found" }, { status: 404 });
