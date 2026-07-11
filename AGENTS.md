@@ -47,11 +47,11 @@ Agent-first, per-call API marketplace. Publishers list APIs via OpenAPI specs; c
 
 Doc discipline: product language in PRODUCT/FLOW, tech language in TECH only. Keep it that way.
 
-## Status: greenfield rebuild
+## Status: built
 
-The repo currently contains the **legacy implementation** (TanStack Start + tRPC + Drizzle/Turso + Better Auth + Polar meters on Cloudflare Workers). It is being replaced wholesale per TECH.md. Zero users; data is disposable.
+The greenfield rebuild is done. Legacy implementation (tRPC + Drizzle/Turso + Better Auth + Polar meters) is fully deleted — no `src/` directory, no trace in the working tree. Waves 1-9 shipped per TECH.md's target architecture, followed by cross-org metering/CORS/keyless-mock hardening and two product-review passes (all green). Zero users; data still disposable.
 
-**Do NOT extend legacy patterns.** Anything under `src/` that contradicts TECH.md is dead code walking. When old and new conflict, TECH.md wins. Delete legacy code instead of working around it.
+TECH.md remains authoritative for architecture. When a doc and the code disagree, the code wins — fix the doc.
 
 ## Target stack (TECH.md is authoritative; this is the summary)
 
@@ -76,7 +76,7 @@ packages/shared/ # spec parsing, x-zevium-* extraction, types shared web↔gatew
 ### Product rules (never violate)
 
 - Zero wallet balance **blocks** the call. Never surprise-overage
-- No unmetered execution paths — every gateway/agent call is key-authenticated and credit-gated
+- No unmetered execution paths — every gateway/agent call is key-authenticated and credit-gated. **Stated carve-out**: `/mock/:org/:project/*` is deliberately keyless and anonymous — it never executes the upstream, only synthesizes a response from the published spec's schema at 0 credits, so the metering rule doesn't apply to it by design
 - The OpenAPI spec is the source of truth: upstream URL, endpoints, pricing (`x-zevium-cost`), free tier (`x-zevium-free-tier`). No parallel pricing tables
 - Published spec versions are immutable
 

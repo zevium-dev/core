@@ -62,8 +62,9 @@ function DocsConsumingPage() {
           creation. Store it immediately.
         </li>
         <li>
-          Per-key spend caps with daily/weekly/monthly resets and zero-downtime
-          rotation are on the roadmap.
+          Per-key monthly spend caps and zero-downtime rotation (24h grace on
+          the old key) are enforced at the gateway. Daily/weekly reset windows
+          are on the roadmap.
         </li>
       </ul>
 

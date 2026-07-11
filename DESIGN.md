@@ -1,6 +1,6 @@
 # Zevium Design Language
 
-> Last updated: 2026-07-11
+> Last updated: 2026-07-12
 > Companion docs: [PRODUCT.md](PRODUCT.md) (what), [FLOW.md](FLOW.md) (which screens). This doc is **how it looks and, above all, how it feels**.
 
 ## Philosophy
@@ -13,23 +13,12 @@
 
 ## Visual base: stock shadcn/ui
 
-- **shadcn/ui latest**, style `new-york`, base color `neutral`, CSS variables on, lucide icons. Regenerate `components.json` + theme tokens via the shadcn CLI so config and CSS agree (today `components.json` says `stone` while `app.css` holds neutral values, and references a `tailwind.config.mjs` that doesn't exist)
+- **shadcn/ui latest**, style `new-york`, base color `neutral`, CSS variables on, lucide icons. `components.json` and the CSS theme tokens agree on `new-york`/`neutral`; there is no stale `tailwind.config.mjs` reference
 - Tailwind v4 CSS-first. Keep `@tailwindcss/typography`. System font stack — no webfonts
-- Semantic tokens only (`bg-primary`, `text-muted-foreground`, `border-destructive`). Raw Tailwind colors (`gray-900`, `yellow-400`) are banned — the current landing page violates this and gets rebuilt
+- Semantic tokens only (`bg-primary`, `text-muted-foreground`, `border-destructive`). Raw Tailwind colors (`gray-900`, `yellow-400`) are banned; the landing page was rebuilt on stock components and carries none
 - Dark + light both first-class; theme switch is **instant** (no crossfade — snappy beats smooth here)
 
-### Kill list (existing customizations to delete)
-
-| Item                                                                    | Why                                                                                          |
-| ----------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| `src/components/magicui/` (all 6)                                       | Landing-only decoration; `text-reveal.tsx` is dead code already                              |
-| `src/components/animated-beam-zev.tsx`                                  | Landing-only wrapper                                                                         |
-| `--animate-ripple` keyframe in `app.css`                                | Serves only magicui/ripple                                                                   |
-| Commented `font-heading` @apply                                         | Dead code                                                                                    |
-| `src/routes/index.tsx` (current landing)                                | Hardcoded raw colors, bespoke mockups; rebuild on stock components + the motion system below |
-| `components.json` stale `tailwind.config.mjs` ref + stone/neutral drift | Regenerate                                                                                   |
-
-Keep: `motion` v12 + app-wide `LazyMotion` in providers (the foundation), `file-upload.tsx` (functional), `cap-widget` CSS vars (functional captcha). Evaluate `text-hover-effect.tsx`/`screen-center.tsx` against the new system.
+The pre-build kill list (magicui components, the animated-beam wrapper, the stale `tailwind.config.mjs` reference, the raw-color legacy landing page) is fully deleted — nothing under a legacy `src/` remains; the app lives entirely under `apps/web/src/`.
 
 ## Motion tokens
 

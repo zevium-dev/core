@@ -236,6 +236,7 @@ const DEMO_PROJECTS: DemoProjectDef[] = [
 export type SeedResult = {
   created: string[];
   skipped: string[];
+  updated: string[];
 };
 
 /**
@@ -257,7 +258,7 @@ export const seedDemoProjects = internalMutation({
       );
     }
 
-    const result: SeedResult = { created: [], skipped: [] };
+    const result: SeedResult = { created: [], skipped: [], updated: [] };
 
     for (const def of DEMO_PROJECTS) {
       const existing = await ctx.db
@@ -266,12 +267,36 @@ export const seedDemoProjects = internalMutation({
           q.eq("organizationId", org._id).eq("slug", def.slug),
         )
         .unique();
+      // Pretty-print: this text IS the publisher-facing draft in the editor.
+      const specJson = JSON.stringify(def.spec, null, 2);
+
       if (existing !== null) {
-        result.skipped.push(def.slug);
+        // Refresh spec text in place (draft + published snapshot) so
+        // formatting/spec tweaks propagate on re-run; metadata stays.
+        const draft = await ctx.db
+          .query("specs")
+          .withIndex("by_project", (q) => q.eq("projectId", existing._id))
+          .unique();
+        if (draft !== null && draft.draft !== specJson) {
+          await ctx.db.patch(draft._id, {
+            draft: specJson,
+            lastSavedAt: Date.now(),
+          });
+          const versions = await ctx.db
+            .query("specVersions")
+            .withIndex("by_project", (q) => q.eq("projectId", existing._id))
+            .collect();
+          for (const v of versions) {
+            if (v.version === DEMO_VERSION) {
+              await ctx.db.patch(v._id, { spec: specJson });
+            }
+          }
+          result.updated.push(def.slug);
+        } else {
+          result.skipped.push(def.slug);
+        }
         continue;
       }
-
-      const specJson = JSON.stringify(def.spec);
       const issues = validateOpenApiSpec(specJson);
       const hasError = issues.some((i) => i.level === "error");
       if (hasError) {

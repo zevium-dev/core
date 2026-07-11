@@ -1,6 +1,6 @@
 # Zevium Product Specification
 
-> Last updated: 2026-07-11
+> Last updated: 2026-07-12
 > Companions: [FLOW.md](FLOW.md) (screens), [DESIGN.md](DESIGN.md) (feel), [TECH.md](TECH.md) (implementation). Market research: [docs/product-discovery-2026.md](docs/product-discovery-2026.md).
 > This doc describes **what Zevium is and what it solves** — no implementation details.
 
@@ -116,7 +116,7 @@ Consumers see: one gateway URL per API, one key, one wallet, itemized charges. P
 - **Lifecycle safety**: a publisher cannot silently kill an API with active consumers — unpublish triggers a mandatory notice window (deprecation notices to consumers, standard deprecation signaling on responses), new subscriptions freeze, existing calls honored through wind-down
 - **Analytics that beat the dead incumbent**: per-endpoint tail latency (p95/p99), error-type breakdown, per-consumer usage, revenue trends
 - **Spec versioning**: draft → validate → publish with semver; published versions immutable
-- **Payouts**: transparent 95/5 split, accumulated earnings visible in dashboard, settled on a published schedule
+- **Payouts**: transparent 95/5 split, accumulated earnings visible in dashboard; publisher requests a payout once earnings clear a $10 minimum, queued for platform fulfillment (automated settlement schedule is a later refinement)
 
 ## Roadmap
 

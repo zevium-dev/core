@@ -1,6 +1,6 @@
 # Zevium Technical Decisions
 
-> Last updated: 2026-07-11
+> Last updated: 2026-07-12
 > Companions: [PRODUCT.md](PRODUCT.md) (what), [FLOW.md](FLOW.md) (screens), [DESIGN.md](DESIGN.md) (feel). This doc: **how it's built and why**.
 > Greenfield rules apply: zero users, data disposable, rebuild beats migrate.
 
@@ -104,6 +104,22 @@ Turborepo drives build/typecheck/test/lint pipelines with caching; each app depl
 - `usageEvents` (per-call: project, endpoint, org, credits, latency, status) + rollup tables via cron (publisher analytics p95/p99 come from here)
 - `embeddings` via `vectorIndex` (catalogue semantic search)
 
+## Implementation notes (verified against code, waves 1-9 + hardening)
+
+Decisions made during the build that extend or sharpen the stack decision above:
+
+- **Usage ingest pipe**: the wallet DO's alarm (~5s, non-empty pending queue) batches settled usage and `POST`s it to `{CONVEX_SITE_URL}/ingest-usage`, an `httpAction` authenticated by a shared `x-internal-secret` header (`GATEWAY_INTERNAL_SECRET`) — no Convex deploy key on the hot path. `CONVEX_DEPLOY_KEY` remains as a fallback constructor path only, unused when the shared secret is configured
+- **Cross-org metering**: the consumer's own org wallet always pays, never the publisher's. Private projects called with a key from a foreign org 404 (`project_not_found`) rather than 401/403, so private listings never leak existence to an unauthorized caller
+- **Gateway CORS**: `/gateway`, `/mock`, `/discovery`, `/mcp` all allow wildcard origin. Safe because auth is bearer-key only, never cookie-based — a wildcard origin doesn't widen the attack surface for a bearer-token API
+- **Per-key caps + rotation**: enforced in the wallet DO, not per-request against Convex. A `keySettings` sync (`/wallet-grants` pull) refreshes disabled/monthly-cap/rotation-grace state at ≤60s staleness (`SYNC_GRANTS_WINDOW_MS`, rate-limited to 1/60s per org). Only a monthly cap exists today (no daily/weekly reset windows); rotation grants the old key a 24h grace period before hard cutoff
+- **Polar manual sync**: `billing.syncWithPolar` action, gated by a server-side 5-minute cooldown (`POLAR_SYNC_COOLDOWN_MS`, stamped on the wallet doc) rather than a live webhook-only flow. Reconciles both planes via the wallet DO's `/sync-grants` HTTP surface — a user-triggered "Sync" button covers webhook delivery gaps without polling
+- **Semantic search**: embeddings come from `gemini-embedding-001` pinned to `outputDimensionality: 768` (matches the `specEmbeddings` `by_embedding` vectorIndex). Not `text-embedding-004` — that model was removed from the Gemini v1beta API (404) and `gemini-embedding-001` is its 768-dim replacement
+- **Publisher webhooks**: HMAC-SHA256 signed (`x-zevium-signature` header, hex digest over the raw body), delivered with up to 3 attempts and backoff of 60s then 300s between retries before marking a delivery failed
+- **Deprecation signaling**: RFC 8594 headers on gateway responses for deprecated spec versions — `Deprecation: @<epoch-seconds>`, `Sunset: <HTTP-date>`, `Link: <catalogue-url>; rel="deprecation"`
+- **Admin gate**: platform-admin access is an env allowlist, `ADMIN_USER_IDS` (Clerk subject ids), checked server-side in Convex — no separate roles table
+- **Payouts**: manual-ledger MVP, not automatic scheduled settlement. Publishers request a payout once accumulated net earnings clear `MIN_PAYOUT_CREDITS` (100,000 credits = $10); the request lands in `payoutRequests` and is fulfilled by platform ops through the `/admin` payout queue
+- **x402**: a stub, not the full rail. Every unauthenticated/invalid-key/insufficient-credit response on the keyless-capable surfaces (`/gateway`, `/mock`) returns a `402` with a machine-readable `actions` envelope (create-key, top-up, docs links) so an agent can self-serve next steps. No payment-header verification via a facilitator yet — that part of the x402 rail is still deferred (see below)
+
 ## What dies from the current repo
 
 tRPC + oRPC, Drizzle + Turso, Upstash Redis, Better Auth (+ apikey plugin), Polar plugin wiring in auth, drizzle/ migrations, the seed script in current form. Route tree, shadcn components, and Motion setup carry over conceptually; code is rewritten against Convex hooks.
@@ -120,5 +136,5 @@ Four spikes ran as real code (scratch projects, reports + artifacts in session s
 ## Later (explicitly deferred)
 
 - Go port of the proxy Worker if TypeScript ever becomes the bottleneck (isolated by design; measure first)
-- x402 rail: implemented in the Worker (402 + payment header verification via facilitator) — P1 per PRODUCT.md, lands after the credit path is solid
+- x402 rail, full: the 402 + actions-envelope stub is live (see Implementation notes above); actual payment-header verification via a facilitator is still deferred — P1 per PRODUCT.md, lands after the credit path is solid
 - Multi-region Convex / read replicas: not our problem; control plane latency is not user-facing hot path
