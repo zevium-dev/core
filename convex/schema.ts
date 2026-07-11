@@ -135,4 +135,55 @@ export default defineSchema({
     createdAt: v.number(),
     payload: v.string(),
   }).index("by_endpoint", ["endpointId", "createdAt"]),
+
+  // Per-key controls (Clerk owns the key itself; this is Zevium metadata).
+  // Gateway pulls these via the internal-secret ledger sync — never per-request.
+  keySettings: defineTable({
+    clerkOrgId: v.string(),
+    keyId: v.string(),
+    /** Monthly credit cap; undefined = unlimited. Enforced by the wallet DO. */
+    monthlyCapCredits: v.optional(v.number()),
+    disabled: v.boolean(),
+    /** Set when this key replaced another during rotation. */
+    rotatedFromKeyId: v.optional(v.string()),
+    /** Old key keeps working until this ms epoch (rotation grace). */
+    graceUntil: v.optional(v.number()),
+    updatedAt: v.number(),
+  })
+    .index("by_org", ["clerkOrgId"])
+    .index("by_key", ["keyId"]),
+
+  // Catalogue semantic search (embedded on publish; Gemini text-embedding-004)
+  specEmbeddings: defineTable({
+    projectId: v.id("projects"),
+    /** Text that was embedded (name + description + tags + endpoint summaries). */
+    text: v.string(),
+    embedding: v.array(v.float64()),
+    updatedAt: v.number(),
+  })
+    .index("by_project", ["projectId"])
+    .vectorIndex("by_embedding", {
+      vectorField: "embedding",
+      dimensions: 768,
+    }),
+
+  // Publisher payout requests (manual fulfilment via /admin queue)
+  payoutRequests: defineTable({
+    clerkOrgId: v.string(),
+    /** Net credits requested for payout (validated <= redeemable at request time). */
+    credits: v.number(),
+    /** Free-form payout destination (bank/PayPal/UPI details). */
+    destination: v.string(),
+    status: v.union(
+      v.literal("pending"),
+      v.literal("paid"),
+      v.literal("rejected"),
+    ),
+    /** Admin note on fulfilment/rejection. */
+    note: v.optional(v.string()),
+    createdAt: v.number(),
+    resolvedAt: v.optional(v.number()),
+  })
+    .index("by_org", ["clerkOrgId", "createdAt"])
+    .index("by_status", ["status", "createdAt"]),
 });

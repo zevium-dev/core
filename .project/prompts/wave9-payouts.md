@@ -1,0 +1,14 @@
+Task: manual payout flow. Write scope: convex/payouts.ts (new) + convex/admin.ts (additive queue fns) + convex tests, apps/web/src/components/project-earnings-panel.tsx OR better an org-level earnings surface you place in apps/web/src/routes/app/earnings.tsx (new route + sidebar entry in apps/web/src/components/app-sidebar.tsx), apps/web/src/routes/admin/payouts.tsx (new) + admin-header nav, web lib helpers/tests. Do NOT touch schema.ts (payoutRequests table EXISTS — read it), billing, keys, catalogue, gateway.
+
+Read first: AGENTS.md, convex/schema.ts payoutRequests, convex/earnings.ts forOrg, convex/lib/auth.ts (requireOrgMemberBySlug, requireAdmin), convex/lib/notifications.ts, apps/web/src/routes/admin/* patterns, project-earnings-panel.tsx.
+
+DESIGN (locked — manual fulfilment MVP):
+
+1. convex/payouts.ts: redeemableCredits query {orgSlug} = allTime net earnings − sum(payoutRequests credits where status pending|paid). requestPayout mutation {orgSlug, credits, destination} — auth member; validate 0 < credits <= redeemable AND credits >= 100_000 (min $10 payout); insert pending; notification to org (reuse kind "visibility_changed"? NO — payouts kind missing from schema union... notifications.kind is a strict union WITHOUT payout kinds. Do NOT edit schema.ts; instead reuse createNotification with kind "spec_published"? Wrong semantics. SOLUTION: skip notification on request; on admin resolve, use kind "webhook_failed"? Also wrong. DECISION: no notifications for payouts in this cut — note it in output as follow-up requiring schema union extension.) listMyRequests query {orgSlug} paginated.
+2. convex/admin.ts additive: listPayoutRequests {status?} paginated (requireAdmin, by_status index) + resolvePayout {requestId, status: paid|rejected, note?} (requireAdmin; only pending resolvable; set resolvedAt).
+3. Web /app/earnings (new sidebar entry "Earnings", icon lucide Banknote): org-wide earnings summary (earnings.forOrg month/all-time + byProject table) + "Request payout" card: redeemable credits + $ equivalent, form (credits amount with max button, destination textarea), min 100,000 credits ($10) stated, submit → toast; requests history table (status badge, credits, $, date, note).
+4. Admin /admin/payouts: pending queue table (org, credits, $, destination, age) with Mark paid / Reject (note dialog) actions; resolved list below. Add "Payouts" to admin nav.
+RULES: semantic tokens, isPending, .mutate handlers, human errors, credits→$ via existing project-helpers formatter.
+   TESTS: convex — redeemable math (earnings minus pending+paid), min/max validation, auth, admin resolve transitions; web helper tests (redeemable formatting) if extracted.
+   VERIFY: pnpm typecheck && pnpm test green; npx convex dev --once clean.
+   Output: CHANGED list, VERIFY results, DONE or BLOCKED.

@@ -1,0 +1,27 @@
+DONE.
+
+## CHANGED
+
+| File | Change |
+|---|---|
+| `convex/search.ts` | **NEW.** `buildEmbedText` (pure), `embedText` (injectable Gemini), `getProjectForEmbed` (iq), `upsertEmbedding` (im), `embedProject` (ia), `listPublishedPublicProjects` (iq), `embedAllPublished` (ia backfill), `fetchSearchListings` (iq — post-search PUBLIC+PUBLISHED security gate), `searchCatalogue` (public action, degraded path). `SearchListing = PublicListing & { score }`. |
+| `convex/specs.ts` | **Additive.** +1 import (`internal`), +1 `ctx.scheduler.runAfter(0, internal.search.embedProject, …)` after publish. |
+| `convex/search.test.ts` | **NEW.** `buildEmbedText` unit (name/desc/tags/endpoints/malformed), `fetchSearchListings` private+draft exclusion + deleted-id + order, `searchCatalogue` degraded + blank-query, `embedProject` full pipeline (injected Gemini) + idempotent upsert + missing-project no-op. |
+| `apps/web/src/lib/catalogue-search.ts` + `.test.ts` | **NEW.** `formatRelevance` / `relevanceFraction` (cosine → clamped % match) + tests. |
+| `apps/web/src/routes/catalogue/index.tsx` | Hybrid search: instant substring (debounced) stays; `<form>` submit (Enter / **Semantic** button) → `useAction(api.search.searchCatalogue)`; ranked results via shared `CatalogueCard` with relevance badge; **Back to browse** clears; degraded → silent substring fallback; `isPending` skeleton. |
+
+**NOT touched:** schema.ts (used pre-existing `specEmbeddings` + `by_embedding` 768-dim vectorIndex), keys, billing, gateway, convex/catalogue.ts.
+
+## Model substitution (necessary)
+Task named `text-embedding-004`; that model is **dead** — v1beta returns `404 models/text-embedding-004 is not found`. Substituted **`gemini-embedding-001`** with **`outputDimensionality: 768`** (its default 3072 would mismatch the schema's 768-dim index). Verified live: HTTP 200, 768-dim vector.
+
+## VERIFY
+- `pnpm test:convex` → **115 passed (10 files)** ✅
+- web tests → **126 passed (17 files)** ✅
+- convex typecheck (`tsc -p convex/tsconfig.json`) → **clean** ✅
+- web typecheck (`tsc --noEmit`) → **clean** ✅
+- `npx convex dev --once` → **Convex functions ready** (twice) ✅
+- backfill `npx convex run search:embedAllPublished` → **`{ "scheduled": 5 }`** ✅
+- end-to-end `npx convex run search:searchCatalogue '{"query":"weather forecast climate data","limit":5}'` → **`degraded:false`**, 5 ranked hits (scores 0.652–0.658, all weather projects) ✅
+
+**Pre-existing, out of scope:** `pnpm typecheck` (turbo) fails on `apps/gateway/src/wallet.ts` (`#resolveKeySetting` / `keySettings` shape) — that's the in-progress wave9 key-controls work in the dirty tree, not introduced by this change. Gateway, `convex/wallets.ts`, `convex/keySettings.ts`, docs routes were already modified before I started.

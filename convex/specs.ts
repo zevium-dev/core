@@ -1,6 +1,7 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import type { Doc } from "./_generated/dataModel";
+import { internal } from "./_generated/api";
 import { getOrgBySlug, requireProjectMember } from "./lib/auth";
 import { createNotification } from "./lib/notifications";
 import { fireWebhookEvent } from "./webhooks";
@@ -181,6 +182,10 @@ export const publish = mutation({
     await fireWebhookEvent(ctx, args.projectId, "spec.published", {
       projectId: args.projectId,
       version,
+    });
+    // Rebuild the catalogue search embedding from the new published spec.
+    await ctx.scheduler.runAfter(0, internal.search.embedProject, {
+      projectId: args.projectId,
     });
 
     return {

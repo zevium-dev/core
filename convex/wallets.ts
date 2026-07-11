@@ -9,6 +9,7 @@ import {
   type QueryCtx,
 } from "./_generated/server";
 import { requireOrgMemberBySlug } from "./lib/auth";
+import { toGatewayRow, type GatewayKeySettingRow } from "./keySettings";
 
 async function getOrCreateWallet(
   ctx: MutationCtx,
@@ -165,6 +166,8 @@ export type GatewayGrantRow = { refId: string; amount: number };
 export type GatewayGrantsView = {
   grants: GatewayGrantRow[];
   balance: number;
+  /** Per-key controls for the org (cap, disabled, grace). */
+  keySettings: GatewayKeySettingRow[];
 };
 
 /**
@@ -177,7 +180,7 @@ export const listGrantsForGateway = internalQuery({
   handler: async (ctx, args): Promise<GatewayGrantsView> => {
     const wallet = await getWalletByClerkOrgId(ctx, args.clerkOrgId);
     if (wallet === null) {
-      return { grants: [], balance: 0 };
+      return { grants: [], balance: 0, keySettings: [] };
     }
     const entries = await ctx.db
       .query("walletEntries")
@@ -185,9 +188,14 @@ export const listGrantsForGateway = internalQuery({
       .filter((q) => q.eq(q.field("kind"), "grant"))
       .order("desc")
       .take(MAX_GATEWAY_GRANTS);
+    const settingsRows = await ctx.db
+      .query("keySettings")
+      .withIndex("by_org", (q) => q.eq("clerkOrgId", args.clerkOrgId))
+      .collect();
     return {
       grants: entries.map((e) => ({ refId: e.refId, amount: e.amount })),
       balance: wallet.balance,
+      keySettings: settingsRows.map(toGatewayRow),
     };
   },
 });

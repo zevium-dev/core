@@ -129,6 +129,25 @@ export type SyncGrantsResult =
   | { status: "rate_limited"; retryAfterSeconds: number }
   | { status: "sync_failed"; error: string; balance: number };
 
+/** Per-key control metadata mirrored from the control-plane keySettings table. */
+export type KeySetting = {
+  keyId: string;
+  /** Absent = unlimited. */
+  monthlyCapCredits?: number;
+  disabled: boolean;
+  rotatedFromKeyId?: string;
+  /** Old rotated key works until this ms epoch; past = treated as disabled. */
+  graceUntil?: number;
+};
+
+/** Optional key-context for a reservation (key enforcement). */
+export type ReserveOptions = {
+  keyId?: string;
+  /** Clerk org id owning this wallet — used for lazy settings refresh. */
+  clerkOrgId?: string;
+  nowMs?: number;
+};
+
 // Storage keys
 const K_BALANCE = "balance";
 const K_IN_FLIGHT = "inFlight";
@@ -137,6 +156,9 @@ const K_PENDING = "pendingSettlements";
 const K_TERMINAL = "terminalReservations";
 const K_FLUSH_SEQ = "flushSeq";
 const K_FREE_PREFIX = "free:";
+const K_KEY_SETTINGS = "keySettings";
+const K_KEY_SETTINGS_AT = "keySettingsSyncedAt";
+const K_SETTLED_PREFIX = "settled:";
 const K_SYNC_GRANTS_AT = "syncGrantsAt";
 const SYNC_GRANTS_WINDOW_MS = 60_000;
 
@@ -163,6 +185,39 @@ function freeStorageKey(keyId: string, day: string): string {
   return `${K_FREE_PREFIX}${keyId}:${day}`;
 }
 
+/** UTC calendar month key YYYY-MM. */
+export function utcMonthKey(ms: number = Date.now()): string {
+  return new Date(ms).toISOString().slice(0, 7);
+}
+
+function settledStorageKey(keyId: string, month: string): string {
+  return `${K_SETTLED_PREFIX}${keyId}:${month}`;
+}
+
+/** Parse a keySettings array from the /wallet-grants JSON payload. */
+function parseKeySettings(raw: unknown): KeySetting[] {
+  if (!Array.isArray(raw)) return [];
+  const out: KeySetting[] = [];
+  for (const row of raw) {
+    if (row === null || typeof row !== "object") continue;
+    const r = row as Record<string, unknown>;
+    if (typeof r.keyId !== "string" || r.keyId.length === 0) continue;
+    if (typeof r.disabled !== "boolean") continue;
+    const setting: KeySetting = { keyId: r.keyId, disabled: r.disabled };
+    if (typeof r.monthlyCapCredits === "number") {
+      setting.monthlyCapCredits = r.monthlyCapCredits;
+    }
+    if (typeof r.rotatedFromKeyId === "string") {
+      setting.rotatedFromKeyId = r.rotatedFromKeyId;
+    }
+    if (typeof r.graceUntil === "number") {
+      setting.graceUntil = r.graceUntil;
+    }
+    out.push(setting);
+  }
+  return out;
+}
+
 // ---------------------------------------------------------------------------
 // WalletDO
 // ---------------------------------------------------------------------------
@@ -173,6 +228,9 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
   #appliedGrantIds: Set<string> = new Set();
   #pendingSettlements: PendingSettlement[] = [];
   #terminal: Record<string, TerminalStatus> = {};
+  #keySettings: Map<string, KeySetting> = new Map();
+  #keySettingsSyncedAt = 0;
+  #syncInFlight: Promise<SyncGrantsResult> | null = null;
   #flushSeq = 0;
   #loaded = false;
 
@@ -183,7 +241,6 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
       await this.#load();
     });
   }
-
   async #load(): Promise<void> {
     const stored = await this.ctx.storage.get<
       | number
@@ -191,6 +248,7 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
       | string[]
       | PendingSettlement[]
       | Record<string, TerminalStatus>
+      | Record<string, KeySetting>
     >([
       K_BALANCE,
       K_IN_FLIGHT,
@@ -198,6 +256,8 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
       K_PENDING,
       K_TERMINAL,
       K_FLUSH_SEQ,
+      K_KEY_SETTINGS,
+      K_KEY_SETTINGS_AT,
     ]);
 
     this.#balance = (stored.get(K_BALANCE) as number | undefined) ?? 0;
@@ -212,6 +272,12 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
       (stored.get(K_TERMINAL) as Record<string, TerminalStatus> | undefined) ??
       {};
     this.#flushSeq = (stored.get(K_FLUSH_SEQ) as number | undefined) ?? 0;
+    const settingsMap =
+      (stored.get(K_KEY_SETTINGS) as Record<string, KeySetting> | undefined) ??
+      {};
+    this.#keySettings = new Map(Object.entries(settingsMap));
+    this.#keySettingsSyncedAt =
+      (stored.get(K_KEY_SETTINGS_AT) as number | undefined) ?? 0;
     this.#loaded = true;
   }
 
@@ -239,6 +305,8 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
       pendingSettlements: PendingSettlement[];
       terminal: Record<string, TerminalStatus>;
       flushSeq: number;
+      keySettings: Record<string, KeySetting>;
+      keySettingsSyncedAt: number;
     }>,
   ): Promise<void> {
     await this.ctx.storage.transaction(async (txn) => {
@@ -252,6 +320,10 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
       if (keys.terminal !== undefined) await txn.put(K_TERMINAL, keys.terminal);
       if (keys.flushSeq !== undefined)
         await txn.put(K_FLUSH_SEQ, keys.flushSeq);
+      if (keys.keySettings !== undefined)
+        await txn.put(K_KEY_SETTINGS, keys.keySettings);
+      if (keys.keySettingsSyncedAt !== undefined)
+        await txn.put(K_KEY_SETTINGS_AT, keys.keySettingsSyncedAt);
     });
   }
 
@@ -289,7 +361,11 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
     return { status: "applied", balance: this.#balance };
   }
 
-  async reserve(reservationId: string, cost: number): Promise<ReserveResult> {
+  async reserve(
+    reservationId: string,
+    cost: number,
+    opts: ReserveOptions = {},
+  ): Promise<ReserveResult> {
     if (!reservationId || typeof reservationId !== "string") {
       return { status: "rejected", reason: "reservationId required" };
     }
@@ -314,6 +390,34 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
         status: "conflict",
         reason: `reservation ${reservationId} already ${terminal}`,
       };
+    }
+
+    // Per-key enforcement: disabled, expired grace, monthly cap.
+    if (opts.keyId) {
+      const now = opts.nowMs ?? Date.now();
+      const setting = await this.#resolveKeySetting(
+        opts.keyId,
+        opts.clerkOrgId,
+        now,
+      );
+      if (setting) {
+        if (setting.disabled) {
+          return { status: "rejected", reason: "key_disabled" };
+        }
+        if (setting.graceUntil !== undefined && setting.graceUntil < now) {
+          return { status: "rejected", reason: "key_disabled" };
+        }
+        if (setting.monthlyCapCredits !== undefined) {
+          const month = utcMonthKey(now);
+          const used =
+            (await this.ctx.storage.get<number>(
+              settledStorageKey(opts.keyId, month),
+            )) ?? 0;
+          if (used >= setting.monthlyCapCredits) {
+            return { status: "rejected", reason: "key_cap_exceeded" };
+          }
+        }
+      }
     }
 
     const available = this.#available();
@@ -375,6 +479,12 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
       terminal: { ...this.#terminal },
     });
     await this.#scheduleFlushAlarm();
+    // Accumulate per-key monthly settled credits (cap enforcement counter).
+    if (usage && usage.keyId && cost > 0) {
+      const sk = settledStorageKey(usage.keyId, utcMonthKey(settledAt));
+      const prev = (await this.ctx.storage.get<number>(sk)) ?? 0;
+      await this.ctx.storage.put(sk, prev + cost);
+    }
 
     return { status: "settled", settlementId, balance: this.#balance };
   }
@@ -676,14 +786,49 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
       applied += 1;
     }
 
-    if (applied > 0) {
-      await this.#persist({
-        balance: this.#balance,
-        appliedGrantIds: [...this.#appliedGrantIds],
-      });
-    }
+    // Full replace of key settings — the response is the org's complete set.
+    this.#keySettings = new Map(grants.keySettings.map((s) => [s.keyId, s]));
+    this.#keySettingsSyncedAt = nowMs;
+
+    await this.#persist({
+      balance: this.#balance,
+      appliedGrantIds: [...this.#appliedGrantIds],
+      keySettings: Object.fromEntries(this.#keySettings),
+      keySettingsSyncedAt: this.#keySettingsSyncedAt,
+    });
 
     return { status: "ok", applied, balance: this.#balance };
+  }
+
+  /**
+   * Resolve a key's settings, lazily refreshing from the control plane when
+   * the key is unknown AND the last sync is older than the window. Single-
+   * flight: concurrent unknown-key lookups share one fetch. Steady-state
+   * (known key, or fresh sync) never touches the network.
+   */
+  async #resolveKeySetting(
+    keyId: string,
+    clerkOrgId: string | undefined,
+    nowMs: number,
+  ): Promise<KeySetting | null> {
+    const cached = this.#keySettings.get(keyId);
+    if (cached) return cached;
+    if (!clerkOrgId) return null;
+    if (nowMs - this.#keySettingsSyncedAt < SYNC_GRANTS_WINDOW_MS) return null;
+    await this.#syncGrantsSingleFlight(clerkOrgId, nowMs);
+    return this.#keySettings.get(keyId) ?? null;
+  }
+
+  /** Coalesce concurrent syncGrants calls into a single fetch. */
+  #syncGrantsSingleFlight(
+    clerkOrgId: string,
+    nowMs: number,
+  ): Promise<SyncGrantsResult> {
+    if (this.#syncInFlight) return this.#syncInFlight;
+    this.#syncInFlight = this.syncGrants(clerkOrgId, nowMs).finally(() => {
+      this.#syncInFlight = null;
+    });
+    return this.#syncInFlight;
   }
 
   /**
@@ -694,9 +839,14 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
   async #fetchGrantsFromConvex(clerkOrgId: string): Promise<{
     grants: { refId: string; amount: number }[];
     balance: number;
+    keySettings: KeySetting[];
   } | null> {
     const testFn = getTestGrantsFetcher();
-    if (testFn) return testFn(clerkOrgId);
+    if (testFn) {
+      const r = await testFn(clerkOrgId);
+      if (r === null) return null;
+      return { ...r, keySettings: r.keySettings ?? [] };
+    }
 
     const env = this.env as Cloudflare.Env;
     const secret = env.GATEWAY_INTERNAL_SECRET;
@@ -716,6 +866,7 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
       const json = (await res.json()) as {
         grants?: unknown;
         balance?: unknown;
+        keySettings?: unknown;
       };
       if (typeof json.balance !== "number") return null;
       if (!Array.isArray(json.grants)) return null;
@@ -735,7 +886,8 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
           });
         }
       }
-      return { grants, balance: json.balance };
+      const keySettings = parseKeySettings(json.keySettings);
+      return { grants, balance: json.balance, keySettings };
     } catch {
       return null;
     }
@@ -794,6 +946,14 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
           const result = await this.reserve(
             String(body.reservationId ?? ""),
             Number(body.cost),
+            {
+              keyId: typeof body.keyId === "string" ? body.keyId : undefined,
+              clerkOrgId:
+                typeof body.clerkOrgId === "string"
+                  ? body.clerkOrgId
+                  : undefined,
+              nowMs: typeof body.nowMs === "number" ? body.nowMs : undefined,
+            },
           );
           return Response.json(result);
         }
@@ -872,6 +1032,7 @@ function getTestUsageMutation(): TestUsageMutation | null {
 type TestGrantsFetcher = (clerkOrgId: string) => Promise<{
   grants: { refId: string; amount: number }[];
   balance: number;
+  keySettings?: KeySetting[];
 } | null>;
 
 let testGrantsFetcher: TestGrantsFetcher | null = null;

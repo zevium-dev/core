@@ -1,0 +1,34 @@
+## DONE
+
+Per-key spend limits + enable/disable + rotation-with-grace shipped across all three planes. All gates green.
+
+### CHANGED
+
+**Convex (control plane)**
+- `convex/keySettings.ts` (new) — `getForOrg` query, `setCap` / `setDisabled` / `recordRotation` mutations. Org auth via JWT active-org claim + mirrored-org check; ownership enforced on existing rows; `null` cap clears the field (patch `undefined` deletes). Renamed from `key-settings.ts` — Convex rejects hyphenated module names.
+- `convex/wallets.ts` — `listGrantsForGateway` now also returns `keySettings[]` (the org's full per-key set). `/wallet-grants` http response extended automatically (no http.ts edit needed).
+- `convex/keySettings.test.ts` (new) — 16 tests: auth rejects (unauth / no-org / cross-org), upsert semantics, cap set/clear/validate, disable preserving cap, rotation grace + lineage + past-grace + identical-id rejects, gateway-grants shape.
+- `convex/_generated/*` — regenerated via `npx convex dev --once` (new module).
+
+**Gateway (data plane, hot-path-safe)**
+- `apps/gateway/src/wallet.ts` — DO now mirrors `keySettings` (full-replace on `syncGrants`, persisted). `reserve(id, cost, opts?)` gates per-key: disabled → `key_disabled`, grace past → `key_disabled`, month-to-date settled credits ≥ cap → `key_cap_exceeded`. Settle bumps a per-key+`YYYY-MM` settled counter. Unknown key + stale sync (>60s) triggers a **single-flight** lazy refresh (`#syncInFlight` coalesces concurrent calls); fresh sync / known key = zero network. Idempotency (duplicate/terminal) checked before the gate.
+- `apps/gateway/src/pipeline.ts` — passes `{keyId, clerkOrgId}` into reserve; maps `rejected` → `403` with machine code + human message + blocked usage emit.
+- `apps/gateway/test/key-settings.test.ts` (new) — 8 tests: disabled reject, cap boundary (100/100 then reject), grace allow→expire, unknown-key single fetch, fresh-sync no-refresh, concurrent single-flight, back-compat (no opts = no gate).
+
+**Web**
+- `apps/web/src/lib/api-keys.ts` — `rotateKey` server fn (creates replacement Clerk key with same `org_id` claim; rotation bypasses the one-key rule; old key stays valid during grace; returns secret once + `graceUntil`). + `RotateApiKeyResult` type, `ROTATION_GRACE_MS`.
+- `apps/web/src/lib/key-cap.ts` (new) + `key-cap.test.ts` — pure `parseMonthlyCap` / `formatMonthlyCap` (7 tests).
+- `apps/web/src/routes/app/settings/keys.tsx` — per-key cap input (commit on blur), enable/disable Switch, Rotate (confirm dialog → Clerk create + Convex `recordRotation` → reveal new secret once), grace badge. Merges Clerk keys with realtime `getForOrg` settings via `useSuspenseQuery(convexQuery(...))` behind a Convex-auth + Suspense gate. `isPending`, toasts, semantic tokens, best-effort gateway re-sync on every settings change.
+
+### VERIFY
+```
+pnpm typecheck   → 3/3 packages green
+pnpm test        → web 133 / gateway 59 / convex 115 / shared cached — all green
+npx convex dev --once → Convex functions ready (clean push)
+```
+New tests: convex +16, gateway +8, web +7.
+
+### Notes / design decisions
+- **One-key rule vs rotation**: `createKey` still enforces one-active-key-per-user; `rotateKey` is a separate path that deliberately creates a 2nd Clerk key so the old one keeps verifying during grace. The gateway enforces the 24h cutoff via `graceUntil`; the old Clerk key remains revocable manually after switch-over (auto-revoke cron is out of scope).
+- **Cap = settled paid credits only**: free-tier calls (0 credits) don't trip the cap. Counter keyed `settled:<keyId>:<YYYY-MM>`, bumps on settle, auto-resets at month rollover.
+- **Propagation**: settings changes trigger a best-effort `/wallet/:org/sync-grants`; the DO's 60s sync window + lazy refresh bound staleness at ≤60s. Hot path stays Clerk/Convex-free in steady state.

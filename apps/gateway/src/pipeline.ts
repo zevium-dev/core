@@ -134,7 +134,10 @@ export async function handleGatewayRequest(
   }
 
   if (!usedFree) {
-    const reserve = await wallet.reserve(reservationId, cost);
+    const reserve = await wallet.reserve(reservationId, cost, {
+      keyId: verified.keyId,
+      clerkOrgId: published.clerkOrgId,
+    });
     if (reserve.status === "insufficient") {
       emitUsage(ctx, deps, {
         requestId,
@@ -157,6 +160,35 @@ export async function handleGatewayRequest(
         "Insufficient credits",
         requestId,
         { available: reserve.available, cost: reserve.cost },
+      );
+    }
+    if (
+      reserve.status === "rejected" &&
+      (reserve.reason === "key_disabled" ||
+        reserve.reason === "key_cap_exceeded")
+    ) {
+      emitUsage(ctx, deps, {
+        requestId,
+        organizationId: published.organizationId,
+        projectId: published.projectId,
+        keyId: verified.keyId,
+        orgSlug: route.orgSlug,
+        projectSlug: route.projectSlug,
+        method: matched.method,
+        pathTemplate: matched.pathTemplate,
+        cost,
+        status: 403,
+        outcome: "blocked",
+        latencyMs: (deps.now ?? Date.now)() - started,
+        reservationId,
+      });
+      return jsonError(
+        403,
+        reserve.reason,
+        reserve.reason === "key_disabled"
+          ? "API key is disabled"
+          : "Monthly credit cap reached for this key",
+        requestId,
       );
     }
     if (reserve.status !== "reserved" && reserve.status !== "duplicate") {

@@ -461,6 +461,12 @@ function LandingPage() {
             >
               Catalogue
             </Link>
+            <Link
+              to="/docs"
+              className="text-muted-foreground transition-colors duration-[var(--dur-instant)] ease-[var(--ease)] hover:text-foreground"
+            >
+              Docs
+            </Link>
             <a
               href="/catalogue#pricing"
               className="text-muted-foreground transition-colors duration-[var(--dur-instant)] ease-[var(--ease)] hover:text-foreground"

@@ -9,8 +9,8 @@ import { cn } from "#/lib/utils";
 type PublicHeaderProps = {
   /** Max content width utility, default max-w-5xl (landing). Catalogue uses max-w-6xl. */
   maxWidthClass?: string;
-  /** Highlight Catalogue nav when on catalogue routes. */
-  active?: "catalogue" | null;
+  /** Highlight Catalogue / Docs nav when on those routes. */
+  active?: "catalogue" | "docs" | null;
   className?: string;
 };
 
@@ -49,6 +49,15 @@ export function PublicHeader({
               )}
             >
               Catalogue
+            </Link>
+            <Link
+              to="/docs"
+              className={cn(
+                "transition-colors duration-[var(--dur-instant)] ease-[var(--ease)] hover:text-foreground",
+                active === "docs" && "text-foreground",
+              )}
+            >
+              Docs
             </Link>
           </nav>
         </div>

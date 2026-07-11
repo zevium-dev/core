@@ -13,11 +13,15 @@ import { Route as CatalogueRouteImport } from './routes/catalogue'
 import { Route as AppRouteImport } from './routes/app'
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as DocsIndexRouteImport } from './routes/docs/index'
 import { Route as CatalogueIndexRouteImport } from './routes/catalogue/index'
 import { Route as AppIndexRouteImport } from './routes/app/index'
 import { Route as AdminIndexRouteImport } from './routes/admin/index'
 import { Route as SignUpSplatRouteImport } from './routes/sign-up.$'
 import { Route as SignInSplatRouteImport } from './routes/sign-in.$'
+import { Route as DocsPublishingRouteImport } from './routes/docs/publishing'
+import { Route as DocsConsumingRouteImport } from './routes/docs/consuming'
+import { Route as DocsAgentsRouteImport } from './routes/docs/agents'
 import { Route as AppSettingsRouteImport } from './routes/app/settings'
 import { Route as AppProjectsRouteImport } from './routes/app/projects'
 import { Route as AppOrgRouteImport } from './routes/app/org'
@@ -55,6 +59,11 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const DocsIndexRoute = DocsIndexRouteImport.update({
+  id: '/docs/',
+  path: '/docs/',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const CatalogueIndexRoute = CatalogueIndexRouteImport.update({
   id: '/',
   path: '/',
@@ -78,6 +87,21 @@ const SignUpSplatRoute = SignUpSplatRouteImport.update({
 const SignInSplatRoute = SignInSplatRouteImport.update({
   id: '/sign-in/$',
   path: '/sign-in/$',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DocsPublishingRoute = DocsPublishingRouteImport.update({
+  id: '/docs/publishing',
+  path: '/docs/publishing',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DocsConsumingRoute = DocsConsumingRouteImport.update({
+  id: '/docs/consuming',
+  path: '/docs/consuming',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DocsAgentsRoute = DocsAgentsRouteImport.update({
+  id: '/docs/agents',
+  path: '/docs/agents',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AppSettingsRoute = AppSettingsRouteImport.update({
@@ -174,11 +198,15 @@ export interface FileRoutesByFullPath {
   '/app/org': typeof AppOrgRouteWithChildren
   '/app/projects': typeof AppProjectsRouteWithChildren
   '/app/settings': typeof AppSettingsRouteWithChildren
+  '/docs/agents': typeof DocsAgentsRoute
+  '/docs/consuming': typeof DocsConsumingRoute
+  '/docs/publishing': typeof DocsPublishingRoute
   '/sign-in/$': typeof SignInSplatRoute
   '/sign-up/$': typeof SignUpSplatRoute
   '/admin/': typeof AdminIndexRoute
   '/app/': typeof AppIndexRoute
   '/catalogue/': typeof CatalogueIndexRoute
+  '/docs/': typeof DocsIndexRoute
   '/app/org/create': typeof AppOrgCreateRoute
   '/app/projects/$projectSlug': typeof AppProjectsProjectSlugRouteWithChildren
   '/app/projects/create': typeof AppProjectsCreateRoute
@@ -195,11 +223,15 @@ export interface FileRoutesByTo {
   '/admin/orgs': typeof AdminOrgsRoute
   '/admin/projects': typeof AdminProjectsRoute
   '/app/billing': typeof AppBillingRoute
+  '/docs/agents': typeof DocsAgentsRoute
+  '/docs/consuming': typeof DocsConsumingRoute
+  '/docs/publishing': typeof DocsPublishingRoute
   '/sign-in/$': typeof SignInSplatRoute
   '/sign-up/$': typeof SignUpSplatRoute
   '/admin': typeof AdminIndexRoute
   '/app': typeof AppIndexRoute
   '/catalogue': typeof CatalogueIndexRoute
+  '/docs': typeof DocsIndexRoute
   '/app/org/create': typeof AppOrgCreateRoute
   '/app/projects/$projectSlug': typeof AppProjectsProjectSlugRouteWithChildren
   '/app/projects/create': typeof AppProjectsCreateRoute
@@ -223,11 +255,15 @@ export interface FileRoutesById {
   '/app/org': typeof AppOrgRouteWithChildren
   '/app/projects': typeof AppProjectsRouteWithChildren
   '/app/settings': typeof AppSettingsRouteWithChildren
+  '/docs/agents': typeof DocsAgentsRoute
+  '/docs/consuming': typeof DocsConsumingRoute
+  '/docs/publishing': typeof DocsPublishingRoute
   '/sign-in/$': typeof SignInSplatRoute
   '/sign-up/$': typeof SignUpSplatRoute
   '/admin/': typeof AdminIndexRoute
   '/app/': typeof AppIndexRoute
   '/catalogue/': typeof CatalogueIndexRoute
+  '/docs/': typeof DocsIndexRoute
   '/app/org/create': typeof AppOrgCreateRoute
   '/app/projects/$projectSlug': typeof AppProjectsProjectSlugRouteWithChildren
   '/app/projects/create': typeof AppProjectsCreateRoute
@@ -252,11 +288,15 @@ export interface FileRouteTypes {
     | '/app/org'
     | '/app/projects'
     | '/app/settings'
+    | '/docs/agents'
+    | '/docs/consuming'
+    | '/docs/publishing'
     | '/sign-in/$'
     | '/sign-up/$'
     | '/admin/'
     | '/app/'
     | '/catalogue/'
+    | '/docs/'
     | '/app/org/create'
     | '/app/projects/$projectSlug'
     | '/app/projects/create'
@@ -273,11 +313,15 @@ export interface FileRouteTypes {
     | '/admin/orgs'
     | '/admin/projects'
     | '/app/billing'
+    | '/docs/agents'
+    | '/docs/consuming'
+    | '/docs/publishing'
     | '/sign-in/$'
     | '/sign-up/$'
     | '/admin'
     | '/app'
     | '/catalogue'
+    | '/docs'
     | '/app/org/create'
     | '/app/projects/$projectSlug'
     | '/app/projects/create'
@@ -300,11 +344,15 @@ export interface FileRouteTypes {
     | '/app/org'
     | '/app/projects'
     | '/app/settings'
+    | '/docs/agents'
+    | '/docs/consuming'
+    | '/docs/publishing'
     | '/sign-in/$'
     | '/sign-up/$'
     | '/admin/'
     | '/app/'
     | '/catalogue/'
+    | '/docs/'
     | '/app/org/create'
     | '/app/projects/$projectSlug'
     | '/app/projects/create'
@@ -322,8 +370,12 @@ export interface RootRouteChildren {
   AdminRoute: typeof AdminRouteWithChildren
   AppRoute: typeof AppRouteWithChildren
   CatalogueRoute: typeof CatalogueRouteWithChildren
+  DocsAgentsRoute: typeof DocsAgentsRoute
+  DocsConsumingRoute: typeof DocsConsumingRoute
+  DocsPublishingRoute: typeof DocsPublishingRoute
   SignInSplatRoute: typeof SignInSplatRoute
   SignUpSplatRoute: typeof SignUpSplatRoute
+  DocsIndexRoute: typeof DocsIndexRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -354,6 +406,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/docs/': {
+      id: '/docs/'
+      path: '/docs'
+      fullPath: '/docs/'
+      preLoaderRoute: typeof DocsIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/catalogue/': {
@@ -389,6 +448,27 @@ declare module '@tanstack/react-router' {
       path: '/sign-in/$'
       fullPath: '/sign-in/$'
       preLoaderRoute: typeof SignInSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/docs/publishing': {
+      id: '/docs/publishing'
+      path: '/docs/publishing'
+      fullPath: '/docs/publishing'
+      preLoaderRoute: typeof DocsPublishingRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/docs/consuming': {
+      id: '/docs/consuming'
+      path: '/docs/consuming'
+      fullPath: '/docs/consuming'
+      preLoaderRoute: typeof DocsConsumingRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/docs/agents': {
+      id: '/docs/agents'
+      path: '/docs/agents'
+      fullPath: '/docs/agents'
+      preLoaderRoute: typeof DocsAgentsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/app/settings': {
@@ -616,8 +696,12 @@ const rootRouteChildren: RootRouteChildren = {
   AdminRoute: AdminRouteWithChildren,
   AppRoute: AppRouteWithChildren,
   CatalogueRoute: CatalogueRouteWithChildren,
+  DocsAgentsRoute: DocsAgentsRoute,
+  DocsConsumingRoute: DocsConsumingRoute,
+  DocsPublishingRoute: DocsPublishingRoute,
   SignInSplatRoute: SignInSplatRoute,
   SignUpSplatRoute: SignUpSplatRoute,
+  DocsIndexRoute: DocsIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
