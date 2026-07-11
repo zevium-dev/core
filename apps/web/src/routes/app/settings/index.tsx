@@ -1,8 +1,7 @@
-import { useUser } from "@clerk/tanstack-react-start";
-import { createFileRoute, Link } from "@tanstack/react-router";
-import { KeyRound, UserRound } from "lucide-react";
+import { UserProfile } from "@clerk/tanstack-react-start";
+import { shadcn } from "@clerk/ui/themes";
+import { createFileRoute } from "@tanstack/react-router";
 
-import { Button } from "#/components/ui/button";
 import {
   Card,
   CardContent,
@@ -10,8 +9,6 @@ import {
   CardHeader,
   CardTitle,
 } from "#/components/ui/card";
-import { Label } from "#/components/ui/label";
-import { Skeleton } from "#/components/ui/skeleton";
 
 export const Route = createFileRoute("/app/settings/")({
   component: SettingsPage,
@@ -21,15 +18,6 @@ export const Route = createFileRoute("/app/settings/")({
 });
 
 function SettingsPage() {
-  const { user, isLoaded } = useUser();
-
-  const displayName =
-    user?.fullName ??
-    user?.username ??
-    user?.primaryEmailAddress?.emailAddress ??
-    "—";
-  const email = user?.primaryEmailAddress?.emailAddress ?? "—";
-
   return (
     <div className="flex flex-col gap-6">
       <div>
@@ -39,59 +27,29 @@ function SettingsPage() {
         </p>
       </div>
 
-      <Card>
+      <Card className="overflow-hidden">
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <UserRound className="size-4" />
-            Profile
-          </CardTitle>
-          <CardDescription>Identity from Clerk</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {!isLoaded ? (
-            <>
-              <div className="space-y-2">
-                <Label>Display name</Label>
-                <Skeleton className="h-9 w-full max-w-sm" />
-              </div>
-              <div className="space-y-2">
-                <Label>Email</Label>
-                <Skeleton className="h-9 w-full max-w-sm" />
-              </div>
-            </>
-          ) : (
-            <>
-              <div className="space-y-1.5">
-                <Label>Display name</Label>
-                <p className="text-sm">{displayName}</p>
-              </div>
-              <div className="space-y-1.5">
-                <Label>Email</Label>
-                <p className="text-sm text-muted-foreground">{email}</p>
-              </div>
-              <p className="text-xs text-muted-foreground">
-                Manage password, 2FA, and connected accounts from the user menu
-                (avatar) in the sidebar.
-              </p>
-            </>
-          )}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <KeyRound className="size-4" />
-            API keys
-          </CardTitle>
+          <CardTitle>Account</CardTitle>
           <CardDescription>
-            Machine keys for the gateway. One active key per user.
+            Profile, security, and connected accounts via Clerk.
           </CardDescription>
         </CardHeader>
-        <CardContent>
-          <Button asChild>
-            <Link to="/app/settings/keys">Manage keys</Link>
-          </Button>
+        <CardContent className="p-0 sm:p-2">
+          <div className="w-full overflow-x-auto">
+            <UserProfile
+              routing="hash"
+              appearance={{
+                theme: shadcn,
+                elements: {
+                  rootBox: "w-full mx-auto",
+                  cardBox: "w-full shadow-none",
+                  card: "w-full shadow-none",
+                  navbar: "border-border",
+                  scrollBox: "w-full",
+                },
+              }}
+            />
+          </div>
         </CardContent>
       </Card>
     </div>

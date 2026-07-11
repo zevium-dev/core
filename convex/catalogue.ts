@@ -1,9 +1,20 @@
+import { extractPricing, parseSpec } from "@zevium/shared";
 import { v } from "convex/values";
 import { query } from "./_generated/server";
 import type { Doc } from "./_generated/dataModel";
 import { getOrgBySlug } from "./lib/auth";
 
 const PAGE_SIZE = 24;
+
+export type CatalogueSort = "newest" | "name" | "cheapest";
+
+/** Pricing rollup from latest published specVersion at query time. */
+export type ListingPricingSummary = {
+  minCost: number;
+  maxCost: number;
+  endpointCount: number;
+  hasFreeTier: boolean;
+};
 
 export type PublicListing = {
   projectId: Doc<"projects">["_id"];
@@ -15,13 +26,72 @@ export type PublicListing = {
   orgName: string;
   orgSlug: string;
   publishedAt: number | null;
+  pricing: ListingPricingSummary | null;
 };
+
+/**
+ * Summarize per-endpoint costs from a published OpenAPI JSON string.
+ * Invalid/unparseable specs yield null (listing still visible, no price chip).
+ */
+export function summarizePublishedPricing(
+  specJson: string,
+): ListingPricingSummary | null {
+  try {
+    const spec = parseSpec(specJson);
+    let endpointCount = 0;
+    let minCost = Number.POSITIVE_INFINITY;
+    let maxCost = Number.NEGATIVE_INFINITY;
+    let hasFreeTier = false;
+
+    for (const pathItem of Object.values(spec.paths)) {
+      if (pathItem === undefined) continue;
+      for (const op of Object.values(pathItem)) {
+        if (op === undefined) continue;
+        endpointCount += 1;
+        const pricing = extractPricing(op);
+        minCost = Math.min(minCost, pricing.cost);
+        maxCost = Math.max(maxCost, pricing.cost);
+        if (pricing.freeTier !== undefined && pricing.freeTier > 0) {
+          hasFreeTier = true;
+        }
+      }
+    }
+
+    if (endpointCount === 0) {
+      return {
+        minCost: 0,
+        maxCost: 0,
+        endpointCount: 0,
+        hasFreeTier: false,
+      };
+    }
+
+    return {
+      minCost,
+      maxCost,
+      endpointCount,
+      hasFreeTier,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function parseSort(raw: string | undefined): CatalogueSort {
+  if (raw === "name" || raw === "cheapest" || raw === "newest") return raw;
+  return "newest";
+}
 
 export const listPublic = query({
   args: {
     search: v.optional(v.string()),
     tag: v.optional(v.string()),
     cursor: v.optional(v.string()),
+    sort: v.optional(
+      v.union(v.literal("newest"), v.literal("name"), v.literal("cheapest")),
+    ),
+    hasFreeTier: v.optional(v.boolean()),
+    maxCost: v.optional(v.number()),
   },
   handler: async (
     ctx,
@@ -33,6 +103,15 @@ export const listPublic = query({
     const search =
       args.search === undefined ? "" : args.search.trim().toLowerCase();
     const tag = args.tag === undefined ? "" : args.tag.trim().toLowerCase();
+    const sort = parseSort(args.sort);
+    const freeOnly = args.hasFreeTier === true;
+    const maxCostCap =
+      args.maxCost !== undefined &&
+      Number.isFinite(args.maxCost) &&
+      args.maxCost >= 0
+        ? args.maxCost
+        : null;
+
     const offset =
       args.cursor !== undefined && args.cursor !== ""
         ? Number.parseInt(args.cursor, 10)
@@ -52,6 +131,7 @@ export const listPublic = query({
       project: Doc<"projects">;
       org: Doc<"organizations">;
       publishedAt: number | null;
+      pricing: ListingPricingSummary | null;
     }> = [];
 
     for (const project of candidates) {
@@ -66,6 +146,7 @@ export const listPublic = query({
       const org = await ctx.db.get(project.organizationId);
       if (org === null) continue;
 
+      // Latest published version only — drafts live in specs table, never here.
       const latest = await ctx.db
         .query("specVersions")
         .withIndex("by_project_published", (q) =>
@@ -74,14 +155,48 @@ export const listPublic = query({
         .order("desc")
         .first();
 
+      const pricing =
+        latest === null ? null : summarizePublishedPricing(latest.spec);
+
+      if (freeOnly && (pricing === null || !pricing.hasFreeTier)) {
+        continue;
+      }
+
+      if (maxCostCap !== null) {
+        // No price data → exclude when caller asked for a cost ceiling.
+        if (pricing === null || pricing.endpointCount === 0) continue;
+        if (pricing.minCost > maxCostCap) continue;
+      }
+
       filtered.push({
         project,
         org,
         publishedAt: latest?.publishedAt ?? null,
+        pricing,
       });
     }
 
     filtered.sort((a, b) => {
+      if (sort === "name") {
+        const byName = a.project.name.localeCompare(b.project.name);
+        if (byName !== 0) return byName;
+        return a.project.slug.localeCompare(b.project.slug);
+      }
+
+      if (sort === "cheapest") {
+        const aCost =
+          a.pricing === null || a.pricing.endpointCount === 0
+            ? Number.POSITIVE_INFINITY
+            : a.pricing.minCost;
+        const bCost =
+          b.pricing === null || b.pricing.endpointCount === 0
+            ? Number.POSITIVE_INFINITY
+            : b.pricing.minCost;
+        if (aCost !== bCost) return aCost - bCost;
+        return a.project.name.localeCompare(b.project.name);
+      }
+
+      // newest (default)
       const ap = a.publishedAt ?? 0;
       const bp = b.publishedAt ?? 0;
       if (bp !== ap) return bp - ap;
@@ -93,7 +208,7 @@ export const listPublic = query({
     const nextCursor = nextOffset < filtered.length ? String(nextOffset) : null;
 
     return {
-      items: page.map(({ project, org, publishedAt }) => ({
+      items: page.map(({ project, org, publishedAt, pricing }) => ({
         projectId: project._id,
         name: project.name,
         slug: project.slug,
@@ -103,6 +218,7 @@ export const listPublic = query({
         orgName: org.name,
         orgSlug: org.slug,
         publishedAt,
+        pricing,
       })),
       nextCursor,
     };

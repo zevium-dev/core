@@ -6,6 +6,7 @@ import {
 import { Webhook } from "svix";
 import { internal } from "./_generated/api";
 import { httpAction } from "./_generated/server";
+import type { Id } from "./_generated/dataModel";
 import { resolveOrderClerkOrgId, resolveOrderCredits } from "./billing";
 
 const http = httpRouter();
@@ -226,6 +227,173 @@ http.route({
     }
 
     return new Response(null, { status: 200 });
+  }),
+});
+
+const MAX_INGEST_EVENTS = 500;
+
+type IngestUsageEvent = {
+  organizationId: string;
+  projectId: string;
+  endpoint: string;
+  method: string;
+  credits: number;
+  status: number;
+  latencyMs: number;
+  keyId: string;
+  at: number;
+  settleRefId: string;
+};
+
+/**
+ * Validate gateway → Convex usage flush body.
+ * Exported for unit tests; http action is the production boundary.
+ */
+export function parseIngestUsageBody(
+  body: unknown,
+):
+  | { ok: true; events: IngestUsageEvent[] }
+  | { ok: false; status: number; error: string } {
+  if (body === null || typeof body !== "object" || Array.isArray(body)) {
+    return { ok: false, status: 400, error: "invalid body" };
+  }
+  if (!("events" in body) || !Array.isArray(body.events)) {
+    return { ok: false, status: 400, error: "events array required" };
+  }
+  if (body.events.length > MAX_INGEST_EVENTS) {
+    return { ok: false, status: 400, error: "too many events" };
+  }
+
+  const events: IngestUsageEvent[] = [];
+  for (const raw of body.events) {
+    if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
+      return { ok: false, status: 400, error: "invalid event" };
+    }
+    const e = raw as Record<string, unknown>;
+    const organizationId = e.organizationId;
+    const projectId = e.projectId;
+    const endpoint = e.endpoint;
+    const method = e.method;
+    const credits = e.credits;
+    const status = e.status;
+    const latencyMs = e.latencyMs;
+    const keyId = e.keyId;
+    const at = e.at;
+    const settleRefId = e.settleRefId;
+
+    if (typeof organizationId !== "string" || organizationId.length === 0) {
+      return { ok: false, status: 400, error: "invalid event" };
+    }
+    if (typeof projectId !== "string" || projectId.length === 0) {
+      return { ok: false, status: 400, error: "invalid event" };
+    }
+    if (typeof endpoint !== "string") {
+      return { ok: false, status: 400, error: "invalid event" };
+    }
+    if (typeof method !== "string") {
+      return { ok: false, status: 400, error: "invalid event" };
+    }
+    if (typeof credits !== "number" || !Number.isFinite(credits)) {
+      return { ok: false, status: 400, error: "invalid event" };
+    }
+    if (typeof status !== "number" || !Number.isFinite(status)) {
+      return { ok: false, status: 400, error: "invalid event" };
+    }
+    if (typeof latencyMs !== "number" || !Number.isFinite(latencyMs)) {
+      return { ok: false, status: 400, error: "invalid event" };
+    }
+    if (typeof keyId !== "string") {
+      return { ok: false, status: 400, error: "invalid event" };
+    }
+    if (typeof at !== "number" || !Number.isFinite(at)) {
+      return { ok: false, status: 400, error: "invalid event" };
+    }
+    if (typeof settleRefId !== "string" || settleRefId.trim() === "") {
+      return { ok: false, status: 400, error: "invalid event" };
+    }
+
+    events.push({
+      organizationId,
+      projectId,
+      endpoint,
+      method,
+      credits,
+      status,
+      latencyMs,
+      keyId,
+      at,
+      settleRefId,
+    });
+  }
+
+  return { ok: true, events };
+}
+
+http.route({
+  path: "/ingest-usage",
+  method: "POST",
+  handler: httpAction(async (ctx, request) => {
+    const secret = process.env.GATEWAY_INTERNAL_SECRET;
+    if (secret === undefined || secret.length === 0) {
+      return new Response(JSON.stringify({ error: "unauthorized" }), {
+        status: 401,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    const provided = request.headers.get("x-internal-secret");
+    if (provided === null || provided !== secret) {
+      return new Response(JSON.stringify({ error: "unauthorized" }), {
+        status: 401,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    let json: unknown;
+    try {
+      json = await request.json();
+    } catch {
+      return new Response(JSON.stringify({ error: "invalid body" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    const parsed = parseIngestUsageBody(json);
+    if (!parsed.ok) {
+      return new Response(JSON.stringify({ error: parsed.error }), {
+        status: parsed.status,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    try {
+      const result = await ctx.runMutation(internal.wallets.recordUsage, {
+        events: parsed.events.map((e) => ({
+          organizationId: e.organizationId as Id<"organizations">,
+          projectId: e.projectId as Id<"projects">,
+          endpoint: e.endpoint,
+          method: e.method,
+          credits: e.credits,
+          status: e.status,
+          latencyMs: e.latencyMs,
+          keyId: e.keyId,
+          at: e.at,
+          settleRefId: e.settleRefId,
+        })),
+      });
+      return new Response(JSON.stringify(result), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "ingest failed";
+      console.error("ingest-usage: recordUsage failed", { message });
+      return new Response(JSON.stringify({ error: "ingest failed" }), {
+        status: 500,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
   }),
 });
 

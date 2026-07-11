@@ -597,6 +597,19 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
     const env = this.env as Cloudflare.Env;
     const url = env.CONVEX_URL;
     if (!url) return null;
+
+    const secret = env.GATEWAY_INTERNAL_SECRET;
+    if (secret) {
+      const siteBase = (
+        env.CONVEX_SITE_URL ?? url.replace(".convex.cloud", ".convex.site")
+      ).replace(/\/+$/, "");
+      return new ConvexUsageClient({
+        convexUrl: url,
+        ingestUrl: `${siteBase}/ingest-usage`,
+        internalSecret: secret,
+      });
+    }
+
     return new ConvexUsageClient({
       convexUrl: url,
       adminKey: env.CONVEX_DEPLOY_KEY,

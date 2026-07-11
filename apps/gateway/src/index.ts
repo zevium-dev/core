@@ -27,9 +27,11 @@ export interface Env {
   WALLET: DurableObjectNamespace<WalletDO>;
   CLERK_SECRET_KEY?: string;
   CONVEX_URL?: string;
-  /** Deploy/admin key for internalMutation wallets:recordUsage. */
+  /** Convex .convex.site origin for httpActions (ingest-usage). */
+  CONVEX_SITE_URL?: string;
+  /** Deploy/admin key fallback for internalMutation wallets:recordUsage. */
   CONVEX_DEPLOY_KEY?: string;
-  /** Shared secret for POST /internal/grant. */
+  /** Shared secret for POST /internal/grant + Convex /ingest-usage. */
   GATEWAY_INTERNAL_SECRET?: string;
   /**
    * Test-only: when set, Worker uses fixture key/spec sources populated via

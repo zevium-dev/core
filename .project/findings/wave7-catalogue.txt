@@ -1,0 +1,14 @@
+**CHANGED**
+- `convex/catalogue.ts` — pricing summary on `listPublic` (`minCost`/`maxCost`/`endpointCount`/`hasFreeTier`); args `sort`/`hasFreeTier`/`maxCost`; `summarizePublishedPricing` via `@zevium/shared`
+- `convex/catalogue.test.ts` — private/draft exclusion, pricing math, filters, sort, detail hide
+- `apps/web/src/routes/catalogue/index.tsx` — price range badge, free-tier badge, endpoint count; sort select + free toggle + max-cost input wired to query
+- `apps/web/src/routes/catalogue/$orgSlug.$projectSlug.tsx` — MCP host from `VITE_GATEWAY_URL` via landing helpers (playground untouched)
+- `apps/web/src/lib/catalogue-card.ts` + `.test.ts` — pure format helpers
+
+**VERIFY**
+- `pnpm typecheck` — green
+- `pnpm test` — green (web 56, convex 21, shared 27, gateway 45)
+- `pnpm --filter web build` — green
+- `npx convex dev --once` — clean (`Convex functions ready`)
+
+**DONE**

@@ -16,7 +16,10 @@ const LABELS: Record<string, string> = {
   app: "Dashboard",
   catalogue: "Catalogue",
   projects: "Projects",
+  org: "Organization",
+  create: "Create",
   settings: "Settings",
+  billing: "Billing",
 };
 
 function labelFor(segment: string) {

@@ -26,6 +26,7 @@ import {
 import { Skeleton } from "#/components/ui/skeleton";
 import { listKeys } from "#/lib/api-keys";
 import { api } from "#/lib/convex-api";
+import { deriveOnboardingFlags, shouldShowOnboarding } from "#/lib/onboarding";
 
 export const Route = createFileRoute("/app/")({
   component: DashboardPage,
@@ -74,6 +75,10 @@ function DashboardContent({ orgSlug }: { orgSlug: string }) {
     convexQuery(api.analytics.orgOverview, { orgSlug }),
   );
 
+  const { data: wallet } = useSuspenseQuery(
+    convexQuery(api.wallets.getMyWallet, { orgSlug }),
+  );
+
   const keysQuery = useQuery({
     queryKey: ["settings", "api-keys", "count"] as const,
     queryFn: () => listKeys(),
@@ -82,8 +87,12 @@ function DashboardContent({ orgSlug }: { orgSlug: string }) {
 
   const keyCount = keysQuery.data?.length ?? 0;
   const keysLoaded = !keysQuery.isPending;
-  const showOnboarding =
-    keysLoaded && keyCount === 0 && overview.callsCycle === 0;
+  const flags = deriveOnboardingFlags({
+    keyCount,
+    callsCycle: overview.callsCycle,
+    balance: wallet.balance,
+  });
+  const showOnboarding = shouldShowOnboarding({ keysLoaded, flags });
 
   return (
     <div className="flex flex-col gap-6">
@@ -96,8 +105,9 @@ function DashboardContent({ orgSlug }: { orgSlug: string }) {
 
       {showOnboarding ? (
         <OnboardingChecklist
-          hasKey={keyCount > 0}
-          hasCall={overview.callsCycle > 0}
+          hasKey={flags.hasKey}
+          hasCall={flags.hasCall}
+          hasTopUp={flags.hasTopUp}
         />
       ) : null}
 
@@ -260,9 +270,11 @@ function DashboardContent({ orgSlug }: { orgSlug: string }) {
 function OnboardingChecklist({
   hasKey,
   hasCall,
+  hasTopUp,
 }: {
   hasKey: boolean;
   hasCall: boolean;
+  hasTopUp: boolean;
 }) {
   const steps = [
     {
@@ -282,7 +294,7 @@ function OnboardingChecklist({
       icon: PhoneCall,
     },
     {
-      done: false,
+      done: hasTopUp,
       title: "Top up credits",
       body: "Prepaid org wallet. Zero balance blocks every call.",
       href: "/app/billing" as const,

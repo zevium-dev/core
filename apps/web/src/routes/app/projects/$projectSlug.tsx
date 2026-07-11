@@ -18,6 +18,11 @@ import { Suspense, useState } from "react";
 import { toast } from "sonner";
 
 import { NumberTicker } from "#/components/motion/number-ticker";
+import {
+  EarningsSkeleton,
+  ProjectEarningsPanel,
+} from "#/components/project-earnings-panel";
+import { ProjectSettingsPanel } from "#/components/project-settings-panel";
 import { Badge } from "#/components/ui/badge";
 import { Button } from "#/components/ui/button";
 import {
@@ -125,7 +130,9 @@ function ProjectShell({
 
   const updateProject = useConvexMutation(api.projects.update);
   const [visibilityOpen, setVisibilityOpen] = useState(false);
-  const [panel, setPanel] = useState<"overview" | "analytics">("overview");
+  const [panel, setPanel] = useState<
+    "overview" | "analytics" | "earnings" | "settings"
+  >("overview");
 
   const { mutate: setVisibility, isPending: visibilityPending } = useMutation({
     mutationFn: (visibility: "public" | "private") => {
@@ -248,29 +255,27 @@ function ProjectShell({
       <Tabs
         value={tab}
         onValueChange={(value) => {
-          if (value === "overview") {
-            setPanel("overview");
-            if (isSpecRoute) {
-              void navigate({
-                to: "/app/projects/$projectSlug",
-                params: { projectSlug: project.slug },
-              });
-            }
-          } else if (value === "analytics") {
-            setPanel("analytics");
-            if (isSpecRoute) {
-              void navigate({
-                to: "/app/projects/$projectSlug",
-                params: { projectSlug: project.slug },
-              });
-            }
-          } else if (value === "spec") {
+          if (value === "spec") {
             void navigate({
               to: "/app/projects/$projectSlug/spec",
               params: { projectSlug: project.slug },
             });
-          } else if (value === "settings") {
-            toast.message("Settings coming soon");
+            return;
+          }
+
+          if (
+            value === "overview" ||
+            value === "analytics" ||
+            value === "earnings" ||
+            value === "settings"
+          ) {
+            setPanel(value);
+            if (isSpecRoute) {
+              void navigate({
+                to: "/app/projects/$projectSlug",
+                params: { projectSlug: project.slug },
+              });
+            }
           }
         }}
       >
@@ -278,6 +283,7 @@ function ProjectShell({
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="spec">Spec</TabsTrigger>
           <TabsTrigger value="analytics">Analytics</TabsTrigger>
+          <TabsTrigger value="earnings">Earnings</TabsTrigger>
           <TabsTrigger value="settings">Settings</TabsTrigger>
         </TabsList>
       </Tabs>
@@ -288,22 +294,42 @@ function ProjectShell({
         <Suspense fallback={<AnalyticsSkeleton />}>
           <ProjectAnalyticsPanel orgSlug={orgSlug} projectSlug={project.slug} />
         </Suspense>
+      ) : panel === "earnings" ? (
+        <Suspense fallback={<EarningsSkeleton />}>
+          <ProjectEarningsPanel orgSlug={orgSlug} projectSlug={project.slug} />
+        </Suspense>
+      ) : panel === "settings" ? (
+        <ProjectSettingsPanel project={project} orgSlug={orgSlug} />
       ) : (
-        <ProjectOverview project={project} />
+        <ProjectOverview
+          project={project}
+          onEdit={() => setPanel("settings")}
+        />
       )}
     </div>
   );
 }
 
-function ProjectOverview({ project }: { project: Doc<"projects"> }) {
+function ProjectOverview({
+  project,
+  onEdit,
+}: {
+  project: Doc<"projects">;
+  onEdit: () => void;
+}) {
   return (
     <div className="grid gap-4 lg:grid-cols-2">
       <Card>
-        <CardHeader>
-          <CardTitle>Overview</CardTitle>
-          <CardDescription>
-            Project status and catalogue readiness.
-          </CardDescription>
+        <CardHeader className="flex flex-row items-start justify-between gap-4 space-y-0">
+          <div className="space-y-1.5">
+            <CardTitle>Overview</CardTitle>
+            <CardDescription>
+              Project status and catalogue readiness.
+            </CardDescription>
+          </div>
+          <Button type="button" variant="outline" size="sm" onClick={onEdit}>
+            Edit
+          </Button>
         </CardHeader>
         <CardContent className="space-y-3 text-sm">
           <div className="flex justify-between gap-4">
@@ -320,6 +346,12 @@ function ProjectOverview({ project }: { project: Doc<"projects"> }) {
               {project.tags.length === 0 ? "None" : project.tags.join(", ")}
             </span>
           </div>
+          {project.description ? (
+            <div className="space-y-1 border-t pt-3">
+              <span className="text-muted-foreground">Description</span>
+              <p className="text-sm">{project.description}</p>
+            </div>
+          ) : null}
         </CardContent>
       </Card>
 

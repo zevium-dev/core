@@ -15,11 +15,18 @@ import {
   CardTitle,
 } from "#/components/ui/card";
 import { Input } from "#/components/ui/input";
+import { Label } from "#/components/ui/label";
 import { Skeleton } from "#/components/ui/skeleton";
+import {
+  formatCataloguePriceRange,
+  formatEndpointCount,
+} from "#/lib/catalogue-card";
 import { api } from "#/lib/convex-api";
 import { cn } from "#/lib/utils";
 
 const SEARCH_DEBOUNCE_MS = 250;
+
+type CatalogueSort = "newest" | "name" | "cheapest";
 
 export const Route = createFileRoute("/catalogue/")({
   loader: async ({ context }) => {
@@ -48,6 +55,10 @@ function CataloguePage() {
   const [searchInput, setSearchInput] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [activeTag, setActiveTag] = useState<string | null>(null);
+  const [sort, setSort] = useState<CatalogueSort>("newest");
+  const [freeOnly, setFreeOnly] = useState(false);
+  const [maxCostInput, setMaxCostInput] = useState("");
+  const [debouncedMaxCost, setDebouncedMaxCost] = useState<number | null>(null);
 
   useEffect(() => {
     const handle = window.setTimeout(() => {
@@ -55,6 +66,23 @@ function CataloguePage() {
     }, SEARCH_DEBOUNCE_MS);
     return () => window.clearTimeout(handle);
   }, [searchInput]);
+
+  useEffect(() => {
+    const handle = window.setTimeout(() => {
+      const trimmed = maxCostInput.trim();
+      if (trimmed === "") {
+        setDebouncedMaxCost(null);
+        return;
+      }
+      const n = Number(trimmed);
+      if (!Number.isFinite(n) || n < 0) {
+        setDebouncedMaxCost(null);
+        return;
+      }
+      setDebouncedMaxCost(n);
+    }, SEARCH_DEBOUNCE_MS);
+    return () => window.clearTimeout(handle);
+  }, [maxCostInput]);
 
   return (
     <div className="min-h-screen bg-background">
@@ -82,11 +110,68 @@ function CataloguePage() {
           />
         </div>
 
+        <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
+          <div className="grid gap-1.5">
+            <Label
+              htmlFor="catalogue-sort"
+              className="text-xs text-muted-foreground"
+            >
+              Sort
+            </Label>
+            <select
+              id="catalogue-sort"
+              aria-label="Sort catalogue"
+              className="h-9 min-w-[10rem] rounded-md border border-input bg-transparent px-3 text-sm shadow-xs outline-none transition-[color,box-shadow] duration-[var(--dur-instant)] ease-[var(--ease)] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+              value={sort}
+              onChange={(e) => setSort(e.target.value as CatalogueSort)}
+            >
+              <option value="newest">Newest</option>
+              <option value="name">Name</option>
+              <option value="cheapest">Cheapest</option>
+            </select>
+          </div>
+
+          <div className="grid gap-1.5">
+            <Label
+              htmlFor="catalogue-max-cost"
+              className="text-xs text-muted-foreground"
+            >
+              Max cost (cr)
+            </Label>
+            <Input
+              id="catalogue-max-cost"
+              type="number"
+              min={0}
+              step={1}
+              inputMode="numeric"
+              placeholder="Any"
+              className="w-28"
+              aria-label="Maximum credits per call"
+              value={maxCostInput}
+              onChange={(e) => setMaxCostInput(e.target.value)}
+            />
+          </div>
+
+          <label className="flex h-9 cursor-pointer items-center gap-2 rounded-md border border-input px-3 text-sm shadow-xs transition-[background-color,border-color] duration-[var(--dur-instant)] ease-[var(--ease)] hover:bg-accent/40">
+            <input
+              type="checkbox"
+              className="size-3.5 accent-primary"
+              checked={freeOnly}
+              onChange={(e) => setFreeOnly(e.target.checked)}
+              aria-label="Only free-tier APIs"
+            />
+            <span className="text-sm">Free tier only</span>
+          </label>
+        </div>
+
         <Suspense fallback={<CatalogueGridSkeleton />}>
           <CatalogueList
             search={debouncedSearch}
             activeTag={activeTag}
             onTagChange={setActiveTag}
+            sort={sort}
+            freeOnly={freeOnly}
+            maxCost={debouncedMaxCost}
           />
         </Suspense>
       </main>
@@ -98,16 +183,25 @@ function CatalogueList({
   search,
   activeTag,
   onTagChange,
+  sort,
+  freeOnly,
+  maxCost,
 }: {
   search: string;
   activeTag: string | null;
   onTagChange: (tag: string | null) => void;
+  sort: CatalogueSort;
+  freeOnly: boolean;
+  maxCost: number | null;
 }) {
   const trimmed = search.trim();
   const { data } = useSuspenseQuery(
     convexQuery(api.catalogue.listPublic, {
       ...(trimmed.length > 0 ? { search: trimmed } : {}),
       ...(activeTag ? { tag: activeTag } : {}),
+      sort,
+      ...(freeOnly ? { hasFreeTier: true } : {}),
+      ...(maxCost !== null ? { maxCost } : {}),
     }),
   );
 
@@ -119,6 +213,9 @@ function CatalogueList({
     if (activeTag) set.add(activeTag);
     return Array.from(set).sort((a, b) => a.localeCompare(b));
   }, [data.items, activeTag]);
+
+  const hasFilters =
+    trimmed.length > 0 || activeTag !== null || freeOnly || maxCost !== null;
 
   return (
     <FadeIn className="flex flex-col gap-6">
@@ -158,60 +255,82 @@ function CatalogueList({
       ) : null}
 
       {data.items.length === 0 ? (
-        <CatalogueEmpty hasSearch={trimmed.length > 0 || activeTag !== null} />
+        <CatalogueEmpty hasSearch={hasFilters} />
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {data.items.map((item) => (
-            <Link
-              key={item.projectId}
-              to="/catalogue/$orgSlug/$projectSlug"
-              params={{ orgSlug: item.orgSlug, projectSlug: item.slug }}
-              className="group block rounded-xl outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
-            >
-              <Card className="h-full transition-[transform,box-shadow,border-color] duration-[var(--dur-instant)] ease-[var(--ease)] group-hover:-translate-y-0.5 group-hover:shadow-sm group-active:scale-[0.98]">
-                <CardHeader className="gap-3">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      {/* VT morph: catalogue card → API detail title (api-title-{slug})
-                          No api-logo/api-price morph: listPublic has no logo/price fields yet. */}
-                      <CardTitle
-                        className="text-base"
-                        style={{
-                          viewTransitionName: `api-title-${item.slug}`,
-                        }}
-                      >
-                        {item.name}
-                      </CardTitle>
-                      <CardDescription className="font-mono text-xs">
-                        {item.orgSlug}/{item.slug}
-                      </CardDescription>
+          {data.items.map((item) => {
+            const priceLabel = formatCataloguePriceRange(item.pricing);
+            const endpointLabel =
+              item.pricing !== null && item.pricing.endpointCount > 0
+                ? formatEndpointCount(item.pricing.endpointCount)
+                : null;
+            const freeBadge = item.pricing?.hasFreeTier === true;
+
+            return (
+              <Link
+                key={item.projectId}
+                to="/catalogue/$orgSlug/$projectSlug"
+                params={{ orgSlug: item.orgSlug, projectSlug: item.slug }}
+                className="group block rounded-xl outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+              >
+                <Card className="h-full transition-[transform,box-shadow,border-color] duration-[var(--dur-instant)] ease-[var(--ease)] group-hover:-translate-y-0.5 group-hover:shadow-sm group-active:scale-[0.98]">
+                  <CardHeader className="gap-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <CardTitle
+                          className="text-base"
+                          style={{
+                            viewTransitionName: `api-title-${item.slug}`,
+                          }}
+                        >
+                          {item.name}
+                        </CardTitle>
+                        <CardDescription className="font-mono text-xs">
+                          {item.orgSlug}/{item.slug}
+                        </CardDescription>
+                      </div>
+                      <Badge variant="secondary" className="shrink-0">
+                        {item.orgName}
+                      </Badge>
                     </div>
-                    <Badge variant="secondary" className="shrink-0">
-                      {item.orgName}
-                    </Badge>
-                  </div>
-                  {item.description ? (
-                    <CardDescription className="line-clamp-2">
-                      {item.description}
-                    </CardDescription>
-                  ) : (
-                    <CardDescription className="text-muted-foreground/70">
-                      No description yet.
-                    </CardDescription>
-                  )}
-                  {item.tags.length > 0 ? (
+                    {item.description ? (
+                      <CardDescription className="line-clamp-2">
+                        {item.description}
+                      </CardDescription>
+                    ) : (
+                      <CardDescription className="text-muted-foreground/70">
+                        No description yet.
+                      </CardDescription>
+                    )}
                     <div className="flex flex-wrap gap-2 pt-1">
-                      {item.tags.slice(0, 4).map((tag) => (
+                      {priceLabel ? (
+                        <Badge
+                          variant="outline"
+                          className="font-mono"
+                          style={{
+                            viewTransitionName: `api-price-${item.slug}`,
+                          }}
+                        >
+                          {priceLabel}
+                        </Badge>
+                      ) : null}
+                      {freeBadge ? (
+                        <Badge variant="secondary">Free tier</Badge>
+                      ) : null}
+                      {endpointLabel ? (
+                        <Badge variant="outline">{endpointLabel}</Badge>
+                      ) : null}
+                      {item.tags.slice(0, 3).map((tag) => (
                         <Badge key={tag} variant="outline">
                           {tag}
                         </Badge>
                       ))}
                     </div>
-                  ) : null}
-                </CardHeader>
-              </Card>
-            </Link>
-          ))}
+                  </CardHeader>
+                </Card>
+              </Link>
+            );
+          })}
         </div>
       )}
     </FadeIn>
@@ -230,7 +349,7 @@ function CatalogueEmpty({ hasSearch }: { hasSearch: boolean }) {
         </CardTitle>
         <CardDescription className="max-w-sm">
           {hasSearch
-            ? "Try a different search or tag. Public listings show up here when publishers make an API public."
+            ? "Try different search, tags, or price filters. Public listings show up here when publishers make an API public."
             : "Publishers haven't listed any public APIs yet. Check back soon, or sign in to publish your own."}
         </CardDescription>
         <div className="pt-4">
@@ -265,6 +384,7 @@ function CatalogueGridSkeleton() {
             <div className="flex gap-2 pt-1">
               <Skeleton className="h-5 w-16 rounded-full" />
               <Skeleton className="h-5 w-20 rounded-full" />
+              <Skeleton className="h-5 w-14 rounded-full" />
             </div>
           </CardHeader>
         </Card>
@@ -286,6 +406,11 @@ function CatalogueSkeleton() {
         <div className="mb-8 space-y-2">
           <Skeleton className="h-9 w-40" />
           <Skeleton className="h-4 w-72" />
+        </div>
+        <div className="mb-6 flex gap-3">
+          <Skeleton className="h-9 w-40" />
+          <Skeleton className="h-9 w-28" />
+          <Skeleton className="h-9 w-36" />
         </div>
         <CatalogueGridSkeleton />
       </main>

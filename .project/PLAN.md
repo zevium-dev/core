@@ -32,7 +32,8 @@
 | 6    | convex     | usage/billing/earnings query surface + specs.getVersion + indexes + convex-test                                                                     | done — 11/11 tests, schema pushed                         |
 | 6    | web+shared | spec editor cut 1: CodeMirror, live validation (shared port), YAML→JSON, import                                                                     | done — e2e 02 PASS through new editor                     |
 | 6    | web        | landing v2: scroll-depth sections, real footer, docs placeholder                                                                                    | done — visual QA clean                                    |
-| 7    | web        | settings (Clerk embeds+prefs), activity, billing breakdown, project settings/earnings, org surfaces, catalogue filters, onboarding fix, MCP env URL | in flight (4 lanes)                                       |
+| 7    | web        | settings (Clerk embeds+prefs), activity, billing breakdown, project settings/earnings, org surfaces, catalogue filters, onboarding fix, MCP env URL | done — visual QA on all 7 screens                         |
+| 7    | gw+convex  | usage ingest pipe: /ingest-usage http action (internal-secret) ← wallet DO alarm flush; was silently dead without deploy key                        | done — events landed retroactively, UI live               |
 | 8    | all        | admin panel, publisher webhooks, notifications, deprecation flow, spec editor cut 2 (rail write-back + diffs)                                       | queued                                                    |
 
 ## Decisions (user, 2026-07-11)

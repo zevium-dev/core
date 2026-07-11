@@ -34,6 +34,11 @@ import { Skeleton } from "#/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "#/components/ui/tabs";
 import { api } from "#/lib/convex-api";
 import { humanError } from "#/lib/human-error";
+import {
+  buildMcpConfigSnippet,
+  mcpEndpointUrl,
+  resolveGatewayOrigin,
+} from "#/lib/landing";
 
 const API_KEY_STORAGE = "zevium:playground-api-key";
 const DEFAULT_GATEWAY = "http://localhost:8787/gateway";
@@ -757,17 +762,11 @@ function ConnectAgentPanel({
   orgSlug: string;
   projectSlug: string;
 }) {
-  const mcpUrl = "https://gateway.zevium.dev/mcp";
-  const snippet = `{
-  "mcpServers": {
-    "zevium": {
-      "url": "${mcpUrl}",
-      "headers": {
-        "Authorization": "Bearer YOUR_API_KEY"
-      }
-    }
-  }
-}`;
+  const gatewayOrigin = resolveGatewayOrigin(
+    import.meta.env.VITE_GATEWAY_URL as string | undefined,
+  );
+  const mcpUrl = mcpEndpointUrl(gatewayOrigin);
+  const snippet = buildMcpConfigSnippet(mcpUrl);
 
   const notes = `// Agent notes for ${orgSlug}/${projectSlug}
 // 1. Search catalogue with tool search_apis({ query })

@@ -83,8 +83,16 @@ export type ConvexUsageClientOptions = {
   /**
    * Deploy/admin key so internalMutation wallets:recordUsage is callable.
    * Authorization: Convex <key>
+   * Fallback only — prefer ingestUrl + internalSecret.
    */
   adminKey?: string;
+  /**
+   * POST target for shared-secret ingest (Convex httpAction /ingest-usage).
+   * When set with internalSecret, preferred over adminKey / public client.
+   */
+  ingestUrl?: string;
+  /** Shared secret for x-internal-secret header on ingest path. */
+  internalSecret?: string;
   fetchImpl?: typeof fetch;
   /** Injected client (tests). */
   client?: ConvexHttpClient;
@@ -109,17 +117,28 @@ export class ConvexUsageClient {
     | null;
   readonly #convexUrl: string | null;
   readonly #adminKey: string | undefined;
+  readonly #ingestUrl: string | undefined;
+  readonly #internalSecret: string | undefined;
   readonly #fetch: typeof fetch;
 
   constructor(opts: ConvexUsageClientOptions) {
     this.#mutationFn = opts.mutationFn ?? null;
     this.#adminKey = opts.adminKey;
-    this.#fetch = opts.fetchImpl ?? fetch;
+    this.#ingestUrl = opts.ingestUrl;
+    this.#internalSecret = opts.internalSecret;
+    // workerd fetch is not free-callable; wrap so stored ref keeps `this`.
+    this.#fetch =
+      opts.fetchImpl ??
+      ((input: RequestInfo | URL, init?: RequestInit) => fetch(input, init));
     if (opts.mutationFn) {
       this.#client = null;
       this.#convexUrl = null;
     } else if (opts.client) {
       this.#client = opts.client;
+      this.#convexUrl = opts.convexUrl.replace(/\/+$/, "");
+    } else if (opts.ingestUrl && opts.internalSecret) {
+      // Ingest path needs no ConvexHttpClient.
+      this.#client = null;
       this.#convexUrl = opts.convexUrl.replace(/\/+$/, "");
     } else {
       this.#client = new ConvexHttpClient(opts.convexUrl, {
@@ -139,6 +158,11 @@ export class ConvexUsageClient {
       return await this.#mutationFn("wallets:recordUsage", { events });
     }
 
+    // Prefer shared-secret httpAction over deploy-key mutation.
+    if (this.#ingestUrl && this.#internalSecret) {
+      return await this.#recordViaIngest(events);
+    }
+
     // Prefer raw HTTP when admin key present — setAdminAuth is @internal
     // and not on public ConvexHttpClient typings.
     if (this.#adminKey && this.#convexUrl) {
@@ -154,6 +178,32 @@ export class ConvexUsageClient {
     }
     const result = await this.#client.mutation(recordUsageRef, { events });
     return parseRecordUsageResult(result);
+  }
+
+  async #recordViaIngest(
+    events: ConvexUsageRecord[],
+  ): Promise<RecordUsageResult> {
+    const url = (this.#ingestUrl ?? "").replace(/\/+$/, "");
+    const secret = this.#internalSecret ?? "";
+    const res = await this.#fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-internal-secret": secret,
+      },
+      body: JSON.stringify({ events }),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`convex ingest failed: ${res.status} ${text}`);
+    }
+    let json: unknown;
+    try {
+      json = await res.json();
+    } catch {
+      throw new Error("convex ingest returned non-json");
+    }
+    return parseRecordUsageResult(json);
   }
 
   async #mutationWithAdmin(

@@ -1,0 +1,20 @@
+**DONE.** Project mgmt surfaces live. Dead toast Settings dead.
+
+### CHANGED
+- `apps/web/src/lib/project-helpers.ts` — credits→$ + tag parse helpers
+- `apps/web/src/lib/project-helpers.test.ts` — vitest coverage
+- `apps/web/src/components/project-settings-panel.tsx` — edit form (name/desc/tags), visibility dialog, danger zone delete (type slug confirm) → `projects.update` / `projects.remove`, optimistic save, toasts
+- `apps/web/src/components/project-earnings-panel.tsx` — `earnings.forOrg` filtered to project + org month/all-time cards, "you keep 95%", `$` at 10k credits = $1, skeleton
+- `apps/web/src/routes/app/projects/$projectSlug.tsx` — tabs: Overview | Spec | Analytics | **Earnings** | **Settings**; Overview **Edit** → Settings; header Make Public/Private kept
+
+### VERIFY
+| Cmd | Result |
+|---|---|
+| `pnpm --filter web typecheck` | green |
+| `pnpm --filter web test` | **56/56** pass (10 files) |
+| `pnpm --filter web build` | green |
+
+### Notes
+- No AlertDialog component in tree — delete uses Dialog + `variant="destructive"` + slug type-confirm. Same UX contract.
+- `earnings.forOrg` month is **org-wide**. Project cards use `byProject` all-time; org month/all-time shown with clear labels. No fake pro-rata.
+- Versions rail skipped (wave 8). Spec-editor / convex / billing / settings routes untouched.

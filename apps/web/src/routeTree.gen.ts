@@ -18,14 +18,17 @@ import { Route as SignUpSplatRouteImport } from './routes/sign-up.$'
 import { Route as SignInSplatRouteImport } from './routes/sign-in.$'
 import { Route as AppSettingsRouteImport } from './routes/app/settings'
 import { Route as AppProjectsRouteImport } from './routes/app/projects'
+import { Route as AppOrgRouteImport } from './routes/app/org'
 import { Route as AppBillingRouteImport } from './routes/app/billing'
 import { Route as AppSettingsIndexRouteImport } from './routes/app/settings/index'
 import { Route as AppProjectsIndexRouteImport } from './routes/app/projects/index'
+import { Route as AppOrgIndexRouteImport } from './routes/app/org/index'
 import { Route as CatalogueOrgSlugProjectSlugRouteImport } from './routes/catalogue/$orgSlug.$projectSlug'
 import { Route as AppSettingsKeysRouteImport } from './routes/app/settings/keys'
 import { Route as AppSettingsActivityRouteImport } from './routes/app/settings/activity'
 import { Route as AppProjectsCreateRouteImport } from './routes/app/projects/create'
 import { Route as AppProjectsProjectSlugRouteImport } from './routes/app/projects/$projectSlug'
+import { Route as AppOrgCreateRouteImport } from './routes/app/org/create'
 import { Route as AppProjectsProjectSlugSpecRouteImport } from './routes/app/projects/$projectSlug/spec'
 
 const CatalogueRoute = CatalogueRouteImport.update({
@@ -73,6 +76,11 @@ const AppProjectsRoute = AppProjectsRouteImport.update({
   path: '/projects',
   getParentRoute: () => AppRoute,
 } as any)
+const AppOrgRoute = AppOrgRouteImport.update({
+  id: '/org',
+  path: '/org',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppBillingRoute = AppBillingRouteImport.update({
   id: '/billing',
   path: '/billing',
@@ -87,6 +95,11 @@ const AppProjectsIndexRoute = AppProjectsIndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => AppProjectsRoute,
+} as any)
+const AppOrgIndexRoute = AppOrgIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AppOrgRoute,
 } as any)
 const CatalogueOrgSlugProjectSlugRoute =
   CatalogueOrgSlugProjectSlugRouteImport.update({
@@ -114,6 +127,11 @@ const AppProjectsProjectSlugRoute = AppProjectsProjectSlugRouteImport.update({
   path: '/$projectSlug',
   getParentRoute: () => AppProjectsRoute,
 } as any)
+const AppOrgCreateRoute = AppOrgCreateRouteImport.update({
+  id: '/create',
+  path: '/create',
+  getParentRoute: () => AppOrgRoute,
+} as any)
 const AppProjectsProjectSlugSpecRoute =
   AppProjectsProjectSlugSpecRouteImport.update({
     id: '/spec',
@@ -126,17 +144,20 @@ export interface FileRoutesByFullPath {
   '/app': typeof AppRouteWithChildren
   '/catalogue': typeof CatalogueRouteWithChildren
   '/app/billing': typeof AppBillingRoute
+  '/app/org': typeof AppOrgRouteWithChildren
   '/app/projects': typeof AppProjectsRouteWithChildren
   '/app/settings': typeof AppSettingsRouteWithChildren
   '/sign-in/$': typeof SignInSplatRoute
   '/sign-up/$': typeof SignUpSplatRoute
   '/app/': typeof AppIndexRoute
   '/catalogue/': typeof CatalogueIndexRoute
+  '/app/org/create': typeof AppOrgCreateRoute
   '/app/projects/$projectSlug': typeof AppProjectsProjectSlugRouteWithChildren
   '/app/projects/create': typeof AppProjectsCreateRoute
   '/app/settings/activity': typeof AppSettingsActivityRoute
   '/app/settings/keys': typeof AppSettingsKeysRoute
   '/catalogue/$orgSlug/$projectSlug': typeof CatalogueOrgSlugProjectSlugRoute
+  '/app/org/': typeof AppOrgIndexRoute
   '/app/projects/': typeof AppProjectsIndexRoute
   '/app/settings/': typeof AppSettingsIndexRoute
   '/app/projects/$projectSlug/spec': typeof AppProjectsProjectSlugSpecRoute
@@ -148,11 +169,13 @@ export interface FileRoutesByTo {
   '/sign-up/$': typeof SignUpSplatRoute
   '/app': typeof AppIndexRoute
   '/catalogue': typeof CatalogueIndexRoute
+  '/app/org/create': typeof AppOrgCreateRoute
   '/app/projects/$projectSlug': typeof AppProjectsProjectSlugRouteWithChildren
   '/app/projects/create': typeof AppProjectsCreateRoute
   '/app/settings/activity': typeof AppSettingsActivityRoute
   '/app/settings/keys': typeof AppSettingsKeysRoute
   '/catalogue/$orgSlug/$projectSlug': typeof CatalogueOrgSlugProjectSlugRoute
+  '/app/org': typeof AppOrgIndexRoute
   '/app/projects': typeof AppProjectsIndexRoute
   '/app/settings': typeof AppSettingsIndexRoute
   '/app/projects/$projectSlug/spec': typeof AppProjectsProjectSlugSpecRoute
@@ -163,17 +186,20 @@ export interface FileRoutesById {
   '/app': typeof AppRouteWithChildren
   '/catalogue': typeof CatalogueRouteWithChildren
   '/app/billing': typeof AppBillingRoute
+  '/app/org': typeof AppOrgRouteWithChildren
   '/app/projects': typeof AppProjectsRouteWithChildren
   '/app/settings': typeof AppSettingsRouteWithChildren
   '/sign-in/$': typeof SignInSplatRoute
   '/sign-up/$': typeof SignUpSplatRoute
   '/app/': typeof AppIndexRoute
   '/catalogue/': typeof CatalogueIndexRoute
+  '/app/org/create': typeof AppOrgCreateRoute
   '/app/projects/$projectSlug': typeof AppProjectsProjectSlugRouteWithChildren
   '/app/projects/create': typeof AppProjectsCreateRoute
   '/app/settings/activity': typeof AppSettingsActivityRoute
   '/app/settings/keys': typeof AppSettingsKeysRoute
   '/catalogue/$orgSlug/$projectSlug': typeof CatalogueOrgSlugProjectSlugRoute
+  '/app/org/': typeof AppOrgIndexRoute
   '/app/projects/': typeof AppProjectsIndexRoute
   '/app/settings/': typeof AppSettingsIndexRoute
   '/app/projects/$projectSlug/spec': typeof AppProjectsProjectSlugSpecRoute
@@ -185,17 +211,20 @@ export interface FileRouteTypes {
     | '/app'
     | '/catalogue'
     | '/app/billing'
+    | '/app/org'
     | '/app/projects'
     | '/app/settings'
     | '/sign-in/$'
     | '/sign-up/$'
     | '/app/'
     | '/catalogue/'
+    | '/app/org/create'
     | '/app/projects/$projectSlug'
     | '/app/projects/create'
     | '/app/settings/activity'
     | '/app/settings/keys'
     | '/catalogue/$orgSlug/$projectSlug'
+    | '/app/org/'
     | '/app/projects/'
     | '/app/settings/'
     | '/app/projects/$projectSlug/spec'
@@ -207,11 +236,13 @@ export interface FileRouteTypes {
     | '/sign-up/$'
     | '/app'
     | '/catalogue'
+    | '/app/org/create'
     | '/app/projects/$projectSlug'
     | '/app/projects/create'
     | '/app/settings/activity'
     | '/app/settings/keys'
     | '/catalogue/$orgSlug/$projectSlug'
+    | '/app/org'
     | '/app/projects'
     | '/app/settings'
     | '/app/projects/$projectSlug/spec'
@@ -221,17 +252,20 @@ export interface FileRouteTypes {
     | '/app'
     | '/catalogue'
     | '/app/billing'
+    | '/app/org'
     | '/app/projects'
     | '/app/settings'
     | '/sign-in/$'
     | '/sign-up/$'
     | '/app/'
     | '/catalogue/'
+    | '/app/org/create'
     | '/app/projects/$projectSlug'
     | '/app/projects/create'
     | '/app/settings/activity'
     | '/app/settings/keys'
     | '/catalogue/$orgSlug/$projectSlug'
+    | '/app/org/'
     | '/app/projects/'
     | '/app/settings/'
     | '/app/projects/$projectSlug/spec'
@@ -310,6 +344,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppProjectsRouteImport
       parentRoute: typeof AppRoute
     }
+    '/app/org': {
+      id: '/app/org'
+      path: '/org'
+      fullPath: '/app/org'
+      preLoaderRoute: typeof AppOrgRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/app/billing': {
       id: '/app/billing'
       path: '/billing'
@@ -330,6 +371,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/app/projects/'
       preLoaderRoute: typeof AppProjectsIndexRouteImport
       parentRoute: typeof AppProjectsRoute
+    }
+    '/app/org/': {
+      id: '/app/org/'
+      path: '/'
+      fullPath: '/app/org/'
+      preLoaderRoute: typeof AppOrgIndexRouteImport
+      parentRoute: typeof AppOrgRoute
     }
     '/catalogue/$orgSlug/$projectSlug': {
       id: '/catalogue/$orgSlug/$projectSlug'
@@ -366,6 +414,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppProjectsProjectSlugRouteImport
       parentRoute: typeof AppProjectsRoute
     }
+    '/app/org/create': {
+      id: '/app/org/create'
+      path: '/create'
+      fullPath: '/app/org/create'
+      preLoaderRoute: typeof AppOrgCreateRouteImport
+      parentRoute: typeof AppOrgRoute
+    }
     '/app/projects/$projectSlug/spec': {
       id: '/app/projects/$projectSlug/spec'
       path: '/spec'
@@ -375,6 +430,19 @@ declare module '@tanstack/react-router' {
     }
   }
 }
+
+interface AppOrgRouteChildren {
+  AppOrgCreateRoute: typeof AppOrgCreateRoute
+  AppOrgIndexRoute: typeof AppOrgIndexRoute
+}
+
+const AppOrgRouteChildren: AppOrgRouteChildren = {
+  AppOrgCreateRoute: AppOrgCreateRoute,
+  AppOrgIndexRoute: AppOrgIndexRoute,
+}
+
+const AppOrgRouteWithChildren =
+  AppOrgRoute._addFileChildren(AppOrgRouteChildren)
 
 interface AppProjectsProjectSlugRouteChildren {
   AppProjectsProjectSlugSpecRoute: typeof AppProjectsProjectSlugSpecRoute
@@ -424,6 +492,7 @@ const AppSettingsRouteWithChildren = AppSettingsRoute._addFileChildren(
 
 interface AppRouteChildren {
   AppBillingRoute: typeof AppBillingRoute
+  AppOrgRoute: typeof AppOrgRouteWithChildren
   AppProjectsRoute: typeof AppProjectsRouteWithChildren
   AppSettingsRoute: typeof AppSettingsRouteWithChildren
   AppIndexRoute: typeof AppIndexRoute
@@ -431,6 +500,7 @@ interface AppRouteChildren {
 
 const AppRouteChildren: AppRouteChildren = {
   AppBillingRoute: AppBillingRoute,
+  AppOrgRoute: AppOrgRouteWithChildren,
   AppProjectsRoute: AppProjectsRouteWithChildren,
   AppSettingsRoute: AppSettingsRouteWithChildren,
   AppIndexRoute: AppIndexRoute,

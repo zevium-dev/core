@@ -19,6 +19,12 @@ import {
   CardTitle,
 } from "#/components/ui/card";
 import { Skeleton } from "#/components/ui/skeleton";
+import {
+  formatCredits,
+  formatCycleMonthLabel,
+  isCycleEmpty,
+  truncateKeyId,
+} from "#/lib/billing-cycle";
 import { api } from "#/lib/convex-api";
 import { humanError } from "#/lib/human-error";
 
@@ -91,6 +97,10 @@ function BillingContent({ orgSlug }: { orgSlug: string }) {
   );
   const packs = packsQuery.data;
 
+  const { data: cycle } = useSuspenseQuery(
+    convexQuery(api.billing.cycleBreakdown, { orgSlug }),
+  );
+
   const [checkoutPackId, setCheckoutPackId] = useState<string | null>(null);
 
   // Ensure wallet row exists so grants land cleanly.
@@ -159,11 +169,74 @@ function BillingContent({ orgSlug }: { orgSlug: string }) {
               <Sparkles className="size-3.5" />
               Usage this cycle
             </CardDescription>
-            <CardTitle className="text-xl">Coming soon</CardTitle>
+            <CardTitle className="text-xl tabular-nums">
+              {formatCredits(cycle.totalCalls)}{" "}
+              <span className="text-base font-normal text-muted-foreground">
+                calls · {formatCredits(cycle.totalCredits)} credits
+              </span>
+            </CardTitle>
           </CardHeader>
-          <CardContent className="text-sm text-muted-foreground">
-            Projected spend and per-key / per-endpoint breakdown land with the
-            usage rollup cron.
+          <CardContent className="space-y-4 text-sm">
+            <p className="text-muted-foreground">
+              {formatCycleMonthLabel(cycle.cycleStart)}. Every recorded gateway
+              call counts.
+            </p>
+            {isCycleEmpty(cycle) ? (
+              <p className="text-muted-foreground">No usage this month yet.</p>
+            ) : (
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+                    By project
+                  </p>
+                  {cycle.byProject.length === 0 ? (
+                    <p className="text-muted-foreground">—</p>
+                  ) : (
+                    <ul className="flex flex-col gap-1.5">
+                      {cycle.byProject.map((row) => (
+                        <li
+                          key={row.projectId}
+                          className="flex items-center justify-between gap-2 rounded-md border px-2.5 py-1.5"
+                        >
+                          <span className="min-w-0 truncate font-medium">
+                            {row.name}
+                          </span>
+                          <span className="shrink-0 tabular-nums text-muted-foreground">
+                            {formatCredits(row.calls)} ·{" "}
+                            {formatCredits(row.credits)} cr
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+                <div className="space-y-2">
+                  <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+                    By key
+                  </p>
+                  {cycle.byKey.length === 0 ? (
+                    <p className="text-muted-foreground">—</p>
+                  ) : (
+                    <ul className="flex flex-col gap-1.5">
+                      {cycle.byKey.map((row) => (
+                        <li
+                          key={row.keyId}
+                          className="flex items-center justify-between gap-2 rounded-md border px-2.5 py-1.5"
+                        >
+                          <span className="min-w-0 truncate font-mono text-xs">
+                            {truncateKeyId(row.keyId)}
+                          </span>
+                          <span className="shrink-0 tabular-nums text-muted-foreground">
+                            {formatCredits(row.calls)} ·{" "}
+                            {formatCredits(row.credits)} cr
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>
