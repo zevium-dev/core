@@ -1,5 +1,8 @@
 /** Map unknown mutation/query errors to short human copy. Never leak internals. */
-export function humanError(err: unknown, fallback = "Something went wrong. Try again."): string {
+export function humanError(
+  err: unknown,
+  fallback = "Something went wrong. Try again.",
+): string {
   if (err instanceof Error) {
     const msg = err.message.trim();
     if (

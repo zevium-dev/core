@@ -32,8 +32,7 @@ export const listPublic = query({
   }> => {
     const search =
       args.search === undefined ? "" : args.search.trim().toLowerCase();
-    const tag =
-      args.tag === undefined ? "" : args.tag.trim().toLowerCase();
+    const tag = args.tag === undefined ? "" : args.tag.trim().toLowerCase();
     const offset =
       args.cursor !== undefined && args.cursor !== ""
         ? Number.parseInt(args.cursor, 10)
@@ -59,7 +58,8 @@ export const listPublic = query({
       if (tag !== "" && !project.tags.includes(tag)) continue;
 
       if (search !== "") {
-        const hay = `${project.name} ${project.slug} ${project.description ?? ""} ${project.tags.join(" ")}`.toLowerCase();
+        const hay =
+          `${project.name} ${project.slug} ${project.description ?? ""} ${project.tags.join(" ")}`.toLowerCase();
         if (!hay.includes(search)) continue;
       }
 
@@ -90,8 +90,7 @@ export const listPublic = query({
 
     const page = filtered.slice(start, start + PAGE_SIZE);
     const nextOffset = start + PAGE_SIZE;
-    const nextCursor =
-      nextOffset < filtered.length ? String(nextOffset) : null;
+    const nextCursor = nextOffset < filtered.length ? String(nextOffset) : null;
 
     return {
       items: page.map(({ project, org, publishedAt }) => ({

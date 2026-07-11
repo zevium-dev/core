@@ -11,6 +11,7 @@ agent-browser find role button click --name "Create project"
 ```
 
 TASK:
+
 1. Add helper to e2e/lib.sh: `click_button <accessible-name> [css-fallback]` — scrollIntoView (via eval, match by text or css) then `ab find role button click --name`, fallback `ab click <css>`. Use `{block:'center'}`.
 2. Replace ALL button clicks in 02-publisher.sh / 03-consumer.sh with the helper (form submits may alternatively use `agent-browser eval "document.querySelector('form')?.requestSubmit()"` — also proven working).
 3. Run `bash e2e/02-publisher.sh` then `bash e2e/03-consumer.sh`, iterate on SCRIPT bugs (selectors, timing, scroll) until both pass or fail ONLY on genuinely missing app functionality. Read apps/web/src/routes for actual selectors/flows (spec editor, publish button, make-public toggle) instead of guessing.

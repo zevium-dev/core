@@ -45,7 +45,8 @@ export default defineSchema({
     version: v.string(),
     spec: v.string(),
     publishedAt: v.number(),
-  }).index("by_project", ["projectId"])
+  })
+    .index("by_project", ["projectId"])
     .index("by_project_version", ["projectId", "version"])
     .index("by_project_published", ["projectId", "publishedAt"]),
 

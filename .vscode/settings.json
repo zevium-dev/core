@@ -10,5 +10,16 @@
   },
   "typescript.tsdk": "node_modules/typescript/lib",
   "typescript.experimental.useTsgo": false,
-  "cSpell.words": ["arktype", "magicui", "orpc", "POSTHOG", "shadcn", "totp", "trpc", "Turso", "typesafe", "zevium"]
+  "cSpell.words": [
+    "arktype",
+    "magicui",
+    "orpc",
+    "POSTHOG",
+    "shadcn",
+    "totp",
+    "trpc",
+    "Turso",
+    "typesafe",
+    "zevium"
+  ]
 }

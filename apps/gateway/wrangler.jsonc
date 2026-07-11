@@ -16,14 +16,14 @@
     "bindings": [
       {
         "name": "WALLET",
-        "class_name": "WalletDO"
-      }
-    ]
+        "class_name": "WalletDO",
+      },
+    ],
   },
   "migrations": [
     {
       "tag": "v1",
-      "new_classes": ["WalletDO"]
-    }
-  ]
+      "new_classes": ["WalletDO"],
+    },
+  ],
 }

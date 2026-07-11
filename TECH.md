@@ -13,15 +13,15 @@
 
 ## Stack decision (2026-07-11)
 
-| Layer | Choice | Replaces |
-| --- | --- | --- |
-| Frontend | React 19 + TanStack Start/Router + shadcn/ui + Motion | (kept) |
-| Control plane | **Convex** (DB, functions, realtime sync, vector search, cron, file storage) | tRPC + Drizzle + Turso + Upstash Redis cache |
-| Data plane | **Cloudflare Worker** (proxy + edge credit gate + MCP endpoint) | (kept, rebuilt thin) |
-| Auth + orgs + API keys | **Clerk** (sessions, org UI, machine API keys — GA 2026-04) | Better Auth + its apikey plugin |
-| Payments | **Polar** (checkout + merchant-of-record for top-ups ONLY) | Polar meters/benefits machinery |
-| Credit ledger | **Convex is the source of truth** (own tables), Worker holds the edge gate | Polar meter credits + Redis gate |
-| Embeddings | Provider API (Gemini or similar) via Convex action → Convex `vectorIndex` | Gemini + Turso `vector_top_k` |
+| Layer                  | Choice                                                                       | Replaces                                     |
+| ---------------------- | ---------------------------------------------------------------------------- | -------------------------------------------- |
+| Frontend               | React 19 + TanStack Start/Router + shadcn/ui + Motion                        | (kept)                                       |
+| Control plane          | **Convex** (DB, functions, realtime sync, vector search, cron, file storage) | tRPC + Drizzle + Turso + Upstash Redis cache |
+| Data plane             | **Cloudflare Worker** (proxy + edge credit gate + MCP endpoint)              | (kept, rebuilt thin)                         |
+| Auth + orgs + API keys | **Clerk** (sessions, org UI, machine API keys — GA 2026-04)                  | Better Auth + its apikey plugin              |
+| Payments               | **Polar** (checkout + merchant-of-record for top-ups ONLY)                   | Polar meters/benefits machinery              |
+| Credit ledger          | **Convex is the source of truth** (own tables), Worker holds the edge gate   | Polar meter credits + Redis gate             |
+| Embeddings             | Provider API (Gemini or similar) via Convex action → Convex `vectorIndex`    | Gemini + Turso `vector_top_k`                |
 
 ### Why Convex for the control plane (verified 2026-07-11)
 

@@ -15,10 +15,7 @@
 
 import { parseSpec } from "@zevium/shared";
 import type { CatalogueSource } from "./catalogue-source";
-import {
-  endpointsFromSpec,
-  type DiscoveryEndpoint,
-} from "./discovery";
+import { endpointsFromSpec, type DiscoveryEndpoint } from "./discovery";
 import { extractApiKey } from "./key-verifier";
 import {
   handleGatewayRequest,
@@ -186,7 +183,9 @@ function failure(
   return { jsonrpc: "2.0", id, error: err };
 }
 
-function textContent(text: string): { content: Array<{ type: "text"; text: string }> } {
+function textContent(text: string): {
+  content: Array<{ type: "text"; text: string }>;
+} {
   return { content: [{ type: "text", text }] };
 }
 
@@ -390,7 +389,9 @@ async function handleCallApi(
 
   if (response.status >= 400) {
     return {
-      content: [{ type: "text" as const, text: JSON.stringify(payload, null, 2) }],
+      content: [
+        { type: "text" as const, text: JSON.stringify(payload, null, 2) },
+      ],
       isError: true,
     };
   }
@@ -512,10 +513,9 @@ export async function handleMcpRequest(
   try {
     raw = await request.json();
   } catch {
-    return Response.json(
-      failure(null, -32700, "Parse error: invalid JSON"),
-      { status: 400 },
-    );
+    return Response.json(failure(null, -32700, "Parse error: invalid JSON"), {
+      status: 400,
+    });
   }
 
   // Batch

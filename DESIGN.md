@@ -20,14 +20,14 @@
 
 ### Kill list (existing customizations to delete)
 
-| Item | Why |
-| --- | --- |
-| `src/components/magicui/` (all 6) | Landing-only decoration; `text-reveal.tsx` is dead code already |
-| `src/components/animated-beam-zev.tsx` | Landing-only wrapper |
-| `--animate-ripple` keyframe in `app.css` | Serves only magicui/ripple |
-| Commented `font-heading` @apply | Dead code |
-| `src/routes/index.tsx` (current landing) | Hardcoded raw colors, bespoke mockups; rebuild on stock components + the motion system below |
-| `components.json` stale `tailwind.config.mjs` ref + stone/neutral drift | Regenerate |
+| Item                                                                    | Why                                                                                          |
+| ----------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `src/components/magicui/` (all 6)                                       | Landing-only decoration; `text-reveal.tsx` is dead code already                              |
+| `src/components/animated-beam-zev.tsx`                                  | Landing-only wrapper                                                                         |
+| `--animate-ripple` keyframe in `app.css`                                | Serves only magicui/ripple                                                                   |
+| Commented `font-heading` @apply                                         | Dead code                                                                                    |
+| `src/routes/index.tsx` (current landing)                                | Hardcoded raw colors, bespoke mockups; rebuild on stock components + the motion system below |
+| `components.json` stale `tailwind.config.mjs` ref + stone/neutral drift | Regenerate                                                                                   |
 
 Keep: `motion` v12 + app-wide `LazyMotion` in providers (the foundation), `file-upload.tsx` (functional), `cap-widget` CSS vars (functional captcha). Evaluate `text-hover-effect.tsx`/`screen-center.tsx` against the new system.
 
@@ -41,19 +41,19 @@ export const EASE = [0.16, 1, 0.3, 1] as const; // ease-out-expo-ish. THE easing
 
 export const DUR = {
   instant: 0.15, // hover/press feedback, toggles
-  fast: 0.25,    // dropdowns, tooltips, tab switches, list item enter
-  base: 0.35,    // dialogs, sheets, popovers, card enter
-  page: 0.4,     // view transitions, route-level enter
-  slow: 0.6,     // scroll-reveals on landing, hero entrances (marketing only)
+  fast: 0.25, // dropdowns, tooltips, tab switches, list item enter
+  base: 0.35, // dialogs, sheets, popovers, card enter
+  page: 0.4, // view transitions, route-level enter
+  slow: 0.6, // scroll-reveals on landing, hero entrances (marketing only)
 } as const;
 
-export const STAGGER = 0.05;   // list children; 0.025 for per-character effects
-export const DIST = 16;        // px translate for enters (24 on landing hero)
+export const STAGGER = 0.05; // list children; 0.025 for per-character effects
+export const DIST = 16; // px translate for enters (24 on landing hero)
 
 export const SPRING = {
   cursor: { stiffness: 250, damping: 18, mass: 0.4 }, // magnetic/trailing effects
   scroll: { stiffness: 120, damping: 30, mass: 0.4 }, // scroll-linked progress
-  pop:    { type: "spring", stiffness: 350, damping: 14 }, // badge/stat pop-in
+  pop: { type: "spring", stiffness: 350, damping: 14 }, // badge/stat pop-in
 } as const;
 ```
 
@@ -62,7 +62,10 @@ CSS mirror (for CSS-only transitions):
 ```css
 :root {
   --ease: cubic-bezier(0.16, 1, 0.3, 1);
-  --dur-instant: 150ms; --dur-fast: 250ms; --dur-base: 350ms; --dur-page: 400ms;
+  --dur-instant: 150ms;
+  --dur-fast: 250ms;
+  --dur-base: 350ms;
+  --dur-page: 400ms;
 }
 ```
 
@@ -97,16 +100,16 @@ defaultViewTransition: {
 
 Naming convention `{kind}-{slug}`, must be unique per snapshot. The signature moments:
 
-| From → To | Morphing element(s) |
-| --- | --- |
-| Catalogue card → API detail | `api-title-{slug}`, `api-logo-{slug}`, `api-price-{slug}` — card title grows into page heading |
-| Projects list → project page | `project-title-{slug}`, `project-status-{slug}` |
-| Project page → spec editor / explorer | `project-title-{slug}` persists in breadcrumb |
-| Landing hero CTA → catalogue heading | `catalogue-heading` |
-| Org switcher → org home | `org-name-{slug}` |
-| Credits balance (sidebar chip → billing page stat) | `credit-balance` |
+| From → To                                          | Morphing element(s)                                                                            |
+| -------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| Catalogue card → API detail                        | `api-title-{slug}`, `api-logo-{slug}`, `api-price-{slug}` — card title grows into page heading |
+| Projects list → project page                       | `project-title-{slug}`, `project-status-{slug}`                                                |
+| Project page → spec editor / explorer              | `project-title-{slug}` persists in breadcrumb                                                  |
+| Landing hero CTA → catalogue heading               | `catalogue-heading`                                                                            |
+| Org switcher → org home                            | `org-name-{slug}`                                                                              |
+| Credits balance (sidebar chip → billing page stat) | `credit-balance`                                                                               |
 
-- Text that changes size/font across a morph: snap content instantly (`animation-duration: 0.01s; step-end`) while the *group* animates position/size over `DUR.page` — prevents font-crossfade flash
+- Text that changes size/font across a morph: snap content instantly (`animation-duration: 0.01s; step-end`) while the _group_ animates position/size over `DUR.page` — prevents font-crossfade flash
 - The morph inventory grows with FLOW.md; every new list→detail pair ships with a morph or a written reason why not
 
 ### VT ↔ Motion coordination
@@ -124,25 +127,25 @@ Reusable primitives, built once in `src/components/motion/`:
 
 Per-surface spec:
 
-| Surface | Interaction |
-| --- | --- |
-| Buttons | `whileTap scale 0.97`; hover = token color shift over `instant`. No hover scale on app chrome |
-| Cards (catalogue, projects) | hover: `-translate-y-0.5` lift + border/`shadow-sm` deepen over `instant`; press 0.98 |
-| Inputs | focus ring animates in over `instant` (default shadcn ring, ensure `transition`) |
-| Dialogs / sheets | shadcn defaults retimed to `base` + THE easing; overlay fade `fast` |
-| Dropdowns / tooltips / popovers | `fast`, scale-from-origin 0.96→1 + fade (stock Radix, retimed) |
-| Toasts (Sonner) | default slide, retimed `base`; success toasts get `<Pop>` on the icon |
-| Sidebar collapse | width via `grid-template-columns` transition `base`; icon-label crossfade `fast` |
-| Nav active state | `layoutId` pill slides between items (Motion layout animation, `fast`) |
-| Tables / lists | row enter: fade + 4px rise, stagger `STAGGER`, cap total ≤400ms (long lists: first 8 rows only) |
-| Tabs | `layoutId` underline slides; panel crossfade `fast` |
-| Key reveal (create API key) | value blurs in (`filter: blur(8px)→0` + fade, `base`); copy button → checkmark morph `instant` |
-| Credits balance | `<NumberTicker>` on change; top-up success: balance pulses once (`SPRING.pop`) |
-| Spec editor: save/publish | Save: button label morphs to spinner to check (`fast` each). Publish: dialog exits, version badge `<Pop>`s into header |
-| Issues panel | count badge `<Pop>`s on change; panel expands `base` |
-| Empty states | illustration + copy `<Reveal>` once |
-| Theme toggle | instant swap; icon rotates 90° over `instant`. Fix current hydration mismatch |
-| Skeletons | shadcn `<Skeleton>` shimmer; skeleton→content = crossfade `fast`, layout-stable (skeleton matches final dimensions exactly — zero shift) |
+| Surface                         | Interaction                                                                                                                              |
+| ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| Buttons                         | `whileTap scale 0.97`; hover = token color shift over `instant`. No hover scale on app chrome                                            |
+| Cards (catalogue, projects)     | hover: `-translate-y-0.5` lift + border/`shadow-sm` deepen over `instant`; press 0.98                                                    |
+| Inputs                          | focus ring animates in over `instant` (default shadcn ring, ensure `transition`)                                                         |
+| Dialogs / sheets                | shadcn defaults retimed to `base` + THE easing; overlay fade `fast`                                                                      |
+| Dropdowns / tooltips / popovers | `fast`, scale-from-origin 0.96→1 + fade (stock Radix, retimed)                                                                           |
+| Toasts (Sonner)                 | default slide, retimed `base`; success toasts get `<Pop>` on the icon                                                                    |
+| Sidebar collapse                | width via `grid-template-columns` transition `base`; icon-label crossfade `fast`                                                         |
+| Nav active state                | `layoutId` pill slides between items (Motion layout animation, `fast`)                                                                   |
+| Tables / lists                  | row enter: fade + 4px rise, stagger `STAGGER`, cap total ≤400ms (long lists: first 8 rows only)                                          |
+| Tabs                            | `layoutId` underline slides; panel crossfade `fast`                                                                                      |
+| Key reveal (create API key)     | value blurs in (`filter: blur(8px)→0` + fade, `base`); copy button → checkmark morph `instant`                                           |
+| Credits balance                 | `<NumberTicker>` on change; top-up success: balance pulses once (`SPRING.pop`)                                                           |
+| Spec editor: save/publish       | Save: button label morphs to spinner to check (`fast` each). Publish: dialog exits, version badge `<Pop>`s into header                   |
+| Issues panel                    | count badge `<Pop>`s on change; panel expands `base`                                                                                     |
+| Empty states                    | illustration + copy `<Reveal>` once                                                                                                      |
+| Theme toggle                    | instant swap; icon rotates 90° over `instant`. Fix current hydration mismatch                                                            |
+| Skeletons                       | shadcn `<Skeleton>` shimmer; skeleton→content = crossfade `fast`, layout-stable (skeleton matches final dimensions exactly — zero shift) |
 
 Landing page only (delight budget): magnetic cursor-pull on primary CTA + social links (`SPRING.cursor`, strength ≤0.3, off for reduced motion + touch), hero copy staggered entrance (`DUR.slow`, stagger 0.15s), one `<NumberTicker>` stat row. That's the whole budget — no orbs, no beams, no ripples, no word-rotate.
 
@@ -163,7 +166,9 @@ Landing page only (delight budget): magnetic cursor-pull on primary CTA + social
   .content-enter,
   ::view-transition-old(root),
   ::view-transition-new(root),
-  ::view-transition-group(*) { animation: none; }
+  ::view-transition-group(*) {
+    animation: none;
+  }
 }
 ```
 

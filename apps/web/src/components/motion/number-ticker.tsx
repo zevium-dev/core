@@ -24,7 +24,10 @@ function defaultFormat(n: number, decimals: number): string {
 }
 
 function prefersReducedMotion(): boolean {
-  if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+  if (
+    typeof window === "undefined" ||
+    typeof window.matchMedia !== "function"
+  ) {
     return false;
   }
   return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -89,19 +92,12 @@ export function NumberTicker({
   const text =
     format !== undefined
       ? format(display)
-      : defaultFormat(
-          decimals === 0 ? Math.round(display) : display,
-          decimals,
-        );
+      : defaultFormat(decimals === 0 ? Math.round(display) : display, decimals);
 
   return (
     <span
       className={cn("tabular-nums", className)}
-      style={
-        viewTransitionName
-          ? { viewTransitionName }
-          : undefined
-      }
+      style={viewTransitionName ? { viewTransitionName } : undefined}
     >
       {text}
     </span>

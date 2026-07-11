@@ -47,10 +47,13 @@ const FALLBACK_TEASERS = [
 export const Route = createFileRoute("/")({
   loader: async ({ context }) => {
     // Prefetch public catalogue for hero teaser; ignore failures (static fallback).
+    const queryOpts = convexQuery(api.catalogue.listPublic, {});
     try {
-      await context.queryClient.ensureQueryData(
-        convexQuery(api.catalogue.listPublic, {}),
-      );
+      if (typeof window !== "undefined") {
+        void context.queryClient.prefetchQuery(queryOpts);
+        return;
+      }
+      await context.queryClient.ensureQueryData(queryOpts);
     } catch {
       /* empty catalogue / offline — FALLBACK_TEASERS */
     }
@@ -85,7 +88,8 @@ function LandingPage() {
           live: true as const,
         }))
       : FALLBACK_TEASERS.map((t) => ({ ...t, live: false as const }));
-  const apiCount = liveItems.length > 0 ? liveItems.length : FALLBACK_TEASERS.length;
+  const apiCount =
+    liveItems.length > 0 ? liveItems.length : FALLBACK_TEASERS.length;
   const showSkeleton = catalogueQuery.isPending && liveItems.length === 0;
 
   const item = {
@@ -130,10 +134,7 @@ function LandingPage() {
             >
               Agent-first API marketplace
             </m.h1>
-            <m.p
-              className="text-lg text-muted-foreground"
-              variants={enterItem}
-            >
+            <m.p className="text-lg text-muted-foreground" variants={enterItem}>
               Publishers list OpenAPI specs with per-call pricing. Consumers and
               agents prepay credits and hit a metered edge gateway. Publishers
               keep 95%.
@@ -156,10 +157,7 @@ function LandingPage() {
                 <Link to="/sign-up/$">Get started</Link>
               </Button>
             </m.div>
-            <m.p
-              className="text-sm text-muted-foreground"
-              variants={enterItem}
-            >
+            <m.p className="text-sm text-muted-foreground" variants={enterItem}>
               Zero balance blocks the call. No surprise overages.
             </m.p>
           </m.div>
@@ -204,7 +202,10 @@ function LandingPage() {
                     </Card>
                   ))
                 : teasers.map((teaser) => (
-                    <m.div key={`${teaser.orgSlug}/${teaser.slug}`} variants={enterItem}>
+                    <m.div
+                      key={`${teaser.orgSlug}/${teaser.slug}`}
+                      variants={enterItem}
+                    >
                       {teaser.live ? (
                         <Link
                           to="/catalogue/$orgSlug/$projectSlug"
@@ -235,10 +236,7 @@ function LandingPage() {
                   ))}
             </div>
 
-            <m.div
-              className="grid grid-cols-2 gap-3 pt-1"
-              variants={enterItem}
-            >
+            <m.div className="grid grid-cols-2 gap-3 pt-1" variants={enterItem}>
               <Card className="py-4">
                 <CardHeader className="gap-1 px-4 py-0">
                   <CardDescription>APIs listed</CardDescription>
@@ -278,8 +276,8 @@ function LandingPage() {
                 endpoint
               </li>
               <li>
-                <span className="font-medium text-foreground">3.</span> Publish —
-                earn 95% of every call
+                <span className="font-medium text-foreground">3.</span> Publish
+                — earn 95% of every call
               </li>
             </ol>
           </div>

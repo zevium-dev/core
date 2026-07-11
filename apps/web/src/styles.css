@@ -117,10 +117,12 @@
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
-  --font-sans: ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji",
-    "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
-  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
-    "Liberation Mono", "Courier New", monospace;
+  --font-sans:
+    ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji",
+    "Segoe UI Symbol", "Noto Color Emoji";
+  --font-mono:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+    "Courier New", monospace;
 }
 
 @layer base {
@@ -169,6 +171,14 @@
 ::view-transition-new(main-content) {
   animation-duration: var(--dur-page);
   animation-timing-function: var(--ease);
+}
+
+/* Sidebar-level hops (no list→detail morph): fast swap, not 400ms page morph */
+html:active-view-transition-type(nav-swap)::view-transition-old(root),
+html:active-view-transition-type(nav-swap)::view-transition-new(root),
+html:active-view-transition-type(nav-swap)::view-transition-old(main-content),
+html:active-view-transition-type(nav-swap)::view-transition-new(main-content) {
+  animation-duration: var(--dur-fast);
 }
 
 /* Inline link underline draw */

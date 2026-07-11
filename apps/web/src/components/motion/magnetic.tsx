@@ -1,15 +1,5 @@
-import {
-  m,
-  useMotionValue,
-  useReducedMotion,
-  useSpring,
-} from "motion/react";
-import {
-  useCallback,
-  useRef,
-  type PointerEvent,
-  type ReactNode,
-} from "react";
+import { m, useMotionValue, useReducedMotion, useSpring } from "motion/react";
+import { useCallback, useRef, type PointerEvent, type ReactNode } from "react";
 
 import { SPRING } from "#/lib/motion";
 import { cn } from "#/lib/utils";

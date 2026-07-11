@@ -1,8 +1,5 @@
 import { useOrganization } from "@clerk/tanstack-react-start";
-import {
-  convexQuery,
-  useConvexMutation,
-} from "@convex-dev/react-query";
+import { convexQuery, useConvexMutation } from "@convex-dev/react-query";
 import {
   useMutation,
   useQueryClient,
@@ -41,26 +38,29 @@ import {
 } from "#/components/ui/dialog";
 import { Skeleton } from "#/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger } from "#/components/ui/tabs";
-import { getAuthOrg } from "#/lib/auth-session";
 import { api } from "#/lib/convex-api";
 import type { Doc } from "#/lib/convex-data-model";
 import { humanError } from "#/lib/human-error";
 import type { RouterContext } from "#/router";
 
-
 export const Route = createFileRoute("/app/projects/$projectSlug")({
   loader: async ({ context, params }) => {
-    const { queryClient } = context as RouterContext;
+    const { queryClient, orgSlug } = context as RouterContext;
+    if (!orgSlug) return;
+
+    const queryOpts = convexQuery(api.projects.get, {
+      orgSlug,
+      projectSlug: params.projectSlug,
+    });
+
+    // Client nav: fire-and-forget; component skeletons cover pending.
+    if (typeof window !== "undefined") {
+      void queryClient.prefetchQuery(queryOpts);
+      return;
+    }
+
     try {
-      const session = await getAuthOrg();
-      if (session.orgSlug) {
-        await queryClient.ensureQueryData(
-          convexQuery(api.projects.get, {
-            orgSlug: session.orgSlug,
-            projectSlug: params.projectSlug,
-          }),
-        );
-      }
+      await queryClient.ensureQueryData(queryOpts);
     } catch {
       // component handles missing org / not found
     }
@@ -162,8 +162,8 @@ function ProjectShell({
           Project not found
         </h1>
         <p className="text-sm text-muted-foreground">
-          No project with slug{" "}
-          <span className="font-mono">{projectSlug}</span> in this org.
+          No project with slug <span className="font-mono">{projectSlug}</span>{" "}
+          in this org.
         </p>
         <Button asChild variant="outline">
           <Link to="/app/projects">Back to projects</Link>
@@ -176,8 +176,7 @@ function ProjectShell({
   // overview | analytics stay on project root; spec is its own route.
   const tab = isSpecRoute ? "spec" : panel;
 
-  const nextVisibility =
-    project.visibility === "public" ? "private" : "public";
+  const nextVisibility = project.visibility === "public" ? "private" : "public";
 
   return (
     <div className="flex flex-col gap-6">
@@ -287,10 +286,7 @@ function ProjectShell({
         <Outlet />
       ) : panel === "analytics" ? (
         <Suspense fallback={<AnalyticsSkeleton />}>
-          <ProjectAnalyticsPanel
-            orgSlug={orgSlug}
-            projectSlug={project.slug}
-          />
+          <ProjectAnalyticsPanel orgSlug={orgSlug} projectSlug={project.slug} />
         </Suspense>
       ) : (
         <ProjectOverview project={project} />
@@ -471,8 +467,8 @@ function ProjectAnalyticsPanel({
           )}
           {analytics.truncated ? (
             <p className="mt-3 text-xs text-muted-foreground">
-              Scan capped at {analytics.scanCap.toLocaleString()} events —
-              stats may undercount.
+              Scan capped at {analytics.scanCap.toLocaleString()} events — stats
+              may undercount.
             </p>
           ) : null}
         </CardContent>
@@ -498,7 +494,9 @@ function ProjectAnalyticsPanel({
                     <th className="px-2 py-2 font-medium">Method</th>
                     <th className="px-2 py-2 font-medium">Path</th>
                     <th className="px-2 py-2 font-medium text-right">Calls</th>
-                    <th className="px-2 py-2 font-medium text-right">Credits</th>
+                    <th className="px-2 py-2 font-medium text-right">
+                      Credits
+                    </th>
                     <th className="px-2 py-2 font-medium text-right">4xx</th>
                     <th className="px-2 py-2 font-medium text-right">5xx</th>
                     <th className="px-2 py-2 font-medium text-right">p95</th>

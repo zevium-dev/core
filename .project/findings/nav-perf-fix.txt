@@ -1,0 +1,25 @@
+Nav lag dead. Client path no more server fn spam.
+
+**What changed:**
+- Root `beforeLoad` only hits `fetchConvexAuth` on server. Client reads `window.Clerk` sync, token stays null.
+- RouterContext got `orgSlug` + `orgId`. Root fills both.
+- `/app` client gate: no `requireAuth()` HTTP — live Clerk userId or bounce to sign-in.
+- Project loaders: `context.orgSlug`, client `prefetchQuery` fire-and-forget, SSR still `ensureQueryData` + `ensureMirrorOnServer`.
+- Catalogue + landing loaders same client prefetch pattern.
+- billing/settings/dashboard: no loader server-fn awaits. Already clean.
+
+CHANGED:
+- `apps/web/src/lib/clerk-client.ts` — typed `window.Clerk` helper + fallback
+- `apps/web/src/router.tsx` — `orgSlug`/`orgId` on RouterContext
+- `apps/web/src/routes/__root.tsx` — client-sync auth; SSR returns org too
+- `apps/web/src/routes/app.tsx` — client auth gate no server fn
+- `apps/web/src/routes/app/projects/index.tsx` — context org + client prefetch
+- `apps/web/src/routes/app/projects/$projectSlug.tsx` — same
+- `apps/web/src/routes/app/projects/$projectSlug/spec.tsx` — same
+- `apps/web/src/routes/catalogue/index.tsx` — client prefetch
+- `apps/web/src/routes/catalogue/$orgSlug.$projectSlug.tsx` — client prefetch
+- `apps/web/src/routes/index.tsx` — client prefetch
+
+VERIFY: `pnpm --filter web typecheck` green. `pnpm --filter web build` green (client+ssr+nitro).
+
+DONE: client nav no serialized Clerk/server-fn round-trips; SSR path unchanged.

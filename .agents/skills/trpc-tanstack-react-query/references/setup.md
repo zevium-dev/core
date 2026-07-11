@@ -93,12 +93,16 @@ import SuperJSON from "superjson";
 
 import type { AppRouter } from "~/server";
 
-export const createTRPCClient = (baseUrl = "", getHeaders?: () => Promise<Record<string, string>>) => {
+export const createTRPCClient = (
+  baseUrl = "",
+  getHeaders?: () => Promise<Record<string, string>>,
+) => {
   return createTRPCClientOriginal<AppRouter>({
     links: [
       loggerLink({
         enabled: (opts) =>
-          (process.env.NODE_ENV === "development" && typeof window !== "undefined") ||
+          (process.env.NODE_ENV === "development" &&
+            typeof window !== "undefined") ||
           (opts.direction === "down" && opts.result instanceof Error),
       }),
       splitLink({
@@ -154,7 +158,9 @@ async function getHeaders() {
   return getServerHeaders();
 }
 
-export const cachedCreateTRPCClient = cache(() => createTRPCClient(getBaseUrl(), getHeaders));
+export const cachedCreateTRPCClient = cache(() =>
+  createTRPCClient(getBaseUrl(), getHeaders),
+);
 ```
 
 SSR/client safe accessor (new per request, singleton in browser):

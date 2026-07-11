@@ -1,12 +1,6 @@
 import { useOrganization } from "@clerk/tanstack-react-start";
-import {
-  convexQuery,
-  useConvexMutation,
-} from "@convex-dev/react-query";
-import {
-  useMutation,
-  useSuspenseQuery,
-} from "@tanstack/react-query";
+import { convexQuery, useConvexMutation } from "@convex-dev/react-query";
+import { useMutation, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { useAction, useConvexAuth } from "convex/react";
 import { CreditCard, Sparkles, Wallet } from "lucide-react";
@@ -218,9 +212,7 @@ function BillingContent({ orgSlug }: { orgSlug: string }) {
                     className="w-full"
                     disabled={buyPending}
                     onClick={() =>
-                      buyPack(
-                        pack.packId as "pack_10" | "pack_50" | "pack_100",
-                      )
+                      buyPack(pack.packId as "pack_10" | "pack_50" | "pack_100")
                     }
                   >
                     {pending ? "Redirecting…" : `Buy ${price}`}

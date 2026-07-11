@@ -35,7 +35,9 @@ export function createTestQueryClient() {
 
 export function renderWithClient(ui: React.ReactElement) {
   const testQueryClient = createTestQueryClient();
-  return render(<QueryClientProvider client={testQueryClient}>{ui}</QueryClientProvider>);
+  return render(
+    <QueryClientProvider client={testQueryClient}>{ui}</QueryClientProvider>,
+  );
 }
 ```
 
@@ -50,7 +52,11 @@ import { useTodos } from "./useTodos";
 describe("useTodos", () => {
   it("fetches todos successfully", async () => {
     const { result } = renderHook(() => useTodos(), {
-      wrapper: ({ children }) => <QueryClientProvider client={createTestQueryClient()}>{children}</QueryClientProvider>,
+      wrapper: ({ children }) => (
+        <QueryClientProvider client={createTestQueryClient()}>
+          {children}
+        </QueryClientProvider>
+      ),
     });
 
     // Initially pending
@@ -98,7 +104,9 @@ test("fetches todos", async () => {
 
   await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
-  expect(result.current.data).toEqual([{ id: 1, title: "Test todo", completed: false }]);
+  expect(result.current.data).toEqual([
+    { id: 1, title: "Test todo", completed: false },
+  ]);
 });
 
 test("handles server error", async () => {
@@ -127,7 +135,9 @@ test("adds todo successfully", async () => {
   });
 
   await waitFor(() => expect(result.current.isSuccess).toBe(true));
-  expect(result.current.data).toEqual(expect.objectContaining({ title: "New todo" }));
+  expect(result.current.data).toEqual(
+    expect.objectContaining({ title: "New todo" }),
+  );
 });
 
 test("handles mutation error", async () => {
@@ -194,7 +204,10 @@ test("uses prefilled cache", () => {
   const queryClient = createTestQueryClient();
 
   // Prefill cache
-  queryClient.setQueryData(["todos"], [{ id: 1, title: "Cached todo", completed: false }]);
+  queryClient.setQueryData(
+    ["todos"],
+    [{ id: 1, title: "Cached todo", completed: false }],
+  );
 
   render(
     <QueryClientProvider client={queryClient}>
@@ -214,7 +227,10 @@ test("uses prefilled cache", () => {
 ```tsx
 test("optimistic update rollback on error", async () => {
   const queryClient = createTestQueryClient();
-  queryClient.setQueryData(["todos"], [{ id: 1, title: "Original", completed: false }]);
+  queryClient.setQueryData(
+    ["todos"],
+    [{ id: 1, title: "Original", completed: false }],
+  );
 
   server.use(
     http.patch("/api/todos/1", () => {
@@ -223,7 +239,9 @@ test("optimistic update rollback on error", async () => {
   );
 
   const { result } = renderHook(() => useUpdateTodo(), {
-    wrapper: ({ children }) => <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>,
+    wrapper: ({ children }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    ),
   });
 
   act(() => {
@@ -231,13 +249,17 @@ test("optimistic update rollback on error", async () => {
   });
 
   // Check optimistic update
-  expect(queryClient.getQueryData(["todos"])).toEqual([{ id: 1, title: "Original", completed: true }]);
+  expect(queryClient.getQueryData(["todos"])).toEqual([
+    { id: 1, title: "Original", completed: true },
+  ]);
 
   // Wait for rollback
   await waitFor(() => expect(result.current.isError).toBe(true));
 
   // Should rollback
-  expect(queryClient.getQueryData(["todos"])).toEqual([{ id: 1, title: "Original", completed: false }]);
+  expect(queryClient.getQueryData(["todos"])).toEqual([
+    { id: 1, title: "Original", completed: false },
+  ]);
 });
 ```
 

@@ -44,12 +44,15 @@ const TEXTAREA_CLASS =
 export const Route = createFileRoute("/catalogue/$orgSlug/$projectSlug")({
   loader: async ({ context, params }) => {
     const { queryClient } = context;
-    await queryClient.ensureQueryData(
-      convexQuery(api.catalogue.getPublicDetail, {
-        orgSlug: params.orgSlug,
-        projectSlug: params.projectSlug,
-      }),
-    );
+    const queryOpts = convexQuery(api.catalogue.getPublicDetail, {
+      orgSlug: params.orgSlug,
+      projectSlug: params.projectSlug,
+    });
+    if (typeof window !== "undefined") {
+      void queryClient.prefetchQuery(queryOpts);
+      return;
+    }
+    await queryClient.ensureQueryData(queryOpts);
   },
   component: ApiDetailPage,
   head: ({ params }) => ({
@@ -155,7 +158,9 @@ function buildCurl(opts: {
   headers: Record<string, string>;
   body: string | undefined;
 }): string {
-  const parts = [`curl -X ${opts.method.toUpperCase()} ${shellQuote(opts.url)}`];
+  const parts = [
+    `curl -X ${opts.method.toUpperCase()} ${shellQuote(opts.url)}`,
+  ];
   for (const [k, v] of Object.entries(opts.headers)) {
     parts.push(`  -H ${shellQuote(`${k}: ${v}`)}`);
   }
@@ -202,7 +207,8 @@ function ApiDetailBody({
   );
 
   const endpoints = useMemo(() => {
-    if (data === null || data.latestVersion === null) return [] as EndpointRow[];
+    if (data === null || data.latestVersion === null)
+      return [] as EndpointRow[];
     try {
       return listEndpoints(data.latestVersion.spec);
     } catch {
@@ -231,10 +237,7 @@ function ApiDetailBody({
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="min-w-0 space-y-2">
             <p className="text-sm text-muted-foreground">
-              <Link
-                to="/catalogue"
-                className="hover:text-foreground link-draw"
-              >
+              <Link to="/catalogue" className="hover:text-foreground link-draw">
                 Catalogue
               </Link>
               <span className="mx-1.5 text-muted-foreground/60">/</span>
@@ -256,10 +259,7 @@ function ApiDetailBody({
                 {data.org.name}
               </span>
               {data.latestVersion ? (
-                <>
-                  {" "}
-                  · v{data.latestVersion.version}
-                </>
+                <> · v{data.latestVersion.version}</>
               ) : null}
               {priceRange ? (
                 <>
@@ -349,16 +349,15 @@ function PricingTable({ endpoints }: { endpoints: EndpointRow[] }) {
                   <th className="px-3 py-2 font-medium">Method</th>
                   <th className="px-3 py-2 font-medium">Path</th>
                   <th className="px-3 py-2 font-medium">Summary</th>
-                  <th className="px-3 py-2 font-medium tabular-nums">Credits</th>
+                  <th className="px-3 py-2 font-medium tabular-nums">
+                    Credits
+                  </th>
                   <th className="px-3 py-2 font-medium">Free tier</th>
                 </tr>
               </thead>
               <tbody>
                 {endpoints.map((ep) => (
-                  <tr
-                    key={ep.id}
-                    className="border-b last:border-0"
-                  >
+                  <tr key={ep.id} className="border-b last:border-0">
                     <td className="px-3 py-2">
                       <MethodBadge method={ep.method} />
                     </td>
@@ -430,10 +429,7 @@ function EndpointDocs({ endpoints }: { endpoints: EndpointRow[] }) {
 
 function MethodBadge({ method }: { method: string }) {
   return (
-    <Badge
-      variant="outline"
-      className="font-mono uppercase tracking-wide"
-    >
+    <Badge variant="outline" className="font-mono uppercase tracking-wide">
       {method}
     </Badge>
   );

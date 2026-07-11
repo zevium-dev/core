@@ -16,6 +16,10 @@ export interface RouterContext {
   userId: string | null;
   /** Clerk JWT for Convex template; used to auth SSR HTTP client. */
   token: string | null;
+  /** Active Clerk org slug; null when none selected. */
+  orgSlug: string | null;
+  /** Active Clerk org id; null when none selected. */
+  orgId: string | null;
 }
 
 const convexUrl = import.meta.env.VITE_CONVEX_URL;
@@ -45,18 +49,37 @@ export function getRouter(): AnyRouter {
     routeTree,
     scrollRestoration: true,
     defaultPreload: "intent",
-    defaultPreloadStaleTime: 0,
+    // Intent-preloads must survive to the click; 0 discards them.
+    defaultPreloadStaleTime: 30_000,
+    // Show pending skeletons quickly instead of freezing the old screen.
+    defaultPendingMs: 100,
+    defaultPendingMinMs: 300,
     context: {
       queryClient,
       userId: null,
       token: null,
+      orgSlug: null,
+      orgId: null,
     } satisfies RouterContext,
     defaultViewTransition: {
       types: ({ fromLocation, toLocation }) => {
         markViewTransitionActive();
         const from = fromLocation?.state.__TSR_index ?? 0;
         const to = toLocation.state.__TSR_index ?? 0;
-        return to >= from ? ["navigate-forward"] : ["navigate-back"];
+        const direction = to >= from ? "navigate-forward" : "navigate-back";
+        // DESIGN.md morphs are for list→detail. Sidebar-level hops get a
+        // fast swap (styles.css scopes duration via nav-swap type).
+        const isDetail = (path: string | undefined): boolean =>
+          path !== undefined &&
+          (/^\/app\/projects\/[^/]+/.test(path) ||
+            /^\/catalogue\/[^/]+\/[^/]+/.test(path));
+        if (
+          !isDetail(fromLocation?.pathname) &&
+          !isDetail(toLocation.pathname)
+        ) {
+          return [direction, "nav-swap"];
+        }
+        return [direction];
       },
     },
     Wrap: ({ children }) => (

@@ -1,0 +1,153 @@
+Publisher flow is raw. No real editor. One giant mono textarea. Backend does real work though.
+
+## Map
+
+**Routes (all under `apps/web/src/routes/`)**
+
+| Path | File | Role |
+|---|---|---|
+| `/app/projects` | `app/projects.tsx` | Layout shell, `<Outlet />` only |
+| `/app/projects/` | `app/projects/index.tsx` | Org-scoped project cards |
+| `/app/projects/create` | `app/projects/create.tsx` | Create form |
+| `/app/projects/$projectSlug` | `app/projects/$projectSlug.tsx` | Project shell: header, tabs, overview/analytics |
+| `/app/projects/$projectSlug/spec` | `app/projects/$projectSlug/spec.tsx` | Draft editor + publish + version list |
+
+**No separate SpecEditor component.** Editor lives fully in route file `spec.tsx` (`SpecEditorPage` → `SpecEditor` → `SpecEditorInner`).
+
+**Helpers**
+- `apps/web/src/lib/spec-pricing.ts` — client pricing summary from draft text
+- `apps/web/src/lib/slug.ts` — slugify on create (used by create form)
+- `apps/web/src/lib/human-error.ts` — toast error mapping
+- `apps/web/src/components/app-sidebar.tsx` — nav link to Projects
+- Catalogue consumer view (not publisher edit): `routes/catalogue/$orgSlug.$projectSlug.tsx` — endpoint table + playground after publish/public
+
+**No Monaco / CodeMirror / YAML / file-upload code in `apps/web`.**
+
+---
+
+## Current flow (user POV)
+
+1. **Org gate** — Clerk org required. No org → “No active organization” / “Select an organization”. Projects are org-scoped.
+2. **List** — `/app/projects`. Cards show `name`, `slug`, `status` (`draft`|`published`), `visibility` (`private`|`public`), optional description. Empty state says create → paste OpenAPI → price → publish. CTA “New project”.
+3. **Create project** — `/app/projects/create`. Inputs:
+   - Name (required, max 120)
+   - Slug (auto from name via `slugify` until user edits; kebab-case, max 64)
+   - Description (optional textarea, max 2000)
+   - Submit → `projects.create` → toast → navigate to project root. **No spec on create.**
+4. **Project shell** — `/app/projects/$projectSlug`.
+   - Header: status badge, visibility badge, name, slug, description.
+   - “Make Public/Private” dialog → `projects.update` visibility only.
+   - Tabs: Overview | Spec | Analytics | Settings.
+     - Overview/Analytics are local panel state on same route.
+     - Spec navigates to child route.
+     - Settings → toast “Settings coming soon” (no UI).
+5. **Overview** — status/visibility/tags read-only. “Edit OpenAPI spec” CTA. Copy tells user to add `x-zevium-cost`, save, publish semver, then make public. **No tag editor, no rename, no delete.**
+6. **Spec tab** — `/app/projects/$projectSlug/spec`.
+   - Loads draft (`specs.getDraft`) + version list (`specs.listVersions`).
+   - **UI = plain monospace `<textarea>`** (min-h 28rem, resize-y). Placeholder is minimal OpenAPI JSON skeleton.
+   - Live client badge: `summarizeDraftPricing(text)` → “N endpoints, min–max credits, free tier on K” or “Invalid JSON”. Dirty/Saved label.
+   - **Save draft** (enabled only when dirty) → `specs.saveDraft`. Server validates; errors block save; toast + issues panel.
+   - **Publish** disabled while dirty. Dialog: semver input (auto-suggest next patch from highest existing, default `0.1.0`) → `specs.publish`. Snapshot draft into immutable `specVersions`, set project `status: "published"`. Warnings still returned (e.g. missing cost).
+   - Right rail:
+     - **Issues** — only from last save/publish attempt (not live). error/warning badges + JSON path.
+     - **Versions** — list of `vX.Y.Z` + date. No open/diff/restore.
+7. **Post-publish** — still edit same draft (not locked). Republish needs new unused semver. Make project public separately so catalogue lists it. Gateway uses latest published version via `specs.getPublishedForGateway`.
+
+**Validation rules (server, `convex/lib/validate.ts`)**
+- Errors block save (non-empty) and publish: invalid JSON, non-object root, missing `openapi`, missing/invalid `servers[0].url` (http/https), bad `x-zevium-cost` type.
+- Warnings: missing `paths`, bad path item/op shape, missing `x-zevium-cost` (defaults to 1 at gateway).
+- Empty draft allowed to save as clear.
+- Publish also requires non-empty saved draft + valid unused semver.
+
+**Preview**
+- Publisher side: pricing badge only (counts + credit range). No endpoint table, no try-it, no rendered docs.
+- Public catalogue detail has endpoint list + playground — separate consumer surface.
+
+---
+
+## API surface
+
+### Schema (`convex/schema.ts`)
+- `projects`: orgId, name, slug, description?, status, visibility, tags[]
+- `specs`: projectId, draft, lastSavedAt (one draft row per project)
+- `specVersions`: projectId, version, spec, publishedAt (immutable)
+
+### `convex/projects.ts`
+| Fn | Kind | Args | Returns / notes |
+|---|---|---|---|
+| `list` L7 | query | `{ orgSlug }` | `Doc<"projects">[]` |
+| `get` L18 | query | `{ orgSlug, projectSlug }` | project \| null |
+| `create` L34 | mutation | `{ orgSlug, name, slug, description? }` | project; inserts empty `specs` draft; status=draft, visibility=private, tags=[] |
+| `update` L100 | mutation | `{ projectId, patch: { name?, description? \| null, visibility?, tags? } }` | project; **UI only uses visibility** |
+| `remove` L200 | mutation | `{ projectId }` | `{ deleted }`; deletes draft + versions; **no UI** |
+
+### `convex/specs.ts`
+| Fn | Kind | Args | Returns / notes |
+|---|---|---|---|
+| `getDraft` L11 | query | `{ projectId }` | `{ draft, lastSavedAt } \| null` |
+| `saveDraft` L27 | mutation | `{ projectId, spec }` | `{ ok, issues, draft, lastSavedAt }` — errors → ok:false, no write |
+| `publish` L88 | mutation | `{ projectId, version }` | `{ ok, issues, version?, project? }` — copies **saved** draft, not unsaved textarea |
+| `listVersions` L184 | query | `{ projectId }` | `{ _id, version, publishedAt }[]` desc by publishedAt |
+| `getPublishedForGateway` L214 | query | `{ orgSlug, projectSlug }` | latest published snapshot + org ids (data plane; no auth) |
+
+### Shared parsing (`packages/shared`)
+| Export | File | What |
+|---|---|---|
+| `CREDITS_PER_DOLLAR`, `PLATFORM_CUT` | `src/index.ts` | credit math constants |
+| `EndpointPricing` | `src/pricing.ts` | `{ cost, freeTier? }` |
+| `parseSpec(json)` | `src/openapi.ts` | JSON only → servers, paths, ops; **throws** on bad JSON |
+| `extractPricing(op)` | `src/openapi.ts` | `x-zevium-cost` (default 1 if missing/≤0), `x-zevium-free-tier` optional |
+| `matchOperation`, `matchPathTemplate`, `normalizePath`, `joinUpstreamUrl` | `src/openapi.ts` | gateway route match / upstream URL |
+| Tests | `src/openapi.test.ts` | parse + match + pricing defaults |
+
+**Not shared:** `validateOpenApiSpec` lives only in `convex/lib/validate.ts` (server). Client uses `parseSpec` only for soft pricing badge.
+
+---
+
+## Critique
+
+- Spec editor is dumb textarea. No syntax highlight, no line numbers, no fold, no find/replace, no JSON schema assist.
+- JSON only. No YAML OpenAPI (industry default for hand-authored specs).
+- No file upload, no paste-from-clipboard helper, no import-from-URL.
+- No validation-as-you-type. Issues only after Save/Publish. Live badge only knows “Invalid JSON” vs pricing summary.
+- Pricing preview is one aggregate badge. No per-operation table in publisher UI (catalogue has it for consumers).
+- No form UI for `x-zevium-cost` / `x-zevium-free-tier` — raw extension editing in blob.
+- No autosave. Unsaved is easy to lose. Publish blocked while dirty (good) but no “save & publish”.
+- Publish snapshots **server draft**, not textarea if dirty — correct gate, easy to misunderstand.
+- Version list is dead: no view snapshot, no diff, no restore-to-draft, no download.
+- No endpoint / server preview before publish. No try-call from publisher.
+- Project metadata incomplete: create-only name/desc/slug; no edit name/desc/tags; Settings tab stub; delete mutation exists, no UI.
+- Visibility separate from publish — correct product rule but easy to “publish” and wonder why catalogue empty (still private).
+- No multi-spec / multi-file; one draft string per project.
+- No `$ref` resolution, no full OpenAPI schema validation — minimal structural checks only.
+- Client and server validation paths diverge (`@zevium/shared` parse vs convex validate).
+- Dirty local state can thrash if remote draft updates (effect resets text on `savedDraft` change).
+- No keyboard shortcuts, no format/pretty-print, no minify, no sample cost injection helper.
+
+---
+
+FILES: apps/web/src/routes/app/projects.tsx; apps/web/src/routes/app/projects/index.tsx; apps/web/src/routes/app/projects/create.tsx; apps/web/src/routes/app/projects/$projectSlug.tsx; apps/web/src/routes/app/projects/$projectSlug/spec.tsx; apps/web/src/lib/spec-pricing.ts; apps/web/src/lib/slug.ts; apps/web/src/components/app-sidebar.tsx; convex/projects.ts; convex/specs.ts; convex/lib/validate.ts; convex/schema.ts; packages/shared/src/index.ts; packages/shared/src/openapi.ts; packages/shared/src/pricing.ts; packages/shared/src/openapi.test.ts; (consumer ref) apps/web/src/routes/catalogue/$orgSlug.$projectSlug.tsx
+
+CURRENT FLOW:
+1. Need Clerk org.
+2. `/app/projects` list cards (status/visibility/name/slug).
+3. `/app/projects/create` name+slug+description → `projects.create` (+ empty draft row).
+4. Project shell overview; toggle public/private; Spec tab → child route.
+5. Spec page: mono textarea edit OpenAPI JSON; live pricing badge; Save draft validates server-side; Publish dialog takes semver, freezes saved draft into `specVersions`, marks project published.
+6. Versions listed read-only; further edits stay on draft; new publish needs new semver; public visibility separate for catalogue.
+
+API SURFACE:
+- projects.list({orgSlug}); projects.get({orgSlug,projectSlug}); projects.create({orgSlug,name,slug,description?}); projects.update({projectId,patch}); projects.remove({projectId})
+- specs.getDraft({projectId}); specs.saveDraft({projectId,spec}); specs.publish({projectId,version}); specs.listVersions({projectId}); specs.getPublishedForGateway({orgSlug,projectSlug})
+- shared: parseSpec, extractPricing (x-zevium-cost / x-zevium-free-tier), matchOperation, joinUpstreamUrl; server validateOpenApiSpec in convex/lib/validate.ts
+
+CRITIQUE:
+- textarea-only, no highlight/YAML/upload/URL import
+- validate only on save/publish, not live
+- aggregate pricing badge only; no op-level pricing UI/table for publishers
+- no version diff/view/restore
+- no autosave; settings/rename/tags/delete missing in UI
+- publish vs public visibility split is easy to miss
+- minimal OpenAPI checks, no full schema/$ref support
+
+DONE.

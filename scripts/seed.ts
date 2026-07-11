@@ -19,9 +19,13 @@ const ORG_SLUG = "test-org";
 
 function loadSecretKey(): string {
   if (process.env.CLERK_SECRET_KEY) return process.env.CLERK_SECRET_KEY;
-  const env = readFileSync(join(import.meta.dirname, "../apps/web/.env.local"), "utf8");
+  const env = readFileSync(
+    join(import.meta.dirname, "../apps/web/.env.local"),
+    "utf8",
+  );
   const match = env.match(/^CLERK_SECRET_KEY=(.+)$/m);
-  if (!match) throw new Error("CLERK_SECRET_KEY not found in env or apps/web/.env.local");
+  if (!match)
+    throw new Error("CLERK_SECRET_KEY not found in env or apps/web/.env.local");
   return match[1].trim();
 }
 
@@ -40,7 +44,9 @@ async function main() {
     }));
   console.log(`user: ${user.id} (${EMAIL})`);
 
-  const orgs = await clerk.organizations.getOrganizationList({ query: ORG_SLUG });
+  const orgs = await clerk.organizations.getOrganizationList({
+    query: ORG_SLUG,
+  });
   const org =
     orgs.data.find((o) => o.slug === ORG_SLUG) ??
     (await clerk.organizations.createOrganization({

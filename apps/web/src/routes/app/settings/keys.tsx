@@ -135,7 +135,11 @@ function KeysPage() {
             setCreateOpen(true);
           }}
           disabled={hasKey || isLoading}
-          title={hasKey ? "Revoke the existing key before creating another" : undefined}
+          title={
+            hasKey
+              ? "Revoke the existing key before creating another"
+              : undefined
+          }
         >
           <Plus className="size-4" />
           Create key

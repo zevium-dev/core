@@ -64,8 +64,8 @@ servers:
 paths:
   /v1/chat/completions:
     post:
-      x-zevium-cost: 10        # credits per call
-      x-zevium-free-tier: 5    # optional: free calls per day
+      x-zevium-cost: 10 # credits per call
+      x-zevium-free-tier: 5 # optional: free calls per day
       summary: Chat completion
   /v1/embeddings:
     post:
@@ -100,7 +100,7 @@ Consumers see: one gateway URL per API, one key, one wallet, itemized charges. P
 
 1. **Metered agent tooling.** Every published API is consumable as agent tools through the same key-authenticated, credit-gated gateway as human traffic. Tool discovery is search-then-load (an agent searches the catalogue semantically, then loads only the tools it needs) — never a dump of every endpoint into the agent's context
 2. **Machine-readable discovery index.** A crawlable index of published APIs with per-endpoint pricing metadata, so agents can evaluate cost before calling
-3. **Agent-readable usage docs per listing** — connection config tells an agent *how to connect*; usage docs tell it *how to use the API well*
+3. **Agent-readable usage docs per listing** — connection config tells an agent _how to connect_; usage docs tell it _how to use the API well_
 4. **Machine-native payments (x402)** beside prepaid credits: agents pay per-call with zero signup; credits remain for humans and high-volume consumers
 
 ## Consumer experience requirements

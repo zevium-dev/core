@@ -65,7 +65,9 @@ function walletStub(clerkOrgId: string): WalletStub {
   return env.WALLET.get(id);
 }
 
-function makeFetchMock(handler: (req: Request) => Promise<Response> | Response) {
+function makeFetchMock(
+  handler: (req: Request) => Promise<Response> | Response,
+) {
   const calls: Request[] = [];
   const fetchImpl: typeof fetch = async (input, init) => {
     const req =
@@ -105,8 +107,7 @@ async function installAgentFixtures(opts: {
     catalogueSource: catalogue,
     usageSink: usage,
     fetchImpl:
-      opts.fetchImpl ??
-      (async () => new Response("ok", { status: 200 })),
+      opts.fetchImpl ?? (async () => new Response("ok", { status: 200 })),
     idGenerator: () => `req_${crypto.randomUUID()}`,
   });
 
@@ -167,7 +168,11 @@ function toolText(rpc: unknown): string {
     throw new Error("missing result");
   }
   const result = rpc.result;
-  if (!isRecord(result) || !("content" in result) || !Array.isArray(result.content)) {
+  if (
+    !isRecord(result) ||
+    !("content" in result) ||
+    !Array.isArray(result.content)
+  ) {
     throw new Error("missing content");
   }
   const first = result.content[0];
@@ -240,9 +245,9 @@ describe("GET /discovery", () => {
     const res = await workerFetch("/discovery");
     expect(res.status).toBe(200);
     const body: unknown = await res.json();
-    expect(isRecord(body) && Array.isArray(body.apis) && body.apis.length === 0).toBe(
-      true,
-    );
+    expect(
+      isRecord(body) && Array.isArray(body.apis) && body.apis.length === 0,
+    ).toBe(true);
   });
 });
 

@@ -237,13 +237,15 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
   ): Promise<void> {
     await this.ctx.storage.transaction(async (txn) => {
       if (keys.balance !== undefined) await txn.put(K_BALANCE, keys.balance);
-      if (keys.inFlight !== undefined) await txn.put(K_IN_FLIGHT, keys.inFlight);
+      if (keys.inFlight !== undefined)
+        await txn.put(K_IN_FLIGHT, keys.inFlight);
       if (keys.appliedGrantIds !== undefined)
         await txn.put(K_APPLIED_GRANTS, keys.appliedGrantIds);
       if (keys.pendingSettlements !== undefined)
         await txn.put(K_PENDING, keys.pendingSettlements);
       if (keys.terminal !== undefined) await txn.put(K_TERMINAL, keys.terminal);
-      if (keys.flushSeq !== undefined) await txn.put(K_FLUSH_SEQ, keys.flushSeq);
+      if (keys.flushSeq !== undefined)
+        await txn.put(K_FLUSH_SEQ, keys.flushSeq);
     });
   }
 
@@ -605,9 +607,14 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
     return this.#snapshot();
   }
 
-  async getFreeTierUsed(keyId: string, nowMs: number = Date.now()): Promise<number> {
+  async getFreeTierUsed(
+    keyId: string,
+    nowMs: number = Date.now(),
+  ): Promise<number> {
     const day = utcDayKey(nowMs);
-    return (await this.ctx.storage.get<number>(freeStorageKey(keyId, day))) ?? 0;
+    return (
+      (await this.ctx.storage.get<number>(freeStorageKey(keyId, day))) ?? 0
+    );
   }
 
   /**
@@ -617,7 +624,9 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
   async alarm(): Promise<void> {
     if (this.#pendingSettlements.length === 0) return;
 
-    const hasUsage = this.#pendingSettlements.some((s) => s.usage !== undefined);
+    const hasUsage = this.#pendingSettlements.some(
+      (s) => s.usage !== undefined,
+    );
     if (hasUsage) {
       await this.flushToConvex();
     }
@@ -681,7 +690,9 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
         case "/ack":
         case "/ackFlush": {
           const ids = Array.isArray(body.settlementIds)
-            ? body.settlementIds.filter((id): id is string => typeof id === "string")
+            ? body.settlementIds.filter(
+                (id): id is string => typeof id === "string",
+              )
             : [];
           return Response.json(await this.ackFlush(ids));
         }

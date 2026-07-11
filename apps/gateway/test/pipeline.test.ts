@@ -13,10 +13,7 @@ import worker, {
 import { FixtureKeyVerifier } from "../src/key-verifier";
 import { FixtureCatalogueSource } from "../src/catalogue-source";
 import { FixtureSpecSource } from "../src/spec-source";
-import {
-  CollectingUsageSink,
-  FakeConvexUsageSink,
-} from "../src/usage";
+import { CollectingUsageSink, FakeConvexUsageSink } from "../src/usage";
 import type { WalletDO } from "../src/wallet";
 
 type WalletStub = DurableObjectStub<WalletDO>;
@@ -67,7 +64,9 @@ function walletStub(clerkOrgId: string): WalletStub {
   return env.WALLET.get(id);
 }
 
-function makeFetchMock(handler: (req: Request) => Promise<Response> | Response) {
+function makeFetchMock(
+  handler: (req: Request) => Promise<Response> | Response,
+) {
   const calls: Request[] = [];
   const fetchImpl: typeof fetch = async (input, init) => {
     const req =
@@ -166,11 +165,14 @@ describe("gateway pipeline", () => {
       credits: 100,
     });
 
-    const res = await gatewayFetch(`/gateway/${ORG_SLUG}/${PROJECT_SLUG}/echo`, {
-      method: "POST",
-      headers: { "content-type": "text/plain" },
-      body: "hello",
-    });
+    const res = await gatewayFetch(
+      `/gateway/${ORG_SLUG}/${PROJECT_SLUG}/echo`,
+      {
+        method: "POST",
+        headers: { "content-type": "text/plain" },
+        body: "hello",
+      },
+    );
 
     expect(res.status).toBe(200);
     expect(await res.text()).toBe("echo:hello");
@@ -203,10 +205,13 @@ describe("gateway pipeline", () => {
       credits: 0,
     });
 
-    const res = await gatewayFetch(`/gateway/${ORG_SLUG}/${PROJECT_SLUG}/echo`, {
-      method: "POST",
-      body: "nope",
-    });
+    const res = await gatewayFetch(
+      `/gateway/${ORG_SLUG}/${PROJECT_SLUG}/echo`,
+      {
+        method: "POST",
+        body: "nope",
+      },
+    );
 
     expect(res.status).toBe(402);
     const body: unknown = await res.json();
@@ -300,11 +305,14 @@ describe("gateway pipeline", () => {
     const { fetchImpl, calls } = makeFetchMock(() => new Response("x"));
     await installFixtures({ clerkOrgId, fetchImpl, credits: 10 });
 
-    const res = await gatewayFetch(`/gateway/${ORG_SLUG}/${PROJECT_SLUG}/echo`, {
-      method: "POST",
-      headers: { authorization: "Bearer zev_wrong" },
-      body: "x",
-    });
+    const res = await gatewayFetch(
+      `/gateway/${ORG_SLUG}/${PROJECT_SLUG}/echo`,
+      {
+        method: "POST",
+        headers: { authorization: "Bearer zev_wrong" },
+        body: "x",
+      },
+    );
     expect(res.status).toBe(401);
     expect(calls).toHaveLength(0);
   });
@@ -371,18 +379,24 @@ describe("gateway pipeline", () => {
       credits: 0,
     });
 
-    const res1 = await gatewayFetch(`/gateway/${ORG_SLUG}/${PROJECT_SLUG}/free`);
+    const res1 = await gatewayFetch(
+      `/gateway/${ORG_SLUG}/${PROJECT_SLUG}/free`,
+    );
     expect(res1.status).toBe(200);
     expect(res1.headers.get("x-zevium-cost")).toBe("0");
     expect(res1.headers.get("x-zevium-free-tier")).toBe("1");
     expect(await res1.text()).toBe("free-ok");
 
-    const res2 = await gatewayFetch(`/gateway/${ORG_SLUG}/${PROJECT_SLUG}/free`);
+    const res2 = await gatewayFetch(
+      `/gateway/${ORG_SLUG}/${PROJECT_SLUG}/free`,
+    );
     expect(res2.status).toBe(200);
     expect(res2.headers.get("x-zevium-free-tier")).toBe("1");
 
     // Free tier exhausted (limit 2) → paid path → 402 at zero balance.
-    const res3 = await gatewayFetch(`/gateway/${ORG_SLUG}/${PROJECT_SLUG}/free`);
+    const res3 = await gatewayFetch(
+      `/gateway/${ORG_SLUG}/${PROJECT_SLUG}/free`,
+    );
     expect(res3.status).toBe(402);
 
     expect(calls).toHaveLength(2);

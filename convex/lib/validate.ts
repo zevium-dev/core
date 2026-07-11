@@ -97,7 +97,10 @@ export function validateOpenApiSpec(specText: string): SpecIssue[] {
       } catch {
         url = null;
       }
-      if (url === null || (url.protocol !== "http:" && url.protocol !== "https:")) {
+      if (
+        url === null ||
+        (url.protocol !== "http:" && url.protocol !== "https:")
+      ) {
         issues.push({
           level: "error",
           path: "$.servers[0].url",
@@ -145,7 +148,11 @@ export function validateOpenApiSpec(specText: string): SpecIssue[] {
           path: `$.paths["${pathKey}"].${lower}.x-zevium-cost`,
           message: "Missing x-zevium-cost (defaults to 1 at gateway)",
         });
-      } else if (typeof cost !== "number" || !Number.isFinite(cost) || cost < 0) {
+      } else if (
+        typeof cost !== "number" ||
+        !Number.isFinite(cost) ||
+        cost < 0
+      ) {
         issues.push({
           level: "error",
           path: `$.paths["${pathKey}"].${lower}.x-zevium-cost`,

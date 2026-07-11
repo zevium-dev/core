@@ -83,9 +83,7 @@ function DashboardContent({ orgSlug }: { orgSlug: string }) {
   const keyCount = keysQuery.data?.length ?? 0;
   const keysLoaded = !keysQuery.isPending;
   const showOnboarding =
-    keysLoaded &&
-    keyCount === 0 &&
-    overview.callsCycle === 0;
+    keysLoaded && keyCount === 0 && overview.callsCycle === 0;
 
   return (
     <div className="flex flex-col gap-6">
@@ -97,7 +95,10 @@ function DashboardContent({ orgSlug }: { orgSlug: string }) {
       </div>
 
       {showOnboarding ? (
-        <OnboardingChecklist hasKey={keyCount > 0} hasCall={overview.callsCycle > 0} />
+        <OnboardingChecklist
+          hasKey={keyCount > 0}
+          hasCall={overview.callsCycle > 0}
+        />
       ) : null}
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -212,8 +213,12 @@ function DashboardContent({ orgSlug }: { orgSlug: string }) {
                     <th className="px-2 py-2 font-medium">API</th>
                     <th className="px-2 py-2 font-medium">Endpoint</th>
                     <th className="px-2 py-2 font-medium">Status</th>
-                    <th className="px-2 py-2 font-medium text-right">Credits</th>
-                    <th className="px-2 py-2 font-medium text-right">Latency</th>
+                    <th className="px-2 py-2 font-medium text-right">
+                      Credits
+                    </th>
+                    <th className="px-2 py-2 font-medium text-right">
+                      Latency
+                    </th>
                   </tr>
                 </thead>
                 <tbody>

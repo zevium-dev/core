@@ -1,5 +1,10 @@
 // src/hooks/useUsers.ts - Example of advanced custom hooks pattern
-import { useQuery, useMutation, useQueryClient, queryOptions } from "@tanstack/react-query";
+import {
+  useQuery,
+  useMutation,
+  useQueryClient,
+  queryOptions,
+} from "@tanstack/react-query";
 
 /**
  * Type definitions
@@ -25,7 +30,9 @@ const userApi = {
   },
 
   getById: async (id: number): Promise<User> => {
-    const response = await fetch(`https://jsonplaceholder.typicode.com/users/${id}`);
+    const response = await fetch(
+      `https://jsonplaceholder.typicode.com/users/${id}`,
+    );
     if (!response.ok) throw new Error(`Failed to fetch user ${id}`);
     return response.json();
   },
@@ -41,19 +48,25 @@ const userApi = {
   },
 
   update: async ({ id, ...updates }: UpdateUserInput): Promise<User> => {
-    const response = await fetch(`https://jsonplaceholder.typicode.com/users/${id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(updates),
-    });
+    const response = await fetch(
+      `https://jsonplaceholder.typicode.com/users/${id}`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updates),
+      },
+    );
     if (!response.ok) throw new Error("Failed to update user");
     return response.json();
   },
 
   delete: async (id: number): Promise<void> => {
-    const response = await fetch(`https://jsonplaceholder.typicode.com/users/${id}`, {
-      method: "DELETE",
-    });
+    const response = await fetch(
+      `https://jsonplaceholder.typicode.com/users/${id}`,
+      {
+        method: "DELETE",
+      },
+    );
     if (!response.ok) throw new Error("Failed to delete user");
   },
 };
@@ -122,7 +135,10 @@ export function useCreateUser() {
     mutationFn: userApi.create,
     onSuccess: (newUser) => {
       // Update cache with new user
-      queryClient.setQueryData<User[]>(["users"], (old = []) => [...old, newUser]);
+      queryClient.setQueryData<User[]>(["users"], (old = []) => [
+        ...old,
+        newUser,
+      ]);
 
       // Invalidate to refetch and ensure consistency
       queryClient.invalidateQueries({ queryKey: ["users"] });
@@ -154,7 +170,9 @@ export function useDeleteUser() {
     mutationFn: userApi.delete,
     onSuccess: (_, deletedId) => {
       // Remove from cache
-      queryClient.setQueryData<User[]>(["users"], (old = []) => old.filter((user) => user.id !== deletedId));
+      queryClient.setQueryData<User[]>(["users"], (old = []) =>
+        old.filter((user) => user.id !== deletedId),
+      );
 
       // Remove individual query
       queryClient.removeQueries({ queryKey: ["users", deletedId] });
@@ -216,7 +234,10 @@ export function UserDetail({ id }: { id: number }) {
       <p>Email: {user.email}</p>
       <p>Phone: {user.phone}</p>
 
-      <button onClick={() => updateUser({ id: user.id, name: "Updated Name" })} disabled={isUpdating}>
+      <button
+        onClick={() => updateUser({ id: user.id, name: "Updated Name" })}
+        disabled={isUpdating}
+      >
         Update Name
       </button>
 
@@ -232,7 +253,12 @@ export function UserSearch() {
 
   return (
     <div>
-      <input type="text" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search users..." />
+      <input
+        type="text"
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+        placeholder="Search users..."
+      />
 
       {isFetching && <span>Searching...</span>}
 

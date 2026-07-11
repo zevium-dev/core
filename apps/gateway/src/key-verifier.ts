@@ -112,7 +112,9 @@ export class ClerkKeyVerifier implements KeyVerifier {
     });
   }
 
-  async #readCacheApi(cacheKey: string): Promise<VerifiedKey | null | undefined> {
+  async #readCacheApi(
+    cacheKey: string,
+  ): Promise<VerifiedKey | null | undefined> {
     try {
       const cache = await this.#caches!.open(CACHE_NAME);
       const req = cacheRequest(cacheKey);
@@ -211,9 +213,7 @@ export function parseClerkVerifyResponse(json: unknown): VerifiedKey | null {
   if ("expired" in json && json.expired === true) return null;
 
   const subject =
-    "subject" in json && typeof json.subject === "string"
-      ? json.subject
-      : null;
+    "subject" in json && typeof json.subject === "string" ? json.subject : null;
   if (!subject) return null;
 
   let claimOrgId: string | null = null;

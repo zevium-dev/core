@@ -15,44 +15,71 @@ import { ConvexProviderWithClerk } from "convex/react-clerk";
 import { ThemeProvider } from "#/components/theme-provider";
 import { Toaster } from "#/components/ui/sonner";
 import { TooltipProvider } from "#/components/ui/tooltip";
+import { readClientClerkAuth } from "#/lib/clerk-client";
 import { convexQueryClient, type RouterContext } from "#/router";
 
 import appCss from "../styles.css?url";
 import clerkShadcnCss from "@clerk/ui/themes/shadcn.css?url";
+
+type ConvexAuthSnapshot = {
+  userId: string | null;
+  token: string | null;
+  orgSlug: string | null;
+  orgId: string | null;
+};
 
 /**
  * SSR: pull Clerk session + Convex JWT template so authed loaders
  * can hit Convex via serverHttpClient with identity.
  */
 const fetchConvexAuth = createServerFn({ method: "GET" }).handler(
-  async (): Promise<{ userId: string | null; token: string | null }> => {
+  async (): Promise<ConvexAuthSnapshot> => {
     const session = await auth();
     const userId = session.userId ?? null;
     if (!userId) {
-      return { userId: null, token: null };
+      return { userId: null, token: null, orgSlug: null, orgId: null };
     }
     const token = (await session.getToken({ template: "convex" })) ?? null;
-    return { userId, token };
+    return {
+      userId,
+      token,
+      orgSlug: session.orgSlug ?? null,
+      orgId: session.orgId ?? null,
+    };
   },
 );
 
 const themeInitScript = `(function(){try{var k='zevium-theme';var t=localStorage.getItem(k);var d=window.matchMedia('(prefers-color-scheme: dark)').matches;var dark=t==='dark'||(t!=='light'&&d);var r=document.documentElement;r.classList.toggle('dark',dark);r.style.colorScheme=dark?'dark':'light';}catch(e){}})();`;
 
 export const Route = createRootRouteWithContext<RouterContext>()({
-  beforeLoad: async () => {
-    const { userId, token } = await fetchConvexAuth();
+  beforeLoad: async ({ context }): Promise<ConvexAuthSnapshot> => {
+    // Client nav: no server round-trip. Clerk browser state is sync.
+    // token stays null — ConvexProviderWithClerk owns browser Convex auth.
+    if (typeof window !== "undefined") {
+      const client = readClientClerkAuth({
+        userId: context.userId,
+        orgId: context.orgId,
+        orgSlug: context.orgSlug,
+      });
+      return {
+        userId: client.userId,
+        token: null,
+        orgSlug: client.orgSlug,
+        orgId: client.orgId,
+      };
+    }
+
+    const { userId, token, orgSlug, orgId } = await fetchConvexAuth();
 
     // SSR only: forward JWT into Convex HTTP client used by loaders.
     // Browser auth stays on ConvexProviderWithClerk.
-    if (typeof window === "undefined") {
-      if (token) {
-        convexQueryClient.serverHttpClient?.setAuth(token);
-      } else {
-        convexQueryClient.serverHttpClient?.clearAuth();
-      }
+    if (token) {
+      convexQueryClient.serverHttpClient?.setAuth(token);
+    } else {
+      convexQueryClient.serverHttpClient?.clearAuth();
     }
 
-    return { userId, token };
+    return { userId, token, orgSlug, orgId };
   },
   head: () => ({
     meta: [

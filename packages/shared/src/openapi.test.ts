@@ -124,7 +124,9 @@ describe("matchOperation", () => {
 
 describe("extractPricing", () => {
   it("floors positive costs and free tier", () => {
-    expect(extractPricing({ "x-zevium-cost": 3.9, "x-zevium-free-tier": 2.2 })).toEqual({
+    expect(
+      extractPricing({ "x-zevium-cost": 3.9, "x-zevium-free-tier": 2.2 }),
+    ).toEqual({
       cost: 3,
       freeTier: 2,
     });

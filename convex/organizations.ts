@@ -97,9 +97,7 @@ export const deleteFromClerk = internalMutation({
 
     const wallet = await ctx.db
       .query("wallets")
-      .withIndex("by_organization", (q) =>
-        q.eq("organizationId", existing._id),
-      )
+      .withIndex("by_organization", (q) => q.eq("organizationId", existing._id))
       .unique();
     if (wallet !== null) {
       const entries = await ctx.db

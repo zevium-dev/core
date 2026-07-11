@@ -42,10 +42,7 @@ export const saveDraft = mutation({
 
     const issues = validateOpenApiSpec(args.spec);
     // Empty draft is allowed to clear editor; only non-empty drafts must parse.
-    const effectiveIssues =
-      args.spec.trim() === ""
-        ? []
-        : issues;
+    const effectiveIssues = args.spec.trim() === "" ? [] : issues;
 
     const hasError = effectiveIssues.some((i) => i.level === "error");
     if (hasError) {
@@ -196,7 +193,9 @@ export const listVersions = query({
     await requireProjectMember(ctx, args.projectId);
     const rows = await ctx.db
       .query("specVersions")
-      .withIndex("by_project_published", (q) => q.eq("projectId", args.projectId))
+      .withIndex("by_project_published", (q) =>
+        q.eq("projectId", args.projectId),
+      )
       .order("desc")
       .collect();
     return rows.map((r) => ({

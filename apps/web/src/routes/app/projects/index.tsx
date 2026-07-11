@@ -16,23 +16,29 @@ import {
   CardTitle,
 } from "#/components/ui/card";
 import { Skeleton } from "#/components/ui/skeleton";
-import { getAuthOrg } from "#/lib/auth-session";
 import { api } from "#/lib/convex-api";
 import { ensureMirrorOnServer } from "#/lib/ensure-mirror";
 import type { RouterContext } from "#/router";
 
 export const Route = createFileRoute("/app/projects/")({
   loader: async ({ context }) => {
-    const { queryClient } = context as RouterContext;
+    const { queryClient, orgSlug } = context as RouterContext;
+    if (!orgSlug) return;
+
+    const queryOpts = convexQuery(api.projects.list, { orgSlug });
+
+    // Client nav: fire-and-forget prefetch; skeletons cover isPending.
+    // Mirror is handled by useEnsureMirror in app.tsx — never block client.
+    if (typeof window !== "undefined") {
+      void queryClient.prefetchQuery(queryOpts);
+      return;
+    }
+
     try {
       // Mirror user/org rows before authed list so first SSR doesn't 500
       // on "Organization not found".
       const mirror = await ensureMirrorOnServer();
-      const session = await getAuthOrg();
-      if (!session.orgSlug || !mirror.mirrored) return;
-      const queryOpts = convexQuery(api.projects.list, {
-        orgSlug: session.orgSlug,
-      });
+      if (!mirror.mirrored) return;
       try {
         await queryClient.ensureQueryData(queryOpts);
       } catch {

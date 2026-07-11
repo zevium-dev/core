@@ -175,7 +175,12 @@ function CreateProjectPage() {
             </div>
 
             <div className="flex items-center justify-end gap-2 pt-2">
-              <Button asChild variant="ghost" type="button" disabled={isPending}>
+              <Button
+                asChild
+                variant="ghost"
+                type="button"
+                disabled={isPending}
+              >
                 <Link to="/app/projects">Cancel</Link>
               </Button>
               <Button type="submit" disabled={isPending}>

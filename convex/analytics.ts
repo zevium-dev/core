@@ -169,9 +169,7 @@ export const orgOverview = query({
       }
       const project = await ctx.db.get(projectId);
       const view =
-        project === null
-          ? null
-          : { slug: project.slug, name: project.name };
+        project === null ? null : { slug: project.slug, name: project.name };
       projectCache.set(projectId, view);
       return view;
     }
@@ -362,4 +360,3 @@ export const projectAnalytics = query({
     };
   },
 });
-

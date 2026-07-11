@@ -7,6 +7,7 @@ Suite failed in e2e/lib.sh sign_in(). Root causes found by orchestrator (proven 
 3. Seed user password was reset by orchestrator to `zevium-test-password` — creds valid now.
 
 Proven working recipe (fresh session, from /sign-in):
+
 ```
 agent-browser fill 'input[name="identifier"]' "$E2E_EMAIL"   # combined first screen may also show password field — ignore it
 agent-browser focus 'input[name="identifier"]'; agent-browser press Enter
@@ -17,9 +18,11 @@ agent-browser focus 'input[name="password"]'; agent-browser press Enter
 agent-browser fill 'input' '424242'   # OTP auto-submits after fill, no button click needed
 # → signed in, redirected to /
 ```
+
 Keep the existing polling loop structure (states can arrive in different order / factor-one may be skipped on trusted client): each iteration inspect URL + page text, act per state (identifier form → fill+Enter; password visible → fill+Enter; verification code → fill OTP; url has /app or Clerk user exists → success). `agent-browser eval "window.Clerk?.user?.id ?? ''"` is a reliable signed-in check. After success land on /app and assert shell renders.
 
 TASK:
+
 1. Rewrite sign_in() in e2e/lib.sh per above. Keep is_signed_in short-circuit.
 2. Run `bash e2e/run-all.sh`. Iterate until 01-auth passes fully. 02-publisher / 03-consumer: iterate on SCRIPT bugs (selectors, timing) until they pass or fail ONLY on genuinely missing app functionality — do NOT edit app code (apps/, convex/ are read-only for you).
 3. Artifacts in e2e/artifacts/ on failure already handled — keep it.

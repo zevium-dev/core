@@ -1,4 +1,9 @@
-import { Link, Outlet, createFileRoute, useRouterState } from "@tanstack/react-router";
+import {
+  Link,
+  Outlet,
+  createFileRoute,
+  useRouterState,
+} from "@tanstack/react-router";
 
 import { cn } from "#/lib/utils";
 

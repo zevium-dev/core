@@ -404,7 +404,13 @@ const checkout = await polarClient.checkouts.create({
   customerId,
   metadata: { orgId: input.orgId },
   prices: {
-    [productId]: [{ amountType: "custom", presetAmount: input.amountUsd * 100, priceCurrency: "usd" }],
+    [productId]: [
+      {
+        amountType: "custom",
+        presetAmount: input.amountUsd * 100,
+        priceCurrency: "usd",
+      },
+    ],
   },
   products: [productId],
   successUrl: input.successUrl,

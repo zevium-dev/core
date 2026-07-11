@@ -47,7 +47,9 @@ function detectBaseBranch(preferred) {
     if (gitOk(["rev-parse", "--verify", c])) return c;
   }
 
-  throw new Error(`Cannot find base branch. Tried: ${candidates.join(", ")}. Fetch remotes or pass --base explicitly.`);
+  throw new Error(
+    `Cannot find base branch. Tried: ${candidates.join(", ")}. Fetch remotes or pass --base explicitly.`,
+  );
 }
 
 function ensureFetched(base, { noFetch }) {
@@ -139,7 +141,8 @@ function summaryBullets(subjects) {
 
 function suggestTestingCommands() {
   const cmds = [];
-  if (fs.existsSync("mise.toml") || fs.existsSync(".mise.toml")) cmds.push("mise run ci");
+  if (fs.existsSync("mise.toml") || fs.existsSync(".mise.toml"))
+    cmds.push("mise run ci");
   if (fs.existsSync("pnpm-lock.yaml")) cmds.push("pnpm -s run ci:pr");
   if (cmds.length === 0) cmds.push("<add your local test command>");
   return cmds;
@@ -219,8 +222,12 @@ function parseArgs(argv) {
 function printHelp() {
   process.stdout.write(`Usage: generate_pr_description.js [options]\n\n`);
   process.stdout.write(`Options:\n`);
-  process.stdout.write(`  --base <ref>     Base ref to compare (default: origin/develop)\n`);
-  process.stdout.write(`  --head <ref>     Head ref to compare (default: HEAD)\n`);
+  process.stdout.write(
+    `  --base <ref>     Base ref to compare (default: origin/develop)\n`,
+  );
+  process.stdout.write(
+    `  --head <ref>     Head ref to compare (default: HEAD)\n`,
+  );
   process.stdout.write(`  --title <title>  Override PR title\n`);
   process.stdout.write(`  --no-fetch       Do not fetch origin/develop\n`);
   process.stdout.write(`  -h, --help       Show help\n`);
@@ -252,10 +259,15 @@ function main() {
 
     const notes = [];
     if (isMigrationTouched(changed)) {
-      notes.push("Includes DB migration changes; ensure migration applies cleanly.");
+      notes.push(
+        "Includes DB migration changes; ensure migration applies cleanly.",
+      );
     }
 
-    const title = args.title && args.title.trim() ? args.title.trim() : guessTitle(subjects, branch);
+    const title =
+      args.title && args.title.trim()
+        ? args.title.trim()
+        : guessTitle(subjects, branch);
 
     const md = renderMarkdown({
       title,

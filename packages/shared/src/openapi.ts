@@ -6,14 +6,7 @@
 import type { EndpointPricing } from "./pricing.js";
 
 export type HttpMethod =
-  | "get"
-  | "post"
-  | "put"
-  | "patch"
-  | "delete"
-  | "options"
-  | "head"
-  | "trace";
+  "get" | "post" | "put" | "patch" | "delete" | "options" | "head" | "trace";
 
 const HTTP_METHODS: Record<string, true> = {
   get: true,
@@ -172,8 +165,7 @@ export function matchOperation(
 
 export function extractPricing(op: OpenApiOperation): EndpointPricing {
   const costRaw = asNumber(op["x-zevium-cost"]);
-  const cost =
-    costRaw !== undefined && costRaw > 0 ? Math.floor(costRaw) : 1;
+  const cost = costRaw !== undefined && costRaw > 0 ? Math.floor(costRaw) : 1;
 
   const freeRaw = asNumber(op["x-zevium-free-tier"]);
   const freeTier =
@@ -241,7 +233,9 @@ export function joinUpstreamUrl(baseUrl: string, requestPath: string): string {
     // If request path already starts with prefix we still append full path —
     // gateway remainder is the full upstream path relative to servers[0].url root.
     u.pathname = `${prefix}${path === "/" ? "" : path}` || "/";
-    return u.toString().replace(/\/$/, path === "/" && prefix === "" ? "/" : "");
+    return u
+      .toString()
+      .replace(/\/$/, path === "/" && prefix === "" ? "/" : "");
   } catch {
     return `${base}${path === "/" ? "" : path}`;
   }

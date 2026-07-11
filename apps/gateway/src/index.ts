@@ -111,11 +111,7 @@ function discoveryDeps(deps: WorkerDeps, request: Request): DiscoveryDeps {
   };
 }
 
-function mcpDeps(
-  deps: WorkerDeps,
-  env: Env,
-  request: Request,
-): McpDeps {
+function mcpDeps(deps: WorkerDeps, env: Env, request: Request): McpDeps {
   return {
     catalogueSource: deps.catalogueSource,
     specSource: deps.specSource,
@@ -197,13 +193,7 @@ export default {
     const route = parseGatewayPath(url.pathname);
     if (route) {
       const deps = buildDeps(env);
-      return handleGatewayRequest(
-        request,
-        env,
-        pipelineOnly(deps),
-        ctx,
-        route,
-      );
+      return handleGatewayRequest(request, env, pipelineOnly(deps), ctx, route);
     }
 
     return Response.json({ error: "not found" }, { status: 404 });

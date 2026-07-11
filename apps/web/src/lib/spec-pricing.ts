@@ -56,7 +56,6 @@ export function formatPricingSummary(summary: PricingSummary): string {
     summary.minCredits === summary.maxCredits
       ? `${summary.minCredits} credits`
       : `${summary.minCredits}–${summary.maxCredits} credits`;
-  const free =
-    summary.freeTier > 0 ? `, free tier on ${summary.freeTier}` : "";
+  const free = summary.freeTier > 0 ? `, free tier on ${summary.freeTier}` : "";
   return `${summary.endpointCount} endpoints, ${range}${free}`;
 }

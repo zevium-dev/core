@@ -195,9 +195,7 @@ export class ConvexUsageClient {
       throw new Error(msg);
     }
     const value =
-      "status" in json &&
-      json.status === "success" &&
-      "value" in json
+      "status" in json && json.status === "success" && "value" in json
         ? json.value
         : json;
     return parseRecordUsageResult(value);

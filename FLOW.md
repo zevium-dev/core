@@ -6,14 +6,14 @@
 
 ## Personas
 
-| Persona | Who | Primary surface |
-| --- | --- | --- |
-| **Visitor** | Anonymous browser | Landing, public catalogue, auth |
-| **Consumer** | Human dev buying API calls | Catalogue, API detail, playground, keys, wallet |
-| **Agent** | AI agent consuming APIs programmatically | Discovery index, agent-tool endpoint, gateway (no screens — machine surface) |
-| **Publisher** | Org member selling APIs | Projects, spec editor, analytics, earnings |
-| **Org admin** | Owner/admin of an organization | Org settings, members, wallet, invitations |
-| **Platform admin** | Zevium staff | Moderation, quality gates, support tooling |
+| Persona            | Who                                      | Primary surface                                                              |
+| ------------------ | ---------------------------------------- | ---------------------------------------------------------------------------- |
+| **Visitor**        | Anonymous browser                        | Landing, public catalogue, auth                                              |
+| **Consumer**       | Human dev buying API calls               | Catalogue, API detail, playground, keys, wallet                              |
+| **Agent**          | AI agent consuming APIs programmatically | Discovery index, agent-tool endpoint, gateway (no screens — machine surface) |
+| **Publisher**      | Org member selling APIs                  | Projects, spec editor, analytics, earnings                                   |
+| **Org admin**      | Owner/admin of an organization           | Org settings, members, wallet, invitations                                   |
+| **Platform admin** | Zevium staff                             | Moderation, quality gates, support tooling                                   |
 
 One account can be several personas at once (a publisher is usually also a consumer). Every user belongs to at least one org (a personal org is created at signup) — the org owns the wallet.
 

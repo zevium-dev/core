@@ -1,7 +1,4 @@
-import {
-  OrganizationSwitcher,
-  UserButton,
-} from "@clerk/tanstack-react-start";
+import { OrganizationSwitcher, UserButton } from "@clerk/tanstack-react-start";
 import { shadcn } from "@clerk/ui/themes";
 import { Link, useRouterState } from "@tanstack/react-router";
 import {

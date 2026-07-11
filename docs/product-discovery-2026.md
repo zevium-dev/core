@@ -10,14 +10,14 @@ Sources: [TechCrunch](https://techcrunch.com/2024/11/13/nokia-acquires-rapid-the
 
 ### Survivors and their strategies
 
-| Player | Model | Take rate | Status |
-|---|---|---|---|
-| APILayer (Idera) | Curated, ~178 APIs, mostly first-party | ~15% historically | Alive; only **4 AI/ML APIs** — asleep on the agent wave |
-| Zyla API Hub | 8-10k APIs, unified key, 7-day trials, **MCP-compatible** | ~20%, 99.8% uptime floor | Alive, closest RapidAPI heir |
-| AWS Marketplace | Enterprise, consolidated billing | ~3-5% markup | Alive, weak discovery UX |
-| Blobr | "Shopify for APIs" portals, €5M seed 2023 | — | **Dead** — pivoted to Google Ads AI agents |
-| Kong Konnect | Gateway, no public catalog | — | Added MCP Registry + prepaid-credits billing (GA Jul 2026) |
-| Postman | API network, zero monetization | — | Not a marketplace threat |
+| Player           | Model                                                     | Take rate                | Status                                                     |
+| ---------------- | --------------------------------------------------------- | ------------------------ | ---------------------------------------------------------- |
+| APILayer (Idera) | Curated, ~178 APIs, mostly first-party                    | ~15% historically        | Alive; only **4 AI/ML APIs** — asleep on the agent wave    |
+| Zyla API Hub     | 8-10k APIs, unified key, 7-day trials, **MCP-compatible** | ~20%, 99.8% uptime floor | Alive, closest RapidAPI heir                               |
+| AWS Marketplace  | Enterprise, consolidated billing                          | ~3-5% markup             | Alive, weak discovery UX                                   |
+| Blobr            | "Shopify for APIs" portals, €5M seed 2023                 | —                        | **Dead** — pivoted to Google Ads AI agents                 |
+| Kong Konnect     | Gateway, no public catalog                                | —                        | Added MCP Registry + prepaid-credits billing (GA Jul 2026) |
+| Postman          | API network, zero monetization                            | —                        | Not a marketplace threat                                   |
 
 **What killed RapidAPI:** 20-30% take rate (compounds brutally on high-volume AI workloads), unverified long-tail listings, proxy latency complaints, weak analytics (no error-type breakdown, no p95/p99). Lesson: **curation + quality signals + low take beat catalog size**.
 
@@ -63,7 +63,7 @@ Threat if ignored, rail if adopted: direct overlap with Zevium's metered-proxy m
 ### Pricing reality
 
 - Production agent-tool pricing clusters at **$0.002-$0.05/call** (Apify scrapers, Ref search at $0.009)
-- Practitioner rule: *"price as if 80% of calls come from agents — an agent will always find the cheapest thing to loop on"*
+- Practitioner rule: _"price as if 80% of calls come from agents — an agent will always find the cheapest thing to loop on"_
 - Take-rate benchmarks: **Apify keeps 20%** (pays devs 80%, $4M+ paid out), MCPize keeps 15%, self-host ≈3% after Stripe fees
 - Zevium's planned 30% cut is above market. 15-20% is the bar; "publishers keep 80%" is the marketing headline that works (Apify precedent)
 
@@ -98,7 +98,7 @@ Threat if ignored, rail if adopted: direct overlap with Zevium's metered-proxy m
 
 - **Stripe docs**: three-column layout (nav / prose / runnable code), hover-sync between prose and code, paste-test-key-and-run with the key held in browser session storage only, visually loud test mode. Benchmark for Zevium's API detail + explorer pages (Scalar gets partway)
 - **OpenRouter keys** (verified verbatim): management keys separated from inference keys (management keys cannot call completion endpoints), full key CRUD under `/api/v1/keys`, per-key credit `limit` with `limit_reset` daily/weekly/monthly at UTC midnight, auto-disable on exceed. Top documented use case: SaaS apps provisioning a unique key per customer. Blueprint for Zevium's `user-key` RPC evolution
-- **Vercel spend management** (verified verbatim): three actions at cap (notify / webhook / pause-all), tiered alerts 50/75/100% + SMS, signed webhook payloads (`budgetAmount`, `currentSpend`, `thresholdPercent`), honest docs about enforcement lag (checks run "every few minutes" — set cap below true max). Zevium's Redis gate is real-time and therefore *stronger* — market that
+- **Vercel spend management** (verified verbatim): three actions at cap (notify / webhook / pause-all), tiered alerts 50/75/100% + SMS, signed webhook payloads (`budgetAmount`, `currentSpend`, `thresholdPercent`), honest docs about enforcement lag (checks run "every few minutes" — set cap below true max). Zevium's Redis gate is real-time and therefore _stronger_ — market that
 - **HuggingFace cards**: structured metadata drives hub-wide filters + rich detail pages. Zevium analog: derive tags/cost/latency filters straight from the OpenAPI spec — spec-as-source-of-truth is already the architecture
 - **RapidAPI baseline** (the bar to beat): search/filter by category, pricing, popularity, success rate, latency; per-listing docs, test console, reviews, one-key subscribe
 

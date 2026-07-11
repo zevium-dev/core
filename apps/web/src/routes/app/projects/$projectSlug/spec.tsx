@@ -1,8 +1,5 @@
 import { useOrganization } from "@clerk/tanstack-react-start";
-import {
-  convexQuery,
-  useConvexMutation,
-} from "@convex-dev/react-query";
+import { convexQuery, useConvexMutation } from "@convex-dev/react-query";
 import {
   useMutation,
   useQueryClient,
@@ -33,7 +30,6 @@ import {
 import { Input } from "#/components/ui/input";
 import { Label } from "#/components/ui/label";
 import { Skeleton } from "#/components/ui/skeleton";
-import { getAuthOrg } from "#/lib/auth-session";
 import { api } from "#/lib/convex-api";
 import type { Id } from "#/lib/convex-data-model";
 import { humanError } from "#/lib/human-error";
@@ -51,16 +47,23 @@ type SpecIssue = {
 
 export const Route = createFileRoute("/app/projects/$projectSlug/spec")({
   loader: async ({ context, params }) => {
-    const { queryClient } = context as RouterContext;
+    const { queryClient, orgSlug } = context as RouterContext;
+    if (!orgSlug) return;
+
+    const projectQuery = convexQuery(api.projects.get, {
+      orgSlug,
+      projectSlug: params.projectSlug,
+    });
+
+    // Client nav: fire-and-forget project fetch; draft/versions need project id
+    // so component queries handle those after project resolves.
+    if (typeof window !== "undefined") {
+      void queryClient.prefetchQuery(projectQuery);
+      return;
+    }
+
     try {
-      const session = await getAuthOrg();
-      if (!session.orgSlug) return;
-      const project = await queryClient.ensureQueryData(
-        convexQuery(api.projects.get, {
-          orgSlug: session.orgSlug,
-          projectSlug: params.projectSlug,
-        }),
-      );
+      const project = await queryClient.ensureQueryData(projectQuery);
       if (project) {
         await Promise.all([
           queryClient.ensureQueryData(
@@ -121,9 +124,7 @@ function SpecEditor({
   );
 
   if (project === null) {
-    return (
-      <p className="text-sm text-muted-foreground">Project not found.</p>
-    );
+    return <p className="text-sm text-muted-foreground">Project not found.</p>;
   }
 
   return (
@@ -403,9 +404,7 @@ function defaultNextVersion(existing: string[]): string {
       best === null ||
       triple[0] > best[0] ||
       (triple[0] === best[0] && triple[1] > best[1]) ||
-      (triple[0] === best[0] &&
-        triple[1] === best[1] &&
-        triple[2] > best[2])
+      (triple[0] === best[0] && triple[1] === best[1] && triple[2] > best[2])
     ) {
       best = triple;
     }

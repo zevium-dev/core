@@ -37,13 +37,13 @@ Agent-first, per-call API marketplace. Publishers list APIs via OpenAPI specs; c
 
 **Source-of-truth docs — read before building anything:**
 
-| Doc | Owns |
-| --- | --- |
-| [PRODUCT.md](PRODUCT.md) | What the product does, pricing model, roadmap (P0/P1/P2). No tech talk |
-| [FLOW.md](FLOW.md) | Every screen, per persona, target-state. No tech talk |
-| [DESIGN.md](DESIGN.md) | Visual + motion language: stock shadcn, motion tokens, view transitions, micro-interactions |
-| [TECH.md](TECH.md) | All architecture + vendor decisions. The only doc where implementation lives |
-| [docs/product-discovery-2026.md](docs/product-discovery-2026.md) | Market research backing the direction |
+| Doc                                                              | Owns                                                                                        |
+| ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| [PRODUCT.md](PRODUCT.md)                                         | What the product does, pricing model, roadmap (P0/P1/P2). No tech talk                      |
+| [FLOW.md](FLOW.md)                                               | Every screen, per persona, target-state. No tech talk                                       |
+| [DESIGN.md](DESIGN.md)                                           | Visual + motion language: stock shadcn, motion tokens, view transitions, micro-interactions |
+| [TECH.md](TECH.md)                                               | All architecture + vendor decisions. The only doc where implementation lives                |
+| [docs/product-discovery-2026.md](docs/product-discovery-2026.md) | Market research backing the direction                                                       |
 
 Doc discipline: product language in PRODUCT/FLOW, tech language in TECH only. Keep it that way.
 

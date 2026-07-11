@@ -6,10 +6,7 @@ import {
 import { Webhook } from "svix";
 import { internal } from "./_generated/api";
 import { httpAction } from "./_generated/server";
-import {
-  resolveOrderClerkOrgId,
-  resolveOrderCredits,
-} from "./billing";
+import { resolveOrderClerkOrgId, resolveOrderCredits } from "./billing";
 
 const http = httpRouter();
 
@@ -99,7 +96,11 @@ http.route({
         const emails = data.email_addresses ?? [];
         let email = "";
         for (const entry of emails) {
-          if (primaryId !== undefined && primaryId !== null && entry.id === primaryId) {
+          if (
+            primaryId !== undefined &&
+            primaryId !== null &&
+            entry.id === primaryId
+          ) {
             email = entry.email_address ?? "";
             break;
           }
@@ -113,7 +114,7 @@ http.route({
         const name =
           nameParts.length > 0
             ? nameParts.join(" ")
-            : data.username ?? (email || "User");
+            : (data.username ?? (email || "User"));
 
         await ctx.runMutation(internal.users.upsertFromClerk, {
           clerkUserId: data.id,

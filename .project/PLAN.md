@@ -14,21 +14,21 @@
 
 ## Waves
 
-| Wave | Lane | Scope (disjoint dirs) | Status |
-| --- | --- | --- | --- |
-| 1 | convex | Full schema + org/user mirror + Clerk JWT auth + webhook http action | done |
-| 1 | web | shadcn init, motion tokens, app shell (sidebar/org switcher/theme), route skeleton | done |
-| 1 | gateway | /gateway routing, key-verify cache module, spec resolution, wallet integration | done |
-| 2 | convex | projects + specs CRUD functions, publish pipeline, catalogue query | done |
-| 2 | web | projects screens + spec editor | done |
-| 2 | gateway | end-to-end proxy against Convex-backed spec + Clerk key verify | done (committed 8ba0b86) |
-| 2 | e2e | agent-browser scripts in e2e/ | done — 01/02/03 ALL PASS incl. paid gateway call |
-| 3 | web | catalogue (public SSR) + API detail + playground | done (07e3f1a) |
-| 3 | convex+web | billing/wallet screens + Polar webhook | done (e7c1994) — Polar webhook registration = user action |
-| 3 | web | keys screens (/app/settings) | done (e7c1994 + 8f524c3 org claims) |
-| 4 | web+convex | analytics dashboards | done (632f6ed) |
-| 4 | gateway | MCP endpoint + discovery | done (93d259e) |
-| 5 | all | DESIGN.md motion pass, E2E full suite green, visual-review-1 fixes | done (7c51257) — ALL PASS 489s |
+| Wave | Lane       | Scope (disjoint dirs)                                                              | Status                                                    |
+| ---- | ---------- | ---------------------------------------------------------------------------------- | --------------------------------------------------------- |
+| 1    | convex     | Full schema + org/user mirror + Clerk JWT auth + webhook http action               | done                                                      |
+| 1    | web        | shadcn init, motion tokens, app shell (sidebar/org switcher/theme), route skeleton | done                                                      |
+| 1    | gateway    | /gateway routing, key-verify cache module, spec resolution, wallet integration     | done                                                      |
+| 2    | convex     | projects + specs CRUD functions, publish pipeline, catalogue query                 | done                                                      |
+| 2    | web        | projects screens + spec editor                                                     | done                                                      |
+| 2    | gateway    | end-to-end proxy against Convex-backed spec + Clerk key verify                     | done (committed 8ba0b86)                                  |
+| 2    | e2e        | agent-browser scripts in e2e/                                                      | done — 01/02/03 ALL PASS incl. paid gateway call          |
+| 3    | web        | catalogue (public SSR) + API detail + playground                                   | done (07e3f1a)                                            |
+| 3    | convex+web | billing/wallet screens + Polar webhook                                             | done (e7c1994) — Polar webhook registration = user action |
+| 3    | web        | keys screens (/app/settings)                                                       | done (e7c1994 + 8f524c3 org claims)                       |
+| 4    | web+convex | analytics dashboards                                                               | done (632f6ed)                                            |
+| 4    | gateway    | MCP endpoint + discovery                                                           | done (93d259e)                                            |
+| 5    | all        | DESIGN.md motion pass, E2E full suite green, visual-review-1 fixes                 | done (7c51257) — ALL PASS 489s                            |
 
 ## User action needed
 

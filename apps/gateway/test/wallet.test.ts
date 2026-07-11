@@ -219,9 +219,10 @@ describe("WalletDO property/fuzz", () => {
     const assertNonNegative = async (label: string) => {
       const state = await stub.getState();
       expect(state.balance, `${label}: balance >= 0`).toBeGreaterThanOrEqual(0);
-      expect(state.available, `${label}: available >= 0`).toBeGreaterThanOrEqual(
-        0,
-      );
+      expect(
+        state.available,
+        `${label}: available >= 0`,
+      ).toBeGreaterThanOrEqual(0);
       expect(
         state.inFlightTotal,
         `${label}: inFlightTotal >= 0`,

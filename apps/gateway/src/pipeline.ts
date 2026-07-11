@@ -3,11 +3,7 @@
  * verify key → load spec → match op → free-tier or reserve → proxy → settle/refund → usage.
  */
 
-import {
-  joinUpstreamUrl,
-  matchOperation,
-  parseSpec,
-} from "@zevium/shared";
+import { joinUpstreamUrl, matchOperation, parseSpec } from "@zevium/shared";
 import type { SettlementUsage, WalletDO } from "./wallet";
 import { extractApiKey, type KeyVerifier } from "./key-verifier";
 import type { SpecSource } from "./spec-source";
@@ -95,7 +91,12 @@ export async function handleGatewayRequest(
   try {
     parsed = parseSpec(published.spec);
   } catch {
-    return jsonError(404, "invalid_spec", "Published spec unreadable", requestId);
+    return jsonError(
+      404,
+      "invalid_spec",
+      "Published spec unreadable",
+      requestId,
+    );
   }
 
   const matched = matchOperation(parsed, request.method, route.remainderPath);
@@ -104,7 +105,12 @@ export async function handleGatewayRequest(
   }
 
   if (!matched.upstreamBaseUrl) {
-    return jsonError(404, "no_upstream", "Spec has no servers[0].url", requestId);
+    return jsonError(
+      404,
+      "no_upstream",
+      "Spec has no servers[0].url",
+      requestId,
+    );
   }
 
   const cost = matched.pricing.cost;

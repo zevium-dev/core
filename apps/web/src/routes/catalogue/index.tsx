@@ -24,9 +24,12 @@ const SEARCH_DEBOUNCE_MS = 250;
 export const Route = createFileRoute("/catalogue/")({
   loader: async ({ context }) => {
     const { queryClient } = context;
-    await queryClient.ensureQueryData(
-      convexQuery(api.catalogue.listPublic, {}),
-    );
+    const queryOpts = convexQuery(api.catalogue.listPublic, {});
+    if (typeof window !== "undefined") {
+      void queryClient.prefetchQuery(queryOpts);
+      return;
+    }
+    await queryClient.ensureQueryData(queryOpts);
   },
   component: CataloguePage,
   head: () => ({

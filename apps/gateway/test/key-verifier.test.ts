@@ -112,11 +112,12 @@ describe("parseClerkVerifyResponse", () => {
 
 describe("ClerkKeyVerifier", () => {
   it("calls Clerk once then serves memory cache", async () => {
-    const fetchImpl = vi.fn(async () =>
-      new Response(
-        JSON.stringify({ subject: "org_1", id: "ak_9", scopes: [] }),
-        { status: 200, headers: { "content-type": "application/json" } },
-      ),
+    const fetchImpl = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({ subject: "org_1", id: "ak_9", scopes: [] }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
     );
 
     let now = 1_000_000;
@@ -141,9 +142,7 @@ describe("ClerkKeyVerifier", () => {
   });
 
   it("returns null on non-ok Clerk response", async () => {
-    const fetchImpl = vi.fn(
-      async () => new Response("nope", { status: 401 }),
-    );
+    const fetchImpl = vi.fn(async () => new Response("nope", { status: 401 }));
     const verifier = new ClerkKeyVerifier({
       secretKey: "sk_test",
       fetchImpl: fetchImpl as unknown as typeof fetch,
