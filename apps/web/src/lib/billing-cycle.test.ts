@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  formatCountdown,
   formatCredits,
   formatCycleMonthLabel,
   isCycleEmpty,
@@ -74,5 +75,28 @@ describe("isCycleEmpty", () => {
         byKey: [],
       }),
     ).toBe(false);
+  });
+});
+
+describe("formatCountdown", () => {
+  it("clamps non-positive and non-finite to 0s", () => {
+    expect(formatCountdown(0)).toBe("0s");
+    expect(formatCountdown(-5)).toBe("0s");
+    expect(formatCountdown(Number.NaN)).toBe("0s");
+    expect(formatCountdown(Number.POSITIVE_INFINITY)).toBe("0s");
+  });
+
+  it("rounds up fractional seconds under a minute", () => {
+    expect(formatCountdown(1)).toBe("1s");
+    expect(formatCountdown(4.2)).toBe("5s");
+    expect(formatCountdown(58.4)).toBe("59s");
+    // anything ceiling to a full minute rolls over to the minute format
+    expect(formatCountdown(59.9)).toBe("1m");
+  });
+
+  it("compounds whole minutes with seconds", () => {
+    expect(formatCountdown(60)).toBe("1m");
+    expect(formatCountdown(90)).toBe("1m 30s");
+    expect(formatCountdown(125)).toBe("2m 5s");
   });
 });

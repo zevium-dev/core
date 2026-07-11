@@ -397,4 +397,58 @@ http.route({
   }),
 });
 
+/**
+ * Gateway pull: grant-kind ledger entries for an org, bounded to newest 500.
+ * Shared-secret gated (x-internal-secret === GATEWAY_INTERNAL_SECRET).
+ * The wallet DO syncGrants op consumes this to mirror control-plane grants
+ * into the edge balance without per-request Clerk/Convex coupling.
+ */
+http.route({
+  path: "/wallet-grants",
+  method: "GET",
+  handler: httpAction(async (ctx, request) => {
+    const secret = process.env.GATEWAY_INTERNAL_SECRET;
+    if (secret === undefined || secret.length === 0) {
+      return new Response(JSON.stringify({ error: "unauthorized" }), {
+        status: 401,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    const provided = request.headers.get("x-internal-secret");
+    if (provided === null || provided !== secret) {
+      return new Response(JSON.stringify({ error: "unauthorized" }), {
+        status: 401,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    const url = new URL(request.url);
+    const clerkOrgId = url.searchParams.get("clerkOrgId") ?? "";
+    if (clerkOrgId.length === 0) {
+      return new Response(JSON.stringify({ error: "clerkOrgId required" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    try {
+      const result = await ctx.runQuery(internal.wallets.listGrantsForGateway, {
+        clerkOrgId,
+      });
+      return new Response(JSON.stringify(result), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "wallet-grants failed";
+      console.error("wallet-grants: listGrantsForGateway failed", { message });
+      return new Response(JSON.stringify({ error: "wallet-grants failed" }), {
+        status: 500,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+  }),
+});
+
 export default http;

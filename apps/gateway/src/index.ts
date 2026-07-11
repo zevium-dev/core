@@ -21,7 +21,7 @@ import { handleDiscoveryRequest, type DiscoveryDeps } from "./discovery";
 import { handleMcpRequest, type McpDeps } from "./mcp";
 
 export { WalletDO };
-export { __setTestUsageMutation } from "./wallet";
+export { __setTestUsageMutation, __setTestGrantsFetcher } from "./wallet";
 
 export interface Env {
   WALLET: DurableObjectNamespace<WalletDO>;

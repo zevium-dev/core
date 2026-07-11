@@ -37,7 +37,7 @@ function issuesToDiagnostics(doc: string, issues: SpecIssue[]): Diagnostic[] {
 
 export type JsonCodeEditorProps = {
   value: string;
-  onChange: (value: string) => void;
+  onChange?: (value: string) => void;
   placeholder?: string;
   className?: string;
   readOnly?: boolean;

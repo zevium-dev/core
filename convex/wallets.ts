@@ -1,12 +1,13 @@
 import { v } from "convex/values";
+import type { Doc, Id } from "./_generated/dataModel";
 import {
   internalMutation,
+  internalQuery,
   mutation,
   query,
   type MutationCtx,
   type QueryCtx,
 } from "./_generated/server";
-import type { Doc, Id } from "./_generated/dataModel";
 import { requireOrgMemberBySlug } from "./lib/auth";
 
 async function getOrCreateWallet(
@@ -104,6 +105,89 @@ export const grantCredits = internalMutation({
       applied: true,
       balance: nextBalance,
       walletId: wallet._id,
+    };
+  },
+});
+
+/** Cooldown window for manual Polar sync. */
+export const POLAR_SYNC_COOLDOWN_MS = 5 * 60 * 1000;
+
+/** Resolve org → wallet by clerkOrgId (internal callers only). */
+async function getWalletByClerkOrgId(
+  ctx: QueryCtx,
+  clerkOrgId: string,
+): Promise<Doc<"wallets"> | null> {
+  const org = await ctx.db
+    .query("organizations")
+    .withIndex("by_clerk_org", (q) => q.eq("clerkOrgId", clerkOrgId))
+    .unique();
+  if (org === null) return null;
+  return await getWalletForOrg(ctx, org._id);
+}
+
+/**
+ * Read manual Polar sync cooldown state. Internal — called from the
+ * syncWithPolar action. Returns null timestamp when never synced.
+ */
+export const getPolarSyncState = internalQuery({
+  args: { clerkOrgId: v.string() },
+  handler: async (ctx, args): Promise<{ lastPolarSyncAt: number | null }> => {
+    const wallet = await getWalletByClerkOrgId(ctx, args.clerkOrgId);
+    return { lastPolarSyncAt: wallet?.lastPolarSyncAt ?? null };
+  },
+});
+
+/**
+ * Stamp the manual Polar sync cooldown. Creates the wallet row if missing.
+ * Returns the canonical balance post-stamp.
+ */
+export const markPolarSync = internalMutation({
+  args: { clerkOrgId: v.string() },
+  handler: async (ctx, args): Promise<{ balance: number }> => {
+    const org = await ctx.db
+      .query("organizations")
+      .withIndex("by_clerk_org", (q) => q.eq("clerkOrgId", args.clerkOrgId))
+      .unique();
+    if (org === null) {
+      throw new Error("Organization not found for clerkOrgId");
+    }
+    const wallet = await getOrCreateWallet(ctx, org._id);
+    await ctx.db.patch(wallet._id, { lastPolarSyncAt: Date.now() });
+    return { balance: wallet.balance };
+  },
+});
+
+/** Max grant rows returned to the gateway wallet-grants pull. */
+const MAX_GATEWAY_GRANTS = 500;
+
+export type GatewayGrantRow = { refId: string; amount: number };
+
+export type GatewayGrantsView = {
+  grants: GatewayGrantRow[];
+  balance: number;
+};
+
+/**
+ * Grant-kind ledger entries for an org, newest first. The gateway wallet DO
+ * pulls these to mirror control-plane grants into the edge balance.
+ * Internal + shared-secret gated (see http.ts /wallet-grants).
+ */
+export const listGrantsForGateway = internalQuery({
+  args: { clerkOrgId: v.string() },
+  handler: async (ctx, args): Promise<GatewayGrantsView> => {
+    const wallet = await getWalletByClerkOrgId(ctx, args.clerkOrgId);
+    if (wallet === null) {
+      return { grants: [], balance: 0 };
+    }
+    const entries = await ctx.db
+      .query("walletEntries")
+      .withIndex("by_wallet", (q) => q.eq("walletId", wallet._id))
+      .filter((q) => q.eq(q.field("kind"), "grant"))
+      .order("desc")
+      .take(MAX_GATEWAY_GRANTS);
+    return {
+      grants: entries.map((e) => ({ refId: e.refId, amount: e.amount })),
+      balance: wallet.balance,
     };
   },
 });

@@ -1,8 +1,15 @@
 import { Polar } from "@polar-sh/sdk";
 import { v } from "convex/values";
-import { action, internalAction, query } from "./_generated/server";
+import {
+  action,
+  internalAction,
+  query,
+  type ActionCtx,
+} from "./_generated/server";
+import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { requireOrgMemberBySlug } from "./lib/auth";
+import { POLAR_SYNC_COOLDOWN_MS } from "./wallets";
 
 /** Stable pack ids used by the web Buy Credits UI. */
 export type CreditPackId = "pack_10" | "pack_50" | "pack_100";
@@ -277,32 +284,7 @@ export const createCheckout = action({
     ),
   },
   handler: async (ctx, args): Promise<CreateCheckoutResult> => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (identity === null) {
-      throw new Error("Not authenticated");
-    }
-
-    // Authz: JWT active org claim must match orgSlug.
-    const raw = identity as Record<string, unknown>;
-    const claimSlug =
-      typeof raw.org_slug === "string"
-        ? raw.org_slug
-        : typeof raw.orgSlug === "string"
-          ? raw.orgSlug
-          : undefined;
-    const clerkOrgId =
-      typeof raw.org_id === "string"
-        ? raw.org_id
-        : typeof raw.orgId === "string"
-          ? raw.orgId
-          : undefined;
-
-    if (claimSlug === undefined || claimSlug !== args.orgSlug) {
-      throw new Error("Not a member of this organization");
-    }
-    if (clerkOrgId === undefined || clerkOrgId.length === 0) {
-      throw new Error("Active organization required");
-    }
+    const clerkOrgId = await requireOrgMemberInAction(ctx, args.orgSlug);
 
     const pack = CREDIT_PACKS.find((p) => p.packId === args.packId);
     if (pack === undefined) {
@@ -451,6 +433,230 @@ export function resolveOrderClerkOrgId(order: {
   if (orgId !== undefined) return orgId;
   return null;
 }
+
+/** Minimal paid-order shape consumed by sync resolution. */
+export type PolarOrderInput = {
+  id: string;
+  status: string;
+  paid: boolean;
+  metadata: Record<string, unknown> | null;
+  product: { metadata: Record<string, unknown> | null } | null;
+  totalAmount: number;
+  netAmount: number;
+};
+
+/**
+ * Fetch paid one-time orders for an external customer (clerkOrgId) from Polar.
+ * Mirrors the listOneTimeProducts iteration pattern. Exported so tests inject
+ * fixtures via planSyncGrants without a live Polar client.
+ */
+export async function fetchPaidOrders(
+  polar: Polar,
+  externalCustomerId: string,
+): Promise<PolarOrderInput[]> {
+  const collected: PolarOrderInput[] = [];
+  const page = await polar.orders.list({
+    externalCustomerId,
+    limit: 100,
+  });
+  for await (const response of page) {
+    for (const order of response.result.items) {
+      if (order.status !== "paid") continue;
+      collected.push({
+        id: order.id,
+        status: order.status,
+        paid: order.paid,
+        metadata: order.metadata as Record<string, unknown>,
+        product:
+          order.product === null || order.product === undefined
+            ? null
+            : {
+                metadata: order.product.metadata as Record<string, unknown>,
+              },
+        totalAmount: order.totalAmount,
+        netAmount: order.netAmount,
+      });
+    }
+  }
+  return collected;
+}
+
+/** A grant instruction derived from a paid Polar order. */
+export type OrderGrantInput = {
+  clerkOrgId: string;
+  amount: number;
+  grantRefId: string;
+  orderId: string;
+};
+
+/**
+ * Map paid orders → grant instructions for the ledger.
+ * - clerkOrgId: order metadata first, then the fallback (checkout owner).
+ * - amount: resolveOrderCredits (order → product → packId → price fallback).
+ * Orders with no resolvable credits are skipped (counted).
+ * Dedupes by orderId so a repeated fetch cannot double-plan.
+ */
+export function planSyncGrants(
+  orders: PolarOrderInput[],
+  fallbackClerkOrgId: string,
+): {
+  toGrant: OrderGrantInput[];
+  skipped: number;
+  ordersSeen: number;
+} {
+  const seen = new Set<string>();
+  const toGrant: OrderGrantInput[] = [];
+  let skipped = 0;
+
+  for (const order of orders) {
+    if (seen.has(order.id)) continue;
+    seen.add(order.id);
+
+    const credits = resolveOrderCredits({
+      metadata: order.metadata,
+      product: order.product,
+      totalAmount: order.totalAmount,
+      netAmount: order.netAmount,
+    });
+    if (credits === null || credits <= 0) {
+      skipped += 1;
+      continue;
+    }
+
+    const clerkOrgId =
+      resolveOrderClerkOrgId({ metadata: order.metadata }) ??
+      fallbackClerkOrgId;
+
+    toGrant.push({
+      clerkOrgId,
+      amount: credits,
+      grantRefId: `polar:order:${order.id}`,
+      orderId: order.id,
+    });
+  }
+
+  return { toGrant, skipped, ordersSeen: seen.size };
+}
+
+/**
+ * Resolve the caller's active Clerk org from the JWT and require it matches
+ * orgSlug. Shared by billing actions (createCheckout, syncWithPolar).
+ */
+export async function requireOrgMemberInAction(
+  ctx: ActionCtx,
+  orgSlug: string,
+): Promise<string> {
+  const identity = await ctx.auth.getUserIdentity();
+  if (identity === null) {
+    throw new Error("Not authenticated");
+  }
+
+  const raw = identity as Record<string, unknown>;
+  const claimSlug =
+    typeof raw.org_slug === "string"
+      ? raw.org_slug
+      : typeof raw.orgSlug === "string"
+        ? raw.orgSlug
+        : undefined;
+  const clerkOrgId =
+    typeof raw.org_id === "string"
+      ? raw.org_id
+      : typeof raw.orgId === "string"
+        ? raw.orgId
+        : undefined;
+
+  if (claimSlug === undefined || claimSlug !== orgSlug) {
+    throw new Error("Not a member of this organization");
+  }
+  if (clerkOrgId === undefined || clerkOrgId.length === 0) {
+    throw new Error("Active organization required");
+  }
+  return clerkOrgId;
+}
+
+export type SyncWithPolarOk = {
+  ok: true;
+  ordersSeen: number;
+  granted: number;
+  creditsGranted: number;
+  balance: number;
+};
+
+export type SyncWithPolarCooldown = {
+  ok: false;
+  retryAfterSeconds: number;
+};
+
+export type SyncWithPolarResult = SyncWithPolarOk | SyncWithPolarCooldown;
+
+/**
+ * Manual "Sync purchases": reconcile Polar paid orders → credit ledger.
+ * Used when the Polar webhook is not yet wired (dev) or as a fallback.
+ * Server-side cooldown (lastPolarSyncAt on the wallet) gates Polar calls.
+ * Grants are idempotent via grantRefId `polar:order:{id}`.
+ */
+export const syncWithPolar = action({
+  args: { orgSlug: v.string() },
+  handler: async (ctx, args): Promise<SyncWithPolarResult> => {
+    const clerkOrgId = await requireOrgMemberInAction(ctx, args.orgSlug);
+
+    // Cooldown gate — read before touching Polar.
+    const { lastPolarSyncAt } = await ctx.runQuery(
+      internal.wallets.getPolarSyncState,
+      { clerkOrgId },
+    );
+    const now = Date.now();
+    if (
+      lastPolarSyncAt !== null &&
+      now - lastPolarSyncAt < POLAR_SYNC_COOLDOWN_MS
+    ) {
+      return {
+        ok: false,
+        retryAfterSeconds: Math.ceil(
+          (POLAR_SYNC_COOLDOWN_MS - (now - lastPolarSyncAt)) / 1000,
+        ),
+      };
+    }
+
+    const polar = polarClient();
+    const orders = await fetchPaidOrders(polar, clerkOrgId);
+    const plan = planSyncGrants(orders, clerkOrgId);
+
+    let granted = 0;
+    let creditsGranted = 0;
+    let balance = 0;
+    for (const grant of plan.toGrant) {
+      const result = await ctx.runMutation(internal.wallets.grantCredits, {
+        clerkOrgId: grant.clerkOrgId,
+        amount: grant.amount,
+        grantRefId: grant.grantRefId,
+      });
+      if (result.applied) {
+        granted += 1;
+        creditsGranted += grant.amount;
+      }
+      balance = result.balance;
+    }
+
+    // Stamp cooldown + fetch canonical balance when nothing was granted.
+    if (plan.toGrant.length === 0) {
+      const stamped = await ctx.runMutation(internal.wallets.markPolarSync, {
+        clerkOrgId,
+      });
+      balance = stamped.balance;
+    } else {
+      await ctx.runMutation(internal.wallets.markPolarSync, { clerkOrgId });
+    }
+
+    return {
+      ok: true,
+      ordersSeen: plan.ordersSeen,
+      granted,
+      creditsGranted,
+      balance,
+    };
+  },
+});
 
 function startOfUtcMonth(now: number): number {
   const d = new Date(now);

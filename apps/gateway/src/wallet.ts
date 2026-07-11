@@ -124,6 +124,10 @@ export type FlushToConvexResult = {
   remaining: number;
   error?: string;
 };
+export type SyncGrantsResult =
+  | { status: "ok"; applied: number; balance: number }
+  | { status: "rate_limited"; retryAfterSeconds: number }
+  | { status: "sync_failed"; error: string; balance: number };
 
 // Storage keys
 const K_BALANCE = "balance";
@@ -133,6 +137,8 @@ const K_PENDING = "pendingSettlements";
 const K_TERMINAL = "terminalReservations";
 const K_FLUSH_SEQ = "flushSeq";
 const K_FREE_PREFIX = "free:";
+const K_SYNC_GRANTS_AT = "syncGrantsAt";
+const SYNC_GRANTS_WINDOW_MS = 60_000;
 
 const FLUSH_ALARM_MS = 5_000;
 
@@ -631,6 +637,113 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
   }
 
   /**
+   * Pull grant-kind ledger entries from the control plane and apply any
+   * refIds the DO has not yet seen. Idempotent via #appliedGrantIds (the
+   * same store backing /internal/grant). Rate-limited to 1/60s per org.
+   * Never throws on Convex failure — returns a graceful sync_failed result.
+   */
+  async syncGrants(
+    clerkOrgId: string,
+    nowMs: number = Date.now(),
+  ): Promise<SyncGrantsResult> {
+    const last = (await this.ctx.storage.get<number>(K_SYNC_GRANTS_AT)) ?? 0;
+    if (nowMs - last < SYNC_GRANTS_WINDOW_MS) {
+      return {
+        status: "rate_limited",
+        retryAfterSeconds: Math.ceil(
+          (SYNC_GRANTS_WINDOW_MS - (nowMs - last)) / 1000,
+        ),
+      };
+    }
+    // Claim the window before the network call so a flood of retries is gated.
+    await this.ctx.storage.put(K_SYNC_GRANTS_AT, nowMs);
+
+    const grants = await this.#fetchGrantsFromConvex(clerkOrgId);
+    if (grants === null) {
+      return {
+        status: "sync_failed",
+        error: "could not fetch grants",
+        balance: this.#balance,
+      };
+    }
+
+    let applied = 0;
+    for (const g of grants.grants) {
+      if (this.#appliedGrantIds.has(g.refId)) continue;
+      if (!(g.amount > 0) || !Number.isFinite(g.amount)) continue;
+      this.#appliedGrantIds.add(g.refId);
+      this.#balance += g.amount;
+      applied += 1;
+    }
+
+    if (applied > 0) {
+      await this.#persist({
+        balance: this.#balance,
+        appliedGrantIds: [...this.#appliedGrantIds],
+      });
+    }
+
+    return { status: "ok", applied, balance: this.#balance };
+  }
+
+  /**
+   * Fetch {grants, balance} for this org from Convex /wallet-grants.
+   * Returns null on any failure (misconfig, non-2xx, bad JSON) so callers
+   * degrade gracefully. Test hook overrides the network path entirely.
+   */
+  async #fetchGrantsFromConvex(
+    clerkOrgId: string,
+  ): Promise<{
+    grants: { refId: string; amount: number }[];
+    balance: number;
+  } | null> {
+    const testFn = getTestGrantsFetcher();
+    if (testFn) return testFn(clerkOrgId);
+
+    const env = this.env as Cloudflare.Env;
+    const secret = env.GATEWAY_INTERNAL_SECRET;
+    const url = env.CONVEX_URL;
+    if (!secret || !url) return null;
+
+    const siteBase = (
+      env.CONVEX_SITE_URL ?? url.replace(".convex.cloud", ".convex.site")
+    ).replace(/\/+$/, "");
+    const target = `${siteBase}/wallet-grants?clerkOrgId=${encodeURIComponent(clerkOrgId)}`;
+
+    try {
+      const res = await fetch(target, {
+        headers: { "x-internal-secret": secret },
+      });
+      if (!res.ok) return null;
+      const json = (await res.json()) as {
+        grants?: unknown;
+        balance?: unknown;
+      };
+      if (typeof json.balance !== "number") return null;
+      if (!Array.isArray(json.grants)) return null;
+      const grants: { refId: string; amount: number }[] = [];
+      for (const row of json.grants) {
+        if (
+          row !== null &&
+          typeof row === "object" &&
+          "refId" in row &&
+          "amount" in row &&
+          typeof (row as Record<string, unknown>).refId === "string" &&
+          typeof (row as Record<string, unknown>).amount === "number"
+        ) {
+          grants.push({
+            refId: (row as Record<string, unknown>).refId as string,
+            amount: (row as Record<string, unknown>).amount as number,
+          });
+        }
+      }
+      return { grants, balance: json.balance };
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * Alarm: batch-flush pending usage to Convex when configured.
    * Re-arms while pending remains.
    */
@@ -709,6 +822,22 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
             : [];
           return Response.json(await this.ackFlush(ids));
         }
+        case "/sync-grants": {
+          const clerkOrgId =
+            String(body.clerkOrgId ?? "") ||
+            url.searchParams.get("clerkOrgId") ||
+            "";
+          if (!clerkOrgId) {
+            return Response.json(
+              { error: "clerkOrgId required" },
+              { status: 400 },
+            );
+          }
+          const syncResult = await this.syncGrants(clerkOrgId);
+          return Response.json(syncResult, {
+            status: syncResult.status === "rate_limited" ? 429 : 200,
+          });
+        }
         default:
           return Response.json({ error: "not found" }, { status: 404 });
       }
@@ -740,4 +869,20 @@ export function __setTestUsageMutation(fn: TestUsageMutation | null): void {
 
 function getTestUsageMutation(): TestUsageMutation | null {
   return testUsageMutation;
+}
+
+type TestGrantsFetcher = (clerkOrgId: string) => Promise<{
+  grants: { refId: string; amount: number }[];
+  balance: number;
+} | null>;
+
+let testGrantsFetcher: TestGrantsFetcher | null = null;
+
+/** Test harness: override the Convex /wallet-grants fetch (no network). */
+export function __setTestGrantsFetcher(fn: TestGrantsFetcher | null): void {
+  testGrantsFetcher = fn;
+}
+
+function getTestGrantsFetcher(): TestGrantsFetcher | null {
+  return testGrantsFetcher;
 }

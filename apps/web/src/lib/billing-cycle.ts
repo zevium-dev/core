@@ -59,3 +59,20 @@ export type CycleBreakdownLike = {
 export function isCycleEmpty(breakdown: CycleBreakdownLike): boolean {
   return breakdown.totalCalls === 0 && breakdown.totalCredits === 0;
 }
+
+/**
+ * Format a remaining-seconds countdown for a disabled button.
+ * <= 0 → "0s"; < 60s → "Ns"; minutes compound "Nm" / "Nm Ns".
+ */
+export function formatCountdown(totalSeconds: number): string {
+  if (!Number.isFinite(totalSeconds) || totalSeconds <= 0) {
+    return "0s";
+  }
+  const s = Math.ceil(totalSeconds);
+  if (s < 60) {
+    return `${s}s`;
+  }
+  const m = Math.floor(s / 60);
+  const rem = s - m * 60;
+  return rem === 0 ? `${m}m` : `${m}m ${rem}s`;
+}

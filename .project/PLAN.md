@@ -60,7 +60,7 @@
 - Clerk password reset REVOKES existing sessions — re-sign-in all browser sessions after.
 - Seed user password drifted once; reset via `clerk api /users/<id> -X PATCH -d '{"password":..., "skip_password_checks": true}'`
 - agent-browser sessions isolate via `AGENT_BROWSER_SESSION` env; e2e suite uses its own, orchestrator default session stays signed in
-- OpenCode Go weekly quota was exhausted — provider-qualify `--model xai-oauth/grok-4.5` on omp calls until reset
+- omp model status (2026-07-11 evening): OpenCode Go weekly quota exhausted; xai-oauth/grok-4.5 hit spending limit (403). Current lane model: `zai/glm-5.2` (user directive).
 - agent-browser eval runs in ISOLATED world: page-world JS props (e.g. CodeMirror contentDOM.cmView) invisible. Dispatched events cross worlds — inject editor text via synthetic ClipboardEvent paste (see e2e/02). DOM structure/attrs visible fine.
 - @uiw/react-codemirror defaults to its own LIGHT theme — pass theme="none" or CSS-var themes get overridden
 - Editing apps/web files while an e2e run is in flight = Vite HMR reload wipes Clerk forms mid-fill → spurious sign-in FAILs. Freeze tree during e2e runs.

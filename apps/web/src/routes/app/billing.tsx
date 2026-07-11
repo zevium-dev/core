@@ -3,7 +3,7 @@ import { convexQuery, useConvexMutation } from "@convex-dev/react-query";
 import { useMutation, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { useAction, useConvexAuth } from "convex/react";
-import { CreditCard, Sparkles, Wallet } from "lucide-react";
+import { CreditCard, RefreshCw, Sparkles, Wallet } from "lucide-react";
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
@@ -20,6 +20,7 @@ import {
 } from "#/components/ui/card";
 import { Skeleton } from "#/components/ui/skeleton";
 import {
+  formatCountdown,
   formatCredits,
   formatCycleMonthLabel,
   isCycleEmpty,
@@ -27,6 +28,8 @@ import {
 } from "#/lib/billing-cycle";
 import { api } from "#/lib/convex-api";
 import { humanError } from "#/lib/human-error";
+import { triggerGatewayGrantSync } from "#/lib/wallet-sync";
+import { cn } from "#/lib/utils";
 
 type BillingSearch = {
   success?: string;
@@ -76,12 +79,18 @@ function BillingPage() {
 
   return (
     <Suspense fallback={<BillingSkeleton />}>
-      <BillingContent orgSlug={orgSlug} />
+      <BillingContent orgSlug={orgSlug} clerkOrgId={organization!.id} />
     </Suspense>
   );
 }
 
-function BillingContent({ orgSlug }: { orgSlug: string }) {
+function BillingContent({
+  orgSlug,
+  clerkOrgId,
+}: {
+  orgSlug: string;
+  clerkOrgId: string;
+}) {
   const search = Route.useSearch();
   const success = search.success === "1";
 
@@ -129,6 +138,52 @@ function BillingContent({ orgSlug }: { orgSlug: string }) {
       toast.error(humanError(err, "Could not start checkout."));
     },
   });
+
+  const syncWithPolar = useAction(api.billing.syncWithPolar);
+  const [cooldownEnd, setCooldownEnd] = useState<number | null>(null);
+  const [nowTick, setNowTick] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (cooldownEnd === null) return;
+    const remaining = cooldownEnd - Date.now();
+    if (remaining <= 0) {
+      setCooldownEnd(null);
+      return;
+    }
+    const id = setTimeout(() => setNowTick(Date.now()), 1000);
+    return () => clearTimeout(id);
+  }, [cooldownEnd, nowTick]);
+
+  const { mutate: syncPurchases, isPending: syncPending } = useMutation({
+    mutationFn: async () => await syncWithPolar({ orgSlug }),
+    onSuccess: (res) => {
+      if (!res.ok) {
+        setCooldownEnd(Date.now() + res.retryAfterSeconds * 1000);
+        toast(`Try again in ${formatCountdown(res.retryAfterSeconds)}`);
+        return;
+      }
+      if (res.granted > 0) {
+        toast.success(
+          `+${res.creditsGranted.toLocaleString()} credits from ${res.granted} ${
+            res.granted === 1 ? "order" : "orders"
+          }`,
+        );
+      } else {
+        toast("Already up to date");
+      }
+      // Mirror the ledger grant into the edge wallet (best-effort, non-blocking).
+      void triggerGatewayGrantSync(
+        import.meta.env.VITE_GATEWAY_URL as string | undefined,
+        clerkOrgId,
+      );
+    },
+    onError: (err: unknown) => {
+      toast.error(humanError(err, "Sync failed. Try again."));
+    },
+  });
+
+  const cooldownRemaining =
+    cooldownEnd === null ? 0 : Math.max(0, (cooldownEnd - nowTick) / 1000);
 
   const grants = useMemo(
     () => wallet.entries.filter((e) => e.kind === "grant"),
@@ -242,11 +297,33 @@ function BillingContent({ orgSlug }: { orgSlug: string }) {
       </div>
 
       <section className="flex flex-col gap-3">
-        <div>
-          <h2 className="text-lg font-semibold tracking-tight">Buy credits</h2>
-          <p className="text-sm text-muted-foreground">
-            One-time packs via Polar checkout. Larger packs include a bonus.
-          </p>
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-semibold tracking-tight">
+              Buy credits
+            </h2>
+            <p className="text-sm text-muted-foreground">
+              One-time packs via Polar checkout. Larger packs include a bonus.
+            </p>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            className="shrink-0"
+            disabled={syncPending || cooldownRemaining > 0}
+            onClick={() => syncPurchases()}
+          >
+            <RefreshCw
+              className={cn(
+                "size-3.5 ease-[var(--ease)]",
+                syncPending &&
+                  "motion-safe:animate-spin motion-safe:duration-[var(--dur-slow)]",
+              )}
+            />
+            {cooldownRemaining > 0
+              ? `Try again in ${formatCountdown(cooldownRemaining)}`
+              : "Sync purchases"}
+          </Button>
         </div>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {packs.map((pack) => {

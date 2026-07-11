@@ -54,6 +54,8 @@ export default defineSchema({
   wallets: defineTable({
     organizationId: v.id("organizations"),
     balance: v.number(),
+    /** Server-side cooldown for manual Polar sync (ms epoch). */
+    lastPolarSyncAt: v.optional(v.number()),
   }).index("by_organization", ["organizationId"]),
 
   // Append-only credit ledger

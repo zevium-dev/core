@@ -1,7 +1,7 @@
 import { convexQuery, useConvexMutation } from "@convex-dev/react-query";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { collectOpenApiSpecIssues, type SpecIssue } from "@zevium/shared";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { Badge } from "#/components/ui/badge";
@@ -21,6 +21,7 @@ import { api } from "#/lib/convex-api";
 import type { Id } from "#/lib/convex-data-model";
 import { humanError } from "#/lib/human-error";
 import { listSpecEndpoints } from "#/lib/spec-endpoints";
+import { applyPricingEdit, type PricingEdit } from "#/lib/spec-pricing-edit";
 import {
   formatPricingSummary,
   summarizeDraftPricing,
@@ -37,6 +38,7 @@ import {
   SpecRailVisibilityNudge,
 } from "./spec-rail";
 import { OPENAPI_TEMPLATE } from "./template";
+import { VersionDialog } from "./version-dialog";
 
 const AUTOSAVE_MS = 2000;
 const STATUS_TICK_MS = 1000;
@@ -101,6 +103,8 @@ export function SpecWorkspace({
   const [text, setText] = useState(savedDraft);
   const [serverIssues, setServerIssues] = useState<SpecIssue[]>([]);
   const [publishOpen, setPublishOpen] = useState(false);
+  const [versionDialogId, setVersionDialogId] =
+    useState<Id<"specVersions"> | null>(null);
   const [version, setVersion] = useState(() =>
     defaultNextVersion(versions.map((v) => v.version)),
   );
@@ -161,6 +165,15 @@ export function SpecWorkspace({
     setGoodEndpoints(rows);
     setEndpointsStale(false);
   }, [text]);
+
+  // Rail pricing write-back: parse current text, mutate the target operation,
+  // re-serialize. Functional updater composes multiple edits per debounce flush.
+  const handlePricingChange = useCallback((edit: PricingEdit) => {
+    setText((prev) => {
+      const result = applyPricingEdit(prev, edit);
+      return result.ok ? result.text : prev;
+    });
+  }, []);
 
   const dirty = text !== savedDraft;
   const hasClientErrors = clientErrors.length > 0;
@@ -359,48 +372,74 @@ export function SpecWorkspace({
   );
 
   return (
-    <div className="grid gap-4 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]">
-      <div className="flex min-w-0 flex-col gap-3">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex flex-wrap items-center gap-2">
-            <EditorToolbar
-              onApplyText={applyEditorText}
-              disabled={savePending}
-            />
-            {pricing ? (
-              <Badge variant="secondary">{formatPricingSummary(pricing)}</Badge>
-            ) : (
-              <Badge variant="outline">Invalid JSON</Badge>
-            )}
-            <span className="text-xs text-muted-foreground">
-              {status.label}
-            </span>
+    <>
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]">
+        <div className="flex min-w-0 flex-col gap-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <EditorToolbar
+                onApplyText={applyEditorText}
+                disabled={savePending}
+              />
+              {pricing ? (
+                <Badge variant="secondary">
+                  {formatPricingSummary(pricing)}
+                </Badge>
+              ) : (
+                <Badge variant="outline">Invalid JSON</Badge>
+              )}
+              <span className="text-xs text-muted-foreground">
+                {status.label}
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                disabled={
+                  !dirty ||
+                  savePending ||
+                  (hasClientErrors && text.trim() !== "")
+                }
+                onClick={() => saveDraft(text)}
+              >
+                {savePending ? "Saving…" : "Save draft"}
+              </Button>
+            </div>
           </div>
-          <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              disabled={
-                !dirty || savePending || (hasClientErrors && text.trim() !== "")
-              }
-              onClick={() => saveDraft(text)}
-            >
-              {savePending ? "Saving…" : "Save draft"}
-            </Button>
-          </div>
+
+          <JsonCodeEditor
+            value={text}
+            onChange={onEditorChange}
+            placeholder={OPENAPI_TEMPLATE}
+          />
         </div>
 
-        <JsonCodeEditor
-          value={text}
-          onChange={onEditorChange}
-          placeholder={OPENAPI_TEMPLATE}
-        />
+        <div className="flex min-w-0 flex-col gap-4">
+          <SpecRailEndpoints
+            endpoints={goodEndpoints}
+            stale={endpointsStale}
+            disabled={endpointsStale}
+            onPricingChange={handlePricingChange}
+          />
+          <SpecRailValidation issues={mergedIssues} />
+          <SpecRailVersions
+            versions={versions}
+            publishSlot={publishSlot}
+            onSelectVersion={(id) =>
+              setVersionDialogId(id as Id<"specVersions">)
+            }
+          />
+        </div>
       </div>
-
-      <div className="flex min-w-0 flex-col gap-4">
-        <SpecRailEndpoints endpoints={goodEndpoints} stale={endpointsStale} />
-        <SpecRailValidation issues={mergedIssues} />
-        <SpecRailVersions versions={versions} publishSlot={publishSlot} />
-      </div>
-    </div>
+      <VersionDialog
+        versionId={versionDialogId}
+        savedDraft={savedDraft}
+        dirty={dirty}
+        onRestore={(spec) => setText(spec)}
+        onOpenChange={(open) => {
+          if (!open) setVersionDialogId(null);
+        }}
+      />
+    </>
   );
 }
