@@ -45,6 +45,12 @@ export default defineSchema({
     version: v.string(),
     spec: v.string(),
     publishedAt: v.number(),
+    /** Set when a version is deprecated (metadata only — spec body immutable). */
+    deprecatedAt: v.optional(v.number()),
+    /** Scheduled hard-cutoff time (metadata only). */
+    sunsetAt: v.optional(v.number()),
+    /** Publisher-facing deprecation reason / migration guidance. */
+    deprecationMessage: v.optional(v.string()),
   })
     .index("by_project", ["projectId"])
     .index("by_project_version", ["projectId", "version"])
@@ -88,5 +94,49 @@ export default defineSchema({
     .index("by_org", ["organizationId"])
     .index("by_project", ["projectId"])
     .index("by_org_at", ["organizationId", "at"])
-    .index("by_project_at", ["projectId", "at"]),
+    .index("by_project_at", ["projectId", "at"])
+    .index("by_at", ["at"]),
+
+  // In-app notifications (org-scoped, idempotent by refId)
+  notifications: defineTable({
+    clerkOrgId: v.string(),
+    kind: v.union(
+      v.literal("low_balance"),
+      v.literal("spec_published"),
+      v.literal("version_deprecated"),
+      v.literal("webhook_failed"),
+      v.literal("visibility_changed"),
+    ),
+    title: v.string(),
+    body: v.string(),
+    refId: v.string(),
+    readAt: v.optional(v.number()),
+    createdAt: v.number(),
+  })
+    .index("by_org", ["clerkOrgId", "createdAt"])
+    .index("by_ref", ["refId"]),
+
+  // Publisher webhook endpoints (one per project)
+  webhookEndpoints: defineTable({
+    projectId: v.id("projects"),
+    url: v.string(),
+    secret: v.string(),
+    active: v.boolean(),
+    createdAt: v.number(),
+  }).index("by_project", ["projectId"]),
+
+  // Webhook delivery log
+  webhookDeliveries: defineTable({
+    endpointId: v.id("webhookEndpoints"),
+    event: v.string(),
+    status: v.union(
+      v.literal("pending"),
+      v.literal("ok"),
+      v.literal("failed"),
+    ),
+    attempts: v.number(),
+    lastError: v.optional(v.string()),
+    createdAt: v.number(),
+    payload: v.string(),
+  }).index("by_endpoint", ["endpointId", "createdAt"]),
 });

@@ -8,19 +8,26 @@
  * @module
  */
 
+import type * as admin from "../admin.js";
 import type * as analytics from "../analytics.js";
 import type * as billing from "../billing.js";
 import type * as catalogue from "../catalogue.js";
+import type * as cronTasks from "../cronTasks.js";
+import type * as crons from "../crons.js";
 import type * as earnings from "../earnings.js";
 import type * as http from "../http.js";
 import type * as lib_auth from "../lib/auth.js";
+import type * as lib_notifications from "../lib/notifications.js";
 import type * as lib_validate from "../lib/validate.js";
+import type * as lib_webhookDelivery from "../lib/webhookDelivery.js";
+import type * as notifications from "../notifications.js";
 import type * as organizations from "../organizations.js";
 import type * as projects from "../projects.js";
 import type * as specs from "../specs.js";
 import type * as usage from "../usage.js";
 import type * as users from "../users.js";
 import type * as wallets from "../wallets.js";
+import type * as webhooks from "../webhooks.js";
 
 import type {
   ApiFromModules,
@@ -29,19 +36,26 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  admin: typeof admin;
   analytics: typeof analytics;
   billing: typeof billing;
   catalogue: typeof catalogue;
+  cronTasks: typeof cronTasks;
+  crons: typeof crons;
   earnings: typeof earnings;
   http: typeof http;
   "lib/auth": typeof lib_auth;
+  "lib/notifications": typeof lib_notifications;
   "lib/validate": typeof lib_validate;
+  "lib/webhookDelivery": typeof lib_webhookDelivery;
+  notifications: typeof notifications;
   organizations: typeof organizations;
   projects: typeof projects;
   specs: typeof specs;
   usage: typeof usage;
   users: typeof users;
   wallets: typeof wallets;
+  webhooks: typeof webhooks;
 }>;
 
 /**

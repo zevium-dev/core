@@ -2,6 +2,8 @@ import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import type { Doc } from "./_generated/dataModel";
 import { getOrgBySlug, requireProjectMember } from "./lib/auth";
+import { createNotification } from "./lib/notifications";
+import { fireWebhookEvent } from "./webhooks";
 import {
   isValidSemver,
   type SpecIssue,
@@ -96,7 +98,7 @@ export const publish = mutation({
     version?: Doc<"specVersions">;
     project?: Doc<"projects">;
   }> => {
-    await requireProjectMember(ctx, args.projectId);
+    const { org } = await requireProjectMember(ctx, args.projectId);
 
     const version = args.version.trim();
     if (!isValidSemver(version)) {
@@ -168,6 +170,18 @@ export const publish = mutation({
     if (versionDoc === null || project === null) {
       throw new Error("Failed to load published version");
     }
+    // Notify publisher org + fire webhook event.
+    await createNotification(ctx, {
+      clerkOrgId: org.clerkOrgId,
+      kind: "spec_published",
+      title: "Spec published",
+      body: `Version ${version} published for ${project.name}.`,
+      refId: `spec_published:${versionId}`,
+    });
+    await fireWebhookEvent(ctx, args.projectId, "spec.published", {
+      projectId: args.projectId,
+      version,
+    });
 
     return {
       ok: true,
@@ -243,9 +257,13 @@ export const getPublishedForGateway = query({
     args,
   ): Promise<{
     spec: string;
+    version: string;
     projectId: string;
     organizationId: string;
     clerkOrgId: string;
+    deprecatedAt: number | undefined;
+    sunsetAt: number | undefined;
+    deprecationMessage: string | undefined;
   } | null> => {
     const org = await getOrgBySlug(ctx, args.orgSlug);
     if (org === null) return null;
@@ -268,9 +286,89 @@ export const getPublishedForGateway = query({
 
     return {
       spec: latest.spec,
+      version: latest.version,
       projectId: project._id,
       organizationId: org._id,
       clerkOrgId: org.clerkOrgId,
+      deprecatedAt: latest.deprecatedAt,
+      sunsetAt: latest.sunsetAt,
+      deprecationMessage: latest.deprecationMessage,
     };
+  },
+});
+
+/**
+ * Deprecate a published version (metadata only — spec body immutable).
+ * Auth: org member owning the project.
+ * Fires version_deprecated notification + spec.deprecated webhook.
+ */
+export const deprecateVersion = mutation({
+  args: {
+    versionId: v.id("specVersions"),
+    sunsetAt: v.optional(v.number()),
+    message: v.optional(v.string()),
+  },
+  handler: async (ctx, args): Promise<Doc<"specVersions">> => {
+    const version = await ctx.db.get(args.versionId);
+    if (version === null) {
+      throw new Error("Version not found");
+    }
+    const { org } = await requireProjectMember(ctx, version.projectId);
+
+    const now = Date.now();
+    await ctx.db.patch(args.versionId, {
+      deprecatedAt: now,
+      sunsetAt: args.sunsetAt,
+      deprecationMessage: args.message,
+    });
+
+    await createNotification(ctx, {
+      clerkOrgId: org.clerkOrgId,
+      kind: "version_deprecated",
+      title: "Version deprecated",
+      body: `Version ${version.version} has been deprecated${args.message !== undefined ? `: ${args.message}` : ""}.`,
+      refId: `version_deprecated:${args.versionId}`,
+    });
+
+    await fireWebhookEvent(ctx, version.projectId, "spec.deprecated", {
+      projectId: version.projectId,
+      version: version.version,
+      sunsetAt: args.sunsetAt,
+    });
+
+    const updated = await ctx.db.get(args.versionId);
+    if (updated === null) {
+      throw new Error("Failed to load version");
+    }
+    return updated;
+  },
+});
+
+/**
+ * Clear deprecation metadata from a version.
+ * Auth: org member owning the project.
+ */
+export const undeprecateVersion = mutation({
+  args: { versionId: v.id("specVersions") },
+  handler: async (ctx, args): Promise<Doc<"specVersions">> => {
+    const version = await ctx.db.get(args.versionId);
+    if (version === null) {
+      throw new Error("Version not found");
+    }
+    await requireProjectMember(ctx, version.projectId);
+
+    // Replace to unset optional fields — patch cannot delete them.
+    await ctx.db.replace(args.versionId, {
+      projectId: version.projectId,
+      version: version.version,
+      spec: version.spec,
+      publishedAt: version.publishedAt,
+    });
+
+    const updated = await ctx.db.get(args.versionId);
+    if (updated === null) {
+      throw new Error("Failed to load version");
+    }
+    return updated;
   },
 });

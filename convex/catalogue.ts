@@ -253,6 +253,9 @@ export const getPublicDetail = query({
       version: string;
       spec: string;
       publishedAt: number;
+      deprecatedAt: number | undefined;
+      sunsetAt: number | undefined;
+      deprecationMessage: string | undefined;
     } | null;
   } | null> => {
     const org = await getOrgBySlug(ctx, args.orgSlug);
@@ -298,6 +301,9 @@ export const getPublicDetail = query({
               version: latest.version,
               spec: latest.spec,
               publishedAt: latest.publishedAt,
+              deprecatedAt: latest.deprecatedAt,
+              sunsetAt: latest.sunsetAt,
+              deprecationMessage: latest.deprecationMessage,
             },
     };
   },

@@ -111,3 +111,40 @@ export async function requireProjectMember(
 
   return { claims, org, project };
 }
+
+/**
+ * Platform admin gate. Reads ADMIN_USER_IDS env (comma-separated Clerk user ids).
+ * Fails closed when env unset — nobody is admin.
+ */
+export async function requireAdmin(
+  ctx: DbCtx,
+): Promise<OrgIdentityClaims> {
+  const claims = await requireIdentity(ctx);
+  const raw = process.env.ADMIN_USER_IDS;
+  if (raw === undefined || raw.trim() === "") {
+    throw new Error("Admin access not configured");
+  }
+  const adminIds = raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+  if (!adminIds.includes(claims.subject)) {
+    throw new Error("Not authorized as admin");
+  }
+  return claims;
+}
+
+/**
+ * Safe admin check (no throw). Returns false when env unset or user not listed.
+ */
+export async function isAdmin(ctx: DbCtx): Promise<boolean> {
+  const identity = await ctx.auth.getUserIdentity();
+  if (identity === null) return false;
+  const raw = process.env.ADMIN_USER_IDS;
+  if (raw === undefined || raw.trim() === "") return false;
+  const adminIds = raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+  return adminIds.includes(identity.subject);
+}
