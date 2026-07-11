@@ -31,8 +31,7 @@ Both:
 - Pre-pay for credits — **org-scoped**: the organization owns the wallet, member keys draw from it, admins see per-member/per-key attribution. Solo devs get a personal org automatically; there is no separate personal-wallet model
 - Each call deducts credits based on the endpoint's price
 - API keys belong to a member (one key per user), are rate-limited, and carry per-key spend limits against the org wallet
-
-> Migration note: current implementation is user-scoped (Polar `externalId = userId`). Target architecture is org-scoped (`externalId = organizationId`); proxy resolves key → member → org wallet.
+- Polar customer `externalId = organizationId`; proxy resolves key → member → org wallet. (Current code is user-scoped — rebuild, don't migrate: pre-launch, no users, data is disposable)
 
 **Headline consumer metric: time-to-first-call.** Signup → working key → first successful proxied request must take under a minute, fully self-serve.
 
@@ -90,7 +89,7 @@ Planned pricing extensions (roadmap): tiered/graduated per-call pricing, per-tok
 | Published API                | `project`                                   | Has `status`, `visibility`, `organizationId` |
 | API spec (draft + published) | `openapi_schema` + `openapi_schema_version` | 1:1 with project                             |
 | Endpoint pricing             | OpenAPI `x-zevium-cost` extension           | Lives IN the spec, not a separate table      |
-| Consumer credits             | Polar meter credits                         | Org-scoped wallet (target; today user-scoped) |
+| Consumer credits             | Polar meter credits                         | Org-scoped wallet (`externalId = orgId`)     |
 | Consumer API keys            | `apikey` (better-auth plugin)               | One key per user, draws from org wallet      |
 | Proxy call logging           | Polar `proxy_call` events                   | Ingested for billing + analytics             |
 | Upstream auth secrets        | `project_secret` (encrypted)                | Built + UI'd, **not yet injected by proxy**  |
@@ -157,7 +156,7 @@ Target surface:
 
 ### Next (P1 — the agent-first bet + trust plumbing)
 
-8. Org-scoped billing migration (org wallet, member keys draw from it, per-member attribution)
+8. Org-scoped billing (org wallet, member keys draw from it, per-member attribution — rebuild from user-scoped, no data migration: pre-launch)
 9. Metered per-project MCP + machine-readable discovery/pricing index
 10. **x402 as second payment rail** (agent payments, zero signup)
 11. `x-zevium-free-tier` enforcement (publisher-funded) + tiered pricing
@@ -180,7 +179,7 @@ Target surface:
 
 - **Publisher payouts**: no payout system; publisher share accumulates unsettled
 - **Revenue split enforcement**: full cost currently charged to consumer; platform-cut/publisher-share calculation not implemented
-- **Org-scoped billing**: credits are user-scoped today; org-wallet migration is P1
+- **Org-scoped billing**: credits are user-scoped today; rebuild as org-scoped (pre-launch, data disposable, no migration needed)
 - **Secrets/variables in proxy**: fully built with UI, but the proxy never loads secrets nor substitutes variables at call time — zombie features until wired (P0)
 - **MCP metering**: `/mcp` exists but `execute_api_call` bypasses billing (P0 fix); per-project MCP + discovery index unbuilt
 - **Free tier**: `x-zevium-free-tier` appears only in this document — no code parses it
