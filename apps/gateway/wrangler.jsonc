@@ -1,0 +1,19 @@
+{
+  "name": "wallet-do-spike",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-04-01",
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "WALLET",
+        "class_name": "WalletDO"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_classes": ["WalletDO"]
+    }
+  ]
+}

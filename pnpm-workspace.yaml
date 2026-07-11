@@ -1,3 +1,7 @@
+packages:
+  - apps/*
+  - packages/*
+
 allowBuilds:
   "@parcel/watcher": true
   "@tailwindcss/oxide": true
@@ -9,3 +13,5 @@ allowBuilds:
   workerd: true
 
 minimumReleaseAge: 720
+minimumReleaseAgeExclude:
+  - "@cloudflare/workers-types"

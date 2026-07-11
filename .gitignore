@@ -30,3 +30,7 @@ after-reload.png
 error.png
 reload-*.png
 reload-*.webm
+
+.env.local
+
+# convex
