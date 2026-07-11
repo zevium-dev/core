@@ -7,9 +7,19 @@ export const CREDITS_PER_DOLLAR = 10_000;
 /** Platform cut: 5%. Publishers keep 95%. */
 export const PLATFORM_CUT = 0.05;
 
-export interface EndpointPricing {
-  /** Credits per call — `x-zevium-cost`, default 1 */
-  cost: number;
-  /** Free calls per day — `x-zevium-free-tier`, publisher-funded */
-  freeTier?: number;
-}
+export type { EndpointPricing } from "./pricing.js";
+
+export {
+  parseSpec,
+  matchOperation,
+  extractPricing,
+  normalizePath,
+  matchPathTemplate,
+  joinUpstreamUrl,
+  type HttpMethod,
+  type OpenApiServer,
+  type OpenApiOperation,
+  type OpenApiPathItem,
+  type ParsedOpenApiSpec,
+  type MatchedOperation,
+} from "./openapi.js";

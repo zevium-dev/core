@@ -1,7 +1,15 @@
 {
-  "name": "wallet-do-spike",
+  "name": "zevium-gateway",
   "main": "src/index.ts",
   "compatibility_date": "2025-04-01",
+  // Placeholder custom domain routes — set zone_name / patterns in deploy env.
+  // "routes": [{ "pattern": "gateway.zevium.dev/*", "zone_name": "zevium.dev" }],
+  "vars": {
+    // Documented runtime vars (override via wrangler secret / dashboard):
+    // CLERK_SECRET_KEY — Clerk secret for POST /v1/api_keys/verify
+    // CONVEX_URL — control-plane HTTP base for published-spec lookup
+    // GATEWAY_TEST_MODE — "1" only in vitest (see vitest config)
+  },
   "durable_objects": {
     "bindings": [
       {

@@ -1,0 +1,8 @@
+All green. Shared OpenAPI helpers + gateway metered pipeline live.
+
+**shared:** `parseSpec` / `matchOperation` / path `{param}` match / `x-zevium-cost` default 1  
+**gateway:** key extract → Clerk verify cache → spec source → reserve DO → stream proxy → settle/refund → usage sink  
+
+`pnpm --filter @zevium/{shared,gateway} test` + typecheck: **15 + 25 pass**
+
+DONE: gateway request pipeline + OpenAPI helpers; files: packages/shared/src/{openapi,pricing,index}.ts, packages/shared/src/openapi.test.ts, packages/shared/{package.json,vitest.config.ts}, apps/gateway/src/{index,pipeline,key-verifier,spec-source,usage,headers}.ts, apps/gateway/test/{pipeline,key-verifier}.test.ts, apps/gateway/{package.json,wrangler.jsonc,worker-configuration.d.ts}
