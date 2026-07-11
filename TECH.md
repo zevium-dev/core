@@ -108,12 +108,14 @@ Turborepo drives build/typecheck/test/lint pipelines with caching; each app depl
 
 tRPC + oRPC, Drizzle + Turso, Upstash Redis, Better Auth (+ apikey plugin), Polar plugin wiring in auth, drizzle/ migrations, the seed script in current form. Route tree, shadcn components, and Motion setup carry over conceptually; code is rewritten against Convex hooks.
 
-## Open verifications before build starts
+## Pre-build spikes — all verified GO (2026-07-11)
 
-1. Clerk TanStack Start SDK beta — smoke-test the auth flow in a spike before committing (fallback: Clerk React SDK + manual SSR token handling)
-2. Clerk API-key verification latency + rate limits from Workers — measure; tune cache TTL accordingly
-3. Convex + TanStack Start data loading (`@convex-dev/react-query`) SSR behavior for public SEO pages (catalogue, API detail)
-4. DO wallet ↔ Convex ledger sync: write the reconcile invariant first (sum of ledger == DO balance ± in-flight)
+Four spikes ran as real code (scratch projects, reports + artifacts in session scratchpad). Verdicts and the design consequences they bought:
+
+1. **Clerk + TanStack Start SDK** — GO. `@clerk/tanstack-react-start` 1.4.x: install/typecheck/production build clean against Start 1.168 + React 19.2; `auth()` works in server functions via `clerkMiddleware` → Start context → `ClerkProvider` hydration. Notes: **pin `react`/`react-dom`** (Clerk peers use tilde patch ranges, `19.4.x` would break resolution); middleware hard-fails all routes on bad keys; route protection is opt-in per route; Start scaffold pins `nitro-nightly` — budget upgrade churn. Live auth flow still unproven until a real Clerk instance exists
+2. **Clerk API-key verify from Workers** — GO. `POST /v1/api_keys/verify` returns `subject` (`org_`/`user_`), scopes, expiry, revoked — everything the gateway cache needs. Measured p50 ~94ms fresh / ~33ms keepalive → confirms cache-first. Limits: 1000 req/10s per instance; $0.00001/verify after 100k/mo. **No `api_key.*` webhook events exist** → cache purge must come from OUR key screens (call Clerk, then purge wallet-DO cache) + short TTL (~60s) safety net. Do not use Clerk's prebuilt key-management component — it would bypass the purge. `@clerk/backend` is workerd-compatible
+3. **Convex + TanStack Start SSR** — GO. Proven: Start loader `ensureQueryData(convexQuery(...))` fetches via HTTP client during SSR, listing text present in raw HTML (view-source SEO requirement), client hydrates into WebSocket subscription with same query keys. Convex local dev works with **zero account** (`CONVEX_AGENT_MODE=anonymous`) — CI/fresh-clone DX solved. Authed SSR needs explicit server-side token forwarding (Clerk guide exists)
+4. **Wallet DO reconcile invariant** — GO. Full DO implemented + fuzz-tested in workerd (10/10 green; 200-op runs with ~30% ack loss and forced evictions). Invariant held: `ledgerGrants − ledgerSettled == doBalance + inFlight`, never negative. Hardening baked into the design: **stable settlement ids** (`settle:{reservationId}` — batch ids insufficient under lost-ack), terminal map for settle/refund idempotency, `storage.transaction` + `blockConcurrencyWhile` reload, refund restores availability without a ledger row. Spike code seeds `apps/gateway`
 
 ## Later (explicitly deferred)
 
