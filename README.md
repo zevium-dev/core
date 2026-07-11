@@ -65,7 +65,7 @@ apps/gateway/    # CF Worker: metered proxy, wallet DO, mock, MCP, discovery
 convex/          # Convex schema + functions (control plane)
 packages/shared/ # OpenAPI parsing, x-zevium-* pricing, validation
 e2e/             # agent-browser end-to-end suite (auth, publisher, consumer)
-docs/            # source-of-truth product/tech docs + assets
+docs/            # market research + demo assets
 ```
 
 Source-of-truth docs: [PRODUCT.md](PRODUCT.md) · [FLOW.md](FLOW.md) ·
