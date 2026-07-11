@@ -1,0 +1,17 @@
+DONE: publisher flow screens live. typecheck + `pnpm --filter web build` green.
+
+### Routes
+- `/app/projects` — org list via `api.projects.list` + `useSuspenseQuery`, loader `ensureQueryData` (auth org), cards + empty CTA, VT `project-title-{slug}` / `project-status-{slug}`
+- `/app/projects/create` — name → auto slug until edit, description, `useMutation` + `useConvexMutation` + `isPending`, toast, navigate detail
+- `/app/projects/$projectSlug` — header badges, Make Public/Private dialog (`projects.update`), tabs Overview | Spec | Settings(placeholder toast), overview cards
+- `/app/projects/$projectSlug/spec` — monospace textarea, Save draft / Publish semver dialog, Issues panel, versions list, pricing chip from `@zevium/shared` client parse
+
+### Helpers (apps/web only)
+- `src/lib/convex-api.ts`, `convex-data-model.ts`, `slug.ts`, `human-error.ts`, `spec-pricing.ts`
+- `getAuthOrg` on auth-session for loader prefetch
+- `@zevium/shared` workspace dep on web
+
+### Verify
+- `pnpm --filter web generate-routes` ok
+- `pnpm --filter web typecheck` clean
+- `pnpm --filter web build` clean (client+ssr+nitro)

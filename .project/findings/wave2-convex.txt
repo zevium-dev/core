@@ -1,0 +1,16 @@
+DONE: publisher control-plane up. `npx convex dev --once` green + indexes added; `tsc -p convex` clean.
+
+**Files**
+- `convex/schema.ts` — `projects.by_visibility_status`, `specVersions.by_project_version` / `by_project_published`
+- `convex/lib/auth.ts` — JWT org claims, `requireOrgMemberBySlug`, `requireProjectMember`
+- `convex/lib/validate.ts` — kebab slug, semver, OpenAPI issues (errors/warnings)
+- `convex/projects.ts` — list/get/create/update/remove, org-scoped
+- `convex/specs.ts` — getDraft/saveDraft/publish/listVersions + public `getPublishedForGateway`
+- `convex/catalogue.ts` — `listPublic`, `getPublicDetail` (no auth)
+- `convex/wallets.ts` — internal `grantCredits` / `recordUsage` (refId dedupe), `getMyWallet`
+- `convex/organizations.ts` — shares `requireIdentity`
+
+**Notes**
+- saveDraft/publish return `{ok, issues[]}` — no throw on validation fail
+- publish snapshots immutable `specVersions`, sets `status: published`
+- gateway query path: `specs:getPublishedForGateway` → `{spec, projectId, organizationId, clerkOrgId}`

@@ -1,0 +1,32 @@
+DONE: both symptoms fixed. Build green. No debug logs left.
+
+## Root causes
+
+**Symptom 1 — `projects:list` InternalServerError**
+1. Client fired authed query before Convex JWT ready → `Not authenticated` → InternalServerError in UI.
+2. Org mirror often missing — `ensureOrganization` failed soft (swallowed), `organizations` empty → later `Organization not found`.
+3. SSR path mostly fine once token + mirror exist; client race was killer.
+
+**Symptom 2 — catalogue skeletons forever**
+`/catalogue` was pure stub: 6 permanent skeletons, zero `catalogue:listPublic` call. Not hang — unfinished page.
+
+## Fixes (apps/web only)
+
+1. **`catalogue.tsx`** — wire `api.catalogue.listPublic` (loader + `useSuspenseQuery`), real empty state `"No public APIs yet"`.
+2. **`projects/index.tsx`** + **`$projectSlug.tsx`** — gate on `useConvexAuth()`; only query when `isAuthenticated`. Loader skips prefetch if mirror fail; remove failed cache entry.
+3. **`use-ensure-mirror.ts`** — wait for Convex auth before mutations; reset `ranFor` on failure so retry works.
+4. **`ensure-mirror.ts`** — return `error` string instead of silent false; stop lying `mirrored: true` when org ensure dies.
+
+Also seeded org mirror once via `npx convex run` so local data matches Clerk org.
+
+## Verify
+
+| Check | Result |
+|---|---|
+| Browser `/app/projects` signed-in | `Projects` + `No projects yet` — no InternalServerError |
+| `curl` + session cookies `/app/projects` | HTML title/heading `Projects` — no Something went wrong |
+| Browser + curl `/catalogue` | `No public APIs yet` — no permanent skeletons |
+| `pnpm --filter web build` | green |
+| debug logs | gone |
+
+Auth config issuer was already correct (`holy-wasp-95.clerk.accounts.dev` / `applicationID: convex`). JWT template claims good. No convex business-logic edits.

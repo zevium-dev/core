@@ -1,0 +1,15 @@
+=== Zevium E2E ===
+base: http://localhost:3000
+artifacts: /home/tnfssc/Code/zevium/e2e/artifacts
+
+── 01-auth.sh ──
+[e2e] → wait for base url
+[e2e] wait_for_url http://localhost:3000/ (timeout=90s)
+[e2e] wait_for_url ok code=200
+[e2e] → anonymous landing /
+✗ Navigation failed: net::ERR_NETWORK_CHANGED
+FAIL 01-auth.sh exit=1 (6s)
+
+=== summary (6s) ===
+  FAIL  01-auth.sh  (6s) exit=1
+  (remaining scripts skipped after first failure)

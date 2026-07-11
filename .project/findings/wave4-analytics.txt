@@ -1,0 +1,22 @@
+
+DONE: Wave 4 analytics lane shipped.
+
+**Convex** `convex/analytics.ts` (pushed dev `doting-warbler-454`)
+- `orgOverview(orgSlug)` — balance, today + UTC-month cycle calls/credits, linear projected spend, recent 20 events (project names resolved), scan cap 5k
+- `projectAnalytics(orgSlug, projectSlug, rangeDays=7)` — totals, success %, p50/p95/p99, 4xx/5xx, per-endpoint table, daily bars, scan cap 10k + `truncated` flag
+
+**Dashboard** `/app`
+- Live wallet (`NumberTicker` + `credit-balance` VT), calls this cycle, projected spend
+- Recent calls table, quick actions → billing / keys / catalogue
+- Onboarding checklist when 0 keys + 0 cycle calls
+
+**Project** Analytics tab
+- Stat tiles + CSS bar sparkline + per-endpoint table
+- Panel state on project root (no new route)
+
+**Verify**
+- `tsc` convex + web green
+- `pnpm --filter web build` green
+- `convex dev --once` green — `analytics.js:orgOverview` + `projectAnalytics` live
+
+Limit: no time index on `usageEvents` → order+cap scan; high volume undercounts past cap (flagged in UI).

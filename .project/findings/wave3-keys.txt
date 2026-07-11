@@ -1,0 +1,18 @@
+DONE: keys lane shipped.
+
+**Server** `apps/web/src/lib/api-keys.ts`
+- `listKeys` / `createKey(name)` / `revokeKey(id)` via `createServerFn` + `clerkClient().apiKeys`
+- subject = current userId
+- create returns secret once; enforces one active key
+- revoke ownership-checked
+
+**UI**
+- `/app/settings/keys` — table (name, masked, created, last used), create dialog, secret blur-in (`blur(8px)→0` + fade, `DUR.base`), copy, revoke confirm, create disabled when key exists, toasts + `isPending`
+- `/app/settings` — profile from `useUser` + link to keys
+- `/app/settings/activity` — empty state (no public usageEvents query yet)
+- settings layout subnav: Overview / API keys / Activity
+
+**Check**
+- `pnpm --filter web generate-routes` ok
+- `pnpm --filter web typecheck` green
+- `pnpm --filter web build` green

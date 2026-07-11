@@ -1,0 +1,18 @@
+**DONE: 02 pass, 03 fail (app gap)**
+
+### 02 PASS
+`create → save draft → publish 0.0.1 → make public → catalogue lists project`
+
+### 03 FAIL
+**step:** `open API detail page`  
+**app gap (not script):**
+- catalogue cards = dumb non-link `Card`s (click no-op)
+- no route `apps/web/src/routes/catalogue/$org/$slug` — `/catalogue/test-org/<slug>` → `Not Found`
+- `convex/catalogue.getPublicDetail` exists, zero UI
+- no pricing table / try-it panel without detail page  
+GATEWAY skip intact.
+
+### script fixes (`e2e/` only)
+- `lib.sh`: `click_button` (scrollIntoView center + role click + css fallback), `click_dialog_button` (dialog-scoped click — stops DialogTrigger toggle), `submit_form`, poll-based `wait_for_url_pattern`
+- `02`: all buttons via helpers; dialog confirms for Publish / Make public; create page SSR 500 retry
+- `03`: require real navigation; fail clean on missing detail route; no false “credits” hit from catalogue blurb

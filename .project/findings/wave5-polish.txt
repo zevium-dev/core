@@ -1,0 +1,14 @@
+DONE: wave 5 polish shipped in `apps/web/`.
+
+**What shipped**
+1. **Session-aware public header** — `components/public-header.tsx` via Clerk `<Show when="signed-out">` + fallback (Clerk v6 killed SignedIn/SignedOut). Fixed min-width auth slot = no layout shift. Landing + catalogue list + catalogue detail all use it.
+2. **Landing hero** — 2-col layout; right half live catalogue teaser (`listPublic`, fallback static), stat row (APIs listed + 95%), how-it-works. Stagger via `DUR.slow`/`STAGGER`, magnetic CTA (`motion/magnetic.tsx`, strength 0.3, reduced-motion off).
+3. **VT audit** — catalogue `api-title-{slug}` + projects `project-title/status-{slug}` already morph; comments note missing logo/price (no fields). Landing CTA → `catalogue-heading` intact.
+4. **Micro-interactions** — button `active:scale-[0.97]` + CSS vars; cards hover-lift already; `FadeIn` skeleton→content; sonner retimed; dialog/sheet/sidebar hardcoded durations → CSS vars; reduced-motion kills transforms.
+5. **Verify** — `pnpm --filter web typecheck` green; `pnpm --filter web build` green.
+
+**Screenshots** (`/tmp/zevium-polish/`)
+- `landing-light-forced.png` / `landing-dark.png` — hero + proof strip + signed-in Dashboard/UserButton
+- `landing-signed-out.png` — Sign in button state
+- `catalogue-light.png` / `catalogue-dark.png` — session header + card grid
+- `dashboard.png` — no regression (wallet 10k, quick actions)

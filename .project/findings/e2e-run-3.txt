@@ -1,0 +1,40 @@
+=== Zevium E2E ===
+base: http://localhost:3000
+artifacts: /home/tnfssc/Code/zevium/e2e/artifacts
+
+── 01-auth.sh ──
+[e2e] → wait for base url
+[e2e] wait_for_url http://localhost:3000/ (timeout=90s)
+[e2e] wait_for_url ok code=200
+[e2e] → anonymous landing /
+[e2e] → anonymous /app redirects to sign-in
+[e2e] → sign_in with seed credentials
+[e2e] → sign_in
+[e2e] filled identifier — submit via Enter
+[e2e] filled password — submit via Enter
+[e2e] OTP screen detected — entering 424242
+[e2e] Clerk user present (user_3GLqr2ul5Xjik1tWZvkJK8KhsqF) — signed in
+[e2e] signed in → http://localhost:3000/app
+[e2e] → signed-in /app/projects loads
+[e2e] 01-auth PASS
+OK 01-auth.sh (176s)
+
+── 02-publisher.sh ──
+[e2e] → wait for base url
+[e2e] wait_for_url http://localhost:3000/ (timeout=90s)
+[e2e] wait_for_url ok code=200
+[e2e] → sign_in
+[e2e] → sign_in
+[e2e] filled identifier — submit via Enter
+[e2e] filled password — submit via Enter
+[e2e] OTP screen detected — entering 424242
+[e2e] Clerk user present (user_3GLqr2ul5Xjik1tWZvkJK8KhsqF) — signed in
+[e2e] signed in → http://localhost:3000/app
+[e2e] → open /app/projects
+/home/tnfssc/Code/zevium/e2e/lib.sh: line 70: needle: unbound variable
+FAIL 02-publisher.sh exit=1 (121s)
+
+=== summary (297s) ===
+  PASS  01-auth.sh  (176s)
+  FAIL  02-publisher.sh  (121s) exit=1
+  (remaining scripts skipped after first failure)

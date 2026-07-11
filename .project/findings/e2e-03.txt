@@ -1,0 +1,6 @@
+[e2e] → wait for base url
+[e2e] wait_for_url http://localhost:3000/ (timeout=90s)
+[e2e] wait_for_url ok code=200
+[e2e] → anonymous /catalogue lists published project
+[e2e] FAIL: catalogue missing published project 'E2E Weather 20260711163543' (run 02 first or app catalogue not wired)
+[e2e] screenshot: /home/tnfssc/Code/zevium/e2e/artifacts/20260711-163913-anonymous_catalogue_lists_published_project.png

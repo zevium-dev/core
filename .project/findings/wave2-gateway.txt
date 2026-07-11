@@ -1,0 +1,15 @@
+DONE: gateway talk real control plane now. 30 tests green. typecheck clean.
+
+**What land:**
+- `ConvexSpecSource` → `specs:getPublishedForGateway` via ConvexHttpClient + `makeFunctionReference`. TTL cache still 30s.
+- Wallet DO id = `idFromName(clerkOrgId)`. Pipeline match key subject vs `published.clerkOrgId`.
+- `ConvexUsageClient` / DO `flushToConvex` → `wallets:recordUsage` (admin HTTP or test mutation hook). Alarm every ~5s when pending. Ack after success.
+- Free tier: `consumeFreeTier` per key/UTC-day. Skip reserve/settle. Enqueue credits 0. Emit `outcome: "free"`.
+- `POST /internal/grant` + `GATEWAY_INTERNAL_SECRET` → DO grant by clerkOrgId.
+- Env: `CONVEX_URL`, `CONVEX_DEPLOY_KEY`, `GATEWAY_INTERNAL_SECRET`.
+
+**Verify:**
+- `pnpm --filter @zevium/gateway test` → 30 pass
+- `pnpm --filter @zevium/gateway typecheck` → clean
+
+Scope only `apps/gateway/` (+ convex dep). shared already had free-tier parse.

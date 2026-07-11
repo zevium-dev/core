@@ -1,0 +1,12 @@
+[e2e] → wait for base url
+[e2e] wait_for_url http://localhost:3000/ (timeout=90s)
+[e2e] wait_for_url ok code=200
+[e2e] → anonymous /catalogue lists published project
+[e2e] found project listing: E2E Weather 20260711165935
+[e2e] → open API detail page
+[e2e] → pricing table shows credits
+[e2e] pricing/credits signal present
+[e2e] → try-it panel renders
+[e2e] try-it panel signal present
+[e2e] GATEWAY_URL unset — skip paid call (browse-only consumer path)
+[e2e] 03-consumer PASS
