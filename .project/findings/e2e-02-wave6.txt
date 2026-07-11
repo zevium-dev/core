@@ -1,0 +1,9 @@
+[e2e] → wait for base url
+[e2e] wait_for_url http://localhost:3000/ (timeout=90s)
+[e2e] wait_for_url ok code=200
+[e2e] → sign_in
+[e2e] → sign_in
+[e2e] filled identifier — submit via Enter
+[e2e] filled password — submit via Enter
+[e2e] FAIL: still on sign-in after credentials+OTP (url=http://localhost:3000/sign-in clerk=)
+[e2e] screenshot: /home/tnfssc/Code/zevium/e2e/artifacts/20260711-191316-sign_in.png

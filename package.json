@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "turbo dev",
     "build": "turbo build",
-    "test": "turbo test",
+    "test": "turbo test && pnpm test:convex",
+    "test:convex": "vitest run --config convex/vitest.config.ts",
     "typecheck": "turbo typecheck",
     "lint": "turbo lint",
     "format": "prettier --write .",
@@ -14,13 +15,17 @@
   },
   "devDependencies": {
     "@clerk/backend": "^3.11.4",
+    "@edge-runtime/vm": "^5.0.0",
+    "convex-test": "^0.0.54",
     "prettier": "^3.6.0",
     "tsx": "^4.23.0",
     "turbo": "^2.6.0",
-    "typescript": "^5.9.0"
+    "typescript": "^5.9.0",
+    "vitest": "^4.1.10"
   },
   "dependencies": {
     "@polar-sh/sdk": "^0.48.1",
+    "@zevium/shared": "workspace:*",
     "convex": "^1.42.1",
     "svix": "^1.96.1"
   },

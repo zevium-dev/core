@@ -207,6 +207,29 @@ export const listVersions = query({
 });
 
 /**
+ * Fetch one immutable published version (full spec body).
+ * Auth: caller must be a member of the org that owns the project.
+ */
+export const getVersion = query({
+  args: { versionId: v.id("specVersions") },
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{ version: string; spec: string; publishedAt: number }> => {
+    const row = await ctx.db.get(args.versionId);
+    if (row === null) {
+      throw new Error("Spec version not found");
+    }
+    await requireProjectMember(ctx, row.projectId);
+    return {
+      version: row.version,
+      spec: row.spec,
+      publishedAt: row.publishedAt,
+    };
+  },
+});
+
+/**
  * Public (no-auth) query for the gateway data plane.
  * Returns latest published immutable snapshot + org ids for wallet DO routing.
  */

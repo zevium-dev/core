@@ -1,0 +1,29 @@
+**DONE.**
+
+### CHANGED
+- `convex/schema.ts` — `by_org_at`, `by_project_at` indexes
+- `convex/usage.ts` — `listForOrg` (paginated, by_org_at, project join)
+- `convex/billing.ts` — `cycleBreakdown` (UTC month, byKey/byProject)
+- `convex/earnings.ts` — `forOrg` (95% net, month + allTime)
+- `convex/specs.ts` — `getVersion` (org-member auth)
+- `convex/usage.test.ts`, `convex/earnings.test.ts`
+- `convex/vitest.config.ts`, `convex/tsconfig.json` (exclude `*.test.ts`)
+- `package.json` — `test:convex`, `test` → `turbo test && pnpm test:convex`
+- root devDeps: `convex-test`, `@edge-runtime/vm`, `vitest`
+- `convex/_generated/api.d.ts` (codegen)
+
+### VERIFY
+| Check | Result |
+|---|---|
+| `pnpm test:convex` | **11/11 green** |
+| `npx convex dev --once` | **ready** (schema push clean) |
+| `npx tsc --noEmit -p convex/tsconfig.json` | **exit 0** |
+| `pnpm typecheck` | **fail outside scope** — `apps/web/.../reveal.tsx` unused `STAGGER` (other lane) |
+
+### Contracts (wave 7 binds here)
+- `api.usage.listForOrg` — consumer log, newest first, filters post-index
+- `api.billing.cycleBreakdown` — all recorded events in UTC month (no status filter; gateway always inserts)
+- `api.earnings.forOrg` — net = `Math.round(gross * 0.95)`
+- `api.specs.getVersion` — `{version, spec, publishedAt}`
+
+Auth: `requireOrgMemberBySlug` / `requireProjectMember` + Clerk `org_id` claim. Non-member + unauth covered in tests.

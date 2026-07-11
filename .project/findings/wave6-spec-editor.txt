@@ -1,0 +1,29 @@
+**DONE**
+
+### CHANGED
+**shared**
+- `packages/shared/src/validate.ts` — ported OpenAPI validate + slug/semver
+- `packages/shared/src/validate.test.ts` — bad json, missing openapi, bad servers, bad cost type, missing-cost warning
+- `packages/shared/src/index.ts` — export validate surface
+- `package.json` (root) — `@zevium/shared` workspace dep for convex import
+
+**convex (shim only)**
+- `convex/lib/validate.ts` — re-export; `validateOpenApiSpec` = `collectOpenApiSpecIssues` (keeps `SpecIssue[]` callers)
+
+**web**
+- deps: `@uiw/react-codemirror`, `@codemirror/*`, `yaml`, `zod`
+- `apps/web/src/lib/spec-yaml.ts` + test — YAML→pretty JSON
+- `apps/web/src/lib/spec-import.ts` + test — zod URL schema + `fetchSpecFromUrl` server fn (2MB cap)
+- `apps/web/src/lib/spec-endpoints.ts` + test — live endpoint rows
+- `apps/web/src/lib/spec-save-status.ts` + test — saved/saving/unsaved/fix-errors
+- `apps/web/src/components/spec-editor/` — CodeMirror editor (JSON lint gutter, shadcn CSS-var theme), toolbar import (file/URL/template), live rail (endpoints/validation/versions + private visibility nudge), `SpecWorkspace` (autosave 2s, no save on client errors)
+- `apps/web/src/routes/app/projects/$projectSlug/spec.tsx` — thin route shell + layout-stable skeleton (~40% rail)
+
+### VERIFY
+| cmd | result |
+|---|---|
+| `pnpm typecheck` | exit 0 |
+| `pnpm test` (+ convex) | exit 0 — shared 27, web 22, gateway 45, convex 11 |
+| `pnpm build` | exit 0 |
+
+Cut 1 ship: real editor + read-only live rail. No rail→spec write-back. No version diff.

@@ -11,12 +11,14 @@
 import type * as analytics from "../analytics.js";
 import type * as billing from "../billing.js";
 import type * as catalogue from "../catalogue.js";
+import type * as earnings from "../earnings.js";
 import type * as http from "../http.js";
 import type * as lib_auth from "../lib/auth.js";
 import type * as lib_validate from "../lib/validate.js";
 import type * as organizations from "../organizations.js";
 import type * as projects from "../projects.js";
 import type * as specs from "../specs.js";
+import type * as usage from "../usage.js";
 import type * as users from "../users.js";
 import type * as wallets from "../wallets.js";
 
@@ -30,12 +32,14 @@ declare const fullApi: ApiFromModules<{
   analytics: typeof analytics;
   billing: typeof billing;
   catalogue: typeof catalogue;
+  earnings: typeof earnings;
   http: typeof http;
   "lib/auth": typeof lib_auth;
   "lib/validate": typeof lib_validate;
   organizations: typeof organizations;
   projects: typeof projects;
   specs: typeof specs;
+  usage: typeof usage;
   users: typeof users;
   wallets: typeof wallets;
 }>;

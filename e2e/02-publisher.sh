@@ -96,28 +96,30 @@ assert_url_contains "/spec" "spec editor route"
 
 step "paste minimal OpenAPI JSON"
 minimal_openapi_json "$PROJECT_NAME" >"$SPEC_FILE"
-# Spec editor is a bare monospace textarea.
-if ! ab fill 'textarea.font-mono' "$(cat "$SPEC_FILE")" >/dev/null 2>&1; then
-  # Fallback: first large textarea on page
-  if ! ab fill 'textarea' "$(cat "$SPEC_FILE")" >/dev/null 2>&1; then
-    # Last resort: JS set value + input event
-    ab eval "$(cat <<'JS'
-const t = document.querySelector('textarea.font-mono') || document.querySelector('textarea');
-if (!t) throw new Error('no textarea');
-t.focus();
-t.value = '';
-JS
-)" >/dev/null
-    # inject via stdin-safe path: write into page from file using base64
-    b64="$(base64 -w0 "$SPEC_FILE" 2>/dev/null || base64 "$SPEC_FILE" | tr -d '\n')"
-    ab eval "const t=document.querySelector('textarea.font-mono')||document.querySelector('textarea'); const v=atob('$b64'); const d=Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype,'value'); d.set.call(t,v); t.dispatchEvent(new Event('input',{bubbles:true})); t.dispatchEvent(new Event('change',{bubbles:true})); t.value.length" >/dev/null \
-      || fail "could not fill OpenAPI into editor"
+# Spec editor is CodeMirror 6 (contenteditable .cm-content). agent-browser eval
+# runs in an isolated world: page-world props (cmView) are INVISIBLE, but
+# dispatched events cross worlds — so inject via synthetic ClipboardEvent paste.
+# Wait for editor mount first (route shows skeleton while draft query loads).
+editor_ready=""
+for _ in $(seq 1 30); do
+  if [[ "$(ab eval "!!document.querySelector('.cm-content')" 2>/dev/null | tail -1)" == "true" ]]; then
+    editor_ready=1
+    break
   fi
-fi
+  ab wait 500 >/dev/null
+done
+[[ -n "$editor_ready" ]] || fail "CodeMirror editor never mounted"
+
+b64="$(base64 -w0 "$SPEC_FILE" 2>/dev/null || base64 "$SPEC_FILE" | tr -d '\n')"
+ab eval "(() => { const el=document.querySelector('.cm-content'); el.focus(); document.execCommand('selectAll'); const dt=new DataTransfer(); dt.setData('text/plain', atob('$b64')); el.dispatchEvent(new ClipboardEvent('paste',{clipboardData:dt,bubbles:true,cancelable:true})); return true; })()" >/dev/null \
+  || fail "could not paste OpenAPI into CodeMirror editor"
 ab wait 500 >/dev/null
+filled="$(ab eval "document.querySelector('.cm-content').textContent.includes('openapi')" 2>/dev/null | tail -1)"
+[[ "$filled" == "true" ]] || fail "editor content missing openapi after paste"
 
 step "save draft"
-click_button "Save draft" || fail "Save draft button missing"
+# Autosave (2s debounce) may beat the button; click if enabled, else rely on autosave.
+click_button "Save draft" || ab wait 2500 >/dev/null
 # Toast or Saved state
 ab wait 1500 >/dev/null
 snap="$(page_text)"

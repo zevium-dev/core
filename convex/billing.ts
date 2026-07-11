@@ -1,6 +1,8 @@
 import { Polar } from "@polar-sh/sdk";
 import { v } from "convex/values";
 import { action, internalAction, query } from "./_generated/server";
+import type { Id } from "./_generated/dataModel";
+import { requireOrgMemberBySlug } from "./lib/auth";
 
 /** Stable pack ids used by the web Buy Credits UI. */
 export type CreditPackId = "pack_10" | "pack_50" | "pack_100";
@@ -449,3 +451,120 @@ export function resolveOrderClerkOrgId(order: {
   if (orgId !== undefined) return orgId;
   return null;
 }
+
+function startOfUtcMonth(now: number): number {
+  const d = new Date(now);
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1);
+}
+
+function endOfUtcMonth(now: number): number {
+  const d = new Date(now);
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1);
+}
+
+export type CycleKeyBreakdown = {
+  keyId: string;
+  calls: number;
+  credits: number;
+};
+
+export type CycleProjectBreakdown = {
+  projectId: Id<"projects">;
+  name: string;
+  slug: string;
+  calls: number;
+  credits: number;
+};
+
+export type CycleBreakdown = {
+  cycleStart: number;
+  cycleEnd: number;
+  totalCalls: number;
+  totalCredits: number;
+  byKey: CycleKeyBreakdown[];
+  byProject: CycleProjectBreakdown[];
+};
+
+/**
+ * Current UTC calendar-month consumer spend breakdown for billing UI.
+ * Counts every recorded usage event (gateway always inserts; no status filter).
+ * Index range: by_org_at [cycleStart, cycleEnd).
+ */
+export const cycleBreakdown = query({
+  args: { orgSlug: v.string() },
+  handler: async (ctx, args): Promise<CycleBreakdown> => {
+    const { org } = await requireOrgMemberBySlug(ctx, args.orgSlug);
+    const now = Date.now();
+    const cycleStart = startOfUtcMonth(now);
+    const cycleEnd = endOfUtcMonth(now);
+
+    const events = await ctx.db
+      .query("usageEvents")
+      .withIndex("by_org_at", (q) =>
+        q
+          .eq("organizationId", org._id)
+          .gte("at", cycleStart)
+          .lt("at", cycleEnd),
+      )
+      .collect();
+
+    const keyMap = new Map<string, { calls: number; credits: number }>();
+    const projectMap = new Map<
+      Id<"projects">,
+      { calls: number; credits: number }
+    >();
+
+    let totalCalls = 0;
+    let totalCredits = 0;
+
+    for (const event of events) {
+      totalCalls += 1;
+      totalCredits += event.credits;
+
+      const keyRow = keyMap.get(event.keyId) ?? { calls: 0, credits: 0 };
+      keyRow.calls += 1;
+      keyRow.credits += event.credits;
+      keyMap.set(event.keyId, keyRow);
+
+      const projectRow = projectMap.get(event.projectId) ?? {
+        calls: 0,
+        credits: 0,
+      };
+      projectRow.calls += 1;
+      projectRow.credits += event.credits;
+      projectMap.set(event.projectId, projectRow);
+    }
+
+    const byKey: CycleKeyBreakdown[] = [...keyMap.entries()]
+      .map(([keyId, row]) => ({
+        keyId,
+        calls: row.calls,
+        credits: row.credits,
+      }))
+      .sort((a, b) => b.credits - a.credits || a.keyId.localeCompare(b.keyId));
+
+    const byProject: CycleProjectBreakdown[] = [];
+    for (const [projectId, row] of projectMap) {
+      const project = await ctx.db.get(projectId);
+      byProject.push({
+        projectId,
+        name: project?.name ?? "Unknown project",
+        slug: project?.slug ?? "unknown",
+        calls: row.calls,
+        credits: row.credits,
+      });
+    }
+    byProject.sort(
+      (a, b) => b.credits - a.credits || a.slug.localeCompare(b.slug),
+    );
+
+    return {
+      cycleStart,
+      cycleEnd,
+      totalCalls,
+      totalCredits,
+      byKey,
+      byProject,
+    };
+  },
+});

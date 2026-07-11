@@ -14,21 +14,34 @@
 
 ## Waves
 
-| Wave | Lane       | Scope (disjoint dirs)                                                              | Status                                                    |
-| ---- | ---------- | ---------------------------------------------------------------------------------- | --------------------------------------------------------- |
-| 1    | convex     | Full schema + org/user mirror + Clerk JWT auth + webhook http action               | done                                                      |
-| 1    | web        | shadcn init, motion tokens, app shell (sidebar/org switcher/theme), route skeleton | done                                                      |
-| 1    | gateway    | /gateway routing, key-verify cache module, spec resolution, wallet integration     | done                                                      |
-| 2    | convex     | projects + specs CRUD functions, publish pipeline, catalogue query                 | done                                                      |
-| 2    | web        | projects screens + spec editor                                                     | done                                                      |
-| 2    | gateway    | end-to-end proxy against Convex-backed spec + Clerk key verify                     | done (committed 8ba0b86)                                  |
-| 2    | e2e        | agent-browser scripts in e2e/                                                      | done — 01/02/03 ALL PASS incl. paid gateway call          |
-| 3    | web        | catalogue (public SSR) + API detail + playground                                   | done (07e3f1a)                                            |
-| 3    | convex+web | billing/wallet screens + Polar webhook                                             | done (e7c1994) — Polar webhook registration = user action |
-| 3    | web        | keys screens (/app/settings)                                                       | done (e7c1994 + 8f524c3 org claims)                       |
-| 4    | web+convex | analytics dashboards                                                               | done (632f6ed)                                            |
-| 4    | gateway    | MCP endpoint + discovery                                                           | done (93d259e)                                            |
-| 5    | all        | DESIGN.md motion pass, E2E full suite green, visual-review-1 fixes                 | done (7c51257) — ALL PASS 489s                            |
+| Wave | Lane       | Scope (disjoint dirs)                                                                                                                               | Status                                                    |
+| ---- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
+| 1    | convex     | Full schema + org/user mirror + Clerk JWT auth + webhook http action                                                                                | done                                                      |
+| 1    | web        | shadcn init, motion tokens, app shell (sidebar/org switcher/theme), route skeleton                                                                  | done                                                      |
+| 1    | gateway    | /gateway routing, key-verify cache module, spec resolution, wallet integration                                                                      | done                                                      |
+| 2    | convex     | projects + specs CRUD functions, publish pipeline, catalogue query                                                                                  | done                                                      |
+| 2    | web        | projects screens + spec editor                                                                                                                      | done                                                      |
+| 2    | gateway    | end-to-end proxy against Convex-backed spec + Clerk key verify                                                                                      | done (committed 8ba0b86)                                  |
+| 2    | e2e        | agent-browser scripts in e2e/                                                                                                                       | done — 01/02/03 ALL PASS incl. paid gateway call          |
+| 3    | web        | catalogue (public SSR) + API detail + playground                                                                                                    | done (07e3f1a)                                            |
+| 3    | convex+web | billing/wallet screens + Polar webhook                                                                                                              | done (e7c1994) — Polar webhook registration = user action |
+| 3    | web        | keys screens (/app/settings)                                                                                                                        | done (e7c1994 + 8f524c3 org claims)                       |
+| 4    | web+convex | analytics dashboards                                                                                                                                | done (632f6ed)                                            |
+| 4    | gateway    | MCP endpoint + discovery                                                                                                                            | done (93d259e)                                            |
+| 5    | all        | DESIGN.md motion pass, E2E full suite green, visual-review-1 fixes                                                                                  | done (7c51257) — ALL PASS 489s                            |
+| 6    | convex     | usage/billing/earnings query surface + specs.getVersion + indexes + convex-test                                                                     | done — 11/11 tests, schema pushed                         |
+| 6    | web+shared | spec editor cut 1: CodeMirror, live validation (shared port), YAML→JSON, import                                                                     | done — e2e 02 PASS through new editor                     |
+| 6    | web        | landing v2: scroll-depth sections, real footer, docs placeholder                                                                                    | done — visual QA clean                                    |
+| 7    | web        | settings (Clerk embeds+prefs), activity, billing breakdown, project settings/earnings, org surfaces, catalogue filters, onboarding fix, MCP env URL | in flight (4 lanes)                                       |
+| 8    | all        | admin panel, publisher webhooks, notifications, deprecation flow, spec editor cut 2 (rail write-back + diffs)                                       | queued                                                    |
+
+## Decisions (user, 2026-07-11)
+
+- Spec editor: direction C phased — cut 1 editor+validation+read-only rail, cut 2 write-back+diffs. Mockups: claude.ai/code/artifact/3591af48
+- Scope: FULL FLOW.md parity — no placeholder left, including org surfaces, earnings, admin, webhooks, notifications
+- Settings: Clerk UserProfile/OrganizationProfile embeds + custom app prefs; keys stay custom
+- YAML: accepted at input, converted client-side, stored canonical JSON (gateway stays JSON-only)
+- Tests mandatory in every lane (user directive): convex-test for convex fns, vitest for shared/web logic, workerd tests for gateway. Root `pnpm test` stays green.
 
 ## User action needed
 
@@ -47,6 +60,9 @@
 - Seed user password drifted once; reset via `clerk api /users/<id> -X PATCH -d '{"password":..., "skip_password_checks": true}'`
 - agent-browser sessions isolate via `AGENT_BROWSER_SESSION` env; e2e suite uses its own, orchestrator default session stays signed in
 - OpenCode Go weekly quota was exhausted — provider-qualify `--model xai-oauth/grok-4.5` on omp calls until reset
+- agent-browser eval runs in ISOLATED world: page-world JS props (e.g. CodeMirror contentDOM.cmView) invisible. Dispatched events cross worlds — inject editor text via synthetic ClipboardEvent paste (see e2e/02). DOM structure/attrs visible fine.
+- @uiw/react-codemirror defaults to its own LIGHT theme — pass theme="none" or CSS-var themes get overridden
+- Editing apps/web files while an e2e run is in flight = Vite HMR reload wipes Clerk forms mid-fill → spurious sign-in FAILs. Freeze tree during e2e runs.
 - Visual debt from visual-review-1: ALL CLEARED in wave 5 (session-aware header, hero proof strip, skeleton crossfades)
 
 ## Verification protocol (after every wave)

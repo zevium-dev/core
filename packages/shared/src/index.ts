@@ -23,3 +23,14 @@ export {
   type ParsedOpenApiSpec,
   type MatchedOperation,
 } from "./openapi.js";
+
+export {
+  isValidSlug,
+  isValidSemver,
+  collectOpenApiSpecIssues,
+  validateOpenApiSpec,
+  hasErrors,
+  hasValidationErrors,
+  type SpecIssue,
+  type SpecValidationResult,
+} from "./validate.js";

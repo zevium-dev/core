@@ -84,5 +84,7 @@ export default defineSchema({
     at: v.number(),
   })
     .index("by_org", ["organizationId"])
-    .index("by_project", ["projectId"]),
+    .index("by_project", ["projectId"])
+    .index("by_org_at", ["organizationId", "at"])
+    .index("by_project_at", ["projectId", "at"]),
 });
