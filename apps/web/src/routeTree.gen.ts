@@ -25,8 +25,10 @@ import { Route as DocsAgentsRouteImport } from './routes/docs/agents'
 import { Route as AppSettingsRouteImport } from './routes/app/settings'
 import { Route as AppProjectsRouteImport } from './routes/app/projects'
 import { Route as AppOrgRouteImport } from './routes/app/org'
+import { Route as AppEarningsRouteImport } from './routes/app/earnings'
 import { Route as AppBillingRouteImport } from './routes/app/billing'
 import { Route as AdminProjectsRouteImport } from './routes/admin/projects'
+import { Route as AdminPayoutsRouteImport } from './routes/admin/payouts'
 import { Route as AdminOrgsRouteImport } from './routes/admin/orgs'
 import { Route as AppSettingsIndexRouteImport } from './routes/app/settings/index'
 import { Route as AppProjectsIndexRouteImport } from './routes/app/projects/index'
@@ -119,6 +121,11 @@ const AppOrgRoute = AppOrgRouteImport.update({
   path: '/org',
   getParentRoute: () => AppRoute,
 } as any)
+const AppEarningsRoute = AppEarningsRouteImport.update({
+  id: '/earnings',
+  path: '/earnings',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppBillingRoute = AppBillingRouteImport.update({
   id: '/billing',
   path: '/billing',
@@ -127,6 +134,11 @@ const AppBillingRoute = AppBillingRouteImport.update({
 const AdminProjectsRoute = AdminProjectsRouteImport.update({
   id: '/projects',
   path: '/projects',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminPayoutsRoute = AdminPayoutsRouteImport.update({
+  id: '/payouts',
+  path: '/payouts',
   getParentRoute: () => AdminRoute,
 } as any)
 const AdminOrgsRoute = AdminOrgsRouteImport.update({
@@ -193,8 +205,10 @@ export interface FileRoutesByFullPath {
   '/app': typeof AppRouteWithChildren
   '/catalogue': typeof CatalogueRouteWithChildren
   '/admin/orgs': typeof AdminOrgsRoute
+  '/admin/payouts': typeof AdminPayoutsRoute
   '/admin/projects': typeof AdminProjectsRoute
   '/app/billing': typeof AppBillingRoute
+  '/app/earnings': typeof AppEarningsRoute
   '/app/org': typeof AppOrgRouteWithChildren
   '/app/projects': typeof AppProjectsRouteWithChildren
   '/app/settings': typeof AppSettingsRouteWithChildren
@@ -221,8 +235,10 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/admin/orgs': typeof AdminOrgsRoute
+  '/admin/payouts': typeof AdminPayoutsRoute
   '/admin/projects': typeof AdminProjectsRoute
   '/app/billing': typeof AppBillingRoute
+  '/app/earnings': typeof AppEarningsRoute
   '/docs/agents': typeof DocsAgentsRoute
   '/docs/consuming': typeof DocsConsumingRoute
   '/docs/publishing': typeof DocsPublishingRoute
@@ -250,8 +266,10 @@ export interface FileRoutesById {
   '/app': typeof AppRouteWithChildren
   '/catalogue': typeof CatalogueRouteWithChildren
   '/admin/orgs': typeof AdminOrgsRoute
+  '/admin/payouts': typeof AdminPayoutsRoute
   '/admin/projects': typeof AdminProjectsRoute
   '/app/billing': typeof AppBillingRoute
+  '/app/earnings': typeof AppEarningsRoute
   '/app/org': typeof AppOrgRouteWithChildren
   '/app/projects': typeof AppProjectsRouteWithChildren
   '/app/settings': typeof AppSettingsRouteWithChildren
@@ -283,8 +301,10 @@ export interface FileRouteTypes {
     | '/app'
     | '/catalogue'
     | '/admin/orgs'
+    | '/admin/payouts'
     | '/admin/projects'
     | '/app/billing'
+    | '/app/earnings'
     | '/app/org'
     | '/app/projects'
     | '/app/settings'
@@ -311,8 +331,10 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/admin/orgs'
+    | '/admin/payouts'
     | '/admin/projects'
     | '/app/billing'
+    | '/app/earnings'
     | '/docs/agents'
     | '/docs/consuming'
     | '/docs/publishing'
@@ -339,8 +361,10 @@ export interface FileRouteTypes {
     | '/app'
     | '/catalogue'
     | '/admin/orgs'
+    | '/admin/payouts'
     | '/admin/projects'
     | '/app/billing'
+    | '/app/earnings'
     | '/app/org'
     | '/app/projects'
     | '/app/settings'
@@ -492,6 +516,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppOrgRouteImport
       parentRoute: typeof AppRoute
     }
+    '/app/earnings': {
+      id: '/app/earnings'
+      path: '/earnings'
+      fullPath: '/app/earnings'
+      preLoaderRoute: typeof AppEarningsRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/app/billing': {
       id: '/app/billing'
       path: '/billing'
@@ -504,6 +535,13 @@ declare module '@tanstack/react-router' {
       path: '/projects'
       fullPath: '/admin/projects'
       preLoaderRoute: typeof AdminProjectsRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/payouts': {
+      id: '/admin/payouts'
+      path: '/payouts'
+      fullPath: '/admin/payouts'
+      preLoaderRoute: typeof AdminPayoutsRouteImport
       parentRoute: typeof AdminRoute
     }
     '/admin/orgs': {
@@ -588,12 +626,14 @@ declare module '@tanstack/react-router' {
 
 interface AdminRouteChildren {
   AdminOrgsRoute: typeof AdminOrgsRoute
+  AdminPayoutsRoute: typeof AdminPayoutsRoute
   AdminProjectsRoute: typeof AdminProjectsRoute
   AdminIndexRoute: typeof AdminIndexRoute
 }
 
 const AdminRouteChildren: AdminRouteChildren = {
   AdminOrgsRoute: AdminOrgsRoute,
+  AdminPayoutsRoute: AdminPayoutsRoute,
   AdminProjectsRoute: AdminProjectsRoute,
   AdminIndexRoute: AdminIndexRoute,
 }
@@ -661,6 +701,7 @@ const AppSettingsRouteWithChildren = AppSettingsRoute._addFileChildren(
 
 interface AppRouteChildren {
   AppBillingRoute: typeof AppBillingRoute
+  AppEarningsRoute: typeof AppEarningsRoute
   AppOrgRoute: typeof AppOrgRouteWithChildren
   AppProjectsRoute: typeof AppProjectsRouteWithChildren
   AppSettingsRoute: typeof AppSettingsRouteWithChildren
@@ -669,6 +710,7 @@ interface AppRouteChildren {
 
 const AppRouteChildren: AppRouteChildren = {
   AppBillingRoute: AppBillingRoute,
+  AppEarningsRoute: AppEarningsRoute,
   AppOrgRoute: AppOrgRouteWithChildren,
   AppProjectsRoute: AppProjectsRouteWithChildren,
   AppSettingsRoute: AppSettingsRouteWithChildren,

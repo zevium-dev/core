@@ -7,6 +7,7 @@ const NAV: { to: string; label: string }[] = [
   { to: "/admin", label: "Overview" },
   { to: "/admin/orgs", label: "Orgs" },
   { to: "/admin/projects", label: "Projects" },
+  { to: "/admin/payouts", label: "Payouts" },
 ];
 
 const navLinkClass =

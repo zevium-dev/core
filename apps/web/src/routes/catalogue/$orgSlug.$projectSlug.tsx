@@ -31,6 +31,7 @@ import {
 import { Input } from "#/components/ui/input";
 import { Label } from "#/components/ui/label";
 import { Skeleton } from "#/components/ui/skeleton";
+import { Switch } from "#/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "#/components/ui/tabs";
 import { api } from "#/lib/convex-api";
 import { humanError } from "#/lib/human-error";
@@ -38,6 +39,7 @@ import {
   buildMcpConfigSnippet,
   mcpEndpointUrl,
   resolveGatewayOrigin,
+  tryItBaseUrl,
 } from "#/lib/landing";
 
 const API_KEY_STORAGE = "zevium:playground-api-key";
@@ -89,6 +91,7 @@ type PlayResult = {
   statusText: string;
   ms: number;
   body: string;
+  mock: boolean;
 };
 
 function gatewayBaseUrl(): string {
@@ -476,6 +479,7 @@ function TryItPanel({
   const [headersText, setHeadersText] = useState("");
   const [bodyText, setBodyText] = useState("{\n  \n}");
   const [apiKey, setApiKey] = useState("");
+  const [mock, setMock] = useState(false);
   const [sending, setSending] = useState(false);
   const [result, setResult] = useState<PlayResult | null>(null);
   const [copiedCurl, setCopiedCurl] = useState(false);
@@ -516,10 +520,10 @@ function TryItPanel({
   const requestUrl = useMemo(() => {
     if (!endpoint) return "";
     const path = buildRequestPath(endpoint.path, pathParams);
-    const base = gatewayBaseUrl();
+    const base = tryItBaseUrl(gatewayBaseUrl(), mock);
     const suffix = path.startsWith("/") ? path : `/${path}`;
     return `${base}/${orgSlug}/${projectSlug}${suffix}`;
-  }, [endpoint, pathParams, orgSlug, projectSlug]);
+  }, [endpoint, pathParams, orgSlug, projectSlug, mock]);
 
   const needsBody =
     endpoint !== null &&
@@ -566,6 +570,7 @@ function TryItPanel({
         statusText: res.statusText,
         ms,
         body: text,
+        mock,
       });
     } catch (err) {
       const ms = Math.round(performance.now() - t0);
@@ -574,6 +579,7 @@ function TryItPanel({
         statusText: "Network error",
         ms,
         body: humanError(err, "Request failed. Check gateway URL and CORS."),
+        mock,
       });
     } finally {
       setSending(false);
@@ -633,13 +639,41 @@ function TryItPanel({
       </CardHeader>
       <CardContent>
         <form className="space-y-5" onSubmit={onSend}>
-          <div
-            role="status"
-            className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
-          >
-            Real call — charged against your org wallet. Key stays in session
-            storage only.
+          <div className="flex items-center justify-between gap-3 rounded-md border px-3 py-2.5">
+            <div className="space-y-0.5">
+              <Label htmlFor="try-mock-toggle">Mock</Label>
+              <p className="text-xs text-muted-foreground">
+                Serve a generated example from the spec — no upstream call, no
+                credits.
+              </p>
+            </div>
+            <Switch
+              id="try-mock-toggle"
+              checked={mock}
+              onCheckedChange={setMock}
+            />
           </div>
+
+          {mock ? (
+            <div
+              role="status"
+              className="flex flex-wrap items-center gap-2 rounded-md border bg-muted/30 px-3 py-2 text-sm text-muted-foreground"
+            >
+              <Badge variant="secondary">mock response · 0 credits</Badge>
+              <span>
+                Calls hit <span className="font-mono text-xs">/mock</span> —
+                key-authenticated, never touches upstream.
+              </span>
+            </div>
+          ) : (
+            <div
+              role="status"
+              className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+            >
+              Real call — charged against your org wallet. Key stays in session
+              storage only.
+            </div>
+          )}
 
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2 sm:col-span-2">
@@ -759,6 +793,9 @@ function TryItPanel({
                 >
                   {result.status || "ERR"} {result.statusText}
                 </Badge>
+                {result.mock ? (
+                  <Badge variant="outline">mock response · 0 credits</Badge>
+                ) : null}
                 <span className="text-muted-foreground tabular-nums">
                   {result.ms} ms
                 </span>

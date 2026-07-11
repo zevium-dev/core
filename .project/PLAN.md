@@ -37,7 +37,15 @@
 | 8    | convex     | notifications + webhooks + deprecation + admin backend (86 tests)                                                                                   | done (b77388f)                                            |
 | 8    | web+gw     | bell, webhooks card, deprecate UI+banner, /admin screens, RFC 8594 headers                                                                          | done — full chain browser-verified                        |
 | 8    | web+convex | Polar "Sync purchases" (dual-plane reconcile, 5-min cooldown) + spec editor cut 2 (rail write-back, version view/diff)                              | done (d995c3b)                                            |
-| 9    | —          | P1/P2 backlog: key spend limits+rotation, mock mode, semantic search, payouts, x402, docs site, SDKs, reviews                                       | needs user product decisions                              |
+| 9a   | all        | key caps/rotation (DO-enforced), semantic search (gemini-embedding-001@768 — text-embedding-004 is dead), in-app /docs                              | done — search + keys browser-verified                     |
+| 9b   | all        | mock mode (/mock, 0-credit, key-authed) + x402 envelope, manual payouts (/app/earnings + /admin/payouts)                                            | done — mock + 402 + earnings live-verified                |
+| 10   | —          | remaining P2: generated SDKs, reviews/ratings, payout notifications (needs notifications.kind union extension), prod deploy                         | deferred (user: not yet)                                  |
+
+## Decisions (user, wave 9)
+
+- Payouts: manual ledger MVP (request → admin queue → human wires). Min payout 100,000 credits ($10).
+- Docs: in-app /docs routes. Prod deploy: NOT yet.
+- omp fallback chain exhausted 2026-07-12 early AM (xai spending cap, glm 5h cap, opencode monthly cap) — wave 9b built with native Claude subagents per omp-delegate exception.
 
 ## User check (dev-only nag)
 

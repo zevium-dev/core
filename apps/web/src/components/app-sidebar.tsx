@@ -2,6 +2,7 @@ import { OrganizationSwitcher, UserButton } from "@clerk/tanstack-react-start";
 import { shadcn } from "@clerk/ui/themes";
 import { Link, useRouterState } from "@tanstack/react-router";
 import {
+  Banknote,
   BookOpen,
   Building2,
   CreditCard,
@@ -32,6 +33,7 @@ const navItems = [
   { title: "Projects", to: "/app/projects", icon: FolderKanban, exact: false },
   { title: "Organization", to: "/app/org", icon: Building2, exact: false },
   { title: "Billing", to: "/app/billing", icon: CreditCard, exact: false },
+  { title: "Earnings", to: "/app/earnings", icon: Banknote, exact: false },
   { title: "Settings", to: "/app/settings", icon: Settings, exact: false },
 ] as const;
 

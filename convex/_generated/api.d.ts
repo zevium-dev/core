@@ -23,6 +23,7 @@ import type * as lib_validate from "../lib/validate.js";
 import type * as lib_webhookDelivery from "../lib/webhookDelivery.js";
 import type * as notifications from "../notifications.js";
 import type * as organizations from "../organizations.js";
+import type * as payouts from "../payouts.js";
 import type * as projects from "../projects.js";
 import type * as search from "../search.js";
 import type * as specs from "../specs.js";
@@ -53,6 +54,7 @@ declare const fullApi: ApiFromModules<{
   "lib/webhookDelivery": typeof lib_webhookDelivery;
   notifications: typeof notifications;
   organizations: typeof organizations;
+  payouts: typeof payouts;
   projects: typeof projects;
   search: typeof search;
   specs: typeof specs;

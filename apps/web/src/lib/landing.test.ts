@@ -6,6 +6,7 @@ import {
   mcpEndpointUrl,
   pickLandingTeasers,
   resolveGatewayOrigin,
+  tryItBaseUrl,
 } from "./landing";
 
 describe("resolveGatewayOrigin", () => {
@@ -39,6 +40,29 @@ describe("discoveryEndpointUrl", () => {
   it("points at /discovery", () => {
     expect(discoveryEndpointUrl("http://localhost:8787/gateway")).toBe(
       "http://localhost:8787/discovery",
+    );
+  });
+});
+
+describe("tryItBaseUrl", () => {
+  it("passes the real gateway URL through unchanged", () => {
+    expect(tryItBaseUrl("http://localhost:8787/gateway", false)).toBe(
+      "http://localhost:8787/gateway",
+    );
+  });
+
+  it("swaps /gateway for /mock", () => {
+    expect(tryItBaseUrl("http://localhost:8787/gateway", true)).toBe(
+      "http://localhost:8787/mock",
+    );
+    expect(tryItBaseUrl("https://gw.example.com/gateway/", true)).toBe(
+      "https://gw.example.com/mock",
+    );
+  });
+
+  it("appends /mock to a bare origin", () => {
+    expect(tryItBaseUrl("http://localhost:8787", true)).toBe(
+      "http://localhost:8787/mock",
     );
   });
 });

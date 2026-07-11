@@ -4,8 +4,10 @@ import type { Id } from "#/lib/convex-data-model";
 import {
   ADMIN_STATUS_OPTIONS,
   ADMIN_VISIBILITY_OPTIONS,
+  buildOrgByClerkIdMap,
   buildOrgNameMap,
   orgDisplayName,
+  orgDisplayNameByClerkId,
   parseProjectStatus,
   parseProjectVisibility,
 } from "#/lib/admin-filters";
@@ -83,6 +85,39 @@ describe("buildOrgNameMap + orgDisplayName", () => {
     };
     const map = buildOrgNameMap([first, second]);
     expect(orgDisplayName("o" as Id<"organizations">, map)).toBe("New");
+  });
+});
+
+describe("buildOrgByClerkIdMap + orgDisplayNameByClerkId", () => {
+  const orgA = { clerkOrgId: "org_a", name: "Acme", slug: "acme" };
+  const orgB = { clerkOrgId: "org_b", name: "", slug: "blank-co" };
+
+  it("builds a map keyed by clerkOrgId", () => {
+    const map = buildOrgByClerkIdMap([orgA, orgB]);
+    expect(map.get("org_a")).toEqual({ name: "Acme", slug: "acme" });
+    expect(map.size).toBe(2);
+  });
+
+  it("prefers name, falls back to slug when name is empty", () => {
+    const map = buildOrgByClerkIdMap([orgA, orgB]);
+    expect(orgDisplayNameByClerkId("org_a", map)).toBe("Acme");
+    expect(orgDisplayNameByClerkId("org_b", map)).toBe("blank-co");
+  });
+
+  it("returns — for an unknown clerkOrgId", () => {
+    const map = buildOrgByClerkIdMap([orgA]);
+    expect(orgDisplayNameByClerkId("org_missing", map)).toBe("—");
+  });
+
+  it("is empty for an empty list", () => {
+    expect(buildOrgByClerkIdMap([]).size).toBe(0);
+  });
+
+  it("later entries overwrite earlier ones (idempotent rebuild)", () => {
+    const first = { clerkOrgId: "org_x", name: "Old", slug: "old" };
+    const second = { clerkOrgId: "org_x", name: "New", slug: "new" };
+    const map = buildOrgByClerkIdMap([first, second]);
+    expect(orgDisplayNameByClerkId("org_x", map)).toBe("New");
   });
 });
 

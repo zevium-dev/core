@@ -329,3 +329,162 @@ describe("admin.setProjectVisibility", () => {
     ).rejects.toThrow(/Not authorized as admin/);
   });
 });
+
+async function seedPayoutRequest(
+  t: ReturnType<typeof convexTest>,
+  overrides: Partial<{
+    clerkOrgId: string;
+    credits: number;
+    status: "pending" | "paid" | "rejected";
+  }> = {},
+) {
+  return await t.run(async (ctx) => {
+    return await ctx.db.insert("payoutRequests", {
+      clerkOrgId: overrides.clerkOrgId ?? "org_a",
+      credits: overrides.credits ?? 100_000,
+      destination: "bank: 1234",
+      status: overrides.status ?? "pending",
+      createdAt: Date.now(),
+    });
+  });
+}
+
+describe("admin.listPayoutRequests", () => {
+  const prevEnv = process.env.ADMIN_USER_IDS;
+
+  beforeEach(() => {
+    process.env.ADMIN_USER_IDS = ADMIN_SUBJECT;
+  });
+
+  afterEach(() => {
+    if (prevEnv === undefined) {
+      delete process.env.ADMIN_USER_IDS;
+    } else {
+      process.env.ADMIN_USER_IDS = prevEnv;
+    }
+  });
+
+  it("rejects non-admin", async () => {
+    const t = convexTest(schema, modules);
+    await seedWorld(t);
+    await seedPayoutRequest(t);
+    await expect(
+      asRegular(t).query(api.admin.listPayoutRequests, {
+        paginationOpts: { numItems: 10, cursor: null },
+      }),
+    ).rejects.toThrow(/Not authorized as admin/);
+  });
+
+  it("lists all requests newest-first when unfiltered", async () => {
+    const t = convexTest(schema, modules);
+    await seedWorld(t);
+    await seedPayoutRequest(t, { status: "pending" });
+    await seedPayoutRequest(t, { status: "paid" });
+
+    const result = await asAdmin(t).query(api.admin.listPayoutRequests, {
+      paginationOpts: { numItems: 10, cursor: null },
+    });
+    expect(result.page).toHaveLength(2);
+  });
+
+  it("filters by status via the by_status index", async () => {
+    const t = convexTest(schema, modules);
+    await seedWorld(t);
+    await seedPayoutRequest(t, { status: "pending" });
+    await seedPayoutRequest(t, { status: "paid" });
+
+    const result = await asAdmin(t).query(api.admin.listPayoutRequests, {
+      status: "pending",
+      paginationOpts: { numItems: 10, cursor: null },
+    });
+    expect(result.page).toHaveLength(1);
+    expect(result.page[0]!.status).toBe("pending");
+  });
+});
+
+describe("admin.resolvePayout", () => {
+  const prevEnv = process.env.ADMIN_USER_IDS;
+
+  beforeEach(() => {
+    process.env.ADMIN_USER_IDS = ADMIN_SUBJECT;
+  });
+
+  afterEach(() => {
+    if (prevEnv === undefined) {
+      delete process.env.ADMIN_USER_IDS;
+    } else {
+      process.env.ADMIN_USER_IDS = prevEnv;
+    }
+  });
+
+  it("rejects non-admin", async () => {
+    const t = convexTest(schema, modules);
+    await seedWorld(t);
+    const requestId = await seedPayoutRequest(t);
+    await expect(
+      asRegular(t).mutation(api.admin.resolvePayout, {
+        requestId,
+        status: "paid",
+      }),
+    ).rejects.toThrow(/Not authorized as admin/);
+  });
+
+  it("marks a pending request paid with a note", async () => {
+    const t = convexTest(schema, modules);
+    await seedWorld(t);
+    const requestId = await seedPayoutRequest(t);
+
+    const updated = await asAdmin(t).mutation(api.admin.resolvePayout, {
+      requestId,
+      status: "paid",
+      note: "wired 2026-07-11",
+    });
+
+    expect(updated.status).toBe("paid");
+    expect(updated.note).toBe("wired 2026-07-11");
+    expect(updated.resolvedAt).toBeGreaterThan(0);
+  });
+
+  it("marks a pending request rejected", async () => {
+    const t = convexTest(schema, modules);
+    await seedWorld(t);
+    const requestId = await seedPayoutRequest(t);
+
+    const updated = await asAdmin(t).mutation(api.admin.resolvePayout, {
+      requestId,
+      status: "rejected",
+    });
+
+    expect(updated.status).toBe("rejected");
+    expect(updated.resolvedAt).toBeGreaterThan(0);
+  });
+
+  it("rejects resolving an already-resolved request", async () => {
+    const t = convexTest(schema, modules);
+    await seedWorld(t);
+    const requestId = await seedPayoutRequest(t, { status: "paid" });
+
+    await expect(
+      asAdmin(t).mutation(api.admin.resolvePayout, {
+        requestId,
+        status: "rejected",
+      }),
+    ).rejects.toThrow(/Only pending requests can be resolved/);
+  });
+
+  it("throws for an unknown request id", async () => {
+    const t = convexTest(schema, modules);
+    await seedWorld(t);
+    const requestId = await seedPayoutRequest(t);
+    await t.run(async (ctx) => {
+      await ctx.db.delete(requestId);
+    });
+
+    await expect(
+      asAdmin(t).mutation(api.admin.resolvePayout, {
+        requestId,
+        status: "paid",
+      }),
+    ).rejects.toThrow(/Payout request not found/);
+  });
+});

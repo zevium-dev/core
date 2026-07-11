@@ -249,3 +249,98 @@ export const setProjectVisibility = mutation({
     return updated;
   },
 });
+
+export type AdminPayoutRequestView = {
+  _id: Id<"payoutRequests">;
+  clerkOrgId: string;
+  credits: number;
+  destination: string;
+  status: "pending" | "paid" | "rejected";
+  note?: string;
+  createdAt: number;
+  resolvedAt?: number;
+};
+
+/** Paginated admin payout queue result. */
+export type AdminPayoutRequestsPage = {
+  page: AdminPayoutRequestView[];
+  isDone: boolean;
+  continueCursor: string;
+};
+
+/**
+ * Admin payout queue. Optional status filter uses the by_status index;
+ * unfiltered scans newest-first via order("desc").
+ */
+export const listPayoutRequests = query({
+  args: {
+    status: v.optional(
+      v.union(v.literal("pending"), v.literal("paid"), v.literal("rejected")),
+    ),
+    paginationOpts: paginationOptsValidator,
+  },
+  handler: async (ctx, args): Promise<AdminPayoutRequestsPage> => {
+    await requireAdmin(ctx);
+
+    const q = ctx.db.query("payoutRequests");
+    const result = args.status
+      ? await q
+          .withIndex("by_status", (qq) => qq.eq("status", args.status!))
+          .order("desc")
+          .paginate(args.paginationOpts)
+      : await q.order("desc").paginate(args.paginationOpts);
+
+    const page: AdminPayoutRequestView[] = result.page.map((r) => ({
+      _id: r._id,
+      clerkOrgId: r.clerkOrgId,
+      credits: r.credits,
+      destination: r.destination,
+      status: r.status,
+      note: r.note,
+      createdAt: r.createdAt,
+      resolvedAt: r.resolvedAt,
+    }));
+
+    return { ...result, page };
+  },
+});
+
+/**
+ * Admin resolve a pending payout request: mark paid or rejected, stamp
+ * resolvedAt, attach optional note. Only pending requests are resolvable.
+ *
+ * No notification in this cut — notifications.kind union lacks a payout kind.
+ * Follow-up: add payout_resolved kind + notify the owning org.
+ */
+export const resolvePayout = mutation({
+  args: {
+    requestId: v.id("payoutRequests"),
+    status: v.union(v.literal("paid"), v.literal("rejected")),
+    note: v.optional(v.string()),
+  },
+  handler: async (ctx, args): Promise<Doc<"payoutRequests">> => {
+    await requireAdmin(ctx);
+
+    const request = await ctx.db.get(args.requestId);
+    if (request === null) {
+      throw new Error("Payout request not found.");
+    }
+    if (request.status !== "pending") {
+      throw new Error(
+        `Request already ${request.status}. Only pending requests can be resolved.`,
+      );
+    }
+
+    await ctx.db.patch(args.requestId, {
+      status: args.status,
+      note: args.note?.trim() || undefined,
+      resolvedAt: Date.now(),
+    });
+
+    const updated = await ctx.db.get(args.requestId);
+    if (updated === null) {
+      throw new Error("Failed to load payout request.");
+    }
+    return updated;
+  },
+});

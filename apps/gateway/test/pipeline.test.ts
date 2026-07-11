@@ -266,10 +266,21 @@ describe("gateway pipeline", () => {
     );
 
     expect(res.status).toBe(402);
+    expect(res.headers.get("www-authenticate")).toBe('Bearer realm="zevium"');
     const body: unknown = await res.json();
     expect(
       body && typeof body === "object" && "error" in body && body.error,
+    ).toBe("payment_required");
+    expect(
+      body && typeof body === "object" && "reason" in body && body.reason,
     ).toBe("insufficient_credits");
+    expect(
+      body && typeof body === "object" && "actions" in body && body.actions,
+    ).toMatchObject({
+      createKey: "https://zevium.dev/app/settings/keys",
+      topUp: "https://zevium.dev/app/billing",
+      docs: "https://zevium.dev/docs/consuming",
+    });
     expect(calls).toHaveLength(0);
     expect(usage.events[0]!.outcome).toBe("blocked");
 
@@ -352,7 +363,7 @@ describe("gateway pipeline", () => {
     expect(calls).toHaveLength(1);
   });
 
-  it("401 on bad key", async () => {
+  it("402 (x402 payment_required, not 401) on bad key", async () => {
     const clerkOrgId = "org_pipe_badkey";
     const { fetchImpl, calls } = makeFetchMock(() => new Response("x"));
     await installFixtures({ clerkOrgId, fetchImpl, credits: 10 });
@@ -365,7 +376,37 @@ describe("gateway pipeline", () => {
         body: "x",
       },
     );
-    expect(res.status).toBe(401);
+    expect(res.status).toBe(402);
+    expect(res.headers.get("www-authenticate")).toBe('Bearer realm="zevium"');
+    const body: unknown = await res.json();
+    expect(
+      body && typeof body === "object" && "error" in body && body.error,
+    ).toBe("payment_required");
+    expect(
+      body && typeof body === "object" && "actions" in body && body.actions,
+    ).toMatchObject({
+      createKey: "https://zevium.dev/app/settings/keys",
+      topUp: "https://zevium.dev/app/billing",
+      docs: "https://zevium.dev/docs/consuming",
+    });
+    expect(calls).toHaveLength(0);
+  });
+
+  it("402 (x402 payment_required, not 401) on missing key", async () => {
+    const clerkOrgId = "org_pipe_missingkey";
+    const { fetchImpl, calls } = makeFetchMock(() => new Response("x"));
+    await installFixtures({ clerkOrgId, fetchImpl, credits: 10 });
+
+    const request = new Request(
+      `https://gateway.test/gateway/${ORG_SLUG}/${PROJECT_SLUG}/echo`,
+      { method: "POST", body: "x" },
+    );
+    const ctx = createExecutionContext();
+    const res = await worker.fetch(request, env as Env, ctx);
+    await waitOnExecutionContext(ctx);
+
+    expect(res.status).toBe(402);
+    expect(res.headers.get("www-authenticate")).toBe('Bearer realm="zevium"');
     expect(calls).toHaveLength(0);
   });
 

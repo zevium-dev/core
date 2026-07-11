@@ -86,3 +86,41 @@ export function orgDisplayName(
   if (entry === undefined) return "—";
   return entry.name.length > 0 ? entry.name : entry.slug;
 }
+
+export type OrgByClerkIdEntry = {
+  clerkOrgId: string;
+  name: string;
+  slug: string;
+};
+
+export type OrgByClerkIdMap = Map<string, { name: string; slug: string }>;
+
+/**
+ * Build a clerkOrgId → `{name, slug}` lookup. Used by admin screens that
+ * key off `clerkOrgId` (the auth-mirror identity) rather than the internal
+ * `organizations` doc id — e.g. payout requests, which store `clerkOrgId`.
+ * Later entries win (idempotent rebuild from a merged list).
+ */
+export function buildOrgByClerkIdMap(
+  orgs: readonly OrgByClerkIdEntry[],
+): OrgByClerkIdMap {
+  const map: OrgByClerkIdMap = new Map();
+  for (const org of orgs) {
+    map.set(org.clerkOrgId, { name: org.name, slug: org.slug });
+  }
+  return map;
+}
+
+/**
+ * Resolve a clerkOrgId to a display name for tables.
+ * Prefers the org name; falls back to the slug; then `—` while the
+ * background org lookup is still loading the owning org.
+ */
+export function orgDisplayNameByClerkId(
+  clerkOrgId: string,
+  map: OrgByClerkIdMap,
+): string {
+  const entry = map.get(clerkOrgId);
+  if (entry === undefined) return "—";
+  return entry.name.length > 0 ? entry.name : entry.slug;
+}

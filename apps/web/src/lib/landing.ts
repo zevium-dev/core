@@ -24,6 +24,18 @@ export function discoveryEndpointUrl(gatewayOrigin: string): string {
   return `${base}/discovery`;
 }
 
+/**
+ * Try-it playground base URL. `mock` swaps `/gateway` for `/mock` — same
+ * key-authenticated route shape, but the gateway serves a generated example
+ * body at 0 credits instead of proxying upstream.
+ */
+export function tryItBaseUrl(gatewayBaseUrl: string, mock: boolean): string {
+  const trimmed = gatewayBaseUrl.replace(/\/+$/, "");
+  if (!mock) return trimmed;
+  const origin = trimmed.replace(/\/gateway$/i, "");
+  return `${origin}/mock`;
+}
+
 /** MCP client config JSON string for agent paste. */
 export function buildMcpConfigSnippet(mcpUrl: string): string {
   return `{

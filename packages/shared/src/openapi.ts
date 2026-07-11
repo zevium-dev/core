@@ -41,6 +41,11 @@ export type ParsedOpenApiSpec = {
   info?: { title?: string; version?: string };
   servers: OpenApiServer[];
   paths: Record<string, OpenApiPathItem>;
+  /**
+   * Raw `components` map (preserved verbatim). Used by mock-response generation
+   * to resolve `$ref: "#/components/schemas/..."` one level. Optional / sparse.
+   */
+  components?: Record<string, unknown>;
 };
 
 export type MatchedOperation = {
@@ -117,11 +122,16 @@ export function parseSpec(json: string): ParsedOpenApiSpec {
       }
     : undefined;
 
+  const components = isRecord(raw.components)
+    ? (raw.components as Record<string, unknown>)
+    : undefined;
+
   return {
     openapi: typeof raw.openapi === "string" ? raw.openapi : undefined,
     info,
     servers,
     paths,
+    components,
   };
 }
 

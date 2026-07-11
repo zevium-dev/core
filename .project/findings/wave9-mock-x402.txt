@@ -1,0 +1,41 @@
+## DONE
+
+Mock try-it responses (0 credits) + x402 payment-required shape shipped across shared/gateway/web. All scoped gates green.
+
+### CHANGED
+
+**packages/shared**
+- `packages/shared/src/mock.ts` (new) — `generateMockResponse(spec, pathTemplate, method)`. Prefers schema `example` / `examples` (array or named-object form); else synthesizes from JSON Schema types (string is format-aware: date-time/date/email/uuid/uri/hostname; number→0; boolean→true; enum→first; array→one item; object→recurse). One-hop `$ref` resolution via `components.schemas.<Name>`; depth cap 5 to survive self-referential schemas. Returns `{status: 200, body, contentType: "application/json"}` or `null` for an unknown op.
+- `packages/shared/src/mock.test.ts` (new) — unknown op, no-schema fallback, example preferred (both `examples` forms), primitive/enum/array/nested synthesis, format-aware strings, `$ref` resolution + unresolvable ref, depth-cap on a self-referential `Node` schema.
+- `packages/shared/src/openapi.ts` — `parseSpec()` now populates `components` (was declared on `ParsedOpenApiSpec` but never read off `raw`), needed for `$ref` resolution.
+- `packages/shared/src/index.ts` — exports `generateMockResponse`, `GeneratedMockResponse`.
+
+**Gateway (data plane)**
+- `apps/gateway/src/mock.ts` (new) — `/mock/:orgSlug/:projectSlug/*`. Same key-verify + spec-resolve + operation-match pipeline as `/gateway`, but never reserves/settles credits and never calls upstream. 402 (missing/invalid key) → x402 shape; org mismatch → 401; unknown project/spec/op → 404 (`project_not_found` / `invalid_spec` / `route_not_found`). Success: `x-zevium-mock: 1`, `x-zevium-cost: 0` headers + generated body.
+- `apps/gateway/src/x402.ts` (new) — `paymentRequiredResponse(requestId, detail, extra?)`: shared 402 envelope `{error: "payment_required", detail, actions: {createKey, topUp, docs}, requestId}` + `WWW-Authenticate: Bearer realm="zevium"` header. `actions` point at `zevium.dev/app/settings/keys`, `/app/billing`, `/docs/consuming`.
+- `apps/gateway/src/errors.ts` (new) — `jsonError()` extracted out of `pipeline.ts` so `/gateway` and `/mock` share one non-leaking error envelope.
+- `apps/gateway/src/pipeline.ts` — missing/invalid API key now returns `paymentRequiredResponse` (402) instead of a bare 401; insufficient-credits case reuses the same envelope with `reason: "insufficient_credits", available, cost` merged in — zero and invalid-key failures now have one machine-readable shape. `org_mismatch` (401), `key_disabled`/`key_cap_exceeded` (403) intentionally left alone — task named "unauthenticated/invalid-key," not authz/rate-limit.
+- `apps/gateway/src/index.ts` — routes `/mock/:orgSlug/:projectSlug/*` to `handleMockRequest`, reusing the same `WorkerDeps` (keyVerifier, specSource).
+- `apps/gateway/test/mock.test.ts` (new) — 7 tests: 200 with generated body + zero wallet delta, schema-example preference, mock works at zero balance, 402 shape on bad key, 402 shape on missing key, 404 unknown op, 404 unknown project. Each test uses a unique `clerkOrgId` (Durable Object wallet state persists per-name across tests in a file — shared org ids leaked a 100-credit grant into a zero-balance assertion on first pass; fixed).
+- `apps/gateway/test/pipeline.test.ts` — updated bad-key/missing-key/insufficient-credit tests to assert 402 + x402 shape instead of the old 401/plain-402 shapes.
+
+**Web**
+- `apps/web/src/lib/landing.ts` — `tryItBaseUrl(gatewayBaseUrl, mock)`: swaps `/gateway` → `/mock` when `mock` is true, else passes the real URL through unchanged.
+- `apps/web/src/lib/landing.test.ts` — 3 new tests for `tryItBaseUrl`.
+- `apps/web/src/routes/catalogue/$orgSlug.$projectSlug.tsx` — Try-it panel gets a "Mock" `Switch`. On: hits `/mock/...`, banner becomes a muted "mock response · 0 credits" note (`Badge variant="secondary"`), result card shows an outline "mock response · 0 credits" badge next to the status. Off (default): unchanged real-call path with the existing destructive "charged against your org wallet" warning.
+
+### VERIFY
+```
+pnpm --filter @zevium/gateway typecheck   → clean
+pnpm --filter @zevium/gateway test        → 7 files, 67/67 passed
+pnpm --filter @zevium/shared test         → 3 files, 37/37 passed
+pnpm --filter web typecheck               → clean
+pnpm --filter web test                    → 19 files, 149/149 passed
+pnpm --filter web build                   → succeeded (vite + nitro)
+```
+Root-wide `pnpm typecheck`/`pnpm test` were deliberately NOT run — convex/web-earnings work from a concurrent agent is mid-flight in this tree (`convex/payouts.ts`, `apps/web/src/routes/app/earnings.tsx`, etc.) and out of my scope; scoped commands above cover every file I touched.
+
+### Notes / design decisions
+- `/mock` is still key-authenticated (product rule: no unmetered execution path) — it just skips reserve/settle. Verified via wallet `getState()` before/after in the 200 test: balance, `inFlightTotal`, `pendingSettlements` all unchanged.
+- 402 reason codes (`missing_api_key`, `invalid_api_key`, `insufficient_credits`) are additive fields on top of the fixed `{error, detail, actions, requestId}` base shape — agents can branch on `error` alone and stay forward-compatible.
+- Did not touch `convex/`, billing, or keys screens, per scope.

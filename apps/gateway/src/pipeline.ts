@@ -9,6 +9,8 @@ import { extractApiKey, type KeyVerifier } from "./key-verifier";
 import type { SpecSource } from "./spec-source";
 import { filterRequestHeaders, filterResponseHeaders } from "./headers";
 import type { UsageSink } from "./usage";
+import { jsonError } from "./errors";
+import { paymentRequiredResponse } from "./x402";
 
 export type PipelineEnv = {
   WALLET: DurableObjectNamespace<WalletDO>;
@@ -61,12 +63,17 @@ export async function handleGatewayRequest(
 
   const secret = extractApiKey(request);
   if (!secret) {
-    return jsonError(401, "missing_api_key", "API key required", requestId);
+    // x402: unauthenticated calls never execute — no unmetered path.
+    return paymentRequiredResponse(requestId, "API key required", {
+      reason: "missing_api_key",
+    });
   }
 
   const verified = await deps.keyVerifier.verify(secret);
   if (!verified) {
-    return jsonError(401, "invalid_api_key", "Invalid API key", requestId);
+    return paymentRequiredResponse(requestId, "Invalid API key", {
+      reason: "invalid_api_key",
+    });
   }
 
   const published = await deps.specSource.getPublishedSpec(
@@ -154,13 +161,13 @@ export async function handleGatewayRequest(
         latencyMs: (deps.now ?? Date.now)() - started,
         reservationId,
       });
-      return jsonError(
-        402,
-        "insufficient_credits",
-        "Insufficient credits",
-        requestId,
-        { available: reserve.available, cost: reserve.cost },
-      );
+      // x402: zero/insufficient balance blocks the call — same payment shape
+      // as an unauthenticated request, plus the balance detail agents need.
+      return paymentRequiredResponse(requestId, "Insufficient credits", {
+        reason: "insufficient_credits",
+        available: reserve.available,
+        cost: reserve.cost,
+      });
     }
     if (
       reserve.status === "rejected" &&
@@ -373,26 +380,4 @@ function emitUsage(
       console.error("usage emit failed", err);
     }),
   );
-}
-
-function jsonError(
-  status: number,
-  code: string,
-  message: string,
-  requestId: string,
-  extra?: Record<string, unknown>,
-): Response {
-  const body: Record<string, unknown> = { error: code, message, requestId };
-  if (extra) {
-    for (const [k, v] of Object.entries(extra)) {
-      body[k] = v;
-    }
-  }
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: {
-      "content-type": "application/json",
-      "x-zevium-request-id": requestId,
-    },
-  });
 }

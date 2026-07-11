@@ -19,6 +19,7 @@ import {
 } from "./pipeline";
 import { handleDiscoveryRequest, type DiscoveryDeps } from "./discovery";
 import { handleMcpRequest, type McpDeps } from "./mcp";
+import { handleMockRequest, parseMockPath, type MockDeps } from "./mock";
 
 export { WalletDO };
 export { __setTestUsageMutation, __setTestGrantsFetcher } from "./wallet";
@@ -113,6 +114,14 @@ function discoveryDeps(deps: WorkerDeps, request: Request): DiscoveryDeps {
   };
 }
 
+function mockDeps(deps: WorkerDeps): MockDeps {
+  return {
+    keyVerifier: deps.keyVerifier,
+    specSource: deps.specSource,
+    idGenerator: deps.idGenerator,
+  };
+}
+
 function mcpDeps(deps: WorkerDeps, env: Env, request: Request): McpDeps {
   return {
     catalogueSource: deps.catalogueSource,
@@ -135,6 +144,7 @@ function timingSafeEqual(a: string, b: string): boolean {
 /**
  * Worker entry:
  * - /gateway/:orgSlug/:projectSlug/* — metered proxy
+ * - /mock/:orgSlug/:projectSlug/* — key-authenticated example responses, 0 credits
  * - /discovery — machine-readable catalogue + pricing index
  * - /mcp — MCP Streamable HTTP (search / docs / metered call_api)
  * - /wallet/:clerkOrgId/* — wallet DO HTTP surface (grants/tests)
@@ -196,6 +206,12 @@ export default {
     if (route) {
       const deps = buildDeps(env);
       return handleGatewayRequest(request, env, pipelineOnly(deps), ctx, route);
+    }
+
+    const mockRoute = parseMockPath(url.pathname);
+    if (mockRoute) {
+      const deps = buildDeps(env);
+      return handleMockRequest(request, mockDeps(deps), mockRoute);
     }
 
     return Response.json({ error: "not found" }, { status: 404 });

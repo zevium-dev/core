@@ -24,6 +24,8 @@ export {
   type MatchedOperation,
 } from "./openapi.js";
 
+export { generateMockResponse, type GeneratedMockResponse } from "./mock.js";
+
 export {
   isValidSlug,
   isValidSemver,
