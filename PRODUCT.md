@@ -28,9 +28,11 @@ Two consumer types, one billing model:
 
 Both:
 
-- Pre-pay for credits (Polar meter credits, user-scoped)
+- Pre-pay for credits — **org-scoped**: the organization owns the wallet, member keys draw from it, admins see per-member/per-key attribution. Solo devs get a personal org automatically; there is no separate personal-wallet model
 - Each call deducts credits based on the endpoint's price
-- API keys are user-scoped (one key per user), rate-limited, with per-key spend limits
+- API keys belong to a member (one key per user), are rate-limited, and carry per-key spend limits against the org wallet
+
+> Migration note: current implementation is user-scoped (Polar `externalId = userId`). Target architecture is org-scoped (`externalId = organizationId`); proxy resolves key → member → org wallet.
 
 **Headline consumer metric: time-to-first-call.** Signup → working key → first successful proxied request must take under a minute, fully self-serve.
 
@@ -74,7 +76,7 @@ No separate pricing table. The OpenAPI spec IS the source of truth for:
 - Upstream server URL (`servers[0].url`)
 - Available endpoints (`paths`)
 - Per-endpoint pricing (`x-zevium-cost` on each operation)
-- Free tier (`x-zevium-free-tier`, optional)
+- Free tier (`x-zevium-free-tier`, optional) — **publisher-funded**: free-tier calls are the publisher's acquisition spend, opted in per endpoint; the platform does not subsidize them. (Extension is designed, not yet parsed by any code)
 
 Production agent-tool pricing in the market clusters at $0.002–$0.05/call equivalents. Price guidance for publishers: **assume agent traffic dominates** — an agent will loop on the cheapest useful endpoint.
 
@@ -88,9 +90,11 @@ Planned pricing extensions (roadmap): tiered/graduated per-call pricing, per-tok
 | Published API                | `project`                                   | Has `status`, `visibility`, `organizationId` |
 | API spec (draft + published) | `openapi_schema` + `openapi_schema_version` | 1:1 with project                             |
 | Endpoint pricing             | OpenAPI `x-zevium-cost` extension           | Lives IN the spec, not a separate table      |
-| Consumer credits             | Polar meter credits                         | User-scoped, prepaid via Polar checkout      |
-| Consumer API keys            | `apikey` (better-auth plugin)               | User-scoped, one key per user                |
+| Consumer credits             | Polar meter credits                         | Org-scoped wallet (target; today user-scoped) |
+| Consumer API keys            | `apikey` (better-auth plugin)               | One key per user, draws from org wallet      |
 | Proxy call logging           | Polar `proxy_call` events                   | Ingested for billing + analytics             |
+| Upstream auth secrets        | `project_secret` (encrypted)                | Built + UI'd, **not yet injected by proxy**  |
+| Spec variables               | `project` variables (`%VAR%` substitution)  | Applied to exported spec only, **not proxy** |
 
 Billing substrate constraints (verified against Polar docs): Polar never blocks usage on its own — **Zevium's Redis credit gate is the only enforcement layer** — and metered prices attach to subscription products only. Never configure a Polar metered price without a hard cap; zero balance must mean blocked call, not surprise overage.
 
@@ -115,12 +119,14 @@ Consumer → POST /api/proxy/{orgSlug}/{projectSlug}/v1/chat/completions
 
 ## Agent-facing surface (the differentiator)
 
-Every published project is consumable by AI agents, not just human integrators:
+A marketplace-wide MCP server **already exists** at `/mcp` with two tools: `search_zevium_api` (semantic search over the catalogue via embeddings + Cohere rerank — the search-then-load pattern, correct instinct) and `execute_api_call`. **Critical defect: `execute_api_call` is a raw passthrough fetch that bypasses the billing proxy — unmetered, unkeyed calls. It must route through the proxy (P0).**
 
-1. **Auto-generated MCP server per project.** Derived from the OpenAPI spec, served through the same metered proxy and billed with the same credits. Tool surface must stay compact — up to 72% of an agent's context window can be eaten by MCP tool schemas, so expose curated search-then-load tool discovery, never one tool per endpoint dump
+Target surface:
+
+1. **Metered MCP.** The existing `/mcp` server routes all execution through the billing proxy (key-authenticated, credit-gated). Tool surface stays compact — up to 72% of an agent's context window can be eaten by MCP tool schemas; search-then-load discovery, never one tool per endpoint dump
 2. **Machine-readable discovery index.** A crawlable endpoint listing published APIs with per-endpoint pricing metadata (x402-Bazaar-compatible shape) so agents can evaluate cost before calling
 3. **Agent-readable usage docs per listing** (SKILL.md pattern) — connection config tells an agent *how to connect*; usage docs tell it *how to use the API well*
-4. **(Later) x402 payment rail** beside prepaid credits: agents pay per-call in stablecoins with zero signup; credits remain for humans and high-volume consumers
+4. **x402 payment rail (P1)** beside prepaid credits: agents pay per-call in stablecoins with zero signup; credits remain for humans and high-volume consumers
 
 ## Consumer experience requirements
 
@@ -131,45 +137,57 @@ Every published project is consumable by AI agents, not just human integrators:
 
 ## Publisher experience requirements
 
-- **Self-serve end to end**: sign up, publish spec, set pricing, go live — zero platform-team involvement
+- **Self-serve end to end**: sign up, publish spec, set pricing, go live — zero platform-team involvement. Publishing model: **auto-publish with automated gates** (spec valid, upstream reachable, uptime probe) + post-hoc staff review; violators get delisted. No pre-approval queue
+- **Lifecycle safety**: a publisher cannot silently kill an API with active consumers — unpublish triggers a mandatory notice window (deprecation banner + email + `Deprecation`/`Sunset` headers per RFC 8594), new subscriptions freeze, existing calls honored through wind-down
 - **Analytics that beat the dead incumbent**: per-endpoint p95/p99 latency, error-type breakdown, per-consumer usage, revenue trends. (RapidAPI shipped neither tail latencies nor error breakdowns)
 - **Spec versioning**: draft → validate → publish with semver; published versions immutable
 - **Payouts**: transparent 95/5 split, accumulated earnings visible in dashboard, settled on a published schedule
 
 ## Roadmap
 
-### Now (P0 — a working loop is table stakes)
+### Now (P0 — a working, honest loop is table stakes)
 
 1. Core loop must work: publish → public catalogue listing → key issuance → paid proxied call
-2. Time-to-first-call < 60s, fully self-serve
-3. Consumer usage dashboard (balance, per-key, per-endpoint, projections)
-4. Publisher analytics (calls, revenue, p95/p99, error breakdown)
-5. Catalogue quality signals (latency, success rate, freshness)
+2. **Close the MCP billing bypass**: route `execute_api_call` through the metered proxy
+3. **Wire secrets + variables into the proxy**: upstream auth injection (secrets are built + UI'd but never loaded at call time; without this, no real authenticated upstream API can be listed)
+4. Time-to-first-call < 60s, fully self-serve
+5. Usage dashboard (org wallet balance, per-member/per-key/per-endpoint, projections); real activity log (page currently renders mock data)
+6. Publisher analytics (calls, revenue, p95/p99, error breakdown)
+7. Catalogue quality signals (latency, success rate, freshness) + semantic search for humans (embeddings exist, catalogue still uses SQL LIKE)
 
-### Next (P1 — the agent-first bet)
+### Next (P1 — the agent-first bet + trust plumbing)
 
-6. MCP gateway per project (auto-generated from spec, metered via existing proxy)
-7. Machine-readable discovery/pricing index for agents
-8. `x-zevium-free-tier` enforcement + tiered pricing
-9. Spend caps, threshold alerts, budget webhooks
-10. Key-management API with rotation
+8. Org-scoped billing migration (org wallet, member keys draw from it, per-member attribution)
+9. Metered per-project MCP + machine-readable discovery/pricing index
+10. **x402 as second payment rail** (agent payments, zero signup)
+11. `x-zevium-free-tier` enforcement (publisher-funded) + tiered pricing
+12. Spend caps, threshold alerts, budget webhooks
+13. Key-management API with zero-downtime rotation
+14. **Mock/sandbox mode**: Prism-style mock server auto-generated from the spec — try the API shape free before spending credits
+15. Deprecation/unpublish lifecycle (notice window, headers, consumer notifications)
+16. Publisher webhooks (new consumer, usage spike, revenue milestone, abnormal-traffic alert)
 
 ### Later (P2 — cutting edge)
 
-11. x402 as second payment rail (agent payments, zero signup)
-12. Publisher payouts (95/5, transparent)
-13. Security-scan + uptime badges as listing gates
-14. Per-token / outcome-based pricing extensions
-15. Provider fallback routing across equivalent APIs
+17. Publisher payouts (95/5, transparent)
+18. Security-scan + uptime badges as listing gates; per-API status pages (component-level uptime, subscribable)
+19. Version pinning per key (Stripe pattern: consumers stay on the spec version they integrated against) + spec-diff changelog tool
+20. Dispute-a-call flow (200-but-garbage-response refunds, credits held pending review) + SLA tiers with automatic service credits
+21. Per-token / outcome-based pricing extensions
+22. Provider fallback routing across equivalent APIs
 
-## What does NOT exist yet
+## What does NOT exist yet (or exists but is disconnected)
 
 - **Publisher payouts**: no payout system; publisher share accumulates unsettled
 - **Revenue split enforcement**: full cost currently charged to consumer; platform-cut/publisher-share calculation not implemented
-- **MCP gateway, discovery index, agent docs**: designed above, unbuilt
-- **Free tier**: `x-zevium-free-tier` is spec'd but not enforced by the proxy
-- **Spend caps/alerts/webhooks, key rotation, projections**: not built
-- **x402 rail, security scanning, fallback routing**: future work
+- **Org-scoped billing**: credits are user-scoped today; org-wallet migration is P1
+- **Secrets/variables in proxy**: fully built with UI, but the proxy never loads secrets nor substitutes variables at call time — zombie features until wired (P0)
+- **MCP metering**: `/mcp` exists but `execute_api_call` bypasses billing (P0 fix); per-project MCP + discovery index unbuilt
+- **Free tier**: `x-zevium-free-tier` appears only in this document — no code parses it
+- **Activity UI**: settings page renders hardcoded mock data; audit rows exist in DB with no read API
+- **Semantic search for humans**: embeddings + vector search exist but only the MCP tool uses them; catalogue is SQL LIKE
+- **Spend caps/alerts/webhooks, key rotation, projections, mock mode, deprecation lifecycle, status pages, disputes**: not built
+- **Emails**: only verification, password-reset, and org-invitation templates exist — no billing/usage/lifecycle notifications
 
 ## Non-goals
 
