@@ -38,3 +38,4 @@ reload-*.webm
 
 # browser e2e
 e2e/artifacts/
+.project/e2e-key.env
