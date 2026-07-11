@@ -16,9 +16,11 @@ import {
   useRouterState,
 } from "@tanstack/react-router";
 import { useConvexAuth } from "convex/react";
+import { Activity } from "lucide-react";
 import { Suspense, useState } from "react";
 import { toast } from "sonner";
 
+import { NumberTicker } from "#/components/motion/number-ticker";
 import { Badge } from "#/components/ui/badge";
 import { Button } from "#/components/ui/button";
 import {
@@ -44,6 +46,7 @@ import { api } from "#/lib/convex-api";
 import type { Doc } from "#/lib/convex-data-model";
 import { humanError } from "#/lib/human-error";
 import type { RouterContext } from "#/router";
+
 
 export const Route = createFileRoute("/app/projects/$projectSlug")({
   loader: async ({ context, params }) => {
@@ -122,6 +125,7 @@ function ProjectShell({
 
   const updateProject = useConvexMutation(api.projects.update);
   const [visibilityOpen, setVisibilityOpen] = useState(false);
+  const [panel, setPanel] = useState<"overview" | "analytics">("overview");
 
   const { mutate: setVisibility, isPending: visibilityPending } = useMutation({
     mutationFn: (visibility: "public" | "private") => {
@@ -169,7 +173,8 @@ function ProjectShell({
   }
 
   const isSpecRoute = pathname.endsWith("/spec");
-  const tab = isSpecRoute ? "spec" : "overview";
+  // overview | analytics stay on project root; spec is its own route.
+  const tab = isSpecRoute ? "spec" : panel;
 
   const nextVisibility =
     project.visibility === "public" ? "private" : "public";
@@ -245,10 +250,21 @@ function ProjectShell({
         value={tab}
         onValueChange={(value) => {
           if (value === "overview") {
-            void navigate({
-              to: "/app/projects/$projectSlug",
-              params: { projectSlug: project.slug },
-            });
+            setPanel("overview");
+            if (isSpecRoute) {
+              void navigate({
+                to: "/app/projects/$projectSlug",
+                params: { projectSlug: project.slug },
+              });
+            }
+          } else if (value === "analytics") {
+            setPanel("analytics");
+            if (isSpecRoute) {
+              void navigate({
+                to: "/app/projects/$projectSlug",
+                params: { projectSlug: project.slug },
+              });
+            }
           } else if (value === "spec") {
             void navigate({
               to: "/app/projects/$projectSlug/spec",
@@ -262,11 +278,23 @@ function ProjectShell({
         <TabsList>
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="spec">Spec</TabsTrigger>
+          <TabsTrigger value="analytics">Analytics</TabsTrigger>
           <TabsTrigger value="settings">Settings</TabsTrigger>
         </TabsList>
       </Tabs>
 
-      {isSpecRoute ? <Outlet /> : <ProjectOverview project={project} />}
+      {isSpecRoute ? (
+        <Outlet />
+      ) : panel === "analytics" ? (
+        <Suspense fallback={<AnalyticsSkeleton />}>
+          <ProjectAnalyticsPanel
+            orgSlug={orgSlug}
+            projectSlug={project.slug}
+          />
+        </Suspense>
+      ) : (
+        <ProjectOverview project={project} />
+      )}
     </div>
   );
 }
@@ -322,6 +350,212 @@ function ProjectOverview({ project }: { project: Doc<"projects"> }) {
           </p>
         </CardContent>
       </Card>
+    </div>
+  );
+}
+
+function formatMs(ms: number | null): string {
+  if (ms === null) return "—";
+  if (ms < 10) return `${ms.toFixed(1)}ms`;
+  return `${Math.round(ms)}ms`;
+}
+
+function formatPct(rate: number): string {
+  return `${(rate * 100).toFixed(rate === 0 || rate === 1 ? 0 : 1)}%`;
+}
+
+function ProjectAnalyticsPanel({
+  orgSlug,
+  projectSlug,
+}: {
+  orgSlug: string;
+  projectSlug: string;
+}) {
+  const { data: analytics } = useSuspenseQuery(
+    convexQuery(api.analytics.projectAnalytics, {
+      orgSlug,
+      projectSlug,
+      rangeDays: 7,
+    }),
+  );
+
+  if (analytics === null) {
+    return (
+      <Card>
+        <CardContent className="py-10 text-center text-sm text-muted-foreground">
+          Project not found.
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const maxDay = Math.max(1, ...analytics.callsByDay);
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <Card>
+          <CardHeader className="pb-2">
+            <CardDescription>Calls ({analytics.rangeDays}d)</CardDescription>
+            <CardTitle className="text-2xl tabular-nums">
+              <NumberTicker value={analytics.calls} />
+            </CardTitle>
+          </CardHeader>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardDescription>Credits earned</CardDescription>
+            <CardTitle className="text-2xl tabular-nums">
+              <NumberTicker value={analytics.credits} />
+            </CardTitle>
+          </CardHeader>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardDescription>Success rate</CardDescription>
+            <CardTitle className="text-2xl tabular-nums">
+              {formatPct(analytics.successRate)}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="text-xs text-muted-foreground">
+            {analytics.errors4xx} 4xx · {analytics.errors5xx} 5xx
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardDescription>Latency p95</CardDescription>
+            <CardTitle className="text-2xl tabular-nums">
+              {formatMs(analytics.p95)}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="text-xs text-muted-foreground">
+            p50 {formatMs(analytics.p50)} · p99 {formatMs(analytics.p99)}
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Calls over time</CardTitle>
+          <CardDescription>
+            Last {analytics.rangeDays} UTC days (CSS bars, no chart lib)
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {analytics.calls === 0 ? (
+            <div className="flex flex-col items-center justify-center gap-2 rounded-md border border-dashed px-6 py-10 text-center">
+              <Activity className="size-5 text-muted-foreground" />
+              <p className="text-sm font-medium">No traffic yet</p>
+              <p className="max-w-sm text-sm text-muted-foreground">
+                Publish the API and wait for metered calls. Stats update live.
+              </p>
+            </div>
+          ) : (
+            <div className="flex h-24 items-end gap-1">
+              {analytics.callsByDay.map((count, i) => {
+                const heightPct = Math.max(4, (count / maxDay) * 100);
+                return (
+                  <div
+                    key={i}
+                    className="flex flex-1 flex-col items-center gap-1"
+                    title={`${count} calls`}
+                  >
+                    <div
+                      className="w-full rounded-sm bg-primary/80 transition-[height] duration-[var(--dur-fast)] ease-[var(--ease)]"
+                      style={{ height: `${heightPct}%` }}
+                    />
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          {analytics.truncated ? (
+            <p className="mt-3 text-xs text-muted-foreground">
+              Scan capped at {analytics.scanCap.toLocaleString()} events —
+              stats may undercount.
+            </p>
+          ) : null}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Per-endpoint</CardTitle>
+          <CardDescription>
+            Method, path, volume, errors, tail latency
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {analytics.endpoints.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              No endpoints called in this window.
+            </p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b text-left text-muted-foreground">
+                    <th className="px-2 py-2 font-medium">Method</th>
+                    <th className="px-2 py-2 font-medium">Path</th>
+                    <th className="px-2 py-2 font-medium text-right">Calls</th>
+                    <th className="px-2 py-2 font-medium text-right">Credits</th>
+                    <th className="px-2 py-2 font-medium text-right">4xx</th>
+                    <th className="px-2 py-2 font-medium text-right">5xx</th>
+                    <th className="px-2 py-2 font-medium text-right">p95</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {analytics.endpoints.map((row) => (
+                    <tr
+                      key={`${row.method} ${row.endpoint}`}
+                      className="border-b last:border-0"
+                    >
+                      <td className="px-2 py-2.5">
+                        <Badge variant="outline" className="font-mono">
+                          {row.method}
+                        </Badge>
+                      </td>
+                      <td className="px-2 py-2.5 font-mono text-xs">
+                        {row.endpoint}
+                      </td>
+                      <td className="px-2 py-2.5 text-right tabular-nums">
+                        {row.calls.toLocaleString()}
+                      </td>
+                      <td className="px-2 py-2.5 text-right tabular-nums">
+                        {row.credits.toLocaleString()}
+                      </td>
+                      <td className="px-2 py-2.5 text-right tabular-nums text-muted-foreground">
+                        {row.errors4xx}
+                      </td>
+                      <td className="px-2 py-2.5 text-right tabular-nums text-muted-foreground">
+                        {row.errors5xx}
+                      </td>
+                      <td className="px-2 py-2.5 text-right tabular-nums">
+                        {formatMs(row.p95)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+function AnalyticsSkeleton() {
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <Skeleton className="h-24 rounded-xl" />
+        <Skeleton className="h-24 rounded-xl" />
+        <Skeleton className="h-24 rounded-xl" />
+        <Skeleton className="h-24 rounded-xl" />
+      </div>
+      <Skeleton className="h-40 rounded-xl" />
+      <Skeleton className="h-56 rounded-xl" />
     </div>
   );
 }
