@@ -456,7 +456,7 @@ minimal_openapi_json() {
     "title": $(printf '%s' "$title" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read().strip()))'),
     "version": "0.0.1"
   },
-  "servers": [{ "url": "https://httpbin.org" }],
+  "servers": [{ "url": "https://postman-echo.com" }],
   "paths": {
     "/get": {
       "get": {
