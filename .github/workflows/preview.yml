@@ -19,10 +19,14 @@ env:
 
 jobs:
   deploy-and-test:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.actor == 'tnfssc'
     runs-on: ubuntu-slim
     timeout-minutes: 20
+    environment: preview
     steps:
       - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
       - uses: actions/cache@v5
         with:
           path: ~/.local/share/pnpm/store
@@ -70,7 +74,7 @@ jobs:
 
       - name: Install browser runtime
         run: |
-          npm install --global agent-browser
+          npm install --global agent-browser@0.27.1
           agent-browser install --with-deps
 
       - name: Run deterministic preview smoke

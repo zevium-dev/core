@@ -18,6 +18,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
       - uses: actions/cache@v5
         with:
           path: ~/.local/share/pnpm/store
@@ -35,6 +37,8 @@ jobs:
     environment: staging
     steps:
       - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
       - uses: actions/cache@v5
         with:
           path: ~/.local/share/pnpm/store
@@ -44,7 +48,7 @@ jobs:
       - uses: jdx/mise-action@v4
       - name: Install browser runtime
         run: |
-          npm install --global agent-browser
+          npm install --global agent-browser@0.27.1
           agent-browser install --with-deps
       - name: Run authenticated publish and metered-call journey
         env:
