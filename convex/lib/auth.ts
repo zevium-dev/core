@@ -113,6 +113,38 @@ export async function requireProjectMember(
 }
 
 /**
+ * Enforce org-admin role from the Clerk JWT claim (`org_role === "org:admin"`).
+ * `claims.orgRole` is parsed by `requireIdentity` but, without this gate, any
+ * org member can perform admin actions. Callers resolve claims first via
+ * `requireIdentity` / `requireOrgMemberBySlug` / `requireProjectMember`, then
+ * pass the returned `claims` here.
+ *
+ * Returns the claims for chaining. Does NOT touch the DB.
+ *
+ * Mutations that SHOULD call `requireOrgAdmin(claims)` (caller migration is a
+ * separate PR — this helper is exported but not yet wired in):
+ *   - projects.create / projects.update / projects.remove
+ *       (project lifecycle: create, rename, transfer, delete)
+ *   - specs.publish / specs.deprecateVersion / specs.undeprecateVersion
+ *       (publishing + deprecation lifecycle; `specs.saveDraft` stays member-level)
+ *   - webhooks.upsertEndpoint / webhooks.deleteEndpoint
+ *       (webhook endpoint config + signing-secret surface)
+ *   - keySettings.setCap / keySettings.setDisabled / keySettings.recordRotation
+ *       (gateway key provisioning, caps, rotation)
+ *   - organizations.ensureOrganization stays identity-scoped (bootstrap/sync);
+ *       any future org-level settings mutation should adopt this gate.
+ *
+ * Read-only queries and per-member mutations (draft save, wallet view, payout
+ * state) intentionally stay at `requireOrgMemberBySlug` / `requireProjectMember`.
+ */
+export function requireOrgAdmin(claims: OrgIdentityClaims): OrgIdentityClaims {
+  if (claims.orgRole !== "org:admin") {
+    throw new Error("Org admin role required");
+  }
+  return claims;
+}
+
+/**
  * Platform admin gate. Reads ADMIN_USER_IDS env (comma-separated Clerk user ids).
  * Fails closed when env unset — nobody is admin.
  */
