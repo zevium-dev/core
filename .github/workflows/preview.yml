@@ -19,10 +19,14 @@ env:
 
 jobs:
   deploy-and-test:
-    runs-on: ubuntu-slim
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.actor == 'tnfssc'
+    runs-on: ubuntu-latest
     timeout-minutes: 20
+    environment: preview
     steps:
       - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
       - uses: actions/cache@v5
         with:
           path: ~/.local/share/pnpm/store
@@ -63,14 +67,14 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
           web_name="zevium-web-pr-$PR_NUMBER"
-          WEB_NAME="$web_name" node -e 'const fs=require("node:fs"); const p="apps/web/dist/server/wrangler.json"; const c=JSON.parse(fs.readFileSync(p)); c.name=process.env.WEB_NAME; delete c.routes; fs.writeFileSync("/tmp/web-preview.json", JSON.stringify(c));'
-          pnpm --filter web exec wrangler deploy --name "$web_name" --config /tmp/web-preview.json
-          printf '%s' '${{ secrets.CLERK_PREVIEW_SECRET_KEY }}' | pnpm --filter web exec wrangler secret put CLERK_SECRET_KEY --name "$web_name" --config /tmp/web-preview.json
+          WEB_NAME="$web_name" node -e 'const fs=require("node:fs"); const p="apps/web/dist/server/wrangler.json"; const c=JSON.parse(fs.readFileSync(p)); c.name=process.env.WEB_NAME; delete c.routes; fs.writeFileSync("apps/web/dist/server/wrangler.preview.json", JSON.stringify(c));'
+          pnpm --filter web exec wrangler deploy --name "$web_name" --config dist/server/wrangler.preview.json
+          printf '%s' '${{ secrets.CLERK_PREVIEW_SECRET_KEY }}' | pnpm --filter web exec wrangler secret put CLERK_SECRET_KEY --name "$web_name" --config dist/server/wrangler.preview.json
           echo "E2E_BASE_URL=https://${web_name}.zevium-dev.workers.dev" >> "$GITHUB_ENV"
 
       - name: Install browser runtime
         run: |
-          npm install --global agent-browser
+          npm install --global agent-browser@0.27.1
           agent-browser install --with-deps
 
       - name: Run deterministic preview smoke
@@ -82,7 +86,14 @@ jobs:
           E2E_EMAIL: ${{ secrets.PREVIEW_E2E_EMAIL }}
           E2E_PASSWORD: ${{ secrets.PREVIEW_E2E_PASSWORD }}
           E2E_OTP: ${{ secrets.PREVIEW_E2E_OTP }}
-        run: e2e/run-all.sh
+        run: |
+          if e2e/run-all.sh; then
+            exit 0
+          fi
+
+          echo "Authenticated preview was not ready; retrying once after propagation delay"
+          sleep 30
+          E2E_SESSION="zevium-e2e-retry-$PR_NUMBER" e2e/run-all.sh
 
       - name: Upload failure evidence
         if: failure()

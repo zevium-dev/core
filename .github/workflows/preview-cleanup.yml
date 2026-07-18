@@ -3,9 +3,15 @@ name: Pull Request Preview Cleanup
 on:
   pull_request:
     types: [closed]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Pull request number to clean up
+        required: true
+        type: number
 
 concurrency:
-  group: preview-${{ github.event.pull_request.number }}
+  group: preview-${{ github.event.pull_request.number || inputs.pr_number }}
   cancel-in-progress: false
 
 permissions:
@@ -18,13 +24,37 @@ jobs:
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: 1ea9299555b026a6a7484c8323c5a953
-      PR_NUMBER: ${{ github.event.pull_request.number }}
+      PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
     steps:
-      - uses: actions/checkout@v6
-      - uses: jdx/mise-action@v4
       - name: Delete isolated Workers
         run: |
-          pnpm --filter web exec wrangler delete "zevium-web-pr-$PR_NUMBER" --force || true
-          pnpm --filter gateway exec wrangler delete "zevium-gateway-pr-$PR_NUMBER" --force || true
+          delete_worker() {
+            local worker="$1"
+            local body="/tmp/${worker}.json"
+            local status
+            status="$(curl --silent --show-error --output "$body" --write-out '%{http_code}' \
+              --request DELETE \
+              --header "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+              "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$worker")"
+
+            if [[ "$status" == "200" ]]; then
+              echo "Deleted $worker"
+              return
+            fi
+
+            if [[ "$status" == "404" ]]; then
+              echo "$worker already absent"
+              return
+            fi
+
+            echo "Failed to delete $worker (HTTP $status)" >&2
+            cat "$body" >&2
+            return 1
+          }
+
+          failed=0
+          delete_worker "zevium-web-pr-$PR_NUMBER" || failed=1
+          delete_worker "zevium-gateway-pr-$PR_NUMBER" || failed=1
+          exit "$failed"
       # Convex preview deployments expire automatically after five days on
       # Free/Starter plans; Convex CLI exposes no explicit preview-delete command.
