@@ -18,6 +18,7 @@ env:
   CLOUDFLARE_ACCOUNT_ID: 1ea9299555b026a6a7484c8323c5a953
   VITE_CONVEX_URL: https://polite-ermine-809.convex.cloud
   VITE_GATEWAY_URL: https://gateway.zevium.dev
+  VERSION_TAG: ci-${{ github.run_id }}-${{ github.run_attempt }}
 
 jobs:
   deploy:
@@ -46,7 +47,9 @@ jobs:
       - name: Deploy gateway Worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-        run: pnpm --filter gateway exec wrangler deploy
+        run: |
+          pnpm --filter gateway exec wrangler versions upload --tag "$VERSION_TAG"
+          pnpm --filter gateway exec wrangler versions deploy --version-tag "$VERSION_TAG" --yes
 
       - name: Build web Worker
         env:
@@ -57,7 +60,9 @@ jobs:
       - name: Deploy web Worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-        run: pnpm --filter web exec wrangler deploy --config dist/server/wrangler.json
+        run: |
+          pnpm --filter web exec wrangler versions upload --config dist/server/wrangler.json --tag "$VERSION_TAG"
+          pnpm --filter web exec wrangler versions deploy --config dist/server/wrangler.json --version-tag "$VERSION_TAG" --yes
 
       - name: Smoke test production
         run: |
