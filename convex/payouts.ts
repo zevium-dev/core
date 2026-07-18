@@ -315,6 +315,33 @@ export const releaseMatureEarnings = internalMutation({
   },
 });
 
+ /**
+  * Build a Stripe-safe idempotency key for a publisher transfer.
+  *
+  * Joining earning ids directly exceeds Stripe's 255-character idempotency key
+  * limit at ~9 earnings (each Convex id is ~32 chars + separator), causing
+  * every non-trivial payout to fail. Instead, hash the sorted earning ids with
+  * SHA-256 (64 hex chars) and prefix with `payout_` for a deterministic,
+  * length-capped key. Same earnings → same key, so retries dedupe.
+  */
+ async function publisherTransferIdempotencyKey(
+   publisherOrganizationId: Id<"organizations">,
+   earnings: { _id: Id<"publisherEarnings"> }[],
+ ): Promise<string> {
+   const payload = `${publisherOrganizationId}:${earnings
+     .map((earning) => earning._id)
+     .sort()
+     .join(",")}`;
+   const digest = await crypto.subtle.digest(
+     "SHA-256",
+     new TextEncoder().encode(payload),
+   );
+   const hex = Array.from(new Uint8Array(digest))
+     .map((byte) => byte.toString(16).padStart(2, "0"))
+     .join("");
+   return `payout_${hex}`;
+ }
+
 export const preparePublisherTransfer = internalMutation({
   args: { publisherOrganizationId: v.id("organizations") },
   handler: async (ctx, args) => {
@@ -368,10 +395,10 @@ export const preparePublisherTransfer = internalMutation({
     );
     const amount = creditsToUsdCents(credits);
     if (amount <= 0) throw new Error("Available earnings are below one cent");
-    const idempotencyKey = `publisher-transfer:${args.publisherOrganizationId}:${earnings
-      .map((earning) => earning._id)
-      .sort()
-      .join(",")}`;
+    const idempotencyKey = await publisherTransferIdempotencyKey(
+      args.publisherOrganizationId,
+      earnings,
+    );
     const existing = await ctx.db
       .query("publisherTransfers")
       .withIndex("by_idempotency_key", (q) =>
