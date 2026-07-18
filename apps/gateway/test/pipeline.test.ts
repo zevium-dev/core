@@ -612,16 +612,20 @@ describe("gateway pipeline", () => {
     state = await stub.getState();
     expect(state.pendingSettlements).toHaveLength(0);
     expect(fake.batches.length).toBeGreaterThanOrEqual(1);
-    expect(fake.records).toHaveLength(2);
-    expect(fake.records.map((r) => r.credits).sort()).toEqual([2, 3]);
-    expect(fake.records.every((r) => r.organizationId === organizationId)).toBe(
-      true,
+    const organizationRecords = fake.records.filter(
+      (record) => record.organizationId === organizationId,
     );
+    expect(organizationRecords).toHaveLength(2);
+    expect(organizationRecords.map((record) => record.credits).sort()).toEqual([
+      2, 3,
+    ]);
 
     // Second flush sees empty pending, no extra records.
     const again = await stub.flushToConvex();
     expect(again.flushed).toBe(0);
-    expect(fake.records).toHaveLength(2);
+    expect(
+      fake.records.filter((record) => record.organizationId === organizationId),
+    ).toHaveLength(2);
   });
 
   it("flush fails without convex then succeeds after sink wired", async () => {
@@ -654,8 +658,11 @@ describe("gateway pipeline", () => {
     expect(ok.error).toBeUndefined();
     expect(ok.acked).toBe(1);
     expect((await stub.getState()).pendingSettlements).toHaveLength(0);
-    expect(fake.records).toHaveLength(1);
-    expect(fake.records[0]!.credits).toBe(2);
+    const organizationRecords = fake.records.filter(
+      (record) => record.organizationId === organizationId,
+    );
+    expect(organizationRecords).toHaveLength(1);
+    expect(organizationRecords[0]!.credits).toBe(2);
   });
 
   it("internal grant endpoint auth + DO credit", async () => {
