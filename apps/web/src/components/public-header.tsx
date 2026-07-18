@@ -8,8 +8,6 @@ import { Button } from "#/components/ui/button";
 import { cn } from "#/lib/utils";
 
 type PublicHeaderProps = {
-  /** Max content width utility, default max-w-5xl (landing). Catalogue uses max-w-6xl. */
-  maxWidthClass?: string;
   /** Highlight Catalogue / Docs nav when on those routes. */
   active?: "catalogue" | "docs" | null;
   className?: string;
@@ -21,26 +19,19 @@ type PublicHeaderProps = {
  * (Clerk v6 renamed SignedIn/SignedOut → Show).
  * Auth slot has fixed min-width so swap never shifts layout.
  */
-export function PublicHeader({
-  maxWidthClass = "max-w-5xl",
-  active = null,
-  className,
-}: PublicHeaderProps) {
+export function PublicHeader({ active = null, className }: PublicHeaderProps) {
   return (
     <header className={cn("border-b", className)}>
-      <div
-        className={cn(
-          "mx-auto flex h-14 items-center justify-between gap-4 px-4",
-          maxWidthClass,
-        )}
-      >
+      <div className="mx-auto flex h-14 max-w-6xl items-center justify-between gap-4 px-4">
         <div className="flex min-w-0 items-center gap-6">
           <Link
             to="/"
-            className="flex items-center gap-2 text-sm font-semibold tracking-tight outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+            className="flex items-center gap-0.5 text-sm font-semibold tracking-tight outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
           >
-            <BrandMark className="size-5" />
-            Zevium
+            <BrandMark className="h-3 w-4" />
+            <span>
+              <span className="sr-only">Z</span>evium
+            </span>
           </Link>
           <nav className="hidden items-center gap-4 text-sm text-muted-foreground sm:flex">
             <Link

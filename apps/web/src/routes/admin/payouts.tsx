@@ -23,6 +23,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from "#/components/ui/dialog";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "#/components/ui/empty";
 import { Skeleton } from "#/components/ui/skeleton";
 import { api } from "#/lib/convex-api";
 import type { Id } from "#/lib/convex-data-model";
@@ -197,9 +204,18 @@ function AdminPayoutsPage() {
           {firstPagePending ? (
             <TransferTableSkeleton />
           ) : rows.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              No {filter === "all" ? "publisher transfers" : filter} transfers.
-            </p>
+            <Empty className="py-8">
+              <EmptyHeader>
+                <EmptyMedia variant="icon">
+                  <Send />
+                </EmptyMedia>
+                <EmptyTitle>No transfers</EmptyTitle>
+                <EmptyDescription>
+                  No {filter === "all" ? "publisher" : filter} transfers match
+                  this filter.
+                </EmptyDescription>
+              </EmptyHeader>
+            </Empty>
           ) : (
             <TransferTable
               rows={rows}
@@ -250,16 +266,30 @@ function TransferTable({
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b text-left text-muted-foreground">
-            <th className="px-2 py-2 font-medium">Publisher organization</th>
-            <th className="px-2 py-2 font-medium">Status</th>
-            <th className="px-2 py-2 font-medium text-right">Amount</th>
-            <th className="hidden px-2 py-2 font-medium lg:table-cell">
+            <th scope="col" className="px-2 py-2 font-medium">
+              Publisher organization
+            </th>
+            <th scope="col" className="px-2 py-2 font-medium">
+              Status
+            </th>
+            <th scope="col" className="px-2 py-2 font-medium text-right">
+              Amount
+            </th>
+            <th
+              scope="col"
+              className="hidden px-2 py-2 font-medium lg:table-cell"
+            >
               Stripe transfer
             </th>
-            <th className="hidden px-2 py-2 font-medium md:table-cell">
+            <th
+              scope="col"
+              className="hidden px-2 py-2 font-medium md:table-cell"
+            >
               Details
             </th>
-            <th className="px-2 py-2 font-medium text-right">Action</th>
+            <th scope="col" className="px-2 py-2 font-medium text-right">
+              Action
+            </th>
           </tr>
         </thead>
         <tbody>

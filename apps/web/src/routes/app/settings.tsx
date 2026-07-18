@@ -12,8 +12,8 @@ export const Route = createFileRoute("/app/settings")({
 });
 
 const tabs = [
-  { title: "Overview", to: "/app/settings", exact: true },
-  { title: "API keys", to: "/app/settings/keys", exact: false },
+  { title: "Account", to: "/app/settings", exact: true },
+  { title: "Gateway keys", to: "/app/settings/keys", exact: false },
   { title: "Activity", to: "/app/settings/activity", exact: false },
 ] as const;
 
@@ -22,6 +22,12 @@ function SettingsLayout() {
 
   return (
     <div className="flex flex-col gap-6">
+      <div>
+        <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
+        <p className="text-sm text-muted-foreground">
+          Account, gateway keys, and organization activity.
+        </p>
+      </div>
       <nav
         className="flex flex-wrap gap-1 border-b pb-px"
         aria-label="Settings sections"

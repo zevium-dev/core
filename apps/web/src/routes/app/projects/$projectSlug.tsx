@@ -41,6 +41,14 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "#/components/ui/dialog";
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "#/components/ui/empty";
 import { Skeleton } from "#/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger } from "#/components/ui/tabs";
 import { api } from "#/lib/convex-api";
@@ -171,18 +179,20 @@ function ProjectShell({
 
   if (project === null) {
     return (
-      <div className="flex flex-col gap-4">
-        <h1 className="text-2xl font-semibold tracking-tight">
-          Project not found
-        </h1>
-        <p className="text-sm text-muted-foreground">
-          No project with slug <span className="font-mono">{projectSlug}</span>{" "}
-          in this org.
-        </p>
-        <Button asChild variant="outline">
-          <Link to="/app/projects">Back to projects</Link>
-        </Button>
-      </div>
+      <Empty className="min-h-80 flex-none border">
+        <EmptyHeader>
+          <EmptyTitle>Project not found</EmptyTitle>
+          <EmptyDescription>
+            No project with slug{" "}
+            <span className="font-mono">{projectSlug}</span> in this org.
+          </EmptyDescription>
+        </EmptyHeader>
+        <EmptyContent>
+          <Button asChild variant="outline">
+            <Link to="/app/projects">Back to projects</Link>
+          </Button>
+        </EmptyContent>
+      </Empty>
     );
   }
 
@@ -433,8 +443,12 @@ function ProjectAnalyticsPanel({
   if (analytics === null) {
     return (
       <Card>
-        <CardContent className="py-10 text-center text-sm text-muted-foreground">
-          Project not found.
+        <CardContent>
+          <Empty className="py-8">
+            <EmptyHeader>
+              <EmptyTitle>Project not found</EmptyTitle>
+            </EmptyHeader>
+          </Empty>
         </CardContent>
       </Card>
     );
@@ -499,13 +513,17 @@ function ProjectAnalyticsPanel({
         </CardHeader>
         <CardContent>
           {analytics.calls === 0 ? (
-            <div className="flex flex-col items-center justify-center gap-2 rounded-md border border-dashed px-6 py-10 text-center">
-              <Activity className="size-5 text-muted-foreground" />
-              <p className="text-sm font-medium">No traffic yet</p>
-              <p className="max-w-sm text-sm text-muted-foreground">
-                Calls appear here as soon as consumers use this API.
-              </p>
-            </div>
+            <Empty className="border py-8">
+              <EmptyHeader>
+                <EmptyMedia variant="icon">
+                  <Activity />
+                </EmptyMedia>
+                <EmptyTitle>No traffic yet</EmptyTitle>
+                <EmptyDescription>
+                  Calls appear here as soon as consumers use this API.
+                </EmptyDescription>
+              </EmptyHeader>
+            </Empty>
           ) : (
             <div className="flex h-24 items-end gap-1">
               {analytics.callsByDay.map((count, i) => {
@@ -547,15 +565,42 @@ function ProjectAnalyticsPanel({
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b text-left text-muted-foreground">
-                    <th className="px-2 py-2 font-medium">Method</th>
-                    <th className="px-2 py-2 font-medium">Path</th>
-                    <th className="px-2 py-2 font-medium text-right">Calls</th>
-                    <th className="px-2 py-2 font-medium text-right">
+                    <th scope="col" className="px-2 py-2 font-medium">
+                      Method
+                    </th>
+                    <th scope="col" className="px-2 py-2 font-medium">
+                      Path
+                    </th>
+                    <th
+                      scope="col"
+                      className="px-2 py-2 font-medium text-right"
+                    >
+                      Calls
+                    </th>
+                    <th
+                      scope="col"
+                      className="px-2 py-2 font-medium text-right"
+                    >
                       Credits
                     </th>
-                    <th className="px-2 py-2 font-medium text-right">4xx</th>
-                    <th className="px-2 py-2 font-medium text-right">5xx</th>
-                    <th className="px-2 py-2 font-medium text-right">p95</th>
+                    <th
+                      scope="col"
+                      className="px-2 py-2 font-medium text-right"
+                    >
+                      4xx
+                    </th>
+                    <th
+                      scope="col"
+                      className="px-2 py-2 font-medium text-right"
+                    >
+                      5xx
+                    </th>
+                    <th
+                      scope="col"
+                      className="px-2 py-2 font-medium text-right"
+                    >
+                      p95
+                    </th>
                   </tr>
                 </thead>
                 <tbody>

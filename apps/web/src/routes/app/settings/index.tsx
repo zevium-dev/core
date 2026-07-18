@@ -2,14 +2,6 @@ import { UserProfile } from "@clerk/tanstack-react-start";
 import { shadcn } from "@clerk/ui/themes";
 import { createFileRoute } from "@tanstack/react-router";
 
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "#/components/ui/card";
-
 export const Route = createFileRoute("/app/settings/")({
   component: SettingsPage,
   head: () => ({
@@ -19,39 +11,29 @@ export const Route = createFileRoute("/app/settings/")({
 
 function SettingsPage() {
   return (
-    <div className="flex flex-col gap-6">
+    <section className="flex flex-col gap-3">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
+        <h2 className="text-lg font-semibold tracking-tight">Account</h2>
         <p className="text-sm text-muted-foreground">
-          Account, keys, and activity.
+          Profile, security, and connected accounts via Clerk.
         </p>
       </div>
 
-      <Card className="overflow-hidden">
-        <CardHeader>
-          <CardTitle>Account</CardTitle>
-          <CardDescription>
-            Profile, security, and connected accounts via Clerk.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="p-0 sm:p-2">
-          <div className="w-full overflow-x-auto">
-            <UserProfile
-              routing="hash"
-              appearance={{
-                theme: shadcn,
-                elements: {
-                  rootBox: "w-full mx-auto",
-                  cardBox: "w-full shadow-none",
-                  card: "w-full shadow-none",
-                  navbar: "border-border",
-                  scrollBox: "w-full",
-                },
-              }}
-            />
-          </div>
-        </CardContent>
-      </Card>
-    </div>
+      <div className="min-h-[28rem] w-full overflow-hidden rounded-xl">
+        <UserProfile
+          routing="hash"
+          appearance={{
+            theme: shadcn,
+            elements: {
+              rootBox: "w-full!",
+              cardBox: "w-full! max-w-none!",
+              card: "w-full! max-w-none!",
+              navbar: "border-border",
+              scrollBox: "w-full!",
+            },
+          }}
+        />
+      </div>
+    </section>
   );
 }

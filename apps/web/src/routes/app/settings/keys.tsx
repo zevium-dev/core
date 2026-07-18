@@ -6,7 +6,7 @@ import {
 } from "@tanstack/react-query";
 import { convexQuery, useConvexMutation } from "@convex-dev/react-query";
 import { useOrganization } from "@clerk/tanstack-react-start";
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { useConvexAuth } from "convex/react";
 import { Check, Copy, KeyRound, Plus, RotateCw, Trash2 } from "lucide-react";
 import { m, useReducedMotion } from "motion/react";
@@ -22,6 +22,14 @@ import {
   CardHeader,
   CardTitle,
 } from "#/components/ui/card";
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "#/components/ui/empty";
 import {
   Dialog,
   DialogContent,
@@ -196,28 +204,16 @@ function KeysContent() {
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">API keys</h1>
+          <h2 className="text-lg font-semibold tracking-tight">
+            Gateway API keys
+          </h2>
           <p className="text-sm text-muted-foreground">
             Machine keys for the gateway. One active key per user.
           </p>
         </div>
         {hasKey ? (
-          <p className="rounded-full border px-3 py-1.5 text-xs text-muted-foreground">
-            1 active key allowed per user
-          </p>
-        ) : (
-          <Button
-            onClick={() => {
-              setRevealed(null);
-              setCopied(false);
-              setCreateOpen(true);
-            }}
-            disabled={isLoading}
-          >
-            <Plus className="size-4" aria-hidden="true" />
-            Create key
-          </Button>
-        )}
+          <Badge variant="outline">1 active key allowed per user</Badge>
+        ) : null}
       </div>
 
       <Card>
@@ -232,9 +228,10 @@ function KeysContent() {
           {isLoading ? (
             <KeysTableSkeleton />
           ) : keysQuery.isError ? (
-            <p className="text-sm text-muted-foreground">
-              {humanError(keysQuery.error, "Could not load keys")}
-            </p>
+            <KeysError
+              message={humanError(keysQuery.error, "Could not load keys")}
+              onRetry={() => void keysQuery.refetch()}
+            />
           ) : keys.length === 0 ? (
             <EmptyKeys
               onCreate={() => {
@@ -247,13 +244,25 @@ function KeysContent() {
               <table className="w-full text-left text-sm">
                 <thead className="hidden border-b bg-muted/40 text-muted-foreground md:table-header-group">
                   <tr>
-                    <th className="px-3 py-2 font-medium">Name</th>
-                    <th className="px-3 py-2 font-medium">Key</th>
-                    <th className="px-3 py-2 font-medium">Monthly cap</th>
-                    <th className="px-3 py-2 font-medium">Status</th>
-                    <th className="px-3 py-2 font-medium">Created</th>
-                    <th className="px-3 py-2 font-medium">Last used</th>
-                    <th className="px-3 py-2 font-medium">
+                    <th scope="col" className="px-3 py-2 font-medium">
+                      Name
+                    </th>
+                    <th scope="col" className="px-3 py-2 font-medium">
+                      Key
+                    </th>
+                    <th scope="col" className="px-3 py-2 font-medium">
+                      Monthly cap
+                    </th>
+                    <th scope="col" className="px-3 py-2 font-medium">
+                      Status
+                    </th>
+                    <th scope="col" className="px-3 py-2 font-medium">
+                      Created
+                    </th>
+                    <th scope="col" className="px-3 py-2 font-medium">
+                      Last used
+                    </th>
+                    <th scope="col" className="px-3 py-2 font-medium">
                       <span className="sr-only">Actions</span>
                     </th>
                   </tr>
@@ -277,10 +286,6 @@ function KeysContent() {
           )}
         </CardContent>
       </Card>
-
-      <Button asChild variant="link" className="w-fit px-0">
-        <Link to="/app/settings">Back to settings</Link>
-      </Button>
 
       <SecretRevealDialog
         revealed={revealed}
@@ -683,21 +688,45 @@ function SecretRevealDialog({
 
 function EmptyKeys({ onCreate }: { onCreate: () => void }) {
   return (
-    <div className="flex flex-col items-center justify-center gap-3 rounded-md border border-dashed px-6 py-12 text-center">
-      <div className="flex size-10 items-center justify-center rounded-full bg-muted">
-        <KeyRound className="size-5 text-muted-foreground" />
-      </div>
-      <div className="space-y-1">
-        <p className="text-sm font-medium">No API keys yet</p>
-        <p className="text-sm text-muted-foreground">
+    <Empty className="border">
+      <EmptyHeader>
+        <EmptyMedia variant="icon">
+          <KeyRound />
+        </EmptyMedia>
+        <EmptyTitle>No API keys yet</EmptyTitle>
+        <EmptyDescription>
           Create one key to call the gateway from curl, SDKs, or agents.
-        </p>
-      </div>
-      <Button onClick={onCreate} size="sm">
-        <Plus className="size-4" />
-        Create key
-      </Button>
-    </div>
+        </EmptyDescription>
+      </EmptyHeader>
+      <EmptyContent>
+        <Button onClick={onCreate}>
+          <Plus data-icon="inline-start" />
+          Create key
+        </Button>
+      </EmptyContent>
+    </Empty>
+  );
+}
+
+function KeysError({
+  message,
+  onRetry,
+}: {
+  message: string;
+  onRetry: () => void;
+}) {
+  return (
+    <Empty>
+      <EmptyHeader>
+        <EmptyTitle>Could not load keys</EmptyTitle>
+        <EmptyDescription>{message}</EmptyDescription>
+      </EmptyHeader>
+      <EmptyContent>
+        <Button variant="outline" onClick={onRetry}>
+          Try again
+        </Button>
+      </EmptyContent>
+    </Empty>
   );
 }
 
@@ -720,7 +749,9 @@ function KeysSkeleton() {
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">API keys</h1>
+          <h2 className="text-lg font-semibold tracking-tight">
+            Gateway API keys
+          </h2>
           <p className="text-sm text-muted-foreground">
             Machine keys for the gateway. One active key per user.
           </p>

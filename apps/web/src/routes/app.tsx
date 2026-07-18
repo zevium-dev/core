@@ -53,15 +53,23 @@ function AppLayout() {
 
   return (
     <SidebarProvider>
+      <a
+        href="#main-content"
+        className="sr-only fixed top-4 left-4 rounded-md bg-background px-3 py-2 text-sm font-medium shadow-md focus:not-sr-only focus-visible:ring-[3px] focus-visible:ring-ring/50"
+      >
+        Skip to main content
+      </a>
       <AppSidebar />
-      <SidebarInset>
+      <SidebarInset className="md:peer-data-[state=collapsed]:ml-0!">
         <AppHeader />
-        <main
-          className="flex flex-1 flex-col gap-4 p-4 md:p-6 content-enter"
+        <div
+          id="main-content"
+          tabIndex={-1}
+          className="flex flex-1 flex-col gap-4 p-4 focus-visible:outline-none md:p-6 content-enter"
           style={{ viewTransitionName: "main-content" }}
         >
           <Outlet />
-        </main>
+        </div>
       </SidebarInset>
     </SidebarProvider>
   );

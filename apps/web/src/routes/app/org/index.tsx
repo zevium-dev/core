@@ -8,7 +8,7 @@ import { convexQuery } from "@convex-dev/react-query";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link, createFileRoute } from "@tanstack/react-router";
 import { useAction } from "convex/react";
-import { Building2, Landmark, Plus } from "lucide-react";
+import { Building2, Landmark, Plus, Users } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -19,10 +19,17 @@ import {
   Card,
   CardContent,
   CardDescription,
-  CardFooter,
   CardHeader,
   CardTitle,
 } from "#/components/ui/card";
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "#/components/ui/empty";
 import { Skeleton } from "#/components/ui/skeleton";
 import { Input } from "#/components/ui/input";
 import { Label } from "#/components/ui/label";
@@ -57,43 +64,51 @@ function OrgHomePage() {
 
   return (
     <FadeIn className="flex flex-col gap-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
+      <div className="min-w-0 space-y-3">
         <div className="min-w-0 space-y-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <h1
-              className="truncate text-2xl font-semibold tracking-tight"
-              style={
-                slug ? { viewTransitionName: `org-name-${slug}` } : undefined
-              }
-            >
-              {organization.name}
-            </h1>
-            {slug ? (
-              <Badge variant="secondary" className="font-mono text-xs">
-                {slug}
-              </Badge>
-            ) : null}
-          </div>
+          <h1
+            className="truncate text-2xl font-semibold tracking-tight"
+            style={
+              slug ? { viewTransitionName: `org-name-${slug}` } : undefined
+            }
+          >
+            {organization.name}
+          </h1>
           <p className="text-sm text-muted-foreground">
             Members, invitations, and organization settings.
           </p>
         </div>
-        {membersCount !== null ? (
-          <div className="rounded-lg border bg-card px-3 py-2 text-sm">
-            <span className="text-muted-foreground">Members</span>
-            <p className="text-lg font-semibold tabular-nums leading-none">
-              {membersCount}
-            </p>
-          </div>
-        ) : null}
+        <div className="flex min-w-0 flex-wrap gap-2">
+          {slug ? (
+            <Badge
+              variant="secondary"
+              className="max-w-64 font-mono text-xs"
+            >
+              <span className="truncate">{slug}</span>
+            </Badge>
+          ) : null}
+          {membersCount !== null ? (
+            <Badge variant="outline">
+              <Users />
+              {membersCount} {membersCount === 1 ? "member" : "members"}
+            </Badge>
+          ) : null}
+        </div>
       </div>
 
       <PublisherPaymentsCard />
 
-      <div className="min-h-[28rem] w-full overflow-hidden rounded-xl border bg-card">
+      <div className="min-h-[28rem] w-full overflow-hidden rounded-xl">
         <OrganizationProfile
           routing="hash"
-          appearance={{ theme: shadcn }}
+          appearance={{
+            theme: shadcn,
+            elements: {
+              rootBox: "w-full!",
+              cardBox: "w-full! max-w-none!",
+              card: "w-full! max-w-none!",
+            },
+          }}
           afterLeaveOrganizationUrl="/app/org"
         />
       </div>
@@ -209,26 +224,26 @@ function NoActiveOrg() {
         </p>
       </div>
 
-      <Card className="border-dashed">
-        <CardHeader className="items-center py-10 text-center">
-          <div className="mb-2 flex size-10 items-center justify-center rounded-full bg-muted">
-            <Building2 className="size-5 text-muted-foreground" />
-          </div>
-          <CardTitle>No active organization</CardTitle>
-          <CardDescription className="max-w-sm">
+      <Empty className="min-h-80 border">
+        <EmptyHeader>
+          <EmptyMedia variant="icon">
+            <Building2 />
+          </EmptyMedia>
+          <EmptyTitle>No active organization</EmptyTitle>
+          <EmptyDescription>
             Wallet, projects, and API keys are org-scoped. Pick an org below or
             create a new one.
-          </CardDescription>
-        </CardHeader>
-        <CardFooter className="justify-center pb-8">
+          </EmptyDescription>
+        </EmptyHeader>
+        <EmptyContent>
           <Button asChild>
             <Link to="/app/org/create">
-              <Plus />
+              <Plus data-icon="inline-start" />
               Create organization
             </Link>
           </Button>
-        </CardFooter>
-      </Card>
+        </EmptyContent>
+      </Empty>
 
       <div className="flex justify-center">
         <OrganizationList

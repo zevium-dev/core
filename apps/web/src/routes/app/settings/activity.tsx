@@ -15,6 +15,14 @@ import {
   CardHeader,
   CardTitle,
 } from "#/components/ui/card";
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "#/components/ui/empty";
 import { Label } from "#/components/ui/label";
 import {
   Select,
@@ -109,9 +117,9 @@ function ActivityPage() {
 function ActivityHeader() {
   return (
     <div>
-      <h1 className="text-2xl font-semibold tracking-tight">Activity</h1>
+      <h2 className="text-lg font-semibold tracking-tight">Activity</h2>
       <p className="text-sm text-muted-foreground">
-        Account activity and metered call log.
+        Organization activity and metered call log.
       </p>
     </div>
   );
@@ -276,12 +284,25 @@ function ActivityContent({ orgSlug }: { orgSlug: string }) {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b text-left text-muted-foreground">
-                      <th className="px-2 py-2 font-medium">Time</th>
-                      <th className="px-2 py-2 font-medium">Project</th>
-                      <th className="px-2 py-2 font-medium">Endpoint</th>
-                      <th className="px-2 py-2 font-medium">Credits</th>
-                      <th className="px-2 py-2 font-medium">Status</th>
-                      <th className="px-2 py-2 font-medium text-right">
+                      <th scope="col" className="px-2 py-2 font-medium">
+                        Time
+                      </th>
+                      <th scope="col" className="px-2 py-2 font-medium">
+                        Project
+                      </th>
+                      <th scope="col" className="px-2 py-2 font-medium">
+                        Endpoint
+                      </th>
+                      <th scope="col" className="px-2 py-2 font-medium">
+                        Credits
+                      </th>
+                      <th scope="col" className="px-2 py-2 font-medium">
+                        Status
+                      </th>
+                      <th
+                        scope="col"
+                        className="px-2 py-2 font-medium text-right"
+                      >
                         Latency
                       </th>
                     </tr>
@@ -341,24 +362,23 @@ function ActivityContent({ orgSlug }: { orgSlug: string }) {
 
 function EmptyActivity() {
   return (
-    <div className="flex flex-col items-center justify-center gap-3 rounded-md border border-dashed px-6 py-12 text-center">
-      <div className="flex size-10 items-center justify-center rounded-full bg-muted">
-        <Activity className="size-5 text-muted-foreground" />
-      </div>
-      <div className="space-y-1">
-        <p className="text-sm font-medium">No activity yet</p>
-        <p className="max-w-sm text-sm text-muted-foreground">
+    <Empty className="border">
+      <EmptyHeader>
+        <EmptyMedia variant="icon">
+          <Activity />
+        </EmptyMedia>
+        <EmptyTitle>No activity yet</EmptyTitle>
+        <EmptyDescription>
           Usage events land after gateway calls. Browse the catalogue, create a
           key, and make a call.
-        </p>
-      </div>
-      <Link
-        to="/catalogue"
-        className="text-sm font-medium text-primary link-draw"
-      >
-        Browse catalogue
-      </Link>
-    </div>
+        </EmptyDescription>
+      </EmptyHeader>
+      <EmptyContent>
+        <Button asChild variant="outline">
+          <Link to="/catalogue">Browse catalogue</Link>
+        </Button>
+      </EmptyContent>
+    </Empty>
   );
 }
 

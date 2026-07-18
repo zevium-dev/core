@@ -15,10 +15,14 @@ import { Badge } from "#/components/ui/badge";
 import { Button } from "#/components/ui/button";
 import {
   Card,
+  CardAction,
+  CardContent,
   CardDescription,
+  CardFooter,
   CardHeader,
   CardTitle,
 } from "#/components/ui/card";
+import { Separator } from "#/components/ui/separator";
 import { Skeleton } from "#/components/ui/skeleton";
 import { api } from "#/lib/convex-api";
 import {
@@ -187,9 +191,18 @@ function LandingPage() {
                   </Link>
                 </Button>
               </Magnetic>
-              <Button asChild variant="outline" size="lg">
-                <Link to="/sign-up/$">Get started</Link>
-              </Button>
+              <Show
+                when="signed-out"
+                fallback={
+                  <Button asChild variant="outline" size="lg">
+                    <Link to="/app">Open dashboard</Link>
+                  </Button>
+                }
+              >
+                <Button asChild variant="outline" size="lg">
+                  <Link to="/sign-up/$">Get started</Link>
+                </Button>
+              </Show>
             </m.div>
             <m.p className="text-sm text-muted-foreground" variants={enterItem}>
               $1 buys 10,000 credits. Zero balance stops requests.
@@ -197,7 +210,6 @@ function LandingPage() {
           </m.div>
 
           <m.div
-            className="overflow-hidden rounded-xl border bg-card"
             initial="hidden"
             animate="show"
             variants={{
@@ -211,27 +223,36 @@ function LandingPage() {
             }}
           >
             <m.div variants={enterItem}>
-              <div className="flex items-center justify-between border-b px-5 py-3 text-xs text-muted-foreground">
-                <span>Request</span>
-                <span className="font-mono">100 credits</span>
-              </div>
-              <div className="space-y-4 px-5 py-5 font-mono text-sm">
-                <p>
-                  <span className="text-muted-foreground">GET</span>{" "}
-                  /acme/summarize/v1/summarize
-                </p>
-                <div className="space-y-2 text-xs text-muted-foreground">
-                  <p>key verified</p>
-                  <p>wallet reserved · 100 credits</p>
-                  <p>upstream streamed · 184 ms</p>
-                </div>
-                <div className="flex items-center justify-between border-t pt-4">
-                  <span className="text-foreground">200 OK</span>
-                  <span className="text-muted-foreground">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Request</CardTitle>
+                  <CardAction>
+                    <Badge variant="outline">100 credits</Badge>
+                  </CardAction>
+                  <CardDescription>
+                    One authenticated, credit-gated call.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="flex flex-col gap-4">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge variant="secondary">GET</Badge>
+                    <code className="break-all text-sm">
+                      /acme/summarize/v1/summarize
+                    </code>
+                  </div>
+                  <div className="flex flex-col gap-2 font-mono text-xs text-muted-foreground">
+                    <p>key verified</p>
+                    <p>wallet reserved · 100 credits</p>
+                    <p>upstream streamed · 184 ms</p>
+                  </div>
+                </CardContent>
+                <CardFooter className="justify-between gap-3 border-t">
+                  <Badge>200 OK</Badge>
+                  <span className="text-sm text-muted-foreground">
                     publisher earns 95
                   </span>
-                </div>
-              </div>
+                </CardFooter>
+              </Card>
             </m.div>
           </m.div>
         </section>
@@ -243,61 +264,68 @@ function LandingPage() {
               How it works
             </h2>
           </Reveal>
-          <div className="divide-y border-y">
+          <div className="flex flex-col">
+            <Separator />
             {HOW_STEPS.map((step, i) => (
-              <Reveal key={step.n} delay={i * STAGGER}>
-                <div className="grid gap-2 py-5 sm:grid-cols-[2rem_12rem_1fr] sm:gap-4">
-                  <span className="font-mono text-xs text-muted-foreground">
-                    0{step.n}
-                  </span>
-                  <h3 className="text-sm font-medium">{step.title}</h3>
-                  <p className="text-sm leading-relaxed text-muted-foreground">
-                    {step.bodyBefore}
-                    {step.mono ? (
-                      <span className="font-mono text-xs text-foreground">
-                        {step.mono}
-                      </span>
-                    ) : null}
-                    {step.bodyAfter}
-                  </p>
-                </div>
-              </Reveal>
+              <div key={step.n}>
+                <Reveal delay={i * STAGGER}>
+                  <div className="grid gap-2 py-5 sm:grid-cols-[2rem_12rem_1fr] sm:gap-4">
+                    <span className="font-mono text-xs text-muted-foreground">
+                      0{step.n}
+                    </span>
+                    <h3 className="text-sm font-medium">{step.title}</h3>
+                    <p className="text-sm leading-relaxed text-muted-foreground">
+                      {step.bodyBefore}
+                      {step.mono ? (
+                        <span className="font-mono text-xs text-foreground">
+                          {step.mono}
+                        </span>
+                      ) : null}
+                      {step.bodyAfter}
+                    </p>
+                  </div>
+                </Reveal>
+                <Separator />
+              </div>
             ))}
           </div>
         </section>
 
-        <Reveal
-          as="section"
-          className="grid gap-10 border-y py-8 md:grid-cols-2"
-        >
-          <div className="space-y-3">
-            <p className="font-mono text-xs text-muted-foreground">CONSUMERS</p>
-            <h2 className="text-xl font-semibold tracking-tight">
-              One wallet across every API
-            </h2>
-            <p className="text-sm leading-relaxed text-muted-foreground">
-              Fund your organization once. Issue member keys, set spend caps,
-              inspect every call, and stop automatically at zero.
-            </p>
-            <Button asChild variant="outline">
-              <Link to="/catalogue">Find an API</Link>
-            </Button>
+        <Reveal as="section" className="flex flex-col gap-8">
+          <Separator />
+          <div className="grid gap-10 md:grid-cols-2">
+            <div className="flex flex-col items-start gap-3">
+              <p className="font-mono text-xs text-muted-foreground">
+                CONSUMERS
+              </p>
+              <h2 className="text-xl font-semibold tracking-tight">
+                One wallet across every API
+              </h2>
+              <p className="text-sm leading-relaxed text-muted-foreground">
+                Fund your organization once. Issue member keys, set spend caps,
+                inspect every call, and stop automatically at zero.
+              </p>
+              <Button asChild variant="outline">
+                <Link to="/catalogue">Find an API</Link>
+              </Button>
+            </div>
+            <div className="flex flex-col items-start gap-3">
+              <p className="font-mono text-xs text-muted-foreground">
+                PUBLISHERS
+              </p>
+              <h2 className="text-xl font-semibold tracking-tight">
+                Ship your spec. Keep 95%.
+              </h2>
+              <p className="text-sm leading-relaxed text-muted-foreground">
+                Put endpoint prices in OpenAPI. Zevium handles keys, credit
+                gates, usage records, earnings, and Stripe payouts.
+              </p>
+              <Button asChild variant="outline">
+                <Link to="/app/projects">Start publishing</Link>
+              </Button>
+            </div>
           </div>
-          <div className="space-y-3">
-            <p className="font-mono text-xs text-muted-foreground">
-              PUBLISHERS
-            </p>
-            <h2 className="text-xl font-semibold tracking-tight">
-              Ship your spec. Keep 95%.
-            </h2>
-            <p className="text-sm leading-relaxed text-muted-foreground">
-              Put endpoint prices in OpenAPI. Zevium handles keys, credit gates,
-              usage records, earnings, and Stripe payouts.
-            </p>
-            <Button asChild variant="outline">
-              <Link to="/app/projects">Start publishing</Link>
-            </Button>
-          </div>
+          <Separator />
         </Reveal>
 
         {/* For agents */}
@@ -309,19 +337,24 @@ function LandingPage() {
             credit-gated gateway as humans.
           </p>
           <div className="grid gap-4 lg:grid-cols-2">
-            <Card className="py-5">
-              <CardHeader className="gap-2 px-5 py-0">
-                <CardTitle className="text-base">Surfaces</CardTitle>
-                <CardDescription className="space-y-2 font-mono text-xs">
-                  <span className="block break-all">{mcpUrl}</span>
-                  <span className="block break-all">{discoveryUrl}</span>
+            <Card>
+              <CardHeader>
+                <CardTitle>Surfaces</CardTitle>
+                <CardDescription>
+                  Machine-readable gateway endpoints for agent clients.
                 </CardDescription>
-                <CardDescription className="pt-1 text-sm">
+              </CardHeader>
+              <CardContent className="flex flex-col gap-4">
+                <div className="flex flex-col gap-2 font-mono text-xs text-muted-foreground">
+                  <span className="break-all">{mcpUrl}</span>
+                  <span className="break-all">{discoveryUrl}</span>
+                </div>
+                <p className="text-sm text-muted-foreground">
                   MCP endpoint +{" "}
                   <span className="font-mono text-xs">/discovery</span> index
                   with per-endpoint pricing. No unmetered side doors.
-                </CardDescription>
-              </CardHeader>
+                </p>
+              </CardContent>
             </Card>
             <McpConfigBlock snippet={mcpSnippet} />
           </div>
@@ -345,12 +378,14 @@ function LandingPage() {
           <div className="grid gap-3 sm:grid-cols-3">
             {showSkeleton
               ? Array.from({ length: 3 }).map((_, i) => (
-                  <Card key={i} className="py-4">
-                    <CardHeader className="gap-2 px-4 py-0">
+                  <Card key={i}>
+                    <CardHeader>
                       <Skeleton className="h-4 w-1/2" />
                       <Skeleton className="h-3 w-1/3" />
-                      <Skeleton className="h-3 w-4/5" />
                     </CardHeader>
+                    <CardContent>
+                      <Skeleton className="h-3 w-4/5" />
+                    </CardContent>
                   </Card>
                 ))
               : teasers.map((teaser, i) => (
@@ -395,12 +430,15 @@ function LandingPage() {
         </section>
       </main>
 
-      <footer className="border-t">
+      <footer>
+        <Separator />
         <div className="mx-auto grid max-w-5xl gap-8 px-4 py-10 sm:grid-cols-4">
           <div className="flex flex-col gap-2">
-            <span className="flex items-center gap-2 text-sm font-semibold tracking-tight">
-              <BrandMark className="size-5" />
-              Zevium
+            <span className="flex items-center gap-0.5 text-sm font-semibold tracking-tight">
+              <BrandMark className="h-3 w-4" />
+              <span>
+                <span className="sr-only">Z</span>evium
+              </span>
             </span>
             <p className="text-xs text-muted-foreground">
               Agent-first, per-call API marketplace.
@@ -448,7 +486,8 @@ function LandingPage() {
             </a>
           </div>
         </div>
-        <div className="border-t">
+        <Separator />
+        <div>
           <div className="mx-auto flex max-w-5xl items-center justify-between gap-3 px-4 py-4 text-xs text-muted-foreground">
             <span>© {new Date().getFullYear()} Zevium</span>
             <Show when="signed-out">
@@ -489,10 +528,10 @@ function McpConfigBlock({ snippet }: { snippet: string }) {
   }
 
   return (
-    <Card className="py-5">
-      <CardHeader className="gap-3 px-5 py-0">
-        <div className="flex items-center justify-between gap-2">
-          <CardTitle className="text-base">MCP config</CardTitle>
+    <Card>
+      <CardHeader>
+        <CardTitle>MCP config</CardTitle>
+        <CardAction>
           <Button
             type="button"
             variant="outline"
@@ -501,20 +540,22 @@ function McpConfigBlock({ snippet }: { snippet: string }) {
             aria-label="Copy MCP config"
           >
             {copied ? (
-              <Check className="size-4" />
+              <Check data-icon="inline-start" />
             ) : (
-              <Copy className="size-4" />
+              <Copy data-icon="inline-start" />
             )}
             Copy
           </Button>
-        </div>
+        </CardAction>
         <CardDescription>
           Paste into your agent client. Replace YOUR_API_KEY with a Zevium key.
         </CardDescription>
+      </CardHeader>
+      <CardContent>
         <pre className="max-h-56 overflow-auto rounded-md border bg-muted/40 p-3 font-mono text-xs whitespace-pre">
           {snippet}
         </pre>
-      </CardHeader>
+      </CardContent>
     </Card>
   );
 }
@@ -533,23 +574,25 @@ function TeaserCard({
   description: string;
 }) {
   return (
-    <Card className="h-full py-4 transition-[transform,box-shadow,border-color] duration-[var(--dur-instant)] ease-[var(--ease)] group-hover:-translate-y-0.5 group-hover:shadow-sm group-active:scale-[0.98]">
-      <CardHeader className="gap-2 px-4 py-0">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <CardTitle className="text-sm">{name}</CardTitle>
-            <CardDescription className="font-mono text-xs">
-              {orgSlug}/{slug}
-            </CardDescription>
-          </div>
-          <Badge variant="secondary" className="shrink-0 text-[10px]">
+    <Card className="h-full transition-[translate,scale,box-shadow,border-color] duration-[var(--dur-instant)] ease-[var(--ease)] group-hover:-translate-y-0.5 group-hover:shadow-sm group-active:scale-[0.98] motion-reduce:transition-none motion-reduce:group-hover:translate-y-0 motion-reduce:group-active:scale-100">
+      <CardHeader>
+        <CardTitle>{name}</CardTitle>
+        <CardAction>
+          <Badge variant="secondary" className="shrink-0">
             {orgName}
           </Badge>
-        </div>
-        <CardDescription className="line-clamp-1 text-xs">
-          {description}
+        </CardAction>
+        <CardDescription>
+          <code>
+            {orgSlug}/{slug}
+          </code>
         </CardDescription>
       </CardHeader>
+      <CardContent>
+        <p className="line-clamp-2 text-sm text-muted-foreground">
+          {description}
+        </p>
+      </CardContent>
     </Card>
   );
 }

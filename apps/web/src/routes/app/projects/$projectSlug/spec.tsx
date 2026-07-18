@@ -1,11 +1,19 @@
 import { useOrganization } from "@clerk/tanstack-react-start";
 import { convexQuery } from "@convex-dev/react-query";
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
+import { Link, createFileRoute } from "@tanstack/react-router";
 import { Suspense } from "react";
 
 import { SpecWorkspace } from "#/components/spec-editor/spec-workspace";
+import { Button } from "#/components/ui/button";
 import { Card, CardContent, CardHeader } from "#/components/ui/card";
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyTitle,
+} from "#/components/ui/empty";
 import { Skeleton } from "#/components/ui/skeleton";
 import { api } from "#/lib/convex-api";
 import type { Id } from "#/lib/convex-data-model";
@@ -65,9 +73,14 @@ function SpecEditorPage() {
 
   if (!orgSlug) {
     return (
-      <p className="text-sm text-muted-foreground">
-        Select an organization to edit this spec.
-      </p>
+      <Empty className="min-h-80 flex-none border">
+        <EmptyHeader>
+          <EmptyTitle>No active organization</EmptyTitle>
+          <EmptyDescription>
+            Select an organization before editing a project spec.
+          </EmptyDescription>
+        </EmptyHeader>
+      </Empty>
     );
   }
 
@@ -90,7 +103,21 @@ function SpecEditor({
   );
 
   if (project === null) {
-    return <p className="text-sm text-muted-foreground">Project not found.</p>;
+    return (
+      <Empty className="min-h-80 flex-none border">
+        <EmptyHeader>
+          <EmptyTitle>Project not found</EmptyTitle>
+          <EmptyDescription>
+            This project does not exist in the active organization.
+          </EmptyDescription>
+        </EmptyHeader>
+        <EmptyContent>
+          <Button asChild variant="outline">
+            <Link to="/app/projects">Back to projects</Link>
+          </Button>
+        </EmptyContent>
+      </Empty>
+    );
   }
 
   return (

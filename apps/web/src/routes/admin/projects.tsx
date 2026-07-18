@@ -23,6 +23,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from "#/components/ui/dialog";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "#/components/ui/empty";
 import { Label } from "#/components/ui/label";
 import { Skeleton } from "#/components/ui/skeleton";
 import { mergeUsagePages } from "#/lib/activity-filters";
@@ -198,11 +205,22 @@ function AdminProjectsPage() {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b text-left text-muted-foreground">
-                      <th className="px-2 py-2 font-medium">Name</th>
-                      <th className="px-2 py-2 font-medium">Org</th>
-                      <th className="px-2 py-2 font-medium">Status</th>
-                      <th className="px-2 py-2 font-medium">Visibility</th>
-                      <th className="px-2 py-2 font-medium text-right">
+                      <th scope="col" className="px-2 py-2 font-medium">
+                        Name
+                      </th>
+                      <th scope="col" className="px-2 py-2 font-medium">
+                        Org
+                      </th>
+                      <th scope="col" className="px-2 py-2 font-medium">
+                        Status
+                      </th>
+                      <th scope="col" className="px-2 py-2 font-medium">
+                        Visibility
+                      </th>
+                      <th
+                        scope="col"
+                        className="px-2 py-2 font-medium text-right"
+                      >
                         Kill switch
                       </th>
                     </tr>
@@ -419,17 +437,15 @@ function useOrgNameMap() {
 
 function EmptyProjects() {
   return (
-    <div className="flex flex-col items-center justify-center gap-3 rounded-md border border-dashed px-6 py-12 text-center">
-      <div className="flex size-10 items-center justify-center rounded-full bg-muted">
-        <FileStack className="size-5 text-muted-foreground" />
-      </div>
-      <div className="space-y-1">
-        <p className="text-sm font-medium">No projects</p>
-        <p className="max-w-sm text-sm text-muted-foreground">
-          No projects match these filters.
-        </p>
-      </div>
-    </div>
+    <Empty className="border">
+      <EmptyHeader>
+        <EmptyMedia variant="icon">
+          <FileStack />
+        </EmptyMedia>
+        <EmptyTitle>No projects</EmptyTitle>
+        <EmptyDescription>No projects match these filters.</EmptyDescription>
+      </EmptyHeader>
+    </Empty>
   );
 }
 

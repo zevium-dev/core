@@ -12,12 +12,19 @@ import { Badge } from "#/components/ui/badge";
 import { Button } from "#/components/ui/button";
 import {
   Card,
+  CardAction,
   CardContent,
   CardDescription,
   CardFooter,
   CardHeader,
   CardTitle,
 } from "#/components/ui/card";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyTitle,
+} from "#/components/ui/empty";
 import { Skeleton } from "#/components/ui/skeleton";
 import { api } from "#/lib/convex-api";
 import { humanError } from "#/lib/human-error";
@@ -108,30 +115,31 @@ function BillingContent({ checkoutSessionId }: { checkoutSessionId?: string }) {
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex flex-wrap items-end justify-between gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Billing</h1>
           <p className="text-sm text-muted-foreground">
             Buy prepaid credits and review payment history.
           </p>
         </div>
-        <div className="text-right">
-          <p className="flex items-center justify-end gap-2 text-sm text-muted-foreground">
-            <Wallet className="size-3.5" aria-hidden="true" />
-            Wallet balance
-          </p>
-          <p className="text-3xl font-semibold tabular-nums">
-            <NumberTicker value={billing.wallet.balance} />
-            <span className="ml-2 text-base font-normal text-muted-foreground">
-              credits
-            </span>
-          </p>
+        <div className="flex w-full items-center gap-3 rounded-lg border bg-card px-4 py-3 sm:w-auto">
+          <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-muted">
+            <Wallet
+              className="size-4 text-muted-foreground"
+              aria-hidden="true"
+            />
+          </div>
+          <div className="min-w-0">
+            <p className="text-xs text-muted-foreground">Wallet balance</p>
+            <p className="text-xl font-semibold tabular-nums">
+              <NumberTicker value={billing.wallet.balance} />
+              <span className="ml-1 text-sm font-normal text-muted-foreground">
+                credits
+              </span>
+            </p>
+          </div>
         </div>
       </div>
-      <p className="-mt-3 border-y py-3 text-sm text-muted-foreground">
-        $1 = 10,000 credits. Stripe confirms payment before credits reach your
-        wallet. Zero balance blocks new calls.
-      </p>
 
       {checkoutNotice ? (
         <Card
@@ -162,7 +170,8 @@ function BillingContent({ checkoutSessionId }: { checkoutSessionId?: string }) {
         <div>
           <h2 className="text-lg font-semibold tracking-tight">Buy credits</h2>
           <p className="text-sm text-muted-foreground">
-            One-time packs. Larger packs include bonus credits.
+            $1 = 10,000 credits. One-time packs; larger packs include bonus
+            credits.
           </p>
         </div>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -177,26 +186,28 @@ function BillingContent({ checkoutSessionId }: { checkoutSessionId?: string }) {
             return (
               <Card
                 key={pack.packId}
-                className="transition-[transform,box-shadow] duration-[var(--dur-instant)] ease-[var(--ease)] hover:-translate-y-0.5 hover:shadow-sm"
+                className="transition-[translate,box-shadow] duration-[var(--dur-instant)] ease-[var(--ease)] hover:-translate-y-0.5 hover:shadow-sm motion-reduce:transition-none motion-reduce:hover:translate-y-0"
               >
                 <CardHeader>
-                  <CardDescription>{price}</CardDescription>
                   <CardTitle className="text-xl tabular-nums">
                     {pack.credits.toLocaleString()}
                     <span className="ml-1 text-sm font-normal text-muted-foreground">
                       credits
                     </span>
                   </CardTitle>
+                  <CardDescription>{price} one-time purchase</CardDescription>
+                  {pack.bonusCredits > 0 ? (
+                    <CardAction>
+                      <Badge variant="secondary">
+                        +{pack.bonusCredits.toLocaleString()} bonus
+                      </Badge>
+                    </CardAction>
+                  ) : null}
                 </CardHeader>
                 <CardContent className="text-sm text-muted-foreground">
-                  {pack.bonusCredits > 0 ? (
-                    <span>
-                      {pack.baseCredits.toLocaleString()} base +{" "}
-                      {pack.bonusCredits.toLocaleString()} bonus
-                    </span>
-                  ) : (
-                    pack.description
-                  )}
+                  {pack.bonusCredits > 0
+                    ? `${pack.baseCredits.toLocaleString()} purchased credits`
+                    : "No bonus credits"}
                 </CardContent>
                 <CardFooter>
                   <Button
@@ -225,7 +236,15 @@ function BillingContent({ checkoutSessionId }: { checkoutSessionId?: string }) {
         </CardHeader>
         <CardContent>
           {billing.payments.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No payments yet.</p>
+            <Empty className="py-8 md:py-10">
+              <EmptyHeader>
+                <EmptyTitle>No payments yet</EmptyTitle>
+                <EmptyDescription>
+                  Completed credit purchases and their Stripe status appear
+                  here.
+                </EmptyDescription>
+              </EmptyHeader>
+            </Empty>
           ) : (
             <>
               <div className="divide-y sm:hidden">
@@ -262,15 +281,27 @@ function BillingContent({ checkoutSessionId }: { checkoutSessionId?: string }) {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b text-left text-muted-foreground">
-                      <th className="px-2 py-2 font-medium">Status</th>
-                      <th className="px-2 py-2 font-medium text-right">
+                      <th scope="col" className="px-2 py-2 font-medium">
+                        Status
+                      </th>
+                      <th
+                        scope="col"
+                        className="px-2 py-2 font-medium text-right"
+                      >
                         Amount
                       </th>
-                      <th className="px-2 py-2 font-medium text-right">
+                      <th
+                        scope="col"
+                        className="px-2 py-2 font-medium text-right"
+                      >
                         Credits
                       </th>
-                      <th className="px-2 py-2 font-medium">Date</th>
-                      <th className="px-2 py-2 font-medium">Details</th>
+                      <th scope="col" className="px-2 py-2 font-medium">
+                        Date
+                      </th>
+                      <th scope="col" className="px-2 py-2 font-medium">
+                        Details
+                      </th>
                     </tr>
                   </thead>
                   <tbody>

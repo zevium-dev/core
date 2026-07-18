@@ -15,6 +15,14 @@ import {
   CardHeader,
   CardTitle,
 } from "#/components/ui/card";
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "#/components/ui/empty";
 import { Skeleton } from "#/components/ui/skeleton";
 import { api } from "#/lib/convex-api";
 import { ensureMirrorOnServer } from "#/lib/ensure-mirror";
@@ -100,12 +108,14 @@ function ProjectsList({ orgSlug }: { orgSlug: string }) {
             Publish APIs from OpenAPI specs.
           </p>
         </div>
-        <Button asChild>
-          <Link to="/app/projects/create">
-            <Plus className="size-4" />
-            New project
-          </Link>
-        </Button>
+        {projects.length > 0 ? (
+          <Button asChild>
+            <Link to="/app/projects/create">
+              <Plus data-icon="inline-start" />
+              New project
+            </Link>
+          </Button>
+        ) : null}
       </div>
 
       {projects.length === 0 ? (
@@ -119,7 +129,7 @@ function ProjectsList({ orgSlug }: { orgSlug: string }) {
               params={{ projectSlug: project.slug }}
               className="group block rounded-xl outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
             >
-              <Card className="h-full transition-[transform,box-shadow,border-color] duration-[var(--dur-instant)] ease-[var(--ease)] group-hover:-translate-y-0.5 group-hover:shadow-sm group-active:scale-[0.98]">
+              <Card className="h-full transition-[translate,scale,box-shadow,border-color] duration-[var(--dur-instant)] ease-[var(--ease)] group-hover:-translate-y-0.5 group-hover:shadow-sm group-active:scale-[0.98] motion-reduce:transition-none motion-reduce:group-hover:translate-y-0 motion-reduce:group-active:scale-100">
                 <CardHeader>
                   <div className="mb-1 flex flex-wrap items-center gap-2">
                     <Badge
@@ -163,26 +173,26 @@ function ProjectsList({ orgSlug }: { orgSlug: string }) {
 
 function EmptyProjects() {
   return (
-    <Card className="border-dashed">
-      <CardHeader className="items-center py-12 text-center">
-        <div className="mb-3 flex size-12 items-center justify-center rounded-full bg-muted">
-          <FolderPlus className="size-6 text-muted-foreground" />
-        </div>
-        <CardTitle>No projects yet</CardTitle>
-        <CardDescription className="max-w-sm">
+    <Empty className="min-h-80 border">
+      <EmptyHeader>
+        <EmptyMedia variant="icon">
+          <FolderPlus />
+        </EmptyMedia>
+        <EmptyTitle>No projects yet</EmptyTitle>
+        <EmptyDescription>
           Create a project, paste an OpenAPI spec, set per-call pricing, and
           publish to the catalogue.
-        </CardDescription>
-        <div className="pt-4">
-          <Button asChild>
-            <Link to="/app/projects/create">
-              <Plus className="size-4" />
-              New project
-            </Link>
-          </Button>
-        </div>
-      </CardHeader>
-    </Card>
+        </EmptyDescription>
+      </EmptyHeader>
+      <EmptyContent>
+        <Button asChild>
+          <Link to="/app/projects/create">
+            <Plus data-icon="inline-start" />
+            New project
+          </Link>
+        </Button>
+      </EmptyContent>
+    </Empty>
   );
 }
 
@@ -195,15 +205,15 @@ function NoOrgState() {
           Select an organization to manage projects.
         </p>
       </div>
-      <Card className="border-dashed">
-        <CardHeader className="items-center py-12 text-center">
-          <CardTitle>No active organization</CardTitle>
-          <CardDescription className="max-w-sm">
+      <Empty className="min-h-80 border">
+        <EmptyHeader>
+          <EmptyTitle>No active organization</EmptyTitle>
+          <EmptyDescription>
             Use the organization switcher in the sidebar to create or select an
             org. Projects are org-scoped.
-          </CardDescription>
-        </CardHeader>
-      </Card>
+          </EmptyDescription>
+        </EmptyHeader>
+      </Empty>
     </div>
   );
 }

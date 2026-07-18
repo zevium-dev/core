@@ -17,6 +17,12 @@ import {
   CardHeader,
   CardTitle,
 } from "#/components/ui/card";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyTitle,
+} from "#/components/ui/empty";
 import { Skeleton } from "#/components/ui/skeleton";
 import { Input } from "#/components/ui/input";
 import { Label } from "#/components/ui/label";
@@ -134,11 +140,9 @@ function EarningsContent() {
   );
   const canTransfer = profile.status === "enabled" && earnings.available > 0;
   const transferLabel =
-    profile.status !== "enabled"
-      ? "Finish payout setup first"
-      : earnings.available <= 0
-        ? "Nothing to transfer"
-        : "Transfer available earnings";
+    earnings.available <= 0
+      ? "Nothing to transfer"
+      : "Transfer available earnings";
 
   return (
     <div className="flex flex-col gap-6">
@@ -218,35 +222,39 @@ function EarningsContent() {
               Your share after Zevium&apos;s 5% fee.
             </p>
           </div>
-          <Button
-            disabled={transferPending || !canTransfer}
-            onClick={() => initiateTransfer()}
-          >
-            {transferPending ? "Submitting transfer…" : transferLabel}
-          </Button>
+          {profile.status === "enabled" ? (
+            <Button
+              disabled={transferPending || !canTransfer}
+              onClick={() => initiateTransfer()}
+            >
+              {transferPending ? "Submitting transfer…" : transferLabel}
+            </Button>
+          ) : null}
         </div>
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <EarningTotalCard
-            label="Pending"
-            value={earnings.pendingRisk}
-            description="Held during risk review."
-          />
-          <EarningTotalCard
-            label="Available"
-            value={earnings.available}
-            description="Ready to transfer."
-          />
-          <EarningTotalCard
-            label="In transfer"
-            value={earnings.allocated}
-            description="Submitted to Stripe."
-          />
-          <EarningTotalCard
-            label="Transferred to Stripe"
-            value={earnings.transferred}
-            description="Delivered to connected account."
-          />
-        </div>
+        <Card>
+          <CardContent className="grid gap-6 sm:grid-cols-2 xl:grid-cols-4">
+            <EarningTotal
+              label="Pending review"
+              value={earnings.pendingRisk}
+              description="Held during risk review."
+            />
+            <EarningTotal
+              label="Available"
+              value={earnings.available}
+              description="Ready to transfer."
+            />
+            <EarningTotal
+              label="Transferring"
+              value={earnings.allocated}
+              description="Submitted to Stripe."
+            />
+            <EarningTotal
+              label="Stripe balance"
+              value={earnings.transferred}
+              description="Delivered to connected account."
+            />
+          </CardContent>
+        </Card>
         {earnings.failed > 0 ? (
           <p className="text-sm text-destructive">
             {earnings.failed.toLocaleString()} credits need transfer review. See
@@ -271,7 +279,7 @@ function EarningsContent() {
   );
 }
 
-function EarningTotalCard({
+function EarningTotal({
   label,
   value,
   description,
@@ -281,20 +289,18 @@ function EarningTotalCard({
   description: string;
 }) {
   return (
-    <Card>
-      <CardHeader className="pb-2">
-        <CardDescription>{label}</CardDescription>
-        <CardTitle className="text-2xl tabular-nums">
-          <NumberTicker value={value} />
-          <span className="ml-1 text-sm font-normal text-muted-foreground">
-            credits
-          </span>
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="text-xs text-muted-foreground">
+    <div className="min-w-0 space-y-2">
+      <p className="text-sm text-muted-foreground">{label}</p>
+      <p className="text-2xl font-semibold tabular-nums">
+        <NumberTicker value={value} />
+        <span className="ml-1 text-sm font-normal text-muted-foreground">
+          credits
+        </span>
+      </p>
+      <p className="text-xs text-muted-foreground">
         ≈ {formatCreditsAsUsd(value)} · {description}
-      </CardContent>
-    </Card>
+      </p>
+    </div>
   );
 }
 
@@ -330,22 +336,34 @@ function EarningsLedgerCard({
       </CardHeader>
       <CardContent>
         {rows.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            No publisher earnings yet. Publish a project and serve a successful
-            paid call to begin earning.
-          </p>
+          <HistoryEmpty
+            title="No earnings yet"
+            description="Publish a project and serve a successful paid call. Its settlement will appear here."
+          />
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b text-left text-muted-foreground">
-                  <th className="px-2 py-2 font-medium">Status</th>
-                  <th className="px-2 py-2 font-medium text-right">Gross</th>
-                  <th className="hidden px-2 py-2 text-right font-medium sm:table-cell">
+                  <th scope="col" className="px-2 py-2 font-medium">
+                    Status
+                  </th>
+                  <th scope="col" className="px-2 py-2 font-medium text-right">
+                    Gross
+                  </th>
+                  <th
+                    scope="col"
+                    className="hidden px-2 py-2 text-right font-medium sm:table-cell"
+                  >
                     Fee
                   </th>
-                  <th className="px-2 py-2 font-medium text-right">Net</th>
-                  <th className="hidden px-2 py-2 font-medium md:table-cell">
+                  <th scope="col" className="px-2 py-2 font-medium text-right">
+                    Net
+                  </th>
+                  <th
+                    scope="col"
+                    className="hidden px-2 py-2 font-medium md:table-cell"
+                  >
                     Available
                   </th>
                 </tr>
@@ -408,16 +426,28 @@ function TransferHistoryCard({
       </CardHeader>
       <CardContent>
         {transfers.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No transfers yet.</p>
+          <HistoryEmpty
+            title="No transfers yet"
+            description="Transfers from available earnings to your connected Stripe balance appear here."
+          />
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b text-left text-muted-foreground">
-                  <th className="px-2 py-2 font-medium">Status</th>
-                  <th className="px-2 py-2 font-medium text-right">Amount</th>
-                  <th className="px-2 py-2 font-medium">Created</th>
-                  <th className="hidden px-2 py-2 font-medium md:table-cell">
+                  <th scope="col" className="px-2 py-2 font-medium">
+                    Status
+                  </th>
+                  <th scope="col" className="px-2 py-2 font-medium text-right">
+                    Amount
+                  </th>
+                  <th scope="col" className="px-2 py-2 font-medium">
+                    Created
+                  </th>
+                  <th
+                    scope="col"
+                    className="hidden px-2 py-2 font-medium md:table-cell"
+                  >
                     Details
                   </th>
                 </tr>
@@ -472,16 +502,28 @@ function PayoutHistoryCard({ payouts }: { payouts: ConnectedPayout[] }) {
       </CardHeader>
       <CardContent>
         {payouts.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No bank payouts yet.</p>
+          <HistoryEmpty
+            title="No bank payouts yet"
+            description="Stripe payouts from your connected balance to your bank account appear here."
+          />
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b text-left text-muted-foreground">
-                  <th className="px-2 py-2 font-medium">Status</th>
-                  <th className="px-2 py-2 font-medium text-right">Amount</th>
-                  <th className="px-2 py-2 font-medium">Arrival</th>
-                  <th className="hidden px-2 py-2 font-medium sm:table-cell">
+                  <th scope="col" className="px-2 py-2 font-medium">
+                    Status
+                  </th>
+                  <th scope="col" className="px-2 py-2 font-medium text-right">
+                    Amount
+                  </th>
+                  <th scope="col" className="px-2 py-2 font-medium">
+                    Arrival
+                  </th>
+                  <th
+                    scope="col"
+                    className="hidden px-2 py-2 font-medium sm:table-cell"
+                  >
                     Details
                   </th>
                 </tr>
@@ -524,6 +566,23 @@ function PayoutHistoryCard({ payouts }: { payouts: ConnectedPayout[] }) {
   );
 }
 
+function HistoryEmpty({
+  title,
+  description,
+}: {
+  title: string;
+  description: string;
+}) {
+  return (
+    <Empty className="py-6 md:py-8">
+      <EmptyHeader>
+        <EmptyTitle>{title}</EmptyTitle>
+        <EmptyDescription>{description}</EmptyDescription>
+      </EmptyHeader>
+    </Empty>
+  );
+}
+
 function formatMoney(amount: number, currency: string): string {
   return new Intl.NumberFormat(undefined, {
     style: "currency",
@@ -539,11 +598,7 @@ function EarningsPageSkeleton() {
         <Skeleton className="h-4 w-72" />
       </div>
       <Skeleton className="h-44 rounded-xl" />
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-        {Array.from({ length: 6 }).map((_, index) => (
-          <Skeleton key={index} className="h-28 rounded-xl" />
-        ))}
-      </div>
+      <Skeleton className="h-36 rounded-xl" />
       <Skeleton className="h-64 rounded-xl" />
       <div className="grid gap-4 xl:grid-cols-2">
         <Skeleton className="h-64 rounded-xl" />

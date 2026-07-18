@@ -21,9 +21,11 @@ const navLinkClass =
 export function AdminHeader() {
   return (
     <header className="flex h-14 shrink-0 items-center gap-2 border-b px-4">
-      <span className="flex items-center gap-2 text-sm font-semibold tracking-tight">
-        <BrandMark className="size-5" />
-        Zevium Admin
+      <span className="flex items-center gap-0.5 text-sm font-semibold tracking-tight">
+        <BrandMark className="h-3 w-4" />
+        <span>
+          <span className="sr-only">Z</span>evium Admin
+        </span>
       </span>
       <nav className="ml-4 hidden items-center gap-0.5 sm:flex">
         {NAV.map((item) => (

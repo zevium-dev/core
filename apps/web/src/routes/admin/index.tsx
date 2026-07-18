@@ -12,6 +12,13 @@ import {
   CardHeader,
   CardTitle,
 } from "#/components/ui/card";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "#/components/ui/empty";
 import { Skeleton } from "#/components/ui/skeleton";
 import { api } from "#/lib/convex-api";
 import type {
@@ -140,22 +147,44 @@ function OverviewContent({
         </CardHeader>
         <CardContent>
           {usage.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              No usage events yet.
-            </p>
+            <Empty className="py-8">
+              <EmptyHeader>
+                <EmptyMedia variant="icon">
+                  <PhoneCall />
+                </EmptyMedia>
+                <EmptyTitle>No usage events yet</EmptyTitle>
+                <EmptyDescription>
+                  Metered gateway activity will appear here.
+                </EmptyDescription>
+              </EmptyHeader>
+            </Empty>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b text-left text-muted-foreground">
-                    <th className="px-2 py-2 font-medium">When</th>
-                    <th className="px-2 py-2 font-medium">Project</th>
-                    <th className="px-2 py-2 font-medium">Endpoint</th>
-                    <th className="px-2 py-2 font-medium">Status</th>
-                    <th className="px-2 py-2 font-medium text-right">
+                    <th scope="col" className="px-2 py-2 font-medium">
+                      When
+                    </th>
+                    <th scope="col" className="px-2 py-2 font-medium">
+                      Project
+                    </th>
+                    <th scope="col" className="px-2 py-2 font-medium">
+                      Endpoint
+                    </th>
+                    <th scope="col" className="px-2 py-2 font-medium">
+                      Status
+                    </th>
+                    <th
+                      scope="col"
+                      className="px-2 py-2 font-medium text-right"
+                    >
                       Credits
                     </th>
-                    <th className="px-2 py-2 font-medium text-right">
+                    <th
+                      scope="col"
+                      className="px-2 py-2 font-medium text-right"
+                    >
                       Latency
                     </th>
                   </tr>

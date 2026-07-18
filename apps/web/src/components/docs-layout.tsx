@@ -53,7 +53,7 @@ type DocsPageProps = {
 export function DocsPage({ title, description, children }: DocsPageProps) {
   return (
     <div className="min-h-screen bg-background">
-      <PublicHeader maxWidthClass="max-w-6xl" active="docs" />
+      <PublicHeader active="docs" />
       <div className="mx-auto max-w-6xl px-4">
         <div className="grid gap-8 py-8 md:grid-cols-[14rem_minmax(0,1fr)]">
           <DocsSidebar />

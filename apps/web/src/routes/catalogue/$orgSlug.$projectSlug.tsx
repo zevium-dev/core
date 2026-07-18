@@ -29,6 +29,14 @@ import {
   CardHeader,
   CardTitle,
 } from "#/components/ui/card";
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "#/components/ui/empty";
 import { Input } from "#/components/ui/input";
 import { Label } from "#/components/ui/label";
 import { Skeleton } from "#/components/ui/skeleton";
@@ -199,7 +207,7 @@ function ApiDetailPage() {
 
   return (
     <div className="min-h-screen bg-background">
-      <PublicHeader maxWidthClass="max-w-6xl" active="catalogue" />
+      <PublicHeader active="catalogue" />
 
       <main className="mx-auto max-w-6xl px-4 py-8 content-enter">
         <Suspense fallback={<ApiDetailBodySkeleton />}>
@@ -380,13 +388,24 @@ function PricingTable({ endpoints }: { endpoints: EndpointRow[] }) {
             <table className="w-full min-w-[28rem] text-left text-sm">
               <thead className="border-b bg-muted/40 text-xs text-muted-foreground">
                 <tr>
-                  <th className="px-3 py-2 font-medium">Method</th>
-                  <th className="px-3 py-2 font-medium">Path</th>
-                  <th className="px-3 py-2 font-medium">Summary</th>
-                  <th className="px-3 py-2 font-medium tabular-nums">
+                  <th scope="col" className="px-3 py-2 font-medium">
+                    Method
+                  </th>
+                  <th scope="col" className="px-3 py-2 font-medium">
+                    Path
+                  </th>
+                  <th scope="col" className="px-3 py-2 font-medium">
+                    Summary
+                  </th>
+                  <th
+                    scope="col"
+                    className="px-3 py-2 font-medium tabular-nums"
+                  >
                     Credits
                   </th>
-                  <th className="px-3 py-2 font-medium">Free tier</th>
+                  <th scope="col" className="px-3 py-2 font-medium">
+                    Free tier
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -912,23 +931,23 @@ function ConnectAgentPanel({
 
 function ApiNotFound() {
   return (
-    <Card className="border-dashed">
-      <CardHeader className="items-center py-16 text-center">
-        <div className="mb-3 flex size-12 items-center justify-center rounded-full bg-muted">
-          <PackageX className="size-6 text-muted-foreground" />
-        </div>
-        <CardTitle>API not found</CardTitle>
-        <CardDescription className="max-w-sm">
+    <Empty className="min-h-80 border">
+      <EmptyHeader>
+        <EmptyMedia variant="icon">
+          <PackageX />
+        </EmptyMedia>
+        <EmptyTitle>API not found</EmptyTitle>
+        <EmptyDescription>
           This listing is missing, private, or unpublished. Browse the public
           catalogue for live APIs.
-        </CardDescription>
-        <div className="pt-4">
-          <Button asChild variant="outline">
-            <Link to="/catalogue">Back to catalogue</Link>
-          </Button>
-        </div>
-      </CardHeader>
-    </Card>
+        </EmptyDescription>
+      </EmptyHeader>
+      <EmptyContent>
+        <Button asChild variant="outline">
+          <Link to="/catalogue">Back to catalogue</Link>
+        </Button>
+      </EmptyContent>
+    </Empty>
   );
 }
 

@@ -13,6 +13,13 @@ import {
   CardHeader,
   CardTitle,
 } from "#/components/ui/card";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "#/components/ui/empty";
 import { Skeleton } from "#/components/ui/skeleton";
 import { api } from "#/lib/convex-api";
 import { formatCredits } from "#/lib/billing-cycle";
@@ -81,9 +88,16 @@ function AdminOrgsPage() {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b text-left text-muted-foreground">
-                      <th className="px-2 py-2 font-medium">Name</th>
-                      <th className="px-2 py-2 font-medium">Slug</th>
-                      <th className="px-2 py-2 font-medium text-right">
+                      <th scope="col" className="px-2 py-2 font-medium">
+                        Name
+                      </th>
+                      <th scope="col" className="px-2 py-2 font-medium">
+                        Slug
+                      </th>
+                      <th
+                        scope="col"
+                        className="px-2 py-2 font-medium text-right"
+                      >
                         Balance
                       </th>
                     </tr>
@@ -131,17 +145,17 @@ function AdminOrgsPage() {
 
 function EmptyOrgs() {
   return (
-    <div className="flex flex-col items-center justify-center gap-3 rounded-md border border-dashed px-6 py-12 text-center">
-      <div className="flex size-10 items-center justify-center rounded-full bg-muted">
-        <Building2 className="size-5 text-muted-foreground" />
-      </div>
-      <div className="space-y-1">
-        <p className="text-sm font-medium">No organizations</p>
-        <p className="max-w-sm text-sm text-muted-foreground">
+    <Empty className="border">
+      <EmptyHeader>
+        <EmptyMedia variant="icon">
+          <Building2 />
+        </EmptyMedia>
+        <EmptyTitle>No organizations</EmptyTitle>
+        <EmptyDescription>
           Mirrored Clerk orgs appear here once members sign in.
-        </p>
-      </div>
-    </div>
+        </EmptyDescription>
+      </EmptyHeader>
+    </Empty>
   );
 }
 
