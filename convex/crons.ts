@@ -9,4 +9,15 @@ crons.hourly(
   { minuteUTC: 0 },
   internal.cronTasks.checkLowBalances,
 );
+
+/**
+ * Hourly release of risk-held earnings that have matured past their hold.
+ * Each org is released in its own transaction with per-org error isolation,
+ * so a single org failing cannot block the rest.
+ */
+crons.hourly(
+  "release-mature-earnings",
+  { minuteUTC: 15 },
+  internal.cronTasks.releaseMatureEarningsCron,
+);
 export default crons;
