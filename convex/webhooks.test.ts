@@ -126,7 +126,7 @@ describe("postWebhook — injectable fetch", () => {
     expect(result.error).toBe("HTTP 500");
   });
 
-  it("returns ok:false on network error", async () => {
+  it("sanitizes network errors", async () => {
     const mockFetch = (async () => {
       throw new Error("ECONNREFUSED");
     }) as typeof fetch;
@@ -144,7 +144,8 @@ describe("postWebhook — injectable fetch", () => {
 
     expect(result.ok).toBe(false);
     expect(result.status).toBe(0);
-    expect(result.error).toBe("ECONNREFUSED");
+    expect(result.error).toBe("Delivery failed");
+    expect(result.error).not.toContain("ECONNREFUSED");
   });
 });
 
