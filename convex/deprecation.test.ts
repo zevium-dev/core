@@ -271,18 +271,35 @@ describe("specs.publish — fires spec_published notification", () => {
   it("creates notification on successful publish", async () => {
     const t = convexTest(schema, modules);
     const seed = await seedWorld(t);
+    const previousApiKey = process.env.GEMINI_API_KEY;
+    const previousFetch = globalThis.fetch;
+    process.env.GEMINI_API_KEY = "test-key";
+    globalThis.fetch = (async () =>
+      Response.json({
+        embedding: { values: Array.from({ length: 768 }, () => 0.1) },
+      })) as typeof fetch;
 
-    await asPublisher(t).mutation(api.specs.publish, {
-      projectId: seed.projectId,
-      version: "1.1.0",
-    });
+    try {
+      await asPublisher(t).mutation(api.specs.publish, {
+        projectId: seed.projectId,
+        version: "1.1.0",
+      });
+      await t.finishInProgressScheduledFunctions();
 
-    const notifs = await t.run(async (ctx) => {
-      return await ctx.db.query("notifications").collect();
-    });
-    const publishedNotif = notifs.find((n) => n.kind === "spec_published");
-    expect(publishedNotif).toBeDefined();
-    expect(publishedNotif!.title).toBe("Spec published");
-    expect(publishedNotif!.refId).toMatch(/spec_published:/);
+      const notifs = await t.run(async (ctx) => {
+        return await ctx.db.query("notifications").collect();
+      });
+      const publishedNotif = notifs.find((n) => n.kind === "spec_published");
+      expect(publishedNotif).toBeDefined();
+      expect(publishedNotif!.title).toBe("Spec published");
+      expect(publishedNotif!.refId).toMatch(/spec_published:/);
+    } finally {
+      if (previousApiKey === undefined) {
+        delete process.env.GEMINI_API_KEY;
+      } else {
+        process.env.GEMINI_API_KEY = previousApiKey;
+      }
+      globalThis.fetch = previousFetch;
+    }
   });
 });
