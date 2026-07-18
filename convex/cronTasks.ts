@@ -1,4 +1,10 @@
-import { internalMutation } from "./_generated/server";
+import {
+  internalAction,
+  internalMutation,
+  internalQuery,
+} from "./_generated/server";
+import type { Id } from "./_generated/dataModel";
+import { internal } from "./_generated/api";
 import { createNotification } from "./lib/notifications";
 
 /** Wallet balance below this triggers a low-balance notification (credits). */
@@ -43,5 +49,71 @@ export const checkLowBalances = internalMutation({
     }
 
     return { notified };
+  },
+});
+
+/**
+ * Returns the distinct set of publisher org ids that currently have earnings
+ * sitting in the risk-hold window (status `pending_risk`). Uses the
+ * `by_status_available` index so this stays cheap as the earnings table grows.
+ *
+ * Exposed as an internal query so the cron action can enumerate orgs without
+ * touching ctx.db (unavailable inside an action) and without requiring admin
+ * auth like admin.listOrgs does.
+ */
+export const listOrgsWithPendingEarnings = internalQuery({
+  args: {},
+  handler: async (ctx): Promise<Id<"organizations">[]> => {
+    const pending = await ctx.db
+      .query("publisherEarnings")
+      .withIndex("by_status_available", (q) => q.eq("status", "pending_risk"))
+      .collect();
+    const orgIds = new Set<Id<"organizations">>();
+    for (const earning of pending) {
+      orgIds.add(earning.publisherOrganizationId);
+    }
+    return [...orgIds];
+  },
+});
+
+/**
+ * Hourly cron: release risk-held earnings that have matured past their hold.
+ *
+ * `payouts.releaseMatureEarnings` is the per-org mutation that flips matured
+ * `pending_risk` rows to `available`; without a cron it was only invoked
+ * opportunistically from the transfer flow, so earnings with no active payout
+ * attempt orphaned in `pending_risk` forever.
+ *
+ * This wrapper fans the release out across every org with pending earnings.
+ * Each org runs in its own transaction via runMutation, so a failure for one
+ * org (thrown validation, transient error, etc.) is caught, logged, and
+ * skipped — it cannot poison the release for the remaining orgs.
+ */
+export const releaseMatureEarningsCron = internalAction({
+  args: {},
+  handler: async (ctx): Promise<{ released: number; failed: number }> => {
+    const orgIds = await ctx.runQuery(
+      internal.cronTasks.listOrgsWithPendingEarnings,
+      {},
+    );
+
+    let released = 0;
+    let failed = 0;
+    for (const orgId of orgIds) {
+      try {
+        await ctx.runMutation(internal.payouts.releaseMatureEarnings, {
+          publisherOrganizationId: orgId,
+        });
+        released += 1;
+      } catch (err) {
+        failed += 1;
+        console.error(
+          `[releaseMatureEarningsCron] release failed for org ${orgId}`,
+          err,
+        );
+      }
+    }
+
+    return { released, failed };
   },
 });
