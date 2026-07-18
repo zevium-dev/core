@@ -68,6 +68,37 @@ Critical invariants:
 - If tabs do not match the user's browser, close the false session immediately
   and restart the permission sequence once.
 
+### Recovering a wedged Helium broker
+
+If clicking **Allow** dismisses the prompt but `/json/version` continues to
+return `404`, Helium can have stale permission state even after an ordinary
+restart. Diagnose before resetting:
+
+```bash
+curl -v --max-time 5 http://127.0.0.1:9222/json/version
+ss -ltnp 'sport = :9222'
+```
+
+When Helium owns port `9222` but returns `404`:
+
+1. Close the stale agent-browser attachment:
+   `agent-browser --session helium-direct close`. This removes session state;
+   it does not stop Helium when the broker is unreachable.
+2. Ask the user to quit Helium fully. Confirm port `9222` has no listener.
+3. Back up `~/.config/net.imput.helium/Local State`.
+4. Set only
+   `devtools.remote_debugging.user-enabled` to `false` in that JSON file.
+5. Reopen Helium and attach once using the same session and `--cdp 9222`.
+6. Verify `tab list` against user-visible tabs.
+
+Never edit Chromium Local State while Helium is running. Preserve file mode and
+write atomically through a temporary file.
+
+Multiple timed-out attachment attempts can queue multiple Helium permission
+prompts, even when they use one session. The user may see two **Allow** dialogs
+after restart. This does not prove multiple browser sessions launched. Once one
+attachment succeeds and `tab list` matches, keep it; do not reset again.
+
 ## Why agent-browser
 
 - Fast native Rust CLI, not a Node.js wrapper

@@ -22,6 +22,7 @@ if (existsSync(localProductionEnv)) {
 process.env.VITE_CLERK_PUBLISHABLE_KEY ??= process.env.CLERK_PUBLISHABLE_KEY;
 
 for (const name of [
+  "CLERK_SECRET_KEY",
   "VITE_CLERK_PUBLISHABLE_KEY",
   "VITE_CONVEX_URL",
   "VITE_GATEWAY_URL",
