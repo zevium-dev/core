@@ -12,6 +12,7 @@ import {
   Settings,
 } from "lucide-react";
 
+import { BrandMark } from "#/components/brand-mark";
 import { ThemeToggle } from "#/components/theme-toggle";
 import {
   Sidebar,
@@ -46,8 +47,8 @@ export function AppSidebar() {
     <Sidebar collapsible="icon" variant="inset">
       <SidebarHeader className="gap-3 p-3">
         <div className="flex items-center gap-2 px-1 group-data-[collapsible=icon]:justify-center">
-          <div className="flex size-7 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground text-xs font-semibold">
-            Z
+          <div className="flex size-7 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground">
+            <BrandMark className="size-5" />
           </div>
           <span className="truncate text-sm font-semibold tracking-tight group-data-[collapsible=icon]:hidden">
             Zevium

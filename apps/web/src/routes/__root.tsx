@@ -89,7 +89,11 @@ export const Route = createRootRouteWithContext<RouterContext>()({
       },
       { title: "Zevium" },
     ],
-    links: [{ rel: "stylesheet", href: appCss }],
+    links: [
+      { rel: "stylesheet", href: appCss },
+      { rel: "icon", href: "/logo.svg", type: "image/svg+xml" },
+      { rel: "manifest", href: "/manifest.json" },
+    ],
     scripts: [{ children: themeInitScript }],
   }),
   component: RootComponent,

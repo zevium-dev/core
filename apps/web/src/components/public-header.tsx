@@ -2,6 +2,7 @@ import { Show, UserButton } from "@clerk/tanstack-react-start";
 import { shadcn } from "@clerk/ui/themes";
 import { Link } from "@tanstack/react-router";
 
+import { BrandMark } from "#/components/brand-mark";
 import { ThemeToggle } from "#/components/theme-toggle";
 import { Button } from "#/components/ui/button";
 import { cn } from "#/lib/utils";
@@ -36,8 +37,9 @@ export function PublicHeader({
         <div className="flex min-w-0 items-center gap-6">
           <Link
             to="/"
-            className="text-sm font-semibold tracking-tight outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+            className="flex items-center gap-2 text-sm font-semibold tracking-tight outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
           >
+            <BrandMark className="size-5" />
             Zevium
           </Link>
           <nav className="hidden items-center gap-4 text-sm text-muted-foreground sm:flex">

@@ -1,5 +1,6 @@
 import { Link } from "@tanstack/react-router";
 
+import { BrandMark } from "#/components/brand-mark";
 import { Button } from "#/components/ui/button";
 import { cn } from "#/lib/utils";
 
@@ -20,7 +21,10 @@ const navLinkClass =
 export function AdminHeader() {
   return (
     <header className="flex h-14 shrink-0 items-center gap-2 border-b px-4">
-      <span className="text-sm font-semibold tracking-tight">Zevium Admin</span>
+      <span className="flex items-center gap-2 text-sm font-semibold tracking-tight">
+        <BrandMark className="size-5" />
+        Zevium Admin
+      </span>
       <nav className="ml-4 hidden items-center gap-0.5 sm:flex">
         {NAV.map((item) => (
           <Link

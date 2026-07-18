@@ -7,6 +7,7 @@ import { m, useReducedMotion } from "motion/react";
 import { useState } from "react";
 import { toast } from "sonner";
 
+import { BrandMark } from "#/components/brand-mark";
 import { Magnetic } from "#/components/motion/magnetic";
 import { Reveal } from "#/components/motion/reveal";
 import { PublicHeader } from "#/components/public-header";
@@ -397,7 +398,10 @@ function LandingPage() {
       <footer className="border-t">
         <div className="mx-auto grid max-w-5xl gap-8 px-4 py-10 sm:grid-cols-4">
           <div className="flex flex-col gap-2">
-            <span className="text-sm font-semibold tracking-tight">Zevium</span>
+            <span className="flex items-center gap-2 text-sm font-semibold tracking-tight">
+              <BrandMark className="size-5" />
+              Zevium
+            </span>
             <p className="text-xs text-muted-foreground">
               Agent-first, per-call API marketplace.
             </p>
