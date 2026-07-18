@@ -67,9 +67,9 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
           web_name="zevium-web-pr-$PR_NUMBER"
-          WEB_NAME="$web_name" node -e 'const fs=require("node:fs"); const p="apps/web/dist/server/wrangler.json"; const c=JSON.parse(fs.readFileSync(p)); c.name=process.env.WEB_NAME; delete c.routes; fs.writeFileSync("/tmp/web-preview.json", JSON.stringify(c));'
-          pnpm --filter web exec wrangler deploy --name "$web_name" --config /tmp/web-preview.json
-          printf '%s' '${{ secrets.CLERK_PREVIEW_SECRET_KEY }}' | pnpm --filter web exec wrangler secret put CLERK_SECRET_KEY --name "$web_name" --config /tmp/web-preview.json
+          WEB_NAME="$web_name" node -e 'const fs=require("node:fs"); const p="apps/web/dist/server/wrangler.json"; const c=JSON.parse(fs.readFileSync(p)); c.name=process.env.WEB_NAME; delete c.routes; fs.writeFileSync("apps/web/dist/server/wrangler.preview.json", JSON.stringify(c));'
+          pnpm --filter web exec wrangler deploy --name "$web_name" --config dist/server/wrangler.preview.json
+          printf '%s' '${{ secrets.CLERK_PREVIEW_SECRET_KEY }}' | pnpm --filter web exec wrangler secret put CLERK_SECRET_KEY --name "$web_name" --config dist/server/wrangler.preview.json
           echo "E2E_BASE_URL=https://${web_name}.zevium-dev.workers.dev" >> "$GITHUB_ENV"
 
       - name: Install browser runtime
