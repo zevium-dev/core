@@ -89,7 +89,10 @@ function isPrivateIPv4(ip: string): boolean {
 
 function ipv4ToTwoGroups(ip: string): [number, number] | null {
   const parts = ip.split(".").map((p) => Number(p));
-  if (parts.length !== 4 || parts.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) {
+  if (
+    parts.length !== 4 ||
+    parts.some((n) => !Number.isInteger(n) || n < 0 || n > 255)
+  ) {
     return null;
   }
   return [(parts[0] << 8) | parts[1], (parts[2] << 8) | parts[3]];
