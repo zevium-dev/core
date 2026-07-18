@@ -123,19 +123,46 @@ describe("matchOperation", () => {
 });
 
 describe("extractPricing", () => {
-  it("floors positive costs and free tier", () => {
-    expect(
-      extractPricing({ "x-zevium-cost": 3.9, "x-zevium-free-tier": 2.2 }),
-    ).toEqual({
-      cost: 3,
-      freeTier: 2,
-    });
+  it("defaults unspecified cost to 1 and omits freeTier", () => {
+    expect(extractPricing({})).toEqual({ cost: 1 });
   });
 
-  it("defaults invalid/zero cost to 1", () => {
-    expect(extractPricing({ "x-zevium-cost": 0 }).cost).toBe(1);
-    expect(extractPricing({ "x-zevium-cost": -2 }).cost).toBe(1);
-    expect(extractPricing({}).cost).toBe(1);
+  it("keeps cost 0 as a valid free-tier cost (no rewrite to 1)", () => {
+    expect(extractPricing({ "x-zevium-cost": 0 })).toEqual({ cost: 0 });
+  });
+
+  it("accepts positive integer cost and freeTier", () => {
+    expect(
+      extractPricing({ "x-zevium-cost": 3, "x-zevium-free-tier": 2 }),
+    ).toEqual({ cost: 3, freeTier: 2 });
+  });
+
+  it("treats freeTier 0 as no free tier", () => {
+    expect(
+      extractPricing({ "x-zevium-cost": 1, "x-zevium-free-tier": 0 }),
+    ).toEqual({ cost: 1 });
+  });
+
+  it("rejects fractional cost", () => {
+    expect(() => extractPricing({ "x-zevium-cost": 3.9 })).toThrow(/integer/);
+  });
+
+  it("rejects fractional freeTier", () => {
+    expect(() =>
+      extractPricing({ "x-zevium-cost": 1, "x-zevium-free-tier": 2.2 }),
+    ).toThrow(/integer/);
+  });
+
+  it("rejects negative cost", () => {
+    expect(() => extractPricing({ "x-zevium-cost": -2 })).toThrow(
+      /non-negative/,
+    );
+  });
+
+  it("rejects negative freeTier", () => {
+    expect(() =>
+      extractPricing({ "x-zevium-cost": 1, "x-zevium-free-tier": -1 }),
+    ).toThrow(/non-negative/);
   });
 });
 

@@ -175,11 +175,39 @@ export function matchOperation(
 
 export function extractPricing(op: OpenApiOperation): EndpointPricing {
   const costRaw = asNumber(op["x-zevium-cost"]);
-  const cost = costRaw !== undefined && costRaw > 0 ? Math.floor(costRaw) : 1;
+  let cost: number;
+  if (costRaw === undefined) {
+    // Unspecified → default credit cost. 0 is NOT defaulted — it is a valid
+    // free-tier cost (free endpoint, publisher-funded free tier aside).
+    cost = 1;
+  } else if (!Number.isInteger(costRaw)) {
+    throw new Error(
+      `x-zevium-cost must be an integer number of credits (got ${costRaw}); ` +
+        `fractional costs are not supported`,
+    );
+  } else if (costRaw < 0) {
+    throw new Error(`x-zevium-cost must be non-negative (got ${costRaw})`);
+  } else {
+    cost = costRaw;
+  }
 
   const freeRaw = asNumber(op["x-zevium-free-tier"]);
-  const freeTier =
-    freeRaw !== undefined && freeRaw > 0 ? Math.floor(freeRaw) : undefined;
+  let freeTier: number | undefined;
+  if (freeRaw !== undefined) {
+    if (!Number.isInteger(freeRaw)) {
+      throw new Error(
+        `x-zevium-free-tier must be an integer (got ${freeRaw}); ` +
+          `fractional values are not supported`,
+      );
+    }
+    if (freeRaw < 0) {
+      throw new Error(
+        `x-zevium-free-tier must be non-negative (got ${freeRaw})`,
+      );
+    }
+    // 0 free calls == no free tier; normalize to undefined.
+    freeTier = freeRaw > 0 ? freeRaw : undefined;
+  }
 
   return freeTier !== undefined ? { cost, freeTier } : { cost };
 }
