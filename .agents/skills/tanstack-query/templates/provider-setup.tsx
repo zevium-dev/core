@@ -12,7 +12,11 @@ createRoot(document.getElementById("root")!).render(
     <QueryClientProvider client={queryClient}>
       <App />
       {/* DevTools are automatically removed in production builds */}
-      <ReactQueryDevtools initialIsOpen={false} buttonPosition="bottom-right" position="bottom" />
+      <ReactQueryDevtools
+        initialIsOpen={false}
+        buttonPosition="bottom-right"
+        position="bottom"
+      />
     </QueryClientProvider>
   </StrictMode>,
 );

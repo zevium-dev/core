@@ -1,0 +1,29 @@
+DONE. Wave-8 backend complete.
+
+## CHANGED
+
+**Schema (additive only):**
+- `convex/schema.ts` — `notifications`, `webhookEndpoints`, `webhookDeliveries` tables; `specVersions` deprecation fields (`deprecatedAt`, `sunsetAt`, `deprecationMessage`); `usageEvents.by_at` index; `visibility_changed` notification kind
+
+**New files:**
+- `convex/lib/notifications.ts` — `createNotification` (idempotent by refId)
+- `convex/lib/webhookDelivery.ts` — `postWebhook` (injectable fetch, WebCrypto HMAC-SHA256), `computeSignature`
+- `convex/notifications.ts` — `listForOrg` (paginated + unreadCount), `markRead`, `markAllRead`
+- `convex/webhooks.ts` — endpoint CRUD (`upsertEndpoint`, `getEndpoint`, `deleteEndpoint`, `listDeliveries`), `fireWebhookEvent` helper, `deliverWebhook` action, `recordDeliveryAttempt` state machine (3 attempts, 60s/300s backoff, `webhook_failed` notification on final failure)
+- `convex/admin.ts` — `isAdminQuery`, `platformStats`, `listOrgs`, `listProjects`, `recentUsage`, `setProjectVisibility` (kill switch + notification + webhook)
+- `convex/cronTasks.ts` — `checkLowBalances` (hourly, <1000 credits, once/day/org via refId)
+- `convex/crons.ts` — hourly cron registration
+- `convex/notifications.test.ts`, `convex/webhooks.test.ts`, `convex/deprecation.test.ts`, `convex/admin.test.ts` — 41 new tests
+
+**Edited (additive):**
+- `convex/lib/auth.ts` — `requireAdmin` (fail-closed on unset env), `isAdmin`
+- `convex/specs.ts` — `deprecateVersion`, `undeprecateVersion`; publish fires `spec_published` notification + `spec.published` webhook; `getPublishedForGateway` includes deprecation metadata
+- `convex/catalogue.ts` — `getPublicDetail` includes deprecation metadata
+
+## VERIFY
+
+| Check | Result |
+|---|---|
+| `pnpm test:convex` | **86/86 passed** (8 files) |
+| `npx convex dev --once` | **Clean** — 5 new indexes applied, functions ready |
+| `npx tsc --project convex/tsconfig.json` | **Zero errors** |

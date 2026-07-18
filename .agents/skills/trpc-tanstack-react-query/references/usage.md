@@ -11,12 +11,21 @@ Important: the loader `params` object includes _all_ route slugs; always pass an
 ```tsx
 import { createFileRoute } from "@tanstack/react-router";
 
-export const Route = createFileRoute("/app/organizations/$organizationSlug/projects/$projectSlug")({
+export const Route = createFileRoute(
+  "/app/organizations/$organizationSlug/projects/$projectSlug",
+)({
   loader: ({ context, params }) => {
-    const routeParams = { organizationSlug: params.organizationSlug, projectSlug: params.projectSlug } as const;
+    const routeParams = {
+      organizationSlug: params.organizationSlug,
+      projectSlug: params.projectSlug,
+    } as const;
 
-    void context.queryClient.ensureQueryData(context.trpc.project.get.queryOptions(routeParams));
-    void context.queryClient.ensureQueryData(context.trpc.projectSecret.list.queryOptions(routeParams));
+    void context.queryClient.ensureQueryData(
+      context.trpc.project.get.queryOptions(routeParams),
+    );
+    void context.queryClient.ensureQueryData(
+      context.trpc.projectSecret.list.queryOptions(routeParams),
+    );
   },
   component: RouteComponent,
 });
@@ -35,7 +44,9 @@ export function RouteComponent() {
   const { organizationSlug, projectSlug } = Route.useParams();
   const trpc = useTRPC();
 
-  const projectQuery = useSuspenseQuery(trpc.project.get.queryOptions({ organizationSlug, projectSlug }));
+  const projectQuery = useSuspenseQuery(
+    trpc.project.get.queryOptions({ organizationSlug, projectSlug }),
+  );
 
   return <div>{projectQuery.data.name}</div>;
 }
@@ -50,14 +61,22 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 import { useTRPC } from "~/lib/trpc";
 
-export function RenameProject({ organizationSlug, projectSlug }: { organizationSlug: string; projectSlug: string }) {
+export function RenameProject({
+  organizationSlug,
+  projectSlug,
+}: {
+  organizationSlug: string;
+  projectSlug: string;
+}) {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
 
   const updateProject = useMutation(
     trpc.project.update.mutationOptions({
       onSuccess: async () => {
-        await queryClient.invalidateQueries(trpc.project.get.queryOptions({ organizationSlug, projectSlug }));
+        await queryClient.invalidateQueries(
+          trpc.project.get.queryOptions({ organizationSlug, projectSlug }),
+        );
       },
     }),
   );
@@ -66,7 +85,11 @@ export function RenameProject({ organizationSlug, projectSlug }: { organizationS
     <button
       disabled={updateProject.isPending}
       onClick={() => {
-        updateProject.mutate({ organizationSlug, projectSlug, name: "New name" });
+        updateProject.mutate({
+          organizationSlug,
+          projectSlug,
+          name: "New name",
+        });
       }}
     >
       {updateProject.isPending ? "Saving..." : "Save"}
@@ -84,19 +107,25 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 import { useTRPC } from "~/lib/trpc";
 
-export function useProjectVisibilityMutation(organizationSlug: string, projectSlug: string) {
+export function useProjectVisibilityMutation(
+  organizationSlug: string,
+  projectSlug: string,
+) {
   const trpc = useTRPC();
   const qc = useQueryClient();
 
   return useMutation(
     trpc.project.update.mutationOptions({
       onMutate(variables) {
-        qc.setQueryData(trpc.project.get.queryKey({ organizationSlug, projectSlug }), (old) =>
-          old ? { ...old, visibility: variables.visibility } : old,
+        qc.setQueryData(
+          trpc.project.get.queryKey({ organizationSlug, projectSlug }),
+          (old) => (old ? { ...old, visibility: variables.visibility } : old),
         );
       },
       async onSettled() {
-        await qc.invalidateQueries(trpc.project.get.queryOptions({ organizationSlug, projectSlug }));
+        await qc.invalidateQueries(
+          trpc.project.get.queryOptions({ organizationSlug, projectSlug }),
+        );
       },
     }),
   );
@@ -117,7 +146,11 @@ export function useUserPreferencesQuery() {
   const user = useSession().user;
   const trpc = useTRPC();
 
-  return useQuery(trpc.userPreference.get.queryOptions(undefined, { enabled: Boolean(user?.id) }));
+  return useQuery(
+    trpc.userPreference.get.queryOptions(undefined, {
+      enabled: Boolean(user?.id),
+    }),
+  );
 }
 ```
 
@@ -130,7 +163,9 @@ import { useTRPC } from "~/lib/trpc";
 
 export function MaybeUser({ userId }: { userId?: string }) {
   const trpc = useTRPC();
-  return useQuery(trpc.user.get.queryOptions(userId ? { id: userId } : skipToken));
+  return useQuery(
+    trpc.user.get.queryOptions(userId ? { id: userId } : skipToken),
+  );
 }
 ```
 

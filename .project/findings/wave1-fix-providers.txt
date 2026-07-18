@@ -1,0 +1,8 @@
+Nesting was wrong twice:
+
+1. First try: `ClerkProvider` in router `Wrap` → Wrap is **outside** `RouterProvider`, Clerk's `useLocation` dies.
+2. Fix: `ClerkProvider` + `ConvexProviderWithClerk` in `__root.tsx` (inside router). Module-singleton `convexQueryClient`/`queryClient` from `router.tsx`. `Wrap` = only `LazyMotion`.
+
+**Check:** `pnpm --filter web build` green. `curl` `/` `/catalogue` `/sign-in` → **200**, HTML has Zevium, no useAuth crash.
+
+DONE: Clerk wraps Convex in root; SSR 200 on /, /catalogue, /sign-in; build green.

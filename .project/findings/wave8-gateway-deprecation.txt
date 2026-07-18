@@ -1,0 +1,14 @@
+All green. 51 tests pass (including the new deprecated-spec test + happy-path absence assertions), typecheck clean.
+
+## CHANGED
+- `apps/gateway/src/spec-source.ts` — `PublishedSpec` gains `deprecatedAt?`/`sunsetAt?`/`deprecationMessage?`; `getPublishedForGatewayRef` Convex return type widened to match; `parsePublishedSpecPayload` parses all three (type+finiteness guarded). `CachedSpecSource`/`FixtureSpecSource` carry the fields unchanged (they store the whole `PublishedSpec` → edge cache rides them through automatically).
+- `apps/gateway/src/pipeline.ts` — after `outHeaders` built, when `published.deprecatedAt !== undefined`: sets `Deprecation: @<secs>`, appends `Link: <https://zevium.dev/catalogue/{org}/{project}>; rel="deprecation"`, and (if `sunsetAt` set) sets `Sunset: <HTTP-date>`. Headers-only — never touches the streamed `upstreamRes.body`.
+- `apps/gateway/test/pipeline.test.ts` — `installFixtures` extended with the three deprecation opts; happy-path test asserts `Deprecation`/`Sunset`/`Link` absent; new test asserts all three present with exact values + billing unaffected.
+
+## VERIFY
+- `pnpm --filter @zevium/gateway typecheck` → clean (`tsc --noEmit`, 2.41s).
+- `pnpm --filter @zevium/gateway test` → **51 passed (51)**, 0 skipped/failed, 5 files.
+
+Design notes: `Link` uses `append` (preserve upstream pagination links per RFC 8288); `Deprecation`/`Sunset` use `set` (gateway is authority on spec-version deprecation, overwrite stray upstream values). `sunsetAt` treated as epoch seconds (parallel to `deprecatedAt`), rendered via `new Date(sunsetAt*1000).toUTCString()` → IMF-fixdate. `deprecationMessage` carried in the data model but not emitted as a header (task specified exactly three header formats); available for other gateway surfaces (agent endpoint, catalogue) without re-fetching Convex.
+
+DONE

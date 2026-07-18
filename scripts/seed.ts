@@ -1,112 +1,79 @@
 /**
- * Seed script: creates a default user + organization for local dev and CI.
+ * Seed default test user + org for local dev and E2E tests. Idempotent.
  *
- * Usage:  pnpm db:seed
+ * Uses Clerk test mode: `+clerk_test` emails sign in with any password set
+ * here and OTP 424242 without real email delivery.
  *
- * Idempotent — safe to run multiple times. Checks for existing rows by
- * email/slug before inserting. Uses better-auth's `hashPassword` so the
- * password hash matches what the auth runtime produces.
+ *   pnpm seed
+ *
+ * Credentials: test+clerk_test@zevium.dev / zevium-test-password
  */
-import "dotenv/config";
+import { createClerkClient } from "@clerk/backend";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
-import { createId } from "@paralleldrive/cuid2";
-import { eq } from "drizzle-orm";
-
-import { hashPassword } from "better-auth/crypto";
-import { db, schema } from "../src/db";
-
-const SEED_EMAIL = "user@example.com";
-const SEED_PASSWORD = "password";
-const SEED_NAME = "Test User";
+const EMAIL = "test+clerk_test@zevium.dev";
+const PASSWORD = "zevium-test-password";
 const ORG_NAME = "Test Organization";
 const ORG_SLUG = "test-org";
 
-async function seed() {
-  console.log("Seeding database...");
-
-  // 1. User (idempotent)
-  const existingUser = await db
-    .select({ id: schema.user.id })
-    .from(schema.user)
-    .where(eq(schema.user.email, SEED_EMAIL))
-    .limit(1)
-    .then((r) => r.at(0));
-
-  let userId: string;
-  if (existingUser) {
-    userId = existingUser.id;
-    console.log(`  User already exists: ${SEED_EMAIL} (${userId})`);
-  } else {
-    userId = createId();
-    const hashedPassword = await hashPassword(SEED_PASSWORD);
-    await db.insert(schema.user).values({
-      email: SEED_EMAIL,
-      emailVerified: true,
-      id: userId,
-      name: SEED_NAME,
-    });
-    await db.insert(schema.account).values({
-      accountId: userId,
-      id: createId(),
-      password: hashedPassword,
-      providerId: "credential",
-      userId,
-    });
-    console.log(`  Created user: ${SEED_EMAIL} (${userId})`);
-  }
-
-  // 2. Organization (idempotent)
-  const existingOrg = await db
-    .select({ id: schema.organization.id })
-    .from(schema.organization)
-    .where(eq(schema.organization.slug, ORG_SLUG))
-    .limit(1)
-    .then((r) => r.at(0));
-
-  let orgId: string;
-  if (existingOrg) {
-    orgId = existingOrg.id;
-    console.log(`  Organization already exists: ${ORG_SLUG} (${orgId})`);
-  } else {
-    orgId = createId();
-    await db.insert(schema.organization).values({
-      id: orgId,
-      name: ORG_NAME,
-      slug: ORG_SLUG,
-    });
-    console.log(`  Created organization: ${ORG_SLUG} (${orgId})`);
-  }
-
-  // 3. Membership (idempotent)
-  const existingMember = await db
-    .select({ id: schema.member.id })
-    .from(schema.member)
-    .where(eq(schema.member.organizationId, orgId))
-    .limit(1)
-    .then((r) => r.at(0));
-
-  if (existingMember) {
-    console.log(`  Membership already exists`);
-  } else {
-    await db.insert(schema.member).values({
-      id: createId(),
-      organizationId: orgId,
-      role: "owner",
-      userId,
-    });
-    console.log(`  Created membership (owner)`);
-  }
-
-  console.log("\nSeed complete:");
-  console.log(`  Email:     ${SEED_EMAIL}`);
-  console.log(`  Password:  ${SEED_PASSWORD}`);
-  console.log(`  Org slug:  ${ORG_SLUG}`);
-  console.log(`  Org name:  ${ORG_NAME}`);
+function loadSecretKey(): string {
+  if (process.env.CLERK_SECRET_KEY) return process.env.CLERK_SECRET_KEY;
+  const env = readFileSync(
+    join(import.meta.dirname, "../apps/web/.env.local"),
+    "utf8",
+  );
+  const match = env.match(/^CLERK_SECRET_KEY=(.+)$/m);
+  if (!match)
+    throw new Error("CLERK_SECRET_KEY not found in env or apps/web/.env.local");
+  return match[1].trim();
 }
 
-seed()
-  .then(() => process.exit(0))
-  .catch((err) => {
-    console.error("Seed failed:", err);
-    process.exit(1);
+const clerk = createClerkClient({ secretKey: loadSecretKey() });
+
+async function main() {
+  const existing = await clerk.users.getUserList({ emailAddress: [EMAIL] });
+  const user =
+    existing.data.at(0) ??
+    (await clerk.users.createUser({
+      emailAddress: [EMAIL],
+      password: PASSWORD,
+      firstName: "Test",
+      lastName: "User",
+      skipPasswordChecks: true,
+    }));
+  console.log(`user: ${user.id} (${EMAIL})`);
+
+  const orgs = await clerk.organizations.getOrganizationList({
+    query: ORG_SLUG,
   });
+  const org =
+    orgs.data.find((o) => o.slug === ORG_SLUG) ??
+    (await clerk.organizations.createOrganization({
+      name: ORG_NAME,
+      slug: ORG_SLUG,
+      createdBy: user.id,
+    }));
+  console.log(`org:  ${org.id} (${ORG_SLUG})`);
+
+  const memberships = await clerk.organizations.getOrganizationMembershipList({
+    organizationId: org.id,
+  });
+  if (!memberships.data.some((m) => m.publicUserData?.userId === user.id)) {
+    await clerk.organizations.createOrganizationMembership({
+      organizationId: org.id,
+      userId: user.id,
+      role: "org:admin",
+    });
+    console.log("membership: created (org:admin)");
+  } else {
+    console.log("membership: exists");
+  }
+
+  console.log(`\nseed OK — sign in: ${EMAIL} / ${PASSWORD}`);
+}
+
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});

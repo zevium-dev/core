@@ -1,0 +1,19 @@
+**CHANGED**
+
+- `apps/web/src/routes/app/settings/index.tsx` — Clerk `<UserProfile routing="hash">` + shadcn theme, full-width card. Static profile dead.
+- `apps/web/src/routes/app/settings/activity.tsx` — real `api.usage.listForOrg` call log, project + 24h/7d/30d/all filters, Load more cursor pages, skeletons, empty→catalogue.
+- `apps/web/src/routes/app/billing.tsx` — `api.billing.cycleBreakdown` usage card (totals, by-project, by-key truncated mono). Wallet/packs/ledger untouched.
+- `apps/web/src/routes/app/index.tsx` — top-up done when `wallet.balance > 0` via `api.wallets.getMyWallet`. Hard `done:false` gone.
+- `apps/web/src/lib/activity-filters.ts` + `.test.ts` — window calc, parse, page merge.
+- `apps/web/src/lib/billing-cycle.ts` + `.test.ts` — truncate key, credits format, month label, empty check.
+- `apps/web/src/lib/onboarding.ts` + `.test.ts` — top-up done + checklist visibility.
+
+Settings tabs already expose Activity. No projects/catalogue/convex/gateway touch.
+
+**VERIFY**
+
+- `pnpm --filter web typecheck` — green
+- `pnpm --filter web test` — 10 files / 56 tests pass
+- `pnpm --filter web build` — green
+
+**DONE**

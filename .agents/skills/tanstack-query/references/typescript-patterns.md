@@ -160,7 +160,10 @@ type QueryState<T> =
   | { status: "error"; data: undefined; error: Error }
   | { status: "success"; data: T; error: null };
 
-function useTypedQuery<T>(queryKey: string[], queryFn: () => Promise<T>): QueryState<T> {
+function useTypedQuery<T>(
+  queryKey: string[],
+  queryFn: () => Promise<T>,
+): QueryState<T> {
   const { data, status, error } = useQuery({ queryKey, queryFn });
 
   return {
@@ -193,7 +196,8 @@ const queryKeys = {
   todos: {
     all: ["todos"] as const,
     lists: () => [...queryKeys.todos.all, "list"] as const,
-    list: (filters: TodoFilters) => [...queryKeys.todos.lists(), filters] as const,
+    list: (filters: TodoFilters) =>
+      [...queryKeys.todos.lists(), filters] as const,
     details: () => [...queryKeys.todos.all, "detail"] as const,
     detail: (id: number) => [...queryKeys.todos.details(), id] as const,
   },

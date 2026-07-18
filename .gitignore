@@ -30,3 +30,13 @@ after-reload.png
 error.png
 reload-*.png
 reload-*.webm
+
+.env*.local
+
+# convex
+.turbo
+
+# browser e2e
+e2e/artifacts/
+.project/e2e-key.env
+.dev.vars

@@ -1,0 +1,23 @@
+DONE: design system + app shell live. `pnpm --filter web build` + `typecheck` green.
+
+**What shipped**
+- shadcn new-york/neutral (CSS vars), 16 UI components + sidebar
+- motion tokens `src/lib/motion.ts` + CSS `--ease/--dur-*` + `vt.ts` VT flag
+- router: ConvexQueryClient + QueryClient + SSR query integration + `ConvexProviderWithClerk` + LazyMotion + `defaultViewTransition`
+- protected `/app` shell: collapsible sidebar, org switcher (Clerk shadcn theme), nav, theme toggle, UserButton, breadcrumb
+- routes: `/` landing stagger, `/catalogue` public grid, `/app` dashboard, `/app/projects`, `/app/settings`
+- mount: optimistic `ensureUser` / `ensureOrganization` via `makeFunctionReference` (try/catch — convex api still empty)
+
+**Files**
+- `apps/web/components.json`
+- `apps/web/src/styles.css`
+- `apps/web/src/lib/{motion,vt,utils,auth-session}.ts`
+- `apps/web/src/router.tsx`
+- `apps/web/src/routes/{__root,index,catalogue,app}.tsx`
+- `apps/web/src/routes/app/{index,projects,settings,settings/index}.tsx`
+- `apps/web/src/components/{app-sidebar,app-header,theme-provider,theme-toggle}.tsx`
+- `apps/web/src/components/ui/*`
+- `apps/web/src/hooks/use-ensure-mirror.ts`
+- `apps/web/.env.local` (`VITE_CONVEX_URL`)
+
+**Note:** convex `_generated` still empty API — ensure mutations no-op/log until convex lane lands.

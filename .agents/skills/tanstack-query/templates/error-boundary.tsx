@@ -20,7 +20,10 @@ type ErrorBoundaryState = {
  *
  * Required because error boundaries must be class components
  */
-class ErrorBoundaryClass extends Component<ErrorBoundaryProps & { onReset?: () => void }, ErrorBoundaryState> {
+class ErrorBoundaryClass extends Component<
+  ErrorBoundaryProps & { onReset?: () => void },
+  ErrorBoundaryState
+> {
   constructor(props: ErrorBoundaryProps & { onReset?: () => void }) {
     super(props);
     this.state = { hasError: false, error: null };
@@ -68,7 +71,9 @@ class ErrorBoundaryClass extends Component<ErrorBoundaryProps & { onReset?: () =
             <summary>Error details</summary>
             {this.state.error.message}
             {this.state.error.stack && (
-              <pre style={{ marginTop: "1rem", fontSize: "0.875rem" }}>{this.state.error.stack}</pre>
+              <pre style={{ marginTop: "1rem", fontSize: "0.875rem" }}>
+                {this.state.error.stack}
+              </pre>
             )}
           </details>
           <button

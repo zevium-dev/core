@@ -1,0 +1,31 @@
+DONE.
+
+## CHANGED
+
+**New files (admin scope only):**
+- `apps/web/src/lib/admin-filters.ts` — pure helpers: `parseProjectStatus`, `parseProjectVisibility`, `buildOrgNameMap`, `orgDisplayName`, `ADMIN_STATUS_OPTIONS`, `ADMIN_VISIBILITY_OPTIONS`
+- `apps/web/src/lib/admin-filters.test.ts` — 11 tests
+- `apps/web/src/components/admin-header.tsx` — minimal header ("Zevium Admin" + Overview/Orgs/Projects nav + Back to app)
+- `apps/web/src/routes/admin.tsx` — layout: beforeLoad client gate (signed-in required → sign-in redirect), `isAdminQuery` check, plain "Not authorized" for non-admins, no admin-data fetch pre-gate
+- `apps/web/src/routes/admin/index.tsx` — `platformStats` cards + `recentUsage` table (100 rows)
+- `apps/web/src/routes/admin/orgs.tsx` — paginated org table (name/slug/balance) + Load more
+- `apps/web/src/routes/admin/projects.tsx` — paginated table (name/org/status/visibility) + status & visibility filter selects + kill-switch confirm dialog (destructive on force-private)
+
+**Regenerated:**
+- `apps/web/src/routeTree.gen.ts` (via `tsr generate`)
+
+No `/app` routes, sidebar, header, or other lanes touched. `convex/admin.ts` consumed as-is.
+
+## VERIFY
+- `pnpm --filter web typecheck` → **green** (tsc --noEmit, 0 errors)
+- `pnpm --filter web test` → **119 passed** (16 files); `admin-filters` **11/11** in isolation
+- `pnpm --filter web build` → **green** (`✓ built in 2.46s`, nitro success)
+
+## Decisions worth flagging
+- **No month-credits number fabricated.** `platformStats` exposes only `usageThisMonth` (call count, capped at 50k) — no credits sum. Overview surfaces the call count honestly + a "Recent credits" card that sums `recentUsage`'s 100 events, labeled "Summed across the N most recent events."
+- **Org name joined client-side.** `listProjects` returns `organizationId` only. `useOrgNameMap` pages `listOrgs` in the background → `buildOrgNameMap`; cells show `—` until the owning org loads.
+- **Kill switch.** `setProjectVisibility` via `convex/react` `useMutation` wrapped in tanstack `useMutation` (for `isPending` + toast via `humanError`). Confirm dialog uses destructive variant when forcing **private** (delist); Convex realtime refreshes the row on success.
+- **Gate.** beforeLoad mirrors `app.tsx` (client Clerk check + SSR `requireAuth`); layout fetches only `isAdminQuery` (safe, no-throw) — children mount only when `data === true`.
+
+## TESTS
+Pure helpers tested (`admin-filters.test.ts`, 11 cases): filter coercion, org-name map build/display/fallback, option-list exhaustiveness. No other pure helpers in scope — route components are React/Convex-bound (not unit-testable in isolation per repo test setup).

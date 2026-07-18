@@ -1,0 +1,15 @@
+[e2e] → wait for base url
+[e2e] wait_for_url http://localhost:3000/ (timeout=90s)
+[e2e] wait_for_url ok code=200
+[e2e] → sign_in
+[e2e] → sign_in
+✗ Navigation failed: net::ERR_NETWORK_CHANGED
+[e2e] filled identifier — submit via Enter
+[e2e] filled password — submit via Enter
+[e2e] OTP screen detected — entering 424242
+[e2e] Clerk user present (user_3GLqr2ul5Xjik1tWZvkJK8KhsqF) — signed in
+[e2e] signed in → http://localhost:3000/app
+[e2e] → open /app/projects
+[e2e] → create project E2E Weather 20260711163543
+[e2e] FAIL: url pattern not matched within 40s: **/app/projects/** (url=http://localhost:3000/app/projects/create)
+[e2e] screenshot: /home/tnfssc/Code/zevium/e2e/artifacts/20260711-163844-create_project_E2E_Weather_20260711163543.png

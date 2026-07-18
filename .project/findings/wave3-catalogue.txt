@@ -1,0 +1,17 @@
+DONE: catalogue + detail + playground live. e2e `03-consumer` PASS (gateway step skipped — `GATEWAY_URL` unset).
+
+**What ship**
+- `/catalogue` layout + index: debounced search, tag chips, Link cards with `api-title-{slug}` VT morph, SSR `ensureQueryData(listPublic)`
+- `/catalogue/$orgSlug/$projectSlug`: SSR `getPublicDetail`, pricing table (`x-zevium-cost`), docs list, Try it (sessionStorage key, Send, curl copy, status/timing/body), Connect your agent MCP snippet
+- Route restructure: parent was eating child (no Outlet) — fixed via `catalogue.tsx` layout + `catalogue/index.tsx` + `catalogue/$orgSlug.$projectSlug.tsx`
+
+**Checks**
+- `pnpm --filter web typecheck` green
+- `pnpm --filter web build` green
+- `bash e2e/03-consumer.sh` PASS
+
+**Files**
+- `apps/web/src/routes/catalogue.tsx`
+- `apps/web/src/routes/catalogue/index.tsx`
+- `apps/web/src/routes/catalogue/$orgSlug.$projectSlug.tsx`
+- `apps/web/src/routeTree.gen.ts` (regen)

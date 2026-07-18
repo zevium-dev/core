@@ -17,12 +17,18 @@ type TodosPage = {
  *
  * In real API: cursor would be offset, page number, or last item ID
  */
-async function fetchTodosPage({ pageParam }: { pageParam: number }): Promise<TodosPage> {
+async function fetchTodosPage({
+  pageParam,
+}: {
+  pageParam: number;
+}): Promise<TodosPage> {
   const limit = 20;
   const start = pageParam * limit;
   const end = start + limit;
 
-  const response = await fetch(`https://jsonplaceholder.typicode.com/todos?_start=${start}&_limit=${limit}`);
+  const response = await fetch(
+    `https://jsonplaceholder.typicode.com/todos?_start=${start}&_limit=${limit}`,
+  );
 
   if (!response.ok) {
     throw new Error("Failed to fetch todos");
@@ -66,7 +72,15 @@ export function useInfiniteTodos() {
  * Component with manual "Load More" button
  */
 export function InfiniteTodosManual() {
-  const { data, fetchNextPage, hasNextPage, isFetchingNextPage, isPending, isError, error } = useInfiniteTodos();
+  const {
+    data,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+    isPending,
+    isError,
+    error,
+  } = useInfiniteTodos();
 
   if (isPending) return <div>Loading...</div>;
   if (isError) return <div>Error: {error.message}</div>;
@@ -91,8 +105,15 @@ export function InfiniteTodosManual() {
       ))}
 
       {/* Load more button */}
-      <button onClick={() => fetchNextPage()} disabled={!hasNextPage || isFetchingNextPage}>
-        {isFetchingNextPage ? "Loading more..." : hasNextPage ? "Load More" : "No more todos"}
+      <button
+        onClick={() => fetchNextPage()}
+        disabled={!hasNextPage || isFetchingNextPage}
+      >
+        {isFetchingNextPage
+          ? "Loading more..."
+          : hasNextPage
+            ? "Load More"
+            : "No more todos"}
       </button>
     </div>
   );
@@ -103,7 +124,15 @@ export function InfiniteTodosManual() {
  * Uses Intersection Observer to detect when user scrolls to bottom
  */
 export function InfiniteTodosAuto() {
-  const { data, fetchNextPage, hasNextPage, isFetchingNextPage, isPending, isError, error } = useInfiniteTodos();
+  const {
+    data,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+    isPending,
+    isError,
+    error,
+  } = useInfiniteTodos();
 
   const loadMoreRef = useRef<HTMLDivElement>(null);
 

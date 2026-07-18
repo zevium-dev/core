@@ -1,0 +1,30 @@
+{
+  "name": "zevium-gateway",
+  "account_id": "1ea9299555b026a6a7484c8323c5a953",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-04-01",
+  "routes": [{ "pattern": "gateway.zevium.dev", "custom_domain": true }],
+  "vars": {
+    // CLERK_SECRET_KEY — Clerk secret for POST /v1/api_keys/verify
+    // CONVEX_DEPLOY_KEY — admin key fallback for wallets:recordUsage
+    // GATEWAY_INTERNAL_SECRET — shared secret for /internal/grant + Convex /ingest-usage
+    // GATEWAY_TEST_MODE — "1" only in vitest (see vitest config)
+    "CONVEX_URL": "https://polite-ermine-809.convex.cloud",
+    "CONVEX_SITE_URL": "https://polite-ermine-809.convex.site",
+  },
+  "observability": { "enabled": true },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "WALLET",
+        "class_name": "WalletDO",
+      },
+    ],
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["WalletDO"],
+    },
+  ],
+}

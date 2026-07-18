@@ -1,0 +1,26 @@
+## CHANGED
+- `apps/web/src/routes/index.tsx` — scroll-depth landing: hero kept, proof strip stats-only, how-it-works 3 cards, consumers/publishers/agents, live catalogue teasers relocated, real footer
+- `apps/web/src/components/motion/reveal.tsx` — DESIGN.md scroll Reveal (`whileInView`, `DUR.slow`, reduced-motion + VT skip)
+- `apps/web/src/lib/landing.ts` — gateway/MCP/discovery helpers + `pickLandingTeasers`
+- `apps/web/src/lib/landing.test.ts` — 8 unit tests
+- `public-header.tsx` — no change (already Catalogue-only, no Docs)
+
+## Behavior
+1. **How it works** — 3 horizontal cards (publish OpenAPI/`x-zevium-cost` → discover+call gateway → settle 95/5)
+2. **For consumers** — org prepaid, zero-balance block, playground, one key
+3. **For publishers** — spec=contract+price, immutable versions, no billing code, $1=10k credits
+4. **For agents** — MCP + `/discovery` URLs from `VITE_GATEWAY_URL` (fallback localhost:8787), MCP JSON + copy
+5. **Live catalogue** below fold; `live:false` FALLBACK_TEASERS → `/catalogue` (no dead deep links)
+6. **Footer** — Product: Catalogue, Pricing→`/catalogue#pricing`; Publishers: `/app/projects`; Company: GitHub `zevium-dev/core`. No Docs.
+
+Motion: Reveal uses `DUR`/`EASE`/`DIST`, viewport once, reduced-motion final state. Semantic tokens only.
+
+## TESTS
+Helpers tested (`landing.test.ts`). Rest presentational.
+
+## VERIFY
+- `pnpm --filter web typecheck` — green
+- `pnpm --filter web test` — 19 passed
+- `pnpm --filter web build` — green
+
+## DONE

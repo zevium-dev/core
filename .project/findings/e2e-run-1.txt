@@ -1,0 +1,19 @@
+=== Zevium E2E ===
+base: http://localhost:3000
+artifacts: /home/tnfssc/Code/zevium/e2e/artifacts
+
+── 01-auth.sh ──
+[e2e] → wait for base url
+[e2e] wait_for_url http://localhost:3000/ (timeout=90s)
+[e2e] wait_for_url ok code=200
+[e2e] → anonymous landing /
+[e2e] → anonymous /app redirects to sign-in
+[e2e] → sign_in with seed credentials
+[e2e] → sign_in
+[e2e] FAIL: still on sign-in after credentials+OTP (url=http://localhost:3000/sign-in)
+[e2e] screenshot: /home/tnfssc/Code/zevium/e2e/artifacts/20260711-142625-sign_in.png
+FAIL 01-auth.sh exit=1 (178s)
+
+=== summary (178s) ===
+  FAIL  01-auth.sh  (178s) exit=1
+  (remaining scripts skipped after first failure)

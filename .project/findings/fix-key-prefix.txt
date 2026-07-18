@@ -1,0 +1,14 @@
+Prefix gate was braindead — only `zev_`. Real Clerk machine keys = `ak_`. Dead on arrival.
+
+**Fix**
+- `isApiKeySecret` — accept `ak_` + `zev_`
+- `ClerkKeyVerifier.verify` + `extractApiKey` use it
+- `mcp.ts` call_api gate + tool/docs copy updated
+- tests cover Bearer/x-api-key `ak_`, verifier cache path uses `ak_secret`
+- garbage (`sk_live_…`) still rejected
+
+**Check**
+- `pnpm --filter @zevium/gateway test` — 42 pass
+- `pnpm --filter @zevium/gateway typecheck` — green
+
+DONE: accept both `ak_` (Clerk) and `zev_` key prefixes in gateway verifier/mcp; tests+typecheck green

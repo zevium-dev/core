@@ -1,0 +1,108 @@
+import {
+  useAuth,
+  useOrganization,
+  useOrganizationList,
+} from "@clerk/tanstack-react-start";
+import {
+  Outlet,
+  createFileRoute,
+  redirect,
+  useNavigate,
+  useRouterState,
+} from "@tanstack/react-router";
+import { useEffect } from "react";
+
+import { AppHeader } from "#/components/app-header";
+import { AppSidebar } from "#/components/app-sidebar";
+import { SidebarInset, SidebarProvider } from "#/components/ui/sidebar";
+import { useEnsureMirror } from "#/hooks/use-ensure-mirror";
+import { readClientClerkAuth } from "#/lib/clerk-client";
+import { requireAuth } from "#/lib/auth-session";
+import type { RouterContext } from "#/router";
+
+export const Route = createFileRoute("/app")({
+  beforeLoad: async ({ context }) => {
+    // Client: gate from live Clerk / cached context — no server fn.
+    if (typeof window !== "undefined") {
+      const { userId } = readClientClerkAuth({
+        userId: (context as RouterContext).userId,
+      });
+      if (!userId) {
+        throw redirect({ to: "/sign-in/$" });
+      }
+      return;
+    }
+
+    // SSR: full server auth check.
+    try {
+      await requireAuth();
+    } catch (err) {
+      // requireAuth throws redirect; rethrow known redirects, else force sign-in
+      if (err && typeof err === "object" && "to" in err) {
+        throw err;
+      }
+      throw redirect({ to: "/sign-in/$" });
+    }
+  },
+  component: AppLayout,
+});
+
+function AppLayout() {
+  useEnsureMirror();
+  useOrgLessGuard();
+
+  return (
+    <SidebarProvider>
+      <AppSidebar />
+      <SidebarInset>
+        <AppHeader />
+        <main
+          className="flex flex-1 flex-col gap-4 p-4 md:p-6 content-enter"
+          style={{ viewTransitionName: "main-content" }}
+        >
+          <Outlet />
+        </main>
+      </SidebarInset>
+    </SidebarProvider>
+  );
+}
+
+/**
+ * Belt-and-braces guard for pre-existing org-less users. Clerk
+ * auto-org-creation is now enabled instance-wide for new signups, but users
+ * created before that flip can still land with no active org and zero
+ * memberships. When that happens, push them to /app/org/create.
+ *
+ * Guards against a redirect loop by skipping entirely under /app/org — that
+ * subtree (including the create screen itself) must always render.
+ */
+function useOrgLessGuard() {
+  const navigate = useNavigate();
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const { isLoaded: authLoaded, isSignedIn } = useAuth();
+  const { isLoaded: orgLoaded, organization } = useOrganization();
+  const { isLoaded: membershipsLoaded, userMemberships } = useOrganizationList({
+    userMemberships: { infinite: false },
+  });
+
+  const underOrgSubtree = pathname.startsWith("/app/org");
+
+  useEffect(() => {
+    if (underOrgSubtree) return;
+    if (!authLoaded || !isSignedIn) return;
+    if (!orgLoaded || !membershipsLoaded) return;
+    if (organization) return;
+    if (userMemberships.count > 0) return;
+
+    void navigate({ to: "/app/org/create" });
+  }, [
+    underOrgSubtree,
+    authLoaded,
+    isSignedIn,
+    orgLoaded,
+    membershipsLoaded,
+    organization,
+    userMemberships.count,
+    navigate,
+  ]);
+}

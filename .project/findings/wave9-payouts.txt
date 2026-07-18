@@ -1,0 +1,1 @@
+429 {"type":"error","error":{"type":"rate_limit_error","code":"1308","message":"[1308][Usage limit reached for 5 hour. Your limit will reset at 2026-07-12 04:44:37][2026071202171435e7386aae294c13]"},"request_id":"2026071202171435e7386aae294c13"} retry-after-ms=8842000

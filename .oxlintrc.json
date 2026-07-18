@@ -1,7 +1,10 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
   "plugins": ["typescript", "react"],
-  "jsPlugins": ["@tanstack/eslint-plugin-router", "eslint-plugin-perfectionist"],
+  "jsPlugins": [
+    "@tanstack/eslint-plugin-router",
+    "eslint-plugin-perfectionist"
+  ],
   "categories": {
     "correctness": "off"
   },

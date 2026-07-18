@@ -1,0 +1,24 @@
+[e2e] → wait for base url
+[e2e] wait_for_url http://localhost:3000/ (timeout=90s)
+[e2e] wait_for_url ok code=200
+[e2e] → sign_in
+[e2e] → sign_in
+[e2e] filled identifier — submit via Enter
+[e2e] filled password — submit via Enter
+[e2e] OTP screen detected — entering 424242
+[e2e] Clerk user present (user_3GLqr2ul5Xjik1tWZvkJK8KhsqF) — signed in
+[e2e] signed in → http://localhost:3000/app
+[e2e] → open /app/projects
+[e2e] → create project E2E Weather 20260711191831
+[e2e] → open spec editor
+[e2e] → paste minimal OpenAPI JSON
+[e2e] → save draft
+[e2e] draft saved (or no error toast)
+[e2e] → publish 0.0.1
+Publish version
+[e2e] published 0.0.1
+[e2e] → make public
+Make project public
+[e2e] → assert catalogue lists project
+[e2e] 02-publisher PASS name=E2E Weather 20260711191831 slug=e2e-weather-20260711191831
+02 exit=0

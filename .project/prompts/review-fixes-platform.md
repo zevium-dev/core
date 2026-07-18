@@ -1,0 +1,19 @@
+Task: product-review fixes, platform lane. Write scope: convex/schema.ts (notifications.kind union ONLY), convex/notifications.ts (lib/notifications.ts if needed), convex/payouts.ts, convex/admin.ts (resolvePayout notification only), convex/dev.ts (new), convex tests, apps/web/src/routes/app.tsx (org guard only), e2e/03-consumer.sh. NOT yours: other web files, gateway, catalogue.
+
+Read first: AGENTS.md, convex/schema.ts notifications table, convex/lib/notifications.ts, convex/payouts.ts, convex/admin.ts resolvePayout, apps/web/src/routes/app.tsx, e2e/lib.sh + e2e/03-consumer.sh, convex/projects.ts + specs.ts (for seeding), packages/shared validate (specs must pass validation).
+
+FIXES:
+
+1. Payout notification kinds: extend notifications.kind union with "payout_requested" and "payout_resolved" (schema.ts — union addition ONLY, touch nothing else in schema). payouts.requestPayout → createNotification (kind payout_requested, refId payout_requested:{requestId}, org = requester org, body includes credits + $). admin.resolvePayout → payout_resolved notification (body includes paid/rejected + note). Tests for both (idempotency refIds).
+2. Org-less user guard (apps/web/src/routes/app.tsx): in AppLayout component (client-side), when Clerk is loaded, user signed in, active organization is null AND user has zero org memberships → redirect (router navigate) to /app/org/create. Use useOrganizationList({ userMemberships: { infinite: false } }) or equivalent; guard against redirect loops (skip when already under /app/org). NOTE: Clerk auto-org-creation was just enabled instance-wide, so this guard is belt-and-braces for pre-existing org-less users.
+3. Demo seed + junk cleanup (convex/dev.ts, new, internalMutation/internalAction only — dev tooling, never client-exposed):
+   - cleanupTestProjects: delete projects (and their specs/specVersions/specEmbeddings/webhookEndpoints rows) whose slug starts with "e2e-weather-" or equals "manual-repro-1628" / "scroll-test-1". Return counts.
+   - seedDemoProjects: for org test-org, create 3 published+public projects with real free upstreams and PROPER names/descriptions/tags + valid specs with x-zevium-cost:
+     a. "Weather Forecast" slug weather-forecast — upstream https://api.open-meteo.com — GET /v1/forecast (summary "Current weather + hourly forecast by lat/lon", x-zevium-cost 3), tags [weather, forecast]. Description: real sentence.
+     b. "Random User Data" slug random-user — upstream https://randomuser.me — GET /api (cost 2, free-tier 25), tags [testing, data].
+     c. "HTTP Echo" slug http-echo — upstream https://postman-echo.com — GET /get (cost 1, free-tier 100) + POST /post (cost 1), tags [testing, http].
+     Reuse existing publish pipeline logic where practical (insert specVersions row + set project published/public + schedule search embedding via internal.search.embedProject). Idempotent (skip when slug exists). Run BOTH via npx convex run (internal fns callable on dev): report outputs. Verify catalogue shows them (listPublic).
+4. e2e browser-fetch coverage (e2e/03-consumer.sh): after the existing curl paid-call step, add: (a) anonymous browser mock call — agent-browser eval fetch('${GATEWAY_URL}/mock/{org}/{project}/get').then(r=>r.status) expect 200 (CORS regression canary); (b) when E2E_API_KEY set, browser fetch paid call with Authorization header expect 200. Follow the script's existing style (ab eval, step/assert helpers). Note eval is async — use a promise pattern compatible with agent-browser eval (it awaits promises).
+   TESTS: convex tests for payout notifications; dev.ts logic covered by running it (report outputs), no unit tests required for seed.
+   VERIFY: pnpm test:convex; npx tsc -p convex/tsconfig.json; npx convex dev --once; pnpm --filter web typecheck; run cleanup+seed via CLI and paste result counts. Report each.
+   Output: CHANGED list, VERIFY results, DONE or BLOCKED.

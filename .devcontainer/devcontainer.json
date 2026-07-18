@@ -91,7 +91,9 @@
 
   "postCreateCommand": "bash .devcontainer/setup.sh",
 
-  "mounts": ["source=${localEnv:HOME}/.gitconfig,target=/home/node/.gitconfig,type=bind,consistency=cached"],
+  "mounts": [
+    "source=${localEnv:HOME}/.gitconfig,target=/home/node/.gitconfig,type=bind,consistency=cached"
+  ],
 
   "remoteUser": "node"
 }

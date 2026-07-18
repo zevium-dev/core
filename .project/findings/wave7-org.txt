@@ -1,0 +1,23 @@
+## CHANGED
+- `apps/web/src/routes/app/org.tsx` — layout shell
+- `apps/web/src/routes/app/org/index.tsx` — org home (active header + member count + `<OrganizationProfile routing="hash">`; no-org → empty + CTA + `<OrganizationList>`)
+- `apps/web/src/routes/app/org/create.tsx` — `<CreateOrganization afterCreateOrganizationUrl="/app">`
+- `apps/web/src/components/app-sidebar.tsx` — **Organization** nav (`Building2` → `/app/org`)
+- `apps/web/src/components/app-header.tsx` — breadcrumb labels `org` / `create` / `billing`
+- `apps/web/src/routeTree.gen.ts` — auto regen
+
+## INVITES
+Clerk owns it:
+- **Members/invites out:** `<OrganizationProfile>` tabs
+- **Incoming pending:** `<OrganizationSwitcher>` already surfaces them (sidebar)
+- No custom `/app/invitations` route
+
+## TESTS
+No pure logic extracted. Zero unit tests. UI = Clerk embeds + layout.
+
+## VERIFY
+- `pnpm --filter web generate-routes` — ok
+- `pnpm --filter web typecheck` — green
+- `pnpm --filter web build` — green (client + ssr + nitro)
+
+## DONE

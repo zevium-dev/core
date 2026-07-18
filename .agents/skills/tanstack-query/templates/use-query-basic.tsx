@@ -52,7 +52,9 @@ export function useTodos() {
  * Fetch single todo by ID
  */
 async function fetchTodoById(id: number): Promise<Todo> {
-  const response = await fetch(`https://jsonplaceholder.typicode.com/todos/${id}`);
+  const response = await fetch(
+    `https://jsonplaceholder.typicode.com/todos/${id}`,
+  );
 
   if (!response.ok) {
     throw new Error(`Failed to fetch todo ${id}: ${response.statusText}`);

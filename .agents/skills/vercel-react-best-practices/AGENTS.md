@@ -207,7 +207,11 @@ const { user, config, profile } = await all({
 const userPromise = fetchUser();
 const profilePromise = userPromise.then((user) => fetchProfile(user.id));
 
-const [user, config, profile] = await Promise.all([userPromise, fetchConfig(), profilePromise]);
+const [user, config, profile] = await Promise.all([
+  userPromise,
+  fetchConfig(),
+  profilePromise,
+]);
 ```
 
 We can also create all the promises first, and do `Promise.all()` at the end.
@@ -238,7 +242,10 @@ export async function GET(request: Request) {
   const sessionPromise = auth();
   const configPromise = fetchConfig();
   const session = await sessionPromise;
-  const [config, data] = await Promise.all([configPromise, fetchData(session.user.id)]);
+  const [config, data] = await Promise.all([
+    configPromise,
+    fetchData(session.user.id),
+  ]);
   return Response.json({ data, config });
 }
 ```
@@ -262,7 +269,11 @@ const comments = await fetchComments();
 **Correct: parallel execution, 1 round trip**
 
 ```typescript
-const [user, posts, comments] = await Promise.all([fetchUser(), fetchPosts(), fetchComments()]);
+const [user, posts, comments] = await Promise.all([
+  fetchUser(),
+  fetchPosts(),
+  fetchComments(),
+]);
 ```
 
 ### 1.5 Strategic Suspense Boundaries
@@ -446,7 +457,9 @@ function AnimationPlayer({
 
   useEffect(() => {
     if (enabled && !frames && typeof window !== "undefined") {
-      import("./animation-frames.js").then((mod) => setFrames(mod.frames)).catch(() => setEnabled(false));
+      import("./animation-frames.js")
+        .then((mod) => setFrames(mod.frames))
+        .catch(() => setEnabled(false));
     }
   }, [enabled, frames, setEnabled]);
 
@@ -485,7 +498,10 @@ export default function RootLayout({ children }) {
 ```tsx
 import dynamic from "next/dynamic";
 
-const Analytics = dynamic(() => import("@vercel/analytics/react").then((m) => m.Analytics), { ssr: false });
+const Analytics = dynamic(
+  () => import("@vercel/analytics/react").then((m) => m.Analytics),
+  { ssr: false },
+);
 
 export default function RootLayout({ children }) {
   return (
@@ -520,7 +536,10 @@ function CodePanel({ code }: { code: string }) {
 ```tsx
 import dynamic from "next/dynamic";
 
-const MonacoEditor = dynamic(() => import("./monaco-editor").then((m) => m.MonacoEditor), { ssr: false });
+const MonacoEditor = dynamic(
+  () => import("./monaco-editor").then((m) => m.MonacoEditor),
+  { ssr: false },
+);
 
 function CodePanel({ code }: { code: string }) {
   return <MonacoEditor value={code} />;
@@ -561,7 +580,9 @@ function FlagsProvider({ children, flags }: Props) {
     }
   }, [flags.editorEnabled]);
 
-  return <FlagsContext.Provider value={flags}>{children}</FlagsContext.Provider>;
+  return (
+    <FlagsContext.Provider value={flags}>{children}</FlagsContext.Provider>
+  );
 }
 ```
 
@@ -982,7 +1003,8 @@ export async function POST(request: Request) {
   // Log after response is sent
   after(async () => {
     const userAgent = (await headers()).get("user-agent") || "unknown";
-    const sessionCookie = (await cookies()).get("session-id")?.value || "anonymous";
+    const sessionCookie =
+      (await cookies()).get("session-id")?.value || "anonymous";
 
     logUserAction({ sessionCookie, userAgent });
   });
@@ -1236,7 +1258,10 @@ function migrate() {
     const v1 = localStorage.getItem("userConfig:v1");
     if (v1) {
       const old = JSON.parse(v1);
-      saveConfig({ theme: old.darkMode ? "dark" : "light", language: old.lang });
+      saveConfig({
+        theme: old.darkMode ? "dark" : "light",
+        language: old.lang,
+      });
       localStorage.removeItem("userConfig:v1");
     }
   } catch {}
@@ -1655,7 +1680,9 @@ function FilteredList({ items }: { items: Item[] }) {
 
 function UserProfile() {
   // JSON.parse runs on every render
-  const [settings, setSettings] = useState(JSON.parse(localStorage.getItem("settings") || "{}"));
+  const [settings, setSettings] = useState(
+    JSON.parse(localStorage.getItem("settings") || "{}"),
+  );
 
   return <SettingsForm settings={settings} onChange={setSettings} />;
 }
@@ -2406,7 +2433,9 @@ let cookieCache: Record<string, string> | null = null;
 
 function getCookie(name: string) {
   if (!cookieCache) {
-    cookieCache = Object.fromEntries(document.cookie.split("; ").map((c) => c.split("=")));
+    cookieCache = Object.fromEntries(
+      document.cookie.split("; ").map((c) => c.split("=")),
+    );
   }
   return cookieCache[name];
 }

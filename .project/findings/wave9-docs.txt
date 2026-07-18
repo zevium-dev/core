@@ -1,0 +1,37 @@
+## DONE
+
+In-app `/docs` built. Four pages, shared layout, code blocks with copy buttons, wired into nav.
+
+### CHANGED
+
+**New files**
+- `apps/web/src/components/docs-code-block.tsx` — `<DocsCodeBlock>` with copy button (Check morph on success, toast, `not-prose` escape, semantic tokens only)
+- `apps/web/src/components/docs-layout.tsx` — `<DocsPage>` layout + `<DocsSidebar>`: PublicHeader (`active="docs"`), sticky desktop sidebar, mobile `<Sheet>` collapsible nav, prose tuned to semantic tokens via typography modifiers (no raw colors)
+- `apps/web/src/routes/docs/index.tsx` — Getting started: what Zevium is, credits model ($1=10,000, 95/5), consumer quickstart (sign up → org → top up → key → first call curl)
+- `apps/web/src/routes/docs/publishing.tsx` — project → spec (`x-zevium-cost`/`x-zevium-free-tier`) → validate → publish semver → make public; immutability; deprecation headers; webhooks (3 events + HMAC-SHA256 verification snippet)
+- `apps/web/src/routes/docs/consuming.tsx` — keys (org-scoped, one/user/org, `ak_` prefix), gateway URL shape `/gateway/{org}/{project}/{path}`, response headers (`x-zevium-cost`, `x-zevium-request-id`, `x-zevium-free-tier`, `Deprecation`/`Sunset`), 402 zero-balance, refunds on non-2xx/502
+- `apps/web/src/routes/docs/agents.tsx` — MCP endpoint (env-driven host via `landing.ts`), `/discovery`, three tools (`search_apis`/`get_api_docs`/`call_api`), 402 gating, mock-mode note
+
+**Modified**
+- `apps/web/src/components/public-header.tsx` — added Docs nav link + `"docs"` to `active` union
+- `apps/web/src/routes/index.tsx` — added Docs link to footer Product column
+- `apps/web/src/routeTree.gen.ts` — regenerated (`tsr generate`), all 4 docs routes registered
+
+### Content grounding
+Every code block verified against source: gateway path + headers + 402 body (`apps/gateway/src/pipeline.ts`), HMAC scheme (`convex/lib/webhookDelivery.ts`), webhook events (`convex/specs.ts`/`admin.ts`), MCP tools (`apps/gateway/src/mcp.ts`), pricing defaults (`packages/shared/src/pricing.ts`), key prefix + one-per-org (`apps/web/src/lib/api-keys.ts`), host resolution (`apps/web/src/lib/landing.ts`).
+
+### TESTS
+None needed — static content. State so. (No new test files; existing 119 tests still green.)
+
+### VERIFY
+| Step | Result |
+|---|---|
+| `pnpm --filter web typecheck` | **Docs code: zero errors.** One pre-existing error in `convex/specs.ts:187` (`internal.search.embedProject` — the `wave9-semantic-search` WIP, `convex/search.ts` unregistered module; modified by prior session, outside docs scope) |
+| `pnpm --filter web test` | **Green** — 16 files, 119 passed |
+| `pnpm --filter web build` | **Green** — ✓ built in 2.65s, docs SSR chunks emitted |
+| Route tree | All 4 docs routes registered |
+
+Design compliance: semantic tokens only (prose remapped via typography modifiers, no raw Tailwind colors), motion minimal (`content-enter` only, global `prefers-reduced-motion` kill switch already in `styles.css`), mobile-responsive collapsible sidebar via shadcn `<Sheet>`, stock components unmodified.
+
+### Note
+Typecheck isn't fully green due to the pre-existing `convex/specs.ts` error from the in-progress semantic-search feature — explicitly out of my write scope ("Nothing else"). My docs deliverable is clean and fully verified (test + build green, zero docs typecheck errors).

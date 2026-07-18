@@ -1,0 +1,24 @@
+**DONE.** Usage pipe fixed. Deploy-key path dead for real flush.
+
+### CHANGED
+- `convex/http.ts` — `POST /ingest-usage` + `parseIngestUsageBody` (auth fail-closed, max 500, `internal.wallets.recordUsage`)
+- `convex/ingest-usage.test.ts` — auth reject, shape reject, apply + settleRefId dedupe via `t.fetch`
+- `apps/gateway/src/usage.ts` — `ingestUrl`/`internalSecret`, `#recordViaIngest`, fetch wrap for workerd
+- `apps/gateway/src/wallet.ts` — `#buildUsageClient` prefer ingest → adminKey → public
+- `apps/gateway/src/index.ts` — `CONVEX_SITE_URL?`
+- `apps/gateway/worker-configuration.d.ts` — same
+- `apps/gateway/wrangler.jsonc` — env docs
+- `apps/gateway/test/usage-client.test.ts` — body/header/401/500/mutationFn prefer
+
+### VERIFY
+| Check | Result |
+|---|---|
+| `npx convex env set GATEWAY_INTERNAL_SECRET dev-internal-secret-1` | ok |
+| `npx convex dev --once` | clean |
+| `pnpm typecheck` | 3/3 green |
+| gateway vitest | 50 pass (incl. 5 ingest client) |
+| convex vitest | 29 pass (incl. ingest http) |
+| `pnpm test` root | green |
+
+### Design
+Gateway DO alarm → `POST {site}/ingest-usage` + `x-internal-secret` → httpAction → `internal.wallets.recordUsage`. No `CONVEX_DEPLOY_KEY` needed on hot flush.

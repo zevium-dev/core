@@ -1,0 +1,104 @@
+name: Pull Request Preview
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+concurrency:
+  group: preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+env:
+  MISE_EXPERIMENTAL: true
+  PR_NUMBER: ${{ github.event.pull_request.number }}
+  CLOUDFLARE_ACCOUNT_ID: 1ea9299555b026a6a7484c8323c5a953
+
+jobs:
+  deploy-and-test:
+    runs-on: ubuntu-slim
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/cache@v5
+        with:
+          path: ~/.local/share/pnpm/store
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+      - uses: jdx/mise-action@v4
+
+      - name: Deploy isolated Convex backend
+        env:
+          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_PREVIEW_DEPLOY_KEY }}
+        run: |
+          pnpm exec convex deploy --preview-create "pr-$PR_NUMBER" \
+            --cmd 'node .github/scripts/capture-preview-env.mjs' \
+            --cmd-url-env-var-name CONVEX_URL
+
+      - name: Deploy isolated gateway Worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          gateway_name="zevium-gateway-pr-$PR_NUMBER"
+          pnpm --filter gateway exec wrangler deploy --name "$gateway_name" --config wrangler.preview.jsonc \
+            --var "CONVEX_URL:$VITE_CONVEX_URL" \
+            --var "CONVEX_SITE_URL:$CONVEX_SITE_URL"
+          printf '%s' '${{ secrets.CLERK_PREVIEW_SECRET_KEY }}' | pnpm --filter gateway exec wrangler secret put CLERK_SECRET_KEY --name "$gateway_name" --config wrangler.preview.jsonc
+          printf '%s' '${{ secrets.GATEWAY_PREVIEW_INTERNAL_SECRET }}' | pnpm --filter gateway exec wrangler secret put GATEWAY_INTERNAL_SECRET --name "$gateway_name" --config wrangler.preview.jsonc
+          echo "VITE_GATEWAY_URL=https://${gateway_name}.zevium-dev.workers.dev" >> "$GITHUB_ENV"
+          echo "GATEWAY_URL=https://${gateway_name}.zevium-dev.workers.dev" >> "$GITHUB_ENV"
+
+      - name: Build isolated web Worker
+        env:
+          CLERK_PUBLISHABLE_KEY: ${{ secrets.CLERK_PREVIEW_PUBLISHABLE_KEY }}
+          CLERK_SECRET_KEY: ${{ secrets.CLERK_PREVIEW_SECRET_KEY }}
+        run: pnpm --filter web build
+
+      - name: Deploy isolated web Worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          web_name="zevium-web-pr-$PR_NUMBER"
+          WEB_NAME="$web_name" node -e 'const fs=require("node:fs"); const p="apps/web/dist/server/wrangler.json"; const c=JSON.parse(fs.readFileSync(p)); c.name=process.env.WEB_NAME; delete c.routes; fs.writeFileSync("/tmp/web-preview.json", JSON.stringify(c));'
+          pnpm --filter web exec wrangler deploy --name "$web_name" --config /tmp/web-preview.json
+          printf '%s' '${{ secrets.CLERK_PREVIEW_SECRET_KEY }}' | pnpm --filter web exec wrangler secret put CLERK_SECRET_KEY --name "$web_name" --config /tmp/web-preview.json
+          echo "E2E_BASE_URL=https://${web_name}.zevium-dev.workers.dev" >> "$GITHUB_ENV"
+
+      - name: Install browser runtime
+        run: |
+          npm install --global agent-browser
+          agent-browser install --with-deps
+
+      - name: Run deterministic preview smoke
+        run: e2e/00-preview-smoke.sh
+
+      - name: Run authenticated publish and catalogue journey
+        env:
+          GATEWAY_URL: ""
+          E2E_EMAIL: ${{ secrets.PREVIEW_E2E_EMAIL }}
+          E2E_PASSWORD: ${{ secrets.PREVIEW_E2E_PASSWORD }}
+          E2E_OTP: ${{ secrets.PREVIEW_E2E_OTP }}
+        run: e2e/run-all.sh
+
+      - name: Upload failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: preview-e2e-${{ env.PR_NUMBER }}
+          path: e2e/artifacts
+          if-no-files-found: ignore
+
+      - name: Publish preview links
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const marker = '<!-- zevium-preview -->'
+            const body = `${marker}\nPreview ready:\n- Web: ${process.env.E2E_BASE_URL}\n- Gateway: ${process.env.VITE_GATEWAY_URL}`
+            const { data: comments } = await github.rest.issues.listComments({ ...context.repo, issue_number: context.issue.number })
+            const prior = comments.find((comment) => comment.body?.includes(marker))
+            if (prior) await github.rest.issues.updateComment({ ...context.repo, comment_id: prior.id, body })
+            else await github.rest.issues.createComment({ ...context.repo, issue_number: context.issue.number, body })

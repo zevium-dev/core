@@ -1,4 +1,4 @@
-# Agents.md - Zevium.dev Repository Overview
+# AGENTS.md — Zevium
 
 ## Agent Personality
 
@@ -31,487 +31,99 @@ Good:
 
 "Bug in auth middleware. Token expiry check use `<` not `<=`. Fix:"
 
-## Examples
+## What Zevium is
 
-Question: "Why React component re-render?"
+Agent-first, per-call API marketplace. Publishers list APIs via OpenAPI specs; consumers (human devs + AI agents) prepay org-scoped credits and pay per call through a metered edge gateway. Platform takes 5%, publishers keep 95%.
 
-Answer:
+**Source-of-truth docs — read before building anything:**
 
-"New object ref each render. Inline object prop = new ref = re-render. Wrap in `useMemo`."
+| Doc                                                              | Owns                                                                                        |
+| ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| [PRODUCT.md](PRODUCT.md)                                         | What the product does, pricing model, roadmap (P0/P1/P2). No tech talk                      |
+| [FLOW.md](FLOW.md)                                               | Every screen, per persona, target-state. No tech talk                                       |
+| [DESIGN.md](DESIGN.md)                                           | Visual + motion language: stock shadcn, motion tokens, view transitions, micro-interactions |
+| [TECH.md](TECH.md)                                               | All architecture + vendor decisions. The only doc where implementation lives                |
+| [docs/product-discovery-2026.md](docs/product-discovery-2026.md) | Market research backing the direction                                                       |
 
-Question: "Explain database connection pooling."
+Doc discipline: product language in PRODUCT/FLOW, tech language in TECH only. Keep it that way.
 
-Answer:
+## Status: built
 
-"Pool reuse open DB connections. No new connection per request. Skip handshake overhead."
+The greenfield rebuild is done. Legacy implementation (tRPC + Drizzle/Turso + Better Auth + Polar meters) is fully deleted — no `src/` directory, no trace in the working tree. Waves 1-9 shipped per TECH.md's target architecture, followed by cross-org metering/CORS/keyless-mock hardening and two product-review passes (all green). Zero users; data still disposable.
 
-## Project Description
+TECH.md remains authoritative for architecture. When a doc and the code disagree, the code wins — fix the doc.
 
-**Zevium.dev** is a per-call API marketplace (RapidAPI model). Publishers publish APIs via projects with OpenAPI specs. Consumers pre-pay credits and are charged per API call through the proxy. Platform takes a cut, publishers earn the rest. See `PRODUCT.md` for the full product spec.
+## Target stack (TECH.md is authoritative; this is the summary)
 
-## Technology Stack
+- **Frontend**: React 19, TanStack Start + Router, shadcn/ui (stock, latest, `new-york`/neutral), Motion — motion tokens + rules in DESIGN.md
+- **Control plane**: Convex — DB, functions, realtime sync, vector search, cron. Credit ledger source of truth
+- **Data plane**: Cloudflare Worker — `/gateway` metered proxy + agent-tool endpoint. Durable Object per org wallet (edge credit gate). Isolated on purpose; nothing else imports from it
+- **Auth**: Clerk — sessions, orgs (prebuilt UI), machine API keys. Convex integration via JWT
+- **Payments**: Polar checkout + merchant-of-record for credit top-ups ONLY. No Polar meters/benefits. Webhook → Convex grant
+- **Language**: TypeScript everywhere, strict
 
-### Core Framework
+Target layout (pnpm workspace + Turborepo):
 
-- **TanStack Start**: Full-stack React framework with SSR/SSG capabilities
-- **React**: Latest React with server components and concurrent features
-- **TypeScript**: Strongly typed development
-- **Vite**: Build tool with hot module replacement
-
-### Backend & APIs
-
-- **tRPC**: End-to-end typesafe APIs with automatic client generation
-- **ORPC**: OpenAPI integration and documentation generation
-- **Better Auth**: Modern authentication with Google OAuth
-- **Drizzle ORM**: Type-safe database ORM
-
-### Database
-
-- **Turso (libSQL)**: Distributed SQLite-compatible database
-- **Drizzle Kit**: Database migrations and schema management
-
-### Styling & UI
-
-- **Tailwind CSS 4**: Utility-first CSS framework with latest features
-- **shadcn/ui**: High-quality component library built on Radix UI
-- **Radix UI**: Accessible, unstyled component primitives
-- **Motion**: Animation library for smooth interactions
-- **Lucide React**: Beautiful icon library
-- **Sonner**: Toast notifications
-
-### State Management & Data Fetching
-
-- **TanStack Query**: Server state management and caching
-- **Jotai**: Atomic state management for client state
-- **Zod**: Runtime type validation and schema parsing
-
-### Development & Deployment
-
-- **Cloudflare Workers**: Serverless edge deployment
-- **Wrangler**: Cloudflare development and deployment tool
-- **PNPM**: Fast, disk space efficient package manager
-- **ESLint**: Code linting with modern configuration
-- **Prettier**: Code formatting
-
-### Analytics & Monitoring
-
-- **PostHog**: Product analytics and feature flags
-
-## Project Architecture
-
-### Directory Structure
-
-```text
-src/
-├── components/           # React components
-│   ├── ui/              # shadcn/ui components
-│   ├── magicui/         # Enhanced UI components with animations
-│   ├── api/             # API-related components
-│   ├── api-viewer/      # API documentation viewers
-│   └── autumn/          # Billing/checkout components
-├── routes/              # TanStack Router file-based routing
-│   ├── api/             # API routes (auth, tRPC, proxy, etc.)
-│   ├── app/             # Authenticated app pages
-│   │   ├── organizations/
-│   │   └── settings/    # Settings pages
-│   ├── auth/            # Auth pages (sign-in, sign-up, etc.)
-│   ├── $internal/       # Dev/test routes
-│   ├── embed/           # Embed routes
-│   ├── mcp/             # MCP routes
-│   └── p/               # Public organization pages
-├── server/              # Backend logic
-│   ├── rpcs/            # tRPC routers (audit, credits, example, orgKey, organization, project, projectSecret, request, tag, user-preference, openapi-schema)
-│   ├── context.ts       # Request context creation
-│   └── orpc.tsx         # OpenAPI documentation generation
-├── db/                  # Database schema, permissions, roles, Zod helpers
-├── lib/                 # Utility libraries
-│   ├── auth/            # Authentication client
-│   ├── trpc/            # tRPC client configuration
-│   ├── cache/           # Caching utilities
-│   ├── client/          # Client-side utilities
-│   ├── email/           # Email templates and sending
-│   ├── hash/            # Hashing utilities
-│   ├── polyfill/        # Polyfills
-│   ├── query-client/    # React Query client setup
-│   ├── server/          # Server-side utilities (polar, user-pool-gate, proxy-cost, proxy-security, redis-keys, kv, auth)
-│   └── utils/           # Helper functions
-├── hooks/               # Custom React hooks
-├── env/                 # Environment variable validation
-└── styles/              # CSS files and styling
-
-drizzle/                 # Database migrations
-scripts/                 # Build and automation scripts
-plugins/                 # Vite plugins
-types/                   # TypeScript type declarations
-public/                  # Static assets
+```
+apps/web/        # TanStack Start app (all screens)
+apps/gateway/    # CF Worker: proxy, wallet DO, agent endpoint
+convex/          # Convex schema + functions (control plane)
+packages/shared/ # spec parsing, x-zevium-* extraction, types shared web↔gateway
 ```
 
-### Key Components
+## Rules
 
-#### Authentication System
+### Product rules (never violate)
 
-- **Better Auth** integration with Google OAuth
-- Session management with JWT tokens
-- Protected routes with automatic redirects
-- User state management across the application
+- Zero wallet balance **blocks** the call. Never surprise-overage
+- No unmetered execution paths — every gateway/agent call is key-authenticated and credit-gated. **Stated carve-out**: `/mock/:org/:project/*` is deliberately keyless and anonymous — it never executes the upstream, only synthesizes a response from the published spec's schema at 0 credits, so the metering rule doesn't apply to it by design
+- The OpenAPI spec is the source of truth: upstream URL, endpoints, pricing (`x-zevium-cost`), free tier (`x-zevium-free-tier`). No parallel pricing tables
+- Published spec versions are immutable
 
-#### API Architecture
+### Code rules
 
-- **tRPC** for type-safe API procedures
-- **oRPC** for OpenAPI specification generation
-- Automatic documentation with Scalar API reference
-- Error handling with proper HTTP status codes
-- Input validation using Zod schemas
+- **pnpm** for everything
+- TypeScript strict; no `any` escapes without a comment stating why
+- Validate all inputs at boundaries (Convex validators / zod at the Worker edge). Never trust client-provided identifiers when auth context supplies them
+- Never leak internal errors to users — map to human-readable messages (toasts included)
+- Prefer deleting dead code over commenting it out
+- Idempotent mutations where feasible; return canonical post-write state
 
-#### Billing (Polar Credits, user-scoped)
+### UI rules (DESIGN.md is authoritative; highlights)
 
-- **User-scoped prepaid credits** via `@polar-sh/better-auth` `polar()` plugin; Polar customer `externalId = userId`, auto-created on signup
-- **Top-up via plugin checkout** (`POST /api/auth/checkout`) with FIXED one-time Polar products (each grants fixed `units` via a `meter_credit` benefit). Product IDs exposed to the browser via `VITE_PUBLIC_POLAR_TOPUP_PRODUCTS`.
-- **Per-call credit reserve**: per-user Redis gate (SDK-only, no Lua) `creditedUnits - userConsumed >= cost`
-- **Per-key rate limiting**: `@better-auth/api-key` plugin (60 req/min, `remaining` quota, no refill, `references: "user"` → keys user-owned, one key per user enforced via `apikey_one_per_user` unique index)
-- **Proxy billing flow**: resolve `{orgSlug}/{projectSlug}` from URL → load published OpenAPI spec → extract `servers[0].url` (upstream) + `x-zevium-cost` (per-endpoint pricing) → verify API key → resolve `userId` from `key.referenceId` → reserve user pool → fetch upstream → ingest `proxy_call` event (`externalCustomerId = userId`) on 2xx + body-complete
-- **Key files**: `src/lib/server/polar.ts`, `src/lib/server/user-pool-gate.ts`, `src/lib/server/proxy-cost.ts`, `src/lib/server/auth.tsx` (plugin wiring)
-- **RPCs**: `credits` (getBalance, listTopUps, listCharges, listPerKeyUsage — all user-scoped, no `organizationId`), `userKey` (create, list, update, delete)
-- **Webhook**: `POST /api/auth/polar/webhooks` (plugin-mounted) — `order.paid`, `order.refunded`, `customer.state_changed` invalidate the per-user `creditedUnits` cache
+- Stock shadcn components, unmodified. Semantic color tokens only (`bg-primary`, `text-muted-foreground`) — raw Tailwind colors (`bg-red-500`, `text-gray-900`) are a review reject
+- All animation values from `src/lib/motion.ts` / CSS vars (`--ease`, `--dur-*`). Hardcoded `duration-300 ease-in-out` is a review reject
+- Every list→detail navigation ships a view-transition morph or a written reason why not
+- Loading = layout-stable skeletons; `isPending` (never `isLoading`); derive loading state from the query/mutation, not separate useState
+- Mutations: `.mutate()` in event handlers; `.mutateAsync()` only when the promise is needed. Optimistic updates where safe
+- Respect `prefers-reduced-motion` in every animated component
 
-#### Database Layer
+### Convex rules
 
-- **Drizzle ORM** with TypeScript-first approach
-- **Turso** for distributed SQLite database
-- Schema-first development with automatic migrations
-- Relations and foreign keys properly defined
+- Queries/mutations small and focused; use indexes, never table scans in hot paths
+- Wallet writes go through the ledger pattern (append entries + materialized balance) — no naive read-modify-write on hot documents; use the sharded rate-limiter component for contended gates
+- Realtime is the default — don't build polling or manual cache invalidation
 
-## Development Workflow
+### Gateway (Worker) rules
 
-### Local Development
+- Hot path budget: no network calls to Clerk/Convex per request — verify keys via edge cache, gate credits via the wallet DO
+- Stream upstream responses; never buffer whole bodies
+- Emit usage events async; never block the response on metering
+- Keep the Worker dependency-light — it is the future Go-port candidate
+
+## Development
 
 ```bash
-# Install dependencies
 pnpm install
-
-# Set up environment
-cp .env.example .env
-# Configure environment variables
-
-# Start development server (do not run this command unless instructed)
-pnpm dev
-
-# Generate route definitions after adding new routes (run this command after modifying routes paths, params, queries, etc.)
-pnpm run generate-routes
+pnpm dev            # do not run unless instructed
+pnpm format         # prettier + eslint fix
 ```
 
-#### Dev Server Policy
+- Dev server expected on http://localhost:5173
+- Legacy seed (`pnpm db:seed`, user@example.com / password) works only against legacy code; dies with the rebuild
 
-- The dev server is expected on [http://localhost:5173](http://localhost:5173).
-- When calling Better Auth organization APIs (e.g., acceptInvitation, cancelInvitation, createInvitation), do not wrap single calls in try/catch; let errors surface through TRPC/Better Auth instead of swallowing them.
+## Commits
 
-#### Browser Testing Login (Local)
-
-- For manual browser testing on localhost, use `http://localhost:5173`.
-- Seed credentials (run `pnpm db:seed` first):
-  - Email: `user@example.com`
-  - Password: `password`
-- These are created by `scripts/seed.ts` — idempotent, safe to re-run.
-
-#### Internal Dev/Test Routes
-
-Routes under `/$internal/*` are intended for local development/testing.
-
-- `useConfirm` / confirm dialog is implemented via `src/components/confirm-dialog.tsx` (Radix `AlertDialog`) and mounted globally in `src/components/providers.tsx`.
-- `useConfirm()` returns a promise and supports multiple concurrent invocations via an internal FIFO queue.
-- `/$internal/confirm-test` - Manual test page for the global `useConfirm` hook + queue behavior.
-- `/$internal/image-upload-test` - Manual test page for `ImageUpload`.
-
-### Code Formatting & Linting
-
-When you encounter **ESLint warnings** or **formatting issues** in files:
-
-```bash
-# Format all files in the project
-pnpm format
-```
-
-This command runs Prettier and ESLint fixes across the codebase to ensure:
-
-- Consistent code formatting
-- Automatic fixing of ESLint violations
-- Adherence to project style guidelines
-
-### Database Management
-
-```bash
-# Generate migrations (after schema changes)
-pnpm drizzle-kit generate
-
-# Apply migrations to the database
-pnpm db:migrate
-
-# Seed default user + organization (idempotent, safe to re-run)
-# Creates: user@example.com / password + test-org organization + owner membership
-# Used for: local dev, CI test setup, fresh environments
-pnpm db:seed
-```
-
-## Contribution Guidelines
-
-These rules exist so contributions stay consistent, type-safe, minimal, and easily maintainable.
-
-### 1. General Principles
-
-- Prefer composition over duplication
-- Minimize side-effects; colocate network logic in React Query / tRPC option objects
-- Only fetch what is needed; defer persistence until explicit user intent (e.g. Save button)
-- Never guess types — always import existing Zod schemas / inferred types
-- Favor idempotent server mutations and optimistic UI where safe
-- Keep client state (form drafts) separate from server state (queries)
-- Avoid stale reads: invalidate after mutation (unless mutation result is authoritative)
-- Keep the UI optimistic where it makes sense. Use `onMutate` callback + `queryClient.setQueryData`
-
-### 1.1 TanStack Router Params Handling
-
-**Critical:** `Route.useParams()` and loader `params` are **not the same** and contain different scope:
-
-- `loader: ({ context, params }) => { ... }` — `params` contains **all route parameters** from ALL slugs in the URL path (e.g., `organizationSlug`, `projectSlug`, `invoiceId`, etc.)
-- `Route.useParams()` — Returns **only the parameters defined on that specific route** (e.g., only `organizationSlug` if the route is `/app/organizations/$organizationSlug`)
-
-**Always pass the complete, explicitly extracted parameter object** to tRPC queries, never pass `params` directly as a shorthand:
-
-✅ **Good** — Explicit parameters in loader and component:
-
-```ts
-// In loader
-loader: (({ context, params }) => {
-  void context.queryClient.ensureQueryData(
-    context.trpc.organization.get.queryOptions({
-      organizationSlug: params.organizationSlug,
-    }),
-  );
-},
-  // In component
-  function RouteComponent() {
-    const params = Route.useParams();
-    const trpc = useTRPC();
-    const organizationDetailsQuery = useSuspenseQuery(
-      trpc.organization.get.queryOptions({
-        organizationSlug: params.organizationSlug,
-      }),
-    );
-    // ...
-  });
-```
-
-❌ **Bad** — Passing `params` shorthand (breaks if route has multiple slugs):
-
-```ts
-// In loader — works by accident but is brittle
-loader: ({ context, params }) => {
-  void context.queryClient.ensureQueryData(
-    context.trpc.organization.get.queryOptions(params), // params has extra fields!
-  );
-},
-
-// In component — only works because Route.useParams() scopes correctly
-const organizationDetailsQuery = useSuspenseQuery(
-  trpc.organization.get.queryOptions(params), // same issue
-);
-```
-
-**Why it matters:** If your route is `/app/organizations/$organizationSlug/projects/$projectSlug/spec`, the loader's `params` will have both `organizationSlug` AND `projectSlug`. Passing `params` directly to a tRPC procedure that only expects `organizationSlug` causes type mismatches and runtime errors. Always destructure and pass only the fields your procedure needs.
-
-### 2. React Query + tRPC Usage
-
-DO NOT manually build `queryKey` arrays unless absolutely necessary. Use the generated helpers:
-
-```ts
-import { useTRPC } from "~/lib/trpc";
-
-export const useUserPreferencesQuery = () => {
-  const trpc = useTRPC();
-  return useQuery(trpc.userPreference.get.queryOptions(undefined));
-};
-
-export const useUserPreferencesOptimisticMutation = () => {
-  const trpc = useTRPC();
-  const qc = useQueryClient();
-  return useMutation(
-    trpc.userPreference.update.mutationOptions({
-      onMutate(variables) {
-        qc.setQueryData(trpc.userPreference.get.queryKey(), (old) => ({ ...old, ...variables }));
-      },
-      async onSettled() {
-        await qc.invalidateQueries(trpc.userPreference.get.queryOptions());
-      },
-    }),
-  );
-};
-```
-
-Rules:
-
-- Split query and mutation hooks (no combined objects returning mixed state)
-- Use `mutationOptions` / `queryOptions` from tRPC proxy when available
-- For optimistic updates: `setQueryData` + post-settle `invalidateQueries`
-- Do NOT trigger side-effects in the body of a hook outside React Query lifecycle callbacks
-- **Do NOT add `onError` handlers** — a global default handler in `providers.tsx` already handles:
-  - `TRPCClientError`: Shows error toast + logs to PostHog
-  - `BetterAuthException`: Handles 429 rate limits, email verification redirects, and generic auth errors
-  - Other errors: Generic error toast + logging
-  - Only add `onError` if you need custom logic (redirect, conditional handling, etc.)
-- **Make `onSuccess` async and always invalidate related queries**:
-  - Use `useQueryClient()` to get the query client
-  - In `onSuccess`, call `await queryClient.invalidateQueries(trpc.resource.list.queryOptions())` to refetch fresh data
-  - This ensures UI stays in sync with server state after mutations
-  - Example: After creating an org, invalidate the org list query so it fetches the updated list
-
-### 2.1 Loading State Naming
-
-- **Always use `isPending` instead of `isLoading`** for queries, mutations, and manual async operations:
-  - From `useQuery`: destructure as `{ isPending }`
-  - From `useMutation`: destructure as `{ isPending }`
-  - Rationale: `isPending` is the correct state indicator from React Query/TanStack Query (which implements SWR patterns). `isLoading` is deprecated/legacy. Always prefer `isPending` for clarity and consistency
-  - **Prefer deriving loading states directly from mutations and queries** rather than maintaining separate state variables
-  - **Whenever you need a loading state, wrap the corresponding logic into a `useQuery` or `useMutation` and use its `isPending` state instead**
-  - Example:
-
-```ts
-const createMutation = useMutation(...);
-// Use createMutation.isPending directly instead of separate isPending state
-<Button disabled={createMutation.isPending}>Create</Button>
-```
-
-### 2.2 Mutation Invocation Pattern
-
-- **Use `.mutate()` instead of `await .mutateAsync()`** in onClick handlers and event callbacks:
-  - ✅ **Good**: `onClick={() => mutation.mutate({ id: '123' })}`
-  - ❌ **Bad**: `onClick={async () => { await mutation.mutateAsync({ id: '123' }) }}`
-  - Rationale: `.mutate()` is fire-and-forget and handles loading states automatically via `isPending`. The mutation callbacks (`onSuccess`, `onSettled`, etc.) handle side effects like invalidation.
-  - **Only use `.mutateAsync()` when you need the returned promise** (e.g., when chaining dependent operations, showing a toast.promise, etc.)
-  - React Query's mutation callbacks already handle async operations (invalidation, navigation, etc.) - no need for extra async/await in the onClick handler
-  - Example patterns:
-
-```tsx
-// ✅ Simple button click - use .mutate()
-<Button onClick={() => deleteMutation.mutate({ id: item.id })}>Delete</Button>
-```
-
-### 3. Local Draft vs Server State
-
-Pattern:
-
-- Initialize local form state once (inside `useEffect`) only if the draft is still empty
-- Do not persist on every change; batch on explicit action (e.g. Save)
-- Compare against last known server values before deciding to mutate
-
-### 4. Zod & Schemas
-
-- Name exported schemas with PascalCase (`UserPreferenceZod`)
-- Always reuse shared schemas for input & output where shape matches; avoid drift
-
-### 5. Drizzle ORM Patterns
-
-- Import from a _single_ barrel when available: `import { db, orm, schema } from "~/db"`
-- Use `row = rows.at(0)` instead of index `[0]` to avoid undefined access pitfalls
-- Use `returning()` + `.at(0)` after UPSERT operations instead of issuing follow-up selects
-- Build `patch` object _only_ with provided fields
-
-### 6. Mutation Design
-
-- Mutations must be idempotent where feasible
-- Return the canonical post-write state (or at least the changed subset)
-- Let client optimistic layer hydrate instantly, then reconcile after invalidation
-
-### 7. Naming Conventions
-
-| Concern                  | Pattern                       |
-| ------------------------ | ----------------------------- |
-| Query hook               | `useThingQuery`               |
-| Mutation hook            | `useThingMutation`            |
-| Optimistic Mutation hook | `useThingOptimisticMutation`  |
-| Form state vars          | `const [name, setName] = ...` |
-| Boolean flags            | `isSaving`, `isPending`       |
-| Zod schema               | `ThingZod`                    |
-| Server router file       | `feature-name/index.ts`       |
-
-### 8. Side-Effects
-
-Only allowed via:
-
-- React Query callbacks: `onSuccess`, `onError`, `onSettled`, `onMutate`
-- Explicit user-intent handlers (e.g. button click)
-  Avoid:
-- `useEffect` that mirrors query data into state every render (only initialize when empty)
-- Manual cache purges unless security-bound (e.g. on logout)
-
-### 9. Conditional Enabling
-
-Use `enabled: Boolean(dependency)` inside query options. Do not guard fetches with ternaries that render null early unless UX requires.
-
-### 10. Error Handling
-
-- Let React Query surface errors; map to toast/UI at call site
-- Avoid swallowing errors in mutations; rethrow after logging if needed
-- Never return `{ error: ... }` objects; throw instead
-
-### 11. Form
-
-Follow TanStack Form best practices (use `@tanstack/react-form` + Standard Schema validators; prefer `void form.handleSubmit()` in submit handlers; render errors from field meta).
-
-When auto-filling derived fields (e.g., generating `slug` from `name`), do not add extra React state like `slugManuallyEdited`. Instead, derive the "has the user edited this field" signal from TanStack Form meta (e.g., gate auto-fill on `!state.fieldMeta.slug?.isDirty` via `useStore(form.store, ...)`).
-
-When setting derived values programmatically, use `form.setFieldValue(..., { dontUpdateMeta: true, dontValidate: true, dontRunListeners: true })` so the derived field does not become touched/dirty from the auto-fill.
-
-Use `field.handleChange(...)` for user input so the field becomes dirty.
-
-### 14. Returning Values from Mutations
-
-Return exactly what the UI needs for reconciliation (e.g. updated fragment). Avoid large payloads.
-
-### 15. Prevent Over-Fetching
-
-- Prefer invalidation over refetch inside mutation `onSuccess`, unless the mutation response is incomplete
-
-### 16. Examples of Anti-Patterns (Avoid)
-
-| Anti-Pattern                                                  | Better                          |
-| ------------------------------------------------------------- | ------------------------------- |
-| Combined query + mutation hook returning many unrelated flags | Separate focused hooks          |
-| Re-selecting row after insert/update                          | Use `.returning()`              |
-| Index `[0]` access                                            | `.at(0)`                        |
-| Immediate persistence on every select change                  | Local draft + explicit save     |
-| Manual array query keys                                       | `trpc.entity.action.queryKey()` |
-
-### 18. Commit Guidance
-
-- Group schema + router + hook changes logically
-- Include migration when altering DB schema
-- Keep diff surface minimal; remove dead code instead of commenting it
-
-### 19. Security & Data Hygiene
-
-- Never trust client-provided identifiers when auth context supplies them
-- Validate all mutation inputs with Zod or Arktype schema at boundary
-- Avoid leaking internal errors; map to generic messages if security-sensitive
-
-### 20. When Unsure
-
-Prefer:
-
-1. Reuse existing pattern
-2. Smaller, composable hook
-3. Explicit state transitions
-
-### 21. Theme & Styling
-
-- **Never use hardcoded colors** from Tailwind (e.g., `bg-red-500`, `text-blue-600`, `rgb(239, 68, 68)`)
-- Always use shadcn/ui theme-defined semantic colors instead:
-  - For Tailwind classes: `bg-destructive`, `bg-primary`, `text-foreground`, etc.
-  - For SVG/inline styles: `stroke="hsl(var(--destructive))"`, `fill="hsl(var(--primary))"`, etc.
-  - With transparency: `stroke="hsl(var(--destructive) / 0.3)"` for 30% opacity
-- Check available theme tokens in the design system (e.g., `--primary`, `--destructive`, `--secondary`, `--muted`, etc.)
-- This ensures the component respects the design system and adapts to theme changes (e.g., dark mode)
-
----
-
-### 22. Package Manager
-
-- **Always use `pnpm`** for all package management and script running
+- Conventional prefixes (`feat:`, `fix:`, `docs:`, `chore:`)
+- Group schema + function + UI changes logically; keep diff surface minimal
+- Never commit or push unless asked

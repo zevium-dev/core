@@ -1,0 +1,9 @@
+WAVE 3 — BILLING LANE (convex + web billing screens). Project: /home/tnfssc/Code/zevium. Read AGENTS.md, PRODUCT.md (revenue, credits, $1=10,000), FLOW.md §2.3, TECH.md (Polar checkout-only), existing convex/wallets.ts. Edit ONLY: convex/ and apps/web/src/routes/app/billing* + related components (coordinate: catalogue lane owns /catalogue routes; keys lane owns settings/keys — do not touch those).
+
+1. Polar (sandbox): creds in legacy root .env (POLAR_ACCESS_TOKEN, POLAR_WEBHOOK_SECRET, server=sandbox). pnpm add -w @polar-sh/sdk. Set convex env vars via `npx convex env set POLAR_ACCESS_TOKEN <value>` etc (read values from root .env yourself).
+2. Convex: http.ts add POST /polar-webhook — verify signature (standard webhooks / @polar-sh/sdk validateEvent) with POLAR_WEBHOOK_SECRET; on order.paid → internal grantCredits(clerkOrgId from order metadata, credits amount from product metadata or price, refId=order id). Action createCheckout(orgSlug, packId) using Polar SDK: create checkout session for a credit-pack product with metadata {clerkOrgId}, success url http://localhost:3000/app/billing?success=1, return url. Define 3 credit packs as one-time products in Polar sandbox programmatically if none exist (action ensureProducts or a script): $10=100k, $50=500k+bonus 25k, $100=1M+bonus 100k credits (store credits in product metadata).
+3. Web /app/billing: balance card (live useQuery wallets.getMyWallet — realtime tick), Buy Credits: 3 pack cards → mutation createCheckout → window.location to checkout url; top-up history + ledger entries list (kind badges), usage summary placeholder. NumberTicker on balance per DESIGN.md (simple count-up hook with motion, reduced-motion renders final).
+4. Sidebar: add Billing nav item under org section if not present.
+5. Build + typecheck + `npx convex dev --once` green.
+
+End with `DONE:` or `BLOCKED:`.

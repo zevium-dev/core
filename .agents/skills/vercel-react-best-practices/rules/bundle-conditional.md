@@ -23,7 +23,9 @@ function AnimationPlayer({
 
   useEffect(() => {
     if (enabled && !frames && typeof window !== "undefined") {
-      import("./animation-frames.js").then((mod) => setFrames(mod.frames)).catch(() => setEnabled(false));
+      import("./animation-frames.js")
+        .then((mod) => setFrames(mod.frames))
+        .catch(() => setEnabled(false));
     }
   }, [enabled, frames, setEnabled]);
 

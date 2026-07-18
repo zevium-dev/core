@@ -1,0 +1,18 @@
+Org-scoping fixed. Keys no longer dump userId as org wallet.
+
+**web `api-keys.ts`**
+- `createKey` / `listKeys` require `session.orgId`
+- create ships `claims: { org_id: orgId }`
+- list + one-key gate filter `claims.org_id === active org`
+
+**gateway `key-verifier.ts`**
+- `orgId = claims.org_id ?? subject`
+- workerd bug: stored bare `fetch` → Illegal invocation. Wrapped default fetch so Clerk verify actually runs
+
+**tests** claim-org / org-subject / legacy user-subject cases. 12/12 key-verifier green. Both typechecks green.
+
+**pre-existing fail (out of edit scope):** `pipeline.test.ts` flush expects `"convex client not configured"` but vitest env has `CONVEX_URL` from `.dev.vars` → hits missing `wallets:recordUsage`. Not this fix.
+
+**E2E:** created `omp-orgclaim-test`, verify returned `claims.org_id`, gateway hit 200, revoked key.
+
+DONE: HTTP/1.1 200 OK | x-zevium-cost: 1 | x-zevium-request-id: 1f11c6c4-b416-4088-9d04-ac8e5b657b02 | body httpbin echo `{"args":{"x":"1"},...}`

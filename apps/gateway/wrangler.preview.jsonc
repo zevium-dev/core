@@ -1,0 +1,14 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "zevium-gateway-preview",
+  "account_id": "1ea9299555b026a6a7484c8323c5a953",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-04-01",
+  "workers_dev": true,
+  "preview_urls": true,
+  "observability": { "enabled": true },
+  "durable_objects": {
+    "bindings": [{ "name": "WALLET", "class_name": "WalletDO" }],
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["WalletDO"] }],
+}

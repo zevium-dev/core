@@ -1,0 +1,16 @@
+DONE: billing lane shipped. build + typecheck + `npx convex dev --once` green.
+
+### Convex
+- `convex/billing.ts` — packs `$10/100k`, `$50/525k`, `$100/1.1M`; `createCheckout`, `listPacks`, `listPacksStatic`, `ensureProducts`
+- `convex/http.ts` — `POST /polar-webhook` via `@polar-sh/sdk/webhooks` `validateEvent` → `grantCredits` on `order.paid` (idempotent `polar:order:{id}`)
+- `convex/wallets.ts` — `getMyWallet` now **query** (live tick); `ensureWallet` mutation
+- Convex env: `POLAR_ACCESS_TOKEN`, `POLAR_WEBHOOK_SECRET`, `POLAR_SERVER=sandbox`
+
+### Web
+- `/app/billing` — balance + `NumberTicker`, 3 pack cards → `createCheckout` → redirect, top-up + ledger badges, usage placeholder
+- Sidebar **Billing** nav item
+
+### Polar note
+Access token **no `products:write`** — cannot mint 3 products in sandbox. Checkout **falls back**: reuses existing one-time product (`Proxy Call Top Up`) + **ad-hoc fixed prices** per pack. Credits still come from checkout/order **metadata** (`clerkOrgId`, `packId`, `credits`). Grant `products:write` later if you want real catalog products.
+
+Wire Polar webhook URL to Convex site: `https://doting-warbler-454.convex.site/polar-webhook` (or your deploy HTTP URL).

@@ -1,11 +1,23 @@
+packages:
+  - apps/*
+  - packages/*
+
 allowBuilds:
   "@parcel/watcher": true
   "@tailwindcss/oxide": true
+  bufferutil: true
   core-js: true
   esbuild: true
   protobufjs: true
   sharp: true
+  utf-8-validate: true
   vue-demi: true
   workerd: true
 
 minimumReleaseAge: 720
+minimumReleaseAgeExclude:
+  - "@cloudflare/workers-types"
+  - "@clerk/*"
+
+overrides:
+  "jayson>uuid": 11.1.0

@@ -1,0 +1,20 @@
+SSR auth fixed. Clerk JWT now hits Convex HTTP client before loaders.
+
+**Bug:** SSR loaders called Convex with no identity → `requireIdentity` went boom "Not authenticated".
+
+**Fix:**
+1. Root `beforeLoad` GET serverFn: `auth()` → `getToken({ template: "convex" })` → `{ userId, token }` into router context
+2. Server only: `convexQueryClient.serverHttpClient?.setAuth(token)` (clear when null). Client stays on `ConvexProviderWithClerk`
+3. `useEnsureMirror` now hits real `api.users.ensureUser` + `api.organizations.ensureOrganization` with full org args (id/name/slug/imageUrl). Once per user+org.
+
+**Files:**
+- `apps/web/src/routes/__root.tsx`
+- `apps/web/src/router.tsx`
+- `apps/web/src/hooks/use-ensure-mirror.ts`
+
+**Check:**
+- `pnpm --filter web build` green
+- `pnpm --filter web typecheck` green
+- `curl -sI --max-redirs 0 http://localhost:4173/app/projects` → **307** `location: /sign-in` (`x-clerk-auth-status: signed-out`)
+
+DONE:

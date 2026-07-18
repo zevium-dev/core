@@ -37,11 +37,14 @@ export function useOptimisticAddTodo() {
 
   return useMutation({
     mutationFn: async (newTodo: AddTodoInput) => {
-      const response = await fetch("https://jsonplaceholder.typicode.com/todos", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...newTodo, userId: 1, completed: false }),
-      });
+      const response = await fetch(
+        "https://jsonplaceholder.typicode.com/todos",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ...newTodo, userId: 1, completed: false }),
+        },
+      );
 
       if (!response.ok) throw new Error("Failed to add todo");
       return response.json();
@@ -98,11 +101,14 @@ export function useOptimisticUpdateTodo() {
 
   return useMutation({
     mutationFn: async ({ id, completed }: UpdateTodoInput) => {
-      const response = await fetch(`https://jsonplaceholder.typicode.com/todos/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ completed }),
-      });
+      const response = await fetch(
+        `https://jsonplaceholder.typicode.com/todos/${id}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ completed }),
+        },
+      );
 
       if (!response.ok) throw new Error("Failed to update todo");
       return response.json();
@@ -146,9 +152,12 @@ export function useOptimisticDeleteTodo() {
 
   return useMutation({
     mutationFn: async (id: number) => {
-      const response = await fetch(`https://jsonplaceholder.typicode.com/todos/${id}`, {
-        method: "DELETE",
-      });
+      const response = await fetch(
+        `https://jsonplaceholder.typicode.com/todos/${id}`,
+        {
+          method: "DELETE",
+        },
+      );
 
       if (!response.ok) throw new Error("Failed to delete todo");
     },
@@ -159,7 +168,9 @@ export function useOptimisticDeleteTodo() {
       const previousTodos = queryClient.getQueryData<Todo[]>(["todos"]);
 
       // Optimistically remove from cache
-      queryClient.setQueryData<Todo[]>(["todos"], (old = []) => old.filter((todo) => todo.id !== deletedId));
+      queryClient.setQueryData<Todo[]>(["todos"], (old = []) =>
+        old.filter((todo) => todo.id !== deletedId),
+      );
 
       return { previousTodos };
     },
@@ -181,19 +192,26 @@ export function useOptimisticDeleteTodo() {
  * Component usage example:
  */
 export function OptimisticTodoItem({ todo }: { todo: Todo }) {
-  const { mutate: updateTodo, isPending: isUpdating } = useOptimisticUpdateTodo();
-  const { mutate: deleteTodo, isPending: isDeleting } = useOptimisticDeleteTodo();
+  const { mutate: updateTodo, isPending: isUpdating } =
+    useOptimisticUpdateTodo();
+  const { mutate: deleteTodo, isPending: isDeleting } =
+    useOptimisticDeleteTodo();
 
   return (
     <li style={{ opacity: isUpdating || isDeleting ? 0.5 : 1 }}>
       <input
         type="checkbox"
         checked={todo.completed}
-        onChange={(e) => updateTodo({ id: todo.id, completed: e.target.checked })}
+        onChange={(e) =>
+          updateTodo({ id: todo.id, completed: e.target.checked })
+        }
         disabled={isUpdating || isDeleting}
       />
       <span>{todo.title}</span>
-      <button onClick={() => deleteTodo(todo.id)} disabled={isUpdating || isDeleting}>
+      <button
+        onClick={() => deleteTodo(todo.id)}
+        disabled={isUpdating || isDeleting}
+      >
         {isDeleting ? "Deleting..." : "Delete"}
       </button>
     </li>

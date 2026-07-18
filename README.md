@@ -1,84 +1,93 @@
-# [zevium.dev](https://zevium.dev)
+# Zevium — agent-first API marketplace
 
-This repo has all the code for [zevium.dev](https://zevium.dev).
-The entire website was made using TanStack Start.
+Publishers list APIs as OpenAPI specs with per-call pricing baked into the spec.
+Consumers — human developers and AI agents — prepay org-scoped credits and call
+through a metered edge gateway. Zero balance blocks the call. Publishers keep 95%.
 
-![TanStack Start](https://img.shields.io/badge/TanStack%20Start-1-c93679?style=for-the-badge&logo=zap)
-![shadcn](https://img.shields.io/badge/shadcn-ui-ffffff?style=for-the-badge&logo=shadcnui)
-![TypeScript](https://img.shields.io/badge/TypeScript-5-4476c0?style=for-the-badge&logo=typescript)
-![PNPM](https://img.shields.io/badge/pnpm-11-f69220?style=for-the-badge&logo=pnpm)
-![WTFPL](https://img.shields.io/badge/license-WTFPL-696969?style=for-the-badge&logo=unlicense)
+![TypeScript](https://img.shields.io/badge/TypeScript-strict-4476c0?style=for-the-badge&logo=typescript)
+![TanStack Start](https://img.shields.io/badge/TanStack%20Start-React%2019-c93679?style=for-the-badge&logo=zap)
+![Convex](https://img.shields.io/badge/Convex-control%20plane-ee342f?style=for-the-badge)
+![Cloudflare Workers](https://img.shields.io/badge/Cloudflare-Workers%20%2B%20DO-f38020?style=for-the-badge&logo=cloudflare)
+![Clerk](https://img.shields.io/badge/Clerk-auth%20%2B%20orgs-6c47ff?style=for-the-badge&logo=clerk)
+![Stripe](https://img.shields.io/badge/Stripe-Checkout%20%2B%20Connect-635bff?style=for-the-badge&logo=stripe)
+![WTFPL](https://img.shields.io/badge/license-WTFPL-696969?style=for-the-badge)
 
-![Drizzle](https://img.shields.io/badge/Drizzle-ORM-ffffff?style=for-the-badge&logo=drizzle)
-![Turso](https://img.shields.io/badge/Turso-Database-ffffff?style=for-the-badge&logo=turso)
-![Workers](https://img.shields.io/badge/Cloudflare-Workers-ffffff?style=for-the-badge&logo=cloudflare)
-![Mise](https://img.shields.io/badge/Mise-2026-ffffff?style=for-the-badge&logo=misskey)
+![Zevium demo — landing, catalogue, and a keyless mock call](docs/assets/demo.gif)
 
----
+_Full walkthrough with the publisher console, billing, earnings, and admin:
+[docs/assets/demo.mp4](docs/assets/demo.mp4)_
 
-## Instructions
+## How it works
 
-### Manual Setup
+1. **Publish** — upload an OpenAPI spec. Upstream URL, endpoints, and pricing
+   (`x-zevium-cost`, `x-zevium-free-tier`) live in the spec. Published versions
+   are immutable; pricing has no parallel tables to drift.
+2. **Discover & call** — browse or semantically search the catalogue, try any
+   endpoint for free via keyless mock responses, then call the real thing
+   through `/gateway/{org}/{project}/{path}` with one API key. Agents get an
+   MCP endpoint and a machine-readable `/discovery` index.
+3. **Settle per call** — a per-org wallet (Durable Object at the edge) reserves
+   credits before the proxy, settles on 2xx, refunds on failure. $1 = 10,000
+   credits; the platform takes 5%, publishers accrue 95% toward payouts.
 
-- You can start the dev server using the following commands:
+## Screenshots
 
-```sh
-# Install `mise` CLI
-curl https://mise.run | sh # Install `mise` CLI
-echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
-source ~/.bashrc
+|                                                                             |                                                                     |
+| --------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| ![Catalogue with pricing badges and tag filters](docs/assets/catalogue.png) | ![API detail with per-endpoint pricing](docs/assets/api-detail.png) |
+| _Catalogue — search, tags, price badges_                                    | _API detail — spec-driven pricing table_                            |
+| ![Spec editor with live pricing rail](docs/assets/spec-editor.png)          | ![Billing with cycle breakdown](docs/assets/billing.png)            |
+| _Spec editor — live validation + pricing rail_                              | _Billing — wallet, packs, cycle breakdown_                          |
 
-# Install tools
-mise trust
-mise install
-npm i -g pnpm
+## What's inside
 
-# Add .env file
-cp .env.example .env
-vim .env
+- **Metered gateway** (Cloudflare Worker) — key verification with edge caching,
+  per-org wallet DO (reserve → settle/refund), per-key monthly caps and
+  rotation with grace, RFC 8594 deprecation headers, CORS for browser callers,
+  x402 payment-required envelopes, keyless `/mock` mode, `/mcp` + `/discovery`
+  for agents.
+- **Control plane** (Convex) — projects and immutable spec versions, credit
+  ledger, usage analytics, publisher earnings, Stripe event reconciliation,
+  notifications, publisher webhooks (HMAC-signed, retried), semantic catalogue
+  search (Gemini embeddings + vector index), platform admin.
+- **Web app** (TanStack Start + React 19 + shadcn/ui + Motion) — public
+  catalogue with try-it playground, CodeMirror spec editor with a two-way
+  pricing rail and version diffs, org billing with Stripe Checkout, Connect
+  publisher onboarding, earnings/transfers/payouts, in-app docs at `/docs`.
+- **Auth** (Clerk) — orgs, machine API keys with org claims, prebuilt
+  profile/org management embeds.
 
-# Install dependencies
-pnpm install
+## Repo layout
 
-# Setup DB
-pnpm drizzle-kit migrate
-
-# Start the dev server
-pnpm dev
+```
+apps/web/        # TanStack Start app — all screens
+apps/gateway/    # CF Worker: metered proxy, wallet DO, mock, MCP, discovery
+convex/          # Convex schema + functions (control plane)
+packages/shared/ # OpenAPI parsing, x-zevium-* pricing, validation
+e2e/             # agent-browser end-to-end suite (auth, publisher, consumer)
+docs/            # market research + demo assets
 ```
 
-- Open `http://localhost:5173` in your browser to view the website.
+Source-of-truth docs: [PRODUCT.md](PRODUCT.md) · [FLOW.md](FLOW.md) ·
+[TECH.md](TECH.md) · [DESIGN.md](DESIGN.md)
 
-### Proxy security config
+## Development
 
-- The `/api/proxy/*` endpoint requires explicit runtime security config:
-  - `PROXY_UPSTREAM_SECRET`: shared secret forwarded to upstreams as `x-zevium-proxy-secret`
-  - `PROXY_ALLOWED_HOSTS`: allowlist for `x-zevium-host` (supports exact hosts and `*.example.com`)
-- If either value is missing, proxy requests fail closed.
+```sh
+pnpm install
+npx convex dev          # control plane (needs CONVEX_DEPLOYMENT in .env.local)
+pnpm dev                # web app on :3000
+cd apps/gateway && npx wrangler dev --port 8787   # gateway
+pnpm seed               # test user + org (test+clerk_test@zevium.dev)
+```
 
----
+Verification:
 
-## Docs
+```sh
+pnpm typecheck && pnpm test && pnpm build   # 394 unit tests across 4 suites
+bash e2e/run-all.sh                         # browser e2e: auth, publish, consume
+```
 
-### Framework
+## License
 
-- [TanStack Start](https://tanstack.com/start/latest/docs/framework/react/overview): Core client and server framework.
-
-### UI
-
-- [shadcn/ui](https://ui.shadcn.com/docs): UI framework.
-- [Tailwind CSS](https://tailwindcss.com/docs/styling-with-utility-classes): Styling.
-
-### Backend
-
-- [tRPC](https://trpc.io/docs/quickstart): App server framework.
-- [Better Auth](https://www.better-auth.com/docs/introduction): Authentication.
-
-### Data
-
-- [Drizzle ORM](https://orm.drizzle.team/docs/get-started): Database ORM.
-- [Turso (libSQL)](https://docs.turso.tech/libsql): Database (subject to change).
-
-### License
-
-- [WTFPL and 69 other licenses found](./LICENSE)
+[WTFPL](LICENSE)

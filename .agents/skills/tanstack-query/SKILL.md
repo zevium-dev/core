@@ -47,7 +47,10 @@ New pattern using `variables` - no cache manipulation, no rollback needed:
 
 ```tsx
 function TodoList() {
-  const { data: todos } = useQuery({ queryKey: ["todos"], queryFn: fetchTodos });
+  const { data: todos } = useQuery({
+    queryKey: ["todos"],
+    queryFn: fetchTodos,
+  });
 
   const addTodo = useMutation({
     mutationKey: ["addTodo"],
@@ -174,7 +177,11 @@ console.log(results.data); // [user1, user2, user3]
 Type-safe factory for infinite queries (parallel to `queryOptions`):
 
 ```tsx
-import { infiniteQueryOptions, useInfiniteQuery, prefetchInfiniteQuery } from "@tanstack/react-query";
+import {
+  infiniteQueryOptions,
+  useInfiniteQuery,
+  prefetchInfiniteQuery,
+} from "@tanstack/react-query";
 
 const todosInfiniteOptions = infiniteQueryOptions({
   queryKey: ["todos", "infinite"],
@@ -242,7 +249,12 @@ const queryClient = new QueryClient({
 
 ```tsx
 // src/hooks/useTodos.ts
-import { useQuery, useMutation, useQueryClient, queryOptions } from "@tanstack/react-query";
+import {
+  useQuery,
+  useMutation,
+  useQueryClient,
+  queryOptions,
+} from "@tanstack/react-query";
 
 // Query options factory (v5 pattern)
 export const todosQueryOptions = queryOptions({
@@ -720,7 +732,10 @@ const { error } = useQuery({
 streamingQueryClient.prefetchQuery({ queryKey: ["data"], queryFn: getData });
 
 // Client: conditional render on fetchStatus
-const { data, isFetching } = useSuspenseQuery({ queryKey: ["data"], queryFn: getData });
+const { data, isFetching } = useSuspenseQuery({
+  queryKey: ["data"],
+  queryFn: getData,
+});
 return (
   <>
     {data && <div>{data}</div>} {isFetching && <Loading />}
@@ -732,7 +747,10 @@ return (
 
 ```tsx
 // Option 1: Await prefetch
-await streamingQueryClient.prefetchQuery({ queryKey: ["data"], queryFn: getData });
+await streamingQueryClient.prefetchQuery({
+  queryKey: ["data"],
+  queryFn: getData,
+});
 
 // Option 2: Don't render based on fetchStatus with Suspense
 const { data } = useSuspenseQuery({ queryKey: ["data"], queryFn: getData });
@@ -758,7 +776,10 @@ await queryClient.prefetchQuery({ queryKey: ["todos"], queryFn: fetchTodos });
 
 // Client Component
 function Todos() {
-  const { data, isLoading } = useQuery({ queryKey: ["todos"], queryFn: fetchTodos });
+  const { data, isLoading } = useQuery({
+    queryKey: ["todos"],
+    queryFn: fetchTodos,
+  });
   if (isLoading) return <div>Loading...</div>; // Server renders this
   return <div>{data.length} todos</div>; // Client hydrates with this
 }
@@ -769,7 +790,10 @@ function Todos() {
 ```tsx
 // Use useSuspenseQuery instead
 function Todos() {
-  const { data } = useSuspenseQuery({ queryKey: ["todos"], queryFn: fetchTodos });
+  const { data } = useSuspenseQuery({
+    queryKey: ["todos"],
+    queryFn: fetchTodos,
+  });
   return <div>{data.length} todos</div>;
 }
 ```
@@ -921,7 +945,8 @@ const pendingTodos = useMutationState({
   select: (mutation) => mutation.state.variables as Todo,
 });
 // Or cast the entire state:
-select: (mutation) => mutation.state as MutationState<Todo, Error, Todo, unknown>;
+select: (mutation) =>
+  mutation.state as MutationState<Todo, Error, Todo, unknown>;
 ```
 
 **Status**: Known limitation of fuzzy matching. No planned fix.
@@ -1113,14 +1138,20 @@ const { data: posts } = useQuery({
 
 ```tsx
 const results = useQueries({
-  queries: ids.map((id) => ({ queryKey: ["todos", id], queryFn: () => fetchTodo(id) })),
+  queries: ids.map((id) => ({
+    queryKey: ["todos", id],
+    queryFn: () => fetchTodo(id),
+  })),
 });
 ```
 
 **Prefetching** (preload on hover):
 
 ```tsx
-queryClient.prefetchQuery({ queryKey: ["todo", id], queryFn: () => fetchTodo(id) });
+queryClient.prefetchQuery({
+  queryKey: ["todo", id],
+  queryFn: () => fetchTodo(id),
+});
 ```
 
 **Infinite Scroll** (useInfiniteQuery):

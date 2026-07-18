@@ -81,7 +81,9 @@ function InfiniteList() {
   // Intersection Observer for auto-loading
   const ref = useRef();
   useEffect(() => {
-    const observer = new IntersectionObserver(([entry]) => entry.isIntersecting && hasNextPage && fetchNextPage());
+    const observer = new IntersectionObserver(
+      ([entry]) => entry.isIntersecting && hasNextPage && fetchNextPage(),
+    );
     if (ref.current) observer.observe(ref.current);
     return () => observer.disconnect();
   }, [fetchNextPage, hasNextPage]);
@@ -111,7 +113,9 @@ function useOptimisticToggle() {
       await queryClient.cancelQueries({ queryKey: ["todos"] });
       const previous = queryClient.getQueryData(["todos"]);
 
-      queryClient.setQueryData(["todos"], (old) => old.map((todo) => (todo.id === updated.id ? updated : todo)));
+      queryClient.setQueryData(["todos"], (old) =>
+        old.map((todo) => (todo.id === updated.id ? updated : todo)),
+      );
 
       return { previous };
     },
@@ -169,7 +173,10 @@ function Search() {
 
   const { data } = useQuery({
     queryKey: ["search", deferredSearch],
-    queryFn: ({ signal }) => fetch(`/api/search?q=${deferredSearch}`, { signal }).then((r) => r.json()),
+    queryFn: ({ signal }) =>
+      fetch(`/api/search?q=${deferredSearch}`, { signal }).then((r) =>
+        r.json(),
+      ),
     enabled: deferredSearch.length >= 2,
   });
 }

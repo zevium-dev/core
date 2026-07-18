@@ -1,0 +1,111 @@
+## Diagnosis
+
+URL flips first (router location optimistic). UI waits on route tree `beforeLoad`/`loader` chain. That chain full of **server fn RPCs to Clerk** every client nav. Preload cache useless (`defaultPreloadStaleTime: 0`). Then 400ms view-transition on top.
+
+---
+
+### 1. Router defaults
+
+`apps/web/src/router.tsx:47-61`
+
+| option | value | effect |
+|---|---|---|
+| `defaultPreload` | `"intent"` | OK, Links preload on hover |
+| `defaultPreloadStaleTime` | `0` | preload dies instantly; click re-runs loaders |
+| `defaultPendingMs` / `defaultPendingMinMs` | **unset** | TSR default ~1000ms → old screen sits while loaders run |
+| `defaultViewTransition` | always on | +400ms (`--dur-page`) after data ready |
+
+---
+
+### 2–4. Route loaders / beforeLoad / Convex pattern
+
+**Always on path for any `/app/*` client nav:**
+
+| layer | file | awaits | blocking? |
+|---|---|---|---|
+| root `beforeLoad` | `__root.tsx:42-55` | `fetchConvexAuth()` → `createServerFn` → Clerk `auth()` + `getToken({template:"convex"})` | **YES every nav** (no client short-circuit) |
+| `/app` `beforeLoad` | `app.tsx:14-16` | `requireAuth()` → another `createServerFn` → Clerk `auth()` | **YES every `/app/*` nav** |
+
+Two sequential server round-trips before leaf even starts. Auth already in Clerk client state — waste.
+
+**Leaf routes under `apps/web/src/routes/app/`:**
+
+| route | loader | awaits | component data |
+|---|---|---|---|
+| `/app/` | none | — | `useSuspenseQuery` `analytics.orgOverview` + non-block `useQuery listKeys` |
+| `/app/billing` | none | — | `useSuspenseQuery` wallet + packs |
+| `/app/settings` | none | — | layout only |
+| `/app/settings/` | none | — | `useUser` client |
+| `/app/settings/keys` | none | — | non-block `useQuery(listKeys)` server fn |
+| `/app/settings/activity` | none | — | static empty |
+| `/app/projects` | none | — | Outlet |
+| `/app/projects/` | **YES** `index.tsx:25-46` | `ensureMirrorOnServer()` (Clerk+Convex mutations) → `getAuthOrg()` → `ensureQueryData(projects.list)` | also `useSuspenseQuery` again |
+| `/app/projects/create` | none | — | form only |
+| `/app/projects/$projectSlug` | **YES** `$projectSlug.tsx:52-67` | `getAuthOrg()` → `ensureQueryData(projects.get)` | `useSuspenseQuery` project |
+| `/app/projects/$projectSlug/spec` | **YES** `spec.tsx:53+` | `getAuthOrg()` → `ensureQueryData` project + draft + versions | `useSuspenseQuery` x3 |
+
+Dashboard/billing/settings: Convex via **component** `useSuspenseQuery` + skeletons — correct pattern.  
+Projects*: **blocking loaders** that re-hit Clerk server fns then Convex — wrong for snappy SPA nav.
+
+`pendingComponent` set on several routes but without `pendingMs: 0` so skeleton rarely shows during the auth lag — old page freezes while URL already moved.
+
+---
+
+### 5. Sidebar links
+
+`app-sidebar.tsx:81` — TanStack `<Link to={item.to}>` inside `SidebarMenuButton asChild`. SPA nav + intent preload. **Not** full reloads. Links fine.
+
+---
+
+## CAUSE (ranked)
+
+1. **Root `beforeLoad` always awaits `fetchConvexAuth` server fn** — `__root.tsx:42-43` + `27-36`. Every client nav pays Clerk server round-trip + JWT mint. Comment says SSR-only for token set, but **await still runs in browser**.
+
+2. **`/app` `beforeLoad` always awaits `requireAuth` server fn** — `app.tsx:14-16` + `auth-session.ts:15-22`. Second Clerk server hop on every in-app nav. Parent stays matched but staleTime 0 → re-run.
+
+3. **Projects loaders stack more server fns** — `projects/index.tsx:30-37` (`ensureMirrorOnServer` + `getAuthOrg` + Convex), `$projectSlug.tsx:55-62`, `spec.tsx:56+`. Worst path: root + app + leaf = 3–4 serial RPCs before paint.
+
+4. **`defaultPreloadStaleTime: 0`** — `router.tsx:48`. Intent preload on hover wasted; click redoes work. Amplifies 1–3.
+
+5. **`defaultViewTransition` 400ms** — `router.tsx:54-61` + `styles.css:146-171`. After loaders finish, another ~400ms morph. Stacks to “500ms+” feel even when data warm.
+
+6. **No `defaultPendingMs: 0`** — old UI sticks during block; feels stuck rather than skeleton flash. Secondary UX, not primary latency.
+
+**Not primary:** Sidebar Link type. Convex-in-component on dashboard/billing (non-blocking after commit). Settings leaves (no loaders).
+
+**Why URL first, UI late:** location commits immediately; match stays `pending` until async `beforeLoad`/`loader` resolve. Default pendingMs hides pending UI → frozen old screen.
+
+---
+
+## FIX PLAN (minimal, file-by-file)
+
+1. **`apps/web/src/routes/__root.tsx`**  
+   - Client: do **not** await `fetchConvexAuth`.  
+   - SSR only: keep server fn + `serverHttpClient.setAuth`.  
+   - Browser: derive `userId` from Clerk client (`useAuth` already in root) or pass null and let ConvexProviderWithClerk own JWT.  
+   - Goal: root `beforeLoad` sync on client.
+
+2. **`apps/web/src/routes/app.tsx`**  
+   - Drop `await requireAuth()` server fn on every nav.  
+   - Guard with client Clerk (`useAuth` / router context `userId` from SSR hydrate) or `beforeLoad` that only checks already-hydrated context; redirect if missing.  
+   - Optional: one-shot SSR `beforeLoad` via `ssr: true` / env check, not client RPC.
+
+3. **`apps/web/src/routes/app/projects/index.tsx`**, **`$projectSlug.tsx`**, **`$projectSlug/spec.tsx`**  
+   - Remove blocking `getAuthOrg` / `ensureMirrorOnServer` from loaders.  
+   - Org slug from Clerk `useOrganization` (already used in components).  
+   - Prefetch optional: fire-and-forget `queryClient.ensureQueryData` **without await**, or delete loaders and rely on `useSuspenseQuery` + existing `pendingComponent`/Suspense skeletons (matches DESIGN/FLOW).  
+   - Keep `useEnsureMirror` in app layout for soft mirror (already there).
+
+4. **`apps/web/src/router.tsx`**  
+   - `defaultPreloadStaleTime: 30_000` (or similar) so intent preload survives to click.  
+   - `defaultPendingMs: 0` so skeletons show if anything still async.  
+   - Optional: `defaultPendingMinMs: 0`.  
+   - Consider scoping VT (only list→detail morphs) instead of every sidebar hop — cuts 400ms chrome on Dashboard↔Billing↔Settings.
+
+5. **Leave alone first pass:** sidebar Links, settings/keys non-blocking `useQuery`, dashboard/billing Suspense pattern.
+
+**Expected after:** sidebar hops among `/app`, billing, settings commit in one frame (no server hop). Projects show skeleton then Convex data without Clerk server chain. Catalogue still can keep public loaders if wanted (public, no auth RPC).
+
+---
+
+DONE.

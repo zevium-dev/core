@@ -1,0 +1,21 @@
+DONE: MCP + discovery live. All agent traffic hit same metered pipeline. Zero side door.
+
+**Shipped**
+- `GET /discovery` — catalogue + per-endpoint pricing, cache-control 60s
+- `GET|POST /mcp` — minimal JSON-RPC (SDK skipped, workerd-safe): `initialize`, `tools/list`, `tools/call`, `ping`
+- Tools: `search_apis`, `get_api_docs`, `call_api` → **direct `handleGatewayRequest`** (verify/reserve/settle)
+- Catalogue source + 60s TTL cache over `catalogue:listPublic`
+
+**Files**
+- `apps/gateway/src/catalogue-source.ts` (new)
+- `apps/gateway/src/discovery.ts` (new)
+- `apps/gateway/src/mcp.ts` (new)
+- `apps/gateway/src/index.ts` (routes wired)
+- `apps/gateway/test/discovery-mcp.test.ts` (new)
+- `apps/gateway/test/pipeline.test.ts` (fixture catalogueSource)
+
+**Check**
+- `pnpm --filter @zevium/gateway test` → **40/40 green**
+- `pnpm --filter @zevium/gateway typecheck` → **clean**
+- call_api test: balance 100→97, pending settlement cost 3, upstream hit once
+- no-key / 402 paths: wallet untouched, upstream never called

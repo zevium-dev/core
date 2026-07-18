@@ -34,11 +34,14 @@ async function addTodo(newTodo: AddTodoInput): Promise<Todo> {
 }
 
 async function updateTodo({ id, ...updates }: UpdateTodoInput): Promise<Todo> {
-  const response = await fetch(`https://jsonplaceholder.typicode.com/todos/${id}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(updates),
-  });
+  const response = await fetch(
+    `https://jsonplaceholder.typicode.com/todos/${id}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(updates),
+    },
+  );
 
   if (!response.ok) {
     throw new Error(`Failed to update todo: ${response.statusText}`);
@@ -48,9 +51,12 @@ async function updateTodo({ id, ...updates }: UpdateTodoInput): Promise<Todo> {
 }
 
 async function deleteTodo(id: number): Promise<void> {
-  const response = await fetch(`https://jsonplaceholder.typicode.com/todos/${id}`, {
-    method: "DELETE",
-  });
+  const response = await fetch(
+    `https://jsonplaceholder.typicode.com/todos/${id}`,
+    {
+      method: "DELETE",
+    },
+  );
 
   if (!response.ok) {
     throw new Error(`Failed to delete todo: ${response.statusText}`);
@@ -127,7 +133,9 @@ export function useDeleteTodo() {
 
     onSuccess: (_, deletedId) => {
       // Remove from list cache
-      queryClient.setQueryData<Todo[]>(["todos"], (old = []) => old.filter((todo) => todo.id !== deletedId));
+      queryClient.setQueryData<Todo[]>(["todos"], (old = []) =>
+        old.filter((todo) => todo.id !== deletedId),
+      );
 
       // Remove individual todo cache
       queryClient.removeQueries({ queryKey: ["todos", deletedId] });
@@ -160,7 +168,13 @@ export function AddTodoForm() {
 
   return (
     <form onSubmit={handleSubmit}>
-      <input type="text" name="title" placeholder="New todo..." required disabled={isPending} />
+      <input
+        type="text"
+        name="title"
+        placeholder="New todo..."
+        required
+        disabled={isPending}
+      />
       <button type="submit" disabled={isPending}>
         {isPending ? "Adding..." : "Add Todo"}
       </button>

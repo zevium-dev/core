@@ -1,0 +1,3 @@
+`npx convex dev --once` green. tsc clean. JWT template `convex` live.
+
+DONE: Control-plane foundation up. Schema expanded (orgs+imageUrl, users, projects.tags, specs, specVersions, wallets, walletEntries, usageEvents + indexes). Clerk JWT auth.config uses issuer `https://holy-wasp-95.clerk.accounts.dev`, applicationID `convex`; Clerk JWT template `convex` created (id `jtmp_3GLsDcj6uXPpG7xtCtOM8s1ojio`) with org claims. orgs: getBySlug/listMine/ensureOrganization + internal upsert/delete + zero-balance wallet. users: ensureUser + internal upsert. http POST `/clerk-webhook` verifies svix, 503 if secret missing. Files: `convex/schema.ts`, `convex/auth.config.ts`, `convex/organizations.ts`, `convex/users.ts`, `convex/http.ts`, root `package.json` (+svix).
