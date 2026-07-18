@@ -86,7 +86,14 @@ jobs:
           E2E_EMAIL: ${{ secrets.PREVIEW_E2E_EMAIL }}
           E2E_PASSWORD: ${{ secrets.PREVIEW_E2E_PASSWORD }}
           E2E_OTP: ${{ secrets.PREVIEW_E2E_OTP }}
-        run: e2e/run-all.sh
+        run: |
+          if e2e/run-all.sh; then
+            exit 0
+          fi
+
+          echo "Authenticated preview was not ready; retrying once after propagation delay"
+          sleep 30
+          E2E_SESSION="zevium-e2e-retry-$PR_NUMBER" e2e/run-all.sh
 
       - name: Upload failure evidence
         if: failure()
