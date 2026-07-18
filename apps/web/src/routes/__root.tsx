@@ -16,7 +16,7 @@ import { ThemeProvider } from "#/components/theme-provider";
 import { Toaster } from "#/components/ui/sonner";
 import { TooltipProvider } from "#/components/ui/tooltip";
 import { readClientClerkAuth } from "#/lib/clerk-client";
-import { convexQueryClient, type RouterContext } from "#/router";
+import type { RouterContext } from "#/router";
 
 import appCss from "../styles.css?url";
 
@@ -73,9 +73,9 @@ export const Route = createRootRouteWithContext<RouterContext>()({
     // SSR only: forward JWT into Convex HTTP client used by loaders.
     // Browser auth stays on ConvexProviderWithClerk.
     if (token) {
-      convexQueryClient.serverHttpClient?.setAuth(token);
+      context.convexQueryClient.serverHttpClient?.setAuth(token);
     } else {
-      convexQueryClient.serverHttpClient?.clearAuth();
+      context.convexQueryClient.serverHttpClient?.clearAuth();
     }
 
     return { userId, token, orgSlug, orgId };
@@ -115,6 +115,8 @@ function RootDocument({ children }: { children: React.ReactNode }) {
 }
 
 function RootComponent() {
+  const { convexQueryClient } = Route.useRouteContext();
+
   return (
     <ClerkProvider appearance={{ theme: shadcn }}>
       <ConvexProviderWithClerk
