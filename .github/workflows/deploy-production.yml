@@ -1,0 +1,68 @@
+name: Deploy Production
+
+on:
+  workflow_run:
+    workflows: [Continuous Integration]
+    types: [completed]
+    branches: [develop]
+
+concurrency:
+  group: production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  MISE_EXPERIMENTAL: true
+  CLOUDFLARE_ACCOUNT_ID: 1ea9299555b026a6a7484c8323c5a953
+  VITE_CONVEX_URL: https://polite-ermine-809.convex.cloud
+  VITE_GATEWAY_URL: https://gateway.zevium.dev
+
+jobs:
+  deploy:
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'develop'
+    runs-on: ubuntu-slim
+    timeout-minutes: 15
+    environment: production
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          persist-credentials: false
+      - uses: actions/cache@v5
+        with:
+          path: ~/.local/share/pnpm/store
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+      - uses: jdx/mise-action@v4
+
+      - name: Deploy Convex control plane
+        env:
+          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_PRODUCTION_DEPLOY_KEY }}
+        run: pnpm exec convex deploy --yes
+
+      - name: Deploy gateway Worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: pnpm --filter gateway exec wrangler deploy
+
+      - name: Build web Worker
+        env:
+          CLERK_PUBLISHABLE_KEY: ${{ secrets.CLERK_PRODUCTION_PUBLISHABLE_KEY }}
+          CLERK_SECRET_KEY: ${{ secrets.CLERK_PRODUCTION_SECRET_KEY }}
+        run: pnpm --filter web build
+
+      - name: Deploy web Worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: pnpm --filter web exec wrangler deploy --config dist/server/wrangler.json
+
+      - name: Smoke test production
+        run: |
+          gateway="$(curl --fail --silent --show-error https://gateway.zevium.dev/health)"
+          [[ "$gateway" == *'"ok":true'* ]] || { echo "Gateway health response is invalid" >&2; exit 1; }
+
+          web="$(curl --fail --silent --show-error https://www.zevium.dev/)"
+          [[ "$web" == *'One key. Every API. Pay per call.'* ]] || { echo "Landing page did not render" >&2; exit 1; }
