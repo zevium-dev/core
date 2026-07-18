@@ -1,0 +1,73 @@
+name: Payment Drills
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 4 * * *"
+
+concurrency:
+  group: payment-drill
+  cancel-in-progress: false
+
+env:
+  MISE_EXPERIMENTAL: true
+
+jobs:
+  deterministic-contracts:
+    runs-on: ubuntu-slim
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/cache@v5
+        with:
+          path: ~/.local/share/pnpm/store
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+      - uses: jdx/mise-action@v4
+      - name: Verify checkout, metering, refunds, and Connect settlement
+        run: pnpm exec vitest run --config convex/vitest.config.ts convex/stripe-billing.test.ts convex/stripe-connect.test.ts convex/ingest-usage.test.ts
+
+  real-sandbox-checkout:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-slim
+    timeout-minutes: 20
+    environment: staging
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/cache@v5
+        with:
+          path: ~/.local/share/pnpm/store
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+      - uses: jdx/mise-action@v4
+      - name: Install browser runtime
+        run: |
+          npm install --global agent-browser
+          agent-browser install --with-deps
+      - name: Run authenticated publish and metered-call journey
+        env:
+          E2E_BASE_URL: ${{ vars.STAGING_WEB_URL }}
+          GATEWAY_URL: ${{ vars.STAGING_GATEWAY_URL }}
+          E2E_EMAIL: ${{ secrets.STAGING_E2E_EMAIL }}
+          E2E_PASSWORD: ${{ secrets.STAGING_E2E_PASSWORD }}
+          E2E_OTP: ${{ secrets.STAGING_E2E_OTP }}
+          E2E_API_KEY: ${{ secrets.STAGING_E2E_API_KEY }}
+          E2E_ORG_SLUG: ${{ vars.STAGING_E2E_ORG_SLUG }}
+        run: e2e/run-all.sh
+      - name: Run real Stripe Checkout and refund journey
+        env:
+          E2E_BASE_URL: ${{ vars.STAGING_WEB_URL }}
+          E2E_EMAIL: ${{ secrets.STAGING_E2E_EMAIL }}
+          E2E_PASSWORD: ${{ secrets.STAGING_E2E_PASSWORD }}
+          E2E_OTP: ${{ secrets.STAGING_E2E_OTP }}
+          STRIPE_SECRET_KEY: ${{ secrets.STAGING_STRIPE_SECRET_KEY }}
+        run: e2e/04-payment-drill.sh
+      - name: Upload failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: payment-drill-evidence
+          path: e2e/artifacts
+          if-no-files-found: ignore

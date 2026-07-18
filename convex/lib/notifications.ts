@@ -8,8 +8,8 @@ export type NotificationKind =
   | "version_deprecated"
   | "webhook_failed"
   | "visibility_changed"
-  | "payout_requested"
-  | "payout_resolved";
+  | "transfer_failed"
+  | "transfer_sent";
 
 export type CreateNotificationArgs = {
   clerkOrgId: string;

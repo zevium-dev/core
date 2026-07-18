@@ -7,6 +7,7 @@ import {
 import { afterEach, describe, expect, it } from "vitest";
 import worker, {
   __setTestPipelineDeps,
+  __setTestGrantsFetcher,
   __setTestUsageMutation,
   type Env,
 } from "../src/index";
@@ -151,6 +152,7 @@ async function gatewayFetch(
 
 afterEach(() => {
   __setTestPipelineDeps(null);
+  __setTestGrantsFetcher(null);
   __setTestUsageMutation(null);
 });
 
@@ -426,7 +428,7 @@ describe("gateway pipeline", () => {
     expect(res.status).toBe(404);
   });
 
-  it("wallet HTTP grant endpoint works for tests", async () => {
+  it("anonymous wallet administration routes do not mutate DO state", async () => {
     const org = "org_http_grant";
     const stub = walletStub(org);
 
@@ -442,23 +444,18 @@ describe("gateway pipeline", () => {
     );
     await waitOnExecutionContext(ctx);
 
-    expect(grantRes.status).toBe(200);
-    const grantJson: unknown = await grantRes.json();
-    expect(
-      grantJson &&
-        typeof grantJson === "object" &&
-        "status" in grantJson &&
-        grantJson.status,
-    ).toBe("applied");
-    expect(
-      grantJson &&
-        typeof grantJson === "object" &&
-        "balance" in grantJson &&
-        grantJson.balance,
-    ).toBe(25);
+    expect(grantRes.status).toBe(404);
+
+    const stateRes = await worker.fetch(
+      new Request(`https://gateway.test/wallet/${org}/state`),
+      env as Env,
+      createExecutionContext(),
+    );
+    expect(stateRes.status).toBe(404);
 
     const state = await stub.getState();
-    expect(state.balance).toBe(25);
+    expect(state.balance).toBe(0);
+    expect(state.inFlightTotal).toBe(0);
   });
 
   it("free-tier path skips reserve, costs 0, still enqueues usage", async () => {
@@ -509,10 +506,82 @@ describe("gateway pipeline", () => {
     expect(freeEvents.every((e) => e.cost === 0)).toBe(true);
   });
 
+  it("disabled and expired-grace keys cannot use the free tier upstream", async () => {
+    for (const [label, setting] of [
+      ["disabled", { keyId: KEY_ID, disabled: true }],
+      ["grace-expired", { keyId: KEY_ID, disabled: false, graceUntil: 0 }],
+    ] as const) {
+      const clerkOrgId = `org_pipe_free_${label}`;
+      const { fetchImpl, calls } = makeFetchMock(
+        () => new Response("should not run"),
+      );
+      __setTestGrantsFetcher(async () => ({
+        wallet: { clerkOrgId, balance: 0, sequence: 1 },
+        keySettings: [setting],
+      }));
+      await installFixtures({ clerkOrgId, fetchImpl, credits: 0 });
+
+      const res = await gatewayFetch(
+        `/gateway/${ORG_SLUG}/${PROJECT_SLUG}/free`,
+      );
+
+      expect(res.status).toBe(403);
+      expect(calls).toHaveLength(0);
+      expect(await walletStub(clerkOrgId).getFreeTierUsed(KEY_ID)).toBe(0);
+      __setTestGrantsFetcher(null);
+    }
+  });
+
+  it("returns free-tier allowance after a failed upstream response", async () => {
+    const clerkOrgId = "org_pipe_free_refund";
+    const { fetchImpl, calls } = makeFetchMock(
+      () => new Response("upstream failure", { status: 503 }),
+    );
+    const { usage } = await installFixtures({
+      clerkOrgId,
+      fetchImpl,
+      credits: 0,
+    });
+
+    const first = await gatewayFetch(
+      `/gateway/${ORG_SLUG}/${PROJECT_SLUG}/free`,
+    );
+    const second = await gatewayFetch(
+      `/gateway/${ORG_SLUG}/${PROJECT_SLUG}/free`,
+    );
+
+    expect(first.status).toBe(503);
+    expect(second.status).toBe(503);
+    expect(calls).toHaveLength(2);
+    expect(await walletStub(clerkOrgId).getFreeTierUsed(KEY_ID)).toBe(0);
+    expect(usage.events.map((event) => event.outcome)).toEqual([
+      "refunded",
+      "refunded",
+    ]);
+    expect(
+      (await walletStub(clerkOrgId).getState()).pendingSettlements,
+    ).toHaveLength(0);
+  });
+
+  it("returns free-tier allowance when the upstream request throws", async () => {
+    const clerkOrgId = "org_pipe_free_transport_failure";
+    const { fetchImpl, calls } = makeFetchMock(() => {
+      throw new Error("connection reset");
+    });
+    await installFixtures({ clerkOrgId, fetchImpl, credits: 0 });
+
+    const res = await gatewayFetch(`/gateway/${ORG_SLUG}/${PROJECT_SLUG}/free`);
+
+    expect(res.status).toBe(502);
+    expect(calls).toHaveLength(1);
+    expect(await walletStub(clerkOrgId).getFreeTierUsed(KEY_ID)).toBe(0);
+  });
+
   it("flush batching with ack via DO alarm + fake convex sink", async () => {
     const clerkOrgId = "org_pipe_flush";
     const organizationId = "org_convex_flush";
     const fake = new FakeConvexUsageSink();
+    fake.setWallet(clerkOrgId, 50);
     __setTestUsageMutation(fake.asMutationFn());
 
     const { fetchImpl } = makeFetchMock(
@@ -559,6 +628,7 @@ describe("gateway pipeline", () => {
     const clerkOrgId = "org_pipe_flush_retry";
     const organizationId = "org_convex_flush_retry";
     const fake = new FakeConvexUsageSink();
+    fake.setWallet(clerkOrgId, 20);
 
     const { fetchImpl } = makeFetchMock(
       () => new Response("ok", { status: 200 }),
@@ -685,6 +755,50 @@ describe("gateway pipeline", () => {
     expect(state.balance).toBe(42);
   });
 
+  it("internal sync requires the shared secret and imports a checkpoint", async () => {
+    const clerkOrgId = "org_internal_sync";
+    const secret = "test-internal-secret";
+    const testEnv = {
+      ...env,
+      GATEWAY_INTERNAL_SECRET: secret,
+    } as Env;
+    __setTestGrantsFetcher(async () => ({
+      wallet: { clerkOrgId, balance: 42, sequence: 1 },
+      keySettings: [],
+    }));
+
+    const unauth = await worker.fetch(
+      new Request("https://gateway.test/internal/sync", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ clerkOrgId }),
+      }),
+      testEnv,
+      createExecutionContext(),
+    );
+    expect(unauth.status).toBe(401);
+    expect((await walletStub(clerkOrgId).getState()).balance).toBe(0);
+
+    const sync = await worker.fetch(
+      new Request("https://gateway.test/internal/sync", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-gateway-secret": secret,
+        },
+        body: JSON.stringify({ clerkOrgId }),
+      }),
+      testEnv,
+      createExecutionContext(),
+    );
+    expect(sync.status).toBe(200);
+    expect(await sync.json()).toMatchObject({
+      status: "ok",
+      balance: 42,
+      sequence: 1,
+    });
+  });
+
   it("wallet DO uses clerkOrgId not convex organizationId", async () => {
     const { fetchImpl } = makeFetchMock(
       () => new Response("ok", { status: 200 }),
@@ -704,6 +818,27 @@ describe("gateway pipeline", () => {
 
     const convexNamed = await walletStub(CONVEX_ORG).getState();
     expect(convexNamed.balance).toBe(0);
+  });
+
+  it("a negative authoritative wallet checkpoint blocks paid execution", async () => {
+    const clerkOrgId = "org_pipe_negative_checkpoint";
+    const { fetchImpl, calls } = makeFetchMock(
+      () => new Response("should not run"),
+    );
+    __setTestGrantsFetcher(async () => ({
+      wallet: { clerkOrgId, balance: -10, sequence: 1 },
+      keySettings: [],
+    }));
+    await installFixtures({ clerkOrgId, fetchImpl, credits: 0 });
+
+    const res = await gatewayFetch(
+      `/gateway/${ORG_SLUG}/${PROJECT_SLUG}/echo`,
+      { method: "POST", body: "request" },
+    );
+
+    expect(res.status).toBe(402);
+    expect(calls).toHaveLength(0);
+    expect((await walletStub(clerkOrgId).getState()).available).toBe(0);
   });
 
   it("marketplace: consumer key calls a PUBLIC project in another org, consumer wallet pays", async () => {

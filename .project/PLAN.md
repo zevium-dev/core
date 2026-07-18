@@ -10,7 +10,7 @@
 - Seed: `pnpm seed` → `test+clerk_test@zevium.dev` / `zevium-test-password`, OTP `424242`, org `test-org`
 - Dev server: `apps/web` on port 3000 (may be running)
 - Legacy is deleted. Never resurrect tRPC/Drizzle/Better Auth/Polar-meters patterns
-- Polar sandbox creds: legacy `.env` at repo root has `POLAR_ACCESS_TOKEN`, `POLAR_WEBHOOK_SECRET` (server=sandbox), `GEMINI_API_KEY`, `RESEND_API_KEY`
+- Stripe Checkout + Connect replaced Polar and manual payouts on 2026-07-12; setup contract lives in `.env.example` and `.project/stripe-discovery.md`
 
 ## Waves
 
@@ -39,7 +39,8 @@
 | 8    | web+convex | Polar "Sync purchases" (dual-plane reconcile, 5-min cooldown) + spec editor cut 2 (rail write-back, version view/diff)                              | done (d995c3b)                                            |
 | 9a   | all        | key caps/rotation (DO-enforced), semantic search (gemini-embedding-001@768 — text-embedding-004 is dead), in-app /docs                              | done — search + keys browser-verified                     |
 | 9b   | all        | mock mode (/mock, 0-credit, key-authed) + x402 envelope, manual payouts (/app/earnings + /admin/payouts)                                            | done — mock + 402 + earnings live-verified                |
-| 10   | —          | remaining P2: generated SDKs, reviews/ratings, payout notifications (needs notifications.kind union extension), prod deploy                         | deferred (user: not yet)                                  |
+| 10   | all        | Stripe Checkout + Connect, refund/dispute debt, explicit earning lifecycle, transfer/payout projection, wallet reconciliation hardening             | done — build/test/typecheck green                         |
+| 11   | —          | remaining P2: generated SDKs, reviews/ratings, prod deploy                                                                                          | deferred (user: not yet)                                  |
 
 ## Decisions (user, wave 9)
 
@@ -63,7 +64,7 @@
 ## User action needed
 
 - ~~Clerk API Keys feature~~ — DONE, user enabled in dashboard; keys flow verified live.
-- Polar sandbox token lacks `products:write` + webhook scopes. To finish billing: (1) create token with full scopes or use dashboard, (2) register webhook `https://doting-warbler-454.convex.site/polar-webhook` for `order.paid`, (3) put its secret in Convex env `POLAR_WEBHOOK_SECRET` (current one is from legacy endpoint — stale), (4) optionally real credit-pack products (billing.ts falls back to ad-hoc prices).
+- Stripe production setup remains operator work: enable Connect, create three canonical Prices, register platform + Connect webhook destinations, configure secrets, and obtain written approval for pooled prepaid credits across independent publishers.
 
 ## Known facts (hard-won, keep)
 

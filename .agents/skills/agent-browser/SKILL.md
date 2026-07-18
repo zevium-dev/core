@@ -34,7 +34,39 @@ agent-browser skills get vercel-sandbox    # agent-browser inside Vercel Sandbox
 agent-browser skills get agentcore         # AWS Bedrock AgentCore cloud browsers
 ```
 
-Run `agent-browser skills list` to see everything available on the installed version.
+Run `agent-browser skills list` to see everything available in the installed version.
+
+## Helium permission-gated CDP
+
+When attaching to a user-controlled Helium browser whose broker reports
+`127.0.0.1:9222`, keep one stable session and pass `--cdp 9222` on every
+command:
+
+```bash
+agent-browser --session helium-direct --cdp 9222 tab list
+```
+
+Follow this sequence:
+
+1. Run one direct command. Helium may show **Allow / Deny** while the command
+   times out.
+2. Stop and ask the user to click **Allow**. Do not create another session.
+3. After approval, wait several seconds, then retry the exact command with the
+   same session and `--cdp 9222`.
+4. If `/json/version` or `/json/list` returns EOF, or the WebSocket times out
+   immediately after approval, treat it as bridge activation lag. Wait and
+   retry the same session.
+5. Prove attachment with `tab list`; targets must match tabs visible to the
+   user before navigating or interacting.
+
+Critical invariants:
+
+- Never omit `--cdp 9222` after an attachment failure. Agent-browser may
+  silently launch managed Chromium and produce false evidence.
+- Never create multiple sessions while permission is pending.
+- A forwarded `get cdp-url` value is not proof of attachment.
+- If tabs do not match the user's browser, close the false session immediately
+  and restart the permission sequence once.
 
 ## Why agent-browser
 

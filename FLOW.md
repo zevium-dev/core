@@ -170,7 +170,7 @@ Org-scoped — the org owns the wallet; admins manage it, members view their own
 ### 4.8 Earnings & payouts — `.../organizations/{org}/earnings` (P2)
 
 - Accumulated publisher share (95%), settlement schedule, payout history, payout method, statement export
-- Implemented ahead of its P2 tag, as a manual-ledger MVP: `/app/earnings` shows accrued balance and a request-payout action (min $10 / 100,000 credits); requests queue in `/admin` for manual fulfilment — no automated settlement schedule yet
+- Implemented ahead of its P2 tag with Stripe Connect: `/app/org` handles publisher onboarding and remediation; `/app/earnings` separates pending-risk, available, allocated, transferred, reversed, and failed earnings and shows transfer/bank-payout history. `/admin/payouts` retries failed Connect transfers; bank destinations stay inside Stripe.
 
 ### 4.9 Listing lifecycle
 

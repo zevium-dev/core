@@ -19,7 +19,6 @@ import { readClientClerkAuth } from "#/lib/clerk-client";
 import { convexQueryClient, type RouterContext } from "#/router";
 
 import appCss from "../styles.css?url";
-import clerkShadcnCss from "@clerk/ui/themes/shadcn.css?url";
 
 type ConvexAuthSnapshot = {
   userId: string | null;
@@ -90,10 +89,7 @@ export const Route = createRootRouteWithContext<RouterContext>()({
       },
       { title: "Zevium" },
     ],
-    links: [
-      { rel: "stylesheet", href: appCss },
-      { rel: "stylesheet", href: clerkShadcnCss },
-    ],
+    links: [{ rel: "stylesheet", href: appCss }],
     scripts: [{ children: themeInitScript }],
   }),
   component: RootComponent,

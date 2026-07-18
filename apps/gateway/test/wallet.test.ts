@@ -1,7 +1,11 @@
 import { env } from "cloudflare:workers";
 import { evictDurableObject } from "cloudflare:test";
-import { describe, expect, it } from "vitest";
-import type { WalletDO } from "../src/wallet";
+import { afterEach, describe, expect, it } from "vitest";
+import {
+  __setTestGrantsFetcher,
+  __setTestUsageMutation,
+  type WalletDO,
+} from "../src/wallet";
 import { SimulatedLedger } from "./ledger";
 
 type WalletStub = DurableObjectStub<WalletDO>;
@@ -10,6 +14,11 @@ function walletStub(name: string): WalletStub {
   const id = env.WALLET.idFromName(name);
   return env.WALLET.get(id);
 }
+
+afterEach(() => {
+  __setTestGrantsFetcher(null);
+  __setTestUsageMutation(null);
+});
 
 /** Seeded mulberry32 PRNG for deterministic fuzz. */
 function mulberry32(seed: number): () => number {
@@ -197,6 +206,101 @@ describe("WalletDO unit", () => {
     expect(again.status).toBe("duplicate");
     const settleAgain = await stub.settle("r1");
     expect(settleAgain.status).toBe("already_settled");
+  });
+
+  it("keeps rejected Convex outcomes pending while applying successful outcomes", async () => {
+    const stub = walletStub("unit-partial-convex-outcomes");
+    await stub.grant("g1", 100);
+    await stub.reserve("r-applied", 10);
+    await stub.reserve("r-rejected", 20);
+    const usage = {
+      organizationId: "org_publisher",
+      consumerClerkOrgId: "org_consumer",
+      projectId: "project",
+      endpoint: "/endpoint",
+      method: "GET",
+      status: 200,
+      latencyMs: 1,
+      keyId: "key",
+    };
+    await stub.settle("r-applied", usage);
+    await stub.settle("r-rejected", usage);
+
+    __setTestUsageMutation(async (_name, { events }) => ({
+      results: events.map((event) =>
+        event.settleRefId === "settle:r-applied"
+          ? { refId: event.settleRefId, status: "applied" as const }
+          : {
+              refId: event.settleRefId,
+              status: "rejected" as const,
+              reason: "temporary ledger rejection",
+            },
+      ),
+      wallet: {
+        clerkOrgId: "org_consumer",
+        balance: 90,
+        sequence: 7,
+      },
+    }));
+
+    const flushed = await stub.flushToConvex();
+    __setTestUsageMutation(null);
+
+    expect(flushed).toMatchObject({ flushed: 2, acked: 1, remaining: 1 });
+    const state = await stub.getState();
+    expect(state.sequence).toBe(7);
+    expect(state.pendingSettlements).toEqual([
+      expect.objectContaining({ settlementId: "settle:r-rejected", cost: 20 }),
+    ]);
+    // Checkpoint 90 retains the rejected 20 as a conservative local debit.
+    expect(state.balance).toBe(70);
+  });
+
+  it("reconciles a newer checkpoint without discarding holds or pending settlement", async () => {
+    const stub = walletStub("unit-checkpoint-preserves-local-state");
+    let checkpoint = { clerkOrgId: "org_reconcile", balance: 100, sequence: 1 };
+    __setTestGrantsFetcher(async () => ({
+      wallet: checkpoint,
+      keySettings: [],
+    }));
+
+    await stub.syncGrants("org_reconcile", 100_000);
+    await stub.reserve("r-held", 30);
+    await stub.reserve("r-pending", 20);
+    await stub.settle("r-pending");
+
+    checkpoint = { clerkOrgId: "org_reconcile", balance: 100, sequence: 2 };
+    await stub.syncGrants("org_reconcile", 161_000);
+    __setTestGrantsFetcher(null);
+
+    const state = await stub.getState();
+    expect(state.sequence).toBe(2);
+    expect(state.balance).toBe(80);
+    expect(state.inFlight).toMatchObject({ "r-held": { cost: 30 } });
+    expect(state.pendingSettlements).toEqual([
+      expect.objectContaining({ settlementId: "settle:r-pending", cost: 20 }),
+    ]);
+    expect(state.available).toBe(50);
+  });
+
+  it("clamps a negative authoritative checkpoint to zero spendable credit", async () => {
+    const stub = walletStub("unit-negative-checkpoint");
+    __setTestGrantsFetcher(async () => ({
+      wallet: { clerkOrgId: "org_negative", balance: -25, sequence: 1 },
+      keySettings: [],
+    }));
+
+    await stub.syncGrants("org_negative", 100_000);
+    __setTestGrantsFetcher(null);
+
+    const state = await stub.getState();
+    expect(state.balance).toBe(-25);
+    expect(state.available).toBe(0);
+    await expect(stub.reserve("r1", 1)).resolves.toEqual({
+      status: "insufficient",
+      available: 0,
+      cost: 1,
+    });
   });
 });
 

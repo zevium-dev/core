@@ -25,8 +25,13 @@ async function seed(
   },
 ): Promise<void> {
   __setTestGrantsFetcher(async () => ({
-    grants: opts.grants ?? [],
-    balance: opts.balance ?? 0,
+    wallet: {
+      clerkOrgId: ORG,
+      balance:
+        opts.balance ??
+        (opts.grants ?? []).reduce((total, grant) => total + grant.amount, 0),
+      sequence: 0,
+    },
     keySettings: opts.keySettings ?? [],
   }));
   await stub.syncGrants(ORG);
@@ -82,6 +87,28 @@ describe("WalletDO key controls — reserve enforcement", () => {
       clerkOrgId: ORG,
     });
     expect(r3.status).toBe("reserved");
+  });
+
+  it("counts active reservations plus requested cost at the cap boundary", async () => {
+    const stub = walletStub("key-cap-concurrent");
+    await seed(stub, {
+      grants: [{ refId: "g1", amount: 1_000 }],
+      keySettings: [{ keyId: "k1", disabled: false, monthlyCapCredits: 100 }],
+    });
+
+    const results = await Promise.all([
+      stub.reserve("r1", 60, { keyId: "k1", clerkOrgId: ORG }),
+      stub.reserve("r2", 60, { keyId: "k1", clerkOrgId: ORG }),
+    ]);
+
+    expect(
+      results.filter((result) => result.status === "reserved"),
+    ).toHaveLength(1);
+    expect(results.filter((result) => result.status === "rejected")).toEqual([
+      { status: "rejected", reason: "key_cap_exceeded" },
+    ]);
+    const state = await stub.getState();
+    expect(state.inFlightTotal).toBe(60);
   });
 
   it("allows a rotated (grace) key before graceUntil, rejects after", async () => {
@@ -146,8 +173,7 @@ describe("WalletDO key controls — lazy single-flight refresh", () => {
     __setTestGrantsFetcher(async () => {
       fetchCount += 1;
       return {
-        grants: [{ refId: "g1", amount: 1000 }],
-        balance: 1000,
+        wallet: { clerkOrgId: ORG, balance: 1000, sequence: 0 },
         keySettings: [{ keyId: "k1", disabled: true }],
       };
     });
@@ -169,8 +195,7 @@ describe("WalletDO key controls — lazy single-flight refresh", () => {
     __setTestGrantsFetcher(async () => {
       fetchCount += 1;
       return {
-        grants: [{ refId: "g1", amount: 1000 }],
-        balance: 1000,
+        wallet: { clerkOrgId: ORG, balance: 1000, sequence: 0 },
         keySettings: [],
       };
     });
@@ -187,14 +212,39 @@ describe("WalletDO key controls — lazy single-flight refresh", () => {
     expect(fetchCount).toBe(primedFetches);
   });
 
+  it("refreshes a known key after its control checkpoint becomes stale", async () => {
+    const stub = walletStub("key-stale-known");
+    await seed(stub, {
+      grants: [{ refId: "g1", amount: 1_000 }],
+      keySettings: [{ keyId: "k1", disabled: false }],
+    });
+
+    let fetchCount = 0;
+    __setTestGrantsFetcher(async () => {
+      fetchCount += 1;
+      return {
+        wallet: { clerkOrgId: ORG, balance: 1_000, sequence: 1 },
+        keySettings: [{ keyId: "k1", disabled: true }],
+      };
+    });
+
+    const res = await stub.reserve("r1", 5, {
+      keyId: "k1",
+      clerkOrgId: ORG,
+      nowMs: Date.now() + 61_000,
+    });
+
+    expect(res).toEqual({ status: "rejected", reason: "key_disabled" });
+    expect(fetchCount).toBe(1);
+  });
+
   it("concurrent unknown-key reserves share a single fetch (single-flight)", async () => {
     const stub = walletStub("key-concurrent");
     let fetchCount = 0;
     __setTestGrantsFetcher(async () => {
       fetchCount += 1;
       return {
-        grants: [{ refId: "g1", amount: 1000 }],
-        balance: 1000,
+        wallet: { clerkOrgId: ORG, balance: 1000, sequence: 0 },
         keySettings: [{ keyId: "k_shared", disabled: true }],
       };
     });

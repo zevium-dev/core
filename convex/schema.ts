@@ -60,20 +60,27 @@ export default defineSchema({
   wallets: defineTable({
     organizationId: v.id("organizations"),
     balance: v.number(),
-    /** Server-side cooldown for manual Polar sync (ms epoch). */
-    lastPolarSyncAt: v.optional(v.number()),
+    /** Monotonic ledger version for edge checkpoint reconciliation. */
+    sequence: v.number(),
   }).index("by_organization", ["organizationId"]),
 
-  // Append-only credit ledger
+  // Append-only, signed credit ledger. `amount` is never inferred from kind.
   walletEntries: defineTable({
     walletId: v.id("wallets"),
     kind: v.union(
-      v.literal("grant"),
-      v.literal("settle"),
-      v.literal("refund_note"),
+      v.literal("payment_grant"),
+      v.literal("usage_settlement"),
+      v.literal("refund_reversal"),
+      v.literal("dispute_reversal"),
+      v.literal("admin_adjustment"),
     ),
     amount: v.number(),
+    /** Globally unique business id; duplicate delivery is a no-op. */
     refId: v.string(),
+    /** Wallet sequence after this entry was atomically materialized. */
+    sequence: v.number(),
+    paymentId: v.optional(v.id("payments")),
+    usageEventId: v.optional(v.id("usageEvents")),
     createdAt: v.number(),
   })
     .index("by_wallet", ["walletId"])
@@ -90,6 +97,12 @@ export default defineSchema({
     latencyMs: v.number(),
     keyId: v.string(),
     at: v.number(),
+    /**
+     * Stable gateway settlement reference (`settle:{reservationId}`).
+     * Optional solely for pre-ledger historical analytics rows; every new
+     * Wallet DO ingest validates and persists it.
+     */
+    settleRefId: v.optional(v.string()),
   })
     .index("by_org", ["organizationId"])
     .index("by_project", ["projectId"])
@@ -106,8 +119,8 @@ export default defineSchema({
       v.literal("version_deprecated"),
       v.literal("webhook_failed"),
       v.literal("visibility_changed"),
-      v.literal("payout_requested"),
-      v.literal("payout_resolved"),
+      v.literal("transfer_failed"),
+      v.literal("transfer_sent"),
     ),
     title: v.string(),
     body: v.string(),
@@ -169,23 +182,163 @@ export default defineSchema({
       dimensions: 768,
     }),
 
-  // Publisher payout requests (manual fulfilment via /admin queue)
-  payoutRequests: defineTable({
-    clerkOrgId: v.string(),
-    /** Net credits requested for payout (validated <= redeemable at request time). */
+  // Stripe identifiers are organization-owned. No bank details are stored.
+  organizationPayments: defineTable({
+    organizationId: v.id("organizations"),
+    stripeCustomerId: v.optional(v.string()),
+    stripeConnectedAccountId: v.optional(v.string()),
+    detailsSubmitted: v.boolean(),
+    chargesEnabled: v.boolean(),
+    payoutsEnabled: v.boolean(),
+    disabledReason: v.optional(v.string()),
+    requirements: v.array(v.string()),
+    updatedAt: v.number(),
+  })
+    .index("by_organization", ["organizationId"])
+    .index("by_customer", ["stripeCustomerId"])
+    .index("by_connected_account", ["stripeConnectedAccountId"]),
+
+  // Checkout state is server-owned: browser-supplied metadata never grants.
+  checkoutIntents: defineTable({
+    organizationId: v.id("organizations"),
+    packId: v.union(
+      v.literal("pack_10"),
+      v.literal("pack_50"),
+      v.literal("pack_100"),
+    ),
+    stripePriceId: v.string(),
+    amount: v.number(),
+    currency: v.string(),
     credits: v.number(),
-    /** Free-form payout destination (bank/PayPal/UPI details). */
-    destination: v.string(),
+    stripeCheckoutSessionId: v.optional(v.string()),
+    stripePaymentIntentId: v.optional(v.string()),
+    status: v.union(
+      v.literal("created"),
+      v.literal("open"),
+      v.literal("complete"),
+      v.literal("expired"),
+      v.literal("failed"),
+    ),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+    expiresAt: v.number(),
+  })
+    .index("by_organization", ["organizationId", "createdAt"])
+    .index("by_checkout_session", ["stripeCheckoutSessionId"])
+    .index("by_payment_intent", ["stripePaymentIntentId"]),
+
+  // Durable Stripe receipt and processing state. Never store raw card data.
+  paymentEvents: defineTable({
+    stripeEventId: v.string(),
+    stripeAccount: v.string(),
+    eventType: v.string(),
+    objectId: v.string(),
+    status: v.union(
+      v.literal("received"),
+      v.literal("processing"),
+      v.literal("processed"),
+      v.literal("failed"),
+      v.literal("ignored"),
+    ),
+    attempts: v.number(),
+    lastError: v.optional(v.string()),
+    receivedAt: v.number(),
+    processedAt: v.optional(v.number()),
+  })
+    .index("by_stripe_event", ["stripeEventId"])
+    .index("by_object", ["objectId"]),
+
+  payments: defineTable({
+    organizationId: v.id("organizations"),
+    checkoutIntentId: v.id("checkoutIntents"),
+    stripeCheckoutSessionId: v.string(),
+    stripePaymentIntentId: v.optional(v.string()),
+    stripeChargeId: v.optional(v.string()),
+    amount: v.number(),
+    currency: v.string(),
+    grantedCredits: v.number(),
+    reversedCredits: v.number(),
     status: v.union(
       v.literal("pending"),
       v.literal("paid"),
-      v.literal("rejected"),
+      v.literal("partially_refunded"),
+      v.literal("refunded"),
+      v.literal("disputed"),
+      v.literal("failed"),
     ),
-    /** Admin note on fulfilment/rejection. */
-    note: v.optional(v.string()),
+    failureReason: v.optional(v.string()),
     createdAt: v.number(),
-    resolvedAt: v.optional(v.number()),
+    updatedAt: v.number(),
   })
-    .index("by_org", ["clerkOrgId", "createdAt"])
-    .index("by_status", ["status", "createdAt"]),
+    .index("by_organization", ["organizationId", "createdAt"])
+    .index("by_checkout_session", ["stripeCheckoutSessionId"])
+    .index("by_payment_intent", ["stripePaymentIntentId"])
+    .index("by_charge", ["stripeChargeId"]),
+
+  // Each successful settlement creates exactly one immutable publisher split.
+  publisherEarnings: defineTable({
+    publisherOrganizationId: v.id("organizations"),
+    /** Immutable published project that earned this settlement. */
+    projectId: v.optional(v.id("projects")),
+    usageSettlementRefId: v.string(),
+    grossCredits: v.number(),
+    platformFeeCredits: v.number(),
+    netCredits: v.number(),
+    availableAt: v.number(),
+    status: v.union(
+      v.literal("pending_risk"),
+      v.literal("available"),
+      v.literal("allocated_to_transfer"),
+      v.literal("transferred"),
+      v.literal("reversed"),
+      v.literal("failed"),
+    ),
+    transferId: v.optional(v.id("publisherTransfers")),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_publisher", ["publisherOrganizationId", "createdAt"])
+    .index("by_settlement", ["usageSettlementRefId"])
+    .index("by_status_available", ["status", "availableAt"]),
+
+  publisherTransfers: defineTable({
+    publisherOrganizationId: v.id("organizations"),
+    stripeConnectedAccountId: v.string(),
+    amount: v.number(),
+    currency: v.string(),
+    idempotencyKey: v.string(),
+    stripeTransferId: v.optional(v.string()),
+    status: v.union(
+      v.literal("created"),
+      v.literal("pending"),
+      v.literal("succeeded"),
+      v.literal("failed"),
+      v.literal("reversed"),
+    ),
+    failureReason: v.optional(v.string()),
+    attemptedAt: v.optional(v.number()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_publisher", ["publisherOrganizationId", "createdAt"])
+    .index("by_idempotency_key", ["idempotencyKey"])
+    .index("by_stripe_transfer", ["stripeTransferId"]),
+
+  connectedPayouts: defineTable({
+    stripeConnectedAccountId: v.string(),
+    stripePayoutId: v.string(),
+    amount: v.number(),
+    currency: v.string(),
+    arrivalDate: v.optional(v.number()),
+    status: v.union(
+      v.literal("pending"),
+      v.literal("paid"),
+      v.literal("failed"),
+      v.literal("canceled"),
+    ),
+    failureCode: v.optional(v.string()),
+    updatedAt: v.number(),
+  })
+    .index("by_connected_account", ["stripeConnectedAccountId", "updatedAt"])
+    .index("by_stripe_payout", ["stripePayoutId"]),
 });

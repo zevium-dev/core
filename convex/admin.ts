@@ -1,11 +1,12 @@
 import { paginationOptsValidator } from "convex/server";
 import { v } from "convex/values";
-import { mutation, query } from "./_generated/server";
+import { action, mutation, query, type ActionCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { isAdmin, requireAdmin } from "./lib/auth";
 import { createNotification } from "./lib/notifications";
-import { formatUsd } from "./payouts";
 import { fireWebhookEvent } from "./webhooks";
+import { stripeClient } from "./billing";
+import { internal } from "./_generated/api";
 
 /** Cap for month-to-date usage count (by_at index range scan). */
 const USAGE_STATS_CAP = 50_000;
@@ -251,107 +252,129 @@ export const setProjectVisibility = mutation({
   },
 });
 
-export type AdminPayoutRequestView = {
-  _id: Id<"payoutRequests">;
-  clerkOrgId: string;
-  credits: number;
-  destination: string;
-  status: "pending" | "paid" | "rejected";
-  note?: string;
+export type AdminPublisherTransferView = {
+  id: Id<"publisherTransfers">;
+  publisherOrganizationId: Id<"organizations">;
+  publisherOrganizationName: string;
+  publisherOrganizationSlug?: string;
+  stripeConnectedAccountId: string;
+  amount: number;
+  currency: string;
+  status: Doc<"publisherTransfers">["status"];
+  failureReason?: string;
+  stripeTransferId?: string;
+  idempotencyKey: string;
   createdAt: number;
-  resolvedAt?: number;
+  updatedAt: number;
 };
 
-/** Paginated admin payout queue result. */
-export type AdminPayoutRequestsPage = {
-  page: AdminPayoutRequestView[];
-  isDone: boolean;
-  continueCursor: string;
-};
-
-/**
- * Admin payout queue. Optional status filter uses the by_status index;
- * unfiltered scans newest-first via order("desc").
- */
-export const listPayoutRequests = query({
+/** Operator view of Stripe Connect transfer state, without bank details. */
+export const listPublisherTransfers = query({
   args: {
     status: v.optional(
-      v.union(v.literal("pending"), v.literal("paid"), v.literal("rejected")),
+      v.union(
+        v.literal("created"),
+        v.literal("pending"),
+        v.literal("succeeded"),
+        v.literal("failed"),
+        v.literal("reversed"),
+      ),
     ),
     paginationOpts: paginationOptsValidator,
   },
-  handler: async (ctx, args): Promise<AdminPayoutRequestsPage> => {
+  handler: async (ctx, args) => {
     await requireAdmin(ctx);
 
-    const q = ctx.db.query("payoutRequests");
+    const q = ctx.db.query("publisherTransfers");
     const result = args.status
       ? await q
-          .withIndex("by_status", (qq) => qq.eq("status", args.status!))
           .order("desc")
+          .filter((qq) => qq.eq(qq.field("status"), args.status!))
           .paginate(args.paginationOpts)
       : await q.order("desc").paginate(args.paginationOpts);
 
-    const page: AdminPayoutRequestView[] = result.page.map((r) => ({
-      _id: r._id,
-      clerkOrgId: r.clerkOrgId,
-      credits: r.credits,
-      destination: r.destination,
-      status: r.status,
-      note: r.note,
-      createdAt: r.createdAt,
-      resolvedAt: r.resolvedAt,
-    }));
-
+    const page: AdminPublisherTransferView[] = await Promise.all(
+      result.page.map(async (transfer) => {
+        const organization = await ctx.db.get(transfer.publisherOrganizationId);
+        return {
+          id: transfer._id,
+          publisherOrganizationId: transfer.publisherOrganizationId,
+          publisherOrganizationName:
+            organization?.name ?? "Deleted organization",
+          publisherOrganizationSlug: organization?.slug,
+          stripeConnectedAccountId: transfer.stripeConnectedAccountId,
+          amount: transfer.amount,
+          currency: transfer.currency,
+          status: transfer.status,
+          failureReason: transfer.failureReason,
+          stripeTransferId: transfer.stripeTransferId,
+          idempotencyKey: transfer.idempotencyKey,
+          createdAt: transfer.createdAt,
+          updatedAt: transfer.updatedAt,
+        };
+      }),
+    );
     return { ...result, page };
   },
 });
 
-/**
- * Admin resolve a pending payout request: mark paid or rejected, stamp
- * resolvedAt, attach optional note. Only pending requests are resolvable.
- * Notifies the owning org (idempotent by requestId-scoped refId).
- */
-export const resolvePayout = mutation({
-  args: {
-    requestId: v.id("payoutRequests"),
-    status: v.union(v.literal("paid"), v.literal("rejected")),
-    note: v.optional(v.string()),
-  },
-  handler: async (ctx, args): Promise<Doc<"payoutRequests">> => {
-    await requireAdmin(ctx);
+async function requireAdminInAction(ctx: ActionCtx): Promise<void> {
+  const identity = await ctx.auth.getUserIdentity();
+  if (identity === null) throw new Error("Not authenticated");
+  const configured = process.env.ADMIN_USER_IDS;
+  if (configured === undefined || configured.trim() === "") {
+    throw new Error("Admin access not configured");
+  }
+  const allowed = configured
+    .split(",")
+    .map((id) => id.trim())
+    .filter((id) => id.length > 0);
+  if (!allowed.includes(identity.subject))
+    throw new Error("Not authorized as admin");
+}
 
-    const request = await ctx.db.get(args.requestId);
-    if (request === null) {
-      throw new Error("Payout request not found.");
+/** Retries a failed/scheduled transfer with its original Stripe idempotency key. */
+export const retryPublisherTransfer = action({
+  args: { transferId: v.id("publisherTransfers") },
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{ transferId: Id<"publisherTransfers"> }> => {
+    await requireAdminInAction(ctx);
+    const transfer = await ctx.runMutation(
+      internal.payouts.getPublisherTransfer,
+      {
+        transferId: args.transferId,
+      },
+    );
+    if (transfer.status === "succeeded" || transfer.status === "reversed") {
+      return { transferId: transfer._id };
     }
-    if (request.status !== "pending") {
-      throw new Error(
-        `Request already ${request.status}. Only pending requests can be resolved.`,
+    try {
+      const stripeTransfer = await stripeClient().transfers.create(
+        {
+          amount: transfer.amount,
+          currency: transfer.currency,
+          destination: transfer.stripeConnectedAccountId,
+          metadata: { publisherTransferId: transfer._id },
+        },
+        { idempotencyKey: transfer.idempotencyKey },
       );
+      await ctx.runMutation(internal.payouts.markPublisherTransferSucceeded, {
+        transferId: transfer._id,
+        stripeTransferId: stripeTransfer.id,
+      });
+    } catch (error) {
+      const reason =
+        error instanceof Error
+          ? error.message.slice(0, 240)
+          : "Stripe transfer failed";
+      await ctx.runMutation(internal.payouts.markPublisherTransferFailed, {
+        transferId: transfer._id,
+        reason,
+      });
+      throw error;
     }
-
-    const note = args.note?.trim() || undefined;
-    await ctx.db.patch(args.requestId, {
-      status: args.status,
-      note,
-      resolvedAt: Date.now(),
-    });
-
-    const statusLabel = args.status === "paid" ? "paid out" : "rejected";
-    await createNotification(ctx, {
-      clerkOrgId: request.clerkOrgId,
-      kind: "payout_resolved",
-      title: `Payout ${statusLabel}`,
-      body: `Your payout request for ${request.credits.toLocaleString()} credits ($${formatUsd(
-        request.credits,
-      )}) was ${statusLabel}${note !== undefined ? `: ${note}` : "."}`,
-      refId: `payout_resolved:${args.requestId}`,
-    });
-
-    const updated = await ctx.db.get(args.requestId);
-    if (updated === null) {
-      throw new Error("Failed to load payout request.");
-    }
-    return updated;
+    return { transferId: transfer._id };
   },
 });

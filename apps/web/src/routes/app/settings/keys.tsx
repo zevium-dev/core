@@ -46,7 +46,6 @@ import { api } from "#/lib/convex-api";
 import { humanError } from "#/lib/human-error";
 import { parseMonthlyCap } from "#/lib/key-cap";
 import { DUR, EASE } from "#/lib/motion";
-import { triggerGatewayGrantSync } from "#/lib/wallet-sync";
 
 const KEYS_QUERY_KEY = ["settings", "api-keys"] as const;
 
@@ -67,7 +66,7 @@ export const Route = createFileRoute("/app/settings/keys")({
 });
 
 function KeysPage() {
-  const { organization, isLoaded } = useOrganization();
+  const { isLoaded } = useOrganization();
   const { isLoading: convexAuthLoading, isAuthenticated: convexAuthed } =
     useConvexAuth();
 
@@ -80,12 +79,12 @@ function KeysPage() {
 
   return (
     <Suspense fallback={<KeysSkeleton />}>
-      <KeysContent clerkOrgId={organization?.id ?? null} />
+      <KeysContent />
     </Suspense>
   );
 }
 
-function KeysContent({ clerkOrgId }: { clerkOrgId: string | null }) {
+function KeysContent() {
   const queryClient = useQueryClient();
   const reduce = useReducedMotion();
 
@@ -152,7 +151,6 @@ function KeysContent({ clerkOrgId }: { clerkOrgId: string | null }) {
       setRotateTarget(null);
       toast.success("Key rotated — copy the new secret now");
       void queryClient.invalidateQueries({ queryKey: KEYS_QUERY_KEY });
-      void syncGateway(clerkOrgId);
     },
     onError: (err: unknown) => {
       toast.error(humanError(err, "Could not rotate API key"));
@@ -203,30 +201,31 @@ function KeysContent({ clerkOrgId }: { clerkOrgId: string | null }) {
             Machine keys for the gateway. One active key per user.
           </p>
         </div>
-        <Button
-          onClick={() => {
-            setRevealed(null);
-            setCopied(false);
-            setCreateOpen(true);
-          }}
-          disabled={hasKey || isLoading}
-          title={
-            hasKey
-              ? "Rotate or revoke the existing key before creating another"
-              : undefined
-          }
-        >
-          <Plus className="size-4" />
-          Create key
-        </Button>
+        {hasKey ? (
+          <p className="rounded-full border px-3 py-1.5 text-xs text-muted-foreground">
+            1 active key allowed per user
+          </p>
+        ) : (
+          <Button
+            onClick={() => {
+              setRevealed(null);
+              setCopied(false);
+              setCreateOpen(true);
+            }}
+            disabled={isLoading}
+          >
+            <Plus className="size-4" aria-hidden="true" />
+            Create key
+          </Button>
+        )}
       </div>
 
       <Card>
         <CardHeader>
           <CardTitle>Your keys</CardTitle>
           <CardDescription>
-            Secrets are shown once at creation. Per-key caps, enable/disable,
-            and rotation take effect at the gateway within a minute.
+            Secrets appear once. Spend caps, status changes, and rotation reach
+            gateway within 1 minute.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -244,9 +243,9 @@ function KeysContent({ clerkOrgId }: { clerkOrgId: string | null }) {
               }}
             />
           ) : (
-            <div className="overflow-x-auto rounded-md border">
-              <table className="w-full min-w-[40rem] text-left text-sm">
-                <thead className="border-b bg-muted/40 text-muted-foreground">
+            <div className="rounded-md border">
+              <table className="w-full text-left text-sm">
+                <thead className="hidden border-b bg-muted/40 text-muted-foreground md:table-header-group">
                   <tr>
                     <th className="px-3 py-2 font-medium">Name</th>
                     <th className="px-3 py-2 font-medium">Key</th>
@@ -259,13 +258,12 @@ function KeysContent({ clerkOrgId }: { clerkOrgId: string | null }) {
                     </th>
                   </tr>
                 </thead>
-                <tbody>
+                <tbody className="block md:table-row-group">
                   {keys.map((key) => (
                     <KeyRow
                       key={key.id}
                       apiKey={key}
                       setting={settingsByKey.get(key.id)}
-                      clerkOrgId={clerkOrgId}
                       setCap={setCap}
                       setDisabled={setDisabled}
                       onRotate={() => setRotateTarget(key)}
@@ -280,12 +278,9 @@ function KeysContent({ clerkOrgId }: { clerkOrgId: string | null }) {
         </CardContent>
       </Card>
 
-      <p className="text-xs text-muted-foreground">
-        Prefer account overview?{" "}
-        <Link to="/app/settings" className="link-draw text-foreground">
-          Back to settings
-        </Link>
-      </p>
+      <Button asChild variant="link" className="w-fit px-0">
+        <Link to="/app/settings">Back to settings</Link>
+      </Button>
 
       <SecretRevealDialog
         revealed={revealed}
@@ -441,7 +436,6 @@ type SetDisabledFn = (args: {
 function KeyRow({
   apiKey,
   setting,
-  clerkOrgId,
   setCap,
   setDisabled,
   onRotate,
@@ -450,7 +444,6 @@ function KeyRow({
 }: {
   apiKey: ApiKeyRow;
   setting: SettingView | undefined;
-  clerkOrgId: string | null;
   setCap: SetCapFn;
   setDisabled: SetDisabledFn;
   onRotate: () => void;
@@ -494,7 +487,6 @@ function KeyRow({
     setCapBusy(true);
     try {
       await setCap({ keyId: apiKey.id, monthlyCapCredits: parsed.cap });
-      void syncGateway(clerkOrgId);
       toast.success(
         parsed.cap === null ? "Monthly cap removed" : "Monthly cap saved",
       );
@@ -510,7 +502,6 @@ function KeyRow({
     setToggleBusy(true);
     try {
       await setDisabled({ keyId: apiKey.id, disabled: !nextEnabled });
-      void syncGateway(clerkOrgId);
       toast.success(nextEnabled ? "Key enabled" : "Key disabled");
     } catch (err) {
       toast.error(humanError(err, "Could not update key"));
@@ -523,12 +514,23 @@ function KeyRow({
     setting?.graceUntil !== undefined && setting.graceUntil > Date.now();
 
   return (
-    <tr className="border-b last:border-0">
-      <td className="px-3 py-2.5 font-medium">{apiKey.name}</td>
-      <td className="px-3 py-2.5 font-mono text-xs text-muted-foreground">
+    <tr className="block space-y-3 p-4 md:table-row md:space-y-0 md:p-0">
+      <td className="flex items-start justify-between gap-4 font-medium md:table-cell md:px-3 md:py-2.5">
+        <span className="text-xs font-normal text-muted-foreground md:hidden">
+          Name
+        </span>
+        <span className="min-w-0 break-words text-right md:text-left">
+          {apiKey.name}
+        </span>
+      </td>
+      <td className="flex items-center justify-between gap-4 font-mono text-xs text-muted-foreground md:table-cell md:px-3 md:py-2.5">
+        <span className="font-sans md:hidden">Key</span>
         {apiKey.masked}
       </td>
-      <td className="px-3 py-2.5">
+      <td className="flex items-center justify-between gap-4 md:table-cell md:px-3 md:py-2.5">
+        <span className="text-xs text-muted-foreground md:hidden">
+          Monthly cap
+        </span>
         <Input
           type="number"
           min={1}
@@ -546,7 +548,8 @@ function KeyRow({
           aria-label={`Monthly credit cap for ${apiKey.name}`}
         />
       </td>
-      <td className="px-3 py-2.5">
+      <td className="flex items-center justify-between gap-4 md:table-cell md:px-3 md:py-2.5">
+        <span className="text-xs text-muted-foreground md:hidden">Enabled</span>
         <div className="flex items-center gap-2">
           <Switch
             checked={!setting?.disabled}
@@ -568,13 +571,15 @@ function KeyRow({
           ) : null}
         </div>
       </td>
-      <td className="px-3 py-2.5 text-muted-foreground tabular-nums">
+      <td className="flex justify-between gap-4 text-xs text-muted-foreground tabular-nums md:table-cell md:px-3 md:py-2.5 md:text-sm">
+        <span className="md:hidden">Created</span>
         {formatDate(apiKey.createdAt)}
       </td>
-      <td className="px-3 py-2.5 text-muted-foreground tabular-nums">
+      <td className="flex justify-between gap-4 text-xs text-muted-foreground tabular-nums md:table-cell md:px-3 md:py-2.5 md:text-sm">
+        <span className="md:hidden">Last used</span>
         {apiKey.lastUsedAt ? formatDate(apiKey.lastUsedAt) : "—"}
       </td>
-      <td className="px-3 py-2.5 text-right">
+      <td className="border-t pt-3 text-right md:table-cell md:border-0 md:px-3 md:py-2.5">
         <div className="flex justify-end gap-1">
           <Button
             variant="ghost"
@@ -732,15 +737,6 @@ function KeysSkeleton() {
         </CardContent>
       </Card>
     </div>
-  );
-}
-
-/** Best-effort: tell the gateway wallet DO to re-sync so settings land fast. */
-function syncGateway(clerkOrgId: string | null): Promise<void> {
-  if (!clerkOrgId) return Promise.resolve();
-  return triggerGatewayGrantSync(
-    import.meta.env.VITE_GATEWAY_URL as string | undefined,
-    clerkOrgId,
   );
 }
 

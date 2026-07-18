@@ -61,7 +61,12 @@ export const Route = createFileRoute("/catalogue/$orgSlug/$projectSlug")({
       void queryClient.prefetchQuery(queryOpts);
       return;
     }
-    await queryClient.ensureQueryData(queryOpts);
+    try {
+      await queryClient.ensureQueryData(queryOpts);
+    } catch {
+      // Keep transient Convex failures inside product UI instead of leaking
+      // TanStack's raw server error page.
+    }
   },
   component: ApiDetailPage,
   head: ({ params }) => ({

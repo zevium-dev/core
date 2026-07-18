@@ -48,7 +48,16 @@ import type { Doc } from "#/lib/convex-data-model";
 import { humanError } from "#/lib/human-error";
 import type { RouterContext } from "#/router";
 
+type ProjectPanel = "overview" | "analytics" | "earnings" | "settings";
+type ProjectSearch = { tab?: Exclude<ProjectPanel, "overview"> };
+
 export const Route = createFileRoute("/app/projects/$projectSlug")({
+  validateSearch: (search: Record<string, unknown>): ProjectSearch =>
+    search.tab === "analytics" ||
+    search.tab === "earnings" ||
+    search.tab === "settings"
+      ? { tab: search.tab }
+      : {},
   loader: async ({ context, params }) => {
     const { queryClient, orgSlug } = context as RouterContext;
     if (!orgSlug) return;
@@ -124,15 +133,13 @@ function ProjectShell({
   const { data: project } = useSuspenseQuery(
     convexQuery(api.projects.get, { orgSlug, projectSlug }),
   );
+  const { tab: searchTab } = Route.useSearch();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
   const updateProject = useConvexMutation(api.projects.update);
   const [visibilityOpen, setVisibilityOpen] = useState(false);
-  const [panel, setPanel] = useState<
-    "overview" | "analytics" | "earnings" | "settings"
-  >("overview");
 
   const { mutate: setVisibility, isPending: visibilityPending } = useMutation({
     mutationFn: (visibility: "public" | "private") => {
@@ -180,7 +187,7 @@ function ProjectShell({
   }
 
   const isSpecRoute = pathname.endsWith("/spec");
-  // overview | analytics stay on project root; spec is its own route.
+  const panel: ProjectPanel = searchTab ?? "overview";
   const tab = isSpecRoute ? "spec" : panel;
 
   const nextVisibility = project.visibility === "public" ? "private" : "public";
@@ -259,6 +266,7 @@ function ProjectShell({
             void navigate({
               to: "/app/projects/$projectSlug/spec",
               params: { projectSlug: project.slug },
+              search: {},
             });
             return;
           }
@@ -269,13 +277,11 @@ function ProjectShell({
             value === "earnings" ||
             value === "settings"
           ) {
-            setPanel(value);
-            if (isSpecRoute) {
-              void navigate({
-                to: "/app/projects/$projectSlug",
-                params: { projectSlug: project.slug },
-              });
-            }
+            void navigate({
+              to: "/app/projects/$projectSlug",
+              params: { projectSlug: project.slug },
+              search: value === "overview" ? {} : { tab: value },
+            });
           }
         }}
       >
@@ -303,7 +309,13 @@ function ProjectShell({
       ) : (
         <ProjectOverview
           project={project}
-          onEdit={() => setPanel("settings")}
+          onEdit={() =>
+            void navigate({
+              to: "/app/projects/$projectSlug",
+              params: { projectSlug: project.slug },
+              search: { tab: "settings" },
+            })
+          }
         />
       )}
     </div>
@@ -317,6 +329,9 @@ function ProjectOverview({
   project: Doc<"projects">;
   onEdit: () => void;
 }) {
+  const isLive =
+    project.status === "published" && project.visibility === "public";
+
   return (
     <div className="grid gap-4 lg:grid-cols-2">
       <Card>
@@ -357,9 +372,11 @@ function ProjectOverview({
 
       <Card>
         <CardHeader>
-          <CardTitle>Next steps</CardTitle>
+          <CardTitle>{isLive ? "Live in catalogue" : "Next steps"}</CardTitle>
           <CardDescription>
-            Get this API live on the marketplace.
+            {isLive
+              ? "Consumers can discover and call this published version."
+              : "Get this API live in the catalogue."}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -372,9 +389,15 @@ function ProjectOverview({
             </Link>
           </Button>
           <p className="text-sm text-muted-foreground">
-            Add <code className="font-mono text-xs">x-zevium-cost</code> per
-            operation, save draft, publish a semver, then make the project
-            public.
+            {isLive ? (
+              "Edit your draft when you are ready to publish a new immutable version."
+            ) : (
+              <>
+                Add <code className="font-mono text-xs">x-zevium-cost</code> per
+                operation, save draft, publish a version, then make project
+                public.
+              </>
+            )}
           </p>
         </CardContent>
       </Card>
@@ -418,13 +441,16 @@ function ProjectAnalyticsPanel({
   }
 
   const maxDay = Math.max(1, ...analytics.callsByDay);
+  const hasTraffic = analytics.calls > 0;
 
   return (
     <div className="flex flex-col gap-4">
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Card>
           <CardHeader className="pb-2">
-            <CardDescription>Calls ({analytics.rangeDays}d)</CardDescription>
+            <CardDescription>
+              Calls · last {analytics.rangeDays} days
+            </CardDescription>
             <CardTitle className="text-2xl tabular-nums">
               <NumberTicker value={analytics.calls} />
             </CardTitle>
@@ -442,12 +468,14 @@ function ProjectAnalyticsPanel({
           <CardHeader className="pb-2">
             <CardDescription>Success rate</CardDescription>
             <CardTitle className="text-2xl tabular-nums">
-              {formatPct(analytics.successRate)}
+              {hasTraffic ? formatPct(analytics.successRate) : "—"}
             </CardTitle>
           </CardHeader>
-          <CardContent className="text-xs text-muted-foreground">
-            {analytics.errors4xx} 4xx · {analytics.errors5xx} 5xx
-          </CardContent>
+          {hasTraffic ? (
+            <CardContent className="text-xs text-muted-foreground">
+              {analytics.errors4xx} 4xx · {analytics.errors5xx} 5xx
+            </CardContent>
+          ) : null}
         </Card>
         <Card>
           <CardHeader className="pb-2">
@@ -466,7 +494,7 @@ function ProjectAnalyticsPanel({
         <CardHeader>
           <CardTitle className="text-base">Calls over time</CardTitle>
           <CardDescription>
-            Last {analytics.rangeDays} UTC days (CSS bars, no chart lib)
+            Daily metered calls over last {analytics.rangeDays} UTC days
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -475,7 +503,7 @@ function ProjectAnalyticsPanel({
               <Activity className="size-5 text-muted-foreground" />
               <p className="text-sm font-medium">No traffic yet</p>
               <p className="max-w-sm text-sm text-muted-foreground">
-                Publish the API and wait for metered calls. Stats update live.
+                Calls appear here as soon as consumers use this API.
               </p>
             </div>
           ) : (
@@ -506,19 +534,15 @@ function ProjectAnalyticsPanel({
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Per-endpoint</CardTitle>
-          <CardDescription>
-            Method, path, volume, errors, tail latency
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {analytics.endpoints.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              No endpoints called in this window.
-            </p>
-          ) : (
+      {analytics.endpoints.length > 0 ? (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Per-endpoint</CardTitle>
+            <CardDescription>
+              Method, path, volume, errors, and tail latency
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
@@ -568,9 +592,9 @@ function ProjectAnalyticsPanel({
                 </tbody>
               </table>
             </div>
-          )}
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      ) : null}
     </div>
   );
 }

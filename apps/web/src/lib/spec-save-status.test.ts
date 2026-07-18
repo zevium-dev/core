@@ -6,6 +6,9 @@ describe("formatSavedAgo", () => {
     expect(formatSavedAgo(1000, 1000)).toBe("saved just now");
     expect(formatSavedAgo(1000, 1000 + 12_000)).toBe("saved 12s ago");
     expect(formatSavedAgo(1000, 1000 + 120_000)).toBe("saved 2m ago");
+    expect(formatSavedAgo(1000, 1000 + 5 * 24 * 60 * 60 * 1000)).toBe(
+      "saved 5 days ago",
+    );
   });
 });
 

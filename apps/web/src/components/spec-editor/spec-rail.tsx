@@ -174,7 +174,7 @@ export function SpecRailEndpoints({
           )}
         </div>
         <CardDescription>
-          Live from editor via OpenAPI paths + x-zevium-*.
+          Endpoints and pricing parsed from your current draft.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -277,9 +277,7 @@ export function SpecRailValidation({ issues }: SpecRailValidationProps) {
             <Badge variant="outline">Clean</Badge>
           )}
         </div>
-        <CardDescription>
-          Live client lint + server issues after save/publish.
-        </CardDescription>
+        <CardDescription>Fix these issues before publishing.</CardDescription>
       </CardHeader>
       <CardContent>
         {issues.length === 0 ? (
@@ -383,7 +381,7 @@ export function SpecRailVersions({
       <CardHeader className="pb-3">
         <CardTitle className="text-base">Versions</CardTitle>
         <CardDescription>
-          Published snapshots (immutable). Publish freezes the saved draft.
+          Published versions never change. New edits stay in your draft.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">

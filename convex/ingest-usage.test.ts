@@ -1,337 +1,237 @@
 /// <reference types="vite/client" />
-import { convexTest } from "convex-test";
+import { convexTest, type TestConvex } from "convex-test";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { parseIngestUsageBody } from "./http";
 import schema from "./schema";
 
 const modules = import.meta.glob("./**/*.ts");
-
 const SECRET = "test-gateway-internal-secret";
 
-type Seeded = {
-  organizationId: Id<"organizations">;
+type SeededWallet = {
+  consumerOrganizationId: Id<"organizations">;
+  publisherOrganizationId: Id<"organizations">;
   projectId: Id<"projects">;
+  paymentId: Id<"payments">;
 };
 
-async function seedOrgAndProject(
-  t: ReturnType<typeof convexTest>,
-): Promise<Seeded> {
+async function seedWallet(t: TestConvex<typeof schema>): Promise<SeededWallet> {
   return await t.run(async (ctx) => {
-    const organizationId = await ctx.db.insert("organizations", {
-      clerkOrgId: "org_ingest_test",
-      name: "Ingest Co",
-      slug: "ingest-co",
+    const consumerOrganizationId = await ctx.db.insert("organizations", {
+      clerkOrgId: "org_consumer",
+      name: "Consumer",
+      slug: "consumer",
     });
-    const projectId = await ctx.db.insert("projects", {
-      organizationId,
-      name: "Ingest API",
-      slug: "ingest-api",
+    const publisherOrganizationId = await ctx.db.insert("organizations", {
+      clerkOrgId: "org_publisher",
+      name: "Publisher",
+      slug: "publisher",
+    });
+    await ctx.db.insert("wallets", {
+      organizationId: consumerOrganizationId,
+      balance: 0,
+      sequence: 0,
+    });
+    const intentId = await ctx.db.insert("checkoutIntents", {
+      organizationId: consumerOrganizationId,
+      packId: "pack_10",
+      stripePriceId: "price_test",
+      amount: 1000,
+      currency: "usd",
+      credits: 100,
+      stripeCheckoutSessionId: "cs_test",
+      stripePaymentIntentId: "pi_test",
+      status: "complete",
+      createdAt: 1,
+      updatedAt: 1,
+      expiresAt: 2,
+    });
+    const paymentId = await ctx.db.insert("payments", {
+      organizationId: consumerOrganizationId,
+      checkoutIntentId: intentId,
+      stripeCheckoutSessionId: "cs_test",
+      stripePaymentIntentId: "pi_test",
+      amount: 1000,
+      currency: "usd",
+      grantedCredits: 100,
+      reversedCredits: 0,
+      status: "paid",
+      createdAt: 1,
+      updatedAt: 1,
+    });
+    await ctx.db.insert("organizationPayments", {
+      organizationId: consumerOrganizationId,
+      stripeCustomerId: "cus_test",
+      detailsSubmitted: false,
+      chargesEnabled: false,
+      payoutsEnabled: false,
+      requirements: [],
+      updatedAt: 1,
+    });
+    await ctx.db.insert("projects", {
+      organizationId: publisherOrganizationId,
+      name: "Publisher API",
+      slug: "publisher-api",
       status: "published",
       visibility: "public",
       tags: [],
     });
-    await ctx.db.insert("wallets", {
-      organizationId,
-      balance: 100,
-    });
-    return { organizationId, projectId };
+    const project = await ctx.db
+      .query("projects")
+      .withIndex("by_org_slug", (q) =>
+        q
+          .eq("organizationId", publisherOrganizationId)
+          .eq("slug", "publisher-api"),
+      )
+      .unique();
+    if (project === null) throw new Error("Failed to seed project");
+    return {
+      consumerOrganizationId,
+      publisherOrganizationId,
+      projectId: project._id,
+      paymentId,
+    };
   });
 }
 
-function makeEvent(
-  organizationId: string,
-  projectId: string,
-  settleRefId: string,
-  credits = 3,
-) {
+function usageEvent(seed: SeededWallet, refId: string, credits = 15) {
   return {
-    organizationId,
-    projectId,
-    endpoint: "/echo",
-    method: "POST",
+    organizationId: seed.publisherOrganizationId,
+    projectId: seed.projectId,
+    endpoint: "/forecast",
+    method: "GET",
     credits,
     status: 200,
-    latencyMs: 12,
-    keyId: "key_1",
-    at: Date.now(),
-    settleRefId,
+    latencyMs: 10,
+    keyId: "key_test",
+    at: 10,
+    settleRefId: refId,
+    consumerClerkOrgId: "org_consumer",
   };
 }
 
-/** Seed a second org (marketplace consumer) with its own wallet. */
-async function seedConsumerOrg(
-  t: ReturnType<typeof convexTest>,
-  clerkOrgId: string,
-  balance = 50,
-): Promise<Id<"organizations">> {
-  return await t.run(async (ctx) => {
-    const organizationId = await ctx.db.insert("organizations", {
-      clerkOrgId,
-      name: "Consumer Co",
-      slug: `consumer-${clerkOrgId}`,
-    });
-    await ctx.db.insert("wallets", { organizationId, balance });
-    return organizationId;
-  });
-}
-
-describe("parseIngestUsageBody", () => {
-  it("rejects non-object and missing events", () => {
-    expect(parseIngestUsageBody(null).ok).toBe(false);
-    expect(parseIngestUsageBody([]).ok).toBe(false);
-    expect(parseIngestUsageBody({}).ok).toBe(false);
-  });
-
-  it("rejects >500 events", () => {
-    const events = Array.from({ length: 501 }, (_, i) =>
-      makeEvent("o", "p", `settle:r${i}`),
-    );
-    const parsed = parseIngestUsageBody({ events });
-    expect(parsed.ok).toBe(false);
-    if (!parsed.ok) {
-      expect(parsed.error).toBe("too many events");
-    }
-  });
-
-  it("accepts valid batch", () => {
-    const parsed = parseIngestUsageBody({
-      events: [makeEvent("o1", "p1", "settle:r1")],
-    });
-    expect(parsed.ok).toBe(true);
-    if (parsed.ok) {
-      expect(parsed.events).toHaveLength(1);
-      expect(parsed.events[0]!.settleRefId).toBe("settle:r1");
-    }
-  });
-});
-
-describe("POST /ingest-usage", () => {
-  const prevSecret = process.env.GATEWAY_INTERNAL_SECRET;
+describe("wallet settlement ingest contract", () => {
+  const previousSecret = process.env.GATEWAY_INTERNAL_SECRET;
 
   beforeEach(() => {
     process.env.GATEWAY_INTERNAL_SECRET = SECRET;
   });
-
   afterEach(() => {
-    if (prevSecret === undefined) {
+    if (previousSecret === undefined)
       delete process.env.GATEWAY_INTERNAL_SECRET;
-    } else {
-      process.env.GATEWAY_INTERNAL_SECRET = prevSecret;
-    }
+    else process.env.GATEWAY_INTERNAL_SECRET = previousSecret;
   });
 
-  it("rejects missing secret header", async () => {
+  it("requires one consumer organization in every parsed batch", () => {
+    expect(parseIngestUsageBody({ events: [] }).ok).toBe(false);
+    const base = {
+      organizationId: "publisher",
+      projectId: "project",
+      endpoint: "/x",
+      method: "GET",
+      credits: 1,
+      status: 200,
+      latencyMs: 1,
+      keyId: "key",
+      at: 1,
+      settleRefId: "settle:one",
+    };
+    expect(parseIngestUsageBody({ events: [base] }).ok).toBe(false);
+    expect(
+      parseIngestUsageBody({
+        events: [
+          { ...base, consumerClerkOrgId: "org_one" },
+          { ...base, settleRefId: "settle:two", consumerClerkOrgId: "org_two" },
+        ],
+      }).ok,
+    ).toBe(false);
+  });
+
+  it("returns applied, already_applied, rejected and an authoritative checkpoint", async () => {
     const t = convexTest(schema, modules);
-    const res = await t.fetch("/ingest-usage", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ events: [] }),
+    const seed = await seedWallet(t);
+    await t.mutation(internal.wallets.grantPaymentCredits, {
+      organizationId: seed.consumerOrganizationId,
+      paymentId: seed.paymentId,
+      amount: 100,
+      refId: "stripe:payment_intent:pi_test",
     });
-    expect(res.status).toBe(401);
-    const body = (await res.json()) as { error: string };
-    expect(body.error).toBe("unauthorized");
-  });
-
-  it("rejects wrong secret", async () => {
-    const t = convexTest(schema, modules);
-    const res = await t.fetch("/ingest-usage", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-internal-secret": "nope",
-      },
-      body: JSON.stringify({ events: [] }),
-    });
-    expect(res.status).toBe(401);
-  });
-
-  it("rejects when env secret unset", async () => {
-    delete process.env.GATEWAY_INTERNAL_SECRET;
-    const t = convexTest(schema, modules);
-    const res = await t.fetch("/ingest-usage", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-internal-secret": SECRET,
-      },
-      body: JSON.stringify({ events: [] }),
-    });
-    expect(res.status).toBe(401);
-  });
-
-  it("applies events and dedupes settleRefId", async () => {
-    const t = convexTest(schema, modules);
-    const seed = await seedOrgAndProject(t);
-    const event = makeEvent(
-      seed.organizationId,
-      seed.projectId,
-      "settle:res-1",
-      5,
-    );
-
     const first = await t.fetch("/ingest-usage", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         "x-internal-secret": SECRET,
       },
-      body: JSON.stringify({ events: [event] }),
-    });
-    expect(first.status).toBe(200);
-    const firstBody = (await first.json()) as {
-      applied: number;
-      skipped: number;
-      balances: Record<string, number>;
-    };
-    expect(firstBody.applied).toBe(1);
-    expect(firstBody.skipped).toBe(0);
-    expect(firstBody.balances[seed.organizationId]).toBe(95);
-
-    const second = await t.fetch("/ingest-usage", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-internal-secret": SECRET,
-      },
-      body: JSON.stringify({ events: [event] }),
-    });
-    expect(second.status).toBe(200);
-    const secondBody = (await second.json()) as {
-      applied: number;
-      skipped: number;
-    };
-    expect(secondBody.applied).toBe(0);
-    expect(secondBody.skipped).toBe(1);
-
-    const usageCount = await t.run(async (ctx) => {
-      const rows = await ctx.db.query("usageEvents").collect();
-      return rows.length;
-    });
-    expect(usageCount).toBe(1);
-  });
-
-  it("rejects invalid event shape", async () => {
-    const t = convexTest(schema, modules);
-    const res = await t.fetch("/ingest-usage", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-internal-secret": SECRET,
-      },
       body: JSON.stringify({
-        events: [{ organizationId: "x" }],
+        events: [
+          usageEvent(seed, "settle:one"),
+          usageEvent(seed, "settle:too-expensive", 200),
+        ],
       }),
     });
-    expect(res.status).toBe(400);
-    const body = (await res.json()) as { error: string };
-    expect(body.error).toBe("invalid event");
-  });
-
-  it("marketplace: consumerClerkOrgId resolves to the consumer's wallet, publisher's untouched", async () => {
-    const t = convexTest(schema, modules);
-    const seed = await seedOrgAndProject(t); // publisher org, wallet balance 100
-    const consumerClerkOrgId = "org_clerk_consumer_1";
-    const consumerOrgId = await seedConsumerOrg(t, consumerClerkOrgId, 50);
-
-    const event = {
-      ...makeEvent(seed.organizationId, seed.projectId, "settle:mkt-1", 7),
-      consumerClerkOrgId,
-    };
-
-    const res = await t.fetch("/ingest-usage", {
+    expect(first.status).toBe(200);
+    expect(await first.json()).toEqual({
+      results: [
+        { refId: "settle:one", status: "applied" },
+        {
+          refId: "settle:too-expensive",
+          status: "rejected",
+          reason: "insufficient authoritative balance",
+        },
+      ],
+      wallet: { clerkOrgId: "org_consumer", balance: 85, sequence: 2 },
+    });
+    const duplicate = await t.fetch("/ingest-usage", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         "x-internal-secret": SECRET,
       },
-      body: JSON.stringify({ events: [event] }),
+      body: JSON.stringify({ events: [usageEvent(seed, "settle:one")] }),
     });
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as {
-      applied: number;
-      skipped: number;
-      balances: Record<string, number>;
-    };
-    expect(body.applied).toBe(1);
-    expect(body.skipped).toBe(0);
-    expect(body.balances[consumerOrgId]).toBe(43); // 50 - 7
-    expect(body.balances[seed.organizationId]).toBeUndefined();
-
-    const consumerWallet = await t.run(async (ctx) =>
-      ctx.db
-        .query("wallets")
-        .withIndex("by_organization", (q) =>
-          q.eq("organizationId", consumerOrgId),
-        )
-        .unique(),
-    );
-    expect(consumerWallet?.balance).toBe(43);
-
-    const publisherWallet = await t.run(async (ctx) =>
-      ctx.db
-        .query("wallets")
-        .withIndex("by_organization", (q) =>
-          q.eq("organizationId", seed.organizationId),
-        )
-        .unique(),
-    );
-    expect(publisherWallet?.balance).toBe(100); // publisher wallet untouched
-
-    const usageRows = await t.run(async (ctx) =>
-      ctx.db.query("usageEvents").collect(),
-    );
-    expect(usageRows).toHaveLength(1);
-    expect(usageRows[0]!.organizationId).toBe(consumerOrgId);
-    expect(usageRows[0]!.projectId).toBe(seed.projectId);
+    expect(await duplicate.json()).toEqual({
+      results: [{ refId: "settle:one", status: "already_applied" }],
+      wallet: { clerkOrgId: "org_consumer", balance: 85, sequence: 2 },
+    });
   });
 
-  it("marketplace: unresolvable consumerClerkOrgId is skipped, batch does not throw", async () => {
+  it("keeps materialized balance and sequence equal to the append-only ledger", async () => {
     const t = convexTest(schema, modules);
-    const seed = await seedOrgAndProject(t);
-
-    const unresolved = {
-      ...makeEvent(seed.organizationId, seed.projectId, "settle:mkt-bad", 4),
-      consumerClerkOrgId: "org_clerk_does_not_exist",
-    };
-    // Legacy event (no consumerClerkOrgId) in the same batch must still apply.
-    const legacy = makeEvent(
-      seed.organizationId,
-      seed.projectId,
-      "settle:mkt-good",
-      3,
-    );
-
-    const res = await t.fetch("/ingest-usage", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-internal-secret": SECRET,
-      },
-      body: JSON.stringify({ events: [unresolved, legacy] }),
+    const seed = await seedWallet(t);
+    await t.mutation(internal.wallets.grantPaymentCredits, {
+      organizationId: seed.consumerOrganizationId,
+      paymentId: seed.paymentId,
+      amount: 100,
+      refId: "stripe:payment_intent:pi_test",
     });
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as {
-      applied: number;
-      skipped: number;
-      balances: Record<string, number>;
-    };
-    expect(body.applied).toBe(1);
-    expect(body.skipped).toBe(1);
-
-    const usageRows = await t.run(async (ctx) =>
-      ctx.db.query("usageEvents").collect(),
-    );
-    expect(usageRows).toHaveLength(1);
-
-    const publisherWallet = await t.run(async (ctx) =>
-      ctx.db
+    await t.mutation(internal.wallets.recordUsage, {
+      events: [usageEvent(seed, "settle:one", 20)],
+    });
+    const invariant = await t.run(async (ctx) => {
+      const wallet = await ctx.db
         .query("wallets")
         .withIndex("by_organization", (q) =>
-          q.eq("organizationId", seed.organizationId),
+          q.eq("organizationId", seed.consumerOrganizationId),
         )
-        .unique(),
-    );
-    expect(publisherWallet?.balance).toBe(97); // 100 - 3 (only the legacy event applied)
+        .unique();
+      if (wallet === null) throw new Error("wallet missing");
+      const entries = await ctx.db
+        .query("walletEntries")
+        .withIndex("by_wallet", (q) => q.eq("walletId", wallet._id))
+        .collect();
+      return {
+        balance: wallet.balance,
+        sequence: wallet.sequence,
+        ledgerBalance: entries.reduce((sum, entry) => sum + entry.amount, 0),
+        entries: entries.length,
+      };
+    });
+    expect(invariant).toEqual({
+      balance: 80,
+      sequence: 2,
+      ledgerBalance: 80,
+      entries: 2,
+    });
   });
 });

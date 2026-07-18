@@ -4,7 +4,6 @@ import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { Link, createFileRoute } from "@tanstack/react-router";
 import { useConvexAuth } from "convex/react";
 import {
-  BookOpen,
   CheckCircle2,
   Circle,
   KeyRound,
@@ -96,11 +95,24 @@ function DashboardContent({ orgSlug }: { orgSlug: string }) {
 
   return (
     <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
-        <p className="text-sm text-muted-foreground">
-          Wallet, recent calls, and quick actions.
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
+          <p className="text-sm text-muted-foreground">
+            Wallet balance and metered usage for this organization.
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button asChild>
+            <Link to="/app/billing">Top up</Link>
+          </Button>
+          <Button asChild variant="outline">
+            <Link to="/app/settings/keys">Manage keys</Link>
+          </Button>
+          <Button asChild variant="outline">
+            <Link to="/catalogue">Browse APIs</Link>
+          </Button>
+        </div>
       </div>
 
       {showOnboarding ? (
@@ -129,7 +141,7 @@ function DashboardContent({ orgSlug }: { orgSlug: string }) {
             </CardTitle>
           </CardHeader>
           <CardContent className="text-sm text-muted-foreground">
-            Live org wallet. Zero balance blocks every call.
+            Zero balance blocks new calls.
           </CardContent>
         </Card>
 
@@ -166,31 +178,10 @@ function DashboardContent({ orgSlug }: { orgSlug: string }) {
             </CardTitle>
           </CardHeader>
           <CardContent className="text-sm text-muted-foreground">
-            Linear projection from cycle-to-date (UTC calendar month).
+            Based on month-to-date usage.
           </CardContent>
         </Card>
       </div>
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Quick actions</CardTitle>
-          <CardDescription>Top up, manage keys, or browse APIs</CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-wrap gap-2">
-          <Button asChild>
-            <Link to="/app/billing">Top up</Link>
-          </Button>
-          <Button asChild variant="outline">
-            <Link to="/app/settings/keys">Keys</Link>
-          </Button>
-          <Button asChild variant="outline">
-            <Link to="/catalogue">
-              <BookOpen className="size-4" />
-              Browse
-            </Link>
-          </Button>
-        </CardContent>
-      </Card>
 
       <Card>
         <CardHeader>
@@ -215,51 +206,77 @@ function DashboardContent({ orgSlug }: { orgSlug: string }) {
               </Button>
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b text-left text-muted-foreground">
-                    <th className="px-2 py-2 font-medium">When</th>
-                    <th className="px-2 py-2 font-medium">API</th>
-                    <th className="px-2 py-2 font-medium">Endpoint</th>
-                    <th className="px-2 py-2 font-medium">Status</th>
-                    <th className="px-2 py-2 font-medium text-right">
-                      Credits
-                    </th>
-                    <th className="px-2 py-2 font-medium text-right">
-                      Latency
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {overview.recent.map((event) => (
-                    <tr key={event._id} className="border-b last:border-0">
-                      <td className="whitespace-nowrap px-2 py-2.5 text-muted-foreground">
-                        {new Date(event.at).toLocaleString()}
-                      </td>
-                      <td className="px-2 py-2.5">
-                        {event.projectName ?? event.projectSlug ?? "—"}
-                      </td>
-                      <td className="px-2 py-2.5 font-mono text-xs">
-                        <span className="text-muted-foreground">
-                          {event.method}
-                        </span>{" "}
-                        {event.endpoint}
-                      </td>
-                      <td className="px-2 py-2.5">
-                        <StatusBadge status={event.status} />
-                      </td>
-                      <td className="px-2 py-2.5 text-right tabular-nums">
-                        {event.credits.toLocaleString()}
-                      </td>
-                      <td className="px-2 py-2.5 text-right tabular-nums text-muted-foreground">
+            <>
+              <div className="divide-y sm:hidden">
+                {overview.recent.map((event) => (
+                  <div key={event._id} className="space-y-3 py-4 first:pt-0">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="font-medium">
+                          {event.projectName ?? event.projectSlug ?? "—"}
+                        </p>
+                        <p className="mt-1 break-all font-mono text-xs text-muted-foreground">
+                          {event.method} {event.endpoint}
+                        </p>
+                      </div>
+                      <StatusBadge status={event.status} />
+                    </div>
+                    <div className="flex flex-wrap justify-between gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                      <span>{new Date(event.at).toLocaleString()}</span>
+                      <span className="tabular-nums">
+                        {event.credits.toLocaleString()} credits ·{" "}
                         {event.latencyMs}ms
-                      </td>
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="hidden overflow-x-auto sm:block">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b text-left text-muted-foreground">
+                      <th className="px-2 py-2 font-medium">When</th>
+                      <th className="px-2 py-2 font-medium">API</th>
+                      <th className="px-2 py-2 font-medium">Endpoint</th>
+                      <th className="px-2 py-2 font-medium">Status</th>
+                      <th className="px-2 py-2 font-medium text-right">
+                        Credits
+                      </th>
+                      <th className="px-2 py-2 font-medium text-right">
+                        Latency
+                      </th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {overview.recent.map((event) => (
+                      <tr key={event._id} className="border-b last:border-0">
+                        <td className="whitespace-nowrap px-2 py-2.5 text-muted-foreground">
+                          {new Date(event.at).toLocaleString()}
+                        </td>
+                        <td className="px-2 py-2.5">
+                          {event.projectName ?? event.projectSlug ?? "—"}
+                        </td>
+                        <td className="px-2 py-2.5 font-mono text-xs">
+                          <span className="text-muted-foreground">
+                            {event.method}
+                          </span>{" "}
+                          {event.endpoint}
+                        </td>
+                        <td className="px-2 py-2.5">
+                          <StatusBadge status={event.status} />
+                        </td>
+                        <td className="px-2 py-2.5 text-right tabular-nums">
+                          {event.credits.toLocaleString()}
+                        </td>
+                        <td className="px-2 py-2.5 text-right tabular-nums text-muted-foreground">
+                          {event.latencyMs}ms
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
           )}
         </CardContent>
       </Card>

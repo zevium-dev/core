@@ -148,8 +148,8 @@ function timingSafeEqual(a: string, b: string): boolean {
  * - /mock/:orgSlug/:projectSlug/* — public keyless example responses, 0 credits
  * - /discovery — machine-readable catalogue + pricing index
  * - /mcp — MCP Streamable HTTP (search / docs / metered call_api)
- * - /wallet/:clerkOrgId/* — wallet DO HTTP surface (grants/tests)
- * - /internal/grant — control-plane grant push (shared secret)
+ * - /internal/grant — control-plane grant projection (shared secret)
+ * - /internal/sync — control-plane checkpoint refresh (shared secret)
  * - /health
  */
 export default {
@@ -171,29 +171,13 @@ export default {
     }
 
     // POST /internal/grant { clerkOrgId, amount, refId }
-    if (parts[0] === "internal" && parts[1] === "grant") {
+    if (parts[0] === "internal" && parts[1] === "grant" && parts.length === 2) {
       return handleInternalGrant(request, env);
     }
 
-    // /wallet/:clerkOrgId[/*] — DO grant/reserve surface for ops + tests
-    if (parts[0] === "wallet" && parts[1]) {
-      const clerkOrgId = parts[1];
-      const rest = "/" + parts.slice(2).join("/");
-      const id = env.WALLET.idFromName(clerkOrgId);
-      const stub = env.WALLET.get(id);
-
-      const doUrl = new URL(rest === "/" ? "/state" : rest, url.origin);
-      doUrl.search = url.search;
-
-      const init: RequestInit = {
-        method: request.method,
-        headers: request.headers,
-      };
-      if (request.method !== "GET" && request.method !== "HEAD") {
-        init.body = await request.arrayBuffer();
-      }
-
-      return withCors(await stub.fetch(new Request(doUrl.toString(), init)));
+    // POST /internal/sync { clerkOrgId }
+    if (parts[0] === "internal" && parts[1] === "sync" && parts.length === 2) {
+      return handleInternalSync(request, env);
     }
 
     // GET /discovery — public machine-readable index
@@ -296,4 +280,52 @@ async function handleInternalGrant(
   const stub = env.WALLET.get(id);
   const result = await stub.grant(refId, amount);
   return Response.json(result);
+}
+
+async function handleInternalSync(
+  request: Request,
+  env: Env,
+): Promise<Response> {
+  if (request.method !== "POST") {
+    return Response.json({ error: "method not allowed" }, { status: 405 });
+  }
+
+  const secret = env.GATEWAY_INTERNAL_SECRET;
+  if (!secret) {
+    return Response.json(
+      { error: "misconfigured", message: "GATEWAY_INTERNAL_SECRET not set" },
+      { status: 500 },
+    );
+  }
+
+  const provided =
+    request.headers.get("x-gateway-secret") ??
+    request.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ??
+    "";
+  if (!provided || !timingSafeEqual(provided, secret)) {
+    return Response.json({ error: "unauthorized" }, { status: 401 });
+  }
+
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return Response.json({ error: "invalid_json" }, { status: 400 });
+  }
+  if (!body || typeof body !== "object") {
+    return Response.json({ error: "invalid_body" }, { status: 400 });
+  }
+  const clerkOrgId =
+    "clerkOrgId" in body && typeof body.clerkOrgId === "string"
+      ? body.clerkOrgId
+      : "";
+  if (!clerkOrgId) {
+    return Response.json(
+      { error: "invalid_body", message: "clerkOrgId required" },
+      { status: 400 },
+    );
+  }
+
+  const id = env.WALLET.idFromName(clerkOrgId);
+  return Response.json(await env.WALLET.get(id).syncGrants(clerkOrgId));
 }

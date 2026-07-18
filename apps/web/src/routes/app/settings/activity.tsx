@@ -1,7 +1,7 @@
 import { useOrganization } from "@clerk/tanstack-react-start";
 import { convexQuery } from "@convex-dev/react-query";
 import { useQuery } from "@tanstack/react-query";
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useConvexAuth } from "convex/react";
 import { Activity } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
@@ -16,6 +16,13 @@ import {
   CardTitle,
 } from "#/components/ui/card";
 import { Label } from "#/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "#/components/ui/select";
 import { Skeleton } from "#/components/ui/skeleton";
 import {
   ACTIVITY_PAGE_SIZE,
@@ -28,7 +35,27 @@ import {
 import { api } from "#/lib/convex-api";
 import type { Id } from "#/lib/convex-data-model";
 
+type ActivitySearch = {
+  range?: ActivityTimeRange;
+  project?: string;
+};
+
 export const Route = createFileRoute("/app/settings/activity")({
+  validateSearch: (search: Record<string, unknown>): ActivitySearch => {
+    const range = ACTIVITY_TIME_RANGES.includes(
+      search.range as ActivityTimeRange,
+    )
+      ? (search.range as ActivityTimeRange)
+      : undefined;
+    const project =
+      typeof search.project === "string" && search.project.length > 0
+        ? search.project
+        : undefined;
+    return {
+      ...(range && range !== "7d" ? { range } : {}),
+      ...(project ? { project } : {}),
+    };
+  },
   component: ActivityPage,
   head: () => ({
     meta: [{ title: "Activity · Zevium" }],
@@ -91,8 +118,10 @@ function ActivityHeader() {
 }
 
 function ActivityContent({ orgSlug }: { orgSlug: string }) {
-  const [timeRange, setTimeRange] = useState<ActivityTimeRange>("7d");
-  const [projectId, setProjectId] = useState<string>("all");
+  const navigate = useNavigate();
+  const search = Route.useSearch();
+  const timeRange = search.range ?? "7d";
+  const projectId = search.project ?? "all";
   const [cursor, setCursor] = useState<string | null>(null);
   const [rows, setRows] = useState<UsageListItem[]>([]);
   const [isDone, setIsDone] = useState(false);
@@ -178,39 +207,61 @@ function ActivityContent({ orgSlug }: { orgSlug: string }) {
               <Label htmlFor="activity-project" className="text-xs">
                 Project
               </Label>
-              <select
-                id="activity-project"
-                className="flex h-9 min-w-[10rem] rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none transition-[color,box-shadow] duration-[var(--dur-instant)] ease-[var(--ease)] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50"
+              <Select
                 value={projectId}
-                onChange={(e) => setProjectId(e.target.value)}
+                onValueChange={(value) =>
+                  void navigate({
+                    to: "/app/settings/activity",
+                    search: {
+                      ...(timeRange === "7d" ? {} : { range: timeRange }),
+                      ...(value === "all" ? {} : { project: value }),
+                    },
+                  })
+                }
                 disabled={projectsQuery.isPending}
               >
-                <option value="all">All projects</option>
-                {projects.map((p) => (
-                  <option key={p._id} value={p._id}>
-                    {p.name}
-                  </option>
-                ))}
-              </select>
+                <SelectTrigger id="activity-project" className="min-w-[10rem]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All projects</SelectItem>
+                  {projects.map((project) => (
+                    <SelectItem key={project._id} value={project._id}>
+                      {project.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="activity-range" className="text-xs">
                 Time range
               </Label>
-              <select
-                id="activity-range"
-                className="flex h-9 min-w-[8rem] rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none transition-[color,box-shadow] duration-[var(--dur-instant)] ease-[var(--ease)] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+              <Select
                 value={timeRange}
-                onChange={(e) =>
-                  setTimeRange(e.target.value as ActivityTimeRange)
+                onValueChange={(value) =>
+                  void navigate({
+                    to: "/app/settings/activity",
+                    search: {
+                      ...(value === "7d"
+                        ? {}
+                        : { range: value as ActivityTimeRange }),
+                      ...(projectId === "all" ? {} : { project: projectId }),
+                    },
+                  })
                 }
               >
-                {ACTIVITY_TIME_RANGES.map((range) => (
-                  <option key={range} value={range}>
-                    {ACTIVITY_TIME_RANGE_LABELS[range]}
-                  </option>
-                ))}
-              </select>
+                <SelectTrigger id="activity-range" className="min-w-[8rem]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {ACTIVITY_TIME_RANGES.map((range) => (
+                    <SelectItem key={range} value={range}>
+                      {ACTIVITY_TIME_RANGE_LABELS[range]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
           </div>
         </CardHeader>

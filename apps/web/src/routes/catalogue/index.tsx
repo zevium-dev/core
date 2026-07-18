@@ -17,6 +17,13 @@ import {
 } from "#/components/ui/card";
 import { Input } from "#/components/ui/input";
 import { Label } from "#/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "#/components/ui/select";
 import { Skeleton } from "#/components/ui/skeleton";
 import {
   formatCataloguePriceRange,
@@ -221,17 +228,23 @@ function BrowsePanel({
           >
             Sort
           </Label>
-          <select
-            id="catalogue-sort"
-            aria-label="Sort catalogue"
-            className="h-9 min-w-[10rem] rounded-md border border-input bg-transparent px-3 text-sm shadow-xs outline-none transition-[color,box-shadow] duration-[var(--dur-instant)] ease-[var(--ease)] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+          <Select
             value={sort}
-            onChange={(e) => setSort(e.target.value as CatalogueSort)}
+            onValueChange={(value) => setSort(value as CatalogueSort)}
           >
-            <option value="newest">Newest</option>
-            <option value="name">Name</option>
-            <option value="cheapest">Cheapest</option>
-          </select>
+            <SelectTrigger
+              id="catalogue-sort"
+              aria-label="Sort catalogue"
+              className="w-40"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="newest">Newest</SelectItem>
+              <SelectItem value="name">Name</SelectItem>
+              <SelectItem value="cheapest">Cheapest</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
 
         <div className="grid gap-1.5">
@@ -453,7 +466,7 @@ function CatalogueCard({ item }: { item: CatalogueCardItem }) {
             </Badge>
           </div>
           {item.description ? (
-            <CardDescription className="line-clamp-2">
+            <CardDescription className="leading-relaxed">
               {item.description}
             </CardDescription>
           ) : (

@@ -3,19 +3,6 @@ import { query } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { requireOrgMemberBySlug } from "./lib/auth";
 
-/**
- * Platform cut 5% → publishers keep 95%.
- * Mirrors packages/shared PLATFORM_CUT (0.05); local copy so convex/ stays
- * free of workspace package resolution for the control-plane bundle.
- */
-const PLATFORM_CUT = 0.05;
-const PUBLISHER_SHARE = 1 - PLATFORM_CUT;
-
-function startOfUtcMonth(now: number): number {
-  const d = new Date(now);
-  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1);
-}
-
 export type EarningsBucket = {
   calls: number;
   grossCredits: number;
@@ -38,75 +25,82 @@ export type OrgEarnings = {
 };
 
 /**
- * Publisher earnings for the org that owns the projects.
- * Aggregates consumer-paid usageEvents via by_project_at.
- * Month = current UTC calendar month.
+ * Publisher-facing statement derived only from immutable `publisherEarnings`.
+ * It never replays mutable usage rows or recomputes a percentage split.
  */
 export const forOrg = query({
   args: { orgSlug: v.string() },
   handler: async (ctx, args): Promise<OrgEarnings> => {
     const { org } = await requireOrgMemberBySlug(ctx, args.orgSlug);
     const now = Date.now();
-    const monthStart = startOfUtcMonth(now);
-
-    const projects = await ctx.db
-      .query("projects")
-      .withIndex("by_org", (q) => q.eq("organizationId", org._id))
+    const monthStart = Date.UTC(
+      new Date(now).getUTCFullYear(),
+      new Date(now).getUTCMonth(),
+      1,
+    );
+    const earnings = await ctx.db
+      .query("publisherEarnings")
+      .withIndex("by_publisher", (q) =>
+        q.eq("publisherOrganizationId", org._id),
+      )
       .collect();
-
-    const byProject: ProjectEarnings[] = [];
+    const rows = new Map<
+      Id<"projects">,
+      { calls: number; grossCredits: number; netCredits: number }
+    >();
     let monthCalls = 0;
     let monthGross = 0;
-    let allCalls = 0;
+    let monthNet = 0;
     let allGross = 0;
+    let allNet = 0;
 
-    for (const project of projects) {
-      const events = await ctx.db
-        .query("usageEvents")
-        .withIndex("by_project_at", (q) => q.eq("projectId", project._id))
-        .collect();
-
-      let calls = 0;
-      let gross = 0;
-      for (const event of events) {
-        calls += 1;
-        gross += event.credits;
-        allCalls += 1;
-        allGross += event.credits;
-        if (event.at >= monthStart) {
-          monthCalls += 1;
-          monthGross += event.credits;
-        }
+    for (const earning of earnings) {
+      allGross += earning.grossCredits;
+      allNet += earning.netCredits;
+      if (earning.createdAt >= monthStart) {
+        monthCalls += 1;
+        monthGross += earning.grossCredits;
+        monthNet += earning.netCredits;
       }
-
-      byProject.push({
-        projectId: project._id,
-        name: project.name,
-        slug: project.slug,
-        calls,
-        grossCredits: gross,
-        netCredits: Math.round(gross * PUBLISHER_SHARE),
-      });
+      if (earning.projectId === undefined) continue;
+      const row = rows.get(earning.projectId) ?? {
+        calls: 0,
+        grossCredits: 0,
+        netCredits: 0,
+      };
+      row.calls += 1;
+      row.grossCredits += earning.grossCredits;
+      row.netCredits += earning.netCredits;
+      rows.set(earning.projectId, row);
     }
 
-    // Stable: name then slug.
-    byProject.sort((a, b) => {
-      const byName = a.name.localeCompare(b.name);
-      if (byName !== 0) return byName;
-      return a.slug.localeCompare(b.slug);
-    });
-
+    const byProject = await Promise.all(
+      [...rows.entries()].map(async ([projectId, row]) => {
+        const project = await ctx.db.get(projectId);
+        return {
+          projectId,
+          name: project?.name ?? "Unknown project",
+          slug: project?.slug ?? "unknown",
+          ...row,
+        };
+      }),
+    );
+    byProject.sort(
+      (left, right) =>
+        left.name.localeCompare(right.name) ||
+        left.slug.localeCompare(right.slug),
+    );
     return {
       byProject,
       month: {
         calls: monthCalls,
         grossCredits: monthGross,
-        netCredits: Math.round(monthGross * PUBLISHER_SHARE),
+        netCredits: monthNet,
       },
       allTime: {
-        calls: allCalls,
+        calls: earnings.length,
         grossCredits: allGross,
-        netCredits: Math.round(allGross * PUBLISHER_SHARE),
+        netCredits: allNet,
       },
     };
   },

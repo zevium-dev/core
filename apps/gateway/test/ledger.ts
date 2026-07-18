@@ -33,6 +33,7 @@ export class SimulatedLedger {
   grants: LedgerGrant[] = [];
   settlements: LedgerSettlement[] = [];
   #seenSettlements = new Set<string>();
+  #sequence = 0;
 
   get grantsSum(): number {
     return this.grants.reduce((s, g) => s + g.amount, 0);
@@ -65,7 +66,8 @@ export class SimulatedLedger {
 
   /**
    * Flush pending settlements from DO into the ledger.
-   * Dedupes by settlementId. Unless `dropAck`, acks the flushed ids.
+   * Dedupes by settlementId. Unless `dropAck`, applies per-reference
+   * outcomes with a signed authoritative checkpoint.
    */
   async flushToLedger(
     stub: WalletStub,
@@ -78,22 +80,33 @@ export class SimulatedLedger {
     const flush = await stub.flush();
     const appended: PendingSettlement[] = [];
 
-    for (const s of flush.settlements) {
-      if (this.#seenSettlements.has(s.settlementId)) continue;
-      this.#seenSettlements.add(s.settlementId);
+    const results = flush.settlements.map((settlement) => {
+      if (this.#seenSettlements.has(settlement.settlementId)) {
+        return {
+          refId: settlement.settlementId,
+          status: "already_applied" as const,
+        };
+      }
+      this.#seenSettlements.add(settlement.settlementId);
+      this.#sequence += 1;
       this.settlements.push({
-        settlementId: s.settlementId,
-        reservationId: s.reservationId,
-        cost: s.cost,
-        settledAt: s.settledAt,
+        settlementId: settlement.settlementId,
+        reservationId: settlement.reservationId,
+        cost: settlement.cost,
+        settledAt: settlement.settledAt,
         flushedAt: Date.now(),
       });
-      appended.push(s);
-    }
+      appended.push(settlement);
+      return { refId: settlement.settlementId, status: "applied" as const };
+    });
 
     const acked = !opts.dropAck;
     if (acked && flush.settlements.length > 0) {
-      await stub.ackFlush(flush.settlements.map((s) => s.settlementId));
+      await stub.applySettlementResults(results, {
+        clerkOrgId: "simulated-ledger",
+        balance: this.net,
+        sequence: this.#sequence,
+      });
     }
 
     return { flush, appended, acked };

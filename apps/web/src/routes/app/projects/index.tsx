@@ -147,7 +147,7 @@ function ProjectsList({ orgSlug }: { orgSlug: string }) {
                     {project.slug}
                   </CardDescription>
                   {project.description ? (
-                    <CardDescription className="line-clamp-2">
+                    <CardDescription className="leading-relaxed">
                       {project.description}
                     </CardDescription>
                   ) : null}

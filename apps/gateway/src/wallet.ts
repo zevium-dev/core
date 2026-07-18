@@ -29,6 +29,8 @@ import {
   ConvexUsageClient,
   pendingToUsageRecord,
   type ConvexUsageRecord,
+  type SettlementOutcome,
+  type WalletCheckpoint,
 } from "./usage";
 
 // ---------------------------------------------------------------------------
@@ -38,6 +40,8 @@ import {
 export type InFlightEntry = {
   cost: number;
   createdAt: number;
+  /** Present for keyed reservations so their aggregate is cap-enforced. */
+  keyId?: string;
 };
 
 /** Usage metadata required to flush a settlement to Convex. */
@@ -68,6 +72,8 @@ export type TerminalStatus = "settled" | "refunded" | "free";
 
 export type WalletState = {
   balance: number;
+  /** Last accepted Convex wallet checkpoint sequence, or -1 before sync. */
+  sequence: number;
   inFlightTotal: number;
   inFlight: Record<string, InFlightEntry>;
   appliedGrantIds: string[];
@@ -128,9 +134,9 @@ export type FlushToConvexResult = {
   error?: string;
 };
 export type SyncGrantsResult =
-  | { status: "ok"; applied: number; balance: number }
+  | { status: "ok"; balance: number; sequence: number }
   | { status: "rate_limited"; retryAfterSeconds: number }
-  | { status: "sync_failed"; error: string; balance: number };
+  | { status: "sync_failed"; error: string; balance: number; sequence: number };
 
 /** Per-key control metadata mirrored from the control-plane keySettings table. */
 export type KeySetting = {
@@ -153,6 +159,7 @@ export type ReserveOptions = {
 
 // Storage keys
 const K_BALANCE = "balance";
+const K_SEQUENCE = "authoritativeSequence";
 const K_IN_FLIGHT = "inFlight";
 const K_APPLIED_GRANTS = "appliedGrantIds";
 const K_PENDING = "pendingSettlements";
@@ -176,6 +183,23 @@ function sumInFlight(inFlight: Record<string, InFlightEntry>): number {
   for (const entry of Object.values(inFlight)) {
     total += entry.cost;
   }
+  return total;
+}
+
+function sumInFlightForKey(
+  inFlight: Record<string, InFlightEntry>,
+  keyId: string,
+): number {
+  let total = 0;
+  for (const entry of Object.values(inFlight)) {
+    if (entry.keyId === keyId) total += entry.cost;
+  }
+  return total;
+}
+
+function sumPendingCosts(pendingSettlements: PendingSettlement[]): number {
+  let total = 0;
+  for (const settlement of pendingSettlements) total += settlement.cost;
   return total;
 }
 
@@ -227,6 +251,7 @@ function parseKeySettings(raw: unknown): KeySetting[] {
 
 export class WalletDO extends DurableObject<Cloudflare.Env> {
   #balance = 0;
+  #sequence = -1;
   #inFlight: Record<string, InFlightEntry> = {};
   #appliedGrantIds: Set<string> = new Set();
   #pendingSettlements: PendingSettlement[] = [];
@@ -236,6 +261,7 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
   #syncInFlight: Promise<SyncGrantsResult> | null = null;
   #flushSeq = 0;
   #loaded = false;
+  #mutationTail: Promise<void> = Promise.resolve();
 
   constructor(ctx: DurableObjectState, env: Cloudflare.Env) {
     super(ctx, env);
@@ -254,6 +280,7 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
       | Record<string, KeySetting>
     >([
       K_BALANCE,
+      K_SEQUENCE,
       K_IN_FLIGHT,
       K_APPLIED_GRANTS,
       K_PENDING,
@@ -264,6 +291,7 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
     ]);
 
     this.#balance = (stored.get(K_BALANCE) as number | undefined) ?? 0;
+    this.#sequence = (stored.get(K_SEQUENCE) as number | undefined) ?? -1;
     this.#inFlight =
       (stored.get(K_IN_FLIGHT) as Record<string, InFlightEntry> | undefined) ??
       {};
@@ -285,24 +313,45 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
   }
 
   #available(): number {
-    return this.#balance - sumInFlight(this.#inFlight);
+    return Math.max(0, this.#balance - sumInFlight(this.#inFlight));
   }
 
   #snapshot(): WalletState {
     const inFlightTotal = sumInFlight(this.#inFlight);
     return {
       balance: this.#balance,
+      sequence: this.#sequence,
       inFlightTotal,
       inFlight: { ...this.#inFlight },
       appliedGrantIds: [...this.#appliedGrantIds],
       pendingSettlements: this.#pendingSettlements.map((s) => ({ ...s })),
-      available: this.#balance - inFlightTotal,
+      available: Math.max(0, this.#balance - inFlightTotal),
     };
+  }
+
+  /**
+   * Serialize read-modify-write transitions inside the DO even across awaits.
+   * Storage transactions protect persistence; this lock keeps the in-memory
+   * projection and cap checks coherent with the committed transaction.
+   */
+  async #mutate<T>(operation: () => Promise<T>): Promise<T> {
+    const previous = this.#mutationTail;
+    let release: (() => void) | undefined;
+    this.#mutationTail = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await previous;
+    try {
+      return await operation();
+    } finally {
+      release?.();
+    }
   }
 
   async #persist(
     keys: Partial<{
       balance: number;
+      sequence: number;
       inFlight: Record<string, InFlightEntry>;
       appliedGrantIds: string[];
       pendingSettlements: PendingSettlement[];
@@ -310,10 +359,12 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
       flushSeq: number;
       keySettings: Record<string, KeySetting>;
       keySettingsSyncedAt: number;
+      settledCounter: { storageKey: string; amount: number };
     }>,
   ): Promise<void> {
     await this.ctx.storage.transaction(async (txn) => {
       if (keys.balance !== undefined) await txn.put(K_BALANCE, keys.balance);
+      if (keys.sequence !== undefined) await txn.put(K_SEQUENCE, keys.sequence);
       if (keys.inFlight !== undefined)
         await txn.put(K_IN_FLIGHT, keys.inFlight);
       if (keys.appliedGrantIds !== undefined)
@@ -327,6 +378,14 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
         await txn.put(K_KEY_SETTINGS, keys.keySettings);
       if (keys.keySettingsSyncedAt !== undefined)
         await txn.put(K_KEY_SETTINGS_AT, keys.keySettingsSyncedAt);
+      if (keys.settledCounter !== undefined) {
+        const current =
+          (await txn.get<number>(keys.settledCounter.storageKey)) ?? 0;
+        await txn.put(
+          keys.settledCounter.storageKey,
+          current + keys.settledCounter.amount,
+        );
+      }
     });
   }
 
@@ -349,19 +408,21 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
       return { status: "rejected", reason: "amount must be > 0" };
     }
 
-    if (this.#appliedGrantIds.has(grantId)) {
-      return { status: "duplicate", balance: this.#balance };
-    }
+    return this.#mutate(async () => {
+      if (this.#appliedGrantIds.has(grantId)) {
+        return { status: "duplicate", balance: this.#balance };
+      }
 
-    this.#appliedGrantIds.add(grantId);
-    this.#balance += amount;
+      this.#appliedGrantIds.add(grantId);
+      this.#balance += amount;
 
-    await this.#persist({
-      balance: this.#balance,
-      appliedGrantIds: [...this.#appliedGrantIds],
+      await this.#persist({
+        balance: this.#balance,
+        appliedGrantIds: [...this.#appliedGrantIds],
+      });
+
+      return { status: "applied", balance: this.#balance };
     });
-
-    return { status: "applied", balance: this.#balance };
   }
 
   async reserve(
@@ -376,62 +437,66 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
       return { status: "rejected", reason: "cost must be > 0" };
     }
 
-    const existing = this.#inFlight[reservationId];
-    if (existing) {
-      if (existing.cost === cost) {
-        return { status: "duplicate", available: this.#available() };
+    const now = opts.nowMs ?? Date.now();
+    const setting = opts.keyId
+      ? await this.#resolveKeySetting(opts.keyId, opts.clerkOrgId, now)
+      : null;
+
+    return this.#mutate(async () => {
+      const existing = this.#inFlight[reservationId];
+      if (existing) {
+        if (existing.cost === cost) {
+          return { status: "duplicate", available: this.#available() };
+        }
+        return {
+          status: "conflict",
+          reason: `reservation ${reservationId} already held at cost ${existing.cost}`,
+        };
       }
-      return {
-        status: "conflict",
-        reason: `reservation ${reservationId} already held at cost ${existing.cost}`,
-      };
-    }
 
-    const terminal = this.#terminal[reservationId];
-    if (terminal) {
-      return {
-        status: "conflict",
-        reason: `reservation ${reservationId} already ${terminal}`,
-      };
-    }
+      const terminal = this.#terminal[reservationId];
+      if (terminal) {
+        return {
+          status: "conflict",
+          reason: `reservation ${reservationId} already ${terminal}`,
+        };
+      }
 
-    // Per-key enforcement: disabled, expired grace, monthly cap.
-    if (opts.keyId) {
-      const now = opts.nowMs ?? Date.now();
-      const setting = await this.#resolveKeySetting(
-        opts.keyId,
-        opts.clerkOrgId,
-        now,
-      );
-      if (setting) {
-        if (setting.disabled) {
+      // Per-key enforcement: disabled, expired grace, and all active holds.
+      const currentSetting = opts.keyId
+        ? (this.#keySettings.get(opts.keyId) ?? setting)
+        : null;
+      if (opts.keyId && currentSetting) {
+        if (this.#isKeyDisabled(currentSetting, now)) {
           return { status: "rejected", reason: "key_disabled" };
         }
-        if (setting.graceUntil !== undefined && setting.graceUntil < now) {
-          return { status: "rejected", reason: "key_disabled" };
-        }
-        if (setting.monthlyCapCredits !== undefined) {
+        if (currentSetting.monthlyCapCredits !== undefined) {
           const month = utcMonthKey(now);
           const used =
             (await this.ctx.storage.get<number>(
               settledStorageKey(opts.keyId, month),
             )) ?? 0;
-          if (used >= setting.monthlyCapCredits) {
+          const reserved = sumInFlightForKey(this.#inFlight, opts.keyId);
+          if (used + reserved + cost > currentSetting.monthlyCapCredits) {
             return { status: "rejected", reason: "key_cap_exceeded" };
           }
         }
       }
-    }
 
-    const available = this.#available();
-    if (available < cost) {
-      return { status: "insufficient", available, cost };
-    }
+      const available = this.#available();
+      if (available < cost) {
+        return { status: "insufficient", available, cost };
+      }
 
-    this.#inFlight[reservationId] = { cost, createdAt: Date.now() };
-    await this.#persist({ inFlight: { ...this.#inFlight } });
+      this.#inFlight[reservationId] = {
+        cost,
+        createdAt: Date.now(),
+        ...(opts.keyId ? { keyId: opts.keyId } : {}),
+      };
+      await this.#persist({ inFlight: { ...this.#inFlight } });
 
-    return { status: "reserved", available: this.#available() };
+      return { status: "reserved", available: this.#available() };
+    });
   }
 
   async settle(
@@ -440,89 +505,98 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
   ): Promise<SettleResult> {
     if (!reservationId) return { status: "unknown" };
 
-    const terminal = this.#terminal[reservationId];
-    if (terminal === "settled") {
-      return {
-        status: "already_settled",
-        settlementId: settlementIdFor(reservationId),
+    return this.#mutate(async () => {
+      const terminal = this.#terminal[reservationId];
+      if (terminal === "settled") {
+        return {
+          status: "already_settled",
+          settlementId: settlementIdFor(reservationId),
+        };
+      }
+      if (terminal === "refunded") {
+        return { status: "already_refunded" };
+      }
+      if (terminal === "free") {
+        return { status: "already_free" };
+      }
+
+      const entry = this.#inFlight[reservationId];
+      if (!entry) {
+        return { status: "unknown" };
+      }
+
+      const settlementId = settlementIdFor(reservationId);
+      const settledAt = Date.now();
+      const { cost } = entry;
+
+      delete this.#inFlight[reservationId];
+      this.#balance -= cost;
+      this.#terminal[reservationId] = "settled";
+      const pending: PendingSettlement = {
+        settlementId,
+        reservationId,
+        cost,
+        settledAt,
       };
-    }
-    if (terminal === "refunded") {
-      return { status: "already_refunded" };
-    }
-    if (terminal === "free") {
-      return { status: "already_free" };
-    }
+      if (usage) pending.usage = usage;
+      this.#pendingSettlements.push(pending);
 
-    const entry = this.#inFlight[reservationId];
-    if (!entry) {
-      return { status: "unknown" };
-    }
+      await this.#persist({
+        balance: this.#balance,
+        inFlight: { ...this.#inFlight },
+        pendingSettlements: this.#pendingSettlements.map((s) => ({ ...s })),
+        terminal: { ...this.#terminal },
+        ...(usage?.keyId && cost > 0
+          ? {
+              settledCounter: {
+                storageKey: settledStorageKey(
+                  usage.keyId,
+                  utcMonthKey(settledAt),
+                ),
+                amount: cost,
+              },
+            }
+          : {}),
+      });
+      await this.#scheduleFlushAlarm();
 
-    const settlementId = settlementIdFor(reservationId);
-    const settledAt = Date.now();
-    const { cost } = entry;
-
-    delete this.#inFlight[reservationId];
-    this.#balance -= cost;
-    this.#terminal[reservationId] = "settled";
-    const pending: PendingSettlement = {
-      settlementId,
-      reservationId,
-      cost,
-      settledAt,
-    };
-    if (usage) pending.usage = usage;
-    this.#pendingSettlements.push(pending);
-
-    await this.#persist({
-      balance: this.#balance,
-      inFlight: { ...this.#inFlight },
-      pendingSettlements: this.#pendingSettlements.map((s) => ({ ...s })),
-      terminal: { ...this.#terminal },
+      return { status: "settled", settlementId, balance: this.#balance };
     });
-    await this.#scheduleFlushAlarm();
-    // Accumulate per-key monthly settled credits (cap enforcement counter).
-    if (usage && usage.keyId && cost > 0) {
-      const sk = settledStorageKey(usage.keyId, utcMonthKey(settledAt));
-      const prev = (await this.ctx.storage.get<number>(sk)) ?? 0;
-      await this.ctx.storage.put(sk, prev + cost);
-    }
-
-    return { status: "settled", settlementId, balance: this.#balance };
   }
 
   async refund(reservationId: string): Promise<RefundResult> {
     if (!reservationId) return { status: "unknown" };
 
-    const terminal = this.#terminal[reservationId];
-    if (terminal === "refunded") {
-      return { status: "already_refunded" };
-    }
-    if (terminal === "settled") {
-      return {
-        status: "already_settled",
-        settlementId: settlementIdFor(reservationId),
-      };
-    }
-    if (terminal === "free") {
-      return { status: "already_free" };
-    }
+    return this.#mutate(async () => {
+      const terminal = this.#terminal[reservationId];
+      if (terminal === "refunded") {
+        return { status: "already_refunded" };
+      }
+      if (terminal === "settled") {
+        return {
+          status: "already_settled",
+          settlementId: settlementIdFor(reservationId),
+        };
+      }
+      if (terminal === "free") {
+        return { status: "already_free" };
+      }
 
-    const entry = this.#inFlight[reservationId];
-    if (!entry) {
-      return { status: "unknown" };
-    }
+      const entry = this.#inFlight[reservationId];
+      if (!entry) {
+        return { status: "unknown" };
+      }
 
-    delete this.#inFlight[reservationId];
-    this.#terminal[reservationId] = "refunded";
+      delete this.#inFlight[reservationId];
+      this.#terminal[reservationId] = "refunded";
 
-    await this.#persist({
-      inFlight: { ...this.#inFlight },
-      terminal: { ...this.#terminal },
+      await this.#persist({
+        inFlight: { ...this.#inFlight },
+        terminal: { ...this.#terminal },
+      });
+
+      return { status: "refunded", available: this.#available() };
     });
-
-    return { status: "refunded", available: this.#available() };
   }
 
   /**
@@ -532,7 +606,7 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
   async consumeFreeTier(
     keyId: string,
     limit: number,
-    nowMs: number = Date.now(),
+    opts: { clerkOrgId?: string; nowMs?: number } = {},
   ): Promise<FreeTierResult> {
     if (!keyId || typeof keyId !== "string") {
       return { status: "rejected", reason: "keyId required" };
@@ -541,16 +615,42 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
       return { status: "rejected", reason: "limit must be > 0" };
     }
 
-    const day = utcDayKey(nowMs);
-    const storageKey = freeStorageKey(keyId, day);
-    const used = (await this.ctx.storage.get<number>(storageKey)) ?? 0;
-    if (used >= limit) {
-      return { status: "exhausted", used, limit };
-    }
+    const nowMs = opts.nowMs ?? Date.now();
+    const setting = await this.#resolveKeySetting(
+      keyId,
+      opts.clerkOrgId,
+      nowMs,
+    );
 
-    const next = used + 1;
-    await this.ctx.storage.put(storageKey, next);
-    return { status: "consumed", used: next, limit };
+    return this.#mutate(async () => {
+      const currentSetting = this.#keySettings.get(keyId) ?? setting;
+      if (currentSetting && this.#isKeyDisabled(currentSetting, nowMs)) {
+        return { status: "rejected", reason: "key_disabled" };
+      }
+      const day = utcDayKey(nowMs);
+      const storageKey = freeStorageKey(keyId, day);
+      const used = (await this.ctx.storage.get<number>(storageKey)) ?? 0;
+      if (used >= limit) {
+        return { status: "exhausted", used, limit };
+      }
+
+      const next = used + 1;
+      await this.ctx.storage.put(storageKey, next);
+      return { status: "consumed", used: next, limit };
+    });
+  }
+
+  /** Return a consumed free-tier unit after upstream failure or non-2xx. */
+  async refundFreeTier(
+    keyId: string,
+    nowMs: number = Date.now(),
+  ): Promise<void> {
+    if (!keyId) return;
+    await this.#mutate(async () => {
+      const storageKey = freeStorageKey(keyId, utcDayKey(nowMs));
+      const used = (await this.ctx.storage.get<number>(storageKey)) ?? 0;
+      if (used > 0) await this.ctx.storage.put(storageKey, used - 1);
+    });
   }
 
   /**
@@ -565,66 +665,91 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
       return { status: "rejected", reason: "reservationId required" };
     }
 
-    const settlementId = settlementIdFor(reservationId);
-    const terminal = this.#terminal[reservationId];
-    if (terminal === "free" || terminal === "settled") {
-      return { status: "duplicate", settlementId };
-    }
-    if (terminal === "refunded") {
-      return { status: "rejected", reason: "already refunded" };
-    }
-    if (this.#inFlight[reservationId]) {
-      return { status: "rejected", reason: "reservation in flight" };
-    }
+    return this.#mutate(async () => {
+      const settlementId = settlementIdFor(reservationId);
+      const terminal = this.#terminal[reservationId];
+      if (terminal === "free" || terminal === "settled") {
+        return { status: "duplicate", settlementId };
+      }
+      if (terminal === "refunded") {
+        return { status: "rejected", reason: "already refunded" };
+      }
+      if (this.#inFlight[reservationId]) {
+        return { status: "rejected", reason: "reservation in flight" };
+      }
 
-    const settledAt = Date.now();
-    this.#terminal[reservationId] = "free";
-    this.#pendingSettlements.push({
-      settlementId,
-      reservationId,
-      cost: 0,
-      settledAt,
-      usage,
+      const settledAt = Date.now();
+      this.#terminal[reservationId] = "free";
+      this.#pendingSettlements.push({
+        settlementId,
+        reservationId,
+        cost: 0,
+        settledAt,
+        usage,
+      });
+
+      await this.#persist({
+        pendingSettlements: this.#pendingSettlements.map((s) => ({ ...s })),
+        terminal: { ...this.#terminal },
+      });
+      await this.#scheduleFlushAlarm();
+
+      return { status: "enqueued", settlementId };
     });
-
-    await this.#persist({
-      pendingSettlements: this.#pendingSettlements.map((s) => ({ ...s })),
-      terminal: { ...this.#terminal },
-    });
-    await this.#scheduleFlushAlarm();
-
-    return { status: "enqueued", settlementId };
   }
 
   async flush(): Promise<FlushResult> {
-    this.#flushSeq += 1;
-    await this.#persist({ flushSeq: this.#flushSeq });
+    return this.#mutate(async () => {
+      this.#flushSeq += 1;
+      await this.#persist({ flushSeq: this.#flushSeq });
 
-    return {
-      batchId: `batch:${this.#flushSeq}`,
-      settlements: this.#pendingSettlements.map((s) => ({ ...s })),
-    };
+      return {
+        batchId: `batch:${this.#flushSeq}`,
+        settlements: this.#pendingSettlements.map((s) => ({ ...s })),
+      };
+    });
   }
 
-  async ackFlush(settlementIds: string[]): Promise<AckFlushResult> {
-    if (!Array.isArray(settlementIds) || settlementIds.length === 0) {
-      return { removed: 0, remaining: this.#pendingSettlements.length };
-    }
+  /**
+   * Persist ledger acknowledgements. Rejected outcomes intentionally remain
+   * pending so the alarm retries them; a lost acknowledgement is retried
+   * with the same settle:{reservationId} reference.
+   */
+  async applySettlementResults(
+    results: SettlementOutcome[],
+    checkpoint: WalletCheckpoint,
+  ): Promise<AckFlushResult> {
+    return this.#mutate(async () => {
+      const removable = new Set(
+        results
+          .filter(
+            (result) =>
+              result.status === "applied" ||
+              result.status === "already_applied",
+          )
+          .map((result) => result.refId),
+      );
+      const before = this.#pendingSettlements.length;
+      if (removable.size > 0) {
+        this.#pendingSettlements = this.#pendingSettlements.filter(
+          (settlement) => !removable.has(settlement.settlementId),
+        );
+      }
+      const removed = before - this.#pendingSettlements.length;
 
-    const toRemove = new Set(settlementIds);
-    const before = this.#pendingSettlements.length;
-    this.#pendingSettlements = this.#pendingSettlements.filter(
-      (s) => !toRemove.has(s.settlementId),
-    );
-    const removed = before - this.#pendingSettlements.length;
+      const checkpointAccepted = this.#acceptCheckpoint(checkpoint);
+      if (removed > 0 || checkpointAccepted) {
+        await this.#persist({
+          balance: this.#balance,
+          sequence: this.#sequence,
+          pendingSettlements: this.#pendingSettlements.map((settlement) => ({
+            ...settlement,
+          })),
+        });
+      }
 
-    if (removed > 0) {
-      await this.#persist({
-        pendingSettlements: this.#pendingSettlements.map((s) => ({ ...s })),
-      });
-    }
-
-    return { removed, remaining: this.#pendingSettlements.length };
+      return { removed, remaining: this.#pendingSettlements.length };
+    });
   }
 
   /**
@@ -636,8 +761,10 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
       return { flushed: 0, acked: 0, remaining: 0 };
     }
 
-    const flushable = this.#pendingSettlements.filter(
-      (s) => s.usage !== undefined,
+    const flushable = await this.#mutate(async () =>
+      this.#pendingSettlements
+        .filter((settlement) => settlement.usage !== undefined)
+        .map((settlement) => ({ ...settlement })),
     );
     if (flushable.length === 0) {
       return {
@@ -695,8 +822,10 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
       };
     }
 
-    const ids = flushable.map((s) => s.settlementId);
-    const ack = await this.ackFlush(ids);
+    const ack = await this.applySettlementResults(
+      usageResult.value.results,
+      usageResult.value.wallet,
+    );
     return {
       flushed: events.length,
       acked: ack.removed,
@@ -751,76 +880,94 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
   }
 
   /**
-   * Pull grant-kind ledger entries from the control plane and apply any
-   * refIds the DO has not yet seen. Idempotent via #appliedGrantIds (the
-   * same store backing /internal/grant). Rate-limited to 1/60s per org.
-   * Never throws on Convex failure — returns a graceful sync_failed result.
+   * Pull the authoritative ledger checkpoint and complete key controls from
+   * the control plane. A newer sequence replaces the local projection while
+   * retaining active holds and unacknowledged usage as local deductions.
    */
   async syncGrants(
     clerkOrgId: string,
     nowMs: number = Date.now(),
   ): Promise<SyncGrantsResult> {
-    const last = (await this.ctx.storage.get<number>(K_SYNC_GRANTS_AT)) ?? 0;
-    if (nowMs - last < SYNC_GRANTS_WINDOW_MS) {
-      return {
-        status: "rate_limited",
-        retryAfterSeconds: Math.ceil(
-          (SYNC_GRANTS_WINDOW_MS - (nowMs - last)) / 1000,
-        ),
-      };
-    }
-    // Claim the window before the network call so a flood of retries is gated.
-    await this.ctx.storage.put(K_SYNC_GRANTS_AT, nowMs);
+    return this.#mutate(async () => {
+      const last = (await this.ctx.storage.get<number>(K_SYNC_GRANTS_AT)) ?? 0;
+      if (nowMs - last < SYNC_GRANTS_WINDOW_MS) {
+        return {
+          status: "rate_limited",
+          retryAfterSeconds: Math.ceil(
+            (SYNC_GRANTS_WINDOW_MS - (nowMs - last)) / 1000,
+          ),
+        };
+      }
+      // Claim the window before the network call so a flood of retries is gated.
+      await this.ctx.storage.put(K_SYNC_GRANTS_AT, nowMs);
 
-    const grants = await this.#fetchGrantsFromConvex(clerkOrgId);
-    if (grants === null) {
-      return {
-        status: "sync_failed",
-        error: "could not fetch grants",
+      const synced = await this.#fetchGrantsFromConvex(clerkOrgId);
+      if (synced === null) {
+        return {
+          status: "sync_failed",
+          error: "could not fetch wallet checkpoint",
+          balance: this.#balance,
+          sequence: this.#sequence,
+        };
+      }
+
+      // Full replace: Convex returns the complete key configuration.
+      this.#keySettings = new Map(
+        synced.keySettings.map((setting) => [setting.keyId, setting]),
+      );
+      this.#keySettingsSyncedAt = nowMs;
+      this.#acceptCheckpoint(synced.wallet);
+
+      await this.#persist({
         balance: this.#balance,
+        sequence: this.#sequence,
+        keySettings: Object.fromEntries(this.#keySettings),
+        keySettingsSyncedAt: this.#keySettingsSyncedAt,
+      });
+
+      return {
+        status: "ok",
+        balance: this.#balance,
+        sequence: this.#sequence,
       };
-    }
-
-    let applied = 0;
-    for (const g of grants.grants) {
-      if (this.#appliedGrantIds.has(g.refId)) continue;
-      if (!(g.amount > 0) || !Number.isFinite(g.amount)) continue;
-      this.#appliedGrantIds.add(g.refId);
-      this.#balance += g.amount;
-      applied += 1;
-    }
-
-    // Full replace of key settings — the response is the org's complete set.
-    this.#keySettings = new Map(grants.keySettings.map((s) => [s.keyId, s]));
-    this.#keySettingsSyncedAt = nowMs;
-
-    await this.#persist({
-      balance: this.#balance,
-      appliedGrantIds: [...this.#appliedGrantIds],
-      keySettings: Object.fromEntries(this.#keySettings),
-      keySettingsSyncedAt: this.#keySettingsSyncedAt,
     });
-
-    return { status: "ok", applied, balance: this.#balance };
   }
 
   /**
-   * Resolve a key's settings, lazily refreshing from the control plane when
-   * the key is unknown AND the last sync is older than the window. Single-
-   * flight: concurrent unknown-key lookups share one fetch. Steady-state
-   * (known key, or fresh sync) never touches the network.
+   * Resolve key settings. Cached settings are refreshed at the bounded
+   * freshness interval even for known keys, so disable/rotation changes
+   * cannot remain indefinitely stale. Concurrent refreshes share one fetch.
    */
   async #resolveKeySetting(
     keyId: string,
     clerkOrgId: string | undefined,
     nowMs: number,
   ): Promise<KeySetting | null> {
-    const cached = this.#keySettings.get(keyId);
-    if (cached) return cached;
     if (!clerkOrgId) return null;
-    if (nowMs - this.#keySettingsSyncedAt < SYNC_GRANTS_WINDOW_MS) return null;
-    await this.#syncGrantsSingleFlight(clerkOrgId, nowMs);
+    if (nowMs - this.#keySettingsSyncedAt >= SYNC_GRANTS_WINDOW_MS) {
+      await this.#syncGrantsSingleFlight(clerkOrgId, nowMs);
+    }
     return this.#keySettings.get(keyId) ?? null;
+  }
+
+  #isKeyDisabled(setting: KeySetting, nowMs: number): boolean {
+    return (
+      setting.disabled ||
+      (setting.graceUntil !== undefined && setting.graceUntil < nowMs)
+    );
+  }
+
+  /**
+   * Accept a strictly newer ledger projection. Pending local settlements are
+   * deducted from its signed balance until their per-reference outcome is
+   * acknowledged; reservations remain represented in #inFlight.
+   */
+  #acceptCheckpoint(checkpoint: WalletCheckpoint): boolean {
+    if (checkpoint.sequence <= this.#sequence) return false;
+    this.#sequence = checkpoint.sequence;
+    this.#balance =
+      checkpoint.balance - sumPendingCosts(this.#pendingSettlements);
+    return true;
   }
 
   /** Coalesce concurrent syncGrants calls into a single fetch. */
@@ -836,13 +983,12 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
   }
 
   /**
-   * Fetch {grants, balance} for this org from Convex /wallet-grants.
+   * Fetch the authoritative wallet checkpoint from Convex /wallet-grants.
    * Returns null on any failure (misconfig, non-2xx, bad JSON) so callers
    * degrade gracefully. Test hook overrides the network path entirely.
    */
   async #fetchGrantsFromConvex(clerkOrgId: string): Promise<{
-    grants: { refId: string; amount: number }[];
-    balance: number;
+    wallet: WalletCheckpoint;
     keySettings: KeySetting[];
   } | null> {
     const testFn = getTestGrantsFetcher();
@@ -868,30 +1014,30 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
       });
       if (!res.ok) return null;
       const json = (await res.json()) as {
-        grants?: unknown;
-        balance?: unknown;
+        wallet?: unknown;
         keySettings?: unknown;
       };
-      if (typeof json.balance !== "number") return null;
-      if (!Array.isArray(json.grants)) return null;
-      const grants: { refId: string; amount: number }[] = [];
-      for (const row of json.grants) {
-        if (
-          row !== null &&
-          typeof row === "object" &&
-          "refId" in row &&
-          "amount" in row &&
-          typeof (row as Record<string, unknown>).refId === "string" &&
-          typeof (row as Record<string, unknown>).amount === "number"
-        ) {
-          grants.push({
-            refId: (row as Record<string, unknown>).refId as string,
-            amount: (row as Record<string, unknown>).amount as number,
-          });
-        }
+      if (!json.wallet || typeof json.wallet !== "object") return null;
+      const rawWallet = json.wallet as Record<string, unknown>;
+      if (
+        rawWallet.clerkOrgId !== clerkOrgId ||
+        typeof rawWallet.balance !== "number" ||
+        !Number.isFinite(rawWallet.balance) ||
+        typeof rawWallet.sequence !== "number" ||
+        !Number.isSafeInteger(rawWallet.sequence) ||
+        rawWallet.sequence < 0
+      ) {
+        return null;
       }
       const keySettings = parseKeySettings(json.keySettings);
-      return { grants, balance: json.balance, keySettings };
+      return {
+        wallet: {
+          clerkOrgId,
+          balance: rawWallet.balance,
+          sequence: rawWallet.sequence,
+        },
+        keySettings,
+      };
     } catch {
       return null;
     }
@@ -915,99 +1061,6 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
       await this.ctx.storage.setAlarm(Date.now() + FLUSH_ALARM_MS);
     }
   }
-
-  // -------------------------------------------------------------------------
-  // HTTP fetch router (also usable from the Worker entrypoint)
-  // -------------------------------------------------------------------------
-
-  async fetch(request: Request): Promise<Response> {
-    const url = new URL(request.url);
-    const path = url.pathname.replace(/\/+$/, "") || "/";
-
-    try {
-      if (request.method === "GET" && (path === "/" || path === "/state")) {
-        return Response.json(await this.getState());
-      }
-
-      if (request.method !== "POST") {
-        return Response.json({ error: "method not allowed" }, { status: 405 });
-      }
-
-      const body = (await request.json().catch(() => ({}))) as Record<
-        string,
-        unknown
-      >;
-
-      switch (path) {
-        case "/grant": {
-          const result = await this.grant(
-            String(body.grantId ?? ""),
-            Number(body.amount),
-          );
-          return Response.json(result);
-        }
-        case "/reserve": {
-          const result = await this.reserve(
-            String(body.reservationId ?? ""),
-            Number(body.cost),
-            {
-              keyId: typeof body.keyId === "string" ? body.keyId : undefined,
-              clerkOrgId:
-                typeof body.clerkOrgId === "string"
-                  ? body.clerkOrgId
-                  : undefined,
-              nowMs: typeof body.nowMs === "number" ? body.nowMs : undefined,
-            },
-          );
-          return Response.json(result);
-        }
-        case "/settle": {
-          const result = await this.settle(String(body.reservationId ?? ""));
-          return Response.json(result);
-        }
-        case "/refund": {
-          const result = await this.refund(String(body.reservationId ?? ""));
-          return Response.json(result);
-        }
-        case "/flush": {
-          return Response.json(await this.flush());
-        }
-        case "/flushToConvex": {
-          return Response.json(await this.flushToConvex());
-        }
-        case "/ack":
-        case "/ackFlush": {
-          const ids = Array.isArray(body.settlementIds)
-            ? body.settlementIds.filter(
-                (id): id is string => typeof id === "string",
-              )
-            : [];
-          return Response.json(await this.ackFlush(ids));
-        }
-        case "/sync-grants": {
-          const clerkOrgId =
-            String(body.clerkOrgId ?? "") ||
-            url.searchParams.get("clerkOrgId") ||
-            "";
-          if (!clerkOrgId) {
-            return Response.json(
-              { error: "clerkOrgId required" },
-              { status: 400 },
-            );
-          }
-          const syncResult = await this.syncGrants(clerkOrgId);
-          return Response.json(syncResult, {
-            status: syncResult.status === "rate_limited" ? 429 : 200,
-          });
-        }
-        default:
-          return Response.json({ error: "not found" }, { status: 404 });
-      }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      return Response.json({ error: message }, { status: 500 });
-    }
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1018,9 +1071,8 @@ type TestUsageMutation = (
   name: string,
   args: { events: ConvexUsageRecord[] },
 ) => Promise<{
-  applied: number;
-  skipped: number;
-  balances: Record<string, number>;
+  results: SettlementOutcome[];
+  wallet: WalletCheckpoint;
 }>;
 
 let testUsageMutation: TestUsageMutation | null = null;
@@ -1034,8 +1086,7 @@ function getTestUsageMutation(): TestUsageMutation | null {
 }
 
 type TestGrantsFetcher = (clerkOrgId: string) => Promise<{
-  grants: { refId: string; amount: number }[];
-  balance: number;
+  wallet: WalletCheckpoint;
   keySettings?: KeySetting[];
 } | null>;
 

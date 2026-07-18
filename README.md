@@ -9,7 +9,7 @@ through a metered edge gateway. Zero balance blocks the call. Publishers keep 95
 ![Convex](https://img.shields.io/badge/Convex-control%20plane-ee342f?style=for-the-badge)
 ![Cloudflare Workers](https://img.shields.io/badge/Cloudflare-Workers%20%2B%20DO-f38020?style=for-the-badge&logo=cloudflare)
 ![Clerk](https://img.shields.io/badge/Clerk-auth%20%2B%20orgs-6c47ff?style=for-the-badge&logo=clerk)
-![Polar](https://img.shields.io/badge/Polar-payments-0062ff?style=for-the-badge)
+![Stripe](https://img.shields.io/badge/Stripe-Checkout%20%2B%20Connect-635bff?style=for-the-badge&logo=stripe)
 ![WTFPL](https://img.shields.io/badge/license-WTFPL-696969?style=for-the-badge)
 
 ![Zevium demo — landing, catalogue, and a keyless mock call](docs/assets/demo.gif)
@@ -47,13 +47,13 @@ _Full walkthrough with the publisher console, billing, earnings, and admin:
   x402 payment-required envelopes, keyless `/mock` mode, `/mcp` + `/discovery`
   for agents.
 - **Control plane** (Convex) — projects and immutable spec versions, credit
-  ledger, usage analytics, publisher earnings, manual payout queue,
+  ledger, usage analytics, publisher earnings, Stripe event reconciliation,
   notifications, publisher webhooks (HMAC-signed, retried), semantic catalogue
   search (Gemini embeddings + vector index), platform admin.
 - **Web app** (TanStack Start + React 19 + shadcn/ui + Motion) — public
   catalogue with try-it playground, CodeMirror spec editor with a two-way
-  pricing rail and version diffs, org billing with Polar checkout + manual
-  sync, earnings and payout requests, in-app docs at `/docs`.
+  pricing rail and version diffs, org billing with Stripe Checkout, Connect
+  publisher onboarding, earnings/transfers/payouts, in-app docs at `/docs`.
 - **Auth** (Clerk) — orgs, machine API keys with org claims, prebuilt
   profile/org management embeds.
 

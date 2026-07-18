@@ -319,8 +319,8 @@ describe("keySettings.recordRotation", () => {
   });
 });
 
-describe("wallets.listGrantsForGateway — includes keySettings", () => {
-  it("returns keySettings rows alongside grants", async () => {
+describe("wallets.getGatewayWallet — checkpoint and keySettings", () => {
+  it("returns the wallet checkpoint alongside keySettings", async () => {
     const t = convexTest(schema, modules);
     const seed = await seedWorld(t);
 
@@ -329,12 +329,14 @@ describe("wallets.listGrantsForGateway — includes keySettings", () => {
       const walletId = await ctx.db.insert("wallets", {
         organizationId: seed.orgId,
         balance: 1000,
+        sequence: 1,
       });
       await ctx.db.insert("walletEntries", {
         walletId,
-        kind: "grant",
+        kind: "payment_grant",
         amount: 1000,
         refId: "grant-1",
+        sequence: 1,
         createdAt: 1,
       });
       await ctx.db.insert("keySettings", {
@@ -352,12 +354,14 @@ describe("wallets.listGrantsForGateway — includes keySettings", () => {
       });
     });
 
-    const view = await t.query(internal.wallets.listGrantsForGateway, {
+    const view = await t.query(internal.wallets.getGatewayWallet, {
       clerkOrgId: "org_acme",
     });
-    expect(view.balance).toBe(1000);
-    expect(view.grants).toHaveLength(1);
-    expect(view.grants[0]!.refId).toBe("grant-1");
+    expect(view.wallet).toEqual({
+      clerkOrgId: "org_acme",
+      balance: 1000,
+      sequence: 1,
+    });
     expect(view.keySettings).toHaveLength(2);
     const byId = new Map(view.keySettings.map((r) => [r.keyId, r]));
     expect(byId.get(KEY_A)!.disabled).toBe(true);
@@ -366,15 +370,18 @@ describe("wallets.listGrantsForGateway — includes keySettings", () => {
     expect(byId.get(KEY_B)!.monthlyCapCredits).toBeUndefined();
   });
 
-  it("returns empty keySettings when wallet missing", async () => {
+  it("returns a zero checkpoint when wallet is missing", async () => {
     const t = convexTest(schema, modules);
     await seedWorld(t);
 
-    const view = await t.query(internal.wallets.listGrantsForGateway, {
+    const view = await t.query(internal.wallets.getGatewayWallet, {
       clerkOrgId: "org_acme",
     });
-    expect(view.grants).toEqual([]);
     expect(view.keySettings).toEqual([]);
-    expect(view.balance).toBe(0);
+    expect(view.wallet).toEqual({
+      clerkOrgId: "org_acme",
+      balance: 0,
+      sequence: 0,
+    });
   });
 });

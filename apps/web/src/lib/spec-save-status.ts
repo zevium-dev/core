@@ -22,6 +22,10 @@ export function formatSavedAgo(lastSavedAt: number, now: number): string {
   const min = Math.floor(sec / 60);
   if (min < 60) return `saved ${min}m ago`;
   const hr = Math.floor(min / 60);
+  if (hr >= 24) {
+    const days = Math.floor(hr / 24);
+    return `saved ${days} day${days === 1 ? "" : "s"} ago`;
+  }
   return `saved ${hr}h ago`;
 }
 

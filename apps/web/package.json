@@ -8,14 +8,16 @@
   "scripts": {
     "dev": "vite dev --port 3000",
     "generate-routes": "tsr generate",
-    "build": "vite build",
+    "build": "node scripts/build.mjs",
     "preview": "vite preview",
+    "deploy": "pnpm build && wrangler deploy",
+    "cf-typegen": "wrangler types",
     "test": "vitest run --passWithNoTests",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@clerk/tanstack-react-start": "^1.4.17",
-    "@clerk/ui": "^1.25.2",
+    "@clerk/ui": "^1.25.5",
     "@codemirror/lang-json": "^6.0.2",
     "@codemirror/language": "^6.12.4",
     "@codemirror/lint": "^6.9.7",
@@ -39,7 +41,6 @@
     "lucide-react": "^0.545.0",
     "motion": "^12.42.2",
     "next-themes": "^0.4.6",
-    "nitro": "npm:nitro-nightly@latest",
     "radix-ui": "^1.6.2",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
@@ -51,6 +52,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@cloudflare/vite-plugin": "^1.45.1",
     "@tailwindcss/typography": "^0.5.20",
     "@tanstack/devtools-vite": "latest",
     "@tanstack/router-cli": "^1.132.0",
@@ -64,12 +66,16 @@
     "jsdom": "^28.1.0",
     "typescript": "^6.0.2",
     "vite": "^8.0.0",
-    "vitest": "^4.1.5"
+    "vitest": "^4.1.5",
+    "wrangler": "^4.112.0"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
       "esbuild",
       "lightningcss"
     ]
+  },
+  "optionalDependencies": {
+    "utf-8-validate": "5.0.10"
   }
 }

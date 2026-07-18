@@ -1,12 +1,14 @@
 import type { AuthConfig } from "convex/server";
 
-// Issuer = Clerk Frontend API domain from pk_test_<base64(domain$)>.
-// VITE_CLERK_PUBLISHABLE_KEY=pk_test_aG9seS13YXNwLTk1LmNsZXJrLmFjY291bnRzLmRldiQ
-// → holy-wasp-95.clerk.accounts.dev
+const clerkIssuerDomain = process.env.CLERK_JWT_ISSUER_DOMAIN;
+if (clerkIssuerDomain === undefined || clerkIssuerDomain.length === 0) {
+  throw new Error("CLERK_JWT_ISSUER_DOMAIN is not configured");
+}
+
 export default {
   providers: [
     {
-      domain: "https://holy-wasp-95.clerk.accounts.dev",
+      domain: clerkIssuerDomain,
       applicationID: "convex",
     },
   ],

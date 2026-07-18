@@ -8,7 +8,6 @@ import { useState } from "react";
 import { toast } from "sonner";
 
 import { Magnetic } from "#/components/motion/magnetic";
-import { NumberTicker } from "#/components/motion/number-ticker";
 import { Reveal } from "#/components/motion/reveal";
 import { PublicHeader } from "#/components/public-header";
 import { Badge } from "#/components/ui/badge";
@@ -82,20 +81,6 @@ const HOW_STEPS = [
   },
 ] as const;
 
-const CONSUMER_POINTS = [
-  "Org-scoped prepaid credits — the org owns the wallet; member keys draw from it.",
-  "Zero balance blocks the call. Never surprise overage.",
-  "Try-before-buy playground — a playground call is a normal metered call.",
-  "One API key for every listed API.",
-] as const;
-
-const PUBLISHER_POINTS = [
-  "Your OpenAPI spec is the contract and the price sheet — no parallel pricing tables.",
-  "Published versions are immutable (draft → validate → publish with semver).",
-  "Instant metering through the gateway — no billing code to build.",
-  "95/5 split. Exchange rate: $1 = 10,000 credits.",
-] as const;
-
 const GITHUB_URL = "https://github.com/zevium-dev/core";
 
 export const Route = createFileRoute("/")({
@@ -132,12 +117,6 @@ function LandingPage() {
   const catalogueQuery = useQuery(convexQuery(api.catalogue.listPublic, {}));
   const liveItems = catalogueQuery.data?.items ?? [];
   const teasers = pickLandingTeasers(liveItems, FALLBACK_TEASERS);
-  // Hero stat: true catalogue size (listPublic.total), not the teaser slice
-  // length — falls back to the static teaser count while pending / empty.
-  const apiCount =
-    catalogueQuery.data && catalogueQuery.data.total > 0
-      ? catalogueQuery.data.total
-      : FALLBACK_TEASERS.length;
   const showSkeleton = catalogueQuery.isPending && liveItems.length === 0;
 
   const gatewayOrigin = resolveGatewayOrigin(
@@ -170,7 +149,7 @@ function LandingPage() {
       <PublicHeader />
 
       <main className="mx-auto flex max-w-5xl flex-col gap-24 px-4 py-16 sm:py-24">
-        {/* Hero: copy left, proof strip right */}
+        {/* Hero */}
         <section className="grid items-center gap-12 lg:grid-cols-2 lg:gap-10">
           <m.div
             className="flex max-w-xl flex-col gap-6"
@@ -186,12 +165,12 @@ function LandingPage() {
               className="text-4xl font-semibold tracking-tight sm:text-5xl"
               variants={enterItem}
             >
-              Agent-first API marketplace
+              One key. Every API. Pay per call.
             </m.h1>
             <m.p className="text-lg text-muted-foreground" variants={enterItem}>
-              Publishers list OpenAPI specs with per-call pricing. Consumers and
-              agents prepay credits and hit a metered edge gateway. Publishers
-              keep 95%.
+              Discover APIs, see exact prices before calling, and route every
+              request through one metered gateway. No subscriptions. No surprise
+              overages.
             </m.p>
             <m.div
               className="flex flex-wrap items-center gap-3"
@@ -212,13 +191,12 @@ function LandingPage() {
               </Button>
             </m.div>
             <m.p className="text-sm text-muted-foreground" variants={enterItem}>
-              Zero balance blocks the call. No surprise overages.
+              $1 buys 10,000 credits. Zero balance stops requests.
             </m.p>
           </m.div>
 
-          {/* Proof strip — 95% pitch + stats; catalogue teasers below fold */}
           <m.div
-            className="flex flex-col gap-4"
+            className="overflow-hidden rounded-xl border bg-card"
             initial="hidden"
             animate="show"
             variants={{
@@ -231,123 +209,90 @@ function LandingPage() {
               },
             }}
           >
-            <m.div
-              className="flex flex-wrap items-baseline justify-between gap-3"
-              variants={enterItem}
-            >
-              <p className="text-sm font-medium text-muted-foreground">
-                Metered marketplace
-              </p>
-              <p className="text-xs text-muted-foreground">
-                Publishers keep{" "}
-                <span className="font-semibold text-foreground">95%</span>
-              </p>
-            </m.div>
-
-            <m.div
-              className="rounded-xl border bg-card px-5 py-4 text-sm text-muted-foreground"
-              variants={enterItem}
-            >
-              <p className="text-foreground">
-                Spec is product. Upstream, endpoints, and{" "}
-                <span className="font-mono text-xs">x-zevium-cost</span> live in
-                OpenAPI. Gateway meters every call. Zero balance blocks the
-                request.
-              </p>
-            </m.div>
-
-            <m.div className="grid grid-cols-2 gap-3 pt-1" variants={enterItem}>
-              <Card className="py-4">
-                <CardHeader className="gap-1 px-4 py-0">
-                  <CardDescription>APIs listed</CardDescription>
-                  <CardTitle className="text-2xl tabular-nums">
-                    <NumberTicker value={apiCount} />
-                  </CardTitle>
-                </CardHeader>
-              </Card>
-              <Card className="py-4">
-                <CardHeader className="gap-1 px-4 py-0">
-                  <CardDescription>Publisher share</CardDescription>
-                  <CardTitle className="text-2xl tabular-nums">95%</CardTitle>
-                </CardHeader>
-              </Card>
+            <m.div variants={enterItem}>
+              <div className="flex items-center justify-between border-b px-5 py-3 text-xs text-muted-foreground">
+                <span>Request</span>
+                <span className="font-mono">100 credits</span>
+              </div>
+              <div className="space-y-4 px-5 py-5 font-mono text-sm">
+                <p>
+                  <span className="text-muted-foreground">GET</span>{" "}
+                  /acme/summarize/v1/summarize
+                </p>
+                <div className="space-y-2 text-xs text-muted-foreground">
+                  <p>key verified</p>
+                  <p>wallet reserved · 100 credits</p>
+                  <p>upstream streamed · 184 ms</p>
+                </div>
+                <div className="flex items-center justify-between border-t pt-4">
+                  <span className="text-foreground">200 OK</span>
+                  <span className="text-muted-foreground">
+                    publisher earns 95
+                  </span>
+                </div>
+              </div>
             </m.div>
           </m.div>
         </section>
 
-        {/* How it works — 3 horizontal cards */}
+        {/* How it works */}
         <section className="flex flex-col gap-6">
           <Reveal>
             <h2 className="text-2xl font-semibold tracking-tight">
               How it works
             </h2>
           </Reveal>
-          <div className="grid gap-4 md:grid-cols-3">
+          <div className="divide-y border-y">
             {HOW_STEPS.map((step, i) => (
               <Reveal key={step.n} delay={i * STAGGER}>
-                <Card className="h-full py-5">
-                  <CardHeader className="gap-3 px-5 py-0">
-                    <span className="font-mono text-xs text-muted-foreground">
-                      {step.n}
-                    </span>
-                    <CardTitle className="text-base">{step.title}</CardTitle>
-                    <CardDescription className="text-sm leading-relaxed">
-                      {step.bodyBefore}
-                      {step.mono ? (
-                        <span className="font-mono text-xs text-foreground">
-                          {step.mono}
-                        </span>
-                      ) : null}
-                      {step.bodyAfter}
-                    </CardDescription>
-                  </CardHeader>
-                </Card>
+                <div className="grid gap-2 py-5 sm:grid-cols-[2rem_12rem_1fr] sm:gap-4">
+                  <span className="font-mono text-xs text-muted-foreground">
+                    0{step.n}
+                  </span>
+                  <h3 className="text-sm font-medium">{step.title}</h3>
+                  <p className="text-sm leading-relaxed text-muted-foreground">
+                    {step.bodyBefore}
+                    {step.mono ? (
+                      <span className="font-mono text-xs text-foreground">
+                        {step.mono}
+                      </span>
+                    ) : null}
+                    {step.bodyAfter}
+                  </p>
+                </div>
               </Reveal>
             ))}
           </div>
         </section>
 
-        {/* For consumers */}
-        <Reveal as="section" className="flex flex-col gap-4">
-          <h2 className="text-2xl font-semibold tracking-tight">
-            For consumers
-          </h2>
-          <p className="max-w-2xl text-sm text-muted-foreground">
-            Human developers and AI agents share one billing model: prepaid
-            credits, key-authenticated, credit-gated gateway.
-          </p>
-          <ul className="grid gap-3 sm:grid-cols-2">
-            {CONSUMER_POINTS.map((point) => (
-              <li
-                key={point}
-                className="rounded-xl border bg-card px-4 py-3 text-sm text-muted-foreground"
-              >
-                <span className="text-foreground">{point}</span>
-              </li>
-            ))}
-          </ul>
-        </Reveal>
-
-        {/* For publishers */}
-        <Reveal as="section" className="flex flex-col gap-4">
-          <h2 className="text-2xl font-semibold tracking-tight">
-            For publishers
-          </h2>
-          <p className="max-w-2xl text-sm text-muted-foreground">
-            Sell per-call API access without building metering, billing, or key
-            management.
-          </p>
-          <ul className="grid gap-3 sm:grid-cols-2">
-            {PUBLISHER_POINTS.map((point) => (
-              <li
-                key={point}
-                className="rounded-xl border bg-card px-4 py-3 text-sm text-muted-foreground"
-              >
-                <span className="text-foreground">{point}</span>
-              </li>
-            ))}
-          </ul>
-          <div>
+        <Reveal
+          as="section"
+          className="grid gap-10 border-y py-8 md:grid-cols-2"
+        >
+          <div className="space-y-3">
+            <p className="font-mono text-xs text-muted-foreground">CONSUMERS</p>
+            <h2 className="text-xl font-semibold tracking-tight">
+              One wallet across every API
+            </h2>
+            <p className="text-sm leading-relaxed text-muted-foreground">
+              Fund your organization once. Issue member keys, set spend caps,
+              inspect every call, and stop automatically at zero.
+            </p>
+            <Button asChild variant="outline">
+              <Link to="/catalogue">Find an API</Link>
+            </Button>
+          </div>
+          <div className="space-y-3">
+            <p className="font-mono text-xs text-muted-foreground">
+              PUBLISHERS
+            </p>
+            <h2 className="text-xl font-semibold tracking-tight">
+              Ship your spec. Keep 95%.
+            </h2>
+            <p className="text-sm leading-relaxed text-muted-foreground">
+              Put endpoint prices in OpenAPI. Zevium handles keys, credit gates,
+              usage records, earnings, and Stripe payouts.
+            </p>
             <Button asChild variant="outline">
               <Link to="/app/projects">Start publishing</Link>
             </Button>

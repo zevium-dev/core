@@ -3,9 +3,11 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import {
   Archive,
+  Banknote,
   Bell,
   BellOff,
   CheckCheck,
+  CircleAlert,
   Eye,
   Rocket,
   Wallet,
@@ -31,9 +33,8 @@ import { formatRelativeTime } from "#/lib/relative-time";
 import { vtState } from "#/lib/vt";
 
 /**
- * lucide icon per notification kind. Kinds come from convex/schema.ts
- * (low_balance | spec_published | version_deprecated | webhook_failed |
- * visibility_changed). A fallback covers any future kind without crashing.
+ * lucide icon per notification kind. A fallback covers any future kind without
+ * crashing, including server-side notifications added before the client ships.
  */
 const KIND_ICON: Record<string, LucideIcon> = {
   low_balance: Wallet,
@@ -41,13 +42,14 @@ const KIND_ICON: Record<string, LucideIcon> = {
   version_deprecated: Archive,
   webhook_failed: Webhook,
   visibility_changed: Eye,
+  transfer_failed: CircleAlert,
+  transfer_sent: Banknote,
 };
 
 /**
- * kind → destination route, for click-through navigation. `payout_requested`
- * / `payout_resolved` may not exist in the schema union yet (another lane
- * adds them) — the lookup tolerates unknown kinds by returning `undefined`,
- * which means "mark read, don't navigate."
+ * kind → destination route, for click-through navigation. The lookup tolerates
+ * unknown kinds by returning `undefined`, which means "mark read, don't
+ * navigate."
  */
 const KIND_DESTINATION = {
   low_balance: "/app/billing",
@@ -55,8 +57,8 @@ const KIND_DESTINATION = {
   version_deprecated: "/app/projects",
   webhook_failed: "/app/projects",
   visibility_changed: "/app/projects",
-  payout_requested: "/app/earnings",
-  payout_resolved: "/app/earnings",
+  transfer_failed: "/app/earnings",
+  transfer_sent: "/app/earnings",
 } as const;
 
 function destinationForKind(

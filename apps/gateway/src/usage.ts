@@ -44,10 +44,29 @@ export type ConvexUsageRecord = {
   settleRefId: string;
 };
 
+export type SettlementOutcomeStatus =
+  "applied" | "already_applied" | "rejected";
+
+/**
+ * Per-settlement result returned by the authoritative Convex ledger.
+ * Only applied outcomes may be removed from the DO retry queue.
+ */
+export type SettlementOutcome = {
+  refId: string;
+  status: SettlementOutcomeStatus;
+  reason?: string;
+};
+
+/** Authoritative post-ingest checkpoint for the single consumer wallet batch. */
+export type WalletCheckpoint = {
+  clerkOrgId: string;
+  balance: number;
+  sequence: number;
+};
+
 export type RecordUsageResult = {
-  applied: number;
-  skipped: number;
-  balances: Record<string, number>;
+  results: SettlementOutcome[];
+  wallet: WalletCheckpoint;
 };
 
 export interface UsageSink {
@@ -158,10 +177,13 @@ export class ConvexUsageClient {
 
   async recordUsage(events: ConvexUsageRecord[]): Promise<RecordUsageResult> {
     if (events.length === 0) {
-      return { applied: 0, skipped: 0, balances: {} };
+      throw new Error("recordUsage requires at least one settlement");
     }
     if (this.#mutationFn) {
-      return await this.#mutationFn("wallets:recordUsage", { events });
+      return this.#validateResult(
+        await this.#mutationFn("wallets:recordUsage", { events }),
+        events,
+      );
     }
 
     // Prefer shared-secret httpAction over deploy-key mutation.
@@ -183,7 +205,7 @@ export class ConvexUsageClient {
       throw new Error("ConvexUsageClient has no client");
     }
     const result = await this.#client.mutation(recordUsageRef, { events });
-    return parseRecordUsageResult(result);
+    return this.#validateResult(parseRecordUsageResult(result), events);
   }
 
   async #recordViaIngest(
@@ -209,7 +231,7 @@ export class ConvexUsageClient {
     } catch {
       throw new Error("convex ingest returned non-json");
     }
-    return parseRecordUsageResult(json);
+    return this.#validateResult(parseRecordUsageResult(json), events);
   }
 
   async #mutationWithAdmin(
@@ -254,7 +276,23 @@ export class ConvexUsageClient {
       "status" in json && json.status === "success" && "value" in json
         ? json.value
         : json;
-    return parseRecordUsageResult(value);
+    return this.#validateResult(parseRecordUsageResult(value), args.events);
+  }
+
+  #validateResult(
+    result: RecordUsageResult,
+    events: ConvexUsageRecord[],
+  ): RecordUsageResult {
+    const consumerClerkOrgId = events[0]!.consumerClerkOrgId;
+    if (
+      !events.every((event) => event.consumerClerkOrgId === consumerClerkOrgId)
+    ) {
+      throw new Error("usage batch contains multiple consumer wallets");
+    }
+    if (result.wallet.clerkOrgId !== consumerClerkOrgId) {
+      throw new Error("convex checkpoint wallet does not match usage batch");
+    }
+    return result;
   }
 }
 
@@ -291,10 +329,13 @@ export class ConvexUsageSink implements UsageSink {
    */
   async flushBatch(
     events?: ConvexUsageRecord[],
-  ): Promise<RecordUsageResult & { settleRefIds: string[] }> {
+  ): Promise<
+    | (RecordUsageResult & { settleRefIds: string[] })
+    | { results: SettlementOutcome[]; settleRefIds: string[] }
+  > {
     const batch = events ?? this.#pending.splice(0, this.#pending.length);
     if (batch.length === 0) {
-      return { applied: 0, skipped: 0, balances: {}, settleRefIds: [] };
+      return { results: [], settleRefIds: [] };
     }
     const result = await this.#client.recordUsage(batch);
     return {
@@ -350,28 +391,60 @@ export function pendingToUsageRecord(input: {
 
 function parseRecordUsageResult(value: unknown): RecordUsageResult {
   if (!value || typeof value !== "object") {
-    return { applied: 0, skipped: 0, balances: {} };
+    throw new Error("convex ingest returned invalid result");
   }
-  let applied = 0;
-  let skipped = 0;
-  const balances: Record<string, number> = {};
-
-  if ("applied" in value && typeof value.applied === "number") {
-    applied = value.applied;
+  const result = value as Record<string, unknown>;
+  if (!Array.isArray(result.results)) {
+    throw new Error("convex ingest result missing settlement outcomes");
   }
-  if ("skipped" in value && typeof value.skipped === "number") {
-    skipped = value.skipped;
-  }
-  if (
-    "balances" in value &&
-    value.balances &&
-    typeof value.balances === "object"
-  ) {
-    for (const [k, v] of Object.entries(value.balances)) {
-      if (typeof v === "number") balances[k] = v;
+  const results: SettlementOutcome[] = [];
+  for (const raw of result.results) {
+    if (!raw || typeof raw !== "object") {
+      throw new Error("convex ingest result has invalid settlement outcome");
     }
+    const outcome = raw as Record<string, unknown>;
+    const status = outcome.status;
+    if (
+      typeof outcome.refId !== "string" ||
+      outcome.refId.length === 0 ||
+      (status !== "applied" &&
+        status !== "already_applied" &&
+        status !== "rejected") ||
+      (outcome.reason !== undefined && typeof outcome.reason !== "string")
+    ) {
+      throw new Error("convex ingest result has invalid settlement outcome");
+    }
+    const parsed: SettlementOutcome = {
+      refId: outcome.refId,
+      status,
+    };
+    if (typeof outcome.reason === "string") parsed.reason = outcome.reason;
+    results.push(parsed);
   }
-  return { applied, skipped, balances };
+
+  if (!result.wallet || typeof result.wallet !== "object") {
+    throw new Error("convex ingest result missing wallet checkpoint");
+  }
+  const wallet = result.wallet as Record<string, unknown>;
+  if (
+    typeof wallet.clerkOrgId !== "string" ||
+    wallet.clerkOrgId.length === 0 ||
+    typeof wallet.balance !== "number" ||
+    !Number.isFinite(wallet.balance) ||
+    typeof wallet.sequence !== "number" ||
+    !Number.isSafeInteger(wallet.sequence) ||
+    wallet.sequence < 0
+  ) {
+    throw new Error("convex ingest result has invalid wallet checkpoint");
+  }
+  return {
+    results,
+    wallet: {
+      clerkOrgId: wallet.clerkOrgId,
+      balance: wallet.balance,
+      sequence: wallet.sequence,
+    },
+  };
 }
 
 /** Test-only fake Convex mutation sink with ack-friendly bookkeeping. */
@@ -379,7 +452,12 @@ export class FakeConvexUsageSink {
   readonly batches: ConvexUsageRecord[][] = [];
   readonly records: ConvexUsageRecord[] = [];
   readonly seenSettleRefIds = new Set<string>();
+  readonly #wallets = new Map<string, WalletCheckpoint>();
   failNext = false;
+
+  setWallet(clerkOrgId: string, balance: number, sequence: number = 0): void {
+    this.#wallets.set(clerkOrgId, { clerkOrgId, balance, sequence });
+  }
 
   async recordUsage(events: ConvexUsageRecord[]): Promise<RecordUsageResult> {
     if (this.failNext) {
@@ -387,18 +465,32 @@ export class FakeConvexUsageSink {
       return Promise.reject(new Error("fake convex unavailable"));
     }
     this.batches.push(events.map((e) => ({ ...e })));
-    let applied = 0;
-    let skipped = 0;
+    const clerkOrgId = events[0]?.consumerClerkOrgId;
+    if (
+      !clerkOrgId ||
+      events.some((event) => event.consumerClerkOrgId !== clerkOrgId)
+    ) {
+      return Promise.reject(new Error("mixed consumer wallet batch"));
+    }
+    const checkpoint = this.#wallets.get(clerkOrgId) ?? {
+      clerkOrgId,
+      balance: 0,
+      sequence: 0,
+    };
+    const results: SettlementOutcome[] = [];
     for (const e of events) {
       if (this.seenSettleRefIds.has(e.settleRefId)) {
-        skipped += 1;
+        results.push({ refId: e.settleRefId, status: "already_applied" });
         continue;
       }
       this.seenSettleRefIds.add(e.settleRefId);
       this.records.push({ ...e });
-      applied += 1;
+      checkpoint.balance -= e.credits;
+      checkpoint.sequence += 1;
+      results.push({ refId: e.settleRefId, status: "applied" });
     }
-    return { applied, skipped, balances: {} };
+    this.#wallets.set(clerkOrgId, checkpoint);
+    return { results, wallet: { ...checkpoint } };
   }
 
   asMutationFn(): (

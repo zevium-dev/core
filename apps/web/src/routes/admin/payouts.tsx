@@ -1,8 +1,9 @@
-import { convexQuery, useConvexMutation } from "@convex-dev/react-query";
+import { convexQuery } from "@convex-dev/react-query";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
-import { Banknote, Check, X } from "lucide-react";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { useAction } from "convex/react";
+import { AlertTriangle, RefreshCw, Send } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import { Badge } from "#/components/ui/badge";
@@ -22,325 +23,341 @@ import {
   DialogHeader,
   DialogTitle,
 } from "#/components/ui/dialog";
-import { Label } from "#/components/ui/label";
 import { Skeleton } from "#/components/ui/skeleton";
-import { Textarea } from "#/components/ui/textarea";
-import {
-  buildOrgByClerkIdMap,
-  orgDisplayNameByClerkId,
-  type OrgByClerkIdMap,
-} from "#/lib/admin-filters";
-import { mergeUsagePages } from "#/lib/activity-filters";
 import { api } from "#/lib/convex-api";
 import type { Id } from "#/lib/convex-data-model";
 import { humanError } from "#/lib/human-error";
-import { payoutStatusLabel, payoutStatusVariant } from "#/lib/payout-helpers";
-import { formatCreditsAsUsd } from "#/lib/project-helpers";
-import type { AdminPayoutRequestView } from "../../../../../convex/admin";
+import {
+  moneyMovementFailure,
+  moneyMovementStatusLabel,
+  moneyMovementStatusVariant,
+  operatorTransferAction,
+} from "#/lib/stripe-ui";
 
-const REQUESTS_PAGE_SIZE = 25;
-const ORG_MAP_PAGE_SIZE = 100;
-
-type ResolveTarget = {
-  request: AdminPayoutRequestView;
-  status: "paid" | "rejected";
+type TransferStatus =
+  "created" | "pending" | "succeeded" | "failed" | "reversed";
+type TransferFilter = "all" | TransferStatus;
+type PayoutsSearch = { status?: TransferStatus };
+type PublisherTransfer = {
+  id: Id<"publisherTransfers">;
+  publisherOrganizationId: string;
+  publisherOrganizationName: string;
+  publisherOrganizationSlug?: string;
+  stripeConnectedAccountId: string;
+  amount: number;
+  currency: string;
+  status: TransferStatus;
+  failureReason?: string;
+  stripeTransferId?: string;
+  idempotencyKey: string;
+  createdAt: number;
+  updatedAt: number;
 };
 
+const PAGE_SIZE = 25;
+const FILTERS: readonly TransferFilter[] = [
+  "all",
+  "created",
+  "pending",
+  "succeeded",
+  "failed",
+  "reversed",
+];
+
 export const Route = createFileRoute("/admin/payouts")({
+  validateSearch: (search: Record<string, unknown>): PayoutsSearch =>
+    search.status === "created" ||
+    search.status === "pending" ||
+    search.status === "succeeded" ||
+    search.status === "failed" ||
+    search.status === "reversed"
+      ? { status: search.status }
+      : {},
   component: AdminPayoutsPage,
   head: () => ({
-    meta: [{ title: "Admin Payouts · Zevium" }],
+    meta: [{ title: "Admin Transfers · Zevium" }],
   }),
   pendingComponent: PayoutsSkeleton,
 });
 
 function AdminPayoutsPage() {
-  const orgMap = useOrgByClerkIdMap();
-
-  const pending = usePayoutQueue("pending");
-  const resolved = useResolvedPayouts();
-
-  const [resolveTarget, setResolveTarget] = useState<ResolveTarget | null>(
+  const { status } = Route.useSearch();
+  const navigate = useNavigate();
+  const filter: TransferFilter = status ?? "all";
+  const [cursor, setCursor] = useState<string | null>(null);
+  const [rows, setRows] = useState<PublisherTransfer[]>([]);
+  const [isDone, setIsDone] = useState(false);
+  const [continueCursor, setContinueCursor] = useState<string | null>(null);
+  const [retryTarget, setRetryTarget] = useState<PublisherTransfer | null>(
     null,
   );
-  const [note, setNote] = useState("");
 
-  const resolveMutation = useConvexMutation(api.admin.resolvePayout);
-  const { mutate: resolvePayout, isPending: resolvePending } = useMutation({
-    mutationFn: (vars: {
-      requestId: Id<"payoutRequests">;
-      status: "paid" | "rejected";
-      note?: string;
-    }) => resolveMutation(vars),
-    onSuccess: (_data, vars) => {
+  const args = useMemo(
+    () => ({
+      paginationOpts: { numItems: PAGE_SIZE, cursor },
+      ...(filter === "all" ? {} : { status: filter }),
+    }),
+    [cursor, filter],
+  );
+  const transfersQuery = useQuery(
+    convexQuery(api.admin.listPublisherTransfers, args),
+  );
+
+  useEffect(() => {
+    if (!transfersQuery.data || transfersQuery.isPending) return;
+    setRows((previous) => {
+      if (cursor === null) return transfersQuery.data.page;
+      const ids = new Set(previous.map((row) => row.id));
+      const next = [...previous];
+      for (const transfer of transfersQuery.data.page) {
+        if (!ids.has(transfer.id)) {
+          ids.add(transfer.id);
+          next.push(transfer);
+        }
+      }
+      return next;
+    });
+    setIsDone(transfersQuery.data.isDone);
+    setContinueCursor(transfersQuery.data.continueCursor);
+  }, [cursor, transfersQuery.data, transfersQuery.isPending]);
+
+  const retryPublisherTransfer = useAction(api.admin.retryPublisherTransfer);
+  const { mutate: retryTransfer, isPending: retryPending } = useMutation({
+    mutationFn: (transferId: Id<"publisherTransfers">) =>
+      retryPublisherTransfer({ transferId }),
+    onSuccess: () => {
       toast.success(
-        vars.status === "paid" ? "Marked paid." : "Request rejected.",
+        "Transfer retry requested. The server will reuse the original idempotency key.",
       );
-      setResolveTarget(null);
-      setNote("");
-      pending.refresh();
-      resolved.refresh();
+      setRetryTarget(null);
+      setCursor(null);
+      setRows([]);
+      setIsDone(false);
+      setContinueCursor(null);
+      void transfersQuery.refetch();
     },
-    onError: (err: unknown) => {
-      toast.error(humanError(err, "Could not resolve payout request."));
+    onError: (error: unknown) => {
+      toast.error(humanError(error, "Could not retry this Stripe transfer."));
     },
   });
+
+  const firstPagePending = transfersQuery.isPending && cursor === null;
+  const loadMorePending = transfersQuery.isPending && cursor !== null;
+  const canLoadMore =
+    !isDone && continueCursor !== null && !transfersQuery.isPending;
+
+  function selectFilter(nextFilter: TransferFilter) {
+    if (nextFilter === filter) return;
+    void navigate({
+      to: "/admin/payouts",
+      search: nextFilter === "all" ? {} : { status: nextFilter },
+    });
+    setCursor(null);
+    setRows([]);
+    setIsDone(false);
+    setContinueCursor(null);
+  }
 
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Payouts</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">
+          Publisher transfers
+        </h1>
         <p className="text-sm text-muted-foreground">
-          Manual fulfilment queue. Publisher requests land here for a human to
-          wire the money and mark them resolved.
+          Review transfers from Zevium to publisher Stripe accounts. Retry only
+          failed transfers.
         </p>
       </div>
 
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <Banknote className="size-4" />
-            Pending queue
+            <Send className="size-4" />
+            Transfer operations
           </CardTitle>
           <CardDescription>
-            Requests awaiting fulfilment, oldest first is not guaranteed —
-            sorted newest-requested first.
+            Filter by status or retry a failed transfer without creating a
+            duplicate payment.
           </CardDescription>
+          <div className="flex flex-wrap gap-2 pt-2">
+            {FILTERS.map((status) => (
+              <Button
+                key={status}
+                size="sm"
+                variant={filter === status ? "default" : "outline"}
+                onClick={() => selectFilter(status)}
+              >
+                {status === "all" ? "All" : moneyMovementStatusLabel(status)}
+              </Button>
+            ))}
+          </div>
         </CardHeader>
         <CardContent>
-          {pending.firstPagePending ? (
-            <PayoutsTableSkeleton />
-          ) : pending.rows.length === 0 ? (
+          {firstPagePending ? (
+            <TransferTableSkeleton />
+          ) : rows.length === 0 ? (
             <p className="text-sm text-muted-foreground">
-              No pending payout requests.
+              No {filter === "all" ? "publisher transfers" : filter} transfers.
             </p>
           ) : (
-            <PayoutsTable
-              rows={pending.rows}
-              orgMap={orgMap}
-              canLoadMore={pending.canLoadMore}
-              loadMorePending={pending.loadMorePending}
-              onLoadMore={pending.loadMore}
-              actions={(request) => (
-                <div className="flex justify-end gap-1.5">
-                  <Button
-                    size="xs"
-                    variant="outline"
-                    disabled={resolvePending}
-                    onClick={() =>
-                      setResolveTarget({ request, status: "paid" })
-                    }
-                  >
-                    <Check className="size-3" />
-                    Mark paid
-                  </Button>
-                  <Button
-                    size="xs"
-                    variant="destructive"
-                    disabled={resolvePending}
-                    onClick={() =>
-                      setResolveTarget({ request, status: "rejected" })
-                    }
-                  >
-                    <X className="size-3" />
-                    Reject
-                  </Button>
-                </div>
-              )}
+            <TransferTable
+              rows={rows}
+              retryPending={retryPending}
+              onRetry={setRetryTarget}
             />
           )}
+          {canLoadMore || loadMorePending ? (
+            <div className="mt-4 flex justify-center">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={loadMorePending || !canLoadMore}
+                onClick={() => {
+                  if (continueCursor !== null) setCursor(continueCursor);
+                }}
+              >
+                {loadMorePending ? "Loading…" : "Load more"}
+              </Button>
+            </div>
+          ) : null}
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Resolved</CardTitle>
-          <CardDescription>Paid and rejected requests.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {resolved.firstPagePending ? (
-            <PayoutsTableSkeleton />
-          ) : resolved.rows.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              Nothing resolved yet.
-            </p>
-          ) : (
-            <PayoutsTable
-              rows={resolved.rows}
-              orgMap={orgMap}
-              canLoadMore={resolved.canLoadMore}
-              loadMorePending={resolved.loadMorePending}
-              onLoadMore={resolved.loadMore}
-            />
-          )}
-        </CardContent>
-      </Card>
-
-      <ResolveDialog
-        target={resolveTarget}
-        note={note}
-        onNoteChange={setNote}
-        pending={resolvePending}
-        onCancel={() => {
-          setResolveTarget(null);
-          setNote("");
-        }}
+      <RetryTransferDialog
+        target={retryTarget}
+        pending={retryPending}
+        onCancel={() => setRetryTarget(null)}
         onConfirm={() => {
-          if (resolveTarget === null) return;
-          resolvePayout({
-            requestId: resolveTarget.request._id,
-            status: resolveTarget.status,
-            note: note.trim().length > 0 ? note.trim() : undefined,
-          });
+          if (retryTarget) retryTransfer(retryTarget.id);
         }}
       />
     </div>
   );
 }
 
-function PayoutsTable({
+function TransferTable({
   rows,
-  orgMap,
-  canLoadMore,
-  loadMorePending,
-  onLoadMore,
-  actions,
+  retryPending,
+  onRetry,
 }: {
-  rows: AdminPayoutRequestView[];
-  orgMap: OrgByClerkIdMap;
-  canLoadMore: boolean;
-  loadMorePending: boolean;
-  onLoadMore: () => void;
-  actions?: (request: AdminPayoutRequestView) => ReactNode;
+  rows: PublisherTransfer[];
+  retryPending: boolean;
+  onRetry: (transfer: PublisherTransfer) => void;
 }) {
   return (
-    <div className="flex flex-col gap-4">
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b text-left text-muted-foreground">
-              <th className="px-2 py-2 font-medium">Org</th>
-              <th className="px-2 py-2 font-medium">Status</th>
-              <th className="px-2 py-2 font-medium text-right">Credits</th>
-              <th className="px-2 py-2 font-medium text-right">USD</th>
-              <th className="px-2 py-2 font-medium">Destination</th>
-              <th className="px-2 py-2 font-medium">Age</th>
-              {actions ? (
-                <th className="px-2 py-2 font-medium text-right">Actions</th>
-              ) : (
-                <th className="px-2 py-2 font-medium">Note</th>
-              )}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((request) => (
-              <tr key={request._id} className="border-b last:border-0">
-                <td className="px-2 py-2.5 font-medium">
-                  {orgDisplayNameByClerkId(request.clerkOrgId, orgMap)}
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b text-left text-muted-foreground">
+            <th className="px-2 py-2 font-medium">Publisher organization</th>
+            <th className="px-2 py-2 font-medium">Status</th>
+            <th className="px-2 py-2 font-medium text-right">Amount</th>
+            <th className="hidden px-2 py-2 font-medium lg:table-cell">
+              Stripe transfer
+            </th>
+            <th className="hidden px-2 py-2 font-medium md:table-cell">
+              Details
+            </th>
+            <th className="px-2 py-2 font-medium text-right">Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((transfer) => {
+            const retry = operatorTransferAction(transfer.status);
+            const failure = moneyMovementFailure(
+              transfer.status,
+              transfer.failureReason,
+            );
+            return (
+              <tr key={transfer.id} className="border-b last:border-0">
+                <td className="max-w-52 px-2 py-2.5">
+                  <span className="block truncate font-medium">
+                    {transfer.publisherOrganizationName}
+                  </span>
+                  <span className="block truncate font-mono text-xs text-muted-foreground">
+                    {transfer.publisherOrganizationSlug ??
+                      transfer.publisherOrganizationId}
+                  </span>
                 </td>
                 <td className="px-2 py-2.5">
-                  <Badge variant={payoutStatusVariant(request.status)}>
-                    {payoutStatusLabel(request.status)}
+                  <Badge variant={moneyMovementStatusVariant(transfer.status)}>
+                    {moneyMovementStatusLabel(transfer.status)}
                   </Badge>
                 </td>
                 <td className="px-2 py-2.5 text-right tabular-nums">
-                  {request.credits.toLocaleString()}
+                  {formatMoney(transfer.amount, transfer.currency)}
                 </td>
-                <td className="px-2 py-2.5 text-right tabular-nums text-muted-foreground">
-                  {formatCreditsAsUsd(request.credits)}
+                <td className="hidden max-w-48 truncate px-2 py-2.5 font-mono text-xs text-muted-foreground lg:table-cell">
+                  {transfer.stripeTransferId ?? "—"}
                 </td>
-                <td className="max-w-[16rem] truncate px-2 py-2.5 text-muted-foreground">
-                  {request.destination}
+                <td className="hidden max-w-64 truncate px-2 py-2.5 text-muted-foreground md:table-cell">
+                  {failure ?? "—"}
                 </td>
-                <td className="px-2 py-2.5 whitespace-nowrap text-muted-foreground">
-                  {new Date(request.createdAt).toLocaleDateString()}
+                <td className="px-2 py-2.5 text-right">
+                  {retry.action && retry.label ? (
+                    <Button
+                      size="xs"
+                      variant="outline"
+                      disabled={retryPending}
+                      onClick={() => onRetry(transfer)}
+                    >
+                      <RefreshCw className="size-3" />
+                      {retry.label}
+                    </Button>
+                  ) : (
+                    <span className="text-xs text-muted-foreground">—</span>
+                  )}
                 </td>
-                {actions ? (
-                  <td className="px-2 py-2.5">{actions(request)}</td>
-                ) : (
-                  <td className="px-2 py-2.5 text-muted-foreground">
-                    {request.note ?? "—"}
-                  </td>
-                )}
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      {canLoadMore || loadMorePending ? (
-        <div className="flex justify-center">
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={loadMorePending || !canLoadMore}
-            onClick={onLoadMore}
-          >
-            {loadMorePending ? "Loading…" : "Load more"}
-          </Button>
-        </div>
-      ) : null}
+            );
+          })}
+        </tbody>
+      </table>
     </div>
   );
 }
 
-function ResolveDialog({
+function RetryTransferDialog({
   target,
-  note,
-  onNoteChange,
   pending,
   onCancel,
   onConfirm,
 }: {
-  target: ResolveTarget | null;
-  note: string;
-  onNoteChange: (v: string) => void;
+  target: PublisherTransfer | null;
   pending: boolean;
   onCancel: () => void;
   onConfirm: () => void;
 }) {
-  const rejecting = target?.status === "rejected";
+  const action = target ? operatorTransferAction(target.status) : null;
   return (
     <Dialog open={target !== null} onOpenChange={(open) => !open && onCancel()}>
       <DialogContent showCloseButton={false}>
         <DialogHeader>
-          <DialogTitle>
-            {rejecting ? "Reject payout request?" : "Mark payout paid?"}
-          </DialogTitle>
+          <DialogTitle>Retry Stripe transfer?</DialogTitle>
           <DialogDescription>
             {target ? (
               <>
-                {target.request.credits.toLocaleString()} credits (
-                {formatCreditsAsUsd(target.request.credits)}) to{" "}
+                {formatMoney(target.amount, target.currency)} for publisher{" "}
                 <span className="font-mono text-xs">
-                  {target.request.destination}
+                  {target.publisherOrganizationId}
                 </span>
-                . This cannot be undone.
+                . {action?.confirmation}
               </>
             ) : null}
           </DialogDescription>
         </DialogHeader>
-        <div className="space-y-1.5">
-          <Label htmlFor="resolve-note">Note (optional)</Label>
-          <Textarea
-            id="resolve-note"
-            placeholder={
-              rejecting ? "Reason for rejection" : "Transfer reference"
-            }
-            value={note}
-            onChange={(e) => onNoteChange(e.target.value)}
-            rows={3}
-          />
+        <div className="flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-muted-foreground">
+          <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-600 dark:text-amber-400" />
+          Retry does not mark the transfer paid. Stripe events determine the
+          final transfer state.
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onCancel} disabled={pending}>
             Cancel
           </Button>
-          <Button
-            variant={rejecting ? "destructive" : "default"}
-            onClick={onConfirm}
-            disabled={pending}
-          >
-            {pending ? "Saving…" : rejecting ? "Reject" : "Mark paid"}
+          <Button onClick={onConfirm} disabled={pending}>
+            {pending ? "Requesting retry…" : "Retry transfer"}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -348,132 +365,15 @@ function ResolveDialog({
   );
 }
 
-/** Shared paginated-page accumulation for the pending / resolved queues. */
-function usePayoutQueue(status: "pending" | "paid" | "rejected") {
-  const [cursor, setCursor] = useState<string | null>(null);
-  const [rows, setRows] = useState<AdminPayoutRequestView[]>([]);
-  const [isDone, setIsDone] = useState(false);
-  const [continueCursor, setContinueCursor] = useState<string | null>(null);
-
-  const args = useMemo(
-    () => ({
-      status,
-      paginationOpts: { numItems: REQUESTS_PAGE_SIZE, cursor },
-    }),
-    [status, cursor],
-  );
-  const query = useQuery(convexQuery(api.admin.listPayoutRequests, args));
-
-  useEffect(() => {
-    if (!query.data || query.isPending) return;
-    setRows((prev) => mergeUsagePages(prev, query.data!.page, cursor === null));
-    setIsDone(query.data.isDone);
-    setContinueCursor(query.data.continueCursor);
-  }, [query.data, query.isPending, cursor]);
-
-  return {
-    rows,
-    firstPagePending: query.isPending && cursor === null,
-    loadMorePending: query.isPending && cursor !== null,
-    canLoadMore: !isDone && continueCursor !== null && !query.isPending,
-    loadMore: () => {
-      if (continueCursor !== null) setCursor(continueCursor);
-    },
-    refresh: () => {
-      setCursor(null);
-      setRows([]);
-      setIsDone(false);
-      setContinueCursor(null);
-    },
-  };
-}
-
-/** Resolved queue merges paid + rejected client-side (no composite index needed at this scale). */
-function useResolvedPayouts() {
-  const paid = usePayoutQueue("paid");
-  const rejected = usePayoutQueue("rejected");
-
-  const rows = useMemo(() => {
-    return [...paid.rows, ...rejected.rows].sort(
-      (a, b) => (b.resolvedAt ?? 0) - (a.resolvedAt ?? 0),
-    );
-  }, [paid.rows, rejected.rows]);
-
-  return {
-    rows,
-    firstPagePending: paid.firstPagePending || rejected.firstPagePending,
-    loadMorePending: paid.loadMorePending || rejected.loadMorePending,
-    canLoadMore: paid.canLoadMore || rejected.canLoadMore,
-    loadMore: () => {
-      if (paid.canLoadMore) paid.loadMore();
-      if (rejected.canLoadMore) rejected.loadMore();
-    },
-    refresh: () => {
-      paid.refresh();
-      rejected.refresh();
-    },
-  };
-}
-
-/**
- * Background clerkOrgId → name lookup, paged in fully (admin tool, bounded
- * scale). Mirrors admin/projects.tsx useOrgNameMap but keyed by clerkOrgId
- * since payout requests store the auth-mirror id, not the doc id.
- */
-function useOrgByClerkIdMap() {
-  const [orgs, setOrgs] = useState<
-    { clerkOrgId: string; name: string; slug: string }[]
-  >([]);
-  const [cursor, setCursor] = useState<string | null>(null);
-  const [isDone, setIsDone] = useState(false);
-  const [continueCursor, setContinueCursor] = useState<string | null>(null);
-
-  const args = useMemo(
-    () => ({ paginationOpts: { numItems: ORG_MAP_PAGE_SIZE, cursor } }),
-    [cursor],
-  );
-  const orgsQuery = useQuery(convexQuery(api.admin.listOrgs, args));
-
-  useEffect(() => {
-    if (!orgsQuery.data || orgsQuery.isPending) return;
-    const incoming = orgsQuery.data.page.map((o) => ({
-      clerkOrgId: o.clerkOrgId,
-      name: o.name,
-      slug: o.slug,
-    }));
-    setOrgs((prev) => {
-      const base = cursor === null ? [] : prev;
-      const seen = new Set(base.map((o) => o.clerkOrgId));
-      const next = [...base];
-      for (const org of incoming) {
-        if (!seen.has(org.clerkOrgId)) {
-          seen.add(org.clerkOrgId);
-          next.push(org);
-        }
-      }
-      return next;
-    });
-    setIsDone(orgsQuery.data.isDone);
-    setContinueCursor(orgsQuery.data.continueCursor);
-  }, [orgsQuery.data, orgsQuery.isPending, cursor]);
-
-  useEffect(() => {
-    if (isDone || orgsQuery.isPending) return;
-    if (continueCursor !== null) setCursor(continueCursor);
-  }, [isDone, continueCursor, orgsQuery.isPending]);
-
-  return useMemo(() => buildOrgByClerkIdMap(orgs), [orgs]);
-}
-
-function PayoutsTableSkeleton() {
+function TransferTableSkeleton() {
   return (
     <div className="space-y-3">
-      {Array.from({ length: 4 }).map((_, i) => (
-        <div key={i} className="flex items-center gap-3">
+      {Array.from({ length: 4 }).map((_, index) => (
+        <div key={index} className="flex items-center gap-3">
           <Skeleton className="h-4 w-28" />
           <Skeleton className="h-5 w-16 rounded-full" />
           <Skeleton className="h-4 w-16" />
-          <Skeleton className="ml-auto h-6 w-32" />
+          <Skeleton className="ml-auto h-6 w-28" />
         </div>
       ))}
     </div>
@@ -484,27 +384,25 @@ function PayoutsSkeleton() {
   return (
     <div className="flex flex-col gap-6">
       <div className="space-y-2">
-        <Skeleton className="h-8 w-32" />
-        <Skeleton className="h-4 w-64" />
+        <Skeleton className="h-8 w-48" />
+        <Skeleton className="h-4 w-80" />
       </div>
       <Card>
         <CardHeader>
-          <Skeleton className="h-5 w-32" />
-          <Skeleton className="h-4 w-48" />
+          <Skeleton className="h-5 w-40" />
+          <Skeleton className="h-4 w-72" />
         </CardHeader>
         <CardContent>
-          <PayoutsTableSkeleton />
-        </CardContent>
-      </Card>
-      <Card>
-        <CardHeader>
-          <Skeleton className="h-5 w-24" />
-          <Skeleton className="h-4 w-40" />
-        </CardHeader>
-        <CardContent>
-          <PayoutsTableSkeleton />
+          <TransferTableSkeleton />
         </CardContent>
       </Card>
     </div>
   );
+}
+
+function formatMoney(amount: number, currency: string): string {
+  return new Intl.NumberFormat(undefined, {
+    style: "currency",
+    currency: currency.toUpperCase(),
+  }).format(amount / 100);
 }

@@ -31,7 +31,7 @@ error.png
 reload-*.png
 reload-*.webm
 
-.env.local
+.env*.local
 
 # convex
 .turbo

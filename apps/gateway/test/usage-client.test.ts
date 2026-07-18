@@ -22,9 +22,12 @@ const sampleEvent: ConvexUsageRecord = {
 describe("ConvexUsageClient ingest path", () => {
   it("POSTs body + x-internal-secret and parses result", async () => {
     const result: RecordUsageResult = {
-      applied: 1,
-      skipped: 0,
-      balances: { org_1: 97 },
+      results: [{ refId: "settle:res-1", status: "applied" }],
+      wallet: {
+        clerkOrgId: sampleEvent.consumerClerkOrgId,
+        balance: 97,
+        sequence: 4,
+      },
     };
     const fetchImpl = vi.fn(
       async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -95,9 +98,12 @@ describe("ConvexUsageClient ingest path", () => {
 
   it("prefers mutationFn over ingest for tests", async () => {
     const mutationFn = vi.fn(async () => ({
-      applied: 2,
-      skipped: 0,
-      balances: {},
+      results: [{ refId: sampleEvent.settleRefId, status: "already_applied" }],
+      wallet: {
+        clerkOrgId: sampleEvent.consumerClerkOrgId,
+        balance: 97,
+        sequence: 4,
+      },
     }));
     const fetchImpl = vi.fn();
     const client = new ConvexUsageClient({
@@ -109,12 +115,14 @@ describe("ConvexUsageClient ingest path", () => {
     });
 
     const out = await client.recordUsage([sampleEvent]);
-    expect(out.applied).toBe(2);
+    expect(out.results).toEqual([
+      { refId: sampleEvent.settleRefId, status: "already_applied" },
+    ]);
     expect(mutationFn).toHaveBeenCalledTimes(1);
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
-  it("returns empty result for empty batch without fetch", async () => {
+  it("rejects empty batches without calling the ingest endpoint", async () => {
     const fetchImpl = vi.fn();
     const client = new ConvexUsageClient({
       convexUrl: "https://example.convex.cloud",
@@ -122,8 +130,9 @@ describe("ConvexUsageClient ingest path", () => {
       internalSecret: "secret-1",
       fetchImpl: fetchImpl as typeof fetch,
     });
-    const out = await client.recordUsage([]);
-    expect(out).toEqual({ applied: 0, skipped: 0, balances: {} });
+    await expect(client.recordUsage([])).rejects.toThrow(
+      "recordUsage requires at least one settlement",
+    );
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 });

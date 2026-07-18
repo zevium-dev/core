@@ -22,6 +22,7 @@ async function ensureWallet(
   return await ctx.db.insert("wallets", {
     organizationId,
     balance: 0,
+    sequence: 0,
   });
 }
 

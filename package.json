@@ -3,8 +3,9 @@
   "private": true,
   "packageManager": "pnpm@11.8.0",
   "scripts": {
-    "dev": "turbo dev",
+    "dev": "concurrently --kill-others-on-fail --names web,convex,gateway --prefix-colors blue,magenta,green \"pnpm --filter web dev\" \"pnpm exec convex dev\" \"pnpm --filter @zevium/gateway dev\"",
     "build": "turbo build",
+    "ci:pr": "prettier --check . && pnpm typecheck && pnpm test",
     "test": "turbo test && pnpm test:convex",
     "test:convex": "vitest run --config convex/vitest.config.ts",
     "typecheck": "turbo typecheck",
@@ -16,6 +17,7 @@
   "devDependencies": {
     "@clerk/backend": "^3.11.4",
     "@edge-runtime/vm": "^5.0.0",
+    "concurrently": "^10.0.3",
     "convex-test": "^0.0.54",
     "prettier": "^3.6.0",
     "tsx": "^4.23.0",
@@ -24,9 +26,9 @@
     "vitest": "^4.1.10"
   },
   "dependencies": {
-    "@polar-sh/sdk": "^0.48.1",
     "@zevium/shared": "workspace:*",
     "convex": "^1.42.1",
+    "stripe": "22.3.1",
     "svix": "^1.96.1"
   },
   "type": "module"

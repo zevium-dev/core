@@ -133,10 +133,11 @@ function CreateProjectPage() {
               <Label htmlFor="project-name">Name</Label>
               <Input
                 id="project-name"
+                name="project-name"
+                autoComplete="off"
                 value={name}
                 onChange={(e) => onNameChange(e.target.value)}
-                placeholder="Weather API"
-                autoFocus
+                placeholder="Weather API…"
                 required
                 maxLength={120}
                 disabled={isPending}
@@ -147,9 +148,12 @@ function CreateProjectPage() {
               <Label htmlFor="project-slug">Slug</Label>
               <Input
                 id="project-slug"
+                name="project-slug"
+                autoComplete="off"
+                spellCheck={false}
                 value={slug}
                 onChange={(e) => onSlugChange(e.target.value)}
-                placeholder="weather-api"
+                placeholder="weather-api…"
                 required
                 maxLength={64}
                 disabled={isPending}
@@ -164,9 +168,11 @@ function CreateProjectPage() {
               <Label htmlFor="project-description">Description</Label>
               <textarea
                 id="project-description"
+                name="project-description"
+                autoComplete="off"
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                placeholder="What does this API do?"
+                placeholder="Describe inputs, outputs, and ideal use cases…"
                 maxLength={2000}
                 disabled={isPending}
                 rows={4}

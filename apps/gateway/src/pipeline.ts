@@ -131,13 +131,33 @@ export async function handleGatewayRequest(
 
   let usedFree = false;
   if (freeTier !== undefined && freeTier > 0) {
-    const freeResult = await wallet.consumeFreeTier(
-      verified.keyId,
-      freeTier,
-      (deps.now ?? Date.now)(),
-    );
+    const freeResult = await wallet.consumeFreeTier(verified.keyId, freeTier, {
+      clerkOrgId: verified.orgId,
+      nowMs: (deps.now ?? Date.now)(),
+    });
     if (freeResult.status === "consumed") {
       usedFree = true;
+    } else if (
+      freeResult.status === "rejected" &&
+      freeResult.reason === "key_disabled"
+    ) {
+      emitUsage(ctx, deps, {
+        requestId,
+        organizationId: published.organizationId,
+        consumerClerkOrgId: verified.orgId,
+        projectId: published.projectId,
+        keyId: verified.keyId,
+        orgSlug: route.orgSlug,
+        projectSlug: route.projectSlug,
+        method: matched.method,
+        pathTemplate: matched.pathTemplate,
+        cost: 0,
+        status: 403,
+        outcome: "blocked",
+        latencyMs: (deps.now ?? Date.now)() - started,
+        reservationId,
+      });
+      return jsonError(403, "key_disabled", "API key is disabled", requestId);
     }
   }
 
@@ -234,6 +254,8 @@ export async function handleGatewayRequest(
   } catch (err) {
     if (!usedFree) {
       await wallet.refund(reservationId);
+    } else {
+      await wallet.refundFreeTier(verified.keyId, (deps.now ?? Date.now)());
     }
     const message = err instanceof Error ? err.message : "upstream error";
     emitUsage(ctx, deps, {
@@ -269,7 +291,7 @@ export async function handleGatewayRequest(
   };
 
   if (usedFree) {
-    // Free path: no reserve/settle; still emit usage with credits 0.
+    // Free path: no reserve/settle; successful calls still enter analytics.
     if (status >= 200 && status < 300) {
       await wallet.enqueueFreeUsage(reservationId, usageMeta);
       emitUsage(ctx, deps, {
@@ -289,11 +311,7 @@ export async function handleGatewayRequest(
         reservationId,
       });
     } else {
-      // Free unit already consumed; non-2xx still records usage at 0 credits.
-      await wallet.enqueueFreeUsage(reservationId, {
-        ...usageMeta,
-        status,
-      });
+      await wallet.refundFreeTier(verified.keyId, (deps.now ?? Date.now)());
       emitUsage(ctx, deps, {
         requestId,
         organizationId: published.organizationId,
@@ -306,7 +324,7 @@ export async function handleGatewayRequest(
         pathTemplate: matched.pathTemplate,
         cost: 0,
         status,
-        outcome: "free",
+        outcome: "refunded",
         latencyMs,
         reservationId,
       });
