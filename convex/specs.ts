@@ -285,6 +285,7 @@ export const getPublishedForGateway = query({
       .withIndex("by_org_slug", (q) =>
         q.eq("organizationId", org._id).eq("slug", args.projectSlug),
       )
+      .filter((q) => q.eq(q.field("visibility"), "public"))
       .unique();
     if (project === null) return null;
     if (project.status !== "published") return null;

@@ -59,10 +59,27 @@ export function __getTestPipelineDeps(): WorkerDeps | null {
   return testDeps;
 }
 
+// Module-scoped prod deps, lazily built on first request and reused across
+// requests in the same isolate. CachedSpecSource / CachedCatalogueSource /
+// ClerkKeyVerifier all carry TTL/in-memory caches; rebuilding per request
+// defeats them. Keyed on an env fingerprint so config changes (deploy, env
+// swap, tests) invalidate the cache instead of serving stale clients.
+let cachedProdDeps: { fingerprint: string; deps: WorkerDeps } | null = null;
+/** Test-only: clear the module-scoped prod dep cache (e.g. between env swaps). */
+export function __resetProdDepsCache(): void {
+  cachedProdDeps = null;
+}
+
 function buildDeps(env: Env): WorkerDeps {
   // Module-scoped test harness wins when installed (vitest-pool-workers).
   if (testDeps) {
     return testDeps;
+  }
+
+  // NUL-joined to avoid ambiguity when one field is empty.
+  const fingerprint = `${env.CLERK_SECRET_KEY ?? ""}\u0000${env.CONVEX_URL ?? ""}`;
+  if (cachedProdDeps && cachedProdDeps.fingerprint === fingerprint) {
+    return cachedProdDeps.deps;
   }
 
   const keyVerifier = env.CLERK_SECRET_KEY
@@ -85,7 +102,7 @@ function buildDeps(env: Env): WorkerDeps {
   // Keep ConvexUsageSink constructable for tests / future dual-write.
   void ConvexUsageSink;
 
-  return {
+  const deps: WorkerDeps = {
     keyVerifier,
     specSource: new CachedSpecSource({ inner: innerSpec }),
     catalogueSource: new CachedCatalogueSource({
@@ -94,6 +111,8 @@ function buildDeps(env: Env): WorkerDeps {
     }),
     usageSink,
   };
+  cachedProdDeps = { fingerprint, deps };
+  return deps;
 }
 
 function pipelineOnly(deps: WorkerDeps): PipelineDeps {

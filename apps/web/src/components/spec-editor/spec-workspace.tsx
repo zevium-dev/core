@@ -1,6 +1,6 @@
 import { convexQuery, useConvexMutation } from "@convex-dev/react-query";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Link } from "@tanstack/react-router";
+import { Link, useBlocker } from "@tanstack/react-router";
 import { collectOpenApiSpecIssues, type SpecIssue } from "@zevium/shared";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -128,17 +128,32 @@ export function SpecWorkspace({
   );
   const [endpointsStale, setEndpointsStale] = useState(false);
 
+  // Autosave circuit breaker: 3 consecutive save failures (server-rejected
+  // draft or transport error) trip the breaker so autosave stops hammering the
+  // backend every 2s. Any user edit resets it.
+  const [autosaveTripped, setAutosaveTripped] = useState(false);
+  const consecutiveFailuresRef = useRef(0);
+  const resetAutosaveCircuit = useCallback(() => {
+    consecutiveFailuresRef.current = 0;
+    setAutosaveTripped(false);
+  }, []);
+
   const textRef = useRef(text);
   textRef.current = text;
-  const skipRemoteSync = useRef(false);
+  // Last text the server has accepted or pushed. Used to detect whether the
+  // user has in-progress edits before adopting a remotely-pushed draft, so a
+  // concurrent tab/session save never clobbers unsaved keystrokes.
+  const lastSavedTextRef = useRef(savedDraft);
 
   useEffect(() => {
-    if (skipRemoteSync.current) {
-      skipRemoteSync.current = false;
-      return;
+    // Only adopt the server draft when the user has no in-progress edits
+    // (local text still equals the last server-synced text). Otherwise keep
+    // the local edits intact and just record the new server baseline.
+    if (textRef.current === lastSavedTextRef.current) {
+      setText(savedDraft);
+      setLastSavedAt(initialLastSavedAt);
     }
-    setText(savedDraft);
-    setLastSavedAt(initialLastSavedAt);
+    lastSavedTextRef.current = savedDraft;
   }, [savedDraft, initialLastSavedAt]);
 
   useEffect(() => {
@@ -179,12 +194,16 @@ export function SpecWorkspace({
 
   // Rail pricing write-back: parse current text, mutate the target operation,
   // re-serialize. Functional updater composes multiple edits per debounce flush.
-  const handlePricingChange = useCallback((edit: PricingEdit) => {
-    setText((prev) => {
-      const result = applyPricingEdit(prev, edit);
-      return result.ok ? result.text : prev;
-    });
-  }, []);
+  const handlePricingChange = useCallback(
+    (edit: PricingEdit) => {
+      resetAutosaveCircuit();
+      setText((prev) => {
+        const result = applyPricingEdit(prev, edit);
+        return result.ok ? result.text : prev;
+      });
+    },
+    [resetAutosaveCircuit],
+  );
 
   const dirty = text !== savedDraft;
   const hasClientErrors = clientErrors.length > 0;
@@ -195,13 +214,24 @@ export function SpecWorkspace({
 
   const { mutate: saveDraft, isPending: savePending } = useMutation({
     mutationFn: (spec: string) => saveDraftFn({ projectId, spec }),
-    onSuccess: async (result) => {
+    onSuccess: async (result, spec) => {
       setServerIssues(result.issues);
       if (!result.ok) {
+        // Server rejected the draft. The client thinks the text is clean, so
+        // without a circuit breaker the autosave effect would re-fire every
+        // 2s forever (toast spam + backend load). Count it and trip after 3.
+        consecutiveFailuresRef.current += 1;
+        if (consecutiveFailuresRef.current >= 3) {
+          setAutosaveTripped(true);
+        }
         toast.error("Draft has errors — fix issues before saving");
         return;
       }
-      skipRemoteSync.current = true;
+      consecutiveFailuresRef.current = 0;
+      setAutosaveTripped(false);
+      // Record the server-accepted text so the remote-sync effect knows we are
+      // in sync and won't clobber any edits typed during the round-trip.
+      lastSavedTextRef.current = spec;
       setLastSavedAt(result.lastSavedAt);
       toast.success("Draft saved");
       await queryClient.invalidateQueries({
@@ -209,6 +239,10 @@ export function SpecWorkspace({
       });
     },
     onError: (err: unknown) => {
+      consecutiveFailuresRef.current += 1;
+      if (consecutiveFailuresRef.current >= 3) {
+        setAutosaveTripped(true);
+      }
       toast.error(humanError(err, "Could not save draft"));
     },
   });
@@ -269,7 +303,7 @@ export function SpecWorkspace({
 
   // Autosave: 2s after last keystroke; never with client errors.
   useEffect(() => {
-    if (!dirty || hasClientErrors || savePending) return;
+    if (!dirty || hasClientErrors || savePending || autosaveTripped) return;
     const handle = setTimeout(() => {
       const current = textRef.current;
       if (current === savedDraft) return;
@@ -280,7 +314,24 @@ export function SpecWorkspace({
       saveDraft(current);
     }, AUTOSAVE_MS);
     return () => clearTimeout(handle);
-  }, [text, dirty, hasClientErrors, savePending, savedDraft, saveDraft]);
+  }, [
+    text,
+    dirty,
+    hasClientErrors,
+    savePending,
+    autosaveTripped,
+    savedDraft,
+    saveDraft,
+  ]);
+
+  // Guard against data loss on navigate-away / tab close while the user has
+  // unsaved edits. `shouldBlockFn` covers in-app route changes (e.g. the
+  // embedded "Add one in Settings" link); `enableBeforeUnload` covers tab
+  // close and refresh. Suppressed while a save is in flight.
+  useBlocker({
+    shouldBlockFn: () => dirty && !savePending,
+    enableBeforeUnload: () => dirty && !savePending,
+  });
 
   const status = deriveSaveStatus({
     dirty,
@@ -291,6 +342,7 @@ export function SpecWorkspace({
   });
 
   function applyEditorText(next: string) {
+    resetAutosaveCircuit();
     const converted = convertSpecInputToJson(next);
     if (!converted.ok) {
       setText(next);
@@ -305,6 +357,7 @@ export function SpecWorkspace({
   }
 
   function onEditorChange(next: string) {
+    resetAutosaveCircuit();
     // Detect YAML paste only when whole doc flipped from JSON-ish to YAML-ish
     // or starts as YAML. Full convert on each keystroke would thrash.
     if (
@@ -399,6 +452,24 @@ export function SpecWorkspace({
 
   return (
     <>
+      {autosaveTripped ? (
+        <div className="mb-3 flex items-center justify-between gap-3 rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          <span>
+            Autosave paused after repeated save failures. Edit the spec to
+            resume, or retry manually.
+          </span>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              resetAutosaveCircuit();
+              saveDraft(textRef.current);
+            }}
+          >
+            Retry save
+          </Button>
+        </div>
+      ) : null}
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]">
         <div className="flex min-w-0 flex-col gap-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -462,7 +533,10 @@ export function SpecWorkspace({
         versionId={versionDialogId}
         savedDraft={savedDraft}
         dirty={dirty}
-        onRestore={(spec) => setText(spec)}
+        onRestore={(spec) => {
+          resetAutosaveCircuit();
+          setText(spec);
+        }}
         onOpenChange={(open) => {
           if (!open) setVersionDialogId(null);
         }}
