@@ -10,6 +10,9 @@ import {
 } from "./publishReadiness";
 import schema from "./schema";
 
+const lookupMock = vi.hoisted(() => vi.fn());
+vi.mock("node:dns/promises", () => ({ lookup: lookupMock }));
+
 const modules = import.meta.glob("./**/*.ts");
 const DRAFT_A = JSON.stringify({
   openapi: "3.1.0",
@@ -253,6 +256,7 @@ describe("publish readiness validity", () => {
     });
     const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
     vi.stubGlobal("fetch", fetchMock);
+    lookupMock.mockResolvedValue([{ address: "93.184.216.34", family: 4 }]);
     try {
       await expect(
         asAdmin(t).action(api.publishReadinessAction.testConnection, {
@@ -261,6 +265,7 @@ describe("publish readiness validity", () => {
       ).resolves.toMatchObject({ status: "ok", statusCode: 204 });
     } finally {
       vi.unstubAllGlobals();
+      lookupMock.mockReset();
     }
 
     await expect(
