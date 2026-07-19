@@ -187,8 +187,14 @@ Security note: credentials and browser/session identifiers are never copied into
     - Convex tests 109/109.
     - Typecheck green.
 85. Key rotation left three enabled Clerk keys despite page saying one active key per user. Revoked original and first rotated keys; retained only final key used by successful production calls.
-86. Attempted to delete temporary localhost fixture and its dummy credential. Helium DevTools bridge timed out on navigation, then on page-list liveness after stable-session restart. User restarted and reopened Helium twice with permission, but bridge remained unreachable. Temporary development-only project `mdtohtmllocal` therefore remains; production data is clean.
+86. Attempted to delete temporary localhost fixture and its dummy credential. Helium's permission-broker DevTools bridge timed out on navigation, then on page-list liveness after stable-session restart. User restarted and reopened Helium twice with permission, but broker remained unreachable.
 87. Pending mock/playground fixes are verified locally only, per user instruction not to deploy every incremental change. Production listing, credential injection, upstream, usage, and earnings are already live.
+88. Added persistent fish `helium-debug` launcher using loopback-only direct CDP port 9333. Direct `--browserUrl http://127.0.0.1:9333` connection succeeded immediately with one page and no Allow prompt.
+89. Used direct connection to finish localhost cleanup through app:
+    - Opened `mdtohtmllocal` Settings.
+    - Confirmed permanent deletion with project slug.
+    - App redirected to project list containing only pre-existing `test-api-22`.
+    - Project deletion also removed its dummy upstream credential through cascade implemented during this dogfood.
 
 ## Issues
 
@@ -224,4 +230,4 @@ Security note: credentials and browser/session identifiers are never copied into
 - **DOM-length selector chose wrong Vercel button:** guessed 36-character button was not `API_KEY`; local source of truth proved real secret length 32 and authenticated production upstream. Exact local value fixed Zevium injection.
 - **Activity route discoverability mismatch:** `/app/activity` rendered Not Found; actual route is `/app/settings/activity`. Sidebar exposes Settings but not direct Activity link.
 - **Rotation permits multiple enabled keys:** two rotations produced three enabled rows even while UI claims one active key. Gateway grace behavior is intentional, but UI status and one-key wording are misleading. Old rows were manually revoked after verification.
-- **Helium bridge remained dead after restart:** final local fixture cleanup could not use app because CDP page listing timed out repeatedly after fresh endpoint/session and user restarts. No alternate browser or direct database deletion was used.
+- **Helium permission broker remained dead after restart:** page listing timed out repeatedly through port 9222. Launching Helium directly on loopback port 9333 bypassed broker, removed repeated Allow prompts, and let app-only cleanup finish.
