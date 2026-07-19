@@ -1,4 +1,4 @@
-<h1><img src="./apps/web/public/logo.svg" alt="" width="32" align="center" />evium — agent-first API marketplace</h1>
+<h1><img src="./apps/web/public/logo.svg" alt="" width="36" align="center" />evium — agent-first API marketplace</h1>
 
 Publishers list APIs as OpenAPI specs with per-call pricing baked into the spec.
 Consumers — human developers and AI agents — prepay org-scoped credits and call
