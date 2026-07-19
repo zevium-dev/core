@@ -11,6 +11,10 @@ import { filterRequestHeaders, filterResponseHeaders } from "./headers";
 import type { UsageSink } from "./usage";
 import { jsonError } from "./errors";
 import { paymentRequiredResponse } from "./x402";
+import { assertSafeUpstreamTarget } from "./upstream-safety";
+import { SpecSourceUnavailableError } from "./spec-source";
+
+const UPSTREAM_HEADERS_TIMEOUT_MS = 15_000;
 
 export type PipelineEnv = {
   WALLET: DurableObjectNamespace<WalletDO>;
@@ -28,22 +32,22 @@ export type PipelineDeps = {
 };
 
 export type GatewayRoute = {
-  orgSlug: string;
+  publisherHandle: string;
   projectSlug: string;
   /** Remainder path under /gateway/:org/:project */
   remainderPath: string;
 };
 
 export function parseGatewayPath(pathname: string): GatewayRoute | null {
-  // /gateway/:orgSlug/:projectSlug/*
+  // /gateway/:publisherHandle/:projectSlug/*
   const parts = pathname.split("/").filter(Boolean);
   if (parts[0] !== "gateway") return null;
   if (!parts[1] || !parts[2]) return null;
-  const orgSlug = parts[1];
+  const publisherHandle = parts[1];
   const projectSlug = parts[2];
   const rest = parts.slice(3);
   const remainderPath = rest.length === 0 ? "/" : `/${rest.join("/")}`;
-  return { orgSlug, projectSlug, remainderPath };
+  return { publisherHandle, projectSlug, remainderPath };
 }
 
 function defaultId(): string {
@@ -76,10 +80,23 @@ export async function handleGatewayRequest(
     });
   }
 
-  const published = await deps.specSource.getPublishedSpec(
-    route.orgSlug,
-    route.projectSlug,
-  );
+  let published;
+  try {
+    published = await deps.specSource.getPublishedSpec(
+      route.publisherHandle,
+      route.projectSlug,
+    );
+  } catch (error) {
+    if (error instanceof SpecSourceUnavailableError) {
+      return jsonError(
+        503,
+        "gateway_unavailable",
+        "Gateway configuration is temporarily unavailable",
+        requestId,
+      );
+    }
+    throw error;
+  }
   if (!published) {
     return jsonError(404, "project_not_found", "Unknown project", requestId);
   }
@@ -120,6 +137,23 @@ export async function handleGatewayRequest(
     );
   }
 
+  let upstreamUrl: URL;
+  try {
+    upstreamUrl = new URL(
+      joinUpstreamUrl(matched.upstreamBaseUrl, route.remainderPath),
+    );
+    assertSafeUpstreamTarget(upstreamUrl);
+  } catch {
+    return jsonError(
+      422,
+      "unsafe_upstream",
+      "This API's upstream URL is not permitted",
+      requestId,
+    );
+  }
+  const incoming = new URL(request.url);
+  upstreamUrl.search = incoming.search;
+
   const cost = matched.pricing.cost;
   const freeTier = matched.pricing.freeTier;
   const reservationId = requestId;
@@ -128,11 +162,45 @@ export async function handleGatewayRequest(
   // never the publisher's, even when they differ (marketplace calls).
   const walletId = env.WALLET.idFromName(verified.orgId);
   const wallet = env.WALLET.get(walletId);
+  const freeTierScope = {
+    clerkOrgId: verified.orgId,
+    projectId: published.projectId,
+    method: matched.method,
+    pathTemplate: matched.pathTemplate,
+  };
 
   let usedFree = false;
-  if (freeTier !== undefined && freeTier > 0) {
-    const freeResult = await wallet.consumeFreeTier(verified.keyId, freeTier, {
-      clerkOrgId: verified.orgId,
+  let unmetered = false;
+  if (cost === 0) {
+    const authorization = await wallet.authorizeKey(
+      verified.keyId,
+      verified.orgId,
+      (deps.now ?? Date.now)(),
+    );
+    if (authorization.status === "rejected") {
+      emitUsage(ctx, deps, {
+        requestId,
+        organizationId: published.organizationId,
+        consumerClerkOrgId: verified.orgId,
+        projectId: published.projectId,
+        keyId: verified.keyId,
+        orgSlug: route.publisherHandle,
+        projectSlug: route.projectSlug,
+        method: matched.method,
+        pathTemplate: matched.pathTemplate,
+        cost: 0,
+        status: 403,
+        outcome: "blocked",
+        latencyMs: (deps.now ?? Date.now)() - started,
+        reservationId,
+      });
+      return jsonError(403, "key_disabled", "API key is disabled", requestId);
+    }
+    unmetered = true;
+  } else if (freeTier !== undefined && freeTier > 0) {
+    const freeResult = await wallet.consumeFreeTier(freeTier, {
+      keyId: verified.keyId,
+      ...freeTierScope,
       nowMs: (deps.now ?? Date.now)(),
     });
     if (freeResult.status === "consumed") {
@@ -147,7 +215,7 @@ export async function handleGatewayRequest(
         consumerClerkOrgId: verified.orgId,
         projectId: published.projectId,
         keyId: verified.keyId,
-        orgSlug: route.orgSlug,
+        orgSlug: route.publisherHandle,
         projectSlug: route.projectSlug,
         method: matched.method,
         pathTemplate: matched.pathTemplate,
@@ -161,7 +229,7 @@ export async function handleGatewayRequest(
     }
   }
 
-  if (!usedFree) {
+  if (!usedFree && !unmetered) {
     const reserve = await wallet.reserve(reservationId, cost, {
       keyId: verified.keyId,
       clerkOrgId: verified.orgId,
@@ -173,7 +241,7 @@ export async function handleGatewayRequest(
         consumerClerkOrgId: verified.orgId,
         projectId: published.projectId,
         keyId: verified.keyId,
-        orgSlug: route.orgSlug,
+        orgSlug: route.publisherHandle,
         projectSlug: route.projectSlug,
         method: matched.method,
         pathTemplate: matched.pathTemplate,
@@ -202,7 +270,7 @@ export async function handleGatewayRequest(
         consumerClerkOrgId: verified.orgId,
         projectId: published.projectId,
         keyId: verified.keyId,
-        orgSlug: route.orgSlug,
+        orgSlug: route.publisherHandle,
         projectSlug: route.projectSlug,
         method: matched.method,
         pathTemplate: matched.pathTemplate,
@@ -231,12 +299,6 @@ export async function handleGatewayRequest(
     }
   }
 
-  const upstreamUrl = new URL(
-    joinUpstreamUrl(matched.upstreamBaseUrl, route.remainderPath),
-  );
-  const incoming = new URL(request.url);
-  upstreamUrl.search = incoming.search;
-
   const upstreamHeaders = filterRequestHeaders(request.headers);
   for (const [name, value] of Object.entries(published.upstreamHeaders ?? {})) {
     upstreamHeaders.set(name, value);
@@ -251,23 +313,31 @@ export async function handleGatewayRequest(
     // Required by fetch when body is a stream.
     init.duplex = "half";
   }
+  const controller = new AbortController();
+  const timeout = setTimeout(
+    () => controller.abort(),
+    UPSTREAM_HEADERS_TIMEOUT_MS,
+  );
+  init.signal = controller.signal;
   let upstreamRes: Response;
   try {
     upstreamRes = await fetchImpl(upstreamUrl.toString(), init);
   } catch (err) {
-    if (!usedFree) {
+    if (!usedFree && !unmetered) {
       await wallet.refund(reservationId);
-    } else {
-      await wallet.refundFreeTier(verified.keyId, (deps.now ?? Date.now)());
+    } else if (usedFree) {
+      await wallet.refundFreeTier({
+        ...freeTierScope,
+        nowMs: (deps.now ?? Date.now)(),
+      });
     }
-    const message = err instanceof Error ? err.message : "upstream error";
     emitUsage(ctx, deps, {
       requestId,
       organizationId: published.organizationId,
       consumerClerkOrgId: verified.orgId,
       projectId: published.projectId,
       keyId: verified.keyId,
-      orgSlug: route.orgSlug,
+      orgSlug: route.publisherHandle,
       projectSlug: route.projectSlug,
       method: matched.method,
       pathTemplate: matched.pathTemplate,
@@ -277,7 +347,16 @@ export async function handleGatewayRequest(
       latencyMs: (deps.now ?? Date.now)() - started,
       reservationId,
     });
-    return jsonError(502, "upstream_error", message, requestId);
+    return jsonError(
+      502,
+      controller.signal.aborted ? "upstream_timeout" : "upstream_error",
+      controller.signal.aborted
+        ? "Upstream did not respond in time"
+        : "Upstream request failed",
+      requestId,
+    );
+  } finally {
+    clearTimeout(timeout);
   }
 
   const status = upstreamRes.status;
@@ -293,8 +372,8 @@ export async function handleGatewayRequest(
     keyId: verified.keyId,
   };
 
-  if (usedFree) {
-    // Free path: no reserve/settle; successful calls still enter analytics.
+  if (usedFree || unmetered) {
+    // Unmetered paths skip reserve/settle; successful calls still enter analytics.
     if (status >= 200 && status < 300) {
       await wallet.enqueueFreeUsage(reservationId, usageMeta);
       emitUsage(ctx, deps, {
@@ -303,25 +382,30 @@ export async function handleGatewayRequest(
         consumerClerkOrgId: verified.orgId,
         projectId: published.projectId,
         keyId: verified.keyId,
-        orgSlug: route.orgSlug,
+        orgSlug: route.publisherHandle,
         projectSlug: route.projectSlug,
         method: matched.method,
         pathTemplate: matched.pathTemplate,
         cost: 0,
         status,
-        outcome: "free",
+        outcome: usedFree ? "free" : "settled",
         latencyMs,
         reservationId,
       });
     } else {
-      await wallet.refundFreeTier(verified.keyId, (deps.now ?? Date.now)());
+      if (usedFree) {
+        await wallet.refundFreeTier({
+          ...freeTierScope,
+          nowMs: (deps.now ?? Date.now)(),
+        });
+      }
       emitUsage(ctx, deps, {
         requestId,
         organizationId: published.organizationId,
         consumerClerkOrgId: verified.orgId,
         projectId: published.projectId,
         keyId: verified.keyId,
-        orgSlug: route.orgSlug,
+        orgSlug: route.publisherHandle,
         projectSlug: route.projectSlug,
         method: matched.method,
         pathTemplate: matched.pathTemplate,
@@ -340,7 +424,7 @@ export async function handleGatewayRequest(
       consumerClerkOrgId: verified.orgId,
       projectId: published.projectId,
       keyId: verified.keyId,
-      orgSlug: route.orgSlug,
+      orgSlug: route.publisherHandle,
       projectSlug: route.projectSlug,
       method: matched.method,
       pathTemplate: matched.pathTemplate,
@@ -358,7 +442,7 @@ export async function handleGatewayRequest(
       consumerClerkOrgId: verified.orgId,
       projectId: published.projectId,
       keyId: verified.keyId,
-      orgSlug: route.orgSlug,
+      orgSlug: route.publisherHandle,
       projectSlug: route.projectSlug,
       method: matched.method,
       pathTemplate: matched.pathTemplate,
@@ -386,7 +470,7 @@ export async function handleGatewayRequest(
     );
     outHeaders.append(
       "Link",
-      `<https://zevium.dev/catalogue/${route.orgSlug}/${route.projectSlug}>; rel="deprecation"`,
+      `<https://zevium.dev/catalogue/${route.publisherHandle}/${route.projectSlug}>; rel="deprecation"`,
     );
     if (published.sunsetAt !== undefined) {
       outHeaders.set("Sunset", new Date(published.sunsetAt).toUTCString());

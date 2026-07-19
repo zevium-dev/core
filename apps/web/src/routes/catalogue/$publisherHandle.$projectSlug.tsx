@@ -52,6 +52,7 @@ import {
   resolveGatewayOrigin,
   tryItBaseUrl,
 } from "#/lib/landing";
+import { tryItBodyDefaults } from "#/lib/try-it";
 
 const API_KEY_STORAGE = "zevium:playground-api-key";
 const DEFAULT_GATEWAY = "http://localhost:8787/gateway";
@@ -68,11 +69,13 @@ function responseLanguage(body: string): "json" | "plain" {
   }
 }
 
-export const Route = createFileRoute("/catalogue/$orgSlug/$projectSlug")({
+export const Route = createFileRoute(
+  "/catalogue/$publisherHandle/$projectSlug",
+)({
   loader: async ({ context, params }) => {
     const { queryClient } = context;
     const queryOpts = convexQuery(api.catalogue.getPublicDetail, {
-      orgSlug: params.orgSlug,
+      publisherHandle: params.publisherHandle,
       projectSlug: params.projectSlug,
     });
     if (typeof window !== "undefined") {
@@ -109,6 +112,8 @@ type EndpointRow = {
   cost: number;
   freeTier: number | undefined;
   pathParams: string[];
+  requestContentType: string;
+  requestBodyExample: string;
 };
 
 type PlayResult = {
@@ -117,6 +122,7 @@ type PlayResult = {
   ms: number;
   body: string;
   mock: boolean;
+  requestId?: string;
 };
 
 function gatewayBaseUrl(): string {
@@ -135,6 +141,7 @@ function listEndpoints(specJson: string): EndpointRow[] {
       if (op === undefined) continue;
       const operation = op as OpenApiOperation;
       const pricing = extractPricing(operation);
+      const bodyDefaults = tryItBodyDefaults(operation);
       const pathParams = Array.from(path.matchAll(/\{([^}/]+)\}/g)).map(
         (m) => m[1]!,
       );
@@ -147,6 +154,8 @@ function listEndpoints(specJson: string): EndpointRow[] {
         cost: pricing.cost,
         freeTier: pricing.freeTier,
         pathParams,
+        requestContentType: bodyDefaults.contentType,
+        requestBodyExample: bodyDefaults.body,
       });
     }
   }
@@ -181,6 +190,13 @@ function parseExtraHeaders(raw: string): Record<string, string> {
   return headers;
 }
 
+function invalidHeaderLine(raw: string): boolean {
+  return raw.split("\n").some((line) => {
+    const trimmed = line.trim();
+    return trimmed !== "" && trimmed.indexOf(":") <= 0;
+  });
+}
+
 function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
 }
@@ -213,7 +229,7 @@ async function copyText(text: string, okMsg: string) {
 }
 
 function ApiDetailPage() {
-  const { orgSlug, projectSlug } = Route.useParams();
+  const { publisherHandle, projectSlug } = Route.useParams();
 
   return (
     <div className="min-h-screen bg-background">
@@ -221,7 +237,10 @@ function ApiDetailPage() {
 
       <main className="mx-auto max-w-6xl px-4 py-8 content-enter">
         <Suspense fallback={<ApiDetailBodySkeleton />}>
-          <ApiDetailBody orgSlug={orgSlug} projectSlug={projectSlug} />
+          <ApiDetailBody
+            publisherHandle={publisherHandle}
+            projectSlug={projectSlug}
+          />
         </Suspense>
       </main>
     </div>
@@ -229,14 +248,17 @@ function ApiDetailPage() {
 }
 
 function ApiDetailBody({
-  orgSlug,
+  publisherHandle,
   projectSlug,
 }: {
-  orgSlug: string;
+  publisherHandle: string;
   projectSlug: string;
 }) {
   const { data } = useSuspenseQuery(
-    convexQuery(api.catalogue.getPublicDetail, { orgSlug, projectSlug }),
+    convexQuery(api.catalogue.getPublicDetail, {
+      publisherHandle,
+      projectSlug,
+    }),
   );
 
   const endpoints = useMemo(() => {
@@ -275,7 +297,7 @@ function ApiDetailBody({
               </Link>
               <span className="mx-1.5 text-muted-foreground/60">/</span>
               <span className="font-mono text-xs">
-                {data.org.slug}/{data.project.slug}
+                {data.org.publisherHandle}/{data.project.slug}
               </span>
             </p>
             <h1
@@ -360,7 +382,7 @@ function ApiDetailBody({
 
         <TabsContent value="try-it" className="mt-2">
           <TryItPanel
-            orgSlug={data.org.slug}
+            publisherHandle={data.org.publisherHandle}
             projectSlug={data.project.slug}
             endpoints={endpoints}
           />
@@ -368,7 +390,7 @@ function ApiDetailBody({
 
         <TabsContent value="agent" className="mt-2">
           <ConnectAgentPanel
-            orgSlug={data.org.slug}
+            publisherHandle={data.org.publisherHandle}
             projectSlug={data.project.slug}
           />
         </TabsContent>
@@ -499,11 +521,11 @@ function MethodBadge({ method }: { method: string }) {
 }
 
 function TryItPanel({
-  orgSlug,
+  publisherHandle,
   projectSlug,
   endpoints,
 }: {
-  orgSlug: string;
+  publisherHandle: string;
   projectSlug: string;
   endpoints: EndpointRow[];
 }) {
@@ -513,11 +535,14 @@ function TryItPanel({
 
   const [pathParams, setPathParams] = useState<Record<string, string>>({});
   const [headersText, setHeadersText] = useState("");
-  const [bodyText, setBodyText] = useState("{\n  \n}");
+  const [bodyText, setBodyText] = useState(
+    endpoint?.requestBodyExample ?? "{\n  \n}",
+  );
   const [apiKey, setApiKey] = useState("");
   const [mock, setMock] = useState(false);
   const [sending, setSending] = useState(false);
   const [result, setResult] = useState<PlayResult | null>(null);
+  const [headersError, setHeadersError] = useState<string | null>(null);
   const [copiedCurl, setCopiedCurl] = useState(false);
 
   useEffect(() => {
@@ -538,6 +563,7 @@ function TryItPanel({
       }
       return next;
     });
+    setBodyText(endpoint.requestBodyExample);
   }, [endpoint]);
 
   const onApiKeyChange = useCallback((value: string) => {
@@ -558,8 +584,8 @@ function TryItPanel({
     const path = buildRequestPath(endpoint.path, pathParams);
     const base = tryItBaseUrl(gatewayBaseUrl(), mock);
     const suffix = path.startsWith("/") ? path : `/${path}`;
-    return `${base}/${orgSlug}/${projectSlug}${suffix}`;
-  }, [endpoint, pathParams, orgSlug, projectSlug, mock]);
+    return `${base}/${publisherHandle}/${projectSlug}${suffix}`;
+  }, [endpoint, pathParams, publisherHandle, projectSlug, mock]);
 
   const needsBody =
     endpoint !== null &&
@@ -570,12 +596,17 @@ function TryItPanel({
   async function onSend(e: FormEvent) {
     e.preventDefault();
     if (!endpoint || sending) return;
+    if (invalidHeaderLine(headersText)) {
+      setHeadersError("Each header must use the format Name: value.");
+      document.getElementById("try-headers")?.focus();
+      return;
+    }
+    setHeadersError(null);
 
     const headers = parseExtraHeaders(headersText);
     const key = apiKey.trim();
     if (key.length > 0) {
       headers.Authorization = `Bearer ${key}`;
-      headers["X-Api-Key"] = key;
     }
 
     const init: RequestInit = {
@@ -589,7 +620,7 @@ function TryItPanel({
         headers["Content-Type"] === undefined &&
         headers["content-type"] === undefined
       ) {
-        headers["Content-Type"] = "application/json";
+        headers["Content-Type"] = endpoint.requestContentType;
       }
       init.body = body;
     }
@@ -607,6 +638,7 @@ function TryItPanel({
         ms,
         body: text,
         mock,
+        requestId: res.headers.get("x-zevium-request-id") ?? undefined,
       });
     } catch (err) {
       const ms = Math.round(performance.now() - t0);
@@ -622,13 +654,14 @@ function TryItPanel({
     }
   }
 
-  function onCopyCurl() {
+  function onCopyCurl(includeKey = false) {
     if (!endpoint) return;
     const headers = parseExtraHeaders(headersText);
     const key = apiKey.trim();
     if (key.length > 0) {
-      headers.Authorization = `Bearer ${key}`;
-      headers["X-Api-Key"] = key;
+      headers.Authorization = includeKey
+        ? `Bearer ${key}`
+        : "Bearer YOUR_API_KEY";
     }
     let body: string | undefined;
     if (needsBody && bodyText.trim().length > 0) {
@@ -637,7 +670,7 @@ function TryItPanel({
         headers["Content-Type"] === undefined &&
         headers["content-type"] === undefined
       ) {
-        headers["Content-Type"] = "application/json";
+        headers["Content-Type"] = endpoint.requestContentType;
       }
     }
     const curl = buildCurl({
@@ -742,7 +775,7 @@ function TryItPanel({
                       [name]: e.target.value,
                     }))
                   }
-                  placeholder={name}
+                  placeholder={`Example ${name}`}
                   className="font-mono text-sm"
                 />
               </div>
@@ -754,14 +787,15 @@ function TryItPanel({
                 id="api-key"
                 name="apiKey"
                 type="password"
-                autoComplete="off"
+                autoComplete="current-password"
                 placeholder="API key"
                 value={apiKey}
                 onChange={(e) => onApiKeyChange(e.target.value)}
                 className="font-mono text-sm"
               />
               <p className="text-xs text-muted-foreground">
-                Stored in this browser session only. Never sent to Convex.
+                Stored in this browser session only. Never sent to Convex. Use
+                the canonical <code>Authorization: Bearer</code> header.
               </p>
               <p className="text-xs text-muted-foreground">
                 <Show when="signed-in">
@@ -787,12 +821,29 @@ function TryItPanel({
               <Label htmlFor="try-headers">Headers</Label>
               <textarea
                 id="try-headers"
+                name="headers"
+                autoComplete="off"
+                spellCheck={false}
+                aria-invalid={headersError !== null}
+                aria-describedby={
+                  headersError ? "try-headers-error" : undefined
+                }
                 value={headersText}
                 onChange={(e) => setHeadersText(e.target.value)}
                 placeholder={"Accept: application/json"}
                 rows={3}
                 className={TEXTAREA_CLASS}
               />
+              {headersError ? (
+                <p
+                  id="try-headers-error"
+                  role="alert"
+                  aria-live="assertive"
+                  className="text-sm text-destructive"
+                >
+                  {headersError}
+                </p>
+              ) : null}
             </div>
 
             {needsBody ? (
@@ -800,6 +851,8 @@ function TryItPanel({
                 <Label htmlFor="try-body">Body</Label>
                 <textarea
                   id="try-body"
+                  name="request-body"
+                  autoComplete="off"
                   value={bodyText}
                   onChange={(e) => setBodyText(e.target.value)}
                   rows={6}
@@ -822,7 +875,7 @@ function TryItPanel({
             <Button
               type="button"
               variant="outline"
-              onClick={onCopyCurl}
+              onClick={() => onCopyCurl()}
               disabled={!endpoint}
             >
               {copiedCurl ? (
@@ -832,10 +885,23 @@ function TryItPanel({
               )}
               Copy as curl
             </Button>
+            {apiKey.trim() !== "" ? (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => onCopyCurl(true)}
+                disabled={!endpoint}
+              >
+                Copy curl with key
+              </Button>
+            ) : null}
+            <span className="text-xs text-muted-foreground">
+              Copy with key puts a secret in your clipboard and shell history.
+            </span>
           </div>
 
           {result ? (
-            <div className="space-y-2">
+            <div className="space-y-2" role="status" aria-live="polite">
               <div className="flex flex-wrap items-center gap-2 text-sm">
                 <Badge
                   variant={
@@ -853,13 +919,38 @@ function TryItPanel({
                 <span className="text-muted-foreground tabular-nums">
                   {result.ms} ms
                 </span>
+                {result.requestId ? (
+                  <span className="font-mono text-xs text-muted-foreground">
+                    Request {result.requestId}
+                  </span>
+                ) : null}
               </div>
-              <pre className="max-h-80 overflow-auto rounded-md border bg-muted/40 p-3 font-mono text-xs whitespace-pre-wrap break-all">
-                <SyntaxCode
-                  code={result.body || "(empty body)"}
-                  lang={responseLanguage(result.body)}
-                />
-              </pre>
+              {result.status >= 400 ? (
+                <p className="text-sm text-muted-foreground">
+                  {result.status === 401
+                    ? "Your API key was not accepted. Create or rotate a key, then try again."
+                    : result.status === 402
+                      ? "Your organization needs credits before this call can run."
+                      : result.status === 429
+                        ? "This key reached a limit. Wait or adjust its cap."
+                        : result.status >= 500
+                          ? "The upstream service failed. Retry later."
+                          : "Check the request fields and try again."}
+                </p>
+              ) : null}
+              {result.status > 0 && result.status < 400 ? (
+                <pre className="max-h-80 overflow-auto rounded-md border bg-muted/40 p-3 font-mono text-xs whitespace-pre-wrap break-all">
+                  <SyntaxCode
+                    code={result.body || "(empty body)"}
+                    lang={responseLanguage(result.body)}
+                  />
+                </pre>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  Error response details are hidden to protect provider and
+                  credential information.
+                </p>
+              )}
             </div>
           ) : null}
         </form>
@@ -869,10 +960,10 @@ function TryItPanel({
 }
 
 function ConnectAgentPanel({
-  orgSlug,
+  publisherHandle,
   projectSlug,
 }: {
-  orgSlug: string;
+  publisherHandle: string;
   projectSlug: string;
 }) {
   const gatewayOrigin = resolveGatewayOrigin(
@@ -881,11 +972,11 @@ function ConnectAgentPanel({
   const mcpUrl = mcpEndpointUrl(gatewayOrigin);
   const snippet = buildMcpConfigSnippet(mcpUrl);
 
-  const notes = `// Agent notes for ${orgSlug}/${projectSlug}
+  const notes = `// Agent notes for ${publisherHandle}/${projectSlug}
 // 1. Search catalogue with tool search_apis({ query })
-// 2. Load docs with get_api_docs({ org: "${orgSlug}", project: "${projectSlug}" })
+// 2. Load docs with get_api_docs({ org: "${publisherHandle}", project: "${projectSlug}" })
 // 3. Call via call_api — same key-authenticated, credit-gated gateway as humans
-// Gateway base: ${gatewayBaseUrl()}/${orgSlug}/${projectSlug}`;
+// Gateway base: ${gatewayBaseUrl()}/${publisherHandle}/${projectSlug}`;
 
   return (
     <div className="grid gap-4 lg:grid-cols-2">

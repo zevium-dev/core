@@ -18,7 +18,7 @@ import {
   type MutationCtx,
   type QueryCtx,
 } from "./_generated/server";
-import { requireIdentity } from "./lib/auth";
+import { requireIdentity, requireOrgAdmin } from "./lib/auth";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -248,42 +248,142 @@ export const setDisabled = mutation({
   },
 });
 
-/**
- * Record a rotation: the old key keeps working until graceUntil, the new key
- * notes its lineage. Called from the web rotateKey server fn after Clerk
- * creates the replacement key.
- */
-export const recordRotation = mutation({
+export const revokePrevious = mutation({
+  args: { keyId: v.string() },
+  handler: async (ctx, args): Promise<KeySettingView> => {
+    const claims = await requireIdentity(ctx);
+    requireOrgAdmin(claims);
+    const { clerkOrgId } = await requireOrgByClerkId(ctx);
+    const doc = await upsertSetting(ctx, clerkOrgId, args.keyId, {
+      disabled: true,
+      graceUntil: undefined,
+    });
+    return toView(doc);
+  },
+});
+
+export const beginRotation = mutation({
+  args: { operationId: v.string(), oldKeyId: v.string() },
+  handler: async (ctx, args) => {
+    const claims = await requireIdentity(ctx);
+    requireOrgAdmin(claims);
+    if (!claims.orgId || !claims.subject)
+      throw new Error("Select an organization before rotating");
+    const existing = await ctx.db
+      .query("keyRotationOperations")
+      .withIndex("by_operation", (q) =>
+        q
+          .eq("clerkOrgId", claims.orgId!)
+          .eq("userId", claims.subject!)
+          .eq("operationId", args.operationId),
+      )
+      .unique();
+    if (
+      existing?.status === "reserved" &&
+      Date.now() - existing.updatedAt > 5 * 60_000
+    ) {
+      await ctx.db.patch(existing._id, {
+        status: "failed",
+        failure: "Reservation expired",
+        updatedAt: Date.now(),
+      });
+    } else if (existing) return existing;
+    const active = await ctx.db
+      .query("keyRotationOperations")
+      .withIndex("by_active_old_key", (q) =>
+        q
+          .eq("clerkOrgId", claims.orgId!)
+          .eq("oldKeyId", args.oldKeyId)
+          .eq("status", "reserved"),
+      )
+      .unique();
+    if (active && Date.now() - active.updatedAt > 5 * 60_000) {
+      await ctx.db.patch(active._id, {
+        status: "failed",
+        failure: "Reservation expired",
+        updatedAt: Date.now(),
+      });
+    } else if (active) {
+      throw new Error("A rotation is already in progress for this key");
+    }
+    const now = Date.now();
+    const id = await ctx.db.insert("keyRotationOperations", {
+      clerkOrgId: claims.orgId,
+      userId: claims.subject,
+      operationId: args.operationId,
+      oldKeyId: args.oldKeyId,
+      status: "reserved",
+      createdAt: now,
+      updatedAt: now,
+    });
+    return await ctx.db.get(id);
+  },
+});
+
+export const completeRotation = mutation({
   args: {
+    operationId: v.string(),
     oldKeyId: v.string(),
     newKeyId: v.string(),
     graceUntil: v.number(),
   },
-  handler: async (
-    ctx,
-    args,
-  ): Promise<{ oldKey: KeySettingView; newKey: KeySettingView }> => {
-    const { clerkOrgId } = await requireOrgByClerkId(ctx);
-    if (
-      args.oldKeyId.trim().length === 0 ||
-      args.newKeyId.trim().length === 0
-    ) {
-      throw new Error("oldKeyId and newKeyId are required");
-    }
-    if (args.oldKeyId === args.newKeyId) {
-      throw new Error("oldKeyId and newKeyId must differ");
-    }
-    if (!Number.isFinite(args.graceUntil) || args.graceUntil <= Date.now()) {
-      throw new Error("graceUntil must be a future timestamp");
-    }
-
-    const oldDoc = await upsertSetting(ctx, clerkOrgId, args.oldKeyId, {
+  handler: async (ctx, args) => {
+    const claims = await requireIdentity(ctx);
+    requireOrgAdmin(claims);
+    if (!claims.orgId || !claims.subject)
+      throw new Error("Select an organization before rotating");
+    const op = await ctx.db
+      .query("keyRotationOperations")
+      .withIndex("by_operation", (q) =>
+        q
+          .eq("clerkOrgId", claims.orgId!)
+          .eq("userId", claims.subject!)
+          .eq("operationId", args.operationId),
+      )
+      .unique();
+    if (!op || op.oldKeyId !== args.oldKeyId)
+      throw new Error("Rotation operation not found");
+    if (op.status === "completed") return op;
+    if (op.status !== "reserved") throw new Error("Rotation operation failed");
+    const oldDoc = await upsertSetting(ctx, claims.orgId, args.oldKeyId, {
       graceUntil: args.graceUntil,
     });
-    const newDoc = await upsertSetting(ctx, clerkOrgId, args.newKeyId, {
+    await upsertSetting(ctx, claims.orgId, args.newKeyId, {
       rotatedFromKeyId: args.oldKeyId,
     });
+    await ctx.db.patch(op._id, {
+      status: "completed",
+      newKeyId: args.newKeyId,
+      graceUntil: oldDoc.graceUntil,
+      updatedAt: Date.now(),
+    });
+    return await ctx.db.get(op._id);
+  },
+});
 
-    return { oldKey: toView(oldDoc), newKey: toView(newDoc) };
+export const failRotation = mutation({
+  args: { operationId: v.string(), message: v.string() },
+  handler: async (ctx, args) => {
+    const claims = await requireIdentity(ctx);
+    requireOrgAdmin(claims);
+    if (!claims.orgId || !claims.subject)
+      throw new Error("Select an organization before rotating");
+    const op = await ctx.db
+      .query("keyRotationOperations")
+      .withIndex("by_operation", (q) =>
+        q
+          .eq("clerkOrgId", claims.orgId!)
+          .eq("userId", claims.subject!)
+          .eq("operationId", args.operationId),
+      )
+      .unique();
+    if (!op) throw new Error("Rotation operation not found");
+    if (op.status === "completed") return op;
+    await ctx.db.patch(op._id, {
+      status: "failed",
+      failure: args.message.slice(0, 160),
+      updatedAt: Date.now(),
+    });
+    return await ctx.db.get(op._id);
   },
 });

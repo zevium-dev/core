@@ -60,6 +60,23 @@ const SPEC = JSON.stringify({
         },
       },
     },
+    "/render": {
+      post: {
+        "x-zevium-cost": 20,
+        responses: {
+          "200": {
+            content: {
+              "text/html": {
+                schema: {
+                  type: "string",
+                  example: "<h1>Rendered Markdown</h1>",
+                },
+              },
+            },
+          },
+        },
+      },
+    },
   },
 });
 
@@ -148,6 +165,17 @@ describe("mock gateway route", () => {
     expect(res.status).toBe(200);
     expect(res.headers.get("x-zevium-cost")).toBe("0");
     expect(await res.json()).toEqual({ greeting: "hi" });
+  });
+
+  it("returns non-JSON mock bodies without JSON string quoting", async () => {
+    await installFixtures({ clerkOrgId: "org_mock_html", credits: 0 });
+
+    const res = await mockFetch(`/mock/${ORG_SLUG}/${PROJECT_SLUG}/render`, {
+      method: "POST",
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("text/html");
+    expect(await res.text()).toBe("<h1>Rendered Markdown</h1>");
   });
 
   it("never reaches upstream — mock works at zero balance", async () => {

@@ -15,6 +15,7 @@ async function seedProject(t: ReturnType<typeof convexTest>) {
       clerkOrgId: "org_publisher",
       name: "Publisher",
       slug: "publisher",
+      publicHandle: "publisher",
     });
     const projectId = await ctx.db.insert("projects", {
       organizationId,
@@ -68,11 +69,30 @@ function asStranger(t: ReturnType<typeof convexTest>) {
   });
 }
 
+function asMember(t: ReturnType<typeof convexTest>) {
+  return t.withIdentity({
+    subject: "user_member",
+    org_id: "org_publisher",
+    org_slug: "publisher",
+    org_role: "org:member",
+  } as {
+    subject: string;
+    org_id: string;
+    org_slug: string;
+    org_role: string;
+  });
+}
+
 describe("upstream credentials", () => {
   const previousSecret = process.env.GATEWAY_INTERNAL_SECRET;
+  const previousEncryptionKey = process.env.UPSTREAM_CREDENTIAL_ENCRYPTION_KEYS;
 
   beforeEach(() => {
     process.env.GATEWAY_INTERNAL_SECRET = INTERNAL_SECRET;
+    process.env.UPSTREAM_CREDENTIAL_ENCRYPTION_KEYS = JSON.stringify({
+      current: "test-v1",
+      keys: { "test-v1": "test-upstream-credential-encryption-key" },
+    });
   });
 
   afterEach(() => {
@@ -80,6 +100,11 @@ describe("upstream credentials", () => {
       delete process.env.GATEWAY_INTERNAL_SECRET;
     } else {
       process.env.GATEWAY_INTERNAL_SECRET = previousSecret;
+    }
+    if (previousEncryptionKey === undefined) {
+      delete process.env.UPSTREAM_CREDENTIAL_ENCRYPTION_KEYS;
+    } else {
+      process.env.UPSTREAM_CREDENTIAL_ENCRYPTION_KEYS = previousEncryptionKey;
     }
   });
 
@@ -104,7 +129,9 @@ describe("upstream credentials", () => {
     const stored = await t.run(async (ctx) =>
       ctx.db.get(created.id as Id<"upstreamCredentials">),
     );
-    expect(stored?.secret).toBe("publisher-secret");
+    expect(stored?.ciphertext).not.toContain("publisher-secret");
+    expect(stored?.iv).toBeTruthy();
+    expect(stored?.keyVersion).toBe("test-v1");
   });
 
   it("updates same header and gateway endpoint receives latest value", async () => {
@@ -125,7 +152,7 @@ describe("upstream credentials", () => {
     expect(second.id).toBe(first.id);
 
     const response = await t.fetch(
-      "/gateway-spec?orgSlug=publisher&projectSlug=md-to-html",
+      "/gateway-spec?publisherHandle=publisher&projectSlug=md-to-html",
       { headers: { "x-internal-secret": INTERNAL_SECRET } },
     );
     expect(response.status).toBe(200);
@@ -150,6 +177,18 @@ describe("upstream credentials", () => {
         secret: "stolen",
       }),
     ).rejects.toThrow(/Not a member of this organization/);
+  });
+
+  it("allows members to view metadata but reserves credential changes for admins", async () => {
+    const t = convexTest(schema, modules);
+    const { projectId } = await seedProject(t);
+    await expect(
+      asMember(t).mutation(api.upstreamCredentials.upsert, {
+        projectId,
+        name: "x-api-key",
+        secret: "stolen",
+      }),
+    ).rejects.toThrow(/Org admin role required/);
   });
 
   it("rejects unsafe headers and values", async () => {

@@ -89,6 +89,112 @@ Security note: credentials and browser/session identifiers are never copied into
 37. First anonymous mock request returned `404 project_not_found` after cache-expiry retry.
 38. Production Worker tail revealed exact failure: `InternalHttpSpecSource.getPublishedSpec failed TypeError: Illegal invocation: function called with incorrect this reference.`
 39. Root cause: gateway stored bare Workerd global `fetch` in a private field, then invoked it with the class instance as receiver. Workerd requires global receiver. Fixed default fetch with closure that calls global `fetch` directly.
+40. Second CI passed in 2m19s; production deployment and smoke test passed in 1m52s.
+41. First post-fix anonymous mock succeeded at zero credits but returned `Content-Type: application/json` with `{}`. Root cause: mock generator only understood `application/json`, and gateway always JSON-stringified output.
+42. Extended mock generation to prefer JSON when present, otherwise use first declared 200 response media type. Non-JSON string bodies now preserve content type and serialize without JSON quotes. Added shared and Workerd tests for `text/html` plus media-level examples.
+43. User corrected workflow: stop deploying every incremental fix; exercise pending app changes through `http://localhost:3000` and batch production delivery later.
+44. Opened localhost app in new background tab. Created temporary public `Markdown to HTML Local` fixture with `text/html` response example and published version `1.0.0`.
+45. Local catalogue rendered fixture. Chrome DevTools input automation again removed requested slug separators, producing `mdtohtmllocal`; description persisted when native input event was used.
+46. Verified local upstream credential UI end to end with dummy value:
+    - Saved `x-api-key`.
+    - Post-save secret field cleared.
+    - Configured list showed header name and timestamp only.
+    - Secret value was not returned to browser snapshot.
+47. Local gateway mock requests for both new fixture and pre-existing `test-org/http-echo` returned `404 project_not_found`.
+48. Local gateway logs showed `InternalHttpSpecSource.getPublishedSpec failed { status: 401 }`. Convex dev has `GATEWAY_INTERNAL_SECRET`, but it does not match `apps/gateway/.dev.vars`; every local gateway spec lookup is currently blocked.
+49. Synced local gateway secret without printing it:
+    - Generated fresh 32-byte value.
+    - Replaced ignored `.dev.vars` value.
+    - Set same value in Convex development deployment.
+    - Deleted temporary sync helper and restarted `zevium-dev`.
+50. Requests still returned 401. Deeper root cause: gateway local runtime inherited production `CONVEX_URL` and `CONVEX_SITE_URL` from `wrangler.jsonc`, while localhost web used development deployment `doting-warbler-454`.
+51. Added ignored `.dev.vars` overrides for development Convex cloud/site URLs, restarted stack, and reran same request.
+52. Local anonymous mock passed end to end:
+    - HTTP 200.
+    - `Content-Type: text/html`.
+    - `x-zevium-cost: 0`.
+    - `x-zevium-mock: 1`.
+    - Body: `<h1>Rendered Markdown</h1>`.
+53. Production gateway key page returned `Forbidden`; no create control rendered.
+54. Browser network inspection showed server function returned HTTP 200 transport envelope containing Clerk error `Forbidden`.
+55. Production Clerk `/v1/environment` reported machine API keys fully disabled:
+    - `enabled: false`
+    - `user_api_keys_enabled: false`
+    - `orgs_api_keys_enabled: false`
+56. Clerk CLI diagnosis:
+    - Host execution passed.
+    - Local CLI token is expired and production instance is not linked, so CLI mutation path was not trusted.
+57. Opened signed-in Clerk production dashboard through Helium. Command-menu search found machine-auth API key controls under `/platform/api-keys/configure`.
+58. Enabled User API keys; Organization API keys stayed disabled because Zevium key contract is user-scoped with org claim.
+59. Reloaded Zevium production key page. `Forbidden` disappeared and `Create key` rendered.
+60. Created one key named `md-to-html dogfood`. Secret was copied through browser control and pasted into password field without snapshotting or printing it.
+61. Production listing playground exposed two correctness bugs:
+    - Real request URL omitted `/gateway`, producing `https://gateway.zevium.dev/{org}/{project}/`.
+    - Request body defaulted to JSON and forced `Content-Type: application/json` even though OpenAPI declares `text/plain`.
+62. Fixed locally:
+    - `tryItBaseUrl` now normalizes bare origin and `/gateway` input to explicit `/gateway` or `/mock`.
+    - Playground derives media type and initial body example from OpenAPI `requestBody`, preferring JSON only when declared.
+    - Added URL and request-body behavior tests.
+63. Executed corrected production gateway request inside browser without exposing key. First attempt failed with browser `ERR_NETWORK_CHANGED`; exact retry reached gateway.
+64. Gateway returned HTTP 401 with `x-zevium-free-tier: 1`, proving Zevium key verification and free-tier path worked but upstream rejected injected credential.
+65. Root cause: first Vercel interaction clicked revealed secret-value element, not actual copy control, so wrong clipboard content was stored in Zevium.
+66. Returned to Vercel and located explicit `aria-label="Copy to clipboard"` button without snapshotting secret. Copied correct value, replaced Zevium `x-api-key`, and kept value write-only.
+67. Original gateway key was used successfully for Clerk verification, proven by key page `Last used` timestamp, but its secret was lost when clipboard was overwritten by upstream key.
+68. Rotated gateway key through Zevium. UI correctly warned old key keeps 24-hour grace and new secret is shown once. Copied rotated secret without snapshot.
+69. First rotated-key call returned HTTP 402 `Invalid API key`; expected edge-sync delay is documented as up to one minute.
+70. Local hot-reload verification passed:
+    - Try-it real URL displayed `/gateway/{org}/{project}/`.
+    - Body initialized from OpenAPI example as `# Hello`.
+    - Mock URL displayed `/mock/{org}/{project}/`.
+    - Sending through browser UI returned HTTP 200, `mock response · 0 credits`, and `<h1>Rendered Markdown</h1>`.
+71. Playground tests passed: web 159/159 and typecheck green.
+72. Second rotation exposed browser-paste diagnosis: exact new Clerk secret rendered as 35 characters, while playground input had grown to 105 characters — three keys concatenated by repeated paste into non-empty password field. Gateway correctly rejected malformed value.
+73. Called production gateway directly from one-time key dialog using exact 35-character DOM value. Clerk verification succeeded and free-tier reservation started, but upstream still returned 401.
+74. Verified Vercel secret independently without exposing it:
+    - Moved 36-character value between same-origin Vercel tabs through temporary browser storage and `window.name`.
+    - Called `md-to-html` from same-origin page.
+    - Upstream itself returned HTTP 401.
+75. Vercel deployment was 176 days old. Environment variable existed in current Project Settings but not deployed runtime. Started production redeploy with latest Project Settings and build cache disabled.
+76. First Vercel deployment view returned `Something went wrong`; retry recovered page. Build completed Ready in 25 seconds and reassigned `md-to-html-lemon.vercel.app`.
+77. Gateway still returned upstream 401 after redeploy. Zevium credential value was therefore also corrupted by clipboard/paste automation.
+78. Replaced Zevium upstream credential without clipboard:
+    - Staged exact 36-character Vercel value in temporary same-origin browser storage.
+    - Moved it into `window.name` on disposable tab and deleted temporary storage.
+    - Navigated disposable tab cross-origin to Zevium Settings.
+    - Wrote exact value into controlled secret input via native input event, cleared `window.name`, and saved.
+79. Root cause of Vercel selector mistake: actual local/Vercel `API_KEY` is 32 characters; automation chose unrelated 36-character button by length. A temporary verifier read sibling `.env` without printing value and proved direct production upstream returned HTTP 200 with HTML.
+80. Filled exact 32-character local secret into Zevium through temporary Node-to-DevTools helper, saved it, deleted helper, and waited through 30-second gateway spec cache.
+81. Full production call passed:
+    - HTTP 200.
+    - `Content-Type: text/html; charset=UTF-8`.
+    - Rendered expected heading and bold Markdown.
+    - First five successful calls used publisher-funded free tier at 0 credits.
+    - Sixth successful call charged 20 credits.
+82. Production usage activity showed six HTTP 200 events for `Markdown to HTML`:
+    - Five rows at 0 credits.
+    - One row at 20 credits.
+    - Observed latency ranged 176–2,112 ms.
+83. Publisher earnings settled exactly:
+    - Gross: 20 credits.
+    - Zevium fee: 1 credit.
+    - Publisher pending share: 19 credits.
+    - Risk-review availability date: 2026-07-26.
+84. Final local verification after pending mock/playground fixes:
+    - Build green.
+    - Shared tests 45/45.
+    - Web tests 159/159.
+    - Gateway tests 84/84.
+    - Convex tests 109/109.
+    - Typecheck green.
+85. Key rotation left three enabled Clerk keys despite page saying one active key per user. Revoked original and first rotated keys; retained only final key used by successful production calls.
+86. Attempted to delete temporary localhost fixture and its dummy credential. Helium's permission-broker DevTools bridge timed out on navigation, then on page-list liveness after stable-session restart. User restarted and reopened Helium twice with permission, but broker remained unreachable.
+87. Pending mock/playground fixes are verified locally only, per user instruction not to deploy every incremental change. Production listing, credential injection, upstream, usage, and earnings are already live.
+88. Added persistent fish `helium-debug` launcher using loopback-only direct CDP port 9333. Direct `--browserUrl http://127.0.0.1:9333` connection succeeded immediately with one page and no Allow prompt.
+89. Used direct connection to finish localhost cleanup through app:
+    - Opened `mdtohtmllocal` Settings.
+    - Confirmed permanent deletion with project slug.
+    - App redirected to project list containing only pre-existing `test-api-22`.
+    - Project deletion also removed its dummy upstream credential through cascade implemented during this dogfood.
 
 ## Issues
 
@@ -105,3 +211,23 @@ Security note: credentials and browser/session identifiers are never copied into
 - **Textarea automation limitation, not app data loss:** `chrome-devtools fill` changed raw textarea DOM value but did not update React controlled state. Saving therefore sent empty description. Dispatching native textarea `input` event updated React state; reload proved persistence. Earlier “description silently dropped” observation was automation-induced.
 - **Visibility confirmation inconsistency:** Spec rail's `Make public` action changed visibility immediately even though accessible metadata reported a dialog-capable control. Settings visibility action uses explicit confirmation.
 - **Production-only Workerd fetch binding bug:** default internal spec source stored bare global `fetch`; tests injected a mock and could not reproduce receiver requirement. Result was `Illegal invocation` and every gateway/mock lookup returned `project_not_found`. Fixed default path to call global `fetch` through closure.
+- **Mock mode was JSON-only:** valid `text/html` API produced `{}` with JSON content type, making try-before-buy useless. Generator and gateway serialization were generalized to declared response media type.
+- **Clipboard-read smoke attempt wedged DevTools:** opening upstream Scalar page succeeded, but `navigator.clipboard.readText()` through evaluated script timed out. Same Helium session also timed out after restart until user accepted/unblocked browser permission again. Existing Vercel secret was not printed or retried through a shell workaround.
+- **Mock response type was over-narrow:** first implementation generalized runtime content types but left TypeScript contract fixed to literal `application/json`; shared typecheck caught it after behavior tests passed. Changed `contentType` to `string`.
+- **Local gateway/control-plane secret mismatch:** localhost Worker receives 401 from Convex `/gateway-spec`, including for known seed projects. Local browser UI works, but gateway and mock smoke tests cannot proceed until same `GATEWAY_INTERNAL_SECRET` is configured in Convex dev and `apps/gateway/.dev.vars`, then dev Worker restarts.
+- **Local gateway pointed at production Convex:** syncing shared secret alone did not fix 401 because localhost Worker still used production URLs from `wrangler.jsonc` while web used dev Convex. Added ignored `.dev.vars` URL overrides. This config drift made localhost UI and gateway operate on different databases.
+- **Production Clerk API keys disabled:** project plan claimed feature enabled and live, but production environment flags were all false and Zevium returned `Forbidden`. Enabled user-scoped API keys in production Clerk dashboard; key page recovered without code deployment.
+- **Clerk CLI stale session:** host access was valid, but CLI token had expired and production instance link was missing. Browser dashboard session was used; no fake CLI success claimed.
+- **Playground real-call URL wrong for bare gateway origin:** production environment supplies origin, while helper assumed real URL already ended in `/gateway`. UI displayed and would fetch nonexistent root path.
+- **Playground hardcoded JSON bodies:** `text/plain` OpenAPI request still received JSON default and `application/json`, making non-JSON APIs impossible to exercise correctly.
+- **First upstream secret copy targeted wrong control:** credential metadata saved successfully but upstream returned 401. Explicit Vercel `Copy to clipboard` control fixed value; secret was never printed.
+- **DevTools paste did not update React state:** raw password input changed, but `onChange`/session storage did not. Native input events are required when browser paste automation is used. Consumer key was rotated because one-time value had already been overwritten in clipboard.
+- **Expected key propagation delay:** immediate use of rotated Clerk key returned machine-readable 402 `Invalid API key`; UI already states gateway changes may take one minute.
+- **Repeated browser paste concatenated secrets:** password field retained previous value across attempts; automation pasted again instead of replacing, creating a 105-character invalid token. Exact one-time 35-character DOM value verified correctly.
+- **Vercel environment change not deployed:** dashboard `API_KEY` value itself failed direct authentication against 176-day-old production runtime. Redeploy with latest Project Settings required before Zevium can call upstream.
+- **Upstream clipboard path also corrupted value:** Vercel runtime redeploy alone did not fix 401. Cross-origin `window.name` transfer plus exact native input event replaced Zevium value without displaying or concatenating it.
+- **Transient Vercel deployment view failure:** redeploy initially navigated to generic `Something went wrong`; dashboard Retry recovered active build.
+- **DOM-length selector chose wrong Vercel button:** guessed 36-character button was not `API_KEY`; local source of truth proved real secret length 32 and authenticated production upstream. Exact local value fixed Zevium injection.
+- **Activity route discoverability mismatch:** `/app/activity` rendered Not Found; actual route is `/app/settings/activity`. Sidebar exposes Settings but not direct Activity link.
+- **Rotation permits multiple enabled keys:** two rotations produced three enabled rows even while UI claims one active key. Gateway grace behavior is intentional, but UI status and one-key wording are misleading. Old rows were manually revoked after verification.
+- **Helium permission broker remained dead after restart:** page listing timed out repeatedly through port 9222. Launching Helium directly on loopback port 9333 bypassed broker, removed repeated Allow prompts, and let app-only cleanup finish.

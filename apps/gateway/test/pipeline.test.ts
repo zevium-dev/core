@@ -57,12 +57,27 @@ const SPEC = JSON.stringify({
         "x-zevium-free-tier": 2,
       },
     },
+    "/zero": {
+      get: {
+        "x-zevium-cost": 0,
+        "x-zevium-free-tier": 1,
+      },
+    },
   },
 });
 
 function walletStub(clerkOrgId: string): WalletStub {
   const id = env.WALLET.idFromName(clerkOrgId);
   return env.WALLET.get(id);
+}
+
+function freeScope(clerkOrgId: string) {
+  return {
+    clerkOrgId,
+    projectId: "proj_demo",
+    method: "GET",
+    pathTemplate: "/free",
+  };
 }
 
 function makeFetchMock(
@@ -92,6 +107,7 @@ async function installFixtures(opts: {
   sunsetAt?: number;
   deprecationMessage?: string;
   upstreamHeaders?: Record<string, string>;
+  spec?: string;
 }) {
   const usage = opts.usage ?? new CollectingUsageSink();
   const organizationId = opts.organizationId ?? opts.clerkOrgId;
@@ -104,7 +120,7 @@ async function installFixtures(opts: {
   });
   const specs = new FixtureSpecSource();
   specs.set(ORG_SLUG, PROJECT_SLUG, {
-    spec: SPEC,
+    spec: opts.spec ?? SPEC,
     projectId: "proj_demo",
     organizationId,
     clerkOrgId: opts.clerkOrgId,
@@ -159,6 +175,29 @@ afterEach(() => {
 });
 
 describe("gateway pipeline", () => {
+  it("rejects an unsafe upstream before a credit reservation or fetch", async () => {
+    const clerkOrgId = "org_pipe_unsafe";
+    const { fetchImpl, calls } = makeFetchMock(() => new Response("no"));
+    const unsafeSpec = JSON.stringify({
+      ...JSON.parse(SPEC),
+      servers: [{ url: "https://127.0.0.1" }],
+    });
+    const { usage } = await installFixtures({
+      clerkOrgId,
+      fetchImpl,
+      credits: 100,
+      spec: unsafeSpec,
+    });
+
+    const res = await gatewayFetch(
+      `/gateway/${ORG_SLUG}/${PROJECT_SLUG}/stream`,
+    );
+    expect(res.status).toBe(422);
+    expect(calls).toHaveLength(0);
+    expect(usage.events).toHaveLength(0);
+    expect((await walletStub(clerkOrgId).getState()).balance).toBe(100);
+  });
+
   it("happy path: reserves, proxies, settles, sets headers", async () => {
     const clerkOrgId = "org_pipe_happy";
     const { fetchImpl, calls } = makeFetchMock(async (req) => {
@@ -539,6 +578,32 @@ describe("gateway pipeline", () => {
     expect(freeEvents.every((e) => e.cost === 0)).toBe(true);
   });
 
+  it("does not consume free-tier allowance for zero-cost operations", async () => {
+    const clerkOrgId = "org_pipe_zero_cost";
+    const { fetchImpl, calls } = makeFetchMock(
+      () => new Response("zero-cost", { status: 200 }),
+    );
+    await installFixtures({ clerkOrgId, fetchImpl, credits: 0 });
+
+    for (let index = 0; index < 3; index += 1) {
+      const response = await gatewayFetch(
+        `/gateway/${ORG_SLUG}/${PROJECT_SLUG}/zero`,
+      );
+      expect(response.status).toBe(200);
+      expect(response.headers.get("x-zevium-free-tier")).toBeNull();
+    }
+
+    expect(calls).toHaveLength(3);
+    expect(
+      await walletStub(clerkOrgId).getFreeTierUsed({
+        clerkOrgId,
+        projectId: "proj_demo",
+        method: "GET",
+        pathTemplate: "/zero",
+      }),
+    ).toBe(0);
+  });
+
   it("disabled and expired-grace keys cannot use the free tier upstream", async () => {
     for (const [label, setting] of [
       ["disabled", { keyId: KEY_ID, disabled: true }],
@@ -560,16 +625,20 @@ describe("gateway pipeline", () => {
 
       expect(res.status).toBe(403);
       expect(calls).toHaveLength(0);
-      expect(await walletStub(clerkOrgId).getFreeTierUsed(KEY_ID)).toBe(0);
+      expect(
+        await walletStub(clerkOrgId).getFreeTierUsed(freeScope(clerkOrgId)),
+      ).toBe(0);
       __setTestGrantsFetcher(null);
     }
   });
 
-  it("returns free-tier allowance after a failed upstream response", async () => {
+  it("returns free-tier allowance after 4xx and 5xx upstream responses", async () => {
     const clerkOrgId = "org_pipe_free_refund";
-    const { fetchImpl, calls } = makeFetchMock(
-      () => new Response("upstream failure", { status: 503 }),
-    );
+    const statuses = [400, 503];
+    const { fetchImpl, calls } = makeFetchMock(() => {
+      const status = statuses.shift();
+      return new Response("upstream failure", { status });
+    });
     const { usage } = await installFixtures({
       clerkOrgId,
       fetchImpl,
@@ -583,10 +652,12 @@ describe("gateway pipeline", () => {
       `/gateway/${ORG_SLUG}/${PROJECT_SLUG}/free`,
     );
 
-    expect(first.status).toBe(503);
+    expect(first.status).toBe(400);
     expect(second.status).toBe(503);
     expect(calls).toHaveLength(2);
-    expect(await walletStub(clerkOrgId).getFreeTierUsed(KEY_ID)).toBe(0);
+    expect(
+      await walletStub(clerkOrgId).getFreeTierUsed(freeScope(clerkOrgId)),
+    ).toBe(0);
     expect(usage.events.map((event) => event.outcome)).toEqual([
       "refunded",
       "refunded",
@@ -607,7 +678,9 @@ describe("gateway pipeline", () => {
 
     expect(res.status).toBe(502);
     expect(calls).toHaveLength(1);
-    expect(await walletStub(clerkOrgId).getFreeTierUsed(KEY_ID)).toBe(0);
+    expect(
+      await walletStub(clerkOrgId).getFreeTierUsed(freeScope(clerkOrgId)),
+    ).toBe(0);
   });
 
   it("flush batching with ack via DO alarm + fake convex sink", async () => {

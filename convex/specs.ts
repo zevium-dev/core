@@ -2,9 +2,14 @@ import { v } from "convex/values";
 import { internalQuery, mutation, query } from "./_generated/server";
 import type { Doc } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
-import { getOrgBySlug, requireProjectMember } from "./lib/auth";
+import { getOrgByPublicHandle, requireProjectMember } from "./lib/auth";
 import { createNotification } from "./lib/notifications";
 import { fireWebhookEvent } from "./webhooks";
+import {
+  decryptCredential,
+  requireEncryptedCredential,
+} from "./lib/credentialCrypto";
+import { draftFingerprint, readinessValidity } from "./publishReadiness";
 import {
   isValidSemver,
   type SpecIssue,
@@ -16,14 +21,22 @@ export const getDraft = query({
   handler: async (
     ctx,
     args,
-  ): Promise<{ draft: string; lastSavedAt: number } | null> => {
+  ): Promise<{
+    draft: string;
+    draftHash: string;
+    lastSavedAt: number;
+  } | null> => {
     await requireProjectMember(ctx, args.projectId);
     const row = await ctx.db
       .query("specs")
       .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
       .unique();
     if (row === null) return null;
-    return { draft: row.draft, lastSavedAt: row.lastSavedAt };
+    return {
+      draft: row.draft,
+      draftHash: await draftFingerprint(row.draft),
+      lastSavedAt: row.lastSavedAt,
+    };
   },
 });
 
@@ -39,6 +52,7 @@ export const saveDraft = mutation({
     ok: boolean;
     issues: SpecIssue[];
     draft: string;
+    draftHash?: string;
     lastSavedAt: number;
   }> => {
     await requireProjectMember(ctx, args.projectId);
@@ -63,6 +77,16 @@ export const saveDraft = mutation({
       .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
       .unique();
 
+    if (existing !== null && existing.draft === args.spec) {
+      return {
+        ok: true,
+        issues: effectiveIssues,
+        draft: existing.draft,
+        draftHash: await draftFingerprint(existing.draft),
+        lastSavedAt: existing.lastSavedAt,
+      };
+    }
+
     if (existing === null) {
       await ctx.db.insert("specs", {
         projectId: args.projectId,
@@ -75,11 +99,17 @@ export const saveDraft = mutation({
         lastSavedAt: now,
       });
     }
+    const readiness = await ctx.db
+      .query("publishReadiness")
+      .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
+      .unique();
+    if (readiness) await ctx.db.delete(readiness._id);
 
     return {
       ok: true,
       issues: effectiveIssues,
       draft: args.spec,
+      draftHash: await draftFingerprint(args.spec),
       lastSavedAt: now,
     };
   },
@@ -110,6 +140,51 @@ export const publish = mutation({
             level: "error",
             path: "version",
             message: "Version must be valid semver (e.g. 0.1.0)",
+          },
+        ],
+      };
+    }
+    const draftForReadiness = await ctx.db
+      .query("specs")
+      .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
+      .unique();
+    const credentialRows = await ctx.db
+      .query("upstreamCredentials")
+      .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
+      .collect();
+    const credentialRevision = credentialRows.reduce(
+      (latest, row) => Math.max(latest, row.updatedAt),
+      0,
+    );
+    const readiness = await ctx.db
+      .query("publishReadiness")
+      .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
+      .unique();
+    const readinessState = await readinessValidity(
+      readiness,
+      draftForReadiness?.draft ?? null,
+      credentialRevision,
+    );
+    if (!readinessState.current) {
+      const readinessMessages = {
+        missing: "Run a passing connection test before publishing.",
+        draft_missing:
+          "Save a draft, then run a passing connection test before publishing.",
+        status_not_ok: "Run a passing connection test before publishing.",
+        expired:
+          "The passing connection test expired. Run it again before publishing.",
+        draft_changed:
+          "The saved draft changed after the connection test. Run it again before publishing.",
+        credentials_changed:
+          "Credentials changed after the connection test. Run it again before publishing.",
+      } as const;
+      return {
+        ok: false,
+        issues: [
+          {
+            level: "error",
+            path: "readiness",
+            message: readinessMessages[readinessState.reason],
           },
         ],
       };
@@ -260,7 +335,7 @@ export const getVersion = query({
  */
 export const getPublishedForGateway = query({
   args: {
-    orgSlug: v.string(),
+    publisherHandle: v.string(),
     projectSlug: v.string(),
   },
   handler: async (
@@ -277,7 +352,7 @@ export const getPublishedForGateway = query({
     sunsetAt: number | undefined;
     deprecationMessage: string | undefined;
   } | null> => {
-    const org = await getOrgBySlug(ctx, args.orgSlug);
+    const org = await getOrgByPublicHandle(ctx, args.publisherHandle);
     if (org === null) return null;
 
     const project = await ctx.db
@@ -317,7 +392,7 @@ export const getPublishedForGateway = query({
  */
 export const getPublishedForGatewayInternal = internalQuery({
   args: {
-    orgSlug: v.string(),
+    publisherHandle: v.string(),
     projectSlug: v.string(),
   },
   handler: async (
@@ -335,7 +410,7 @@ export const getPublishedForGatewayInternal = internalQuery({
     sunsetAt: number | undefined;
     deprecationMessage: string | undefined;
   } | null> => {
-    const org = await getOrgBySlug(ctx, args.orgSlug);
+    const org = await getOrgByPublicHandle(ctx, args.publisherHandle);
     if (org === null) return null;
 
     const project = await ctx.db
@@ -367,7 +442,12 @@ export const getPublishedForGatewayInternal = internalQuery({
       clerkOrgId: org.clerkOrgId,
       visibility: project.visibility,
       upstreamHeaders: Object.fromEntries(
-        upstreamHeaders.map((row) => [row.name, row.secret]),
+        await Promise.all(
+          upstreamHeaders.map(async (row) => [
+            row.name,
+            await decryptCredential(requireEncryptedCredential(row)),
+          ]),
+        ),
       ),
       deprecatedAt: latest.deprecatedAt,
       sunsetAt: latest.sunsetAt,

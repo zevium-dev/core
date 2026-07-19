@@ -299,6 +299,7 @@ export const fetchSearchListings = internalQuery({
 
       const org = await ctx.db.get(project.organizationId);
       if (org === null) continue;
+      if (org.publicHandle === undefined || org.publicHandle === "") continue;
 
       const latest = await ctx.db
         .query("specVersions")
@@ -319,7 +320,7 @@ export const fetchSearchListings = internalQuery({
         tags: project.tags,
         organizationId: org._id,
         orgName: org.name,
-        orgSlug: org.slug,
+        publisherHandle: org.publicHandle,
         publishedAt: latest?.publishedAt ?? null,
         pricing,
         score: args.scores[i] ?? 0,

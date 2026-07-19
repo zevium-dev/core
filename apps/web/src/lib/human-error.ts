@@ -5,6 +5,9 @@ export function humanError(
 ): string {
   if (err instanceof Error) {
     const msg = err.message.trim();
+    if (msg === "Forbidden" || msg === "Unauthorized") {
+      return "You do not have access to this action. Check your organization role and try again.";
+    }
     if (
       msg.length > 0 &&
       msg.length <= 200 &&

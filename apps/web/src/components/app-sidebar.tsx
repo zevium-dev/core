@@ -2,6 +2,7 @@ import { OrganizationSwitcher, UserButton } from "@clerk/tanstack-react-start";
 import { shadcn } from "@clerk/ui/themes";
 import { Link, useRouterState } from "@tanstack/react-router";
 import {
+  Activity,
   Banknote,
   BookOpen,
   BookText,
@@ -55,6 +56,12 @@ const navGroups = [
   {
     label: "System",
     items: [
+      {
+        title: "Activity",
+        to: "/app/settings/activity",
+        icon: Activity,
+        exact: true,
+      },
       { title: "Settings", to: "/app/settings", icon: Settings, exact: false },
       { title: "Docs", to: "/docs", icon: BookText, exact: false },
     ],

@@ -654,13 +654,13 @@ function UndeprecateDialog({
 
 export type SpecRailVisibilityProps = {
   visibility: "public" | "private";
-  onMakePublic: () => void;
+  onRequestMakePublic: () => void;
   pending?: boolean;
 };
 
 export function SpecRailVisibilityNudge({
   visibility,
-  onMakePublic,
+  onRequestMakePublic,
   pending,
 }: SpecRailVisibilityProps) {
   if (visibility !== "private") return null;
@@ -674,7 +674,7 @@ export function SpecRailVisibilityNudge({
         variant="outline"
         size="sm"
         className="mt-2"
-        onClick={onMakePublic}
+        onClick={onRequestMakePublic}
         disabled={pending}
       >
         {pending ? "Updating…" : "Make public"}

@@ -31,6 +31,29 @@ describe("generateMockResponse", () => {
     });
   });
 
+  it("uses a declared non-2xx response when no success response exists", () => {
+    const spec = specWith({
+      "/private": {
+        get: {
+          responses: {
+            "401": {
+              content: {
+                "application/json": {
+                  example: { error: "unauthorized" },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+    expect(generateMockResponse(spec, "/private", "get")).toEqual({
+      status: 401,
+      body: { error: "unauthorized" },
+      contentType: "application/json",
+    });
+  });
+
   it("prefers a schema-level example over synthesis", () => {
     const spec = specWith({
       "/users/{id}": {
@@ -58,6 +81,52 @@ describe("generateMockResponse", () => {
     expect(result?.body).toEqual({ id: "u_123", name: "Ada" });
     expect(result?.status).toBe(200);
     expect(result?.contentType).toBe("application/json");
+  });
+
+  it("uses a declared text/html response and preserves its example", () => {
+    const spec = specWith({
+      "/render": {
+        post: {
+          responses: {
+            "200": {
+              content: {
+                "text/html": {
+                  schema: {
+                    type: "string",
+                    example: "<h1>Rendered Markdown</h1>",
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+    expect(generateMockResponse(spec, "/render", "post")).toEqual({
+      status: 200,
+      body: "<h1>Rendered Markdown</h1>",
+      contentType: "text/html",
+    });
+  });
+
+  it("prefers media-level examples before schema synthesis", () => {
+    const spec = specWith({
+      "/plain": {
+        get: {
+          responses: {
+            "200": {
+              content: {
+                "text/plain": {
+                  example: "ready",
+                  schema: { type: "string" },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+    expect(generateMockResponse(spec, "/plain", "get")?.body).toBe("ready");
   });
 
   it("prefers schema-level examples (array form) over synthesis", () => {

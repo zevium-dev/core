@@ -144,8 +144,14 @@ if [[ "$snap" == *" error"* || "$snap" == *"errors"* ]]; then
 fi
 log "draft saved (or no error toast)"
 
+step "test saved upstream connection"
+click_button "Test connection" || fail "Test connection button missing/disabled after draft save"
+ab wait --text "Server responded successfully." 30 \
+  || fail "saved upstream connection test did not pass"
+ab wait 500 >/dev/null
+
 step "publish 0.0.1"
-click_button "Publish" || fail "Publish button missing/disabled (unsaved dirty?)"
+click_button "Publish" || fail "Publish button missing/disabled after passing connection test"
 ab wait --text "Publish version" 15
 ab fill '#semver' "0.0.1" >/dev/null \
   || ab fill 'input#semver' "0.0.1" >/dev/null \

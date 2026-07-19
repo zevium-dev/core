@@ -205,9 +205,7 @@ function DashboardContent({ orgSlug }: { orgSlug: string }) {
 
       <Card>
         <CardHeader>
-          <CardTitle>
-            <h2>Recent calls</h2>
-          </CardTitle>
+          <CardTitle>Recent calls</CardTitle>
           <CardDescription>Latest metered gateway activity</CardDescription>
         </CardHeader>
         <CardContent>

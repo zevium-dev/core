@@ -56,7 +56,7 @@ const LISTING: CatalogueListing = {
   tags: ["weather", "demo"],
   organizationId: CONVEX_ORG,
   orgName: "Acme Corp",
-  orgSlug: ORG_SLUG,
+  publisherHandle: ORG_SLUG,
   publishedAt: 1_700_000_000_000,
 };
 
@@ -210,7 +210,7 @@ describe("GET /discovery", () => {
     if (!isRecord(api)) return;
 
     expect(api.name).toBe("Demo Weather");
-    expect(api.org).toBe(ORG_SLUG);
+    expect(api.publisherHandle).toBe(ORG_SLUG);
     expect(api.slug).toBe(PROJECT_SLUG);
     expect(api.description).toBe("Weather forecasts for agents");
     expect(api.gatewayBaseUrl).toBe(
@@ -324,7 +324,7 @@ describe("MCP /mcp", () => {
     expect(isRecord(first)).toBe(true);
     if (!isRecord(first)) return;
     expect(first.slug).toBe(PROJECT_SLUG);
-    expect(first.org).toBe(ORG_SLUG);
+    expect(first.publisherHandle).toBe(ORG_SLUG);
     expect(Array.isArray(first.endpoints)).toBe(true);
   });
 

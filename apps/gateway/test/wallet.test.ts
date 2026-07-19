@@ -55,6 +55,76 @@ describe("WalletDO unit", () => {
     }
   });
 
+  it("free tier is atomic per consumer project operation and UTC day", async () => {
+    const clerkOrgId = "org_free_scope";
+    const stub = walletStub(clerkOrgId);
+    const dayOne = Date.UTC(2026, 6, 19, 23, 59, 59);
+    const base = {
+      clerkOrgId,
+      projectId: "project-a",
+      method: "GET",
+      pathTemplate: "/widgets/{widgetId}",
+      nowMs: dayOne,
+    };
+
+    const concurrent = await Promise.all(
+      Array.from({ length: 8 }, (_, index) =>
+        stub.consumeFreeTier(3, {
+          ...base,
+          keyId: index % 2 === 0 ? "key-one" : "key-two",
+        }),
+      ),
+    );
+    expect(
+      concurrent.filter((result) => result.status === "consumed"),
+    ).toHaveLength(3);
+    expect(
+      await stub.getFreeTierUsed({
+        clerkOrgId,
+        projectId: "project-a",
+        method: "GET",
+        pathTemplate: "/widgets/{widgetId}",
+        nowMs: dayOne,
+      }),
+    ).toBe(3);
+
+    expect(
+      (
+        await stub.consumeFreeTier(3, {
+          ...base,
+          keyId: "key-two",
+        })
+      ).status,
+    ).toBe("exhausted");
+    expect(
+      (
+        await stub.consumeFreeTier(3, {
+          ...base,
+          keyId: "key-one",
+          pathTemplate: "/widgets",
+        })
+      ).status,
+    ).toBe("consumed");
+    expect(
+      (
+        await stub.consumeFreeTier(3, {
+          ...base,
+          keyId: "key-one",
+          projectId: "project-b",
+        })
+      ).status,
+    ).toBe("consumed");
+    expect(
+      (
+        await stub.consumeFreeTier(3, {
+          ...base,
+          keyId: "key-one",
+          nowMs: dayOne + 1_000,
+        })
+      ).status,
+    ).toBe("consumed");
+  });
+
   it("grant idempotency — same grantId does not double-credit", async () => {
     const stub = walletStub("unit-grant-idem");
     const a = await stub.grant("g1", 100);

@@ -33,7 +33,7 @@ export type DiscoveryEndpoint = {
 
 export type DiscoveryApi = {
   name: string;
-  org: string;
+  publisherHandle: string;
   slug: string;
   description: string | undefined;
   gatewayBaseUrl: string;
@@ -88,7 +88,7 @@ export async function buildDiscoveryIndex(
 
   for (const item of page.items) {
     const published = await deps.specSource.getPublishedSpec(
-      item.orgSlug,
+      item.publisherHandle,
       item.slug,
     );
     let endpoints: DiscoveryEndpoint[] = [];
@@ -104,10 +104,10 @@ export async function buildDiscoveryIndex(
     const origin = deps.gatewayOrigin.replace(/\/+$/, "");
     apis.push({
       name: item.name,
-      org: item.orgSlug,
+      publisherHandle: item.publisherHandle,
       slug: item.slug,
       description: item.description,
-      gatewayBaseUrl: `${origin}/gateway/${item.orgSlug}/${item.slug}`,
+      gatewayBaseUrl: `${origin}/gateway/${item.publisherHandle}/${item.slug}`,
       endpoints,
     });
   }

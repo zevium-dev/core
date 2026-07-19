@@ -2,7 +2,7 @@ import { extractPricing, parseSpec } from "@zevium/shared";
 import { v } from "convex/values";
 import { query } from "./_generated/server";
 import type { Doc } from "./_generated/dataModel";
-import { getOrgBySlug } from "./lib/auth";
+import { getOrgByPublicHandle } from "./lib/auth";
 
 const PAGE_SIZE = 24;
 
@@ -24,7 +24,7 @@ export type PublicListing = {
   tags: string[];
   organizationId: Doc<"organizations">["_id"];
   orgName: string;
-  orgSlug: string;
+  publisherHandle: string;
   publishedAt: number | null;
   pricing: ListingPricingSummary | null;
 };
@@ -159,6 +159,9 @@ export const listPublic = query({
 
       const org = await ctx.db.get(project.organizationId);
       if (org === null) continue;
+      // Public URLs are only valid through the dedicated publisher handle.
+      // Never emit an empty segment or fall back to Clerk's internal slug.
+      if (org.publicHandle === undefined || org.publicHandle === "") continue;
 
       // Latest published version only — drafts live in specs table, never here.
       const latest = await ctx.db
@@ -230,7 +233,7 @@ export const listPublic = query({
         tags: project.tags,
         organizationId: org._id,
         orgName: org.name,
-        orgSlug: org.slug,
+        publisherHandle: org.publicHandle!,
         publishedAt,
         pricing,
       })),
@@ -242,7 +245,7 @@ export const listPublic = query({
 
 export const getPublicDetail = query({
   args: {
-    orgSlug: v.string(),
+    publisherHandle: v.string(),
     projectSlug: v.string(),
   },
   handler: async (
@@ -261,7 +264,7 @@ export const getPublicDetail = query({
     org: {
       _id: Doc<"organizations">["_id"];
       name: string;
-      slug: string;
+      publisherHandle: string;
       imageUrl: string | undefined;
     };
     latestVersion: {
@@ -273,8 +276,8 @@ export const getPublicDetail = query({
       deprecationMessage: string | undefined;
     } | null;
   } | null> => {
-    const org = await getOrgBySlug(ctx, args.orgSlug);
-    if (org === null) return null;
+    const org = await getOrgByPublicHandle(ctx, args.publisherHandle);
+    if (org === null || org.publicHandle === undefined) return null;
 
     const project = await ctx.db
       .query("projects")
@@ -306,7 +309,7 @@ export const getPublicDetail = query({
       org: {
         _id: org._id,
         name: org.name,
-        slug: org.slug,
+        publisherHandle: org.publicHandle,
         imageUrl: org.imageUrl,
       },
       latestVersion:

@@ -56,6 +56,19 @@ export async function getOrgBySlug(
     .unique();
 }
 
+/** Public routing uses the product handle, never the Clerk slug. */
+export async function getOrgByPublicHandle(
+  ctx: DbCtx,
+  handle: string,
+): Promise<Doc<"organizations"> | null> {
+  return await ctx.db
+    .query("organizations")
+    .withIndex("by_public_handle", (q) =>
+      q.eq("publicHandle", handle.trim().toLowerCase()),
+    )
+    .unique();
+}
+
 /**
  * Resolve org by slug and require the JWT active org claim matches it.
  * Creator/editor must be a member of the org (Clerk org claim).
@@ -129,7 +142,7 @@ export async function requireProjectMember(
  *       (publishing + deprecation lifecycle; `specs.saveDraft` stays member-level)
  *   - webhooks.upsertEndpoint / webhooks.deleteEndpoint
  *       (webhook endpoint config + signing-secret surface)
- *   - keySettings.setCap / keySettings.setDisabled / keySettings.recordRotation
+ *   - keySettings.setCap / keySettings.setDisabled / keySettings rotation state machine
  *       (gateway key provisioning, caps, rotation)
  *   - organizations.ensureOrganization stays identity-scoped (bootstrap/sync);
  *       any future org-level settings mutation should adopt this gate.

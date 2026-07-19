@@ -15,7 +15,7 @@ export type CatalogueListing = {
   tags: string[];
   organizationId: string;
   orgName: string;
-  orgSlug: string;
+  publisherHandle: string;
   publishedAt: number | null;
 };
 
@@ -34,6 +34,13 @@ export interface CatalogueSource {
   listPublic(args?: CatalogueListArgs): Promise<CataloguePage>;
 }
 
+/** Production safety valve when the Convex public catalogue is unavailable. */
+export class FailClosedCatalogueSource implements CatalogueSource {
+  async listPublic(): Promise<CataloguePage> {
+    return { items: [], nextCursor: null };
+  }
+}
+
 const DEFAULT_TTL_MS = 60_000;
 const MEMORY_MAX = 64;
 
@@ -49,7 +56,7 @@ const listPublicRef = makeFunctionReference<
       tags: string[];
       organizationId: string;
       orgName: string;
-      orgSlug: string;
+      publisherHandle: string;
       publishedAt: number | null;
     }>;
     nextCursor: string | null;
@@ -165,14 +172,14 @@ function parseListing(raw: unknown): CatalogueListing | null {
   const slug = asString(raw.slug);
   const organizationId = asString(raw.organizationId);
   const orgName = asString(raw.orgName);
-  const orgSlug = asString(raw.orgSlug);
+  const publisherHandle = asString(raw.publisherHandle);
   if (
     projectId === undefined ||
     name === undefined ||
     slug === undefined ||
     organizationId === undefined ||
     orgName === undefined ||
-    orgSlug === undefined
+    publisherHandle === undefined
   ) {
     return null;
   }
@@ -194,7 +201,7 @@ function parseListing(raw: unknown): CatalogueListing | null {
     tags,
     organizationId,
     orgName,
-    orgSlug,
+    publisherHandle,
     publishedAt: publishedAt === undefined ? null : publishedAt,
   };
 }

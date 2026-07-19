@@ -1,5 +1,8 @@
 import { auth, clerkClient } from "@clerk/tanstack-react-start/server";
 import { createServerFn } from "@tanstack/react-start";
+import { ConvexHttpClient } from "convex/browser";
+
+import { api } from "#/lib/convex-api";
 
 export type ApiKeyRow = {
   id: string;
@@ -57,6 +60,20 @@ function toRow(key: {
     lastUsedAt: key.lastUsedAt,
     revoked: key.revoked,
   };
+}
+
+function keyBelongsToOrganization(
+  key: { claims?: unknown },
+  orgId: string,
+): boolean {
+  const claims = key.claims;
+  return (
+    claims !== null &&
+    typeof claims === "object" &&
+    "org_id" in claims &&
+    typeof claims.org_id === "string" &&
+    claims.org_id === orgId
+  );
 }
 
 /** List non-revoked API keys for signed-in user in active org. */
@@ -174,19 +191,33 @@ export const revokeKey = createServerFn({ method: "POST" })
   .handler(async ({ data }): Promise<{ id: string }> => {
     const session = await auth();
     const userId = requireUserId(session.userId);
+    const orgId = session.orgId;
+    if (typeof orgId !== "string" || orgId.length === 0) {
+      throw new Error("Select an organization before revoking an API key");
+    }
     const client = await clerkClient();
+    const convexUrl = import.meta.env.VITE_CONVEX_URL;
+    const token = (await session.getToken({ template: "convex" })) ?? null;
+    if (!convexUrl || !token) {
+      throw new Error(
+        "Secure key revocation is temporarily unavailable. Refresh and try again.",
+      );
+    }
+    const convex = new ConvexHttpClient(convexUrl);
+    convex.setAuth(token);
 
     const key = await client.apiKeys.get(data.id);
-    if (key.subject !== userId) {
+    if (key.subject !== userId || !keyBelongsToOrganization(key, orgId)) {
       throw new Error("Key not found");
     }
-    if (key.revoked) {
-      return { id: key.id };
+    if (!key.revoked) {
+      await client.apiKeys.revoke({
+        apiKeyId: data.id,
+        revocationReason: "Revoked by user from settings",
+      });
     }
-
-    await client.apiKeys.revoke({
-      apiKeyId: data.id,
-      revocationReason: "Revoked by user from settings",
+    await convex.mutation(api.keySettings.revokePrevious, {
+      keyId: data.id,
     });
     return { id: data.id };
   });
@@ -213,7 +244,14 @@ export const rotateKey = createServerFn({ method: "POST" })
     if (name.length > 64) {
       throw new Error("Name must be 64 characters or fewer");
     }
-    return { id: id.trim(), name };
+    const operationId =
+      "operationId" in input && typeof input.operationId === "string"
+        ? input.operationId.trim()
+        : "";
+    if (operationId.length < 8 || operationId.length > 128) {
+      throw new Error("Rotation operation is invalid");
+    }
+    return { id: id.trim(), name, operationId };
   })
   .handler(async ({ data }): Promise<RotateApiKeyResult> => {
     const session = await auth();
@@ -223,30 +261,102 @@ export const rotateKey = createServerFn({ method: "POST" })
       throw new Error("Select an organization before rotating an API key");
     }
     const client = await clerkClient();
-
+    const convexUrl = import.meta.env.VITE_CONVEX_URL;
+    const token = (await session.getToken({ template: "convex" })) ?? null;
+    if (!convexUrl || !token) {
+      throw new Error(
+        "Secure key rotation is temporarily unavailable. Refresh and try again.",
+      );
+    }
+    const convex = new ConvexHttpClient(convexUrl);
+    convex.setAuth(token);
     // Verify the old key belongs to this user.
     const old = await client.apiKeys.get(data.id);
-    if (old.subject !== userId) {
+    if (old.subject !== userId || !keyBelongsToOrganization(old, orgId)) {
       throw new Error("Key not found");
     }
-
-    const created = await client.apiKeys.create({
-      name: data.name.length > 0 ? data.name : `${old.name} (rotated)`,
-      subject: userId,
-      createdBy: userId,
-      claims: { org_id: orgId },
+    if (old.revoked || old.expired) {
+      throw new Error("This key is no longer active");
+    }
+    const operation = await convex.mutation(api.keySettings.beginRotation, {
+      operationId: data.operationId,
+      oldKeyId: data.id,
     });
+    if (!operation) {
+      throw new Error("Could not reserve this rotation. Try again.");
+    }
+    if (operation.status === "completed") {
+      throw new Error(
+        "This rotation already completed. The one-time secret cannot be shown again; revoke the previous key or create a new key.",
+      );
+    }
+    if (operation.status === "failed") {
+      throw new Error("This rotation previously failed. Start a new rotation.");
+    }
+
+    const settings = await convex.query(api.keySettings.getForOrg, {});
+    if (
+      settings.some(
+        (setting) =>
+          setting.graceUntil !== undefined && setting.graceUntil > Date.now(),
+      )
+    ) {
+      throw new Error("Revoke the previous grace key before rotating again");
+    }
+
+    let created;
+    try {
+      created = await client.apiKeys.create({
+        name: data.name.length > 0 ? data.name : `${old.name} (rotated)`,
+        subject: userId,
+        createdBy: userId,
+        claims: { org_id: orgId },
+      });
+    } catch (error) {
+      await convex.mutation(api.keySettings.failRotation, {
+        operationId: data.operationId,
+        message: "Clerk replacement creation failed",
+      });
+      throw error;
+    }
 
     const secret = created.secret;
     if (typeof secret !== "string" || secret.length === 0) {
+      await client.apiKeys.revoke({
+        apiKeyId: created.id,
+        revocationReason: "Rotation secret was not returned",
+      });
+      await convex.mutation(api.keySettings.failRotation, {
+        operationId: data.operationId,
+        message: "Clerk replacement secret missing",
+      });
       throw new Error("Key created but secret missing. Contact support.");
     }
 
-    return {
-      id: created.id,
-      name: created.name,
-      secret,
-      createdAt: created.createdAt,
-      graceUntil: Date.now() + ROTATION_GRACE_MS,
-    };
+    const graceUntil = Date.now() + ROTATION_GRACE_MS;
+    try {
+      await convex.mutation(api.keySettings.completeRotation, {
+        operationId: data.operationId,
+        oldKeyId: old.id,
+        newKeyId: created.id,
+        graceUntil,
+      });
+      return {
+        id: created.id,
+        name: created.name,
+        secret,
+        createdAt: created.createdAt,
+        graceUntil,
+      };
+    } catch (error) {
+      await client.apiKeys.revoke({
+        apiKeyId: created.id,
+        revocationReason: "Rotation lineage recording failed",
+      });
+      await convex.mutation(api.keySettings.failRotation, {
+        operationId: data.operationId,
+        message: "Lineage recording failed",
+      });
+      throw error;
+    }
   });
