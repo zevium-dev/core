@@ -158,7 +158,9 @@ export class InternalHttpSpecSource implements SpecSource {
   constructor(opts: InternalHttpSpecSourceOptions) {
     this.#siteUrl = opts.siteUrl.replace(/\/+$/, "");
     this.#internalSecret = opts.internalSecret;
-    this.#fetch = opts.fetchImpl ?? fetch;
+    // Workerd's global fetch requires its receiver; storing the bare function
+    // and invoking it as a private field throws "Illegal invocation".
+    this.#fetch = opts.fetchImpl ?? ((input, init) => fetch(input, init));
   }
 
   async getPublishedSpec(

@@ -76,6 +76,19 @@ Security note: credentials and browser/session identifiers are never copied into
     - Root build: green.
     - Root tests: shared 43, web 156, gateway 83, Convex 109 — all green.
     - Root typecheck: green.
+29. User authorized production delivery after blocker explanation.
+30. Created commits:
+    - `8fe98a1 docs: sync project roadmap`
+    - `a1026c1 feat(gateway): inject publisher upstream credentials`
+31. Pushed `develop`; CI-gated production deployment pending.
+32. CI passed in 3m37s. Production deployment passed Convex, gateway, web, and smoke-test stages in 2m29s.
+33. Refreshed production Settings. Upstream credential UI appeared.
+34. Copied existing Vercel `API_KEY` through browser clipboard and pasted it into write-only Zevium secret field. Saved `x-api-key`; post-save UI showed header name and timestamp only.
+35. Published immutable version `1.0.0` and made project public.
+36. Public catalogue and detail page rendered listing, description, tags, version, 20-credit price, and 5/day free tier.
+37. First anonymous mock request returned `404 project_not_found` after cache-expiry retry.
+38. Production Worker tail revealed exact failure: `InternalHttpSpecSource.getPublishedSpec failed TypeError: Illegal invocation: function called with incorrect this reference.`
+39. Root cause: gateway stored bare Workerd global `fetch` in a private field, then invoked it with the class instance as receiver. Workerd requires global receiver. Fixed default fetch with closure that calls global `fetch` directly.
 
 ## Issues
 
@@ -89,3 +102,6 @@ Security note: credentials and browser/session identifiers are never copied into
 - **P0 launch blocker — upstream credentials are documentation-only:** app has no credential UI or backend/gateway injection path. Protected upstreams cannot work. Fix must land before publishing this listing; passing the Vercel secret from consumers or making upstream public would violate product contract.
 - **Authorization test wording differed:** focused test expected hidden-resource wording, while shared auth helper intentionally returned `Not a member of this organization`. Implementation was correct; test expectation changed.
 - **Production deployment requires repository delivery:** local fix is verified, but Zevium production cannot expose credential UI/injection until changes are committed and pushed through CI-gated `develop` deployment.
+- **Textarea automation limitation, not app data loss:** `chrome-devtools fill` changed raw textarea DOM value but did not update React controlled state. Saving therefore sent empty description. Dispatching native textarea `input` event updated React state; reload proved persistence. Earlier “description silently dropped” observation was automation-induced.
+- **Visibility confirmation inconsistency:** Spec rail's `Make public` action changed visibility immediately even though accessible metadata reported a dialog-capable control. Settings visibility action uses explicit confirmation.
+- **Production-only Workerd fetch binding bug:** default internal spec source stored bare global `fetch`; tests injected a mock and could not reproduce receiver requirement. Result was `Illegal invocation` and every gateway/mock lookup returned `project_not_found`. Fixed default path to call global `fetch` through closure.
