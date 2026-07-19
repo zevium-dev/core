@@ -91,13 +91,32 @@ jobs:
           echo "web_url=https://zevium-web-pr-$PR_NUMBER.zevium-dev.workers.dev" >> "$GITHUB_OUTPUT"
           echo "gateway_url=https://zevium-gateway-pr-$PR_NUMBER.zevium-dev.workers.dev" >> "$GITHUB_OUTPUT"
 
-      - name: Install browser runtime
+      - name: Run curl preview smoke
         run: |
-          npm install --global agent-browser@0.27.1
-          agent-browser install --with-deps
+          mkdir -p e2e/artifacts
+          curl --fail --silent --show-error --output e2e/artifacts/landing.html \
+            "$E2E_BASE_URL/"
+          curl --fail --silent --show-error --output e2e/artifacts/catalogue.html \
+            "$E2E_BASE_URL/catalogue"
 
-      - name: Run deterministic preview smoke
-        run: e2e/00-preview-smoke.sh
+          health="$(curl --fail --silent --show-error "$GATEWAY_URL/health")"
+          printf '%s\n' "$health" > e2e/artifacts/gateway-health.json
+          case "$health" in
+            *'"ok":true'*'"service":"zevium-gateway"'*) ;;
+            *) echo "Unexpected gateway health response" >&2; exit 1 ;;
+          esac
+
+          preflight_status="$(curl --silent --show-error --output /dev/null \
+            --write-out '%{http_code}' --request OPTIONS \
+            --header 'Origin: https://preview-smoke.invalid' \
+            --header 'Access-Control-Request-Method: GET' \
+            "$GATEWAY_URL/gateway/missing-org/missing-project/ping")"
+          test "$preflight_status" = "204"
+
+          missing_status="$(curl --silent --show-error --output e2e/artifacts/gateway-404.json \
+            --write-out '%{http_code}' \
+            "$GATEWAY_URL/gateway/missing-org/missing-project/ping")"
+          test "$missing_status" = "404"
 
       - name: Upload smoke failure evidence
         if: failure()
