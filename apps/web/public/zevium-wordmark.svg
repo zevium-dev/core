@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 1.4 57 20" role="img" aria-labelledby="title description">
+  <title id="title">Zevium</title>
+  <desc id="description">Zevium wordmark</desc>
+  <style>
+    .ink { fill: #18181b; }
+    @media (prefers-color-scheme: dark) { .ink { fill: #fafafa; } }
+  </style>
+  <svg x="0" y="4" width="16" height="12" viewBox="78 128 356 256" class="ink">
+    <g transform="translate(0 32)">
+      <path d="M130 96h304L338 264h-92l55-96H89l41-72Z"/>
+      <path d="M174 184h92l-55 96h212l-41 72H78l96-168Z"/>
+    </g>
+  </svg>
+  <text x="18" y="15.5" class="ink" font-family="ui-sans-serif, system-ui, sans-serif, Apple Color Emoji, Segoe UI Emoji, Segoe UI Symbol, Noto Color Emoji" font-size="14" font-weight="600" letter-spacing="-0.35">evium</text>
+</svg>
