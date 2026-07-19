@@ -171,9 +171,7 @@ export function AppSidebar() {
                   },
                 }}
               />
-              {compact ? null : (
-                <ThemeToggle className="size-8 shrink-0" />
-              )}
+              {compact ? null : <ThemeToggle className="size-8 shrink-0" />}
             </div>
           </SidebarMenuItem>
         </SidebarMenu>
