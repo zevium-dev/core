@@ -119,7 +119,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: preview-web-${{ env.PR_NUMBER }}
-          path: apps/web/dist/server
+          path: apps/web/dist
           if-no-files-found: error
 
   web-preview:
@@ -136,7 +136,7 @@ jobs:
       - uses: actions/download-artifact@v8
         with:
           name: preview-web-${{ env.PR_NUMBER }}
-          path: apps/web/dist/server
+          path: apps/web/dist
       - uses: actions/cache@v5
         with:
           path: ~/.local/share/pnpm/store
