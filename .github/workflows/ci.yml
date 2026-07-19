@@ -15,7 +15,7 @@ env:
   MISE_EXPERIMENTAL: true
 
 jobs:
-  ci:
+  format:
     runs-on: ubuntu-slim
     timeout-minutes: 10
     steps:
@@ -27,4 +27,96 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pnpm-store-
       - uses: jdx/mise-action@v4
-      - run: mise run ci
+      - run: pnpm exec prettier --check .
+
+  typecheck:
+    runs-on: ubuntu-slim
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/cache@v5
+        with:
+          path: ~/.local/share/pnpm/store
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+      - uses: jdx/mise-action@v4
+      - run: pnpm typecheck
+
+  shared-tests:
+    runs-on: ubuntu-slim
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/cache@v5
+        with:
+          path: ~/.local/share/pnpm/store
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+      - uses: jdx/mise-action@v4
+      - run: pnpm --filter @zevium/shared test
+
+  web-tests:
+    runs-on: ubuntu-slim
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/cache@v5
+        with:
+          path: ~/.local/share/pnpm/store
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+      - uses: jdx/mise-action@v4
+      - run: pnpm --filter web test
+
+  gateway-tests:
+    runs-on: ubuntu-slim
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/cache@v5
+        with:
+          path: ~/.local/share/pnpm/store
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+      - uses: jdx/mise-action@v4
+      - run: pnpm --filter @zevium/gateway test
+
+  convex-tests:
+    runs-on: ubuntu-slim
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/cache@v5
+        with:
+          path: ~/.local/share/pnpm/store
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+      - uses: jdx/mise-action@v4
+      - run: pnpm test:convex
+
+  ci:
+    needs: [format, typecheck, shared-tests, web-tests, gateway-tests, convex-tests]
+    if: always()
+    runs-on: ubuntu-slim
+    timeout-minutes: 2
+    steps:
+      - name: Require every CI lane to pass
+        env:
+          FORMAT: ${{ needs.format.result }}
+          TYPECHECK: ${{ needs.typecheck.result }}
+          SHARED: ${{ needs.shared-tests.result }}
+          WEB: ${{ needs.web-tests.result }}
+          GATEWAY: ${{ needs.gateway-tests.result }}
+          CONVEX: ${{ needs.convex-tests.result }}
+        run: |
+          test "$FORMAT" = "success"
+          test "$TYPECHECK" = "success"
+          test "$SHARED" = "success"
+          test "$WEB" = "success"
+          test "$GATEWAY" = "success"
+          test "$CONVEX" = "success"
