@@ -52,6 +52,7 @@ import {
   resolveGatewayOrigin,
   tryItBaseUrl,
 } from "#/lib/landing";
+import { tryItBodyDefaults } from "#/lib/try-it";
 
 const API_KEY_STORAGE = "zevium:playground-api-key";
 const DEFAULT_GATEWAY = "http://localhost:8787/gateway";
@@ -109,6 +110,8 @@ type EndpointRow = {
   cost: number;
   freeTier: number | undefined;
   pathParams: string[];
+  requestContentType: string;
+  requestBodyExample: string;
 };
 
 type PlayResult = {
@@ -135,6 +138,7 @@ function listEndpoints(specJson: string): EndpointRow[] {
       if (op === undefined) continue;
       const operation = op as OpenApiOperation;
       const pricing = extractPricing(operation);
+      const bodyDefaults = tryItBodyDefaults(operation);
       const pathParams = Array.from(path.matchAll(/\{([^}/]+)\}/g)).map(
         (m) => m[1]!,
       );
@@ -147,6 +151,8 @@ function listEndpoints(specJson: string): EndpointRow[] {
         cost: pricing.cost,
         freeTier: pricing.freeTier,
         pathParams,
+        requestContentType: bodyDefaults.contentType,
+        requestBodyExample: bodyDefaults.body,
       });
     }
   }
@@ -513,7 +519,9 @@ function TryItPanel({
 
   const [pathParams, setPathParams] = useState<Record<string, string>>({});
   const [headersText, setHeadersText] = useState("");
-  const [bodyText, setBodyText] = useState("{\n  \n}");
+  const [bodyText, setBodyText] = useState(
+    endpoint?.requestBodyExample ?? "{\n  \n}",
+  );
   const [apiKey, setApiKey] = useState("");
   const [mock, setMock] = useState(false);
   const [sending, setSending] = useState(false);
@@ -538,6 +546,7 @@ function TryItPanel({
       }
       return next;
     });
+    setBodyText(endpoint.requestBodyExample);
   }, [endpoint]);
 
   const onApiKeyChange = useCallback((value: string) => {
@@ -589,7 +598,7 @@ function TryItPanel({
         headers["Content-Type"] === undefined &&
         headers["content-type"] === undefined
       ) {
-        headers["Content-Type"] = "application/json";
+        headers["Content-Type"] = endpoint.requestContentType;
       }
       init.body = body;
     }
@@ -637,7 +646,7 @@ function TryItPanel({
         headers["Content-Type"] === undefined &&
         headers["content-type"] === undefined
       ) {
-        headers["Content-Type"] = "application/json";
+        headers["Content-Type"] = endpoint.requestContentType;
       }
     }
     const curl = buildCurl({

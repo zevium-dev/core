@@ -60,6 +60,52 @@ describe("generateMockResponse", () => {
     expect(result?.contentType).toBe("application/json");
   });
 
+  it("uses a declared text/html response and preserves its example", () => {
+    const spec = specWith({
+      "/render": {
+        post: {
+          responses: {
+            "200": {
+              content: {
+                "text/html": {
+                  schema: {
+                    type: "string",
+                    example: "<h1>Rendered Markdown</h1>",
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+    expect(generateMockResponse(spec, "/render", "post")).toEqual({
+      status: 200,
+      body: "<h1>Rendered Markdown</h1>",
+      contentType: "text/html",
+    });
+  });
+
+  it("prefers media-level examples before schema synthesis", () => {
+    const spec = specWith({
+      "/plain": {
+        get: {
+          responses: {
+            "200": {
+              content: {
+                "text/plain": {
+                  example: "ready",
+                  schema: { type: "string" },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+    expect(generateMockResponse(spec, "/plain", "get")?.body).toBe("ready");
+  });
+
   it("prefers schema-level examples (array form) over synthesis", () => {
     const spec = specWith({
       "/ping": {

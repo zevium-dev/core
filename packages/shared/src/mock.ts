@@ -1,7 +1,7 @@
 /**
  * Mock response generation for the gateway `/mock/*` route.
- * Builds an example JSON body from an operation's `responses["200"]`
- * `application/json` schema — no upstream call, no credits.
+ * Builds an example body from an operation's first successful response
+ * media type — no upstream call, no credits.
  */
 
 import type { ParsedOpenApiSpec } from "./openapi.js";
@@ -9,7 +9,7 @@ import type { ParsedOpenApiSpec } from "./openapi.js";
 export type GeneratedMockResponse = {
   status: 200;
   body: unknown;
-  contentType: "application/json";
+  contentType: string;
 };
 
 const MAX_DEPTH = 5;
@@ -143,26 +143,42 @@ function synthesize(
   }
 }
 
-/** `op.responses["200"].content["application/json"].schema` — undefined if absent. */
-function extractResponseSchema(op: unknown): unknown {
-  if (!isRecord(op)) return undefined;
+type ResponseContent = {
+  contentType: string;
+  schema: unknown;
+  example: { found: true; value: unknown } | { found: false };
+};
+
+/** Prefer JSON, else first declared media type. */
+function extractResponseContent(op: unknown): ResponseContent | null {
+  if (!isRecord(op)) return null;
   const responses = op.responses;
-  if (!isRecord(responses)) return undefined;
+  if (!isRecord(responses)) return null;
   const ok = responses["200"];
-  if (!isRecord(ok)) return undefined;
+  if (!isRecord(ok)) return null;
   const content = ok.content;
-  if (!isRecord(content)) return undefined;
-  const media = content["application/json"];
-  if (!isRecord(media)) return undefined;
-  return media.schema;
+  if (!isRecord(content)) return null;
+  const selected =
+    (isRecord(content["application/json"])
+      ? (["application/json", content["application/json"]] as const)
+      : Object.entries(content).find((entry) => isRecord(entry[1]))) ?? null;
+  if (selected === null || !isRecord(selected[1])) return null;
+  const media = selected[1];
+  return {
+    contentType: selected[0],
+    schema: media.schema,
+    example:
+      "example" in media
+        ? { found: true, value: media.example }
+        : { found: false },
+  };
 }
 
 /**
  * Build a mock 200 response for `pathTemplate`+`method` from the spec's
- * `responses["200"].content["application/json"].schema`. Prefers schema
- * `example`/`examples`, else synthesizes from `type` (depth-capped, one-hop
- * `$ref` resolution). Returns null when the operation itself is unknown —
- * callers (gateway `/mock` route) treat that as 404.
+ * `responses["200"].content`. Prefers JSON when present, otherwise uses first
+ * declared media type. Media/schema examples beat type synthesis. Returns null
+ * when operation itself is unknown — callers treat that as 404.
  */
 export function generateMockResponse(
   spec: ParsedOpenApiSpec,
@@ -172,9 +188,15 @@ export function generateMockResponse(
   const op = spec.paths[pathTemplate]?.[method.toLowerCase()];
   if (!op) return null;
 
-  const schema = extractResponseSchema(op);
-  const body =
-    schema === undefined ? {} : synthesize(schema, spec.components, 0);
+  const content = extractResponseContent(op);
+  if (content === null) {
+    return { status: 200, body: {}, contentType: "application/json" };
+  }
+  const body = content.example.found
+    ? content.example.value
+    : content.schema === undefined
+      ? {}
+      : synthesize(content.schema, spec.components, 0);
 
-  return { status: 200, body, contentType: "application/json" };
+  return { status: 200, body, contentType: content.contentType };
 }

@@ -31,9 +31,8 @@ export function discoveryEndpointUrl(gatewayOrigin: string): string {
  */
 export function tryItBaseUrl(gatewayBaseUrl: string, mock: boolean): string {
   const trimmed = gatewayBaseUrl.replace(/\/+$/, "");
-  if (!mock) return trimmed;
   const origin = trimmed.replace(/\/gateway$/i, "");
-  return `${origin}/mock`;
+  return `${origin}/${mock ? "mock" : "gateway"}`;
 }
 
 /** MCP client config JSON string for agent paste. */

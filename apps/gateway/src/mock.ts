@@ -86,7 +86,13 @@ export async function handleMockRequest(
     return jsonError(404, "route_not_found", "Unknown route", requestId);
   }
 
-  return new Response(JSON.stringify(mock.body), {
+  const body =
+    typeof mock.body === "string" &&
+    !mock.contentType.toLowerCase().includes("json")
+      ? mock.body
+      : JSON.stringify(mock.body);
+
+  return new Response(body, {
     status: mock.status,
     headers: {
       "content-type": mock.contentType,

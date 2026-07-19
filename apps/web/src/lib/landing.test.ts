@@ -45,8 +45,11 @@ describe("discoveryEndpointUrl", () => {
 });
 
 describe("tryItBaseUrl", () => {
-  it("passes the real gateway URL through unchanged", () => {
+  it("normalizes the real gateway URL", () => {
     expect(tryItBaseUrl("http://localhost:8787/gateway", false)).toBe(
+      "http://localhost:8787/gateway",
+    );
+    expect(tryItBaseUrl("http://localhost:8787", false)).toBe(
       "http://localhost:8787/gateway",
     );
   });
