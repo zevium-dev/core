@@ -69,12 +69,19 @@ export function AppSidebar() {
   return (
     <Sidebar collapsible="icon" variant="inset">
       <SidebarHeader className="h-14 justify-center border-b p-3">
-        <div className="flex items-center gap-1 px-1 transition-transform duration-[var(--dur-base)] ease-[var(--ease)] group-data-[collapsible=icon]:-translate-x-1">
+        <Link
+          to="/app"
+          aria-label="Zevium dashboard"
+          className="flex items-center gap-1 rounded-md px-1 outline-none transition-transform duration-[var(--dur-base)] ease-[var(--ease)] focus-visible:ring-[3px] focus-visible:ring-sidebar-ring/50 group-data-[collapsible=icon]:-translate-x-1"
+        >
           <BrandMark className="h-4 w-6 shrink-0" />
-          <span className="truncate text-lg font-semibold tracking-tight group-data-[collapsible=icon]:hidden">
-            <span className="sr-only">Z</span>evium
+          <span
+            aria-hidden="true"
+            className="truncate text-lg font-semibold tracking-tight group-data-[collapsible=icon]:hidden"
+          >
+            evium
           </span>
-        </div>
+        </Link>
       </SidebarHeader>
 
       <SidebarContent>

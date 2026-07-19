@@ -12,7 +12,6 @@ import { Badge } from "#/components/ui/badge";
 import { Button } from "#/components/ui/button";
 import {
   Card,
-  CardAction,
   CardContent,
   CardDescription,
   CardFooter,
@@ -196,15 +195,13 @@ function BillingContent({ checkoutSessionId }: { checkoutSessionId?: string }) {
                     </span>
                   </CardTitle>
                   <CardDescription>{price} one-time purchase</CardDescription>
-                  {pack.bonusCredits > 0 ? (
-                    <CardAction>
-                      <Badge variant="secondary">
-                        +{pack.bonusCredits.toLocaleString()} bonus
-                      </Badge>
-                    </CardAction>
-                  ) : null}
                 </CardHeader>
-                <CardContent className="text-sm text-muted-foreground">
+                <CardContent className="flex flex-col items-start gap-2 text-sm text-muted-foreground">
+                  {pack.bonusCredits > 0 ? (
+                    <Badge variant="secondary">
+                      +{pack.bonusCredits.toLocaleString()} bonus
+                    </Badge>
+                  ) : null}
                   {pack.bonusCredits > 0
                     ? `${pack.baseCredits.toLocaleString()} purchased credits`
                     : "No bonus credits"}

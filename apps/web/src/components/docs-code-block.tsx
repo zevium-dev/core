@@ -2,12 +2,12 @@ import { Check, Copy } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
+import { SyntaxCode } from "#/components/syntax-code";
 import { Button } from "#/components/ui/button";
 import { cn } from "#/lib/utils";
 
 type DocsCodeBlockProps = {
   code: string;
-  /** Display-only language label (no syntax highlighting — keeps bundle lean). */
   lang?: string;
   className?: string;
 };
@@ -51,15 +51,18 @@ export function DocsCodeBlock({ code, lang, className }: DocsCodeBlockProps) {
           aria-label="Copy code"
         >
           {copied ? (
-            <Check className="size-3.5 text-foreground" />
+            <Check
+              data-icon="inline-start"
+              className="size-3.5 text-foreground"
+            />
           ) : (
-            <Copy className="size-3.5" />
+            <Copy data-icon="inline-start" className="size-3.5" />
           )}
           {copied ? "Copied" : "Copy"}
         </Button>
       </div>
       <pre className="overflow-x-auto p-4 font-mono text-xs leading-relaxed text-foreground">
-        <code>{code}</code>
+        <SyntaxCode code={code} lang={lang} />
       </pre>
     </div>
   );

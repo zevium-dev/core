@@ -11,6 +11,7 @@ import { BrandMark } from "#/components/brand-mark";
 import { Magnetic } from "#/components/motion/magnetic";
 import { Reveal } from "#/components/motion/reveal";
 import { PublicHeader } from "#/components/public-header";
+import { SyntaxCode } from "#/components/syntax-code";
 import { Badge } from "#/components/ui/badge";
 import { Button } from "#/components/ui/button";
 import {
@@ -236,20 +237,46 @@ function LandingPage() {
                 <CardContent className="flex flex-col gap-4">
                   <div className="flex flex-wrap items-center gap-2">
                     <Badge variant="secondary">GET</Badge>
-                    <code className="break-all text-sm">
+                    <code className="break-all text-sm text-[var(--syntax-string)]">
                       /acme/summarize/v1/summarize
                     </code>
                   </div>
                   <div className="flex flex-col gap-2 font-mono text-xs text-muted-foreground">
-                    <p>key verified</p>
-                    <p>wallet reserved · 100 credits</p>
-                    <p>upstream streamed · 184 ms</p>
+                    <p>
+                      <span className="text-[var(--syntax-function)]">key</span>{" "}
+                      <span className="text-[var(--syntax-string)]">
+                        verified
+                      </span>
+                    </p>
+                    <p>
+                      <span className="text-[var(--syntax-function)]">
+                        wallet
+                      </span>{" "}
+                      <span className="text-[var(--syntax-string)]">
+                        reserved
+                      </span>{" "}
+                      · <span className="text-[var(--syntax-number)]">100</span>{" "}
+                      credits
+                    </p>
+                    <p>
+                      <span className="text-[var(--syntax-function)]">
+                        upstream
+                      </span>{" "}
+                      <span className="text-[var(--syntax-string)]">
+                        streamed
+                      </span>{" "}
+                      · <span className="text-[var(--syntax-number)]">184</span>{" "}
+                      ms
+                    </p>
                   </div>
                 </CardContent>
                 <CardFooter className="justify-between gap-3 border-t">
                   <Badge>200 OK</Badge>
                   <span className="text-sm text-muted-foreground">
-                    publisher earns 95
+                    publisher earns{" "}
+                    <span className="font-mono text-[var(--syntax-number)]">
+                      95
+                    </span>
                   </span>
                 </CardFooter>
               </Card>
@@ -336,8 +363,8 @@ function LandingPage() {
             catalogue, load only the tools you need, call through the same
             credit-gated gateway as humans.
           </p>
-          <div className="grid gap-4 lg:grid-cols-2">
-            <Card>
+          <div className="grid min-w-0 gap-4 lg:grid-cols-2">
+            <Card className="min-w-0">
               <CardHeader>
                 <CardTitle>Surfaces</CardTitle>
                 <CardDescription>
@@ -434,12 +461,14 @@ function LandingPage() {
         <Separator />
         <div className="mx-auto grid max-w-5xl gap-8 px-4 py-10 sm:grid-cols-4">
           <div className="flex flex-col gap-2">
-            <span className="flex items-center gap-0.5 text-sm font-semibold tracking-tight">
+            <Link
+              to="/"
+              aria-label="Zevium"
+              className="flex items-center gap-0.5 rounded-md text-sm font-semibold tracking-tight outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+            >
               <BrandMark className="h-3 w-4" />
-              <span>
-                <span className="sr-only">Z</span>evium
-              </span>
-            </span>
+              <span aria-hidden="true">evium</span>
+            </Link>
             <p className="text-xs text-muted-foreground">
               Agent-first, per-call API marketplace.
             </p>
@@ -528,7 +557,7 @@ function McpConfigBlock({ snippet }: { snippet: string }) {
   }
 
   return (
-    <Card>
+    <Card className="min-w-0">
       <CardHeader>
         <CardTitle>MCP config</CardTitle>
         <CardAction>
@@ -552,8 +581,8 @@ function McpConfigBlock({ snippet }: { snippet: string }) {
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <pre className="max-h-56 overflow-auto rounded-md border bg-muted/40 p-3 font-mono text-xs whitespace-pre">
-          {snippet}
+        <pre className="max-h-56 min-w-0 overflow-auto rounded-md border bg-muted/40 p-3 font-mono text-xs whitespace-pre">
+          <SyntaxCode code={snippet} lang="json" />
         </pre>
       </CardContent>
     </Card>

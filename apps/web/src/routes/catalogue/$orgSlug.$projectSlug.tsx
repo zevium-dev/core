@@ -20,6 +20,7 @@ import {
 import { toast } from "sonner";
 
 import { PublicHeader } from "#/components/public-header";
+import { SyntaxCode } from "#/components/syntax-code";
 import { Badge } from "#/components/ui/badge";
 import { Button } from "#/components/ui/button";
 import {
@@ -57,6 +58,15 @@ const DEFAULT_GATEWAY = "http://localhost:8787/gateway";
 
 const TEXTAREA_CLASS =
   "flex min-h-24 w-full rounded-md border border-input bg-transparent px-3 py-2 font-mono text-xs shadow-xs transition-[color,box-shadow] outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50";
+
+function responseLanguage(body: string): "json" | "plain" {
+  try {
+    JSON.parse(body);
+    return "json";
+  } catch {
+    return "plain";
+  }
+}
 
 export const Route = createFileRoute("/catalogue/$orgSlug/$projectSlug")({
   loader: async ({ context, params }) => {
@@ -845,7 +855,10 @@ function TryItPanel({
                 </span>
               </div>
               <pre className="max-h-80 overflow-auto rounded-md border bg-muted/40 p-3 font-mono text-xs whitespace-pre-wrap break-all">
-                {result.body || "(empty body)"}
+                <SyntaxCode
+                  code={result.body || "(empty body)"}
+                  lang={responseLanguage(result.body)}
+                />
               </pre>
             </div>
           ) : null}
@@ -889,7 +902,7 @@ function ConnectAgentPanel({
         </CardHeader>
         <CardContent className="space-y-3">
           <pre className="max-h-72 overflow-auto rounded-md border bg-muted/40 p-3 font-mono text-xs whitespace-pre">
-            {snippet}
+            <SyntaxCode code={snippet} lang="json" />
           </pre>
           <Button
             type="button"
@@ -912,7 +925,7 @@ function ConnectAgentPanel({
         </CardHeader>
         <CardContent className="space-y-3">
           <pre className="max-h-72 overflow-auto rounded-md border bg-muted/40 p-3 font-mono text-xs whitespace-pre-wrap">
-            {notes}
+            <SyntaxCode code={notes} lang="js" />
           </pre>
           <Button
             type="button"

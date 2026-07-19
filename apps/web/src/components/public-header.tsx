@@ -26,12 +26,11 @@ export function PublicHeader({ active = null, className }: PublicHeaderProps) {
         <div className="flex min-w-0 items-center gap-6">
           <Link
             to="/"
+            aria-label="Zevium"
             className="flex items-center gap-0.5 text-sm font-semibold tracking-tight outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
           >
             <BrandMark className="h-3 w-4" />
-            <span>
-              <span className="sr-only">Z</span>evium
-            </span>
+            <span aria-hidden="true">evium</span>
           </Link>
           <nav className="hidden items-center gap-4 text-sm text-muted-foreground sm:flex">
             <Link

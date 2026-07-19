@@ -67,7 +67,7 @@ function OrgHomePage() {
       <div className="min-w-0 space-y-3">
         <div className="min-w-0 space-y-1">
           <h1
-            className="truncate text-2xl font-semibold tracking-tight"
+            className="break-words text-2xl font-semibold tracking-tight"
             style={
               slug ? { viewTransitionName: `org-name-${slug}` } : undefined
             }
@@ -80,10 +80,7 @@ function OrgHomePage() {
         </div>
         <div className="flex min-w-0 flex-wrap gap-2">
           {slug ? (
-            <Badge
-              variant="secondary"
-              className="max-w-64 font-mono text-xs"
-            >
+            <Badge variant="secondary" className="max-w-64 font-mono text-xs">
               <span className="truncate">{slug}</span>
             </Badge>
           ) : null}
