@@ -2,13 +2,14 @@ import { WalletDO } from "./wallet";
 import { ClerkKeyVerifier, FixtureKeyVerifier } from "./key-verifier";
 import {
   CachedSpecSource,
-  ConvexSpecSource,
+  FailClosedSpecSource,
   FixtureSpecSource,
   InternalHttpSpecSource,
 } from "./spec-source";
 import {
   CachedCatalogueSource,
   ConvexCatalogueSource,
+  FailClosedCatalogueSource,
   FixtureCatalogueSource,
   type CatalogueSource,
 } from "./catalogue-source";
@@ -88,9 +89,12 @@ function buildDeps(env: Env): WorkerDeps {
     return cachedProdDeps.deps;
   }
 
+  const testMode = env.GATEWAY_TEST_MODE === "1";
   const keyVerifier = env.CLERK_SECRET_KEY
     ? new ClerkKeyVerifier({ secretKey: env.CLERK_SECRET_KEY })
-    : new FixtureKeyVerifier();
+    : testMode
+      ? new FixtureKeyVerifier()
+      : { verify: async () => null };
 
   const siteUrl =
     env.CONVEX_SITE_URL ??
@@ -102,12 +106,18 @@ function buildDeps(env: Env): WorkerDeps {
           internalSecret: env.GATEWAY_INTERNAL_SECRET,
         })
       : env.CONVEX_URL
-        ? new ConvexSpecSource({ convexUrl: env.CONVEX_URL })
-        : new FixtureSpecSource();
+        ? new FailClosedSpecSource()
+        : testMode
+          ? new FixtureSpecSource()
+          : new FailClosedSpecSource();
 
   const innerCatalogue = env.CONVEX_URL
     ? new ConvexCatalogueSource({ convexUrl: env.CONVEX_URL })
-    : new FixtureCatalogueSource();
+    : testMode
+      ? new FixtureCatalogueSource()
+      : testMode
+        ? new FixtureCatalogueSource()
+        : new FailClosedCatalogueSource();
 
   const usageSink = env.CONVEX_URL
     ? // Pipeline emit is best-effort logging; authoritative flush is DO alarm.
@@ -178,8 +188,8 @@ function timingSafeEqual(a: string, b: string): boolean {
 
 /**
  * Worker entry:
- * - /gateway/:orgSlug/:projectSlug/* — metered proxy
- * - /mock/:orgSlug/:projectSlug/* — public keyless example responses, 0 credits
+ * - /gateway/:publisherHandle/:projectSlug/* — metered proxy
+ * - /mock/:publisherHandle/:projectSlug/* — public keyless example responses, 0 credits
  * - /discovery — machine-readable catalogue + pricing index
  * - /mcp — MCP Streamable HTTP (search / docs / metered call_api)
  * - /internal/grant — control-plane grant projection (shared secret)
@@ -201,7 +211,21 @@ export default {
     }
 
     if (url.pathname === "/" || url.pathname === "/health") {
-      return withCors(Response.json({ ok: true, service: "zevium-gateway" }));
+      const testMode = env.GATEWAY_TEST_MODE === "1";
+      const specConfigReady =
+        testMode ||
+        Boolean(
+          env.CONVEX_URL &&
+          env.CONVEX_SITE_URL &&
+          env.GATEWAY_INTERNAL_SECRET &&
+          env.CLERK_SECRET_KEY,
+        );
+      return withCors(
+        Response.json(
+          { ok: specConfigReady, service: "zevium-gateway" },
+          { status: specConfigReady ? 200 : 503 },
+        ),
+      );
     }
 
     // POST /internal/grant { clerkOrgId, amount, refId }

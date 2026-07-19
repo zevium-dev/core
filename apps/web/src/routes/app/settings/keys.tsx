@@ -10,7 +10,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useConvexAuth } from "convex/react";
 import { Check, Copy, KeyRound, Plus, RotateCw, Trash2 } from "lucide-react";
 import { m, useReducedMotion } from "motion/react";
-import { Suspense, useEffect, useState, type FormEvent } from "react";
+import { Suspense, useEffect, useRef, useState, type FormEvent } from "react";
 import { toast } from "sonner";
 
 import { Badge } from "#/components/ui/badge";
@@ -142,21 +142,19 @@ function KeysContent() {
 
   const setDisabled = useConvexMutation(api.keySettings.setDisabled);
   const setCap = useConvexMutation(api.keySettings.setCap);
-  const recordRotation = useConvexMutation(api.keySettings.recordRotation);
+  const rotationOperationIds = useRef(new Map<string, string>());
 
   const rotateMutation = useMutation({
-    mutationFn: async (target: ApiKeyRow): Promise<RotateApiKeyResult> => {
-      const created = await rotateKey({ data: { id: target.id } });
-      await recordRotation({
-        oldKeyId: target.id,
-        newKeyId: created.id,
-        graceUntil: created.graceUntil,
-      });
-      return created;
+    mutationFn: (target: ApiKeyRow): Promise<RotateApiKeyResult> => {
+      const operationId =
+        rotationOperationIds.current.get(target.id) ?? crypto.randomUUID();
+      rotationOperationIds.current.set(target.id, operationId);
+      return rotateKey({ data: { id: target.id, operationId } });
     },
     onSuccess: (created) => {
       setRevealed(created);
       setRotateTarget(null);
+      rotationOperationIds.current.clear();
       toast.success("Key rotated — copy the new secret now");
       void queryClient.invalidateQueries({ queryKey: KEYS_QUERY_KEY });
     },
@@ -463,6 +461,12 @@ function KeyRow({
   );
   const [capBusy, setCapBusy] = useState(false);
   const [toggleBusy, setToggleBusy] = useState(false);
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    const interval = window.setInterval(() => setNow(Date.now()), 60_000);
+    return () => window.clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     setCapInput(
@@ -515,8 +519,12 @@ function KeyRow({
     }
   }
 
-  const graceActive =
-    setting?.graceUntil !== undefined && setting.graceUntil > Date.now();
+  const graceUntil = setting?.graceUntil;
+  const graceActive = graceUntil !== undefined && graceUntil > now;
+  const graceExpired = graceUntil !== undefined && graceUntil <= now;
+  const remainingMinutes = graceActive
+    ? Math.max(1, Math.ceil((graceUntil! - now) / 60_000))
+    : 0;
 
   return (
     <tr className="block space-y-3 p-4 md:table-row md:space-y-0 md:p-0">
@@ -564,7 +572,23 @@ function KeyRow({
           />
           {graceActive ? (
             <Badge variant="secondary" className="font-normal">
-              Grace {formatDateShort(setting!.graceUntil!)}
+              Previous — {remainingMinutes}m remaining, until{" "}
+              {formatDate(graceUntil!)}
+            </Badge>
+          ) : graceExpired ? (
+            <Badge
+              variant="outline"
+              className="font-normal text-muted-foreground"
+            >
+              Expired — {formatDate(graceUntil!)}
+            </Badge>
+          ) : setting?.rotatedFromKeyId ? (
+            <Badge variant="secondary" className="font-normal">
+              Current
+            </Badge>
+          ) : !setting?.disabled ? (
+            <Badge variant="secondary" className="font-normal">
+              Current
             </Badge>
           ) : setting?.disabled ? (
             <Badge
@@ -590,6 +614,7 @@ function KeyRow({
             variant="ghost"
             size="sm"
             onClick={onRotate}
+            disabled={graceActive || graceExpired}
             title="Rotate key (old key works 24h)"
           >
             <RotateCw className="size-4" />
@@ -600,10 +625,10 @@ function KeyRow({
             size="sm"
             className="text-destructive hover:text-destructive"
             onClick={onRevoke}
-            disabled={revokePending}
+            disabled={revokePending || graceExpired}
           >
             <Trash2 className="size-4" />
-            Revoke
+            {graceActive ? "Revoke previous now" : "Revoke"}
           </Button>
         </div>
       </td>
@@ -779,15 +804,5 @@ function formatDate(ms: number): string {
     }).format(new Date(ms));
   } catch {
     return new Date(ms).toISOString();
-  }
-}
-
-function formatDateShort(ms: number): string {
-  try {
-    return new Intl.DateTimeFormat(undefined, { dateStyle: "short" }).format(
-      new Date(ms),
-    );
-  } catch {
-    return new Date(ms).toISOString().slice(0, 10);
   }
 }

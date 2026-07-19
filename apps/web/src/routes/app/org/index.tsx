@@ -4,12 +4,12 @@ import {
   useOrganization,
 } from "@clerk/tanstack-react-start";
 import { shadcn } from "@clerk/ui/themes";
-import { convexQuery } from "@convex-dev/react-query";
+import { convexQuery, useConvexMutation } from "@convex-dev/react-query";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link, createFileRoute } from "@tanstack/react-router";
 import { useAction } from "convex/react";
 import { Building2, Landmark, Plus, Users } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
 import { FadeIn } from "#/components/motion/fade-in";
@@ -22,6 +22,14 @@ import {
   CardHeader,
   CardTitle,
 } from "#/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "#/components/ui/dialog";
 import {
   Empty,
   EmptyContent,
@@ -93,6 +101,7 @@ function OrgHomePage() {
         </div>
       </div>
 
+      <PublicHandleCard />
       <PublisherPaymentsCard />
 
       <div className="min-h-[28rem] w-full overflow-hidden rounded-xl">
@@ -110,6 +119,148 @@ function OrgHomePage() {
         />
       </div>
     </FadeIn>
+  );
+}
+
+function PublicHandleCard() {
+  const { membership } = useOrganization();
+  const mine = useQuery(convexQuery(api.organizations.listMine, {}));
+  const setPublicHandle = useConvexMutation(api.organizations.setPublicHandle);
+  const current = mine.data?.[0]?.publicHandle ?? "";
+  const [handle, setHandle] = useState("");
+  const [confirming, setConfirming] = useState(false);
+
+  useEffect(() => {
+    setHandle(current);
+  }, [current]);
+
+  const normalized = handle.trim().toLowerCase();
+  const lookup = useQuery({
+    ...convexQuery(api.organizations.checkPublicHandleAvailability, {
+      handle: normalized,
+    }),
+    enabled: normalized.length > 0,
+  });
+  const unavailable = lookup.data?.available === false;
+  const valid = /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(normalized);
+  const isAdmin = membership?.role === "org:admin";
+  const { mutate: save, isPending } = useMutation({
+    mutationFn: () => setPublicHandle({ handle: normalized }),
+    onSuccess: () => {
+      toast.success("Public publisher handle updated");
+      setConfirming(false);
+      void mine.refetch();
+    },
+    onError: (error: unknown) => {
+      toast.error(humanError(error, "Could not update public handle"));
+    },
+  });
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Public publisher handle</CardTitle>
+        <CardDescription>
+          This stable handle appears in catalogue, gateway, mock, and MCP URLs.
+          Clerk organization slugs are internal identity values and never form
+          public URLs.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-3">
+        <Label htmlFor="public-handle">Handle</Label>
+        <div className="flex flex-wrap gap-2">
+          <Input
+            id="public-handle"
+            name="public-handle"
+            value={handle}
+            onChange={(event) => setHandle(event.target.value)}
+            autoComplete="username"
+            spellCheck={false}
+            aria-describedby="public-handle-help"
+            aria-invalid={normalized !== "" && !valid}
+            readOnly={!isAdmin}
+          />
+          <Button
+            type="button"
+            onClick={() => setConfirming(true)}
+            disabled={
+              !isAdmin ||
+              isPending ||
+              normalized === current ||
+              !valid ||
+              unavailable
+            }
+          >
+            Save handle
+          </Button>
+        </div>
+        {!isAdmin ? (
+          <p className="text-sm text-muted-foreground">
+            An organization admin can change this public handle.
+          </p>
+        ) : null}
+        {current ? (
+          <div className="flex flex-wrap items-center gap-2">
+            <code className="text-xs text-muted-foreground">
+              /catalogue/{current}
+            </code>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                void navigator.clipboard.writeText(
+                  `${window.location.origin}/catalogue/${current}`,
+                );
+                toast.success("Public catalogue URL copied");
+              }}
+            >
+              Copy public URL
+            </Button>
+            <span className="text-xs text-muted-foreground">
+              Gateway, mock, discovery, and MCP routes update within 60 seconds.
+            </span>
+          </div>
+        ) : null}
+        <p
+          id="public-handle-help"
+          role="status"
+          aria-live="polite"
+          className="text-sm text-muted-foreground"
+        >
+          {normalized === ""
+            ? "Choose lowercase letters, numbers, and single hyphens."
+            : !valid
+              ? "Use lowercase letters, numbers, and single hyphens."
+              : unavailable
+                ? "This handle is already taken."
+                : "This handle is available."}
+        </p>
+      </CardContent>
+      <Dialog open={confirming} onOpenChange={setConfirming}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Change public publisher handle?</DialogTitle>
+            <DialogDescription>
+              Existing catalogue, gateway, mock, and MCP URLs using the old
+              handle stop working after the gateway propagation window.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="ghost"
+              onClick={() => setConfirming(false)}
+              disabled={isPending}
+            >
+              Cancel
+            </Button>
+            <Button onClick={() => save()} disabled={isPending}>
+              {isPending ? "Saving…" : "Change handle"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </Card>
   );
 }
 

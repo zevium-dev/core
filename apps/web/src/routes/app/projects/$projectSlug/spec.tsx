@@ -161,6 +161,7 @@ function SpecEditorInner({
       visibility={visibility}
       description={description}
       savedDraft={draftRow?.draft ?? ""}
+      savedDraftHash={draftRow?.draftHash ?? null}
       lastSavedAt={draftRow?.lastSavedAt ?? null}
       versions={versions.map((v) => ({
         _id: v._id,

@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { api } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import schema from "./schema";
+import { draftFingerprint } from "./publishReadiness";
 
 const modules = import.meta.glob("./**/*.ts");
 
@@ -30,11 +31,13 @@ async function seedWorld(t: ReturnType<typeof convexTest>): Promise<Seeded> {
       clerkOrgId: "org_pub",
       name: "Pub Co",
       slug: "pub-co",
+      publicHandle: "pub-co",
     });
     await ctx.db.insert("organizations", {
       clerkOrgId: "org_stranger",
       name: "Stranger Co",
       slug: "stranger-co",
+      publicHandle: "stranger-co",
     });
     const projectId = await ctx.db.insert("projects", {
       organizationId: orgId,
@@ -92,6 +95,16 @@ describe("specs.deprecateVersion — auth", () => {
   it("rejects non-member", async () => {
     const t = convexTest(schema, modules);
     const seed = await seedWorld(t);
+    await t.run(async (ctx) => {
+      await ctx.db.insert("publishReadiness", {
+        projectId: seed.projectId,
+        draftHash: await draftFingerprint(SPEC_BODY),
+        serverOrigin: "https://api.example.com",
+        credentialRevision: 0,
+        status: "ok",
+        testedAt: Date.now(),
+      });
+    });
     await expect(
       asStranger(t).mutation(api.specs.deprecateVersion, {
         versionId: seed.versionId,
@@ -190,7 +203,7 @@ describe("specs.getPublishedForGateway — deprecation metadata", () => {
     await seedWorld(t);
 
     const result = await t.query(api.specs.getPublishedForGateway, {
-      orgSlug: "pub-co",
+      publisherHandle: "pub-co",
       projectSlug: "dep-api",
     });
 
@@ -213,7 +226,7 @@ describe("specs.getPublishedForGateway — deprecation metadata", () => {
     });
 
     const result = await t.query(api.specs.getPublishedForGateway, {
-      orgSlug: "pub-co",
+      publisherHandle: "pub-co",
       projectSlug: "dep-api",
     });
 
@@ -233,7 +246,7 @@ describe("specs.getPublishedForGateway — deprecation metadata", () => {
     });
 
     const result = await t.query(api.specs.getPublishedForGateway, {
-      orgSlug: "pub-co",
+      publisherHandle: "pub-co",
       projectSlug: "dep-api",
     });
     expect(result!.spec).toBe(SPEC_BODY);
@@ -247,7 +260,7 @@ describe("catalogue.getPublicDetail — deprecation metadata", () => {
 
     // Before deprecation
     const before = await t.query(api.catalogue.getPublicDetail, {
-      orgSlug: "pub-co",
+      publisherHandle: "pub-co",
       projectSlug: "dep-api",
     });
     expect(before!.latestVersion!.deprecatedAt).toBeUndefined();
@@ -259,7 +272,7 @@ describe("catalogue.getPublicDetail — deprecation metadata", () => {
 
     // After deprecation
     const after = await t.query(api.catalogue.getPublicDetail, {
-      orgSlug: "pub-co",
+      publisherHandle: "pub-co",
       projectSlug: "dep-api",
     });
     expect(after!.latestVersion!.deprecatedAt).toBeGreaterThan(0);
@@ -271,6 +284,16 @@ describe("specs.publish — fires spec_published notification", () => {
   it("creates notification on successful publish", async () => {
     const t = convexTest(schema, modules);
     const seed = await seedWorld(t);
+    await t.run(async (ctx) => {
+      await ctx.db.insert("publishReadiness", {
+        projectId: seed.projectId,
+        draftHash: await draftFingerprint(SPEC_BODY),
+        serverOrigin: "https://api.example.com",
+        credentialRevision: 0,
+        status: "ok",
+        testedAt: Date.now(),
+      });
+    });
     const previousApiKey = process.env.GEMINI_API_KEY;
     const previousFetch = globalThis.fetch;
     process.env.GEMINI_API_KEY = "test-key";

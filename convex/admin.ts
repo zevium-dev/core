@@ -27,6 +27,42 @@ export const isAdminQuery = query({
   },
 });
 
+/** Bounded, idempotent rollout step; run repeatedly until remaining is zero. */
+export const migrateSecurityRollout = mutation({
+  args: {},
+  handler: async (
+    ctx,
+  ): Promise<{
+    credentials: { migrated: number; remaining: number };
+    handles: { updated: number; collisions: number };
+    remainingPlaintext: number;
+    remainingUnencrypted: number;
+    remainingMissingHandles: number;
+  }> => {
+    await requireAdmin(ctx);
+    const credentials: { migrated: number; remaining: number } =
+      await ctx.runMutation(
+        internal.upstreamCredentials.migrateLegacyPlaintext,
+        {},
+      );
+    const handles: { updated: number; collisions: number } =
+      await ctx.runMutation(internal.organizations.backfillPublicHandles, {});
+    const rows = await ctx.db.query("upstreamCredentials").collect();
+    const organizations = await ctx.db.query("organizations").collect();
+    return {
+      credentials,
+      handles,
+      remainingPlaintext: rows.filter((row) => Boolean(row.secret)).length,
+      remainingUnencrypted: rows.filter(
+        (row) => !row.ciphertext || !row.iv || !row.keyVersion,
+      ).length,
+      remainingMissingHandles: organizations.filter(
+        (organization) => organization.publicHandle === undefined,
+      ).length,
+    };
+  },
+});
+
 export type PlatformStats = {
   orgs: number;
   projects: {

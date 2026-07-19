@@ -407,6 +407,11 @@ function UpstreamCredentialsCard({ project }: { project: Doc<"projects"> }) {
   const [name, setName] = useState("x-api-key");
   const [secret, setSecret] = useState("");
   const [revealSecret, setRevealSecret] = useState(false);
+  const [credentialError, setCredentialError] = useState<string | null>(null);
+  const [credentialToRemove, setCredentialToRemove] = useState<{
+    id: Id<"upstreamCredentials">;
+    name: string;
+  } | null>(null);
 
   const queryKey = convexQuery(api.upstreamCredentials.listForProject, {
     projectId: project._id,
@@ -434,6 +439,7 @@ function UpstreamCredentialsCard({ project }: { project: Doc<"projects"> }) {
       removeCredential({ credentialId }),
     onSuccess: async () => {
       toast.success("Upstream credential removed");
+      setCredentialToRemove(null);
       await queryClient.invalidateQueries({ queryKey });
     },
     onError: (err: unknown) =>
@@ -443,6 +449,18 @@ function UpstreamCredentialsCard({ project }: { project: Doc<"projects"> }) {
   function onSave(e: FormEvent) {
     e.preventDefault();
     if (saving) return;
+    if (name.trim() === "" || secret.trim() === "") {
+      setCredentialError("Enter both a header name and secret value.");
+      document
+        .getElementById(
+          name.trim() === ""
+            ? "upstream-header-name"
+            : "upstream-header-secret",
+        )
+        ?.focus();
+      return;
+    }
+    setCredentialError(null);
     saveCredential({ name: name.trim(), secret });
   }
 
@@ -476,6 +494,7 @@ function UpstreamCredentialsCard({ project }: { project: Doc<"projects"> }) {
               spellCheck={false}
               disabled={saving}
               required
+              aria-invalid={credentialError !== null && name.trim() === ""}
             />
           </div>
           <div className="space-y-2">
@@ -485,6 +504,7 @@ function UpstreamCredentialsCard({ project }: { project: Doc<"projects"> }) {
                 id="upstream-header-secret"
                 type={revealSecret ? "text" : "password"}
                 value={secret}
+                aria-invalid={credentialError !== null && secret.trim() === ""}
                 onChange={(e) => setSecret(e.target.value)}
                 placeholder="Enter new value"
                 autoComplete="new-password"
@@ -540,7 +560,12 @@ function UpstreamCredentialsCard({ project }: { project: Doc<"projects"> }) {
                   variant="ghost"
                   size="icon-sm"
                   aria-label={`Remove ${credential.name}`}
-                  onClick={() => deleteCredential(credential.id)}
+                  onClick={() =>
+                    setCredentialToRemove({
+                      id: credential.id,
+                      name: credential.name,
+                    })
+                  }
                   disabled={deleting}
                 >
                   <Trash2 />
@@ -550,6 +575,43 @@ function UpstreamCredentialsCard({ project }: { project: Doc<"projects"> }) {
           </div>
         )}
       </CardContent>
+      <Dialog
+        open={credentialToRemove !== null}
+        onOpenChange={(open) => {
+          if (!open && !deleting) setCredentialToRemove(null);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              Remove {credentialToRemove?.name ?? "credential"}?
+            </DialogTitle>
+            <DialogDescription>
+              Gateway calls may start failing immediately after the propagation
+              window. Replace this credential first if the upstream still
+              requires it.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="ghost"
+              onClick={() => setCredentialToRemove(null)}
+              disabled={deleting}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                if (credentialToRemove) deleteCredential(credentialToRemove.id);
+              }}
+              disabled={deleting}
+            >
+              {deleting ? "Removing…" : "Remove credential"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Card>
   );
 }

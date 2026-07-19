@@ -6,11 +6,15 @@ export default defineSchema({
   organizations: defineTable({
     clerkOrgId: v.string(),
     name: v.string(),
+    /** Clerk identity mirror; never emitted into public routing contracts. */
     slug: v.string(),
+    /** Stable, publisher-controlled public URL segment. */
+    publicHandle: v.optional(v.string()),
     imageUrl: v.optional(v.string()),
   })
     .index("by_clerk_org", ["clerkOrgId"])
-    .index("by_slug", ["slug"]),
+    .index("by_slug", ["slug"])
+    .index("by_public_handle", ["publicHandle"]),
 
   // Mirror of Clerk users
   users: defineTable({
@@ -37,11 +41,25 @@ export default defineSchema({
   upstreamCredentials: defineTable({
     projectId: v.id("projects"),
     name: v.string(),
-    secret: v.string(),
+    // Transitional rollout: legacy plaintext rows are migrated then these
+    // optional fields become required in the next schema tightening.
+    ciphertext: v.optional(v.string()),
+    iv: v.optional(v.string()),
+    keyVersion: v.optional(v.string()),
+    secret: v.optional(v.string()),
     updatedAt: v.number(),
   })
     .index("by_project", ["projectId"])
     .index("by_project_name", ["projectId", "name"]),
+
+  publishReadiness: defineTable({
+    projectId: v.id("projects"),
+    draftHash: v.string(),
+    serverOrigin: v.string(),
+    credentialRevision: v.number(),
+    status: v.literal("ok"),
+    testedAt: v.number(),
+  }).index("by_project", ["projectId"]),
 
   // Mutable draft OpenAPI document per project
   specs: defineTable({
@@ -178,6 +196,25 @@ export default defineSchema({
   })
     .index("by_org", ["clerkOrgId"])
     .index("by_key", ["keyId"]),
+
+  keyRotationOperations: defineTable({
+    clerkOrgId: v.string(),
+    userId: v.string(),
+    operationId: v.string(),
+    oldKeyId: v.string(),
+    status: v.union(
+      v.literal("reserved"),
+      v.literal("completed"),
+      v.literal("failed"),
+    ),
+    newKeyId: v.optional(v.string()),
+    graceUntil: v.optional(v.number()),
+    failure: v.optional(v.string()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_operation", ["clerkOrgId", "userId", "operationId"])
+    .index("by_active_old_key", ["clerkOrgId", "oldKeyId", "status"]),
 
   // Catalogue semantic search (embedded on publish; Gemini text-embedding-004)
   specEmbeddings: defineTable({

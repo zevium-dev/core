@@ -41,6 +41,7 @@ async function seedCatalogue(
       clerkOrgId: "org_pub",
       name: "Pub Co",
       slug: "pub-co",
+      publicHandle: "pub-co",
     });
 
     // Public + published, minCost 1, no free tier. Newest-ish.
@@ -334,20 +335,20 @@ describe("catalogue.listPublic", () => {
 
     await expect(
       t.query(api.catalogue.getPublicDetail, {
-        orgSlug: "pub-co",
+        publisherHandle: "pub-co",
         projectSlug: "secret",
       }),
     ).resolves.toBeNull();
 
     await expect(
       t.query(api.catalogue.getPublicDetail, {
-        orgSlug: "pub-co",
+        publisherHandle: "pub-co",
         projectSlug: "drafty",
       }),
     ).resolves.toBeNull();
 
     const publicDetail = await t.query(api.catalogue.getPublicDetail, {
-      orgSlug: "pub-co",
+      publisherHandle: "pub-co",
       projectSlug: "cheap",
     });
     expect(publicDetail?.project.slug).toBe("cheap");

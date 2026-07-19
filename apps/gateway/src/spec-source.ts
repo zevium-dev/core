@@ -32,9 +32,18 @@ export type PublishedSpec = {
 
 export interface SpecSource {
   getPublishedSpec(
-    orgSlug: string,
+    publisherHandle: string,
     projectSlug: string,
   ): Promise<PublishedSpec | null>;
+}
+
+export class SpecSourceUnavailableError extends Error {}
+
+/** Production safety valve when the authenticated control-plane source is absent. */
+export class FailClosedSpecSource implements SpecSource {
+  async getPublishedSpec(): Promise<PublishedSpec | null> {
+    return null;
+  }
 }
 
 const DEFAULT_TTL_MS = 30_000;
@@ -42,7 +51,7 @@ const MEMORY_MAX = 256;
 
 const getPublishedForGatewayRef = makeFunctionReference<
   "query",
-  { orgSlug: string; projectSlug: string },
+  { publisherHandle: string; projectSlug: string },
   {
     spec: string;
     projectId: string;
@@ -80,15 +89,18 @@ export class CachedSpecSource implements SpecSource {
   }
 
   async getPublishedSpec(
-    orgSlug: string,
+    publisherHandle: string,
     projectSlug: string,
   ): Promise<PublishedSpec | null> {
-    const key = `${orgSlug}/${projectSlug}`;
+    const key = `${publisherHandle}/${projectSlug}`;
     const now = this.#now();
     const hit = this.#cache.get(key);
     if (hit && hit.expiresAt > now) return hit.value;
 
-    const value = await this.#inner.getPublishedSpec(orgSlug, projectSlug);
+    const value = await this.#inner.getPublishedSpec(
+      publisherHandle,
+      projectSlug,
+    );
     if (this.#cache.size >= MEMORY_MAX) {
       const first = this.#cache.keys().next().value;
       if (first !== undefined) this.#cache.delete(first);
@@ -126,12 +138,12 @@ export class ConvexSpecSource implements SpecSource {
   }
 
   async getPublishedSpec(
-    orgSlug: string,
+    publisherHandle: string,
     projectSlug: string,
   ): Promise<PublishedSpec | null> {
     try {
       const value = await this.#client.query(getPublishedForGatewayRef, {
-        orgSlug,
+        publisherHandle,
         projectSlug,
       });
       return parsePublishedSpecPayload(value);
@@ -164,26 +176,30 @@ export class InternalHttpSpecSource implements SpecSource {
   }
 
   async getPublishedSpec(
-    orgSlug: string,
+    publisherHandle: string,
     projectSlug: string,
   ): Promise<PublishedSpec | null> {
     const target = new URL(`${this.#siteUrl}/gateway-spec`);
-    target.searchParams.set("orgSlug", orgSlug);
+    target.searchParams.set("publisherHandle", publisherHandle);
     target.searchParams.set("projectSlug", projectSlug);
     try {
       const response = await this.#fetch(target, {
         headers: { "x-internal-secret": this.#internalSecret },
       });
+      if (response.status === 404) return null;
       if (!response.ok) {
         console.error("InternalHttpSpecSource.getPublishedSpec failed", {
           status: response.status,
         });
-        return null;
+        throw new SpecSourceUnavailableError(
+          "Internal spec source unavailable",
+        );
       }
       return parsePublishedSpecPayload(await response.json());
     } catch (err) {
+      if (err instanceof SpecSourceUnavailableError) throw err;
       console.error("InternalHttpSpecSource.getPublishedSpec failed", err);
-      return null;
+      throw new SpecSourceUnavailableError("Internal spec source unavailable");
     }
   }
 }
@@ -279,14 +295,18 @@ export class FixtureSpecSource implements SpecSource {
     this.#specs = new Map(Object.entries(entries));
   }
 
-  set(orgSlug: string, projectSlug: string, value: PublishedSpec): void {
-    this.#specs.set(`${orgSlug}/${projectSlug}`, value);
+  set(
+    publisherHandle: string,
+    projectSlug: string,
+    value: PublishedSpec,
+  ): void {
+    this.#specs.set(`${publisherHandle}/${projectSlug}`, value);
   }
 
   async getPublishedSpec(
-    orgSlug: string,
+    publisherHandle: string,
     projectSlug: string,
   ): Promise<PublishedSpec | null> {
-    return this.#specs.get(`${orgSlug}/${projectSlug}`) ?? null;
+    return this.#specs.get(`${publisherHandle}/${projectSlug}`) ?? null;
   }
 }

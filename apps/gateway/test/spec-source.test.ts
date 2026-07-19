@@ -17,7 +17,7 @@ describe("internal gateway spec source", () => {
         );
         const url = new URL(request.url);
         expect(url.pathname).toBe("/gateway-spec");
-        expect(url.searchParams.get("orgSlug")).toBe("publisher");
+        expect(url.searchParams.get("publisherHandle")).toBe("publisher");
         expect(url.searchParams.get("projectSlug")).toBe("md-to-html");
         return Response.json({
           spec: '{"openapi":"3.1.0"}',

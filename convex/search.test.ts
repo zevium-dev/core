@@ -46,6 +46,7 @@ async function seedSearchWorld(
       clerkOrgId: "org_search",
       name: "Search Co",
       slug: "search-co",
+      publicHandle: "search-co",
     });
 
     const publicId = await ctx.db.insert("projects", {
@@ -193,7 +194,7 @@ describe("search.fetchSearchListings", () => {
     expect(only?.projectId).toBe(seed.publicId);
     expect(only?.score).toBe(0.95);
     expect(only?.name).toBe("Weather API");
-    expect(only?.orgSlug).toBe("search-co");
+    expect(only?.publisherHandle).toBe("search-co");
     expect(only?.pricing).toEqual({
       minCost: 1,
       maxCost: 1,
@@ -341,6 +342,7 @@ describe("search.embedProject — embedding pipeline", () => {
         clerkOrgId: "org_ep",
         name: "EP Co",
         slug: "ep-co",
+        publicHandle: "ep-co",
       });
       const pid = await ctx.db.insert("projects", {
         organizationId: orgId,
@@ -396,6 +398,7 @@ describe("search.embedProject — embedding pipeline", () => {
         clerkOrgId: "org_gone",
         name: "Gone Co",
         slug: "gone-co",
+        publicHandle: "gone-co",
       });
       const pid = await ctx.db.insert("projects", {
         organizationId: orgId,

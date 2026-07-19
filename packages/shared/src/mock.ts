@@ -7,7 +7,7 @@
 import type { ParsedOpenApiSpec } from "./openapi.js";
 
 export type GeneratedMockResponse = {
-  status: 200;
+  status: number;
   body: unknown;
   contentType: string;
 };
@@ -144,6 +144,7 @@ function synthesize(
 }
 
 type ResponseContent = {
+  status: number;
   contentType: string;
   schema: unknown;
   example: { found: true; value: unknown } | { found: false };
@@ -154,9 +155,12 @@ function extractResponseContent(op: unknown): ResponseContent | null {
   if (!isRecord(op)) return null;
   const responses = op.responses;
   if (!isRecord(responses)) return null;
-  const ok = responses["200"];
-  if (!isRecord(ok)) return null;
-  const content = ok.content;
+  const selectedResponse =
+    Object.entries(responses).find(([status]) => /^2\d\d$/.test(status)) ??
+    Object.entries(responses).find(([status]) => /^\d\d\d$/.test(status));
+  if (!selectedResponse || !isRecord(selectedResponse[1])) return null;
+  const status = Number(selectedResponse[0]);
+  const content = selectedResponse[1].content;
   if (!isRecord(content)) return null;
   const selected =
     (isRecord(content["application/json"])
@@ -165,6 +169,7 @@ function extractResponseContent(op: unknown): ResponseContent | null {
   if (selected === null || !isRecord(selected[1])) return null;
   const media = selected[1];
   return {
+    status,
     contentType: selected[0],
     schema: media.schema,
     example:
@@ -175,10 +180,11 @@ function extractResponseContent(op: unknown): ResponseContent | null {
 }
 
 /**
- * Build a mock 200 response for `pathTemplate`+`method` from the spec's
- * `responses["200"].content`. Prefers JSON when present, otherwise uses first
- * declared media type. Media/schema examples beat type synthesis. Returns null
- * when operation itself is unknown — callers treat that as 404.
+ * Build a mock response for `pathTemplate`+`method` from the operation's
+ * declared responses. Prefers the first 2xx response, then another numeric
+ * response; JSON is preferred when present. Media/schema examples beat type
+ * synthesis. Returns null when operation itself is unknown — callers treat it
+ * as 404.
  */
 export function generateMockResponse(
   spec: ParsedOpenApiSpec,
@@ -190,7 +196,16 @@ export function generateMockResponse(
 
   const content = extractResponseContent(op);
   if (content === null) {
-    return { status: 200, body: {}, contentType: "application/json" };
+    const responses =
+      isRecord(op) && isRecord(op.responses) ? op.responses : {};
+    const declared = Object.keys(responses).find((status) =>
+      /^\d\d\d$/.test(status),
+    );
+    return {
+      status: declared ? Number(declared) : 200,
+      body: {},
+      contentType: "application/json",
+    };
   }
   const body = content.example.found
     ? content.example.value
@@ -198,5 +213,5 @@ export function generateMockResponse(
       ? {}
       : synthesize(content.schema, spec.components, 0);
 
-  return { status: 200, body, contentType: content.contentType };
+  return { status: content.status, body, contentType: content.contentType };
 }

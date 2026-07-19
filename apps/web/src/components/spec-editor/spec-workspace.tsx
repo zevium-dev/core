@@ -1,7 +1,8 @@
 import { convexQuery, useConvexMutation } from "@convex-dev/react-query";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useBlocker } from "@tanstack/react-router";
 import { collectOpenApiSpecIssues, type SpecIssue } from "@zevium/shared";
+import { useAction } from "convex/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
@@ -28,6 +29,7 @@ import {
   summarizeDraftPricing,
 } from "#/lib/spec-pricing";
 import { deriveSaveStatus } from "#/lib/spec-save-status";
+import { canTestSavedDraft } from "#/lib/spec-readiness";
 import { convertSpecInputToJson } from "#/lib/spec-yaml";
 
 import { EditorToolbar } from "./editor-toolbar";
@@ -52,6 +54,7 @@ export type SpecWorkspaceProps = {
   /** Nudges the publish flow to remind publishers to fill this in. */
   description: string | undefined;
   savedDraft: string;
+  savedDraftHash: string | null;
   lastSavedAt: number | null;
   versions: Array<{
     _id: string;
@@ -107,13 +110,35 @@ export function SpecWorkspace({
   visibility,
   description,
   savedDraft,
+  savedDraftHash,
   lastSavedAt: initialLastSavedAt,
   versions,
 }: SpecWorkspaceProps) {
   const queryClient = useQueryClient();
-  const [text, setText] = useState(savedDraft);
+  // A new project owns an empty persisted draft. Make the first editor state a
+  // real, dirty OpenAPI document instead of rendering the template as a
+  // misleading textarea placeholder: the endpoint rail, validation, and
+  // readiness checklist now all describe the same draft the user can save.
+  const initialText = savedDraft.trim() === "" ? OPENAPI_TEMPLATE : savedDraft;
+  const [text, setText] = useState(initialText);
+  const [confirmedDraft, setConfirmedDraft] = useState(savedDraft);
+  const [confirmedDraftHash, setConfirmedDraftHash] = useState(savedDraftHash);
   const [serverIssues, setServerIssues] = useState<SpecIssue[]>([]);
   const [publishOpen, setPublishOpen] = useState(false);
+  const [makePublicOpen, setMakePublicOpen] = useState(false);
+  const [connectionResult, setConnectionResult] = useState<{
+    status:
+      | "ok"
+      | "auth_rejected"
+      | "reachable_unconfirmed"
+      | "blocked_target"
+      | "timeout"
+      | "unreachable"
+      | "missing_server";
+    statusCode?: number;
+    latencyMs?: number;
+    message: string;
+  } | null>(null);
   const [versionDialogId, setVersionDialogId] =
     useState<Id<"specVersions"> | null>(null);
   const [version, setVersion] = useState(() =>
@@ -124,7 +149,7 @@ export function SpecWorkspace({
   );
   const [now, setNow] = useState(() => Date.now());
   const [goodEndpoints, setGoodEndpoints] = useState(
-    () => listSpecEndpoints(savedDraft) ?? [],
+    () => listSpecEndpoints(initialText) ?? [],
   );
   const [endpointsStale, setEndpointsStale] = useState(false);
 
@@ -153,8 +178,10 @@ export function SpecWorkspace({
       setText(savedDraft);
       setLastSavedAt(initialLastSavedAt);
     }
+    setConfirmedDraft(savedDraft);
+    setConfirmedDraftHash(savedDraftHash);
     lastSavedTextRef.current = savedDraft;
-  }, [savedDraft, initialLastSavedAt]);
+  }, [savedDraft, savedDraftHash, initialLastSavedAt]);
 
   useEffect(() => {
     setVersion(defaultNextVersion(versions.map((v) => v.version)));
@@ -205,12 +232,17 @@ export function SpecWorkspace({
     [resetAutosaveCircuit],
   );
 
-  const dirty = text !== savedDraft;
+  const dirty = text !== confirmedDraft;
   const hasClientErrors = clientErrors.length > 0;
 
   const saveDraftFn = useConvexMutation(api.specs.saveDraft);
   const publishFn = useConvexMutation(api.specs.publish);
   const updateProject = useConvexMutation(api.projects.update);
+  const testConnection = useAction(api.publishReadinessAction.testConnection);
+  const persistedReadiness = useQuery(
+    convexQuery(api.publishReadiness.getCurrent, { projectId }),
+  );
+  const readinessCurrent = persistedReadiness.data?.current === true;
 
   const { mutate: saveDraft, isPending: savePending } = useMutation({
     mutationFn: (spec: string) => saveDraftFn({ projectId, spec }),
@@ -232,6 +264,8 @@ export function SpecWorkspace({
       // Record the server-accepted text so the remote-sync effect knows we are
       // in sync and won't clobber any edits typed during the round-trip.
       lastSavedTextRef.current = spec;
+      setConfirmedDraft(spec);
+      setConfirmedDraftHash(result.draftHash ?? null);
       setLastSavedAt(result.lastSavedAt);
       toast.success("Draft saved");
       await queryClient.invalidateQueries({
@@ -246,6 +280,12 @@ export function SpecWorkspace({
       toast.error(humanError(err, "Could not save draft"));
     },
   });
+  const savedFingerprintMatchesEditor = canTestSavedDraft(
+    text,
+    { text: confirmedDraft, hash: confirmedDraftHash },
+    savePending,
+    hasClientErrors,
+  );
 
   const { mutate: publish, isPending: publishPending } = useMutation({
     mutationFn: () =>
@@ -301,12 +341,40 @@ export function SpecWorkspace({
     },
   });
 
+  const { mutate: verifyConnection, isPending: connectionPending } =
+    useMutation({
+      mutationFn: () => testConnection({ projectId }),
+      onSuccess: (result) => {
+        setConnectionResult(result);
+        void queryClient.invalidateQueries({
+          queryKey: convexQuery(api.publishReadiness.getCurrent, {
+            projectId,
+          }).queryKey,
+        });
+        if (result.status === "ok") {
+          toast.success(
+            result.latencyMs === undefined
+              ? "Upstream server is reachable"
+              : `Upstream server is reachable in ${result.latencyMs} ms`,
+          );
+        }
+      },
+      onError: (err: unknown) => {
+        const message = humanError(
+          err,
+          "Could not test the upstream connection",
+        );
+        setConnectionResult({ status: "unreachable", message });
+        toast.error(message);
+      },
+    });
+
   // Autosave: 2s after last keystroke; never with client errors.
   useEffect(() => {
     if (!dirty || hasClientErrors || savePending || autosaveTripped) return;
     const handle = setTimeout(() => {
       const current = textRef.current;
-      if (current === savedDraft) return;
+      if (current === confirmedDraft) return;
       if (current.trim() !== "") {
         const issues = collectOpenApiSpecIssues(current);
         if (issues.some((i) => i.level === "error")) return;
@@ -320,7 +388,7 @@ export function SpecWorkspace({
     hasClientErrors,
     savePending,
     autosaveTripped,
-    savedDraft,
+    confirmedDraft,
     saveDraft,
   ]);
 
@@ -376,14 +444,153 @@ export function SpecWorkspace({
   }
 
   const hasDescription = description !== undefined && description.trim() !== "";
+  const checklist = [
+    {
+      label: "Valid saved spec",
+      complete: !dirty && !hasClientErrors && text.trim() !== "",
+      detail: dirty
+        ? "Save the current draft before publishing."
+        : hasClientErrors
+          ? "Fix the errors in the validation rail."
+          : "A valid OpenAPI draft is saved.",
+    },
+    {
+      label: "Server URL and reachability",
+      complete: readinessCurrent,
+      detail:
+        connectionResult?.message ??
+        (readinessCurrent
+          ? "Saved passing connection test is current."
+          : persistedReadiness.data?.reason === "expired"
+            ? "Saved passing test expired. Run it again."
+            : persistedReadiness.data?.reason === "draft_changed"
+              ? "Saved draft changed after the passing test. Run it again."
+              : persistedReadiness.data?.reason === "credentials_changed"
+                ? "Credentials changed after the passing test. Run it again."
+                : persistedReadiness.data?.readiness
+                  ? "Saved test is no longer valid. Run it again."
+                  : "Run a secure connection test against servers[0].url."),
+    },
+    {
+      label: "Publisher credentials (when required)",
+      complete:
+        connectionResult === null ||
+        (connectionResult.status === "ok" &&
+          connectionResult.statusCode !== 401 &&
+          connectionResult.statusCode !== 403),
+      detail:
+        connectionResult === null
+          ? "Keyless upstreams can publish without credentials. Add credentials only when the upstream requires them."
+          : connectionResult.statusCode === 401 ||
+              connectionResult?.statusCode === 403
+            ? "Configured credentials were rejected. Replace them in Settings, then test again."
+            : "Keyless upstreams can publish without credentials. Add credentials only when the upstream requires them.",
+    },
+    {
+      label: "Pricing",
+      complete: pricing !== null && goodEndpoints.length > 0,
+      detail:
+        pricing === null
+          ? "Fix the pricing fields in the spec."
+          : goodEndpoints.length === 0
+            ? "Add at least one operation before publishing."
+            : formatPricingSummary(pricing),
+    },
+    {
+      label: "Listing metadata",
+      complete: hasDescription,
+      detail: hasDescription
+        ? "Description is ready for the catalogue."
+        : "Add a description so consumers understand the listing.",
+    },
+    {
+      label: "Mock preview",
+      complete: goodEndpoints.length > 0 && !hasClientErrors,
+      detail:
+        goodEndpoints.length > 0 && !hasClientErrors
+          ? "A mock response will be available after publication."
+          : "Fix the spec and add an operation to enable the mock preview.",
+    },
+  ];
 
   const publishSlot = (
     <div className="space-y-3">
       <SpecRailVisibilityNudge
         visibility={visibility}
-        onMakePublic={() => makePublic()}
+        onRequestMakePublic={() => setMakePublicOpen(true)}
         pending={visibilityPending}
       />
+      <Dialog open={makePublicOpen} onOpenChange={setMakePublicOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Make project public?</DialogTitle>
+            <DialogDescription>
+              Published versions will become discoverable in the public
+              catalogue. Drafts remain private until they are published.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="ghost"
+              onClick={() => setMakePublicOpen(false)}
+              disabled={visibilityPending}
+            >
+              Cancel
+            </Button>
+            <Button onClick={() => makePublic()} disabled={visibilityPending}>
+              {visibilityPending ? "Making public…" : "Make public"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <section
+        aria-labelledby="publish-readiness-title"
+        className="rounded-md border p-3 text-sm"
+      >
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div>
+            <h2 id="publish-readiness-title" className="font-medium">
+              Publish readiness
+            </h2>
+            <p className="text-muted-foreground">
+              Check these before making this version public.
+            </p>
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => verifyConnection()}
+            disabled={
+              connectionPending ||
+              savePending ||
+              dirty ||
+              !savedFingerprintMatchesEditor ||
+              hasClientErrors
+            }
+          >
+            {connectionPending ? "Testing…" : "Test connection"}
+          </Button>
+        </div>
+        <ul className="mt-3 flex flex-col gap-2">
+          {checklist.map((item) => (
+            <li key={item.label} className="flex gap-2">
+              <span aria-hidden="true">{item.complete ? "✓" : "•"}</span>
+              <div>
+                <p className="font-medium">{item.label}</p>
+                <p className="text-muted-foreground">{item.detail}</p>
+              </div>
+            </li>
+          ))}
+        </ul>
+        {!hasDescription ? (
+          <Button asChild variant="link" size="sm" className="mt-2 px-0">
+            <Link to="/app/projects/$projectSlug" params={{ projectSlug }}>
+              Add listing metadata
+            </Link>
+          </Button>
+        ) : null}
+      </section>
       {!hasDescription ? (
         <p className="rounded-md border border-dashed px-3 py-2 text-xs text-muted-foreground">
           No description — catalogue card will look empty.{" "}
@@ -401,9 +608,11 @@ export function SpecWorkspace({
         <DialogTrigger asChild>
           <Button
             className="w-full"
-            disabled={dirty || savePending || hasClientErrors}
+            disabled={
+              dirty || savePending || hasClientErrors || !readinessCurrent
+            }
           >
-            Publish
+            {readinessCurrent ? "Publish" : "Test connection to publish"}
           </Button>
         </DialogTrigger>
         <DialogContent>

@@ -15,7 +15,7 @@
  * - flush/ack: flush returns all pending settlements (stable ids). After the
  *   ledger appends them, ack removes them. If ack is lost, re-flush yields the
  *   same settlement ids; the ledger dedupes by settlementId.
- * - free tier: per-key per-UTC-day counters; free calls skip reserve/settle
+ * - free tier: per-consumer-operation per-UTC-day counters; free calls skip reserve/settle
  *   but still enqueue pending usage with credits 0.
  * - alarm (~5s): when pending non-empty, batch → wallets:recordUsage → ack.
  *
@@ -111,6 +111,9 @@ export type FreeTierResult =
   | { status: "consumed"; used: number; limit: number }
   | { status: "exhausted"; used: number; limit: number }
   | { status: "rejected"; reason: string };
+
+export type KeyAuthorizationResult =
+  { status: "allowed" } | { status: "rejected"; reason: "key_disabled" };
 
 export type EnqueueFreeResult =
   | { status: "enqueued"; settlementId: string }
@@ -208,8 +211,14 @@ export function utcDayKey(ms: number = Date.now()): string {
   return new Date(ms).toISOString().slice(0, 10);
 }
 
-function freeStorageKey(keyId: string, day: string): string {
-  return `${K_FREE_PREFIX}${keyId}:${day}`;
+function freeStorageKey(
+  consumerOrgId: string,
+  projectId: string,
+  method: string,
+  pathTemplate: string,
+  day: string,
+): string {
+  return `${K_FREE_PREFIX}${encodeURIComponent(consumerOrgId)}:${encodeURIComponent(projectId)}:${method.toUpperCase()}:${encodeURIComponent(pathTemplate)}:${day}`;
 }
 
 /** UTC calendar month key YYYY-MM. */
@@ -600,35 +609,44 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
   }
 
   /**
-   * Consume one free-tier unit for keyId on the current UTC day.
+   * Consume one free-tier unit for a consumer/project/operation on the current UTC day.
    * Does not touch balance / inFlight.
    */
   async consumeFreeTier(
-    keyId: string,
     limit: number,
-    opts: { clerkOrgId?: string; nowMs?: number } = {},
+    opts: {
+      keyId: string;
+      clerkOrgId: string;
+      projectId: string;
+      method: string;
+      pathTemplate: string;
+      nowMs?: number;
+    },
   ): Promise<FreeTierResult> {
-    if (!keyId || typeof keyId !== "string") {
-      return { status: "rejected", reason: "keyId required" };
-    }
     if (!(limit > 0) || !Number.isFinite(limit)) {
       return { status: "rejected", reason: "limit must be > 0" };
     }
 
     const nowMs = opts.nowMs ?? Date.now();
     const setting = await this.#resolveKeySetting(
-      keyId,
+      opts.keyId,
       opts.clerkOrgId,
       nowMs,
     );
 
     return this.#mutate(async () => {
-      const currentSetting = this.#keySettings.get(keyId) ?? setting;
+      const currentSetting = this.#keySettings.get(opts.keyId) ?? setting;
       if (currentSetting && this.#isKeyDisabled(currentSetting, nowMs)) {
         return { status: "rejected", reason: "key_disabled" };
       }
       const day = utcDayKey(nowMs);
-      const storageKey = freeStorageKey(keyId, day);
+      const storageKey = freeStorageKey(
+        opts.clerkOrgId,
+        opts.projectId,
+        opts.method,
+        opts.pathTemplate,
+        day,
+      );
       const used = (await this.ctx.storage.get<number>(storageKey)) ?? 0;
       if (used >= limit) {
         return { status: "exhausted", used, limit };
@@ -640,14 +658,38 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
     });
   }
 
-  /** Return a consumed free-tier unit after upstream failure or non-2xx. */
-  async refundFreeTier(
+  /** Apply current key controls without reserving credits or quota. */
+  async authorizeKey(
     keyId: string,
+    clerkOrgId: string,
     nowMs: number = Date.now(),
-  ): Promise<void> {
-    if (!keyId) return;
+  ): Promise<KeyAuthorizationResult> {
+    const setting = await this.#resolveKeySetting(keyId, clerkOrgId, nowMs);
+    return this.#mutate(async () => {
+      const currentSetting = this.#keySettings.get(keyId) ?? setting;
+      if (currentSetting && this.#isKeyDisabled(currentSetting, nowMs)) {
+        return { status: "rejected", reason: "key_disabled" };
+      }
+      return { status: "allowed" };
+    });
+  }
+
+  /** Return a consumed free-tier unit after upstream failure or non-2xx. */
+  async refundFreeTier(opts: {
+    clerkOrgId: string;
+    projectId: string;
+    method: string;
+    pathTemplate: string;
+    nowMs?: number;
+  }): Promise<void> {
     await this.#mutate(async () => {
-      const storageKey = freeStorageKey(keyId, utcDayKey(nowMs));
+      const storageKey = freeStorageKey(
+        opts.clerkOrgId,
+        opts.projectId,
+        opts.method,
+        opts.pathTemplate,
+        utcDayKey(opts.nowMs ?? Date.now()),
+      );
       const used = (await this.ctx.storage.get<number>(storageKey)) ?? 0;
       if (used > 0) await this.ctx.storage.put(storageKey, used - 1);
     });
@@ -869,13 +911,24 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
     return this.#snapshot();
   }
 
-  async getFreeTierUsed(
-    keyId: string,
-    nowMs: number = Date.now(),
-  ): Promise<number> {
-    const day = utcDayKey(nowMs);
+  async getFreeTierUsed(opts: {
+    clerkOrgId: string;
+    projectId: string;
+    method: string;
+    pathTemplate: string;
+    nowMs?: number;
+  }): Promise<number> {
+    const day = utcDayKey(opts.nowMs ?? Date.now());
     return (
-      (await this.ctx.storage.get<number>(freeStorageKey(keyId, day))) ?? 0
+      (await this.ctx.storage.get<number>(
+        freeStorageKey(
+          opts.clerkOrgId,
+          opts.projectId,
+          opts.method,
+          opts.pathTemplate,
+          day,
+        ),
+      )) ?? 0
     );
   }
 
@@ -953,7 +1006,7 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
   #isKeyDisabled(setting: KeySetting, nowMs: number): boolean {
     return (
       setting.disabled ||
-      (setting.graceUntil !== undefined && setting.graceUntil < nowMs)
+      (setting.graceUntil !== undefined && nowMs >= setting.graceUntil)
     );
   }
 

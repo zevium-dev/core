@@ -84,14 +84,14 @@ describe("pickLandingTeasers", () => {
     {
       name: "Weather",
       slug: "weather",
-      orgSlug: "demo",
+      publisherHandle: "demo",
       orgName: "Demo",
       description: "Forecasts.",
     },
     {
       name: "FX",
       slug: "fx",
-      orgSlug: "demo",
+      publisherHandle: "demo",
       orgName: "Demo",
       description: "Rates.",
     },
@@ -103,7 +103,7 @@ describe("pickLandingTeasers", () => {
         {
           name: "Real",
           slug: "real",
-          orgSlug: "acme",
+          publisherHandle: "acme",
           orgName: "Acme",
           description: null,
         },

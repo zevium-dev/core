@@ -1,6 +1,8 @@
 import { Show, UserButton } from "@clerk/tanstack-react-start";
 import { shadcn } from "@clerk/ui/themes";
 import { Link } from "@tanstack/react-router";
+import { Menu, X } from "lucide-react";
+import { useEffect, useState } from "react";
 
 import { BrandMark } from "#/components/brand-mark";
 import { ThemeToggle } from "#/components/theme-toggle";
@@ -20,6 +22,14 @@ type PublicHeaderProps = {
  * Auth slot has fixed min-width so swap never shifts layout.
  */
 export function PublicHeader({ active = null, className }: PublicHeaderProps) {
+  const [mobileOpen, setMobileOpen] = useState(false);
+  useEffect(() => {
+    const close = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMobileOpen(false);
+    };
+    window.addEventListener("keydown", close);
+    return () => window.removeEventListener("keydown", close);
+  }, []);
   return (
     <header className={cn("border-b", className)}>
       <div className="mx-auto flex h-14 max-w-6xl items-center justify-between gap-4 px-4">
@@ -55,6 +65,17 @@ export function PublicHeader({ active = null, className }: PublicHeaderProps) {
         </div>
 
         <div className="flex items-center gap-2">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="sm:hidden"
+            aria-label={mobileOpen ? "Close navigation" : "Open navigation"}
+            aria-expanded={mobileOpen}
+            onClick={() => setMobileOpen((open) => !open)}
+          >
+            {mobileOpen ? <X /> : <Menu />}
+          </Button>
           <ThemeToggle />
           {/* Fixed-width auth slot: prevents Sign in ↔ Dashboard+UserButton shift */}
           <div className="flex h-9 min-w-[9.5rem] items-center justify-end gap-2">
@@ -76,6 +97,33 @@ export function PublicHeader({ active = null, className }: PublicHeaderProps) {
           </div>
         </div>
       </div>
+      {mobileOpen ? (
+        <nav
+          aria-label="Public navigation"
+          className="flex flex-col gap-1 border-t px-4 py-3 text-sm sm:hidden"
+        >
+          <Link
+            to="/catalogue"
+            onClick={() => setMobileOpen(false)}
+            className={cn(
+              "rounded-md px-3 py-2 focus-visible:ring-[3px] focus-visible:ring-ring/50",
+              active === "catalogue" && "bg-muted",
+            )}
+          >
+            Catalogue
+          </Link>
+          <Link
+            to="/docs"
+            onClick={() => setMobileOpen(false)}
+            className={cn(
+              "rounded-md px-3 py-2 focus-visible:ring-[3px] focus-visible:ring-ring/50",
+              active === "docs" && "bg-muted",
+            )}
+          >
+            Docs
+          </Link>
+        </nav>
+      ) : null}
     </header>
   );
 }

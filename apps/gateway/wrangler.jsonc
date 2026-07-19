@@ -3,6 +3,9 @@
   "account_id": "1ea9299555b026a6a7484c8323c5a953",
   "main": "src/index.ts",
   "compatibility_date": "2025-04-01",
+  // Cloudflare global fetch rejects private-network targets at the egress
+  // boundary. URL policy below remains defense in depth.
+  "compatibility_flags": ["global_fetch_strictly_public"],
   "routes": [{ "pattern": "gateway.zevium.dev", "custom_domain": true }],
   "vars": {
     // CLERK_SECRET_KEY — Clerk secret for POST /v1/api_keys/verify

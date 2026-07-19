@@ -31,6 +31,29 @@ describe("generateMockResponse", () => {
     });
   });
 
+  it("uses a declared non-2xx response when no success response exists", () => {
+    const spec = specWith({
+      "/private": {
+        get: {
+          responses: {
+            "401": {
+              content: {
+                "application/json": {
+                  example: { error: "unauthorized" },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+    expect(generateMockResponse(spec, "/private", "get")).toEqual({
+      status: 401,
+      body: { error: "unauthorized" },
+      contentType: "application/json",
+    });
+  });
+
   it("prefers a schema-level example over synthesis", () => {
     const spec = specWith({
       "/users/{id}": {

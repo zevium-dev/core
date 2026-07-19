@@ -434,19 +434,21 @@ http.route({
       return json({ error: "unauthorized" }, 401);
     }
     const url = new URL(request.url);
-    const orgSlug = url.searchParams.get("orgSlug")?.trim() ?? "";
+    const publisherHandle =
+      url.searchParams.get("publisherHandle")?.trim() ?? "";
     const projectSlug = url.searchParams.get("projectSlug")?.trim() ?? "";
-    if (orgSlug === "" || projectSlug === "") {
-      return json({ error: "orgSlug and projectSlug required" }, 400);
+    if (publisherHandle === "" || projectSlug === "") {
+      return json({ error: "publisherHandle and projectSlug required" }, 400);
     }
     try {
-      return json(
-        await ctx.runQuery(internal.specs.getPublishedForGatewayInternal, {
-          orgSlug,
+      const payload = await ctx.runQuery(
+        internal.specs.getPublishedForGatewayInternal,
+        {
+          publisherHandle,
           projectSlug,
-        }),
-        200,
+        },
       );
+      return json(payload, 200);
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "gateway spec failed";

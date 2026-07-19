@@ -41,21 +41,21 @@ const FALLBACK_TEASERS = [
   {
     name: "Weather",
     slug: "weather",
-    orgSlug: "demo",
+    publisherHandle: "demo",
     orgName: "Demo",
     description: "Forecasts priced per call.",
   },
   {
     name: "FX Rates",
     slug: "fx-rates",
-    orgSlug: "demo",
+    publisherHandle: "demo",
     orgName: "Demo",
     description: "Live FX with free tier on /ping.",
   },
   {
     name: "Embeddings",
     slug: "embeddings",
-    orgSlug: "demo",
+    publisherHandle: "demo",
     orgName: "Demo",
     description: "Vectorize text. Agent-ready.",
   },
@@ -417,21 +417,21 @@ function LandingPage() {
                 ))
               : teasers.map((teaser, i) => (
                   <Reveal
-                    key={`${teaser.orgSlug}/${teaser.slug}`}
+                    key={`${teaser.publisherHandle}/${teaser.slug}`}
                     delay={i * STAGGER}
                   >
                     {teaser.live ? (
                       <Link
-                        to="/catalogue/$orgSlug/$projectSlug"
+                        to="/catalogue/$publisherHandle/$projectSlug"
                         params={{
-                          orgSlug: teaser.orgSlug,
+                          publisherHandle: teaser.publisherHandle,
                           projectSlug: teaser.slug,
                         }}
                         className="group block h-full rounded-xl outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
                       >
                         <TeaserCard
                           name={teaser.name}
-                          orgSlug={teaser.orgSlug}
+                          publisherHandle={teaser.publisherHandle}
                           slug={teaser.slug}
                           orgName={teaser.orgName}
                           description={teaser.description}
@@ -444,7 +444,7 @@ function LandingPage() {
                       >
                         <TeaserCard
                           name={teaser.name}
-                          orgSlug={teaser.orgSlug}
+                          publisherHandle={teaser.publisherHandle}
                           slug={teaser.slug}
                           orgName={teaser.orgName}
                           description={teaser.description}
@@ -591,13 +591,13 @@ function McpConfigBlock({ snippet }: { snippet: string }) {
 
 function TeaserCard({
   name,
-  orgSlug,
+  publisherHandle,
   slug,
   orgName,
   description,
 }: {
   name: string;
-  orgSlug: string;
+  publisherHandle: string;
   slug: string;
   orgName: string;
   description: string;
@@ -613,7 +613,7 @@ function TeaserCard({
         </CardAction>
         <CardDescription>
           <code>
-            {orgSlug}/{slug}
+            {publisherHandle}/{slug}
           </code>
         </CardDescription>
       </CardHeader>

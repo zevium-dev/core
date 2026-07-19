@@ -207,7 +207,7 @@ async function handleSearchApis(
 
   const matches: Array<{
     name: string;
-    org: string;
+    publisherHandle: string;
     slug: string;
     description: string | undefined;
     gatewayBaseUrl: string;
@@ -216,7 +216,7 @@ async function handleSearchApis(
 
   for (const item of page.items) {
     const published = await deps.specSource.getPublishedSpec(
-      item.orgSlug,
+      item.publisherHandle,
       item.slug,
     );
     let endpoints: DiscoveryEndpoint[] = [];
@@ -230,10 +230,10 @@ async function handleSearchApis(
     const origin = deps.gatewayOrigin.replace(/\/+$/, "");
     matches.push({
       name: item.name,
-      org: item.orgSlug,
+      publisherHandle: item.publisherHandle,
       slug: item.slug,
       description: item.description,
-      gatewayBaseUrl: `${origin}/gateway/${item.orgSlug}/${item.slug}`,
+      gatewayBaseUrl: `${origin}/gateway/${item.publisherHandle}/${item.slug}`,
       endpoints,
     });
   }
@@ -320,7 +320,7 @@ async function handleCallApi(
   const method = methodRaw.toUpperCase();
   const remainderPath = pathRaw.startsWith("/") ? pathRaw : `/${pathRaw}`;
   const route: GatewayRoute = {
-    orgSlug: org,
+    publisherHandle: org,
     projectSlug: project,
     remainderPath,
   };

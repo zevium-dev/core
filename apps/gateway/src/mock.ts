@@ -1,5 +1,5 @@
 /**
- * Mock gateway route: /mock/:orgSlug/:projectSlug/* — PUBLIC, no API key.
+ * Mock gateway route: /mock/:publisherHandle/:projectSlug/* — PUBLIC, no API key.
  * Mock never executes the upstream API, so the "no unmetered execution"
  * product rule does not apply: responses are synthesized from the published
  * spec's response schema at 0 credits. This is the anonymous try-before-buy
@@ -23,22 +23,22 @@ export type MockDeps = {
 };
 
 export type MockRoute = {
-  orgSlug: string;
+  publisherHandle: string;
   projectSlug: string;
   /** Remainder path under /mock/:org/:project */
   remainderPath: string;
 };
 
 export function parseMockPath(pathname: string): MockRoute | null {
-  // /mock/:orgSlug/:projectSlug/*
+  // /mock/:publisherHandle/:projectSlug/*
   const parts = pathname.split("/").filter(Boolean);
   if (parts[0] !== "mock") return null;
   if (!parts[1] || !parts[2]) return null;
-  const orgSlug = parts[1];
+  const publisherHandle = parts[1];
   const projectSlug = parts[2];
   const rest = parts.slice(3);
   const remainderPath = rest.length === 0 ? "/" : `/${rest.join("/")}`;
-  return { orgSlug, projectSlug, remainderPath };
+  return { publisherHandle, projectSlug, remainderPath };
 }
 
 function defaultId(): string {
@@ -53,7 +53,7 @@ export async function handleMockRequest(
   const requestId = (deps.idGenerator ?? defaultId)();
 
   const published = await deps.specSource.getPublishedSpec(
-    route.orgSlug,
+    route.publisherHandle,
     route.projectSlug,
   );
   if (!published) {
