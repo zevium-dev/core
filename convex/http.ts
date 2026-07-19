@@ -420,4 +420,40 @@ http.route({
   }),
 });
 
+/** Published spec plus publisher credentials; gateway-only. */
+http.route({
+  path: "/gateway-spec",
+  method: "GET",
+  handler: httpAction(async (ctx, request) => {
+    const secret = process.env.GATEWAY_INTERNAL_SECRET;
+    if (
+      secret === undefined ||
+      secret.length === 0 ||
+      request.headers.get("x-internal-secret") !== secret
+    ) {
+      return json({ error: "unauthorized" }, 401);
+    }
+    const url = new URL(request.url);
+    const orgSlug = url.searchParams.get("orgSlug")?.trim() ?? "";
+    const projectSlug = url.searchParams.get("projectSlug")?.trim() ?? "";
+    if (orgSlug === "" || projectSlug === "") {
+      return json({ error: "orgSlug and projectSlug required" }, 400);
+    }
+    try {
+      return json(
+        await ctx.runQuery(internal.specs.getPublishedForGatewayInternal, {
+          orgSlug,
+          projectSlug,
+        }),
+        200,
+      );
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "gateway spec failed";
+      console.error("gateway spec failed", { message });
+      return json({ error: "gateway spec failed" }, 500);
+    }
+  }),
+});
+
 export default http;

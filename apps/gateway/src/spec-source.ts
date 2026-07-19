@@ -20,6 +20,8 @@ export type PublishedSpec = {
    * "private" projects only accept keys whose org owns the project.
    */
   visibility: "public" | "private";
+  /** Publisher-owned headers injected after consumer auth headers are stripped. */
+  upstreamHeaders?: Record<string, string>;
   /** Epoch seconds when this spec version was deprecated (RFC 8594). Undefined when active. */
   deprecatedAt?: number;
   /** Epoch seconds when this spec version is scheduled for removal (RFC 8594 Sunset). */
@@ -140,6 +142,50 @@ export class ConvexSpecSource implements SpecSource {
   }
 }
 
+export type InternalHttpSpecSourceOptions = {
+  siteUrl: string;
+  internalSecret: string;
+  /** Injected for tests. */
+  fetchImpl?: typeof fetch;
+};
+
+/** Gateway-only spec lookup. Shared-secret httpAction also returns upstream headers. */
+export class InternalHttpSpecSource implements SpecSource {
+  readonly #siteUrl: string;
+  readonly #internalSecret: string;
+  readonly #fetch: typeof fetch;
+
+  constructor(opts: InternalHttpSpecSourceOptions) {
+    this.#siteUrl = opts.siteUrl.replace(/\/+$/, "");
+    this.#internalSecret = opts.internalSecret;
+    this.#fetch = opts.fetchImpl ?? fetch;
+  }
+
+  async getPublishedSpec(
+    orgSlug: string,
+    projectSlug: string,
+  ): Promise<PublishedSpec | null> {
+    const target = new URL(`${this.#siteUrl}/gateway-spec`);
+    target.searchParams.set("orgSlug", orgSlug);
+    target.searchParams.set("projectSlug", projectSlug);
+    try {
+      const response = await this.#fetch(target, {
+        headers: { "x-internal-secret": this.#internalSecret },
+      });
+      if (!response.ok) {
+        console.error("InternalHttpSpecSource.getPublishedSpec failed", {
+          status: response.status,
+        });
+        return null;
+      }
+      return parsePublishedSpecPayload(await response.json());
+    } catch (err) {
+      console.error("InternalHttpSpecSource.getPublishedSpec failed", err);
+      return null;
+    }
+  }
+}
+
 /** Accepts raw PublishedSpec, null, or Convex-shaped payloads. */
 export function parsePublishedSpecPayload(json: unknown): PublishedSpec | null {
   if (json === null || json === undefined) return null;
@@ -188,6 +234,18 @@ export function parsePublishedSpecPayload(json: unknown): PublishedSpec | null {
     clerkOrgId,
     visibility,
   };
+  if (
+    "upstreamHeaders" in candidate &&
+    candidate.upstreamHeaders !== null &&
+    typeof candidate.upstreamHeaders === "object" &&
+    !Array.isArray(candidate.upstreamHeaders)
+  ) {
+    const headers: Record<string, string> = {};
+    for (const [name, value] of Object.entries(candidate.upstreamHeaders)) {
+      if (typeof value === "string") headers[name] = value;
+    }
+    published.upstreamHeaders = headers;
+  }
   if (
     "deprecatedAt" in candidate &&
     typeof candidate.deprecatedAt === "number" &&

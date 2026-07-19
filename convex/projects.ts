@@ -218,6 +218,14 @@ export const remove = mutation({
       await ctx.db.delete(version._id);
     }
 
+    const credentials = await ctx.db
+      .query("upstreamCredentials")
+      .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
+      .collect();
+    for (const credential of credentials) {
+      await ctx.db.delete(credential._id);
+    }
+
     // Usage events stay for analytics integrity; they still reference projectId.
     await ctx.db.delete(args.projectId);
     return { deleted: args.projectId };

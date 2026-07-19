@@ -4,6 +4,7 @@ import {
   CachedSpecSource,
   ConvexSpecSource,
   FixtureSpecSource,
+  InternalHttpSpecSource,
 } from "./spec-source";
 import {
   CachedCatalogueSource,
@@ -77,7 +78,12 @@ function buildDeps(env: Env): WorkerDeps {
   }
 
   // NUL-joined to avoid ambiguity when one field is empty.
-  const fingerprint = `${env.CLERK_SECRET_KEY ?? ""}\u0000${env.CONVEX_URL ?? ""}`;
+  const fingerprint = [
+    env.CLERK_SECRET_KEY ?? "",
+    env.CONVEX_URL ?? "",
+    env.CONVEX_SITE_URL ?? "",
+    env.GATEWAY_INTERNAL_SECRET ?? "",
+  ].join("\u0000");
   if (cachedProdDeps && cachedProdDeps.fingerprint === fingerprint) {
     return cachedProdDeps.deps;
   }
@@ -86,9 +92,18 @@ function buildDeps(env: Env): WorkerDeps {
     ? new ClerkKeyVerifier({ secretKey: env.CLERK_SECRET_KEY })
     : new FixtureKeyVerifier();
 
-  const innerSpec = env.CONVEX_URL
-    ? new ConvexSpecSource({ convexUrl: env.CONVEX_URL })
-    : new FixtureSpecSource();
+  const siteUrl =
+    env.CONVEX_SITE_URL ??
+    env.CONVEX_URL?.replace(".convex.cloud", ".convex.site");
+  const innerSpec =
+    siteUrl && env.GATEWAY_INTERNAL_SECRET
+      ? new InternalHttpSpecSource({
+          siteUrl,
+          internalSecret: env.GATEWAY_INTERNAL_SECRET,
+        })
+      : env.CONVEX_URL
+        ? new ConvexSpecSource({ convexUrl: env.CONVEX_URL })
+        : new FixtureSpecSource();
 
   const innerCatalogue = env.CONVEX_URL
     ? new ConvexCatalogueSource({ convexUrl: env.CONVEX_URL })

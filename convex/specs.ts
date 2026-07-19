@@ -1,5 +1,5 @@
 import { v } from "convex/values";
-import { mutation, query } from "./_generated/server";
+import { internalQuery, mutation, query } from "./_generated/server";
 import type { Doc } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
 import { getOrgBySlug, requireProjectMember } from "./lib/auth";
@@ -304,6 +304,71 @@ export const getPublishedForGateway = query({
       organizationId: org._id,
       clerkOrgId: org.clerkOrgId,
       visibility: project.visibility,
+      deprecatedAt: latest.deprecatedAt,
+      sunsetAt: latest.sunsetAt,
+      deprecationMessage: latest.deprecationMessage,
+    };
+  },
+});
+
+/**
+ * Internal gateway lookup. Same immutable published snapshot as public query,
+ * plus publisher-owned headers. Only reachable through authenticated httpAction.
+ */
+export const getPublishedForGatewayInternal = internalQuery({
+  args: {
+    orgSlug: v.string(),
+    projectSlug: v.string(),
+  },
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{
+    spec: string;
+    version: string;
+    projectId: string;
+    organizationId: string;
+    clerkOrgId: string;
+    visibility: Doc<"projects">["visibility"];
+    upstreamHeaders: Record<string, string>;
+    deprecatedAt: number | undefined;
+    sunsetAt: number | undefined;
+    deprecationMessage: string | undefined;
+  } | null> => {
+    const org = await getOrgBySlug(ctx, args.orgSlug);
+    if (org === null) return null;
+
+    const project = await ctx.db
+      .query("projects")
+      .withIndex("by_org_slug", (q) =>
+        q.eq("organizationId", org._id).eq("slug", args.projectSlug),
+      )
+      .filter((q) => q.eq(q.field("visibility"), "public"))
+      .unique();
+    if (project === null || project.status !== "published") return null;
+
+    const latest = await ctx.db
+      .query("specVersions")
+      .withIndex("by_project_published", (q) => q.eq("projectId", project._id))
+      .order("desc")
+      .first();
+    if (latest === null) return null;
+
+    const upstreamHeaders = await ctx.db
+      .query("upstreamCredentials")
+      .withIndex("by_project", (q) => q.eq("projectId", project._id))
+      .collect();
+
+    return {
+      spec: latest.spec,
+      version: latest.version,
+      projectId: project._id,
+      organizationId: org._id,
+      clerkOrgId: org.clerkOrgId,
+      visibility: project.visibility,
+      upstreamHeaders: Object.fromEntries(
+        upstreamHeaders.map((row) => [row.name, row.secret]),
+      ),
       deprecatedAt: latest.deprecatedAt,
       sunsetAt: latest.sunsetAt,
       deprecationMessage: latest.deprecationMessage,

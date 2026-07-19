@@ -32,6 +32,17 @@ export default defineSchema({
     .index("by_org_slug", ["organizationId", "slug"])
     .index("by_visibility_status", ["visibility", "status"]),
 
+  // Publisher-owned headers injected by gateway after consumer auth headers are stripped.
+  // Values never return through member-facing queries after write.
+  upstreamCredentials: defineTable({
+    projectId: v.id("projects"),
+    name: v.string(),
+    secret: v.string(),
+    updatedAt: v.number(),
+  })
+    .index("by_project", ["projectId"])
+    .index("by_project_name", ["projectId", "name"]),
+
   // Mutable draft OpenAPI document per project
   specs: defineTable({
     projectId: v.id("projects"),

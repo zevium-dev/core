@@ -238,6 +238,9 @@ export async function handleGatewayRequest(
   upstreamUrl.search = incoming.search;
 
   const upstreamHeaders = filterRequestHeaders(request.headers);
+  for (const [name, value] of Object.entries(published.upstreamHeaders ?? {})) {
+    upstreamHeaders.set(name, value);
+  }
   const init: RequestInit & { duplex?: "half" } = {
     method: request.method,
     headers: upstreamHeaders,

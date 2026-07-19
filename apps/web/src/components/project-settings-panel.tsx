@@ -1,7 +1,15 @@
 import { convexQuery, useConvexMutation } from "@convex-dev/react-query";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { Check, Copy, Eye, EyeOff, Webhook } from "lucide-react";
+import {
+  Check,
+  Copy,
+  Eye,
+  EyeOff,
+  KeyRound,
+  Trash2,
+  Webhook,
+} from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import { toast } from "sonner";
 
@@ -28,7 +36,7 @@ import { Switch } from "#/components/ui/switch";
 import { Input } from "#/components/ui/input";
 import { Label } from "#/components/ui/label";
 import { api } from "#/lib/convex-api";
-import type { Doc } from "#/lib/convex-data-model";
+import type { Doc, Id } from "#/lib/convex-data-model";
 import { humanError } from "#/lib/human-error";
 import { parseTagsInput } from "#/lib/project-helpers";
 import { deliveryStatusView, truncateError } from "#/lib/webhook-delivery";
@@ -312,6 +320,8 @@ export function ProjectSettingsPanel({
         </CardContent>
       </Card>
 
+      <UpstreamCredentialsCard project={project} />
+
       <WebhooksCard project={project} />
 
       <Card className="border-destructive/40">
@@ -381,6 +391,166 @@ export function ProjectSettingsPanel({
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+function UpstreamCredentialsCard({ project }: { project: Doc<"projects"> }) {
+  const queryClient = useQueryClient();
+  const credentialsQuery = useQuery(
+    convexQuery(api.upstreamCredentials.listForProject, {
+      projectId: project._id,
+    }),
+  );
+  const upsertCredential = useConvexMutation(api.upstreamCredentials.upsert);
+  const removeCredential = useConvexMutation(api.upstreamCredentials.remove);
+
+  const [name, setName] = useState("x-api-key");
+  const [secret, setSecret] = useState("");
+  const [revealSecret, setRevealSecret] = useState(false);
+
+  const queryKey = convexQuery(api.upstreamCredentials.listForProject, {
+    projectId: project._id,
+  }).queryKey;
+
+  const { mutate: saveCredential, isPending: saving } = useMutation({
+    mutationFn: (input: { name: string; secret: string }) =>
+      upsertCredential({
+        projectId: project._id,
+        name: input.name,
+        secret: input.secret,
+      }),
+    onSuccess: async () => {
+      setSecret("");
+      setRevealSecret(false);
+      toast.success("Upstream credential saved");
+      await queryClient.invalidateQueries({ queryKey });
+    },
+    onError: (err: unknown) =>
+      toast.error(humanError(err, "Could not save upstream credential")),
+  });
+
+  const { mutate: deleteCredential, isPending: deleting } = useMutation({
+    mutationFn: (credentialId: Id<"upstreamCredentials">) =>
+      removeCredential({ credentialId }),
+    onSuccess: async () => {
+      toast.success("Upstream credential removed");
+      await queryClient.invalidateQueries({ queryKey });
+    },
+    onError: (err: unknown) =>
+      toast.error(humanError(err, "Could not remove upstream credential")),
+  });
+
+  function onSave(e: FormEvent) {
+    e.preventDefault();
+    if (saving) return;
+    saveCredential({ name: name.trim(), secret });
+  }
+
+  const credentials = credentialsQuery.data ?? [];
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <KeyRound className="size-4 text-muted-foreground" />
+          Upstream credentials
+        </CardTitle>
+        <CardDescription>
+          Gateway injects these headers after removing consumer credentials.
+          Secret values are write-only and never shown again.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-5">
+        <form
+          className="grid gap-3 sm:grid-cols-[1fr_1fr_auto]"
+          onSubmit={onSave}
+        >
+          <div className="space-y-2">
+            <Label htmlFor="upstream-header-name">Header name</Label>
+            <Input
+              id="upstream-header-name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="x-api-key"
+              autoComplete="off"
+              spellCheck={false}
+              disabled={saving}
+              required
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="upstream-header-secret">Secret value</Label>
+            <div className="relative">
+              <Input
+                id="upstream-header-secret"
+                type={revealSecret ? "text" : "password"}
+                value={secret}
+                onChange={(e) => setSecret(e.target.value)}
+                placeholder="Enter new value"
+                autoComplete="new-password"
+                disabled={saving}
+                required
+                className="pr-10"
+              />
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                className="absolute top-1/2 right-1 -translate-y-1/2"
+                onClick={() => setRevealSecret((value) => !value)}
+                aria-label={
+                  revealSecret ? "Hide secret value" : "Show secret value"
+                }
+                disabled={saving}
+              >
+                {revealSecret ? <EyeOff /> : <Eye />}
+              </Button>
+            </div>
+          </div>
+          <Button
+            type="submit"
+            className="self-end"
+            disabled={saving || name.trim() === "" || secret === ""}
+          >
+            {saving ? "Saving…" : "Save credential"}
+          </Button>
+        </form>
+
+        {credentials.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            No upstream credentials configured.
+          </p>
+        ) : (
+          <div className="divide-y rounded-md border">
+            {credentials.map((credential) => (
+              <div
+                key={credential.id}
+                className="flex items-center justify-between gap-3 px-3 py-2.5"
+              >
+                <div className="min-w-0">
+                  <p className="truncate font-mono text-sm">
+                    {credential.name}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Updated {formatRelativeTime(credential.updatedAt)}
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label={`Remove ${credential.name}`}
+                  onClick={() => deleteCredential(credential.id)}
+                  disabled={deleting}
+                >
+                  <Trash2 />
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 

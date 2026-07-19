@@ -91,6 +91,7 @@ async function installFixtures(opts: {
   deprecatedAt?: number;
   sunsetAt?: number;
   deprecationMessage?: string;
+  upstreamHeaders?: Record<string, string>;
 }) {
   const usage = opts.usage ?? new CollectingUsageSink();
   const organizationId = opts.organizationId ?? opts.clerkOrgId;
@@ -111,6 +112,7 @@ async function installFixtures(opts: {
     deprecatedAt: opts.deprecatedAt,
     sunsetAt: opts.sunsetAt,
     deprecationMessage: opts.deprecationMessage,
+    upstreamHeaders: opts.upstreamHeaders,
   });
 
   __setTestPipelineDeps({
@@ -207,6 +209,37 @@ describe("gateway pipeline", () => {
     expect(usage.events[0]!.outcome).toBe("settled");
     expect(usage.events[0]!.cost).toBe(3);
     expect(usage.events[0]!.status).toBe(200);
+  });
+
+  it("strips consumer auth and injects publisher upstream credentials", async () => {
+    const clerkOrgId = "org_pipe_upstream_auth";
+    const { fetchImpl } = makeFetchMock((req) => {
+      expect(req.headers.get("authorization")).toBe("Bearer publisher-secret");
+      expect(req.headers.get("x-api-key")).toBe("publisher-api-key");
+      return new Response("ok");
+    });
+    await installFixtures({
+      clerkOrgId,
+      fetchImpl,
+      credits: 100,
+      upstreamHeaders: {
+        authorization: "Bearer publisher-secret",
+        "x-api-key": "publisher-api-key",
+      },
+    });
+
+    const response = await gatewayFetch(
+      `/gateway/${ORG_SLUG}/${PROJECT_SLUG}/echo`,
+      {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${KEY_SECRET}`,
+          "x-api-key": "consumer-must-not-reach-upstream",
+        },
+        body: "hello",
+      },
+    );
+    expect(response.status).toBe(200);
   });
 
   it("deprecated spec → RFC 8594 deprecation/sunset/link headers", async () => {

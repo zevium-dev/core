@@ -29,6 +29,7 @@ import type * as payouts from "../payouts.js";
 import type * as projects from "../projects.js";
 import type * as search from "../search.js";
 import type * as specs from "../specs.js";
+import type * as upstreamCredentials from "../upstreamCredentials.js";
 import type * as usage from "../usage.js";
 import type * as users from "../users.js";
 import type * as wallets from "../wallets.js";
@@ -62,6 +63,7 @@ declare const fullApi: ApiFromModules<{
   projects: typeof projects;
   search: typeof search;
   specs: typeof specs;
+  upstreamCredentials: typeof upstreamCredentials;
   usage: typeof usage;
   users: typeof users;
   wallets: typeof wallets;
