@@ -2,10 +2,16 @@ name: Pull Request Preview
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened]
+    types: [opened, synchronize, reopened, labeled]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Pull request number whose preview should be deployed and tested
+        required: true
+        type: number
 
 concurrency:
-  group: preview-${{ github.event.pull_request.number }}
+  group: preview-${{ github.event.pull_request.number || inputs.pr_number }}
   cancel-in-progress: true
 
 permissions:
@@ -14,15 +20,22 @@ permissions:
 
 env:
   MISE_EXPERIMENTAL: true
-  PR_NUMBER: ${{ github.event.pull_request.number }}
+  PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
   CLOUDFLARE_ACCOUNT_ID: 1ea9299555b026a6a7484c8323c5a953
 
 jobs:
   deploy-and-test:
-    if: github.event.pull_request.head.repo.full_name == github.repository && github.actor == 'tnfssc'
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.pull_request.head.repo.full_name == github.repository &&
+      github.actor == 'tnfssc' &&
+      (github.event.action != 'labeled' || github.event.label.name == 'full-e2e'))
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: preview
+    outputs:
+      web_url: ${{ steps.preview_urls.outputs.web_url }}
+      gateway_url: ${{ steps.preview_urls.outputs.gateway_url }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -72,6 +85,12 @@ jobs:
           printf '%s' '${{ secrets.CLERK_PREVIEW_SECRET_KEY }}' | pnpm --filter web exec wrangler secret put CLERK_SECRET_KEY --name "$web_name" --config dist/server/wrangler.preview.json
           echo "E2E_BASE_URL=https://${web_name}.zevium-dev.workers.dev" >> "$GITHUB_ENV"
 
+      - name: Share preview URLs
+        id: preview_urls
+        run: |
+          echo "web_url=https://zevium-web-pr-$PR_NUMBER.zevium-dev.workers.dev" >> "$GITHUB_OUTPUT"
+          echo "gateway_url=https://zevium-gateway-pr-$PR_NUMBER.zevium-dev.workers.dev" >> "$GITHUB_OUTPUT"
+
       - name: Install browser runtime
         run: |
           npm install --global agent-browser@0.27.1
@@ -80,6 +99,53 @@ jobs:
       - name: Run deterministic preview smoke
         run: e2e/00-preview-smoke.sh
 
+      - name: Upload smoke failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: preview-smoke-${{ env.PR_NUMBER }}
+          path: e2e/artifacts
+          if-no-files-found: ignore
+
+      - name: Publish preview links
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const marker = '<!-- zevium-preview -->'
+            const body = `${marker}\nPreview ready:\n- Web: ${process.env.E2E_BASE_URL}\n- Gateway: ${process.env.VITE_GATEWAY_URL}`
+            const { data: comments } = await github.rest.issues.listComments({ ...context.repo, issue_number: context.issue.number })
+            const prior = comments.find((comment) => comment.body?.includes(marker))
+            if (prior) await github.rest.issues.updateComment({ ...context.repo, comment_id: prior.id, body })
+            else await github.rest.issues.createComment({ ...context.repo, issue_number: context.issue.number, body })
+
+  full-e2e:
+    needs: deploy-and-test
+    if: >-
+      needs.deploy-and-test.result == 'success' &&
+      (github.event_name == 'workflow_dispatch' ||
+      (github.event.action == 'labeled' && github.event.label.name == 'full-e2e'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: preview
+    env:
+      E2E_BASE_URL: ${{ needs.deploy-and-test.outputs.web_url }}
+      PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/cache@v5
+        with:
+          path: ~/.local/share/pnpm/store
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+      - uses: jdx/mise-action@v4
+      - name: Install browser runtime
+        run: |
+          npm install --global agent-browser@0.27.1
+          agent-browser install --with-deps
       - name: Run authenticated publish and catalogue journey
         env:
           GATEWAY_URL: ""
@@ -102,14 +168,3 @@ jobs:
           name: preview-e2e-${{ env.PR_NUMBER }}
           path: e2e/artifacts
           if-no-files-found: ignore
-
-      - name: Publish preview links
-        uses: actions/github-script@v8
-        with:
-          script: |
-            const marker = '<!-- zevium-preview -->'
-            const body = `${marker}\nPreview ready:\n- Web: ${process.env.E2E_BASE_URL}\n- Gateway: ${process.env.VITE_GATEWAY_URL}`
-            const { data: comments } = await github.rest.issues.listComments({ ...context.repo, issue_number: context.issue.number })
-            const prior = comments.find((comment) => comment.body?.includes(marker))
-            if (prior) await github.rest.issues.updateComment({ ...context.repo, comment_id: prior.id, body })
-            else await github.rest.issues.createComment({ ...context.repo, issue_number: context.issue.number, body })
