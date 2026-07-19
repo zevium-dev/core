@@ -9,46 +9,41 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as CatalogueRouteImport } from './routes/catalogue'
-import { Route as AppRouteImport } from './routes/app'
-import { Route as AdminRouteImport } from './routes/admin'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as DocsIndexRouteImport } from './routes/docs/index'
-import { Route as CatalogueIndexRouteImport } from './routes/catalogue/index'
-import { Route as AppIndexRouteImport } from './routes/app/index'
+import { Route as AdminRouteImport } from './routes/admin'
+import { Route as AppRouteImport } from './routes/app'
+import { Route as CatalogueRouteImport } from './routes/catalogue'
 import { Route as AdminIndexRouteImport } from './routes/admin/index'
-import { Route as SignUpSplatRouteImport } from './routes/sign-up.$'
-import { Route as SignInSplatRouteImport } from './routes/sign-in.$'
-import { Route as DocsPublishingRouteImport } from './routes/docs/publishing'
-import { Route as DocsConsumingRouteImport } from './routes/docs/consuming'
-import { Route as DocsAgentsRouteImport } from './routes/docs/agents'
-import { Route as AppSettingsRouteImport } from './routes/app/settings'
-import { Route as AppProjectsRouteImport } from './routes/app/projects'
-import { Route as AppOrgRouteImport } from './routes/app/org'
-import { Route as AppEarningsRouteImport } from './routes/app/earnings'
-import { Route as AppBillingRouteImport } from './routes/app/billing'
-import { Route as AdminProjectsRouteImport } from './routes/admin/projects'
-import { Route as AdminPayoutsRouteImport } from './routes/admin/payouts'
 import { Route as AdminOrgsRouteImport } from './routes/admin/orgs'
-import { Route as AppSettingsIndexRouteImport } from './routes/app/settings/index'
-import { Route as AppProjectsIndexRouteImport } from './routes/app/projects/index'
+import { Route as AdminPayoutsRouteImport } from './routes/admin/payouts'
+import { Route as AdminProjectsRouteImport } from './routes/admin/projects'
+import { Route as AppIndexRouteImport } from './routes/app/index'
+import { Route as AppBillingRouteImport } from './routes/app/billing'
+import { Route as AppEarningsRouteImport } from './routes/app/earnings'
+import { Route as AppOrgRouteImport } from './routes/app/org'
+import { Route as AppProjectsRouteImport } from './routes/app/projects'
+import { Route as AppSettingsRouteImport } from './routes/app/settings'
+import { Route as CatalogueIndexRouteImport } from './routes/catalogue/index'
+import { Route as DocsIndexRouteImport } from './routes/docs/index'
+import { Route as DocsAgentsRouteImport } from './routes/docs/agents'
+import { Route as DocsConsumingRouteImport } from './routes/docs/consuming'
+import { Route as DocsPublishingRouteImport } from './routes/docs/publishing'
+import { Route as SignInSplatRouteImport } from './routes/sign-in.$'
+import { Route as SignUpSplatRouteImport } from './routes/sign-up.$'
 import { Route as AppOrgIndexRouteImport } from './routes/app/org/index'
-import { Route as CatalogueOrgSlugProjectSlugRouteImport } from './routes/catalogue/$orgSlug.$projectSlug'
-import { Route as AppSettingsKeysRouteImport } from './routes/app/settings/keys'
-import { Route as AppSettingsActivityRouteImport } from './routes/app/settings/activity'
-import { Route as AppProjectsCreateRouteImport } from './routes/app/projects/create'
-import { Route as AppProjectsProjectSlugRouteImport } from './routes/app/projects/$projectSlug'
 import { Route as AppOrgCreateRouteImport } from './routes/app/org/create'
+import { Route as AppProjectsIndexRouteImport } from './routes/app/projects/index'
+import { Route as AppProjectsProjectSlugRouteImport } from './routes/app/projects/$projectSlug'
+import { Route as AppProjectsCreateRouteImport } from './routes/app/projects/create'
+import { Route as AppSettingsIndexRouteImport } from './routes/app/settings/index'
+import { Route as AppSettingsActivityRouteImport } from './routes/app/settings/activity'
+import { Route as AppSettingsKeysRouteImport } from './routes/app/settings/keys'
+import { Route as CatalogueOrgSlugProjectSlugRouteImport } from './routes/catalogue/$orgSlug.$projectSlug'
 import { Route as AppProjectsProjectSlugSpecRouteImport } from './routes/app/projects/$projectSlug/spec'
 
-const CatalogueRoute = CatalogueRouteImport.update({
-  id: '/catalogue',
-  path: '/catalogue',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AppRoute = AppRouteImport.update({
-  id: '/app',
-  path: '/app',
+const IndexRoute = IndexRouteImport.update({
+  id: '/',
+  path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AdminRoute = AdminRouteImport.update({
@@ -56,89 +51,19 @@ const AdminRoute = AdminRouteImport.update({
   path: '/admin',
   getParentRoute: () => rootRouteImport,
 } as any)
-const IndexRoute = IndexRouteImport.update({
-  id: '/',
-  path: '/',
+const AppRoute = AppRouteImport.update({
+  id: '/app',
+  path: '/app',
   getParentRoute: () => rootRouteImport,
 } as any)
-const DocsIndexRoute = DocsIndexRouteImport.update({
-  id: '/docs/',
-  path: '/docs/',
+const CatalogueRoute = CatalogueRouteImport.update({
+  id: '/catalogue',
+  path: '/catalogue',
   getParentRoute: () => rootRouteImport,
-} as any)
-const CatalogueIndexRoute = CatalogueIndexRouteImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => CatalogueRoute,
-} as any)
-const AppIndexRoute = AppIndexRouteImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => AppRoute,
 } as any)
 const AdminIndexRoute = AdminIndexRouteImport.update({
   id: '/',
   path: '/',
-  getParentRoute: () => AdminRoute,
-} as any)
-const SignUpSplatRoute = SignUpSplatRouteImport.update({
-  id: '/sign-up/$',
-  path: '/sign-up/$',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const SignInSplatRoute = SignInSplatRouteImport.update({
-  id: '/sign-in/$',
-  path: '/sign-in/$',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const DocsPublishingRoute = DocsPublishingRouteImport.update({
-  id: '/docs/publishing',
-  path: '/docs/publishing',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const DocsConsumingRoute = DocsConsumingRouteImport.update({
-  id: '/docs/consuming',
-  path: '/docs/consuming',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const DocsAgentsRoute = DocsAgentsRouteImport.update({
-  id: '/docs/agents',
-  path: '/docs/agents',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AppSettingsRoute = AppSettingsRouteImport.update({
-  id: '/settings',
-  path: '/settings',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppProjectsRoute = AppProjectsRouteImport.update({
-  id: '/projects',
-  path: '/projects',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppOrgRoute = AppOrgRouteImport.update({
-  id: '/org',
-  path: '/org',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppEarningsRoute = AppEarningsRouteImport.update({
-  id: '/earnings',
-  path: '/earnings',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppBillingRoute = AppBillingRouteImport.update({
-  id: '/billing',
-  path: '/billing',
-  getParentRoute: () => AppRoute,
-} as any)
-const AdminProjectsRoute = AdminProjectsRouteImport.update({
-  id: '/projects',
-  path: '/projects',
-  getParentRoute: () => AdminRoute,
-} as any)
-const AdminPayoutsRoute = AdminPayoutsRouteImport.update({
-  id: '/payouts',
-  path: '/payouts',
   getParentRoute: () => AdminRoute,
 } as any)
 const AdminOrgsRoute = AdminOrgsRouteImport.update({
@@ -146,40 +71,94 @@ const AdminOrgsRoute = AdminOrgsRouteImport.update({
   path: '/orgs',
   getParentRoute: () => AdminRoute,
 } as any)
-const AppSettingsIndexRoute = AppSettingsIndexRouteImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => AppSettingsRoute,
+const AdminPayoutsRoute = AdminPayoutsRouteImport.update({
+  id: '/payouts',
+  path: '/payouts',
+  getParentRoute: () => AdminRoute,
 } as any)
-const AppProjectsIndexRoute = AppProjectsIndexRouteImport.update({
+const AdminProjectsRoute = AdminProjectsRouteImport.update({
+  id: '/projects',
+  path: '/projects',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AppIndexRoute = AppIndexRouteImport.update({
   id: '/',
   path: '/',
-  getParentRoute: () => AppProjectsRoute,
+  getParentRoute: () => AppRoute,
+} as any)
+const AppBillingRoute = AppBillingRouteImport.update({
+  id: '/billing',
+  path: '/billing',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppEarningsRoute = AppEarningsRouteImport.update({
+  id: '/earnings',
+  path: '/earnings',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppOrgRoute = AppOrgRouteImport.update({
+  id: '/org',
+  path: '/org',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppProjectsRoute = AppProjectsRouteImport.update({
+  id: '/projects',
+  path: '/projects',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppSettingsRoute = AppSettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
+  getParentRoute: () => AppRoute,
+} as any)
+const CatalogueIndexRoute = CatalogueIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => CatalogueRoute,
+} as any)
+const DocsIndexRoute = DocsIndexRouteImport.update({
+  id: '/docs/',
+  path: '/docs/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DocsAgentsRoute = DocsAgentsRouteImport.update({
+  id: '/docs/agents',
+  path: '/docs/agents',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DocsConsumingRoute = DocsConsumingRouteImport.update({
+  id: '/docs/consuming',
+  path: '/docs/consuming',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DocsPublishingRoute = DocsPublishingRouteImport.update({
+  id: '/docs/publishing',
+  path: '/docs/publishing',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SignInSplatRoute = SignInSplatRouteImport.update({
+  id: '/sign-in/$',
+  path: '/sign-in/$',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SignUpSplatRoute = SignUpSplatRouteImport.update({
+  id: '/sign-up/$',
+  path: '/sign-up/$',
+  getParentRoute: () => rootRouteImport,
 } as any)
 const AppOrgIndexRoute = AppOrgIndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => AppOrgRoute,
 } as any)
-const CatalogueOrgSlugProjectSlugRoute =
-  CatalogueOrgSlugProjectSlugRouteImport.update({
-    id: '/$orgSlug/$projectSlug',
-    path: '/$orgSlug/$projectSlug',
-    getParentRoute: () => CatalogueRoute,
-  } as any)
-const AppSettingsKeysRoute = AppSettingsKeysRouteImport.update({
-  id: '/keys',
-  path: '/keys',
-  getParentRoute: () => AppSettingsRoute,
-} as any)
-const AppSettingsActivityRoute = AppSettingsActivityRouteImport.update({
-  id: '/activity',
-  path: '/activity',
-  getParentRoute: () => AppSettingsRoute,
-} as any)
-const AppProjectsCreateRoute = AppProjectsCreateRouteImport.update({
+const AppOrgCreateRoute = AppOrgCreateRouteImport.update({
   id: '/create',
   path: '/create',
+  getParentRoute: () => AppOrgRoute,
+} as any)
+const AppProjectsIndexRoute = AppProjectsIndexRouteImport.update({
+  id: '/',
+  path: '/',
   getParentRoute: () => AppProjectsRoute,
 } as any)
 const AppProjectsProjectSlugRoute = AppProjectsProjectSlugRouteImport.update({
@@ -187,11 +166,32 @@ const AppProjectsProjectSlugRoute = AppProjectsProjectSlugRouteImport.update({
   path: '/$projectSlug',
   getParentRoute: () => AppProjectsRoute,
 } as any)
-const AppOrgCreateRoute = AppOrgCreateRouteImport.update({
+const AppProjectsCreateRoute = AppProjectsCreateRouteImport.update({
   id: '/create',
   path: '/create',
-  getParentRoute: () => AppOrgRoute,
+  getParentRoute: () => AppProjectsRoute,
 } as any)
+const AppSettingsIndexRoute = AppSettingsIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AppSettingsRoute,
+} as any)
+const AppSettingsActivityRoute = AppSettingsActivityRouteImport.update({
+  id: '/activity',
+  path: '/activity',
+  getParentRoute: () => AppSettingsRoute,
+} as any)
+const AppSettingsKeysRoute = AppSettingsKeysRouteImport.update({
+  id: '/keys',
+  path: '/keys',
+  getParentRoute: () => AppSettingsRoute,
+} as any)
+const CatalogueOrgSlugProjectSlugRoute =
+  CatalogueOrgSlugProjectSlugRouteImport.update({
+    id: '/$orgSlug/$projectSlug',
+    path: '/$orgSlug/$projectSlug',
+    getParentRoute: () => CatalogueRoute,
+  } as any)
 const AppProjectsProjectSlugSpecRoute =
   AppProjectsProjectSlugSpecRouteImport.update({
     id: '/spec',
@@ -404,18 +404,11 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/catalogue': {
-      id: '/catalogue'
-      path: '/catalogue'
-      fullPath: '/catalogue'
-      preLoaderRoute: typeof CatalogueRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/app': {
-      id: '/app'
-      path: '/app'
-      fullPath: '/app'
-      preLoaderRoute: typeof AppRouteImport
+    '/': {
+      id: '/'
+      path: '/'
+      fullPath: '/'
+      preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/admin': {
@@ -425,123 +418,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/': {
-      id: '/'
-      path: '/'
-      fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
+    '/app': {
+      id: '/app'
+      path: '/app'
+      fullPath: '/app'
+      preLoaderRoute: typeof AppRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/docs/': {
-      id: '/docs/'
-      path: '/docs'
-      fullPath: '/docs/'
-      preLoaderRoute: typeof DocsIndexRouteImport
+    '/catalogue': {
+      id: '/catalogue'
+      path: '/catalogue'
+      fullPath: '/catalogue'
+      preLoaderRoute: typeof CatalogueRouteImport
       parentRoute: typeof rootRouteImport
-    }
-    '/catalogue/': {
-      id: '/catalogue/'
-      path: '/'
-      fullPath: '/catalogue/'
-      preLoaderRoute: typeof CatalogueIndexRouteImport
-      parentRoute: typeof CatalogueRoute
-    }
-    '/app/': {
-      id: '/app/'
-      path: '/'
-      fullPath: '/app/'
-      preLoaderRoute: typeof AppIndexRouteImport
-      parentRoute: typeof AppRoute
     }
     '/admin/': {
       id: '/admin/'
       path: '/'
       fullPath: '/admin/'
       preLoaderRoute: typeof AdminIndexRouteImport
-      parentRoute: typeof AdminRoute
-    }
-    '/sign-up/$': {
-      id: '/sign-up/$'
-      path: '/sign-up/$'
-      fullPath: '/sign-up/$'
-      preLoaderRoute: typeof SignUpSplatRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/sign-in/$': {
-      id: '/sign-in/$'
-      path: '/sign-in/$'
-      fullPath: '/sign-in/$'
-      preLoaderRoute: typeof SignInSplatRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/docs/publishing': {
-      id: '/docs/publishing'
-      path: '/docs/publishing'
-      fullPath: '/docs/publishing'
-      preLoaderRoute: typeof DocsPublishingRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/docs/consuming': {
-      id: '/docs/consuming'
-      path: '/docs/consuming'
-      fullPath: '/docs/consuming'
-      preLoaderRoute: typeof DocsConsumingRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/docs/agents': {
-      id: '/docs/agents'
-      path: '/docs/agents'
-      fullPath: '/docs/agents'
-      preLoaderRoute: typeof DocsAgentsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/app/settings': {
-      id: '/app/settings'
-      path: '/settings'
-      fullPath: '/app/settings'
-      preLoaderRoute: typeof AppSettingsRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/app/projects': {
-      id: '/app/projects'
-      path: '/projects'
-      fullPath: '/app/projects'
-      preLoaderRoute: typeof AppProjectsRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/app/org': {
-      id: '/app/org'
-      path: '/org'
-      fullPath: '/app/org'
-      preLoaderRoute: typeof AppOrgRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/app/earnings': {
-      id: '/app/earnings'
-      path: '/earnings'
-      fullPath: '/app/earnings'
-      preLoaderRoute: typeof AppEarningsRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/app/billing': {
-      id: '/app/billing'
-      path: '/billing'
-      fullPath: '/app/billing'
-      preLoaderRoute: typeof AppBillingRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/admin/projects': {
-      id: '/admin/projects'
-      path: '/projects'
-      fullPath: '/admin/projects'
-      preLoaderRoute: typeof AdminProjectsRouteImport
-      parentRoute: typeof AdminRoute
-    }
-    '/admin/payouts': {
-      id: '/admin/payouts'
-      path: '/payouts'
-      fullPath: '/admin/payouts'
-      preLoaderRoute: typeof AdminPayoutsRouteImport
       parentRoute: typeof AdminRoute
     }
     '/admin/orgs': {
@@ -551,19 +446,110 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminOrgsRouteImport
       parentRoute: typeof AdminRoute
     }
-    '/app/settings/': {
-      id: '/app/settings/'
-      path: '/'
-      fullPath: '/app/settings/'
-      preLoaderRoute: typeof AppSettingsIndexRouteImport
-      parentRoute: typeof AppSettingsRoute
+    '/admin/payouts': {
+      id: '/admin/payouts'
+      path: '/payouts'
+      fullPath: '/admin/payouts'
+      preLoaderRoute: typeof AdminPayoutsRouteImport
+      parentRoute: typeof AdminRoute
     }
-    '/app/projects/': {
-      id: '/app/projects/'
+    '/admin/projects': {
+      id: '/admin/projects'
+      path: '/projects'
+      fullPath: '/admin/projects'
+      preLoaderRoute: typeof AdminProjectsRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/app/': {
+      id: '/app/'
       path: '/'
-      fullPath: '/app/projects/'
-      preLoaderRoute: typeof AppProjectsIndexRouteImport
-      parentRoute: typeof AppProjectsRoute
+      fullPath: '/app/'
+      preLoaderRoute: typeof AppIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/app/billing': {
+      id: '/app/billing'
+      path: '/billing'
+      fullPath: '/app/billing'
+      preLoaderRoute: typeof AppBillingRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/app/earnings': {
+      id: '/app/earnings'
+      path: '/earnings'
+      fullPath: '/app/earnings'
+      preLoaderRoute: typeof AppEarningsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/app/org': {
+      id: '/app/org'
+      path: '/org'
+      fullPath: '/app/org'
+      preLoaderRoute: typeof AppOrgRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/app/projects': {
+      id: '/app/projects'
+      path: '/projects'
+      fullPath: '/app/projects'
+      preLoaderRoute: typeof AppProjectsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/app/settings': {
+      id: '/app/settings'
+      path: '/settings'
+      fullPath: '/app/settings'
+      preLoaderRoute: typeof AppSettingsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/catalogue/': {
+      id: '/catalogue/'
+      path: '/'
+      fullPath: '/catalogue/'
+      preLoaderRoute: typeof CatalogueIndexRouteImport
+      parentRoute: typeof CatalogueRoute
+    }
+    '/docs/': {
+      id: '/docs/'
+      path: '/docs'
+      fullPath: '/docs/'
+      preLoaderRoute: typeof DocsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/docs/agents': {
+      id: '/docs/agents'
+      path: '/docs/agents'
+      fullPath: '/docs/agents'
+      preLoaderRoute: typeof DocsAgentsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/docs/consuming': {
+      id: '/docs/consuming'
+      path: '/docs/consuming'
+      fullPath: '/docs/consuming'
+      preLoaderRoute: typeof DocsConsumingRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/docs/publishing': {
+      id: '/docs/publishing'
+      path: '/docs/publishing'
+      fullPath: '/docs/publishing'
+      preLoaderRoute: typeof DocsPublishingRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/sign-in/$': {
+      id: '/sign-in/$'
+      path: '/sign-in/$'
+      fullPath: '/sign-in/$'
+      preLoaderRoute: typeof SignInSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/sign-up/$': {
+      id: '/sign-up/$'
+      path: '/sign-up/$'
+      fullPath: '/sign-up/$'
+      preLoaderRoute: typeof SignUpSplatRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/app/org/': {
       id: '/app/org/'
@@ -572,32 +558,18 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppOrgIndexRouteImport
       parentRoute: typeof AppOrgRoute
     }
-    '/catalogue/$orgSlug/$projectSlug': {
-      id: '/catalogue/$orgSlug/$projectSlug'
-      path: '/$orgSlug/$projectSlug'
-      fullPath: '/catalogue/$orgSlug/$projectSlug'
-      preLoaderRoute: typeof CatalogueOrgSlugProjectSlugRouteImport
-      parentRoute: typeof CatalogueRoute
-    }
-    '/app/settings/keys': {
-      id: '/app/settings/keys'
-      path: '/keys'
-      fullPath: '/app/settings/keys'
-      preLoaderRoute: typeof AppSettingsKeysRouteImport
-      parentRoute: typeof AppSettingsRoute
-    }
-    '/app/settings/activity': {
-      id: '/app/settings/activity'
-      path: '/activity'
-      fullPath: '/app/settings/activity'
-      preLoaderRoute: typeof AppSettingsActivityRouteImport
-      parentRoute: typeof AppSettingsRoute
-    }
-    '/app/projects/create': {
-      id: '/app/projects/create'
+    '/app/org/create': {
+      id: '/app/org/create'
       path: '/create'
-      fullPath: '/app/projects/create'
-      preLoaderRoute: typeof AppProjectsCreateRouteImport
+      fullPath: '/app/org/create'
+      preLoaderRoute: typeof AppOrgCreateRouteImport
+      parentRoute: typeof AppOrgRoute
+    }
+    '/app/projects/': {
+      id: '/app/projects/'
+      path: '/'
+      fullPath: '/app/projects/'
+      preLoaderRoute: typeof AppProjectsIndexRouteImport
       parentRoute: typeof AppProjectsRoute
     }
     '/app/projects/$projectSlug': {
@@ -607,12 +579,40 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppProjectsProjectSlugRouteImport
       parentRoute: typeof AppProjectsRoute
     }
-    '/app/org/create': {
-      id: '/app/org/create'
+    '/app/projects/create': {
+      id: '/app/projects/create'
       path: '/create'
-      fullPath: '/app/org/create'
-      preLoaderRoute: typeof AppOrgCreateRouteImport
-      parentRoute: typeof AppOrgRoute
+      fullPath: '/app/projects/create'
+      preLoaderRoute: typeof AppProjectsCreateRouteImport
+      parentRoute: typeof AppProjectsRoute
+    }
+    '/app/settings/': {
+      id: '/app/settings/'
+      path: '/'
+      fullPath: '/app/settings/'
+      preLoaderRoute: typeof AppSettingsIndexRouteImport
+      parentRoute: typeof AppSettingsRoute
+    }
+    '/app/settings/activity': {
+      id: '/app/settings/activity'
+      path: '/activity'
+      fullPath: '/app/settings/activity'
+      preLoaderRoute: typeof AppSettingsActivityRouteImport
+      parentRoute: typeof AppSettingsRoute
+    }
+    '/app/settings/keys': {
+      id: '/app/settings/keys'
+      path: '/keys'
+      fullPath: '/app/settings/keys'
+      preLoaderRoute: typeof AppSettingsKeysRouteImport
+      parentRoute: typeof AppSettingsRoute
+    }
+    '/catalogue/$orgSlug/$projectSlug': {
+      id: '/catalogue/$orgSlug/$projectSlug'
+      path: '/$orgSlug/$projectSlug'
+      fullPath: '/catalogue/$orgSlug/$projectSlug'
+      preLoaderRoute: typeof CatalogueOrgSlugProjectSlugRouteImport
+      parentRoute: typeof CatalogueRoute
     }
     '/app/projects/$projectSlug/spec': {
       id: '/app/projects/$projectSlug/spec'
