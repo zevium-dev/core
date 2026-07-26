@@ -100,7 +100,8 @@ async function installFixtures(opts: { clerkOrgId: string; credits?: number }) {
 
   __setTestPipelineDeps({
     keyVerifier: keys,
-    specSource: specs,
+    specSource: new FixtureSpecSource(),
+    publicSpecSource: specs,
     catalogueSource: new FixtureCatalogueSource(),
     usageSink: new NoopUsageSink(),
     idGenerator: () => `req_${crypto.randomUUID()}`,

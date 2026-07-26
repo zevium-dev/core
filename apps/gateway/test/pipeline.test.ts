@@ -134,6 +134,7 @@ async function installFixtures(opts: {
   __setTestPipelineDeps({
     keyVerifier: keys,
     specSource: specs,
+    publicSpecSource: specs,
     catalogueSource: new FixtureCatalogueSource(),
     usageSink: usage,
     fetchImpl: opts.fetchImpl,

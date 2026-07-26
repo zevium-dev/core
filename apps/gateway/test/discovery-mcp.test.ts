@@ -105,6 +105,7 @@ async function installAgentFixtures(opts: {
   __setTestPipelineDeps({
     keyVerifier: keys,
     specSource: specs,
+    publicSpecSource: specs,
     catalogueSource: catalogue,
     usageSink: usage,
     fetchImpl:

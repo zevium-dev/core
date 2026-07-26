@@ -2,9 +2,11 @@ import { WalletDO } from "./wallet";
 import { ClerkKeyVerifier, FixtureKeyVerifier } from "./key-verifier";
 import {
   CachedSpecSource,
+  ConvexSpecSource,
   FailClosedSpecSource,
   FixtureSpecSource,
   InternalHttpSpecSource,
+  type SpecSource,
 } from "./spec-source";
 import {
   CachedCatalogueSource,
@@ -47,6 +49,8 @@ export interface Env {
 /** Full worker deps: pipeline + catalogue for discovery/MCP. */
 export type WorkerDeps = PipelineDeps & {
   catalogueSource: CatalogueSource;
+  /** Credential-free source for discovery, docs, and keyless mocks. */
+  publicSpecSource: SpecSource;
 };
 
 // Test-mode singletons (module scope per isolate). Production never sets GATEWAY_TEST_MODE.
@@ -110,6 +114,11 @@ function buildDeps(env: Env): WorkerDeps {
         : testMode
           ? new FixtureSpecSource()
           : new FailClosedSpecSource();
+  const innerPublicSpec = env.CONVEX_URL
+    ? new ConvexSpecSource({ convexUrl: env.CONVEX_URL })
+    : testMode
+      ? new FixtureSpecSource()
+      : new FailClosedSpecSource();
 
   const innerCatalogue = env.CONVEX_URL
     ? new ConvexCatalogueSource({ convexUrl: env.CONVEX_URL })
@@ -130,6 +139,7 @@ function buildDeps(env: Env): WorkerDeps {
   const deps: WorkerDeps = {
     keyVerifier,
     specSource: new CachedSpecSource({ inner: innerSpec }),
+    publicSpecSource: new CachedSpecSource({ inner: innerPublicSpec }),
     catalogueSource: new CachedCatalogueSource({
       inner: innerCatalogue,
       ttlMs: 60_000,
@@ -154,7 +164,7 @@ function pipelineOnly(deps: WorkerDeps): PipelineDeps {
 function discoveryDeps(deps: WorkerDeps, request: Request): DiscoveryDeps {
   return {
     catalogueSource: deps.catalogueSource,
-    specSource: deps.specSource,
+    specSource: deps.publicSpecSource,
     gatewayOrigin: new URL(request.url).origin,
   };
 }
@@ -162,7 +172,7 @@ function discoveryDeps(deps: WorkerDeps, request: Request): DiscoveryDeps {
 function mockDeps(deps: WorkerDeps): MockDeps {
   return {
     keyVerifier: deps.keyVerifier,
-    specSource: deps.specSource,
+    specSource: deps.publicSpecSource,
     idGenerator: deps.idGenerator,
   };
 }
@@ -170,7 +180,7 @@ function mockDeps(deps: WorkerDeps): MockDeps {
 function mcpDeps(deps: WorkerDeps, env: Env, request: Request): McpDeps {
   return {
     catalogueSource: deps.catalogueSource,
-    specSource: deps.specSource,
+    specSource: deps.publicSpecSource,
     pipeline: pipelineOnly(deps),
     pipelineEnv: { WALLET: env.WALLET },
     gatewayOrigin: new URL(request.url).origin,
