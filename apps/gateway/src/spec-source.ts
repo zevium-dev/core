@@ -172,7 +172,8 @@ export class InternalHttpSpecSource implements SpecSource {
     this.#internalSecret = opts.internalSecret;
     // Workerd's global fetch requires its receiver; storing the bare function
     // and invoking it as a private field throws "Illegal invocation".
-    this.#fetch = opts.fetchImpl ?? ((input, init) => fetch(input, init));
+    this.#fetch =
+      opts.fetchImpl ?? ((input, init) => globalThis.fetch(input, init));
   }
 
   async getPublishedSpec(
