@@ -623,20 +623,25 @@ function CatalogueCard({ item }: { item: CatalogueCardItem }) {
     >
       <Card className="h-full transition-[translate,scale,box-shadow,border-color] duration-[var(--dur-instant)] ease-[var(--ease)] group-hover:-translate-y-0.5 group-hover:shadow-sm group-active:scale-[0.98] motion-reduce:transition-none motion-reduce:group-hover:translate-y-0 motion-reduce:group-active:scale-100">
         <CardHeader>
-          <CardTitle
-            style={{
-              viewTransitionName: `api-title-${item.slug}`,
-            }}
-          >
-            {item.name}
-          </CardTitle>
-          <CardAction>
-            <Badge variant="secondary" className="shrink-0">
+          <div className="flex min-w-0 flex-wrap items-start justify-between gap-2">
+            <CardTitle
+              className="min-w-0 break-words"
+              style={{
+                viewTransitionName: `api-title-${item.slug}`,
+              }}
+            >
+              {item.name}
+            </CardTitle>
+            <Badge
+              variant="secondary"
+              className="max-w-full shrink-0 truncate"
+              title={item.orgName}
+            >
               {item.orgName}
             </Badge>
-          </CardAction>
-          <CardDescription>
-            <code>
+          </div>
+          <CardDescription className="min-w-0">
+            <code className="break-all">
               {item.publisherHandle}/{item.slug}
             </code>
           </CardDescription>
