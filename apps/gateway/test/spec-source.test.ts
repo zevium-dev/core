@@ -11,20 +11,20 @@ describe("internal gateway spec source", () => {
   });
 
   it("preserves the Workerd global fetch receiver", async () => {
-    const fetchSpy = vi
-      .spyOn(globalThis, "fetch")
-      .mockImplementation(function (this: typeof globalThis) {
-        expect(this).toBe(globalThis);
-        return Promise.resolve(
-          Response.json({
-            spec: '{"openapi":"3.1.0"}',
-            projectId: "project",
-            organizationId: "organization",
-            clerkOrgId: "org_publisher",
-            visibility: "public",
-          }),
-        );
-      });
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(function (
+      this: typeof globalThis,
+    ) {
+      expect(this).toBe(globalThis);
+      return Promise.resolve(
+        Response.json({
+          spec: '{"openapi":"3.1.0"}',
+          projectId: "project",
+          organizationId: "organization",
+          clerkOrgId: "org_publisher",
+          visibility: "public",
+        }),
+      );
+    });
     const source = new InternalHttpSpecSource({
       siteUrl: "https://control.test/",
       internalSecret: "internal-secret",
