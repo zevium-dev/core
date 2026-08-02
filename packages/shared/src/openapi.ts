@@ -212,13 +212,20 @@ export function extractPricing(op: OpenApiOperation): EndpointPricing {
   return freeTier !== undefined ? { cost, freeTier } : { cost };
 }
 
+/** Remove trailing slashes in linear time, including for untrusted input. */
+export function trimTrailingSlashes(value: string): string {
+  let end = value.length;
+  while (end > 0 && value.charCodeAt(end - 1) === 47) end--;
+  return end === value.length ? value : value.slice(0, end);
+}
+
 /** Collapse empty / trailing-slash edge cases; keep leading slash. */
 export function normalizePath(path: string): string {
   if (!path || path === "") return "/";
   let p = path.startsWith("/") ? path : `/${path}`;
   // Strip trailing slashes except root
   if (p.length > 1 && p.endsWith("/")) {
-    p = p.replace(/\/+$/, "");
+    p = trimTrailingSlashes(p);
   }
   return p || "/";
 }
@@ -261,13 +268,13 @@ export function matchPathTemplate(
  * Does not rewrite query strings — caller appends search.
  */
 export function joinUpstreamUrl(baseUrl: string, requestPath: string): string {
-  const base = baseUrl.replace(/\/+$/, "");
+  const base = trimTrailingSlashes(baseUrl);
   const path = normalizePath(requestPath);
   if (!base) return path;
   // Absolute base may already include a path prefix (e.g. https://api.example.com/v1)
   try {
     const u = new URL(base.includes("://") ? base : `https://${base}`);
-    const prefix = u.pathname.replace(/\/+$/, "");
+    const prefix = trimTrailingSlashes(u.pathname);
     // If request path already starts with prefix we still append full path —
     // gateway remainder is the full upstream path relative to servers[0].url root.
     u.pathname = `${prefix}${path === "/" ? "" : path}` || "/";

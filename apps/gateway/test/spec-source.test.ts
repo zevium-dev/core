@@ -26,7 +26,7 @@ describe("internal gateway spec source", () => {
       );
     });
     const source = new InternalHttpSpecSource({
-      siteUrl: "https://control.test/",
+      siteUrl: "https://control.test////",
       internalSecret: "internal-secret",
     });
 

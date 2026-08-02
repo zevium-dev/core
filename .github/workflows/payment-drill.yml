@@ -12,6 +12,9 @@ concurrency:
 env:
   MISE_EXPERIMENTAL: true
 
+permissions:
+  contents: read
+
 jobs:
   deterministic-contracts:
     runs-on: ubuntu-slim
