@@ -169,8 +169,7 @@ function BillingContent({ checkoutSessionId }: { checkoutSessionId?: string }) {
         <div>
           <h2 className="text-lg font-semibold tracking-tight">Buy credits</h2>
           <p className="text-sm text-muted-foreground">
-            $1 = 10,000 credits. One-time packs; larger packs include bonus
-            credits.
+            $1 = 10,000 credits. One-time packs at one fixed exchange rate.
           </p>
         </div>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -196,16 +195,6 @@ function BillingContent({ checkoutSessionId }: { checkoutSessionId?: string }) {
                   </CardTitle>
                   <CardDescription>{price} one-time purchase</CardDescription>
                 </CardHeader>
-                <CardContent className="flex flex-col items-start gap-2 text-sm text-muted-foreground">
-                  {pack.bonusCredits > 0 ? (
-                    <Badge variant="secondary">
-                      +{pack.bonusCredits.toLocaleString()} bonus
-                    </Badge>
-                  ) : null}
-                  {pack.bonusCredits > 0
-                    ? `${pack.baseCredits.toLocaleString()} purchased credits`
-                    : "No bonus credits"}
-                </CardContent>
                 <CardFooter>
                   <Button
                     className="w-full"

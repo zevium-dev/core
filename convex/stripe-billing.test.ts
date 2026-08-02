@@ -7,6 +7,7 @@ import {
   createHostedCheckout,
   cumulativeRefundCredits,
 } from "./billing";
+import { creditsToUsdCents, publisherEarningSplit } from "./accounting";
 import { verifyStripeWebhook } from "./http";
 import schema from "./schema";
 
@@ -18,9 +19,15 @@ describe("Stripe Checkout control plane", () => {
       CREDIT_PACKS.map((pack) => [pack.packId, pack.priceCents, pack.credits]),
     ).toEqual([
       ["pack_10", 1000, 100_000],
-      ["pack_50", 5000, 525_000],
-      ["pack_100", 10_000, 1_100_000],
+      ["pack_50", 5000, 500_000],
+      ["pack_100", 10_000, 1_000_000],
     ]);
+    for (const pack of CREDIT_PACKS) {
+      const publisherPayoutCents = creditsToUsdCents(
+        publisherEarningSplit(pack.credits).publisherNetCredits,
+      );
+      expect(publisherPayoutCents).toBeLessThan(pack.priceCents);
+    }
     let request: unknown = null;
     const session = await createHostedCheckout(
       {
