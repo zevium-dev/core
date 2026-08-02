@@ -9,7 +9,9 @@ allowBuilds:
   core-js: true
   esbuild: true
   protobufjs: true
-  sharp: true
+  # sharp ships prebuilt platform binaries; running its install script can
+  # incorrectly force a source build when system libvips is present.
+  sharp: false
   utf-8-validate: true
   vue-demi: true
   workerd: true
