@@ -6,6 +6,7 @@
 
 import { ConvexHttpClient } from "convex/browser";
 import { makeFunctionReference } from "convex/server";
+import { trimTrailingSlashes } from "@zevium/shared";
 
 export type PublishedSpec = {
   /** Raw OpenAPI JSON string. */
@@ -168,7 +169,7 @@ export class InternalHttpSpecSource implements SpecSource {
   readonly #fetch: typeof fetch;
 
   constructor(opts: InternalHttpSpecSourceOptions) {
-    this.#siteUrl = opts.siteUrl.replace(/\/+$/, "");
+    this.#siteUrl = trimTrailingSlashes(opts.siteUrl);
     this.#internalSecret = opts.internalSecret;
     // Workerd's global fetch requires its receiver; storing the bare function
     // and invoking it as a private field throws "Illegal invocation".

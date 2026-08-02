@@ -5,6 +5,7 @@ import {
   matchOperation,
   matchPathTemplate,
   normalizePath,
+  trimTrailingSlashes,
   parseSpec,
 } from "./openapi.js";
 
@@ -167,6 +168,13 @@ describe("extractPricing", () => {
 });
 
 describe("normalizePath / joinUpstreamUrl", () => {
+  it("trims long trailing slash runs in linear time", () => {
+    expect(
+      trimTrailingSlashes(`https://api.example.com${"/".repeat(10_000)}`),
+    ).toBe("https://api.example.com");
+    expect(normalizePath(`/users${"/".repeat(10_000)}`)).toBe("/users");
+  });
+
   it("normalizePath", () => {
     expect(normalizePath("")).toBe("/");
     expect(normalizePath("foo")).toBe("/foo");

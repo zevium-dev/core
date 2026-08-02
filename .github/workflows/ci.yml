@@ -14,6 +14,9 @@ concurrency:
 env:
   MISE_EXPERIMENTAL: true
 
+permissions:
+  contents: read
+
 jobs:
   quality:
     runs-on: ubuntu-slim

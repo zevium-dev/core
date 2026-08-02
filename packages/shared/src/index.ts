@@ -13,6 +13,7 @@ export {
   parseSpec,
   matchOperation,
   extractPricing,
+  trimTrailingSlashes,
   normalizePath,
   matchPathTemplate,
   joinUpstreamUrl,
