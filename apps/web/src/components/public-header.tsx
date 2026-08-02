@@ -1,7 +1,7 @@
 import { Show, UserButton } from "@clerk/tanstack-react-start";
 import { shadcn } from "@clerk/ui/themes";
 import { Link } from "@tanstack/react-router";
-import { Menu, X } from "lucide-react";
+import { Github, Menu, X } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { BrandMark } from "#/components/brand-mark";
@@ -14,6 +14,8 @@ type PublicHeaderProps = {
   active?: "catalogue" | "docs" | null;
   className?: string;
 };
+
+const GITHUB_URL = "https://github.com/zevium-dev/core";
 
 /**
  * Shared public chrome for landing + catalogue.
@@ -75,6 +77,16 @@ export function PublicHeader({ active = null, className }: PublicHeaderProps) {
             onClick={() => setMobileOpen((open) => !open)}
           >
             {mobileOpen ? <X /> : <Menu />}
+          </Button>
+          <Button asChild variant="ghost" size="icon-sm">
+            <a
+              href={GITHUB_URL}
+              target="_blank"
+              rel="noreferrer"
+              aria-label="Open Zevium on GitHub"
+            >
+              <Github data-icon="inline-start" />
+            </a>
           </Button>
           <ThemeToggle />
           {/* Fixed-width auth slot: prevents Sign in ↔ Dashboard+UserButton shift */}
