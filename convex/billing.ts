@@ -23,8 +23,6 @@ export type CreditPackDefinition = {
   description: string;
   priceCents: number;
   credits: number;
-  baseCredits: number;
-  bonusCredits: number;
 };
 
 /** Server-owned catalogue. Price IDs come only from process configuration. */
@@ -35,26 +33,20 @@ export const CREDIT_PACKS: readonly CreditPackDefinition[] = [
     description: "100,000 credits",
     priceCents: 1_000,
     credits: 100_000,
-    baseCredits: 100_000,
-    bonusCredits: 0,
   },
   {
     packId: "pack_50",
     name: "Zevium Credits — $50",
-    description: "500,000 credits + 25,000 bonus",
+    description: "500,000 credits",
     priceCents: 5_000,
-    credits: 525_000,
-    baseCredits: 500_000,
-    bonusCredits: 25_000,
+    credits: 500_000,
   },
   {
     packId: "pack_100",
     name: "Zevium Credits — $100",
-    description: "1,000,000 credits + 100,000 bonus",
+    description: "1,000,000 credits",
     priceCents: 10_000,
-    credits: 1_100_000,
-    baseCredits: 1_000_000,
-    bonusCredits: 100_000,
+    credits: 1_000_000,
   },
 ] as const;
 
