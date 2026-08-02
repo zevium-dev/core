@@ -15,7 +15,7 @@
     "e2e": "bash e2e/run-all.sh"
   },
   "devDependencies": {
-    "@clerk/backend": "^3.11.4",
+    "@clerk/backend": "^3.14.0",
     "@edge-runtime/vm": "^5.0.0",
     "concurrently": "^10.0.3",
     "convex-test": "^0.0.54",
