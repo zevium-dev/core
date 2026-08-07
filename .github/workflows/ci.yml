@@ -19,7 +19,7 @@ permissions:
 
 jobs:
   quality:
-    runs-on: ubuntu-slim
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
@@ -34,7 +34,7 @@ jobs:
       - run: pnpm typecheck
 
   tests:
-    runs-on: ubuntu-slim
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
@@ -50,7 +50,7 @@ jobs:
   ci:
     needs: [quality, tests]
     if: always()
-    runs-on: ubuntu-slim
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 2
     steps:
       - name: Require quality and tests to pass
