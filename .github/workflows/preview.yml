@@ -30,7 +30,7 @@ jobs:
       (github.event.pull_request.head.repo.full_name == github.repository &&
       github.actor == 'tnfssc' &&
       (github.event.action != 'labeled' || github.event.label.name == 'full-e2e'))
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 10
     environment: preview
     outputs:
@@ -59,7 +59,7 @@ jobs:
 
   gateway-preview:
     needs: preview-convex
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 10
     environment: preview
     outputs:
@@ -93,7 +93,7 @@ jobs:
 
   web-build:
     needs: preview-convex
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 10
     environment: preview
     env:
@@ -124,7 +124,7 @@ jobs:
 
   web-preview:
     needs: web-build
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 10
     environment: preview
     outputs:
@@ -157,7 +157,7 @@ jobs:
 
   deploy-and-test:
     needs: [gateway-preview, web-preview]
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 5
     environment: preview
     outputs:
@@ -220,7 +220,7 @@ jobs:
       needs.deploy-and-test.result == 'success' &&
       (github.event_name == 'workflow_dispatch' ||
       (github.event.action == 'labeled' && github.event.label.name == 'full-e2e'))
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 20
     environment: preview
     env:

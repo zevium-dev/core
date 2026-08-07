@@ -17,7 +17,7 @@ permissions:
 
 jobs:
   deterministic-contracts:
-    runs-on: ubuntu-slim
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
@@ -35,7 +35,7 @@ jobs:
 
   real-sandbox-checkout:
     if: github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 20
     environment: staging
     steps:
