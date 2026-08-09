@@ -34,6 +34,26 @@ export interface CatalogueSource {
   listPublic(args?: CatalogueListArgs): Promise<CataloguePage>;
 }
 
+/** Read every catalogue page while preserving caller filters. */
+export async function listAllPublic(
+  source: CatalogueSource,
+  args: Omit<CatalogueListArgs, "cursor"> = {},
+): Promise<CatalogueListing[]> {
+  const items: CatalogueListing[] = [];
+  const seenCursors = new Set<string>();
+  let cursor: string | undefined;
+
+  do {
+    const page = await source.listPublic({ ...args, cursor });
+    items.push(...page.items);
+    cursor = page.nextCursor ?? undefined;
+    if (cursor === undefined || seenCursors.has(cursor)) break;
+    seenCursors.add(cursor);
+  } while (true);
+
+  return items;
+}
+
 /** Production safety valve when the Convex public catalogue is unavailable. */
 export class FailClosedCatalogueSource implements CatalogueSource {
   async listPublic(): Promise<CataloguePage> {

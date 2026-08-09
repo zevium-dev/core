@@ -14,7 +14,7 @@
  */
 
 import { parseSpec } from "@zevium/shared";
-import type { CatalogueSource } from "./catalogue-source";
+import { listAllPublic, type CatalogueSource } from "./catalogue-source";
 import { endpointsFromSpec, type DiscoveryEndpoint } from "./discovery";
 import { extractApiKey } from "./key-verifier";
 import {
@@ -201,7 +201,7 @@ async function handleSearchApis(
   args: Record<string, unknown>,
 ): Promise<unknown> {
   const query = asString(args.query) ?? "";
-  const page = await deps.catalogueSource.listPublic({
+  const items = await listAllPublic(deps.catalogueSource, {
     search: query.trim() === "" ? undefined : query,
   });
 
@@ -214,7 +214,7 @@ async function handleSearchApis(
     endpoints: DiscoveryEndpoint[];
   }> = [];
 
-  for (const item of page.items) {
+  for (const item of items) {
     const published = await deps.specSource.getPublishedSpec(
       item.publisherHandle,
       item.slug,
