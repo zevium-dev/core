@@ -531,14 +531,13 @@ describe("gateway pipeline", () => {
     expect(state.inFlightTotal).toBe(0);
   });
 
-  it("free-tier path skips reserve, costs 0, still enqueues usage", async () => {
+  it("zero balance blocks free-tier upstream without consuming allowance", async () => {
     const clerkOrgId = "org_pipe_free";
     const organizationId = "org_convex_free";
     const { fetchImpl, calls } = makeFetchMock(
       () => new Response("free-ok", { status: 200 }),
     );
 
-    // Zero credits — free path must still work.
     const { usage } = await installFixtures({
       clerkOrgId,
       organizationId,
@@ -549,52 +548,57 @@ describe("gateway pipeline", () => {
     const res1 = await gatewayFetch(
       `/gateway/${ORG_SLUG}/${PROJECT_SLUG}/free`,
     );
-    expect(res1.status).toBe(200);
-    expect(res1.headers.get("x-zevium-cost")).toBe("0");
-    expect(res1.headers.get("x-zevium-free-tier")).toBe("1");
-    expect(await res1.text()).toBe("free-ok");
+    expect(res1.status).toBe(402);
+    expect(calls).toHaveLength(0);
+    expect(
+      await walletStub(clerkOrgId).getFreeTierUsed(freeScope(clerkOrgId)),
+    ).toBe(0);
 
+    await walletStub(clerkOrgId).grant("free-tier-positive-balance", 1);
     const res2 = await gatewayFetch(
       `/gateway/${ORG_SLUG}/${PROJECT_SLUG}/free`,
     );
-    expect(res2.status).toBe(200);
-    expect(res2.headers.get("x-zevium-free-tier")).toBe("1");
-
-    // Free tier exhausted (limit 2) → paid path → 402 at zero balance.
     const res3 = await gatewayFetch(
       `/gateway/${ORG_SLUG}/${PROJECT_SLUG}/free`,
     );
-    expect(res3.status).toBe(402);
+    const res4 = await gatewayFetch(
+      `/gateway/${ORG_SLUG}/${PROJECT_SLUG}/free`,
+    );
 
+    expect(res2.status).toBe(200);
+    expect(res3.status).toBe(200);
+    expect(res4.status).toBe(402);
     expect(calls).toHaveLength(2);
 
     const state = await walletStub(clerkOrgId).getState();
-    expect(state.balance).toBe(0);
+    expect(state.balance).toBe(1);
     expect(state.inFlightTotal).toBe(0);
     expect(state.pendingSettlements).toHaveLength(2);
-    expect(state.pendingSettlements.every((s) => s.cost === 0)).toBe(true);
+    expect(
+      await walletStub(clerkOrgId).getFreeTierUsed(freeScope(clerkOrgId)),
+    ).toBe(2);
 
-    const freeEvents = usage.events.filter((e) => e.outcome === "free");
-    expect(freeEvents).toHaveLength(2);
-    expect(freeEvents.every((e) => e.cost === 0)).toBe(true);
+    expect(usage.events).toContainEqual(
+      expect.objectContaining({ outcome: "blocked", status: 402, cost: 0 }),
+    );
+    expect(
+      usage.events.filter((event) => event.outcome === "free"),
+    ).toHaveLength(2);
   });
 
-  it("does not consume free-tier allowance for zero-cost operations", async () => {
+  it("zero balance blocks zero-cost upstream", async () => {
     const clerkOrgId = "org_pipe_zero_cost";
     const { fetchImpl, calls } = makeFetchMock(
       () => new Response("zero-cost", { status: 200 }),
     );
     await installFixtures({ clerkOrgId, fetchImpl, credits: 0 });
 
-    for (let index = 0; index < 3; index += 1) {
-      const response = await gatewayFetch(
-        `/gateway/${ORG_SLUG}/${PROJECT_SLUG}/zero`,
-      );
-      expect(response.status).toBe(200);
-      expect(response.headers.get("x-zevium-free-tier")).toBeNull();
-    }
+    const response = await gatewayFetch(
+      `/gateway/${ORG_SLUG}/${PROJECT_SLUG}/zero`,
+    );
+    expect(response.status).toBe(402);
 
-    expect(calls).toHaveLength(3);
+    expect(calls).toHaveLength(0);
     expect(
       await walletStub(clerkOrgId).getFreeTierUsed({
         clerkOrgId,
@@ -603,6 +607,14 @@ describe("gateway pipeline", () => {
         pathTemplate: "/zero",
       }),
     ).toBe(0);
+
+    await walletStub(clerkOrgId).grant("zero-cost-positive-balance", 1);
+    const allowed = await gatewayFetch(
+      `/gateway/${ORG_SLUG}/${PROJECT_SLUG}/zero`,
+    );
+    expect(allowed.status).toBe(200);
+    expect(calls).toHaveLength(1);
+    expect((await walletStub(clerkOrgId).getState()).balance).toBe(1);
   });
 
   it("disabled and expired-grace keys cannot use the free tier upstream", async () => {
@@ -643,7 +655,7 @@ describe("gateway pipeline", () => {
     const { usage } = await installFixtures({
       clerkOrgId,
       fetchImpl,
-      credits: 0,
+      credits: 1,
     });
 
     const first = await gatewayFetch(
@@ -673,7 +685,7 @@ describe("gateway pipeline", () => {
     const { fetchImpl, calls } = makeFetchMock(() => {
       throw new Error("connection reset");
     });
-    await installFixtures({ clerkOrgId, fetchImpl, credits: 0 });
+    await installFixtures({ clerkOrgId, fetchImpl, credits: 1 });
 
     const res = await gatewayFetch(`/gateway/${ORG_SLUG}/${PROJECT_SLUG}/free`);
 
