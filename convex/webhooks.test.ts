@@ -1,6 +1,6 @@
 /// <reference types="vite/client" />
 import { convexTest } from "convex-test";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { api, internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import schema from "./schema";
@@ -517,5 +517,90 @@ describe("recordDeliveryAttempt — state machine", () => {
 
     // endpointId was deleted; scheduled retry action exits harmlessly
     expect(endpointId).toBeDefined();
+  });
+});
+
+describe("deliverWebhook — action integration", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  async function seedDelivery(
+    t: ReturnType<typeof convexTest>,
+    status: "pending" | "ok" | "failed" = "pending",
+  ) {
+    return await t.run(async (ctx) => {
+      const orgId = await ctx.db.insert("organizations", {
+        clerkOrgId: "org_action",
+        name: "Action Co",
+        slug: "action-co",
+      });
+      const projectId = await ctx.db.insert("projects", {
+        organizationId: orgId,
+        name: "Action API",
+        slug: "action-api",
+        status: "published",
+        visibility: "public",
+        tags: [],
+      });
+      const endpointId = await ctx.db.insert("webhookEndpoints", {
+        projectId,
+        url: "https://example.com/hook",
+        secret: "secret",
+        active: true,
+        createdAt: Date.now(),
+      });
+      return await ctx.db.insert("webhookDeliveries", {
+        endpointId,
+        event: "spec.published",
+        status,
+        attempts: status === "pending" ? 0 : 1,
+        createdAt: Date.now(),
+        payload: JSON.stringify({
+          event: "spec.published",
+          data: { projectId },
+          timestamp: 123,
+        }),
+      });
+    });
+  }
+
+  it("sends the delivery id header and skips completed deliveries", async () => {
+    const t = convexTest(schema, modules);
+    const pendingId = await seedDelivery(t);
+    const fetchMock = vi.fn(async () => new Response(null, { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await t.action(internal.webhooks.deliverWebhook, {
+      deliveryId: pendingId,
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const headers = fetchMock.mock.calls[0]![1]?.headers as Record<
+      string,
+      string
+    >;
+    expect(headers["X-Zevium-Delivery-Id"]).toBe(pendingId);
+
+    await t.action(internal.webhooks.deliverWebhook, {
+      deliveryId: pendingId,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not retry a terminal 4xx response", async () => {
+    const t = convexTest(schema, modules);
+    const deliveryId = await seedDelivery(t);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(null, { status: 400 })),
+    );
+
+    await t.action(internal.webhooks.deliverWebhook, { deliveryId });
+
+    const delivery = await t.run(async (ctx) => ctx.db.get(deliveryId));
+    expect(delivery?.status).toBe("failed");
+    expect(delivery?.attempts).toBe(1);
+    expect(delivery?.lastError).toBe("HTTP 400");
   });
 });
