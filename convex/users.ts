@@ -30,6 +30,21 @@ export const upsertFromClerk = internalMutation({
   },
 });
 
+/** Remove Clerk's personal-data mirror. Safe for webhook retries. */
+export const deleteFromClerk = internalMutation({
+  args: { clerkUserId: v.string() },
+  handler: async (ctx, args): Promise<void> => {
+    const existing = await ctx.db
+      .query("users")
+      .withIndex("by_clerk_user", (q) => q.eq("clerkUserId", args.clerkUserId))
+      .unique();
+
+    if (existing !== null) {
+      await ctx.db.delete(existing._id);
+    }
+  },
+});
+
 /**
  * Mirror the authenticated Clerk identity into the users table.
  * Safe to call on every app boot; returns the canonical row.
