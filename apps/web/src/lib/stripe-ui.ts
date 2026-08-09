@@ -78,7 +78,13 @@ export function checkoutStartFailureMessage(message?: string): string {
 }
 
 export type PaymentStatus =
-  "pending" | "succeeded" | "failed" | "refunded" | "disputed";
+  | "pending"
+  | "succeeded"
+  | "failed"
+  | "refunded"
+  | "disputed"
+  | "dispute_won"
+  | "dispute_lost";
 
 export function paymentStatusLabel(status: string): string {
   switch (status) {
@@ -95,6 +101,10 @@ export function paymentStatusLabel(status: string): string {
       return "Refunded";
     case "disputed":
       return "Disputed";
+    case "dispute_won":
+      return "Dispute won";
+    case "dispute_lost":
+      return "Dispute lost";
     default:
       return "Processing";
   }
@@ -109,7 +119,10 @@ export function paymentStatusVariant(status: string): BadgeVariant {
     case "payment_failed":
     case "expired":
     case "disputed":
+    case "dispute_lost":
       return "destructive";
+    case "dispute_won":
+      return "secondary";
     case "pending":
     case "refunded":
       return "outline";
