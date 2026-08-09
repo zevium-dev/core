@@ -282,6 +282,40 @@ describe("gateway pipeline", () => {
     expect(response.status).toBe(200);
   });
 
+  it("strips consumer cookies from upstream requests", async () => {
+    const clerkOrgId = "org_pipe_request_cookies";
+    const { fetchImpl } = makeFetchMock((req) => {
+      expect(req.headers.get("cookie")).toBeNull();
+      return new Response("ok");
+    });
+    await installFixtures({ clerkOrgId, fetchImpl, credits: 100 });
+
+    const response = await gatewayFetch(
+      `/gateway/${ORG_SLUG}/${PROJECT_SLUG}/stream`,
+      { headers: { cookie: "consumer_session=secret" } },
+    );
+
+    expect(response.status).toBe(200);
+  });
+
+  it("strips publisher cookies from gateway responses", async () => {
+    const clerkOrgId = "org_pipe_response_cookies";
+    const { fetchImpl } = makeFetchMock(
+      () =>
+        new Response("ok", {
+          headers: { "set-cookie": "publisher_session=secret; HttpOnly" },
+        }),
+    );
+    await installFixtures({ clerkOrgId, fetchImpl, credits: 100 });
+
+    const response = await gatewayFetch(
+      `/gateway/${ORG_SLUG}/${PROJECT_SLUG}/stream`,
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("set-cookie")).toBeNull();
+  });
+
   it("deprecated spec → RFC 8594 deprecation/sunset/link headers", async () => {
     const clerkOrgId = "org_pipe_deprecated";
     const { fetchImpl } = makeFetchMock(
