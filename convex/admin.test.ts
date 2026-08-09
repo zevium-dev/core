@@ -18,6 +18,7 @@ async function seedTransfer(t: TestConvex<typeof schema>): Promise<void> {
       publisherOrganizationId: organizationId,
       stripeConnectedAccountId: "acct_operator_view",
       amount: 950,
+      remainderCredits: 0,
       currency: "usd",
       idempotencyKey: "publisher-transfer:test",
       status: "failed",
