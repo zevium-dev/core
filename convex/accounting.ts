@@ -1,7 +1,7 @@
 /** Credits are integer units; $1 is 10,000 credits. */
 export const CREDITS_PER_USD = 10_000;
 
-/** The platform retains exactly five percent, rounded down in credits. */
+/** The platform retains five percent, rounded up to the nearest credit. */
 export const PLATFORM_FEE_BASIS_POINTS = 500;
 export const BASIS_POINTS_DENOMINATOR = 10_000;
 
@@ -15,8 +15,8 @@ export type PublisherEarningSplit = {
 };
 
 /**
- * Canonical 95/5 integer split. The fee is floored, so the publisher receives
- * the remainder and gross always equals fee plus net.
+ * Canonical 95/5 integer split. The platform fee is rounded up so every paid
+ * call contributes to the platform, and gross always equals fee plus net.
  */
 export function publisherEarningSplit(
   grossCredits: number,
@@ -24,7 +24,7 @@ export function publisherEarningSplit(
   if (!Number.isSafeInteger(grossCredits) || grossCredits < 0) {
     throw new Error("Gross credits must be a non-negative safe integer");
   }
-  const platformFeeCredits = Math.floor(
+  const platformFeeCredits = Math.ceil(
     (grossCredits * PLATFORM_FEE_BASIS_POINTS) / BASIS_POINTS_DENOMINATOR,
   );
   return {
