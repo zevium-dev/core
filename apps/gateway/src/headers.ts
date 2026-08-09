@@ -31,6 +31,7 @@ export function filterRequestHeaders(source: Headers): Headers {
   source.forEach((value, key) => {
     const lower = key.toLowerCase();
     if (lower in HOP_BY_HOP) return;
+    if (lower === "cookie") return;
     if (lower === "host") return;
     if (lower === "content-length") return;
     out.append(key, value);
@@ -46,6 +47,7 @@ export function filterResponseHeaders(source: Headers): Headers {
   source.forEach((value, key) => {
     const lower = key.toLowerCase();
     if (lower in HOP_BY_HOP) return;
+    if (lower === "set-cookie") return;
     // Let runtime recompute content-length for streamed bodies.
     if (lower === "content-length") return;
     out.append(key, value);
