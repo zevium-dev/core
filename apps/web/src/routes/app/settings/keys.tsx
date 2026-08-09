@@ -50,6 +50,7 @@ import {
   type ApiKeyRow,
   type RotateApiKeyResult,
 } from "#/lib/api-keys";
+import { getApiKeyLifecycle } from "#/lib/api-key-lifecycle";
 import { api } from "#/lib/convex-api";
 import { humanError } from "#/lib/human-error";
 import { parseMonthlyCap } from "#/lib/key-cap";
@@ -164,7 +165,10 @@ function KeysContent() {
   });
 
   const keys = keysQuery.data ?? [];
-  const hasKey = keys.length > 0;
+  const hasKey = keys.some(
+    (key) =>
+      getApiKeyLifecycle(settingsByKey.get(key.id), Date.now()) === "current",
+  );
   const isLoading = keysQuery.isPending;
 
   function closeReveal() {
@@ -238,48 +242,62 @@ function KeysContent() {
               }}
             />
           ) : (
-            <div className="rounded-md border">
-              <table className="w-full text-left text-sm">
-                <thead className="hidden border-b bg-muted/40 text-muted-foreground md:table-header-group">
-                  <tr>
-                    <th scope="col" className="px-3 py-2 font-medium">
-                      Name
-                    </th>
-                    <th scope="col" className="px-3 py-2 font-medium">
-                      Key
-                    </th>
-                    <th scope="col" className="px-3 py-2 font-medium">
-                      Monthly cap
-                    </th>
-                    <th scope="col" className="px-3 py-2 font-medium">
-                      Status
-                    </th>
-                    <th scope="col" className="px-3 py-2 font-medium">
-                      Created
-                    </th>
-                    <th scope="col" className="px-3 py-2 font-medium">
-                      Last used
-                    </th>
-                    <th scope="col" className="px-3 py-2 font-medium">
-                      <span className="sr-only">Actions</span>
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="block md:table-row-group">
-                  {keys.map((key) => (
-                    <KeyRow
-                      key={key.id}
-                      apiKey={key}
-                      setting={settingsByKey.get(key.id)}
-                      setCap={setCap}
-                      setDisabled={setDisabled}
-                      onRotate={() => setRotateTarget(key)}
-                      onRevoke={() => setRevokeTarget(key)}
-                      revokePending={revokeMutation.isPending}
-                    />
-                  ))}
-                </tbody>
-              </table>
+            <div className="flex flex-col gap-3">
+              <div className="rounded-md border">
+                <table className="w-full text-left text-sm">
+                  <thead className="hidden border-b bg-muted/40 text-muted-foreground md:table-header-group">
+                    <tr>
+                      <th scope="col" className="px-3 py-2 font-medium">
+                        Name
+                      </th>
+                      <th scope="col" className="px-3 py-2 font-medium">
+                        Key
+                      </th>
+                      <th scope="col" className="px-3 py-2 font-medium">
+                        Monthly cap
+                      </th>
+                      <th scope="col" className="px-3 py-2 font-medium">
+                        Status
+                      </th>
+                      <th scope="col" className="px-3 py-2 font-medium">
+                        Created
+                      </th>
+                      <th scope="col" className="px-3 py-2 font-medium">
+                        Last used
+                      </th>
+                      <th scope="col" className="px-3 py-2 font-medium">
+                        <span className="sr-only">Actions</span>
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="block md:table-row-group">
+                    {keys.map((key) => (
+                      <KeyRow
+                        key={key.id}
+                        apiKey={key}
+                        setting={settingsByKey.get(key.id)}
+                        setCap={setCap}
+                        setDisabled={setDisabled}
+                        onRotate={() => setRotateTarget(key)}
+                        onRevoke={() => setRevokeTarget(key)}
+                        revokePending={revokeMutation.isPending}
+                      />
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {!hasKey ? (
+                <Button
+                  className="self-start"
+                  onClick={() => {
+                    setRevealed(null);
+                    setCreateOpen(true);
+                  }}
+                >
+                  <Plus data-icon="inline-start" />
+                  Create current key
+                </Button>
+              ) : null}
             </div>
           )}
         </CardContent>
@@ -520,8 +538,9 @@ function KeyRow({
   }
 
   const graceUntil = setting?.graceUntil;
-  const graceActive = graceUntil !== undefined && graceUntil > now;
-  const graceExpired = graceUntil !== undefined && graceUntil <= now;
+  const lifecycle = getApiKeyLifecycle(setting, now);
+  const graceActive = lifecycle === "grace";
+  const graceExpired = lifecycle === "expired";
   const remainingMinutes = graceActive
     ? Math.max(1, Math.ceil((graceUntil! - now) / 60_000))
     : 0;
@@ -564,12 +583,14 @@ function KeyRow({
       <td className="flex items-center justify-between gap-4 md:table-cell md:px-3 md:py-2.5">
         <span className="text-xs text-muted-foreground md:hidden">Enabled</span>
         <div className="flex items-center gap-2">
-          <Switch
-            checked={!setting?.disabled}
-            disabled={toggleBusy}
-            onCheckedChange={(checked) => void commitToggle(checked === true)}
-            aria-label={`Enable ${apiKey.name}`}
-          />
+          {lifecycle === "current" || lifecycle === "disabled" ? (
+            <Switch
+              checked={lifecycle === "current"}
+              disabled={toggleBusy}
+              onCheckedChange={(checked) => void commitToggle(checked === true)}
+              aria-label={`Enable ${apiKey.name}`}
+            />
+          ) : null}
           {graceActive ? (
             <Badge variant="secondary" className="font-normal">
               Previous — {remainingMinutes}m remaining, until{" "}
@@ -582,15 +603,11 @@ function KeyRow({
             >
               Expired — {formatDate(graceUntil!)}
             </Badge>
-          ) : setting?.rotatedFromKeyId ? (
+          ) : lifecycle === "current" ? (
             <Badge variant="secondary" className="font-normal">
               Current
             </Badge>
-          ) : !setting?.disabled ? (
-            <Badge variant="secondary" className="font-normal">
-              Current
-            </Badge>
-          ) : setting?.disabled ? (
+          ) : lifecycle === "disabled" ? (
             <Badge
               variant="outline"
               className="font-normal text-muted-foreground"
@@ -614,7 +631,7 @@ function KeyRow({
             variant="ghost"
             size="sm"
             onClick={onRotate}
-            disabled={graceActive || graceExpired}
+            disabled={lifecycle !== "current"}
             title="Rotate key (old key works 24h)"
           >
             <RotateCw className="size-4" />
@@ -625,7 +642,7 @@ function KeyRow({
             size="sm"
             className="text-destructive hover:text-destructive"
             onClick={onRevoke}
-            disabled={revokePending || graceExpired}
+            disabled={revokePending}
           >
             <Trash2 className="size-4" />
             {graceActive ? "Revoke previous now" : "Revoke"}

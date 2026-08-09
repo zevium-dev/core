@@ -348,6 +348,12 @@ export const completeRotation = mutation({
     const oldDoc = await upsertSetting(ctx, claims.orgId, args.oldKeyId, {
       graceUntil: args.graceUntil,
     });
+    if (oldDoc.rotatedFromKeyId !== undefined) {
+      await upsertSetting(ctx, claims.orgId, oldDoc.rotatedFromKeyId, {
+        disabled: true,
+        graceUntil: undefined,
+      });
+    }
     await upsertSetting(ctx, claims.orgId, args.newKeyId, {
       rotatedFromKeyId: args.oldKeyId,
     });
