@@ -9,7 +9,10 @@ import schema from "./schema";
 const modules = import.meta.glob("./**/*.ts");
 const INTERNAL_SECRET = "test-gateway-internal-secret";
 
-async function seedProject(t: ReturnType<typeof convexTest>) {
+async function seedProject(
+  t: ReturnType<typeof convexTest>,
+  visibility: "public" | "private" = "public",
+) {
   return await t.run(async (ctx) => {
     const organizationId = await ctx.db.insert("organizations", {
       clerkOrgId: "org_publisher",
@@ -23,7 +26,7 @@ async function seedProject(t: ReturnType<typeof convexTest>) {
       slug: "md-to-html",
       description: "Render markdown",
       status: "published",
-      visibility: "public",
+      visibility,
       tags: ["markdown"],
     });
     await ctx.db.insert("specs", {
@@ -159,6 +162,22 @@ describe("upstream credentials", () => {
     expect(await response.json()).toMatchObject({
       projectId,
       upstreamHeaders: { "x-api-key": "second" },
+    });
+  });
+
+  it("returns private published projects to the gateway", async () => {
+    const t = convexTest(schema, modules);
+    const { projectId } = await seedProject(t, "private");
+
+    const response = await t.fetch(
+      "/gateway-spec?publisherHandle=publisher&projectSlug=md-to-html",
+      { headers: { "x-internal-secret": INTERNAL_SECRET } },
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      projectId,
+      visibility: "private",
     });
   });
 
