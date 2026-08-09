@@ -18,14 +18,24 @@ describe("validateWebhookUrl", () => {
     expect(validateWebhookUrl("https://api.zevium.dev/wh")).toBe(true);
   });
 
-  it("accepts http://localhost for dev", () => {
-    expect(validateWebhookUrl("http://localhost:3000/hook")).toBe(true);
-    expect(validateWebhookUrl("http://localhost/hook")).toBe(true);
-  });
-
-  it("rejects non-localhost http", () => {
+  it("rejects http, including localhost", () => {
+    expect(validateWebhookUrl("http://localhost:3000/hook")).toBe(false);
+    expect(validateWebhookUrl("http://localhost/hook")).toBe(false);
     expect(validateWebhookUrl("http://example.com/hook")).toBe(false);
     expect(validateWebhookUrl("http://192.168.1.1/hook")).toBe(false);
+  });
+
+  it("rejects private and local https targets", () => {
+    expect(validateWebhookUrl("https://localhost/hook")).toBe(false);
+    expect(validateWebhookUrl("https://127.0.0.1/hook")).toBe(false);
+    expect(validateWebhookUrl("https://10.0.0.8/hook")).toBe(false);
+    expect(validateWebhookUrl("https://169.254.169.254/hook")).toBe(false);
+    expect(validateWebhookUrl("https://172.16.0.1/hook")).toBe(false);
+    expect(validateWebhookUrl("https://192.168.1.1/hook")).toBe(false);
+    expect(validateWebhookUrl("https://192.0.2.1/hook")).toBe(false);
+    expect(validateWebhookUrl("https://2130706433/hook")).toBe(false);
+    expect(validateWebhookUrl("https://[::1]/hook")).toBe(false);
+    expect(validateWebhookUrl("https://[fd00::1]/hook")).toBe(false);
   });
 
   it("rejects garbage", () => {
@@ -146,6 +156,96 @@ describe("postWebhook — injectable fetch", () => {
     expect(result.status).toBe(0);
     expect(result.error).toBe("Delivery failed");
     expect(result.error).not.toContain("ECONNREFUSED");
+  });
+
+  it("follows safe redirects manually", async () => {
+    const requestedUrls: string[] = [];
+    const mockFetch = (async (
+      url: string | URL | Request,
+      init?: RequestInit,
+    ) => {
+      requestedUrls.push(url.toString());
+      expect(init?.redirect).toBe("manual");
+      if (requestedUrls.length === 1) {
+        return new Response(null, {
+          status: 307,
+          headers: { location: "https://hooks.example.com/final" },
+        });
+      }
+      return new Response(null, { status: 204 });
+    }) as typeof fetch;
+
+    const result = await postWebhook(
+      {
+        url: "https://example.com/hook",
+        secret: "s",
+        event: "x",
+        data: {},
+        timestamp: 0,
+      },
+      mockFetch,
+    );
+
+    expect(result).toMatchObject({ ok: true, status: 204 });
+    expect(requestedUrls).toEqual([
+      "https://example.com/hook",
+      "https://hooks.example.com/final",
+    ]);
+  });
+
+  it("blocks redirects to private targets", async () => {
+    const requestedUrls: string[] = [];
+    const mockFetch = (async (url: string | URL | Request) => {
+      requestedUrls.push(url.toString());
+      return new Response(null, {
+        status: 307,
+        headers: { location: "https://private.example/latest/meta-data" },
+      });
+    }) as typeof fetch;
+
+    const result = await postWebhook(
+      {
+        url: "https://example.com/hook",
+        secret: "s",
+        event: "x",
+        data: {},
+        timestamp: 0,
+      },
+      mockFetch,
+      async (hostname) =>
+        hostname === "private.example"
+          ? ["169.254.169.254"]
+          : ["93.184.216.34"],
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      status: 0,
+      error: "Delivery failed",
+      retryable: false,
+    });
+    expect(requestedUrls).toEqual(["https://example.com/hook"]);
+  });
+
+  it("blocks hostnames that resolve to private addresses", async () => {
+    let fetchCalled = false;
+    const result = await postWebhook(
+      {
+        url: "https://rebind.example/hook",
+        secret: "s",
+        event: "x",
+        data: {},
+        timestamp: 0,
+      },
+      (async () => {
+        fetchCalled = true;
+        return new Response(null, { status: 204 });
+      }) as typeof fetch,
+      async () => ["10.0.0.8"],
+    );
+
+    expect(result).toMatchObject({ ok: false, retryable: false });
+    expect(fetchCalled).toBe(false);
   });
 });
 

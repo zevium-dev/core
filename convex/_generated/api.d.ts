@@ -36,6 +36,7 @@ import type * as upstreamCredentials from "../upstreamCredentials.js";
 import type * as usage from "../usage.js";
 import type * as users from "../users.js";
 import type * as wallets from "../wallets.js";
+import type * as webhookDeliveryAction from "../webhookDeliveryAction.js";
 import type * as webhooks from "../webhooks.js";
 
 import type {
@@ -73,6 +74,7 @@ declare const fullApi: ApiFromModules<{
   usage: typeof usage;
   users: typeof users;
   wallets: typeof wallets;
+  webhookDeliveryAction: typeof webhookDeliveryAction;
   webhooks: typeof webhooks;
 }>;
 
