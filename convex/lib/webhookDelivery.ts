@@ -8,7 +8,7 @@
  * Idempotency contract:
  *  - Callers SHOULD pass `deliveryId` (the `webhookDeliveries` doc id) and the
  *    delivery's `currentStatus` on every invocation. When `currentStatus` is
- *    already terminal (`succeeded` / `failed`), `postWebhook` short-circuits
+ *    already terminal (`ok` / `failed`), `postWebhook` short-circuits
  *    and does NOT re-deliver — this prevents late scheduler duplicates from
  *    resurrecting a `failed` delivery to `ok`.
  *  - When `deliveryId` is supplied it is propagated on the outgoing request as
@@ -38,14 +38,14 @@ export type PostWebhookParams = {
   deliveryId?: string;
   /**
    * Current persisted status of the delivery, as read by the caller before
-   * invoking `postWebhook`. If already terminal (`succeeded` / `failed`),
+   * invoking `postWebhook`. If already terminal (`ok` / `failed`),
    * the request is NOT sent — guards against late scheduler duplicates
    * resurrecting a terminal delivery.
    */
   currentStatus?: DeliveryStatus;
 };
 
-export type DeliveryStatus = "pending" | "retrying" | "succeeded" | "failed";
+export type DeliveryStatus = "pending" | "ok" | "failed";
 
 export type PostWebhookResult = {
   ok: boolean;
@@ -75,7 +75,7 @@ const RETRYABLE_4XX: Record<number, true> = { 408: true, 429: true };
 
 /** Terminal delivery statuses — a delivery in these states must not be re-sent. */
 const TERMINAL_STATUSES: Partial<Record<DeliveryStatus, true>> = {
-  succeeded: true,
+  ok: true,
   failed: true,
 };
 
@@ -118,10 +118,10 @@ export async function postWebhook(
 ): Promise<PostWebhookResult> {
   // (1) Terminal-state guard: a delivery already in a terminal state must not
   //     be re-delivered. A late scheduler duplicate of the original action
-  //     must not resurrect `failed → ok` or double-send a `succeeded` one.
+  //     must not resurrect `failed → ok` or double-send a successful one.
   if (params.currentStatus && TERMINAL_STATUSES[params.currentStatus]) {
     return {
-      ok: params.currentStatus === "succeeded",
+      ok: params.currentStatus === "ok",
       status: 0,
       retryable: false,
       skipped: true,
