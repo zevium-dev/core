@@ -240,6 +240,58 @@ describe("Stripe Connect publisher accounting", () => {
     expect(first.amount).toBe(950);
   });
 
+  it("carries sub-cent earnings into the next transfer", async () => {
+    const t = convexTest(schema, modules);
+    const seed = await seedConnect(t);
+    await t.mutation(internal.payouts.setConnectedAccount, {
+      organizationId: seed.organizationId,
+      stripeConnectedAccountId: "acct_carry",
+    });
+    await t.run(async (ctx) => {
+      const profile = await ctx.db
+        .query("organizationPayments")
+        .withIndex("by_organization", (q) =>
+          q.eq("organizationId", seed.organizationId),
+        )
+        .unique();
+      if (profile === null) throw new Error("profile missing");
+      await ctx.db.patch(profile._id, { payoutsEnabled: true });
+      await ctx.db.patch(seed.earningId, {
+        grossCredits: 100_001,
+        netCredits: 95_001,
+      });
+    });
+
+    const first = await t.mutation(internal.payouts.preparePublisherTransfer, {
+      publisherOrganizationId: seed.organizationId,
+    });
+    expect(first.amount).toBe(950);
+    expect(first.remainderCredits).toBe(1);
+    await t.mutation(internal.payouts.markPublisherTransferSucceeded, {
+      transferId: first.transferId,
+      stripeTransferId: "tr_carry_first",
+    });
+    await t.run(async (ctx) => {
+      await ctx.db.insert("publisherEarnings", {
+        publisherOrganizationId: seed.organizationId,
+        usageSettlementRefId: "settle:publisher-carry",
+        grossCredits: 99,
+        platformFeeCredits: 0,
+        netCredits: 99,
+        availableAt: 1,
+        status: "available",
+        createdAt: 2,
+        updatedAt: 2,
+      });
+    });
+
+    const second = await t.mutation(internal.payouts.preparePublisherTransfer, {
+      publisherOrganizationId: seed.organizationId,
+    });
+    expect(second.amount).toBe(1);
+    expect(second.remainderCredits).toBe(0);
+  });
+
   it("projects failed/reversed transfers and payout state without changing earnings twice", async () => {
     const t = convexTest(schema, modules);
     const seed = await seedConnect(t);

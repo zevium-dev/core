@@ -353,6 +353,8 @@ export default defineSchema({
     publisherOrganizationId: v.id("organizations"),
     stripeConnectedAccountId: v.string(),
     amount: v.number(),
+    /** Credits below Stripe's one-cent precision, carried to the next transfer. */
+    remainderCredits: v.number(),
     currency: v.string(),
     idempotencyKey: v.string(),
     stripeTransferId: v.optional(v.string()),
