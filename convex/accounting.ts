@@ -1,5 +1,6 @@
 /** Credits are integer units; $1 is 10,000 credits. */
 export const CREDITS_PER_USD = 10_000;
+export const CREDITS_PER_USD_CENT = CREDITS_PER_USD / 100;
 
 /** The platform retains exactly five percent, rounded down in credits. */
 export const PLATFORM_FEE_BASIS_POINTS = 500;
