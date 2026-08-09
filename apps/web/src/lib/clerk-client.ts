@@ -47,23 +47,28 @@ export function readClientClerkAuth(
   const clerk = typeof window !== "undefined" ? window.Clerk : undefined;
 
   const userId =
-    (typeof clerk?.user?.id === "string" ? clerk.user.id : null) ??
-    fallback.userId ??
-    null;
+    clerk?.user === undefined
+      ? (fallback.userId ?? null)
+      : typeof clerk.user?.id === "string"
+        ? clerk.user.id
+        : null;
 
   const orgId =
-    (typeof clerk?.organization?.id === "string"
-      ? clerk.organization.id
-      : null) ??
-    fallback.orgId ??
-    null;
+    clerk?.organization === undefined
+      ? (fallback.orgId ?? null)
+      : typeof clerk.organization?.id === "string"
+        ? clerk.organization.id
+        : null;
 
   const liveSlug = clerk?.organization?.slug;
   const orgSlug =
-    (typeof liveSlug === "string" && liveSlug.length > 0 ? liveSlug : null) ??
-    (typeof fallback.orgSlug === "string" && fallback.orgSlug.length > 0
-      ? fallback.orgSlug
-      : null);
+    clerk?.organization === undefined
+      ? typeof fallback.orgSlug === "string" && fallback.orgSlug.length > 0
+        ? fallback.orgSlug
+        : null
+      : typeof liveSlug === "string" && liveSlug.length > 0
+        ? liveSlug
+        : null;
 
   return { userId, orgId, orgSlug };
 }
