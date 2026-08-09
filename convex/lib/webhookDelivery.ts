@@ -67,6 +67,8 @@ export type PostWebhookResult = {
   skipped?: boolean;
 };
 
+export type ResolveWebhookHostname = (hostname: string) => Promise<string[]>;
+
 /** Delivery timeout in milliseconds. */
 export const WEBHOOK_TIMEOUT_MS = 10_000;
 
@@ -81,6 +83,130 @@ const TERMINAL_STATUSES: Partial<Record<DeliveryStatus, true>> = {
 
 /** Generic, publisher-safe failure label for transport-level errors. */
 const TRANSPORT_ERROR_LABEL = "Delivery failed";
+
+/** Maximum number of safe redirects followed for one delivery attempt. */
+const MAX_WEBHOOK_REDIRECTS = 3;
+
+function isPrivateIpv4(hostname: string): boolean {
+  const parts = hostname.split(".").map(Number);
+  if (
+    parts.length !== 4 ||
+    parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)
+  ) {
+    return false;
+  }
+  const [a, b, c] = parts as [number, number, number, number];
+  return (
+    a === 0 ||
+    a === 10 ||
+    a === 127 ||
+    (a === 100 && b >= 64 && b <= 127) ||
+    (a === 169 && b === 254) ||
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 0) ||
+    (a === 192 && b === 2) ||
+    (a === 192 && b === 88 && c === 99) ||
+    (a === 192 && b === 168) ||
+    (a === 198 && (b === 18 || b === 19)) ||
+    (a === 198 && b === 51 && c === 100) ||
+    (a === 203 && b === 0 && c === 113) ||
+    a >= 224
+  );
+}
+
+function parseIpv6(hostname: string): number[] | null {
+  const normalized = hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  if (!normalized.includes(":")) return null;
+  const halves = normalized.split("::");
+  if (halves.length > 2) return null;
+  const left = halves[0] ? halves[0].split(":") : [];
+  const right = halves[1] ? halves[1].split(":") : [];
+  const missing = 8 - left.length - right.length;
+  if ((halves.length === 1 && missing !== 0) || missing < 0) return null;
+  const groups = [...left, ...Array<number>(missing).fill(0), ...right].map(
+    (part) => Number.parseInt(String(part), 16),
+  );
+  if (
+    groups.length !== 8 ||
+    groups.some((part) => !Number.isInteger(part) || part < 0 || part > 0xffff)
+  ) {
+    return null;
+  }
+  return groups;
+}
+
+function isPrivateIpv6(hostname: string): boolean {
+  const groups = parseIpv6(hostname);
+  if (groups === null) return false;
+  const first = groups[0]!;
+  if (
+    groups.every((part) => part === 0) ||
+    (groups.slice(0, 7).every((part) => part === 0) && groups[7] === 1) ||
+    (first & 0xfe00) === 0xfc00 ||
+    (first & 0xffc0) === 0xfe80 ||
+    (first & 0xff00) === 0xff00
+  ) {
+    return true;
+  }
+  // IPv4-mapped IPv6 addresses are normalized by URL, e.g.
+  // ::ffff:127.0.0.1 becomes ::ffff:7f00:1.
+  if (groups.slice(0, 5).every((part) => part === 0) && groups[5] === 0xffff) {
+    const ipv4 = `${groups[6]! >>> 8}.${groups[6]! & 255}.${groups[7]! >>> 8}.${groups[7]! & 255}`;
+    return isPrivateIpv4(ipv4);
+  }
+  return false;
+}
+
+/**
+ * Accept only public HTTPS webhook destinations. URL normalisation also turns
+ * alternative IPv4 forms (integer, octal, shortened) into dotted decimal
+ * before private-range checks run.
+ */
+export function validateWebhookUrl(url: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol !== "https:" || parsed.username || parsed.password) {
+    return false;
+  }
+  const hostname = parsed.hostname.toLowerCase();
+  if (
+    hostname === "localhost" ||
+    hostname.endsWith(".localhost") ||
+    hostname.endsWith(".local") ||
+    hostname.endsWith(".internal")
+  ) {
+    return false;
+  }
+  return !isPrivateIpv4(hostname) && !isPrivateIpv6(hostname);
+}
+
+async function validateResolvedWebhookUrl(
+  url: URL,
+  resolveHostname?: ResolveWebhookHostname,
+): Promise<boolean> {
+  if (!validateWebhookUrl(url.toString())) return false;
+  if (
+    resolveHostname === undefined ||
+    isPrivateIpv4(url.hostname) ||
+    parseIpv6(url.hostname) !== null ||
+    /^\d{1,3}(?:\.\d{1,3}){3}$/.test(url.hostname)
+  ) {
+    return true;
+  }
+  const addresses = await resolveHostname(url.hostname);
+  return (
+    addresses.length > 0 &&
+    addresses.every((address) =>
+      validateWebhookUrl(
+        address.includes(":") ? `https://[${address}]` : `https://${address}`,
+      ),
+    )
+  );
+}
 
 /**
  * Compute hex HMAC-SHA256 of `body` using `secret`.
@@ -115,6 +241,7 @@ export async function computeSignature(
 export async function postWebhook(
   params: PostWebhookParams,
   fetchImpl: typeof fetch = fetch,
+  resolveHostname?: ResolveWebhookHostname,
 ): Promise<PostWebhookResult> {
   // (1) Terminal-state guard: a delivery already in a terminal state must not
   //     be re-delivered. A late scheduler duplicate of the original action
@@ -148,27 +275,55 @@ export async function postWebhook(
   }
 
   try {
-    const response = await fetchImpl(params.url, {
-      method: "POST",
-      headers,
-      body,
-      signal: AbortSignal.timeout(WEBHOOK_TIMEOUT_MS),
-    });
+    let currentUrl = new URL(params.url);
+    for (
+      let redirects = 0;
+      redirects <= MAX_WEBHOOK_REDIRECTS;
+      redirects += 1
+    ) {
+      if (!(await validateResolvedWebhookUrl(currentUrl, resolveHostname))) {
+        return {
+          ok: false,
+          status: 0,
+          error: TRANSPORT_ERROR_LABEL,
+          retryable: false,
+        };
+      }
 
-    if (response.status >= 200 && response.status < 300) {
-      return { ok: true, status: response.status, retryable: false };
+      const response = await fetchImpl(currentUrl, {
+        method: "POST",
+        headers,
+        body,
+        redirect: "manual",
+        signal: AbortSignal.timeout(WEBHOOK_TIMEOUT_MS),
+      });
+
+      if (response.status >= 300 && response.status < 400) {
+        const location = response.headers.get("location");
+        if (location !== null && redirects < MAX_WEBHOOK_REDIRECTS) {
+          currentUrl = new URL(location, currentUrl);
+          continue;
+        }
+      }
+
+      if (response.status >= 200 && response.status < 300) {
+        return { ok: true, status: response.status, retryable: false };
+      }
+
+      // (3) Classify: 4xx (except 408/429) is terminal — the receiver rejected
+      //     the payload and retries will not help. Only 5xx + 408/429 retry.
+      const retryable =
+        response.status >= 500 || RETRYABLE_4XX[response.status] === true;
+      return {
+        ok: false,
+        status: response.status,
+        error: `HTTP ${response.status}`,
+        retryable,
+      };
     }
 
-    // (3) Classify: 4xx (except 408/429) is terminal — the receiver rejected
-    //     the payload and retries will not help. Only 5xx + 408/429 retry.
-    const retryable =
-      response.status >= 500 || RETRYABLE_4XX[response.status] === true;
-    return {
-      ok: false,
-      status: response.status,
-      error: `HTTP ${response.status}`,
-      retryable,
-    };
+    // Loop always returns after its final response.
+    throw new Error("Unreachable redirect state");
   } catch (err) {
     // (4) Never interpolate raw transport-error strings into the publisher-
     //     visible notification body. `fetch` failures routinely embed internal
