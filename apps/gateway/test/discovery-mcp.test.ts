@@ -3,7 +3,7 @@ import {
   env,
   waitOnExecutionContext,
 } from "cloudflare:test";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import worker, {
   __setTestPipelineDeps,
   __setTestUsageMutation,
@@ -254,6 +254,50 @@ describe("GET /discovery", () => {
 });
 
 describe("MCP /mcp", () => {
+  it("rejects request bodies larger than 1 MiB", async () => {
+    await installAgentFixtures({ clerkOrgId: "org_mcp_request_limit" });
+    const res = await workerFetch("/mcp", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "ping",
+        padding: "x".repeat(1024 * 1024),
+      }),
+    });
+
+    expect(res.status).toBe(413);
+    const body: unknown = await res.json();
+    expect(
+      isRecord(body) &&
+        isRecord(body.error) &&
+        body.error.message === "Request body exceeds 1 MiB limit",
+    ).toBe(true);
+  });
+
+  it("rejects JSON-RPC batches larger than 100 requests", async () => {
+    await installAgentFixtures({ clerkOrgId: "org_mcp_batch_limit" });
+    const batch = Array.from({ length: 101 }, (_, id) => ({
+      jsonrpc: "2.0",
+      id,
+      method: "ping",
+    }));
+    const res = await workerFetch("/mcp", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(batch),
+    });
+
+    expect(res.status).toBe(400);
+    const body: unknown = await res.json();
+    expect(
+      isRecord(body) &&
+        isRecord(body.error) &&
+        body.error.message === "Invalid Request: batch limit is 100",
+    ).toBe(true);
+  });
+
   it("GET lists server tools", async () => {
     await installAgentFixtures({ clerkOrgId: "org_mcp_get" });
     const res = await workerFetch("/mcp");
@@ -411,6 +455,86 @@ describe("MCP /mcp", () => {
     expect(after.inFlightTotal).toBe(0);
     expect(after.pendingSettlements).toHaveLength(1);
     expect(after.pendingSettlements[0]!.cost).toBe(3);
+  });
+
+  it("caps buffered call_api responses at 1 MiB", async () => {
+    const clerkOrgId = "org_mcp_response_limit";
+    await installAgentFixtures({
+      clerkOrgId,
+      credits: 100,
+      fetchImpl: async () =>
+        new Response("x".repeat(1024 * 1024 + 1), { status: 200 }),
+    });
+
+    const rpc: unknown = await mcpCall(
+      "tools/call",
+      {
+        name: "call_api",
+        arguments: {
+          org: ORG_SLUG,
+          project: PROJECT_SLUG,
+          method: "POST",
+          path: "/echo",
+        },
+      },
+      { headers: { authorization: `Bearer ${KEY_SECRET}` } },
+    );
+
+    expect(isRecord(rpc)).toBe(true);
+    if (!isRecord(rpc)) return;
+    expect(
+      isRecord(rpc.result) &&
+        rpc.result.isError === true &&
+        toolText(rpc) === "Upstream response exceeds 1 MiB limit",
+    ).toBe(true);
+  });
+
+  it("times out tool execution after 10 seconds", async () => {
+    vi.useFakeTimers();
+    try {
+      const clerkOrgId = "org_mcp_execution_limit";
+      await installAgentFixtures({
+        clerkOrgId,
+        credits: 100,
+        fetchImpl: async (input) => {
+          const request =
+            input instanceof Request ? input : new Request(String(input));
+          return new Promise<Response>((_resolve, reject) => {
+            request.signal.addEventListener(
+              "abort",
+              () => reject(request.signal.reason),
+              { once: true },
+            );
+          });
+        },
+      });
+
+      const pending = mcpCall(
+        "tools/call",
+        {
+          name: "call_api",
+          arguments: {
+            org: ORG_SLUG,
+            project: PROJECT_SLUG,
+            method: "POST",
+            path: "/echo",
+          },
+        },
+        { headers: { authorization: `Bearer ${KEY_SECRET}` } },
+      );
+      await vi.advanceTimersByTimeAsync(20_001);
+      const rpc = await pending;
+
+      expect(isRecord(rpc)).toBe(true);
+      if (!isRecord(rpc)) return;
+      expect(
+        isRecord(rpc.result) &&
+          rpc.result.isError === true &&
+          toolText(rpc) === "Tool execution timed out after 10 seconds",
+      ).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("call_api without key fails without touching wallet", async () => {
