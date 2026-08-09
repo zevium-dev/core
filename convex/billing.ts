@@ -481,7 +481,7 @@ export const upsertPaidPayment = internalMutation({
       }
       await ctx.db.patch(existing._id, {
         stripeChargeId: args.stripeChargeId ?? existing.stripeChargeId,
-        status: "paid",
+        status: existing.status === "pending" ? "paid" : existing.status,
         updatedAt: now,
       });
       return {
@@ -603,6 +603,9 @@ export const applyDispute = internalMutation({
       )
       .unique();
     if (payment === null) return { kind: "ignored" as const };
+    if (payment.status === "dispute_won" || payment.status === "dispute_lost") {
+      return { kind: "ignored" as const };
+    }
     const remaining = Math.max(
       0,
       payment.grantedCredits - payment.reversedCredits,
@@ -639,9 +642,94 @@ export const finalizeDispute = internalMutation({
         payment.grantedCredits,
         payment.reversedCredits + args.creditsReversed,
       ),
+      disputedCredits: Math.min(
+        payment.grantedCredits,
+        (payment.disputedCredits ?? 0) + args.creditsReversed,
+      ),
       status: "disputed",
       updatedAt: Date.now(),
     });
+  },
+});
+
+const disputeOutcome = v.union(v.literal("won"), v.literal("lost"));
+
+export const prepareDisputeClosure = internalQuery({
+  args: {
+    stripeDisputeId: v.string(),
+    stripeChargeId: v.string(),
+    outcome: disputeOutcome,
+  },
+  handler: async (ctx, args) => {
+    const payment = await ctx.db
+      .query("payments")
+      .withIndex("by_charge", (q) =>
+        q.eq("stripeChargeId", args.stripeChargeId),
+      )
+      .unique();
+    if (payment === null) return { kind: "ignored" as const };
+    const creditsToRestore =
+      args.outcome === "won"
+        ? Math.min(
+            payment.reversedCredits,
+            payment.disputedCredits ??
+              (payment.status === "disputed" ? payment.reversedCredits : 0),
+          )
+        : 0;
+    return {
+      kind: "dispute_closure" as const,
+      paymentId: payment._id,
+      organizationId: payment.organizationId,
+      outcome: args.outcome,
+      creditsToRestore,
+      refId: `stripe:dispute:${args.stripeDisputeId}:${args.outcome}`,
+    };
+  },
+});
+
+export const finalizeDisputeClosure = internalMutation({
+  args: {
+    paymentId: v.id("payments"),
+    outcome: disputeOutcome,
+    creditsRestored: v.number(),
+  },
+  handler: async (ctx, args): Promise<void> => {
+    const payment = await ctx.db.get(args.paymentId);
+    if (payment === null) throw new Error("Payment not found");
+    if (
+      !Number.isSafeInteger(args.creditsRestored) ||
+      args.creditsRestored < 0 ||
+      (args.outcome === "lost" && args.creditsRestored !== 0)
+    ) {
+      throw new Error("Invalid dispute restoration amount");
+    }
+    const disputedCredits =
+      payment.disputedCredits ??
+      (payment.status === "disputed" ? payment.reversedCredits : 0);
+    if (args.creditsRestored > disputedCredits) {
+      throw new Error("Dispute restoration exceeds reversed credits");
+    }
+    await ctx.db.patch(payment._id, {
+      reversedCredits: payment.reversedCredits - args.creditsRestored,
+      disputedCredits:
+        args.outcome === "won"
+          ? disputedCredits - args.creditsRestored
+          : disputedCredits,
+      status: args.outcome === "won" ? "dispute_won" : "dispute_lost",
+      updatedAt: Date.now(),
+    });
+    const profile = await ctx.db
+      .query("organizationPayments")
+      .withIndex("by_organization", (q) =>
+        q.eq("organizationId", payment.organizationId),
+      )
+      .unique();
+    if (profile?.disabledReason === "Payment dispute under review") {
+      await ctx.db.patch(profile._id, {
+        disabledReason: undefined,
+        updatedAt: Date.now(),
+      });
+    }
   },
 });
 
@@ -814,6 +902,37 @@ export const processStripeEvent = internalAction({
             await ctx.runMutation(internal.billing.finalizeDispute, {
               paymentId: result.paymentId,
               creditsReversed: result.creditsToReverse,
+            });
+          }
+          break;
+        }
+        case "charge.dispute.closed": {
+          const dispute = await stripe.disputes.retrieve(args.objectId);
+          if (dispute.status !== "won" && dispute.status !== "lost") {
+            throw new Error("Closed Stripe dispute has non-terminal status");
+          }
+          const chargeId = stringId(dispute.charge) ?? "";
+          const result = await ctx.runQuery(
+            internal.billing.prepareDisputeClosure,
+            {
+              stripeDisputeId: dispute.id,
+              stripeChargeId: chargeId,
+              outcome: dispute.status,
+            },
+          );
+          if (result.kind === "dispute_closure") {
+            if (result.creditsToRestore > 0) {
+              await ctx.runMutation(internal.wallets.grantPaymentCredits, {
+                organizationId: result.organizationId,
+                paymentId: result.paymentId,
+                amount: result.creditsToRestore,
+                refId: result.refId,
+              });
+            }
+            await ctx.runMutation(internal.billing.finalizeDisputeClosure, {
+              paymentId: result.paymentId,
+              outcome: result.outcome,
+              creditsRestored: result.creditsToRestore,
             });
           }
           break;
