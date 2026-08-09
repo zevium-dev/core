@@ -206,6 +206,7 @@ export const getDeliveryForAction = internalQuery({
     event: string;
     payload: string;
     attempts: number;
+    status: Doc<"webhookDeliveries">["status"];
   } | null> => {
     const delivery = await ctx.db.get(args.deliveryId);
     if (delivery === null) return null;
@@ -218,6 +219,7 @@ export const getDeliveryForAction = internalQuery({
       event: delivery.event,
       payload: delivery.payload,
       attempts: delivery.attempts,
+      status: delivery.status,
     };
   },
 });
@@ -231,6 +233,7 @@ export const recordDeliveryAttempt = internalMutation({
     deliveryId: v.id("webhookDeliveries"),
     ok: v.boolean(),
     error: v.optional(v.string()),
+    retryable: v.optional(v.boolean()),
   },
   handler: async (ctx, args): Promise<void> => {
     const delivery = await ctx.db.get(args.deliveryId);
@@ -246,7 +249,7 @@ export const recordDeliveryAttempt = internalMutation({
       return;
     }
 
-    if (nextAttempts < MAX_WEBHOOK_ATTEMPTS) {
+    if (args.retryable !== false && nextAttempts < MAX_WEBHOOK_ATTEMPTS) {
       await ctx.db.patch(args.deliveryId, {
         attempts: nextAttempts,
         lastError: args.error,
@@ -279,7 +282,7 @@ export const recordDeliveryAttempt = internalMutation({
       clerkOrgId: org.clerkOrgId,
       kind: "webhook_failed",
       title: "Webhook delivery failed",
-      body: `Delivery of "${delivery.event}" failed after ${MAX_WEBHOOK_ATTEMPTS} attempts${args.error !== undefined ? `: ${args.error}` : ""}.`,
+      body: `Delivery of "${delivery.event}" failed after ${nextAttempts} attempt${nextAttempts === 1 ? "" : "s"}${args.error !== undefined ? `: ${args.error}` : ""}.`,
       refId: `webhook_failed:${args.deliveryId}`,
     });
   },
@@ -318,12 +321,17 @@ export const deliverWebhook = internalAction({
       event: parsed.event,
       data: parsed.data,
       timestamp: parsed.timestamp,
+      deliveryId: args.deliveryId,
+      currentStatus: info.status,
     });
+
+    if (result.skipped) return;
 
     await ctx.runMutation(internal.webhooks.recordDeliveryAttempt, {
       deliveryId: args.deliveryId,
       ok: result.ok,
       error: result.error,
+      retryable: result.retryable,
     });
   },
 });
