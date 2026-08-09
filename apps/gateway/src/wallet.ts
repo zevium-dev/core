@@ -15,8 +15,8 @@
  * - flush/ack: flush returns all pending settlements (stable ids). After the
  *   ledger appends them, ack removes them. If ack is lost, re-flush yields the
  *   same settlement ids; the ledger dedupes by settlementId.
- * - free tier: per-consumer-operation per-UTC-day counters; free calls skip reserve/settle
- *   but still enqueue pending usage with credits 0.
+ * - free tier: positive wallet balance is required; calls skip reserve/settle,
+ *   use per-consumer-operation per-UTC-day counters, and enqueue usage at 0 credits.
  * - alarm (~5s): when pending non-empty, batch → wallets:recordUsage → ack.
  *
  * Crash-safety: multi-key updates go through storage.transaction. State is
@@ -110,10 +110,19 @@ export type RefundResult =
 export type FreeTierResult =
   | { status: "consumed"; used: number; limit: number }
   | { status: "exhausted"; used: number; limit: number }
-  | { status: "rejected"; reason: string };
+  | {
+      status: "rejected";
+      reason: string;
+      available?: number;
+    };
 
 export type KeyAuthorizationResult =
-  { status: "allowed" } | { status: "rejected"; reason: "key_disabled" };
+  | { status: "allowed" }
+  | {
+      status: "rejected";
+      reason: "key_disabled" | "insufficient_credits";
+      available?: number;
+    };
 
 export type EnqueueFreeResult =
   | { status: "enqueued"; settlementId: string }
@@ -639,6 +648,13 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
       if (currentSetting && this.#isKeyDisabled(currentSetting, nowMs)) {
         return { status: "rejected", reason: "key_disabled" };
       }
+      if (this.#balance <= 0) {
+        return {
+          status: "rejected",
+          reason: "insufficient_credits",
+          available: this.#available(),
+        };
+      }
       const day = utcDayKey(nowMs);
       const storageKey = freeStorageKey(
         opts.clerkOrgId,
@@ -669,6 +685,13 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
       const currentSetting = this.#keySettings.get(keyId) ?? setting;
       if (currentSetting && this.#isKeyDisabled(currentSetting, nowMs)) {
         return { status: "rejected", reason: "key_disabled" };
+      }
+      if (this.#balance <= 0) {
+        return {
+          status: "rejected",
+          reason: "insufficient_credits",
+          available: this.#available(),
+        };
       }
       return { status: "allowed" };
     });

@@ -58,6 +58,7 @@ describe("WalletDO unit", () => {
   it("free tier is atomic per consumer project operation and UTC day", async () => {
     const clerkOrgId = "org_free_scope";
     const stub = walletStub(clerkOrgId);
+    await stub.grant("free-tier-balance", 1);
     const dayOne = Date.UTC(2026, 6, 19, 23, 59, 59);
     const base = {
       clerkOrgId,

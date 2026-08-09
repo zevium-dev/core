@@ -189,11 +189,18 @@ export async function handleGatewayRequest(
         method: matched.method,
         pathTemplate: matched.pathTemplate,
         cost: 0,
-        status: 403,
+        status: authorization.reason === "key_disabled" ? 403 : 402,
         outcome: "blocked",
         latencyMs: (deps.now ?? Date.now)() - started,
         reservationId,
       });
+      if (authorization.reason === "insufficient_credits") {
+        return paymentRequiredResponse(requestId, "Insufficient credits", {
+          reason: "insufficient_credits",
+          available: authorization.available ?? 0,
+          cost: 0,
+        });
+      }
       return jsonError(403, "key_disabled", "API key is disabled", requestId);
     }
     unmetered = true;
@@ -205,6 +212,31 @@ export async function handleGatewayRequest(
     });
     if (freeResult.status === "consumed") {
       usedFree = true;
+    } else if (
+      freeResult.status === "rejected" &&
+      freeResult.reason === "insufficient_credits"
+    ) {
+      emitUsage(ctx, deps, {
+        requestId,
+        organizationId: published.organizationId,
+        consumerClerkOrgId: verified.orgId,
+        projectId: published.projectId,
+        keyId: verified.keyId,
+        orgSlug: route.publisherHandle,
+        projectSlug: route.projectSlug,
+        method: matched.method,
+        pathTemplate: matched.pathTemplate,
+        cost: 0,
+        status: 402,
+        outcome: "blocked",
+        latencyMs: (deps.now ?? Date.now)() - started,
+        reservationId,
+      });
+      return paymentRequiredResponse(requestId, "Insufficient credits", {
+        reason: "insufficient_credits",
+        available: freeResult.available ?? 0,
+        cost: 0,
+      });
     } else if (
       freeResult.status === "rejected" &&
       freeResult.reason === "key_disabled"
