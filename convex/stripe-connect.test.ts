@@ -138,11 +138,17 @@ describe("Stripe Connect publisher accounting", () => {
     ]);
   });
 
-  it("uses the single integer 95/5 rounding rule", () => {
+  it("rounds the platform fee up so every paid call contributes", () => {
+    expect([0, 1, 19, 20].map(publisherEarningSplit)).toEqual([
+      { grossCredits: 0, platformFeeCredits: 0, publisherNetCredits: 0 },
+      { grossCredits: 1, platformFeeCredits: 1, publisherNetCredits: 0 },
+      { grossCredits: 19, platformFeeCredits: 1, publisherNetCredits: 18 },
+      { grossCredits: 20, platformFeeCredits: 1, publisherNetCredits: 19 },
+    ]);
     expect(publisherEarningSplit(100_001)).toEqual({
       grossCredits: 100_001,
-      platformFeeCredits: 5_000,
-      publisherNetCredits: 95_001,
+      platformFeeCredits: 5_001,
+      publisherNetCredits: 95_000,
     });
     expect(() => publisherEarningSplit(-1)).toThrow("non-negative");
   });
