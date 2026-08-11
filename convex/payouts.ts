@@ -9,7 +9,7 @@ import {
 } from "./_generated/server";
 import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
-import { creditsToUsdCents } from "./accounting";
+import { CREDITS_PER_USD_CENT, creditsToUsdCents } from "./accounting";
 import { requireIdentity } from "./lib/auth";
 import { createNotification } from "./lib/notifications";
 import { stripeClient } from "./billing";
@@ -377,6 +377,7 @@ export const preparePublisherTransfer = internalMutation({
         transferId: retry._id,
         connectedAccountId: retry.stripeConnectedAccountId,
         amount: retry.amount,
+        remainderCredits: retry.remainderCredits,
         currency: retry.currency,
         idempotencyKey: retry.idempotencyKey,
       };
@@ -389,12 +390,14 @@ export const preparePublisherTransfer = internalMutation({
       )
       .filter((q) => q.eq(q.field("status"), "available"))
       .collect();
+    const carriedCredits = priorTransfers[0]?.remainderCredits ?? 0;
     const credits = earnings.reduce(
       (total, earning) => total + earning.netCredits,
-      0,
+      carriedCredits,
     );
     const amount = creditsToUsdCents(credits);
     if (amount <= 0) throw new Error("Available earnings are below one cent");
+    const remainderCredits = credits % CREDITS_PER_USD_CENT;
     const idempotencyKey = await publisherTransferIdempotencyKey(
       args.publisherOrganizationId,
       earnings,
@@ -410,6 +413,7 @@ export const preparePublisherTransfer = internalMutation({
         transferId: existing._id,
         connectedAccountId: existing.stripeConnectedAccountId,
         amount: existing.amount,
+        remainderCredits: existing.remainderCredits,
         currency: existing.currency,
         idempotencyKey: existing.idempotencyKey,
       };
@@ -418,6 +422,7 @@ export const preparePublisherTransfer = internalMutation({
       publisherOrganizationId: args.publisherOrganizationId,
       stripeConnectedAccountId: profile.stripeConnectedAccountId,
       amount,
+      remainderCredits,
       currency: "usd",
       idempotencyKey,
       status: "created",
@@ -435,6 +440,7 @@ export const preparePublisherTransfer = internalMutation({
       transferId,
       connectedAccountId: profile.stripeConnectedAccountId,
       amount,
+      remainderCredits,
       currency: "usd",
       idempotencyKey,
     };
