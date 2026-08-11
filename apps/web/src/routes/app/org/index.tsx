@@ -75,7 +75,7 @@ function OrgHomePage() {
       <div className="min-w-0 space-y-3">
         <div className="min-w-0 space-y-1">
           <h1
-            className="break-words text-2xl font-semibold tracking-tight"
+            className="min-w-0 text-2xl font-semibold tracking-tight [overflow-wrap:anywhere]"
             style={
               slug ? { viewTransitionName: `org-name-${slug}` } : undefined
             }
@@ -135,19 +135,21 @@ function PublicHandleCard() {
   }, [current]);
 
   const normalized = handle.trim().toLowerCase();
+  const valid = /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(normalized);
+  const changed = normalized !== current;
   const lookup = useQuery({
     ...convexQuery(api.organizations.checkPublicHandleAvailability, {
       handle: normalized,
     }),
-    enabled: normalized.length > 0,
+    enabled: valid && changed,
   });
   const unavailable = lookup.data?.available === false;
-  const valid = /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(normalized);
+  const availabilityConfirmed = lookup.data?.available === true;
+  const checking = lookup.isPending && valid && changed;
   const isAdmin = membership?.role === "org:admin";
   const { mutate: save, isPending } = useMutation({
     mutationFn: () => setPublicHandle({ handle: normalized }),
     onSuccess: () => {
-      toast.success("Public publisher handle updated");
       setConfirming(false);
       void mine.refetch();
     },
@@ -177,7 +179,8 @@ function PublicHandleCard() {
             autoComplete="username"
             spellCheck={false}
             aria-describedby="public-handle-help"
-            aria-invalid={normalized !== "" && !valid}
+            aria-invalid={normalized !== "" && (!valid || unavailable)}
+            aria-busy={checking}
             readOnly={!isAdmin}
           />
           <Button
@@ -186,9 +189,9 @@ function PublicHandleCard() {
             disabled={
               !isAdmin ||
               isPending ||
-              normalized === current ||
+              !changed ||
               !valid ||
-              unavailable
+              !availabilityConfirmed
             }
           >
             Save handle
@@ -232,9 +235,17 @@ function PublicHandleCard() {
             ? "Choose lowercase letters, numbers, and single hyphens."
             : !valid
               ? "Use lowercase letters, numbers, and single hyphens."
-              : unavailable
-                ? "This handle is already taken."
-                : "This handle is available."}
+              : !changed
+                ? "This is the current public handle."
+                : checking
+                  ? "Checking availability…"
+                  : lookup.isError
+                    ? "Could not check availability. Edit the handle to retry."
+                    : unavailable
+                      ? "This handle is already taken."
+                      : availabilityConfirmed
+                        ? "This handle is available."
+                        : "Checking availability…"}
         </p>
       </CardContent>
       <Dialog open={confirming} onOpenChange={setConfirming}>
@@ -289,7 +300,7 @@ function PublisherPaymentsCard() {
       <Card>
         <CardHeader>
           <Skeleton className="h-5 w-36" />
-          <Skeleton className="h-4 w-80" />
+          <Skeleton className="h-4 w-80 max-w-full" />
         </CardHeader>
         <CardContent>
           <Skeleton className="h-9 w-44" />

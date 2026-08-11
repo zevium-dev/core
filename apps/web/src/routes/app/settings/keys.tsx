@@ -58,6 +58,11 @@ import { DUR, EASE } from "#/lib/motion";
 import { safeReturnPath } from "#/lib/return-path";
 
 const KEYS_QUERY_KEY = ["settings", "api-keys"] as const;
+const KEY_DATE_FORMATTER = new Intl.DateTimeFormat("en-US", {
+  dateStyle: "medium",
+  timeStyle: "short",
+  timeZone: "UTC",
+});
 
 /** Secret reveal shape shared by create + rotate. */
 type RevealedSecret = {
@@ -126,7 +131,6 @@ function KeysContent() {
     onSuccess: (result) => {
       setRevealed(result);
       setName("");
-      toast.success("API key created — copy it now");
       void queryClient.invalidateQueries({ queryKey: KEYS_QUERY_KEY });
     },
     onError: (err: unknown) => {
@@ -137,7 +141,6 @@ function KeysContent() {
   const revokeMutation = useMutation({
     mutationFn: (id: string) => revokeKey({ data: { id } }),
     onSuccess: () => {
-      toast.success("API key revoked");
       setRevokeTarget(null);
       void queryClient.invalidateQueries({ queryKey: KEYS_QUERY_KEY });
     },
@@ -161,7 +164,6 @@ function KeysContent() {
       setRevealed(created);
       setRotateTarget(null);
       rotationOperationIds.current.clear();
-      toast.success("Key rotated — copy the new secret now");
       void queryClient.invalidateQueries({ queryKey: KEYS_QUERY_KEY });
     },
     onError: (err: unknown) => {
@@ -526,9 +528,6 @@ function KeyRow({
     setCapBusy(true);
     try {
       await setCap({ keyId: apiKey.id, monthlyCapCredits: parsed.cap });
-      toast.success(
-        parsed.cap === null ? "Monthly cap removed" : "Monthly cap saved",
-      );
     } catch (err) {
       toast.error(humanError(err, "Could not save cap"));
       resetCapInput();
@@ -541,7 +540,6 @@ function KeyRow({
     setToggleBusy(true);
     try {
       await setDisabled({ keyId: apiKey.id, disabled: !nextEnabled });
-      toast.success(nextEnabled ? "Key enabled" : "Key disabled");
     } catch (err) {
       toast.error(humanError(err, "Could not update key"));
     } finally {
@@ -827,10 +825,7 @@ function KeysSkeleton() {
 
 function formatDate(ms: number): string {
   try {
-    return new Intl.DateTimeFormat(undefined, {
-      dateStyle: "medium",
-      timeStyle: "short",
-    }).format(new Date(ms));
+    return KEY_DATE_FORMATTER.format(ms);
   } catch {
     return new Date(ms).toISOString();
   }
