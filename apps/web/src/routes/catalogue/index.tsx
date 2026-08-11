@@ -631,7 +631,7 @@ function CatalogueCard({ item }: { item: CatalogueCardItem }) {
             <CardTitle
               className="min-w-0 break-words"
               style={{
-                viewTransitionName: `api-title-${item.slug}`,
+                viewTransitionName: `api-title-${item.publisherHandle}-${item.slug}`,
               }}
             >
               {item.name}
@@ -670,7 +670,7 @@ function CatalogueCard({ item }: { item: CatalogueCardItem }) {
               <Badge
                 variant="outline"
                 style={{
-                  viewTransitionName: `api-price-${item.slug}`,
+                  viewTransitionName: `api-price-${item.publisherHandle}-${item.slug}`,
                 }}
               >
                 <code>{priceLabel}</code>

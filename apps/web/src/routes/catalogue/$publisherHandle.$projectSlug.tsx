@@ -328,7 +328,7 @@ function ApiDetailBody({
             <h1
               className="text-3xl font-semibold tracking-tight"
               style={{
-                viewTransitionName: `api-title-${data.project.slug}`,
+                viewTransitionName: `api-title-${data.org.publisherHandle}-${data.project.slug}`,
               }}
             >
               {data.project.name}
@@ -405,7 +405,11 @@ function ApiDetailBody({
         }}
         className="gap-4"
       >
-        <TabsList variant="line" aria-label="API tools">
+        <TabsList
+          variant="line"
+          aria-label="API tools"
+          className="max-w-full justify-start overflow-x-auto"
+        >
           <TabsTrigger value="try">Try it</TabsTrigger>
           <TabsTrigger value="docs">Reference</TabsTrigger>
           <TabsTrigger value="agent">Connect your agent</TabsTrigger>

@@ -53,9 +53,17 @@ function AdminLayout() {
 
   return (
     <div className="flex min-h-svh flex-col">
+      <a
+        href="#main-content"
+        className="fixed top-3 left-3 z-50 -translate-y-24 rounded-md bg-background px-3 py-2 text-sm font-medium shadow-md outline-none transition-transform duration-[var(--dur-instant)] ease-[var(--ease)] focus-visible:translate-y-0 focus-visible:ring-[3px] focus-visible:ring-ring/50 motion-reduce:transition-none"
+      >
+        Skip to content
+      </a>
       <AdminHeader />
       <main
-        className="flex flex-1 flex-col gap-4 p-4 md:p-6 content-enter"
+        id="main-content"
+        tabIndex={-1}
+        className="flex flex-1 flex-col gap-4 p-4 focus-visible:outline-none md:p-6 content-enter"
         style={{ viewTransitionName: "main-content" }}
       >
         <Outlet />
