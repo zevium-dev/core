@@ -1,6 +1,11 @@
 import { convexQuery } from "@convex-dev/react-query";
 import { useQuery } from "@tanstack/react-query";
-import { Outlet, createFileRoute, redirect } from "@tanstack/react-router";
+import {
+  Link,
+  Outlet,
+  createFileRoute,
+  redirect,
+} from "@tanstack/react-router";
 import { useConvexAuth } from "convex/react";
 import { ShieldAlert } from "lucide-react";
 
@@ -10,6 +15,7 @@ import { Skeleton } from "#/components/ui/skeleton";
 import { api } from "#/lib/convex-api";
 import { readClientClerkAuth } from "#/lib/clerk-client";
 import { requireAuth } from "#/lib/auth-session";
+import { humanError } from "#/lib/human-error";
 import type { RouterContext } from "#/router";
 
 export const Route = createFileRoute("/admin")({
@@ -47,6 +53,18 @@ function AdminLayout() {
     return <AdminShellSkeleton />;
   }
 
+  if (adminQuery.isError) {
+    return (
+      <AdminGateError
+        message={humanError(
+          adminQuery.error,
+          "Could not verify platform admin access.",
+        )}
+        onRetry={() => void adminQuery.refetch()}
+      />
+    );
+  }
+
   if (adminQuery.data !== true) {
     return <NotAuthorized />;
   }
@@ -72,6 +90,38 @@ function AdminLayout() {
   );
 }
 
+function AdminGateError({
+  message,
+  onRetry,
+}: {
+  message: string;
+  onRetry: () => void;
+}) {
+  return (
+    <div className="flex min-h-svh items-center justify-center p-6">
+      <div className="flex max-w-sm flex-col items-center gap-3 text-center">
+        <div className="flex size-10 items-center justify-center rounded-full bg-muted">
+          <ShieldAlert className="size-5 text-muted-foreground" />
+        </div>
+        <div className="space-y-1">
+          <h1 className="text-2xl font-semibold tracking-tight">
+            Access check unavailable
+          </h1>
+          <p className="text-sm text-muted-foreground">{message}</p>
+        </div>
+        <div className="flex flex-wrap justify-center gap-2">
+          <Button type="button" onClick={onRetry}>
+            Retry
+          </Button>
+          <Button asChild variant="outline">
+            <Link to="/app">Back to app</Link>
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function NotAuthorized() {
   return (
     <div className="flex min-h-svh items-center justify-center p-6">
@@ -88,7 +138,7 @@ function NotAuthorized() {
           </p>
         </div>
         <Button asChild variant="outline" size="sm">
-          <a href="/app">Back to app</a>
+          <Link to="/app">Back to app</Link>
         </Button>
       </div>
     </div>

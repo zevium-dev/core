@@ -1,6 +1,6 @@
 import { convexQuery } from "@convex-dev/react-query";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { Eye, EyeOff, FileStack } from "lucide-react";
 import { useMutation as useConvexMutation } from "convex/react";
 import { useEffect, useMemo, useState } from "react";
@@ -25,12 +25,21 @@ import {
 } from "#/components/ui/dialog";
 import {
   Empty,
+  EmptyContent,
   EmptyDescription,
   EmptyHeader,
   EmptyMedia,
   EmptyTitle,
 } from "#/components/ui/empty";
 import { Label } from "#/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "#/components/ui/select";
 import { Skeleton } from "#/components/ui/skeleton";
 import { mergeUsagePages } from "#/lib/activity-filters";
 import {
@@ -52,10 +61,20 @@ import type { AdminProjectView } from "../../../../../convex/admin";
 const PROJECT_PAGE_SIZE = 25;
 const ORG_MAP_PAGE_SIZE = 100;
 
-const SELECT_CLASS =
-  "flex h-9 min-w-[9rem] rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none transition-[color,box-shadow] duration-[var(--dur-instant)] ease-[var(--ease)] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50";
+type AdminProjectsSearch = {
+  status?: ProjectStatusFilter;
+  visibility?: ProjectVisibilityFilter;
+};
 
 export const Route = createFileRoute("/admin/projects")({
+  validateSearch: (search: Record<string, unknown>): AdminProjectsSearch => {
+    const status = parseProjectStatus(search.status);
+    const visibility = parseProjectVisibility(search.visibility);
+    return {
+      ...(status ? { status } : {}),
+      ...(visibility ? { visibility } : {}),
+    };
+  },
   component: AdminProjectsPage,
   head: () => ({
     meta: [{ title: "Admin Projects · Zevium" }],
@@ -70,12 +89,10 @@ type KillSwitchTarget = {
 };
 
 function AdminProjectsPage() {
-  const [statusFilter, setStatusFilter] = useState<
-    ProjectStatusFilter | undefined
-  >(undefined);
-  const [visibilityFilter, setVisibilityFilter] = useState<
-    ProjectVisibilityFilter | undefined
-  >(undefined);
+  const navigate = useNavigate({ from: Route.fullPath });
+  const search = Route.useSearch();
+  const statusFilter = search.status;
+  const visibilityFilter = search.visibility;
 
   const [cursor, setCursor] = useState<string | null>(null);
   const [rows, setRows] = useState<AdminProjectView[]>([]);
@@ -120,11 +137,28 @@ function AdminProjectsPage() {
       projectId: Id<"projects">;
       visibility: ProjectVisibilityFilter;
     }) => convexSetVisibility(vars),
-    onSuccess: (_data, vars) => {
-      toast.success(`Project visibility forced to ${vars.visibility}.`);
+    onMutate: (vars) => {
+      const previous =
+        rows.find((project) => project._id === vars.projectId) ?? null;
+      setRows((current) =>
+        current.map((project) => {
+          if (project._id !== vars.projectId) return project;
+          return { ...project, visibility: vars.visibility };
+        }),
+      );
+      return { previous };
+    },
+    onSuccess: () => {
       setKillTarget(null);
     },
-    onError: (err) => {
+    onError: (err, _vars, context) => {
+      if (context?.previous) {
+        setRows((current) =>
+          current.map((project) =>
+            project._id === context.previous?._id ? context.previous : project,
+          ),
+        );
+      }
       toast.error(humanError(err));
     },
   });
@@ -156,47 +190,92 @@ function AdminProjectsPage() {
               <Label htmlFor="admin-status" className="text-xs">
                 Status
               </Label>
-              <select
-                id="admin-status"
-                className={SELECT_CLASS}
+              <Select
                 value={statusFilter ?? "all"}
-                onChange={(e) =>
-                  setStatusFilter(parseProjectStatus(e.target.value))
-                }
+                onValueChange={(value) => {
+                  const status = parseProjectStatus(value);
+                  void navigate({
+                    search: {
+                      ...(status ? { status } : {}),
+                      ...(visibilityFilter
+                        ? { visibility: visibilityFilter }
+                        : {}),
+                    },
+                  });
+                }}
               >
-                <option value="all">All statuses</option>
-                {ADMIN_STATUS_OPTIONS.map((opt) => (
-                  <option key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </option>
-                ))}
-              </select>
+                <SelectTrigger id="admin-status" className="min-w-[9rem]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    <SelectItem value="all">All statuses</SelectItem>
+                    {ADMIN_STATUS_OPTIONS.map((opt) => (
+                      <SelectItem key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="admin-visibility" className="text-xs">
                 Visibility
               </Label>
-              <select
-                id="admin-visibility"
-                className={SELECT_CLASS}
+              <Select
                 value={visibilityFilter ?? "all"}
-                onChange={(e) =>
-                  setVisibilityFilter(parseProjectVisibility(e.target.value))
-                }
+                onValueChange={(value) => {
+                  const visibility = parseProjectVisibility(value);
+                  void navigate({
+                    search: {
+                      ...(statusFilter ? { status: statusFilter } : {}),
+                      ...(visibility ? { visibility } : {}),
+                    },
+                  });
+                }}
               >
-                <option value="all">All visibilities</option>
-                {ADMIN_VISIBILITY_OPTIONS.map((opt) => (
-                  <option key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </option>
-                ))}
-              </select>
+                <SelectTrigger id="admin-visibility" className="min-w-[9rem]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    <SelectItem value="all">All visibilities</SelectItem>
+                    {ADMIN_VISIBILITY_OPTIONS.map((opt) => (
+                      <SelectItem key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
             </div>
           </div>
         </CardHeader>
         <CardContent>
           {firstPagePending ? (
             <ProjectsTableSkeleton />
+          ) : projectsQuery.isError ? (
+            <Empty className="border border-dashed">
+              <EmptyHeader>
+                <EmptyTitle>Could not load projects</EmptyTitle>
+                <EmptyDescription>
+                  {humanError(
+                    projectsQuery.error,
+                    "Platform projects are temporarily unavailable.",
+                  )}
+                </EmptyDescription>
+              </EmptyHeader>
+              <EmptyContent>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => void projectsQuery.refetch()}
+                >
+                  Retry
+                </Button>
+              </EmptyContent>
+            </Empty>
           ) : rows.length === 0 ? (
             <EmptyProjects />
           ) : (

@@ -15,6 +15,7 @@ import {
 } from "#/components/ui/card";
 import {
   Empty,
+  EmptyContent,
   EmptyDescription,
   EmptyHeader,
   EmptyMedia,
@@ -24,6 +25,7 @@ import { Skeleton } from "#/components/ui/skeleton";
 import { api } from "#/lib/convex-api";
 import { formatCredits } from "#/lib/billing-cycle";
 import { mergeUsagePages } from "#/lib/activity-filters";
+import { humanError } from "#/lib/human-error";
 import type { AdminOrgView } from "../../../../../convex/admin";
 
 const ORG_PAGE_SIZE = 25;
@@ -80,6 +82,27 @@ function AdminOrgsPage() {
         <CardContent>
           {firstPagePending ? (
             <OrgsTableSkeleton />
+          ) : orgsQuery.isError ? (
+            <Empty className="border border-dashed">
+              <EmptyHeader>
+                <EmptyTitle>Could not load organizations</EmptyTitle>
+                <EmptyDescription>
+                  {humanError(
+                    orgsQuery.error,
+                    "Platform organizations are temporarily unavailable.",
+                  )}
+                </EmptyDescription>
+              </EmptyHeader>
+              <EmptyContent>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => void orgsQuery.refetch()}
+                >
+                  Retry
+                </Button>
+              </EmptyContent>
+            </Empty>
           ) : rows.length === 0 ? (
             <EmptyOrgs />
           ) : (
