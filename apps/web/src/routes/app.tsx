@@ -14,6 +14,7 @@ import { useEffect } from "react";
 
 import { AppHeader } from "#/components/app-header";
 import { AppSidebar } from "#/components/app-sidebar";
+import { AuthenticatedProviders } from "#/components/authenticated-providers";
 import { SidebarInset, SidebarProvider } from "#/components/ui/sidebar";
 import { useEnsureMirror } from "#/hooks/use-ensure-mirror";
 import { readClientClerkAuth } from "#/lib/clerk-client";
@@ -44,8 +45,18 @@ export const Route = createFileRoute("/app")({
       throw redirect({ to: "/sign-in/$" });
     }
   },
-  component: AppLayout,
+  component: AppProviderBoundary,
 });
+
+function AppProviderBoundary() {
+  const { convexQueryClient } = Route.useRouteContext();
+
+  return (
+    <AuthenticatedProviders client={convexQueryClient.convexClient}>
+      <AppLayout />
+    </AuthenticatedProviders>
+  );
+}
 
 function AppLayout() {
   useEnsureMirror();

@@ -717,7 +717,9 @@ function CatalogueEmpty({ hasSearch }: { hasSearch: boolean }) {
           </Button>
         ) : (
           <Button asChild variant="outline">
-            <Link to="/sign-in/$">Sign in to publish</Link>
+            <Link to="/sign-in/$" search={{ redirect: "/app/projects" }}>
+              Sign in to publish
+            </Link>
           </Button>
         )}
       </EmptyContent>

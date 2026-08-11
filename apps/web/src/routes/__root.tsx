@@ -1,21 +1,21 @@
-import { ClerkProvider, useAuth } from "@clerk/tanstack-react-start";
 import { auth } from "@clerk/tanstack-react-start/server";
-import { shadcn } from "@clerk/ui/themes";
 import { TanStackDevtools } from "@tanstack/react-devtools";
 import {
   HeadContent,
   Outlet,
   Scripts,
   createRootRouteWithContext,
+  useRouterState,
 } from "@tanstack/react-router";
 import { TanStackRouterDevtoolsPanel } from "@tanstack/react-router-devtools";
 import { createServerFn } from "@tanstack/react-start";
-import { ConvexProviderWithClerk } from "convex/react-clerk";
+import { ConvexProvider } from "convex/react";
 
 import { ThemeProvider } from "#/components/theme-provider";
 import { Toaster } from "#/components/ui/sonner";
 import { TooltipProvider } from "#/components/ui/tooltip";
 import { readClientClerkAuth } from "#/lib/clerk-client";
+import { needsAuthenticatedProviders } from "#/lib/provider-scope";
 import type { RouterContext } from "#/router";
 
 import appCss from "../styles.css?url";
@@ -116,31 +116,37 @@ function RootDocument({ children }: { children: React.ReactNode }) {
 
 function RootComponent() {
   const { convexQueryClient } = Route.useRouteContext();
+  const pathname = useRouterState({
+    select: (state) => state.location.pathname,
+  });
+
+  const content = (
+    <ThemeProvider>
+      <TooltipProvider>
+        <Outlet />
+        <Toaster />
+        {import.meta.env.DEV ? (
+          <TanStackDevtools
+            config={{ position: "bottom-right" }}
+            plugins={[
+              {
+                name: "Tanstack Router",
+                render: <TanStackRouterDevtoolsPanel />,
+              },
+            ]}
+          />
+        ) : null}
+      </TooltipProvider>
+    </ThemeProvider>
+  );
+
+  // App/admin/auth layouts own Clerk + Convex auth. Avoid nesting the same
+  // Convex client under an anonymous provider, which can race token setup.
+  if (needsAuthenticatedProviders(pathname)) return content;
 
   return (
-    <ClerkProvider appearance={{ theme: shadcn }}>
-      <ConvexProviderWithClerk
-        client={convexQueryClient.convexClient}
-        useAuth={useAuth}
-      >
-        <ThemeProvider>
-          <TooltipProvider>
-            <Outlet />
-            <Toaster />
-            {import.meta.env.DEV ? (
-              <TanStackDevtools
-                config={{ position: "bottom-right" }}
-                plugins={[
-                  {
-                    name: "Tanstack Router",
-                    render: <TanStackRouterDevtoolsPanel />,
-                  },
-                ]}
-              />
-            ) : null}
-          </TooltipProvider>
-        </ThemeProvider>
-      </ConvexProviderWithClerk>
-    </ClerkProvider>
+    <ConvexProvider client={convexQueryClient.convexClient}>
+      {content}
+    </ConvexProvider>
   );
 }

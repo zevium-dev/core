@@ -1,4 +1,3 @@
-import { Show } from "@clerk/tanstack-react-start";
 import { convexQuery } from "@convex-dev/react-query";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
@@ -720,6 +719,7 @@ function TryItPanel({
   onEndpointChange: (endpointId: string) => void;
   onModeChange: (mode: PlaygroundMode) => void;
 }) {
+  const { userId } = Route.useRouteContext();
   const endpoint =
     endpoints.find((e) => e.id === endpointId) ?? endpoints[0] ?? null;
 
@@ -1129,7 +1129,7 @@ function TryItPanel({
                 </FieldDescription>
                 <FieldError>{errors.apiKey}</FieldError>
                 <p className="text-xs text-muted-foreground">
-                  <Show when="signed-in">
+                  {userId ? (
                     <Link
                       to="/app/settings/keys"
                       search={{ returnTo: returnPath }}
@@ -1137,8 +1137,7 @@ function TryItPanel({
                     >
                       Manage keys →
                     </Link>
-                  </Show>
-                  <Show when="signed-out">
+                  ) : (
                     <Link
                       to="/sign-up/$"
                       search={{ redirect: returnPath }}
@@ -1146,7 +1145,7 @@ function TryItPanel({
                     >
                       Create account, then a key →
                     </Link>
-                  </Show>
+                  )}
                 </p>
               </Field>
             ) : null}

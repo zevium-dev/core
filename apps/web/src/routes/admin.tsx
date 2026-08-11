@@ -10,6 +10,7 @@ import { useConvexAuth } from "convex/react";
 import { ShieldAlert } from "lucide-react";
 
 import { AdminHeader } from "#/components/admin-header";
+import { AuthenticatedProviders } from "#/components/authenticated-providers";
 import { Button } from "#/components/ui/button";
 import { Skeleton } from "#/components/ui/skeleton";
 import { api } from "#/lib/convex-api";
@@ -41,8 +42,18 @@ export const Route = createFileRoute("/admin")({
       throw redirect({ to: "/sign-in/$" });
     }
   },
-  component: AdminLayout,
+  component: AdminProviderBoundary,
 });
+
+function AdminProviderBoundary() {
+  const { convexQueryClient } = Route.useRouteContext();
+
+  return (
+    <AuthenticatedProviders client={convexQueryClient.convexClient}>
+      <AdminLayout />
+    </AuthenticatedProviders>
+  );
+}
 
 function AdminLayout() {
   // Convex auth must be loaded before the safe isAdminQuery result is real.

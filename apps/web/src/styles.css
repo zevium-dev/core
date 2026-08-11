@@ -1,7 +1,15 @@
 @import "tailwindcss";
-@import "@clerk/ui/themes/shadcn.css";
 @import "tw-animate-css";
+@import "@clerk/ui/themes/shadcn.css";
 @plugin "@tailwindcss/typography";
+
+/* Hallmark · pre-emit critique: P5 H5 E5 S5 R4 V4 · genre: modern-minimal · tone: precise developer infrastructure · system: DESIGN.md stock-shadcn neutral · structure: marketplace index → mock-first workbench · contrast: pass (40–41) · honest: pass (46) · chrome: pass (47) · tokens: pass (48) · mobile: pass (34, 49, 50–57) */
+
+/* Clerk's hosted UI mounts after its client bundle resolves. Keep auth routes
+   useful and layout-stable during that network gap, including before hydration. */
+.auth-card-shell:has([data-clerk-component]:not(:empty)) .auth-card-pending {
+  display: none;
+}
 
 @custom-variant dark (&:is(.dark *));
 

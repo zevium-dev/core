@@ -1,14 +1,22 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@clerk/tanstack-react-start", () => ({
-  Show: ({ children }: { children: React.ReactNode }) => children,
-  UserButton: () => <button type="button">User menu</button>,
-}));
-
 vi.mock("@tanstack/react-router", () => ({
+  useRouterState: ({
+    select,
+  }: {
+    select: (state: {
+      matches: Array<{ context: { userId: string } }>;
+    }) => unknown;
+  }) => select({ matches: [{ context: { userId: "user_test" } }] }),
   Link: ({
     children,
     to,
@@ -75,13 +83,16 @@ describe("PublicHeader", () => {
         .getByRole("button", { name: "Close navigation" })
         .getAttribute("aria-expanded"),
     ).toBe("true");
+    const navigation = screen.getByRole("navigation", {
+      name: "Public navigation",
+    });
+    expect(navigation.getAttribute("id")).toBe("public-mobile-navigation");
     expect(
-      screen
-        .getByRole("navigation", { name: "Public navigation" })
-        .getAttribute("id"),
-    ).toBe("public-mobile-navigation");
-    expect(screen.getByRole("link", { name: "Dashboard" })).not.toBeNull();
-    expect(screen.getByRole("link", { name: "GitHub" })).not.toBeNull();
+      within(navigation).getByRole("link", { name: "Dashboard" }),
+    ).not.toBeNull();
+    expect(
+      within(navigation).getByRole("link", { name: "GitHub" }),
+    ).not.toBeNull();
   });
 
   it("exposes the current public destination to assistive technology", () => {

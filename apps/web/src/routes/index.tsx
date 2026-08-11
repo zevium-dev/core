@@ -1,9 +1,7 @@
-import { Show } from "@clerk/tanstack-react-start";
 import { convexQuery } from "@convex-dev/react-query";
 import { useQuery } from "@tanstack/react-query";
 import { Link, createFileRoute } from "@tanstack/react-router";
 import { Check, Copy } from "lucide-react";
-import { m, useReducedMotion } from "motion/react";
 import { useState } from "react";
 
 import { BrandMark } from "#/components/brand-mark";
@@ -31,8 +29,7 @@ import {
   pickLandingTeasers,
   resolveGatewayOrigin,
 } from "#/lib/landing";
-import { DIST, DUR, EASE, STAGGER } from "#/lib/motion";
-import { vtState } from "#/lib/vt";
+import { STAGGER } from "#/lib/motion";
 
 const HOW_STEPS = [
   {
@@ -63,18 +60,11 @@ const HOW_STEPS = [
 const GITHUB_URL = "https://github.com/zevium-dev/core";
 
 export const Route = createFileRoute("/")({
-  loader: async ({ context }) => {
-    // Prefetch public catalogue for real listings. Failure stays explicit in UI.
+  loader: ({ context }) => {
+    // Catalogue lives below the fold. Warm it without blocking public shell
+    // HTML on a control-plane round trip; the query owns its stable skeleton.
     const queryOpts = convexQuery(api.catalogue.listPublic, {});
-    try {
-      if (typeof window !== "undefined") {
-        void context.queryClient.prefetchQuery(queryOpts);
-        return;
-      }
-      await context.queryClient.ensureQueryData(queryOpts);
-    } catch {
-      // Route remains usable while catalogue reports its unavailable state.
-    }
+    void context.queryClient.prefetchQuery(queryOpts).catch(() => undefined);
   },
   component: LandingPage,
   head: () => ({
@@ -90,9 +80,7 @@ export const Route = createFileRoute("/")({
 });
 
 function LandingPage() {
-  const reduce = useReducedMotion();
-  const skipEnter = Boolean(reduce) || vtState.active;
-
+  const { userId } = Route.useRouteContext();
   const catalogueQuery = useQuery(convexQuery(api.catalogue.listPublic, {}));
   const liveItems = catalogueQuery.data?.items ?? [];
   const teasers = pickLandingTeasers(liveItems);
@@ -105,24 +93,6 @@ function LandingPage() {
   const discoveryUrl = discoveryEndpointUrl(gatewayOrigin);
   const mcpSnippet = buildMcpConfigSnippet(mcpUrl);
 
-  const item = {
-    hidden: skipEnter ? { opacity: 1, y: 0 } : { opacity: 0, y: DIST + 8 },
-    show: {
-      opacity: 1,
-      y: 0,
-      transition: { duration: DUR.slow, ease: EASE },
-    },
-  };
-
-  const itemReduced = {
-    hidden: skipEnter ? { opacity: 1 } : { opacity: 0 },
-    show: {
-      opacity: 1,
-      transition: { duration: DUR.slow, ease: EASE },
-    },
-  };
-  const enterItem = reduce ? itemReduced : item;
-
   return (
     <div className="min-h-screen bg-background">
       <PublicHeader />
@@ -134,31 +104,16 @@ function LandingPage() {
       >
         {/* Hero */}
         <section className="grid items-center gap-12 lg:grid-cols-2 lg:gap-10">
-          <m.div
-            className="flex max-w-xl flex-col gap-6"
-            initial="hidden"
-            animate="show"
-            variants={{
-              show: {
-                transition: { staggerChildren: reduce ? 0 : 0.15 },
-              },
-            }}
-          >
-            <m.h1
-              className="text-4xl font-semibold tracking-tight sm:text-5xl"
-              variants={enterItem}
-            >
+          <div className="flex max-w-xl flex-col gap-6">
+            <h1 className="text-4xl font-semibold tracking-tight sm:text-5xl">
               One key. Every API. Pay per call.
-            </m.h1>
-            <m.p className="text-lg text-muted-foreground" variants={enterItem}>
+            </h1>
+            <p className="text-lg text-muted-foreground">
               Discover APIs, see exact prices before calling, and route every
               request through one metered gateway. No subscriptions. No surprise
               overages.
-            </m.p>
-            <m.div
-              className="flex flex-wrap items-center gap-3"
-              variants={enterItem}
-            >
+            </p>
+            <div className="flex flex-wrap items-center gap-3">
               <Magnetic strength={0.3}>
                 <Button asChild size="lg">
                   <Link
@@ -169,38 +124,23 @@ function LandingPage() {
                   </Link>
                 </Button>
               </Magnetic>
-              <Show
-                when="signed-out"
-                fallback={
-                  <Button asChild variant="outline" size="lg">
-                    <Link to="/app">Open dashboard</Link>
-                  </Button>
-                }
-              >
+              {userId ? (
+                <Button asChild variant="outline" size="lg">
+                  <Link to="/app">Open dashboard</Link>
+                </Button>
+              ) : (
                 <Button asChild variant="outline" size="lg">
                   <Link to="/sign-up/$">Create account</Link>
                 </Button>
-              </Show>
-            </m.div>
-            <m.p className="text-sm text-muted-foreground" variants={enterItem}>
+              )}
+            </div>
+            <p className="text-sm text-muted-foreground">
               $1 buys 10,000 credits. Zero balance stops requests.
-            </m.p>
-          </m.div>
+            </p>
+          </div>
 
-          <m.div
-            initial="hidden"
-            animate="show"
-            variants={{
-              hidden: {},
-              show: {
-                transition: {
-                  staggerChildren: reduce ? 0 : STAGGER * 2,
-                  delayChildren: reduce ? 0 : 0.15,
-                },
-              },
-            }}
-          >
-            <m.div variants={enterItem}>
+          <div>
+            <div>
               <Card>
                 <CardHeader>
                   <CardTitle>Every live request</CardTitle>
@@ -232,8 +172,8 @@ function LandingPage() {
                   </div>
                 </CardContent>
               </Card>
-            </m.div>
-          </m.div>
+            </div>
+          </div>
         </section>
 
         {/* How it works */}

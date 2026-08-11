@@ -87,7 +87,7 @@ function DocsSidebar() {
       <div className="md:hidden">
         <Sheet open={open} onOpenChange={setOpen}>
           <SheetTrigger asChild>
-            <Button variant="outline" size="sm" className="gap-2">
+            <Button variant="outline" size="sm" className="h-11 gap-2 md:h-8">
               <Menu className="size-4" />
               Contents
             </Button>
@@ -134,7 +134,7 @@ function DocsNavList({
             onClick={onNavigate}
             aria-current={active ? "page" : undefined}
             className={cn(
-              "rounded-md px-3 py-1.5 text-sm transition-colors duration-[var(--dur-instant)] ease-[var(--ease)]",
+              "rounded-md px-3 py-2.5 text-sm transition-colors duration-[var(--dur-instant)] ease-[var(--ease)] md:py-1.5",
               active
                 ? "bg-accent font-medium text-accent-foreground"
                 : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
