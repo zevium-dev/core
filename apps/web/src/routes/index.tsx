@@ -5,7 +5,6 @@ import { Link, createFileRoute } from "@tanstack/react-router";
 import { Check, Copy } from "lucide-react";
 import { m, useReducedMotion } from "motion/react";
 import { useState } from "react";
-import { toast } from "sonner";
 
 import { BrandMark } from "#/components/brand-mark";
 import { Magnetic } from "#/components/motion/magnetic";
@@ -19,7 +18,6 @@ import {
   CardAction,
   CardContent,
   CardDescription,
-  CardFooter,
   CardHeader,
   CardTitle,
 } from "#/components/ui/card";
@@ -35,31 +33,6 @@ import {
 } from "#/lib/landing";
 import { DIST, DUR, EASE, STAGGER } from "#/lib/motion";
 import { vtState } from "#/lib/vt";
-
-/** Static teaser when catalogue empty / query pending — never blank right half. */
-const FALLBACK_TEASERS = [
-  {
-    name: "Weather",
-    slug: "weather",
-    publisherHandle: "demo",
-    orgName: "Demo",
-    description: "Forecasts priced per call.",
-  },
-  {
-    name: "FX Rates",
-    slug: "fx-rates",
-    publisherHandle: "demo",
-    orgName: "Demo",
-    description: "Live FX with free tier on /ping.",
-  },
-  {
-    name: "Embeddings",
-    slug: "embeddings",
-    publisherHandle: "demo",
-    orgName: "Demo",
-    description: "Vectorize text. Agent-ready.",
-  },
-] as const;
 
 const HOW_STEPS = [
   {
@@ -91,7 +64,7 @@ const GITHUB_URL = "https://github.com/zevium-dev/core";
 
 export const Route = createFileRoute("/")({
   loader: async ({ context }) => {
-    // Prefetch public catalogue for hero teaser; ignore failures (static fallback).
+    // Prefetch public catalogue for real listings. Failure stays explicit in UI.
     const queryOpts = convexQuery(api.catalogue.listPublic, {});
     try {
       if (typeof window !== "undefined") {
@@ -100,7 +73,7 @@ export const Route = createFileRoute("/")({
       }
       await context.queryClient.ensureQueryData(queryOpts);
     } catch {
-      /* empty catalogue / offline — FALLBACK_TEASERS */
+      // Route remains usable while catalogue reports its unavailable state.
     }
   },
   component: LandingPage,
@@ -122,7 +95,7 @@ function LandingPage() {
 
   const catalogueQuery = useQuery(convexQuery(api.catalogue.listPublic, {}));
   const liveItems = catalogueQuery.data?.items ?? [];
-  const teasers = pickLandingTeasers(liveItems, FALLBACK_TEASERS);
+  const teasers = pickLandingTeasers(liveItems);
   const showSkeleton = catalogueQuery.isPending && liveItems.length === 0;
 
   const gatewayOrigin = resolveGatewayOrigin(
@@ -154,7 +127,11 @@ function LandingPage() {
     <div className="min-h-screen bg-background">
       <PublicHeader />
 
-      <main className="mx-auto flex max-w-5xl flex-col gap-24 px-4 py-16 sm:py-24">
+      <main
+        id="main-content"
+        tabIndex={-1}
+        className="mx-auto flex max-w-5xl flex-col gap-24 px-4 py-16 outline-none sm:py-24"
+      >
         {/* Hero */}
         <section className="grid items-center gap-12 lg:grid-cols-2 lg:gap-10">
           <m.div
@@ -201,7 +178,7 @@ function LandingPage() {
                 }
               >
                 <Button asChild variant="outline" size="lg">
-                  <Link to="/sign-up/$">Get started</Link>
+                  <Link to="/sign-up/$">Create account</Link>
                 </Button>
               </Show>
             </m.div>
@@ -226,59 +203,34 @@ function LandingPage() {
             <m.div variants={enterItem}>
               <Card>
                 <CardHeader>
-                  <CardTitle>Request</CardTitle>
-                  <CardAction>
-                    <Badge variant="outline">100 credits</Badge>
-                  </CardAction>
+                  <CardTitle>Every live request</CardTitle>
                   <CardDescription>
-                    One authenticated, credit-gated call.
+                    Same enforced path for every API. No unmetered shortcut.
                   </CardDescription>
                 </CardHeader>
-                <CardContent className="flex flex-col gap-4">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Badge variant="secondary">GET</Badge>
-                    <code className="break-all text-sm text-[var(--syntax-string)]">
-                      /acme/summarize/v1/summarize
-                    </code>
-                  </div>
-                  <div className="flex flex-col gap-2 font-mono text-xs text-muted-foreground">
-                    <p>
-                      <span className="text-[var(--syntax-function)]">key</span>{" "}
-                      <span className="text-[var(--syntax-string)]">
-                        verified
+                <CardContent className="flex flex-col gap-4 text-sm">
+                  {[
+                    ["01", "Verify key at the edge"],
+                    ["02", "Read exact cost from the published spec"],
+                    ["03", "Reserve credits or block at zero"],
+                    ["04", "Stream upstream response and settle usage"],
+                  ].map(([number, label]) => (
+                    <div
+                      key={number}
+                      className="grid grid-cols-[2rem_1fr] items-start gap-3 border-b pb-4 last:border-0 last:pb-0"
+                    >
+                      <span className="font-mono text-xs text-muted-foreground">
+                        {number}
                       </span>
-                    </p>
-                    <p>
-                      <span className="text-[var(--syntax-function)]">
-                        wallet
-                      </span>{" "}
-                      <span className="text-[var(--syntax-string)]">
-                        reserved
-                      </span>{" "}
-                      · <span className="text-[var(--syntax-number)]">100</span>{" "}
-                      credits
-                    </p>
-                    <p>
-                      <span className="text-[var(--syntax-function)]">
-                        upstream
-                      </span>{" "}
-                      <span className="text-[var(--syntax-string)]">
-                        streamed
-                      </span>{" "}
-                      · <span className="text-[var(--syntax-number)]">184</span>{" "}
-                      ms
-                    </p>
+                      <span>{label}</span>
+                    </div>
+                  ))}
+                  <div className="flex flex-wrap gap-2 pt-1">
+                    <Badge variant="secondary">prepaid only</Badge>
+                    <Badge variant="outline">spec-priced</Badge>
+                    <Badge variant="outline">streamed</Badge>
                   </div>
                 </CardContent>
-                <CardFooter className="justify-between gap-3 border-t">
-                  <Badge>200 OK</Badge>
-                  <span className="text-sm text-muted-foreground">
-                    publisher earns{" "}
-                    <span className="font-mono text-[var(--syntax-number)]">
-                      95
-                    </span>
-                  </span>
-                </CardFooter>
               </Card>
             </m.div>
           </m.div>
@@ -402,65 +354,87 @@ function LandingPage() {
               <Link to="/catalogue">View all</Link>
             </Button>
           </Reveal>
-          <div className="grid gap-3 sm:grid-cols-3">
-            {showSkeleton
-              ? Array.from({ length: 3 }).map((_, i) => (
-                  <Card key={i}>
-                    <CardHeader>
-                      <Skeleton className="h-4 w-1/2" />
-                      <Skeleton className="h-3 w-1/3" />
-                    </CardHeader>
-                    <CardContent>
-                      <Skeleton className="h-3 w-4/5" />
-                    </CardContent>
-                  </Card>
-                ))
-              : teasers.map((teaser, i) => (
-                  <Reveal
-                    key={`${teaser.publisherHandle}/${teaser.slug}`}
-                    delay={i * STAGGER}
+          {showSkeleton ? (
+            <div
+              className="grid gap-3 sm:grid-cols-3"
+              aria-label="Loading APIs"
+            >
+              {Array.from({ length: 3 }).map((_, i) => (
+                <Card key={i}>
+                  <CardHeader>
+                    <Skeleton className="h-4 w-1/2" />
+                    <Skeleton className="h-3 w-1/3" />
+                  </CardHeader>
+                  <CardContent>
+                    <Skeleton className="h-3 w-4/5" />
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          ) : teasers.length > 0 ? (
+            <div className="grid gap-3 sm:grid-cols-3">
+              {teasers.map((teaser, i) => (
+                <Reveal
+                  key={`${teaser.publisherHandle}/${teaser.slug}`}
+                  delay={i * STAGGER}
+                >
+                  <Link
+                    to="/catalogue/$publisherHandle/$projectSlug"
+                    params={{
+                      publisherHandle: teaser.publisherHandle,
+                      projectSlug: teaser.slug,
+                    }}
+                    className="group block h-full rounded-xl outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
                   >
-                    {teaser.live ? (
-                      <Link
-                        to="/catalogue/$publisherHandle/$projectSlug"
-                        params={{
-                          publisherHandle: teaser.publisherHandle,
-                          projectSlug: teaser.slug,
-                        }}
-                        className="group block h-full rounded-xl outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
-                      >
-                        <TeaserCard
-                          name={teaser.name}
-                          publisherHandle={teaser.publisherHandle}
-                          slug={teaser.slug}
-                          orgName={teaser.orgName}
-                          description={teaser.description}
-                        />
-                      </Link>
-                    ) : (
-                      <Link
-                        to="/catalogue"
-                        className="group block h-full rounded-xl outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
-                      >
-                        <TeaserCard
-                          name={teaser.name}
-                          publisherHandle={teaser.publisherHandle}
-                          slug={teaser.slug}
-                          orgName={teaser.orgName}
-                          description={teaser.description}
-                        />
-                      </Link>
-                    )}
-                  </Reveal>
-                ))}
-          </div>
+                    <TeaserCard
+                      name={teaser.name}
+                      publisherHandle={teaser.publisherHandle}
+                      slug={teaser.slug}
+                      orgName={teaser.orgName}
+                      description={teaser.description}
+                    />
+                  </Link>
+                </Reveal>
+              ))}
+            </div>
+          ) : (
+            <Card className="border-dashed">
+              <CardHeader>
+                <CardTitle className="text-base">
+                  {catalogueQuery.isError
+                    ? "Catalogue unavailable"
+                    : "No public APIs yet"}
+                </CardTitle>
+                <CardDescription>
+                  {catalogueQuery.isError
+                    ? "Listings could not be loaded. Nothing fabricated is shown in their place."
+                    : "First published API will appear here. Mock calls remain free and never reach upstreams."}
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="flex flex-wrap gap-2">
+                {catalogueQuery.isError ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => void catalogueQuery.refetch()}
+                  >
+                    Retry
+                  </Button>
+                ) : (
+                  <Button asChild variant="outline">
+                    <Link to="/app/projects">Publish an API</Link>
+                  </Button>
+                )}
+              </CardContent>
+            </Card>
+          )}
         </section>
       </main>
 
       <footer>
         <Separator />
-        <div className="mx-auto grid max-w-5xl gap-8 px-4 py-10 sm:grid-cols-4">
-          <div className="flex flex-col gap-2">
+        <div className="mx-auto flex max-w-5xl flex-col gap-5 px-4 py-8 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex min-w-0 flex-col gap-2">
             <Link
               to="/"
               aria-label="Zevium"
@@ -473,8 +447,10 @@ function LandingPage() {
               Agent-first, per-call API marketplace.
             </p>
           </div>
-          <div className="flex flex-col gap-2 text-sm">
-            <span className="font-medium">Product</span>
+          <nav
+            aria-label="Footer navigation"
+            className="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm"
+          >
             <Link
               to="/catalogue"
               className="text-muted-foreground transition-colors duration-[var(--dur-instant)] ease-[var(--ease)] hover:text-foreground"
@@ -487,24 +463,12 @@ function LandingPage() {
             >
               Docs
             </Link>
-            <a
-              href="/catalogue#pricing"
-              className="text-muted-foreground transition-colors duration-[var(--dur-instant)] ease-[var(--ease)] hover:text-foreground"
-            >
-              Pricing
-            </a>
-          </div>
-          <div className="flex flex-col gap-2 text-sm">
-            <span className="font-medium">Publishers</span>
             <Link
               to="/app/projects"
               className="text-muted-foreground transition-colors duration-[var(--dur-instant)] ease-[var(--ease)] hover:text-foreground"
             >
-              Start publishing
+              Publish
             </Link>
-          </div>
-          <div className="flex flex-col gap-2 text-sm">
-            <span className="font-medium">Company</span>
             <a
               href={GITHUB_URL}
               target="_blank"
@@ -513,29 +477,7 @@ function LandingPage() {
             >
               GitHub
             </a>
-          </div>
-        </div>
-        <Separator />
-        <div>
-          <div className="mx-auto flex max-w-5xl items-center justify-between gap-3 px-4 py-4 text-xs text-muted-foreground">
-            <span>© {new Date().getFullYear()} Zevium</span>
-            <Show when="signed-out">
-              <Link
-                to="/sign-in/$"
-                className="transition-colors duration-[var(--dur-instant)] ease-[var(--ease)] hover:text-foreground"
-              >
-                Sign in
-              </Link>
-            </Show>
-            <Show when="signed-in">
-              <Link
-                to="/app"
-                className="transition-colors duration-[var(--dur-instant)] ease-[var(--ease)] hover:text-foreground"
-              >
-                Dashboard
-              </Link>
-            </Show>
-          </div>
+          </nav>
         </div>
       </footer>
     </div>
@@ -544,15 +486,16 @@ function LandingPage() {
 
 function McpConfigBlock({ snippet }: { snippet: string }) {
   const [copied, setCopied] = useState(false);
+  const [copyError, setCopyError] = useState(false);
 
   async function onCopy() {
     try {
       await navigator.clipboard.writeText(snippet);
       setCopied(true);
-      toast.success("MCP config copied");
+      setCopyError(false);
       window.setTimeout(() => setCopied(false), 1500);
     } catch {
-      toast.error("Could not copy — select and copy manually");
+      setCopyError(true);
     }
   }
 
@@ -573,7 +516,7 @@ function McpConfigBlock({ snippet }: { snippet: string }) {
             ) : (
               <Copy data-icon="inline-start" />
             )}
-            Copy
+            {copied ? "Copied" : "Copy"}
           </Button>
         </CardAction>
         <CardDescription>
@@ -584,6 +527,12 @@ function McpConfigBlock({ snippet }: { snippet: string }) {
         <pre className="max-h-56 min-w-0 overflow-auto rounded-md border bg-muted/40 p-3 font-mono text-xs whitespace-pre">
           <SyntaxCode code={snippet} lang="json" />
         </pre>
+        <p
+          className="mt-2 min-h-4 text-xs text-muted-foreground"
+          aria-live="polite"
+        >
+          {copyError ? "Copy failed. Select the config and copy manually." : ""}
+        </p>
       </CardContent>
     </Card>
   );

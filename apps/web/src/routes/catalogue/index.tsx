@@ -261,7 +261,11 @@ function CataloguePage() {
     <div className="min-h-screen bg-background">
       <PublicHeader active="catalogue" />
 
-      <main className="mx-auto flex max-w-6xl flex-col gap-6 px-4 py-8 content-enter">
+      <main
+        id="main-content"
+        tabIndex={-1}
+        className="mx-auto flex max-w-6xl flex-col gap-6 px-4 py-8 outline-none content-enter"
+      >
         <div>
           <div>
             <h1
@@ -760,7 +764,11 @@ function CatalogueSkeleton() {
         </div>
         <Separator />
       </header>
-      <main className="mx-auto flex max-w-6xl flex-col gap-6 px-4 py-8">
+      <main
+        id="main-content"
+        tabIndex={-1}
+        className="mx-auto flex max-w-6xl flex-col gap-6 px-4 py-8 outline-none"
+      >
         <div className="flex flex-col gap-2">
           <Skeleton className="h-9 w-40" />
           <Skeleton className="h-4 w-72" />

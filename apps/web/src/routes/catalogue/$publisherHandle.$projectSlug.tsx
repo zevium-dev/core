@@ -235,7 +235,11 @@ function ApiDetailPage() {
     <div className="min-h-screen bg-background">
       <PublicHeader active="catalogue" />
 
-      <main className="mx-auto max-w-6xl px-4 py-8 content-enter">
+      <main
+        id="main-content"
+        tabIndex={-1}
+        className="mx-auto max-w-6xl px-4 py-8 outline-none content-enter"
+      >
         <Suspense fallback={<ApiDetailBodySkeleton />}>
           <ApiDetailBody
             publisherHandle={publisherHandle}
@@ -1101,7 +1105,11 @@ function ApiDetailSkeleton() {
           <Skeleton className="h-8 w-20" />
         </div>
       </header>
-      <main className="mx-auto max-w-6xl px-4 py-8">
+      <main
+        id="main-content"
+        tabIndex={-1}
+        className="mx-auto max-w-6xl px-4 py-8 outline-none"
+      >
         <ApiDetailBodySkeleton />
       </main>
     </div>
