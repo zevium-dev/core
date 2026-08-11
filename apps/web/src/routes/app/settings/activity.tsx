@@ -3,7 +3,7 @@ import { convexQuery } from "@convex-dev/react-query";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useConvexAuth } from "convex/react";
-import { Activity } from "lucide-react";
+import { Activity, Search } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import { Badge } from "#/components/ui/badge";
@@ -27,11 +27,19 @@ import { Label } from "#/components/ui/label";
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
   SelectTrigger,
   SelectValue,
 } from "#/components/ui/select";
 import { Skeleton } from "#/components/ui/skeleton";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "#/components/ui/sheet";
 import {
   ACTIVITY_PAGE_SIZE,
   ACTIVITY_TIME_RANGE_LABELS,
@@ -42,26 +50,35 @@ import {
 } from "#/lib/activity-filters";
 import { api } from "#/lib/convex-api";
 import type { Id } from "#/lib/convex-data-model";
+import { humanError } from "#/lib/human-error";
 
 type ActivitySearch = {
   range?: ActivityTimeRange;
   project?: string;
+  event?: string;
 };
 
 export const Route = createFileRoute("/app/settings/activity")({
   validateSearch: (search: Record<string, unknown>): ActivitySearch => {
-    const range = ACTIVITY_TIME_RANGES.includes(
-      search.range as ActivityTimeRange,
-    )
-      ? (search.range as ActivityTimeRange)
-      : undefined;
+    const range = ACTIVITY_TIME_RANGES.find(
+      (candidate) => candidate === search.range,
+    );
     const project =
-      typeof search.project === "string" && search.project.length > 0
+      typeof search.project === "string" &&
+      search.project.length > 0 &&
+      search.project.length <= 128
         ? search.project
+        : undefined;
+    const event =
+      typeof search.event === "string" &&
+      search.event.length > 0 &&
+      search.event.length <= 128
+        ? search.event
         : undefined;
     return {
       ...(range && range !== "7d" ? { range } : {}),
       ...(project ? { project } : {}),
+      ...(event ? { event } : {}),
     };
   },
   component: ActivityPage,
@@ -83,6 +100,21 @@ type UsageListItem = {
   keyId: string;
   at: number;
 };
+
+const ACTIVITY_DATE_FORMATTER = new Intl.DateTimeFormat("en-US", {
+  year: "numeric",
+  month: "short",
+  day: "numeric",
+  hour: "numeric",
+  minute: "2-digit",
+  second: "2-digit",
+  timeZone: "UTC",
+  timeZoneName: "short",
+});
+
+function formatActivityDate(timestamp: number): string {
+  return ACTIVITY_DATE_FORMATTER.format(timestamp);
+}
 
 function ActivityPage() {
   const { organization, isLoaded } = useOrganization();
@@ -126,7 +158,7 @@ function ActivityHeader() {
 }
 
 function ActivityContent({ orgSlug }: { orgSlug: string }) {
-  const navigate = useNavigate();
+  const navigate = useNavigate({ from: Route.fullPath });
   const search = Route.useSearch();
   const timeRange = search.range ?? "7d";
   const projectId = search.project ?? "all";
@@ -197,6 +229,23 @@ function ActivityContent({ orgSlug }: { orgSlug: string }) {
   const loadMorePending = usageQuery.isPending && cursor !== null;
   const canLoadMore =
     !isDone && continueCursor !== null && !usageQuery.isPending;
+  const selectedEvent = search.event
+    ? (rows.find((event) => event._id === search.event) ?? null)
+    : null;
+
+  const inspectEvent = (eventId: string) => {
+    void navigate({ search: { ...search, event: eventId } });
+  };
+
+  const closeInspector = () => {
+    void navigate({
+      search: {
+        ...(search.range ? { range: search.range } : {}),
+        ...(search.project ? { project: search.project } : {}),
+      },
+      replace: true,
+    });
+  };
 
   return (
     <div className="flex flex-col gap-6">
@@ -232,12 +281,14 @@ function ActivityContent({ orgSlug }: { orgSlug: string }) {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">All projects</SelectItem>
-                  {projects.map((project) => (
-                    <SelectItem key={project._id} value={project._id}>
-                      {project.name}
-                    </SelectItem>
-                  ))}
+                  <SelectGroup>
+                    <SelectItem value="all">All projects</SelectItem>
+                    {projects.map((project) => (
+                      <SelectItem key={project._id} value={project._id}>
+                        {project.name}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
                 </SelectContent>
               </Select>
             </div>
@@ -247,27 +298,30 @@ function ActivityContent({ orgSlug }: { orgSlug: string }) {
               </Label>
               <Select
                 value={timeRange}
-                onValueChange={(value) =>
+                onValueChange={(value) => {
+                  const range = ACTIVITY_TIME_RANGES.find(
+                    (candidate) => candidate === value,
+                  );
+                  if (!range) return;
                   void navigate({
-                    to: "/app/settings/activity",
                     search: {
-                      ...(value === "7d"
-                        ? {}
-                        : { range: value as ActivityTimeRange }),
+                      ...(range === "7d" ? {} : { range }),
                       ...(projectId === "all" ? {} : { project: projectId }),
                     },
-                  })
-                }
+                  });
+                }}
               >
                 <SelectTrigger id="activity-range" className="min-w-[8rem]">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {ACTIVITY_TIME_RANGES.map((range) => (
-                    <SelectItem key={range} value={range}>
-                      {ACTIVITY_TIME_RANGE_LABELS[range]}
-                    </SelectItem>
-                  ))}
+                  <SelectGroup>
+                    {ACTIVITY_TIME_RANGES.map((range) => (
+                      <SelectItem key={range} value={range}>
+                        {ACTIVITY_TIME_RANGE_LABELS[range]}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
                 </SelectContent>
               </Select>
             </div>
@@ -276,11 +330,77 @@ function ActivityContent({ orgSlug }: { orgSlug: string }) {
         <CardContent>
           {firstPagePending ? (
             <ActivityTableSkeleton />
+          ) : usageQuery.isError ? (
+            <Empty className="border border-dashed">
+              <EmptyHeader>
+                <EmptyTitle>Could not load activity</EmptyTitle>
+                <EmptyDescription>
+                  {humanError(
+                    usageQuery.error,
+                    "Activity is temporarily unavailable.",
+                  )}
+                </EmptyDescription>
+              </EmptyHeader>
+              <EmptyContent>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => void usageQuery.refetch()}
+                >
+                  Retry
+                </Button>
+              </EmptyContent>
+            </Empty>
           ) : rows.length === 0 ? (
             <EmptyActivity />
           ) : (
             <div className="flex flex-col gap-4">
-              <div className="overflow-x-auto">
+              <div className="divide-y md:hidden">
+                {rows.map((event) => (
+                  <div key={event._id} className="space-y-3 py-4 first:pt-0">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="font-medium">
+                          {event.projectName ??
+                            event.projectSlug ??
+                            "Unknown API"}
+                        </p>
+                        <p className="mt-1 break-all font-mono text-xs text-muted-foreground">
+                          {event.method.toUpperCase()} {event.endpoint}
+                        </p>
+                      </div>
+                      <StatusBadge status={event.status} />
+                    </div>
+                    <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
+                      <div>
+                        <dt className="text-muted-foreground">Time</dt>
+                        <dd>{formatActivityDate(event.at)}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-muted-foreground">Cost</dt>
+                        <dd className="tabular-nums">
+                          {event.credits.toLocaleString("en-US")} credits
+                        </dd>
+                      </div>
+                      <div>
+                        <dt className="text-muted-foreground">Latency</dt>
+                        <dd className="tabular-nums">{event.latencyMs} ms</dd>
+                      </div>
+                    </dl>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="w-full"
+                      onClick={() => inspectEvent(event._id)}
+                    >
+                      <Search />
+                      Inspect call
+                    </Button>
+                  </div>
+                ))}
+              </div>
+              <div className="hidden overflow-x-auto md:block">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b text-left text-muted-foreground">
@@ -305,20 +425,26 @@ function ActivityContent({ orgSlug }: { orgSlug: string }) {
                       >
                         Latency
                       </th>
+                      <th
+                        scope="col"
+                        className="px-2 py-2 text-right font-medium"
+                      >
+                        <span className="sr-only">Actions</span>
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
                     {rows.map((event) => (
                       <tr key={event._id} className="border-b last:border-0">
                         <td className="whitespace-nowrap px-2 py-2.5 text-muted-foreground">
-                          {new Date(event.at).toLocaleString()}
+                          {formatActivityDate(event.at)}
                         </td>
                         <td className="px-2 py-2.5">
                           {event.projectName ?? event.projectSlug ?? "—"}
                         </td>
                         <td className="px-2 py-2.5 font-mono text-xs">
                           <span className="text-muted-foreground">
-                            {event.method}
+                            {event.method.toUpperCase()}
                           </span>{" "}
                           {event.endpoint}
                         </td>
@@ -330,6 +456,17 @@ function ActivityContent({ orgSlug }: { orgSlug: string }) {
                         </td>
                         <td className="px-2 py-2.5 text-right tabular-nums text-muted-foreground">
                           {event.latencyMs}ms
+                        </td>
+                        <td className="px-2 py-2.5 text-right">
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => inspectEvent(event._id)}
+                            aria-label={`Inspect ${event.method.toUpperCase()} ${event.endpoint}`}
+                          >
+                            Inspect
+                          </Button>
                         </td>
                       </tr>
                     ))}
@@ -356,6 +493,107 @@ function ActivityContent({ orgSlug }: { orgSlug: string }) {
           )}
         </CardContent>
       </Card>
+
+      <ActivityInspector
+        open={search.event !== undefined}
+        event={selectedEvent}
+        requestedId={search.event}
+        onOpenChange={(open) => {
+          if (!open) closeInspector();
+        }}
+      />
+    </div>
+  );
+}
+
+function ActivityInspector({
+  open,
+  event,
+  requestedId,
+  onOpenChange,
+}: {
+  open: boolean;
+  event: UsageListItem | null;
+  requestedId?: string;
+  onOpenChange: (open: boolean) => void;
+}) {
+  return (
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent className="w-full overflow-y-auto sm:max-w-md">
+        <SheetHeader>
+          <SheetTitle>Call inspector</SheetTitle>
+          <SheetDescription>
+            Exact usage metadata retained for this metered gateway call.
+          </SheetDescription>
+        </SheetHeader>
+        {event ? (
+          <div className="space-y-5 px-4 pb-6">
+            <div className="flex flex-wrap items-center gap-2">
+              <StatusBadge status={event.status} />
+              <Badge variant="outline" className="font-mono uppercase">
+                {event.method}
+              </Badge>
+              <Badge variant="secondary" className="tabular-nums">
+                {event.credits.toLocaleString("en-US")} credits
+              </Badge>
+            </div>
+            <dl className="divide-y rounded-lg border text-sm">
+              <InspectorRow label="Time" value={formatActivityDate(event.at)} />
+              <InspectorRow
+                label="API"
+                value={event.projectName ?? event.projectSlug ?? "Unavailable"}
+              />
+              <InspectorRow label="Endpoint" value={event.endpoint} mono />
+              <InspectorRow
+                label="Latency"
+                value={`${event.latencyMs.toLocaleString("en-US")} ms`}
+              />
+              <InspectorRow label="Key" value={event.keyId} mono />
+              <InspectorRow label="Usage event" value={event._id} mono />
+            </dl>
+            <div className="rounded-lg border bg-muted/30 p-4">
+              <p className="text-sm font-medium">Payload retention</p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Request headers, bodies, response bodies, and gateway request ID
+                are not stored in usage events. This inspector cannot
+                reconstruct them.
+              </p>
+            </div>
+          </div>
+        ) : (
+          <div className="px-4 pb-6">
+            <Empty className="border border-dashed">
+              <EmptyHeader>
+                <EmptyTitle>Call is not in loaded results</EmptyTitle>
+                <EmptyDescription>
+                  Event {requestedId ?? "requested"} may be outside the selected
+                  range or a page not loaded yet. Close inspector, adjust
+                  filters, and load more results.
+                </EmptyDescription>
+              </EmptyHeader>
+            </Empty>
+          </div>
+        )}
+      </SheetContent>
+    </Sheet>
+  );
+}
+
+function InspectorRow({
+  label,
+  value,
+  mono = false,
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+}) {
+  return (
+    <div className="grid gap-1 px-3 py-3 sm:grid-cols-[6rem_minmax(0,1fr)] sm:gap-3">
+      <dt className="text-muted-foreground">{label}</dt>
+      <dd className={mono ? "break-all font-mono text-xs" : "break-words"}>
+        {value}
+      </dd>
     </div>
   );
 }

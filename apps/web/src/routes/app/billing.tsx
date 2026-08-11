@@ -1,9 +1,9 @@
 import { useOrganization } from "@clerk/tanstack-react-start";
 import { convexQuery } from "@convex-dev/react-query";
 import { useMutation, useSuspenseQuery } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
+import { Link, createFileRoute } from "@tanstack/react-router";
 import { useAction, useConvexAuth } from "convex/react";
-import { CreditCard, Wallet } from "lucide-react";
+import { ChartNoAxesColumn, CreditCard, Wallet } from "lucide-react";
 import { Suspense, useState } from "react";
 import { toast } from "sonner";
 
@@ -26,6 +26,12 @@ import {
 } from "#/components/ui/empty";
 import { Skeleton } from "#/components/ui/skeleton";
 import { api } from "#/lib/convex-api";
+import {
+  formatCredits,
+  formatCycleMonthLabel,
+  isCycleEmpty,
+  truncateKeyId,
+} from "#/lib/billing-cycle";
 import { humanError } from "#/lib/human-error";
 import {
   checkoutDisplay,
@@ -64,7 +70,12 @@ function BillingPage() {
     return <BillingSkeleton />;
   }
 
-  if (!organization) {
+  const orgSlug =
+    organization && typeof organization.slug === "string"
+      ? organization.slug
+      : null;
+
+  if (!organization || !orgSlug) {
     return (
       <div className="flex flex-col gap-2">
         <h1 className="text-2xl font-semibold tracking-tight">Billing</h1>
@@ -77,14 +88,23 @@ function BillingPage() {
 
   return (
     <Suspense fallback={<BillingSkeleton />}>
-      <BillingContent checkoutSessionId={checkout} />
+      <BillingContent checkoutSessionId={checkout} orgSlug={orgSlug} />
     </Suspense>
   );
 }
 
-function BillingContent({ checkoutSessionId }: { checkoutSessionId?: string }) {
+function BillingContent({
+  checkoutSessionId,
+  orgSlug,
+}: {
+  checkoutSessionId?: string;
+  orgSlug: string;
+}) {
   const { data: billing } = useSuspenseQuery(
     convexQuery(api.billing.getBillingState, { checkoutSessionId }),
+  );
+  const { data: cycle } = useSuspenseQuery(
+    convexQuery(api.billing.cycleBreakdown, { orgSlug }),
   );
   const createCheckout = useAction(api.billing.createCheckout);
   const [checkoutPackId, setCheckoutPackId] = useState<string | null>(null);
@@ -165,6 +185,8 @@ function BillingContent({ checkoutSessionId }: { checkoutSessionId?: string }) {
         </Card>
       ) : null}
 
+      <CycleUsage cycle={cycle} />
+
       <section className="flex flex-col gap-3">
         <div>
           <h2 className="text-lg font-semibold tracking-tight">Buy credits</h2>
@@ -188,7 +210,7 @@ function BillingContent({ checkoutSessionId }: { checkoutSessionId?: string }) {
               >
                 <CardHeader>
                   <CardTitle className="text-xl tabular-nums">
-                    {pack.credits.toLocaleString()}
+                    {formatCredits(pack.credits)}
                     <span className="ml-1 text-sm font-normal text-muted-foreground">
                       credits
                     </span>
@@ -249,11 +271,11 @@ function BillingContent({ checkoutSessionId }: { checkoutSessionId?: string }) {
                         Credits added
                       </span>
                       <span className="tabular-nums">
-                        {payment.credits.toLocaleString()}
+                        {formatCredits(payment.credits)}
                       </span>
                     </div>
                     <p className="text-xs text-muted-foreground">
-                      {new Date(payment.createdAt).toLocaleString()}
+                      {formatDateTime(payment.createdAt)}
                     </p>
                     {payment.failureReason ? (
                       <p className="text-sm text-destructive">
@@ -302,10 +324,10 @@ function BillingContent({ checkoutSessionId }: { checkoutSessionId?: string }) {
                           {formatMoney(payment.amount, payment.currency)}
                         </td>
                         <td className="px-2 py-2.5 text-right tabular-nums">
-                          {payment.credits.toLocaleString()}
+                          {formatCredits(payment.credits)}
                         </td>
                         <td className="px-2 py-2.5 whitespace-nowrap text-muted-foreground">
-                          {new Date(payment.createdAt).toLocaleString()}
+                          {formatDateTime(payment.createdAt)}
                         </td>
                         <td className="max-w-64 truncate px-2 py-2.5 text-muted-foreground">
                           {payment.failureReason ?? "—"}
@@ -323,8 +345,171 @@ function BillingContent({ checkoutSessionId }: { checkoutSessionId?: string }) {
   );
 }
 
+type CycleUsageData = {
+  cycleStart: number;
+  cycleEnd: number;
+  totalCalls: number;
+  totalCredits: number;
+  byProject: Array<{
+    projectId: string;
+    name: string;
+    slug: string;
+    calls: number;
+    credits: number;
+  }>;
+  byKey: Array<{ keyId: string; calls: number; credits: number }>;
+};
+
+function CycleUsage({ cycle }: { cycle: CycleUsageData }) {
+  return (
+    <Card>
+      <CardHeader className="gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="space-y-1.5">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <ChartNoAxesColumn className="size-4" aria-hidden="true" />
+            Current usage cycle
+          </CardTitle>
+          <CardDescription>
+            {formatCycleMonthLabel(cycle.cycleStart)} · ends{" "}
+            {formatDateTime(cycle.cycleEnd)}
+          </CardDescription>
+        </div>
+        <Button asChild variant="outline" size="sm">
+          <Link to="/app/settings/activity" search={{}}>
+            Inspect calls
+          </Link>
+        </Button>
+      </CardHeader>
+      <CardContent className="space-y-5">
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="rounded-lg border bg-muted/20 p-4">
+            <p className="text-xs text-muted-foreground">Calls</p>
+            <p className="mt-1 text-2xl font-semibold tabular-nums">
+              {formatCredits(cycle.totalCalls)}
+            </p>
+          </div>
+          <div className="rounded-lg border bg-muted/20 p-4">
+            <p className="text-xs text-muted-foreground">Credits spent</p>
+            <p className="mt-1 text-2xl font-semibold tabular-nums">
+              {formatCredits(cycle.totalCredits)}
+            </p>
+          </div>
+        </div>
+
+        {isCycleEmpty(cycle) ? (
+          <Empty className="border border-dashed py-8">
+            <EmptyHeader>
+              <EmptyTitle>No metered calls this cycle</EmptyTitle>
+              <EmptyDescription>
+                Keyless mock calls cost zero and do not appear in billing usage.
+                Live calls will break down by API and key here.
+              </EmptyDescription>
+            </EmptyHeader>
+          </Empty>
+        ) : (
+          <div className="grid gap-5 lg:grid-cols-2">
+            <UsageBreakdownTable
+              title="By API"
+              rows={cycle.byProject.map((row) => ({
+                id: row.projectId,
+                label: row.name,
+                detail: row.slug,
+                calls: row.calls,
+                credits: row.credits,
+              }))}
+            />
+            <UsageBreakdownTable
+              title="By key"
+              rows={cycle.byKey.map((row) => ({
+                id: row.keyId,
+                label: truncateKeyId(row.keyId),
+                detail: "Gateway key",
+                calls: row.calls,
+                credits: row.credits,
+              }))}
+            />
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function UsageBreakdownTable({
+  title,
+  rows,
+}: {
+  title: string;
+  rows: Array<{
+    id: string;
+    label: string;
+    detail: string;
+    calls: number;
+    credits: number;
+  }>;
+}) {
+  return (
+    <div className="space-y-2">
+      <h3 className="text-sm font-medium">{title}</h3>
+      {rows.length === 0 ? (
+        <p className="text-sm text-muted-foreground">No breakdown available.</p>
+      ) : (
+        <div className="overflow-x-auto rounded-md border">
+          <table className="w-full min-w-[22rem] text-left text-sm">
+            <thead className="border-b bg-muted/40 text-xs text-muted-foreground">
+              <tr>
+                <th scope="col" className="px-3 py-2 font-medium">
+                  Name
+                </th>
+                <th scope="col" className="px-3 py-2 text-right font-medium">
+                  Calls
+                </th>
+                <th scope="col" className="px-3 py-2 text-right font-medium">
+                  Credits
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row) => (
+                <tr key={row.id} className="border-b last:border-0">
+                  <th scope="row" className="px-3 py-2 font-medium">
+                    <span className="block">{row.label}</span>
+                    <span className="block font-mono text-xs font-normal text-muted-foreground">
+                      {row.detail}
+                    </span>
+                  </th>
+                  <td className="px-3 py-2 text-right tabular-nums">
+                    {formatCredits(row.calls)}
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums">
+                    {formatCredits(row.credits)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+const DATE_TIME_FORMATTER = new Intl.DateTimeFormat("en-US", {
+  year: "numeric",
+  month: "short",
+  day: "numeric",
+  hour: "numeric",
+  minute: "2-digit",
+  timeZone: "UTC",
+  timeZoneName: "short",
+});
+
+function formatDateTime(timestamp: number): string {
+  return DATE_TIME_FORMATTER.format(timestamp);
+}
+
 function formatMoney(amount: number, currency: string): string {
-  return new Intl.NumberFormat(undefined, {
+  return new Intl.NumberFormat("en-US", {
     style: "currency",
     currency: currency.toUpperCase(),
   }).format(amount / 100);
