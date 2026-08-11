@@ -138,11 +138,13 @@ function EarningsContent() {
     profile.disabledReason,
     profile.requirements,
   );
-  const canTransfer = profile.status === "enabled" && earnings.available > 0;
+  const canTransfer = profile.status === "enabled" && earnings.canTransfer;
   const transferLabel =
     earnings.available <= 0
       ? "Nothing to transfer"
-      : "Transfer available earnings";
+      : !earnings.canTransfer
+        ? `${earnings.minimumPayoutCredits.toLocaleString()} credit minimum`
+        : "Transfer available earnings";
 
   return (
     <div className="flex flex-col gap-6">
@@ -255,6 +257,24 @@ function EarningsContent() {
             />
           </CardContent>
         </Card>
+        {earnings.available > 0 && !earnings.canTransfer ? (
+          <p className="text-sm text-muted-foreground">
+            {(
+              earnings.minimumPayoutCredits - earnings.available
+            ).toLocaleString(undefined, { maximumFractionDigits: 2 })}{" "}
+            more credits needed to reach the $10 payout minimum. Every
+            fractional credit stays in your balance.
+          </p>
+        ) : null}
+        {earnings.available < 0 ? (
+          <p className="text-sm text-destructive">
+            Refund or dispute reversals exceed current available earnings by{" "}
+            {Math.abs(earnings.available).toLocaleString(undefined, {
+              maximumFractionDigits: 2,
+            })}{" "}
+            credits. Future earnings clear this balance before another transfer.
+          </p>
+        ) : null}
         {earnings.failed > 0 ? (
           <p className="text-sm text-destructive">
             {earnings.failed.toLocaleString()} credits need transfer review. See
@@ -292,7 +312,7 @@ function EarningTotal({
     <div className="min-w-0 space-y-2">
       <p className="text-sm text-muted-foreground">{label}</p>
       <p className="text-2xl font-semibold tabular-nums">
-        <NumberTicker value={value} />
+        <NumberTicker value={value} decimals={2} />
         <span className="ml-1 text-sm font-normal text-muted-foreground">
           credits
         </span>
@@ -319,6 +339,7 @@ function EarningsLedgerCard({
     grossCredits: number;
     platformFeeCredits: number;
     netCredits: number;
+    clawedBackCredits: number;
     availableAt: number;
     createdAt: number;
   }[];
@@ -362,6 +383,12 @@ function EarningsLedgerCard({
                   </th>
                   <th
                     scope="col"
+                    className="hidden px-2 py-2 text-right font-medium md:table-cell"
+                  >
+                    Reversed
+                  </th>
+                  <th
+                    scope="col"
                     className="hidden px-2 py-2 font-medium md:table-cell"
                   >
                     Available
@@ -380,10 +407,19 @@ function EarningsLedgerCard({
                       {earning.grossCredits.toLocaleString()}
                     </td>
                     <td className="hidden px-2 py-2.5 text-right tabular-nums text-muted-foreground sm:table-cell">
-                      {earning.platformFeeCredits.toLocaleString()}
+                      {earning.platformFeeCredits.toLocaleString(undefined, {
+                        maximumFractionDigits: 2,
+                      })}
                     </td>
                     <td className="px-2 py-2.5 text-right tabular-nums">
-                      {earning.netCredits.toLocaleString()}
+                      {earning.netCredits.toLocaleString(undefined, {
+                        maximumFractionDigits: 2,
+                      })}
+                    </td>
+                    <td className="hidden px-2 py-2.5 text-right tabular-nums text-muted-foreground md:table-cell">
+                      {earning.clawedBackCredits.toLocaleString(undefined, {
+                        maximumFractionDigits: 2,
+                      })}
                     </td>
                     <td className="hidden px-2 py-2.5 whitespace-nowrap text-muted-foreground md:table-cell">
                       {new Date(earning.availableAt).toLocaleDateString()}
