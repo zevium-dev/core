@@ -671,7 +671,7 @@ describe("deliverWebhook — action integration", () => {
     const fetchMock = vi.fn(async () => new Response(null, { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await t.action(internal.webhooks.deliverWebhook, {
+    await t.action(internal.webhookDeliveryAction.deliverWebhook, {
       deliveryId: pendingId,
     });
 
@@ -682,7 +682,7 @@ describe("deliverWebhook — action integration", () => {
     >;
     expect(headers["X-Zevium-Delivery-Id"]).toBe(pendingId);
 
-    await t.action(internal.webhooks.deliverWebhook, {
+    await t.action(internal.webhookDeliveryAction.deliverWebhook, {
       deliveryId: pendingId,
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -696,7 +696,9 @@ describe("deliverWebhook — action integration", () => {
       vi.fn(async () => new Response(null, { status: 400 })),
     );
 
-    await t.action(internal.webhooks.deliverWebhook, { deliveryId });
+    await t.action(internal.webhookDeliveryAction.deliverWebhook, {
+      deliveryId,
+    });
 
     const delivery = await t.run(async (ctx) => ctx.db.get(deliveryId));
     expect(delivery?.status).toBe("failed");
