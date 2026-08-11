@@ -7,8 +7,9 @@ export E2E_BASE_URL="${E2E_BASE_URL:-http://localhost:3000}"
 export E2E_ARTIFACTS="${E2E_ARTIFACTS:-$ROOT/artifacts}"
 mkdir -p "$E2E_ARTIFACTS"
 
-# Shared session across suite so sign_in short-circuit helps 02 after 01.
-export E2E_SESSION="${E2E_SESSION:-zevium-e2e}"
+# Auth and publisher share one session. Consumer gets a clean session so its
+# public-catalogue assertions cannot pass on leaked auth state.
+SUITE_SESSION="${E2E_SESSION:-zevium-e2e}"
 
 SCRIPTS=(
   "01-auth.sh"
@@ -33,8 +34,12 @@ for script in "${SCRIPTS[@]}"; do
   printf '── %s ──\n' "$script"
   t0="$(date +%s)"
   set +e
-  # Propagate last project env from 02 → 03 within this process tree via files in artifacts.
-  bash "$path"
+  # Project identity propagates through artifact files. Browser auth must not.
+  if [[ "$script" == "03-consumer.sh" ]]; then
+    E2E_SESSION="${SUITE_SESSION}-consumer" bash "$path"
+  else
+    E2E_SESSION="$SUITE_SESSION" bash "$path"
+  fi
   code=$?
   set -e
   t1="$(date +%s)"

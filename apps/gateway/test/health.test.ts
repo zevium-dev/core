@@ -18,6 +18,20 @@ async function health(overrides: Partial<Env>) {
 }
 
 describe("production health configuration matrix", () => {
+  it("exposes immutable release and contract identities", async () => {
+    const response = await health({
+      GATEWAY_TEST_MODE: "1",
+      ZEVIUM_RELEASE: "a".repeat(40),
+    });
+
+    await expect(response.json()).resolves.toMatchObject({
+      ok: true,
+      service: "zevium-gateway",
+      release: "a".repeat(40),
+      contract: 1,
+    });
+  });
+
   it("accepts explicit test mode", async () => {
     expect(
       (

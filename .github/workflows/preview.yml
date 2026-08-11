@@ -16,7 +16,6 @@ concurrency:
 
 permissions:
   contents: read
-  pull-requests: write
 
 env:
   MISE_EXPERIMENTAL: true
@@ -24,12 +23,53 @@ env:
   CLOUDFLARE_ACCOUNT_ID: 1ea9299555b026a6a7484c8323c5a953
 
 jobs:
-  preview-convex:
+  preview-target:
     if: >-
-      github.event_name == 'workflow_dispatch' ||
-      (github.event.pull_request.head.repo.full_name == github.repository &&
-      github.actor == 'tnfssc' &&
-      (github.event.action != 'labeled' || github.event.label.name == 'full-e2e'))
+      github.event_name == 'workflow_dispatch' || github.event.action != 'labeled' ||
+      github.event.label.name == 'full-e2e'
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 3
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      ref: ${{ steps.target.outputs.ref }}
+    steps:
+      - name: Validate trusted preview target with gh CLI
+        id: target
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          [[ "$GITHUB_ACTOR" == "tnfssc" ]] || {
+            echo "Only trusted maintainer may execute secret-bearing preview" >&2
+            exit 1
+          }
+          [[ "$PR_NUMBER" =~ ^[1-9][0-9]*$ ]] || {
+            echo "Invalid pull request number" >&2
+            exit 1
+          }
+          preview_sha="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" \
+            | node -e '
+              let input="";
+              process.stdin.on("data", d => input += d).on("end", () => {
+                const pr = JSON.parse(input);
+                if (pr.state !== "open") throw new Error("preview target PR is not open");
+                if (pr.head.repo.full_name !== process.env.GITHUB_REPOSITORY) {
+                  throw new Error("fork previews cannot receive deployment secrets");
+                }
+                if (pr.user.login !== "tnfssc") {
+                  throw new Error("preview target author is not trusted maintainer");
+                }
+                if (!/^[0-9a-f]{40}$/.test(pr.merge_commit_sha ?? "")) {
+                  throw new Error("preview merge commit is not ready");
+                }
+                process.stdout.write(pr.merge_commit_sha);
+              });
+            ')"
+          echo "ref=$preview_sha" >> "$GITHUB_OUTPUT"
+
+  preview-convex:
+    needs: preview-target
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 10
     environment: preview
@@ -39,6 +79,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
+          ref: ${{ needs.preview-target.outputs.ref }}
           persist-credentials: false
       - uses: actions/cache@v5
         with:
@@ -58,18 +99,20 @@ jobs:
             --cmd-url-env-var-name CONVEX_URL
 
   gateway-preview:
-    needs: preview-convex
+    needs: [preview-target, preview-convex]
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 10
     environment: preview
     outputs:
       gateway_url: ${{ steps.deploy.outputs.gateway_url }}
+      release_sha: ${{ steps.deploy.outputs.release_sha }}
     env:
       VITE_CONVEX_URL: ${{ needs.preview-convex.outputs.convex_url }}
       CONVEX_SITE_URL: ${{ needs.preview-convex.outputs.convex_site_url }}
     steps:
       - uses: actions/checkout@v6
         with:
+          ref: ${{ needs.preview-target.outputs.ref }}
           persist-credentials: false
       - uses: actions/cache@v5
         with:
@@ -82,17 +125,22 @@ jobs:
         id: deploy
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLERK_PREVIEW_SECRET_KEY: ${{ secrets.CLERK_PREVIEW_SECRET_KEY }}
+          GATEWAY_PREVIEW_INTERNAL_SECRET: ${{ secrets.GATEWAY_PREVIEW_INTERNAL_SECRET }}
         run: |
           gateway_name="zevium-gateway-pr-$PR_NUMBER"
+          release_sha="$(git rev-parse HEAD)"
           pnpm --filter gateway exec wrangler deploy --name "$gateway_name" --config wrangler.preview.jsonc \
             --var "CONVEX_URL:$VITE_CONVEX_URL" \
-            --var "CONVEX_SITE_URL:$CONVEX_SITE_URL"
-          printf '%s' '${{ secrets.CLERK_PREVIEW_SECRET_KEY }}' | pnpm --filter gateway exec wrangler secret put CLERK_SECRET_KEY --name "$gateway_name" --config wrangler.preview.jsonc
-          printf '%s' '${{ secrets.GATEWAY_PREVIEW_INTERNAL_SECRET }}' | pnpm --filter gateway exec wrangler secret put GATEWAY_INTERNAL_SECRET --name "$gateway_name" --config wrangler.preview.jsonc
+            --var "CONVEX_SITE_URL:$CONVEX_SITE_URL" \
+            --var "ZEVIUM_RELEASE:$release_sha"
+          printf '%s' "$CLERK_PREVIEW_SECRET_KEY" | pnpm --filter gateway exec wrangler secret put CLERK_SECRET_KEY --name "$gateway_name" --config wrangler.preview.jsonc
+          printf '%s' "$GATEWAY_PREVIEW_INTERNAL_SECRET" | pnpm --filter gateway exec wrangler secret put GATEWAY_INTERNAL_SECRET --name "$gateway_name" --config wrangler.preview.jsonc
           echo "gateway_url=https://${gateway_name}.zevium-dev.workers.dev" >> "$GITHUB_OUTPUT"
+          echo "release_sha=$release_sha" >> "$GITHUB_OUTPUT"
 
   web-build:
-    needs: preview-convex
+    needs: [preview-target, preview-convex]
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 10
     environment: preview
@@ -102,6 +150,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
+          ref: ${{ needs.preview-target.outputs.ref }}
           persist-credentials: false
       - uses: actions/cache@v5
         with:
@@ -114,7 +163,7 @@ jobs:
         env:
           CLERK_PUBLISHABLE_KEY: ${{ secrets.CLERK_PREVIEW_PUBLISHABLE_KEY }}
           CLERK_SECRET_KEY: ${{ secrets.CLERK_PREVIEW_SECRET_KEY }}
-        run: pnpm --filter web build
+        run: VITE_RELEASE_SHA="$(git rev-parse HEAD)" pnpm --filter web build
       - name: Upload web Worker build
         uses: actions/upload-artifact@v7
         with:
@@ -123,7 +172,7 @@ jobs:
           if-no-files-found: error
 
   web-preview:
-    needs: web-build
+    needs: [preview-target, web-build]
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 10
     environment: preview
@@ -132,6 +181,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
+          ref: ${{ needs.preview-target.outputs.ref }}
           persist-credentials: false
       - uses: actions/download-artifact@v8
         with:
@@ -148,24 +198,29 @@ jobs:
         id: deploy
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLERK_PREVIEW_SECRET_KEY: ${{ secrets.CLERK_PREVIEW_SECRET_KEY }}
         run: |
           web_name="zevium-web-pr-$PR_NUMBER"
           WEB_NAME="$web_name" node -e 'const fs=require("node:fs"); const p="apps/web/dist/server/wrangler.json"; const c=JSON.parse(fs.readFileSync(p)); c.name=process.env.WEB_NAME; delete c.routes; fs.writeFileSync("apps/web/dist/server/wrangler.preview.json", JSON.stringify(c));'
           pnpm --filter web exec wrangler deploy --name "$web_name" --config dist/server/wrangler.preview.json
-          printf '%s' '${{ secrets.CLERK_PREVIEW_SECRET_KEY }}' | pnpm --filter web exec wrangler secret put CLERK_SECRET_KEY --name "$web_name" --config dist/server/wrangler.preview.json
+          printf '%s' "$CLERK_PREVIEW_SECRET_KEY" | pnpm --filter web exec wrangler secret put CLERK_SECRET_KEY --name "$web_name" --config dist/server/wrangler.preview.json
           echo "web_url=https://${web_name}.zevium-dev.workers.dev" >> "$GITHUB_OUTPUT"
 
   deploy-and-test:
-    needs: [gateway-preview, web-preview]
+    needs: [preview-target, gateway-preview, web-preview]
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 5
     environment: preview
+    permissions:
+      contents: read
+      pull-requests: write
     outputs:
       web_url: ${{ needs.web-preview.outputs.web_url }}
       gateway_url: ${{ needs.gateway-preview.outputs.gateway_url }}
     env:
       E2E_BASE_URL: ${{ needs.web-preview.outputs.web_url }}
       GATEWAY_URL: ${{ needs.gateway-preview.outputs.gateway_url }}
+      RELEASE_SHA: ${{ needs.gateway-preview.outputs.release_sha }}
     steps:
       - name: Verify preview deployment contract
         run: |
@@ -174,15 +229,15 @@ jobs:
           wait_for_http_200() {
             url="$1"
             output="$2"
-
-            for attempt in $(seq 1 45); do
+            for attempt in $(seq 1 30); do
               status="$(curl --location --silent --show-error --output "$output" \
+                --connect-timeout 1 --max-time 1 \
                 --write-out '%{http_code}' "$url" || true)"
               if [ "$status" = "200" ]; then
                 return 0
               fi
 
-              if [ "$attempt" -lt 45 ]; then
+              if [ "$attempt" -lt 30 ]; then
                 sleep 2
               fi
             done
@@ -194,29 +249,69 @@ jobs:
           wait_for_http_200 "$E2E_BASE_URL/" e2e/artifacts/landing.html
           grep --fixed-strings --quiet '<title>Zevium — Agent-first API marketplace</title>' \
             e2e/artifacts/landing.html
+          grep --fixed-strings --quiet \
+            "name=\"zevium-release\" content=\"$RELEASE_SHA\"" \
+            e2e/artifacts/landing.html
 
           wait_for_http_200 "$E2E_BASE_URL/catalogue" e2e/artifacts/catalogue.html
           grep --fixed-strings --quiet '<title>Catalogue · Zevium</title>' \
             e2e/artifacts/catalogue.html
+          grep --fixed-strings --quiet 'Public APIs with per-call credits' \
+            e2e/artifacts/catalogue.html
+          grep --fixed-strings --quiet \
+            "name=\"zevium-release\" content=\"$RELEASE_SHA\"" \
+            e2e/artifacts/catalogue.html
+          if grep --fixed-strings --quiet 'Something went wrong' \
+            e2e/artifacts/catalogue.html; then
+            echo "Preview catalogue rendered error state" >&2
+            exit 1
+          fi
 
           wait_for_http_200 "$GATEWAY_URL/health" e2e/artifacts/gateway-health.json
-          health="$(cat e2e/artifacts/gateway-health.json)"
-          case "$health" in
-            *'"ok":true'*'"service":"zevium-gateway"'*) ;;
-            *) echo "Unexpected gateway health response" >&2; exit 1 ;;
-          esac
+          node -e '
+            const fs = require("node:fs");
+            const health = JSON.parse(fs.readFileSync("e2e/artifacts/gateway-health.json", "utf8"));
+            if (health.ok !== true || health.service !== "zevium-gateway" ||
+                health.release !== process.env.RELEASE_SHA || health.contract !== 1) {
+              throw new Error("Unexpected gateway health response");
+            }
+          '
 
-          preflight_status="$(curl --silent --show-error --output /dev/null \
+          preflight_status="$(curl --silent --show-error \
+            --connect-timeout 1 --max-time 2 \
+            --dump-header e2e/artifacts/gateway-cors.headers \
+            --output /dev/null \
             --write-out '%{http_code}' --request OPTIONS \
             --header 'Origin: https://preview-contract.invalid' \
             --header 'Access-Control-Request-Method: GET' \
+            --header 'Access-Control-Request-Headers: authorization, content-type' \
             "$GATEWAY_URL/gateway/missing-org/missing-project/ping")"
           test "$preflight_status" = "204"
+          grep --ignore-case --quiet '^access-control-allow-origin: \*[[:space:]]*$' \
+            e2e/artifacts/gateway-cors.headers
+          grep --ignore-case '^access-control-allow-headers:' \
+            e2e/artifacts/gateway-cors.headers | grep --ignore-case --quiet 'authorization'
+          grep --ignore-case '^access-control-allow-headers:' \
+            e2e/artifacts/gateway-cors.headers | grep --ignore-case --quiet 'content-type'
+          grep --ignore-case '^access-control-allow-methods:' \
+            e2e/artifacts/gateway-cors.headers | grep --ignore-case --quiet 'GET'
 
-          missing_status="$(curl --silent --show-error --output e2e/artifacts/gateway-404.json \
+          missing_status="$(curl --silent --show-error \
+            --connect-timeout 1 --max-time 2 \
+            --dump-header e2e/artifacts/gateway-404.headers \
+            --output e2e/artifacts/gateway-404.json \
             --write-out '%{http_code}' \
             "$GATEWAY_URL/preview-contract-missing")"
           test "$missing_status" = "404"
+          grep --ignore-case --quiet '^content-type: application/json' \
+            e2e/artifacts/gateway-404.headers
+          node -e '
+            const fs = require("node:fs");
+            const body = JSON.parse(fs.readFileSync("e2e/artifacts/gateway-404.json", "utf8"));
+            if (body.error !== "not found" || Object.keys(body).length !== 1) {
+              throw new Error("Unexpected gateway 404 contract");
+            }
+          '
 
       - name: Upload contract failure evidence
         if: failure()
@@ -239,7 +334,7 @@ jobs:
             else await github.rest.issues.createComment({ ...context.repo, issue_number: context.issue.number, body })
 
   full-e2e:
-    needs: deploy-and-test
+    needs: [preview-target, deploy-and-test]
     if: >-
       needs.deploy-and-test.result == 'success' &&
       (github.event_name == 'workflow_dispatch' ||
@@ -253,6 +348,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
+          ref: ${{ needs.preview-target.outputs.ref }}
           persist-credentials: false
       - uses: actions/cache@v5
         with:
@@ -285,5 +381,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: preview-e2e-${{ env.PR_NUMBER }}
-          path: e2e/artifacts
+          path: |
+            e2e/artifacts/*.png
+            e2e/artifacts/*.url.txt
           if-no-files-found: ignore
