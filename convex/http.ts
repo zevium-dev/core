@@ -175,23 +175,12 @@ function stripeWebhookRoute(
       const objectId = event.data.object.id;
       const stripeAccount =
         typeof event.account === "string" ? event.account : "platform";
-      const receipt = await ctx.runMutation(
-        internal.billing.receiveStripeEvent,
-        {
-          stripeEventId: event.id,
-          stripeAccount,
-          eventType: event.type,
-          objectId,
-        },
-      );
-      if (receipt.isNew) {
-        await ctx.scheduler.runAfter(0, internal.billing.processStripeEvent, {
-          stripeEventId: event.id,
-          stripeAccount,
-          eventType: event.type,
-          objectId,
-        });
-      }
+      await ctx.runMutation(internal.billing.receiveStripeEvent, {
+        stripeEventId: event.id,
+        stripeAccount,
+        eventType: event.type,
+        objectId,
+      });
       return new Response(null, { status: 200 });
     }),
   });
@@ -240,20 +229,12 @@ http.route({
     if (typeof objectId !== "string" || objectId.length === 0) {
       return new Response("Unsupported Stripe event object", { status: 400 });
     }
-    const receipt = await ctx.runMutation(internal.billing.receiveStripeEvent, {
+    await ctx.runMutation(internal.billing.receiveStripeEvent, {
       stripeEventId: event.id,
       stripeAccount: "platform",
       eventType: event.type,
       objectId,
     });
-    if (receipt.isNew) {
-      await ctx.scheduler.runAfter(0, internal.billing.processStripeEvent, {
-        stripeEventId: event.id,
-        stripeAccount: "platform",
-        eventType: event.type,
-        objectId,
-      });
-    }
     return new Response(null, { status: 200 });
   }),
 });

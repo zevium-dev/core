@@ -101,6 +101,7 @@ export default defineSchema({
       v.literal("usage_settlement"),
       v.literal("refund_reversal"),
       v.literal("dispute_reversal"),
+      v.literal("dispute_restoration"),
       v.literal("admin_adjustment"),
     ),
     amount: v.number(),
@@ -288,13 +289,19 @@ export default defineSchema({
       v.literal("failed"),
       v.literal("ignored"),
     ),
+    /** Processing attempts, not duplicate HTTP deliveries. */
     attempts: v.number(),
+    deliveries: v.number(),
     lastError: v.optional(v.string()),
     receivedAt: v.number(),
+    nextAttemptAt: v.optional(v.number()),
+    leaseExpiresAt: v.optional(v.number()),
     processedAt: v.optional(v.number()),
   })
     .index("by_stripe_event", ["stripeEventId"])
-    .index("by_object", ["objectId"]),
+    .index("by_object", ["objectId"])
+    .index("by_status_next_attempt", ["status", "nextAttemptAt"])
+    .index("by_status_lease", ["status", "leaseExpiresAt"]),
 
   payments: defineTable({
     organizationId: v.id("organizations"),
@@ -305,8 +312,12 @@ export default defineSchema({
     amount: v.number(),
     currency: v.string(),
     grantedCredits: v.number(),
+    refundedAmount: v.number(),
+    refundedCredits: v.number(),
+    /** Effective wallet reversal, capped to the immutable grant. */
     reversedCredits: v.number(),
-    disputedCredits: v.optional(v.number()),
+    /** Reversal target projected into publisher earnings. */
+    publisherClawbackTargetCredits: v.number(),
     status: v.union(
       v.literal("pending"),
       v.literal("paid"),
@@ -326,15 +337,50 @@ export default defineSchema({
     .index("by_payment_intent", ["stripePaymentIntentId"])
     .index("by_charge", ["stripeChargeId"]),
 
+  // One row per Stripe dispute. Money movement is event-driven, not inferred
+  // from lifecycle state: warning inquiries never withdraw wallet credits.
+  paymentDisputes: defineTable({
+    paymentId: v.id("payments"),
+    organizationId: v.id("organizations"),
+    stripeDisputeId: v.string(),
+    stripeChargeId: v.string(),
+    amount: v.number(),
+    currency: v.string(),
+    status: v.union(
+      v.literal("warning_needs_response"),
+      v.literal("warning_under_review"),
+      v.literal("warning_closed"),
+      v.literal("needs_response"),
+      v.literal("under_review"),
+      v.literal("won"),
+      v.literal("lost"),
+      v.literal("prevented"),
+    ),
+    creditsAtRisk: v.number(),
+    fundsWithdrawn: v.boolean(),
+    fundsReinstated: v.boolean(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_stripe_dispute", ["stripeDisputeId"])
+    .index("by_payment", ["paymentId", "createdAt"]),
+
   // Each successful settlement creates exactly one immutable publisher split.
   publisherEarnings: defineTable({
     publisherOrganizationId: v.id("organizations"),
+    consumerOrganizationId: v.id("organizations"),
     /** Immutable published project that earned this settlement. */
     projectId: v.optional(v.id("projects")),
     usageSettlementRefId: v.string(),
     grossCredits: v.number(),
+    /** Exact atom values are canonical; decimal credits are display mirrors. */
+    platformFeeAtoms: v.number(),
+    publisherNetAtoms: v.number(),
     platformFeeCredits: v.number(),
     netCredits: v.number(),
+    clawedBackGrossCredits: v.number(),
+    clawedBackAtoms: v.number(),
+    releasedAtoms: v.number(),
     availableAt: v.number(),
     status: v.union(
       v.literal("pending_risk"),
@@ -349,15 +395,73 @@ export default defineSchema({
     updatedAt: v.number(),
   })
     .index("by_publisher", ["publisherOrganizationId", "createdAt"])
+    .index("by_consumer", ["consumerOrganizationId", "createdAt"])
     .index("by_settlement", ["usageSettlementRefId"])
     .index("by_status_available", ["status", "availableAt"]),
+
+  // Materialized publisher settlement buckets. `availableAtoms` may be
+  // negative after clawing back earnings already paid; future earnings repay
+  // that debt before another transfer can be prepared.
+  publisherBalances: defineTable({
+    publisherOrganizationId: v.id("organizations"),
+    availableAtoms: v.number(),
+    allocatedAtoms: v.number(),
+    paidAtoms: v.number(),
+    sequence: v.number(),
+    updatedAt: v.number(),
+  }).index("by_publisher", ["publisherOrganizationId"]),
+
+  // Append-only settlement ledger. Bucket deltas plus sequence make every
+  // payout, reversal, and clawback independently auditable and idempotent.
+  publisherSettlementEntries: defineTable({
+    publisherBalanceId: v.id("publisherBalances"),
+    publisherOrganizationId: v.id("organizations"),
+    kind: v.union(
+      v.literal("earning_release"),
+      v.literal("refund_clawback"),
+      v.literal("dispute_clawback"),
+      v.literal("dispute_restoration"),
+      v.literal("transfer_allocation"),
+      v.literal("transfer_succeeded"),
+      v.literal("transfer_reversal"),
+    ),
+    availableDeltaAtoms: v.number(),
+    allocatedDeltaAtoms: v.number(),
+    paidDeltaAtoms: v.number(),
+    refId: v.string(),
+    sequence: v.number(),
+    earningId: v.optional(v.id("publisherEarnings")),
+    transferId: v.optional(v.id("publisherTransfers")),
+    paymentId: v.optional(v.id("payments")),
+    createdAt: v.number(),
+  })
+    .index("by_publisher", ["publisherOrganizationId", "sequence"])
+    .index("by_ref", ["refId"]),
+
+  publisherClawbacks: defineTable({
+    paymentId: v.id("payments"),
+    consumerOrganizationId: v.id("organizations"),
+    publisherOrganizationId: v.id("organizations"),
+    earningId: v.id("publisherEarnings"),
+    sourceKind: v.union(v.literal("refund"), v.literal("dispute")),
+    sourceRef: v.string(),
+    grossCredits: v.number(),
+    amountAtoms: v.number(),
+    restoredGrossCredits: v.number(),
+    restoredAtoms: v.number(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_payment", ["paymentId", "createdAt"])
+    .index("by_source", ["sourceRef"]),
 
   publisherTransfers: defineTable({
     publisherOrganizationId: v.id("organizations"),
     stripeConnectedAccountId: v.string(),
     amount: v.number(),
-    /** Credits below Stripe's one-cent precision, carried to the next transfer. */
-    remainderCredits: v.number(),
+    amountAtoms: v.number(),
+    /** Snapshot only. Canonical remainder stays in publisherBalances. */
+    remainderAtoms: v.number(),
     currency: v.string(),
     idempotencyKey: v.string(),
     stripeTransferId: v.optional(v.string()),

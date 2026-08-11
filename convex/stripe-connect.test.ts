@@ -4,7 +4,10 @@ import type Stripe from "stripe";
 import { describe, expect, it } from "vitest";
 import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
-import { publisherEarningSplit } from "./accounting";
+import {
+  ACCOUNTING_ATOMS_PER_CREDIT,
+  publisherEarningSplit,
+} from "./accounting";
 import { connectAccountProjection, createOnboardingLink } from "./payouts";
 import schema from "./schema";
 
@@ -30,14 +33,21 @@ async function seedConnect(t: TestConvex<typeof schema>): Promise<ConnectSeed> {
       requirements: [],
       updatedAt: 1,
     });
+    const split = publisherEarningSplit(110_000);
     const earningId = await ctx.db.insert("publisherEarnings", {
       publisherOrganizationId: organizationId,
+      consumerOrganizationId: organizationId,
       usageSettlementRefId: "settle:publisher-one",
-      grossCredits: 100_000,
-      platformFeeCredits: 5_000,
-      netCredits: 95_000,
+      grossCredits: split.grossCredits,
+      platformFeeAtoms: split.platformFeeAtoms,
+      publisherNetAtoms: split.publisherNetAtoms,
+      platformFeeCredits: split.platformFeeCredits,
+      netCredits: split.publisherNetCredits,
+      clawedBackGrossCredits: 0,
+      clawedBackAtoms: 0,
+      releasedAtoms: 0,
       availableAt: 1,
-      status: "available",
+      status: "pending_risk",
       createdAt: 1,
       updatedAt: 1,
     });
@@ -138,18 +148,51 @@ describe("Stripe Connect publisher accounting", () => {
     ]);
   });
 
-  it("rounds the platform fee up so every paid call contributes", () => {
+  it("splits every call exactly in atom units without rounding theft", () => {
     expect([0, 1, 19, 20].map(publisherEarningSplit)).toEqual([
-      { grossCredits: 0, platformFeeCredits: 0, publisherNetCredits: 0 },
-      { grossCredits: 1, platformFeeCredits: 1, publisherNetCredits: 0 },
-      { grossCredits: 19, platformFeeCredits: 1, publisherNetCredits: 18 },
-      { grossCredits: 20, platformFeeCredits: 1, publisherNetCredits: 19 },
+      {
+        grossCredits: 0,
+        platformFeeAtoms: 0,
+        publisherNetAtoms: 0,
+        platformFeeCredits: 0,
+        publisherNetCredits: 0,
+      },
+      {
+        grossCredits: 1,
+        platformFeeAtoms: 500,
+        publisherNetAtoms: 9_500,
+        platformFeeCredits: 0.05,
+        publisherNetCredits: 0.95,
+      },
+      {
+        grossCredits: 19,
+        platformFeeAtoms: 9_500,
+        publisherNetAtoms: 180_500,
+        platformFeeCredits: 0.95,
+        publisherNetCredits: 18.05,
+      },
+      {
+        grossCredits: 20,
+        platformFeeAtoms: 10_000,
+        publisherNetAtoms: 190_000,
+        platformFeeCredits: 1,
+        publisherNetCredits: 19,
+      },
     ]);
     expect(publisherEarningSplit(100_001)).toEqual({
       grossCredits: 100_001,
-      platformFeeCredits: 5_001,
-      publisherNetCredits: 95_000,
+      platformFeeAtoms: 50_000_500,
+      publisherNetAtoms: 950_009_500,
+      platformFeeCredits: 5_000.05,
+      publisherNetCredits: 95_000.95,
     });
+    for (let credits = 0; credits < 10_000; credits += 17) {
+      const split = publisherEarningSplit(credits);
+      expect(split.platformFeeAtoms + split.publisherNetAtoms).toBe(
+        credits * ACCOUNTING_ATOMS_PER_CREDIT,
+      );
+      expect(split.platformFeeAtoms * 19).toBe(split.publisherNetAtoms);
+    }
     expect(() => publisherEarningSplit(-1)).toThrow("non-negative");
   });
 
@@ -218,26 +261,34 @@ describe("Stripe Connect publisher accounting", () => {
         availableAt: Date.now() + 60_000,
       });
     });
+    await t.mutation(internal.payouts.releaseMatureEarnings, {
+      publisherOrganizationId: seed.organizationId,
+    });
     await expect(
       t.mutation(internal.payouts.preparePublisherTransfer, {
         publisherOrganizationId: seed.organizationId,
       }),
-    ).rejects.toThrow("below one cent");
+    ).rejects.toThrow("$10.00 payout minimum");
     await t.run(async (ctx) => {
       await ctx.db.patch(seed.earningId, {
-        status: "available",
+        status: "pending_risk",
         availableAt: 1,
       });
     });
-    const first = await t.mutation(internal.payouts.preparePublisherTransfer, {
+    await t.mutation(internal.payouts.releaseMatureEarnings, {
       publisherOrganizationId: seed.organizationId,
     });
-    const retry = await t.mutation(internal.payouts.preparePublisherTransfer, {
-      publisherOrganizationId: seed.organizationId,
-    });
+    const [first, retry] = await Promise.all([
+      t.mutation(internal.payouts.preparePublisherTransfer, {
+        publisherOrganizationId: seed.organizationId,
+      }),
+      t.mutation(internal.payouts.preparePublisherTransfer, {
+        publisherOrganizationId: seed.organizationId,
+      }),
+    ]);
     expect(retry.transferId).toBe(first.transferId);
     expect(retry.idempotencyKey).toBe(first.idempotencyKey);
-    expect(first.amount).toBe(950);
+    expect(first.amount).toBe(1_045);
   });
 
   it("carries sub-cent earnings into the next transfer", async () => {
@@ -256,40 +307,62 @@ describe("Stripe Connect publisher accounting", () => {
         .unique();
       if (profile === null) throw new Error("profile missing");
       await ctx.db.patch(profile._id, { payoutsEnabled: true });
+      const split = publisherEarningSplit(110_001);
       await ctx.db.patch(seed.earningId, {
-        grossCredits: 100_001,
-        netCredits: 95_001,
+        grossCredits: split.grossCredits,
+        platformFeeAtoms: split.platformFeeAtoms,
+        publisherNetAtoms: split.publisherNetAtoms,
+        platformFeeCredits: split.platformFeeCredits,
+        netCredits: split.publisherNetCredits,
       });
+    });
+    await t.mutation(internal.payouts.releaseMatureEarnings, {
+      publisherOrganizationId: seed.organizationId,
     });
 
     const first = await t.mutation(internal.payouts.preparePublisherTransfer, {
       publisherOrganizationId: seed.organizationId,
     });
-    expect(first.amount).toBe(950);
-    expect(first.remainderCredits).toBe(1);
+    expect(first.amount).toBe(1_045);
+    expect(first.remainderAtoms).toBe(9_500);
     await t.mutation(internal.payouts.markPublisherTransferSucceeded, {
       transferId: first.transferId,
       stripeTransferId: "tr_carry_first",
     });
+    await expect(
+      t.mutation(internal.payouts.preparePublisherTransfer, {
+        publisherOrganizationId: seed.organizationId,
+      }),
+    ).rejects.toThrow("$10.00 payout minimum");
     await t.run(async (ctx) => {
+      const split = publisherEarningSplit(105_263);
       await ctx.db.insert("publisherEarnings", {
         publisherOrganizationId: seed.organizationId,
+        consumerOrganizationId: seed.organizationId,
         usageSettlementRefId: "settle:publisher-carry",
-        grossCredits: 99,
-        platformFeeCredits: 0,
-        netCredits: 99,
+        grossCredits: split.grossCredits,
+        platformFeeAtoms: split.platformFeeAtoms,
+        publisherNetAtoms: split.publisherNetAtoms,
+        platformFeeCredits: split.platformFeeCredits,
+        netCredits: split.publisherNetCredits,
+        clawedBackGrossCredits: 0,
+        clawedBackAtoms: 0,
+        releasedAtoms: 0,
         availableAt: 1,
-        status: "available",
+        status: "pending_risk",
         createdAt: 2,
         updatedAt: 2,
       });
+    });
+    await t.mutation(internal.payouts.releaseMatureEarnings, {
+      publisherOrganizationId: seed.organizationId,
     });
 
     const second = await t.mutation(internal.payouts.preparePublisherTransfer, {
       publisherOrganizationId: seed.organizationId,
     });
-    expect(second.amount).toBe(1);
-    expect(second.remainderCredits).toBe(0);
+    expect(second.amount).toBe(1_000);
+    expect(second.remainderAtoms).toBe(8_000);
   });
 
   it("projects failed/reversed transfers and payout state without changing earnings twice", async () => {
@@ -309,6 +382,9 @@ describe("Stripe Connect publisher accounting", () => {
       if (profile === null) throw new Error("profile missing");
       await ctx.db.patch(profile._id, { payoutsEnabled: true });
     });
+    await t.mutation(internal.payouts.releaseMatureEarnings, {
+      publisherOrganizationId: seed.organizationId,
+    });
     const transfer = await t.mutation(
       internal.payouts.preparePublisherTransfer,
       {
@@ -318,6 +394,11 @@ describe("Stripe Connect publisher accounting", () => {
     await t.mutation(internal.payouts.markPublisherTransferSucceeded, {
       transferId: transfer.transferId,
       stripeTransferId: "tr_projection",
+    });
+    await t.mutation(internal.payouts.projectStripeTransfer, {
+      stripeTransferId: "tr_projection",
+      state: "failed",
+      failureReason: "stale failure",
     });
     await t.mutation(internal.payouts.projectStripeTransfer, {
       stripeTransferId: "tr_projection",
@@ -346,9 +427,27 @@ describe("Stripe Connect publisher accounting", () => {
       earning: await ctx.db.get(seed.earningId),
       transfer: await ctx.db.get(transfer.transferId),
       payouts: await ctx.db.query("connectedPayouts").collect(),
+      balance: await ctx.db
+        .query("publisherBalances")
+        .withIndex("by_publisher", (q) =>
+          q.eq("publisherOrganizationId", seed.organizationId),
+        )
+        .unique(),
+      ledger: await ctx.db.query("publisherSettlementEntries").collect(),
     }));
-    expect(state.earning?.status).toBe("reversed");
+    expect(state.earning?.status).toBe("available");
     expect(state.transfer?.status).toBe("reversed");
+    expect(state.balance).toMatchObject({
+      availableAtoms: 1_045_000_000,
+      allocatedAtoms: 0,
+      paidAtoms: 0,
+    });
+    expect(state.ledger.map((entry) => entry.kind)).toEqual([
+      "earning_release",
+      "transfer_allocation",
+      "transfer_succeeded",
+      "transfer_reversal",
+    ]);
     expect(state.payouts).toHaveLength(1);
   });
 });

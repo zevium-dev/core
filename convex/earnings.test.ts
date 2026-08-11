@@ -31,11 +31,17 @@ async function seedEarnings(
     });
     await ctx.db.insert("publisherEarnings", {
       publisherOrganizationId: organizationId,
+      consumerOrganizationId: organizationId,
       projectId,
       usageSettlementRefId: "settle:one",
       grossCredits: 100_001,
-      platformFeeCredits: 5_000,
-      netCredits: 95_001,
+      platformFeeAtoms: 50_000_500,
+      publisherNetAtoms: 950_009_500,
+      platformFeeCredits: 5_000.05,
+      netCredits: 95_000.95,
+      clawedBackGrossCredits: 0,
+      clawedBackAtoms: 0,
+      releasedAtoms: 950_009_500,
       availableAt: 1,
       status: "available",
       createdAt: Date.now(),
@@ -61,7 +67,7 @@ describe("earnings.forOrg", () => {
     expect(result.allTime).toEqual({
       calls: 1,
       grossCredits: 100_001,
-      netCredits: 95_001,
+      netCredits: 95_000.95,
     });
     expect(result.byProject).toHaveLength(1);
     expect(result.byProject[0]).toMatchObject({
@@ -69,7 +75,7 @@ describe("earnings.forOrg", () => {
       slug: "forecast",
       calls: 1,
       grossCredits: 100_001,
-      netCredits: 95_001,
+      netCredits: 95_000.95,
     });
   });
 });

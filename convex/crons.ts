@@ -20,4 +20,12 @@ crons.hourly(
   { minuteUTC: 15 },
   internal.cronTasks.releaseMatureEarningsCron,
 );
+
+// Scheduled actions are at-most-once. Lease recovery closes crash windows
+// without asking Stripe to redeliver an event we already acknowledged.
+crons.interval(
+  "stripe-event-recovery",
+  { minutes: 1 },
+  internal.billing.recoverStripeEvents,
+);
 export default crons;
