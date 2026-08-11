@@ -6,6 +6,14 @@ import type { Id } from "./_generated/dataModel";
 import schema from "./schema";
 import { computeSignature, postWebhook } from "./lib/webhookDelivery";
 import { validateWebhookUrl } from "./webhooks";
+
+const { pinnedTransportMock } = vi.hoisted(() => ({
+  pinnedTransportMock: vi.fn(),
+}));
+vi.mock("./lib/webhookTransport", () => ({
+  deliverPinnedHttps: pinnedTransportMock,
+}));
+
 const modules = import.meta.glob("./**/*.ts");
 
 // ---------------------------------------------------------------------------
@@ -18,14 +26,29 @@ describe("validateWebhookUrl", () => {
     expect(validateWebhookUrl("https://api.zevium.dev/wh")).toBe(true);
   });
 
-  it("accepts http://localhost for dev", () => {
-    expect(validateWebhookUrl("http://localhost:3000/hook")).toBe(true);
-    expect(validateWebhookUrl("http://localhost/hook")).toBe(true);
-  });
-
-  it("rejects non-localhost http", () => {
+  it("rejects http, including localhost", () => {
+    expect(validateWebhookUrl("http://localhost:3000/hook")).toBe(false);
+    expect(validateWebhookUrl("http://localhost/hook")).toBe(false);
     expect(validateWebhookUrl("http://example.com/hook")).toBe(false);
     expect(validateWebhookUrl("http://192.168.1.1/hook")).toBe(false);
+  });
+
+  it("rejects private and local https targets", () => {
+    expect(validateWebhookUrl("https://localhost/hook")).toBe(false);
+    expect(validateWebhookUrl("https://127.0.0.1/hook")).toBe(false);
+    expect(validateWebhookUrl("https://10.0.0.8/hook")).toBe(false);
+    expect(validateWebhookUrl("https://169.254.169.254/hook")).toBe(false);
+    expect(validateWebhookUrl("https://172.16.0.1/hook")).toBe(false);
+    expect(validateWebhookUrl("https://192.168.1.1/hook")).toBe(false);
+    expect(validateWebhookUrl("https://192.0.2.1/hook")).toBe(false);
+    expect(validateWebhookUrl("https://2130706433/hook")).toBe(false);
+    expect(validateWebhookUrl("https://0177.0.0.1/hook")).toBe(false);
+    expect(validateWebhookUrl("https://0x7f000001/hook")).toBe(false);
+    expect(validateWebhookUrl("https://[::1]/hook")).toBe(false);
+    expect(validateWebhookUrl("https://[fd00::1]/hook")).toBe(false);
+    expect(validateWebhookUrl("https://[fe80::1]/hook")).toBe(false);
+    expect(validateWebhookUrl("https://[::ffff:127.0.0.1]/hook")).toBe(false);
+    expect(validateWebhookUrl("https://[2001:db8::1]/hook")).toBe(false);
   });
 
   it("rejects garbage", () => {
@@ -56,19 +79,9 @@ describe("computeSignature", () => {
   });
 });
 
-describe("postWebhook — injectable fetch", () => {
+describe("postWebhook — injectable transport", () => {
   it("POSTs with HMAC signature + event headers + JSON body", async () => {
-    let capturedUrl: string | undefined;
-    let capturedInit: RequestInit | undefined;
-
-    const mockFetch = (async (
-      url: string | URL | Request,
-      init?: RequestInit,
-    ) => {
-      capturedUrl = url.toString();
-      capturedInit = init;
-      return new Response("ok", { status: 200 });
-    }) as typeof fetch;
+    const transport = vi.fn(async () => ({ status: 200 }));
 
     const result = await postWebhook(
       {
@@ -78,20 +91,19 @@ describe("postWebhook — injectable fetch", () => {
         data: { projectId: "p1", version: "1.0.0" },
         timestamp: 123,
       },
-      mockFetch,
+      transport,
     );
 
     expect(result.ok).toBe(true);
     expect(result.status).toBe(200);
-    expect(capturedUrl).toBe("https://example.com/hook");
-    expect(capturedInit?.method).toBe("POST");
-
-    const headers = capturedInit?.headers as Record<string, string>;
+    const input = transport.mock.calls[0]![0];
+    expect(input.url.toString()).toBe("https://example.com/hook");
+    const headers = input.headers;
     expect(headers["x-zevium-event"]).toBe("spec.published");
     expect(headers["x-zevium-signature"]).toMatch(/^[0-9a-f]{64}$/);
     expect(headers["Content-Type"]).toBe("application/json");
 
-    const body = JSON.parse(capturedInit?.body as string);
+    const body = JSON.parse(input.body);
     expect(body).toEqual({
       event: "spec.published",
       data: { projectId: "p1", version: "1.0.0" },
@@ -99,16 +111,12 @@ describe("postWebhook — injectable fetch", () => {
     });
 
     // Signature matches independent computation over the body
-    const expectedSig = await computeSignature(
-      "s3cr3t",
-      capturedInit?.body as string,
-    );
+    const expectedSig = await computeSignature("s3cr3t", input.body);
     expect(headers["x-zevium-signature"]).toBe(expectedSig);
   });
 
   it("returns ok:false with error for non-2xx", async () => {
-    const mockFetch = (async () =>
-      new Response("Internal Server Error", { status: 500 })) as typeof fetch;
+    const transport = vi.fn(async () => ({ status: 500 }));
 
     const result = await postWebhook(
       {
@@ -118,7 +126,7 @@ describe("postWebhook — injectable fetch", () => {
         data: {},
         timestamp: 0,
       },
-      mockFetch,
+      transport,
     );
 
     expect(result.ok).toBe(false);
@@ -127,9 +135,9 @@ describe("postWebhook — injectable fetch", () => {
   });
 
   it("sanitizes network errors", async () => {
-    const mockFetch = (async () => {
+    const transport = vi.fn(async () => {
       throw new Error("ECONNREFUSED");
-    }) as typeof fetch;
+    });
 
     const result = await postWebhook(
       {
@@ -139,7 +147,7 @@ describe("postWebhook — injectable fetch", () => {
         data: {},
         timestamp: 0,
       },
-      mockFetch,
+      transport,
     );
 
     expect(result.ok).toBe(false);
@@ -388,6 +396,11 @@ describe("recordDeliveryAttempt — state machine", () => {
         deliveryId,
         ok: true,
       });
+      await ctx.runMutation(internal.webhooks.recordDeliveryAttempt, {
+        deliveryId,
+        ok: false,
+        error: "late duplicate",
+      });
     });
 
     const delivery = await t.run(async (ctx) => {
@@ -522,7 +535,7 @@ describe("recordDeliveryAttempt — state machine", () => {
 
 describe("deliverWebhook — action integration", () => {
   afterEach(() => {
-    vi.unstubAllGlobals();
+    pinnedTransportMock.mockReset();
   });
 
   async function seedDelivery(
@@ -568,35 +581,30 @@ describe("deliverWebhook — action integration", () => {
   it("sends the delivery id header and skips completed deliveries", async () => {
     const t = convexTest(schema, modules);
     const pendingId = await seedDelivery(t);
-    const fetchMock = vi.fn(async () => new Response(null, { status: 200 }));
-    vi.stubGlobal("fetch", fetchMock);
+    pinnedTransportMock.mockResolvedValue({ status: 200 });
 
-    await t.action(internal.webhooks.deliverWebhook, {
+    await t.action(internal.webhookDeliveryAction.deliverWebhook, {
       deliveryId: pendingId,
     });
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const headers = fetchMock.mock.calls[0]![1]?.headers as Record<
-      string,
-      string
-    >;
+    expect(pinnedTransportMock).toHaveBeenCalledTimes(1);
+    const headers = pinnedTransportMock.mock.calls[0]![0].headers;
     expect(headers["X-Zevium-Delivery-Id"]).toBe(pendingId);
 
-    await t.action(internal.webhooks.deliverWebhook, {
+    await t.action(internal.webhookDeliveryAction.deliverWebhook, {
       deliveryId: pendingId,
     });
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(pinnedTransportMock).toHaveBeenCalledTimes(1);
   });
 
   it("does not retry a terminal 4xx response", async () => {
     const t = convexTest(schema, modules);
     const deliveryId = await seedDelivery(t);
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => new Response(null, { status: 400 })),
-    );
+    pinnedTransportMock.mockResolvedValue({ status: 400 });
 
-    await t.action(internal.webhooks.deliverWebhook, { deliveryId });
+    await t.action(internal.webhookDeliveryAction.deliverWebhook, {
+      deliveryId,
+    });
 
     const delivery = await t.run(async (ctx) => ctx.db.get(deliveryId));
     expect(delivery?.status).toBe("failed");
