@@ -27,6 +27,14 @@ export {
 
 export { generateMockResponse, type GeneratedMockResponse } from "./mock.js";
 
+export type {
+  PublicReviewContract,
+  QualityIncidentContract,
+  QualityProbeOutcome,
+  QualitySnapshotContract,
+  ReviewAggregateContract,
+} from "./quality.js";
+
 export {
   isValidSlug,
   isValidSemver,

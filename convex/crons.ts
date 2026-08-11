@@ -10,6 +10,13 @@ crons.hourly(
   internal.cronTasks.checkLowBalances,
 );
 
+/** Credential-free public upstream probes. Batch size and network time are bounded. */
+crons.interval(
+  "probe-published-upstreams",
+  { minutes: 5 },
+  internal.quality.runDueProbes,
+);
+
 /**
  * Hourly release of risk-held earnings that have matured past their hold.
  * Each org is released in its own transaction with per-org error isolation,

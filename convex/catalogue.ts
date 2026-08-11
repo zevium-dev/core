@@ -1,8 +1,13 @@
-import { extractPricing, parseSpec } from "@zevium/shared";
+import {
+  extractPricing,
+  parseSpec,
+  type QualitySnapshotContract,
+} from "@zevium/shared";
 import { v } from "convex/values";
 import { query } from "./_generated/server";
 import type { Doc } from "./_generated/dataModel";
 import { getOrgByPublicHandle } from "./lib/auth";
+import { toQualitySnapshotContract } from "./quality";
 
 const PAGE_SIZE = 24;
 
@@ -27,6 +32,7 @@ export type PublicListing = {
   publisherHandle: string;
   publishedAt: number | null;
   pricing: ListingPricingSummary | null;
+  quality: QualitySnapshotContract | null;
 };
 
 /**
@@ -145,6 +151,7 @@ export const listPublic = query({
       project: Doc<"projects">;
       org: Doc<"organizations">;
       publishedAt: number | null;
+      latestVersionId: Doc<"specVersions">["_id"] | null;
       pricing: ListingPricingSummary | null;
     }> = [];
 
@@ -189,6 +196,7 @@ export const listPublic = query({
         project,
         org,
         publishedAt: latest?.publishedAt ?? null,
+        latestVersionId: latest?._id ?? null,
         pricing,
       });
     }
@@ -223,9 +231,19 @@ export const listPublic = query({
     const page = filtered.slice(start, start + PAGE_SIZE);
     const nextOffset = start + PAGE_SIZE;
     const nextCursor = nextOffset < filtered.length ? String(nextOffset) : null;
-
-    return {
-      items: page.map(({ project, org, publishedAt, pricing }) => ({
+    const items: PublicListing[] = [];
+    for (const {
+      project,
+      org,
+      publishedAt,
+      latestVersionId,
+      pricing,
+    } of page) {
+      const snapshot = await ctx.db
+        .query("qualitySnapshots")
+        .withIndex("by_project", (q) => q.eq("projectId", project._id))
+        .unique();
+      items.push({
         projectId: project._id,
         name: project.name,
         slug: project.slug,
@@ -236,7 +254,17 @@ export const listPublic = query({
         publisherHandle: org.publicHandle!,
         publishedAt,
         pricing,
-      })),
+        quality:
+          snapshot === null ||
+          latestVersionId === null ||
+          snapshot.specVersionId !== latestVersionId
+            ? null
+            : toQualitySnapshotContract(snapshot),
+      });
+    }
+
+    return {
+      items,
       nextCursor,
       total,
     };
@@ -275,6 +303,7 @@ export const getPublicDetail = query({
       sunsetAt: number | undefined;
       deprecationMessage: string | undefined;
     } | null;
+    quality: QualitySnapshotContract | null;
   } | null> => {
     const org = await getOrgByPublicHandle(ctx, args.publisherHandle);
     if (org === null || org.publicHandle === undefined) return null;
@@ -295,6 +324,10 @@ export const getPublicDetail = query({
       .withIndex("by_project_published", (q) => q.eq("projectId", project._id))
       .order("desc")
       .first();
+    const snapshot = await ctx.db
+      .query("qualitySnapshots")
+      .withIndex("by_project", (q) => q.eq("projectId", project._id))
+      .unique();
 
     return {
       project: {
@@ -323,6 +356,12 @@ export const getPublicDetail = query({
               sunsetAt: latest.sunsetAt,
               deprecationMessage: latest.deprecationMessage,
             },
+      quality:
+        snapshot === null ||
+        latest === null ||
+        snapshot.specVersionId !== latest._id
+          ? null
+          : toQualitySnapshotContract(snapshot),
     };
   },
 });
