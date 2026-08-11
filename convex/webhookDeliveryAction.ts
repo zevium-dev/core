@@ -42,14 +42,19 @@ export const deliverWebhook = internalAction({
         event: parsed.event,
         data: parsed.data,
         timestamp: parsed.timestamp,
+        deliveryId: args.deliveryId,
+        currentStatus: info.status,
       },
       deliverPinnedHttps,
     );
+
+    if (result.skipped) return;
 
     await ctx.runMutation(internal.webhooks.recordDeliveryAttempt, {
       deliveryId: args.deliveryId,
       ok: result.ok,
       error: result.error,
+      retryable: result.retryable,
     });
   },
 });
