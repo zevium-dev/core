@@ -2,7 +2,12 @@ import { SignIn } from "@clerk/tanstack-react-start";
 import { shadcn } from "@clerk/ui/themes";
 import { createFileRoute } from "@tanstack/react-router";
 
+import { safeAppReturnPath } from "#/lib/auth-redirect";
+
 export const Route = createFileRoute("/sign-in/$")({
+  validateSearch: (search: Record<string, unknown>) => ({
+    redirect_url: safeAppReturnPath(search.redirect_url),
+  }),
   component: Page,
   head: () => ({
     meta: [{ title: "Sign in · Zevium" }],
@@ -10,9 +15,15 @@ export const Route = createFileRoute("/sign-in/$")({
 });
 
 function Page() {
+  const { redirect_url: fallbackRedirectUrl } = Route.useSearch();
+
   return (
     <div className="flex min-h-svh items-center justify-center p-4">
-      <SignIn appearance={{ theme: shadcn }} />
+      <SignIn
+        appearance={{ theme: shadcn }}
+        fallbackRedirectUrl={fallbackRedirectUrl}
+        forceRedirectUrl={fallbackRedirectUrl}
+      />
     </div>
   );
 }

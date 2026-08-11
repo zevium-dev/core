@@ -16,19 +16,26 @@ import { AppHeader } from "#/components/app-header";
 import { AppSidebar } from "#/components/app-sidebar";
 import { SidebarInset, SidebarProvider } from "#/components/ui/sidebar";
 import { useEnsureMirror } from "#/hooks/use-ensure-mirror";
+import { safeAppReturnPath } from "#/lib/auth-redirect";
 import { readClientClerkAuth } from "#/lib/clerk-client";
 import { requireAuth } from "#/lib/auth-session";
 import type { RouterContext } from "#/router";
 
 export const Route = createFileRoute("/app")({
-  beforeLoad: async ({ context }) => {
+  beforeLoad: async ({ context, location }) => {
+    const signInRedirect = () =>
+      redirect({
+        to: "/sign-in/$",
+        search: { redirect_url: safeAppReturnPath(location.href) },
+      });
+
     // Client: gate from live Clerk / cached context — no server fn.
     if (typeof window !== "undefined") {
       const { userId } = readClientClerkAuth({
         userId: (context as RouterContext).userId,
       });
       if (!userId) {
-        throw redirect({ to: "/sign-in/$" });
+        throw signInRedirect();
       }
       return;
     }
@@ -39,9 +46,9 @@ export const Route = createFileRoute("/app")({
     } catch (err) {
       // requireAuth throws redirect; rethrow known redirects, else force sign-in
       if (err && typeof err === "object" && "to" in err) {
-        throw err;
+        throw signInRedirect();
       }
-      throw redirect({ to: "/sign-in/$" });
+      throw signInRedirect();
     }
   },
   component: AppLayout,

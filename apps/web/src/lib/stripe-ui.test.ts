@@ -34,6 +34,7 @@ describe("checkoutDisplay", () => {
 
   it("treats unknown redirect status as processing rather than a client-side grant", () => {
     expect(checkoutStateFromStatus("paid")).toBe("succeeded");
+    expect(checkoutStateFromStatus("complete")).toBe("succeeded");
     expect(checkoutStateFromStatus("payment_failed")).toBe("failed");
     expect(checkoutStateFromStatus("created")).toBe("processing");
   });

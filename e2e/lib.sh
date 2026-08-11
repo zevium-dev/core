@@ -37,9 +37,11 @@ fail() {
   ts="$(date +%Y%m%d-%H%M%S)"
   slug="$(printf '%s' "$E2E_STEP" | tr -cs '[:alnum:]._-' '_' | cut -c1-80)"
   shot="$E2E_ARTIFACTS/${ts}-${slug}.png"
-  ab screenshot "$shot" >/dev/null 2>&1 || true
-  ab get url >"$E2E_ARTIFACTS/${ts}-${slug}.url.txt" 2>/dev/null || true
-  ab snapshot >"$E2E_ARTIFACTS/${ts}-${slug}.snapshot.txt" 2>/dev/null || true
+  timeout 10s agent-browser screenshot "$shot" >/dev/null 2>&1 || true
+  timeout 10s agent-browser get url \
+    >"$E2E_ARTIFACTS/${ts}-${slug}.url.txt" 2>/dev/null || true
+  timeout 10s agent-browser snapshot \
+    >"$E2E_ARTIFACTS/${ts}-${slug}.snapshot.txt" 2>/dev/null || true
   printf '[e2e] FAIL: %s\n' "$msg" >&2
   printf '[e2e] screenshot: %s\n' "$shot" >&2
   exit 1
@@ -438,7 +440,7 @@ sign_in() {
 }
 
 close_browser() {
-  ab close >/dev/null 2>&1 || true
+  timeout 10s agent-browser close >/dev/null 2>&1 || true
 }
 
 # Unique-ish stamp for project names/slugs.

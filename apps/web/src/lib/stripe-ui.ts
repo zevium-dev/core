@@ -45,6 +45,7 @@ export function checkoutStateFromStatus(status: string): CheckoutState {
   switch (status) {
     case "succeeded":
     case "paid":
+    case "complete":
     case "completed":
       return "succeeded";
     case "failed":
