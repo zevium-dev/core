@@ -44,6 +44,8 @@ describe("checkoutDisplay", () => {
     expect(paymentStatusLabel("failed")).toBe("Failed");
     expect(paymentStatusLabel("refunded")).toBe("Refunded");
     expect(paymentStatusLabel("disputed")).toBe("Disputed");
+    expect(paymentStatusLabel("dispute_won")).toBe("Dispute won");
+    expect(paymentStatusLabel("dispute_lost")).toBe("Dispute lost");
   });
 
   it("disables duplicate pack selection while one hosted Checkout redirect starts", () => {

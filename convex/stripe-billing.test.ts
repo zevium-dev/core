@@ -300,6 +300,173 @@ describe("Stripe Checkout control plane", () => {
     expect(result.payment).toMatchObject({
       status: "disputed",
       reversedCredits: 100,
+      disputedCredits: 100,
     });
+  });
+
+  it("projects won and lost dispute closures and clears the payment lock", async () => {
+    const t = convexTest(schema, modules);
+    const seed = await t.run(async (ctx) => {
+      const organizationId = await ctx.db.insert("organizations", {
+        clerkOrgId: "org_dispute_won",
+        name: "Won dispute org",
+        slug: "won-dispute-org",
+      });
+      await ctx.db.insert("wallets", {
+        organizationId,
+        balance: -80,
+        sequence: 2,
+      });
+      const intentId = await ctx.db.insert("checkoutIntents", {
+        organizationId,
+        packId: "pack_10",
+        stripePriceId: "price_dispute_won",
+        amount: 1000,
+        currency: "usd",
+        credits: 100,
+        stripeCheckoutSessionId: "cs_dispute_won",
+        status: "complete",
+        createdAt: 1,
+        updatedAt: 1,
+        expiresAt: 2,
+      });
+      const paymentId = await ctx.db.insert("payments", {
+        organizationId,
+        checkoutIntentId: intentId,
+        stripeCheckoutSessionId: "cs_dispute_won",
+        stripePaymentIntentId: "pi_dispute_won",
+        stripeChargeId: "ch_dispute_won",
+        amount: 1000,
+        currency: "usd",
+        grantedCredits: 100,
+        reversedCredits: 100,
+        disputedCredits: 80,
+        status: "disputed",
+        createdAt: 1,
+        updatedAt: 1,
+      });
+      await ctx.db.insert("organizationPayments", {
+        organizationId,
+        stripeCustomerId: "cus_dispute_won",
+        detailsSubmitted: false,
+        chargesEnabled: false,
+        payoutsEnabled: false,
+        disabledReason: "Payment dispute under review",
+        requirements: [],
+        updatedAt: 1,
+      });
+      return { organizationId, paymentId };
+    });
+
+    const closure = await t.query(internal.billing.prepareDisputeClosure, {
+      stripeDisputeId: "dp_won",
+      stripeChargeId: "ch_dispute_won",
+      outcome: "won",
+    });
+    if (closure.kind !== "dispute_closure") {
+      throw new Error("Dispute payment was not found");
+    }
+    await t.mutation(internal.wallets.grantPaymentCredits, {
+      organizationId: closure.organizationId,
+      paymentId: closure.paymentId,
+      amount: closure.creditsToRestore,
+      refId: closure.refId,
+    });
+    await t.mutation(internal.billing.finalizeDisputeClosure, {
+      paymentId: closure.paymentId,
+      outcome: closure.outcome,
+      creditsRestored: closure.creditsToRestore,
+    });
+
+    const result = await t.run(async (ctx) => ({
+      wallet: await ctx.db
+        .query("wallets")
+        .withIndex("by_organization", (q) =>
+          q.eq("organizationId", seed.organizationId),
+        )
+        .unique(),
+      payment: await ctx.db.get(seed.paymentId),
+      profile: await ctx.db
+        .query("organizationPayments")
+        .withIndex("by_organization", (q) =>
+          q.eq("organizationId", seed.organizationId),
+        )
+        .unique(),
+    }));
+    expect(result.wallet).toMatchObject({ balance: 0, sequence: 3 });
+    expect(result.payment).toMatchObject({
+      status: "dispute_won",
+      reversedCredits: 20,
+      disputedCredits: 0,
+    });
+    expect(result.profile?.disabledReason).toBeUndefined();
+    await t.mutation(internal.billing.upsertPaidPayment, {
+      stripeCheckoutSessionId: "cs_dispute_won",
+      stripePaymentIntentId: "pi_dispute_won",
+      stripeChargeId: "ch_dispute_won",
+    });
+    expect(
+      await t.run(async (ctx) => ctx.db.get(seed.paymentId)),
+    ).toMatchObject({ status: "dispute_won" });
+
+    const lostPaymentId = await t.run(async (ctx) => {
+      const paymentId = await ctx.db.insert("payments", {
+        organizationId: seed.organizationId,
+        checkoutIntentId: result.payment!.checkoutIntentId,
+        stripeCheckoutSessionId: "cs_dispute_lost",
+        stripePaymentIntentId: "pi_dispute_lost",
+        stripeChargeId: "ch_dispute_lost",
+        amount: 1000,
+        currency: "usd",
+        grantedCredits: 100,
+        reversedCredits: 100,
+        disputedCredits: 100,
+        status: "disputed",
+        createdAt: 2,
+        updatedAt: 2,
+      });
+      if (result.profile !== null) {
+        await ctx.db.patch(result.profile._id, {
+          disabledReason: "Payment dispute under review",
+        });
+      }
+      return paymentId;
+    });
+    const lost = await t.query(internal.billing.prepareDisputeClosure, {
+      stripeDisputeId: "dp_lost",
+      stripeChargeId: "ch_dispute_lost",
+      outcome: "lost",
+    });
+    if (lost.kind !== "dispute_closure") {
+      throw new Error("Lost dispute payment was not found");
+    }
+    expect(lost.creditsToRestore).toBe(0);
+    await t.mutation(internal.billing.finalizeDisputeClosure, {
+      paymentId: lost.paymentId,
+      outcome: lost.outcome,
+      creditsRestored: lost.creditsToRestore,
+    });
+    const lostResult = await t.run(async (ctx) => ({
+      payment: await ctx.db.get(lostPaymentId),
+      wallet: await ctx.db
+        .query("wallets")
+        .withIndex("by_organization", (q) =>
+          q.eq("organizationId", seed.organizationId),
+        )
+        .unique(),
+      profile: await ctx.db
+        .query("organizationPayments")
+        .withIndex("by_organization", (q) =>
+          q.eq("organizationId", seed.organizationId),
+        )
+        .unique(),
+    }));
+    expect(lostResult.payment).toMatchObject({
+      status: "dispute_lost",
+      reversedCredits: 100,
+      disputedCredits: 100,
+    });
+    expect(lostResult.wallet).toMatchObject({ balance: 0, sequence: 3 });
+    expect(lostResult.profile?.disabledReason).toBeUndefined();
   });
 });
