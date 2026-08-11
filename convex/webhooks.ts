@@ -1,7 +1,6 @@
 import { paginationOptsValidator } from "convex/server";
 import { v } from "convex/values";
 import {
-  internalAction,
   internalMutation,
   internalQuery,
   mutation,
@@ -12,7 +11,9 @@ import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import { requireProjectMember } from "./lib/auth";
 import { createNotification } from "./lib/notifications";
-import { postWebhook } from "./lib/webhookDelivery";
+import { validateWebhookUrl } from "./lib/webhookDelivery";
+
+export { validateWebhookUrl } from "./lib/webhookDelivery";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -27,21 +28,6 @@ export const WEBHOOK_BACKOFF_SECONDS = [60, 300] as const;
 // ---------------------------------------------------------------------------
 // Validation helpers
 // ---------------------------------------------------------------------------
-
-/** URL must be https; http://localhost allowed for dev. */
-export function validateWebhookUrl(url: string): boolean {
-  let parsed: URL;
-  try {
-    parsed = new URL(url);
-  } catch {
-    return false;
-  }
-  if (parsed.protocol === "https:") return true;
-  if (parsed.protocol === "http:" && parsed.hostname === "localhost") {
-    return true;
-  }
-  return false;
-}
 
 /** Generate a random signing secret. */
 function generateSecret(): string {
@@ -80,9 +66,13 @@ export async function fireWebhookEvent(
     payload,
   });
 
-  await ctx.scheduler.runAfter(0, internal.webhooks.deliverWebhook, {
-    deliveryId,
-  });
+  await ctx.scheduler.runAfter(
+    0,
+    internal.webhookDeliveryAction.deliverWebhook,
+    {
+      deliveryId,
+    },
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -104,7 +94,7 @@ export const upsertEndpoint = mutation({
 
     const url = args.url.trim();
     if (!validateWebhookUrl(url)) {
-      throw new Error("URL must be https (http://localhost allowed for dev)");
+      throw new Error("URL must be a public https endpoint");
     }
 
     const existing = await ctx.db
@@ -258,7 +248,7 @@ export const recordDeliveryAttempt = internalMutation({
       const backoffSec = WEBHOOK_BACKOFF_SECONDS[backoffIndex] ?? 300;
       await ctx.scheduler.runAfter(
         backoffSec * 1000,
-        internal.webhooks.deliverWebhook,
+        internal.webhookDeliveryAction.deliverWebhook,
         { deliveryId: args.deliveryId },
       );
       return;
@@ -284,54 +274,6 @@ export const recordDeliveryAttempt = internalMutation({
       title: "Webhook delivery failed",
       body: `Delivery of "${delivery.event}" failed after ${nextAttempts} attempt${nextAttempts === 1 ? "" : "s"}${args.error !== undefined ? `: ${args.error}` : ""}.`,
       refId: `webhook_failed:${args.deliveryId}`,
-    });
-  },
-});
-
-/**
- * Delivery action: load delivery + endpoint, POST webhook, record result.
- * Scheduled by fireWebhookEvent (initial) and recordDeliveryAttempt (retries).
- */
-export const deliverWebhook = internalAction({
-  args: { deliveryId: v.id("webhookDeliveries") },
-  handler: async (ctx, args): Promise<void> => {
-    const info = await ctx.runQuery(internal.webhooks.getDeliveryForAction, {
-      deliveryId: args.deliveryId,
-    });
-    if (info === null) return;
-
-    if (!info.active) {
-      await ctx.runMutation(internal.webhooks.recordDeliveryAttempt, {
-        deliveryId: args.deliveryId,
-        ok: false,
-        error: "Endpoint inactive",
-      });
-      return;
-    }
-
-    const parsed = JSON.parse(info.payload) as {
-      event: string;
-      data: unknown;
-      timestamp: number;
-    };
-
-    const result = await postWebhook({
-      url: info.url,
-      secret: info.secret,
-      event: parsed.event,
-      data: parsed.data,
-      timestamp: parsed.timestamp,
-      deliveryId: args.deliveryId,
-      currentStatus: info.status,
-    });
-
-    if (result.skipped) return;
-
-    await ctx.runMutation(internal.webhooks.recordDeliveryAttempt, {
-      deliveryId: args.deliveryId,
-      ok: result.ok,
-      error: result.error,
-      retryable: result.retryable,
     });
   },
 });
