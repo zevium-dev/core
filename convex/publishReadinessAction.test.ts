@@ -3,6 +3,7 @@ import {
   isPublicAddress,
   isPublicIpv4,
   isPublicIpv6,
+  pinnedLookupResult,
   probePublicHttps,
   resolveSafeHttpsUrl,
 } from "./qualityProbeAction";
@@ -88,6 +89,15 @@ describe("credential-free upstream SSRF guard", () => {
     );
     expect(result.url.hostname).toBe("example.com");
     expect(result.addresses).toEqual([{ address: "93.184.216.34", family: 4 }]);
+    expect(pinnedLookupResult(result.addresses[0]!, true)).toEqual({
+      all: true,
+      addresses: [{ address: "93.184.216.34", family: 4 }],
+    });
+    expect(pinnedLookupResult(result.addresses[0]!, false)).toEqual({
+      all: false,
+      address: "93.184.216.34",
+      family: 4,
+    });
   });
 
   it("pins vetted DNS and revalidates every redirect before another socket", async () => {

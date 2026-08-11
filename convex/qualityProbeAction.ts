@@ -30,6 +30,20 @@ export type ProbeDependencies = {
   timeoutMs?: number;
 };
 
+export type PinnedLookupResult =
+  | { all: true; addresses: LookupAddress[] }
+  | { all: false; address: string; family: number };
+
+/** Node 20+ may request all addresses even from a custom lookup callback. */
+export function pinnedLookupResult(
+  pinned: LookupAddress,
+  all: boolean,
+): PinnedLookupResult {
+  return all
+    ? { all: true, addresses: [pinned] }
+    : { all: false, address: pinned.address, family: pinned.family };
+}
+
 export type SafeProbeResult = {
   outcome: QualityProbeOutcome;
   statusCode?: number;
@@ -201,8 +215,13 @@ function requestPinnedHead(
           isIP(url.hostname.replace(/^\[|\]$/g, "")) === 0
             ? url.hostname
             : undefined,
-        lookup: (_hostname, _options, callback) => {
-          callback(null, pinned.address, pinned.family);
+        lookup: (_hostname, options, callback) => {
+          const result = pinnedLookupResult(pinned, options.all === true);
+          if (result.all) {
+            callback(null, result.addresses);
+          } else {
+            callback(null, result.address, result.family);
+          }
         },
       },
       (response) => {
