@@ -418,7 +418,6 @@ export const getPublishedForGatewayInternal = internalQuery({
       .withIndex("by_org_slug", (q) =>
         q.eq("organizationId", org._id).eq("slug", args.projectSlug),
       )
-      .filter((q) => q.eq(q.field("visibility"), "public"))
       .unique();
     if (project === null || project.status !== "published") return null;
 

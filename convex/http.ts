@@ -98,6 +98,11 @@ http.route({
         });
         break;
       }
+      case "user.deleted":
+        await ctx.runMutation(internal.users.deleteFromClerk, {
+          clerkUserId: (event.data as ClerkUserEventData).id,
+        });
+        break;
       default:
         break;
     }
