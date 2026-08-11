@@ -20,6 +20,16 @@ import { cn } from "#/lib/utils";
 
 import { JsonCodeEditor } from "./json-code-editor";
 
+const PUBLISHED_AT_FORMATTER = new Intl.DateTimeFormat("en-US", {
+  year: "numeric",
+  month: "short",
+  day: "numeric",
+  hour: "numeric",
+  minute: "2-digit",
+  timeZone: "UTC",
+  timeZoneName: "short",
+});
+
 export type VersionDialogProps = {
   versionId: Id<"specVersions"> | null;
   /** Current SAVED draft — diff baseline target. */
@@ -97,7 +107,7 @@ function VersionDialogBody({
       <DialogHeader>
         <DialogTitle className="font-mono">v{data.version}</DialogTitle>
         <DialogDescription>
-          Published {new Date(data.publishedAt).toLocaleString()}.
+          Published {PUBLISHED_AT_FORMATTER.format(data.publishedAt)}.
         </DialogDescription>
       </DialogHeader>
 

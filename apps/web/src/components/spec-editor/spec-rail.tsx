@@ -30,6 +30,7 @@ import {
   DropdownMenuTrigger,
 } from "#/components/ui/dropdown-menu";
 import { Label } from "#/components/ui/label";
+import { Textarea } from "#/components/ui/textarea";
 import { api } from "#/lib/convex-api";
 import type { Id } from "#/lib/convex-data-model";
 import { humanError } from "#/lib/human-error";
@@ -59,6 +60,12 @@ export type SpecRailEndpointsProps = {
 type EndpointInputValue = { cost: string; freeTier: string };
 
 const PRICING_DEBOUNCE_MS = 300;
+const VERSION_DATE_FORMATTER = new Intl.DateTimeFormat("en-US", {
+  year: "numeric",
+  month: "short",
+  day: "numeric",
+  timeZone: "UTC",
+});
 
 function endpointKey(method: string, path: string): string {
   return `${method}:${path}`;
@@ -356,7 +363,6 @@ export function SpecRailVersions({
       message?: string;
     }) => deprecateMut(input),
     onSuccess: async () => {
-      toast.success("Version deprecated");
       setDeprecateTarget(null);
       await invalidateVersions();
     },
@@ -368,7 +374,6 @@ export function SpecRailVersions({
     mutationFn: (versionId: Id<"specVersions">) =>
       undeprecateMut({ versionId }),
     onSuccess: async () => {
-      toast.success("Version restored");
       setUndeprecateTarget(null);
       await invalidateVersions();
     },
@@ -470,7 +475,7 @@ function VersionRow({
           ) : null}
         </button>
         <span className="shrink-0 text-xs text-muted-foreground">
-          {new Date(version.publishedAt).toLocaleDateString()}
+          {VERSION_DATE_FORMATTER.format(version.publishedAt)}
         </span>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -569,7 +574,7 @@ function DeprecateDialog({
           </div>
           <div className="space-y-2">
             <Label htmlFor="deprecate-message">Message (optional)</Label>
-            <textarea
+            <Textarea
               id="deprecate-message"
               value={message}
               onChange={(e) => setMessage(e.target.value)}
@@ -577,7 +582,7 @@ function DeprecateDialog({
               rows={3}
               disabled={pending}
               placeholder="Migration guidance or replacement version."
-              className="flex min-h-20 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs transition-[color,box-shadow] outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50"
+              className="min-h-20"
             />
           </div>
         </div>
