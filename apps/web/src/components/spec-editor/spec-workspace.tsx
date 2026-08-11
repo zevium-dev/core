@@ -135,16 +135,6 @@ export function SpecWorkspace({
   );
   const [makePublicOpen, setMakePublicOpen] = useState(false);
   const [connectionResult, setConnectionResult] = useState<{
-    status:
-      | "ok"
-      | "auth_rejected"
-      | "reachable_unconfirmed"
-      | "blocked_target"
-      | "timeout"
-      | "unreachable"
-      | "missing_server";
-    statusCode?: number;
-    latencyMs?: number;
     message: string;
   } | null>(null);
   const [versionDialogId, setVersionDialogId] =
@@ -369,7 +359,7 @@ export function SpecWorkspace({
           err,
           "Could not test the upstream connection",
         );
-        setConnectionResult({ status: "unreachable", message });
+        setConnectionResult({ message });
         toast.error(message);
       },
     });
@@ -478,31 +468,14 @@ export function SpecWorkspace({
       detail:
         connectionResult?.message ??
         (readinessCurrent
-          ? "Saved passing connection test is current."
+          ? "Saved credential-free reachability test is current."
           : persistedReadiness.data?.reason === "expired"
             ? "Saved passing test expired. Run it again."
             : persistedReadiness.data?.reason === "draft_changed"
               ? "Saved draft changed after the passing test. Run it again."
-              : persistedReadiness.data?.reason === "credentials_changed"
-                ? "Credentials changed after the passing test. Run it again."
-                : persistedReadiness.data?.readiness
-                  ? "Saved test is no longer valid. Run it again."
-                  : "Run a secure connection test against servers[0].url."),
-    },
-    {
-      label: "Publisher credentials (when required)",
-      complete:
-        connectionResult === null ||
-        (connectionResult.status === "ok" &&
-          connectionResult.statusCode !== 401 &&
-          connectionResult.statusCode !== 403),
-      detail:
-        connectionResult === null
-          ? "Keyless upstreams can publish without credentials. Add credentials only when the upstream requires them."
-          : connectionResult.statusCode === 401 ||
-              connectionResult?.statusCode === 403
-            ? "Configured credentials were rejected. Replace them in Settings, then test again."
-            : "Keyless upstreams can publish without credentials. Add credentials only when the upstream requires them.",
+              : persistedReadiness.data?.readiness
+                ? "Saved test is no longer valid. Run it again."
+                : "Run a credential-free reachability test against servers[0].url. Saved publisher credentials are never sent."),
     },
     {
       label: "Pricing",
@@ -598,7 +571,7 @@ export function SpecWorkspace({
               hasClientErrors
             }
           >
-            {connectionPending ? "Testing…" : "Test connection"}
+            {connectionPending ? "Testing…" : "Test reachability"}
           </Button>
         </div>
         <ul className="mt-3 flex flex-col gap-2">
@@ -647,7 +620,7 @@ export function SpecWorkspace({
               dirty || savePending || hasClientErrors || !readinessCurrent
             }
           >
-            {readinessCurrent ? "Publish" : "Test connection to publish"}
+            {readinessCurrent ? "Publish" : "Test reachability to publish"}
           </Button>
         </DialogTrigger>
         <DialogContent>
