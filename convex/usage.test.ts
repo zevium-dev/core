@@ -226,6 +226,48 @@ describe("usage.listForOrg", () => {
     expect(monthOnly.page.every((e) => e.at >= seed.monthStart)).toBe(true);
     expect(monthOnly.page.some((e) => e.credits === 999)).toBe(false);
   });
+
+  it("applies combined filters before pagination with stable, gap-free cursors", async () => {
+    const t = convexTest(schema, modules);
+    const seed = await seedWorld(t);
+    await t.run(async (ctx) => {
+      for (let index = 0; index < 8; index += 1) {
+        await ctx.db.insert("usageEvents", {
+          organizationId: seed.consumerOrgId,
+          projectId: index % 2 === 0 ? seed.projectAId : seed.projectBId,
+          endpoint: `/interleaved/${index}`,
+          method: "GET",
+          credits: index,
+          status: 200,
+          latencyMs: index,
+          keyId: index % 3 === 0 ? "key_target" : "key_noise",
+          at: seed.inMonth + 100 + index,
+        });
+      }
+    });
+    const consumer = asMember(t, "org_consumer");
+    const seen: string[] = [];
+    let cursor: string | null = null;
+    let done = false;
+    while (!done) {
+      const result = await consumer.query(api.usage.listForOrg, {
+        orgSlug: "consumer-co",
+        projectId: seed.projectAId,
+        keyId: "key_target",
+        paginationOpts: { numItems: 1, cursor },
+      });
+      expect(result.page).toHaveLength(1);
+      expect(result.page[0]).toMatchObject({
+        projectId: seed.projectAId,
+        keyId: "key_target",
+      });
+      seen.push(result.page[0]!.endpoint);
+      cursor = result.continueCursor;
+      done = result.isDone;
+    }
+    expect(seen).toEqual(["/interleaved/6", "/interleaved/0"]);
+    expect(new Set(seen).size).toBe(seen.length);
+  });
 });
 
 describe("billing.cycleBreakdown", () => {

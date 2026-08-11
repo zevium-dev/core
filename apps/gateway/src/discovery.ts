@@ -10,7 +10,7 @@ import {
   type ParsedOpenApiSpec,
 } from "@zevium/shared";
 import { listAllPublic, type CatalogueSource } from "./catalogue-source";
-import type { SpecSource } from "./spec-source";
+import type { PublicSpecSource } from "./spec-source";
 
 const HTTP_METHODS: readonly HttpMethod[] = [
   "get",
@@ -46,7 +46,7 @@ export type DiscoveryIndex = {
 
 export type DiscoveryDeps = {
   catalogueSource: CatalogueSource;
-  specSource: SpecSource;
+  specSource: PublicSpecSource;
   /** Origin used to build gatewayBaseUrl, e.g. https://gateway.zevium.dev */
   gatewayOrigin: string;
 };

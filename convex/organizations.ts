@@ -27,25 +27,34 @@ async function ensureWallet(
   });
 }
 
-export const getBySlug = query({
-  args: { slug: v.string() },
-  handler: async (ctx, args): Promise<Doc<"organizations"> | null> => {
-    return await ctx.db
-      .query("organizations")
-      .withIndex("by_slug", (q) => q.eq("slug", args.slug))
-      .unique();
-  },
-});
+export type PublicOrganization = {
+  name: string;
+  publisherHandle: string;
+  imageUrl: string | undefined;
+};
 
 export const getByPublicHandle = query({
   args: { handle: v.string() },
-  handler: async (ctx, args): Promise<Doc<"organizations"> | null> =>
-    await ctx.db
+  handler: async (ctx, args): Promise<PublicOrganization | null> => {
+    const org = await ctx.db
       .query("organizations")
       .withIndex("by_public_handle", (q) =>
         q.eq("publicHandle", args.handle.trim().toLowerCase()),
       )
-      .unique(),
+      .unique();
+    if (
+      org === null ||
+      org.archivedAt !== undefined ||
+      org.publicHandle === undefined
+    ) {
+      return null;
+    }
+    return {
+      name: org.name,
+      publisherHandle: org.publicHandle,
+      imageUrl: org.imageUrl,
+    };
+  },
 });
 
 /** Auth-scoped availability probe; never exposes another organization record. */
@@ -59,6 +68,9 @@ export const checkPublicHandleAvailability = query({
       .query("organizations")
       .withIndex("by_clerk_org", (q) => q.eq("clerkOrgId", claims.orgId!))
       .unique();
+    if (current?.archivedAt !== undefined) {
+      throw new Error("Organization is archived");
+    }
     const existing = await ctx.db
       .query("organizations")
       .withIndex("by_public_handle", (q) => q.eq("publicHandle", handle))
@@ -69,7 +81,7 @@ export const checkPublicHandleAvailability = query({
 
 export const listMine = query({
   args: {},
-  handler: async (ctx): Promise<Doc<"organizations">[]> => {
+  handler: async (ctx): Promise<PublicOrganization[]> => {
     const claims = await requireIdentity(ctx);
     if (claims.orgId === undefined) {
       return [];
@@ -78,7 +90,20 @@ export const listMine = query({
       .query("organizations")
       .withIndex("by_clerk_org", (q) => q.eq("clerkOrgId", claims.orgId!))
       .unique();
-    return org === null ? [] : [org];
+    if (
+      org === null ||
+      org.archivedAt !== undefined ||
+      org.publicHandle === undefined
+    ) {
+      return [];
+    }
+    return [
+      {
+        name: org.name,
+        publisherHandle: org.publicHandle,
+        imageUrl: org.imageUrl,
+      },
+    ];
   },
 });
 
@@ -107,6 +132,11 @@ export const upsertFromClerk = internalMutation({
       return organizationId;
     }
 
+    if (existing.archivedAt !== undefined) {
+      // A late/out-of-order update must never resurrect a Clerk-deleted org.
+      return existing._id;
+    }
+
     await ctx.db.patch(existing._id, {
       name: args.name,
       slug: args.slug,
@@ -120,7 +150,7 @@ export const upsertFromClerk = internalMutation({
   },
 });
 
-export const deleteFromClerk = internalMutation({
+export const archiveFromClerk = internalMutation({
   args: { clerkOrgId: v.string() },
   handler: async (ctx, args): Promise<void> => {
     const existing = await ctx.db
@@ -131,22 +161,19 @@ export const deleteFromClerk = internalMutation({
       return;
     }
 
-    const wallet = await ctx.db
-      .query("wallets")
-      .withIndex("by_organization", (q) => q.eq("organizationId", existing._id))
-      .unique();
-    if (wallet !== null) {
-      const entries = await ctx.db
-        .query("walletEntries")
-        .withIndex("by_wallet", (q) => q.eq("walletId", wallet._id))
-        .collect();
-      for (const entry of entries) {
-        await ctx.db.delete(entry._id);
-      }
-      await ctx.db.delete(wallet._id);
+    if (existing.archivedAt === undefined) {
+      await ctx.db.patch(existing._id, { archivedAt: Date.now() });
     }
-
-    await ctx.db.delete(existing._id);
+    const settings = await ctx.db
+      .query("keySettings")
+      .withIndex("by_org", (q) => q.eq("clerkOrgId", args.clerkOrgId))
+      .collect();
+    for (const setting of settings) {
+      await ctx.db.patch(setting._id, {
+        disabled: true,
+        updatedAt: Date.now(),
+      });
+    }
   },
 });
 
@@ -158,9 +185,6 @@ export const deleteFromClerk = internalMutation({
 export const ensureOrganization = mutation({
   args: {
     clerkOrgId: v.string(),
-    name: v.string(),
-    slug: v.string(),
-    imageUrl: v.optional(v.string()),
   },
   handler: async (ctx, args): Promise<Doc<"organizations">> => {
     const claims = await requireIdentity(ctx);
@@ -174,12 +198,17 @@ export const ensureOrganization = mutation({
       .unique();
 
     if (existing === null) {
+      const signedSlug = claims.orgSlug?.trim().toLowerCase();
+      if (signedSlug === undefined || !isValidSlug(signedSlug)) {
+        throw new Error(
+          "Active organization is awaiting Clerk synchronization",
+        );
+      }
       const organizationId = await ctx.db.insert("organizations", {
         clerkOrgId: args.clerkOrgId,
-        name: args.name,
-        slug: args.slug,
-        publicHandle: args.slug,
-        imageUrl: args.imageUrl,
+        name: signedSlug,
+        slug: signedSlug,
+        publicHandle: signedSlug,
       });
       await ensureWallet(ctx, organizationId);
       const created = await ctx.db.get(organizationId);
@@ -188,21 +217,11 @@ export const ensureOrganization = mutation({
       }
       return created;
     }
-
-    await ctx.db.patch(existing._id, {
-      name: args.name,
-      slug: args.slug,
-      ...(existing.publicHandle === undefined
-        ? { publicHandle: args.slug }
-        : {}),
-      imageUrl: args.imageUrl,
-    });
-    await ensureWallet(ctx, existing._id);
-    const updated = await ctx.db.get(existing._id);
-    if (updated === null) {
-      throw new Error("Failed to load updated organization");
+    if (existing.archivedAt !== undefined) {
+      throw new Error("Organization is archived");
     }
-    return updated;
+    await ensureWallet(ctx, existing._id);
+    return existing;
   },
 });
 
@@ -222,6 +241,9 @@ export const setPublicHandle = mutation({
       .withIndex("by_clerk_org", (q) => q.eq("clerkOrgId", claims.orgId!))
       .unique();
     if (!organization) throw new Error("Organization not found");
+    if (organization.archivedAt !== undefined) {
+      throw new Error("Organization is archived");
+    }
     const existing = await ctx.db
       .query("organizations")
       .withIndex("by_public_handle", (q) => q.eq("publicHandle", handle))

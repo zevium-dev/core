@@ -41,9 +41,6 @@ export function useEnsureMirror() {
       try {
         await convex.mutation(api.organizations.ensureOrganization, {
           clerkOrgId: organization.id,
-          name: organization.name,
-          slug,
-          imageUrl: organization.imageUrl,
         });
       } catch (err) {
         console.warn("[ensureOrganization] failed:", err);

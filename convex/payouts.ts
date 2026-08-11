@@ -127,7 +127,7 @@ export const getConnectProfileForActiveOrg = internalMutation({
       .query("organizations")
       .withIndex("by_clerk_org", (q) => q.eq("clerkOrgId", args.clerkOrgId))
       .unique();
-    if (organization === null)
+    if (organization === null || organization.archivedAt !== undefined)
       throw new Error("Active organization is not provisioned");
     let profile = await ctx.db
       .query("organizationPayments")
@@ -674,7 +674,7 @@ export const getPayoutState = query({
       .query("organizations")
       .withIndex("by_clerk_org", (q) => q.eq("clerkOrgId", claims.orgId!))
       .unique();
-    if (organization === null)
+    if (organization === null || organization.archivedAt !== undefined)
       throw new Error("Active organization is not provisioned");
     const profile = await ctx.db
       .query("organizationPayments")

@@ -330,8 +330,8 @@ export const getVersion = query({
 });
 
 /**
- * Public (no-auth) query for the gateway data plane.
- * Returns latest published immutable snapshot + org ids for wallet DO routing.
+ * Public immutable spec DTO for docs, discovery, and keyless mocks.
+ * Metering identifiers and Clerk identity stay behind gateway-spec httpAction.
  */
 export const getPublishedForGateway = query({
   args: {
@@ -344,13 +344,11 @@ export const getPublishedForGateway = query({
   ): Promise<{
     spec: string;
     version: string;
-    projectId: string;
-    organizationId: string;
-    clerkOrgId: string;
     visibility: Doc<"projects">["visibility"];
     deprecatedAt: number | undefined;
     sunsetAt: number | undefined;
     deprecationMessage: string | undefined;
+    retiredAt: number | undefined;
   } | null> => {
     const org = await getOrgByPublicHandle(ctx, args.publisherHandle);
     if (org === null) return null;
@@ -375,13 +373,12 @@ export const getPublishedForGateway = query({
     return {
       spec: latest.spec,
       version: latest.version,
-      projectId: project._id,
-      organizationId: org._id,
-      clerkOrgId: org.clerkOrgId,
       visibility: project.visibility,
-      deprecatedAt: latest.deprecatedAt,
-      sunsetAt: latest.sunsetAt,
-      deprecationMessage: latest.deprecationMessage,
+      deprecatedAt: project.deprecationStartedAt ?? latest.deprecatedAt,
+      sunsetAt: project.sunsetAt ?? latest.sunsetAt,
+      deprecationMessage:
+        project.deprecationMessage ?? latest.deprecationMessage,
+      retiredAt: project.retiredAt,
     };
   },
 });
@@ -409,6 +406,7 @@ export const getPublishedForGatewayInternal = internalQuery({
     deprecatedAt: number | undefined;
     sunsetAt: number | undefined;
     deprecationMessage: string | undefined;
+    retiredAt: number | undefined;
   } | null> => {
     const org = await getOrgByPublicHandle(ctx, args.publisherHandle);
     if (org === null) return null;
@@ -428,10 +426,15 @@ export const getPublishedForGatewayInternal = internalQuery({
       .first();
     if (latest === null) return null;
 
-    const upstreamHeaders = await ctx.db
-      .query("upstreamCredentials")
-      .withIndex("by_project", (q) => q.eq("projectId", project._id))
-      .collect();
+    const isPastSunset =
+      project.retiredAt !== undefined ||
+      (project.sunsetAt !== undefined && project.sunsetAt <= Date.now());
+    const upstreamHeaders = isPastSunset
+      ? []
+      : await ctx.db
+          .query("upstreamCredentials")
+          .withIndex("by_project", (q) => q.eq("projectId", project._id))
+          .collect();
 
     return {
       spec: latest.spec,
@@ -448,9 +451,11 @@ export const getPublishedForGatewayInternal = internalQuery({
           ]),
         ),
       ),
-      deprecatedAt: latest.deprecatedAt,
-      sunsetAt: latest.sunsetAt,
-      deprecationMessage: latest.deprecationMessage,
+      deprecatedAt: project.deprecationStartedAt ?? latest.deprecatedAt,
+      sunsetAt: project.sunsetAt ?? latest.sunsetAt,
+      deprecationMessage:
+        project.deprecationMessage ?? latest.deprecationMessage,
+      retiredAt: project.retiredAt,
     };
   },
 });

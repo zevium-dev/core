@@ -12,13 +12,13 @@ import {
   parseSpec,
 } from "@zevium/shared";
 import type { KeyVerifier } from "./key-verifier";
-import type { SpecSource } from "./spec-source";
+import type { PublicSpecSource } from "./spec-source";
 import { jsonError } from "./errors";
 
 export type MockDeps = {
   /** Unused since mock went keyless; kept so test deps stay uniform. */
   keyVerifier?: KeyVerifier;
-  specSource: SpecSource;
+  specSource: PublicSpecSource;
   idGenerator?: () => string;
 };
 

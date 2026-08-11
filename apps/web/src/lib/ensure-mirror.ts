@@ -1,4 +1,4 @@
-import { auth, clerkClient } from "@clerk/tanstack-react-start/server";
+import { auth } from "@clerk/tanstack-react-start/server";
 import { createServerFn } from "@tanstack/react-start";
 import { ConvexHttpClient } from "convex/browser";
 
@@ -89,27 +89,8 @@ export const ensureMirrorOnServer = createServerFn({ method: "GET" }).handler(
     }
 
     try {
-      let name = orgSlug;
-      let imageUrl: string | undefined;
-      try {
-        const org = await (
-          await clerkClient()
-        ).organizations.getOrganization({ organizationId: orgId });
-        if (typeof org.name === "string" && org.name.length > 0) {
-          name = org.name;
-        }
-        if (typeof org.imageUrl === "string" && org.imageUrl.length > 0) {
-          imageUrl = org.imageUrl;
-        }
-      } catch {
-        // Clerk lookup optional — slug is enough for mirror row.
-      }
-
       await client.mutation(api.organizations.ensureOrganization, {
         clerkOrgId: orgId,
-        name,
-        slug: orgSlug,
-        imageUrl,
       });
       return {
         userId,

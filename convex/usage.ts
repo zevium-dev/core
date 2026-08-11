@@ -20,7 +20,7 @@ export type UsageListItem = {
 
 /**
  * Paginated consumer call log for the org that paid (organizationId on events).
- * Index range: by_org_at. projectId/keyId filtered after the index scan.
+ * Every optional filter is part of the selected index before pagination.
  * Newest first.
  */
 export const listForOrg = query({
@@ -35,23 +35,73 @@ export const listForOrg = query({
   handler: async (ctx, args) => {
     const { org } = await requireOrgMemberBySlug(ctx, args.orgSlug);
 
-    const result = await ctx.db
-      .query("usageEvents")
-      .withIndex("by_org_at", (q) => {
-        const base = q.eq("organizationId", org._id);
-        if (args.since !== undefined && args.until !== undefined) {
-          return base.gte("at", args.since).lt("at", args.until);
-        }
-        if (args.since !== undefined) {
-          return base.gte("at", args.since);
-        }
-        if (args.until !== undefined) {
-          return base.lt("at", args.until);
-        }
-        return base;
-      })
-      .order("desc")
-      .paginate(args.paginationOpts);
+    const result =
+      args.projectId !== undefined && args.keyId !== undefined
+        ? await ctx.db
+            .query("usageEvents")
+            .withIndex("by_org_project_key_at", (q) => {
+              const base = q
+                .eq("organizationId", org._id)
+                .eq("projectId", args.projectId!)
+                .eq("keyId", args.keyId!);
+              if (args.since !== undefined && args.until !== undefined) {
+                return base.gte("at", args.since).lt("at", args.until);
+              }
+              if (args.since !== undefined) return base.gte("at", args.since);
+              if (args.until !== undefined) return base.lt("at", args.until);
+              return base;
+            })
+            .order("desc")
+            .paginate(args.paginationOpts)
+        : args.projectId !== undefined
+          ? await ctx.db
+              .query("usageEvents")
+              .withIndex("by_org_project_at", (q) => {
+                const base = q
+                  .eq("organizationId", org._id)
+                  .eq("projectId", args.projectId!);
+                if (args.since !== undefined && args.until !== undefined) {
+                  return base.gte("at", args.since).lt("at", args.until);
+                }
+                if (args.since !== undefined) return base.gte("at", args.since);
+                if (args.until !== undefined) return base.lt("at", args.until);
+                return base;
+              })
+              .order("desc")
+              .paginate(args.paginationOpts)
+          : args.keyId !== undefined
+            ? await ctx.db
+                .query("usageEvents")
+                .withIndex("by_org_key_at", (q) => {
+                  const base = q
+                    .eq("organizationId", org._id)
+                    .eq("keyId", args.keyId!);
+                  if (args.since !== undefined && args.until !== undefined) {
+                    return base.gte("at", args.since).lt("at", args.until);
+                  }
+                  if (args.since !== undefined)
+                    return base.gte("at", args.since);
+                  if (args.until !== undefined)
+                    return base.lt("at", args.until);
+                  return base;
+                })
+                .order("desc")
+                .paginate(args.paginationOpts)
+            : await ctx.db
+                .query("usageEvents")
+                .withIndex("by_org_at", (q) => {
+                  const base = q.eq("organizationId", org._id);
+                  if (args.since !== undefined && args.until !== undefined) {
+                    return base.gte("at", args.since).lt("at", args.until);
+                  }
+                  if (args.since !== undefined)
+                    return base.gte("at", args.since);
+                  if (args.until !== undefined)
+                    return base.lt("at", args.until);
+                  return base;
+                })
+                .order("desc")
+                .paginate(args.paginationOpts);
 
     const projectCache = new Map<
       Id<"projects">,
@@ -73,12 +123,6 @@ export const listForOrg = query({
 
     const page: UsageListItem[] = [];
     for (const event of result.page) {
-      if (args.projectId !== undefined && event.projectId !== args.projectId) {
-        continue;
-      }
-      if (args.keyId !== undefined && event.keyId !== args.keyId) {
-        continue;
-      }
       const project = await resolveProject(event.projectId);
       page.push({
         _id: event._id,

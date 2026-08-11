@@ -64,15 +64,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function asNumber(value: unknown): number | undefined {
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  if (typeof value === "string" && value.trim() !== "") {
-    const n = Number(value);
-    if (Number.isFinite(n)) return n;
-  }
-  return undefined;
-}
-
 /**
  * Parse an OpenAPI 3.x document from a JSON string into a minimal typed shape.
  * Throws on invalid JSON or non-object root.
@@ -174,33 +165,29 @@ export function matchOperation(
 }
 
 export function extractPricing(op: OpenApiOperation): EndpointPricing {
-  const costRaw = asNumber(op["x-zevium-cost"]);
+  const costRaw = op["x-zevium-cost"];
   let cost: number;
   if (costRaw === undefined) {
     // Unspecified → default credit cost. 0 is NOT defaulted — it is a valid
     // free-tier cost (free endpoint, publisher-funded free tier aside).
     cost = 1;
-  } else if (!Number.isInteger(costRaw)) {
-    throw new Error(
-      `x-zevium-cost must be an integer number of credits (got ${costRaw}); ` +
-        `fractional costs are not supported`,
-    );
-  } else if (costRaw < 0) {
+  } else if (!Number.isSafeInteger(costRaw)) {
+    throw new Error("x-zevium-cost must be a finite safe non-negative integer");
+  } else if (typeof costRaw !== "number" || costRaw < 0) {
     throw new Error(`x-zevium-cost must be non-negative (got ${costRaw})`);
   } else {
     cost = costRaw;
   }
 
-  const freeRaw = asNumber(op["x-zevium-free-tier"]);
+  const freeRaw = op["x-zevium-free-tier"];
   let freeTier: number | undefined;
   if (freeRaw !== undefined) {
-    if (!Number.isInteger(freeRaw)) {
+    if (!Number.isSafeInteger(freeRaw)) {
       throw new Error(
-        `x-zevium-free-tier must be an integer (got ${freeRaw}); ` +
-          `fractional values are not supported`,
+        "x-zevium-free-tier must be a finite safe non-negative integer",
       );
     }
-    if (freeRaw < 0) {
+    if (typeof freeRaw !== "number" || freeRaw < 0) {
       throw new Error(
         `x-zevium-free-tier must be non-negative (got ${freeRaw})`,
       );

@@ -105,6 +105,7 @@ async function installFixtures(opts: {
   visibility?: "public" | "private";
   deprecatedAt?: number;
   sunsetAt?: number;
+  retiredAt?: number;
   deprecationMessage?: string;
   upstreamHeaders?: Record<string, string>;
   spec?: string;
@@ -127,6 +128,7 @@ async function installFixtures(opts: {
     visibility: opts.visibility ?? "private",
     deprecatedAt: opts.deprecatedAt,
     sunsetAt: opts.sunsetAt,
+    retiredAt: opts.retiredAt,
     deprecationMessage: opts.deprecationMessage,
     upstreamHeaders: opts.upstreamHeaders,
   });
@@ -356,6 +358,38 @@ describe("gateway pipeline", () => {
     // Billing unaffected by deprecation signalling.
     const state = await walletStub(clerkOrgId).getState();
     expect(state.balance).toBe(48); // 50 - 2 (stream cost)
+  });
+
+  it("blocks at sunset with 410, truthful headers, and zero upstream traffic", async () => {
+    const clerkOrgId = "org_pipe_sunset";
+    const { fetchImpl, calls } = makeFetchMock(() => {
+      throw new Error("sunset request must not reach upstream");
+    });
+    const deprecatedAt = Date.now() - 8 * 86_400_000;
+    const sunsetAt = Date.now() - 1;
+    await installFixtures({
+      clerkOrgId,
+      fetchImpl,
+      credits: 50,
+      deprecatedAt,
+      sunsetAt,
+    });
+
+    const response = await gatewayFetch(
+      `/gateway/${ORG_SLUG}/${PROJECT_SLUG}/stream`,
+    );
+    expect(response.status).toBe(410);
+    await expect(response.json()).resolves.toMatchObject({
+      error: "sunset_reached",
+    });
+    expect(response.headers.get("Deprecation")).toBe(
+      `@${Math.floor(deprecatedAt / 1000)}`,
+    );
+    expect(response.headers.get("Sunset")).toBe(
+      new Date(sunsetAt).toUTCString(),
+    );
+    expect(calls).toHaveLength(0);
+    expect((await walletStub(clerkOrgId).getState()).balance).toBe(50);
   });
 
   it("insufficient credits → 402 and no upstream call", async () => {

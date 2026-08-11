@@ -296,9 +296,10 @@ export const fetchSearchListings = internalQuery({
       if (project === null) continue;
       if (project.visibility !== "public") continue;
       if (project.status !== "published") continue;
+      if (project.deprecationStartedAt !== undefined) continue;
 
       const org = await ctx.db.get(project.organizationId);
-      if (org === null) continue;
+      if (org === null || org.archivedAt !== undefined) continue;
       if (org.publicHandle === undefined || org.publicHandle === "") continue;
 
       const latest = await ctx.db
@@ -313,12 +314,10 @@ export const fetchSearchListings = internalQuery({
         latest === null ? null : summarizePublishedPricing(latest.spec);
 
       out.push({
-        projectId: project._id,
         name: project.name,
         slug: project.slug,
         description: project.description,
         tags: project.tags,
-        organizationId: org._id,
         orgName: org.name,
         publisherHandle: org.publicHandle,
         publishedAt: latest?.publishedAt ?? null,

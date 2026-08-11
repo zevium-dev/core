@@ -54,6 +54,12 @@ export function ProjectSettingsPanel({
   const queryClient = useQueryClient();
   const updateProject = useConvexMutation(api.projects.update);
   const removeProject = useConvexMutation(api.projects.remove);
+  const scheduleProjectRetirement = useConvexMutation(
+    api.projects.scheduleRetirement,
+  );
+  const cancelProjectRetirement = useConvexMutation(
+    api.projects.cancelRetirement,
+  );
 
   const [name, setName] = useState(project.name);
   const [description, setDescription] = useState(project.description ?? "");
@@ -61,6 +67,8 @@ export function ProjectSettingsPanel({
   const [visibilityOpen, setVisibilityOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState("");
+  const [sunsetDate, setSunsetDate] = useState("");
+  const [retirementMessage, setRetirementMessage] = useState("");
 
   // Keep local form in sync when realtime project doc changes (e.g. header visibility).
   useEffect(() => {
@@ -157,9 +165,41 @@ export function ProjectSettingsPanel({
     },
   });
 
+  const { mutate: scheduleRetirement, isPending: retirementPending } =
+    useMutation({
+      mutationFn: (input: { sunsetAt: number; message: string }) =>
+        scheduleProjectRetirement({ projectId: project._id, ...input }),
+      onSuccess: async () => {
+        toast.success("Project retirement scheduled");
+        setVisibilityOpen(false);
+        setSunsetDate("");
+        setRetirementMessage("");
+        await invalidateProjectQueries();
+      },
+      onError: (err: unknown) =>
+        toast.error(humanError(err, "Could not schedule retirement")),
+    });
+
+  const { mutate: cancelRetirement, isPending: cancelRetirementPending } =
+    useMutation({
+      mutationFn: () => cancelProjectRetirement({ projectId: project._id }),
+      onSuccess: async () => {
+        toast.success("Project retirement canceled");
+        await invalidateProjectQueries();
+      },
+      onError: (err: unknown) =>
+        toast.error(humanError(err, "Could not cancel retirement")),
+    });
+
   const nextVisibility = project.visibility === "public" ? "private" : "public";
   const tagsPreview = parseTagsInput(tagsText);
   const canDelete = deleteConfirm.trim() === project.slug;
+  const isPublishedPublic =
+    project.status === "published" && project.visibility === "public";
+  const retirementScheduled = project.deprecationStartedAt !== undefined;
+  const parsedSunset = Date.parse(`${sunsetDate}T23:59:59.999Z`);
+  const canScheduleRetirement =
+    Number.isFinite(parsedSunset) && retirementMessage.trim().length > 0;
 
   function onSaveDetails(e: FormEvent) {
     e.preventDefault();
@@ -269,7 +309,8 @@ export function ProjectSettingsPanel({
           <CardTitle>Visibility</CardTitle>
           <CardDescription>
             Public projects appear in the catalogue when published. Private
-            projects stay hidden.
+            projects stay hidden. Published projects require at least 7 days
+            notice before retirement.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -284,39 +325,110 @@ export function ProjectSettingsPanel({
               Status:{" "}
               <span className="font-medium capitalize">{project.status}</span>
             </p>
+            {retirementScheduled && project.sunsetAt !== undefined ? (
+              <p className="text-muted-foreground">
+                Sunset: {new Date(project.sunsetAt).toLocaleDateString()}
+              </p>
+            ) : null}
           </div>
-          <Dialog open={visibilityOpen} onOpenChange={setVisibilityOpen}>
-            <DialogTrigger asChild>
-              <Button variant="outline">
-                Make {nextVisibility === "public" ? "Public" : "Private"}
-              </Button>
-            </DialogTrigger>
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>Make project {nextVisibility}?</DialogTitle>
-                <DialogDescription>
-                  {nextVisibility === "public"
-                    ? "Public projects appear in the catalogue when published. Only published specs are listed."
-                    : "Private projects stay hidden from the public catalogue."}
-                </DialogDescription>
-              </DialogHeader>
-              <DialogFooter>
-                <Button
-                  variant="ghost"
-                  onClick={() => setVisibilityOpen(false)}
-                  disabled={visibilityPending}
-                >
-                  Cancel
+          {retirementScheduled ? (
+            <Button
+              variant="outline"
+              onClick={() => cancelRetirement()}
+              disabled={cancelRetirementPending}
+            >
+              {cancelRetirementPending ? "Canceling…" : "Cancel retirement"}
+            </Button>
+          ) : (
+            <Dialog open={visibilityOpen} onOpenChange={setVisibilityOpen}>
+              <DialogTrigger asChild>
+                <Button variant="outline">
+                  {isPublishedPublic
+                    ? "Schedule retirement"
+                    : `Make ${nextVisibility === "public" ? "Public" : "Private"}`}
                 </Button>
-                <Button
-                  onClick={() => setVisibility(nextVisibility)}
-                  disabled={visibilityPending}
-                >
-                  {visibilityPending ? "Updating…" : `Make ${nextVisibility}`}
-                </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>
+                    {isPublishedPublic
+                      ? "Schedule project retirement?"
+                      : `Make project ${nextVisibility}?`}
+                  </DialogTitle>
+                  <DialogDescription>
+                    {isPublishedPublic
+                      ? "New discovery freezes immediately. Existing gateway traffic continues through sunset, then stops."
+                      : nextVisibility === "public"
+                        ? "Public projects appear in the catalogue when published. Only published specs are listed."
+                        : "Private projects stay hidden from the public catalogue."}
+                  </DialogDescription>
+                </DialogHeader>
+                {isPublishedPublic ? (
+                  <div className="space-y-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="project-sunset">Sunset date</Label>
+                      <Input
+                        id="project-sunset"
+                        type="date"
+                        value={sunsetDate}
+                        onChange={(event) => setSunsetDate(event.target.value)}
+                        min={new Date(Date.now() + 7 * 86_400_000)
+                          .toISOString()
+                          .slice(0, 10)}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="retirement-message">
+                        Migration notice
+                      </Label>
+                      <Input
+                        id="retirement-message"
+                        value={retirementMessage}
+                        onChange={(event) =>
+                          setRetirementMessage(event.target.value)
+                        }
+                        placeholder="Where should consumers migrate?"
+                      />
+                    </div>
+                  </div>
+                ) : null}
+                <DialogFooter>
+                  <Button
+                    variant="ghost"
+                    onClick={() => setVisibilityOpen(false)}
+                    disabled={visibilityPending || retirementPending}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    onClick={() => {
+                      if (isPublishedPublic) {
+                        scheduleRetirement({
+                          sunsetAt: parsedSunset,
+                          message: retirementMessage.trim(),
+                        });
+                        return;
+                      }
+                      setVisibility(nextVisibility);
+                    }}
+                    disabled={
+                      visibilityPending ||
+                      retirementPending ||
+                      (isPublishedPublic && !canScheduleRetirement)
+                    }
+                  >
+                    {retirementPending
+                      ? "Scheduling…"
+                      : visibilityPending
+                        ? "Updating…"
+                        : isPublishedPublic
+                          ? "Schedule retirement"
+                          : `Make ${nextVisibility}`}
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+          )}
         </CardContent>
       </Card>
 

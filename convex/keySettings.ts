@@ -91,6 +91,9 @@ async function requireOrgByClerkId(
   if (org === null) {
     throw new Error("Organization not found");
   }
+  if (org.archivedAt !== undefined) {
+    throw new Error("Organization is archived");
+  }
   return { clerkOrgId };
 }
 

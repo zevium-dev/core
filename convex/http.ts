@@ -67,7 +67,7 @@ http.route({
         break;
       }
       case "organization.deleted":
-        await ctx.runMutation(internal.organizations.deleteFromClerk, {
+        await ctx.runMutation(internal.organizations.archiveFromClerk, {
           clerkOrgId: (event.data as ClerkOrgEventData).id,
         });
         break;

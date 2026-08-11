@@ -4,9 +4,7 @@ import type { Id } from "./_generated/dataModel";
 import { requireOrgMemberBySlug } from "./lib/auth";
 
 /**
- * Scan caps — usageEvents only has by_org / by_project (no time index).
- * Queries order by _creationTime desc, filter on `at`, and stop at these caps.
- * High-volume orgs will undercount past the cap; a by_org_at index is the fix.
+ * Time-indexed scan caps bound aggregation work on high-volume ranges.
  */
 const ORG_SCAN_CAP = 5_000;
 const PROJECT_SCAN_CAP = 10_000;
@@ -142,10 +140,14 @@ export const orgOverview = query({
       .withIndex("by_organization", (q) => q.eq("organizationId", org._id))
       .unique();
 
-    // Newest first via _creationTime; filter on event `at` for cycle window.
     const scanned = await ctx.db
       .query("usageEvents")
-      .withIndex("by_org", (q) => q.eq("organizationId", org._id))
+      .withIndex("by_org_at", (q) =>
+        q
+          .eq("organizationId", org._id)
+          .gte("at", cycleStart)
+          .lt("at", now + 1),
+      )
       .order("desc")
       .take(ORG_SCAN_CAP);
 
@@ -254,12 +256,16 @@ export const projectAnalytics = query({
 
     const scanned = await ctx.db
       .query("usageEvents")
-      .withIndex("by_project", (q) => q.eq("projectId", project._id))
+      .withIndex("by_project_at", (q) =>
+        q
+          .eq("projectId", project._id)
+          .gte("at", rangeStart)
+          .lt("at", now + 1),
+      )
       .order("desc")
       .take(PROJECT_SCAN_CAP);
 
     const truncated = scanned.length >= PROJECT_SCAN_CAP;
-    const inRange = scanned.filter((e) => e.at >= rangeStart);
 
     type Acc = {
       method: string;
@@ -282,7 +288,7 @@ export const projectAnalytics = query({
     let errors4xx = 0;
     let errors5xx = 0;
 
-    for (const event of inRange) {
+    for (const event of scanned) {
       calls += 1;
       credits += event.credits;
       allLatencies.push(event.latencyMs);

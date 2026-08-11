@@ -10,6 +10,12 @@ crons.hourly(
   internal.cronTasks.checkLowBalances,
 );
 
+crons.hourly(
+  "retire-sunset-projects",
+  { minuteUTC: 30 },
+  internal.projects.retireSunsetProjects,
+);
+
 /**
  * Hourly release of risk-held earnings that have matured past their hold.
  * Each org is released in its own transaction with per-org error isolation,

@@ -11,6 +11,8 @@ export default defineSchema({
     /** Stable, publisher-controlled public URL segment. */
     publicHandle: v.optional(v.string()),
     imageUrl: v.optional(v.string()),
+    /** Clerk deletion tombstone. Financial, audit, and project rows remain intact. */
+    archivedAt: v.optional(v.number()),
   })
     .index("by_clerk_org", ["clerkOrgId"])
     .index("by_slug", ["slug"])
@@ -31,10 +33,16 @@ export default defineSchema({
     status: v.union(v.literal("draft"), v.literal("published")),
     visibility: v.union(v.literal("private"), v.literal("public")),
     tags: v.array(v.string()),
+    deprecationStartedAt: v.optional(v.number()),
+    sunsetAt: v.optional(v.number()),
+    deprecationMessage: v.optional(v.string()),
+    /** Audit tombstone after sunset cleanup; project row remains immutable history. */
+    retiredAt: v.optional(v.number()),
   })
     .index("by_org", ["organizationId"])
     .index("by_org_slug", ["organizationId", "slug"])
-    .index("by_visibility_status", ["visibility", "status"]),
+    .index("by_visibility_status", ["visibility", "status"])
+    .index("by_sunset", ["sunsetAt"]),
 
   // Publisher-owned headers injected by gateway after consumer auth headers are stripped.
   // Values never return through member-facing queries after write.
@@ -137,6 +145,14 @@ export default defineSchema({
     .index("by_org", ["organizationId"])
     .index("by_project", ["projectId"])
     .index("by_org_at", ["organizationId", "at"])
+    .index("by_org_project_at", ["organizationId", "projectId", "at"])
+    .index("by_org_key_at", ["organizationId", "keyId", "at"])
+    .index("by_org_project_key_at", [
+      "organizationId",
+      "projectId",
+      "keyId",
+      "at",
+    ])
     .index("by_project_at", ["projectId", "at"])
     .index("by_at", ["at"]),
 

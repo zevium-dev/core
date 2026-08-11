@@ -50,10 +50,11 @@ export async function getOrgBySlug(
   ctx: DbCtx,
   slug: string,
 ): Promise<Doc<"organizations"> | null> {
-  return await ctx.db
+  const org = await ctx.db
     .query("organizations")
     .withIndex("by_slug", (q) => q.eq("slug", slug))
     .unique();
+  return org?.archivedAt === undefined ? org : null;
 }
 
 /** Public routing uses the product handle, never the Clerk slug. */
@@ -61,12 +62,13 @@ export async function getOrgByPublicHandle(
   ctx: DbCtx,
   handle: string,
 ): Promise<Doc<"organizations"> | null> {
-  return await ctx.db
+  const org = await ctx.db
     .query("organizations")
     .withIndex("by_public_handle", (q) =>
       q.eq("publicHandle", handle.trim().toLowerCase()),
     )
     .unique();
+  return org?.archivedAt === undefined ? org : null;
 }
 
 /**
@@ -85,6 +87,9 @@ export async function requireOrgMemberBySlug(
   const org = await getOrgBySlug(ctx, orgSlug);
   if (org === null) {
     throw new Error("Organization not found");
+  }
+  if (org.archivedAt !== undefined) {
+    throw new Error("Organization is archived");
   }
   if (org.clerkOrgId !== claims.orgId) {
     throw new Error("Not a member of this organization");
@@ -117,6 +122,9 @@ export async function requireProjectMember(
   const org = await ctx.db.get(project.organizationId);
   if (org === null) {
     throw new Error("Organization not found");
+  }
+  if (org.archivedAt !== undefined) {
+    throw new Error("Organization is archived");
   }
   if (org.clerkOrgId !== claims.orgId) {
     throw new Error("Not a member of this organization");

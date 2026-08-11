@@ -260,7 +260,8 @@ describe("catalogue.listPublic", () => {
       endpointCount: 2,
       hasFreeTier: false,
     });
-    expect(bySlug.cheap?.projectId).toBe(seed.cheapId);
+    expect(bySlug.cheap).not.toHaveProperty("projectId");
+    expect(bySlug.cheap).not.toHaveProperty("organizationId");
   });
 
   it("filters by hasFreeTier", async () => {
@@ -351,6 +352,8 @@ describe("catalogue.listPublic", () => {
       publisherHandle: "pub-co",
       projectSlug: "cheap",
     });
+    expect(publicDetail?.project).not.toHaveProperty("_id");
+    expect(publicDetail?.org).not.toHaveProperty("_id");
     expect(publicDetail?.project.slug).toBe("cheap");
     expect(publicDetail?.latestVersion?.version).toBe("1.0.0");
   });

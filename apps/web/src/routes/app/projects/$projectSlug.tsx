@@ -201,6 +201,8 @@ function ProjectShell({
   const tab = isSpecRoute ? "spec" : panel;
 
   const nextVisibility = project.visibility === "public" ? "private" : "public";
+  const requiresRetirement =
+    project.status === "published" && project.visibility === "public";
 
   return (
     <div className="flex flex-col gap-6">
@@ -235,38 +237,50 @@ function ProjectShell({
           ) : null}
         </div>
 
-        <Dialog open={visibilityOpen} onOpenChange={setVisibilityOpen}>
-          <DialogTrigger asChild>
-            <Button variant="outline">
-              Make {nextVisibility === "public" ? "Public" : "Private"}
-            </Button>
-          </DialogTrigger>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Make project {nextVisibility}?</DialogTitle>
-              <DialogDescription>
-                {nextVisibility === "public"
-                  ? "Public projects appear in the catalogue when published. Only published specs are listed."
-                  : "Private projects stay hidden from the public catalogue."}
-              </DialogDescription>
-            </DialogHeader>
-            <DialogFooter>
-              <Button
-                variant="ghost"
-                onClick={() => setVisibilityOpen(false)}
-                disabled={visibilityPending}
-              >
-                Cancel
+        {requiresRetirement ? (
+          <Button asChild variant="outline">
+            <Link
+              to="/app/projects/$projectSlug"
+              params={{ projectSlug }}
+              search={{ tab: "settings" }}
+            >
+              Manage retirement
+            </Link>
+          </Button>
+        ) : (
+          <Dialog open={visibilityOpen} onOpenChange={setVisibilityOpen}>
+            <DialogTrigger asChild>
+              <Button variant="outline">
+                Make {nextVisibility === "public" ? "Public" : "Private"}
               </Button>
-              <Button
-                onClick={() => setVisibility(nextVisibility)}
-                disabled={visibilityPending}
-              >
-                {visibilityPending ? "Updating…" : `Make ${nextVisibility}`}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Make project {nextVisibility}?</DialogTitle>
+                <DialogDescription>
+                  {nextVisibility === "public"
+                    ? "Public projects appear in the catalogue when published. Only published specs are listed."
+                    : "Private projects stay hidden from the public catalogue."}
+                </DialogDescription>
+              </DialogHeader>
+              <DialogFooter>
+                <Button
+                  variant="ghost"
+                  onClick={() => setVisibilityOpen(false)}
+                  disabled={visibilityPending}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  onClick={() => setVisibility(nextVisibility)}
+                  disabled={visibilityPending}
+                >
+                  {visibilityPending ? "Updating…" : `Make ${nextVisibility}`}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        )}
       </div>
 
       <Tabs

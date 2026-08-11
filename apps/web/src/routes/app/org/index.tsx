@@ -126,7 +126,7 @@ function PublicHandleCard() {
   const { membership } = useOrganization();
   const mine = useQuery(convexQuery(api.organizations.listMine, {}));
   const setPublicHandle = useConvexMutation(api.organizations.setPublicHandle);
-  const current = mine.data?.[0]?.publicHandle ?? "";
+  const current = mine.data?.[0]?.publisherHandle ?? "";
   const [handle, setHandle] = useState("");
   const [confirming, setConfirming] = useState(false);
 

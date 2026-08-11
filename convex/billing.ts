@@ -233,7 +233,7 @@ export const prepareCheckoutIntent = internalMutation({
       .query("organizations")
       .withIndex("by_clerk_org", (q) => q.eq("clerkOrgId", args.clerkOrgId))
       .unique();
-    if (organization === null)
+    if (organization === null || organization.archivedAt !== undefined)
       throw new Error("Active organization is not provisioned");
     const pack = creditPack(args.packId);
     const now = Date.now();
@@ -1228,7 +1228,7 @@ export const getBillingState = query({
       .query("organizations")
       .withIndex("by_clerk_org", (q) => q.eq("clerkOrgId", claims.orgId!))
       .unique();
-    if (organization === null)
+    if (organization === null || organization.archivedAt !== undefined)
       throw new Error("Active organization is not provisioned");
     const wallet = await ctx.db
       .query("wallets")

@@ -17,12 +17,10 @@ export type ListingPricingSummary = {
 };
 
 export type PublicListing = {
-  projectId: Doc<"projects">["_id"];
   name: string;
   slug: string;
   description: string | undefined;
   tags: string[];
-  organizationId: Doc<"organizations">["_id"];
   orgName: string;
   publisherHandle: string;
   publishedAt: number | null;
@@ -129,17 +127,7 @@ export const listPublic = query({
       )
       .collect();
 
-    // Total public+published count, decoupled from search/tag/price filtering
-    // below — the landing "APIs listed" stat wants the whole catalogue size,
-    // not a filtered subset. Bounded at 1000 docs (noted in the return type
-    // comment); catalogue growth past that undercounts the stat.
-    const totalDocs = await ctx.db
-      .query("projects")
-      .withIndex("by_visibility_status", (q) =>
-        q.eq("visibility", "public").eq("status", "published"),
-      )
-      .take(1000);
-    const total = totalDocs.length;
+    let total = 0;
 
     const filtered: Array<{
       project: Doc<"projects">;
@@ -149,6 +137,15 @@ export const listPublic = query({
     }> = [];
 
     for (const project of candidates) {
+      // Retirement notice freezes new discovery while direct traffic continues.
+      if (project.deprecationStartedAt !== undefined) continue;
+      const org = await ctx.db.get(project.organizationId);
+      if (org === null || org.archivedAt !== undefined) continue;
+      // Public URLs are only valid through the dedicated publisher handle.
+      // Never emit an empty segment or fall back to Clerk's internal slug.
+      if (org.publicHandle === undefined || org.publicHandle === "") continue;
+      total += 1;
+
       if (tag !== "" && !project.tags.includes(tag)) continue;
 
       if (search !== "") {
@@ -156,12 +153,6 @@ export const listPublic = query({
           `${project.name} ${project.slug} ${project.description ?? ""} ${project.tags.join(" ")}`.toLowerCase();
         if (!hay.includes(search)) continue;
       }
-
-      const org = await ctx.db.get(project.organizationId);
-      if (org === null) continue;
-      // Public URLs are only valid through the dedicated publisher handle.
-      // Never emit an empty segment or fall back to Clerk's internal slug.
-      if (org.publicHandle === undefined || org.publicHandle === "") continue;
 
       // Latest published version only — drafts live in specs table, never here.
       const latest = await ctx.db
@@ -226,12 +217,10 @@ export const listPublic = query({
 
     return {
       items: page.map(({ project, org, publishedAt, pricing }) => ({
-        projectId: project._id,
         name: project.name,
         slug: project.slug,
         description: project.description,
         tags: project.tags,
-        organizationId: org._id,
         orgName: org.name,
         publisherHandle: org.publicHandle!,
         publishedAt,
@@ -253,7 +242,6 @@ export const getPublicDetail = query({
     args,
   ): Promise<{
     project: {
-      _id: Doc<"projects">["_id"];
       name: string;
       slug: string;
       description: string | undefined;
@@ -262,7 +250,6 @@ export const getPublicDetail = query({
       visibility: Doc<"projects">["visibility"];
     };
     org: {
-      _id: Doc<"organizations">["_id"];
       name: string;
       publisherHandle: string;
       imageUrl: string | undefined;
@@ -298,7 +285,6 @@ export const getPublicDetail = query({
 
     return {
       project: {
-        _id: project._id,
         name: project.name,
         slug: project.slug,
         description: project.description,
@@ -307,7 +293,6 @@ export const getPublicDetail = query({
         visibility: project.visibility,
       },
       org: {
-        _id: org._id,
         name: org.name,
         publisherHandle: org.publicHandle,
         imageUrl: org.imageUrl,
@@ -319,9 +304,10 @@ export const getPublicDetail = query({
               version: latest.version,
               spec: latest.spec,
               publishedAt: latest.publishedAt,
-              deprecatedAt: latest.deprecatedAt,
-              sunsetAt: latest.sunsetAt,
-              deprecationMessage: latest.deprecationMessage,
+              deprecatedAt: project.deprecationStartedAt ?? latest.deprecatedAt,
+              sunsetAt: project.sunsetAt ?? latest.sunsetAt,
+              deprecationMessage:
+                project.deprecationMessage ?? latest.deprecationMessage,
             },
     };
   },

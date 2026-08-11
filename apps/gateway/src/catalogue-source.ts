@@ -8,12 +8,10 @@ import { ConvexHttpClient } from "convex/browser";
 import { makeFunctionReference } from "convex/server";
 
 export type CatalogueListing = {
-  projectId: string;
   name: string;
   slug: string;
   description: string | undefined;
   tags: string[];
-  organizationId: string;
   orgName: string;
   publisherHandle: string;
   publishedAt: number | null;
@@ -69,12 +67,10 @@ const listPublicRef = makeFunctionReference<
   { search?: string; tag?: string; cursor?: string },
   {
     items: Array<{
-      projectId: string;
       name: string;
       slug: string;
       description?: string;
       tags: string[];
-      organizationId: string;
       orgName: string;
       publisherHandle: string;
       publishedAt: number | null;
@@ -187,17 +183,13 @@ function asNumberOrNull(value: unknown): number | null | undefined {
 function parseListing(raw: unknown): CatalogueListing | null {
   if (!isRecord(raw)) return null;
 
-  const projectId = asString(raw.projectId);
   const name = asString(raw.name);
   const slug = asString(raw.slug);
-  const organizationId = asString(raw.organizationId);
   const orgName = asString(raw.orgName);
   const publisherHandle = asString(raw.publisherHandle);
   if (
-    projectId === undefined ||
     name === undefined ||
     slug === undefined ||
-    organizationId === undefined ||
     orgName === undefined ||
     publisherHandle === undefined
   ) {
@@ -214,12 +206,10 @@ function parseListing(raw: unknown): CatalogueListing | null {
 
   const publishedAt = asNumberOrNull(raw.publishedAt);
   return {
-    projectId,
     name,
     slug,
     description,
     tags,
-    organizationId,
     orgName,
     publisherHandle,
     publishedAt: publishedAt === undefined ? null : publishedAt,

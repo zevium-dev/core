@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   InternalHttpSpecSource,
+  parsePublicPublishedSpecPayload,
   parsePublishedSpecPayload,
 } from "../src/spec-source";
 
@@ -83,5 +84,29 @@ describe("internal gateway spec source", () => {
     ).toMatchObject({
       upstreamHeaders: { "x-valid": "secret" },
     });
+  });
+
+  it("accepts minimal public spec DTO without metering or Clerk ids", () => {
+    expect(
+      parsePublicPublishedSpecPayload({
+        spec: '{"openapi":"3.1.0"}',
+        version: "1.0.0",
+        visibility: "public",
+        deprecatedAt: 1,
+        sunsetAt: 2,
+      }),
+    ).toEqual({
+      spec: '{"openapi":"3.1.0"}',
+      version: "1.0.0",
+      visibility: "public",
+      deprecatedAt: 1,
+      sunsetAt: 2,
+    });
+    expect(
+      parsePublicPublishedSpecPayload({
+        spec: "{}",
+        visibility: "private",
+      }),
+    ).toBeNull();
   });
 });

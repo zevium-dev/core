@@ -155,13 +155,28 @@ export function collectOpenApiSpecIssues(specText: string): SpecIssue[] {
         });
       } else if (
         typeof cost !== "number" ||
-        !Number.isFinite(cost) ||
+        !Number.isSafeInteger(cost) ||
         cost < 0
       ) {
         issues.push({
           level: "error",
           path: `$.paths["${pathKey}"].${lower}.x-zevium-cost`,
-          message: "x-zevium-cost must be a number ≥ 0",
+          message: "x-zevium-cost must be a finite safe non-negative integer",
+        });
+      }
+
+      const freeTier = opVal["x-zevium-free-tier"];
+      if (
+        freeTier !== undefined &&
+        (typeof freeTier !== "number" ||
+          !Number.isSafeInteger(freeTier) ||
+          freeTier < 0)
+      ) {
+        issues.push({
+          level: "error",
+          path: `$.paths["${pathKey}"].${lower}.x-zevium-free-tier`,
+          message:
+            "x-zevium-free-tier must be a finite safe non-negative integer",
         });
       }
     }

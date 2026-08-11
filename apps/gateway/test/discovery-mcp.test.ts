@@ -52,12 +52,10 @@ const SPEC = JSON.stringify({
 });
 
 const LISTING: CatalogueListing = {
-  projectId: "proj_demo",
   name: "Demo Weather",
   slug: PROJECT_SLUG,
   description: "Weather forecasts for agents",
   tags: ["weather", "demo"],
-  organizationId: CONVEX_ORG,
   orgName: "Acme Corp",
   publisherHandle: ORG_SLUG,
   publishedAt: 1_700_000_000_000,
@@ -275,7 +273,6 @@ describe("GET /discovery", () => {
   it("returns APIs from every catalogue page", async () => {
     const second = {
       ...LISTING,
-      projectId: "proj_second",
       name: "Second API",
       slug: "second",
     };
@@ -418,7 +415,6 @@ describe("MCP /mcp", () => {
   it("search_apis returns matches from every catalogue page", async () => {
     const second = {
       ...LISTING,
-      projectId: "proj_second",
       name: "Second API",
       slug: "second",
     };

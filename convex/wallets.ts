@@ -60,10 +60,11 @@ async function getOrganizationByClerkId(
   ctx: QueryCtx | MutationCtx,
   clerkOrgId: string,
 ): Promise<Doc<"organizations"> | null> {
-  return await ctx.db
+  const organization = await ctx.db
     .query("organizations")
     .withIndex("by_clerk_org", (q) => q.eq("clerkOrgId", clerkOrgId))
     .unique();
+  return organization?.archivedAt === undefined ? organization : null;
 }
 
 export function checkpoint(
