@@ -167,16 +167,40 @@ jobs:
       E2E_BASE_URL: ${{ needs.web-preview.outputs.web_url }}
       GATEWAY_URL: ${{ needs.gateway-preview.outputs.gateway_url }}
     steps:
-      - name: Run curl preview smoke
+      - name: Verify preview deployment contract
         run: |
           mkdir -p e2e/artifacts
-          curl --fail --silent --show-error --output e2e/artifacts/landing.html \
-            "$E2E_BASE_URL/"
-          curl --fail --silent --show-error --output e2e/artifacts/catalogue.html \
-            "$E2E_BASE_URL/catalogue"
 
-          health="$(curl --fail --silent --show-error "$GATEWAY_URL/health")"
-          printf '%s\n' "$health" > e2e/artifacts/gateway-health.json
+          wait_for_http_200() {
+            url="$1"
+            output="$2"
+
+            for attempt in $(seq 1 45); do
+              status="$(curl --location --silent --show-error --output "$output" \
+                --write-out '%{http_code}' "$url" || true)"
+              if [ "$status" = "200" ]; then
+                return 0
+              fi
+
+              if [ "$attempt" -lt 45 ]; then
+                sleep 2
+              fi
+            done
+
+            echo "Preview did not become ready: $url returned HTTP $status" >&2
+            return 1
+          }
+
+          wait_for_http_200 "$E2E_BASE_URL/" e2e/artifacts/landing.html
+          grep --fixed-strings --quiet '<title>Zevium — Agent-first API marketplace</title>' \
+            e2e/artifacts/landing.html
+
+          wait_for_http_200 "$E2E_BASE_URL/catalogue" e2e/artifacts/catalogue.html
+          grep --fixed-strings --quiet '<title>Catalogue · Zevium</title>' \
+            e2e/artifacts/catalogue.html
+
+          wait_for_http_200 "$GATEWAY_URL/health" e2e/artifacts/gateway-health.json
+          health="$(cat e2e/artifacts/gateway-health.json)"
           case "$health" in
             *'"ok":true'*'"service":"zevium-gateway"'*) ;;
             *) echo "Unexpected gateway health response" >&2; exit 1 ;;
@@ -184,21 +208,21 @@ jobs:
 
           preflight_status="$(curl --silent --show-error --output /dev/null \
             --write-out '%{http_code}' --request OPTIONS \
-            --header 'Origin: https://preview-smoke.invalid' \
+            --header 'Origin: https://preview-contract.invalid' \
             --header 'Access-Control-Request-Method: GET' \
             "$GATEWAY_URL/gateway/missing-org/missing-project/ping")"
           test "$preflight_status" = "204"
 
           missing_status="$(curl --silent --show-error --output e2e/artifacts/gateway-404.json \
             --write-out '%{http_code}' \
-            "$GATEWAY_URL/preview-smoke-missing")"
+            "$GATEWAY_URL/preview-contract-missing")"
           test "$missing_status" = "404"
 
-      - name: Upload smoke failure evidence
+      - name: Upload contract failure evidence
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: preview-smoke-${{ env.PR_NUMBER }}
+          name: preview-contract-${{ env.PR_NUMBER }}
           path: e2e/artifacts
           if-no-files-found: ignore
 
