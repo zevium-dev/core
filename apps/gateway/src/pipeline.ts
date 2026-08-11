@@ -346,6 +346,12 @@ export async function handleGatewayRequest(
     init.duplex = "half";
   }
   const controller = new AbortController();
+  const abortUpstream = () => controller.abort(request.signal.reason);
+  if (request.signal.aborted) {
+    abortUpstream();
+  } else {
+    request.signal.addEventListener("abort", abortUpstream, { once: true });
+  }
   const timeout = setTimeout(
     () => controller.abort(),
     UPSTREAM_HEADERS_TIMEOUT_MS,
@@ -389,6 +395,7 @@ export async function handleGatewayRequest(
     );
   } finally {
     clearTimeout(timeout);
+    request.signal.removeEventListener("abort", abortUpstream);
   }
 
   const status = upstreamRes.status;
