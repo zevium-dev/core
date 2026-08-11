@@ -28,6 +28,7 @@ import { Input } from "#/components/ui/input";
 import { Label } from "#/components/ui/label";
 import { api } from "#/lib/convex-api";
 import { humanError } from "#/lib/human-error";
+import { canAdministerOrg } from "#/lib/org-permissions";
 import { formatCreditsAsUsd } from "#/lib/project-helpers";
 import {
   connectedAccountDisplay,
@@ -67,7 +68,7 @@ export const Route = createFileRoute("/app/earnings")({
 });
 
 function EarningsPage() {
-  const { organization, isLoaded } = useOrganization();
+  const { organization, membership, isLoaded } = useOrganization();
   const { isLoading: convexAuthLoading, isAuthenticated } = useConvexAuth();
 
   if (!isLoaded || convexAuthLoading || !isAuthenticated) {
@@ -87,12 +88,12 @@ function EarningsPage() {
 
   return (
     <Suspense fallback={<EarningsPageSkeleton />}>
-      <EarningsContent />
+      <EarningsContent canManagePayouts={canAdministerOrg(membership?.role)} />
     </Suspense>
   );
 }
 
-function EarningsContent() {
+function EarningsContent({ canManagePayouts }: { canManagePayouts: boolean }) {
   const { onboarding } = Route.useSearch();
   const refreshStarted = useRef(false);
   const [publisherCountry, setPublisherCountry] = useState("");
@@ -117,10 +118,11 @@ function EarningsContent() {
   });
   const { profile, earnings, payouts, transfers } = payoutState;
   useEffect(() => {
-    if (onboarding !== "refresh" || refreshStarted.current) return;
+    if (!canManagePayouts || onboarding !== "refresh" || refreshStarted.current)
+      return;
     refreshStarted.current = true;
     openOnboarding();
-  }, [onboarding, openOnboarding]);
+  }, [canManagePayouts, onboarding, openOnboarding]);
   const initiatePublisherTransfer = useAction(
     api.payouts.initiatePublisherTransfer,
   );
@@ -168,6 +170,12 @@ function EarningsContent() {
         </CardHeader>
         <CardContent className="space-y-3">
           <p className="text-sm text-muted-foreground">{connect.description}</p>
+          {!canManagePayouts ? (
+            <p className="rounded-md border bg-muted/40 p-3 text-sm text-muted-foreground">
+              Organization admins manage Stripe onboarding and transfers. You
+              can review payout status and earnings history here.
+            </p>
+          ) : null}
           {profile.requirements.length > 0 ? (
             <ul className="list-disc space-y-1 pl-4 text-sm text-muted-foreground">
               {profile.requirements.map((requirement) => (
@@ -175,7 +183,7 @@ function EarningsContent() {
               ))}
             </ul>
           ) : null}
-          {connect.action && connect.actionLabel ? (
+          {canManagePayouts && connect.action && connect.actionLabel ? (
             <div className="space-y-3">
               {profile.status === "not_started" ? (
                 <div className="max-w-xs space-y-2">
@@ -222,7 +230,7 @@ function EarningsContent() {
               Your share after Zevium&apos;s 5% fee.
             </p>
           </div>
-          {profile.status === "enabled" ? (
+          {canManagePayouts && profile.status === "enabled" ? (
             <Button
               disabled={transferPending || !canTransfer}
               onClick={() => initiateTransfer()}

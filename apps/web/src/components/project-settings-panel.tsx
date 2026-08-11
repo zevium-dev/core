@@ -46,6 +46,33 @@ import { formatRelativeTime } from "#/lib/relative-time";
 export function ProjectSettingsPanel({
   project,
   orgSlug,
+  canAdminister,
+}: {
+  project: Doc<"projects">;
+  orgSlug: string;
+  canAdminister: boolean;
+}) {
+  if (!canAdminister) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>Admin-managed settings</CardTitle>
+          <CardDescription>
+            Organization admins manage project metadata, visibility, upstream
+            credentials, webhook secrets, and deletion. You can keep editing
+            this project&apos;s OpenAPI draft from the Spec tab.
+          </CardDescription>
+        </CardHeader>
+      </Card>
+    );
+  }
+
+  return <AdminProjectSettingsPanel project={project} orgSlug={orgSlug} />;
+}
+
+function AdminProjectSettingsPanel({
+  project,
+  orgSlug,
 }: {
   project: Doc<"projects">;
   orgSlug: string;

@@ -26,6 +26,7 @@ import {
 import { Skeleton } from "#/components/ui/skeleton";
 import { api } from "#/lib/convex-api";
 import { ensureMirrorOnServer } from "#/lib/ensure-mirror";
+import { canAdministerOrg } from "#/lib/org-permissions";
 import type { RouterContext } from "#/router";
 
 export const Route = createFileRoute("/app/projects/")({
@@ -66,7 +67,7 @@ export const Route = createFileRoute("/app/projects/")({
 });
 
 function ProjectsIndexPage() {
-  const { organization, isLoaded } = useOrganization();
+  const { organization, membership, isLoaded } = useOrganization();
   const { isLoading: convexAuthLoading, isAuthenticated } = useConvexAuth();
   const orgSlug =
     organization && typeof organization.slug === "string"
@@ -89,12 +90,21 @@ function ProjectsIndexPage() {
 
   return (
     <Suspense fallback={<ProjectsListSkeleton />}>
-      <ProjectsList orgSlug={orgSlug} />
+      <ProjectsList
+        orgSlug={orgSlug}
+        canCreate={canAdministerOrg(membership?.role)}
+      />
     </Suspense>
   );
 }
 
-function ProjectsList({ orgSlug }: { orgSlug: string }) {
+function ProjectsList({
+  orgSlug,
+  canCreate,
+}: {
+  orgSlug: string;
+  canCreate: boolean;
+}) {
   const { data: projects } = useSuspenseQuery(
     convexQuery(api.projects.list, { orgSlug }),
   );
@@ -108,7 +118,7 @@ function ProjectsList({ orgSlug }: { orgSlug: string }) {
             Publish APIs from OpenAPI specs.
           </p>
         </div>
-        {projects.length > 0 ? (
+        {canCreate && projects.length > 0 ? (
           <Button asChild>
             <Link to="/app/projects/create">
               <Plus data-icon="inline-start" />
@@ -119,7 +129,7 @@ function ProjectsList({ orgSlug }: { orgSlug: string }) {
       </div>
 
       {projects.length === 0 ? (
-        <EmptyProjects />
+        <EmptyProjects canCreate={canCreate} />
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {projects.map((project) => (
@@ -171,7 +181,7 @@ function ProjectsList({ orgSlug }: { orgSlug: string }) {
   );
 }
 
-function EmptyProjects() {
+function EmptyProjects({ canCreate }: { canCreate: boolean }) {
   return (
     <Empty className="min-h-80 border">
       <EmptyHeader>
@@ -180,18 +190,21 @@ function EmptyProjects() {
         </EmptyMedia>
         <EmptyTitle>No projects yet</EmptyTitle>
         <EmptyDescription>
-          Create a project, paste an OpenAPI spec, set per-call pricing, and
-          publish to the catalogue.
+          {canCreate
+            ? "Create a project, paste an OpenAPI spec, set per-call pricing, and publish to the catalogue."
+            : "An organization admin can create the first project. Members can edit project drafts after it exists."}
         </EmptyDescription>
       </EmptyHeader>
-      <EmptyContent>
-        <Button asChild>
-          <Link to="/app/projects/create">
-            <Plus data-icon="inline-start" />
-            New project
-          </Link>
-        </Button>
-      </EmptyContent>
+      {canCreate ? (
+        <EmptyContent>
+          <Button asChild>
+            <Link to="/app/projects/create">
+              <Plus data-icon="inline-start" />
+              New project
+            </Link>
+          </Button>
+        </EmptyContent>
+      ) : null}
     </Empty>
   );
 }

@@ -10,7 +10,11 @@ import {
 } from "./_generated/server";
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
-import { requireIdentity, requireOrgMemberBySlug } from "./lib/auth";
+import {
+  requireActiveOrgAdmin,
+  requireIdentity,
+  requireOrgMemberBySlug,
+} from "./lib/auth";
 
 /** Pinned alongside `stripe@22.3.1`; upgrade only as an explicit migration. */
 export const STRIPE_API_VERSION = "2026-06-24.dahlia" as const;
@@ -138,27 +142,6 @@ function stringId(
     return value.id;
   }
   return null;
-}
-
-function activeClerkOrgId(identity: unknown): string {
-  if (identity === null || typeof identity !== "object") {
-    throw new Error("Not authenticated");
-  }
-  const raw = identity as Record<string, unknown>;
-  const orgId =
-    typeof raw.org_id === "string"
-      ? raw.org_id
-      : typeof raw.orgId === "string"
-        ? raw.orgId
-        : undefined;
-  if (orgId === undefined || orgId.trim() === "") {
-    throw new Error("Active organization required");
-  }
-  return orgId;
-}
-
-async function requireActiveClerkOrgInAction(ctx: ActionCtx): Promise<string> {
-  return activeClerkOrgId(await ctx.auth.getUserIdentity());
 }
 
 export type StripeCheckoutCreator = {
@@ -334,7 +317,7 @@ export const createCheckout = action({
     ctx,
     args,
   ): Promise<{ url: string; checkoutIntentId: Id<"checkoutIntents"> }> => {
-    const clerkOrgId = await requireActiveClerkOrgInAction(ctx);
+    const { orgId: clerkOrgId } = await requireActiveOrgAdmin(ctx);
     const stripePriceId = stripePriceForPack(args.packId);
     const prepared = await ctx.runMutation(
       internal.billing.prepareCheckoutIntent,

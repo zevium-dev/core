@@ -1,0 +1,297 @@
+/// <reference types="vite/client" />
+import { convexTest } from "convex-test";
+import { describe, expect, it } from "vitest";
+import { api } from "./_generated/api";
+import type { Id } from "./_generated/dataModel";
+import schema from "./schema";
+
+const modules = import.meta.glob("./**/*.ts");
+
+type Seeded = {
+  projectId: Id<"projects">;
+  specId: Id<"specs">;
+  versionId: Id<"specVersions">;
+  credentialId: Id<"upstreamCredentials">;
+};
+
+async function seedWorld(t: ReturnType<typeof convexTest>): Promise<Seeded> {
+  return await t.run(async (ctx) => {
+    const orgId = await ctx.db.insert("organizations", {
+      clerkOrgId: "org_pub",
+      name: "Publisher",
+      slug: "publisher",
+      publicHandle: "publisher",
+    });
+    await ctx.db.insert("organizations", {
+      clerkOrgId: "org_other",
+      name: "Other",
+      slug: "other",
+      publicHandle: "other",
+    });
+    const projectId = await ctx.db.insert("projects", {
+      organizationId: orgId,
+      name: "Original API",
+      slug: "original-api",
+      description: "Original description",
+      status: "published",
+      visibility: "private",
+      tags: ["original"],
+    });
+    const specId = await ctx.db.insert("specs", {
+      projectId,
+      draft: "",
+      lastSavedAt: 1,
+    });
+    const versionId = await ctx.db.insert("specVersions", {
+      projectId,
+      version: "1.0.0",
+      spec: '{"openapi":"3.1.0"}',
+      publishedAt: 1,
+    });
+    const credentialId = await ctx.db.insert("upstreamCredentials", {
+      projectId,
+      name: "Authorization",
+      ciphertext: "encrypted",
+      iv: "iv",
+      keyVersion: "v1",
+      updatedAt: 1,
+    });
+    return { projectId, specId, versionId, credentialId };
+  });
+}
+
+function asAdmin(t: ReturnType<typeof convexTest>) {
+  return t.withIdentity({
+    subject: "user_admin",
+    org_id: "org_pub",
+    org_slug: "publisher",
+    org_role: "org:admin",
+  } as {
+    subject: string;
+    org_id: string;
+    org_slug: string;
+    org_role: string;
+  });
+}
+
+function asMember(t: ReturnType<typeof convexTest>) {
+  return t.withIdentity({
+    subject: "user_member",
+    org_id: "org_pub",
+    org_slug: "publisher",
+    org_role: "org:member",
+  } as {
+    subject: string;
+    org_id: string;
+    org_slug: string;
+    org_role: string;
+  });
+}
+
+function asCrossOrgAdmin(t: ReturnType<typeof convexTest>) {
+  return t.withIdentity({
+    subject: "user_other_admin",
+    org_id: "org_other",
+    org_slug: "other",
+    org_role: "org:admin",
+  } as {
+    subject: string;
+    org_id: string;
+    org_slug: string;
+    org_role: string;
+  });
+}
+
+describe("project lifecycle authorization", () => {
+  it("lets admins create canonical private projects and draft rows", async () => {
+    const t = convexTest(schema, modules);
+    await seedWorld(t);
+
+    const created = await asAdmin(t).mutation(api.projects.create, {
+      orgSlug: "publisher",
+      name: " New API ",
+      slug: "new-api",
+      description: " New description ",
+    });
+
+    expect(created).toMatchObject({
+      name: "New API",
+      slug: "new-api",
+      description: "New description",
+      status: "draft",
+      visibility: "private",
+      tags: [],
+    });
+    const draft = await t.run(async (ctx) =>
+      ctx.db
+        .query("specs")
+        .withIndex("by_project", (q) => q.eq("projectId", created._id))
+        .unique(),
+    );
+    expect(draft?.draft).toBe("");
+  });
+
+  it("rejects member create before validation or writes", async () => {
+    const t = convexTest(schema, modules);
+    await seedWorld(t);
+    const before = await t.run(async (ctx) => ({
+      projects: await ctx.db.query("projects").collect(),
+      specs: await ctx.db.query("specs").collect(),
+    }));
+
+    await expect(
+      asMember(t).mutation(api.projects.create, {
+        orgSlug: "publisher",
+        name: "",
+        slug: "INVALID",
+      }),
+    ).rejects.toThrow(/Org admin role required/);
+
+    const after = await t.run(async (ctx) => ({
+      projects: await ctx.db.query("projects").collect(),
+      specs: await ctx.db.query("specs").collect(),
+    }));
+    expect(after).toEqual(before);
+  });
+
+  it("does not reveal an existing org slug to cross-org admins", async () => {
+    const t = convexTest(schema, modules);
+    await seedWorld(t);
+
+    await expect(
+      asCrossOrgAdmin(t).mutation(api.projects.create, {
+        orgSlug: "publisher",
+        name: "Probe",
+        slug: "probe",
+      }),
+    ).rejects.toThrow(/Organization not found/);
+    await expect(
+      asCrossOrgAdmin(t).mutation(api.projects.create, {
+        orgSlug: "does-not-exist",
+        name: "Probe",
+        slug: "probe",
+      }),
+    ).rejects.toThrow(/Organization not found/);
+  });
+
+  it("rejects member and cross-org updates with no state change", async () => {
+    const t = convexTest(schema, modules);
+    const seed = await seedWorld(t);
+    const before = await t.run(async (ctx) => ctx.db.get(seed.projectId));
+
+    await expect(
+      asMember(t).mutation(api.projects.update, {
+        projectId: seed.projectId,
+        patch: { name: "Member edit", visibility: "public" },
+      }),
+    ).rejects.toThrow(/Org admin role required/);
+    await expect(
+      asCrossOrgAdmin(t).mutation(api.projects.update, {
+        projectId: seed.projectId,
+        patch: { name: "Cross-org edit", visibility: "public" },
+      }),
+    ).rejects.toThrow(/Project not found/);
+
+    expect(await t.run(async (ctx) => ctx.db.get(seed.projectId))).toEqual(
+      before,
+    );
+  });
+
+  it("lets admins update metadata and catalogue visibility", async () => {
+    const t = convexTest(schema, modules);
+    const seed = await seedWorld(t);
+
+    const updated = await asAdmin(t).mutation(api.projects.update, {
+      projectId: seed.projectId,
+      patch: {
+        name: "Updated API",
+        description: "Updated description",
+        visibility: "public",
+        tags: [" Billing ", "billing", "AI"],
+      },
+    });
+
+    expect(updated).toMatchObject({
+      name: "Updated API",
+      description: "Updated description",
+      visibility: "public",
+      tags: ["billing", "ai"],
+    });
+  });
+
+  it("keeps member draft collaboration while blocking lifecycle writes", async () => {
+    const t = convexTest(schema, modules);
+    const seed = await seedWorld(t);
+    const spec = JSON.stringify({
+      openapi: "3.1.0",
+      info: { title: "Member Draft", version: "1.0.0" },
+      servers: [{ url: "https://api.example.com" }],
+      paths: {},
+    });
+
+    const result = await asMember(t).mutation(api.specs.saveDraft, {
+      projectId: seed.projectId,
+      spec,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.draft).toBe(spec);
+    await expect(
+      asMember(t).mutation(api.projects.update, {
+        projectId: seed.projectId,
+        patch: { visibility: "public" },
+      }),
+    ).rejects.toThrow(/Org admin role required/);
+  });
+
+  it("rejects member and cross-org deletes without orphaning state", async () => {
+    const t = convexTest(schema, modules);
+    const seed = await seedWorld(t);
+
+    await expect(
+      asMember(t).mutation(api.projects.remove, {
+        projectId: seed.projectId,
+      }),
+    ).rejects.toThrow(/Org admin role required/);
+    await expect(
+      asCrossOrgAdmin(t).mutation(api.projects.remove, {
+        projectId: seed.projectId,
+      }),
+    ).rejects.toThrow(/Project not found/);
+
+    const state = await t.run(async (ctx) => ({
+      project: await ctx.db.get(seed.projectId),
+      spec: await ctx.db.get(seed.specId),
+      version: await ctx.db.get(seed.versionId),
+      credential: await ctx.db.get(seed.credentialId),
+    }));
+    expect(state.project).not.toBeNull();
+    expect(state.spec).not.toBeNull();
+    expect(state.version).not.toBeNull();
+    expect(state.credential).not.toBeNull();
+  });
+
+  it("lets admins delete project-owned mutable state", async () => {
+    const t = convexTest(schema, modules);
+    const seed = await seedWorld(t);
+
+    expect(
+      await asAdmin(t).mutation(api.projects.remove, {
+        projectId: seed.projectId,
+      }),
+    ).toEqual({ deleted: seed.projectId });
+
+    const state = await t.run(async (ctx) => ({
+      project: await ctx.db.get(seed.projectId),
+      spec: await ctx.db.get(seed.specId),
+      version: await ctx.db.get(seed.versionId),
+      credential: await ctx.db.get(seed.credentialId),
+    }));
+    expect(state).toEqual({
+      project: null,
+      spec: null,
+      version: null,
+      credential: null,
+    });
+  });
+});

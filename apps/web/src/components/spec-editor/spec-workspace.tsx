@@ -53,6 +53,7 @@ export type SpecWorkspaceProps = {
   visibility: "public" | "private";
   /** Nudges the publish flow to remind publishers to fill this in. */
   description: string | undefined;
+  canAdminister: boolean;
   savedDraft: string;
   savedDraftHash: string | null;
   lastSavedAt: number | null;
@@ -109,6 +110,7 @@ export function SpecWorkspace({
   projectSlug,
   visibility,
   description,
+  canAdminister,
   savedDraft,
   savedDraftHash,
   lastSavedAt: initialLastSavedAt,
@@ -513,7 +515,7 @@ export function SpecWorkspace({
     },
   ];
 
-  const publishSlot = (
+  const adminPublishSlot = (
     <div className="space-y-3">
       <SpecRailVisibilityNudge
         visibility={visibility}
@@ -658,6 +660,18 @@ export function SpecWorkspace({
       ) : null}
     </div>
   );
+  const publishSlot = canAdminister ? (
+    adminPublishSlot
+  ) : (
+    <div className="rounded-md border bg-muted/40 p-3 text-sm">
+      <p className="font-medium">Draft collaboration</p>
+      <p className="mt-1 text-muted-foreground">
+        Your draft changes save for this organization. An organization admin
+        handles connection approval, publishing, visibility, and version
+        deprecation.
+      </p>
+    </div>
+  );
 
   return (
     <>
@@ -732,6 +746,7 @@ export function SpecWorkspace({
             versions={versions}
             publishSlot={publishSlot}
             projectId={projectId}
+            canAdminister={canAdminister}
             onSelectVersion={(id) =>
               setVersionDialogId(id as Id<"specVersions">)
             }

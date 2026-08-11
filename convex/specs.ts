@@ -2,7 +2,12 @@ import { v } from "convex/values";
 import { internalQuery, mutation, query } from "./_generated/server";
 import type { Doc } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
-import { getOrgByPublicHandle, requireProjectMember } from "./lib/auth";
+import {
+  getOrgByPublicHandle,
+  requireProjectAdmin,
+  requireProjectMember,
+  requireSpecVersionAdmin,
+} from "./lib/auth";
 import { createNotification } from "./lib/notifications";
 import { fireWebhookEvent } from "./webhooks";
 import {
@@ -129,7 +134,7 @@ export const publish = mutation({
     version?: Doc<"specVersions">;
     project?: Doc<"projects">;
   }> => {
-    const { org } = await requireProjectMember(ctx, args.projectId);
+    const { org } = await requireProjectAdmin(ctx, args.projectId);
 
     const version = args.version.trim();
     if (!isValidSemver(version)) {
@@ -457,7 +462,7 @@ export const getPublishedForGatewayInternal = internalQuery({
 
 /**
  * Deprecate a published version (metadata only — spec body immutable).
- * Auth: org member owning the project.
+ * Auth: org admin owning the project.
  * Fires version_deprecated notification + spec.deprecated webhook.
  */
 export const deprecateVersion = mutation({
@@ -467,11 +472,7 @@ export const deprecateVersion = mutation({
     message: v.optional(v.string()),
   },
   handler: async (ctx, args): Promise<Doc<"specVersions">> => {
-    const version = await ctx.db.get(args.versionId);
-    if (version === null) {
-      throw new Error("Version not found");
-    }
-    const { org } = await requireProjectMember(ctx, version.projectId);
+    const { org, version } = await requireSpecVersionAdmin(ctx, args.versionId);
 
     const now = Date.now();
     await ctx.db.patch(args.versionId, {
@@ -504,16 +505,12 @@ export const deprecateVersion = mutation({
 
 /**
  * Clear deprecation metadata from a version.
- * Auth: org member owning the project.
+ * Auth: org admin owning the project.
  */
 export const undeprecateVersion = mutation({
   args: { versionId: v.id("specVersions") },
   handler: async (ctx, args): Promise<Doc<"specVersions">> => {
-    const version = await ctx.db.get(args.versionId);
-    if (version === null) {
-      throw new Error("Version not found");
-    }
-    await requireProjectMember(ctx, version.projectId);
+    const { version } = await requireSpecVersionAdmin(ctx, args.versionId);
 
     // Replace to unset optional fields — patch cannot delete them.
     await ctx.db.replace(args.versionId, {

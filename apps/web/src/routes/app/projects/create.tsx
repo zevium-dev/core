@@ -17,6 +17,7 @@ import { Input } from "#/components/ui/input";
 import { Label } from "#/components/ui/label";
 import { api } from "#/lib/convex-api";
 import { humanError } from "#/lib/human-error";
+import { canAdministerOrg } from "#/lib/org-permissions";
 import { slugify } from "#/lib/slug";
 
 export const Route = createFileRoute("/app/projects/create")({
@@ -28,7 +29,7 @@ export const Route = createFileRoute("/app/projects/create")({
 
 function CreateProjectPage() {
   const navigate = useNavigate();
-  const { organization, isLoaded } = useOrganization();
+  const { organization, membership, isLoaded } = useOrganization();
   const orgSlug =
     organization && typeof organization.slug === "string"
       ? organization.slug
@@ -107,6 +108,33 @@ function CreateProjectPage() {
         <Button asChild variant="outline">
           <Link to="/app/projects">Back to projects</Link>
         </Button>
+      </div>
+    );
+  }
+
+  if (!canAdministerOrg(membership?.role)) {
+    return (
+      <div className="mx-auto flex w-full max-w-lg flex-col gap-6">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">New project</h1>
+          <p className="text-sm text-muted-foreground">
+            Project creation is managed by organization admins.
+          </p>
+        </div>
+        <Card>
+          <CardHeader>
+            <CardTitle>Admin access required</CardTitle>
+            <CardDescription>
+              Ask an organization admin to create the project. Once created,
+              members can collaborate on its OpenAPI draft.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button asChild variant="outline">
+              <Link to="/app/projects">Back to projects</Link>
+            </Button>
+          </CardContent>
+        </Card>
       </div>
     );
   }

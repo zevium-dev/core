@@ -9,7 +9,7 @@ import {
 } from "./_generated/server";
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
-import { requireProjectMember } from "./lib/auth";
+import { requireProjectAdmin, requireProjectMember } from "./lib/auth";
 import { createNotification } from "./lib/notifications";
 import { validateWebhookUrl } from "./lib/webhookDelivery";
 
@@ -90,7 +90,7 @@ export const upsertEndpoint = mutation({
     active: v.optional(v.boolean()),
   },
   handler: async (ctx, args): Promise<Doc<"webhookEndpoints">> => {
-    await requireProjectMember(ctx, args.projectId);
+    await requireProjectAdmin(ctx, args.projectId);
 
     const url = args.url.trim();
     if (!validateWebhookUrl(url)) {
@@ -129,7 +129,7 @@ export const upsertEndpoint = mutation({
 export const getEndpoint = query({
   args: { projectId: v.id("projects") },
   handler: async (ctx, args): Promise<Doc<"webhookEndpoints"> | null> => {
-    await requireProjectMember(ctx, args.projectId);
+    await requireProjectAdmin(ctx, args.projectId);
     return await ctx.db
       .query("webhookEndpoints")
       .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
@@ -141,7 +141,7 @@ export const getEndpoint = query({
 export const deleteEndpoint = mutation({
   args: { projectId: v.id("projects") },
   handler: async (ctx, args): Promise<{ deleted: boolean }> => {
-    await requireProjectMember(ctx, args.projectId);
+    await requireProjectAdmin(ctx, args.projectId);
     const existing = await ctx.db
       .query("webhookEndpoints")
       .withIndex("by_project", (q) => q.eq("projectId", args.projectId))

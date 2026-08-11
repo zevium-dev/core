@@ -14,6 +14,39 @@ import schema from "./schema";
 const modules = import.meta.glob("./**/*.ts");
 
 describe("Stripe Checkout control plane", () => {
+  it("rejects same-org members before creating checkout or payment state", async () => {
+    const t = convexTest(schema, modules);
+    await t.run(async (ctx) => {
+      await ctx.db.insert("organizations", {
+        clerkOrgId: "org_billing",
+        name: "Billing org",
+        slug: "billing-org",
+      });
+    });
+    const member = t.withIdentity({
+      subject: "billing_member",
+      org_id: "org_billing",
+      org_slug: "billing-org",
+      org_role: "org:member",
+    } as {
+      subject: string;
+      org_id: string;
+      org_slug: string;
+      org_role: string;
+    });
+
+    await expect(
+      member.action(api.billing.createCheckout, { packId: "pack_10" }),
+    ).rejects.toThrow(/Org admin role required/);
+
+    const state = await t.run(async (ctx) => ({
+      intents: await ctx.db.query("checkoutIntents").collect(),
+      profiles: await ctx.db.query("organizationPayments").collect(),
+      payments: await ctx.db.query("payments").collect(),
+    }));
+    expect(state).toEqual({ intents: [], profiles: [], payments: [] });
+  });
+
   it("uses immutable server-owned credit packs and only a server-owned Price", async () => {
     expect(
       CREDIT_PACKS.map((pack) => [pack.packId, pack.priceCents, pack.credits]),

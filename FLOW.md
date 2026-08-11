@@ -11,8 +11,8 @@
 | **Visitor**        | Anonymous browser                        | Landing, public catalogue, auth                                              |
 | **Consumer**       | Human dev buying API calls               | Catalogue, API detail, playground, keys, wallet                              |
 | **Agent**          | AI agent consuming APIs programmatically | Discovery index, agent-tool endpoint, gateway (no screens — machine surface) |
-| **Publisher**      | Org member selling APIs                  | Projects, spec editor, analytics, earnings                                   |
-| **Org admin**      | Owner/admin of an organization           | Org settings, members, wallet, invitations                                   |
+| **Publisher**      | Org member collaborating on API drafts   | Projects, spec editor, analytics, earnings                                   |
+| **Org admin**      | Owner/admin of an organization           | Project/listing lifecycle, secrets, payouts, wallet, members, invitations    |
 | **Platform admin** | Zevium staff                             | Moderation, quality gates, support tooling                                   |
 
 One account can be several personas at once (a publisher is usually also a consumer). Every user belongs to at least one org (a personal org is created at signup) — the org owns the wallet.
@@ -139,21 +139,22 @@ Org-scoped — the org owns the wallet; admins manage it, members view their own
 
 ### 4.3 Projects — `/app/organizations/{org}/projects`
 
-- Card list, New Project, empty state with CTA
+- Card list for all members; New Project and its empty-state CTA for org admins
 
 ### 4.4 Create project — `.../projects/create`
 
-- Name (slug auto-derived), description → project page
+- Org admin only: name (slug auto-derived), description → project page
 
 ### 4.5 Project page — `.../projects/{project}`
 
-- Header: name, slug, status badge (draft/published), visibility badge (private/public), Make Public action
+- Header: name, slug, status badge (draft/published), visibility badge (private/public), admin-only Make Public action
 - Tabs: Overview / Spec / Analytics / Earnings / Settings
-- Settings tab: description, tags, **upstream credentials** (encrypted secrets attached to forwarded calls), spec variables, danger zone
+- Settings tab: admin-only description, tags, **upstream credentials** (encrypted secrets attached to forwarded calls), webhook secret/config, spec variables, danger zone
 
 ### 4.6 Spec editor — `.../projects/{project}/spec`
 
-- Code editor with live validation, Issues panel, Save draft, Publish (semver dialog)
+- Members: code editor with live validation, Issues panel, Save draft
+- Org admins: connection gate, Publish (semver dialog), visibility, deprecate/restore lifecycle
 - JSON + YAML both accepted
 - Pricing lint: warn on operations missing `x-zevium-cost`; pricing summary sidebar ("12 endpoints, 2–10 credits, free tier on 3")
 - Import from URL / file upload
@@ -170,16 +171,17 @@ Org-scoped — the org owns the wallet; admins manage it, members view their own
 ### 4.8 Earnings & payouts — `.../organizations/{org}/earnings` (P2)
 
 - Accumulated publisher share (95%), settlement schedule, payout history, payout method, statement export
-- Implemented ahead of its P2 tag with Stripe Connect: `/app/org` handles publisher onboarding and remediation; `/app/earnings` separates pending-risk, available, allocated, transferred, reversed, and failed earnings and shows transfer/bank-payout history. `/admin/payouts` retries failed Connect transfers; bank destinations stay inside Stripe.
+- Implemented ahead of its P2 tag with Stripe Connect: members can view state and history; org admins handle publisher onboarding, remediation, and transfers from `/app/org` and `/app/earnings`. Earnings separate pending-risk, available, allocated, transferred, reversed, and failed states. `/admin/payouts` retries failed Connect transfers; bank destinations stay inside Stripe.
 
 ### 4.9 Listing lifecycle
 
-- Publish: auto-publish with automated gates (spec valid, upstream reachable, uptime probe); post-hoc review may delist
-- Deprecate/unpublish (P1): cannot silently kill an API with active consumers — set sunset date → consumers notified (banner + email), gateway signals deprecation, new subscriptions freeze, wind-down, hard cutoff
+- Org admins publish through automated gates (spec valid, upstream reachable, uptime probe); post-hoc review may delist
+- Org admins deprecate/unpublish (P1): cannot silently kill an API with active consumers — set sunset date → consumers notified (banner + email), gateway signals deprecation, new subscriptions freeze, wind-down, hard cutoff
 - Quality surface (P2): uptime status on own listing, security-scan results, freshness nudges
 
 ### 4.10 Publisher webhooks (P1)
 
+- Org admins configure the signed endpoint and read its signing secret; members can review delivery history
 - Subscribe to: new consumer, usage spike / abnormal traffic, revenue milestone, key revoked
 
 ---

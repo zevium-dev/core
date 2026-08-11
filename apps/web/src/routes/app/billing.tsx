@@ -27,6 +27,7 @@ import {
 import { Skeleton } from "#/components/ui/skeleton";
 import { api } from "#/lib/convex-api";
 import { humanError } from "#/lib/human-error";
+import { canAdministerOrg } from "#/lib/org-permissions";
 import {
   checkoutDisplay,
   checkoutPackButton,
@@ -56,7 +57,7 @@ export const Route = createFileRoute("/app/billing")({
 });
 
 function BillingPage() {
-  const { organization, isLoaded } = useOrganization();
+  const { organization, membership, isLoaded } = useOrganization();
   const { isLoading: convexAuthLoading, isAuthenticated } = useConvexAuth();
   const { checkout } = Route.useSearch();
 
@@ -77,12 +78,21 @@ function BillingPage() {
 
   return (
     <Suspense fallback={<BillingSkeleton />}>
-      <BillingContent checkoutSessionId={checkout} />
+      <BillingContent
+        checkoutSessionId={checkout}
+        canPurchase={canAdministerOrg(membership?.role)}
+      />
     </Suspense>
   );
 }
 
-function BillingContent({ checkoutSessionId }: { checkoutSessionId?: string }) {
+function BillingContent({
+  checkoutSessionId,
+  canPurchase,
+}: {
+  checkoutSessionId?: string;
+  canPurchase: boolean;
+}) {
   const { data: billing } = useSuspenseQuery(
     convexQuery(api.billing.getBillingState, { checkoutSessionId }),
   );
@@ -165,6 +175,18 @@ function BillingContent({ checkoutSessionId }: { checkoutSessionId?: string }) {
         </Card>
       ) : null}
 
+      {!canPurchase ? (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Admin-managed wallet</CardTitle>
+            <CardDescription>
+              You can review wallet and payment activity. Organization admins
+              purchase credit packs.
+            </CardDescription>
+          </CardHeader>
+        </Card>
+      ) : null}
+
       <section className="flex flex-col gap-3">
         <div>
           <h2 className="text-lg font-semibold tracking-tight">Buy credits</h2>
@@ -195,15 +217,17 @@ function BillingContent({ checkoutSessionId }: { checkoutSessionId?: string }) {
                   </CardTitle>
                   <CardDescription>{price} one-time purchase</CardDescription>
                 </CardHeader>
-                <CardFooter>
-                  <Button
-                    className="w-full"
-                    disabled={button.disabled}
-                    onClick={() => buyPack(pack.packId)}
-                  >
-                    {button.label}
-                  </Button>
-                </CardFooter>
+                {canPurchase ? (
+                  <CardFooter>
+                    <Button
+                      className="w-full"
+                      disabled={button.disabled}
+                      onClick={() => buyPack(pack.packId)}
+                    >
+                      {button.label}
+                    </Button>
+                  </CardFooter>
+                ) : null}
               </Card>
             );
           })}

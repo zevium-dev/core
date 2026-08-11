@@ -2,7 +2,7 @@
 import { convexTest, type TestConvex } from "convex-test";
 import type Stripe from "stripe";
 import { describe, expect, it } from "vitest";
-import { internal } from "./_generated/api";
+import { api, internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { publisherEarningSplit } from "./accounting";
 import { connectAccountProjection, createOnboardingLink } from "./payouts";
@@ -46,6 +46,53 @@ async function seedConnect(t: TestConvex<typeof schema>): Promise<ConnectSeed> {
 }
 
 describe("Stripe Connect publisher accounting", () => {
+  it("rejects member onboarding and transfers before any payout mutation", async () => {
+    const t = convexTest(schema, modules);
+    const seed = await seedConnect(t);
+    const member = t.withIdentity({
+      subject: "publisher_member",
+      email: "member@example.com",
+      org_id: "org_publisher",
+      org_slug: "publisher",
+      org_role: "org:member",
+    } as {
+      subject: string;
+      email: string;
+      org_id: string;
+      org_slug: string;
+      org_role: string;
+    });
+    const before = await t.run(async (ctx) => ({
+      profile: await ctx.db
+        .query("organizationPayments")
+        .withIndex("by_organization", (q) =>
+          q.eq("organizationId", seed.organizationId),
+        )
+        .unique(),
+      earning: await ctx.db.get(seed.earningId),
+      transfers: await ctx.db.query("publisherTransfers").collect(),
+    }));
+
+    await expect(
+      member.action(api.payouts.startOnboarding, { country: "AE" }),
+    ).rejects.toThrow(/Org admin role required/);
+    await expect(
+      member.action(api.payouts.initiatePublisherTransfer, {}),
+    ).rejects.toThrow(/Org admin role required/);
+
+    const after = await t.run(async (ctx) => ({
+      profile: await ctx.db
+        .query("organizationPayments")
+        .withIndex("by_organization", (q) =>
+          q.eq("organizationId", seed.organizationId),
+        )
+        .unique(),
+      earning: await ctx.db.get(seed.earningId),
+      transfers: await ctx.db.query("publisherTransfers").collect(),
+    }));
+    expect(after).toEqual(before);
+  });
+
   it("projects Accounts v2 recipient capability and requirements", () => {
     const projection = connectAccountProjection({
       id: "acct_recipient",

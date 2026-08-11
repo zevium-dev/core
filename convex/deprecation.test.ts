@@ -91,8 +91,22 @@ function asStranger(t: ReturnType<typeof convexTest>) {
   });
 }
 
+function asMember(t: ReturnType<typeof convexTest>) {
+  return t.withIdentity({
+    subject: "user_member",
+    org_id: "org_pub",
+    org_slug: "pub-co",
+    org_role: "org:member",
+  } as {
+    subject: string;
+    org_id: string;
+    org_slug: string;
+    org_role: string;
+  });
+}
+
 describe("specs.deprecateVersion — auth", () => {
-  it("rejects non-member", async () => {
+  it("masks versions from cross-org callers", async () => {
     const t = convexTest(schema, modules);
     const seed = await seedWorld(t);
     await t.run(async (ctx) => {
@@ -110,7 +124,29 @@ describe("specs.deprecateVersion — auth", () => {
         versionId: seed.versionId,
         message: "Use v2",
       }),
-    ).rejects.toThrow(/Not a member/);
+    ).rejects.toThrow(/Version not found/);
+  });
+
+  it("rejects same-org members without changing version state", async () => {
+    const t = convexTest(schema, modules);
+    const seed = await seedWorld(t);
+
+    await expect(
+      asMember(t).mutation(api.specs.deprecateVersion, {
+        versionId: seed.versionId,
+        message: "member mutation",
+      }),
+    ).rejects.toThrow(/Org admin role required/);
+
+    const state = await t.run(async (ctx) => ({
+      version: await ctx.db.get(seed.versionId),
+      notifications: await ctx.db.query("notifications").collect(),
+      deliveries: await ctx.db.query("webhookDeliveries").collect(),
+    }));
+    expect(state.version?.deprecatedAt).toBeUndefined();
+    expect(state.version?.deprecationMessage).toBeUndefined();
+    expect(state.notifications).toEqual([]);
+    expect(state.deliveries).toEqual([]);
   });
 
   it("rejects unauthenticated", async () => {
@@ -186,14 +222,34 @@ describe("specs.undeprecateVersion", () => {
     expect(cleared.version).toBe("1.0.0");
   });
 
-  it("rejects non-member", async () => {
+  it("masks versions from cross-org callers", async () => {
     const t = convexTest(schema, modules);
     const seed = await seedWorld(t);
     await expect(
       asStranger(t).mutation(api.specs.undeprecateVersion, {
         versionId: seed.versionId,
       }),
-    ).rejects.toThrow(/Not a member/);
+    ).rejects.toThrow(/Version not found/);
+  });
+
+  it("rejects same-org members without clearing metadata", async () => {
+    const t = convexTest(schema, modules);
+    const seed = await seedWorld(t);
+    await asPublisher(t).mutation(api.specs.deprecateVersion, {
+      versionId: seed.versionId,
+      message: "keep me",
+      sunsetAt: 123_456,
+    });
+
+    await expect(
+      asMember(t).mutation(api.specs.undeprecateVersion, {
+        versionId: seed.versionId,
+      }),
+    ).rejects.toThrow(/Org admin role required/);
+
+    const stored = await t.run(async (ctx) => ctx.db.get(seed.versionId));
+    expect(stored?.deprecationMessage).toBe("keep me");
+    expect(stored?.sunsetAt).toBe(123_456);
   });
 });
 
@@ -281,6 +337,47 @@ describe("catalogue.getPublicDetail — deprecation metadata", () => {
 });
 
 describe("specs.publish — fires spec_published notification", () => {
+  it("rejects same-org members before immutable version writes", async () => {
+    const t = convexTest(schema, modules);
+    const seed = await seedWorld(t);
+    const before = await t.run(async (ctx) =>
+      ctx.db
+        .query("specVersions")
+        .withIndex("by_project", (q) => q.eq("projectId", seed.projectId))
+        .collect(),
+    );
+
+    await expect(
+      asMember(t).mutation(api.specs.publish, {
+        projectId: seed.projectId,
+        version: "1.1.0",
+      }),
+    ).rejects.toThrow(/Org admin role required/);
+
+    const after = await t.run(async (ctx) => ({
+      versions: await ctx.db
+        .query("specVersions")
+        .withIndex("by_project", (q) => q.eq("projectId", seed.projectId))
+        .collect(),
+      notifications: await ctx.db.query("notifications").collect(),
+      project: await ctx.db.get(seed.projectId),
+    }));
+    expect(after.versions).toEqual(before);
+    expect(after.notifications).toEqual([]);
+    expect(after.project?.status).toBe("published");
+  });
+
+  it("masks projects from cross-org publish attempts", async () => {
+    const t = convexTest(schema, modules);
+    const seed = await seedWorld(t);
+    await expect(
+      asStranger(t).mutation(api.specs.publish, {
+        projectId: seed.projectId,
+        version: "1.1.0",
+      }),
+    ).rejects.toThrow(/Project not found/);
+  });
+
   it("creates notification on successful publish", async () => {
     const t = convexTest(schema, modules);
     const seed = await seedWorld(t);

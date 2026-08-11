@@ -43,6 +43,7 @@ import { Input } from "#/components/ui/input";
 import { Label } from "#/components/ui/label";
 import { api } from "#/lib/convex-api";
 import { humanError } from "#/lib/human-error";
+import { canAdministerOrg } from "#/lib/org-permissions";
 import { connectedAccountDisplay } from "#/lib/stripe-ui";
 
 export const Route = createFileRoute("/app/org/")({
@@ -143,7 +144,7 @@ function PublicHandleCard() {
   });
   const unavailable = lookup.data?.available === false;
   const valid = /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(normalized);
-  const isAdmin = membership?.role === "org:admin";
+  const isAdmin = canAdministerOrg(membership?.role);
   const { mutate: save, isPending } = useMutation({
     mutationFn: () => setPublicHandle({ handle: normalized }),
     onSuccess: () => {
@@ -180,19 +181,17 @@ function PublicHandleCard() {
             aria-invalid={normalized !== "" && !valid}
             readOnly={!isAdmin}
           />
-          <Button
-            type="button"
-            onClick={() => setConfirming(true)}
-            disabled={
-              !isAdmin ||
-              isPending ||
-              normalized === current ||
-              !valid ||
-              unavailable
-            }
-          >
-            Save handle
-          </Button>
+          {isAdmin ? (
+            <Button
+              type="button"
+              onClick={() => setConfirming(true)}
+              disabled={
+                isPending || normalized === current || !valid || unavailable
+              }
+            >
+              Save handle
+            </Button>
+          ) : null}
         </div>
         {!isAdmin ? (
           <p className="text-sm text-muted-foreground">
@@ -265,6 +264,8 @@ function PublicHandleCard() {
 }
 
 function PublisherPaymentsCard() {
+  const { membership } = useOrganization();
+  const canManagePayouts = canAdministerOrg(membership?.role);
   const [publisherCountry, setPublisherCountry] = useState("");
   const payoutState = useQuery(convexQuery(api.payouts.getPayoutState, {}));
   const startOnboarding = useAction(api.payouts.startOnboarding);
@@ -321,6 +322,11 @@ function PublisherPaymentsCard() {
       </CardHeader>
       <CardContent className="space-y-3">
         <p className="text-sm text-muted-foreground">{display.description}</p>
+        {!canManagePayouts ? (
+          <p className="rounded-md border bg-muted/40 p-3 text-sm text-muted-foreground">
+            Organization admins manage Stripe onboarding and payout settings.
+          </p>
+        ) : null}
         {profile.requirements.length > 0 ? (
           <ul className="list-disc space-y-1 pl-4 text-sm text-muted-foreground">
             {profile.requirements.map((requirement) => (
@@ -328,7 +334,7 @@ function PublisherPaymentsCard() {
             ))}
           </ul>
         ) : null}
-        {display.action && display.actionLabel ? (
+        {canManagePayouts && display.action && display.actionLabel ? (
           <div className="space-y-3">
             {profile.status === "not_started" ? (
               <div className="max-w-xs space-y-2">

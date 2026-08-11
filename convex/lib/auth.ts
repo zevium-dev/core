@@ -3,14 +3,18 @@ import type { MutationCtx, QueryCtx } from "../_generated/server";
 
 export type OrgIdentityClaims = {
   subject: string;
+  email: string | undefined;
   orgId: string | undefined;
   orgSlug: string | undefined;
   orgRole: string | undefined;
 };
 
 type DbCtx = QueryCtx | MutationCtx;
+type AuthCtx = Pick<QueryCtx, "auth">;
 
-export async function requireIdentity(ctx: DbCtx): Promise<OrgIdentityClaims> {
+export async function requireIdentity(
+  ctx: AuthCtx,
+): Promise<OrgIdentityClaims> {
   const identity = await ctx.auth.getUserIdentity();
   if (identity === null) {
     throw new Error("Not authenticated");
@@ -37,9 +41,11 @@ export async function requireIdentity(ctx: DbCtx): Promise<OrgIdentityClaims> {
       : typeof raw.orgRole === "string"
         ? raw.orgRole
         : undefined;
+  const email = typeof identity.email === "string" ? identity.email : undefined;
 
   return {
     subject: identity.subject,
+    email,
     orgId,
     orgSlug,
     orgRole,
@@ -126,6 +132,91 @@ export async function requireProjectMember(
 }
 
 /**
+ * Resolve an org-admin mutation by slug without confirming whether another
+ * organization's slug exists. This keeps cross-org failures indistinguishable
+ * from missing resources while same-org members receive a useful role error.
+ */
+export async function requireOrgAdminBySlug(
+  ctx: DbCtx,
+  orgSlug: string,
+): Promise<{ claims: OrgIdentityClaims; org: Doc<"organizations"> }> {
+  const claims = await requireIdentity(ctx);
+  if (claims.orgId === undefined) {
+    throw new Error("No active organization on identity");
+  }
+
+  const org = await getOrgBySlug(ctx, orgSlug);
+  if (org === null || org.clerkOrgId !== claims.orgId) {
+    throw new Error("Organization not found");
+  }
+  requireOrgAdmin(claims);
+
+  return { claims, org };
+}
+
+/**
+ * Resolve an org-admin mutation by project id. Cross-org callers receive the
+ * same error as an unknown project id, preventing project-id enumeration.
+ */
+export async function requireProjectAdmin(
+  ctx: DbCtx,
+  projectId: Id<"projects">,
+): Promise<{
+  claims: OrgIdentityClaims;
+  org: Doc<"organizations">;
+  project: Doc<"projects">;
+}> {
+  const claims = await requireIdentity(ctx);
+  if (claims.orgId === undefined) {
+    throw new Error("No active organization on identity");
+  }
+
+  const project = await ctx.db.get(projectId);
+  if (project === null) {
+    throw new Error("Project not found");
+  }
+  const org = await ctx.db.get(project.organizationId);
+  if (org === null || org.clerkOrgId !== claims.orgId) {
+    throw new Error("Project not found");
+  }
+  requireOrgAdmin(claims);
+
+  return { claims, org, project };
+}
+
+/** Admin gate for version lifecycle writes with non-enumerating failures. */
+export async function requireSpecVersionAdmin(
+  ctx: DbCtx,
+  versionId: Id<"specVersions">,
+): Promise<{
+  claims: OrgIdentityClaims;
+  org: Doc<"organizations">;
+  project: Doc<"projects">;
+  version: Doc<"specVersions">;
+}> {
+  const claims = await requireIdentity(ctx);
+  if (claims.orgId === undefined) {
+    throw new Error("No active organization on identity");
+  }
+
+  const version = await ctx.db.get(versionId);
+  if (version === null) {
+    throw new Error("Version not found");
+  }
+  const project = await ctx.db.get(version.projectId);
+  if (project === null) {
+    throw new Error("Version not found");
+  }
+  const org = await ctx.db.get(project.organizationId);
+  if (org === null || org.clerkOrgId !== claims.orgId) {
+    throw new Error("Version not found");
+  }
+  requireOrgAdmin(claims);
+
+  return { claims, org, project, version };
+}
+
+/**
  * Enforce org-admin role from the Clerk JWT claim (`org_role === "org:admin"`).
  * `claims.orgRole` is parsed by `requireIdentity` but, without this gate, any
  * org member can perform admin actions. Callers resolve claims first via
@@ -134,27 +225,29 @@ export async function requireProjectMember(
  *
  * Returns the claims for chaining. Does NOT touch the DB.
  *
- * Mutations that SHOULD call `requireOrgAdmin(claims)` (caller migration is a
- * separate PR — this helper is exported but not yet wired in):
- *   - projects.create / projects.update / projects.remove
- *       (project lifecycle: create, rename, transfer, delete)
- *   - specs.publish / specs.deprecateVersion / specs.undeprecateVersion
- *       (publishing + deprecation lifecycle; `specs.saveDraft` stays member-level)
- *   - webhooks.upsertEndpoint / webhooks.deleteEndpoint
- *       (webhook endpoint config + signing-secret surface)
- *   - keySettings.setCap / keySettings.setDisabled / keySettings rotation state machine
- *       (gateway key provisioning, caps, rotation)
- *   - organizations.ensureOrganization stays identity-scoped (bootstrap/sync);
- *       any future org-level settings mutation should adopt this gate.
- *
- * Read-only queries and per-member mutations (draft save, wallet view, payout
- * state) intentionally stay at `requireOrgMemberBySlug` / `requireProjectMember`.
+ * Read-only queries and member collaboration mutations intentionally stay at
+ * `requireOrgMemberBySlug` / `requireProjectMember`. Lifecycle, billing, payout,
+ * secret, and org-setting writes must use one of the admin-resolving helpers.
  */
 export function requireOrgAdmin(claims: OrgIdentityClaims): OrgIdentityClaims {
   if (claims.orgRole !== "org:admin") {
     throw new Error("Org admin role required");
   }
   return claims;
+}
+
+export type ActiveOrgAdminClaims = OrgIdentityClaims & { orgId: string };
+
+/** Authenticate an action and require an active Clerk org-admin membership. */
+export async function requireActiveOrgAdmin(
+  ctx: AuthCtx,
+): Promise<ActiveOrgAdminClaims> {
+  const claims = await requireIdentity(ctx);
+  if (claims.orgId === undefined || claims.orgId.trim() === "") {
+    throw new Error("Active organization required");
+  }
+  requireOrgAdmin(claims);
+  return { ...claims, orgId: claims.orgId };
 }
 
 /**

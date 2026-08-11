@@ -35,6 +35,7 @@ import { Skeleton } from "#/components/ui/skeleton";
 import { listKeys } from "#/lib/api-keys";
 import { api } from "#/lib/convex-api";
 import { deriveOnboardingFlags, shouldShowOnboarding } from "#/lib/onboarding";
+import { canAdministerOrg } from "#/lib/org-permissions";
 
 const NUMBER_FORMATTER = new Intl.NumberFormat("en-US");
 const DATE_TIME_FORMATTER = new Intl.DateTimeFormat("en-US", {
@@ -56,7 +57,7 @@ export const Route = createFileRoute("/app/")({
 });
 
 function DashboardPage() {
-  const { organization, isLoaded } = useOrganization();
+  const { organization, membership, isLoaded } = useOrganization();
   const { isLoading: convexAuthLoading, isAuthenticated } = useConvexAuth();
   const orgSlug =
     organization && typeof organization.slug === "string"
@@ -84,12 +85,21 @@ function DashboardPage() {
 
   return (
     <Suspense fallback={<DashboardSkeleton />}>
-      <DashboardContent orgSlug={orgSlug} />
+      <DashboardContent
+        orgSlug={orgSlug}
+        canAdministerWallet={canAdministerOrg(membership?.role)}
+      />
     </Suspense>
   );
 }
 
-function DashboardContent({ orgSlug }: { orgSlug: string }) {
+function DashboardContent({
+  orgSlug,
+  canAdministerWallet,
+}: {
+  orgSlug: string;
+  canAdministerWallet: boolean;
+}) {
   const { data: overview } = useSuspenseQuery(
     convexQuery(api.analytics.orgOverview, { orgSlug }),
   );
@@ -124,9 +134,11 @@ function DashboardContent({ orgSlug }: { orgSlug: string }) {
         </div>
         {keysLoaded && !showOnboarding ? (
           <div className="flex flex-wrap gap-2">
-            <Button asChild>
-              <Link to="/app/billing">Top up</Link>
-            </Button>
+            {canAdministerWallet ? (
+              <Button asChild>
+                <Link to="/app/billing">Top up</Link>
+              </Button>
+            ) : null}
             <Button asChild variant="outline">
               <Link to="/app/settings/keys">Manage keys</Link>
             </Button>
@@ -200,6 +212,7 @@ function DashboardContent({ orgSlug }: { orgSlug: string }) {
           hasKey={flags.hasKey}
           hasCall={flags.hasCall}
           hasTopUp={flags.hasTopUp}
+          canAdministerWallet={canAdministerWallet}
         />
       ) : null}
 
@@ -327,10 +340,12 @@ function OnboardingChecklist({
   hasKey,
   hasCall,
   hasTopUp,
+  canAdministerWallet,
 }: {
   hasKey: boolean;
   hasCall: boolean;
   hasTopUp: boolean;
+  canAdministerWallet: boolean;
 }) {
   const steps = [
     {
@@ -389,7 +404,8 @@ function OnboardingChecklist({
                     <p className="text-sm text-muted-foreground">{step.body}</p>
                   </div>
                 </div>
-                {!step.done ? (
+                {!step.done &&
+                (step.href !== "/app/billing" || canAdministerWallet) ? (
                   <Button
                     asChild
                     size="sm"
@@ -398,9 +414,13 @@ function OnboardingChecklist({
                   >
                     <Link to={step.href}>{step.cta}</Link>
                   </Button>
-                ) : (
+                ) : step.done ? (
                   <Badge variant="secondary" className="self-start">
                     Done
+                  </Badge>
+                ) : (
+                  <Badge variant="outline" className="self-start">
+                    Admin managed
                   </Badge>
                 )}
               </div>

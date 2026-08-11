@@ -54,6 +54,7 @@ import { Tabs, TabsList, TabsTrigger } from "#/components/ui/tabs";
 import { api } from "#/lib/convex-api";
 import type { Doc } from "#/lib/convex-data-model";
 import { humanError } from "#/lib/human-error";
+import { canAdministerOrg } from "#/lib/org-permissions";
 import type { RouterContext } from "#/router";
 
 type ProjectPanel = "overview" | "analytics" | "earnings" | "settings";
@@ -96,7 +97,7 @@ export const Route = createFileRoute("/app/projects/$projectSlug")({
 
 function ProjectLayoutPage() {
   const { projectSlug } = Route.useParams();
-  const { organization, isLoaded } = useOrganization();
+  const { organization, membership, isLoaded } = useOrganization();
   const { isLoading: convexAuthLoading, isAuthenticated } = useConvexAuth();
   const orgSlug =
     organization && typeof organization.slug === "string"
@@ -126,7 +127,11 @@ function ProjectLayoutPage() {
 
   return (
     <Suspense fallback={<ProjectPageSkeleton />}>
-      <ProjectShell orgSlug={orgSlug} projectSlug={projectSlug} />
+      <ProjectShell
+        orgSlug={orgSlug}
+        projectSlug={projectSlug}
+        canAdminister={canAdministerOrg(membership?.role)}
+      />
     </Suspense>
   );
 }
@@ -134,9 +139,11 @@ function ProjectLayoutPage() {
 function ProjectShell({
   orgSlug,
   projectSlug,
+  canAdminister,
 }: {
   orgSlug: string;
   projectSlug: string;
+  canAdminister: boolean;
 }) {
   const { data: project } = useSuspenseQuery(
     convexQuery(api.projects.get, { orgSlug, projectSlug }),
@@ -235,38 +242,40 @@ function ProjectShell({
           ) : null}
         </div>
 
-        <Dialog open={visibilityOpen} onOpenChange={setVisibilityOpen}>
-          <DialogTrigger asChild>
-            <Button variant="outline">
-              Make {nextVisibility === "public" ? "Public" : "Private"}
-            </Button>
-          </DialogTrigger>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Make project {nextVisibility}?</DialogTitle>
-              <DialogDescription>
-                {nextVisibility === "public"
-                  ? "Public projects appear in the catalogue when published. Only published specs are listed."
-                  : "Private projects stay hidden from the public catalogue."}
-              </DialogDescription>
-            </DialogHeader>
-            <DialogFooter>
-              <Button
-                variant="ghost"
-                onClick={() => setVisibilityOpen(false)}
-                disabled={visibilityPending}
-              >
-                Cancel
+        {canAdminister ? (
+          <Dialog open={visibilityOpen} onOpenChange={setVisibilityOpen}>
+            <DialogTrigger asChild>
+              <Button variant="outline">
+                Make {nextVisibility === "public" ? "Public" : "Private"}
               </Button>
-              <Button
-                onClick={() => setVisibility(nextVisibility)}
-                disabled={visibilityPending}
-              >
-                {visibilityPending ? "Updating…" : `Make ${nextVisibility}`}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Make project {nextVisibility}?</DialogTitle>
+                <DialogDescription>
+                  {nextVisibility === "public"
+                    ? "Public projects appear in the catalogue when published. Only published specs are listed."
+                    : "Private projects stay hidden from the public catalogue."}
+                </DialogDescription>
+              </DialogHeader>
+              <DialogFooter>
+                <Button
+                  variant="ghost"
+                  onClick={() => setVisibilityOpen(false)}
+                  disabled={visibilityPending}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  onClick={() => setVisibility(nextVisibility)}
+                  disabled={visibilityPending}
+                >
+                  {visibilityPending ? "Updating…" : `Make ${nextVisibility}`}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        ) : null}
       </div>
 
       <Tabs
@@ -315,10 +324,15 @@ function ProjectShell({
           <ProjectEarningsPanel orgSlug={orgSlug} projectSlug={project.slug} />
         </Suspense>
       ) : panel === "settings" ? (
-        <ProjectSettingsPanel project={project} orgSlug={orgSlug} />
+        <ProjectSettingsPanel
+          project={project}
+          orgSlug={orgSlug}
+          canAdminister={canAdminister}
+        />
       ) : (
         <ProjectOverview
           project={project}
+          canAdminister={canAdminister}
           onEdit={() =>
             void navigate({
               to: "/app/projects/$projectSlug",
@@ -335,9 +349,11 @@ function ProjectShell({
 function ProjectOverview({
   project,
   onEdit,
+  canAdminister,
 }: {
   project: Doc<"projects">;
   onEdit: () => void;
+  canAdminister: boolean;
 }) {
   const isLive =
     project.status === "published" && project.visibility === "public";
@@ -352,9 +368,11 @@ function ProjectOverview({
               Project status and catalogue readiness.
             </CardDescription>
           </div>
-          <Button type="button" variant="outline" size="sm" onClick={onEdit}>
-            Edit
-          </Button>
+          {canAdminister ? (
+            <Button type="button" variant="outline" size="sm" onClick={onEdit}>
+              Edit
+            </Button>
+          ) : null}
         </CardHeader>
         <CardContent className="space-y-3 text-sm">
           <div className="flex justify-between gap-4">
