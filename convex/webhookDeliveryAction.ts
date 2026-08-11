@@ -1,10 +1,10 @@
 "use node";
 
-import { lookup } from "node:dns/promises";
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import { internalAction } from "./_generated/server";
 import { postWebhook } from "./lib/webhookDelivery";
+import { deliverPinnedHttps } from "./lib/webhookTransport";
 
 /**
  * Delivery action: resolve and validate every target, POST the webhook, then
@@ -43,9 +43,7 @@ export const deliverWebhook = internalAction({
         data: parsed.data,
         timestamp: parsed.timestamp,
       },
-      fetch,
-      async (hostname) =>
-        (await lookup(hostname, { all: true })).map(({ address }) => address),
+      deliverPinnedHttps,
     );
 
     await ctx.runMutation(internal.webhooks.recordDeliveryAttempt, {

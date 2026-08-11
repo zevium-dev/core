@@ -228,6 +228,9 @@ export const recordDeliveryAttempt = internalMutation({
   handler: async (ctx, args): Promise<void> => {
     const delivery = await ctx.db.get(args.deliveryId);
     if (delivery === null) return;
+    // Duplicate actions can race after both read `pending`. Convex retries this
+    // mutation on OCC, so re-check makes result/schedule/notification exact-once.
+    if (delivery.status === "ok" || delivery.status === "failed") return;
 
     const nextAttempts = delivery.attempts + 1;
 
