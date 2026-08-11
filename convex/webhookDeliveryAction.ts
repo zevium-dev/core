@@ -24,6 +24,7 @@ export const deliverWebhook = internalAction({
         deliveryId: args.deliveryId,
         ok: false,
         error: "Endpoint inactive",
+        retryable: false,
       });
       return;
     }
