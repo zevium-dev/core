@@ -71,6 +71,9 @@ docs/            # market research + demo assets
 Source-of-truth docs: [PRODUCT.md](PRODUCT.md) · [FLOW.md](FLOW.md) ·
 [TECH.md](TECH.md) · [DESIGN.md](DESIGN.md)
 
+Trust docs: [Security policy](SECURITY.md) ·
+[Launch security and compliance posture](docs/launch-security-compliance.md)
+
 ## Development
 
 ```sh

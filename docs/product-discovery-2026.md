@@ -33,7 +33,7 @@ Sources: [TechCrunch](https://techcrunch.com/2024/11/13/nokia-acquires-rapid-the
 - Discovery fragmented across community directories (mcp.so, Smithery, PulseMCP)
 - The MCP spec **contains no payment or metering primitives** — monetization explicitly left to third-party layers
 
-A curated + metered + secured MCP layer is an open goal, and it is exactly the shape of Zevium's existing proxy + credits architecture.
+A curated, authenticated, and metered MCP layer is an open goal, and it is exactly the shape of Zevium's existing proxy + credits architecture.
 
 Design constraint: **up to 72% of an agent's context window can be consumed by MCP tool schemas alone**. An MCP gateway must expose a compact, curated tool surface (e.g. search-then-load tool discovery), not dump every endpoint of every spec as a tool.
 

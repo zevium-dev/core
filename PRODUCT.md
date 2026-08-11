@@ -1,6 +1,6 @@
 # Zevium Product Specification
 
-> Last updated: 2026-07-12
+> Last updated: 2026-08-12
 > Companions: [FLOW.md](FLOW.md) (screens), [DESIGN.md](DESIGN.md) (feel), [TECH.md](TECH.md) (implementation). Market research: [docs/product-discovery-2026.md](docs/product-discovery-2026.md).
 > This doc describes **what Zevium is and what it solves** — no implementation details.
 
@@ -10,7 +10,7 @@ Zevium is an **agent-first, per-call API marketplace**. Publishers list APIs des
 
 **The problem.** Selling API access is broken in both directions. Publishers who want to charge per call must build metering, billing, key management, and payout plumbing themselves. Consumers — increasingly AI agents — have no trustworthy place to discover, evaluate, and pay for APIs: the incumbent horizontal marketplace collapsed (RapidAPI, sold for parts in 2024), and the agent-tool ecosystem that replaced the demand is a mess of thousands of broken, unmetered, insecure community servers with no payment layer at all.
 
-**The bet.** Be the curated, metered, secured place where both humans and agents discover and pay for APIs per call — and where publishing a paid API takes minutes, not a billing-infrastructure project.
+**The bet.** Be the curated, metered place where both humans and agents discover and pay for APIs per call — and where publishing a paid API takes minutes, not a billing-infrastructure project.
 
 ## Two-sided platform
 

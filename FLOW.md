@@ -1,6 +1,6 @@
 # Zevium Product Flow
 
-> Last updated: 2026-07-12
+> Last updated: 2026-08-12
 > Companion to [PRODUCT.md](PRODUCT.md) (what), [DESIGN.md](DESIGN.md) (feel), [TECH.md](TECH.md) (how). This doc is **what users see on screen**, screen by screen, per persona — the target product, not the current code.
 > Priority tags (P0/P1/P2) follow the PRODUCT.md roadmap; untagged = P0.
 
@@ -149,7 +149,7 @@ Org-scoped — the org owns the wallet; admins manage it, members view their own
 
 - Header: name, slug, status badge (draft/published), visibility badge (private/public), Make Public action
 - Tabs: Overview / Spec / Analytics / Earnings / Settings
-- Settings tab: description, tags, **upstream credentials** (encrypted secrets attached to forwarded calls), spec variables, danger zone
+- Settings tab: description, tags, **upstream credentials** (gateway-only secrets attached to forwarded calls; production encryption rollout gate is documented in TECH.md), spec variables, danger zone
 
 ### 4.6 Spec editor — `.../projects/{project}/spec`
 
