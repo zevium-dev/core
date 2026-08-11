@@ -178,12 +178,7 @@ function ProjectShell({
         patch: { visibility },
       });
     },
-    onSuccess: async (updated) => {
-      toast.success(
-        updated.visibility === "public"
-          ? "Project is now public"
-          : "Project is now private",
-      );
+    onSuccess: async () => {
       setVisibilityOpen(false);
       await queryClient.invalidateQueries({
         queryKey: convexQuery(api.projects.get, { orgSlug, projectSlug })
@@ -239,7 +234,7 @@ function ProjectShell({
             <Badge variant="outline">{project.visibility}</Badge>
           </div>
           <h1
-            className="text-2xl font-semibold tracking-tight"
+            className="min-w-0 text-2xl font-semibold tracking-tight [overflow-wrap:anywhere]"
             style={{
               viewTransitionName: `project-title-${project.slug}`,
             }}

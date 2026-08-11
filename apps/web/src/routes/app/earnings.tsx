@@ -52,6 +52,13 @@ type EarningsSearch = {
   onboarding?: "refresh" | "return";
 };
 
+const EARNINGS_DATE_FORMATTER = new Intl.DateTimeFormat("en-US", {
+  year: "numeric",
+  month: "short",
+  day: "numeric",
+  timeZone: "UTC",
+});
+
 export const Route = createFileRoute("/app/earnings")({
   validateSearch: (search: Record<string, unknown>): EarningsSearch => {
     const onboarding = search.onboarding;
@@ -257,14 +264,14 @@ function EarningsContent() {
         </Card>
         {earnings.failed > 0 ? (
           <p className="text-sm text-destructive">
-            {earnings.failed.toLocaleString()} credits need transfer review. See
-            transfer history for the safe failure reason.
+            {earnings.failed.toLocaleString("en-US")} credits need transfer
+            review. See transfer history for the safe failure reason.
           </p>
         ) : null}
         {earnings.reversed > 0 ? (
           <p className="text-sm text-destructive">
-            {earnings.reversed.toLocaleString()} credits were reversed. Review
-            ledger for affected earnings.
+            {earnings.reversed.toLocaleString("en-US")} credits were reversed.
+            Review ledger for affected earnings.
           </p>
         ) : null}
       </section>
@@ -377,16 +384,16 @@ function EarningsLedgerCard({
                       </Badge>
                     </td>
                     <td className="px-2 py-2.5 text-right tabular-nums">
-                      {earning.grossCredits.toLocaleString()}
+                      {earning.grossCredits.toLocaleString("en-US")}
                     </td>
                     <td className="hidden px-2 py-2.5 text-right tabular-nums text-muted-foreground sm:table-cell">
-                      {earning.platformFeeCredits.toLocaleString()}
+                      {earning.platformFeeCredits.toLocaleString("en-US")}
                     </td>
                     <td className="px-2 py-2.5 text-right tabular-nums">
-                      {earning.netCredits.toLocaleString()}
+                      {earning.netCredits.toLocaleString("en-US")}
                     </td>
                     <td className="hidden px-2 py-2.5 whitespace-nowrap text-muted-foreground md:table-cell">
-                      {new Date(earning.availableAt).toLocaleDateString()}
+                      {EARNINGS_DATE_FORMATTER.format(earning.availableAt)}
                     </td>
                   </tr>
                 ))}
@@ -471,7 +478,7 @@ function TransferHistoryCard({
                         {formatMoney(transfer.amount, transfer.currency)}
                       </td>
                       <td className="px-2 py-2.5 whitespace-nowrap text-muted-foreground">
-                        {new Date(transfer.createdAt).toLocaleDateString()}
+                        {EARNINGS_DATE_FORMATTER.format(transfer.createdAt)}
                       </td>
                       <td className="hidden max-w-56 truncate px-2 py-2.5 text-muted-foreground md:table-cell">
                         {failure ?? transfer.stripeTransferId ?? "—"}
@@ -548,7 +555,7 @@ function PayoutHistoryCard({ payouts }: { payouts: ConnectedPayout[] }) {
                       </td>
                       <td className="px-2 py-2.5 whitespace-nowrap text-muted-foreground">
                         {payout.arrivalDate
-                          ? new Date(payout.arrivalDate).toLocaleDateString()
+                          ? EARNINGS_DATE_FORMATTER.format(payout.arrivalDate)
                           : "—"}
                       </td>
                       <td className="hidden max-w-56 truncate px-2 py-2.5 text-muted-foreground sm:table-cell">
@@ -584,7 +591,7 @@ function HistoryEmpty({
 }
 
 function formatMoney(amount: number, currency: string): string {
-  return new Intl.NumberFormat(undefined, {
+  return new Intl.NumberFormat("en-US", {
     style: "currency",
     currency: currency.toUpperCase(),
   }).format(amount / 100);

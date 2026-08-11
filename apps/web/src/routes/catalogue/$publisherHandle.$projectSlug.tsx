@@ -49,6 +49,7 @@ import {
 } from "#/components/ui/select";
 import { Skeleton } from "#/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "#/components/ui/tabs";
+import { Textarea } from "#/components/ui/textarea";
 import { ToggleGroup, ToggleGroupItem } from "#/components/ui/toggle-group";
 import { api } from "#/lib/convex-api";
 import { creditsLabel } from "#/lib/credits-label";
@@ -76,9 +77,6 @@ const DATE_FORMATTER = new Intl.DateTimeFormat("en-US", {
   day: "numeric",
   timeZone: "UTC",
 });
-
-const TEXTAREA_CLASS =
-  "flex min-h-24 w-full rounded-md border border-input bg-transparent px-3 py-2 font-mono text-xs shadow-xs transition-[color,box-shadow] outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50";
 
 function responseLanguage(body: string): "json" | "plain" {
   try {
@@ -326,7 +324,7 @@ function ApiDetailBody({
               </span>
             </p>
             <h1
-              className="text-3xl font-semibold tracking-tight"
+              className="min-w-0 text-3xl font-semibold tracking-tight [overflow-wrap:anywhere]"
               style={{
                 viewTransitionName: `api-title-${data.org.publisherHandle}-${data.project.slug}`,
               }}
@@ -1158,7 +1156,7 @@ function TryItPanel({
               data-invalid={Boolean(errors.headers)}
             >
               <FieldLabel htmlFor="try-headers">Additional headers</FieldLabel>
-              <textarea
+              <Textarea
                 id="try-headers"
                 name="headers"
                 autoComplete="off"
@@ -1178,7 +1176,7 @@ function TryItPanel({
                 }}
                 placeholder={"Accept: application/json"}
                 rows={3}
-                className={TEXTAREA_CLASS}
+                className="min-h-24 font-mono text-xs"
               />
               <FieldDescription id="try-headers-help">
                 One <code>Name: value</code> pair per line. Declared header
@@ -1199,7 +1197,7 @@ function TryItPanel({
                     {endpoint?.requestBodyRequired ? " · required" : ""}
                   </span>
                 </FieldLabel>
-                <textarea
+                <Textarea
                   id="try-body"
                   name="request-body"
                   autoComplete="off"
@@ -1216,7 +1214,7 @@ function TryItPanel({
                   }}
                   rows={6}
                   spellCheck={false}
-                  className={TEXTAREA_CLASS}
+                  className="min-h-24 font-mono text-xs"
                   aria-invalid={Boolean(errors.body)}
                   aria-describedby="try-body-help"
                 />
@@ -1438,7 +1436,7 @@ function ApiDetailBodySkeleton() {
       <div className="space-y-3">
         <Skeleton className="h-4 w-40" />
         <Skeleton className="h-9 w-64" />
-        <Skeleton className="h-4 w-80" />
+        <Skeleton className="h-4 w-80 max-w-full" />
         <div className="flex gap-2 pt-1">
           <Skeleton className="h-5 w-16 rounded-full" />
           <Skeleton className="h-5 w-20 rounded-full" />

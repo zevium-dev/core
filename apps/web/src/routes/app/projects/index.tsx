@@ -146,7 +146,7 @@ function ProjectsList({ orgSlug }: { orgSlug: string }) {
                   </div>
                   {/* VT morph: projects list → project page (project-title/status-{slug}) */}
                   <CardTitle
-                    className="text-base"
+                    className="min-w-0 text-base [overflow-wrap:anywhere]"
                     style={{
                       viewTransitionName: `project-title-${project.slug}`,
                     }}

@@ -51,9 +51,13 @@ export function PublicHeader({ active = null, className }: PublicHeaderProps) {
               <BrandMark className="h-3 w-4" />
               <span aria-hidden="true">evium</span>
             </Link>
-            <nav className="hidden items-center gap-4 text-sm text-muted-foreground sm:flex">
+            <nav
+              className="hidden items-center gap-4 text-sm text-muted-foreground sm:flex"
+              aria-label="Primary"
+            >
               <Link
                 to="/catalogue"
+                aria-current={active === "catalogue" ? "page" : undefined}
                 className={cn(
                   "transition-colors duration-[var(--dur-instant)] ease-[var(--ease)] hover:text-foreground",
                   active === "catalogue" && "text-foreground",
@@ -63,6 +67,7 @@ export function PublicHeader({ active = null, className }: PublicHeaderProps) {
               </Link>
               <Link
                 to="/docs"
+                aria-current={active === "docs" ? "page" : undefined}
                 className={cn(
                   "transition-colors duration-[var(--dur-instant)] ease-[var(--ease)] hover:text-foreground",
                   active === "docs" && "text-foreground",
@@ -135,6 +140,7 @@ export function PublicHeader({ active = null, className }: PublicHeaderProps) {
           >
             <Link
               to="/catalogue"
+              aria-current={active === "catalogue" ? "page" : undefined}
               onClick={() => setMobileOpen(false)}
               className={cn(
                 "rounded-md px-3 py-2 focus-visible:ring-[3px] focus-visible:ring-ring/50",
@@ -145,6 +151,7 @@ export function PublicHeader({ active = null, className }: PublicHeaderProps) {
             </Link>
             <Link
               to="/docs"
+              aria-current={active === "docs" ? "page" : undefined}
               onClick={() => setMobileOpen(false)}
               className={cn(
                 "rounded-md px-3 py-2 focus-visible:ring-[3px] focus-visible:ring-ring/50",
@@ -153,6 +160,23 @@ export function PublicHeader({ active = null, className }: PublicHeaderProps) {
             >
               Docs
             </Link>
+            <Show when="signed-in">
+              <Link
+                to="/app"
+                onClick={() => setMobileOpen(false)}
+                className="rounded-md px-3 py-2 focus-visible:ring-[3px] focus-visible:ring-ring/50"
+              >
+                Dashboard
+              </Link>
+            </Show>
+            <a
+              href={GITHUB_URL}
+              target="_blank"
+              rel="noreferrer"
+              className="rounded-md px-3 py-2 focus-visible:ring-[3px] focus-visible:ring-ring/50"
+            >
+              GitHub
+            </a>
           </nav>
         ) : null}
       </header>

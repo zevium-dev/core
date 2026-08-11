@@ -449,7 +449,7 @@ function ActivityContent({ orgSlug }: { orgSlug: string }) {
                           {event.endpoint}
                         </td>
                         <td className="px-2 py-2.5 tabular-nums">
-                          {event.credits.toLocaleString()}
+                          {event.credits.toLocaleString("en-US")}
                         </td>
                         <td className="px-2 py-2.5">
                           <StatusBadge status={event.status} />

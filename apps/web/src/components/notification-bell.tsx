@@ -127,7 +127,6 @@ function BellWithOrg({ orgSlug }: { orgSlug: string }) {
 
   const { mutate: markAllRead, isPending: markingAll } = useMutation({
     mutationFn: () => markAllMut({ orgSlug }),
-    onSuccess: () => toast.success("All notifications marked read"),
     onError: (err: unknown) =>
       toast.error(humanError(err, "Could not mark all read")),
   });
@@ -160,7 +159,7 @@ function BellWithOrg({ orgSlug }: { orgSlug: string }) {
               initial={reduce ? false : { scale: 0 }}
               animate={{ scale: 1 }}
               transition={SPRING.pop}
-              className="absolute -top-0.5 -right-0.5 flex min-w-4 h-4 items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-semibold leading-none text-white tabular-nums"
+              className="absolute -top-0.5 -right-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-semibold leading-none text-destructive-foreground tabular-nums"
             >
               {unreadLabel}
             </m.span>
@@ -169,7 +168,7 @@ function BellWithOrg({ orgSlug }: { orgSlug: string }) {
       </PopoverTrigger>
       <PopoverContent
         align="end"
-        className="w-80 p-0"
+        className="w-80 max-w-[calc(100vw-1rem)] p-0"
         // Reset `now` when opening so the first paint is accurate.
         onOpenAutoFocus={() => setNow(Date.now())}
       >

@@ -15,14 +15,22 @@ vi.mock("@tanstack/react-router", () => ({
     className,
     onClick,
     "aria-label": ariaLabel,
+    "aria-current": ariaCurrent,
   }: {
     children: React.ReactNode;
     to: string;
     className?: string;
     onClick?: React.MouseEventHandler<HTMLAnchorElement>;
     "aria-label"?: string;
+    "aria-current"?: "page";
   }) => (
-    <a href={to} className={className} onClick={onClick} aria-label={ariaLabel}>
+    <a
+      href={to}
+      className={className}
+      onClick={onClick}
+      aria-label={ariaLabel}
+      aria-current={ariaCurrent}
+    >
       {children}
     </a>
   ),
@@ -72,5 +80,15 @@ describe("PublicHeader", () => {
         .getByRole("navigation", { name: "Public navigation" })
         .getAttribute("id"),
     ).toBe("public-mobile-navigation");
+    expect(screen.getByRole("link", { name: "Dashboard" })).not.toBeNull();
+    expect(screen.getByRole("link", { name: "GitHub" })).not.toBeNull();
+  });
+
+  it("exposes the current public destination to assistive technology", () => {
+    render(<PublicHeader active="catalogue" />);
+
+    for (const link of screen.getAllByRole("link", { name: "Catalogue" })) {
+      expect(link.getAttribute("aria-current")).toBe("page");
+    }
   });
 });

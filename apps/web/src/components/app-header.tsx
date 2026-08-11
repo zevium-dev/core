@@ -44,17 +44,27 @@ export function AppHeader() {
     <header className="flex h-14 shrink-0 items-center gap-2 border-b px-4">
       <SidebarTrigger className="-ml-1" />
       <Separator orientation="vertical" className="mr-2 h-4!" />
-      <Breadcrumb>
-        <BreadcrumbList>
+      <Breadcrumb className="min-w-0 flex-1 overflow-hidden">
+        <BreadcrumbList className="flex-nowrap overflow-hidden">
           {crumbs.map((crumb, i) => (
             <Fragment key={crumb.href}>
-              {i > 0 ? <BreadcrumbSeparator /> : null}
-              <BreadcrumbItem>
+              {i > 0 ? (
+                <BreadcrumbSeparator className="hidden shrink-0 sm:block" />
+              ) : null}
+              <BreadcrumbItem
+                className={
+                  crumb.isLast ? "min-w-0" : "hidden shrink-0 sm:inline-flex"
+                }
+              >
                 {crumb.isLast ? (
-                  <BreadcrumbPage>{crumb.label}</BreadcrumbPage>
+                  <BreadcrumbPage className="block truncate whitespace-nowrap">
+                    {crumb.label}
+                  </BreadcrumbPage>
                 ) : (
                   <BreadcrumbLink asChild>
-                    <Link to={crumb.href}>{crumb.label}</Link>
+                    <Link to={crumb.href} className="whitespace-nowrap">
+                      {crumb.label}
+                    </Link>
                   </BreadcrumbLink>
                 )}
               </BreadcrumbItem>

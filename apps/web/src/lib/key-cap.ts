@@ -24,5 +24,5 @@ export function parseMonthlyCap(input: string): ParsedCap {
 /** Display a cap value: undefined/absent → "Unlimited", number → grouped. */
 export function formatMonthlyCap(cap: number | undefined): string {
   if (cap === undefined) return "Unlimited";
-  return cap.toLocaleString();
+  return cap.toLocaleString("en-US");
 }
