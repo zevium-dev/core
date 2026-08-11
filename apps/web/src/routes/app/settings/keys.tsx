@@ -55,6 +55,7 @@ import { api } from "#/lib/convex-api";
 import { humanError } from "#/lib/human-error";
 import { parseMonthlyCap } from "#/lib/key-cap";
 import { DUR, EASE } from "#/lib/motion";
+import { safeReturnPath } from "#/lib/return-path";
 
 const KEYS_QUERY_KEY = ["settings", "api-keys"] as const;
 
@@ -68,6 +69,9 @@ type RevealedSecret = {
 };
 
 export const Route = createFileRoute("/app/settings/keys")({
+  validateSearch: (search: Record<string, unknown>) => ({
+    returnTo: safeReturnPath(search.returnTo, "") || undefined,
+  }),
   component: KeysPage,
   head: () => ({
     meta: [{ title: "API keys · Zevium" }],
@@ -94,6 +98,7 @@ function KeysPage() {
 }
 
 function KeysContent() {
+  const { returnTo } = Route.useSearch();
   const queryClient = useQueryClient();
   const reduce = useReducedMotion();
 
@@ -213,9 +218,16 @@ function KeysContent() {
             Machine keys for the gateway. One active key per user.
           </p>
         </div>
-        {hasKey ? (
-          <Badge variant="outline">1 active key allowed per user</Badge>
-        ) : null}
+        <div className="flex flex-wrap items-center gap-2">
+          {returnTo ? (
+            <Button asChild variant="outline" size="sm">
+              <a href={returnTo}>Return to API</a>
+            </Button>
+          ) : null}
+          {hasKey ? (
+            <Badge variant="outline">1 active key allowed per user</Badge>
+          ) : null}
+        </div>
       </div>
 
       <Card>
