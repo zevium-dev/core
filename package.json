@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "concurrently --kill-others-on-fail --names web,convex,gateway --prefix-colors blue,magenta,green \"pnpm --filter web dev\" \"pnpm exec convex dev\" \"pnpm --filter @zevium/gateway dev\"",
     "build": "turbo build",
-    "ci:pr": "prettier --check . && pnpm typecheck && pnpm test",
+    "ci:pr": "prettier --check . && pnpm check:compliance-claims && pnpm typecheck && pnpm test",
+    "check:compliance-claims": "node scripts/check-compliance-claims.mjs",
     "test": "turbo test && pnpm test:convex",
     "test:convex": "vitest run --config convex/vitest.config.ts",
     "typecheck": "turbo typecheck",

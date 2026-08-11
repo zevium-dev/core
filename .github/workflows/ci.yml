@@ -31,6 +31,7 @@ jobs:
             ${{ runner.os }}-pnpm-store-
       - uses: jdx/mise-action@v4
       - run: pnpm exec prettier --check .
+      - run: pnpm check:compliance-claims
       - run: pnpm typecheck
 
   tests:
