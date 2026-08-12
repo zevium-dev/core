@@ -14,6 +14,7 @@ describe("deployment workflow security", () => {
     ]);
 
     expect(entrypoint).toContain("name: Production Broker Preflight");
+    expect(entrypoint).toMatch(/permissions:\s+actions: read\s+contents: read/);
     expect(production).toContain(
       "name: Cloudflare Production Broker Preflight",
     );
@@ -24,6 +25,39 @@ describe("deployment workflow security", () => {
     expect(production).not.toMatch(/versions upload \\\n(?!\s+--dry-run)/);
     expect(production).not.toMatch(/CLOUDFLARE_API_TOKEN|BROKER_ENV_FILE/);
     expect(production).not.toMatch(/\bcurl\b|smoke/i);
+  });
+
+  it("uses exact publisher for preview mutation", async () => {
+    const [preview, caller] = await Promise.all([
+      workflow("cloudflare-preview.yml"),
+      workflow("preview.yml"),
+    ]);
+
+    expect(preview).toMatch(/permissions:\s+actions: read\s+contents: read/);
+    expect(caller).toMatch(
+      /web-preview:[\s\S]*?permissions:\s+actions: read\s+contents: read\s+id-token: write/,
+    );
+    expect(preview.match(/versions upload --dry-run/g)).toHaveLength(1);
+    expect(preview).toContain("apps/deploy-broker/scripts/publish.ts");
+    expect(preview).not.toMatch(/versions deploy|wrangler secret put/);
+    expect(preview).not.toContain("--secrets-file");
+    expect(preview).not.toContain("CLOUDFLARE_API_BASE_URL=");
+    expect(preview).toContain(
+      "GATEWAY_INTERNAL_SECRET: ${{ secrets.GATEWAY_PREVIEW_INTERNAL_SECRET }}",
+    );
+  });
+
+  it("keeps remote dry-run ahead of all Durable Object writes", async () => {
+    const broker = await readFile(
+      new URL("../../src/index.ts", import.meta.url),
+      "utf8",
+    );
+    const dryRunExit = broker.indexOf("if (dryRun)");
+    const rateWrite = broker.indexOf("await consumeRegistrationRate");
+
+    expect(dryRunExit).toBeGreaterThan(0);
+    expect(rateWrite).toBeGreaterThan(dryRunExit);
+    expect(broker).toContain("cacheJwks: !dryRun");
   });
 
   it("rejects stale source CI before executing candidate code", async () => {

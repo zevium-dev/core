@@ -31,6 +31,7 @@ interface PartHeaders {
 }
 
 interface MultipartInspectorOptions {
+  assetContentTypes?: Record<string, string>;
   assetDigests?: Record<string, string>;
   assetSizes?: Record<string, number>;
   mode: "assets" | "worker-version";
@@ -38,6 +39,7 @@ interface MultipartInspectorOptions {
 }
 
 export interface InspectedMultipart {
+  assetHashes?: string[];
   assetsJwt?: string;
   body: ReadableStream<Uint8Array>;
   contentLength: number | null;
@@ -158,6 +160,7 @@ class StreamingMultipartInspector {
   mainModule: string | undefined;
   migrationMode: "initial" | "none" | undefined;
   assetsJwt: string | undefined;
+  readonly assetHashes: string[] = [];
   ready = false;
 
   constructor(
@@ -451,11 +454,14 @@ class StreamingMultipartInspector {
       invariant(
         ASSET_HASH_PATTERN.test(headers.name) &&
           headers.filename === headers.name &&
-          this.options.assetSizes?.[headers.name] !== undefined,
+          this.options.assetSizes?.[headers.name] !== undefined &&
+          headers.contentType ===
+            this.options.assetContentTypes?.[headers.name],
         400,
         "asset_rejected",
         "Asset part is not declared in manifest",
       );
+      this.assetHashes.push(headers.name);
       this.ready = true;
       this.partChunks.set(headers.name, []);
       this.partSizes.set(headers.name, 0);
@@ -724,6 +730,9 @@ export async function inspectMultipart(
   await parser.verifyArtifacts();
   const forwarded = parser.forwardedBody(boundary);
   return {
+    ...(parser.assetHashes.length > 0
+      ? { assetHashes: parser.assetHashes }
+      : {}),
     ...(parser.assetsJwt ? { assetsJwt: parser.assetsJwt } : {}),
     body: forwarded.body,
     contentLength: forwarded.contentLength,

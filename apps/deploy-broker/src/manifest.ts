@@ -24,11 +24,9 @@ export type ManifestOperation =
   | "assets:upload"
   | "deployment:create"
   | "script:delete"
-  | "script:read"
+  | "service:read"
   | "script:upload"
-  | "secret:put"
-  | "subdomain:write"
-  | "version:read";
+  | "subdomain:write";
 
 export interface PlainTextBindingManifest {
   name: string;
@@ -54,6 +52,7 @@ export interface ModuleArtifactManifest {
 
 export interface StaticAssetArtifactManifest {
   cloudflareHash: string;
+  contentType: string;
   path: string;
   sha256: string;
   size: number;
@@ -66,7 +65,6 @@ export interface TargetManifest {
   compatibilityFlags: string[];
   component: "gateway" | "web";
   durableObjectBindings: DurableObjectBindingManifest[];
-  inheritedBindingTypes: string[];
   migration: null | {
     newSqliteClasses: string[];
     tag: string;
@@ -135,6 +133,45 @@ const MODULE_CONTENT_TYPES = new Set([
   "text/plain",
 ]);
 const MAX_MANIFEST_BYTES = 96 * 1024;
+
+const STATIC_ASSET_CONTENT_TYPES: Readonly<Record<string, string>> = {
+  apng: "image/apng",
+  avif: "image/avif",
+  css: "text/css; charset=utf-8",
+  gif: "image/gif",
+  htm: "text/html; charset=utf-8",
+  html: "text/html; charset=utf-8",
+  ico: "image/x-icon",
+  jpeg: "image/jpeg",
+  jpg: "image/jpeg",
+  js: "text/javascript; charset=utf-8",
+  json: "application/json",
+  map: "application/json",
+  mjs: "text/javascript; charset=utf-8",
+  mp4: "video/mp4",
+  ogg: "audio/ogg",
+  otf: "font/otf",
+  pdf: "application/pdf",
+  png: "image/png",
+  svg: "image/svg+xml",
+  ttf: "font/ttf",
+  txt: "text/plain; charset=utf-8",
+  wasm: "application/wasm",
+  webm: "video/webm",
+  webmanifest: "application/manifest+json",
+  webp: "image/webp",
+  woff: "font/woff",
+  woff2: "font/woff2",
+  xml: "application/xml",
+};
+
+export function staticAssetContentType(path: string): string {
+  const filename = path.split("/").at(-1) ?? "";
+  const extension = filename.includes(".")
+    ? (filename.split(".").at(-1) ?? "").toLowerCase()
+    : "";
+  return STATIC_ASSET_CONTENT_TYPES[extension] ?? "application/octet-stream";
+}
 
 function fail(message: string): never {
   throw new BrokerError(
@@ -278,6 +315,7 @@ function validateStaticAssets(
         .some((segment) => segment === "." || segment === "..") ||
       paths.has(asset.path) ||
       !ASSET_HASH_PATTERN.test(asset.cloudflareHash) ||
+      asset.contentType !== staticAssetContentType(asset.path) ||
       !DIGEST_PATTERN.test(asset.sha256) ||
       !Number.isSafeInteger(asset.size) ||
       asset.size < 0 ||
@@ -292,6 +330,7 @@ function validateStaticAssets(
     }
     return {
       cloudflareHash: asset.cloudflareHash,
+      contentType: asset.contentType,
       path: asset.path,
       sha256: asset.sha256,
       size: asset.size,
@@ -394,7 +433,6 @@ function gatewayTarget(
     compatibilityFlags: ["global_fetch_strictly_public"],
     component: "gateway",
     durableObjectBindings: [{ className: "WalletDO", name: "WALLET" }],
-    inheritedBindingTypes: ["secret_text", "secret_key"],
     migration: { newSqliteClasses: ["WalletDO"], tag: "v1" },
     mainModule: artifacts.mainModule,
     modules: artifacts.modules,
@@ -402,13 +440,11 @@ function gatewayTarget(
       mode === "preview"
         ? [
             "deployment:create",
-            "script:read",
+            "service:read",
             "script:upload",
-            "secret:put",
             "subdomain:write",
-            "version:read",
           ]
-        : ["deployment:create", "script:read", "script:upload", "version:read"],
+        : ["deployment:create", "service:read", "script:upload"],
     plainTextBindings: [
       { name: "CONVEX_SITE_URL", text: convexSiteUrl },
       { name: "CONVEX_URL", text: convexUrl },
@@ -436,7 +472,6 @@ function webTarget(
     compatibilityFlags: ["nodejs_compat"],
     component: "web",
     durableObjectBindings: [],
-    inheritedBindingTypes: [],
     migration: null,
     mainModule: artifacts.mainModule,
     modules: artifacts.modules,
@@ -445,18 +480,10 @@ function webTarget(
         ? [
             "assets:upload",
             "deployment:create",
-            "script:read",
             "script:upload",
             "subdomain:write",
-            "version:read",
           ]
-        : [
-            "assets:upload",
-            "deployment:create",
-            "script:read",
-            "script:upload",
-            "version:read",
-          ],
+        : ["assets:upload", "deployment:create", "script:upload"],
     plainTextBindings: [],
     scriptName,
     staticAssets,
@@ -512,7 +539,10 @@ export function buildManifest(input: ManifestInput): DeploymentManifest {
               PRODUCTION_CONVEX_URL,
               PRODUCTION_CONVEX_SITE_URL,
               versionTag,
-              [],
+              validateSecretDigests(input.secretDigests, [
+                "CLERK_SECRET_KEY",
+                "GATEWAY_INTERNAL_SECRET",
+              ]),
               artifacts,
             ),
           ]

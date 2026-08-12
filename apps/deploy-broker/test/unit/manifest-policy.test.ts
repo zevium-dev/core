@@ -3,7 +3,8 @@ import {
   authorizeApiRoute,
   validateAssetInitBody,
   validateDeploymentBody,
-  validateSecretBody,
+  validateDeploymentDetail,
+  validateVersionDetail,
   validateWorkerMetadata,
 } from "../../src/api-policy";
 import {
@@ -50,6 +51,7 @@ function productionGateway() {
     ref: "refs/heads/develop",
     runAttempt: 1,
     runId: "9002",
+    secretDigests: PREVIEW_SECRET_DIGESTS,
     sourceRunId: "8999",
   });
 }
@@ -79,7 +81,10 @@ describe("signed deployment manifest", () => {
     expect(production?.scriptName).toBe("zevium-gateway");
     expect(production?.versionTag).toBe("ci-9002-1");
     expect(preview?.operations).toContain("deployment:create");
-    expect(production?.operations).not.toContain("secret:put");
+    expect(production?.allowedSecrets.map(({ name }) => name)).toEqual([
+      "CLERK_SECRET_KEY",
+      "GATEWAY_INTERNAL_SECRET",
+    ]);
   });
 
   it("rejects cross-environment and malformed Convex origins", () => {
@@ -123,6 +128,7 @@ describe("signed deployment manifest", () => {
   it("bounds serialized manifests before Durable Object persistence", () => {
     const staticAssets = Array.from({ length: 120 }, (_, index) => ({
       cloudflareHash: index.toString(16).padStart(32, "0"),
+      contentType: "text/javascript; charset=utf-8",
       path: `/${index.toString().padStart(3, "0")}-${"x".repeat(900)}.js`,
       sha256: "d".repeat(64),
       size: 1,
@@ -151,52 +157,19 @@ describe("Cloudflare endpoint policy", () => {
       "GET",
       "/accounts/1ea9299555b026a6a7484c8323c5a953/workers/services/zevium-gateway",
       "",
-      "script-read",
-    ],
-    [
-      "GET",
-      "/accounts/1ea9299555b026a6a7484c8323c5a953/workers/scripts/zevium-gateway/secrets",
-      "",
-      "script-read",
-    ],
-    [
-      "GET",
-      "/accounts/1ea9299555b026a6a7484c8323c5a953/workers/scripts",
-      "",
-      "script-list-synthetic",
-    ],
-    [
-      "GET",
-      "/accounts/1ea9299555b026a6a7484c8323c5a953/workers/scripts/zevium-gateway/settings",
-      "",
-      "script-read",
+      "service-read",
     ],
     [
       "POST",
       "/accounts/1ea9299555b026a6a7484c8323c5a953/workers/scripts/zevium-gateway/versions",
-      "?bindings_inherit=strict",
+      "",
       "version-upload",
     ],
-    [
-      "GET",
-      "/accounts/1ea9299555b026a6a7484c8323c5a953/workers/scripts/zevium-gateway/subdomain",
-      "",
-      "script-read",
-    ],
-    [
-      "GET",
-      "/accounts/1ea9299555b026a6a7484c8323c5a953/workers/subdomain",
-      "",
-      "script-read",
-    ],
-  ])(
-    "allows observed Wrangler transcript %s %s",
-    (method, path, query, kind) => {
-      expect(
-        authorizeApiRoute(productionGateway(), method, path, query).kind,
-      ).toBe(kind);
-    },
-  );
+  ])("allows exact publisher route %s %s", (method, path, query, kind) => {
+    expect(
+      authorizeApiRoute(productionGateway(), method, path, query).kind,
+    ).toBe(kind);
+  });
 
   it.each([
     "/accounts/WRONG/workers/scripts/zevium-gateway/settings",
@@ -219,12 +192,27 @@ describe("Cloudflare endpoint policy", () => {
         productionGateway(),
         "POST",
         path,
-        "?bindings_inherit=strict&foo=bar",
+        "?bindings_inherit=strict",
       ),
     ).toThrow("query");
     expect(() =>
       authorizeApiRoute(productionGateway(), "PATCH", path, ""),
     ).toThrow("method");
+  });
+
+  it.each([
+    "/accounts/1ea9299555b026a6a7484c8323c5a953/workers/scripts",
+    "/accounts/1ea9299555b026a6a7484c8323c5a953/workers/subdomain",
+    "/accounts/1ea9299555b026a6a7484c8323c5a953/workers/scripts/zevium-gateway/settings",
+    "/accounts/1ea9299555b026a6a7484c8323c5a953/workers/scripts/zevium-gateway/secrets",
+    "/accounts/1ea9299555b026a6a7484c8323c5a953/workers/scripts/zevium-gateway/deployments",
+    "/accounts/1ea9299555b026a6a7484c8323c5a953/workers/scripts/zevium-gateway/versions?deployable=true",
+    "/accounts/1ea9299555b026a6a7484c8323c5a953/workers/scripts/zevium-gateway/versions/11111111-1111-4111-8111-111111111111",
+  ])("rejects obsolete Wrangler read surface %s", (input) => {
+    const url = new URL(`https://api.cloudflare.test${input}`);
+    expect(() =>
+      authorizeApiRoute(productionGateway(), "GET", url.pathname, url.search),
+    ).toThrow();
   });
 });
 
@@ -251,10 +239,19 @@ describe("mutation metadata", () => {
           name: "WALLET",
           type: "durable_object_namespace",
         },
+        {
+          name: "CLERK_SECRET_KEY",
+          text: "redacted-clerk",
+          type: "secret_text",
+        },
+        {
+          name: "GATEWAY_INTERNAL_SECRET",
+          text: "redacted-gateway",
+          type: "secret_text",
+        },
       ],
       compatibility_date: "2025-04-01",
       compatibility_flags: ["global_fetch_strictly_public"],
-      keep_bindings: ["secret_text", "secret_key"],
       main_module: "index.js",
       migrations: {
         new_tag: "v1",
@@ -266,6 +263,10 @@ describe("mutation metadata", () => {
     ).toEqual({
       mainModule: "index.js",
       migrationMode: "initial",
+      secretBindings: [
+        { name: "CLERK_SECRET_KEY", text: "redacted-clerk" },
+        { name: "GATEWAY_INTERNAL_SECRET", text: "redacted-gateway" },
+      ],
     });
     expect(() =>
       validateWorkerMetadata(
@@ -293,22 +294,17 @@ describe("mutation metadata", () => {
         productionTarget,
         "version",
       ),
-    ).toEqual({ mainModule: "index.js", migrationMode: "none" });
+    ).toEqual({
+      mainModule: "index.js",
+      migrationMode: "none",
+      secretBindings: [
+        { name: "CLERK_SECRET_KEY", text: "redacted-clerk" },
+        { name: "GATEWAY_INTERNAL_SECRET", text: "redacted-gateway" },
+      ],
+    });
   });
 
   it("bounds secrets, traffic, and asset manifests", () => {
-    expect(
-      validateSecretBody(
-        { name: "CLERK_SECRET_KEY", text: "redacted", type: "secret_text" },
-        previewTarget,
-      ).mutationKey,
-    ).toContain("CLERK_SECRET_KEY");
-    expect(() =>
-      validateSecretBody(
-        { name: "CLOUDFLARE_API_TOKEN", text: "evil", type: "secret_text" },
-        previewTarget,
-      ),
-    ).toThrow("Secret");
     expect(() =>
       validateDeploymentBody(
         {
@@ -343,6 +339,9 @@ describe("mutation metadata", () => {
         { ...previewTarget, staticAssets: TEST_STATIC_ASSETS.staticAssets },
       ),
     ).toEqual({
+      contentTypeByHash: {
+        ["b".repeat(32)]: "text/javascript; charset=utf-8",
+      },
       hashes: { ["b".repeat(32)]: 18 },
       sha256ByHash: { ["b".repeat(32)]: TEST_ASSET_SHA256 },
       totalBytes: 18,
@@ -357,6 +356,32 @@ describe("mutation metadata", () => {
         { ...previewTarget, staticAssets: TEST_STATIC_ASSETS.staticAssets },
       ),
     ).toThrow("Asset manifest");
+  });
+
+  it("accepts only exact immutable 100% deployment readback", () => {
+    const deploymentId = "22222222-2222-4222-8222-222222222222";
+    const versionId = "11111111-1111-4111-8111-111111111111";
+    const detail = {
+      id: deploymentId,
+      strategy: "percentage",
+      versions: [{ percentage: 100, version_id: versionId }],
+    };
+    expect(() =>
+      validateDeploymentDetail(detail, deploymentId, versionId),
+    ).not.toThrow();
+    expect(() =>
+      validateDeploymentDetail(
+        {
+          ...detail,
+          versions: [{ percentage: 99, version_id: versionId }],
+        },
+        deploymentId,
+        versionId,
+      ),
+    ).toThrow("differs from sealed version");
+    expect(() =>
+      validateDeploymentDetail(detail, versionId, versionId),
+    ).toThrow("differs from sealed version");
   });
 
   it("retires undeclared web secrets instead of inheriting provider drift", () => {
@@ -395,7 +420,7 @@ describe("mutation metadata", () => {
         target,
         "version",
       ),
-    ).toThrow("inheritance");
+    ).toThrow("undeclared field");
     expect(() =>
       validateWorkerMetadata(
         {
@@ -409,5 +434,77 @@ describe("mutation metadata", () => {
         "version",
       ),
     ).toThrow("Secret binding");
+  });
+
+  it("seals only exact Cloudflare readback and rejects stale secrets", () => {
+    const detail = {
+      id: "11111111-1111-4111-8111-111111111111",
+      resources: {
+        bindings: [
+          {
+            name: "CONVEX_SITE_URL",
+            text: "https://polite-ermine-809.convex.site",
+            type: "plain_text",
+          },
+          {
+            name: "CONVEX_URL",
+            text: "https://polite-ermine-809.convex.cloud",
+            type: "plain_text",
+          },
+          {
+            class_name: "WalletDO",
+            name: "WALLET",
+            type: "durable_object_namespace",
+          },
+          { name: "CLERK_SECRET_KEY", type: "secret_text" },
+          { name: "GATEWAY_INTERNAL_SECRET", type: "secret_text" },
+        ],
+        script: { etag: "a".repeat(64) },
+        script_runtime: {
+          compatibility_date: "2025-04-01",
+          compatibility_flags: ["global_fetch_strictly_public"],
+          migration_tag: "v1",
+        },
+      },
+    };
+    expect(() =>
+      validateVersionDetail(
+        detail,
+        productionTarget,
+        "11111111-1111-4111-8111-111111111111",
+      ),
+    ).not.toThrow();
+    expect(() =>
+      validateVersionDetail(
+        {
+          ...detail,
+          resources: {
+            ...detail.resources,
+            bindings: [
+              ...detail.resources.bindings,
+              { name: "LEGACY_SECRET", type: "secret_text" },
+            ],
+          },
+        },
+        productionTarget,
+        "11111111-1111-4111-8111-111111111111",
+      ),
+    ).toThrow("closed");
+    expect(() =>
+      validateVersionDetail(
+        {
+          ...detail,
+          resources: {
+            ...detail.resources,
+            script_runtime: {
+              ...detail.resources.script_runtime,
+              migration_tag: "legacy",
+            },
+          },
+        },
+        productionTarget,
+        "11111111-1111-4111-8111-111111111111",
+      ),
+    ).toThrow("does not match");
   });
 });

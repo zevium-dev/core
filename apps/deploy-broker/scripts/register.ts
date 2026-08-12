@@ -6,6 +6,7 @@ import {
   AUDIENCE_PREFIX,
   buildManifest,
   manifestDigest,
+  staticAssetContentType,
   type DeploymentProfile,
   type ModuleArtifactManifest,
   type StaticAssetArtifactManifest,
@@ -60,7 +61,7 @@ function parseArguments(argv: string[]): Arguments {
   return { dryRun, profile, remoteDryRun };
 }
 
-function requiredEnvironment(name: string): string {
+export function requiredEnvironment(name: string): string {
   const value = process.env[name];
   if (!value) fail(`${name} is required`);
   return value;
@@ -180,11 +181,14 @@ async function staticAssetInventory(
     if (ignored.has(name)) continue;
     const bytes = await readFile(path);
     const extension = extname(path).slice(1);
-    const cloudflareHash = blake3(`${bytes.toString("base64")}${extension}`)
+    const cloudflareHash = Buffer.from(
+      blake3(`${Buffer.from(bytes).toString("base64")}${extension}`),
+    )
       .toString("hex")
       .slice(0, 32);
     assets.push({
       cloudflareHash,
+      contentType: staticAssetContentType(`/${name}`),
       path: `/${name}`,
       sha256: sha256(bytes),
       size: bytes.byteLength,
@@ -193,7 +197,7 @@ async function staticAssetInventory(
   return assets;
 }
 
-async function readResponseBounded(
+export async function readResponseBounded(
   response: Response,
   maximumBytes: number,
 ): Promise<unknown> {
@@ -238,7 +242,7 @@ async function readResponseBounded(
   }
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
+export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
@@ -279,32 +283,28 @@ async function requestOidcToken(audience: string): Promise<string> {
   return value.value;
 }
 
-async function buildFromEnvironment(profile: DeploymentProfile) {
+export async function buildFromEnvironment(profile: DeploymentProfile) {
   const prNumber = optionalInteger("PR_NUMBER");
   const sourceRunId = process.env.SOURCE_RUN_ID;
-  const secretSources =
-    profile === "preview-gateway"
+  const secretSources = profile.endsWith("-gateway")
+    ? [
+        {
+          environmentName: "CLERK_SECRET_KEY",
+          name: "CLERK_SECRET_KEY",
+        },
+        {
+          environmentName: "GATEWAY_INTERNAL_SECRET",
+          name: "GATEWAY_INTERNAL_SECRET",
+        },
+      ]
+    : profile.endsWith("-web")
       ? [
           {
-            environmentName: "CLERK_PREVIEW_SECRET_KEY",
+            environmentName: "CLERK_SECRET_KEY",
             name: "CLERK_SECRET_KEY",
           },
-          {
-            environmentName: "GATEWAY_PREVIEW_INTERNAL_SECRET",
-            name: "GATEWAY_INTERNAL_SECRET",
-          },
         ]
-      : profile.endsWith("-web")
-        ? [
-            {
-              environmentName:
-                profile === "preview-web"
-                  ? "CLERK_PREVIEW_SECRET_KEY"
-                  : "CLERK_SECRET_KEY",
-              name: "CLERK_SECRET_KEY",
-            },
-          ]
-        : [];
+      : [];
   const secretDigests = secretSources.map(({ environmentName, name }) => ({
     name,
     sha256: createHash("sha256")
@@ -409,4 +409,4 @@ async function main(): Promise<void> {
   );
 }
 
-await main();
+if (import.meta.main) await main();

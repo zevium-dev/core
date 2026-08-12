@@ -54,6 +54,7 @@ interface CachedJwks {
 type GitHubJwk = JsonWebKey & { kid: string };
 
 export interface JwtVerificationOptions {
+  cacheJwks?: boolean;
   fetcher?: typeof fetch;
   nowSeconds?: number;
   resolveJwk?: (kid: string, forceRefresh: boolean) => Promise<JsonWebKey>;
@@ -368,14 +369,15 @@ async function parseJwksResponse(response: Response): Promise<GitHubJwk[]> {
 async function fetchJwks(
   fetcher: typeof fetch,
   forceRefresh: boolean,
+  cacheJwks: boolean,
 ): Promise<GitHubJwk[]> {
   const now = Date.now();
-  if (!forceRefresh && memoryJwks && memoryJwks.expiresAt > now)
+  if (cacheJwks && !forceRefresh && memoryJwks && memoryJwks.expiresAt > now)
     return memoryJwks.keys;
 
   let response: Response | undefined;
   const cache =
-    typeof caches === "undefined"
+    !cacheJwks || typeof caches === "undefined"
       ? undefined
       : (caches as unknown as { default: Cache }).default;
   if (!forceRefresh && cache) response = await cache.match(GITHUB_JWKS_URL);
@@ -408,8 +410,10 @@ async function fetchJwks(
     }
   }
   const keys = await parseJwksResponse(response);
-  memoryJwks = { expiresAt: now + JWKS_TTL_MS, keys };
-  if (forceRefresh) lastForcedRefreshAt = now;
+  if (cacheJwks) {
+    memoryJwks = { expiresAt: now + JWKS_TTL_MS, keys };
+    if (forceRefresh) lastForcedRefreshAt = now;
+  }
   return keys;
 }
 
@@ -417,8 +421,10 @@ async function resolveProductionJwk(
   kid: string,
   forceRefresh: boolean,
   fetcher: typeof fetch,
+  cacheJwks: boolean,
 ): Promise<GitHubJwk> {
   if (
+    cacheJwks &&
     forceRefresh &&
     Date.now() - lastForcedRefreshAt < UNKNOWN_KID_REFRESH_GUARD_MS
   ) {
@@ -431,17 +437,20 @@ async function resolveProductionJwk(
     );
     return cached;
   }
-  let keys = await fetchJwks(fetcher, forceRefresh);
+  let keys = await fetchJwks(fetcher, forceRefresh, cacheJwks);
   let key = keys.find((candidate) => candidate.kid === kid);
   if (!key && !forceRefresh) {
-    if (Date.now() - lastForcedRefreshAt < UNKNOWN_KID_REFRESH_GUARD_MS) {
+    if (
+      cacheJwks &&
+      Date.now() - lastForcedRefreshAt < UNKNOWN_KID_REFRESH_GUARD_MS
+    ) {
       throw new BrokerError(
         401,
         "unknown_signing_key",
         "OIDC signing key is unknown",
       );
     }
-    keys = await fetchJwks(fetcher, true);
+    keys = await fetchJwks(fetcher, true, cacheJwks);
     key = keys.find((candidate) => candidate.kid === kid);
   }
   invariant(key, 401, "unknown_signing_key", "OIDC signing key is unknown");
@@ -498,7 +507,12 @@ export async function verifyGitHubOidc(
   const resolver =
     options.resolveJwk ??
     ((kid: string, forceRefresh: boolean) =>
-      resolveProductionJwk(kid, forceRefresh, options.fetcher ?? fetch));
+      resolveProductionJwk(
+        kid,
+        forceRefresh,
+        options.fetcher ?? fetch,
+        options.cacheJwks ?? true,
+      ));
   let jwk = await resolver(header.kid, false);
   let key = await crypto.subtle.importKey(
     "jwk",

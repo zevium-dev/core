@@ -19,9 +19,7 @@ export type ApiRouteKind =
   | "asset-upload-single"
   | "deployment-create"
   | "script-delete"
-  | "script-list-synthetic"
-  | "script-read"
-  | "secret-put"
+  | "service-read"
   | "subdomain-write"
   | "version-upload";
 
@@ -35,14 +33,10 @@ export interface ApiRoute {
 }
 
 export interface ValidatedAssetManifest {
+  contentTypeByHash: Record<string, string>;
   hashes: Record<string, number>;
   sha256ByHash: Record<string, string>;
   totalBytes: number;
-}
-
-export interface TargetScriptState {
-  migrationTag?: string;
-  scriptName: string;
 }
 
 function hasOperation(
@@ -130,40 +124,6 @@ export function authorizeApiRoute(
     "Cloudflare account is not authorized",
   );
 
-  if (pathname === `${root}/scripts`) {
-    invariant(
-      method === "GET",
-      405,
-      "method_rejected",
-      "Only script listing is allowed here",
-    );
-    requireQuery(search, "");
-    invariant(
-      manifest.targets.some((target) => hasOperation(target, "script:read")),
-      403,
-      "operation_rejected",
-      "Script reads are not declared",
-    );
-    return noBody("script-list-synthetic");
-  }
-
-  if (pathname === `${root}/subdomain`) {
-    invariant(
-      method === "GET",
-      405,
-      "method_rejected",
-      "Account subdomain is read-only",
-    );
-    requireQuery(search, "");
-    invariant(
-      manifest.targets.some((target) => hasOperation(target, "script:read")),
-      403,
-      "operation_rejected",
-      "Script reads are not declared",
-    );
-    return noBody("script-read");
-  }
-
   if (pathname === `${root}/assets/upload`) {
     const target = manifest.targets.find((candidate) => candidate.assets);
     invariant(
@@ -227,13 +187,13 @@ export function authorizeApiRoute(
   if (service) {
     const target = targetFor(manifest, service[1] ?? "");
     invariant(
-      method === "GET" && hasOperation(target, "script:read"),
+      method === "GET" && hasOperation(target, "service:read"),
       403,
       "operation_rejected",
       "Service read is not declared",
     );
     requireQuery(search, "");
-    return noBody("script-read", target);
+    return noBody("service-read", target);
   }
 
   const script = new RegExp(
@@ -269,31 +229,6 @@ export function authorizeApiRoute(
       "method_rejected",
       "Script endpoint method is not allowed",
     );
-  }
-
-  if (
-    ["settings", "secrets", "deployments", "subdomain"].includes(suffix) &&
-    method === "GET"
-  ) {
-    invariant(
-      hasOperation(target, "script:read"),
-      403,
-      "operation_rejected",
-      "Script read is not declared",
-    );
-    requireQuery(search, "");
-    return noBody("script-read", target);
-  }
-
-  if (suffix === "secrets" && method === "PUT") {
-    invariant(
-      hasOperation(target, "secret:put"),
-      403,
-      "operation_rejected",
-      "Secret update is not declared",
-    );
-    requireQuery(search, "");
-    return { kind: "secret-put", maximumBodyBytes: 128 * 1024, target };
   }
 
   if (suffix === "subdomain" && method === "POST") {
@@ -335,43 +270,13 @@ export function authorizeApiRoute(
       "operation_rejected",
       "Version upload is not declared",
     );
-    requireQuery(search, "?bindings_inherit=strict");
+    requireQuery(search, "");
     return {
       kind: "version-upload",
-      maximumBodyBytes: 32 * 1024 * 1024,
+      maximumBodyBytes: 40 * 1024 * 1024,
       mutationKey: `version-upload:${target.scriptName}`,
       target,
     };
-  }
-
-  if (suffix === "versions" && method === "GET") {
-    invariant(
-      hasOperation(target, "version:read"),
-      403,
-      "operation_rejected",
-      "Version read is not declared",
-    );
-    requireQuery(search, "?deployable=true");
-    return noBody("script-read", target);
-  }
-
-  const versionDetail = /^versions\/([0-9a-f-]+)$/.exec(suffix);
-  if (versionDetail && method === "GET") {
-    invariant(
-      hasOperation(target, "version:read"),
-      403,
-      "operation_rejected",
-      "Version read is not declared",
-    );
-    requireQuery(search, "");
-    const versionId = versionDetail[1] ?? "";
-    invariant(
-      VERSION_ID_PATTERN.test(versionId),
-      400,
-      "version_rejected",
-      "Version ID is invalid",
-    );
-    return { ...noBody("script-read", target), versionId };
   }
 
   if (suffix === "deployments" && method === "POST") {
@@ -486,9 +391,7 @@ function validateBindings(
       (binding) =>
         `durable_object_namespace:${binding.name}:${binding.className}`,
     ),
-    ...(target.inheritedBindingTypes.length === 0
-      ? target.allowedSecrets.map((binding) => `secret_text:${binding.name}`)
-      : []),
+    ...target.allowedSecrets.map((binding) => `secret_text:${binding.name}`),
   ];
   invariant(
     normalized.sort().join("\n") === expected.sort().join("\n"),
@@ -619,7 +522,6 @@ export function validateWorkerMetadata(
     "bindings",
     "compatibility_date",
     "compatibility_flags",
-    "keep_bindings",
     "main_module",
     "migrations",
     "observability",
@@ -651,14 +553,6 @@ export function validateWorkerMetadata(
   const assetsJwt = validateAssets(value.assets, target);
   validatePackageDependencies(value.package_dependencies);
 
-  invariant(
-    target.inheritedBindingTypes.length === 0
-      ? value.keep_bindings === undefined
-      : sameStringArray(value.keep_bindings, target.inheritedBindingTypes),
-    400,
-    "keep_bindings_rejected",
-    "Version upload inheritance does not match signed manifest",
-  );
   invariant(
     isRecord(value.annotations) &&
       exactKeys(value.annotations, ["workers/tag"]) &&
@@ -698,36 +592,6 @@ export function isSafeModuleName(value: string): boolean {
           /^[A-Za-z0-9@+_.-]+$/.test(segment),
       )
   );
-}
-
-export function validateSecretBody(
-  value: unknown,
-  target: TargetManifest,
-): {
-  expectedSha256: string;
-  mutationKey: string;
-} {
-  const secret =
-    isRecord(value) && typeof value.name === "string"
-      ? target.allowedSecrets.find((candidate) => candidate.name === value.name)
-      : undefined;
-  invariant(
-    isRecord(value) &&
-      exactKeys(value, ["name", "text", "type"]) &&
-      value.type === "secret_text" &&
-      typeof value.name === "string" &&
-      secret !== undefined &&
-      typeof value.text === "string" &&
-      value.text.length >= 1 &&
-      value.text.length <= 65_536,
-    400,
-    "secret_rejected",
-    "Secret mutation is not declared in manifest",
-  );
-  return {
-    expectedSha256: secret.sha256,
-    mutationKey: `secret:${target.scriptName}:${value.name}`,
-  };
 }
 
 export function validateSubdomainBody(
@@ -784,6 +648,122 @@ export function validateDeploymentBody(
   return { versionId: version.version_id };
 }
 
+/** Proves an immutable Cloudflare deployment points 100% at one sealed version. */
+export function validateDeploymentDetail(
+  value: unknown,
+  deploymentId: string,
+  versionId: string,
+): void {
+  const versions = isRecord(value) ? value.versions : undefined;
+  const version = Array.isArray(versions) ? versions[0] : undefined;
+  invariant(
+    isRecord(value) &&
+      value.id === deploymentId &&
+      VERSION_ID_PATTERN.test(deploymentId) &&
+      value.strategy === "percentage" &&
+      Array.isArray(versions) &&
+      versions.length === 1 &&
+      isRecord(version) &&
+      version.version_id === versionId &&
+      version.percentage === 100,
+    502,
+    "deployment_verification_failed",
+    "Cloudflare deployment differs from sealed version",
+  );
+}
+
+/**
+ * Proves Cloudflare persisted an exact closed binding set before that immutable
+ * version can receive traffic. Secret values are write-only, so their values
+ * are proved by the signed upload bytes and their names/types by this readback.
+ */
+export function validateVersionDetail(
+  value: unknown,
+  target: TargetManifest,
+  versionId: string,
+): void {
+  invariant(
+    isRecord(value) &&
+      value.id === versionId &&
+      isRecord(value.resources) &&
+      Array.isArray(value.resources.bindings) &&
+      isRecord(value.resources.script) &&
+      typeof value.resources.script.etag === "string" &&
+      /^[0-9a-f]{64}$/.test(value.resources.script.etag) &&
+      isRecord(value.resources.script_runtime) &&
+      value.resources.script_runtime.compatibility_date ===
+        target.compatibilityDate &&
+      sameStringArray(
+        value.resources.script_runtime.compatibility_flags,
+        target.compatibilityFlags,
+      ) &&
+      (target.migration === null
+        ? value.resources.script_runtime.migration_tag === undefined
+        : value.resources.script_runtime.migration_tag ===
+          target.migration.tag),
+    502,
+    "version_verification_failed",
+    "Cloudflare version state does not match signed manifest",
+  );
+
+  const actual: string[] = [];
+  const names = new Set<string>();
+  for (const binding of value.resources.bindings) {
+    invariant(
+      isRecord(binding) &&
+        typeof binding.name === "string" &&
+        !names.has(binding.name),
+      502,
+      "version_verification_failed",
+      "Cloudflare returned invalid or duplicate bindings",
+    );
+    names.add(binding.name);
+    if (binding.type === "plain_text" && typeof binding.text === "string") {
+      actual.push(`plain_text:${binding.name}:${binding.text}`);
+      continue;
+    }
+    if (
+      binding.type === "durable_object_namespace" &&
+      typeof binding.class_name === "string" &&
+      (binding.script_name === undefined ||
+        binding.script_name === target.scriptName) &&
+      binding.environment === undefined &&
+      binding.dispatch_namespace === undefined
+    ) {
+      actual.push(
+        `durable_object_namespace:${binding.name}:${binding.class_name}`,
+      );
+      continue;
+    }
+    if (binding.type === "secret_text") {
+      actual.push(`secret_text:${binding.name}`);
+      continue;
+    }
+    throw new BrokerError(
+      502,
+      "version_binding_rejected",
+      "Cloudflare version contains an undeclared binding",
+    );
+  }
+
+  const expected = [
+    ...target.plainTextBindings.map(
+      (binding) => `plain_text:${binding.name}:${binding.text}`,
+    ),
+    ...target.durableObjectBindings.map(
+      (binding) =>
+        `durable_object_namespace:${binding.name}:${binding.className}`,
+    ),
+    ...target.allowedSecrets.map((binding) => `secret_text:${binding.name}`),
+  ];
+  invariant(
+    actual.sort().join("\n") === expected.sort().join("\n"),
+    502,
+    "version_binding_rejected",
+    "Cloudflare version binding set is not closed over signed manifest",
+  );
+}
+
 export function validateAssetInitBody(
   value: unknown,
   target: TargetManifest,
@@ -811,6 +791,9 @@ export function validateAssetInitBody(
     string,
     string
   >;
+  const contentTypeByHash: Record<string, string> = Object.create(
+    null,
+  ) as Record<string, string>;
   const expectedByPath = new Map(
     target.staticAssets.map((asset) => [asset.path, asset]),
   );
@@ -840,7 +823,8 @@ export function validateAssetInitBody(
       "Asset manifest entry is invalid",
     );
     const existingSize = hashes[metadata.hash];
-    const expectedSha256 = expectedByPath.get(path)?.sha256;
+    const expectedAsset = expectedByPath.get(path);
+    const expectedSha256 = expectedAsset?.sha256;
     invariant(
       expectedSha256 !== undefined &&
         (sha256ByHash[metadata.hash] === undefined ||
@@ -855,9 +839,18 @@ export function validateAssetInitBody(
       "asset_manifest_rejected",
       "Repeated asset hashes must have one size",
     );
+    invariant(
+      expectedAsset !== undefined &&
+        (contentTypeByHash[metadata.hash] === undefined ||
+          contentTypeByHash[metadata.hash] === expectedAsset.contentType),
+      400,
+      "asset_manifest_rejected",
+      "Repeated asset hashes must have one content type",
+    );
     if (existingSize === undefined) {
       hashes[metadata.hash] = metadata.size;
       sha256ByHash[metadata.hash] = expectedSha256;
+      contentTypeByHash[metadata.hash] = expectedAsset.contentType;
       totalBytes += metadata.size;
     }
     invariant(
@@ -867,39 +860,7 @@ export function validateAssetInitBody(
       "Asset manifest is too large",
     );
   }
-  return { hashes, sha256ByHash, totalBytes };
-}
-
-export function syntheticScriptsResponse(
-  states: TargetScriptState[],
-): Response {
-  const result = states.map((state) => ({
-    id: state.scriptName,
-    ...(state.migrationTag === undefined
-      ? {}
-      : { migration_tag: state.migrationTag }),
-  }));
-  return new Response(
-    JSON.stringify({
-      errors: [],
-      messages: [],
-      result,
-      result_info: {
-        count: result.length,
-        page: 1,
-        per_page: 100,
-        total_count: result.length,
-        total_pages: 1,
-      },
-      success: true,
-    }),
-    {
-      headers: {
-        "cache-control": "no-store",
-        "content-type": "application/json; charset=utf-8",
-      },
-    },
-  );
+  return { contentTypeByHash, hashes, sha256ByHash, totalBytes };
 }
 
 export { ASSET_HASH_PATTERN, VERSION_ID_PATTERN };

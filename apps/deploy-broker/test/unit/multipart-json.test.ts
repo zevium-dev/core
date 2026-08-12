@@ -9,6 +9,8 @@ import {
   PRODUCTION_SHA,
   TEST_MODULE_ARTIFACTS,
   TEST_STATIC_ASSETS,
+  TEST_CLERK_SECRET,
+  TEST_GATEWAY_SECRET,
 } from "../fixtures";
 
 function gatewayTarget() {
@@ -112,10 +114,19 @@ function versionMetadata(): Record<string, unknown> {
         name: "WALLET",
         type: "durable_object_namespace",
       },
+      {
+        name: "CLERK_SECRET_KEY",
+        text: TEST_CLERK_SECRET,
+        type: "secret_text",
+      },
+      {
+        name: "GATEWAY_INTERNAL_SECRET",
+        text: TEST_GATEWAY_SECRET,
+        type: "secret_text",
+      },
     ],
     compatibility_date: "2025-04-01",
     compatibility_flags: ["global_fetch_strictly_public"],
-    keep_bindings: ["secret_text", "secret_key"],
     main_module: "index.js",
     migrations: {
       new_tag: "v1",
@@ -352,6 +363,7 @@ describe("streaming multipart validation", () => {
             method: "POST",
           }),
           {
+            assetContentTypes: { [hash]: "text/plain" },
             assetSizes: { [hash]: 1 },
             mode: "assets",
             target: gatewayTarget(),

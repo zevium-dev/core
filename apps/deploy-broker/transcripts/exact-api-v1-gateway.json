@@ -1,0 +1,18 @@
+[
+  {
+    "method": "GET",
+    "path": "/client/v4/accounts/1ea9299555b026a6a7484c8323c5a953/workers/services/zevium-gateway-pr-123"
+  },
+  {
+    "method": "POST",
+    "path": "/client/v4/accounts/1ea9299555b026a6a7484c8323c5a953/workers/scripts/zevium-gateway-pr-123/versions"
+  },
+  {
+    "method": "POST",
+    "path": "/client/v4/accounts/1ea9299555b026a6a7484c8323c5a953/workers/scripts/zevium-gateway-pr-123/deployments"
+  },
+  {
+    "method": "POST",
+    "path": "/client/v4/accounts/1ea9299555b026a6a7484c8323c5a953/workers/scripts/zevium-gateway-pr-123/subdomain"
+  }
+]

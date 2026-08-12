@@ -68,7 +68,9 @@ jobs:
       # cannot impersonate protected release attestations or paid-call proof.
       - name: Authorize exact gateway artifact without mutation
         env:
+          CLERK_SECRET_KEY: ${{ secrets.CLERK_PRODUCTION_SECRET_KEY }}
           DEPLOY_HEAD_SHA: ${{ inputs.head_sha }}
+          GATEWAY_INTERNAL_SECRET: ${{ secrets.GATEWAY_PRODUCTION_INTERNAL_SECRET }}
           SOURCE_RUN_ID: ${{ inputs.source_run_id }}
         run: |
           module_root="$(mktemp -d)"

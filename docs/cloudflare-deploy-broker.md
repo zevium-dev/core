@@ -6,11 +6,12 @@
 
 1. Reusable deployment workflow builds a canonical manifest from immutable GitHub runner values. Manifest fixes environment, PR/source CI, head and runner SHA, exact target name, bindings, migration, secret names plus SHA-256 value digests, asset mode, version tag, and operations. Secret values never enter manifest.
 2. Registration helper hashes canonical manifest, including exact Worker module and static-asset bytes, and asks GitHub's runner OIDC endpoint for audience `urn:zevium:cloudflare-deploy:v2:<sha256>`.
-3. Broker fetches GitHub's rotating JWKS, caches it for one hour, allows only `RS256`, verifies signature, then enforces exact `iss`, `aud`, `exp`, `nbf`, `iat`, `jti`, repository/owner/actor numeric IDs, visibility, environment, event, ref, SHA, run ID/attempt, caller `workflow_ref`, reusable `job_workflow_ref`, and both workflow SHAs. Read-only GitHub API check on 2026-08-12 confirmed this pre-July-2026 repository uses default mutable-name subject format (`use_default=true`, `use_immutable_subject=false`), so exact subject is `repo:zevium-dev/core:environment:<environment>`; any OIDC subject-policy change requires reviewed broker policy update.
+3. Broker fetches GitHub's rotating JWKS, caches it for one hour during live registration, allows only `RS256`, verifies signature, then enforces exact `iss`, `aud`, `exp`, `nbf`, `iat`, `jti`, repository/owner/actor numeric IDs, visibility, environment, event, ref, SHA, run ID/attempt, caller `workflow_ref`, reusable `job_workflow_ref`, and both workflow SHAs. Remote dry-run bypasses every Durable Object write and all Cache API/JWKS state. Read-only GitHub API check on 2026-08-12 confirmed this pre-July-2026 repository uses default mutable-name subject format (`use_default=true`, `use_immutable_subject=false`), so exact subject is `repo:zevium-dev/core:environment:<environment>`; any OIDC subject-policy change requires reviewed broker policy update.
 4. Broker independently reads public GitHub API provenance. Preview requires same-repository PR against `develop`, exact head/merge SHAs, state, and head/base refs. Production requires named successful `Continuous Integration` push run on `develop`, exact source run and head SHA. Redirects fail closed.
-5. Registration creates a Durable Object session keyed by `sha256(jti + NUL + manifestDigest)`. Every request re-verifies same JWT and JTI binding. Session expires with JWT. Mutations are one-shot; request and registration rates are bounded.
-6. Broker validates raw canonical account path/query before URL normalization, rejects percent/backslash/dot traversal, validates strict duplicate-free JSON and streaming multipart metadata, then replaces GitHub JWT with broker token. Cloudflare asset-upload JWT is preserved only after it is hashed and bound to broker-created asset session.
-7. Upstream redirects fail closed. Normal responses stream. Broker forwards only `content-type`, `etag`, and `retry-after`; cookies, auth challenges, locations, Cloudflare control headers, and hop-by-hop headers die. Audit records contain decision metadata, never request bodies, OIDC JWTs, asset JWTs, Cloudflare token, or secret values.
+5. Live registration creates a Durable Object session keyed by `sha256(jti + NUL + manifestDigest)`. Every request re-verifies same JWT and JTI binding. Session expires with JWT. Mutations are one-shot; request and registration rates are bounded.
+6. Repo-owned publisher sends exact Cloudflare API requests. Broker validates raw canonical account path/query before URL normalization, rejects percent/backslash/dot traversal, validates strict duplicate-free JSON and streaming multipart metadata, then replaces GitHub JWT with broker token. Version multipart must contain complete explicit plain-text, Durable Object, and secret bindings; inheritance fields and undeclared bindings are rejected. Static-asset path, size, SHA-256, Cloudflare hash, and MIME type are signed. Cloudflare asset JWTs are accepted only after hashing and binding them to broker-created asset state.
+7. Successful version upload does not authorize traffic. Broker validates signed tag on outbound metadata, captures UUID returned by that exact upload, then reads immutable version state directly from Cloudflare and proves same UUID, compatibility settings, script etag, and closed binding names/types before sealing it in session storage. Secret values were already proven from multipart bytes against signed digests; Cloudflare does not expose them on readback. Deployment accepts only sealed UUID, repeats version readback immediately before mutation, then proves active deployment is one version at 100%. Gateway activation additionally proves signed Durable Object migration tag.
+8. Upstream redirects fail closed. Normal responses stream. Broker forwards only `content-type`, `etag`, and `retry-after`; cookies, auth challenges, locations, Cloudflare control headers, and hop-by-hop headers die. Audit records contain decision metadata, never request bodies, OIDC JWTs, asset JWTs, Cloudflare token, or secret values.
 
 GitHub OIDC has `sha`, not `head_sha`. Broker therefore binds `sha` as `oidcSha`, binds desired source revision separately as manifest `headSha`, and proves latter through GitHub PR or workflow-run API. This avoids `workflow_run` default-branch SHA ambiguity and PR merge-ref ambiguity.
 
@@ -18,63 +19,52 @@ GitHub OIDC has `sha`, not `head_sha`. Broker therefore binds `sha` as `oidcSha`
 
 Account is compiled to `1ea9299555b026a6a7484c8323c5a953`. Script names are one of signed profile targets. `zevium-deploy-broker` and test broker name are always forbidden.
 
-| Method   | Endpoint                                                            | Purpose                                                           |
-| -------- | ------------------------------------------------------------------- | ----------------------------------------------------------------- |
-| `GET`    | `/workers/services/:script`                                         | Wrangler pre-upload metadata                                      |
-| `GET`    | `/workers/scripts`                                                  | Exact-service-probed target-only list; account list never exposed |
-| `GET`    | `/workers/scripts/:script/{settings,secrets,deployments,subdomain}` | Wrangler reads                                                    |
-| `GET`    | `/workers/subdomain`                                                | Account workers.dev name read                                     |
-| `POST`   | `/workers/scripts/:script/versions?bindings_inherit=strict`         | Validated version multipart upload                                |
-| `GET`    | `/workers/scripts/:script/versions?deployable=true`                 | Resolve exact signed version tag                                  |
-| `GET`    | `/workers/scripts/:script/versions/:uuid`                           | Version read and broker deployment re-verification                |
-| `POST`   | `/workers/scripts/:script/deployments`                              | One exact version at 100% traffic                                 |
-| `PUT`    | `/workers/scripts/:script/secrets`                                  | Preview allowlisted secret names only                             |
-| `POST`   | `/workers/scripts/:script/subdomain`                                | Exact `enabled=true`, `previews_enabled=true`                     |
-| `DELETE` | `/workers/scripts/:script`                                          | Closed-preview cleanup only                                       |
-| `POST`   | `/workers/scripts/:script/assets-upload-session`                    | Signed web target asset manifest                                  |
-| `POST`   | `/workers/assets/upload?base64=true`                                | Session-bound bulk asset upload                                   |
-| `POST`   | `/workers/assets/upload/:hash`                                      | Session-bound exact-length single asset                           |
+| Method   | Endpoint                                         | Purpose                                                          |
+| -------- | ------------------------------------------------ | ---------------------------------------------------------------- |
+| `GET`    | `/workers/services/:script`                      | Gateway Durable Object lifecycle state only                      |
+| `POST`   | `/workers/scripts/:script/versions`              | Closed, explicit-binding version multipart                       |
+| `POST`   | `/workers/scripts/:script/deployments`           | Sealed UUID as sole version at 100% traffic                      |
+| `POST`   | `/workers/scripts/:script/subdomain`             | Preview-only exact `enabled=true`, `previews_enabled=true`       |
+| `DELETE` | `/workers/scripts/:script`                       | Closed-preview cleanup only                                      |
+| `POST`   | `/workers/scripts/:script/assets-upload-session` | Signed web target asset manifest                                 |
+| `POST`   | `/workers/assets/upload?base64=true`             | Session-bound bulk assets with signed bytes, length, and MIME    |
+| `POST`   | `/workers/assets/upload/:hash`                   | Session-bound exact-length single asset with signed content type |
 
-All paths above are under `/client/v4/accounts/<fixed-account-id>`. No routes, custom domains, DNS, KV/R2/D1, account settings, user/token endpoints, service names outside manifest, multiple traffic versions, force deployments, or `script-settings` PATCH exist in policy.
+All paths above are under `/client/v4/accounts/<fixed-account-id>`. Broker-owned post-write verification calls Cloudflare directly and cannot be selected by client. No account/script inventory, secret mutation, version discovery, routes, custom domains, DNS, KV/R2/D1, account settings, user/token endpoints, service names outside manifest, multiple traffic versions, force deployments, binding inheritance, or `script-settings` PATCH exist in client policy.
 
-| Signed profile       | GitHub environment | Exact target(s)                                | Lifecycle capability                        |
-| -------------------- | ------------------ | ---------------------------------------------- | ------------------------------------------- |
-| `preview-gateway`    | `preview`          | `zevium-gateway-pr-<PR>`                       | version, 100% deploy, two signed secrets    |
-| `preview-web`        | `preview`          | `zevium-web-pr-<PR>`                           | assets, version, 100% deploy, signed secret |
-| `preview-cleanup`    | `preview`          | `zevium-gateway-pr-<PR>`, `zevium-web-pr-<PR>` | delete only after PR closes                 |
-| `production-gateway` | `production`       | `zevium-gateway`                               | version, 100% deploy, `WalletDO` v1 only    |
-| `production-web`     | `production`       | `zevium-dev`                                   | assets, version, 100% deploy                |
+| Signed profile       | GitHub environment | Exact target(s)                                | Lifecycle capability                                         |
+| -------------------- | ------------------ | ---------------------------------------------- | ------------------------------------------------------------ |
+| `preview-gateway`    | `preview`          | `zevium-gateway-pr-<PR>`                       | version, 100% deploy, two signed secrets                     |
+| `preview-web`        | `preview`          | `zevium-web-pr-<PR>`                           | assets, version, 100% deploy, signed secret                  |
+| `preview-cleanup`    | `preview`          | `zevium-gateway-pr-<PR>`, `zevium-web-pr-<PR>` | delete only after PR closes                                  |
+| `production-gateway` | `production`       | `zevium-gateway`                               | version, 100% deploy, two signed secrets, `WalletDO` v1 only |
+| `production-web`     | `production`       | `zevium-dev`                                   | assets, version, 100% deploy, signed secret                  |
 
 Repo has no separate Cloudflare staging Worker. PR-isolated `preview` environment is nonproduction staging/contract lane; production lane remains successful `develop` CI only.
 
-### Observed Wrangler 4.119.0 transcript
+### Exact publisher protocol and Wrangler regression evidence
 
-Hermetic recorder run of `wrangler versions upload` for gateway observed, in order:
+`scripts/publish.ts` is sole client for mutating version publication. Gateway first reads exact service lifecycle state. Web initializes asset session, uploads only provider-requested signed hashes using signed MIME types, and requires a completion JWT. Both profiles upload multipart with metadata first, exact module bytes, complete explicit bindings, no query, no `keep_bindings`, and no `keep_assets`; deployment then uses returned sealed UUID directly. Preview workers.dev settings are written last with exact booleans.
 
-1. `GET /workers/services/zevium-gateway`
-2. `GET /workers/scripts/zevium-gateway/secrets`
-3. `GET /workers/scripts`
-4. `GET /workers/scripts/zevium-gateway/settings`
-5. `POST /workers/scripts/zevium-gateway/versions?bindings_inherit=strict`
-6. `GET /workers/scripts/zevium-gateway/subdomain`
-7. `GET /workers/subdomain` when preview URLs are enabled
+Actual publisher tests execute both gateway and web clients against byte-inspecting mocked HTTP and compare full call sequences with `transcripts/exact-api-v1-{gateway,web}.json`. They decode multipart, prove module and asset bytes, MIME, secret closure, migration behavior, asset JWT, exact UUID activation, and absence of inheritance fields. Integration tests run same policy in workerd/Miniflare and prove unsealed/wrong IDs, provider-state drift, replay, forged secrets, and dry-run writes fail closed.
 
-Recorder fixtures under `apps/deploy-broker/transcripts/` cover gateway upload and version deployment; tests assert every request stays allowed. Version deployment reads deployments, deployable versions, current version detail, posts deployment, then reads service metadata. It uses `wrangler-client.jsonc`, which intentionally has no non-versioned settings; otherwise Wrangler issues undeclared `script-settings` PATCH after deployment. Web version upload initializes/uploads static assets first. Repeated paths may share one content hash only when declared sizes match; unique asset bytes stay under signed-session limits. Preview and protected release workflows use explicit `versions upload` plus `versions deploy`; `wrangler deploy` is forbidden because its endpoint choice changes with remote Worker state and can also issue `script-settings` PATCH.
+Pinned Wrangler 4.119.0 remains only for gateway `--dry-run` bundling. Source and recorded negative fixtures prove its mutating `versions upload` forces `keep_bindings: ["secret_text", "secret_key"]` even with a secrets file, and its deploy flow performs broad discovery reads. Broker rejects that transcript. `wrangler versions upload`, `wrangler versions deploy`, `wrangler secret put`, and `wrangler deploy` are forbidden publication paths.
 
-Observed gateway upload metadata is locked to `index.js`, `CONVEX_URL`, `CONVEX_SITE_URL`, `WALLET` → `WalletDO`, compatibility date/flags, exact `workers/tag`, and secret-only `keep_bindings`. Exact target-service probe tells Wrangler whether script is new: broker permits declared `v1` `new_sqlite_classes` only for initialization and permits omitted migration only as rerun no-op after remote tag is exactly `v1`. Web is locked to built compatibility settings, one manifest-digest-bound `CLERK_SECRET_KEY`, no inherited bindings, no migrations, and broker-issued asset completion JWT.
+Gateway metadata is locked to `index.js`, `CONVEX_URL`, `CONVEX_SITE_URL`, `WALLET` → `WalletDO`, compatibility date/flags, exact `workers/tag`, and exactly `{CLERK_SECRET_KEY, GATEWAY_INTERNAL_SECRET}`. Exact target-service state determines whether declared `v1` `new_sqlite_classes` initialization is required; existing state must already equal `v1`. Web is locked to built compatibility settings, exactly `{CLERK_SECRET_KEY}`, no migrations, and broker-issued asset completion JWT.
 
-Production web's exact allowed secret set is `{CLERK_SECRET_KEY}`. Provider inventory on 2026-08-12 found 19 inherited legacy secrets on active version `ddc4f56c`; none are allowed into replacement version. Protected release workflow must upload `CLERK_SECRET_KEY` explicitly with `--secrets-file` and omit `keep_bindings`, which retires provider drift only in new version. Keep previous version ID as recoverable rollback pointer until exact paid-call/accounting proof passes. Never delete secrets directly as cleanup.
+Provider inventory on 2026-08-12 found 19 inherited legacy secrets on production web active version `ddc4f56c`. Raw exact upload sends only `CLERK_SECRET_KEY`; broker refuses to seal or activate candidate if Cloudflare readback exposes any extra binding. Keep previous version ID as recoverable rollback pointer until exact paid-call/accounting proof passes. Never delete secrets directly as cleanup.
 
 `.github/workflows/deploy-production.yml` and `cloudflare-production.yml` are deliberately non-mutating preflights. They prove current `develop`, exact successful source CI, signed module/static-asset inventory, and exact secret digests through broker's remote dry-run. Convex deploy, Cloudflare upload, traffic activation, and production verification belong only to protected release protocol, where active-release state, protected attestations, and exact paid-call/accounting proof are enforced as one transaction boundary.
+
+Production environment must provide `CLERK_PRODUCTION_SECRET_KEY` and `GATEWAY_PRODUCTION_INTERNAL_SECRET`; workflow maps them to exact runtime binding names before manifest construction. Missing either blocks gateway authorization. As of 2026-08-12, repository environment inventory lacks `GATEWAY_PRODUCTION_INTERNAL_SECRET`, so production gateway release remains deliberately fail-closed until operator provisions it through GitHub's protected environment controls.
 
 ## Cloudflare token
 
 Create account token with only:
 
 - Account → Workers Scripts → Write
-- Account → Account Settings → Read, required by Wrangler's workers.dev subdomain lookup
 
-No Workers Routes permission is needed during normal operation. One-time broker custom-domain bootstrap needs Zone → Workers Routes → Write for `zevium.dev`; remove it from steady-state token afterward. Do not copy the broad "Edit Cloudflare Workers" template's KV, R2, or Tail permissions. Token must target one Zevium account and one zone where applicable. Broker policy still limits token use to exact endpoints above.
+No Account Settings or Workers Routes permission is needed during normal operation. One-time broker custom-domain bootstrap needs Zone → Workers Routes → Write for `zevium.dev`; remove it from steady-state token afterward. Do not copy the broad "Edit Cloudflare Workers" template's KV, R2, or Tail permissions. Token must target one Zevium account and one zone where applicable. Broker policy still limits token use to exact endpoints above.
 
 ## Bootstrap
 
@@ -126,7 +116,7 @@ DEPLOY_HEAD_SHA=<source-ci-sha> SOURCE_RUN_ID=1 \
 pnpm --filter @zevium/deploy-broker manifest:dry-run
 ```
 
-Unit suite covers forged claims/signatures, canonical manifests, path/query/encoding/traversal, body schemas, multipart chunk boundaries, assets, migrations, secrets, traffic, and recorded Wrangler transcript. Integration suite runs in workerd/Miniflare with real Durable Object storage and checks auth substitution, replay, cross-environment tokens, rate limits, and forbidden paths.
+Unit suite covers forged claims/signatures, canonical manifests, path/query/encoding/traversal, body schemas, multipart chunk boundaries, exact publisher transcripts, assets, migrations, secrets, sealing, traffic, and rejected Wrangler transcripts. Integration suite runs in workerd/Miniflare with real Durable Object storage and checks auth substitution, provider readback, replay, cross-environment tokens, storage-free dry-runs, rate limits, and forbidden paths.
 
 ## Sources checked 2026-08-12
 

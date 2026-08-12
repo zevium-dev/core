@@ -47,6 +47,7 @@ export const TEST_STATIC_ASSETS = {
   staticAssets: [
     {
       cloudflareHash: "b".repeat(32),
+      contentType: "text/javascript; charset=utf-8",
       path: "/copy.js",
       sha256: TEST_ASSET_SHA256,
       size: TEST_ASSET_BYTES.byteLength,
@@ -61,9 +62,11 @@ export const PREVIEW_SECRET_DIGESTS = [
   },
   {
     name: "GATEWAY_INTERNAL_SECRET",
-    sha256: "5686319557f053a8c480deab360ac65ab8531b85c9280c19f318105eafa53f7e",
+    sha256: "b704d663a3e9371f725b507cce561602698413286e0bd72fc9944d18c0abefa3",
   },
 ];
+export const TEST_CLERK_SECRET = "redacted-test-secret";
+export const TEST_GATEWAY_SECRET = "redacted-test-gateway-secret";
 
 function base64Url(value: Uint8Array | string): string {
   const bytes =

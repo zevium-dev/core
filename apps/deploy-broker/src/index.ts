@@ -73,7 +73,6 @@ function policySummary(manifest: DeploymentManifest): Record<string, unknown> {
       assets: target.assets,
       component: target.component,
       durableObjectBindings: target.durableObjectBindings,
-      inheritedBindingTypes: target.inheritedBindingTypes,
       mainModule: target.mainModule,
       migration: target.migration,
       moduleCount: target.modules.length,
@@ -103,13 +102,13 @@ async function registerManifest(
   dryRun: boolean,
 ): Promise<Response> {
   validateEnvironment(env, { requireCloudflareToken: !dryRun });
-  await consumeRegistrationRate(request, env);
   const { value } = await readJsonBounded(request, 128 * 1024);
   const manifest = parseManifest(value);
   const digest = await manifestDigest(manifest);
   const claims = await verifyGitHubOidc(
     bearerToken(request),
     `${AUDIENCE_PREFIX}${digest}`,
+    { cacheJwks: !dryRun },
   );
   await verifyProvenance(manifest, claims);
 
@@ -132,6 +131,8 @@ async function registerManifest(
       policy: policySummary(manifest),
     });
   }
+
+  await consumeRegistrationRate(request, env);
 
   const sessionId = await sha256Hex(`${claims.jti}\0${digest}`);
   const jtiHash = await sha256Hex(claims.jti);

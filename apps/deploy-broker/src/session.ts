@@ -1,13 +1,12 @@
 import { DurableObject } from "cloudflare:workers";
 import {
   authorizeApiRoute,
-  syntheticScriptsResponse,
   validateAssetInitBody,
   validateDeploymentBody,
-  validateSecretBody,
+  validateDeploymentDetail,
   validateSubdomainBody,
+  validateVersionDetail,
   type ApiRoute,
-  type TargetScriptState,
   type ValidatedAssetManifest,
 } from "./api-policy";
 import { audit } from "./audit";
@@ -37,11 +36,14 @@ import {
 const CLOUDFLARE_API_ORIGIN = "https://api.cloudflare.com";
 const SESSION_STORAGE_KEY = "session";
 const ASSET_STORAGE_PREFIX = "assets:";
+const SEALED_VERSION_STORAGE_PREFIX = "sealed-version:";
 const MUTATION_STORAGE_PREFIX = "mutation:";
 const SESSION_REQUEST_LIMIT = 2_100;
 const SESSION_REQUESTS_PER_MINUTE = 1_800;
 const MAX_CONTROL_RESPONSE_BYTES = 512 * 1024;
 const SESSION_ID_PATTERN = /^[0-9a-f]{64}$/;
+const VERSION_ID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const CLOUDFLARE_ASSET_JWT_PATTERN =
   /^[A-Za-z0-9_-]{1,4096}\.[A-Za-z0-9_-]{1,8192}\.[A-Za-z0-9_-]{1,4096}$/;
 
@@ -69,12 +71,18 @@ interface RegistrationBody {
 interface AssetState extends ValidatedAssetManifest {
   completionJwtHashes: string[];
   initialJwtHash?: string;
+  uploadedHashes: string[];
   uploadSizes: Record<string, number>;
 }
 
 interface CloudflareEnvelope {
   result: Record<string, unknown>;
   success: true;
+}
+
+interface TargetScriptState {
+  migrationTag?: string;
+  scriptName: string;
 }
 
 function rawPathAndSearch(url: string): { pathname: string; search: string } {
@@ -238,6 +246,42 @@ function responseFromBytes(response: Response, bytes: Uint8Array): Response {
     status: response.status,
     statusText: response.statusText,
   });
+}
+
+function responseFromResult(
+  response: Response,
+  result: Record<string, unknown>,
+): Response {
+  const headers = sanitizeResponseHeaders(response.headers);
+  headers.set("content-type", "application/json; charset=utf-8");
+  return new Response(
+    JSON.stringify({ errors: [], messages: [], result, success: true }),
+    {
+      headers,
+      status: response.status,
+      statusText: response.statusText,
+    },
+  );
+}
+
+function sanitizedFailure(response: Response): Response {
+  const headers = sanitizeResponseHeaders(response.headers);
+  headers.set("content-type", "application/json; charset=utf-8");
+  return new Response(
+    JSON.stringify({ errors: [], messages: [], result: {}, success: false }),
+    {
+      headers,
+      status: response.status,
+      statusText: response.statusText,
+    },
+  );
+}
+
+async function discardAndSanitizeFailure(
+  response: Response,
+): Promise<Response> {
+  await response.body?.cancel("provider failure body is not exposed");
+  return sanitizedFailure(response);
 }
 
 function assertNoRedirect(response: Response): void {
@@ -492,9 +536,11 @@ export class DeploySessionDO extends DurableObject<BrokerEnv> {
     );
     invariant(
       value &&
+        isRecord(value.contentTypeByHash) &&
         isRecord(value.hashes) &&
         isRecord(value.sha256ByHash) &&
         isRecord(value.uploadSizes) &&
+        Array.isArray(value.uploadedHashes) &&
         Array.isArray(value.completionJwtHashes),
       409,
       "asset_session_missing",
@@ -563,13 +609,12 @@ export class DeploySessionDO extends DurableObject<BrokerEnv> {
     );
   }
 
-  private async verifyVersionTag(
-    targetScript: string,
+  private async verifyVersionState(
+    target: TargetManifest,
     versionId: string,
-    expectedTag: string,
   ): Promise<void> {
     validateEnvironment(this.env, { requireCloudflareToken: true });
-    const path = `/client/v4/accounts/${this.env.CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${targetScript}/versions/${versionId}`;
+    const path = `/client/v4/accounts/${this.env.CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${target.scriptName}/versions/${versionId}`;
     const response = await fetch(`${CLOUDFLARE_API_ORIGIN}${path}`, {
       headers: {
         accept: "application/json",
@@ -587,15 +632,190 @@ export class DeploySessionDO extends DurableObject<BrokerEnv> {
     const envelope = parseCloudflareEnvelope(
       await boundedResponseBytes(response, MAX_CONTROL_RESPONSE_BYTES),
     );
-    const annotations = envelope.result.annotations;
-    invariant(
-      envelope.result.id === versionId &&
-        isRecord(annotations) &&
-        annotations["workers/tag"] === expectedTag,
-      403,
-      "version_tag_rejected",
-      "Cloudflare version tag does not match signed manifest",
+    validateVersionDetail(envelope.result, target, versionId);
+  }
+
+  private async sealedVersionId(target: TargetManifest): Promise<string> {
+    const versionId = await this.state.storage.get<string>(
+      `${SEALED_VERSION_STORAGE_PREFIX}${target.scriptName}`,
     );
+    invariant(
+      typeof versionId === "string" && VERSION_ID_PATTERN.test(versionId),
+      409,
+      "version_not_sealed",
+      "Exact Worker version has not passed broker post-state verification",
+    );
+    return versionId;
+  }
+
+  private async captureServiceRead(
+    route: ApiRoute,
+    response: Response,
+  ): Promise<Response> {
+    invariant(route.target, 500, "route_invalid", "Service target is missing");
+    if (response.status !== 200) return discardAndSanitizeFailure(response);
+    const envelope = parseCloudflareEnvelope(
+      await boundedResponseBytes(response, MAX_CONTROL_RESPONSE_BYTES),
+    );
+    const defaultEnvironment = envelope.result.default_environment;
+    const script = isRecord(defaultEnvironment)
+      ? defaultEnvironment.script
+      : undefined;
+    const migrationTag = isRecord(script) ? script.migration_tag : undefined;
+    invariant(
+      migrationTag === undefined ||
+        (typeof migrationTag === "string" &&
+          route.target.migration !== null &&
+          migrationTag === route.target.migration.tag),
+      409,
+      "migration_state_rejected",
+      "Cloudflare Durable Object migration state differs from manifest",
+    );
+    return responseFromResult(response, {
+      default_environment: {
+        script: {
+          ...(typeof migrationTag === "string"
+            ? { migration_tag: migrationTag }
+            : {}),
+        },
+      },
+    });
+  }
+
+  private async captureVersionUpload(
+    route: ApiRoute,
+    response: Response,
+  ): Promise<Response> {
+    const bytes = await boundedResponseBytes(
+      response,
+      MAX_CONTROL_RESPONSE_BYTES,
+    );
+    if (response.status >= 200 && response.status < 300) {
+      invariant(route.target, 500, "route_invalid", "Upload target is missing");
+      const envelope = parseCloudflareEnvelope(bytes);
+      const versionId = envelope.result.id;
+      invariant(
+        typeof versionId === "string" && VERSION_ID_PATTERN.test(versionId),
+        502,
+        "version_verification_failed",
+        "Cloudflare upload did not return an immutable version ID",
+      );
+      await this.verifyVersionState(route.target, versionId);
+      await this.state.storage.put(
+        `${SEALED_VERSION_STORAGE_PREFIX}${route.target.scriptName}`,
+        versionId,
+      );
+      return responseFromResult(response, { id: versionId });
+    }
+    return sanitizedFailure(response);
+  }
+
+  private async verifyDeploymentState(
+    target: TargetManifest,
+    versionId: string,
+    deploymentId: string,
+  ): Promise<void> {
+    const deploymentPath = `/client/v4/accounts/${this.env.CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${target.scriptName}/deployments/${deploymentId}`;
+    const deploymentResponse = await fetch(
+      `${CLOUDFLARE_API_ORIGIN}${deploymentPath}`,
+      {
+        headers: {
+          accept: "application/json",
+          authorization: `Bearer ${this.env.CLOUDFLARE_BROKER_API_TOKEN}`,
+        },
+        redirect: "manual",
+      },
+    );
+    assertNoRedirect(deploymentResponse);
+    invariant(
+      deploymentResponse.status === 200,
+      502,
+      "deployment_verification_failed",
+      "Cloudflare deployment could not be verified",
+    );
+    const deploymentEnvelope = parseCloudflareEnvelope(
+      await boundedResponseBytes(
+        deploymentResponse,
+        MAX_CONTROL_RESPONSE_BYTES,
+      ),
+    );
+    validateDeploymentDetail(
+      deploymentEnvelope.result,
+      deploymentId,
+      versionId,
+    );
+
+    const listPath = `/client/v4/accounts/${this.env.CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${target.scriptName}/deployments`;
+    const response = await fetch(`${CLOUDFLARE_API_ORIGIN}${listPath}`, {
+      headers: {
+        accept: "application/json",
+        authorization: `Bearer ${this.env.CLOUDFLARE_BROKER_API_TOKEN}`,
+      },
+      redirect: "manual",
+    });
+    assertNoRedirect(response);
+    invariant(
+      response.status === 200,
+      502,
+      "deployment_verification_failed",
+      "Cloudflare deployment could not be verified",
+    );
+    const envelope = parseCloudflareEnvelope(
+      await boundedResponseBytes(response, MAX_CONTROL_RESPONSE_BYTES),
+    );
+    const deployments = envelope.result.deployments;
+    const latest = Array.isArray(deployments) ? deployments[0] : undefined;
+    invariant(
+      isRecord(latest) && latest.id === deploymentId,
+      502,
+      "deployment_verification_failed",
+      "Cloudflare active deployment is not the created deployment",
+    );
+    validateDeploymentDetail(latest, deploymentId, versionId);
+    if (target.migration !== null) {
+      const scriptState = await this.readTargetScriptState(
+        target,
+        `Bearer ${this.env.CLOUDFLARE_BROKER_API_TOKEN}`,
+      );
+      invariant(
+        scriptState?.migrationTag === target.migration.tag,
+        502,
+        "deployment_verification_failed",
+        "Cloudflare Durable Object migration did not reach signed state",
+      );
+    }
+  }
+
+  private async captureDeployment(
+    route: ApiRoute,
+    versionId: string,
+    response: Response,
+  ): Promise<Response> {
+    const bytes = await boundedResponseBytes(
+      response,
+      MAX_CONTROL_RESPONSE_BYTES,
+    );
+    if (response.status >= 200 && response.status < 300) {
+      invariant(
+        route.target,
+        500,
+        "route_invalid",
+        "Deployment target is missing",
+      );
+      const envelope = parseCloudflareEnvelope(bytes);
+      const deploymentId = envelope.result.id;
+      invariant(
+        typeof deploymentId === "string" &&
+          VERSION_ID_PATTERN.test(deploymentId),
+        502,
+        "deployment_verification_failed",
+        "Cloudflare deployment did not return an immutable deployment ID",
+      );
+      validateDeploymentDetail(envelope.result, deploymentId, versionId);
+      await this.verifyDeploymentState(route.target, versionId, deploymentId);
+      return responseFromResult(response, { id: deploymentId });
+    }
+    return sanitizedFailure(response);
   }
 
   private async readTargetScriptState(
@@ -641,20 +861,6 @@ export class DeploySessionDO extends DurableObject<BrokerEnv> {
     };
   }
 
-  private async readTargetScriptStates(
-    manifest: DeploymentManifest,
-    authorization: string,
-  ): Promise<TargetScriptState[]> {
-    const states: TargetScriptState[] = [];
-    for (const target of manifest.targets.filter((candidate) =>
-      candidate.operations.includes("script:read"),
-    )) {
-      const state = await this.readTargetScriptState(target, authorization);
-      if (state) states.push(state);
-    }
-    return states;
-  }
-
   private async verifyMigrationState(
     target: TargetManifest,
     migrationMode: "initial" | "none" | undefined,
@@ -692,9 +898,11 @@ export class DeploySessionDO extends DurableObject<BrokerEnv> {
   ): Promise<void> {
     const state: AssetState = {
       completionJwtHashes: [],
+      contentTypeByHash: manifest.contentTypeByHash,
       hashes: manifest.hashes,
       sha256ByHash: manifest.sha256ByHash,
       totalBytes: manifest.totalBytes,
+      uploadedHashes: [],
       uploadSizes: Object.create(null) as Record<string, number>,
     };
     await this.state.storage.put(this.assetStorageKey(route), state);
@@ -752,6 +960,7 @@ export class DeploySessionDO extends DurableObject<BrokerEnv> {
   private async captureAssetCompletion(
     route: ApiRoute,
     response: Response,
+    uploadedHashes: string[],
   ): Promise<Response> {
     const bytes = await boundedResponseBytes(
       response,
@@ -759,7 +968,10 @@ export class DeploySessionDO extends DurableObject<BrokerEnv> {
     );
     if (response.status >= 200 && response.status < 300) {
       const envelope = parseCloudflareEnvelope(bytes);
-      const jwtHash = await sha256Hex(validateAssetJwt(envelope.result.jwt));
+      const jwtHash =
+        envelope.result.jwt === undefined
+          ? undefined
+          : await sha256Hex(validateAssetJwt(envelope.result.jwt));
       await this.state.storage.transaction(async (transaction) => {
         const key = this.assetStorageKey(route);
         const state = await transaction.get<AssetState>(key);
@@ -769,16 +981,24 @@ export class DeploySessionDO extends DurableObject<BrokerEnv> {
           "asset_session_missing",
           "Asset upload session is not initialized",
         );
-        if (!state.completionJwtHashes.includes(jwtHash)) {
+        const completed = new Set(state.uploadedHashes);
+        for (const hash of uploadedHashes) {
           invariant(
-            state.completionJwtHashes.length < 1_500,
-            502,
-            "asset_session_rejected",
-            "Cloudflare returned too many asset completion tokens",
+            state.uploadSizes[hash] !== undefined,
+            500,
+            "artifact_state_invalid",
+            "Uploaded asset is absent from provider request state",
           );
-          state.completionJwtHashes.push(jwtHash);
-          await transaction.put(key, state);
+          completed.add(hash);
         }
+        state.uploadedHashes = [...completed].sort();
+        const allUploaded = Object.keys(state.uploadSizes).every((hash) =>
+          completed.has(hash),
+        );
+        if (allUploaded && jwtHash !== undefined) {
+          state.completionJwtHashes = [jwtHash];
+        }
+        await transaction.put(key, state);
       });
     }
     return responseFromBytes(response, bytes);
@@ -810,31 +1030,14 @@ export class DeploySessionDO extends DurableObject<BrokerEnv> {
       authorization = `Bearer ${this.env.CLOUDFLARE_BROKER_API_TOKEN}`;
     }
 
-    if (route.kind === "script-list-synthetic") {
-      ensureNoBody(request);
-      const response = syntheticScriptsResponse(
-        await this.readTargetScriptStates(session.manifest, authorization),
-      );
-      audit(
-        {
-          decision: "allow",
-          method: request.method,
-          route: route.kind,
-          sessionId: session.sessionId,
-          status: response.status,
-        },
-        session.manifest,
-      );
-      return response;
-    }
-
     let body: BodyInit | null = null;
     let forwardedContentLength: number | null | undefined;
     let mutationKey = route.mutationKey;
+    let deploymentVersionId: string | undefined;
+    let uploadedAssetHashes: string[] = [];
     if (route.maximumBodyBytes === 0) {
       ensureNoBody(request);
     } else if (
-      route.kind === "secret-put" ||
       route.kind === "subdomain-write" ||
       route.kind === "asset-init" ||
       route.kind === "deployment-create"
@@ -847,21 +1050,7 @@ export class DeploySessionDO extends DurableObject<BrokerEnv> {
         "route_invalid",
         "Mutation target is missing",
       );
-      if (route.kind === "secret-put") {
-        const secret = validateSecretBody(parsed.value, route.target);
-        invariant(
-          isRecord(parsed.value) &&
-            typeof parsed.value.text === "string" &&
-            timingSafeEqual(
-              await sha256Hex(parsed.value.text),
-              secret.expectedSha256,
-            ),
-          400,
-          "secret_rejected",
-          "Secret value does not match signed manifest",
-        );
-        mutationKey = secret.mutationKey;
-      } else if (route.kind === "subdomain-write") {
+      if (route.kind === "subdomain-write") {
         validateSubdomainBody(parsed.value, route.target);
       } else if (route.kind === "asset-init") {
         const assetManifest = validateAssetInitBody(parsed.value, route.target);
@@ -876,17 +1065,15 @@ export class DeploySessionDO extends DurableObject<BrokerEnv> {
         await this.initializeAssetState(route, assetManifest);
       } else {
         const deployment = validateDeploymentBody(parsed.value, route.target);
+        const sealedVersionId = await this.sealedVersionId(route.target);
         invariant(
-          route.target.versionTag,
-          500,
-          "route_invalid",
-          "Deployment version tag is missing",
+          timingSafeEqual(deployment.versionId, sealedVersionId),
+          403,
+          "version_not_sealed",
+          "Deployment version is not exact broker-sealed candidate",
         );
-        await this.verifyVersionTag(
-          route.target.scriptName,
-          deployment.versionId,
-          route.target.versionTag,
-        );
+        await this.verifyVersionState(route.target, deployment.versionId);
+        deploymentVersionId = deployment.versionId;
         mutationKey = `${route.mutationKey}:${deployment.versionId}`;
       }
     } else if (route.kind === "version-upload") {
@@ -919,6 +1106,7 @@ export class DeploySessionDO extends DurableObject<BrokerEnv> {
         {
           assetSizes: assetState.uploadSizes,
           assetDigests: assetState.sha256ByHash,
+          assetContentTypes: assetState.contentTypeByHash,
           mode: "assets",
           target: route.target,
         },
@@ -926,6 +1114,7 @@ export class DeploySessionDO extends DurableObject<BrokerEnv> {
       );
       body = inspected.body;
       forwardedContentLength = inspected.contentLength;
+      uploadedAssetHashes = inspected.assetHashes ?? [];
       mutationKey = undefined;
     } else if (route.kind === "asset-upload-single") {
       invariant(
@@ -943,6 +1132,13 @@ export class DeploySessionDO extends DurableObject<BrokerEnv> {
       );
       const declaredLength = contentLength(request, route.maximumBodyBytes);
       validateSingleAssetLength(declaredLength, expected);
+      invariant(
+        request.headers.get("content-type") ===
+          assetState.contentTypeByHash[route.assetHash],
+        415,
+        "invalid_content_type",
+        "Static asset content type does not match signed manifest",
+      );
       const bytes = await readBodyBounded(request, route.maximumBodyBytes);
       invariant(
         bytes.byteLength === expected &&
@@ -955,6 +1151,7 @@ export class DeploySessionDO extends DurableObject<BrokerEnv> {
         "Static asset does not match signed manifest",
       );
       body = Uint8Array.from(bytes).buffer;
+      uploadedAssetHashes = [route.assetHash];
       mutationKey = undefined;
     }
 
@@ -970,13 +1167,33 @@ export class DeploySessionDO extends DurableObject<BrokerEnv> {
     assertNoRedirect(response);
 
     let output: Response;
-    if (route.kind === "asset-init") {
+    if (route.kind === "service-read") {
+      output = await this.captureServiceRead(route, response);
+    } else if (route.kind === "asset-init") {
       output = await this.captureAssetInitialization(route, response);
+    } else if (route.kind === "version-upload") {
+      output = await this.captureVersionUpload(route, response);
+    } else if (route.kind === "deployment-create") {
+      invariant(
+        deploymentVersionId,
+        500,
+        "route_invalid",
+        "Deployment version is missing",
+      );
+      output = await this.captureDeployment(
+        route,
+        deploymentVersionId,
+        response,
+      );
     } else if (
       route.kind === "asset-upload-bulk" ||
       route.kind === "asset-upload-single"
     ) {
-      output = await this.captureAssetCompletion(route, response);
+      output = await this.captureAssetCompletion(
+        route,
+        response,
+        uploadedAssetHashes,
+      );
     } else {
       output = new Response(response.body, {
         headers: sanitizeResponseHeaders(response.headers),
