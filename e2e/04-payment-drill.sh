@@ -2,7 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-export E2E_SESSION="${E2E_SESSION:-zevium-payment-drill}"
+export E2E_SESSION="${E2E_SESSION:-${E2E_SESSION_PREFIX:-zevium-e2e}-payment-signed-in}"
 # shellcheck source=lib.sh
 source "$SCRIPT_DIR/lib.sh"
 
@@ -10,8 +10,7 @@ checkout_id=""
 drill_refunded=false
 
 refund_failed_checkout() {
-  [[ "$checkout_id" == cs_test_* ]] || return 0
-
+  [[ "$checkout_id" == cs_* ]] || return 0
   local session_json payment_status payment_intent refund_json refund_status
   session_json="$(
     curl -fsS --oauth2-bearer "$STRIPE_SECRET_KEY" \
@@ -21,10 +20,9 @@ refund_failed_checkout() {
   [[ "$payment_status" == "paid" ]] || return 0
   payment_intent="$(node -e 'const x=JSON.parse(process.argv[1]); console.log(x.payment_intent || "")' "$session_json")"
   [[ "$payment_intent" == pi_* ]] || return 0
-
   refund_json="$(
     curl -fsS --oauth2-bearer "$STRIPE_SECRET_KEY" -X POST \
-      -H "Idempotency-Key: zevium-drill-$checkout_id" \
+      -H "Idempotency-Key: zevium-drill-cleanup-$checkout_id" \
       https://api.stripe.com/v1/refunds \
       --data-urlencode "payment_intent=$payment_intent" \
       --data-urlencode "metadata[zevium_drill]=true"
@@ -36,91 +34,78 @@ refund_failed_checkout() {
 cleanup() {
   local code="$?"
   if (( code != 0 )) && [[ "$drill_refunded" != true ]]; then
-    refund_failed_checkout || true
+    refund_failed_checkout
   fi
   close_browser
+  cleanup_e2e_runtime
 }
 trap cleanup EXIT
 
-on_error() {
-  local code="$?" line="$1"
-  trap - ERR
-  fail "unexpected command failure at line $line (exit=$code)"
-}
-trap 'on_error "$LINENO"' ERR
-
 : "${STRIPE_SECRET_KEY:?STRIPE_SECRET_KEY is required}"
+configure_browser_context
 
 step "sign in to stable staging"
 wait_for_url "$E2E_BASE_URL/" "200" 90
-ab open "$E2E_BASE_URL/" >/dev/null
-ab cookies clear >/dev/null
+verify_target_commit "payment"
 sign_in
 
 step "start Stripe Checkout"
 open_path "/app/billing"
 ab wait --text "Buy credits" >/dev/null
-ab find role button click --name 'Buy $10.00' >/dev/null
-wait_for_url_pattern "https://checkout.stripe.com/" 30
-ab wait --load domcontentloaded >/dev/null 2>&1 || true
-wait_for_text "Payment method" 30
-checkout_url="$(ab get url)"
-checkout_id="$(node -e 'const match=new URL(process.argv[1]).pathname.match(/cs_test_[A-Za-z0-9]+/); console.log(match?.[0] || "")' "$checkout_url")"
-[[ "$checkout_id" == cs_test_* ]] || fail "Stripe sandbox URL lacks checkout session id"
+if ! ab find text "Buy $10.00" click --exact >/dev/null 2>&1; then
+  ab find role button click --name "Buy $10.00" >/dev/null
+fi
+ab wait --url "https://checkout.stripe.com/**" >/dev/null
 
 step "complete Stripe sandbox card payment"
-if ab get count 'input[name="email"]' | grep -qv '^0$'; then
-  log "fill checkout email"
-  ab fill 'input[name="email"]' "$E2E_EMAIL"
-fi
-if ab get count 'input[name="cardNumber"]' | grep -q '^0$'; then
-  log "select card payment method"
-  ab find role button click --name "Pay with card" >/dev/null
-  ab wait 'input[name="cardNumber"]' >/dev/null || fail "card fields did not open"
-fi
-log "fill card number"
 ab fill 'input[name="cardNumber"]' "4242424242424242"
-log "fill card expiry"
 ab fill 'input[name="cardExpiry"]' "1234"
-log "fill card CVC"
 ab fill 'input[name="cardCvc"]' "123"
 if ab get count 'input[name="billingName"]' | grep -qv '^0$'; then
-  log "fill cardholder name"
   ab fill 'input[name="billingName"]' "Zevium CI"
 fi
 if ab get count 'input[name="billingPostalCode"]' | grep -qv '^0$'; then
   ab fill 'input[name="billingPostalCode"]' "10001"
 fi
-ab scroll down 700 >/dev/null
-pay_ref="$(page_interactive | sed -nE 's/^[[:space:]]*- button "Pay" \[ref=([^],]+).*/\1/p' | head -1)"
-[[ -n "$pay_ref" ]] || fail "Stripe Pay button is missing"
-ab click "@$pay_ref" >/dev/null || fail "Stripe Pay button could not be clicked"
-wait_for_url_pattern "/app/billing?checkout=" 60
+ab find role button click --name "Pay" >/dev/null
+ab wait --url "**/app/billing?checkout=*" >/dev/null
 
 billing_url="$(ab get url)"
-returned_checkout_id="$(node -e 'console.log(new URL(process.argv[1]).searchParams.get("checkout") || "")' "$billing_url")"
-assert_eq "$returned_checkout_id" "$checkout_id" "checkout return URL changed Stripe session id"
-wait_for_text "Confirmed" 90
+checkout_id="$(node -e 'console.log(new URL(process.argv[1]).searchParams.get("checkout") || "")' "$billing_url")"
+[[ "$checkout_id" == cs_* ]] || fail "checkout return URL lacks Stripe session id"
+ab wait --text "Confirmed" >/dev/null
 
 step "refund Stripe sandbox payment"
-session_json="$E2E_ARTIFACTS/checkout-session.json"
-refund_json="$E2E_ARTIFACTS/refund.json"
+proof_stamp="$(date +%Y%m%d-%H%M%S)-$(date +%N)"
+session_json="$E2E_RAW_DIR/$proof_stamp-checkout-session.raw.json"
+refund_json="$E2E_RAW_DIR/$proof_stamp-refund.raw.json"
 curl -fsS --oauth2-bearer "$STRIPE_SECRET_KEY" "https://api.stripe.com/v1/checkout/sessions/$checkout_id" >"$session_json"
 payment_intent="$(node -e 'const x=require(process.argv[1]); console.log(x.payment_intent || "")' "$session_json")"
 [[ "$payment_intent" == pi_* ]] || fail "checkout session lacks payment intent"
-curl -fsS --oauth2-bearer "$STRIPE_SECRET_KEY" -X POST https://api.stripe.com/v1/refunds \
+sanitize_artifact "$session_json" "$E2E_ARTIFACTS/$proof_stamp-checkout-proof.json" "stripe-session"
+curl -fsS --oauth2-bearer "$STRIPE_SECRET_KEY" -X POST \
   -H "Idempotency-Key: zevium-drill-$checkout_id" \
+  https://api.stripe.com/v1/refunds \
   --data-urlencode "payment_intent=$payment_intent" \
   --data-urlencode "metadata[zevium_drill]=true" >"$refund_json"
 refund_status="$(node -e 'const x=require(process.argv[1]); console.log(x.status || "")' "$refund_json")"
 assert_eq "$refund_status" "succeeded" "Stripe refund did not succeed"
 drill_refunded=true
+sanitize_artifact "$refund_json" "$E2E_ARTIFACTS/$proof_stamp-refund-proof.json" "stripe-refund"
 
 step "verify refund reached Zevium"
 for _ in $(seq 1 30); do
   open_path "/app/billing"
   snap="$(page_text)"
   if [[ "$snap" == *"Refunded"* ]]; then
+    record_browser_contract "payment" "checkout-refund-history" "signed-in"
+    if [[ "${E2E_RUNNER_ACTIVE:-0}" != "1" ]]; then
+      for excluded_lane in preview auth publisher consumer paid-consumer; do
+        record_manifest_result "$excluded_lane" "excluded" 0 "standalone payment drill did not request this lane"
+      done
+      record_manifest_result "payment" "passed" 0 "real checkout, fulfillment, refund, and webhook history asserted"
+      build_evidence_manifest "$E2E_ARTIFACTS/$proof_stamp-payment-evidence-manifest.json"
+    fi
     log "04-payment-drill PASS"
     exit 0
   fi

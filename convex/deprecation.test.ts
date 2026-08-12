@@ -154,6 +154,17 @@ describe("specs.deprecateVersion — auth", () => {
         message: "Use v2",
       }),
     ).rejects.toThrow(/admin/);
+    await expect(
+      asPublisherMember(t).mutation(api.specs.undeprecateVersion, {
+        versionId: seed.versionId,
+      }),
+    ).rejects.toThrow(/admin/);
+    await expect(
+      asPublisherMember(t).mutation(api.specs.publish, {
+        projectId: seed.projectId,
+        version: "2.0.0",
+      }),
+    ).rejects.toThrow(/admin/);
   });
 });
 

@@ -5,12 +5,21 @@ import {
   useSuspenseQuery,
 } from "@tanstack/react-query";
 import { convexQuery, useConvexMutation } from "@convex-dev/react-query";
-import { useOrganization } from "@clerk/tanstack-react-start";
+import { useAuth, useOrganization } from "@clerk/tanstack-react-start";
 import { createFileRoute } from "@tanstack/react-router";
 import { useConvexAuth } from "convex/react";
 import { Check, Copy, KeyRound, Plus, RotateCw, Trash2 } from "lucide-react";
 import { m, useReducedMotion } from "motion/react";
-import { Suspense, useEffect, useRef, useState, type FormEvent } from "react";
+import {
+  Suspense,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type FormEvent,
+  type RefObject,
+} from "react";
 import { toast } from "sonner";
 
 import { Badge } from "#/components/ui/badge";
@@ -55,8 +64,17 @@ import { api } from "#/lib/convex-api";
 import { humanError } from "#/lib/human-error";
 import { parseMonthlyCap } from "#/lib/key-cap";
 import { DUR, EASE } from "#/lib/motion";
+import { isPrivilegedOrgRole } from "#/lib/org-capabilities";
+import { safeReturnPath } from "#/lib/return-path";
 
-const KEYS_QUERY_KEY = ["settings", "api-keys"] as const;
+function keysQueryKey(userId: string, orgId: string) {
+  return ["settings", "api-keys", userId, orgId] as const;
+}
+const KEY_DATE_FORMATTER = new Intl.DateTimeFormat("en-US", {
+  dateStyle: "medium",
+  timeStyle: "short",
+  timeZone: "UTC",
+});
 
 /** Secret reveal shape shared by create + rotate. */
 type RevealedSecret = {
@@ -68,6 +86,9 @@ type RevealedSecret = {
 };
 
 export const Route = createFileRoute("/app/settings/keys")({
+  validateSearch: (search: Record<string, unknown>) => ({
+    returnTo: safeReturnPath(search.returnTo, "") || undefined,
+  }),
   component: KeysPage,
   head: () => ({
     meta: [{ title: "API keys · Zevium" }],
@@ -76,10 +97,11 @@ export const Route = createFileRoute("/app/settings/keys")({
 
 function KeysPage() {
   const { isLoaded } = useOrganization();
+  const { isLoaded: authLoaded, userId, orgId } = useAuth();
   const { isLoading: convexAuthLoading, isAuthenticated: convexAuthed } =
     useConvexAuth();
 
-  if (!isLoaded || convexAuthLoading) {
+  if (!isLoaded || !authLoaded || convexAuthLoading || !userId || !orgId) {
     return <KeysSkeleton />;
   }
   if (!convexAuthed) {
@@ -88,17 +110,30 @@ function KeysPage() {
 
   return (
     <Suspense fallback={<KeysSkeleton />}>
-      <KeysContent />
+      <KeysContent key={`${userId}:${orgId}`} userId={userId} orgId={orgId} />
     </Suspense>
   );
 }
 
-function KeysContent() {
+function KeysContent({ userId, orgId }: { userId: string; orgId: string }) {
+  const { membership } = useOrganization();
+  const canAdminister = isPrivilegedOrgRole(membership?.role);
+  const { returnTo } = Route.useSearch();
   const queryClient = useQueryClient();
   const reduce = useReducedMotion();
+  const principalKey = `${userId}:${orgId}`;
+  const activePrincipalRef = useRef<string | null>(principalKey);
+  const queryKey = keysQueryKey(userId, orgId);
+
+  useLayoutEffect(() => {
+    activePrincipalRef.current = principalKey;
+    return () => {
+      activePrincipalRef.current = null;
+    };
+  }, [principalKey]);
 
   const keysQuery = useQuery({
-    queryKey: KEYS_QUERY_KEY,
+    queryKey,
     queryFn: () => listKeys(),
   });
 
@@ -110,33 +145,47 @@ function KeysContent() {
 
   const [createOpen, setCreateOpen] = useState(false);
   const [name, setName] = useState("");
+  const [nameSubmitted, setNameSubmitted] = useState(false);
+  const nameInputRef = useRef<HTMLInputElement>(null);
   const [revealed, setRevealed] = useState<RevealedSecret | null>(null);
   const [copied, setCopied] = useState(false);
 
   const [revokeTarget, setRevokeTarget] = useState<ApiKeyRow | null>(null);
   const [rotateTarget, setRotateTarget] = useState<ApiKeyRow | null>(null);
+  const dialogTriggerRef = useRef<HTMLElement | null>(null);
+  const revokeTriggerRef = useRef<HTMLElement | null>(null);
+  const revealedRef = useRef<RevealedSecret | null>(revealed);
+  revealedRef.current = revealed;
 
   const createMutation = useMutation({
-    mutationFn: (keyName: string) => createKey({ data: { name: keyName } }),
-    onSuccess: (result) => {
-      setRevealed(result);
+    mutationFn: async (keyName: string) => ({
+      principalKey,
+      created: await createKey({ data: { name: keyName } }),
+    }),
+    onSuccess: ({ principalKey: completedPrincipal, created }) => {
+      if (activePrincipalRef.current !== completedPrincipal) return;
+      setRevealed(created);
       setName("");
-      toast.success("API key created — copy it now");
-      void queryClient.invalidateQueries({ queryKey: KEYS_QUERY_KEY });
+      void queryClient.invalidateQueries({ queryKey });
     },
     onError: (err: unknown) => {
+      if (activePrincipalRef.current !== principalKey) return;
       toast.error(humanError(err, "Could not create API key"));
     },
   });
 
   const revokeMutation = useMutation({
-    mutationFn: (id: string) => revokeKey({ data: { id } }),
-    onSuccess: () => {
-      toast.success("API key revoked");
+    mutationFn: async (id: string) => ({
+      principalKey,
+      result: await revokeKey({ data: { id } }),
+    }),
+    onSuccess: ({ principalKey: completedPrincipal }) => {
+      if (activePrincipalRef.current !== completedPrincipal) return;
       setRevokeTarget(null);
-      void queryClient.invalidateQueries({ queryKey: KEYS_QUERY_KEY });
+      void queryClient.invalidateQueries({ queryKey });
     },
     onError: (err: unknown) => {
+      if (activePrincipalRef.current !== principalKey) return;
       toast.error(humanError(err, "Could not revoke API key"));
     },
   });
@@ -146,20 +195,26 @@ function KeysContent() {
   const rotationOperationIds = useRef(new Map<string, string>());
 
   const rotateMutation = useMutation({
-    mutationFn: (target: ApiKeyRow): Promise<RotateApiKeyResult> => {
+    mutationFn: async (
+      target: ApiKeyRow,
+    ): Promise<{ principalKey: string; created: RotateApiKeyResult }> => {
       const operationId =
         rotationOperationIds.current.get(target.id) ?? crypto.randomUUID();
       rotationOperationIds.current.set(target.id, operationId);
-      return rotateKey({ data: { id: target.id, operationId } });
+      return {
+        principalKey,
+        created: await rotateKey({ data: { id: target.id, operationId } }),
+      };
     },
-    onSuccess: (created) => {
+    onSuccess: ({ principalKey: completedPrincipal, created }) => {
+      if (activePrincipalRef.current !== completedPrincipal) return;
       setRevealed(created);
       setRotateTarget(null);
       rotationOperationIds.current.clear();
-      toast.success("Key rotated — copy the new secret now");
-      void queryClient.invalidateQueries({ queryKey: KEYS_QUERY_KEY });
+      void queryClient.invalidateQueries({ queryKey });
     },
     onError: (err: unknown) => {
+      if (activePrincipalRef.current !== principalKey) return;
       toast.error(humanError(err, "Could not rotate API key"));
     },
   });
@@ -175,6 +230,7 @@ function KeysContent() {
     if (createMutation.isPending || rotateMutation.isPending) return;
     setCreateOpen(false);
     setName("");
+    setNameSubmitted(false);
     setRevealed(null);
     setCopied(false);
   }
@@ -182,9 +238,10 @@ function KeysContent() {
   function onCreateSubmit(e: FormEvent) {
     e.preventDefault();
     if (createMutation.isPending || hasKey) return;
+    setNameSubmitted(true);
     const trimmed = name.trim();
     if (trimmed.length === 0) {
-      toast.error("Name is required");
+      nameInputRef.current?.focus();
       return;
     }
     createMutation.mutate(trimmed);
@@ -192,12 +249,16 @@ function KeysContent() {
 
   async function copySecret() {
     if (!revealed) return;
+    const copiedForPrincipal = principalKey;
     try {
       await navigator.clipboard.writeText(revealed.secret);
+      if (activePrincipalRef.current !== copiedForPrincipal) return;
       setCopied(true);
-      toast.success("Copied to clipboard");
-      window.setTimeout(() => setCopied(false), 1500);
+      window.setTimeout(() => {
+        if (activePrincipalRef.current === copiedForPrincipal) setCopied(false);
+      }, 1500);
     } catch {
+      if (activePrincipalRef.current !== copiedForPrincipal) return;
       toast.error("Could not copy — select and copy manually");
     }
   }
@@ -213,9 +274,16 @@ function KeysContent() {
             Machine keys for the gateway. One active key per user.
           </p>
         </div>
-        {hasKey ? (
-          <Badge variant="outline">1 active key allowed per user</Badge>
-        ) : null}
+        <div className="flex flex-wrap items-center gap-2">
+          {returnTo ? (
+            <Button asChild variant="outline" size="sm">
+              <a href={returnTo}>Return to API</a>
+            </Button>
+          ) : null}
+          {hasKey ? (
+            <Badge variant="outline">1 active key allowed per user</Badge>
+          ) : null}
+        </div>
       </div>
 
       <Card>
@@ -225,6 +293,12 @@ function KeysContent() {
             Secrets appear once. Spend caps, status changes, and rotation reach
             gateway within 1 minute.
           </CardDescription>
+          {!canAdminister ? (
+            <p className="text-sm text-muted-foreground">
+              You can create your own key. Organization admins manage caps,
+              rotation, status, and revocation.
+            </p>
+          ) : null}
         </CardHeader>
         <CardContent>
           {isLoading ? (
@@ -236,7 +310,8 @@ function KeysContent() {
             />
           ) : keys.length === 0 ? (
             <EmptyKeys
-              onCreate={() => {
+              onCreate={(trigger) => {
+                dialogTriggerRef.current = trigger;
                 setRevealed(null);
                 setCreateOpen(true);
               }}
@@ -245,7 +320,7 @@ function KeysContent() {
             <div className="flex flex-col gap-3">
               <div className="rounded-md border">
                 <table className="w-full text-left text-sm">
-                  <thead className="hidden border-b bg-muted/40 text-muted-foreground md:table-header-group">
+                  <thead className="hidden border-b bg-muted/40 text-muted-foreground lg:table-header-group">
                     <tr>
                       <th scope="col" className="px-3 py-2 font-medium">
                         Name
@@ -270,7 +345,7 @@ function KeysContent() {
                       </th>
                     </tr>
                   </thead>
-                  <tbody className="block md:table-row-group">
+                  <tbody className="block lg:table-row-group">
                     {keys.map((key) => (
                       <KeyRow
                         key={key.id}
@@ -278,9 +353,16 @@ function KeysContent() {
                         setting={settingsByKey.get(key.id)}
                         setCap={setCap}
                         setDisabled={setDisabled}
-                        onRotate={() => setRotateTarget(key)}
-                        onRevoke={() => setRevokeTarget(key)}
+                        onRotate={(trigger) => {
+                          dialogTriggerRef.current = trigger;
+                          setRotateTarget(key);
+                        }}
+                        onRevoke={(trigger) => {
+                          revokeTriggerRef.current = trigger;
+                          setRevokeTarget(key);
+                        }}
                         revokePending={revokeMutation.isPending}
+                        canAdminister={canAdminister}
                       />
                     ))}
                   </tbody>
@@ -289,7 +371,8 @@ function KeysContent() {
               {!hasKey ? (
                 <Button
                   className="self-start"
-                  onClick={() => {
+                  onClick={(event) => {
+                    dialogTriggerRef.current = event.currentTarget;
                     setRevealed(null);
                     setCreateOpen(true);
                   }}
@@ -309,6 +392,7 @@ function KeysContent() {
         reduce={reduce}
         onCopy={() => void copySecret()}
         onClose={closeReveal}
+        restoreFocusRef={dialogTriggerRef}
       />
 
       {/* Create form (when no secret revealed yet) */}
@@ -319,7 +403,13 @@ function KeysContent() {
           else setCreateOpen(true);
         }}
       >
-        <DialogContent className="sm:max-w-md">
+        <DialogContent
+          className="sm:max-w-md"
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            if (revealedRef.current === null) dialogTriggerRef.current?.focus();
+          }}
+        >
           <form onSubmit={onCreateSubmit} className="space-y-4">
             <DialogHeader>
               <DialogTitle>Create API key</DialogTitle>
@@ -330,13 +420,29 @@ function KeysContent() {
             <div className="space-y-2">
               <Label htmlFor="key-name">Name</Label>
               <Input
+                ref={nameInputRef}
                 id="key-name"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="Local dev"
                 maxLength={64}
                 disabled={createMutation.isPending}
+                aria-invalid={nameSubmitted && name.trim() === ""}
+                aria-describedby="key-name-help"
               />
+              <p
+                id="key-name-help"
+                role={nameSubmitted && name.trim() === "" ? "alert" : undefined}
+                className={`min-h-5 text-xs ${
+                  nameSubmitted && name.trim() === ""
+                    ? "text-destructive"
+                    : "text-muted-foreground"
+                }`}
+              >
+                {nameSubmitted && name.trim() === ""
+                  ? "Enter a name so you can identify where this key is used."
+                  : "Use a short location or workload name, such as Local dev."}
+              </p>
             </div>
             <DialogFooter>
               <Button
@@ -362,7 +468,13 @@ function KeysContent() {
           if (!open && !rotateMutation.isPending) setRotateTarget(null);
         }}
       >
-        <DialogContent className="sm:max-w-md">
+        <DialogContent
+          className="sm:max-w-md"
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            if (revealedRef.current === null) dialogTriggerRef.current?.focus();
+          }}
+        >
           <DialogHeader>
             <DialogTitle>Rotate API key?</DialogTitle>
             <DialogDescription>
@@ -400,7 +512,13 @@ function KeysContent() {
           if (!open && !revokeMutation.isPending) setRevokeTarget(null);
         }}
       >
-        <DialogContent className="sm:max-w-md">
+        <DialogContent
+          className="sm:max-w-md"
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            revokeTriggerRef.current?.focus();
+          }}
+        >
           <DialogHeader>
             <DialogTitle>Revoke API key?</DialogTitle>
             <DialogDescription>
@@ -461,14 +579,16 @@ function KeyRow({
   onRotate,
   onRevoke,
   revokePending,
+  canAdminister,
 }: {
   apiKey: ApiKeyRow;
   setting: SettingView | undefined;
   setCap: SetCapFn;
   setDisabled: SetDisabledFn;
-  onRotate: () => void;
-  onRevoke: () => void;
+  onRotate: (trigger: HTMLButtonElement) => void;
+  onRevoke: (trigger: HTMLButtonElement) => void;
   revokePending: boolean;
+  canAdminister: boolean;
 }) {
   // Local cap input mirrors the persisted value; edits commit on blur.
   const [capInput, setCapInput] = useState(
@@ -477,6 +597,8 @@ function KeyRow({
       : String(setting.monthlyCapCredits),
   );
   const [capBusy, setCapBusy] = useState(false);
+  const [capError, setCapError] = useState<string | null>(null);
+  const capErrorId = useId();
   const [toggleBusy, setToggleBusy] = useState(false);
   const [now, setNow] = useState(() => Date.now());
 
@@ -493,32 +615,20 @@ function KeyRow({
     );
   }, [setting?.monthlyCapCredits]);
 
-  function resetCapInput() {
-    setCapInput(
-      setting?.monthlyCapCredits === undefined
-        ? ""
-        : String(setting.monthlyCapCredits),
-    );
-  }
-
   async function commitCap() {
     const parsed = parseMonthlyCap(capInput);
     if (!parsed.ok) {
-      toast.error(parsed.error);
-      resetCapInput();
+      setCapError(parsed.error);
       return;
     }
+    setCapError(null);
     const current = setting?.monthlyCapCredits ?? null;
     if (parsed.cap === current) return;
     setCapBusy(true);
     try {
       await setCap({ keyId: apiKey.id, monthlyCapCredits: parsed.cap });
-      toast.success(
-        parsed.cap === null ? "Monthly cap removed" : "Monthly cap saved",
-      );
     } catch (err) {
-      toast.error(humanError(err, "Could not save cap"));
-      resetCapInput();
+      setCapError(humanError(err, "Could not save cap. Retry."));
     } finally {
       setCapBusy(false);
     }
@@ -528,7 +638,6 @@ function KeyRow({
     setToggleBusy(true);
     try {
       await setDisabled({ keyId: apiKey.id, disabled: !nextEnabled });
-      toast.success(nextEnabled ? "Key enabled" : "Key disabled");
     } catch (err) {
       toast.error(humanError(err, "Could not update key"));
     } finally {
@@ -545,21 +654,21 @@ function KeyRow({
     : 0;
 
   return (
-    <tr className="block space-y-3 p-4 md:table-row md:space-y-0 md:p-0">
-      <td className="flex items-start justify-between gap-4 font-medium md:table-cell md:px-3 md:py-2.5">
-        <span className="text-xs font-normal text-muted-foreground md:hidden">
+    <tr className="block space-y-3 p-4 lg:table-row lg:space-y-0 lg:p-0">
+      <td className="flex items-start justify-between gap-4 font-medium lg:table-cell lg:px-3 lg:py-2.5">
+        <span className="text-xs font-normal text-muted-foreground lg:hidden">
           Name
         </span>
-        <span className="min-w-0 break-words text-right md:text-left">
+        <span className="min-w-0 break-words text-right lg:text-left">
           {apiKey.name}
         </span>
       </td>
-      <td className="flex items-center justify-between gap-4 font-mono text-xs text-muted-foreground md:table-cell md:px-3 md:py-2.5">
-        <span className="font-sans md:hidden">Key</span>
+      <td className="flex items-center justify-between gap-4 font-mono text-xs text-muted-foreground lg:table-cell lg:px-3 lg:py-2.5">
+        <span className="font-sans lg:hidden">Key</span>
         {apiKey.masked}
       </td>
-      <td className="flex items-center justify-between gap-4 md:table-cell md:px-3 md:py-2.5">
-        <span className="text-xs text-muted-foreground md:hidden">
+      <td className="flex items-center justify-between gap-4 lg:table-cell lg:px-3 lg:py-2.5">
+        <span className="text-xs text-muted-foreground lg:hidden">
           Monthly cap
         </span>
         <Input
@@ -568,24 +677,42 @@ function KeyRow({
           step={1}
           inputMode="numeric"
           value={capInput}
-          onChange={(e) => setCapInput(e.target.value)}
+          onChange={(e) => {
+            const value = e.target.value;
+            setCapInput(value);
+            if (capError !== null) {
+              const parsed = parseMonthlyCap(value);
+              setCapError(parsed.ok ? null : parsed.error);
+            }
+          }}
           onBlur={() => void commitCap()}
           onKeyDown={(e) => {
             if (e.key === "Enter") (e.target as HTMLInputElement).blur();
           }}
           placeholder="Unlimited"
-          disabled={capBusy}
+          disabled={capBusy || !canAdminister}
           className="h-8 w-28 tabular-nums"
           aria-label={`Monthly credit cap for ${apiKey.name}`}
+          aria-invalid={capError !== null}
+          aria-describedby={capError ? capErrorId : undefined}
         />
+        {capError ? (
+          <p
+            id={capErrorId}
+            role="alert"
+            className="mt-1 max-w-48 text-xs text-destructive"
+          >
+            {capError}
+          </p>
+        ) : null}
       </td>
-      <td className="flex items-center justify-between gap-4 md:table-cell md:px-3 md:py-2.5">
-        <span className="text-xs text-muted-foreground md:hidden">Enabled</span>
+      <td className="flex items-center justify-between gap-4 lg:table-cell lg:px-3 lg:py-2.5">
+        <span className="text-xs text-muted-foreground lg:hidden">Enabled</span>
         <div className="flex items-center gap-2">
           {lifecycle === "current" || lifecycle === "disabled" ? (
             <Switch
               checked={lifecycle === "current"}
-              disabled={toggleBusy}
+              disabled={toggleBusy || !canAdminister}
               onCheckedChange={(checked) => void commitToggle(checked === true)}
               aria-label={`Enable ${apiKey.name}`}
             />
@@ -616,22 +743,22 @@ function KeyRow({
           ) : null}
         </div>
       </td>
-      <td className="flex justify-between gap-4 text-xs text-muted-foreground tabular-nums md:table-cell md:px-3 md:py-2.5 md:text-sm">
-        <span className="md:hidden">Created</span>
+      <td className="flex justify-between gap-4 text-xs text-muted-foreground tabular-nums lg:table-cell lg:px-3 lg:py-2.5 lg:text-sm">
+        <span className="lg:hidden">Created</span>
         {formatDate(apiKey.createdAt)}
       </td>
-      <td className="flex justify-between gap-4 text-xs text-muted-foreground tabular-nums md:table-cell md:px-3 md:py-2.5 md:text-sm">
-        <span className="md:hidden">Last used</span>
+      <td className="flex justify-between gap-4 text-xs text-muted-foreground tabular-nums lg:table-cell lg:px-3 lg:py-2.5 lg:text-sm">
+        <span className="lg:hidden">Last used</span>
         {apiKey.lastUsedAt ? formatDate(apiKey.lastUsedAt) : "—"}
       </td>
-      <td className="border-t pt-3 text-right md:table-cell md:border-0 md:px-3 md:py-2.5">
+      <td className="border-t pt-3 text-right lg:table-cell lg:border-0 lg:px-3 lg:py-2.5">
         <div className="flex justify-end gap-1">
           <Button
             variant="ghost"
             size="sm"
             aria-label="Rotate API key"
-            onClick={onRotate}
-            disabled={lifecycle !== "current"}
+            onClick={(event) => onRotate(event.currentTarget)}
+            disabled={!canAdminister || lifecycle !== "current"}
             title="Rotate key (old key works 24h)"
           >
             <RotateCw className="size-4" />
@@ -641,8 +768,8 @@ function KeyRow({
             variant="ghost"
             size="sm"
             className="text-destructive hover:text-destructive"
-            onClick={onRevoke}
-            disabled={revokePending}
+            onClick={(event) => onRevoke(event.currentTarget)}
+            disabled={!canAdminister || revokePending}
           >
             <Trash2 className="size-4" />
             {graceActive ? "Revoke previous now" : "Revoke"}
@@ -659,12 +786,14 @@ function SecretRevealDialog({
   reduce,
   onCopy,
   onClose,
+  restoreFocusRef,
 }: {
   revealed: RevealedSecret | null;
   copied: boolean;
   reduce: boolean | null;
   onCopy: () => void;
   onClose: () => void;
+  restoreFocusRef: RefObject<HTMLElement | null>;
 }) {
   return (
     <Dialog
@@ -673,7 +802,13 @@ function SecretRevealDialog({
         if (!open) onClose();
       }}
     >
-      <DialogContent className="sm:max-w-md">
+      <DialogContent
+        className="sm:max-w-md"
+        onCloseAutoFocus={(event) => {
+          event.preventDefault();
+          restoreFocusRef.current?.focus();
+        }}
+      >
         {revealed ? (
           <>
             <DialogHeader>
@@ -728,7 +863,11 @@ function SecretRevealDialog({
   );
 }
 
-function EmptyKeys({ onCreate }: { onCreate: () => void }) {
+function EmptyKeys({
+  onCreate,
+}: {
+  onCreate: (trigger: HTMLButtonElement) => void;
+}) {
   return (
     <Empty className="border">
       <EmptyHeader>
@@ -741,7 +880,7 @@ function EmptyKeys({ onCreate }: { onCreate: () => void }) {
         </EmptyDescription>
       </EmptyHeader>
       <EmptyContent>
-        <Button onClick={onCreate}>
+        <Button onClick={(event) => onCreate(event.currentTarget)}>
           <Plus data-icon="inline-start" />
           Create key
         </Button>
@@ -815,10 +954,7 @@ function KeysSkeleton() {
 
 function formatDate(ms: number): string {
   try {
-    return new Intl.DateTimeFormat(undefined, {
-      dateStyle: "medium",
-      timeStyle: "short",
-    }).format(new Date(ms));
+    return KEY_DATE_FORMATTER.format(ms);
   } catch {
     return new Date(ms).toISOString();
   }

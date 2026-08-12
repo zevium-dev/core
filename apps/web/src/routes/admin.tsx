@@ -1,15 +1,22 @@
 import { convexQuery } from "@convex-dev/react-query";
 import { useQuery } from "@tanstack/react-query";
-import { Outlet, createFileRoute, redirect } from "@tanstack/react-router";
+import {
+  Link,
+  Outlet,
+  createFileRoute,
+  redirect,
+} from "@tanstack/react-router";
 import { useConvexAuth } from "convex/react";
 import { ShieldAlert } from "lucide-react";
 
 import { AdminHeader } from "#/components/admin-header";
+import { AuthenticatedProviders } from "#/components/authenticated-providers";
 import { Button } from "#/components/ui/button";
 import { Skeleton } from "#/components/ui/skeleton";
 import { api } from "#/lib/convex-api";
 import { readClientClerkAuth } from "#/lib/clerk-client";
 import { requireAuth } from "#/lib/auth-session";
+import { humanError } from "#/lib/human-error";
 import type { RouterContext } from "#/router";
 
 export const Route = createFileRoute("/admin")({
@@ -35,8 +42,21 @@ export const Route = createFileRoute("/admin")({
       throw redirect({ to: "/sign-in/$" });
     }
   },
-  component: AdminLayout,
+  component: AdminProviderBoundary,
 });
+
+function AdminProviderBoundary() {
+  const { convexQueryClient, principalCache } = Route.useRouteContext();
+
+  return (
+    <AuthenticatedProviders
+      client={convexQueryClient.convexClient}
+      principalCache={principalCache}
+    >
+      <AdminLayout />
+    </AuthenticatedProviders>
+  );
+}
 
 function AdminLayout() {
   // Convex auth must be loaded before the safe isAdminQuery result is real.
@@ -47,19 +67,71 @@ function AdminLayout() {
     return <AdminShellSkeleton />;
   }
 
+  if (adminQuery.isError) {
+    return (
+      <AdminGateError
+        message={humanError(
+          adminQuery.error,
+          "Could not verify platform admin access.",
+        )}
+        onRetry={() => void adminQuery.refetch()}
+      />
+    );
+  }
+
   if (adminQuery.data !== true) {
     return <NotAuthorized />;
   }
 
   return (
     <div className="flex min-h-svh flex-col">
+      <a
+        href="#main-content"
+        className="fixed top-3 left-3 z-50 -translate-y-24 rounded-md bg-background px-3 py-2 text-sm font-medium shadow-md outline-none transition-transform duration-[var(--dur-instant)] ease-[var(--ease)] focus-visible:translate-y-0 focus-visible:ring-[3px] focus-visible:ring-ring/50 motion-reduce:transition-none"
+      >
+        Skip to content
+      </a>
       <AdminHeader />
       <main
-        className="flex flex-1 flex-col gap-4 p-4 md:p-6 content-enter"
+        id="main-content"
+        tabIndex={-1}
+        className="flex flex-1 flex-col gap-4 p-4 focus-visible:outline-none md:p-6 content-enter"
         style={{ viewTransitionName: "main-content" }}
       >
         <Outlet />
       </main>
+    </div>
+  );
+}
+
+function AdminGateError({
+  message,
+  onRetry,
+}: {
+  message: string;
+  onRetry: () => void;
+}) {
+  return (
+    <div className="flex min-h-svh items-center justify-center p-6">
+      <div className="flex max-w-sm flex-col items-center gap-3 text-center">
+        <div className="flex size-10 items-center justify-center rounded-full bg-muted">
+          <ShieldAlert className="size-5 text-muted-foreground" />
+        </div>
+        <div className="space-y-1">
+          <h1 className="text-2xl font-semibold tracking-tight">
+            Access check unavailable
+          </h1>
+          <p className="text-sm text-muted-foreground">{message}</p>
+        </div>
+        <div className="flex flex-wrap justify-center gap-2">
+          <Button type="button" onClick={onRetry}>
+            Retry
+          </Button>
+          <Button asChild variant="outline">
+            <Link to="/app">Back to app</Link>
+          </Button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -80,7 +152,7 @@ function NotAuthorized() {
           </p>
         </div>
         <Button asChild variant="outline" size="sm">
-          <a href="/app">Back to app</a>
+          <Link to="/app">Back to app</Link>
         </Button>
       </div>
     </div>

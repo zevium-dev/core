@@ -253,7 +253,7 @@ describe("generateMockResponse", () => {
     expect(result.body.link).toBe("https://example.com");
   });
 
-  it("resolves $ref against components.schemas one level", () => {
+  it("resolves $ref against components.schemas", () => {
     const spec = specWith(
       {
         "/users/{id}": {
@@ -284,6 +284,116 @@ describe("generateMockResponse", () => {
     );
     const result = generateMockResponse(spec, "/users/{id}", "get");
     expect(result?.body).toEqual({ id: "string", age: 0 });
+  });
+
+  it("resolves chained refs and RFC 6901 escaped component names", () => {
+    const spec = specWith(
+      {
+        "/escaped": {
+          get: {
+            responses: {
+              "200": {
+                content: {
+                  "application/json": {
+                    schema: { $ref: "#/components/schemas/Alias" },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      {
+        schemas: {
+          Alias: { $ref: "#/components/schemas/owner~1pet~0record" },
+          "owner/pet~record": {
+            type: "object",
+            properties: {
+              id: { type: "string" },
+            },
+          },
+        },
+      },
+    );
+
+    expect(generateMockResponse(spec, "/escaped", "get")?.body).toEqual({
+      id: "string",
+    });
+  });
+
+  it("preserves schema siblings while resolving a ref", () => {
+    const spec = specWith(
+      {
+        "/sibling": {
+          get: {
+            responses: {
+              "200": {
+                content: {
+                  "application/json": {
+                    schema: {
+                      $ref: "#/components/schemas/Base",
+                      example: { source: "sibling" },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      {
+        schemas: {
+          Base: { type: "object", example: { source: "base" } },
+        },
+      },
+    );
+
+    expect(generateMockResponse(spec, "/sibling", "get")?.body).toEqual({
+      source: "sibling",
+    });
+  });
+
+  it("fails closed on malformed pointer escapes and ref-only cycles", () => {
+    const spec = specWith(
+      {
+        "/cycle": {
+          get: {
+            responses: {
+              "200": {
+                content: {
+                  "application/json": {
+                    schema: { $ref: "#/components/schemas/A" },
+                  },
+                },
+              },
+            },
+          },
+        },
+        "/malformed": {
+          get: {
+            responses: {
+              "200": {
+                content: {
+                  "application/json": {
+                    schema: { $ref: "#/components/schemas/bad~2name" },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      {
+        schemas: {
+          A: { $ref: "#/components/schemas/B" },
+          B: { $ref: "#/components/schemas/A" },
+          "bad~2name": { type: "string", example: "must-not-resolve" },
+        },
+      },
+    );
+
+    expect(generateMockResponse(spec, "/cycle", "get")?.body).toEqual({});
+    expect(generateMockResponse(spec, "/malformed", "get")?.body).toEqual({});
   });
 
   it("leaves an unresolvable $ref as an empty object rather than throwing", () => {

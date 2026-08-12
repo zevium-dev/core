@@ -228,6 +228,7 @@ describe("notifications.listForOrg — data", () => {
     expect(page1.isDone).toBe(false);
     // 4 unread (5 total - 1 read)
     expect(page1.unreadCount).toBe(4);
+    expect(page1.unreadCountCapped).toBe(false);
   });
 
   it("returns all notifications across pages", async () => {
@@ -346,8 +347,11 @@ describe("notifications.markAllRead", () => {
     const as = asMember(t);
     const result = await as.mutation(api.notifications.markAllRead, {
       orgSlug: "test-co",
+      through: Number.MAX_SAFE_INTEGER,
     });
     expect(result.updated).toBe(3);
+    expect(result).toMatchObject({ updated: 3, hasMore: false });
+    expect(result.through).toBe(Number.MAX_SAFE_INTEGER);
 
     const unread = await t.run(async (ctx) => {
       return await ctx.db

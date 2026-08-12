@@ -30,8 +30,9 @@ export function formatRelativeTime(
   if (weeks < 5) return `${weeks}w`;
 
   // Beyond ~5 weeks the relative bucket loses meaning — show a real date.
-  return new Date(then).toLocaleDateString(undefined, {
+  return new Date(then).toLocaleDateString("en-US", {
     month: "short",
     day: "numeric",
+    timeZone: "UTC",
   });
 }

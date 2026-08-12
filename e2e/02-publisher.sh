@@ -3,12 +3,13 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-export E2E_SESSION="${E2E_SESSION:-zevium-e2e-publisher}"
+export E2E_SESSION="${E2E_SESSION:-${E2E_SESSION_PREFIX:-zevium-e2e}-publisher-signed-in}"
 # shellcheck source=lib.sh
 source "$SCRIPT_DIR/lib.sh"
 
 cleanup() {
   close_browser
+  cleanup_e2e_runtime
 }
 trap cleanup EXIT
 
@@ -16,15 +17,18 @@ STAMP="$(e2e_stamp)"
 PROJECT_NAME="E2E Weather ${STAMP}"
 # slugify-compatible: lowercase, hyphens
 PROJECT_SLUG="e2e-weather-${STAMP}"
-SPEC_FILE="$E2E_ARTIFACTS/openapi-${STAMP}.json"
+SPEC_FILE="$E2E_FIXTURES_DIR/openapi-${STAMP}.json"
 # Persist name for 03-consumer if run in same shell/suite
 export E2E_LAST_PROJECT_NAME="$PROJECT_NAME"
 export E2E_LAST_PROJECT_SLUG="$PROJECT_SLUG"
-printf '%s\n' "$PROJECT_NAME" >"$E2E_ARTIFACTS/last-project-name.txt"
-printf '%s\n' "$PROJECT_SLUG" >"$E2E_ARTIFACTS/last-project-slug.txt"
+printf '%s\n' "$PROJECT_NAME" >"$E2E_FIXTURES_DIR/last-project-name.txt"
+printf '%s\n' "$PROJECT_SLUG" >"$E2E_FIXTURES_DIR/last-project-slug.txt"
+
+configure_browser_context
 
 step "wait for base url"
 wait_for_url "$E2E_BASE_URL/" "200" 90
+verify_target_commit "publisher"
 
 step "sign_in"
 sign_in
@@ -40,35 +44,18 @@ if [[ "$snap" == *"No active organization"* ]]; then
 fi
 
 step "create project $PROJECT_NAME"
-# Create page can 500 once under cold Convex; retry load.
-create_ready=0
-for attempt in 1 2 3; do
-  open_path "/app/projects/create"
-  ab wait --load networkidle >/dev/null 2>&1 || ab wait 800 >/dev/null
-  snap="$(page_text)"
-  if [[ "$snap" == *"New project"* ]]; then
-    create_ready=1
-    break
-  fi
-  if [[ "$snap" == *"HTTPError"* || "$snap" == *"Something went wrong"* || "$snap" == *"500"* ]]; then
-    log "create page error on attempt $attempt — retry"
-    ab wait 1500 >/dev/null
-    continue
-  fi
-  log "create page missing heading on attempt $attempt"
-  ab wait 1000 >/dev/null
-done
-if (( create_ready == 0 )); then
-  fail "New project form never loaded after retries"
-fi
+open_path "/app/projects/create"
+ab wait --load networkidle >/dev/null 2>&1 || ab wait 800 >/dev/null
+snap="$(page_text)"
+assert_url_contains "/app/projects/create" "New project navigation failed"
+assert_contains "$snap" "New project" "New project form missing on first request"
+assert_not_contains "$snap" "Something went wrong" "New project failed on first request"
+assert_not_contains "$snap" "HTTPError" "raw create-page error leaked"
 
 ab fill '#project-name' "$PROJECT_NAME" >/dev/null
 
-# Scroll + click; fall back to native form.requestSubmit if still stuck.
-if ! click_button "Create project" 'button[type="submit"]'; then
-  log "Create project click failed — try form.requestSubmit"
-  submit_form 'form' || fail "Create project submit failed"
-fi
+click_button "Create project" 'button[type="submit"]' \
+  || fail "Create project button missing or click failed"
 
 # Navigate to project detail (poll URL — agent-browser --url globs are flaky)
 wait_for_url_pattern "/app/projects/${PROJECT_SLUG}" 40
@@ -83,14 +70,9 @@ assert_contains "$snap" "$PROJECT_NAME" "project name not shown after create"
 assert_not_contains "$snap" "Something went wrong"
 
 step "open spec editor"
-# Prefer UI tab / next-step CTA, fall back to direct URL.
-if ab find role tab click --name "Spec" >/dev/null 2>&1 \
-  || click_button "Edit OpenAPI spec" \
-  || ab find text "Edit OpenAPI spec" click >/dev/null 2>&1; then
-  ab wait 800 >/dev/null
-else
-  open_path "/app/projects/${PROJECT_SLUG}/spec"
-fi
+ab find role tab click --name "Spec" >/dev/null 2>&1 \
+  || fail "Spec tab missing or click failed"
+ab wait 800 >/dev/null
 ab wait --load networkidle >/dev/null 2>&1 || ab wait 800 >/dev/null
 assert_url_contains "/spec" "spec editor route"
 
@@ -144,8 +126,8 @@ if [[ "$snap" == *" error"* || "$snap" == *"errors"* ]]; then
 fi
 log "draft saved (or no error toast)"
 
-step "test saved upstream connection"
-click_button "Test connection" || fail "Test connection button missing/disabled after draft save"
+step "test saved upstream reachability"
+click_button "Test reachability" || fail "Test reachability button missing/disabled after draft save"
 ab wait --text "Server responded successfully." 30 \
   || fail "saved upstream connection test did not pass"
 ab wait 500 >/dev/null
@@ -172,33 +154,15 @@ if [[ "$snap" != *"Published"* && "$snap" != *"0.0.1"* && "$snap" != *"v0.0.1"* 
 fi
 log "published 0.0.1"
 
-step "make public"
-# Leave spec tab to overview for visibility control
-open_path "/app/projects/${PROJECT_SLUG}"
-ab wait 1000 >/dev/null
+step "make public from spec workflow"
+click_button "Make public" || fail "spec visibility action missing"
+ab wait --text "Make project public?" 10
+click_dialog_button "Make public" || fail "confirm make public failed"
+ab wait 2000 >/dev/null
 snap="$(page_text)"
-if [[ "$snap" == *"Make Private"* ]]; then
-  log "already public"
-else
-  # Outer trigger: "Make Public"; dialog confirm: "Make public"
-  click_button "Make Public" || fail "Make Public button missing"
-  ab wait --text "Make project public" 10
-  click_dialog_button "Make public" \
-    || click_dialog_button "Make Public" \
-    || fail "confirm make public failed"
-  ab wait 2000 >/dev/null
-  snap="$(page_text)"
-  assert_not_contains "$snap" "Could not update visibility" "visibility mutation failed"
-  # Require post-mutation UI: toast and/or trigger flipped to Make Private
-  if [[ "$snap" != *"now public"* && "$snap" != *"Make Private"* ]]; then
-    # one more settle for realtime badge
-    ab wait 1500 >/dev/null
-    snap="$(page_text)"
-  fi
-  if [[ "$snap" != *"now public"* && "$snap" != *"Make Private"* ]]; then
-    fail "expected public visibility (toast 'now public' or button 'Make Private'); still private?"
-  fi
-fi
+assert_not_contains "$snap" "Could not update visibility" "visibility mutation failed"
+assert_not_contains "$snap" "Project is private" "project remained private after mutation"
+assert_contains "$snap" "Make Private" "project did not become public"
 
 step "assert catalogue lists project"
 open_path "/catalogue"
@@ -208,5 +172,6 @@ assert_contains "$snap" "Catalogue" "catalogue heading missing"
 if [[ "$snap" != *"$PROJECT_NAME"* && "$snap" != *"$PROJECT_SLUG"* ]]; then
   fail "catalogue does not list published project '$PROJECT_NAME' (app may lack live catalogue data)"
 fi
+record_browser_contract "publisher" "published-catalogue" "signed-in"
 
 log "02-publisher PASS name=$PROJECT_NAME slug=$PROJECT_SLUG"

@@ -29,6 +29,7 @@ try {
     ...process.env,
     CLERK_PUBLISHABLE_KEY: clerkPublicFixture,
     CLERK_SECRET_KEY: clerkSecretFixture,
+    VITE_BUILD_SHA: "0".repeat(40),
     VITE_CONVEX_URL: "https://ci.invalid",
     VITE_GATEWAY_URL: "https://ci.invalid",
   });

@@ -17,6 +17,11 @@ export {
 } from "./pricing.js";
 
 export {
+  resolveLocalJsonPointer,
+  resolveLocalJsonRefChain,
+} from "./json-pointer.js";
+
+export {
   parseSpec,
   MAX_OPENAPI_SPEC_BYTES,
   matchOperation,
@@ -46,6 +51,17 @@ export type {
   ReviewAggregateContract,
 } from "./quality.js";
 export { REGISTRY_V2_SHARED_VECTORS } from "./registry-v2-vectors.js";
+
+export {
+  ORG_CAPABILITIES,
+  ORG_ROLES,
+  isOrgRole,
+  isPrivilegedOrgRole,
+  projectOrgCapabilities,
+  type OrgCapability,
+  type OrgCapabilityProjection,
+  type OrgRole,
+} from "./org-capabilities.js";
 
 export {
   isValidSlug,

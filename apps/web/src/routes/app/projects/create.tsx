@@ -2,8 +2,7 @@ import { useOrganization } from "@clerk/tanstack-react-start";
 import { useConvexMutation } from "@convex-dev/react-query";
 import { useMutation } from "@tanstack/react-query";
 import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useState, type FormEvent } from "react";
-import { toast } from "sonner";
+import { useRef, useState, type FormEvent } from "react";
 
 import { Button } from "#/components/ui/button";
 import {
@@ -15,8 +14,11 @@ import {
 } from "#/components/ui/card";
 import { Input } from "#/components/ui/input";
 import { Label } from "#/components/ui/label";
+import { Skeleton } from "#/components/ui/skeleton";
+import { Textarea } from "#/components/ui/textarea";
 import { api } from "#/lib/convex-api";
 import { humanError } from "#/lib/human-error";
+import { isPrivilegedOrgRole } from "#/lib/org-capabilities";
 import { slugify } from "#/lib/slug";
 
 export const Route = createFileRoute("/app/projects/create")({
@@ -28,7 +30,7 @@ export const Route = createFileRoute("/app/projects/create")({
 
 function CreateProjectPage() {
   const navigate = useNavigate();
-  const { organization, isLoaded } = useOrganization();
+  const { organization, membership, isLoaded } = useOrganization();
   const orgSlug =
     organization && typeof organization.slug === "string"
       ? organization.slug
@@ -40,6 +42,13 @@ function CreateProjectPage() {
   const [slug, setSlug] = useState("");
   const [slugEdited, setSlugEdited] = useState(false);
   const [description, setDescription] = useState("");
+  const [submitted, setSubmitted] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const nameInputRef = useRef<HTMLInputElement>(null);
+  const slugInputRef = useRef<HTMLInputElement>(null);
+
+  const nameError = name.trim() === "" ? "Enter a project name." : null;
+  const slugError = slug.trim() === "" ? "Enter a project slug." : null;
 
   const { mutate, isPending } = useMutation({
     mutationFn: async (input: {
@@ -49,18 +58,23 @@ function CreateProjectPage() {
       description?: string;
     }) => createProjectFn(input),
     onSuccess: (project) => {
-      toast.success("Project created");
       void navigate({
         to: "/app/projects/$projectSlug",
         params: { projectSlug: project.slug },
+        replace: true,
       });
     },
     onError: (err: unknown) => {
-      toast.error(humanError(err, "Could not create project"));
+      const message = humanError(err, "Could not create project");
+      setSubmitError(message);
+      if (/slug|already|exist|unique/i.test(message)) {
+        slugInputRef.current?.focus();
+      }
     },
   });
 
   function onNameChange(value: string) {
+    setSubmitError(null);
     setName(value);
     if (!slugEdited) {
       setSlug(slugify(value));
@@ -68,6 +82,7 @@ function CreateProjectPage() {
   }
 
   function onSlugChange(value: string) {
+    setSubmitError(null);
     setSlugEdited(true);
     setSlug(slugify(value));
   }
@@ -75,11 +90,17 @@ function CreateProjectPage() {
   function onSubmit(e: FormEvent) {
     e.preventDefault();
     if (!orgSlug || isPending) return;
+    setSubmitted(true);
+    setSubmitError(null);
 
     const trimmedName = name.trim();
     const trimmedSlug = slug.trim();
-    if (trimmedName.length === 0 || trimmedSlug.length === 0) {
-      toast.error("Name and slug are required");
+    if (trimmedName.length === 0) {
+      nameInputRef.current?.focus();
+      return;
+    }
+    if (trimmedSlug.length === 0) {
+      slugInputRef.current?.focus();
       return;
     }
 
@@ -92,7 +113,7 @@ function CreateProjectPage() {
   }
 
   if (!isLoaded) {
-    return null;
+    return <CreateProjectSkeleton />;
   }
 
   if (!orgSlug) {
@@ -105,6 +126,21 @@ function CreateProjectPage() {
           </p>
         </div>
         <Button asChild variant="outline">
+          <Link to="/app/projects">Back to projects</Link>
+        </Button>
+      </div>
+    );
+  }
+
+  if (!isPrivilegedOrgRole(membership?.role)) {
+    return (
+      <div className="mx-auto flex w-full max-w-lg flex-col gap-4">
+        <h1 className="text-2xl font-semibold tracking-tight">New project</h1>
+        <p className="text-sm text-muted-foreground">
+          Organization admins create projects. Ask an admin to create this API
+          or update your role.
+        </p>
+        <Button asChild variant="outline" className="self-start">
           <Link to="/app/projects">Back to projects</Link>
         </Button>
       </div>
@@ -128,10 +164,19 @@ function CreateProjectPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <form className="space-y-4" onSubmit={onSubmit}>
+          <form className="space-y-4" onSubmit={onSubmit} noValidate>
+            {submitError ? (
+              <p
+                role="alert"
+                className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+              >
+                {submitError}
+              </p>
+            ) : null}
             <div className="space-y-2">
               <Label htmlFor="project-name">Name</Label>
               <Input
+                ref={nameInputRef}
                 id="project-name"
                 name="project-name"
                 autoComplete="off"
@@ -141,12 +186,23 @@ function CreateProjectPage() {
                 required
                 maxLength={120}
                 disabled={isPending}
+                aria-invalid={submitted && nameError !== null}
+                aria-describedby="project-name-help"
               />
+              <p
+                id="project-name-help"
+                className={`min-h-5 text-xs ${submitted && nameError ? "text-destructive" : "text-muted-foreground"}`}
+              >
+                {submitted && nameError
+                  ? nameError
+                  : "Shown in the dashboard and public catalogue."}
+              </p>
             </div>
 
             <div className="space-y-2">
               <Label htmlFor="project-slug">Slug</Label>
               <Input
+                ref={slugInputRef}
                 id="project-slug"
                 name="project-slug"
                 autoComplete="off"
@@ -158,15 +214,22 @@ function CreateProjectPage() {
                 maxLength={64}
                 disabled={isPending}
                 className="font-mono text-sm"
+                aria-invalid={submitted && slugError !== null}
+                aria-describedby="project-slug-help"
               />
-              <p className="text-xs text-muted-foreground">
-                Lowercase letters, numbers, hyphens.
+              <p
+                id="project-slug-help"
+                className={`min-h-5 text-xs ${submitted && slugError ? "text-destructive" : "text-muted-foreground"}`}
+              >
+                {submitted && slugError
+                  ? slugError
+                  : "Lowercase letters, numbers, and single hyphens."}
               </p>
             </div>
 
             <div className="space-y-2">
               <Label htmlFor="project-description">Description</Label>
-              <textarea
+              <Textarea
                 id="project-description"
                 name="project-description"
                 autoComplete="off"
@@ -176,24 +239,57 @@ function CreateProjectPage() {
                 maxLength={2000}
                 disabled={isPending}
                 rows={4}
-                className="flex min-h-24 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs transition-[color,box-shadow] outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50"
+                className="min-h-24"
+                aria-describedby="project-description-help"
               />
+              <p
+                id="project-description-help"
+                className="min-h-5 text-xs text-muted-foreground"
+              >
+                Explain inputs, outputs, and who should use this API.
+              </p>
             </div>
 
             <div className="flex items-center justify-end gap-2 pt-2">
               <Button
-                asChild
                 variant="ghost"
                 type="button"
                 disabled={isPending}
+                onClick={() => void navigate({ to: "/app/projects" })}
               >
-                <Link to="/app/projects">Cancel</Link>
+                Cancel
               </Button>
               <Button type="submit" disabled={isPending}>
                 {isPending ? "Creating…" : "Create project"}
               </Button>
             </div>
           </form>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+function CreateProjectSkeleton() {
+  return (
+    <div className="mx-auto flex w-full max-w-lg flex-col gap-6">
+      <div className="space-y-2">
+        <Skeleton className="h-8 w-40" />
+        <Skeleton className="h-4 w-80 max-w-full" />
+      </div>
+      <Card>
+        <CardHeader>
+          <Skeleton className="h-5 w-32" />
+          <Skeleton className="h-4 w-72 max-w-full" />
+        </CardHeader>
+        <CardContent className="space-y-5">
+          <Skeleton className="h-16 w-full" />
+          <Skeleton className="h-16 w-full" />
+          <Skeleton className="h-28 w-full" />
+          <div className="flex justify-end gap-2">
+            <Skeleton className="h-9 w-20" />
+            <Skeleton className="h-9 w-32" />
+          </div>
         </CardContent>
       </Card>
     </div>

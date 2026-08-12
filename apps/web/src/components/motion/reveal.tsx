@@ -1,6 +1,7 @@
-import { m, useReducedMotion } from "motion/react";
+import { m } from "motion/react";
 import type { ReactNode } from "react";
 
+import { useHydratedReducedMotion } from "#/hooks/use-hydrated-reduced-motion";
 import { DIST, DUR, EASE } from "#/lib/motion";
 import { vtState } from "#/lib/vt";
 import { cn } from "#/lib/utils";
@@ -19,7 +20,7 @@ type RevealProps = {
 
 /**
  * Scroll-entrance wrapper (DESIGN.md `<Reveal>`).
- * Fade + DIST rise, viewport once, margin -60px.
+ * Visible-first DIST rise, viewport once, margin -60px.
  * Final state when reduced-motion or active view transition.
  */
 export function Reveal({
@@ -30,16 +31,21 @@ export function Reveal({
   distance = DIST,
   as = "div",
 }: RevealProps) {
-  const reduce = useReducedMotion();
-  const skip = Boolean(reduce) || vtState.active;
+  const reduce = useHydratedReducedMotion();
+  const skip = reduce || vtState.active;
   const y = reduce ? 0 : distance;
   const Comp = m[as];
 
   return (
     <Comp
-      className={cn(className)}
-      initial={skip ? false : { opacity: 0, y }}
-      whileInView={{ opacity: 1, y: 0 }}
+      className={cn(
+        "motion-reduce:!transform-none motion-reduce:!opacity-100",
+        className,
+      )}
+      // Content remains fully visible in SSR, no-JS, hydration, screenshots,
+      // and slow clients. Motion is progressive enhancement, never a gate.
+      initial={skip ? false : { y }}
+      whileInView={{ y: 0 }}
       viewport={{ once: true, margin: "-60px" }}
       transition={{
         duration: reduce ? 0 : duration,

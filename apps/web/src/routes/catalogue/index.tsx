@@ -1,11 +1,15 @@
 import { convexQuery } from "@convex-dev/react-query";
-import { useMutation, useSuspenseQuery } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useAction } from "convex/react";
 import { ArrowLeft, PackageSearch, Sparkles } from "lucide-react";
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 
 import { FadeIn } from "#/components/motion/fade-in";
+import {
+  CatalogueSortSelect,
+  type CatalogueSort,
+} from "#/components/catalogue-sort-select";
 import { PublicHeader } from "#/components/public-header";
 import { Badge } from "#/components/ui/badge";
 import { Button } from "#/components/ui/button";
@@ -35,55 +39,63 @@ import {
   FieldSet,
 } from "#/components/ui/field";
 import { Input } from "#/components/ui/input";
-import { Separator } from "#/components/ui/separator";
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "#/components/ui/select";
 import { Skeleton } from "#/components/ui/skeleton";
 import { ToggleGroup, ToggleGroupItem } from "#/components/ui/toggle-group";
 import {
   formatCataloguePriceRange,
   formatEndpointCount,
 } from "#/lib/catalogue-card";
-import { formatRelevance } from "#/lib/catalogue-search";
+import {
+  catalogueLoaderDeps,
+  catalogueUrlSearch,
+  formatRelevance,
+  useDebouncedUrlDraft,
+  validateCatalogueSearch,
+} from "#/lib/catalogue-search";
 import { api } from "#/lib/convex-api";
 import type { SearchListing } from "../../../../../convex/search";
-
-const SEARCH_DEBOUNCE_MS = 250;
-
-type CatalogueSort = "newest" | "name" | "cheapest";
 
 /** Card shape shared by browse + semantic results; `score` only on ranked hits. */
 type CatalogueCardItem = Omit<SearchListing, "score"> & { score?: number };
 
+function catalogueListArgs({
+  search,
+  tag,
+  sort,
+  freeOnly,
+  maxCost,
+}: {
+  search: string;
+  tag: string | null;
+  sort: CatalogueSort;
+  freeOnly: boolean;
+  maxCost: number | null;
+}) {
+  const trimmed = search.trim();
+  return {
+    ...(trimmed.length > 0 ? { search: trimmed } : {}),
+    ...(tag ? { tag } : {}),
+    sort,
+    ...(freeOnly ? { hasFreeTier: true } : {}),
+    ...(maxCost !== null ? { maxCost } : {}),
+  };
+}
+
 export const Route = createFileRoute("/catalogue/")({
-  validateSearch: (search: Record<string, unknown>) => ({
-    q: typeof search.q === "string" ? search.q : "",
-    tag: typeof search.tag === "string" ? search.tag : undefined,
-    sort:
-      search.sort === "name" || search.sort === "cheapest"
-        ? search.sort
-        : ("newest" as CatalogueSort),
-    free:
-      search.free === true || search.free === "1" || search.free === 1
-        ? true
-        : undefined,
-    semantic:
-      search.semantic === true || search.semantic === "1" ? true : undefined,
-    max:
-      (typeof search.max === "string" || typeof search.max === "number") &&
-      /^\d+$/.test(String(search.max))
-        ? Number(search.max)
-        : undefined,
-  }),
-  loader: async ({ context }) => {
+  validateSearch: validateCatalogueSearch,
+  loaderDeps: ({ search }) => catalogueLoaderDeps(search),
+  loader: async ({ context, deps }) => {
     const { queryClient } = context;
-    const queryOpts = convexQuery(api.catalogue.listPublic, {});
+    const queryOpts = convexQuery(
+      api.catalogue.listPublic,
+      catalogueListArgs({
+        search: deps.q ?? "",
+        tag: deps.tag ?? null,
+        sort: (deps.sort ?? "newest") as CatalogueSort,
+        freeOnly: deps.free ?? false,
+        maxCost: deps.max ?? null,
+      }),
+    );
     if (typeof window !== "undefined") {
       void queryClient.prefetchQuery(queryOpts);
       return;
@@ -106,162 +118,151 @@ export const Route = createFileRoute("/catalogue/")({
 function CataloguePage() {
   const routeSearch = Route.useSearch();
   const navigate = useNavigate({ from: Route.fullPath });
-  const [searchInput, setSearchInput] = useState(routeSearch.q);
-  const [debouncedSearch, setDebouncedSearch] = useState(routeSearch.q);
-  const [activeTag, setActiveTag] = useState<string | null>(
-    routeSearch.tag ?? null,
-  );
-  const [sort, setSort] = useState<CatalogueSort>(routeSearch.sort);
-  const [freeOnly, setFreeOnly] = useState(routeSearch.free ?? false);
-  const [maxCostInput, setMaxCostInput] = useState(
-    routeSearch.max === undefined ? "" : String(routeSearch.max),
-  );
-  const [debouncedMaxCost, setDebouncedMaxCost] = useState<number | null>(null);
+  const activeTag = routeSearch.tag ?? null;
+  const sort: CatalogueSort = routeSearch.sort ?? "newest";
+  const freeOnly = routeSearch.free ?? false;
 
-  // Semantic results: null = browse mode; [] = searched, no genuine matches
-  // (shown as empty state); degraded → reset to null (silent substring fallback).
-  const [semanticItems, setSemanticItems] = useState<SearchListing[] | null>(
-    null,
-  );
-  const [semanticState, setSemanticState] = useState<
-    "idle" | "ready" | "degraded" | "error"
-  >("idle");
-  const runSemanticAction = useAction(api.search.searchCatalogue);
-  const { mutate: runSemanticSearch, isPending: semanticPending } = useMutation(
-    {
-      mutationFn: (query: string) => runSemanticAction({ query, limit: 20 }),
-      onSuccess: (res) => {
-        setSemanticState(res.degraded ? "degraded" : "ready");
-        setSemanticItems(res.degraded ? null : res.items);
-      },
-      onError: () => {
-        setSemanticItems(null);
-        setSemanticState("error");
-      },
+  const navigateSearch = (
+    next: {
+      q: string;
+      tag: string | null;
+      sort: CatalogueSort;
+      freeOnly: boolean;
+      maxCostInput: string;
+      semantic: boolean;
     },
+    replace = true,
+  ) => {
+    void navigate({
+      search: catalogueUrlSearch(next),
+      replace,
+      viewTransition: false,
+    });
+  };
+
+  const [searchInput, setSearchInput] = useDebouncedUrlDraft(
+    routeSearch.q ?? "",
+    (q) =>
+      navigateSearch({
+        q,
+        tag: activeTag,
+        sort,
+        freeOnly,
+        maxCostInput:
+          routeSearch.max === undefined ? "" : String(routeSearch.max),
+        semantic: false,
+      }),
+  );
+  const [maxCostInput, setMaxCostInput] = useDebouncedUrlDraft(
+    routeSearch.max === undefined ? "" : String(routeSearch.max),
+    (nextMaxCostInput) =>
+      navigateSearch({
+        q: searchInput,
+        tag: activeTag,
+        sort,
+        freeOnly,
+        maxCostInput: nextMaxCostInput,
+        semantic: false,
+      }),
   );
 
-  const inSemanticMode = semanticItems !== null || semanticPending;
-
-  useEffect(() => {
-    if (routeSearch.semantic && routeSearch.q.trim() !== "") {
-      runSemanticSearch(routeSearch.q.trim());
-    } else {
-      setSemanticItems(null);
-      setSemanticState("idle");
-    }
-  }, [routeSearch.q, routeSearch.semantic, runSemanticSearch]);
-
-  useEffect(() => {
-    const handle = window.setTimeout(() => {
-      setDebouncedSearch(searchInput);
-    }, SEARCH_DEBOUNCE_MS);
-    return () => window.clearTimeout(handle);
-  }, [searchInput]);
-
-  useEffect(() => {
-    const handle = window.setTimeout(() => {
-      const trimmed = maxCostInput.trim();
-      if (trimmed === "") {
-        setDebouncedMaxCost(null);
-        return;
-      }
-      const n = Number(trimmed);
-      if (!Number.isFinite(n) || n < 0) {
-        setDebouncedMaxCost(null);
-        return;
-      }
-      setDebouncedMaxCost(n);
-    }, SEARCH_DEBOUNCE_MS);
-    return () => window.clearTimeout(handle);
-  }, [maxCostInput]);
-
-  useEffect(() => {
-    void navigate({
-      search: {
-        q: searchInput || undefined,
-        tag: activeTag ?? undefined,
-        sort: sort === "newest" ? undefined : sort,
-        free: freeOnly || undefined,
-        max:
-          maxCostInput.trim() === "" ? undefined : Number(maxCostInput.trim()),
-        semantic: routeSearch.semantic ? true : undefined,
-      },
-      replace: true,
-    });
-  }, [
-    activeTag,
-    freeOnly,
-    maxCostInput,
-    navigate,
-    routeSearch.semantic,
-    searchInput,
-    sort,
-  ]);
-
-  useEffect(() => {
-    setSearchInput(routeSearch.q);
-    setDebouncedSearch(routeSearch.q);
-    setActiveTag(routeSearch.tag ?? null);
-    setSort(routeSearch.sort);
-    setFreeOnly(routeSearch.free ?? false);
-    setMaxCostInput(
-      routeSearch.max === undefined ? "" : String(routeSearch.max),
-    );
-  }, [
-    routeSearch.free,
-    routeSearch.max,
-    routeSearch.q,
-    routeSearch.sort,
-    routeSearch.tag,
-  ]);
+  const runSemanticAction = useAction(api.search.searchCatalogue);
+  const semanticQueryText = routeSearch.semantic
+    ? (routeSearch.q ?? "").trim()
+    : "";
+  const semanticSearchEnabled = semanticQueryText !== "";
+  const semanticQuery = useQuery({
+    queryKey: ["catalogue", "semantic", semanticQueryText],
+    queryFn: () => runSemanticAction({ query: semanticQueryText, limit: 20 }),
+    enabled: semanticSearchEnabled,
+    retry: false,
+    staleTime: 60_000,
+  });
+  const semanticPending = semanticSearchEnabled && semanticQuery.isPending;
+  const semanticState = !semanticSearchEnabled
+    ? "idle"
+    : semanticQuery.isError
+      ? "error"
+      : semanticQuery.data?.degraded
+        ? "degraded"
+        : semanticQuery.data
+          ? "ready"
+          : "idle";
+  const semanticItems =
+    semanticQuery.data && !semanticQuery.data.degraded
+      ? semanticQuery.data.items
+      : null;
+  const inSemanticMode =
+    semanticSearchEnabled &&
+    (semanticPending ||
+      (semanticQuery.data !== undefined && !semanticQuery.data.degraded));
 
   const handleSearchInput = (value: string) => {
     setSearchInput(value);
-    // Editing the query invalidates any prior semantic ranking → back to browse.
-    setSemanticItems(null);
-    setSemanticState("idle");
-    if (routeSearch.semantic) {
-      void navigate({
-        search: {
-          q: value || undefined,
-          tag: activeTag ?? undefined,
-          sort: sort === "newest" ? undefined : sort,
-          free: freeOnly || undefined,
-          max: maxCostInput.trim() ? Number(maxCostInput.trim()) : undefined,
-          semantic: undefined,
-        },
-        replace: true,
-      });
-    }
+  };
+
+  const handleTagChange = (tag: string | null) => {
+    navigateSearch({
+      q: searchInput,
+      tag,
+      sort,
+      freeOnly,
+      maxCostInput,
+      semantic: false,
+    });
+  };
+
+  const handleSortChange = (nextSort: CatalogueSort) => {
+    navigateSearch({
+      q: searchInput,
+      tag: activeTag,
+      sort: nextSort,
+      freeOnly,
+      maxCostInput,
+      semantic: false,
+    });
+  };
+
+  const handleFreeOnlyChange = (nextFreeOnly: boolean) => {
+    navigateSearch({
+      q: searchInput,
+      tag: activeTag,
+      sort,
+      freeOnly: nextFreeOnly,
+      maxCostInput,
+      semantic: false,
+    });
+  };
+
+  const handleMaxCostChange = (nextMaxCostInput: string) => {
+    setMaxCostInput(nextMaxCostInput);
   };
 
   const submitSemanticSearch = (e: React.SubmitEvent<HTMLFormElement>) => {
     e.preventDefault();
     const query = searchInput.trim();
     if (query.length === 0) return;
-    void navigate({
-      search: {
+    navigateSearch(
+      {
         q: query,
-        tag: activeTag ?? undefined,
-        sort: sort === "newest" ? undefined : sort,
-        free: freeOnly || undefined,
-        max: maxCostInput.trim() ? Number(maxCostInput.trim()) : undefined,
+        tag: activeTag,
+        sort,
+        freeOnly,
+        maxCostInput,
         semantic: true,
       },
-    });
+      false,
+    );
   };
 
   const exitSemanticMode = () => {
-    void navigate({
-      search: {
-        q: searchInput || undefined,
-        tag: activeTag ?? undefined,
-        sort: sort === "newest" ? undefined : sort,
-        free: freeOnly || undefined,
-        max: maxCostInput.trim() ? Number(maxCostInput.trim()) : undefined,
-        semantic: undefined,
-      },
+    navigateSearch({
+      q: searchInput,
+      tag: activeTag,
+      sort,
+      freeOnly,
+      maxCostInput,
+      semantic: false,
     });
   };
 
@@ -269,7 +270,11 @@ function CataloguePage() {
     <div className="min-h-screen bg-background">
       <PublicHeader active="catalogue" />
 
-      <main className="mx-auto flex max-w-6xl flex-col gap-6 px-4 py-8 content-enter">
+      <main
+        id="main-content"
+        tabIndex={-1}
+        className="mx-auto flex max-w-6xl flex-col gap-6 px-4 py-8 outline-none content-enter"
+      >
         <div>
           <div>
             <h1
@@ -325,7 +330,7 @@ function CataloguePage() {
                   </FieldDescription>
                   <p
                     aria-live="polite"
-                    className="text-sm text-muted-foreground"
+                    className="min-h-5 text-sm text-muted-foreground"
                   >
                     {semanticPending
                       ? "Searching semantically…"
@@ -345,7 +350,7 @@ function CataloguePage() {
                       variant="link"
                       size="sm"
                       className="px-0"
-                      onClick={() => runSemanticSearch(searchInput.trim())}
+                      onClick={() => void semanticQuery.refetch()}
                     >
                       Retry semantic search
                     </Button>
@@ -353,14 +358,21 @@ function CataloguePage() {
                 </Field>
 
                 {inSemanticMode ? null : (
-                  <BrowseFilters
-                    sort={sort}
-                    setSort={setSort}
-                    freeOnly={freeOnly}
-                    setFreeOnly={setFreeOnly}
-                    maxCostInput={maxCostInput}
-                    setMaxCostInput={setMaxCostInput}
-                  />
+                  <details className="group rounded-md border px-3 py-2 sm:border-0 sm:p-0">
+                    <summary className="flex min-h-11 cursor-pointer items-center text-sm font-medium outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 sm:hidden">
+                      Filters and sorting
+                    </summary>
+                    <div className="hidden pt-4 group-open:block sm:block sm:pt-0">
+                      <BrowseFilters
+                        sort={sort}
+                        setSort={handleSortChange}
+                        freeOnly={freeOnly}
+                        setFreeOnly={handleFreeOnlyChange}
+                        maxCostInput={maxCostInput}
+                        setMaxCostInput={handleMaxCostChange}
+                      />
+                    </div>
+                  </details>
                 )}
               </FieldGroup>
             </form>
@@ -375,12 +387,12 @@ function CataloguePage() {
           />
         ) : (
           <BrowsePanel
-            debouncedSearch={debouncedSearch}
+            search={routeSearch.q ?? ""}
             activeTag={activeTag}
-            onTagChange={setActiveTag}
+            onTagChange={handleTagChange}
             sort={sort}
             freeOnly={freeOnly}
-            debouncedMaxCost={debouncedMaxCost}
+            maxCost={routeSearch.max ?? null}
           />
         )}
       </main>
@@ -407,21 +419,7 @@ function BrowseFilters({
     <FieldGroup className="gap-4 sm:flex-row sm:items-end">
       <Field className="sm:max-w-40">
         <FieldLabel htmlFor="catalogue-sort">Sort</FieldLabel>
-        <Select
-          value={sort}
-          onValueChange={(value) => setSort(value as CatalogueSort)}
-        >
-          <SelectTrigger id="catalogue-sort" aria-label="Sort catalogue">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectGroup>
-              <SelectItem value="newest">Newest</SelectItem>
-              <SelectItem value="name">Name</SelectItem>
-              <SelectItem value="cheapest">Cheapest</SelectItem>
-            </SelectGroup>
-          </SelectContent>
-        </Select>
+        <CatalogueSortSelect value={sort} onValueChange={setSort} />
       </Field>
 
       <Field className="sm:max-w-28">
@@ -452,33 +450,29 @@ function BrowseFilters({
 }
 
 function BrowsePanel({
-  debouncedSearch,
+  search,
   activeTag,
   onTagChange,
   sort,
   freeOnly,
-  debouncedMaxCost,
+  maxCost,
 }: {
-  debouncedSearch: string;
+  search: string;
   activeTag: string | null;
   onTagChange: (tag: string | null) => void;
   sort: CatalogueSort;
   freeOnly: boolean;
-  debouncedMaxCost: number | null;
+  maxCost: number | null;
 }) {
   return (
-    <>
-      <Suspense fallback={<CatalogueGridSkeleton />}>
-        <CatalogueList
-          search={debouncedSearch}
-          activeTag={activeTag}
-          onTagChange={onTagChange}
-          sort={sort}
-          freeOnly={freeOnly}
-          maxCost={debouncedMaxCost}
-        />
-      </Suspense>
-    </>
+    <CatalogueList
+      search={search}
+      activeTag={activeTag}
+      onTagChange={onTagChange}
+      sort={sort}
+      freeOnly={freeOnly}
+      maxCost={maxCost}
+    />
   );
 }
 
@@ -547,30 +541,72 @@ function CatalogueList({
   maxCost: number | null;
 }) {
   const trimmed = search.trim();
-  const { data } = useSuspenseQuery(
-    convexQuery(api.catalogue.listPublic, {
-      ...(trimmed.length > 0 ? { search: trimmed } : {}),
-      ...(activeTag ? { tag: activeTag } : {}),
-      sort,
-      ...(freeOnly ? { hasFreeTier: true } : {}),
-      ...(maxCost !== null ? { maxCost } : {}),
-    }),
+  const catalogueQuery = useQuery(
+    convexQuery(
+      api.catalogue.listPublic,
+      catalogueListArgs({
+        search,
+        tag: activeTag,
+        sort,
+        freeOnly,
+        maxCost,
+      }),
+    ),
   );
-
+  const items = catalogueQuery.data?.items;
   const tags = useMemo(() => {
     const set = new Set<string>();
-    for (const item of data.items) {
+    for (const item of items ?? []) {
       for (const tag of item.tags) set.add(tag);
     }
     if (activeTag) set.add(activeTag);
     return Array.from(set).sort((a, b) => a.localeCompare(b));
-  }, [data.items, activeTag]);
+  }, [items, activeTag]);
+
+  if (catalogueQuery.isPending) return <CatalogueGridSkeleton />;
+  if (catalogueQuery.isError || catalogueQuery.data === undefined) {
+    return (
+      <Empty
+        className="min-h-64 border border-destructive/40"
+        role="alert"
+        data-state="error"
+      >
+        <EmptyHeader>
+          <EmptyMedia variant="icon">
+            <PackageSearch />
+          </EmptyMedia>
+          <EmptyTitle>Catalogue did not load</EmptyTitle>
+          <EmptyDescription>
+            Check your connection, then retry. Your filters are preserved.
+          </EmptyDescription>
+        </EmptyHeader>
+        <EmptyContent>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => void catalogueQuery.refetch()}
+          >
+            Retry catalogue
+          </Button>
+        </EmptyContent>
+      </Empty>
+    );
+  }
+  const data = catalogueQuery.data;
 
   const hasFilters =
     trimmed.length > 0 || activeTag !== null || freeOnly || maxCost !== null;
 
   return (
     <FadeIn className="flex flex-col gap-6">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-sm font-medium tabular-nums" aria-live="polite">
+          {data.total === 1 ? "1 API" : `${data.total} APIs`}
+        </p>
+        <p className="text-xs text-muted-foreground">
+          Published specs · keyless mocks · per-call pricing
+        </p>
+      </div>
       {tags.length > 0 ? (
         <FieldSet className="gap-3">
           <FieldLegend variant="label">Tags</FieldLegend>
@@ -639,9 +675,9 @@ function CatalogueCard({ item }: { item: CatalogueCardItem }) {
         <CardHeader>
           <div className="flex min-w-0 flex-wrap items-start justify-between gap-2">
             <CardTitle
-              className="min-w-0 break-words"
+              className="min-w-0 [overflow-wrap:anywhere]"
               style={{
-                viewTransitionName: `api-title-${item.slug}`,
+                viewTransitionName: `api-title-${item.publisherHandle}-${item.slug}`,
               }}
             >
               {item.name}
@@ -680,13 +716,16 @@ function CatalogueCard({ item }: { item: CatalogueCardItem }) {
               <Badge
                 variant="outline"
                 style={{
-                  viewTransitionName: `api-price-${item.slug}`,
+                  viewTransitionName: `api-price-${item.publisherHandle}-${item.slug}`,
                 }}
               >
                 <code>{priceLabel}</code>
               </Badge>
             ) : null}
             {freeBadge ? <Badge variant="secondary">Free tier</Badge> : null}
+            {item.publishedAt !== null ? (
+              <Badge variant="secondary">Published spec</Badge>
+            ) : null}
             {endpointLabel ? (
               <Badge variant="outline">{endpointLabel}</Badge>
             ) : null}
@@ -704,7 +743,11 @@ function CatalogueCard({ item }: { item: CatalogueCardItem }) {
 
 function CatalogueEmpty({ hasSearch }: { hasSearch: boolean }) {
   return (
-    <Empty className="border border-dashed">
+    <Empty
+      className="min-h-64 border border-dashed"
+      role="status"
+      data-state={hasSearch ? "no-results" : "no-supply"}
+    >
       <EmptyHeader>
         <EmptyMedia variant="icon">
           <PackageSearch />
@@ -720,14 +763,16 @@ function CatalogueEmpty({ hasSearch }: { hasSearch: boolean }) {
       </EmptyHeader>
       <EmptyContent>
         {hasSearch ? (
-          <Button asChild variant="outline">
+          <Button asChild>
             <Link to="/catalogue" search={{}}>
               Clear search and filters
             </Link>
           </Button>
         ) : (
-          <Button asChild variant="outline">
-            <Link to="/sign-in/$">Sign in to publish</Link>
+          <Button asChild>
+            <Link to="/sign-in/$" search={{ redirect: "/app/projects" }}>
+              Publish an API
+            </Link>
           </Button>
         )}
       </EmptyContent>
@@ -767,14 +812,12 @@ function CatalogueGridSkeleton() {
 function CatalogueSkeleton() {
   return (
     <div className="min-h-screen bg-background">
-      <header>
-        <div className="mx-auto flex h-14 max-w-6xl items-center justify-between gap-4 px-4">
-          <Skeleton className="h-4 w-20" />
-          <Skeleton className="h-8 w-20" />
-        </div>
-        <Separator />
-      </header>
-      <main className="mx-auto flex max-w-6xl flex-col gap-6 px-4 py-8">
+      <PublicHeader active="catalogue" />
+      <main
+        id="main-content"
+        tabIndex={-1}
+        className="mx-auto flex max-w-6xl flex-col gap-6 px-4 py-8 outline-none"
+      >
         <div className="flex flex-col gap-2">
           <Skeleton className="h-9 w-40" />
           <Skeleton className="h-4 w-72" />

@@ -17,6 +17,8 @@ To build this application for production:
 pnpm build
 ```
 
+Run this command from workspace root. It loads ignored `apps/web/.env.production.local` when present, binds output to current full Git SHA, exposes only documented `VITE_*` values to Turbo cache keys, and passes `CLERK_SECRET_KEY` without caching it. Production output must never contain `dist/server/.dev.vars`.
+
 ## Testing
 
 This project uses [Vitest](https://vitest.dev/) for testing. You can run the tests with:

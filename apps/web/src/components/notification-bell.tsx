@@ -18,6 +18,7 @@ import { useEffect, useState, type ComponentType } from "react";
 import { toast } from "sonner";
 
 import { Button } from "#/components/ui/button";
+import { Skeleton } from "#/components/ui/skeleton";
 import {
   Popover,
   PopoverContent,
@@ -132,14 +133,19 @@ function BellWithOrg({ orgSlug }: { orgSlug: string }) {
     return () => clearInterval(id);
   }, []);
 
-  const { data, isPending: pagePending } = useQuery(
+  const notificationsQuery = useQuery(
     convexQuery(api.notifications.listForOrg, {
       orgSlug,
       paginationOpts: { numItems: NOTIFICATION_PAGE_SIZE, cursor },
     }),
   );
 
-  const unread = data?.unreadCount ?? 0;
+  const unread = notificationsQuery.isSuccess
+    ? notificationsQuery.data.unreadCount
+    : 0;
+  const unreadCountCapped = notificationsQuery.isSuccess
+    ? notificationsQuery.data.unreadCountCapped
+    : false;
 
   const markReadMut = useConvexMutation(api.notifications.markRead);
   const markAllMut = useConvexMutation(api.notifications.markAllRead);
@@ -152,15 +158,20 @@ function BellWithOrg({ orgSlug }: { orgSlug: string }) {
   });
 
   const { mutate: markAllRead, isPending: markingAll } = useMutation({
+    // Server drains remaining pages asynchronously; realtime query updates.
     mutationFn: () => markAllMut({ orgSlug }),
     onSuccess: () => toast.success("All notifications marked read"),
     onError: (err: unknown) =>
       toast.error(humanError(err, "Could not mark all read")),
   });
 
+  const data = notificationsQuery.isSuccess ? notificationsQuery.data : undefined;
+  const pagePending = notificationsQuery.isPending;
   const page = [...olderPages, ...(data?.page ?? [])];
-  const unreadCapped = data?.unreadCountCapped === true;
-  const unreadLabel = unreadCapped || unread > 99 ? "99+" : String(unread);
+  const unreadLabel = unreadCountCapped || unread > 99 ? "99+" : String(unread);
+  const unreadAccessibleLabel = unreadCountCapped
+    ? "more than 99 unread"
+    : `${unread} unread`;
 
   function onRowClick(notificationId: Id<"notifications">) {
     markRead(notificationId);
@@ -194,7 +205,7 @@ function BellWithOrg({ orgSlug }: { orgSlug: string }) {
           variant="ghost"
           size="icon"
           className="relative"
-          aria-label={`Notifications${unread > 0 ? `, ${unreadCapped ? "at least " : ""}${unread} unread` : ""}`}
+          aria-label={`Notifications${unread > 0 ? `, ${unreadAccessibleLabel}` : ""}`}
         >
           <Bell aria-hidden="true" className="size-4" />
           {unread > 0 ? (
@@ -203,7 +214,7 @@ function BellWithOrg({ orgSlug }: { orgSlug: string }) {
               initial={reduce ? false : { scale: 0 }}
               animate={{ scale: 1 }}
               transition={SPRING.pop}
-              className="absolute -top-0.5 -right-0.5 flex min-w-4 h-4 items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-semibold leading-none text-white tabular-nums"
+              className="absolute -top-0.5 -right-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-foreground px-1 text-[10px] font-semibold leading-none text-background tabular-nums"
             >
               {unreadLabel}
             </m.span>
@@ -212,7 +223,7 @@ function BellWithOrg({ orgSlug }: { orgSlug: string }) {
       </PopoverTrigger>
       <PopoverContent
         align="end"
-        className="w-80 p-0"
+        className="w-80 max-w-[calc(100vw-1rem)] p-0"
         // Reset `now` when opening so the first paint is accurate.
         onOpenAutoFocus={() => setNow(Date.now())}
       >
@@ -230,7 +241,34 @@ function BellWithOrg({ orgSlug }: { orgSlug: string }) {
           </Button>
         </div>
 
-        {page.length === 0 ? (
+        {notificationsQuery.isPending ? (
+          <div className="space-y-3 p-3" aria-label="Loading notifications">
+            {Array.from({ length: 3 }).map((_, index) => (
+              <div key={index} className="flex items-start gap-2.5">
+                <Skeleton className="size-7 shrink-0 rounded-md" />
+                <div className="flex-1 space-y-2">
+                  <Skeleton className="h-3.5 w-3/4" />
+                  <Skeleton className="h-3 w-full" />
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : notificationsQuery.isError ? (
+          <div className="space-y-3 px-4 py-8 text-center" role="alert">
+            <p className="text-sm font-medium">Notifications did not load</p>
+            <p className="text-xs text-muted-foreground">
+              Check your connection, then retry.
+            </p>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => void notificationsQuery.refetch()}
+            >
+              Retry
+            </Button>
+          </div>
+        ) : page.length === 0 ? (
           <EmptyState />
         ) : (
           <ul className="max-h-80 overflow-y-auto">

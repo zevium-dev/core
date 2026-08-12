@@ -3,6 +3,7 @@ import { convexTest } from "convex-test";
 import { describe, expect, it } from "vitest";
 import { api } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
+import { projectedCycleCredits } from "./billing";
 import schema from "./schema";
 
 const modules = import.meta.glob("./**/*.ts");
@@ -12,6 +13,8 @@ type Seeded = {
   publisherOrgId: Id<"organizations">;
   projectAId: Id<"projects">;
   projectBId: Id<"projects">;
+  eventAId: Id<"usageEvents">;
+  eventMemberId: Id<"usageEvents">;
   monthStart: number;
   inMonth: number;
   prevMonth: number;
@@ -34,6 +37,7 @@ async function seedWorld(t: ReturnType<typeof convexTest>): Promise<Seeded> {
       clerkOrgId: "org_publisher",
       name: "Publisher Co",
       slug: "publisher-co",
+      publicHandle: "publisher-co",
     });
 
     const projectAId = await ctx.db.insert("projects", {
@@ -53,8 +57,35 @@ async function seedWorld(t: ReturnType<typeof convexTest>): Promise<Seeded> {
       tags: [],
     });
 
+    await ctx.db.insert("users", {
+      clerkUserId: "user_alice",
+      name: "Alice Admin",
+      email: "alice@example.com",
+    });
+    await ctx.db.insert("users", {
+      clerkUserId: "user_member",
+      name: "Morgan Member",
+      email: "morgan@example.com",
+    });
+    await ctx.db.insert("keySettings", {
+      clerkOrgId: "org_consumer",
+      keyId: "key_alpha",
+      ownerUserId: "user_alice",
+      keyName: "CI",
+      disabled: false,
+      updatedAt: 1,
+    });
+    await ctx.db.insert("keySettings", {
+      clerkOrgId: "org_consumer",
+      keyId: "key_beta",
+      keyName: "Production agent",
+      ownerUserId: "user_member",
+      disabled: false,
+      updatedAt: 1,
+    });
+
     // In-month usage on two keys / two projects.
-    await ctx.db.insert("usageEvents", {
+    const eventAId = await ctx.db.insert("usageEvents", {
       organizationId: consumerOrgId,
       projectId: projectAId,
       endpoint: "/v1/forecast",
@@ -63,6 +94,7 @@ async function seedWorld(t: ReturnType<typeof convexTest>): Promise<Seeded> {
       status: 200,
       latencyMs: 40,
       keyId: "key_alpha",
+      ownerUserId: "user_alice",
       at: inMonth,
     });
     await ctx.db.insert("usageEvents", {
@@ -76,7 +108,7 @@ async function seedWorld(t: ReturnType<typeof convexTest>): Promise<Seeded> {
       keyId: "key_alpha",
       at: inMonth + 1,
     });
-    await ctx.db.insert("usageEvents", {
+    const eventMemberId = await ctx.db.insert("usageEvents", {
       organizationId: consumerOrgId,
       projectId: projectBId,
       endpoint: "/v1/geocode",
@@ -85,6 +117,7 @@ async function seedWorld(t: ReturnType<typeof convexTest>): Promise<Seeded> {
       status: 201,
       latencyMs: 90,
       keyId: "key_beta",
+      ownerUserId: "user_member",
       at: inMonth + 2,
     });
     // Prior month — must not land in cycleBreakdown.
@@ -97,6 +130,7 @@ async function seedWorld(t: ReturnType<typeof convexTest>): Promise<Seeded> {
       status: 200,
       latencyMs: 10,
       keyId: "key_alpha",
+      ownerUserId: "user_alice",
       at: prevMonth,
     });
     // 5xx still recorded by gateway — counts for cycle totals.
@@ -109,6 +143,7 @@ async function seedWorld(t: ReturnType<typeof convexTest>): Promise<Seeded> {
       status: 502,
       latencyMs: 1200,
       keyId: "key_beta",
+      ownerUserId: "user_member",
       at: inMonth + 3,
     });
 
@@ -117,6 +152,8 @@ async function seedWorld(t: ReturnType<typeof convexTest>): Promise<Seeded> {
       publisherOrgId,
       projectAId,
       projectBId,
+      eventAId,
+      eventMemberId,
       monthStart,
       inMonth,
       prevMonth,
@@ -124,13 +161,18 @@ async function seedWorld(t: ReturnType<typeof convexTest>): Promise<Seeded> {
   });
 }
 
-function asMember(t: ReturnType<typeof convexTest>, clerkOrgId: string) {
+function withRole(
+  t: ReturnType<typeof convexTest>,
+  clerkOrgId: string,
+  role: "org:admin" | "org:owner" | "org:member",
+  subject = role === "org:member" ? "user_member" : "user_alice",
+) {
   return t.withIdentity({
-    subject: "user_member",
+    subject,
     // Clerk JWT template flattens org claims onto identity.
     org_id: clerkOrgId,
     org_slug: clerkOrgId === "org_consumer" ? "consumer-co" : "publisher-co",
-    org_role: "org:admin",
+    org_role: role,
   } as {
     subject: string;
     org_id: string;
@@ -139,17 +181,18 @@ function asMember(t: ReturnType<typeof convexTest>, clerkOrgId: string) {
   });
 }
 
+function asAdmin(t: ReturnType<typeof convexTest>, clerkOrgId: string) {
+  return withRole(t, clerkOrgId, "org:admin");
+}
+
+function asMember(t: ReturnType<typeof convexTest>, clerkOrgId: string) {
+  return withRole(t, clerkOrgId, "org:member");
+}
+
 describe("usage.listForOrg", () => {
-  it("scopes by signed org id even when another org slug is supplied", async () => {
+  it("rejects non-member", async () => {
     const t = convexTest(schema, modules);
     await seedWorld(t);
-    await t.run(async (ctx) => {
-      await ctx.db.insert("organizations", {
-        clerkOrgId: "org_other",
-        name: "Other",
-        slug: "other",
-      });
-    });
     const outsider = t.withIdentity({
       subject: "user_outsider",
       org_id: "org_other",
@@ -162,11 +205,12 @@ describe("usage.listForOrg", () => {
       org_role: string;
     });
 
-    const result = await outsider.query(api.usage.listForOrg, {
-      orgSlug: "consumer-co",
-      paginationOpts: { numItems: 10, cursor: null },
-    });
-    expect(result.page).toEqual([]);
+    await expect(
+      outsider.query(api.usage.listForOrg, {
+        orgSlug: "consumer-co",
+        paginationOpts: { numItems: 10, cursor: null },
+      }),
+    ).rejects.toThrow(/Not a member/);
   });
 
   it("rejects unauthenticated", async () => {
@@ -183,7 +227,7 @@ describe("usage.listForOrg", () => {
   it("paginates newest first with project name+slug joined", async () => {
     const t = convexTest(schema, modules);
     const seed = await seedWorld(t);
-    const asConsumer = asMember(t, "org_consumer");
+    const asConsumer = asAdmin(t, "org_consumer");
 
     const page1 = await asConsumer.query(api.usage.listForOrg, {
       orgSlug: "consumer-co",
@@ -213,11 +257,11 @@ describe("usage.listForOrg", () => {
     expect(onlyAlpha.page.every((e) => e.keyId === "key_alpha")).toBe(true);
     expect(onlyAlpha.page.length).toBe(3);
 
-    // projectId filter.
+    // Public project reference filter. Internal Convex IDs never cross this API.
     const onlyB = await asConsumer.query(api.usage.listForOrg, {
       orgSlug: "consumer-co",
       paginationOpts: { numItems: 50, cursor: null },
-      projectId: seed.projectBId,
+      projectRef: "publisher-co/maps",
     });
     expect(onlyB.page).toHaveLength(1);
     expect(onlyB.page[0]!.projectSlug).toBe("maps");
@@ -233,7 +277,231 @@ describe("usage.listForOrg", () => {
     expect(monthOnly.page.some((e) => e.credits === 999)).toBe(false);
   });
 
-  it("applies combined filters before pagination with stable, gap-free cursors", async () => {
+  it("resolves an authorized deep link by ID and hides cross-org events", async () => {
+    const t = convexTest(schema, modules);
+    const seed = await seedWorld(t);
+    const event = await asAdmin(t, "org_consumer").query(
+      api.usage.getForOrgById,
+      { orgSlug: "consumer-co", eventId: seed.eventAId },
+    );
+    expect(event).toMatchObject({
+      eventId: String(seed.eventAId),
+      projectName: "Weather API",
+      endpoint: "/v1/forecast",
+      credits: 10,
+    });
+
+    await expect(
+      asAdmin(t, "org_publisher").query(api.usage.getForOrgById, {
+        orgSlug: "consumer-co",
+        eventId: seed.eventAId,
+      }),
+    ).rejects.toThrow(/Not a member/);
+    expect(
+      await asAdmin(t, "org_publisher").query(api.usage.getForOrgById, {
+        orgSlug: "publisher-co",
+        eventId: seed.eventAId,
+      }),
+    ).toBeNull();
+  });
+
+  it("scopes ordinary members to their own masked usage and blocks colleague deep links", async () => {
+    const t = convexTest(schema, modules);
+    const seed = await seedWorld(t);
+    const member = asMember(t, "org_consumer");
+
+    const result = await member.query(api.usage.listForOrg, {
+      orgSlug: "consumer-co",
+      paginationOpts: { numItems: 50, cursor: null },
+    });
+    expect(result.access.role).toBe("org:member");
+    expect(result.access.capabilities.viewOrgUsage).toBe(false);
+    expect(result.page).toHaveLength(2);
+    expect(result.page.every((event) => event.keyId === "••••beta")).toBe(true);
+    expect(result.page.every((event) => !("memberId" in event))).toBe(true);
+    expect(result.page.every((event) => !("memberName" in event))).toBe(true);
+
+    expect(
+      await member.query(api.usage.getForOrgById, {
+        orgSlug: "consumer-co",
+        eventId: seed.eventAId,
+      }),
+    ).toBeNull();
+    expect(
+      await member.query(api.usage.getForOrgById, {
+        orgSlug: "consumer-co",
+        eventId: seed.eventMemberId,
+      }),
+    ).toMatchObject({ eventId: String(seed.eventMemberId), keyId: "••••beta" });
+
+    const forcedColleague = await member.query(api.usage.listForOrg, {
+      orgSlug: "consumer-co",
+      memberId: "user_alice",
+      paginationOpts: { numItems: 50, cursor: null },
+    });
+    expect(forcedColleague.page).toEqual([]);
+  });
+});
+
+describe("billing.cycleBreakdown", () => {
+  it("projects linearly without dropping below spend already incurred", () => {
+    expect(projectedCycleCredits(100, 0, 1_000, 250)).toBe(400);
+    expect(projectedCycleCredits(100, 0, 1_000, 2_000)).toBe(100);
+    expect(projectedCycleCredits(0, 0, 1_000, 250)).toBe(0);
+  });
+
+  it("rejects non-member", async () => {
+    const t = convexTest(schema, modules);
+    await seedWorld(t);
+    const outsider = t.withIdentity({
+      subject: "user_outsider",
+      org_id: "org_other",
+      org_slug: "other",
+      org_role: "org:member",
+    } as {
+      subject: string;
+      org_id: string;
+      org_slug: string;
+      org_role: string;
+    });
+    await expect(
+      outsider.query(api.billing.cycleBreakdown, { orgSlug: "consumer-co" }),
+    ).rejects.toThrow(/Not a member/);
+  });
+
+  it("attributes current-cycle spend by named key, member, API, and endpoint", async () => {
+    const t = convexTest(schema, modules);
+    await seedWorld(t);
+    const asConsumer = asAdmin(t, "org_consumer");
+
+    const breakdown = await asConsumer.query(api.billing.cycleBreakdown, {
+      orgSlug: "consumer-co",
+    });
+
+    // In-month: 10+20+50+5 = 85 credits, 4 calls. Prev-month 999 excluded.
+    expect(breakdown.totalCalls).toBe(4);
+    expect(breakdown.totalCredits).toBe(85);
+    expect(breakdown.cycleStart).toBeLessThanOrEqual(Date.now());
+    expect(breakdown.cycleEnd).toBeGreaterThan(breakdown.cycleStart);
+    expect(breakdown.projectedCredits).toBeGreaterThanOrEqual(85);
+
+    const alpha = breakdown.byKey.find((k) => k.keyId === "key_alpha");
+    const beta = breakdown.byKey.find((k) => k.keyId === "key_beta");
+    expect(alpha).toMatchObject({
+      keyName: "CI",
+      memberId: "user_alice",
+      calls: 2,
+      credits: 30,
+    });
+    expect(beta).toMatchObject({
+      keyName: "Production agent",
+      memberId: "user_member",
+      calls: 2,
+      credits: 55,
+    });
+
+    const weather = breakdown.byProject.find((p) => p.slug === "weather");
+    const maps = breakdown.byProject.find((p) => p.slug === "maps");
+    expect(weather).toMatchObject({
+      name: "Weather API",
+      calls: 3,
+      credits: 35,
+    });
+    expect(maps).toMatchObject({ name: "Maps API", calls: 1, credits: 50 });
+
+    expect(breakdown.byMember).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          memberId: "user_alice",
+          name: "Alice Admin",
+          calls: 2,
+          credits: 30,
+        }),
+        expect.objectContaining({
+          memberId: "user_member",
+          name: "Morgan Member",
+          calls: 2,
+          credits: 55,
+        }),
+      ]),
+    );
+    expect(breakdown.byEndpoint).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          projectName: "Weather API",
+          method: "GET",
+          endpoint: "/v1/forecast",
+          calls: 3,
+          credits: 35,
+        }),
+        expect.objectContaining({
+          projectName: "Maps API",
+          method: "POST",
+          endpoint: "/v1/geocode",
+          calls: 1,
+          credits: 50,
+        }),
+      ]),
+    );
+  });
+
+  it("returns only self spend without member attribution to ordinary members", async () => {
+    const t = convexTest(schema, modules);
+    await seedWorld(t);
+
+    const breakdown = await asMember(t, "org_consumer").query(
+      api.billing.cycleBreakdown,
+      { orgSlug: "consumer-co" },
+    );
+
+    expect(breakdown.scope).toBe("member");
+    expect(breakdown.totalCalls).toBe(2);
+    expect(breakdown.totalCredits).toBe(55);
+    expect(breakdown.ownCalls).toBe(2);
+    expect(breakdown.ownCredits).toBe(55);
+    expect(breakdown.byMember).toEqual([]);
+    expect(breakdown.byKey).toEqual([
+      expect.objectContaining({
+        keyId: "••••beta",
+        memberId: null,
+        calls: 2,
+        credits: 55,
+      }),
+    ]);
+  });
+});
+
+describe("usage.listForOrg — scope and pagination hardening", () => {
+  it("scopes by signed org id even when another org slug is supplied", async () => {
+    const t = convexTest(schema, modules);
+    await seedWorld(t);
+    await t.run(async (ctx) => {
+      await ctx.db.insert("organizations", {
+        clerkOrgId: "org_other",
+        name: "Other",
+        slug: "other",
+      });
+    });
+    const outsider = t.withIdentity({
+      subject: "user_outsider",
+      org_id: "org_other",
+      org_slug: "other",
+      org_role: "org:member",
+    } as {
+      subject: string;
+      org_id: string;
+      org_slug: string;
+      org_role: string;
+    });
+
+    const result = await outsider.query(api.usage.listForOrg, {
+      orgSlug: "consumer-co",
+      paginationOpts: { numItems: 10, cursor: null },
+    });
+    expect(result.page).toEqual([]);
+  });
+
+  it("applies combined filters with gap-free result sets across pages", async () => {
     const t = convexTest(schema, modules);
     const seed = await seedWorld(t);
     await t.run(async (ctx) => {
@@ -251,23 +519,22 @@ describe("usage.listForOrg", () => {
         });
       }
     });
-    const consumer = asMember(t, "org_consumer");
+    const consumer = asAdmin(t, "org_consumer");
     const seen: string[] = [];
     let cursor: string | null = null;
     let done = false;
     while (!done) {
       const result = await consumer.query(api.usage.listForOrg, {
         orgSlug: "consumer-co",
-        projectId: seed.projectAId,
+        projectRef: "publisher-co/weather",
         keyId: "key_target",
-        paginationOpts: { numItems: 1, cursor },
+        paginationOpts: { numItems: 3, cursor },
       });
-      expect(result.page).toHaveLength(1);
-      expect(result.page[0]).toMatchObject({
-        projectId: seed.projectAId,
-        keyId: "key_target",
-      });
-      seen.push(result.page[0]!.endpoint);
+      for (const event of result.page) {
+        expect(event.projectRef).toBe("publisher-co/weather");
+        expect(event.keyId).toBe("key_target");
+        seen.push(event.endpoint);
+      }
       cursor = result.continueCursor;
       done = result.isDone;
     }
@@ -293,7 +560,7 @@ describe("usage.listForOrg", () => {
         });
       }
     });
-    const consumer = asMember(t, "org_consumer");
+    const consumer = asAdmin(t, "org_consumer");
     const capped = await consumer.query(api.usage.listForOrg, {
       orgSlug: "consumer-co",
       paginationOpts: { numItems: 10_000, cursor: null },
@@ -308,72 +575,13 @@ describe("usage.listForOrg", () => {
         until: 10,
       }),
     ).rejects.toThrow(/before end time/);
-  });
-
-  it("shows members only provider-attributed usage while admins see the org", async () => {
-    const t = convexTest(schema, modules);
-    const seed = await seedWorld(t);
-    await t.run(async (ctx) => {
-      await ctx.db.insert("usageEvents", {
-        organizationId: seed.consumerOrgId,
-        ownerUserId: "user_alice",
-        projectId: seed.projectAId,
-        endpoint: "/owned/alice",
-        method: "GET",
-        credits: 7,
-        status: 200,
-        latencyMs: 7,
-        keyId: "key_alice",
-        at: Date.now(),
-      });
-      await ctx.db.insert("usageEvents", {
-        organizationId: seed.consumerOrgId,
-        ownerUserId: "user_bob",
-        projectId: seed.projectAId,
-        endpoint: "/owned/bob",
-        method: "GET",
-        credits: 11,
-        status: 200,
-        latencyMs: 11,
-        keyId: "key_bob",
-        at: Date.now() + 1,
-      });
-    });
-    const alice = t.withIdentity({
-      subject: "user_alice",
-      org_id: "org_consumer",
-      org_slug: "consumer-co",
-      org_role: "org:member",
-    } as {
-      subject: string;
-      org_id: string;
-      org_slug: string;
-      org_role: string;
-    });
-    const admin = asMember(t, "org_consumer");
-
-    const memberLog = await alice.query(api.usage.listForOrg, {
-      orgSlug: "consumer-co",
-      paginationOpts: { numItems: 50, cursor: null },
-    });
-    expect(memberLog.page.map((event) => event.endpoint)).toEqual([
-      "/owned/alice",
-    ]);
-
-    const siblingKey = await alice.query(api.usage.listForOrg, {
-      orgSlug: "consumer-co",
-      keyId: "key_bob",
-      paginationOpts: { numItems: 50, cursor: null },
-    });
-    expect(siblingKey.page).toEqual([]);
-
-    const adminLog = await admin.query(api.usage.listForOrg, {
-      orgSlug: "consumer-co",
-      paginationOpts: { numItems: 50, cursor: null },
-    });
-    expect(adminLog.page.map((event) => event.endpoint)).toEqual(
-      expect.arrayContaining(["/owned/alice", "/owned/bob", "/v1/forecast"]),
-    );
+    await expect(
+      consumer.query(api.usage.listForOrg, {
+        orgSlug: "consumer-co",
+        paginationOpts: { numItems: 1, cursor: null },
+        since: -5,
+      }),
+    ).rejects.toThrow(/Invalid start time/);
   });
 });
 
@@ -426,7 +634,7 @@ describe("analytics.orgOverview", () => {
       });
     });
 
-    const result = await asMember(t, "org_publisher").query(
+    const result = await asAdmin(t, "org_publisher").query(
       api.analytics.projectAnalytics,
       { orgSlug: "publisher-co", projectSlug: "weather", rangeDays: 7 },
     );
@@ -478,7 +686,7 @@ describe("analytics.orgOverview", () => {
   });
 });
 
-describe("billing.cycleBreakdown", () => {
+describe("billing.cycleBreakdown — scope hardening", () => {
   it("never uses a supplied slug to escape the signed org scope", async () => {
     const t = convexTest(schema, modules);
     await seedWorld(t);
@@ -507,16 +715,15 @@ describe("billing.cycleBreakdown", () => {
     expect(result.totalCredits).toBe(0);
   });
 
-  it("aggregates current UTC month byKey and byProject", async () => {
+  it("aggregates current UTC month and reports scan bounds", async () => {
     const t = convexTest(schema, modules);
     await seedWorld(t);
-    const asConsumer = asMember(t, "org_consumer");
+    const asConsumer = asAdmin(t, "org_consumer");
 
     const breakdown = await asConsumer.query(api.billing.cycleBreakdown, {
       orgSlug: "consumer-co",
     });
 
-    // In-month: 10+20+50+5 = 85 credits, 4 calls. Prev-month 999 excluded.
     expect(breakdown.totalCalls).toBe(4);
     expect(breakdown.totalCredits).toBe(85);
     expect(breakdown.cycleStart).toBeLessThanOrEqual(Date.now());
@@ -524,8 +731,12 @@ describe("billing.cycleBreakdown", () => {
 
     const alpha = breakdown.byKey.find((k) => k.keyId === "key_alpha");
     const beta = breakdown.byKey.find((k) => k.keyId === "key_beta");
-    expect(alpha).toMatchObject({ calls: 2, credits: 30 });
-    expect(beta).toMatchObject({ calls: 2, credits: 55 });
+    expect(alpha).toMatchObject({ calls: 2, credits: 30, keyName: "CI" });
+    expect(beta).toMatchObject({
+      calls: 2,
+      credits: 55,
+      keyName: "Production agent",
+    });
 
     const weather = breakdown.byProject.find((p) => p.slug === "weather");
     const maps = breakdown.byProject.find((p) => p.slug === "maps");
@@ -535,57 +746,7 @@ describe("billing.cycleBreakdown", () => {
       credits: 35,
     });
     expect(maps).toMatchObject({ name: "Maps API", calls: 1, credits: 50 });
-    expect(breakdown.truncated).toBe(false);
+    expect(breakdown.scanTruncated).toBe(false);
     expect(breakdown.scanCap).toBe(10_000);
-  });
-
-  it("keeps member billing attribution private from sibling key owners", async () => {
-    const t = convexTest(schema, modules);
-    const seed = await seedWorld(t);
-    await t.run(async (ctx) => {
-      await ctx.db.insert("usageEvents", {
-        organizationId: seed.consumerOrgId,
-        ownerUserId: "user_alice",
-        projectId: seed.projectAId,
-        endpoint: "/owned/alice",
-        method: "GET",
-        credits: 7,
-        status: 200,
-        latencyMs: 7,
-        keyId: "key_alice",
-        at: Date.now(),
-      });
-      await ctx.db.insert("usageEvents", {
-        organizationId: seed.consumerOrgId,
-        ownerUserId: "user_bob",
-        projectId: seed.projectAId,
-        endpoint: "/owned/bob",
-        method: "GET",
-        credits: 11,
-        status: 200,
-        latencyMs: 11,
-        keyId: "key_bob",
-        at: Date.now() + 1,
-      });
-    });
-    const alice = t.withIdentity({
-      subject: "user_alice",
-      org_id: "org_consumer",
-      org_slug: "consumer-co",
-      org_role: "org:member",
-    } as {
-      subject: string;
-      org_id: string;
-      org_slug: string;
-      org_role: string;
-    });
-    const result = await alice.query(api.billing.cycleBreakdown, {
-      orgSlug: "consumer-co",
-    });
-    expect(result.totalCalls).toBe(1);
-    expect(result.totalCredits).toBe(7);
-    expect(result.byKey).toEqual([
-      { keyId: "key_alice", calls: 1, credits: 7 },
-    ]);
   });
 });

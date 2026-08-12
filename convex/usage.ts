@@ -1,14 +1,15 @@
 import { paginationOptsValidator } from "convex/server";
 import { v } from "convex/values";
-import { query } from "./_generated/server";
-import type { Id } from "./_generated/dataModel";
+
+import type { Doc, Id } from "./_generated/dataModel";
+import { query, type QueryCtx } from "./_generated/server";
 import { requireOrgMemberBySlug } from "./lib/auth";
 
-const USAGE_PAGE_SIZE_MAX = 50;
+const MAX_USAGE_PAGE_SIZE = 50;
 
 export type UsageListItem = {
-  _id: Id<"usageEvents">;
-  projectId: Id<"projects">;
+  eventId: string;
+  projectRef: string | null;
   projectName: string | null;
   projectSlug: string | null;
   endpoint: string;
@@ -17,25 +18,159 @@ export type UsageListItem = {
   status: number;
   latencyMs: number;
   keyId: string;
+  memberId?: string | null;
+  memberName?: string | null;
   at: number;
 };
 
-/**
- * Paginated consumer call log for the org that paid (organizationId on events).
- * Every optional filter is part of the selected index before pagination.
- * Newest first.
- */
+function boundedPagination(options: {
+  numItems: number;
+  cursor: string | null;
+}) {
+  const numItems = Number.isSafeInteger(options.numItems)
+    ? Math.min(Math.max(options.numItems, 1), MAX_USAGE_PAGE_SIZE)
+    : MAX_USAGE_PAGE_SIZE;
+  return {
+    cursor: options.cursor,
+    numItems,
+    maximumRowsRead: MAX_USAGE_PAGE_SIZE + 1,
+    maximumBytesRead: 256 * 1024,
+  };
+}
+
+function maskedKeyId(keyId: string): string {
+  return keyId.length > 4 ? `••••${keyId.slice(-4)}` : "••••";
+}
+
+async function projectView(
+  ctx: QueryCtx,
+  projectId: Id<"projects">,
+): Promise<{
+  projectRef: string | null;
+  projectName: string | null;
+  projectSlug: string | null;
+}> {
+  const project = await ctx.db.get(projectId);
+  if (project === null) {
+    return { projectRef: null, projectName: null, projectSlug: null };
+  }
+  const publisher = await ctx.db.get(project.organizationId);
+  return {
+    projectRef: publisher?.publicHandle
+      ? `${publisher.publicHandle}/${project.slug}`
+      : null,
+    projectName: project.name,
+    projectSlug: project.slug,
+  };
+}
+
+async function usageView(
+  ctx: QueryCtx,
+  event: Doc<"usageEvents">,
+  canViewOrgUsage: boolean,
+): Promise<UsageListItem> {
+  const ownerUserId = event.ownerUserId;
+  const member =
+    canViewOrgUsage && ownerUserId !== undefined
+      ? await ctx.db
+          .query("users")
+          .withIndex("by_clerk_user", (q) => q.eq("clerkUserId", ownerUserId))
+          .unique()
+      : null;
+  return {
+    eventId: String(event._id),
+    ...(await projectView(ctx, event.projectId)),
+    endpoint: event.endpoint,
+    method: event.method,
+    credits: event.credits,
+    status: event.status,
+    latencyMs: event.latencyMs,
+    keyId: canViewOrgUsage ? event.keyId : maskedKeyId(event.keyId),
+    ...(canViewOrgUsage
+      ? {
+          memberId: ownerUserId ?? null,
+          memberName:
+            ownerUserId === undefined
+              ? "Unattributed member"
+              : (member?.name ?? "Organization member"),
+        }
+      : {}),
+    at: event.at,
+  };
+}
+
+async function resolveProjectRef(
+  ctx: QueryCtx,
+  projectRef: string,
+): Promise<Id<"projects"> | null> {
+  const separator = projectRef.indexOf("/");
+  if (separator <= 0 || separator === projectRef.length - 1) return null;
+  const publisherHandle = projectRef.slice(0, separator);
+  const projectSlug = projectRef.slice(separator + 1);
+  const publisher = await ctx.db
+    .query("organizations")
+    .withIndex("by_public_handle", (q) => q.eq("publicHandle", publisherHandle))
+    .unique();
+  if (publisher === null) return null;
+  const project = await ctx.db
+    .query("projects")
+    .withIndex("by_org_slug", (q) =>
+      q.eq("organizationId", publisher._id).eq("slug", projectSlug),
+    )
+    .unique();
+  return project?._id ?? null;
+}
+
+function emptyPage(
+  access: Awaited<ReturnType<typeof requireOrgMemberBySlug>>["access"],
+) {
+  return {
+    access,
+    page: [] as UsageListItem[],
+    isDone: true,
+    continueCursor: "",
+  };
+}
+
+/** Paginated consumer call log. Ordinary members are always self-scoped. */
 export const listForOrg = query({
   args: {
     orgSlug: v.string(),
     paginationOpts: paginationOptsValidator,
-    projectId: v.optional(v.id("projects")),
+    projectRef: v.optional(v.string()),
     keyId: v.optional(v.string()),
+    memberId: v.optional(v.string()),
+    endpoint: v.optional(v.string()),
+    method: v.optional(v.string()),
     since: v.optional(v.number()),
     until: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
-    const { claims, org } = await requireOrgMemberBySlug(ctx, args.orgSlug);
+    const { access, claims, org } = await requireOrgMemberBySlug(
+      ctx,
+      args.orgSlug,
+    );
+    const canViewOrgUsage = access.capabilities.viewOrgUsage;
+    if (
+      (!canViewOrgUsage &&
+        args.memberId !== undefined &&
+        args.memberId !== claims.subject) ||
+      (args.endpoint?.length ?? 0) > 512 ||
+      (args.method?.length ?? 0) > 16 ||
+      (args.keyId?.length ?? 0) > 128 ||
+      (args.projectRef?.length ?? 0) > 256
+    ) {
+      return emptyPage(access);
+    }
+
+    const keyId = args.keyId;
+    const endpoint = args.endpoint;
+    const projectId = args.projectRef
+      ? await resolveProjectRef(ctx, args.projectRef)
+      : undefined;
+    if (args.projectRef !== undefined && projectId === null) {
+      return emptyPage(access);
+    }
     if (
       args.since !== undefined &&
       (!Number.isSafeInteger(args.since) || args.since < 0)
@@ -55,204 +190,124 @@ export const listForOrg = query({
     ) {
       throw new Error("Start time must be before end time");
     }
-    if (args.keyId !== undefined && args.keyId.length > 256) {
-      throw new Error("Key filter is too long");
-    }
-    const paginationOpts = {
-      ...args.paginationOpts,
-      numItems: Number.isSafeInteger(args.paginationOpts.numItems)
-        ? Math.min(
-            Math.max(args.paginationOpts.numItems, 1),
-            USAGE_PAGE_SIZE_MAX,
-          )
-        : USAGE_PAGE_SIZE_MAX,
-      maximumRowsRead: USAGE_PAGE_SIZE_MAX + 1,
-      maximumBytesRead: 256 * 1024,
+    const method = args.method?.toUpperCase();
+    const pagination = boundedPagination(args.paginationOpts);
+    type TimeRange = {
+      gte: (field: "at", value: number) => TimeRange;
+      lt: (field: "at", value: number) => TimeRange;
+    };
+    const applyTime = <T extends TimeRange>(base: T): T => {
+      if (args.since !== undefined && args.until !== undefined) {
+        return base.gte("at", args.since).lt("at", args.until);
+      }
+      if (args.since !== undefined) return base.gte("at", args.since);
+      if (args.until !== undefined) return base.lt("at", args.until);
+      return base;
     };
 
-    const result =
-      claims.orgRole !== "org:admin"
-        ? args.projectId !== undefined && args.keyId !== undefined
-          ? await ctx.db
-              .query("usageEvents")
-              .withIndex("by_org_owner_project_key_at", (q) => {
-                const base = q
-                  .eq("organizationId", org._id)
-                  .eq("ownerUserId", claims.subject)
-                  .eq("projectId", args.projectId!)
-                  .eq("keyId", args.keyId!);
-                if (args.since !== undefined && args.until !== undefined) {
-                  return base.gte("at", args.since).lt("at", args.until);
-                }
-                if (args.since !== undefined) return base.gte("at", args.since);
-                if (args.until !== undefined) return base.lt("at", args.until);
-                return base;
-              })
-              .order("desc")
-              .paginate(paginationOpts)
-          : args.projectId !== undefined
-            ? await ctx.db
-                .query("usageEvents")
-                .withIndex("by_org_owner_project_at", (q) => {
-                  const base = q
-                    .eq("organizationId", org._id)
-                    .eq("ownerUserId", claims.subject)
-                    .eq("projectId", args.projectId!);
-                  if (args.since !== undefined && args.until !== undefined) {
-                    return base.gte("at", args.since).lt("at", args.until);
-                  }
-                  if (args.since !== undefined)
-                    return base.gte("at", args.since);
-                  if (args.until !== undefined)
-                    return base.lt("at", args.until);
-                  return base;
-                })
-                .order("desc")
-                .paginate(paginationOpts)
-            : args.keyId !== undefined
-              ? await ctx.db
-                  .query("usageEvents")
-                  .withIndex("by_org_owner_key_at", (q) => {
-                    const base = q
-                      .eq("organizationId", org._id)
-                      .eq("ownerUserId", claims.subject)
-                      .eq("keyId", args.keyId!);
-                    if (args.since !== undefined && args.until !== undefined) {
-                      return base.gte("at", args.since).lt("at", args.until);
-                    }
-                    if (args.since !== undefined)
-                      return base.gte("at", args.since);
-                    if (args.until !== undefined)
-                      return base.lt("at", args.until);
-                    return base;
-                  })
-                  .order("desc")
-                  .paginate(paginationOpts)
-              : await ctx.db
-                  .query("usageEvents")
-                  .withIndex("by_org_owner_at", (q) => {
-                    const base = q
-                      .eq("organizationId", org._id)
-                      .eq("ownerUserId", claims.subject);
-                    if (args.since !== undefined && args.until !== undefined) {
-                      return base.gte("at", args.since).lt("at", args.until);
-                    }
-                    if (args.since !== undefined)
-                      return base.gte("at", args.since);
-                    if (args.until !== undefined)
-                      return base.lt("at", args.until);
-                    return base;
-                  })
-                  .order("desc")
-                  .paginate(paginationOpts)
-        : args.projectId !== undefined && args.keyId !== undefined
-          ? await ctx.db
-              .query("usageEvents")
-              .withIndex("by_org_project_key_at", (q) => {
-                const base = q
-                  .eq("organizationId", org._id)
-                  .eq("projectId", args.projectId!)
-                  .eq("keyId", args.keyId!);
-                if (args.since !== undefined && args.until !== undefined) {
-                  return base.gte("at", args.since).lt("at", args.until);
-                }
-                if (args.since !== undefined) return base.gte("at", args.since);
-                if (args.until !== undefined) return base.lt("at", args.until);
-                return base;
-              })
-              .order("desc")
-              .paginate(paginationOpts)
-          : args.projectId !== undefined
-            ? await ctx.db
-                .query("usageEvents")
-                .withIndex("by_org_project_at", (q) => {
-                  const base = q
-                    .eq("organizationId", org._id)
-                    .eq("projectId", args.projectId!);
-                  if (args.since !== undefined && args.until !== undefined) {
-                    return base.gte("at", args.since).lt("at", args.until);
-                  }
-                  if (args.since !== undefined)
-                    return base.gte("at", args.since);
-                  if (args.until !== undefined)
-                    return base.lt("at", args.until);
-                  return base;
-                })
-                .order("desc")
-                .paginate(paginationOpts)
-            : args.keyId !== undefined
-              ? await ctx.db
-                  .query("usageEvents")
-                  .withIndex("by_org_key_at", (q) => {
-                    const base = q
-                      .eq("organizationId", org._id)
-                      .eq("keyId", args.keyId!);
-                    if (args.since !== undefined && args.until !== undefined) {
-                      return base.gte("at", args.since).lt("at", args.until);
-                    }
-                    if (args.since !== undefined)
-                      return base.gte("at", args.since);
-                    if (args.until !== undefined)
-                      return base.lt("at", args.until);
-                    return base;
-                  })
-                  .order("desc")
-                  .paginate(paginationOpts)
-              : await ctx.db
-                  .query("usageEvents")
-                  .withIndex("by_org_at", (q) => {
-                    const base = q.eq("organizationId", org._id);
-                    if (args.since !== undefined && args.until !== undefined) {
-                      return base.gte("at", args.since).lt("at", args.until);
-                    }
-                    if (args.since !== undefined)
-                      return base.gte("at", args.since);
-                    if (args.until !== undefined)
-                      return base.lt("at", args.until);
-                    return base;
-                  })
-                  .order("desc")
-                  .paginate(paginationOpts);
-
-    const projectCache = new Map<
-      Id<"projects">,
-      { name: string; slug: string } | null
-    >();
-
-    async function resolveProject(
-      projectId: Id<"projects">,
-    ): Promise<{ name: string; slug: string } | null> {
-      if (projectCache.has(projectId)) {
-        return projectCache.get(projectId) ?? null;
-      }
-      const project = await ctx.db.get(projectId);
-      const view =
-        project === null ? null : { name: project.name, slug: project.slug };
-      projectCache.set(projectId, view);
-      return view;
+    let result;
+    if (!canViewOrgUsage) {
+      result = await ctx.db
+        .query("usageEvents")
+        .withIndex("by_org_owner_at", (q) =>
+          applyTime(
+            q.eq("organizationId", org._id).eq("ownerUserId", claims.subject),
+          ),
+        )
+        .order("desc")
+        .paginate(pagination);
+    } else if (args.memberId !== undefined) {
+      result = await ctx.db
+        .query("usageEvents")
+        .withIndex("by_org_owner_at", (q) =>
+          applyTime(
+            q.eq("organizationId", org._id).eq("ownerUserId", args.memberId),
+          ),
+        )
+        .order("desc")
+        .paginate(pagination);
+    } else if (keyId !== undefined) {
+      result = await ctx.db
+        .query("usageEvents")
+        .withIndex("by_org_key_at", (q) =>
+          applyTime(q.eq("organizationId", org._id).eq("keyId", keyId)),
+        )
+        .order("desc")
+        .paginate(pagination);
+    } else if (projectId !== undefined && projectId !== null) {
+      result = await ctx.db
+        .query("usageEvents")
+        .withIndex("by_org_project_at", (q) =>
+          applyTime(q.eq("organizationId", org._id).eq("projectId", projectId)),
+        )
+        .order("desc")
+        .paginate(pagination);
+    } else if (endpoint !== undefined && method !== undefined) {
+      result = await ctx.db
+        .query("usageEvents")
+        .withIndex("by_org_endpoint_method_at", (q) =>
+          applyTime(
+            q
+              .eq("organizationId", org._id)
+              .eq("endpoint", endpoint)
+              .eq("method", method),
+          ),
+        )
+        .order("desc")
+        .paginate(pagination);
+    } else if (endpoint !== undefined) {
+      result = await ctx.db
+        .query("usageEvents")
+        .withIndex("by_org_endpoint_at", (q) =>
+          applyTime(
+            q.eq("organizationId", org._id).eq("endpoint", endpoint),
+          ),
+        )
+        .order("desc")
+        .paginate(pagination);
+    } else {
+      result = await ctx.db
+        .query("usageEvents")
+        .withIndex("by_org_at", (q) =>
+          applyTime(q.eq("organizationId", org._id)),
+        )
+        .order("desc")
+        .paginate(pagination);
     }
 
     const page: UsageListItem[] = [];
     for (const event of result.page) {
-      const project = await resolveProject(event.projectId);
-      page.push({
-        _id: event._id,
-        projectId: event.projectId,
-        projectName: project?.name ?? null,
-        projectSlug: project?.slug ?? null,
-        endpoint: event.endpoint,
-        method: event.method,
-        credits: event.credits,
-        status: event.status,
-        latencyMs: event.latencyMs,
-        keyId: event.keyId,
-        at: event.at,
-      });
+      if (!canViewOrgUsage && event.ownerUserId !== claims.subject) continue;
+      if (projectId && event.projectId !== projectId) continue;
+      if (args.keyId !== undefined && event.keyId !== args.keyId) continue;
+      if (args.endpoint !== undefined && event.endpoint !== args.endpoint)
+        continue;
+      if (method !== undefined && event.method.toUpperCase() !== method)
+        continue;
+      page.push(await usageView(ctx, event, canViewOrgUsage));
     }
+    return { ...result, access, page };
+  },
+});
 
-    return {
-      ...result,
-      page,
-    };
+/** Deep-linked usage reads return null for missing, cross-org, or colleague rows. */
+export const getForOrgById = query({
+  args: { orgSlug: v.string(), eventId: v.string() },
+  handler: async (ctx, args): Promise<UsageListItem | null> => {
+    const { access, claims, org } = await requireOrgMemberBySlug(
+      ctx,
+      args.orgSlug,
+    );
+    const eventId = ctx.db.normalizeId("usageEvents", args.eventId);
+    if (eventId === null) return null;
+    const event = await ctx.db.get(eventId);
+    if (event === null || event.organizationId !== org._id) return null;
+    if (
+      !access.capabilities.viewOrgUsage &&
+      event.ownerUserId !== claims.subject
+    ) {
+      return null;
+    }
+    return await usageView(ctx, event, access.capabilities.viewOrgUsage);
   },
 });

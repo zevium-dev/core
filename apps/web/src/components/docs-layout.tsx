@@ -57,7 +57,11 @@ export function DocsPage({ title, description, children }: DocsPageProps) {
       <div className="mx-auto max-w-6xl px-4">
         <div className="grid gap-8 py-8 md:grid-cols-[14rem_minmax(0,1fr)]">
           <DocsSidebar />
-          <article className={cn("content-enter min-w-0", PROSE_CLASS)}>
+          <article
+            id="main-content"
+            tabIndex={-1}
+            className={cn("content-enter min-w-0 outline-none", PROSE_CLASS)}
+          >
             <h1 className="mb-2">{title}</h1>
             <p className="lead mb-8">{description}</p>
             {children}
@@ -83,7 +87,7 @@ function DocsSidebar() {
       <div className="md:hidden">
         <Sheet open={open} onOpenChange={setOpen}>
           <SheetTrigger asChild>
-            <Button variant="outline" size="sm" className="gap-2">
+            <Button variant="outline" size="sm" className="h-11 gap-2 md:h-8">
               <Menu className="size-4" />
               Contents
             </Button>
@@ -130,7 +134,7 @@ function DocsNavList({
             onClick={onNavigate}
             aria-current={active ? "page" : undefined}
             className={cn(
-              "rounded-md px-3 py-1.5 text-sm transition-colors duration-[var(--dur-instant)] ease-[var(--ease)]",
+              "rounded-md px-3 py-2.5 text-sm transition-colors duration-[var(--dur-instant)] ease-[var(--ease)] md:py-1.5",
               active
                 ? "bg-accent font-medium text-accent-foreground"
                 : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",

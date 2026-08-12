@@ -1,9 +1,28 @@
 @import "tailwindcss";
-@source "./lib/clerk-theme.ts";
 @import "tw-animate-css";
+@source "./lib/clerk-theme.ts";
 @plugin "@tailwindcss/typography";
 
+/* Hallmark · macrostructure: Marketplace Index · H2 hero knobs: split=copy/lifecycle, alignment=left, demo=semantic · nav: N1b compact · footer: Ft2 inline · enrichment: E6 live lifecycle · tone: precise developer infrastructure · anchor hue: neutral */
+/* Hallmark · pre-emit critique: P5 H5 E5 S5 R4 V4 · genre: modern-minimal · system: DESIGN.md locked stock-shadcn neutral · contrast: pass (40–41) · honest: pass (46) · chrome: pass (47) · tokens: pass (48) · responsive: pass (49) · icons: pass (30) · mobile: pass (34, 49, 50–57) */
+
+/* Clerk's hosted UI mounts after its client bundle resolves. Keep auth routes
+   useful and layout-stable during that network gap, including before hydration. */
+.auth-card-shell:has([data-clerk-component]:not(:empty)) .auth-card-pending {
+  display: none;
+}
+
 @custom-variant dark (&:is(.dark *));
+
+html,
+body {
+  overflow-x: clip;
+}
+
+/* Focus indicators must appear immediately; transition remains for pointer states. */
+*:focus-visible {
+  transition-property: none;
+}
 
 :root {
   --background: oklch(1 0 0);
@@ -178,11 +197,9 @@
 @keyframes content-enter {
   from {
     opacity: 0;
-    transform: translateY(8px);
   }
   to {
     opacity: 1;
-    transform: translateY(0);
   }
 }
 
@@ -262,10 +279,24 @@ html:active-view-transition-type(nav-swap)::view-transition-new(main-content) {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-delay: 0s !important;
+    animation-duration: 0s !important;
+    animation-iteration-count: 1 !important;
+    transition-delay: 0s !important;
+    transition-duration: 0s !important;
+  }
+
   .content-enter,
   ::view-transition-old(root),
   ::view-transition-new(root),
-  ::view-transition-group(*) {
+  ::view-transition-group(*),
+  ::view-transition-image-pair(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
     animation: none !important;
   }
 
@@ -278,6 +309,44 @@ html:active-view-transition-type(nav-swap)::view-transition-new(main-content) {
 
   .animate-pulse {
     animation: none !important;
+  }
+}
+
+/* Keep desktop density. Coarse pointers get WCAG-sized controls and overlay exits. */
+@media (pointer: coarse) {
+  :where(
+    button:not([data-slot="checkbox"]):not([data-slot="switch"]),
+    input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"]),
+    select,
+    textarea,
+    [role="button"]:not([data-slot="checkbox"]):not([data-slot="switch"]),
+    [role="menuitem"],
+    [role="option"],
+    [role="tab"]
+  ) {
+    min-block-size: 2.75rem;
+  }
+
+  :where(
+    button:not([data-slot="checkbox"]):not([data-slot="switch"]),
+    [role="button"]:not([data-slot="checkbox"]):not([data-slot="switch"])
+  ) {
+    min-inline-size: 2.75rem;
+  }
+
+  :where([data-slot="checkbox"], [data-slot="switch"]) {
+    position: relative;
+  }
+
+  .cl-userButtonTrigger {
+    min-block-size: 2.75rem !important;
+    min-inline-size: 2.75rem !important;
+  }
+
+  :where([data-slot="checkbox"], [data-slot="switch"])::after {
+    position: absolute;
+    inset: -0.75rem;
+    content: "";
   }
 }
 

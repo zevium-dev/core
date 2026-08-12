@@ -1,6 +1,7 @@
-import { m, useReducedMotion } from "motion/react";
+import { m } from "motion/react";
 import type { ReactNode } from "react";
 
+import { useHydratedReducedMotion } from "#/hooks/use-hydrated-reduced-motion";
 import { DUR, EASE } from "#/lib/motion";
 import { vtState } from "#/lib/vt";
 import { cn } from "#/lib/utils";
@@ -21,12 +22,12 @@ export function FadeIn({
   className,
   duration = DUR.fast,
 }: FadeInProps) {
-  const reduce = useReducedMotion();
+  const reduce = useHydratedReducedMotion();
   const skip = reduce || vtState.active;
 
   return (
     <m.div
-      className={cn(className)}
+      className={cn("motion-reduce:!opacity-100", className)}
       initial={skip ? false : { opacity: 0 }}
       animate={{ opacity: 1 }}
       transition={{ duration: reduce ? 0 : duration, ease: EASE }}

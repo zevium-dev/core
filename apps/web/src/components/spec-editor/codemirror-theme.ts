@@ -89,8 +89,8 @@ export function createShadcnEditorTheme(): Extension {
   const highlight = HighlightStyle.define([
     { tag: t.propertyName, color: "var(--foreground)" },
     { tag: t.string, color: "var(--primary)" },
-    { tag: t.number, color: "var(--chart-2)" },
-    { tag: t.bool, color: "var(--chart-2)" },
+    { tag: t.number, color: "var(--syntax-number)" },
+    { tag: t.bool, color: "var(--syntax-number)" },
     { tag: t.null, color: "var(--muted-foreground)" },
     { tag: t.keyword, color: "var(--muted-foreground)" },
     { tag: t.punctuation, color: "var(--muted-foreground)" },

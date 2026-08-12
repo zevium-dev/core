@@ -9,6 +9,18 @@ export type OnboardingFlags = {
   hasTopUp: boolean;
 };
 
+export type OnboardingStep = "key" | "topup" | "call";
+
+/** Canonical paid-call sequence after the always-free mock exploration step. */
+export function nextOnboardingStep(
+  flags: OnboardingFlags,
+): OnboardingStep | null {
+  if (!flags.hasKey) return "key";
+  if (!flags.hasTopUp) return "topup";
+  if (!flags.hasCall) return "call";
+  return null;
+}
+
 /**
  * Derive checklist completion from live org state.
  * Key count / call count / wallet balance — never hardcode done:false for top-up.

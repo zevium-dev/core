@@ -17,7 +17,7 @@ export type NumberTickerProps = {
 };
 
 function defaultFormat(n: number, decimals: number): string {
-  return n.toLocaleString(undefined, {
+  return n.toLocaleString("en-US", {
     maximumFractionDigits: decimals,
     minimumFractionDigits: decimals,
   });

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   deriveOnboardingFlags,
   isTopUpDone,
+  nextOnboardingStep,
   shouldShowOnboarding,
 } from "./onboarding";
 
@@ -17,6 +18,23 @@ describe("isTopUpDone", () => {
   it("rejects non-finite", () => {
     expect(isTopUpDone(Number.NaN)).toBe(false);
     expect(isTopUpDone(Number.POSITIVE_INFINITY)).toBe(false);
+  });
+});
+
+describe("nextOnboardingStep", () => {
+  it("keeps key, top-up, live-call order regardless of later flags", () => {
+    expect(
+      nextOnboardingStep({ hasKey: false, hasTopUp: true, hasCall: true }),
+    ).toBe("key");
+    expect(
+      nextOnboardingStep({ hasKey: true, hasTopUp: false, hasCall: true }),
+    ).toBe("topup");
+    expect(
+      nextOnboardingStep({ hasKey: true, hasTopUp: true, hasCall: false }),
+    ).toBe("call");
+    expect(
+      nextOnboardingStep({ hasKey: true, hasTopUp: true, hasCall: true }),
+    ).toBeNull();
   });
 });
 

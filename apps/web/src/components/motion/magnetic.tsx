@@ -1,7 +1,8 @@
-import { m, useMotionValue, useReducedMotion, useSpring } from "motion/react";
+import { m, useMotionValue, useSpring } from "motion/react";
 import { useCallback, useRef, type PointerEvent, type ReactNode } from "react";
 
 import { SPRING } from "#/lib/motion";
+import { useHydratedReducedMotion } from "#/hooks/use-hydrated-reduced-motion";
 import { cn } from "#/lib/utils";
 
 type MagneticProps = {
@@ -20,7 +21,7 @@ export function Magnetic({
   className,
   strength = 0.3,
 }: MagneticProps) {
-  const reduce = useReducedMotion();
+  const reduce = useHydratedReducedMotion();
   const ref = useRef<HTMLDivElement>(null);
   const rawX = useMotionValue(0);
   const rawY = useMotionValue(0);

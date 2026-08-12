@@ -13,7 +13,9 @@ import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import {
   getOrgByClerkId,
+  requireActiveOrg,
   requireIdentity,
+  requireOrgAdmin,
   requireOrgMemberBySlug,
 } from "./lib/auth";
 import { reconcilePaymentPublisherClawback } from "./lib/publisherLedger";
@@ -146,27 +148,6 @@ function stringId(
     return value.id;
   }
   return null;
-}
-
-function activeClerkOrgId(identity: unknown): string {
-  if (identity === null || typeof identity !== "object") {
-    throw new Error("Not authenticated");
-  }
-  const raw = identity as Record<string, unknown>;
-  const orgId =
-    typeof raw.org_id === "string"
-      ? raw.org_id
-      : typeof raw.orgId === "string"
-        ? raw.orgId
-        : undefined;
-  if (orgId === undefined || orgId.trim() === "") {
-    throw new Error("Active organization required");
-  }
-  return orgId;
-}
-
-async function requireActiveClerkOrgInAction(ctx: ActionCtx): Promise<string> {
-  return activeClerkOrgId(await ctx.auth.getUserIdentity());
 }
 
 export type StripeCheckoutCreator = {
@@ -339,7 +320,12 @@ export const createCheckout = action({
     ctx,
     args,
   ): Promise<{ url: string; checkoutIntentId: Id<"checkoutIntents"> }> => {
-    const clerkOrgId = await requireActiveClerkOrgInAction(ctx);
+    const claims = await requireIdentity(ctx);
+    requireOrgAdmin(claims);
+    const clerkOrgId = claims.orgId;
+    if (clerkOrgId === undefined) {
+      throw new Error("Active organization required");
+    }
     const stripePriceId = stripePriceForPack(args.packId);
     const prepared = await ctx.runMutation(
       internal.billing.prepareCheckoutIntent,
@@ -1223,46 +1209,44 @@ export const processStripeEvent = internalAction({
 export const getBillingState = query({
   args: { checkoutSessionId: v.optional(v.string()) },
   handler: async (ctx, args) => {
-    const claims = await requireIdentity(ctx);
-    if (claims.orgId === undefined)
-      throw new Error("Active organization required");
-    const organization = await getOrgByClerkId(ctx, claims.orgId);
-    if (organization === null)
-      throw new Error("Active organization is not provisioned");
+    const { access, org: organization } = await requireActiveOrg(ctx);
+    const canManageBilling = access.capabilities.manageBilling;
     const wallet = await ctx.db
       .query("wallets")
       .withIndex("by_organization", (q) =>
         q.eq("organizationId", organization._id),
       )
       .unique();
-    const payments = await ctx.db
-      .query("payments")
-      .withIndex("by_organization", (q) =>
-        q.eq("organizationId", organization._id),
-      )
-      .order("desc")
-      .take(50);
-    let checkout: {
-      id: Id<"checkoutIntents">;
-      status: Doc<"checkoutIntents">["status"];
-    } | null = null;
-    if (args.checkoutSessionId !== undefined) {
+    const payments = canManageBilling
+      ? await ctx.db
+          .query("payments")
+          .withIndex("by_organization", (q) =>
+            q.eq("organizationId", organization._id),
+          )
+          .order("desc")
+          .take(50)
+      : [];
+    let checkout: { status: Doc<"checkoutIntents">["status"] } | null = null;
+    if (canManageBilling && args.checkoutSessionId !== undefined) {
       const intent = await ctx.db
         .query("checkoutIntents")
         .withIndex("by_checkout_session", (q) =>
-          q.eq("stripeCheckoutSessionId", args.checkoutSessionId!),
+          q.eq(
+            "stripeCheckoutSessionId",
+            args.checkoutSessionId as string,
+          ),
         )
         .unique();
       if (intent !== null && intent.organizationId === organization._id) {
-        checkout = { id: intent._id, status: intent.status };
+        checkout = { status: intent.status };
       }
     }
     return {
+      access,
       wallet: {
         balance: wallet?.balance ?? 0,
-        sequence: wallet?.sequence ?? 0,
       },
-      packs: [...CREDIT_PACKS],
+      packs: canManageBilling ? [...CREDIT_PACKS] : [],
       checkout,
       payments: payments.map((payment) => ({
         id: payment._id,
@@ -1287,41 +1271,78 @@ function endOfUtcMonth(now: number): number {
   return Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1);
 }
 
+/** Linear month-end projection from elapsed cycle usage. */
+export function projectedCycleCredits(
+  totalCredits: number,
+  cycleStart: number,
+  cycleEnd: number,
+  asOf: number,
+): number {
+  if (totalCredits <= 0) return 0;
+  const duration = cycleEnd - cycleStart;
+  const elapsed = Math.min(Math.max(asOf - cycleStart, 1), duration);
+  if (duration <= 0) return totalCredits;
+  return Math.max(
+    totalCredits,
+    Math.round((totalCredits * duration) / elapsed),
+  );
+}
+
 export const cycleBreakdown = query({
   args: { orgSlug: v.string() },
   handler: async (ctx, args) => {
-    const { claims, org } = await requireOrgMemberBySlug(ctx, args.orgSlug);
-    const cycleStart = startOfUtcMonth(Date.now());
-    const cycleEnd = endOfUtcMonth(Date.now());
-    const scanned =
-      claims.orgRole === "org:admin"
-        ? await ctx.db
-            .query("usageEvents")
-            .withIndex("by_org_at", (q) =>
-              q
-                .eq("organizationId", org._id)
-                .gte("at", cycleStart)
-                .lt("at", cycleEnd),
-            )
-            .take(BILLING_CYCLE_SCAN_CAP + 1)
-        : await ctx.db
-            .query("usageEvents")
-            .withIndex("by_org_owner_at", (q) =>
-              q
-                .eq("organizationId", org._id)
-                .eq("ownerUserId", claims.subject)
-                .gte("at", cycleStart)
-                .lt("at", cycleEnd),
-            )
-            .take(BILLING_CYCLE_SCAN_CAP + 1);
-    const truncated = scanned.length > BILLING_CYCLE_SCAN_CAP;
-    const events = scanned.slice(0, BILLING_CYCLE_SCAN_CAP);
+    const { access, claims, org } = await requireOrgMemberBySlug(
+      ctx,
+      args.orgSlug,
+    );
+    const canViewOrgUsage = access.capabilities.viewOrgUsage;
+    const asOf = Date.now();
+    const cycleStart = startOfUtcMonth(asOf);
+    const cycleEnd = endOfUtcMonth(asOf);
+    const scanned = canViewOrgUsage
+      ? await ctx.db
+          .query("usageEvents")
+          .withIndex("by_org_at", (q) =>
+            q
+              .eq("organizationId", org._id)
+              .gte("at", cycleStart)
+              .lt("at", cycleEnd),
+          )
+          .take(BILLING_CYCLE_SCAN_CAP + 1)
+      : await ctx.db
+          .query("usageEvents")
+          .withIndex("by_org_owner_at", (q) =>
+            q
+              .eq("organizationId", org._id)
+              .eq("ownerUserId", claims.subject)
+              .gte("at", cycleStart)
+              .lt("at", cycleEnd),
+          )
+          .take(BILLING_CYCLE_SCAN_CAP + 1);
+    const scanTruncated = scanned.length > BILLING_CYCLE_SCAN_CAP;
+    const visibleEvents = scanned.slice(0, BILLING_CYCLE_SCAN_CAP);
     const byKey = new Map<string, { calls: number; credits: number }>();
+    const byMember = new Map<string, { calls: number; credits: number }>();
     const byProject = new Map<
       Id<"projects">,
       { calls: number; credits: number }
     >();
-    for (const event of events) {
+    const byEndpoint = new Map<
+      string,
+      {
+        projectId: Id<"projects">;
+        method: string;
+        endpoint: string;
+        calls: number;
+        credits: number;
+      }
+    >();
+    const keySettings = await ctx.db
+      .query("keySettings")
+      .withIndex("by_org", (q) => q.eq("clerkOrgId", org.clerkOrgId))
+      .collect();
+    const keyMetadata = new Map(keySettings.map((row) => [row.keyId, row]));
+    for (const event of visibleEvents) {
       const key = byKey.get(event.keyId) ?? { calls: 0, credits: 0 };
       key.calls += 1;
       key.credits += event.credits;
@@ -1333,36 +1354,154 @@ export const cycleBreakdown = query({
       project.calls += 1;
       project.credits += event.credits;
       byProject.set(event.projectId, project);
+
+      const ownerUserId =
+        event.ownerUserId ?? keyMetadata.get(event.keyId)?.ownerUserId;
+      if (canViewOrgUsage) {
+        const memberKey = ownerUserId ?? "unattributed";
+        const member = byMember.get(memberKey) ?? { calls: 0, credits: 0 };
+        member.calls += 1;
+        member.credits += event.credits;
+        byMember.set(memberKey, member);
+      }
+
+      const endpointKey = `${event.projectId}\u0000${event.method}\u0000${event.endpoint}`;
+      const endpoint = byEndpoint.get(endpointKey) ?? {
+        projectId: event.projectId,
+        method: event.method,
+        endpoint: event.endpoint,
+        calls: 0,
+        credits: 0,
+      };
+      endpoint.calls += 1;
+      endpoint.credits += event.credits;
+      byEndpoint.set(endpointKey, endpoint);
     }
-    const projects = await Promise.all(
-      [...byProject.entries()].map(async ([projectId, row]) => {
-        const project = await ctx.db.get(projectId);
-        return {
+    const projectDocs = new Map<Id<"projects">, Doc<"projects"> | null>();
+    await Promise.all(
+      [...byProject.keys()].map(async (projectId) => {
+        projectDocs.set(projectId, await ctx.db.get(projectId));
+      }),
+    );
+    const projectRefs = new Map<Id<"projects">, string | null>();
+    await Promise.all(
+      [...byProject.keys()].map(async (projectId) => {
+        const project = projectDocs.get(projectId);
+        if (project === null || project === undefined) {
+          projectRefs.set(projectId, null);
+          return;
+        }
+        const publisher = await ctx.db.get(project.organizationId);
+        projectRefs.set(
           projectId,
-          name: project?.name ?? "Unknown project",
-          slug: project?.slug ?? "unknown",
+          publisher?.publicHandle
+            ? `${publisher.publicHandle}/${project.slug}`
+            : null,
+        );
+      }),
+    );
+    const projects = [...byProject.entries()].map(([projectId, row]) => {
+      const project = projectDocs.get(projectId);
+      return {
+        projectRef: projectRefs.get(projectId) ?? null,
+        name: project?.name ?? "Deleted API",
+        slug: project?.slug ?? "deleted",
+        ...row,
+      };
+    });
+    const members = await Promise.all(
+      [...byMember.entries()].map(async ([userId, row]) => {
+        const user =
+          userId === "unattributed"
+            ? null
+            : await ctx.db
+                .query("users")
+                .withIndex("by_clerk_user", (q) => q.eq("clerkUserId", userId))
+                .unique();
+        return {
+          memberId: userId === "unattributed" ? null : userId,
+          name: user?.name ?? "Unattributed member",
           ...row,
         };
       }),
     );
+    const totalCredits = visibleEvents.reduce(
+      (total, event) => total + event.credits,
+      0,
+    );
+    const dimensionLimit = 100;
+    const sortedKeys = [...byKey.entries()]
+      .map(([keyId, row]) => {
+        const metadata = keyMetadata.get(keyId);
+        return {
+          keyId: canViewOrgUsage
+            ? keyId
+            : keyId.length > 4
+              ? `••••${keyId.slice(-4)}`
+              : "••••",
+          keyName: metadata?.keyName ?? "Unnamed key",
+          memberId: canViewOrgUsage ? (metadata?.ownerUserId ?? null) : null,
+          ...row,
+        };
+      })
+      .sort(
+        (left, right) =>
+          right.credits - left.credits || left.keyId.localeCompare(right.keyId),
+      );
+    const sortedProjects = projects.sort(
+      (left, right) =>
+        right.credits - left.credits || left.slug.localeCompare(right.slug),
+    );
+    const sortedEndpoints = [...byEndpoint.values()]
+      .map((row) => {
+        const project = projectDocs.get(row.projectId);
+        return {
+          projectRef: projectRefs.get(row.projectId) ?? null,
+          projectName: project?.name ?? "Deleted API",
+          projectSlug: project?.slug ?? "deleted",
+          method: row.method,
+          endpoint: row.endpoint,
+          calls: row.calls,
+          credits: row.credits,
+        };
+      })
+      .sort(
+        (left, right) =>
+          right.credits - left.credits ||
+          left.endpoint.localeCompare(right.endpoint),
+      );
+    const sortedMembers = members.sort(
+      (left, right) =>
+        right.credits - left.credits || left.name.localeCompare(right.name),
+    );
     return {
+      access,
+      scope: canViewOrgUsage ? ("organization" as const) : ("member" as const),
       cycleStart,
       cycleEnd,
-      truncated,
-      scanCap: BILLING_CYCLE_SCAN_CAP,
-      totalCalls: events.length,
-      totalCredits: events.reduce((total, event) => total + event.credits, 0),
-      byKey: [...byKey.entries()]
-        .map(([keyId, row]) => ({ keyId, ...row }))
-        .sort(
-          (left, right) =>
-            right.credits - left.credits ||
-            left.keyId.localeCompare(right.keyId),
-        ),
-      byProject: projects.sort(
-        (left, right) =>
-          right.credits - left.credits || left.slug.localeCompare(right.slug),
+      asOf,
+      totalCalls: visibleEvents.length,
+      totalCredits,
+      ownCalls: canViewOrgUsage ? null : visibleEvents.length,
+      ownCredits: canViewOrgUsage ? null : totalCredits,
+      projectedCredits: projectedCycleCredits(
+        totalCredits,
+        cycleStart,
+        cycleEnd,
+        asOf,
       ),
+      byKey: sortedKeys.slice(0, dimensionLimit),
+      byProject: sortedProjects.slice(0, dimensionLimit),
+      byEndpoint: sortedEndpoints.slice(0, dimensionLimit),
+      byMember: sortedMembers.slice(0, dimensionLimit),
+      breakdownTruncated: {
+        members: sortedMembers.length > dimensionLimit,
+        keys: sortedKeys.length > dimensionLimit,
+        projects: sortedProjects.length > dimensionLimit,
+        endpoints: sortedEndpoints.length > dimensionLimit,
+      },
+      scanTruncated,
+      scanCap: BILLING_CYCLE_SCAN_CAP,
     };
   },
 });

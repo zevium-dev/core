@@ -82,6 +82,8 @@ const verifiedKeyRotationProjectionValidator = v.object({
 export type KeySettingView = {
   _id: Id<"keySettings">;
   keyId: string;
+  keyName?: string;
+  ownerUserId?: string;
   budgetId?: string;
   budgetRevision?: number;
   /** Absent = unlimited. */
@@ -111,6 +113,8 @@ function toView(doc: Doc<"keySettings">): KeySettingView {
   return {
     _id: doc._id,
     keyId: doc.keyId,
+    keyName: doc.keyName,
+    ownerUserId: doc.ownerUserId,
     budgetId: doc.budgetId,
     budgetRevision: doc.budgetRevision,
     monthlyCapCredits: doc.monthlyCapCredits,
@@ -250,6 +254,8 @@ type UpsertPatch = {
   disabled?: boolean;
   rotatedFromKeyId?: string;
   graceUntil?: number;
+  keyName?: string;
+  ownerUserId?: string;
   rotationRequiredAt?: number;
   lifecycle?: "active" | "grace" | "disabled" | "revoked";
 };
@@ -383,6 +389,36 @@ export const registerVerified = mutation({
   },
 });
 
+/**
+ * Stamp display attribution after Clerk creates or rotates a key. Identity
+ * supplies owner + organization; callers cannot assign metadata to a member.
+ */
+export const registerOwnedKey = mutation({
+  args: { keyId: v.string(), keyName: v.string() },
+  handler: async (ctx, args): Promise<KeySettingView> => {
+    const claims = await requireIdentity(ctx);
+    const { clerkOrgId } = await requireOrgByClerkId(ctx);
+    const keyId = args.keyId.trim();
+    const keyName = args.keyName.trim();
+    if (keyId.length === 0) throw new Error("keyId is required");
+    if (keyName.length === 0 || keyName.length > 64) {
+      throw new Error("Key name must be 1–64 characters");
+    }
+    const existing = await getOwnedRow(ctx, clerkOrgId, keyId);
+    const doc =
+      existing !== null
+        ? await patchSetting(ctx, existing._id, {
+            keyName,
+            ownerUserId: claims.subject,
+          })
+        : await insertSetting(ctx, clerkOrgId, keyId, {
+            keyName,
+            ownerUserId: claims.subject,
+          });
+    return toView(doc);
+  },
+});
+
 /** Set or clear (null) the monthly credit cap for a key. */
 export const setCap = mutation({
   args: {
@@ -391,6 +427,8 @@ export const setCap = mutation({
     monthlyCapCredits: v.union(v.number(), v.null()),
   },
   handler: async (ctx, args): Promise<KeySettingView> => {
+    const claims = await requireIdentity(ctx);
+    requireOrgAdmin(claims);
     const { clerkOrgId } = await requireOrgByClerkId(ctx);
     if (args.keyId.trim().length === 0) {
       throw new Error("keyId is required");
@@ -428,6 +466,8 @@ export const setDisabled = mutation({
     disabled: v.boolean(),
   },
   handler: async (ctx, args): Promise<KeySettingView> => {
+    const claims = await requireIdentity(ctx);
+    requireOrgAdmin(claims);
     const { clerkOrgId } = await requireOrgByClerkId(ctx);
     if (args.keyId.trim().length === 0) {
       throw new Error("keyId is required");
@@ -678,6 +718,10 @@ async function insertSetting(
       ? { rotatedFromKeyId: patch.rotatedFromKeyId }
       : {}),
     ...(patch.graceUntil !== undefined ? { graceUntil: patch.graceUntil } : {}),
+    ...(patch.keyName !== undefined ? { keyName: patch.keyName } : {}),
+    ...(patch.ownerUserId !== undefined
+      ? { ownerUserId: patch.ownerUserId }
+      : {}),
   });
   const created = await ctx.db.get(id);
   if (created === null) throw new Error("Failed to read created key setting");
