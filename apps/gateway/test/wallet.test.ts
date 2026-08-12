@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import { evictDurableObject } from "cloudflare:test";
 import { afterEach, describe, expect, it } from "vitest";
+import { MAX_USAGE_INGEST_EVENTS } from "@zevium/shared";
 import {
   __setTestGrantsFetcher,
   __setTestUsageMutation,
@@ -329,7 +330,16 @@ describe("WalletDO unit", () => {
 
   it("dead-letters terminal financial rejects and preserves retryable rejects", async () => {
     const stub = walletStub("unit-terminal-dead-letter");
-    await stub.grant("g1", 20);
+    __setTestGrantsFetcher(async () => ({
+      wallet: {
+        clerkOrgId: "unit-terminal-dead-letter",
+        balance: 20,
+        sequence: 3,
+      },
+      keySettings: [],
+    }));
+    await stub.syncGrants("unit-terminal-dead-letter", 100_000);
+    __setTestGrantsFetcher(null);
     const usage = {
       organizationId: "org_publisher",
       consumerClerkOrgId: "unit-terminal-dead-letter",
@@ -362,7 +372,7 @@ describe("WalletDO unit", () => {
       ),
       wallet: {
         clerkOrgId: "unit-terminal-dead-letter",
-        balance: 10,
+        balance: 20,
         sequence: 3,
       },
     }));
@@ -377,6 +387,10 @@ describe("WalletDO unit", () => {
     expect(state.pendingSettlements).toEqual([
       expect.objectContaining({ settlementId: "settle:r-retry" }),
     ]);
+    // Same-sequence authoritative response restores exactly the terminal
+    // rejection while retaining the retryable settlement's local debit.
+    expect(state.balance).toBe(10);
+    expect(state.available).toBe(10);
   });
 
   it("drains more than 500 settlements in server-capped chunks", async () => {
@@ -422,8 +436,8 @@ describe("WalletDO unit", () => {
     const state = await stub.getState();
     expect(state.pendingSettlements).toHaveLength(0);
     expect(batchSizes.reduce((sum, size) => sum + size, 0)).toBe(count);
-    expect(Math.max(...batchSizes)).toBe(25);
-    expect(batchSizes).toHaveLength(21);
+    expect(Math.max(...batchSizes)).toBe(MAX_USAGE_INGEST_EVENTS);
+    expect(batchSizes).toHaveLength(Math.ceil(count / MAX_USAGE_INGEST_EVENTS));
   });
 
   it("reconciles a newer checkpoint without discarding holds or pending settlement", async () => {

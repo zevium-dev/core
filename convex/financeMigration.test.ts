@@ -2,7 +2,6 @@
 import { convexTest } from "convex-test";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { api, internal } from "./_generated/api";
-import { publisherEarningSplit } from "./accounting";
 import schema from "./schema";
 
 const modules = import.meta.glob("./**/*.ts");
@@ -16,7 +15,7 @@ describe("staged finance migration", () => {
     process.env.ADMIN_USER_IDS = "migration_admin";
     process.env.STRIPE_TRANSFER_CORRELATION_SECRET =
       "migration-transfer-secret-32-bytes";
-    process.env.STRIPE_PLATFORM_ACCOUNT_ID = "acct_platform_migration";
+    process.env.STRIPE_PLATFORM_ACCOUNT_ID = "acct_platformmigration";
   });
 
   afterEach(() => {
@@ -30,6 +29,74 @@ describe("staged finance migration", () => {
     if (priorPlatform === undefined)
       delete process.env.STRIPE_PLATFORM_ACCOUNT_ID;
     else process.env.STRIPE_PLATFORM_ACCOUNT_ID = priorPlatform;
+  });
+
+  it("refuses to fence a half-processed Stripe workflow", async () => {
+    const t = convexTest(schema, modules);
+    await t.run(async (ctx) => {
+      await ctx.db.insert("paymentEvents", {
+        stripeEventId: "evt_migration_inflight",
+        stripeAccount: "acct_platformmigration",
+        eventType: "checkout.session.completed",
+        objectId: "cs_migration_inflight",
+        status: "processing",
+        attempts: 1,
+        deliveries: 1,
+        receivedAt: 1,
+        leaseExpiresAt: Date.now() + 60_000,
+      });
+    });
+    const admin = t.withIdentity({ subject: "migration_admin" } as {
+      subject: string;
+    });
+    await expect(
+      admin.mutation(api.financeMigration.start, {}),
+    ).rejects.toThrow("must be drained before finance migration");
+    expect(
+      await t.run(async (ctx) =>
+        ctx.db.query("financialMigrationJobs").collect(),
+      ),
+    ).toEqual([]);
+  });
+
+  it("verifies an empty legacy deployment without manufacturing finance rows", async () => {
+    const t = convexTest(schema, modules);
+    const admin = t.withIdentity({ subject: "migration_admin" } as {
+      subject: string;
+    });
+    const jobId = await admin.mutation(api.financeMigration.start, {});
+    for (let index = 0; index < 100; index += 1) {
+      const status = await admin.query(api.financeMigration.status, {});
+      if (status?.status === "verified") break;
+      if (status?.status === "failed") {
+        throw new Error(status.lastError ?? "empty migration failed");
+      }
+      await t.mutation(internal.financeMigration.runChunk, { jobId });
+    }
+    const result = await t.run(async (ctx) => ({
+      job: await ctx.db.get(jobId),
+      wallets: await ctx.db.query("walletFundingStates").collect(),
+      lots: await ctx.db.query("walletFundingLots").collect(),
+      publishers: await ctx.db.query("publisherBalances").collect(),
+      exposures: await ctx.db.query("paymentExposures").collect(),
+      audits: await ctx.db
+        .query("financialMigrationAudits")
+        .withIndex("by_job_created", (q) => q.eq("migrationJobId", jobId))
+        .collect(),
+    }));
+    expect(result.job).toMatchObject({
+      status: "verified",
+      phase: "complete",
+      rowsWritten: 0,
+    });
+    expect(result.wallets).toHaveLength(0);
+    expect(result.lots).toHaveLength(0);
+    expect(result.publishers).toHaveLength(0);
+    expect(result.exposures).toHaveLength(0);
+    expect(result.audits.at(-1)).toMatchObject({
+      phase: "conservation",
+      result: "verified",
+    });
   });
 
   it("resumes legacy production-shaped rows and verifies conservation", async () => {
@@ -143,20 +210,19 @@ describe("staged finance migration", () => {
         });
       }
 
-      const split = publisherEarningSplit(600);
       const earningId = await ctx.db.insert("publisherEarnings", {
         publisherOrganizationId: publisherId,
         consumerOrganizationId: consumerId,
         projectId,
         usageSettlementRefId: "settle:legacy",
-        grossCredits: split.grossCredits,
-        platformFeeAtoms: split.platformFeeAtoms,
-        publisherNetAtoms: split.publisherNetAtoms,
-        platformFeeCredits: split.platformFeeCredits,
-        netCredits: split.publisherNetCredits,
+        grossCredits: 600,
+        platformFeeAtoms: 300_000,
+        publisherNetAtoms: 5_700_000,
+        platformFeeCredits: 30,
+        netCredits: 570,
         clawedBackGrossCredits: 100,
         clawedBackAtoms: 950_000,
-        releasedAtoms: split.publisherNetAtoms - 950_000,
+        releasedAtoms: 4_750_000,
         availableAt: 1,
         status: "transferred",
         createdAt: 3,
@@ -268,9 +334,63 @@ describe("staged finance migration", () => {
       await t.mutation(internal.financeMigration.runChunk, { jobId });
     }
     expect(await admin.mutation(api.financeMigration.start, {})).toBe(jobId);
-    for (let index = 0; index < 100; index += 1) {
+    await expect(
+      t.mutation(internal.wallets.applyAdminAdjustment, {
+        organizationId: seeded.publisherId,
+        amount: 1,
+        refId: "admin:migration:concurrent",
+      }),
+    ).rejects.toThrow("Finance migration is fenced");
+
+    for (let index = 0; index < 500; index += 1) {
+      const status = await admin.query(api.financeMigration.status, {});
+      if (status?.status === "failed") break;
+      await t.mutation(internal.financeMigration.runChunk, { jobId });
+    }
+    const repair = await t.run(async (ctx) => {
+      const job = await ctx.db.get(jobId);
+      const transfer = await ctx.db.get(seeded.transferId);
+      return { job, transfer };
+    });
+    expect(repair.job).toMatchObject({
+      status: "failed",
+      phase: "conservation",
+    });
+    expect(repair.transfer).toMatchObject({
+      correlationState: "provider_repair_required",
+      providerCreateMetadataShape: "publisher_only",
+      reversedAmount: 2,
+    });
+    expect(repair.transfer?.providerMetadataVerifiedAt).toBeUndefined();
+    if (
+      repair.transfer?.correlationNonce === undefined ||
+      repair.transfer.correlationHmac === undefined ||
+      repair.transfer.platformAccountId === undefined
+    ) {
+      throw new Error("migration correlation repair fields missing");
+    }
+    await t.mutation(
+      internal.payouts.verifyLegacyStripeTransferMetadataRepair,
+      {
+        transferId: seeded.transferId,
+        stripeTransferId: "tr_legacy",
+        amount: 5,
+        amountReversed: 2,
+        currency: "usd",
+        destination: "acct_legacy_publisher",
+        platformAccountId: repair.transfer.platformAccountId,
+        correlationNonce: repair.transfer.correlationNonce,
+        correlationHmac: repair.transfer.correlationHmac,
+        metadataRepairVersion: 1,
+      },
+    );
+    await admin.mutation(api.financeMigration.start, {});
+    for (let index = 0; index < 500; index += 1) {
       const status = await admin.query(api.financeMigration.status, {});
       if (status?.status === "verified") break;
+      if (status?.status === "failed") {
+        throw new Error(status.lastError ?? "migration failed after repair");
+      }
       await t.mutation(internal.financeMigration.runChunk, { jobId });
     }
     await t.mutation(internal.billing.applyRefundProjection, {
@@ -278,6 +398,7 @@ describe("staged finance migration", () => {
       stripeChargeId: "ch_legacy",
       refundAmount: 200,
       totalRefundedAmount: 200,
+      status: "succeeded",
     });
 
     const result = await t.run(async (ctx) => ({
@@ -289,6 +410,13 @@ describe("staged finance migration", () => {
         .withIndex("by_wallet", (q) => q.eq("walletId", seeded.walletId))
         .unique(),
       lots: await ctx.db.query("walletFundingLots").collect(),
+      entries: await ctx.db
+        .query("walletEntries")
+        .withIndex("by_wallet_sequence", (q) =>
+          q.eq("walletId", seeded.walletId),
+        )
+        .collect(),
+      components: await ctx.db.query("walletFundingLotComponents").collect(),
       allocations: await ctx.db.query("walletFundingAllocations").collect(),
       reversals: await ctx.db.query("walletFundingReversals").collect(),
       clawbacks: await ctx.db.query("publisherClawbacks").collect(),
@@ -347,9 +475,46 @@ describe("staged finance migration", () => {
     });
     expect(result.transfer).toMatchObject({
       reversedAmount: 2,
-      platformAccountId: "acct_platform_migration",
+      platformAccountId: "acct_platformmigration",
       correlationNonce: expect.stringMatching(/^[0-9a-f]{64}$/),
       correlationHmac: expect.stringMatching(/^[0-9a-f]{64}$/),
+      correlationState: "provider_verified",
+      metadataRepairVersion: 1,
+      providerCreateMetadataShape: "publisher_only",
+      providerMetadataVerifiedAt: expect.any(Number),
+    });
+    const ledgerBalance = result.entries.reduce(
+      (sum, entry) => sum + entry.amount,
+      0,
+    );
+    const rootGranted = result.lots
+      .filter((lot) => lot.sourceKind !== "compaction")
+      .reduce((sum, lot) => sum + lot.grantedCredits, 0);
+    const lotAvailable = result.lots.reduce(
+      (sum, lot) => sum + lot.availableCredits,
+      0,
+    );
+    const lotAllocated = result.lots.reduce(
+      (sum, lot) => sum + lot.allocatedCredits,
+      0,
+    );
+    const lotReversed = result.lots.reduce(
+      (sum, lot) => sum + lot.reversedCredits,
+      0,
+    );
+    expect(result.components).toHaveLength(0);
+    expect({
+      ledgerBalance,
+      rootGranted,
+      lotAvailable,
+      lotAllocated,
+      lotReversed,
+    }).toEqual({
+      ledgerBalance: 300,
+      rootGranted: 1_100,
+      lotAvailable: 300,
+      lotAllocated: 700,
+      lotReversed: 100,
     });
     expect(result.audits.some((audit) => audit.result === "verified")).toBe(
       true,

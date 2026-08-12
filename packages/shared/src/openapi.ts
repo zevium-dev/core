@@ -3,7 +3,7 @@
  * Spec is source of truth for upstream URL, routes, and x-zevium-* pricing.
  */
 
-import type { EndpointPricing } from "./pricing.js";
+import { MAX_ENDPOINT_COST_CREDITS, type EndpointPricing } from "./pricing.js";
 
 export type HttpMethod =
   "get" | "post" | "put" | "patch" | "delete" | "options" | "head" | "trace";
@@ -187,6 +187,10 @@ export function extractPricing(op: OpenApiOperation): EndpointPricing {
     );
   } else if (costRaw < 0) {
     throw new Error(`x-zevium-cost must be non-negative (got ${costRaw})`);
+  } else if (costRaw > MAX_ENDPOINT_COST_CREDITS) {
+    throw new Error(
+      `x-zevium-cost must be at most ${MAX_ENDPOINT_COST_CREDITS}`,
+    );
   } else {
     cost = costRaw;
   }

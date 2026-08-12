@@ -1,28 +1,5 @@
 /** Hard server and gateway cap for one financial settlement transaction. */
-export const MAX_USAGE_INGEST_EVENTS = 25;
-
-export type ReservationProofPayload = {
-  consumerClerkOrgId: string;
-  reservationId: string;
-  credits: number;
-  checkpointSequence: number;
-  authorizedBalance: number;
-  reservedAt: number;
-  keyId: string;
-};
-
-function proofMessage(payload: ReservationProofPayload): string {
-  return [
-    "zevium-reservation-v1",
-    payload.consumerClerkOrgId,
-    payload.reservationId,
-    String(payload.credits),
-    String(payload.checkpointSequence),
-    String(payload.authorizedBalance),
-    String(payload.reservedAt),
-    payload.keyId,
-  ].join("\n");
-}
+export const MAX_USAGE_INGEST_EVENTS = 100;
 
 function toHex(bytes: ArrayBuffer): string {
   return [...new Uint8Array(bytes)]
@@ -40,30 +17,6 @@ async function hmac(secret: string, message: string): Promise<string> {
     ["sign"],
   );
   return toHex(await crypto.subtle.sign("HMAC", key, encoder.encode(message)));
-}
-
-export async function signReservationProof(
-  secret: string,
-  payload: ReservationProofPayload,
-): Promise<string> {
-  if (secret.length < 32) {
-    throw new Error("Reservation proof secret must contain at least 32 bytes");
-  }
-  return await hmac(secret, proofMessage(payload));
-}
-
-export async function verifyReservationProof(
-  secret: string,
-  payload: ReservationProofPayload,
-  signature: string,
-): Promise<boolean> {
-  if (secret.length < 32 || !/^[0-9a-f]{64}$/i.test(signature)) return false;
-  const expected = await hmac(secret, proofMessage(payload));
-  let mismatch = expected.length ^ signature.length;
-  for (let index = 0; index < expected.length; index += 1) {
-    mismatch |= expected.charCodeAt(index) ^ (signature.charCodeAt(index) || 0);
-  }
-  return mismatch === 0;
 }
 
 export type TransferCorrelationPayload = {

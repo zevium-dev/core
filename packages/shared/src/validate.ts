@@ -1,3 +1,5 @@
+import { MAX_ENDPOINT_COST_CREDITS } from "./pricing.js";
+
 /** Kebab-case slug: lowercase alnum segments joined by single hyphens. */
 const SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
@@ -162,6 +164,12 @@ export function collectOpenApiSpecIssues(specText: string): SpecIssue[] {
           level: "error",
           path: `$.paths["${pathKey}"].${lower}.x-zevium-cost`,
           message: "x-zevium-cost must be a number ≥ 0",
+        });
+      } else if (cost > MAX_ENDPOINT_COST_CREDITS) {
+        issues.push({
+          level: "error",
+          path: `$.paths["${pathKey}"].${lower}.x-zevium-cost`,
+          message: `x-zevium-cost must be at most ${MAX_ENDPOINT_COST_CREDITS}`,
         });
       }
     }

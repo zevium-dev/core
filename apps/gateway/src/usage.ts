@@ -21,8 +21,10 @@ export type UsageEvent = {
   pathTemplate: string;
   cost: number;
   status: number;
-  /** settled | refunded | blocked | free */
-  outcome: "settled" | "refunded" | "blocked" | "free";
+  /** settled | ambiguous | refunded | blocked | free */
+  outcome: "settled" | "ambiguous" | "refunded" | "blocked" | "free";
+  ambiguous?: boolean;
+  publisherIdempotencyKey?: string;
   latencyMs: number;
   reservationId: string;
 };
@@ -42,12 +44,8 @@ export type ConvexUsageRecord = {
   keyId: string;
   at: number;
   settleRefId: string;
-  reservationProof?: {
-    checkpointSequence: number;
-    authorizedBalance: number;
-    reservedAt: number;
-    signature: string;
-  };
+  ambiguous?: boolean;
+  publisherIdempotencyKey?: string;
 };
 
 export type SettlementOutcomeStatus =
@@ -365,6 +363,10 @@ export function usageEventToRecord(event: UsageEvent): ConvexUsageRecord {
     keyId: event.keyId,
     at: Date.now(),
     settleRefId: `settle:${event.reservationId}`,
+    ...(event.ambiguous === undefined ? {} : { ambiguous: event.ambiguous }),
+    ...(event.publisherIdempotencyKey === undefined
+      ? {}
+      : { publisherIdempotencyKey: event.publisherIdempotencyKey }),
   };
 }
 
@@ -380,7 +382,8 @@ export function pendingToUsageRecord(input: {
   status: number;
   latencyMs: number;
   keyId: string;
-  reservationProof?: ConvexUsageRecord["reservationProof"];
+  ambiguous?: boolean;
+  publisherIdempotencyKey?: string;
 }): ConvexUsageRecord {
   return {
     organizationId: input.organizationId,
@@ -394,9 +397,10 @@ export function pendingToUsageRecord(input: {
     keyId: input.keyId,
     at: input.settledAt,
     settleRefId: input.settlementId,
-    ...(input.reservationProof
-      ? { reservationProof: input.reservationProof }
-      : {}),
+    ...(input.ambiguous === undefined ? {} : { ambiguous: input.ambiguous }),
+    ...(input.publisherIdempotencyKey === undefined
+      ? {}
+      : { publisherIdempotencyKey: input.publisherIdempotencyKey }),
   };
 }
 
@@ -449,7 +453,7 @@ function parseRecordUsageResult(value: unknown): RecordUsageResult {
     !Number.isFinite(wallet.balance) ||
     typeof wallet.sequence !== "number" ||
     !Number.isSafeInteger(wallet.sequence) ||
-    wallet.sequence < 0
+    wallet.sequence < -1
   ) {
     throw new Error("convex ingest result has invalid wallet checkpoint");
   }

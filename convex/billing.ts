@@ -26,7 +26,13 @@ import {
   commitPaymentReversal,
   preflightPaymentReversal,
   recordPositiveFundingSource,
+  requireVerifiedWalletFunding,
 } from "./lib/funding";
+import { assertFinanceMigrationAllowsRuntime } from "./lib/financeMigrationGate";
+import {
+  paymentStatusForProjection,
+  terminalDisputeStatus,
+} from "./lib/paymentStatus";
 
 /** Pinned alongside `stripe@22.3.1`; upgrade only as an explicit migration. */
 export const STRIPE_API_VERSION = "2026-06-24.dahlia" as const;
@@ -173,8 +179,22 @@ function activeClerkOrgId(identity: unknown): string {
   return orgId;
 }
 
-async function requireActiveClerkOrgInAction(ctx: ActionCtx): Promise<string> {
-  return activeClerkOrgId(await ctx.auth.getUserIdentity());
+async function requireActiveClerkOrgAdminInAction(
+  ctx: ActionCtx,
+): Promise<string> {
+  const identity = await ctx.auth.getUserIdentity();
+  const clerkOrgId = activeClerkOrgId(identity);
+  const raw = identity as Record<string, unknown>;
+  const role =
+    typeof raw.org_role === "string"
+      ? raw.org_role
+      : typeof raw.orgRole === "string"
+        ? raw.orgRole
+        : undefined;
+  if (role !== "org:admin" && role !== "org:owner") {
+    throw new Error("Org admin or owner role required");
+  }
+  return clerkOrgId;
 }
 
 export type StripeCheckoutCreator = {
@@ -242,6 +262,7 @@ export const prepareCheckoutIntent = internalMutation({
     stripePriceId: v.string(),
   },
   handler: async (ctx, args) => {
+    await assertFinanceMigrationAllowsRuntime(ctx);
     const organization = await ctx.db
       .query("organizations")
       .withIndex("by_clerk_org", (q) => q.eq("clerkOrgId", args.clerkOrgId))
@@ -377,7 +398,7 @@ export const createCheckout = action({
     ctx,
     args,
   ): Promise<{ url: string; checkoutIntentId: Id<"checkoutIntents"> }> => {
-    const clerkOrgId = await requireActiveClerkOrgInAction(ctx);
+    const clerkOrgId = await requireActiveClerkOrgAdminInAction(ctx);
     const stripePriceId = stripePriceForPack(args.packId);
     const prepared = await ctx.runMutation(
       internal.billing.prepareCheckoutIntent,
@@ -677,6 +698,7 @@ export const upsertPaidPayment = internalMutation({
     stripeChargeId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    await assertFinanceMigrationAllowsRuntime(ctx);
     const intent = await ctx.db
       .query("checkoutIntents")
       .withIndex("by_checkout_session", (q) =>
@@ -701,9 +723,20 @@ export const upsertPaidPayment = internalMutation({
       .unique();
     const now = Date.now();
     if (existing !== null) {
-      if (existing.organizationId !== intent.organizationId) {
-        throw new Error("Payment intent belongs to another organization");
+      if (
+        existing.organizationId !== intent.organizationId ||
+        existing.checkoutIntentId !== intent._id ||
+        existing.stripeCheckoutSessionId !== args.stripeCheckoutSessionId ||
+        existing.amount !== intent.amount ||
+        existing.currency !== intent.currency ||
+        existing.grantedCredits !== intent.credits ||
+        (existing.stripeChargeId !== undefined &&
+          args.stripeChargeId !== undefined &&
+          existing.stripeChargeId !== args.stripeChargeId)
+      ) {
+        throw new Error("Payment replay changed immutable provider facts");
       }
+      requireVerifiedPaymentFinance(existing);
       await ctx.db.patch(existing._id, {
         stripeChargeId: args.stripeChargeId ?? existing.stripeChargeId,
         status: existing.status === "pending" ? "paid" : existing.status,
@@ -729,6 +762,8 @@ export const upsertPaidPayment = internalMutation({
       reversedCredits: 0,
       walletReversedCredits: 0,
       publisherClawbackTargetCredits: 0,
+      reversalSequence: 0,
+      financeMigrationStatus: "verified",
       status: "paid",
       createdAt: now,
       updatedAt: now,
@@ -749,6 +784,7 @@ export const upsertPaidPayment = internalMutation({
 export const markPaymentGrantRecorded = internalMutation({
   args: { paymentId: v.id("payments") },
   handler: async (ctx, args): Promise<void> => {
+    await assertFinanceMigrationAllowsRuntime(ctx);
     const payment = await ctx.db.get(args.paymentId);
     if (payment === null) throw new Error("Payment not found");
     if (payment.status === "pending") {
@@ -771,52 +807,74 @@ const stripeDisputeStatus = v.union(
   v.literal("prevented"),
 );
 
+const stripeRefundStatus = v.union(
+  v.literal("pending"),
+  v.literal("requires_action"),
+  v.literal("succeeded"),
+  v.literal("failed"),
+  v.literal("canceled"),
+);
+
+type StripeRefundStatus = Doc<"paymentExposures">["sourceStatus"] & string;
+
+function requireVerifiedPaymentFinance(payment: Doc<"payments">): {
+  walletReversedCredits: number;
+  publisherClawbackTargetCredits: number;
+  reversalSequence: number;
+} {
+  if (
+    payment.financeMigrationStatus !== "verified" ||
+    payment.financeMigrationJobId !== undefined ||
+    payment.walletReversedCredits === undefined ||
+    payment.publisherClawbackTargetCredits === undefined ||
+    payment.reversalSequence === undefined
+  ) {
+    throw new Error("Payment finance migration is not verified");
+  }
+  if (
+    payment.walletReversedCredits < 0 ||
+    payment.publisherClawbackTargetCredits < 0 ||
+    payment.reversalSequence < 0
+  ) {
+    throw new Error("Payment finance projection is invalid");
+  }
+  return {
+    walletReversedCredits: payment.walletReversedCredits,
+    publisherClawbackTargetCredits: payment.publisherClawbackTargetCredits,
+    reversalSequence: payment.reversalSequence,
+  };
+}
+
+function refundStatusActive(status: StripeRefundStatus): boolean {
+  return status !== "failed" && status !== "canceled";
+}
+
+function safeIntegerSum(left: number, right: number, label: string): number {
+  const value = left + right;
+  if (!Number.isSafeInteger(value)) throw new Error(`${label} overflow`);
+  return value;
+}
+
+function normalizedStripeRefundStatus(
+  status: Stripe.Refund["status"],
+): StripeRefundStatus {
+  if (
+    status === "pending" ||
+    status === "requires_action" ||
+    status === "succeeded" ||
+    status === "failed" ||
+    status === "canceled"
+  ) {
+    return status;
+  }
+  throw new Error("Stripe refund returned an unsupported status");
+}
+
 const stripeDisputeMovement = v.union(
   v.literal("none"),
   v.literal("funds_withdrawn"),
   v.literal("funds_reinstated"),
 );
-
-function terminalDisputeStatus(
-  status: Doc<"paymentDisputes">["status"],
-): boolean {
-  return (
-    status === "warning_closed" ||
-    status === "won" ||
-    status === "lost" ||
-    status === "prevented"
-  );
-}
-
-function paymentStatusForProjection(args: {
-  grantedCredits: number;
-  refundedCredits: number;
-  disputes: Doc<"paymentDisputes">[];
-}): Doc<"payments">["status"] {
-  const moneyOutstanding = args.disputes.filter(
-    (dispute) => dispute.fundsWithdrawn && !dispute.fundsReinstated,
-  );
-  const open = args.disputes.some(
-    (dispute) => !terminalDisputeStatus(dispute.status),
-  );
-  if (open || moneyOutstanding.some((dispute) => dispute.status !== "lost")) {
-    return "disputed";
-  }
-  if (moneyOutstanding.length > 0) return "dispute_lost";
-  if (args.refundedCredits === args.grantedCredits) return "refunded";
-  if (args.refundedCredits > 0) return "partially_refunded";
-  if (args.disputes.some((dispute) => dispute.status === "lost")) {
-    return "dispute_lost";
-  }
-  if (
-    args.disputes.some(
-      (dispute) => dispute.status === "won" || dispute.status === "prevented",
-    )
-  ) {
-    return "dispute_won";
-  }
-  return "paid";
-}
 
 async function boundedPaymentDisputes(
   ctx: MutationCtx,
@@ -844,8 +902,10 @@ async function applyEffectivePaymentReversal(
     sourceAmount: number;
     sourceRequestedCredits: number;
     sourceActive: boolean;
+    sourceStatus?: StripeRefundStatus;
   },
 ): Promise<{ walletDelta: number; targetReversedCredits: number }> {
+  const verified = requireVerifiedPaymentFinance(args.payment);
   if (
     !Number.isSafeInteger(args.sourceRequestedCredits) ||
     args.sourceRequestedCredits < 0 ||
@@ -865,6 +925,9 @@ async function applyEffectivePaymentReversal(
     throw new Error("Payment exposure source belongs to another payment");
   }
   const now = Date.now();
+  if (args.sourceKind === "refund" && args.sourceStatus === undefined) {
+    throw new Error("Stripe refund status is required");
+  }
   if (existingSource === null) {
     await ctx.db.insert("paymentExposures", {
       paymentId: args.payment._id,
@@ -873,6 +936,7 @@ async function applyEffectivePaymentReversal(
       sourceRef: args.sourceRef,
       sourceAmount: args.sourceAmount,
       sourceAmountExact: true,
+      sourceStatus: args.sourceStatus,
       migrationBackfilled: false,
       requestedCredits: args.sourceRequestedCredits,
       effectiveCredits: 0,
@@ -891,10 +955,21 @@ async function applyEffectivePaymentReversal(
     ) {
       throw new Error("Payment exposure immutable source facts changed");
     }
+    const priorStatus = existingSource.sourceStatus;
+    if (
+      priorStatus !== undefined &&
+      priorStatus !== args.sourceStatus &&
+      (priorStatus === "succeeded" ||
+        priorStatus === "failed" ||
+        priorStatus === "canceled")
+    ) {
+      throw new Error("Stripe refund terminal status changed");
+    }
     await ctx.db.patch(existingSource._id, {
       sourceAmount: args.sourceAmount,
       sourceAmountExact: true,
       migrationBackfilled: false,
+      sourceStatus: args.sourceStatus,
       requestedCredits: args.sourceRequestedCredits,
       active: args.sourceActive,
       updatedAt: now,
@@ -918,19 +993,64 @@ async function applyEffectivePaymentReversal(
     }
     return left.sourceRef.localeCompare(right.sourceRef);
   });
+  const activeRefundedAmount = Math.min(
+    args.payment.amount,
+    ordered
+      .filter(
+        (exposure) =>
+          exposure.sourceKind === "refund" &&
+          exposure.active &&
+          exposure.sourceStatus !== undefined &&
+          refundStatusActive(exposure.sourceStatus),
+      )
+      .reduce((sum, exposure) => sum + exposure.sourceAmount, 0),
+  );
+  if (!Number.isSafeInteger(activeRefundedAmount)) {
+    throw new Error("Stripe refund aggregate overflow");
+  }
+  const activeRefundedCredits = cumulativeRefundCredits({
+    grantedCredits: args.payment.grantedCredits,
+    reversedCredits: 0,
+    paidAmount: args.payment.amount,
+    totalRefundedAmount: activeRefundedAmount,
+  }).targetReversedCredits;
   let capRemaining = args.payment.grantedCredits;
+  let refundAmountRunning = 0;
+  let refundCreditsRunning = 0;
   const effectiveById = new Map<Id<"paymentExposures">, number>();
   for (const exposure of ordered) {
-    const effective = exposure.active
-      ? Math.min(exposure.requestedCredits, capRemaining)
-      : 0;
+    let requestedEffective = 0;
+    if (exposure.active && exposure.sourceKind === "refund") {
+      refundAmountRunning = Math.min(
+        args.payment.amount,
+        safeIntegerSum(
+          refundAmountRunning,
+          exposure.sourceAmount,
+          "Stripe refund aggregate",
+        ),
+      );
+      const cumulativeCredits = cumulativeRefundCredits({
+        grantedCredits: args.payment.grantedCredits,
+        reversedCredits: 0,
+        paidAmount: args.payment.amount,
+        totalRefundedAmount: refundAmountRunning,
+      }).targetReversedCredits;
+      requestedEffective = cumulativeCredits - refundCreditsRunning;
+      refundCreditsRunning = cumulativeCredits;
+    } else if (exposure.active) {
+      requestedEffective = exposure.requestedCredits;
+    }
+    const effective = Math.min(requestedEffective, capRemaining);
     effectiveById.set(exposure._id, effective);
     capRemaining -= effective;
   }
+  if (refundCreditsRunning !== activeRefundedCredits) {
+    throw new Error("Stripe refund sources do not conserve cumulative credits");
+  }
   const targetReversedCredits = args.payment.grantedCredits - capRemaining;
-  const currentWalletReversedCredits = args.payment.walletReversedCredits ?? 0;
+  const currentWalletReversedCredits = verified.walletReversedCredits;
   const currentPublisherClawbackCredits =
-    args.payment.publisherClawbackTargetCredits ?? 0;
+    verified.publisherClawbackTargetCredits;
   const effectiveDelta = targetReversedCredits - args.payment.reversedCredits;
   const wallet = await getOrCreateWallet(ctx, args.payment.organizationId);
   let targetWalletReversedCredits = currentWalletReversedCredits;
@@ -950,10 +1070,14 @@ async function applyEffectivePaymentReversal(
         kind:
           args.sourceKind === "refund" ? "refund_reversal" : "dispute_reversal",
         amount: -walletDelta,
-        refId: `${args.sourceRef}:wallet:reverse:${targetWalletReversedCredits}`,
+        refId: `${args.sourceRef}:wallet:reverse:${verified.reversalSequence + 1}:${targetWalletReversedCredits}`,
         paymentId: args.payment._id,
       });
-      await commitPaymentReversal(ctx, reversalPlan, now);
+      await commitPaymentReversal(ctx, {
+        plan: reversalPlan,
+        walletSequence: reversal.wallet.sequence,
+        now,
+      });
       await ctx.db.insert("walletFundingReversals", {
         walletId: wallet._id,
         organizationId: args.payment.organizationId,
@@ -975,9 +1099,12 @@ async function applyEffectivePaymentReversal(
     if (creditsToRestore > 0) {
       const restored = await appendWalletEntry(ctx, {
         wallet,
-        kind: "dispute_restoration",
+        kind:
+          args.sourceKind === "refund"
+            ? "refund_restoration"
+            : "dispute_restoration",
         amount: creditsToRestore,
-        refId: `${args.sourceRef}:wallet:restore:${targetWalletReversedCredits}`,
+        refId: `${args.sourceRef}:wallet:restore:${verified.reversalSequence + 1}:${targetWalletReversedCredits}`,
         paymentId: args.payment._id,
       });
       const entry = await ctx.db.get(restored.entryId);
@@ -1036,14 +1163,18 @@ async function applyEffectivePaymentReversal(
     });
   }
   await ctx.db.patch(args.payment._id, {
-    refundedAmount: args.refundedAmount,
-    refundedCredits: args.refundedCredits,
+    refundedAmount: activeRefundedAmount,
+    refundedCredits: activeRefundedCredits,
     reversedCredits: targetReversedCredits,
     walletReversedCredits: targetWalletReversedCredits,
     publisherClawbackTargetCredits: targetPublisherClawbackCredits,
+    reversalSequence:
+      effectiveDelta === 0
+        ? verified.reversalSequence
+        : verified.reversalSequence + 1,
     status: paymentStatusForProjection({
       grantedCredits: args.payment.grantedCredits,
-      refundedCredits: args.refundedCredits,
+      refundedCredits: activeRefundedCredits,
       disputes: args.disputes,
     }),
     updatedAt: Date.now(),
@@ -1058,8 +1189,10 @@ export const applyRefundProjection = internalMutation({
     stripeChargeId: v.string(),
     refundAmount: v.optional(v.number()),
     totalRefundedAmount: v.number(),
+    status: stripeRefundStatus,
   },
   handler: async (ctx, args) => {
+    await assertFinanceMigrationAllowsRuntime(ctx);
     const payment = await ctx.db
       .query("payments")
       .withIndex("by_charge", (q) =>
@@ -1067,23 +1200,14 @@ export const applyRefundProjection = internalMutation({
       )
       .unique();
     if (payment === null) return { kind: "ignored" as const };
+    requireVerifiedPaymentFinance(payment);
     if (
       !Number.isSafeInteger(args.totalRefundedAmount) ||
-      args.totalRefundedAmount < 0
+      args.totalRefundedAmount < 0 ||
+      args.totalRefundedAmount > payment.amount
     ) {
       throw new Error("Invalid Stripe refund amount");
     }
-    // Stripe charge snapshots are cumulative. Ignore stale out-of-order views.
-    const refundedAmount = Math.max(
-      payment.refundedAmount,
-      Math.min(args.totalRefundedAmount, payment.amount),
-    );
-    const refundedCredits = cumulativeRefundCredits({
-      grantedCredits: payment.grantedCredits,
-      reversedCredits: 0,
-      paidAmount: payment.amount,
-      totalRefundedAmount: refundedAmount,
-    }).targetReversedCredits;
     const sourceRef = `stripe:refund:${args.stripeRefundId}`;
     const existingExposure = await ctx.db
       .query("paymentExposures")
@@ -1096,7 +1220,7 @@ export const applyRefundProjection = internalMutation({
         ? args.refundAmount
         : (existingExposure?.sourceAmount ??
           args.refundAmount ??
-          Math.max(0, refundedAmount - payment.refundedAmount));
+          Math.max(0, args.totalRefundedAmount - payment.refundedAmount));
     if (!Number.isSafeInteger(sourceAmount) || sourceAmount <= 0) {
       if (existingExposure !== null) {
         return {
@@ -1107,35 +1231,24 @@ export const applyRefundProjection = internalMutation({
       }
       throw new Error("Stripe refund source amount must be positive");
     }
-    const sourceRequestedCredits =
-      existingExposure?.migrationBackfilled === true &&
-      args.refundAmount !== undefined
-        ? cumulativeRefundCredits({
-            grantedCredits: payment.grantedCredits,
-            reversedCredits: 0,
-            paidAmount: payment.amount,
-            totalRefundedAmount: Math.min(sourceAmount, payment.amount),
-          }).targetReversedCredits
-        : (existingExposure?.requestedCredits ??
-          (args.refundAmount !== undefined
-            ? cumulativeRefundCredits({
-                grantedCredits: payment.grantedCredits,
-                reversedCredits: 0,
-                paidAmount: payment.amount,
-                totalRefundedAmount: Math.min(sourceAmount, payment.amount),
-              }).targetReversedCredits
-            : Math.max(0, refundedCredits - payment.refundedCredits)));
+    const sourceRequestedCredits = cumulativeRefundCredits({
+      grantedCredits: payment.grantedCredits,
+      reversedCredits: 0,
+      paidAmount: payment.amount,
+      totalRefundedAmount: Math.min(sourceAmount, payment.amount),
+    }).targetReversedCredits;
     const disputes = await boundedPaymentDisputes(ctx, payment._id);
     const projected = await applyEffectivePaymentReversal(ctx, {
       payment,
-      refundedAmount,
-      refundedCredits,
+      refundedAmount: payment.refundedAmount,
+      refundedCredits: payment.refundedCredits,
       disputes,
       sourceKind: "refund",
       sourceRef,
       sourceAmount,
       sourceRequestedCredits,
-      sourceActive: true,
+      sourceActive: refundStatusActive(args.status),
+      sourceStatus: args.status,
     });
     return { kind: "refund" as const, ...projected };
   },
@@ -1156,6 +1269,7 @@ export const applyDisputeProjection = internalMutation({
     movement: stripeDisputeMovement,
   },
   handler: async (ctx, args) => {
+    await assertFinanceMigrationAllowsRuntime(ctx);
     if (!Number.isSafeInteger(args.amount) || args.amount <= 0) {
       throw new Error("Invalid Stripe dispute amount");
     }
@@ -1166,6 +1280,7 @@ export const applyDisputeProjection = internalMutation({
       )
       .unique();
     if (payment === null) return { kind: "ignored" as const };
+    requireVerifiedPaymentFinance(payment);
     if (payment.currency !== args.currency) {
       throw new Error("Stripe dispute currency does not match payment");
     }
@@ -1411,22 +1526,20 @@ export const processStripeEvent = internalAction({
             throw new Error("Charge exceeds bounded 100-refund projection cap");
           }
           for (const refund of refunds.data) {
-            if (refund.status === "failed" || refund.status === "canceled") {
-              continue;
-            }
             await ctx.runMutation(internal.billing.applyRefundProjection, {
               stripeRefundId: refund.id,
               stripeChargeId: charge.id,
               refundAmount: refund.amount,
               totalRefundedAmount: charge.amount_refunded,
+              status: normalizedStripeRefundStatus(refund.status),
             });
           }
           break;
         }
         case "refund.created":
-        case "refund.updated": {
+        case "refund.updated":
+        case "refund.failed": {
           const refund = await stripe.refunds.retrieve(args.objectId);
-          if (refund.status === "failed" || refund.status === "canceled") break;
           const chargeId = stringId(refund.charge);
           if (chargeId === null) break;
           const charge = await stripe.charges.retrieve(chargeId);
@@ -1436,6 +1549,7 @@ export const processStripeEvent = internalAction({
             stripeChargeId: charge.id,
             refundAmount: refund.amount,
             totalRefundedAmount: charge.amount_refunded,
+            status: normalizedStripeRefundStatus(refund.status),
           });
           break;
         }
@@ -1489,12 +1603,13 @@ export const processStripeEvent = internalAction({
             amountReversed: transfer.amount_reversed,
             currency: transfer.currency,
             destination: stringId(transfer.destination) ?? "",
-            platformAccountId:
-              args.stripeAccount === "platform"
-                ? process.env.STRIPE_PLATFORM_ACCOUNT_ID
-                : args.stripeAccount,
+            platformAccountId: transfer.metadata.platformAccountId,
             correlationNonce: transfer.metadata.correlationNonce,
             correlationHmac: transfer.metadata.correlationHmac,
+            metadataRepairVersion:
+              transfer.metadata.metadataRepairVersion === undefined
+                ? undefined
+                : Number(transfer.metadata.metadataRepairVersion),
             failed: args.eventType === "transfer.failed",
             failureReason: undefined,
           });
@@ -1562,6 +1677,7 @@ export const getBillingState = query({
     checkoutIntentId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    await assertFinanceMigrationAllowsRuntime(ctx);
     const claims = await requireIdentity(ctx);
     if (claims.orgId === undefined)
       throw new Error("Active organization required");
@@ -1584,6 +1700,10 @@ export const getBillingState = query({
       )
       .order("desc")
       .take(50);
+    if (wallet !== null) {
+      await requireVerifiedWalletFunding(ctx, wallet);
+    }
+    for (const payment of payments) requireVerifiedPaymentFinance(payment);
     let checkout: {
       id: Id<"checkoutIntents">;
       status: Doc<"checkoutIntents">["status"] | "canceled";
@@ -1645,6 +1765,7 @@ function endOfUtcMonth(now: number): number {
 export const cycleBreakdown = query({
   args: { orgSlug: v.string() },
   handler: async (ctx, args) => {
+    await assertFinanceMigrationAllowsRuntime(ctx);
     const { org } = await requireOrgMemberBySlug(ctx, args.orgSlug);
     const cycleStart = startOfUtcMonth(Date.now());
     const cycleEnd = endOfUtcMonth(Date.now());
@@ -1656,36 +1777,39 @@ export const cycleBreakdown = query({
           .gte("at", cycleStart)
           .lt("at", cycleEnd),
       )
-      .collect();
+      .take(5_001);
+    if (events.length > 5_000) {
+      throw new Error("Billing cycle breakdown requires paginated export");
+    }
     const byKey = new Map<string, { calls: number; credits: number }>();
     const byProject = new Map<
       Id<"projects">,
-      { calls: number; credits: number }
+      { name: string; slug: string; calls: number; credits: number }
     >();
     for (const event of events) {
       const key = byKey.get(event.keyId) ?? { calls: 0, credits: 0 };
       key.calls += 1;
       key.credits += event.credits;
       byKey.set(event.keyId, key);
+      if (event.projectName === undefined || event.projectSlug === undefined) {
+        throw new Error("Billing cycle migration is not verified");
+      }
       const project = byProject.get(event.projectId) ?? {
+        name: event.projectName,
+        slug: event.projectSlug,
         calls: 0,
         credits: 0,
       };
+      project.name = event.projectName;
+      project.slug = event.projectSlug;
       project.calls += 1;
       project.credits += event.credits;
       byProject.set(event.projectId, project);
     }
-    const projects = await Promise.all(
-      [...byProject.entries()].map(async ([projectId, row]) => {
-        const project = await ctx.db.get(projectId);
-        return {
-          projectId,
-          name: project?.name ?? "Unknown project",
-          slug: project?.slug ?? "unknown",
-          ...row,
-        };
-      }),
-    );
+    const projects = [...byProject.entries()].map(([projectId, row]) => ({
+      projectId,
+      ...row,
+    }));
     return {
       cycleStart,
       cycleEnd,

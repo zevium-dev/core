@@ -7,7 +7,7 @@ export const CREDITS_PER_DOLLAR = 10_000;
 /** Platform cut: 5%. Publishers keep 95%. */
 export const PLATFORM_CUT = 0.05;
 
-export type { EndpointPricing } from "./pricing.js";
+export { MAX_ENDPOINT_COST_CREDITS, type EndpointPricing } from "./pricing.js";
 
 export {
   parseSpec,
@@ -29,11 +29,8 @@ export { generateMockResponse, type GeneratedMockResponse } from "./mock.js";
 
 export {
   MAX_USAGE_INGEST_EVENTS,
-  signReservationProof,
-  verifyReservationProof,
   signTransferCorrelation,
   verifyTransferCorrelation,
-  type ReservationProofPayload,
   type TransferCorrelationPayload,
 } from "./finance.js";
 

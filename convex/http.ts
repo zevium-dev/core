@@ -1,5 +1,8 @@
 import Stripe from "stripe";
-import { MAX_USAGE_INGEST_EVENTS } from "@zevium/shared";
+import {
+  MAX_ENDPOINT_COST_CREDITS,
+  MAX_USAGE_INGEST_EVENTS,
+} from "@zevium/shared";
 import { httpRouter } from "convex/server";
 import { Webhook } from "svix";
 import { internal } from "./_generated/api";
@@ -252,12 +255,8 @@ type IngestUsageEvent = {
   at: number;
   settleRefId: string;
   consumerClerkOrgId: string;
-  reservationProof?: {
-    checkpointSequence: number;
-    authorizedBalance: number;
-    reservedAt: number;
-    signature: string;
-  };
+  ambiguous?: boolean;
+  publisherIdempotencyKey?: string;
 };
 
 /** Parse exactly the one-wallet settlement batch accepted from a Wallet DO. */
@@ -297,7 +296,14 @@ export function parseIngestUsageBody(
     if (
       requiredStrings.some(
         (value) => typeof value !== "string" || value.trim() === "",
-      )
+      ) ||
+      (event.endpoint as string).length > 2_048 ||
+      (event.method as string).length > 16 ||
+      (event.keyId as string).length > 256 ||
+      (event.settleRefId as string).length > 200 ||
+      (event.consumerClerkOrgId as string).length > 256 ||
+      (typeof event.publisherIdempotencyKey === "string" &&
+        event.publisherIdempotencyKey.length > 256)
     ) {
       return { ok: false, status: 400, error: "invalid event" };
     }
@@ -305,12 +311,23 @@ export function parseIngestUsageBody(
       typeof event.credits !== "number" ||
       !Number.isSafeInteger(event.credits) ||
       event.credits < 0 ||
+      event.credits > MAX_ENDPOINT_COST_CREDITS ||
       typeof event.status !== "number" ||
-      !Number.isFinite(event.status) ||
+      !Number.isSafeInteger(event.status) ||
+      event.status < 100 ||
+      event.status > 599 ||
       typeof event.latencyMs !== "number" ||
-      !Number.isFinite(event.latencyMs) ||
+      !Number.isSafeInteger(event.latencyMs) ||
+      event.latencyMs < 0 ||
+      event.latencyMs > 86_400_000 ||
       typeof event.at !== "number" ||
-      !Number.isFinite(event.at)
+      !Number.isSafeInteger(event.at) ||
+      event.at <= 0 ||
+      (event.ambiguous !== undefined && typeof event.ambiguous !== "boolean") ||
+      (event.publisherIdempotencyKey !== undefined &&
+        (typeof event.publisherIdempotencyKey !== "string" ||
+          event.publisherIdempotencyKey.trim() === "")) ||
+      event.reservationProof !== undefined
     ) {
       return { ok: false, status: 400, error: "invalid event" };
     }
@@ -319,35 +336,6 @@ export function parseIngestUsageBody(
       return { ok: false, status: 400, error: "mixed consumer organizations" };
     }
     consumerClerkOrgId = consumer;
-    let reservationProof: IngestUsageEvent["reservationProof"];
-    if (event.reservationProof !== undefined) {
-      if (
-        event.reservationProof === null ||
-        typeof event.reservationProof !== "object" ||
-        Array.isArray(event.reservationProof)
-      ) {
-        return { ok: false, status: 400, error: "invalid reservation proof" };
-      }
-      const proof = event.reservationProof as Record<string, unknown>;
-      if (
-        typeof proof.checkpointSequence !== "number" ||
-        !Number.isSafeInteger(proof.checkpointSequence) ||
-        typeof proof.authorizedBalance !== "number" ||
-        !Number.isSafeInteger(proof.authorizedBalance) ||
-        typeof proof.reservedAt !== "number" ||
-        !Number.isSafeInteger(proof.reservedAt) ||
-        typeof proof.signature !== "string" ||
-        proof.signature.trim() === ""
-      ) {
-        return { ok: false, status: 400, error: "invalid reservation proof" };
-      }
-      reservationProof = {
-        checkpointSequence: proof.checkpointSequence,
-        authorizedBalance: proof.authorizedBalance,
-        reservedAt: proof.reservedAt,
-        signature: proof.signature,
-      };
-    }
     events.push({
       organizationId: event.organizationId as string,
       projectId: event.projectId as string,
@@ -360,7 +348,14 @@ export function parseIngestUsageBody(
       at: event.at,
       settleRefId: event.settleRefId as string,
       consumerClerkOrgId: consumer,
-      ...(reservationProof ? { reservationProof } : {}),
+      ...(event.ambiguous === undefined
+        ? {}
+        : { ambiguous: event.ambiguous as boolean }),
+      ...(event.publisherIdempotencyKey === undefined
+        ? {}
+        : {
+            publisherIdempotencyKey: event.publisherIdempotencyKey as string,
+          }),
     });
   }
   return { ok: true, events };

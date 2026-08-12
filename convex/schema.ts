@@ -91,10 +91,7 @@ export default defineSchema({
     balance: v.number(),
     /** Monotonic ledger version for edge checkpoint reconciliation. */
     sequence: v.number(),
-    /**
-     * Transitional materialized debt. Legacy rows omit it and read as
-     * `Math.max(0, -balance)` until finance migration v2 verifies them.
-     */
+    /** Transitional legacy field. Verified finance-v2 wallets require zero. */
     debtCredits: v.optional(v.number()),
   }).index("by_organization", ["organizationId"]),
 
@@ -106,6 +103,7 @@ export default defineSchema({
       v.literal("usage_settlement"),
       v.literal("refund_reversal"),
       v.literal("dispute_reversal"),
+      v.literal("refund_restoration"),
       v.literal("dispute_restoration"),
       v.literal("admin_adjustment"),
     ),
@@ -116,6 +114,8 @@ export default defineSchema({
     sequence: v.number(),
     paymentId: v.optional(v.id("payments")),
     usageEventId: v.optional(v.id("usageEvents")),
+    /** Canonical immutable settlement binding; optional only for legacy rows. */
+    settlementFingerprint: v.optional(v.string()),
     createdAt: v.number(),
   })
     .index("by_wallet", ["walletId"])
@@ -161,6 +161,7 @@ export default defineSchema({
       v.literal("promotion"),
       v.literal("admin_adjustment"),
       v.literal("restoration"),
+      v.literal("compaction"),
     ),
     sourceRef: v.string(),
     paymentId: v.optional(v.id("payments")),
@@ -169,11 +170,19 @@ export default defineSchema({
     availableCredits: v.number(),
     allocatedCredits: v.number(),
     reversedCredits: v.number(),
-    state: v.union(v.literal("available"), v.literal("depleted")),
+    /** Available inventory moved into a derived compacted lot. */
+    compactedCredits: v.optional(v.number()),
+    state: v.union(
+      v.literal("available"),
+      v.literal("depleted"),
+      v.literal("compacted"),
+    ),
     createdAt: v.number(),
     updatedAt: v.number(),
   })
     .index("by_source_ref", ["sourceRef"])
+    .index("by_wallet_created", ["walletId", "createdAt"])
+    .index("by_payment_created", ["paymentId", "createdAt"])
     .index("by_org_priority_state_created", [
       "organizationId",
       "refundable",
@@ -192,13 +201,20 @@ export default defineSchema({
     allocatedCredits: v.number(),
     reversedCredits: v.number(),
     sequence: v.number(),
+    /** Missing means legacy/unverified. Runtime accepts only `verified`. */
+    migrationStatus: v.optional(
+      v.union(v.literal("building"), v.literal("verified")),
+    ),
+    migrationJobId: v.optional(v.id("financialMigrationJobs")),
+    migrationWatermarkSequence: v.optional(v.number()),
     updatedAt: v.number(),
   })
     .index("by_wallet", ["walletId"])
     .index("by_organization", ["organizationId"]),
 
-  // Immutable debit attribution. `fundingLotId` is absent only for a signed
-  // reservation honored as wallet debt after concurrent external reversal.
+  // Immutable debit attribution. Missing fundingLotId / reservation_debt are
+  // legacy-only shapes rejected by finance-v2 verification; new debits are
+  // always fully source-backed.
   walletFundingAllocations: defineTable({
     walletId: v.id("wallets"),
     organizationId: v.id("organizations"),
@@ -217,6 +233,7 @@ export default defineSchema({
     createdAt: v.number(),
   })
     .index("by_wallet_entry", ["walletEntryId"])
+    .index("by_wallet_created", ["walletId", "createdAt"])
     .index("by_lot_created", ["fundingLotId", "createdAt"])
     .index("by_payment_created", ["paymentId", "createdAt"])
     .index("by_earning", ["earningId"]),
@@ -232,7 +249,20 @@ export default defineSchema({
     createdAt: v.number(),
   })
     .index("by_wallet_entry", ["walletEntryId"])
+    .index("by_wallet_created", ["walletId", "createdAt"])
     .index("by_payment_created", ["paymentId", "createdAt"]),
+
+  // Derived-lot lineage. Compaction changes write fan-out, never provenance.
+  walletFundingLotComponents: defineTable({
+    walletId: v.id("wallets"),
+    compactedLotId: v.id("walletFundingLots"),
+    sourceLotId: v.id("walletFundingLots"),
+    grossCredits: v.number(),
+    createdAt: v.number(),
+  })
+    .index("by_compacted_lot", ["compactedLotId", "sourceLotId"])
+    .index("by_source_lot", ["sourceLotId"])
+    .index("by_wallet_created", ["walletId", "createdAt"]),
 
   // Compact per-source/per-publisher totals. Refund reconciliation reads this
   // rollup, then advances a bounded detail journal instead of scanning history.
@@ -251,6 +281,9 @@ export default defineSchema({
   usageEvents: defineTable({
     organizationId: v.id("organizations"),
     projectId: v.id("projects"),
+    /** Denormalized display identity; missing means legacy/unverified. */
+    projectName: v.optional(v.string()),
+    projectSlug: v.optional(v.string()),
     endpoint: v.string(),
     method: v.string(),
     credits: v.number(),
@@ -264,11 +297,16 @@ export default defineSchema({
      * Wallet DO ingest validates and persists it.
      */
     settleRefId: v.optional(v.string()),
+    /** Provider dispatch completed but response authority was ambiguous. */
+    ambiguous: v.optional(v.boolean()),
+    /** Stable publisher-facing replay key, when gateway contract supplies it. */
+    publisherIdempotencyKey: v.optional(v.string()),
   })
     .index("by_org", ["organizationId"])
     .index("by_project", ["projectId"])
     .index("by_org_at", ["organizationId", "at"])
     .index("by_project_at", ["projectId", "at"])
+    .index("by_settlement", ["settleRefId"])
     .index("by_at", ["at"]),
 
   // In-app notifications (org-scoped, idempotent by refId)
@@ -454,6 +492,14 @@ export default defineSchema({
     walletReversedCredits: v.optional(v.number()),
     /** Active reversal satisfied by clawing consumed publisher-funded credits. */
     publisherClawbackTargetCredits: v.optional(v.number()),
+    /** Monotonic local reversal transition sequence; prevents cyclic ref reuse. */
+    reversalSequence: v.optional(v.number()),
+    /** Missing means legacy/unverified. Money mutations require `verified`. */
+    financeMigrationStatus: v.optional(
+      v.union(v.literal("building"), v.literal("verified")),
+    ),
+    /** Present only while this payment is fenced by a migration job. */
+    financeMigrationJobId: v.optional(v.id("financialMigrationJobs")),
     status: v.union(
       v.literal("pending"),
       v.literal("paid"),
@@ -511,6 +557,15 @@ export default defineSchema({
     sourceAmount: v.number(),
     /** False only for legacy refund rows until Stripe supplies exact amount. */
     sourceAmountExact: v.optional(v.boolean()),
+    sourceStatus: v.optional(
+      v.union(
+        v.literal("pending"),
+        v.literal("requires_action"),
+        v.literal("succeeded"),
+        v.literal("failed"),
+        v.literal("canceled"),
+      ),
+    ),
     migrationBackfilled: v.optional(v.boolean()),
     requestedCredits: v.number(),
     effectiveCredits: v.number(),
@@ -552,6 +607,9 @@ export default defineSchema({
     consumerOrganizationId: v.id("organizations"),
     /** Immutable published project that earned this settlement. */
     projectId: v.optional(v.id("projects")),
+    /** Denormalized display identity; missing means legacy/unverified. */
+    projectName: v.optional(v.string()),
+    projectSlug: v.optional(v.string()),
     usageSettlementRefId: v.string(),
     grossCredits: v.number(),
     /** Exact atom values are canonical; decimal credits are display mirrors. */
@@ -598,6 +656,12 @@ export default defineSchema({
     reversedAtoms: v.optional(v.number()),
     failedAtoms: v.optional(v.number()),
     sequence: v.number(),
+    /** Missing means legacy/unverified. Runtime accepts only `verified`. */
+    migrationStatus: v.optional(
+      v.union(v.literal("building"), v.literal("verified")),
+    ),
+    migrationJobId: v.optional(v.id("financialMigrationJobs")),
+    migrationWatermarkSequence: v.optional(v.number()),
     updatedAt: v.number(),
   }).index("by_publisher", ["publisherOrganizationId"]),
 
@@ -667,6 +731,24 @@ export default defineSchema({
     correlationNonce: v.optional(v.string()),
     correlationHmac: v.optional(v.string()),
     platformAccountId: v.optional(v.string()),
+    /** Local correlation is not provider proof until a Stripe snapshot agrees. */
+    correlationState: v.optional(
+      v.union(
+        v.literal("local_prepared"),
+        v.literal("provider_verified"),
+        v.literal("provider_repair_required"),
+      ),
+    ),
+    providerMetadataVerifiedAt: v.optional(v.number()),
+    metadataRepairVersion: v.optional(v.number()),
+    /** Exact metadata parameter set used by original idempotent create. */
+    providerCreateMetadataShape: v.optional(
+      v.union(
+        v.literal("publisher_only"),
+        v.literal("correlated_v0"),
+        v.literal("correlated_v1"),
+      ),
+    ),
     status: v.union(
       v.literal("created"),
       v.literal("pending"),
@@ -706,6 +788,7 @@ export default defineSchema({
     detailCursor: v.optional(v.string()),
     subphase: v.optional(v.string()),
     activeWalletId: v.optional(v.id("wallets")),
+    activePaymentId: v.optional(v.id("payments")),
     activePublisherOrganizationId: v.optional(v.id("organizations")),
     activeTransferId: v.optional(v.id("publisherTransfers")),
     activeSequence: v.optional(v.number()),
@@ -715,6 +798,8 @@ export default defineSchema({
     accumulatorD: v.optional(v.number()),
     accumulatorE: v.optional(v.number()),
     accumulatorF: v.optional(v.number()),
+    /** Resumable independently recomputed conservation accumulator. */
+    verificationState: v.optional(v.string()),
     rowsRead: v.number(),
     rowsWritten: v.number(),
     chunks: v.number(),
@@ -727,7 +812,11 @@ export default defineSchema({
     migrationJobId: v.id("financialMigrationJobs"),
     phase: v.string(),
     scopeRef: v.string(),
-    result: v.union(v.literal("checkpoint"), v.literal("verified")),
+    result: v.union(
+      v.literal("checkpoint"),
+      v.literal("verified"),
+      v.literal("failed"),
+    ),
     facts: v.string(),
     createdAt: v.number(),
   }).index("by_job_created", ["migrationJobId", "createdAt"]),

@@ -271,6 +271,18 @@ describe("wallets.getGatewayWallet — checkpoint and keySettings", () => {
         sequence: 1,
         createdAt: 1,
       });
+      await ctx.db.insert("walletFundingStates", {
+        walletId,
+        organizationId: seed.orgId,
+        nonrefundableAvailableCredits: 1_000,
+        refundableAvailableCredits: 0,
+        allocatedCredits: 0,
+        reversedCredits: 0,
+        sequence: 1,
+        migrationStatus: "verified",
+        migrationWatermarkSequence: 1,
+        updatedAt: 1,
+      });
       await ctx.db.insert("keySettings", {
         clerkOrgId: "org_acme",
         keyId: KEY_A,

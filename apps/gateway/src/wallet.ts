@@ -25,11 +25,7 @@
  */
 
 import { DurableObject } from "cloudflare:workers";
-import {
-  MAX_USAGE_INGEST_EVENTS,
-  signReservationProof,
-  type ReservationProofPayload,
-} from "@zevium/shared";
+import { MAX_USAGE_INGEST_EVENTS } from "@zevium/shared";
 import {
   ConvexUsageClient,
   pendingToUsageRecord,
@@ -47,7 +43,6 @@ export type InFlightEntry = {
   createdAt: number;
   /** Present for keyed reservations so their aggregate is cap-enforced. */
   keyId?: string;
-  reservationProof?: PendingSettlement["reservationProof"];
 };
 
 /** Usage metadata required to flush a settlement to Convex. */
@@ -62,6 +57,10 @@ export type SettlementUsage = {
   status: number;
   latencyMs: number;
   keyId: string;
+  /** Origin dispatch happened but no authoritative response was observed. */
+  ambiguous?: boolean;
+  /** Stable platform-generated key sent to publisher for replay protection. */
+  publisherIdempotencyKey?: string;
 };
 
 export type PendingSettlement = {
@@ -69,12 +68,6 @@ export type PendingSettlement = {
   reservationId: string;
   cost: number;
   settledAt: number;
-  reservationProof?: {
-    checkpointSequence: number;
-    authorizedBalance: number;
-    reservedAt: number;
-    signature: string;
-  };
   /** Present for production flush path; unit tests may omit. */
   usage?: SettlementUsage;
 };
@@ -535,30 +528,10 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
       }
 
       const reservedAt = Date.now();
-      let reservationProof: InFlightEntry["reservationProof"];
-      const proofSecret = (this.env as Cloudflare.Env).GATEWAY_INTERNAL_SECRET;
-      if (proofSecret && opts.clerkOrgId && opts.keyId && this.#sequence >= 0) {
-        const payload: ReservationProofPayload = {
-          consumerClerkOrgId: opts.clerkOrgId,
-          reservationId,
-          credits: cost,
-          checkpointSequence: this.#sequence,
-          authorizedBalance: available,
-          reservedAt,
-          keyId: opts.keyId,
-        };
-        reservationProof = {
-          checkpointSequence: payload.checkpointSequence,
-          authorizedBalance: payload.authorizedBalance,
-          reservedAt: payload.reservedAt,
-          signature: await signReservationProof(proofSecret, payload),
-        };
-      }
       this.#inFlight[reservationId] = {
         cost,
         createdAt: reservedAt,
         ...(opts.keyId ? { keyId: opts.keyId } : {}),
-        ...(reservationProof ? { reservationProof } : {}),
       };
       await this.#persist({ inFlight: { ...this.#inFlight } });
 
@@ -604,9 +577,6 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
         reservationId,
         cost,
         settledAt,
-        ...(entry.reservationProof
-          ? { reservationProof: entry.reservationProof }
-          : {}),
       };
       if (usage) pending.usage = usage;
       this.#pendingSettlements.push(pending);
@@ -858,7 +828,7 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
       }
       const removed = before - this.#pendingSettlements.length;
 
-      const checkpointAccepted = this.#acceptCheckpoint(checkpoint);
+      const checkpointAccepted = this.#acceptCheckpoint(checkpoint, true);
       if (removed > 0 || checkpointAccepted) {
         this.#deadLetterCount += terminalRejects.length;
         await this.#persist({
@@ -919,9 +889,8 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
           status: usage.status,
           latencyMs: usage.latencyMs,
           keyId: usage.keyId,
-          ...(s.reservationProof
-            ? { reservationProof: s.reservationProof }
-            : {}),
+          ambiguous: usage.ambiguous,
+          publisherIdempotencyKey: usage.publisherIdempotencyKey,
         }),
       );
     }
@@ -1100,12 +1069,20 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
   }
 
   /**
-   * Accept a strictly newer ledger projection. Pending local settlements are
-   * deducted from its signed balance until their per-reference outcome is
-   * acknowledged; reservations remain represented in #inFlight.
+   * Accept a newer ledger projection, or a direct settlement response at the
+   * current sequence. Pending local settlements are deducted until their
+   * per-reference outcome is acknowledged; holds stay in #inFlight.
    */
-  #acceptCheckpoint(checkpoint: WalletCheckpoint): boolean {
-    if (checkpoint.sequence <= this.#sequence) return false;
+  #acceptCheckpoint(
+    checkpoint: WalletCheckpoint,
+    allowCurrentSequence = false,
+  ): boolean {
+    if (
+      checkpoint.sequence < this.#sequence ||
+      (checkpoint.sequence === this.#sequence && !allowCurrentSequence)
+    ) {
+      return false;
+    }
     this.#sequence = checkpoint.sequence;
     this.#balance =
       checkpoint.balance - sumPendingCosts(this.#pendingSettlements);

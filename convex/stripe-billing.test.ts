@@ -152,6 +152,18 @@ async function seedFinancialPayment(
 }
 
 describe("Stripe Checkout control plane", () => {
+  it("rejects org members before any top-up provider call", async () => {
+    const t = convexTest(schema, modules);
+    const member = t.withIdentity({
+      subject: "member_user",
+      org_id: "org_member_topup",
+      org_role: "org:member",
+    } as { subject: string; org_id: string; org_role: string });
+    await expect(
+      member.action(api.billing.createCheckout, { packId: "pack_10" }),
+    ).rejects.toThrow("Org admin or owner role required");
+  });
+
   it("uses immutable server-owned credit packs and only a server-owned Price", async () => {
     expect(
       CREDIT_PACKS.map((pack) => [pack.packId, pack.priceCents, pack.credits]),
@@ -508,6 +520,71 @@ describe("Stripe Checkout control plane", () => {
     ).resolves.toMatchObject({ checkout: null });
   });
 
+  it("fails billing reads closed for nonzero legacy payment projections", async () => {
+    const t = convexTest(schema, modules);
+    await t.run(async (ctx) => {
+      const organizationId = await ctx.db.insert("organizations", {
+        clerkOrgId: "org_legacy_billing",
+        name: "Legacy billing",
+        slug: "legacy-billing",
+      });
+      const walletId = await ctx.db.insert("wallets", {
+        organizationId,
+        balance: 100,
+        sequence: 1,
+      });
+      await ctx.db.insert("walletFundingStates", {
+        walletId,
+        organizationId,
+        nonrefundableAvailableCredits: 100,
+        refundableAvailableCredits: 0,
+        allocatedCredits: 0,
+        reversedCredits: 0,
+        sequence: 1,
+        migrationStatus: "verified",
+        migrationWatermarkSequence: 1,
+        updatedAt: 1,
+      });
+      const checkoutIntentId = await ctx.db.insert("checkoutIntents", {
+        organizationId,
+        packId: "pack_10",
+        stripePriceId: "price_legacy_billing",
+        amount: 1_000,
+        currency: "usd",
+        credits: 100,
+        stripeCheckoutSessionId: "cs_legacy_billing",
+        stripePaymentIntentId: "pi_legacy_billing",
+        status: "complete",
+        createdAt: 1,
+        updatedAt: 1,
+        expiresAt: 2,
+      });
+      await ctx.db.insert("payments", {
+        organizationId,
+        checkoutIntentId,
+        stripeCheckoutSessionId: "cs_legacy_billing",
+        stripePaymentIntentId: "pi_legacy_billing",
+        stripeChargeId: "ch_legacy_billing",
+        amount: 1_000,
+        currency: "usd",
+        grantedCredits: 100,
+        refundedAmount: 100,
+        refundedCredits: 10,
+        reversedCredits: 10,
+        status: "partially_refunded",
+        createdAt: 1,
+        updatedAt: 2,
+      });
+    });
+    const owner = t.withIdentity({
+      subject: "legacy_billing_owner",
+      org_id: "org_legacy_billing",
+    } as { subject: string; org_id: string });
+    await expect(owner.query(api.billing.getBillingState, {})).rejects.toThrow(
+      "Payment finance migration is not verified",
+    );
+  });
+
   it("fulfills synchronous and async paid paths once and never exposes another org checkout", async () => {
     const t = convexTest(schema, modules);
     const seed = await t.run(async (ctx) => {
@@ -766,6 +843,7 @@ describe("Stripe Checkout control plane", () => {
       stripeRefundId: "re_partial",
       stripeChargeId: "ch_overlap",
       totalRefundedAmount: 200,
+      status: "succeeded",
     });
     const dispute = async (
       event: string,
@@ -851,12 +929,14 @@ describe("Stripe Checkout control plane", () => {
       stripeChargeId: "ch_refund",
       refundAmount: 500,
       totalRefundedAmount: 500,
+      status: "succeeded",
     });
     await t.mutation(internal.billing.applyRefundProjection, {
       stripeRefundId: "re_half",
       stripeChargeId: "ch_refund",
       refundAmount: 500,
       totalRefundedAmount: 100,
+      status: "succeeded",
     });
     await drainFinancialJobs(t, seed.paymentId);
     const result = await t.run(async (ctx) => ({
@@ -884,6 +964,125 @@ describe("Stripe Checkout control plane", () => {
     expect(result.wallet?.balance).toBe(100);
     expect(result.publisher?.availableAtoms).toBe(475_000);
     expect(result.clawbacks).toHaveLength(1);
+  });
+
+  it("restores pending refunds on failed and canceled provider transitions", async () => {
+    const t = convexTest(schema, modules);
+    const seed = await seedFinancialPayment(t, "refund-lifecycle", 0);
+    const original = await t.run(async (ctx) =>
+      ctx.db
+        .query("publisherBalances")
+        .withIndex("by_publisher", (q) =>
+          q.eq("publisherOrganizationId", seed.publisherOrganizationId),
+        )
+        .unique(),
+    );
+    if (original === null) throw new Error("publisher balance missing");
+
+    await t.mutation(internal.billing.applyRefundProjection, {
+      stripeRefundId: "re_lifecycle_failed",
+      stripeChargeId: "ch_refund-lifecycle",
+      refundAmount: 1_000,
+      totalRefundedAmount: 1_000,
+      status: "pending",
+    });
+    await drainFinancialJobs(t, seed.paymentId);
+    await t.mutation(internal.billing.applyRefundProjection, {
+      stripeRefundId: "re_lifecycle_failed",
+      stripeChargeId: "ch_refund-lifecycle",
+      refundAmount: 1_000,
+      totalRefundedAmount: 0,
+      status: "failed",
+    });
+    await drainFinancialJobs(t, seed.paymentId);
+    await expect(
+      t.mutation(internal.billing.applyRefundProjection, {
+        stripeRefundId: "re_lifecycle_failed",
+        stripeChargeId: "ch_refund-lifecycle",
+        refundAmount: 1_000,
+        totalRefundedAmount: 1_000,
+        status: "succeeded",
+      }),
+    ).rejects.toThrow("terminal status changed");
+
+    await t.mutation(internal.billing.applyRefundProjection, {
+      stripeRefundId: "re_lifecycle_canceled",
+      stripeChargeId: "ch_refund-lifecycle",
+      refundAmount: 1_000,
+      totalRefundedAmount: 1_000,
+      status: "requires_action",
+    });
+    await drainFinancialJobs(t, seed.paymentId);
+    await t.mutation(internal.billing.applyRefundProjection, {
+      stripeRefundId: "re_lifecycle_canceled",
+      stripeChargeId: "ch_refund-lifecycle",
+      refundAmount: 1_000,
+      totalRefundedAmount: 0,
+      status: "canceled",
+    });
+    await drainFinancialJobs(t, seed.paymentId);
+
+    const result = await t.run(async (ctx) => ({
+      payment: await ctx.db.get(seed.paymentId),
+      exposures: await ctx.db
+        .query("paymentExposures")
+        .withIndex("by_payment_created", (q) =>
+          q.eq("paymentId", seed.paymentId),
+        )
+        .collect(),
+      balance: await ctx.db
+        .query("publisherBalances")
+        .withIndex("by_publisher", (q) =>
+          q.eq("publisherOrganizationId", seed.publisherOrganizationId),
+        )
+        .unique(),
+      lots: await ctx.db
+        .query("walletFundingLots")
+        .withIndex("by_payment_created", (q) =>
+          q.eq("paymentId", seed.paymentId),
+        )
+        .collect(),
+    }));
+    expect(result.payment).toMatchObject({
+      refundedAmount: 0,
+      refundedCredits: 0,
+      reversedCredits: 0,
+      walletReversedCredits: 0,
+      publisherClawbackTargetCredits: 0,
+      status: "paid",
+    });
+    expect(result.exposures).toHaveLength(2);
+    expect(result.exposures).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          sourceStatus: "failed",
+          active: false,
+          effectiveCredits: 0,
+          publisherCredits: 0,
+          appliedPublisherCredits: 0,
+        }),
+        expect.objectContaining({
+          sourceStatus: "canceled",
+          active: false,
+          effectiveCredits: 0,
+          publisherCredits: 0,
+          appliedPublisherCredits: 0,
+        }),
+      ]),
+    );
+    expect(result.balance).toMatchObject({
+      availableAtoms: original.availableAtoms,
+      allocatedAtoms: original.allocatedAtoms,
+      paidAtoms: original.paidAtoms,
+    });
+    for (const lot of result.lots) {
+      expect(
+        lot.availableCredits +
+          lot.allocatedCredits +
+          lot.reversedCredits +
+          (lot.compactedCredits ?? 0),
+      ).toBe(lot.grantedCredits);
+    }
   });
 
   it("turns a clawback after transfer into publisher debt and repays it before payout", async () => {
@@ -951,9 +1150,18 @@ describe("Stripe Checkout control plane", () => {
           platformAccountId: "acct_platform_test",
         },
       );
-      await t.mutation(internal.payouts.markPublisherTransferSucceeded, {
-        transferId: transfer.transferId,
+      await t.mutation(internal.payouts.projectStripeTransfer, {
         stripeTransferId: "tr_paid_clawback",
+        publisherTransferId: transfer.transferId,
+        amount: transfer.amount,
+        amountReversed: 0,
+        currency: transfer.currency,
+        destination: transfer.connectedAccountId,
+        platformAccountId: transfer.platformAccountId,
+        correlationNonce: transfer.correlationNonce,
+        correlationHmac: transfer.correlationHmac,
+        metadataRepairVersion: 1,
+        failed: false,
       });
     } finally {
       if (priorCorrelationSecret === undefined) {
@@ -968,6 +1176,7 @@ describe("Stripe Checkout control plane", () => {
       stripeChargeId: "ch_paid_clawback",
       refundAmount: 1_000,
       totalRefundedAmount: 1_000,
+      status: "succeeded",
     });
     await drainFinancialJobs(t, seed.paymentId);
     let balance = await t.run(async (ctx) =>

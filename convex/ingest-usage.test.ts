@@ -60,6 +60,8 @@ async function seedWallet(t: TestConvex<typeof schema>): Promise<SeededWallet> {
       reversedCredits: 0,
       walletReversedCredits: 0,
       publisherClawbackTargetCredits: 0,
+      reversalSequence: 0,
+      financeMigrationStatus: "verified",
       status: "paid",
       createdAt: 1,
       updatedAt: 1,
@@ -181,8 +183,7 @@ describe("wallet settlement ingest contract", () => {
         {
           refId: "settle:too-expensive",
           status: "rejected",
-          reason:
-            "insufficient balance without authoritative reservation proof",
+          reason: "reservation checkpoint is stale after ledger debit",
           retryable: false,
         },
       ],

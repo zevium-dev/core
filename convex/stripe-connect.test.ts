@@ -1,4 +1,5 @@
 /// <reference types="vite/client" />
+import { signTransferCorrelation } from "@zevium/shared";
 import { convexTest, type TestConvex } from "convex-test";
 import type Stripe from "stripe";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -12,7 +13,9 @@ import {
   connectAccountProjection,
   createAndRetrieveStripeTransfer,
   createOnboardingLink,
+  repairAndRetrieveStripeTransferMetadata,
 } from "./payouts";
+import { FINANCE_MIGRATION_KEY } from "./lib/financeMigrationGate";
 import schema from "./schema";
 
 const modules = import.meta.glob("./**/*.ts");
@@ -69,6 +72,8 @@ async function seedConnect(t: TestConvex<typeof schema>): Promise<ConnectSeed> {
       reversedAtoms: 0,
       failedAtoms: 0,
       sequence: 0,
+      migrationStatus: "verified",
+      migrationWatermarkSequence: 0,
       updatedAt: 1,
     });
     return { organizationId, earningId };
@@ -416,9 +421,18 @@ describe("Stripe Connect publisher accounting", () => {
     });
     expect(first.amount).toBe(1_045);
     expect(first.remainderAtoms).toBe(9_500);
-    await t.mutation(internal.payouts.markPublisherTransferSucceeded, {
-      transferId: first.transferId,
+    await t.mutation(internal.payouts.projectStripeTransfer, {
       stripeTransferId: "tr_carry_first",
+      publisherTransferId: first.transferId,
+      amount: first.amount,
+      amountReversed: 0,
+      currency: first.currency,
+      destination: first.connectedAccountId,
+      platformAccountId: first.platformAccountId,
+      correlationNonce: first.correlationNonce,
+      correlationHmac: first.correlationHmac,
+      metadataRepairVersion: 1,
+      failed: false,
     });
     await expect(
       t.mutation(internal.payouts.preparePublisherTransfer, {
@@ -495,9 +509,18 @@ describe("Stripe Connect publisher accounting", () => {
         ...TRANSFER_CORRELATION,
       },
     );
-    await t.mutation(internal.payouts.markPublisherTransferSucceeded, {
-      transferId: transfer.transferId,
+    await t.mutation(internal.payouts.projectStripeTransfer, {
       stripeTransferId: "tr_projection",
+      publisherTransferId: transfer.transferId,
+      amount: transfer.amount,
+      amountReversed: 0,
+      currency: transfer.currency,
+      destination: transfer.connectedAccountId,
+      platformAccountId: transfer.platformAccountId,
+      correlationNonce: transfer.correlationNonce,
+      correlationHmac: transfer.correlationHmac,
+      metadataRepairVersion: 1,
+      failed: false,
     });
     await t.mutation(internal.payouts.projectStripeTransfer, {
       stripeTransferId: "tr_projection",
@@ -508,6 +531,7 @@ describe("Stripe Connect publisher accounting", () => {
       platformAccountId: transfer.platformAccountId,
       correlationNonce: transfer.correlationNonce,
       correlationHmac: transfer.correlationHmac,
+      metadataRepairVersion: 1,
       failed: true,
       failureReason: "stale failure",
     });
@@ -520,6 +544,7 @@ describe("Stripe Connect publisher accounting", () => {
       platformAccountId: transfer.platformAccountId,
       correlationNonce: transfer.correlationNonce,
       correlationHmac: transfer.correlationHmac,
+      metadataRepairVersion: 1,
       failed: false,
       failureReason: undefined,
     });
@@ -609,6 +634,7 @@ describe("Stripe Connect publisher accounting", () => {
               correlationNonce: local.correlationNonce,
               correlationHmac: local.correlationHmac,
               platformAccountId: local.platformAccountId,
+              metadataRepairVersion: "1",
             },
           } as Stripe.Transfer;
         }) as Stripe["transfers"]["create"],
@@ -626,6 +652,7 @@ describe("Stripe Connect publisher accounting", () => {
               correlationNonce: local.correlationNonce,
               correlationHmac: local.correlationHmac,
               platformAccountId: local.platformAccountId,
+              metadataRepairVersion: "1",
             },
           } as Stripe.Transfer;
         }) as Stripe["transfers"]["retrieve"],
@@ -639,6 +666,9 @@ describe("Stripe Connect publisher accounting", () => {
         correlationNonce: local.correlationNonce,
         correlationHmac: local.correlationHmac,
         platformAccountId: local.platformAccountId,
+        correlationState: local.correlationState,
+        metadataRepairVersion: local.metadataRepairVersion,
+        providerCreateMetadataShape: local.providerCreateMetadataShape,
       },
     );
     expect(calls).toEqual(["create", "retrieve"]);
@@ -657,6 +687,7 @@ describe("Stripe Connect publisher accounting", () => {
       platformAccountId: snapshot.metadata.platformAccountId,
       correlationNonce: snapshot.metadata.correlationNonce,
       correlationHmac: snapshot.metadata.correlationHmac,
+      metadataRepairVersion: Number(snapshot.metadata.metadataRepairVersion),
       failed: false,
       failureReason: undefined,
     } as const;
@@ -697,7 +728,285 @@ describe("Stripe Connect publisher accounting", () => {
     ]);
   });
 
-  it("reads conservative zero aggregates from a staged legacy balance", async () => {
+  it("repairs legacy provider metadata without changing original idempotent create", async () => {
+    const t = convexTest(schema, modules);
+    const transferId = await t.run(async (ctx) => {
+      const publisherOrganizationId = await ctx.db.insert("organizations", {
+        clerkOrgId: "org_legacy_repair",
+        name: "Legacy repair",
+        slug: "legacy-repair",
+      });
+      const publisherBalanceId = await ctx.db.insert("publisherBalances", {
+        publisherOrganizationId,
+        availableAtoms: 0,
+        allocatedAtoms: 500_000_000,
+        paidAtoms: 0,
+        pendingRiskAtoms: 0,
+        reversedAtoms: 0,
+        failedAtoms: 0,
+        sequence: 1,
+        migrationStatus: "verified",
+        migrationWatermarkSequence: 1,
+        updatedAt: 1,
+      });
+      const transferId = await ctx.db.insert("publisherTransfers", {
+        publisherOrganizationId,
+        stripeConnectedAccountId: "acct_legacy_destination",
+        amount: 500,
+        amountAtoms: 500_000_000,
+        remainderAtoms: 0,
+        currency: "usd",
+        idempotencyKey: "publisher-transfer:legacy-original",
+        reversedAmount: 0,
+        correlationNonce: "c".repeat(64),
+        platformAccountId: "acct_platform_test",
+        correlationState: "provider_repair_required",
+        metadataRepairVersion: 1,
+        providerCreateMetadataShape: "publisher_only",
+        status: "created",
+        createdAt: 1,
+        updatedAt: 1,
+      });
+      const correlationHmac = await signTransferCorrelation(TRANSFER_SECRET, {
+        publisherTransferId: transferId,
+        nonce: "c".repeat(64),
+        platformAccountId: "acct_platform_test",
+        destination: "acct_legacy_destination",
+        currency: "usd",
+        amount: 500,
+      });
+      await ctx.db.patch(transferId, { correlationHmac });
+      await ctx.db.insert("publisherSettlementEntries", {
+        publisherBalanceId,
+        publisherOrganizationId,
+        kind: "transfer_allocation",
+        availableDeltaAtoms: -500_000_000,
+        allocatedDeltaAtoms: 500_000_000,
+        paidDeltaAtoms: 0,
+        refId: `publisher:transfer:${transferId}:allocated`,
+        sequence: 1,
+        transferId,
+        createdAt: 1,
+      });
+      await ctx.db.insert("financialMigrationJobs", {
+        migrationKey: FINANCE_MIGRATION_KEY,
+        status: "failed",
+        phase: "conservation",
+        accumulatorA: 0,
+        accumulatorB: 0,
+        accumulatorC: 0,
+        rowsRead: 0,
+        rowsWritten: 0,
+        chunks: 1,
+        lastError: "provider repair required",
+        createdAt: 1,
+        updatedAt: 1,
+      });
+      return transferId;
+    });
+    const local = await t.mutation(
+      internal.payouts.getLegacyPublisherTransferForRepair,
+      { transferId },
+    );
+
+    let metadata: Record<string, string> = {
+      publisherTransferId: local._id,
+    };
+    let createParams: Stripe.TransferCreateParams | undefined;
+    let createOptions: Stripe.RequestOptions | undefined;
+    let updateOptions: Stripe.RequestOptions | undefined;
+    const providerSnapshot = (): Stripe.Transfer =>
+      ({
+        id: "tr_legacy_repair",
+        amount: local.amount,
+        amount_reversed: 0,
+        currency: local.currency,
+        destination: local.stripeConnectedAccountId,
+        metadata: { ...metadata },
+      }) as Stripe.Transfer;
+    const snapshot = await repairAndRetrieveStripeTransferMetadata(
+      {
+        create: (async (params, options) => {
+          createParams = params;
+          createOptions = options;
+          return providerSnapshot();
+        }) as Stripe["transfers"]["create"],
+        retrieve: (async () =>
+          providerSnapshot()) as Stripe["transfers"]["retrieve"],
+        update: (async (_id, params, options) => {
+          metadata = { ...metadata, ...(params.metadata ?? {}) } as Record<
+            string,
+            string
+          >;
+          updateOptions = options;
+          return providerSnapshot();
+        }) as Stripe["transfers"]["update"],
+      },
+      local,
+    );
+    expect(createParams).toEqual({
+      amount: 500,
+      currency: "usd",
+      destination: "acct_legacy_destination",
+      metadata: { publisherTransferId: local._id },
+    });
+    expect(createOptions?.idempotencyKey).toBe(local.idempotencyKey);
+    expect(updateOptions?.idempotencyKey).toBe(
+      "publisher-transfer-metadata-repair:v1:tr_legacy_repair",
+    );
+
+    await t.mutation(
+      internal.payouts.verifyLegacyStripeTransferMetadataRepair,
+      {
+        transferId: local._id,
+        stripeTransferId: snapshot.id,
+        amount: snapshot.amount,
+        amountReversed: snapshot.amount_reversed,
+        currency: snapshot.currency,
+        destination:
+          typeof snapshot.destination === "string"
+            ? snapshot.destination
+            : snapshot.destination.id,
+        platformAccountId: snapshot.metadata.platformAccountId!,
+        correlationNonce: snapshot.metadata.correlationNonce!,
+        correlationHmac: snapshot.metadata.correlationHmac!,
+        metadataRepairVersion: Number(snapshot.metadata.metadataRepairVersion),
+      },
+    );
+    const repaired = await t.run(async (ctx) => ({
+      transfer: await ctx.db.get(local._id),
+      balance: await ctx.db
+        .query("publisherBalances")
+        .withIndex("by_publisher", (q) =>
+          q.eq("publisherOrganizationId", local.publisherOrganizationId),
+        )
+        .unique(),
+      ledger: await ctx.db
+        .query("publisherSettlementEntries")
+        .withIndex("by_transfer_sequence", (q) => q.eq("transferId", local._id))
+        .collect(),
+    }));
+    expect(repaired.transfer).toMatchObject({
+      stripeTransferId: "tr_legacy_repair",
+      status: "succeeded",
+      correlationState: "provider_verified",
+      providerMetadataVerifiedAt: expect.any(Number),
+    });
+    expect(repaired.balance).toMatchObject({
+      availableAtoms: 0,
+      allocatedAtoms: 0,
+      paidAtoms: 500_000_000,
+      sequence: 2,
+      migrationWatermarkSequence: 2,
+    });
+    expect(repaired.ledger.map((entry) => entry.kind)).toEqual([
+      "transfer_allocation",
+      "transfer_succeeded",
+    ]);
+  });
+
+  it("replays pre-version correlated transfer metadata with its exact original shape", async () => {
+    const t = convexTest(schema, modules);
+    const transferId = await t.run(async (ctx) => {
+      const publisherOrganizationId = await ctx.db.insert("organizations", {
+        clerkOrgId: "org_correlated_v0_repair",
+        name: "Correlated v0 repair",
+        slug: "correlated-v0-repair",
+      });
+      const transferId = await ctx.db.insert("publisherTransfers", {
+        publisherOrganizationId,
+        stripeConnectedAccountId: "acct_correlated_v0",
+        amount: 700,
+        amountAtoms: 700_000_000,
+        remainderAtoms: 0,
+        currency: "usd",
+        idempotencyKey: "publisher-transfer:correlated-v0-original",
+        reversedAmount: 0,
+        correlationNonce: "d".repeat(64),
+        platformAccountId: "acct_platform_test",
+        correlationState: "provider_repair_required",
+        metadataRepairVersion: 1,
+        providerCreateMetadataShape: "correlated_v0",
+        status: "created",
+        createdAt: 1,
+        updatedAt: 1,
+      });
+      const correlationHmac = await signTransferCorrelation(TRANSFER_SECRET, {
+        publisherTransferId: transferId,
+        nonce: "d".repeat(64),
+        platformAccountId: "acct_platform_test",
+        destination: "acct_correlated_v0",
+        currency: "usd",
+        amount: 700,
+      });
+      await ctx.db.patch(transferId, { correlationHmac });
+      await ctx.db.insert("financialMigrationJobs", {
+        migrationKey: FINANCE_MIGRATION_KEY,
+        status: "failed",
+        phase: "transfers",
+        accumulatorA: 0,
+        accumulatorB: 0,
+        accumulatorC: 0,
+        rowsRead: 0,
+        rowsWritten: 0,
+        chunks: 1,
+        lastError: "provider repair required",
+        createdAt: 1,
+        updatedAt: 1,
+      });
+      return transferId;
+    });
+    const local = await t.mutation(
+      internal.payouts.getLegacyPublisherTransferForRepair,
+      { transferId },
+    );
+    const originalMetadata = {
+      publisherTransferId: String(local._id),
+      correlationNonce: local.correlationNonce!,
+      correlationHmac: local.correlationHmac!,
+      platformAccountId: local.platformAccountId!,
+    };
+    let providerMetadata: Record<string, string> = { ...originalMetadata };
+    let replayParams: Stripe.TransferCreateParams | undefined;
+    const snapshot = (): Stripe.Transfer =>
+      ({
+        id: "tr_correlated_v0",
+        amount: local.amount,
+        amount_reversed: 0,
+        currency: local.currency,
+        destination: local.stripeConnectedAccountId,
+        metadata: { ...providerMetadata },
+      }) as Stripe.Transfer;
+    await repairAndRetrieveStripeTransferMetadata(
+      {
+        create: (async (params) => {
+          replayParams = params;
+          return snapshot();
+        }) as Stripe["transfers"]["create"],
+        retrieve: (async () => snapshot()) as Stripe["transfers"]["retrieve"],
+        update: (async (_id, params) => {
+          providerMetadata = {
+            ...providerMetadata,
+            ...(params.metadata ?? {}),
+          } as Record<string, string>;
+          return snapshot();
+        }) as Stripe["transfers"]["update"],
+      },
+      local,
+    );
+    expect(replayParams).toEqual({
+      amount: 700,
+      currency: "usd",
+      destination: "acct_correlated_v0",
+      metadata: originalMetadata,
+    });
+    expect(providerMetadata).toEqual({
+      ...originalMetadata,
+      metadataRepairVersion: "1",
+    });
+  });
+
+  it("fails closed instead of zero-lying for a staged legacy balance", async () => {
     const t = convexTest(schema, modules);
     await t.run(async (ctx) => {
       const organizationId = await ctx.db.insert("organizations", {
@@ -714,19 +1023,14 @@ describe("Stripe Connect publisher accounting", () => {
         updatedAt: 1,
       });
     });
-    const state = await t
-      .withIdentity({
-        subject: "totals_user",
-        org_id: "org_totals",
-        org_role: "org:member",
-      } as { subject: string; org_id: string; org_role: string })
-      .query(api.payouts.getPayoutState, {});
-    expect(state.earnings).toMatchObject({
-      pendingRisk: 0,
-      reversed: 0,
-      failed: 0,
-      rows: [],
-    });
-    expect(state.transfers).toEqual([]);
+    await expect(
+      t
+        .withIdentity({
+          subject: "totals_user",
+          org_id: "org_totals",
+          org_role: "org:member",
+        } as { subject: string; org_id: string; org_role: string })
+        .query(api.payouts.getPayoutState, {}),
+    ).rejects.toThrow("Publisher finance migration is not verified");
   });
 });

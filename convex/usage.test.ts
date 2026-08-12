@@ -57,6 +57,8 @@ async function seedWorld(t: ReturnType<typeof convexTest>): Promise<Seeded> {
     await ctx.db.insert("usageEvents", {
       organizationId: consumerOrgId,
       projectId: projectAId,
+      projectName: "Weather API",
+      projectSlug: "weather",
       endpoint: "/v1/forecast",
       method: "GET",
       credits: 10,
@@ -68,6 +70,8 @@ async function seedWorld(t: ReturnType<typeof convexTest>): Promise<Seeded> {
     await ctx.db.insert("usageEvents", {
       organizationId: consumerOrgId,
       projectId: projectAId,
+      projectName: "Weather API",
+      projectSlug: "weather",
       endpoint: "/v1/forecast",
       method: "GET",
       credits: 20,
@@ -79,6 +83,8 @@ async function seedWorld(t: ReturnType<typeof convexTest>): Promise<Seeded> {
     await ctx.db.insert("usageEvents", {
       organizationId: consumerOrgId,
       projectId: projectBId,
+      projectName: "Maps API",
+      projectSlug: "maps",
       endpoint: "/v1/geocode",
       method: "POST",
       credits: 50,
@@ -91,6 +97,8 @@ async function seedWorld(t: ReturnType<typeof convexTest>): Promise<Seeded> {
     await ctx.db.insert("usageEvents", {
       organizationId: consumerOrgId,
       projectId: projectAId,
+      projectName: "Weather API",
+      projectSlug: "weather",
       endpoint: "/v1/forecast",
       method: "GET",
       credits: 999,
@@ -103,6 +111,8 @@ async function seedWorld(t: ReturnType<typeof convexTest>): Promise<Seeded> {
     await ctx.db.insert("usageEvents", {
       organizationId: consumerOrgId,
       projectId: projectAId,
+      projectName: "Weather API",
+      projectSlug: "weather",
       endpoint: "/v1/forecast",
       method: "GET",
       credits: 5,

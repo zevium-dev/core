@@ -20,11 +20,25 @@ async function ensureWallet(
   if (existing !== null) {
     return existing._id;
   }
-  return await ctx.db.insert("wallets", {
+  const walletId = await ctx.db.insert("wallets", {
     organizationId,
     balance: 0,
     sequence: 0,
+    debtCredits: 0,
   });
+  await ctx.db.insert("walletFundingStates", {
+    walletId,
+    organizationId,
+    nonrefundableAvailableCredits: 0,
+    refundableAvailableCredits: 0,
+    allocatedCredits: 0,
+    reversedCredits: 0,
+    sequence: 0,
+    migrationStatus: "verified",
+    migrationWatermarkSequence: 0,
+    updatedAt: Date.now(),
+  });
+  return walletId;
 }
 
 export const getBySlug = query({

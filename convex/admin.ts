@@ -5,7 +5,11 @@ import type { Doc, Id } from "./_generated/dataModel";
 import { isAdmin, requireAdmin } from "./lib/auth";
 import { createNotification } from "./lib/notifications";
 import { fireWebhookEvent } from "./webhooks";
-import { transferToStripe } from "./payouts";
+import {
+  repairAndRetrieveStripeTransferMetadata,
+  transferToStripe,
+} from "./payouts";
+import { stripeClient } from "./billing";
 import { internal } from "./_generated/api";
 
 /** Cap for month-to-date usage count (by_at index range scan). */
@@ -388,5 +392,46 @@ export const retryPublisherTransfer = action({
     }
     await transferToStripe(ctx, transfer);
     return { transferId: transfer._id };
+  },
+});
+
+/** Explicit provider reconciliation for pre-correlation Stripe transfers. */
+export const repairLegacyPublisherTransfer = action({
+  args: { transferId: v.id("publisherTransfers") },
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{
+    transferId: Id<"publisherTransfers">;
+    stripeTransferId: string;
+  }> => {
+    await requireAdminInAction(ctx);
+    const transfer = await ctx.runMutation(
+      internal.payouts.getLegacyPublisherTransferForRepair,
+      { transferId: args.transferId },
+    );
+    const snapshot = await repairAndRetrieveStripeTransferMetadata(
+      stripeClient().transfers,
+      transfer,
+    );
+    await ctx.runMutation(
+      internal.payouts.verifyLegacyStripeTransferMetadataRepair,
+      {
+        transferId: transfer._id,
+        stripeTransferId: snapshot.id,
+        amount: snapshot.amount,
+        amountReversed: snapshot.amount_reversed,
+        currency: snapshot.currency,
+        destination:
+          typeof snapshot.destination === "string"
+            ? snapshot.destination
+            : (snapshot.destination?.id ?? ""),
+        platformAccountId: snapshot.metadata.platformAccountId,
+        correlationNonce: snapshot.metadata.correlationNonce,
+        correlationHmac: snapshot.metadata.correlationHmac,
+        metadataRepairVersion: Number(snapshot.metadata.metadataRepairVersion),
+      },
+    );
+    return { transferId: transfer._id, stripeTransferId: snapshot.id };
   },
 });
