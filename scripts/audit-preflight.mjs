@@ -460,7 +460,9 @@ export function validateAuditBootstrap({ requireInstalled = false } = {}) {
       ((upper.startsWith("NPM_CONFIG_") || upper.startsWith("PNPM_CONFIG_")) &&
         !allowedPackageManagerRuntime)
     ) {
-      fail(`${key} is forbidden during dependency audit bootstrap.`);
+      fail(
+        `${key} is forbidden during dependency audit bootstrap${upper === "NODE_PATH" ? ` (value: ${String(value)})` : "."}`,
+      );
     }
   }
   for (const relativePath of [
