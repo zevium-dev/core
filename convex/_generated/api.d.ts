@@ -17,6 +17,7 @@ import type * as cronTasks from "../cronTasks.js";
 import type * as crons from "../crons.js";
 import type * as dev from "../dev.js";
 import type * as earnings from "../earnings.js";
+import type * as financeMigration from "../financeMigration.js";
 import type * as http from "../http.js";
 import type * as keySettings from "../keySettings.js";
 import type * as lib_auth from "../lib/auth.js";
@@ -56,6 +57,7 @@ declare const fullApi: ApiFromModules<{
   crons: typeof crons;
   dev: typeof dev;
   earnings: typeof earnings;
+  financeMigration: typeof financeMigration;
   http: typeof http;
   keySettings: typeof keySettings;
   "lib/auth": typeof lib_auth;

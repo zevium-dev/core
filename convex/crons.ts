@@ -8,6 +8,7 @@ crons.hourly(
   "low-balance-check",
   { minuteUTC: 0 },
   internal.cronTasks.checkLowBalances,
+  {},
 );
 
 /**
@@ -18,7 +19,7 @@ crons.hourly(
 crons.hourly(
   "release-mature-earnings",
   { minuteUTC: 15 },
-  internal.cronTasks.releaseMatureEarningsCron,
+  internal.payouts.releaseMatureEarningsGlobal,
 );
 
 // Scheduled actions are at-most-once. Lease recovery closes crash windows
@@ -27,5 +28,11 @@ crons.interval(
   "stripe-event-recovery",
   { minutes: 1 },
   internal.billing.recoverStripeEvents,
+);
+
+crons.interval(
+  "publisher-reconciliation-recovery",
+  { minutes: 1 },
+  internal.billing.recoverPublisherReconciliations,
 );
 export default crons;

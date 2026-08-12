@@ -28,6 +28,16 @@ export {
 export { generateMockResponse, type GeneratedMockResponse } from "./mock.js";
 
 export {
+  MAX_USAGE_INGEST_EVENTS,
+  signReservationProof,
+  verifyReservationProof,
+  signTransferCorrelation,
+  verifyTransferCorrelation,
+  type ReservationProofPayload,
+  type TransferCorrelationPayload,
+} from "./finance.js";
+
+export {
   isValidSlug,
   isValidSemver,
   collectOpenApiSpecIssues,

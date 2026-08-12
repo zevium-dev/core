@@ -17,8 +17,16 @@ import {
   requireIdentity,
   requireOrgMemberBySlug,
 } from "./lib/auth";
-import { reconcilePaymentPublisherClawback } from "./lib/publisherLedger";
+import {
+  enqueuePaymentPublisherReconciliation,
+  processPaymentPublisherReconciliationChunk,
+} from "./lib/publisherLedger";
 import { appendWalletEntry, getOrCreateWallet } from "./wallets";
+import {
+  commitPaymentReversal,
+  preflightPaymentReversal,
+  recordPositiveFundingSource,
+} from "./lib/funding";
 
 /** Pinned alongside `stripe@22.3.1`; upgrade only as an explicit migration. */
 export const STRIPE_API_VERSION = "2026-06-24.dahlia" as const;
@@ -405,7 +413,7 @@ export const createCheckout = action({
       clerkOrgId,
       packId: args.packId,
       successUrl: `${origin}/app/billing?checkout={CHECKOUT_SESSION_ID}`,
-      cancelUrl: `${origin}/app/billing`,
+      cancelUrl: `${origin}/app/billing?checkout_cancel=${prepared.checkoutIntentId}`,
     });
     await ctx.runMutation(internal.billing.attachCheckoutSession, {
       checkoutIntentId: prepared.checkoutIntentId,
@@ -810,6 +818,20 @@ function paymentStatusForProjection(args: {
   return "paid";
 }
 
+async function boundedPaymentDisputes(
+  ctx: MutationCtx,
+  paymentId: Id<"payments">,
+): Promise<Doc<"paymentDisputes">[]> {
+  const disputes = await ctx.db
+    .query("paymentDisputes")
+    .withIndex("by_payment", (q) => q.eq("paymentId", paymentId))
+    .take(101);
+  if (disputes.length > 100) {
+    throw new Error("Payment exceeds 100 bounded dispute sources");
+  }
+  return disputes;
+}
+
 async function applyEffectivePaymentReversal(
   ctx: MutationCtx,
   args: {
@@ -819,97 +841,200 @@ async function applyEffectivePaymentReversal(
     disputes: Doc<"paymentDisputes">[];
     sourceKind: "refund" | "dispute";
     sourceRef: string;
+    sourceAmount: number;
+    sourceRequestedCredits: number;
+    sourceActive: boolean;
   },
 ): Promise<{ walletDelta: number; targetReversedCredits: number }> {
-  const disputedCredits = args.disputes.reduce(
-    (sum, dispute) =>
-      sum +
-      (dispute.fundsWithdrawn && !dispute.fundsReinstated
-        ? dispute.creditsAtRisk
-        : 0),
-    0,
-  );
-  const targetReversedCredits = Math.min(
-    args.payment.grantedCredits,
-    args.refundedCredits + disputedCredits,
-  );
-  const fundingLot = await ctx.db
-    .query("paymentFundingLots")
-    .withIndex("by_payment", (q) => q.eq("paymentId", args.payment._id))
+  if (
+    !Number.isSafeInteger(args.sourceRequestedCredits) ||
+    args.sourceRequestedCredits < 0 ||
+    !Number.isSafeInteger(args.sourceAmount) ||
+    args.sourceAmount < 0
+  ) {
+    throw new Error("Invalid payment exposure source amount");
+  }
+  const existingSource = await ctx.db
+    .query("paymentExposures")
+    .withIndex("by_source", (q) => q.eq("sourceRef", args.sourceRef))
     .unique();
-  if (fundingLot === null) {
-    throw new Error("Payment funding lot is missing");
-  }
   if (
-    fundingLot.grantedCredits !== args.payment.grantedCredits ||
-    fundingLot.walletReversedCredits !== args.payment.walletReversedCredits
+    existingSource !== null &&
+    existingSource.paymentId !== args.payment._id
   ) {
-    throw new Error("Payment funding projection is inconsistent");
+    throw new Error("Payment exposure source belongs to another payment");
   }
-
-  const effectiveDelta = targetReversedCredits - args.payment.reversedCredits;
-  let walletDelta = 0;
-  let targetWalletReversedCredits = fundingLot.walletReversedCredits;
-  let targetPublisherClawbackCredits =
-    args.payment.publisherClawbackTargetCredits;
-  let availableCredits = fundingLot.availableCredits;
-  if (effectiveDelta > 0) {
-    walletDelta = Math.min(effectiveDelta, availableCredits);
-    targetWalletReversedCredits += walletDelta;
-    availableCredits -= walletDelta;
-    targetPublisherClawbackCredits += effectiveDelta - walletDelta;
-  } else if (effectiveDelta < 0) {
-    let creditsToRestore = -effectiveDelta;
-    const publisherRestoration = Math.min(
-      creditsToRestore,
-      targetPublisherClawbackCredits,
-    );
-    targetPublisherClawbackCredits -= publisherRestoration;
-    creditsToRestore -= publisherRestoration;
-    if (creditsToRestore > targetWalletReversedCredits) {
-      throw new Error("Payment wallet restoration exceeds active reversal");
-    }
-    walletDelta = -creditsToRestore;
-    targetWalletReversedCredits -= creditsToRestore;
-    availableCredits += creditsToRestore;
-  }
-  if (
-    targetWalletReversedCredits + targetPublisherClawbackCredits !==
-    targetReversedCredits
-  ) {
-    throw new Error("Payment reversal allocation does not balance");
-  }
-
-  if (walletDelta !== 0) {
-    const wallet = await getOrCreateWallet(ctx, args.payment.organizationId);
-    await appendWalletEntry(ctx, {
-      wallet,
-      kind:
-        walletDelta > 0
-          ? args.sourceKind === "refund"
-            ? "refund_reversal"
-            : "dispute_reversal"
-          : "dispute_restoration",
-      amount: -walletDelta,
-      refId: `${args.sourceRef}:wallet:${targetWalletReversedCredits}`,
+  const now = Date.now();
+  if (existingSource === null) {
+    await ctx.db.insert("paymentExposures", {
       paymentId: args.payment._id,
+      organizationId: args.payment.organizationId,
+      sourceKind: args.sourceKind,
+      sourceRef: args.sourceRef,
+      sourceAmount: args.sourceAmount,
+      sourceAmountExact: true,
+      migrationBackfilled: false,
+      requestedCredits: args.sourceRequestedCredits,
+      effectiveCredits: 0,
+      walletCredits: 0,
+      publisherCredits: 0,
+      appliedPublisherCredits: 0,
+      active: args.sourceActive,
+      createdAt: now,
+      updatedAt: now,
+    });
+  } else {
+    if (
+      existingSource.sourceKind !== args.sourceKind ||
+      ((existingSource.sourceAmountExact ?? true) &&
+        existingSource.sourceAmount !== args.sourceAmount)
+    ) {
+      throw new Error("Payment exposure immutable source facts changed");
+    }
+    await ctx.db.patch(existingSource._id, {
+      sourceAmount: args.sourceAmount,
+      sourceAmountExact: true,
+      migrationBackfilled: false,
+      requestedCredits: args.sourceRequestedCredits,
+      active: args.sourceActive,
+      updatedAt: now,
     });
   }
 
-  await ctx.db.patch(fundingLot._id, {
-    availableCredits,
-    walletReversedCredits: targetWalletReversedCredits,
-    state: availableCredits === 0 ? "depleted" : "available",
-    updatedAt: Date.now(),
+  const exposures = await ctx.db
+    .query("paymentExposures")
+    .withIndex("by_payment_created", (q) => q.eq("paymentId", args.payment._id))
+    .order("asc")
+    .take(101);
+  if (exposures.length > 100) {
+    throw new Error("Payment exceeds 100 bounded exposure sources");
+  }
+  const ordered = [...exposures].sort((left, right) => {
+    if (left.sourceKind !== right.sourceKind) {
+      return left.sourceKind === "refund" ? -1 : 1;
+    }
+    if (left.createdAt !== right.createdAt) {
+      return left.createdAt - right.createdAt;
+    }
+    return left.sourceRef.localeCompare(right.sourceRef);
   });
+  let capRemaining = args.payment.grantedCredits;
+  const effectiveById = new Map<Id<"paymentExposures">, number>();
+  for (const exposure of ordered) {
+    const effective = exposure.active
+      ? Math.min(exposure.requestedCredits, capRemaining)
+      : 0;
+    effectiveById.set(exposure._id, effective);
+    capRemaining -= effective;
+  }
+  const targetReversedCredits = args.payment.grantedCredits - capRemaining;
+  const currentWalletReversedCredits = args.payment.walletReversedCredits ?? 0;
+  const currentPublisherClawbackCredits =
+    args.payment.publisherClawbackTargetCredits ?? 0;
+  const effectiveDelta = targetReversedCredits - args.payment.reversedCredits;
+  const wallet = await getOrCreateWallet(ctx, args.payment.organizationId);
+  let targetWalletReversedCredits = currentWalletReversedCredits;
+  let walletDelta = 0;
 
-  await reconcilePaymentPublisherClawback(ctx, {
-    paymentId: args.payment._id,
-    consumerOrganizationId: args.payment.organizationId,
-    targetGrossCredits: targetPublisherClawbackCredits,
-    sourceKind: args.sourceKind,
-    sourceRef: args.sourceRef,
-  });
+  if (effectiveDelta > 0) {
+    const reversalPlan = await preflightPaymentReversal(ctx, {
+      wallet,
+      paymentId: args.payment._id,
+      requestedCredits: effectiveDelta,
+    });
+    walletDelta = reversalPlan.walletCredits;
+    targetWalletReversedCredits += walletDelta;
+    if (walletDelta > 0) {
+      const reversal = await appendWalletEntry(ctx, {
+        wallet,
+        kind:
+          args.sourceKind === "refund" ? "refund_reversal" : "dispute_reversal",
+        amount: -walletDelta,
+        refId: `${args.sourceRef}:wallet:reverse:${targetWalletReversedCredits}`,
+        paymentId: args.payment._id,
+      });
+      await commitPaymentReversal(ctx, reversalPlan, now);
+      await ctx.db.insert("walletFundingReversals", {
+        walletId: wallet._id,
+        organizationId: args.payment.organizationId,
+        walletEntryId: reversal.entryId,
+        paymentId: args.payment._id,
+        grossCredits: walletDelta,
+        createdAt: now,
+      });
+    }
+  } else if (effectiveDelta < 0) {
+    // Restore publisher exposure first. Only remaining reduction recreates
+    // wallet inventory, preserving unspent-first reversal policy.
+    const creditsToRestore = Math.min(
+      Math.max(0, -effectiveDelta - currentPublisherClawbackCredits),
+      currentWalletReversedCredits,
+    );
+    walletDelta = -creditsToRestore;
+    targetWalletReversedCredits -= creditsToRestore;
+    if (creditsToRestore > 0) {
+      const restored = await appendWalletEntry(ctx, {
+        wallet,
+        kind: "dispute_restoration",
+        amount: creditsToRestore,
+        refId: `${args.sourceRef}:wallet:restore:${targetWalletReversedCredits}`,
+        paymentId: args.payment._id,
+      });
+      const entry = await ctx.db.get(restored.entryId);
+      if (entry === null)
+        throw new Error("Restoration ledger entry is missing");
+      await recordPositiveFundingSource(ctx, {
+        wallet: restored.wallet,
+        sourceKind: "restoration",
+        sourceRef: entry.refId,
+        amount: creditsToRestore,
+        refundable: true,
+        paymentId: args.payment._id,
+        createdAt: entry.createdAt,
+      });
+    }
+  }
+
+  const targetPublisherClawbackCredits =
+    targetReversedCredits - targetWalletReversedCredits;
+  if (targetPublisherClawbackCredits < 0) {
+    throw new Error("Payment publisher exposure cannot be negative");
+  }
+  let walletCoverageRemaining = targetWalletReversedCredits;
+  let publisherTargetSum = 0;
+  let publisherTargetsChanged = false;
+  for (const exposure of ordered) {
+    const effectiveCredits = effectiveById.get(exposure._id) ?? 0;
+    const walletCredits = Math.min(effectiveCredits, walletCoverageRemaining);
+    const publisherCredits = effectiveCredits - walletCredits;
+    walletCoverageRemaining -= walletCredits;
+    publisherTargetSum += publisherCredits;
+    if (exposure.publisherCredits !== publisherCredits) {
+      publisherTargetsChanged = true;
+    }
+    await ctx.db.patch(exposure._id, {
+      effectiveCredits,
+      walletCredits,
+      publisherCredits,
+      allocationCursor:
+        exposure.publisherCredits === publisherCredits
+          ? exposure.allocationCursor
+          : undefined,
+      updatedAt: now,
+    });
+  }
+  if (
+    walletCoverageRemaining !== 0 ||
+    publisherTargetSum !== targetPublisherClawbackCredits
+  ) {
+    throw new Error("Payment reversal source allocation does not balance");
+  }
+  if (publisherTargetsChanged) {
+    await enqueuePaymentPublisherReconciliation(ctx, {
+      paymentId: args.payment._id,
+      consumerOrganizationId: args.payment.organizationId,
+    });
+  }
   await ctx.db.patch(args.payment._id, {
     refundedAmount: args.refundedAmount,
     refundedCredits: args.refundedCredits,
@@ -931,6 +1056,7 @@ export const applyRefundProjection = internalMutation({
   args: {
     stripeRefundId: v.string(),
     stripeChargeId: v.string(),
+    refundAmount: v.optional(v.number()),
     totalRefundedAmount: v.number(),
   },
   handler: async (ctx, args) => {
@@ -958,17 +1084,58 @@ export const applyRefundProjection = internalMutation({
       paidAmount: payment.amount,
       totalRefundedAmount: refundedAmount,
     }).targetReversedCredits;
-    const disputes = await ctx.db
-      .query("paymentDisputes")
-      .withIndex("by_payment", (q) => q.eq("paymentId", payment._id))
-      .collect();
+    const sourceRef = `stripe:refund:${args.stripeRefundId}`;
+    const existingExposure = await ctx.db
+      .query("paymentExposures")
+      .withIndex("by_source", (q) => q.eq("sourceRef", sourceRef))
+      .unique();
+    const sourceAmount =
+      existingExposure !== null &&
+      !(existingExposure.sourceAmountExact ?? true) &&
+      args.refundAmount !== undefined
+        ? args.refundAmount
+        : (existingExposure?.sourceAmount ??
+          args.refundAmount ??
+          Math.max(0, refundedAmount - payment.refundedAmount));
+    if (!Number.isSafeInteger(sourceAmount) || sourceAmount <= 0) {
+      if (existingExposure !== null) {
+        return {
+          kind: "refund" as const,
+          walletDelta: 0,
+          targetReversedCredits: payment.reversedCredits,
+        };
+      }
+      throw new Error("Stripe refund source amount must be positive");
+    }
+    const sourceRequestedCredits =
+      existingExposure?.migrationBackfilled === true &&
+      args.refundAmount !== undefined
+        ? cumulativeRefundCredits({
+            grantedCredits: payment.grantedCredits,
+            reversedCredits: 0,
+            paidAmount: payment.amount,
+            totalRefundedAmount: Math.min(sourceAmount, payment.amount),
+          }).targetReversedCredits
+        : (existingExposure?.requestedCredits ??
+          (args.refundAmount !== undefined
+            ? cumulativeRefundCredits({
+                grantedCredits: payment.grantedCredits,
+                reversedCredits: 0,
+                paidAmount: payment.amount,
+                totalRefundedAmount: Math.min(sourceAmount, payment.amount),
+              }).targetReversedCredits
+            : Math.max(0, refundedCredits - payment.refundedCredits)));
+    const disputes = await boundedPaymentDisputes(ctx, payment._id);
     const projected = await applyEffectivePaymentReversal(ctx, {
       payment,
       refundedAmount,
       refundedCredits,
       disputes,
       sourceKind: "refund",
-      sourceRef: `stripe:refund:${args.stripeRefundId}`,
+      sourceRef,
+      sourceAmount,
+      sourceRequestedCredits,
+      sourceActive: true,
     });
     return { kind: "refund" as const, ...projected };
   },
@@ -1062,19 +1229,48 @@ export const applyDisputeProjection = internalMutation({
         updatedAt: now,
       });
     }
-    const disputes = await ctx.db
-      .query("paymentDisputes")
-      .withIndex("by_payment", (q) => q.eq("paymentId", payment._id))
-      .collect();
+    const disputes = await boundedPaymentDisputes(ctx, payment._id);
     const projected = await applyEffectivePaymentReversal(ctx, {
       payment,
       refundedAmount: payment.refundedAmount,
       refundedCredits: payment.refundedCredits,
       disputes,
       sourceKind: "dispute",
-      sourceRef: `stripe:dispute:${args.stripeEventId}`,
+      sourceRef: `stripe:dispute:${args.stripeDisputeId}`,
+      sourceAmount: args.amount,
+      sourceRequestedCredits: creditsAtRisk,
+      sourceActive: fundsWithdrawn && !fundsReinstated,
     });
     return { kind: "dispute" as const, ...projected };
+  },
+});
+
+export const processPublisherReconciliation = internalMutation({
+  args: { paymentId: v.id("payments") },
+  handler: async (ctx, args) =>
+    await processPaymentPublisherReconciliationChunk(ctx, args.paymentId),
+});
+
+/** Crash recovery schedules a bounded number of unfinished journals. */
+export const recoverPublisherReconciliations = internalMutation({
+  args: {},
+  handler: async (ctx): Promise<{ scheduled: number }> => {
+    const pending = await ctx.db
+      .query("publisherReconciliationJobs")
+      .withIndex("by_status_updated", (q) => q.eq("status", "pending"))
+      .take(25);
+    const running = await ctx.db
+      .query("publisherReconciliationJobs")
+      .withIndex("by_status_updated", (q) => q.eq("status", "running"))
+      .take(25);
+    for (const job of [...pending, ...running]) {
+      await ctx.scheduler.runAfter(
+        0,
+        internal.billing.processPublisherReconciliation,
+        { paymentId: job.paymentId },
+      );
+    }
+    return { scheduled: pending.length + running.length };
   },
 });
 
@@ -1207,9 +1403,38 @@ export const processStripeEvent = internalAction({
         case "charge.refunded": {
           const charge = await stripe.charges.retrieve(args.objectId);
           await fulfillPaymentForCharge(ctx, stripe, charge);
+          const refunds = await stripe.refunds.list({
+            charge: charge.id,
+            limit: 100,
+          });
+          if (refunds.has_more) {
+            throw new Error("Charge exceeds bounded 100-refund projection cap");
+          }
+          for (const refund of refunds.data) {
+            if (refund.status === "failed" || refund.status === "canceled") {
+              continue;
+            }
+            await ctx.runMutation(internal.billing.applyRefundProjection, {
+              stripeRefundId: refund.id,
+              stripeChargeId: charge.id,
+              refundAmount: refund.amount,
+              totalRefundedAmount: charge.amount_refunded,
+            });
+          }
+          break;
+        }
+        case "refund.created":
+        case "refund.updated": {
+          const refund = await stripe.refunds.retrieve(args.objectId);
+          if (refund.status === "failed" || refund.status === "canceled") break;
+          const chargeId = stringId(refund.charge);
+          if (chargeId === null) break;
+          const charge = await stripe.charges.retrieve(chargeId);
+          await fulfillPaymentForCharge(ctx, stripe, charge);
           await ctx.runMutation(internal.billing.applyRefundProjection, {
-            stripeRefundId: args.stripeEventId,
+            stripeRefundId: refund.id,
             stripeChargeId: charge.id,
+            refundAmount: refund.amount,
             totalRefundedAmount: charge.amount_refunded,
           });
           break;
@@ -1262,6 +1487,14 @@ export const processStripeEvent = internalAction({
             publisherTransferId: transfer.metadata.publisherTransferId,
             amount: transfer.amount,
             amountReversed: transfer.amount_reversed,
+            currency: transfer.currency,
+            destination: stringId(transfer.destination) ?? "",
+            platformAccountId:
+              args.stripeAccount === "platform"
+                ? process.env.STRIPE_PLATFORM_ACCOUNT_ID
+                : args.stripeAccount,
+            correlationNonce: transfer.metadata.correlationNonce,
+            correlationHmac: transfer.metadata.correlationHmac,
             failed: args.eventType === "transfer.failed",
             failureReason: undefined,
           });
@@ -1324,7 +1557,10 @@ export const processStripeEvent = internalAction({
 });
 
 export const getBillingState = query({
-  args: { checkoutSessionId: v.optional(v.string()) },
+  args: {
+    checkoutSessionId: v.optional(v.string()),
+    checkoutIntentId: v.optional(v.string()),
+  },
   handler: async (ctx, args) => {
     const claims = await requireIdentity(ctx);
     if (claims.orgId === undefined)
@@ -1350,7 +1586,7 @@ export const getBillingState = query({
       .take(50);
     let checkout: {
       id: Id<"checkoutIntents">;
-      status: Doc<"checkoutIntents">["status"];
+      status: Doc<"checkoutIntents">["status"] | "canceled";
     } | null = null;
     if (args.checkoutSessionId !== undefined) {
       const intent = await ctx.db
@@ -1361,6 +1597,18 @@ export const getBillingState = query({
         .unique();
       if (intent !== null && intent.organizationId === organization._id) {
         checkout = { id: intent._id, status: intent.status };
+      }
+    } else if (args.checkoutIntentId !== undefined) {
+      const intentId = ctx.db.normalizeId(
+        "checkoutIntents",
+        args.checkoutIntentId,
+      );
+      const intent = intentId === null ? null : await ctx.db.get(intentId);
+      if (intent !== null && intent.organizationId === organization._id) {
+        checkout = {
+          id: intent._id,
+          status: intent.status === "complete" ? "complete" : "canceled",
+        };
       }
     }
     return {
@@ -1376,6 +1624,7 @@ export const getBillingState = query({
         amount: payment.amount,
         currency: payment.currency,
         credits: payment.grantedCredits,
+        refundedCredits: payment.refundedCredits,
         createdAt: payment.createdAt,
         failureReason: payment.failureReason,
       })),

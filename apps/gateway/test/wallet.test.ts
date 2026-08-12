@@ -327,6 +327,105 @@ describe("WalletDO unit", () => {
     expect(state.balance).toBe(70);
   });
 
+  it("dead-letters terminal financial rejects and preserves retryable rejects", async () => {
+    const stub = walletStub("unit-terminal-dead-letter");
+    await stub.grant("g1", 20);
+    const usage = {
+      organizationId: "org_publisher",
+      consumerClerkOrgId: "unit-terminal-dead-letter",
+      projectId: "project",
+      endpoint: "/endpoint",
+      method: "GET",
+      status: 200,
+      latencyMs: 1,
+      keyId: "key",
+    };
+    await stub.reserve("r-terminal", 10);
+    await stub.reserve("r-retry", 10);
+    await stub.settle("r-terminal", usage);
+    await stub.settle("r-retry", usage);
+    __setTestUsageMutation(async (_name, { events }) => ({
+      results: events.map((event) =>
+        event.settleRefId === "settle:r-terminal"
+          ? {
+              refId: event.settleRefId,
+              status: "rejected" as const,
+              reason: "immutable payload mismatch",
+              retryable: false,
+            }
+          : {
+              refId: event.settleRefId,
+              status: "rejected" as const,
+              reason: "migration pending",
+              retryable: true,
+            },
+      ),
+      wallet: {
+        clerkOrgId: "unit-terminal-dead-letter",
+        balance: 10,
+        sequence: 3,
+      },
+    }));
+
+    expect(await stub.flushToConvex()).toMatchObject({
+      flushed: 2,
+      acked: 1,
+      remaining: 1,
+    });
+    const state = await stub.getState();
+    expect(state.deadLetterCount).toBe(1);
+    expect(state.pendingSettlements).toEqual([
+      expect.objectContaining({ settlementId: "settle:r-retry" }),
+    ]);
+  });
+
+  it("drains more than 500 settlements in server-capped chunks", async () => {
+    const stub = walletStub("unit-large-chunking");
+    const count = 501;
+    await stub.grant("g-large", count);
+    const usage = {
+      organizationId: "org_publisher",
+      consumerClerkOrgId: "unit-large-chunking",
+      projectId: "project",
+      endpoint: "/endpoint",
+      method: "GET",
+      status: 200,
+      latencyMs: 1,
+      keyId: "key",
+    };
+    for (let index = 0; index < count; index += 1) {
+      await stub.reserve(`r-${index}`, 1);
+      await stub.settle(`r-${index}`, usage);
+    }
+    const batchSizes: number[] = [];
+    let sequence = 1;
+    __setTestUsageMutation(async (_name, { events }) => {
+      batchSizes.push(events.length);
+      sequence += events.length;
+      return {
+        results: events.map((event) => ({
+          refId: event.settleRefId,
+          status: "applied" as const,
+        })),
+        wallet: {
+          clerkOrgId: "unit-large-chunking",
+          balance: count - (sequence - 1),
+          sequence,
+        },
+      };
+    });
+
+    for (let chunk = 0; chunk < 30; chunk += 1) {
+      const result = await stub.flushToConvex();
+      if (result.remaining === 0) break;
+    }
+    const state = await stub.getState();
+    expect(state.pendingSettlements).toHaveLength(0);
+    expect(batchSizes.reduce((sum, size) => sum + size, 0)).toBe(count);
+    expect(Math.max(...batchSizes)).toBe(25);
+    expect(batchSizes).toHaveLength(21);
+  });
+
   it("reconciles a newer checkpoint without discarding holds or pending settlement", async () => {
     const stub = walletStub("unit-checkpoint-preserves-local-state");
     let checkpoint = { clerkOrgId: "org_reconcile", balance: 100, sequence: 1 };

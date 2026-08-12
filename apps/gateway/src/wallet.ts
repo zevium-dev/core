@@ -26,6 +26,11 @@
 
 import { DurableObject } from "cloudflare:workers";
 import {
+  MAX_USAGE_INGEST_EVENTS,
+  signReservationProof,
+  type ReservationProofPayload,
+} from "@zevium/shared";
+import {
   ConvexUsageClient,
   pendingToUsageRecord,
   type ConvexUsageRecord,
@@ -42,6 +47,7 @@ export type InFlightEntry = {
   createdAt: number;
   /** Present for keyed reservations so their aggregate is cap-enforced. */
   keyId?: string;
+  reservationProof?: PendingSettlement["reservationProof"];
 };
 
 /** Usage metadata required to flush a settlement to Convex. */
@@ -63,6 +69,12 @@ export type PendingSettlement = {
   reservationId: string;
   cost: number;
   settledAt: number;
+  reservationProof?: {
+    checkpointSequence: number;
+    authorizedBalance: number;
+    reservedAt: number;
+    signature: string;
+  };
   /** Present for production flush path; unit tests may omit. */
   usage?: SettlementUsage;
 };
@@ -79,6 +91,7 @@ export type WalletState = {
   appliedGrantIds: string[];
   pendingSettlements: PendingSettlement[];
   available: number;
+  deadLetterCount: number;
 };
 
 export type GrantResult =
@@ -136,6 +149,7 @@ export type FlushResult = {
 
 export type AckFlushResult = {
   removed: number;
+  deadLettered: number;
   remaining: number;
 };
 
@@ -182,6 +196,8 @@ const K_KEY_SETTINGS = "keySettings";
 const K_KEY_SETTINGS_AT = "keySettingsSyncedAt";
 const K_SETTLED_PREFIX = "settled:";
 const K_SYNC_GRANTS_AT = "syncGrantsAt";
+const K_DEAD_LETTER_COUNT = "deadLetterCount";
+const K_DEAD_LETTER_PREFIX = "dead:";
 const SYNC_GRANTS_WINDOW_MS = 60_000;
 
 const FLUSH_ALARM_MS = 5_000;
@@ -278,6 +294,7 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
   #keySettingsSyncedAt = 0;
   #syncInFlight: Promise<SyncGrantsResult> | null = null;
   #flushSeq = 0;
+  #deadLetterCount = 0;
   #loaded = false;
   #mutationTail: Promise<void> = Promise.resolve();
 
@@ -306,6 +323,7 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
       K_FLUSH_SEQ,
       K_KEY_SETTINGS,
       K_KEY_SETTINGS_AT,
+      K_DEAD_LETTER_COUNT,
     ]);
 
     this.#balance = (stored.get(K_BALANCE) as number | undefined) ?? 0;
@@ -327,6 +345,8 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
     this.#keySettings = new Map(Object.entries(settingsMap));
     this.#keySettingsSyncedAt =
       (stored.get(K_KEY_SETTINGS_AT) as number | undefined) ?? 0;
+    this.#deadLetterCount =
+      (stored.get(K_DEAD_LETTER_COUNT) as number | undefined) ?? 0;
     this.#loaded = true;
   }
 
@@ -344,6 +364,7 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
       appliedGrantIds: [...this.#appliedGrantIds],
       pendingSettlements: this.#pendingSettlements.map((s) => ({ ...s })),
       available: Math.max(0, this.#balance - inFlightTotal),
+      deadLetterCount: this.#deadLetterCount,
     };
   }
 
@@ -378,6 +399,7 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
       keySettings: Record<string, KeySetting>;
       keySettingsSyncedAt: number;
       settledCounter: { storageKey: string; amount: number };
+      deadLetters: SettlementOutcome[];
     }>,
   ): Promise<void> {
     await this.ctx.storage.transaction(async (txn) => {
@@ -403,6 +425,12 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
           keys.settledCounter.storageKey,
           current + keys.settledCounter.amount,
         );
+      }
+      if (keys.deadLetters !== undefined) {
+        for (const outcome of keys.deadLetters) {
+          await txn.put(`${K_DEAD_LETTER_PREFIX}${outcome.refId}`, outcome);
+        }
+        await txn.put(K_DEAD_LETTER_COUNT, this.#deadLetterCount);
       }
     });
   }
@@ -506,10 +534,31 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
         return { status: "insufficient", available, cost };
       }
 
+      const reservedAt = Date.now();
+      let reservationProof: InFlightEntry["reservationProof"];
+      const proofSecret = (this.env as Cloudflare.Env).GATEWAY_INTERNAL_SECRET;
+      if (proofSecret && opts.clerkOrgId && opts.keyId && this.#sequence >= 0) {
+        const payload: ReservationProofPayload = {
+          consumerClerkOrgId: opts.clerkOrgId,
+          reservationId,
+          credits: cost,
+          checkpointSequence: this.#sequence,
+          authorizedBalance: available,
+          reservedAt,
+          keyId: opts.keyId,
+        };
+        reservationProof = {
+          checkpointSequence: payload.checkpointSequence,
+          authorizedBalance: payload.authorizedBalance,
+          reservedAt: payload.reservedAt,
+          signature: await signReservationProof(proofSecret, payload),
+        };
+      }
       this.#inFlight[reservationId] = {
         cost,
-        createdAt: Date.now(),
+        createdAt: reservedAt,
         ...(opts.keyId ? { keyId: opts.keyId } : {}),
+        ...(reservationProof ? { reservationProof } : {}),
       };
       await this.#persist({ inFlight: { ...this.#inFlight } });
 
@@ -555,6 +604,9 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
         reservationId,
         cost,
         settledAt,
+        ...(entry.reservationProof
+          ? { reservationProof: entry.reservationProof }
+          : {}),
       };
       if (usage) pending.usage = usage;
       this.#pendingSettlements.push(pending);
@@ -785,12 +837,16 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
     checkpoint: WalletCheckpoint,
   ): Promise<AckFlushResult> {
     return this.#mutate(async () => {
+      const terminalRejects = results.filter(
+        (result) => result.status === "rejected" && result.retryable === false,
+      );
       const removable = new Set(
         results
           .filter(
             (result) =>
               result.status === "applied" ||
-              result.status === "already_applied",
+              result.status === "already_applied" ||
+              (result.status === "rejected" && result.retryable === false),
           )
           .map((result) => result.refId),
       );
@@ -804,16 +860,22 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
 
       const checkpointAccepted = this.#acceptCheckpoint(checkpoint);
       if (removed > 0 || checkpointAccepted) {
+        this.#deadLetterCount += terminalRejects.length;
         await this.#persist({
           balance: this.#balance,
           sequence: this.#sequence,
           pendingSettlements: this.#pendingSettlements.map((settlement) => ({
             ...settlement,
           })),
+          deadLetters: terminalRejects,
         });
       }
 
-      return { removed, remaining: this.#pendingSettlements.length };
+      return {
+        removed,
+        deadLettered: terminalRejects.length,
+        remaining: this.#pendingSettlements.length,
+      };
     });
   }
 
@@ -829,6 +891,7 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
     const flushable = await this.#mutate(async () =>
       this.#pendingSettlements
         .filter((settlement) => settlement.usage !== undefined)
+        .slice(0, MAX_USAGE_INGEST_EVENTS)
         .map((settlement) => ({ ...settlement })),
     );
     if (flushable.length === 0) {
@@ -856,6 +919,9 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
           status: usage.status,
           latencyMs: usage.latencyMs,
           keyId: usage.keyId,
+          ...(s.reservationProof
+            ? { reservationProof: s.reservationProof }
+            : {}),
         }),
       );
     }

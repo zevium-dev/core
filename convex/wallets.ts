@@ -1,4 +1,9 @@
 import { v } from "convex/values";
+import {
+  MAX_USAGE_INGEST_EVENTS,
+  verifyReservationProof,
+  type ReservationProofPayload,
+} from "@zevium/shared";
 import type { Doc, Id } from "./_generated/dataModel";
 import {
   internalMutation,
@@ -15,6 +20,13 @@ import {
   adjustPublisherBalanceAggregates,
   getOrCreatePublisherBalance,
 } from "./lib/publisherLedger";
+import {
+  commitFundingAllocation,
+  FundingInvariantError,
+  preflightFundingAllocation,
+  recordPositiveFundingSource,
+  type FundingPlan,
+} from "./lib/funding";
 
 export type SettlementStatus = "applied" | "already_applied" | "rejected";
 
@@ -28,6 +40,7 @@ export type SettlementResult = {
   refId: string;
   status: SettlementStatus;
   reason?: string;
+  retryable?: boolean;
 };
 
 export async function getOrCreateWallet(
@@ -97,23 +110,33 @@ export async function appendWalletEntry(
     paymentId?: Id<"payments">;
     usageEventId?: Id<"usageEvents">;
   },
-): Promise<{ applied: boolean; wallet: Doc<"wallets"> }> {
+): Promise<{
+  applied: boolean;
+  wallet: Doc<"wallets">;
+  entryId: Id<"walletEntries">;
+}> {
   const existing = await ctx.db
     .query("walletEntries")
     .withIndex("by_ref", (q) => q.eq("refId", args.refId))
     .unique();
   if (existing !== null) {
-    if (existing.walletId !== args.wallet._id) {
-      throw new Error("Wallet ledger reference belongs to another wallet");
+    if (
+      existing.walletId !== args.wallet._id ||
+      existing.kind !== args.kind ||
+      existing.amount !== args.amount ||
+      existing.paymentId !== args.paymentId ||
+      existing.usageEventId !== args.usageEventId
+    ) {
+      throw new Error("Wallet ledger reference immutable facts changed");
     }
     const wallet = await ctx.db.get(existing.walletId);
     if (wallet === null) throw new Error("Wallet missing for existing entry");
-    return { applied: false, wallet };
+    return { applied: false, wallet, entryId: existing._id };
   }
 
   const sequence = args.wallet.sequence + 1;
   const balance = args.wallet.balance + args.amount;
-  await ctx.db.insert("walletEntries", {
+  const entryId = await ctx.db.insert("walletEntries", {
     walletId: args.wallet._id,
     kind: args.kind,
     amount: args.amount,
@@ -123,11 +146,21 @@ export async function appendWalletEntry(
     usageEventId: args.usageEventId,
     createdAt: Date.now(),
   });
-  await ctx.db.patch(args.wallet._id, { balance, sequence });
+  await ctx.db.patch(args.wallet._id, {
+    balance,
+    sequence,
+    debtCredits: Math.max(0, -balance),
+  });
 
   return {
     applied: true,
-    wallet: { ...args.wallet, balance, sequence },
+    wallet: {
+      ...args.wallet,
+      balance,
+      sequence,
+      debtCredits: Math.max(0, -balance),
+    },
+    entryId,
   };
 }
 
@@ -159,63 +192,17 @@ export const grantPaymentCredits = internalMutation({
       refId: args.refId,
       paymentId: args.paymentId,
     });
-    const existingLot = await ctx.db
-      .query("paymentFundingLots")
-      .withIndex("by_payment", (q) => q.eq("paymentId", args.paymentId))
-      .unique();
-    if (existingLot === null) {
-      if (!result.applied) {
-        throw new Error("Payment grant is missing its funding lot");
-      }
-      const now = Date.now();
-      await ctx.db.insert("paymentFundingLots", {
-        paymentId: args.paymentId,
-        organizationId: organization._id,
-        grantedCredits: args.amount,
-        availableCredits: args.amount,
-        walletReversedCredits: 0,
-        state: "available",
-        createdAt: now,
-        updatedAt: now,
-      });
-    } else if (
-      existingLot.organizationId !== organization._id ||
-      existingLot.grantedCredits !== args.amount
-    ) {
-      throw new Error("Payment funding lot does not match immutable grant");
-    }
-    return {
-      ...checkpoint(organization.clerkOrgId, result.wallet),
-      applied: result.applied,
-    };
-  },
-});
-
-/** Refund/dispute reversals are permitted to create debt. */
-export const reversePaymentCredits = internalMutation({
-  args: {
-    organizationId: v.id("organizations"),
-    paymentId: v.id("payments"),
-    amount: v.number(),
-    refId: v.string(),
-    kind: v.union(v.literal("refund_reversal"), v.literal("dispute_reversal")),
-  },
-  handler: async (
-    ctx,
-    args,
-  ): Promise<WalletCheckpoint & { applied: boolean }> => {
-    if (!Number.isSafeInteger(args.amount) || args.amount <= 0) {
-      throw new Error("Payment reversal must be a positive integer");
-    }
-    const organization = await ctx.db.get(args.organizationId);
-    if (organization === null) throw new Error("Organization not found");
-    const wallet = await getOrCreateWallet(ctx, organization._id);
-    const result = await appendWalletEntry(ctx, {
-      wallet,
-      kind: args.kind,
-      amount: -args.amount,
-      refId: args.refId,
+    const entry = await ctx.db.get(result.entryId);
+    if (entry === null)
+      throw new Error("Payment grant ledger entry is missing");
+    await recordPositiveFundingSource(ctx, {
+      wallet: result.wallet,
+      sourceKind: "stripe_payment",
+      sourceRef: args.refId,
+      amount: args.amount,
+      refundable: true,
       paymentId: args.paymentId,
+      createdAt: entry.createdAt,
     });
     return {
       ...checkpoint(organization.clerkOrgId, result.wallet),
@@ -229,6 +216,7 @@ export const applyAdminAdjustment = internalMutation({
     organizationId: v.id("organizations"),
     amount: v.number(),
     refId: v.string(),
+    promotion: v.optional(v.boolean()),
   },
   handler: async (
     ctx,
@@ -240,12 +228,41 @@ export const applyAdminAdjustment = internalMutation({
     const organization = await ctx.db.get(args.organizationId);
     if (organization === null) throw new Error("Organization not found");
     const wallet = await getOrCreateWallet(ctx, organization._id);
+    const plan =
+      args.amount < 0
+        ? await preflightFundingAllocation(ctx, {
+            wallet,
+            credits: -args.amount,
+            allowReservationDebt: false,
+          })
+        : null;
     const result = await appendWalletEntry(ctx, {
       wallet,
       kind: "admin_adjustment",
       amount: args.amount,
       refId: args.refId,
     });
+    const entry = await ctx.db.get(result.entryId);
+    if (entry === null) throw new Error("Admin adjustment entry is missing");
+    if (args.amount > 0) {
+      await recordPositiveFundingSource(ctx, {
+        wallet: result.wallet,
+        sourceKind: args.promotion ? "promotion" : "admin_adjustment",
+        sourceRef: args.refId,
+        amount: args.amount,
+        refundable: false,
+        createdAt: entry.createdAt,
+      });
+    } else if (plan !== null) {
+      await commitFundingAllocation(ctx, {
+        plan,
+        walletEntryId: result.entryId,
+        walletId: wallet._id,
+        organizationId: organization._id,
+        kind: "negative_adjustment",
+        createdAt: entry.createdAt,
+      });
+    }
     return {
       ...checkpoint(organization.clerkOrgId, result.wallet),
       applied: result.applied,
@@ -359,7 +376,104 @@ const usageEventArg = v.object({
   settleRefId: v.string(),
   /** The only consumer identity accepted for a Wallet DO settlement. */
   consumerClerkOrgId: v.string(),
+  reservationProof: v.optional(
+    v.object({
+      checkpointSequence: v.number(),
+      authorizedBalance: v.number(),
+      reservedAt: v.number(),
+      signature: v.string(),
+    }),
+  ),
 });
+
+type UsageEventArg = {
+  organizationId: Id<"organizations">;
+  projectId: Id<"projects">;
+  endpoint: string;
+  method: string;
+  credits: number;
+  status: number;
+  latencyMs: number;
+  keyId: string;
+  at: number;
+  settleRefId: string;
+  consumerClerkOrgId: string;
+  reservationProof?: {
+    checkpointSequence: number;
+    authorizedBalance: number;
+    reservedAt: number;
+    signature: string;
+  };
+};
+
+function normalizedMethod(value: string): string {
+  return value.trim().toUpperCase();
+}
+
+function normalizedEndpoint(value: string): string {
+  const trimmed = value.trim();
+  return trimmed.length > 1 ? trimmed.replace(/\/+$/, "") : trimmed;
+}
+
+async function duplicateSettlementMatches(
+  ctx: MutationCtx,
+  entry: Doc<"walletEntries">,
+  walletId: Id<"wallets">,
+  consumerOrganizationId: Id<"organizations">,
+  event: UsageEventArg,
+): Promise<boolean> {
+  if (
+    entry.walletId !== walletId ||
+    entry.kind !== "usage_settlement" ||
+    entry.amount !== -event.credits ||
+    entry.usageEventId === undefined
+  ) {
+    return false;
+  }
+  const usage = await ctx.db.get(entry.usageEventId);
+  if (usage === null) return false;
+  return (
+    usage.organizationId === consumerOrganizationId &&
+    usage.projectId === event.projectId &&
+    usage.credits === event.credits &&
+    normalizedEndpoint(usage.endpoint) === normalizedEndpoint(event.endpoint) &&
+    normalizedMethod(usage.method) === normalizedMethod(event.method) &&
+    usage.status === event.status &&
+    usage.latencyMs === event.latencyMs &&
+    usage.keyId === event.keyId &&
+    usage.at === event.at &&
+    usage.settleRefId === event.settleRefId
+  );
+}
+
+async function hasValidReservationProof(
+  event: UsageEventArg,
+): Promise<boolean> {
+  const proof = event.reservationProof;
+  const secret = process.env.GATEWAY_INTERNAL_SECRET ?? "";
+  if (
+    proof === undefined ||
+    !event.settleRefId.startsWith("settle:") ||
+    !Number.isSafeInteger(proof.checkpointSequence) ||
+    proof.checkpointSequence < 0 ||
+    !Number.isSafeInteger(proof.authorizedBalance) ||
+    proof.authorizedBalance < event.credits ||
+    !Number.isSafeInteger(proof.reservedAt) ||
+    proof.reservedAt > event.at
+  ) {
+    return false;
+  }
+  const payload: ReservationProofPayload = {
+    consumerClerkOrgId: event.consumerClerkOrgId,
+    reservationId: event.settleRefId.slice("settle:".length),
+    credits: event.credits,
+    checkpointSequence: proof.checkpointSequence,
+    authorizedBalance: proof.authorizedBalance,
+    reservedAt: proof.reservedAt,
+    keyId: event.keyId,
+  };
+  return await verifyReservationProof(secret, payload, proof.signature);
+}
 
 /**
  * Gateway settlement ingest. A request belongs to precisely one consumer
@@ -374,6 +488,11 @@ export const recordUsage = internalMutation({
   ): Promise<{ results: SettlementResult[]; wallet: WalletCheckpoint }> => {
     if (args.events.length === 0) {
       throw new Error("At least one settlement is required");
+    }
+    if (args.events.length > MAX_USAGE_INGEST_EVENTS) {
+      throw new Error(
+        `Settlement batch exceeds ${MAX_USAGE_INGEST_EVENTS} events`,
+      );
     }
     const clerkOrgId = args.events[0]!.consumerClerkOrgId;
     if (
@@ -404,6 +523,7 @@ export const recordUsage = internalMutation({
           refId: event.settleRefId,
           status: "rejected",
           reason: "invalid settlement",
+          retryable: false,
         });
         continue;
       }
@@ -413,13 +533,22 @@ export const recordUsage = internalMutation({
         .withIndex("by_ref", (q) => q.eq("refId", event.settleRefId))
         .unique();
       if (existing !== null) {
-        if (existing.walletId === wallet._id) {
+        if (
+          await duplicateSettlementMatches(
+            ctx,
+            existing,
+            wallet._id,
+            consumerOrg._id,
+            event,
+          )
+        ) {
           results.push({ refId: event.settleRefId, status: "already_applied" });
         } else {
           results.push({
             refId: event.settleRefId,
             status: "rejected",
-            reason: "settlement reference belongs to another wallet",
+            reason: "settlement replay changed immutable payload or linkage",
+            retryable: false,
           });
         }
         continue;
@@ -431,23 +560,62 @@ export const recordUsage = internalMutation({
           refId: event.settleRefId,
           status: "rejected",
           reason: "project not found",
+          retryable: false,
         });
         continue;
       }
-      if (wallet.balance - event.credits < 0) {
+      if (project.organizationId !== event.organizationId) {
         results.push({
           refId: event.settleRefId,
           status: "rejected",
-          reason: "insufficient authoritative balance",
+          reason: "publisher organization does not own project",
+          retryable: false,
         });
         continue;
       }
 
+      const insufficientAuthoritativeBalance =
+        wallet.balance - event.credits < 0;
+      const reservationProofValid = insufficientAuthoritativeBalance
+        ? await hasValidReservationProof(event)
+        : false;
+      if (insufficientAuthoritativeBalance && !reservationProofValid) {
+        results.push({
+          refId: event.settleRefId,
+          status: "rejected",
+          reason:
+            "insufficient balance without authoritative reservation proof",
+          retryable: false,
+        });
+        continue;
+      }
+
+      let fundingPlan: FundingPlan | null = null;
+      if (event.credits > 0) {
+        try {
+          fundingPlan = await preflightFundingAllocation(ctx, {
+            wallet,
+            credits: event.credits,
+            allowReservationDebt: reservationProofValid,
+          });
+        } catch (error) {
+          if (!(error instanceof FundingInvariantError)) throw error;
+          results.push({
+            refId: event.settleRefId,
+            status: "rejected",
+            reason: error.message,
+            retryable: error.retryable,
+          });
+          continue;
+        }
+      }
+
+      const now = Date.now();
       const usageEventId = await ctx.db.insert("usageEvents", {
         organizationId: consumerOrg._id,
         projectId: event.projectId,
         endpoint: event.endpoint,
-        method: event.method,
+        method: normalizedMethod(event.method),
         credits: event.credits,
         status: event.status,
         latencyMs: event.latencyMs,
@@ -465,69 +633,45 @@ export const recordUsage = internalMutation({
       wallet = settled.wallet;
 
       const split = publisherEarningSplit(event.credits);
-      const existingEarning = await ctx.db
-        .query("publisherEarnings")
-        .withIndex("by_settlement", (q) =>
-          q.eq("usageSettlementRefId", event.settleRefId),
-        )
-        .unique();
-      if (existingEarning === null) {
-        const now = Date.now();
-        const earningId = await ctx.db.insert("publisherEarnings", {
-          publisherOrganizationId: project.organizationId,
-          consumerOrganizationId: consumerOrg._id,
-          projectId: project._id,
-          usageSettlementRefId: event.settleRefId,
-          grossCredits: split.grossCredits,
-          platformFeeAtoms: split.platformFeeAtoms,
-          publisherNetAtoms: split.publisherNetAtoms,
-          platformFeeCredits: split.platformFeeCredits,
-          netCredits: split.publisherNetCredits,
-          clawedBackGrossCredits: 0,
-          clawedBackAtoms: 0,
-          releasedAtoms: 0,
-          availableAt: now + PUBLISHER_RISK_HOLD_MS,
-          status: "pending_risk",
-          createdAt: now,
-          updatedAt: now,
+      const earningId = await ctx.db.insert("publisherEarnings", {
+        publisherOrganizationId: project.organizationId,
+        consumerOrganizationId: consumerOrg._id,
+        projectId: project._id,
+        usageSettlementRefId: event.settleRefId,
+        grossCredits: split.grossCredits,
+        platformFeeAtoms: split.platformFeeAtoms,
+        publisherNetAtoms: split.publisherNetAtoms,
+        platformFeeCredits: split.platformFeeCredits,
+        netCredits: split.publisherNetCredits,
+        clawedBackGrossCredits: 0,
+        clawedBackAtoms: 0,
+        releasedAtoms: 0,
+        availableAt: now + PUBLISHER_RISK_HOLD_MS,
+        status: "pending_risk",
+        createdAt: now,
+        updatedAt: now,
+      });
+      const publisherBalance = await getOrCreatePublisherBalance(
+        ctx,
+        project.organizationId,
+      );
+      if (split.publisherNetAtoms > 0) {
+        await adjustPublisherBalanceAggregates(ctx, publisherBalance, {
+          pendingRiskAtoms: split.publisherNetAtoms,
         });
-        const publisherBalance = await getOrCreatePublisherBalance(
-          ctx,
-          project.organizationId,
-        );
-        if (split.publisherNetAtoms > 0) {
-          await adjustPublisherBalanceAggregates(ctx, publisherBalance, {
-            pendingRiskAtoms: split.publisherNetAtoms,
-          });
-        }
-
-        let remaining = event.credits;
-        const fundingLots = await ctx.db
-          .query("paymentFundingLots")
-          .withIndex("by_org_state_created", (q) =>
-            q.eq("organizationId", consumerOrg._id).eq("state", "available"),
-          )
-          .collect();
-        for (const lot of fundingLots) {
-          if (remaining === 0) break;
-          const grossCredits = Math.min(lot.availableCredits, remaining);
-          if (grossCredits === 0) continue;
-          const availableCredits = lot.availableCredits - grossCredits;
-          await ctx.db.patch(lot._id, {
-            availableCredits,
-            state: availableCredits === 0 ? "depleted" : "available",
-            updatedAt: now,
-          });
-          await ctx.db.insert("paymentFundingAllocations", {
-            paymentId: lot.paymentId,
-            fundingLotId: lot._id,
-            earningId,
-            usageEventId,
-            grossCredits,
-            createdAt: now,
-          });
-          remaining -= grossCredits;
-        }
+      }
+      if (fundingPlan !== null) {
+        await commitFundingAllocation(ctx, {
+          plan: fundingPlan,
+          walletEntryId: settled.entryId,
+          walletId: wallet._id,
+          organizationId: consumerOrg._id,
+          kind: "usage",
+          usageEventId,
+          earningId,
+          publisherOrganizationId: project.organizationId,
+          createdAt: now,
+        });
       }
       results.push({ refId: event.settleRefId, status: "applied" });
     }

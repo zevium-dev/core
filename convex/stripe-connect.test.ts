@@ -1,7 +1,7 @@
 /// <reference types="vite/client" />
 import { convexTest, type TestConvex } from "convex-test";
 import type Stripe from "stripe";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { api, internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import {
@@ -16,6 +16,11 @@ import {
 import schema from "./schema";
 
 const modules = import.meta.glob("./**/*.ts");
+const TRANSFER_SECRET = "transfer-test-secret-32-bytes-minimum";
+const TRANSFER_CORRELATION = {
+  correlationNonce: "b".repeat(64),
+  platformAccountId: "acct_platform_test",
+} as const;
 
 type ConnectSeed = {
   organizationId: Id<"organizations">;
@@ -71,6 +76,19 @@ async function seedConnect(t: TestConvex<typeof schema>): Promise<ConnectSeed> {
 }
 
 describe("Stripe Connect publisher accounting", () => {
+  const previousSecret = process.env.STRIPE_TRANSFER_CORRELATION_SECRET;
+
+  beforeEach(() => {
+    process.env.STRIPE_TRANSFER_CORRELATION_SECRET = TRANSFER_SECRET;
+  });
+
+  afterEach(() => {
+    if (previousSecret === undefined) {
+      delete process.env.STRIPE_TRANSFER_CORRELATION_SECRET;
+    } else {
+      process.env.STRIPE_TRANSFER_CORRELATION_SECRET = previousSecret;
+    }
+  });
   it("projects Accounts v2 recipient capability and requirements", () => {
     const projection = connectAccountProjection({
       id: "acct_recipient",
@@ -303,6 +321,7 @@ describe("Stripe Connect publisher accounting", () => {
     await expect(
       t.mutation(internal.payouts.preparePublisherTransfer, {
         publisherOrganizationId: seed.organizationId,
+        ...TRANSFER_CORRELATION,
       }),
     ).rejects.toThrow("not eligible");
     await t.run(async (ctx) => {
@@ -325,6 +344,7 @@ describe("Stripe Connect publisher accounting", () => {
     await expect(
       t.mutation(internal.payouts.preparePublisherTransfer, {
         publisherOrganizationId: seed.organizationId,
+        ...TRANSFER_CORRELATION,
       }),
     ).rejects.toThrow("$10.00 payout minimum");
     await t.run(async (ctx) => {
@@ -339,9 +359,11 @@ describe("Stripe Connect publisher accounting", () => {
     const [first, retry] = await Promise.all([
       t.mutation(internal.payouts.preparePublisherTransfer, {
         publisherOrganizationId: seed.organizationId,
+        ...TRANSFER_CORRELATION,
       }),
       t.mutation(internal.payouts.preparePublisherTransfer, {
         publisherOrganizationId: seed.organizationId,
+        ...TRANSFER_CORRELATION,
       }),
     ]);
     expect(retry.transferId).toBe(first.transferId);
@@ -390,6 +412,7 @@ describe("Stripe Connect publisher accounting", () => {
 
     const first = await t.mutation(internal.payouts.preparePublisherTransfer, {
       publisherOrganizationId: seed.organizationId,
+      ...TRANSFER_CORRELATION,
     });
     expect(first.amount).toBe(1_045);
     expect(first.remainderAtoms).toBe(9_500);
@@ -400,6 +423,7 @@ describe("Stripe Connect publisher accounting", () => {
     await expect(
       t.mutation(internal.payouts.preparePublisherTransfer, {
         publisherOrganizationId: seed.organizationId,
+        ...TRANSFER_CORRELATION,
       }),
     ).rejects.toThrow("$10.00 payout minimum");
     await t.run(async (ctx) => {
@@ -438,6 +462,7 @@ describe("Stripe Connect publisher accounting", () => {
 
     const second = await t.mutation(internal.payouts.preparePublisherTransfer, {
       publisherOrganizationId: seed.organizationId,
+      ...TRANSFER_CORRELATION,
     });
     expect(second.amount).toBe(1_000);
     expect(second.remainderAtoms).toBe(8_000);
@@ -467,6 +492,7 @@ describe("Stripe Connect publisher accounting", () => {
       internal.payouts.preparePublisherTransfer,
       {
         publisherOrganizationId: seed.organizationId,
+        ...TRANSFER_CORRELATION,
       },
     );
     await t.mutation(internal.payouts.markPublisherTransferSucceeded, {
@@ -477,6 +503,11 @@ describe("Stripe Connect publisher accounting", () => {
       stripeTransferId: "tr_projection",
       amount: transfer.amount,
       amountReversed: 0,
+      currency: transfer.currency,
+      destination: transfer.connectedAccountId,
+      platformAccountId: transfer.platformAccountId,
+      correlationNonce: transfer.correlationNonce,
+      correlationHmac: transfer.correlationHmac,
       failed: true,
       failureReason: "stale failure",
     });
@@ -484,6 +515,11 @@ describe("Stripe Connect publisher accounting", () => {
       stripeTransferId: "tr_projection",
       amount: transfer.amount,
       amountReversed: transfer.amount,
+      currency: transfer.currency,
+      destination: transfer.connectedAccountId,
+      platformAccountId: transfer.platformAccountId,
+      correlationNonce: transfer.correlationNonce,
+      correlationHmac: transfer.correlationHmac,
       failed: false,
       failureReason: undefined,
     });
@@ -555,6 +591,7 @@ describe("Stripe Connect publisher accounting", () => {
     });
     const local = await t.mutation(internal.payouts.preparePublisherTransfer, {
       publisherOrganizationId: seed.organizationId,
+      ...TRANSFER_CORRELATION,
     });
     const calls: string[] = [];
     const snapshot = await createAndRetrieveStripeTransfer(
@@ -565,7 +602,14 @@ describe("Stripe Connect publisher accounting", () => {
             id: "tr_crash",
             amount: local.amount,
             amount_reversed: 0,
-            metadata: { publisherTransferId: local.transferId },
+            currency: local.currency,
+            destination: local.connectedAccountId,
+            metadata: {
+              publisherTransferId: local.transferId,
+              correlationNonce: local.correlationNonce,
+              correlationHmac: local.correlationHmac,
+              platformAccountId: local.platformAccountId,
+            },
           } as Stripe.Transfer;
         }) as Stripe["transfers"]["create"],
         retrieve: (async () => {
@@ -575,7 +619,14 @@ describe("Stripe Connect publisher accounting", () => {
             amount: local.amount,
             amount_reversed: local.amount,
             reversed: true,
-            metadata: { publisherTransferId: local.transferId },
+            currency: local.currency,
+            destination: local.connectedAccountId,
+            metadata: {
+              publisherTransferId: local.transferId,
+              correlationNonce: local.correlationNonce,
+              correlationHmac: local.correlationHmac,
+              platformAccountId: local.platformAccountId,
+            },
           } as Stripe.Transfer;
         }) as Stripe["transfers"]["retrieve"],
       },
@@ -585,6 +636,9 @@ describe("Stripe Connect publisher accounting", () => {
         amount: local.amount,
         currency: local.currency,
         idempotencyKey: local.idempotencyKey,
+        correlationNonce: local.correlationNonce,
+        correlationHmac: local.correlationHmac,
+        platformAccountId: local.platformAccountId,
       },
     );
     expect(calls).toEqual(["create", "retrieve"]);
@@ -595,9 +649,24 @@ describe("Stripe Connect publisher accounting", () => {
       publisherTransferId: snapshot.metadata.publisherTransferId,
       amount: snapshot.amount,
       amountReversed: snapshot.amount_reversed,
+      currency: snapshot.currency,
+      destination:
+        typeof snapshot.destination === "string"
+          ? snapshot.destination
+          : snapshot.destination.id,
+      platformAccountId: snapshot.metadata.platformAccountId,
+      correlationNonce: snapshot.metadata.correlationNonce,
+      correlationHmac: snapshot.metadata.correlationHmac,
       failed: false,
       failureReason: undefined,
     } as const;
+    await expect(
+      t.mutation(internal.payouts.projectStripeTransfer, {
+        ...projection,
+        stripeTransferId: "tr_spoof",
+        destination: "acct_attacker",
+      }),
+    ).rejects.toThrow("does not match allocation");
     await t.mutation(internal.payouts.projectStripeTransfer, projection);
     await t.mutation(internal.payouts.projectStripeTransfer, projection);
     const state = await t.run(async (ctx) => ({
@@ -628,9 +697,8 @@ describe("Stripe Connect publisher accounting", () => {
     ]);
   });
 
-  it("uses materialized all-row payout totals while paginating display rows", async () => {
+  it("reads conservative zero aggregates from a staged legacy balance", async () => {
     const t = convexTest(schema, modules);
-    const count = 120;
     await t.run(async (ctx) => {
       const organizationId = await ctx.db.insert("organizations", {
         clerkOrgId: "org_totals",
@@ -642,44 +710,9 @@ describe("Stripe Connect publisher accounting", () => {
         availableAtoms: 0,
         allocatedAtoms: 0,
         paidAtoms: 0,
-        pendingRiskAtoms: count * 9_500,
-        reversedAtoms: count * 9_500,
-        failedAtoms: count * 10_000,
         sequence: 0,
         updatedAt: 1,
       });
-      for (let index = 0; index < count; index += 1) {
-        await ctx.db.insert("publisherEarnings", {
-          publisherOrganizationId: organizationId,
-          consumerOrganizationId: organizationId,
-          usageSettlementRefId: `settle:totals:${index}`,
-          grossCredits: 1,
-          platformFeeAtoms: 500,
-          publisherNetAtoms: 9_500,
-          platformFeeCredits: 0.05,
-          netCredits: 0.95,
-          clawedBackGrossCredits: 0,
-          clawedBackAtoms: 0,
-          releasedAtoms: 0,
-          availableAt: 2,
-          status: "pending_risk",
-          createdAt: index + 1,
-          updatedAt: index + 1,
-        });
-        await ctx.db.insert("publisherTransfers", {
-          publisherOrganizationId: organizationId,
-          stripeConnectedAccountId: "acct_totals",
-          amount: 1,
-          amountAtoms: 10_000,
-          remainderAtoms: 0,
-          currency: "usd",
-          idempotencyKey: `totals:${index}`,
-          reversedAmount: 0,
-          status: "failed",
-          createdAt: index + 1,
-          updatedAt: index + 1,
-        });
-      }
     });
     const state = await t
       .withIdentity({
@@ -688,10 +721,12 @@ describe("Stripe Connect publisher accounting", () => {
         org_role: "org:member",
       } as { subject: string; org_id: string; org_role: string })
       .query(api.payouts.getPayoutState, {});
-    expect(state.earnings.rows).toHaveLength(100);
-    expect(state.transfers).toHaveLength(100);
-    expect(state.earnings.pendingRisk).toBe(114);
-    expect(state.earnings.reversed).toBe(114);
-    expect(state.earnings.failed).toBe(120);
+    expect(state.earnings).toMatchObject({
+      pendingRisk: 0,
+      reversed: 0,
+      failed: 0,
+      rows: [],
+    });
+    expect(state.transfers).toEqual([]);
   });
 });

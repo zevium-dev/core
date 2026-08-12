@@ -181,7 +181,9 @@ describe("wallet settlement ingest contract", () => {
         {
           refId: "settle:too-expensive",
           status: "rejected",
-          reason: "insufficient authoritative balance",
+          reason:
+            "insufficient balance without authoritative reservation proof",
+          retryable: false,
         },
       ],
       wallet: { clerkOrgId: "org_consumer", balance: 85, sequence: 2 },

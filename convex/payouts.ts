@@ -1,4 +1,8 @@
 import Stripe from "stripe";
+import {
+  signTransferCorrelation,
+  verifyTransferCorrelation,
+} from "@zevium/shared";
 import { v } from "convex/values";
 import {
   action,
@@ -28,6 +32,31 @@ import { stripeClient } from "./billing";
 
 export type ConnectProfileStatus =
   "not_started" | "incomplete" | "restricted" | "enabled";
+
+function transferCorrelationSecret(): string {
+  const secret = process.env.STRIPE_TRANSFER_CORRELATION_SECRET;
+  if (secret === undefined || secret.length < 32) {
+    throw new Error(
+      "STRIPE_TRANSFER_CORRELATION_SECRET must contain at least 32 bytes",
+    );
+  }
+  return secret;
+}
+
+export function stripePlatformAccountId(): string {
+  const accountId = process.env.STRIPE_PLATFORM_ACCOUNT_ID;
+  if (accountId === undefined || !/^acct_[A-Za-z0-9]+$/.test(accountId)) {
+    throw new Error("STRIPE_PLATFORM_ACCOUNT_ID is not configured");
+  }
+  return accountId;
+}
+
+function randomCorrelationNonce(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(32));
+  return [...bytes]
+    .map((value) => value.toString(16).padStart(2, "0"))
+    .join("");
+}
 
 function activeClerkOrgId(identity: unknown): string {
   if (identity === null || typeof identity !== "object") {
@@ -319,26 +348,66 @@ export const startOnboarding = action({
 
 export const releaseMatureEarnings = internalMutation({
   args: { publisherOrganizationId: v.id("organizations") },
-  handler: async (ctx, args): Promise<void> => {
+  handler: async (ctx, args): Promise<{ released: number }> => {
     const now = Date.now();
     const pending = await ctx.db
       .query("publisherEarnings")
-      .withIndex("by_publisher", (q) =>
-        q.eq("publisherOrganizationId", args.publisherOrganizationId),
+      .withIndex("by_publisher_status_available", (q) =>
+        q
+          .eq("publisherOrganizationId", args.publisherOrganizationId)
+          .eq("status", "pending_risk")
+          .lte("availableAt", now),
       )
-      .filter((q) => q.eq(q.field("status"), "pending_risk"))
-      .collect();
+      .take(25);
     for (const earning of pending) {
-      if (earning.availableAt <= now) {
-        await releasePublisherEarning(ctx, earning);
-      }
+      await releasePublisherEarning(ctx, earning);
     }
+    if (pending.length === 25) {
+      await ctx.scheduler.runAfter(0, internal.payouts.releaseMatureEarnings, {
+        publisherOrganizationId: args.publisherOrganizationId,
+      });
+    }
+    return { released: pending.length };
+  },
+});
+
+/** Global bounded release queue; each chunk reschedules itself atomically. */
+export const releaseMatureEarningsGlobal = internalMutation({
+  args: {},
+  handler: async (ctx): Promise<{ released: number }> => {
+    const now = Date.now();
+    const pending = await ctx.db
+      .query("publisherEarnings")
+      .withIndex("by_status_available", (q) =>
+        q.eq("status", "pending_risk").lte("availableAt", now),
+      )
+      .take(25);
+    for (const earning of pending) {
+      await releasePublisherEarning(ctx, earning);
+    }
+    if (pending.length === 25) {
+      await ctx.scheduler.runAfter(
+        0,
+        internal.payouts.releaseMatureEarningsGlobal,
+        {},
+      );
+    }
+    return { released: pending.length };
   },
 });
 
 export const preparePublisherTransfer = internalMutation({
-  args: { publisherOrganizationId: v.id("organizations") },
+  args: {
+    publisherOrganizationId: v.id("organizations"),
+    correlationNonce: v.string(),
+    platformAccountId: v.string(),
+  },
   handler: async (ctx, args) => {
+    if (!/^[0-9a-f]{64}$/.test(args.correlationNonce)) {
+      throw new Error(
+        "Transfer correlation nonce must contain 256 random bits",
+      );
+    }
     const profile = await ctx.db
       .query("organizationPayments")
       .withIndex("by_organization", (q) =>
@@ -353,19 +422,23 @@ export const preparePublisherTransfer = internalMutation({
     ) {
       throw new Error("Connected account is not eligible for transfers");
     }
-    const priorTransfers = await ctx.db
-      .query("publisherTransfers")
-      .withIndex("by_publisher", (q) =>
-        q.eq("publisherOrganizationId", args.publisherOrganizationId),
-      )
-      .order("desc")
-      .take(20);
-    const retry = priorTransfers.find(
-      (transfer) =>
-        transfer.status === "created" ||
-        transfer.status === "pending" ||
-        transfer.status === "failed",
+    const retryCandidates = await Promise.all(
+      (["created", "pending", "failed"] as const).map(
+        async (status) =>
+          await ctx.db
+            .query("publisherTransfers")
+            .withIndex("by_publisher_status", (q) =>
+              q
+                .eq("publisherOrganizationId", args.publisherOrganizationId)
+                .eq("status", status),
+            )
+            .order("desc")
+            .first(),
+      ),
     );
+    const retry = retryCandidates
+      .filter((candidate) => candidate !== null)
+      .sort((left, right) => right.createdAt - left.createdAt)[0];
     if (retry !== undefined) {
       return {
         transferId: retry._id,
@@ -374,6 +447,9 @@ export const preparePublisherTransfer = internalMutation({
         remainderAtoms: retry.remainderAtoms,
         currency: retry.currency,
         idempotencyKey: retry.idempotencyKey,
+        correlationNonce: retry.correlationNonce,
+        correlationHmac: retry.correlationHmac,
+        platformAccountId: retry.platformAccountId,
       };
     }
     const balance = await getOrCreatePublisherBalance(
@@ -403,6 +479,9 @@ export const preparePublisherTransfer = internalMutation({
         remainderAtoms: existing.remainderAtoms,
         currency: existing.currency,
         idempotencyKey: existing.idempotencyKey,
+        correlationNonce: existing.correlationNonce,
+        correlationHmac: existing.correlationHmac,
+        platformAccountId: existing.platformAccountId,
       };
     }
     const now = Date.now();
@@ -415,10 +494,24 @@ export const preparePublisherTransfer = internalMutation({
       currency: "usd",
       idempotencyKey,
       reversedAmount: 0,
+      correlationNonce: args.correlationNonce,
+      platformAccountId: args.platformAccountId,
       status: "created",
       createdAt: now,
       updatedAt: now,
     });
+    const correlationHmac = await signTransferCorrelation(
+      transferCorrelationSecret(),
+      {
+        publisherTransferId: transferId,
+        nonce: args.correlationNonce,
+        platformAccountId: args.platformAccountId,
+        destination: profile.stripeConnectedAccountId,
+        currency: "usd",
+        amount,
+      },
+    );
+    await ctx.db.patch(transferId, { correlationHmac });
     await appendPublisherSettlementEntry(ctx, {
       balance,
       kind: "transfer_allocation",
@@ -435,6 +528,9 @@ export const preparePublisherTransfer = internalMutation({
       remainderAtoms,
       currency: "usd",
       idempotencyKey,
+      correlationNonce: args.correlationNonce,
+      correlationHmac,
+      platformAccountId: args.platformAccountId,
     };
   },
 });
@@ -459,7 +555,12 @@ export const markPublisherTransferSucceeded = internalMutation({
     await applyStripeTransferProjection(ctx, transfer, {
       stripeTransferId: args.stripeTransferId,
       amount: transfer.amount,
-      amountReversed: transfer.reversedAmount,
+      amountReversed: transfer.reversedAmount ?? 0,
+      currency: transfer.currency,
+      destination: transfer.stripeConnectedAccountId,
+      platformAccountId: transfer.platformAccountId,
+      correlationNonce: transfer.correlationNonce,
+      correlationHmac: transfer.correlationHmac,
       failed: false,
     });
   },
@@ -508,6 +609,11 @@ async function applyStripeTransferProjection(
     stripeTransferId: string;
     amount: number;
     amountReversed: number;
+    currency: string;
+    destination: string;
+    platformAccountId?: string;
+    correlationNonce?: string;
+    correlationHmac?: string;
     failed: boolean;
     failureReason?: string;
   },
@@ -516,10 +622,38 @@ async function applyStripeTransferProjection(
     !Number.isSafeInteger(args.amount) ||
     !Number.isSafeInteger(args.amountReversed) ||
     args.amount !== transfer.amount ||
+    args.currency.toLowerCase() !== transfer.currency.toLowerCase() ||
+    args.destination !== transfer.stripeConnectedAccountId ||
     args.amountReversed < 0 ||
     args.amountReversed > args.amount
   ) {
     throw new Error("Stripe transfer snapshot does not match allocation");
+  }
+  if (
+    transfer.platformAccountId === undefined ||
+    transfer.correlationNonce === undefined ||
+    transfer.correlationHmac === undefined
+  ) {
+    throw new Error("Legacy transfer correlation migration is pending");
+  }
+  if (
+    args.platformAccountId !== transfer.platformAccountId ||
+    args.correlationNonce !== transfer.correlationNonce ||
+    args.correlationHmac !== transfer.correlationHmac ||
+    !(await verifyTransferCorrelation(
+      transferCorrelationSecret(),
+      {
+        publisherTransferId: transfer._id,
+        nonce: transfer.correlationNonce,
+        platformAccountId: transfer.platformAccountId,
+        destination: transfer.stripeConnectedAccountId,
+        currency: transfer.currency,
+        amount: transfer.amount,
+      },
+      args.correlationHmac ?? "",
+    ))
+  ) {
+    throw new Error("Stripe transfer correlation proof is invalid");
   }
   if (
     transfer.stripeTransferId !== undefined &&
@@ -576,10 +710,10 @@ async function applyStripeTransferProjection(
   }
 
   const targetReversedAmount = Math.max(
-    transfer.reversedAmount,
+    transfer.reversedAmount ?? 0,
     args.amountReversed,
   );
-  const reversalDelta = targetReversedAmount - transfer.reversedAmount;
+  const reversalDelta = targetReversedAmount - (transfer.reversedAmount ?? 0);
   if (reversalDelta > 0) {
     const reversalDeltaAtoms = reversalDelta * ACCOUNTING_ATOMS_PER_USD_CENT;
     await appendPublisherSettlementEntry(ctx, {
@@ -608,6 +742,11 @@ export const projectStripeTransfer = internalMutation({
     publisherTransferId: v.optional(v.string()),
     amount: v.number(),
     amountReversed: v.number(),
+    currency: v.string(),
+    destination: v.string(),
+    platformAccountId: v.optional(v.string()),
+    correlationNonce: v.optional(v.string()),
+    correlationHmac: v.optional(v.string()),
     failed: v.boolean(),
     failureReason: v.optional(v.string()),
   },
@@ -623,13 +762,31 @@ export const projectStripeTransfer = internalMutation({
         "publisherTransfers",
         args.publisherTransferId,
       );
-      if (localId !== null) transfer = await ctx.db.get(localId);
+      if (localId !== null) {
+        const candidate = await ctx.db.get(localId);
+        if (
+          candidate !== null &&
+          candidate.correlationNonce !== undefined &&
+          candidate.correlationHmac !== undefined &&
+          candidate.platformAccountId !== undefined &&
+          args.correlationNonce === candidate.correlationNonce &&
+          args.correlationHmac === candidate.correlationHmac &&
+          args.platformAccountId === candidate.platformAccountId
+        ) {
+          transfer = candidate;
+        }
+      }
     }
     if (transfer === null) return;
     await applyStripeTransferProjection(ctx, transfer, {
       stripeTransferId: args.stripeTransferId,
       amount: args.amount,
       amountReversed: args.amountReversed,
+      currency: args.currency,
+      destination: args.destination,
+      platformAccountId: args.platformAccountId,
+      correlationNonce: args.correlationNonce,
+      correlationHmac: args.correlationHmac,
       failed: args.failed,
       failureReason: args.failureReason,
     });
@@ -689,14 +846,29 @@ export async function createAndRetrieveStripeTransfer(
     amount: number;
     currency: string;
     idempotencyKey: string;
+    correlationNonce?: string;
+    correlationHmac?: string;
+    platformAccountId?: string;
   },
 ): Promise<Stripe.Transfer> {
+  if (
+    transfer.correlationNonce === undefined ||
+    transfer.correlationHmac === undefined ||
+    transfer.platformAccountId === undefined
+  ) {
+    throw new Error("Transfer correlation migration is incomplete");
+  }
   const created = await stripe.create(
     {
       amount: transfer.amount,
       currency: transfer.currency,
       destination: transfer.stripeConnectedAccountId,
-      metadata: { publisherTransferId: transfer._id },
+      metadata: {
+        publisherTransferId: transfer._id,
+        correlationNonce: transfer.correlationNonce,
+        correlationHmac: transfer.correlationHmac,
+        platformAccountId: transfer.platformAccountId,
+      },
     },
     { idempotencyKey: transfer.idempotencyKey },
   );
@@ -711,6 +883,9 @@ export async function transferToStripe(
     amount: number;
     currency: string;
     idempotencyKey: string;
+    correlationNonce?: string;
+    correlationHmac?: string;
+    platformAccountId?: string;
   },
 ): Promise<void> {
   try {
@@ -724,6 +899,14 @@ export async function transferToStripe(
         stripeTransfer.metadata.publisherTransferId ?? transfer._id,
       amount: stripeTransfer.amount,
       amountReversed: stripeTransfer.amount_reversed,
+      currency: stripeTransfer.currency,
+      destination:
+        typeof stripeTransfer.destination === "string"
+          ? stripeTransfer.destination
+          : (stripeTransfer.destination?.id ?? ""),
+      platformAccountId: stripeTransfer.metadata.platformAccountId,
+      correlationNonce: stripeTransfer.metadata.correlationNonce,
+      correlationHmac: stripeTransfer.metadata.correlationHmac,
       failed: false,
       failureReason: undefined,
     });
@@ -755,6 +938,8 @@ export const initiatePublisherTransfer = action({
       internal.payouts.preparePublisherTransfer,
       {
         publisherOrganizationId: profile.organizationId,
+        correlationNonce: randomCorrelationNonce(),
+        platformAccountId: stripePlatformAccountId(),
       },
     );
     await transferToStripe(ctx, {
@@ -763,6 +948,9 @@ export const initiatePublisherTransfer = action({
       amount: prepared.amount,
       currency: prepared.currency,
       idempotencyKey: prepared.idempotencyKey,
+      correlationNonce: prepared.correlationNonce,
+      correlationHmac: prepared.correlationHmac,
+      platformAccountId: prepared.platformAccountId,
     });
     return { transferId: prepared.transferId };
   },

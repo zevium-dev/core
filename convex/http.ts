@@ -1,4 +1,5 @@
 import Stripe from "stripe";
+import { MAX_USAGE_INGEST_EVENTS } from "@zevium/shared";
 import { httpRouter } from "convex/server";
 import { Webhook } from "svix";
 import { internal } from "./_generated/api";
@@ -239,8 +240,6 @@ http.route({
   }),
 });
 
-const MAX_INGEST_EVENTS = 500;
-
 type IngestUsageEvent = {
   organizationId: string;
   projectId: string;
@@ -253,6 +252,12 @@ type IngestUsageEvent = {
   at: number;
   settleRefId: string;
   consumerClerkOrgId: string;
+  reservationProof?: {
+    checkpointSequence: number;
+    authorizedBalance: number;
+    reservedAt: number;
+    signature: string;
+  };
 };
 
 /** Parse exactly the one-wallet settlement batch accepted from a Wallet DO. */
@@ -269,7 +274,7 @@ export function parseIngestUsageBody(
     return { ok: false, status: 400, error: "events array required" };
   if (
     candidate.events.length === 0 ||
-    candidate.events.length > MAX_INGEST_EVENTS
+    candidate.events.length > MAX_USAGE_INGEST_EVENTS
   ) {
     return { ok: false, status: 400, error: "invalid event count" };
   }
@@ -314,6 +319,35 @@ export function parseIngestUsageBody(
       return { ok: false, status: 400, error: "mixed consumer organizations" };
     }
     consumerClerkOrgId = consumer;
+    let reservationProof: IngestUsageEvent["reservationProof"];
+    if (event.reservationProof !== undefined) {
+      if (
+        event.reservationProof === null ||
+        typeof event.reservationProof !== "object" ||
+        Array.isArray(event.reservationProof)
+      ) {
+        return { ok: false, status: 400, error: "invalid reservation proof" };
+      }
+      const proof = event.reservationProof as Record<string, unknown>;
+      if (
+        typeof proof.checkpointSequence !== "number" ||
+        !Number.isSafeInteger(proof.checkpointSequence) ||
+        typeof proof.authorizedBalance !== "number" ||
+        !Number.isSafeInteger(proof.authorizedBalance) ||
+        typeof proof.reservedAt !== "number" ||
+        !Number.isSafeInteger(proof.reservedAt) ||
+        typeof proof.signature !== "string" ||
+        proof.signature.trim() === ""
+      ) {
+        return { ok: false, status: 400, error: "invalid reservation proof" };
+      }
+      reservationProof = {
+        checkpointSequence: proof.checkpointSequence,
+        authorizedBalance: proof.authorizedBalance,
+        reservedAt: proof.reservedAt,
+        signature: proof.signature,
+      };
+    }
     events.push({
       organizationId: event.organizationId as string,
       projectId: event.projectId as string,
@@ -326,6 +360,7 @@ export function parseIngestUsageBody(
       at: event.at,
       settleRefId: event.settleRefId as string,
       consumerClerkOrgId: consumer,
+      ...(reservationProof ? { reservationProof } : {}),
     });
   }
   return { ok: true, events };

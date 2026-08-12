@@ -38,15 +38,22 @@ import {
 
 type BillingSearch = {
   checkout?: string;
+  checkout_cancel?: string;
 };
 type PackId = "pack_10" | "pack_50" | "pack_100";
 
 export const Route = createFileRoute("/app/billing")({
   validateSearch: (search: Record<string, unknown>): BillingSearch => {
     const checkout = search.checkout;
-    return typeof checkout === "string" && checkout.trim().length > 0
-      ? { checkout: checkout.trim() }
-      : {};
+    const checkoutCancel = search.checkout_cancel;
+    return {
+      ...(typeof checkout === "string" && checkout.trim().length > 0
+        ? { checkout: checkout.trim() }
+        : {}),
+      ...(typeof checkoutCancel === "string" && checkoutCancel.trim().length > 0
+        ? { checkout_cancel: checkoutCancel.trim() }
+        : {}),
+    };
   },
   component: BillingPage,
   head: () => ({
@@ -58,7 +65,7 @@ export const Route = createFileRoute("/app/billing")({
 function BillingPage() {
   const { organization, isLoaded } = useOrganization();
   const { isLoading: convexAuthLoading, isAuthenticated } = useConvexAuth();
-  const { checkout } = Route.useSearch();
+  const { checkout, checkout_cancel: checkoutIntentId } = Route.useSearch();
 
   if (!isLoaded || convexAuthLoading || !isAuthenticated) {
     return <BillingSkeleton />;
@@ -77,14 +84,26 @@ function BillingPage() {
 
   return (
     <Suspense fallback={<BillingSkeleton />}>
-      <BillingContent checkoutSessionId={checkout} />
+      <BillingContent
+        checkoutSessionId={checkout}
+        checkoutIntentId={checkoutIntentId}
+      />
     </Suspense>
   );
 }
 
-function BillingContent({ checkoutSessionId }: { checkoutSessionId?: string }) {
+function BillingContent({
+  checkoutSessionId,
+  checkoutIntentId,
+}: {
+  checkoutSessionId?: string;
+  checkoutIntentId?: string;
+}) {
   const { data: billing } = useSuspenseQuery(
-    convexQuery(api.billing.getBillingState, { checkoutSessionId }),
+    convexQuery(api.billing.getBillingState, {
+      checkoutSessionId,
+      checkoutIntentId,
+    }),
   );
   const createCheckout = useAction(api.billing.createCheckout);
   const [checkoutPackId, setCheckoutPackId] = useState<string | null>(null);
@@ -157,7 +176,9 @@ function BillingContent({ checkoutSessionId }: { checkoutSessionId?: string }) {
                   ? "Confirmed"
                   : checkoutState === "failed"
                     ? "Not completed"
-                    : "Processing"}
+                    : checkoutState === "canceled"
+                      ? "Canceled"
+                      : "Processing"}
               </Badge>
             </div>
             <CardDescription>{checkoutNotice.description}</CardDescription>
@@ -255,6 +276,12 @@ function BillingContent({ checkoutSessionId }: { checkoutSessionId?: string }) {
                     <p className="text-xs text-muted-foreground">
                       {new Date(payment.createdAt).toLocaleString()}
                     </p>
+                    {payment.refundedCredits > 0 ? (
+                      <p className="text-sm text-muted-foreground">
+                        {payment.refundedCredits.toLocaleString()} credits
+                        refunded
+                      </p>
+                    ) : null}
                     {payment.failureReason ? (
                       <p className="text-sm text-destructive">
                         {payment.failureReason}
@@ -308,7 +335,10 @@ function BillingContent({ checkoutSessionId }: { checkoutSessionId?: string }) {
                           {new Date(payment.createdAt).toLocaleString()}
                         </td>
                         <td className="max-w-64 truncate px-2 py-2.5 text-muted-foreground">
-                          {payment.failureReason ?? "—"}
+                          {payment.failureReason ??
+                            (payment.refundedCredits > 0
+                              ? `${payment.refundedCredits.toLocaleString()} credits refunded`
+                              : "—")}
                         </td>
                       </tr>
                     ))}

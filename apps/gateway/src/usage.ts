@@ -42,6 +42,12 @@ export type ConvexUsageRecord = {
   keyId: string;
   at: number;
   settleRefId: string;
+  reservationProof?: {
+    checkpointSequence: number;
+    authorizedBalance: number;
+    reservedAt: number;
+    signature: string;
+  };
 };
 
 export type SettlementOutcomeStatus =
@@ -55,6 +61,7 @@ export type SettlementOutcome = {
   refId: string;
   status: SettlementOutcomeStatus;
   reason?: string;
+  retryable?: boolean;
 };
 
 /** Authoritative post-ingest checkpoint for the single consumer wallet batch. */
@@ -373,6 +380,7 @@ export function pendingToUsageRecord(input: {
   status: number;
   latencyMs: number;
   keyId: string;
+  reservationProof?: ConvexUsageRecord["reservationProof"];
 }): ConvexUsageRecord {
   return {
     organizationId: input.organizationId,
@@ -386,6 +394,9 @@ export function pendingToUsageRecord(input: {
     keyId: input.keyId,
     at: input.settledAt,
     settleRefId: input.settlementId,
+    ...(input.reservationProof
+      ? { reservationProof: input.reservationProof }
+      : {}),
   };
 }
 
@@ -410,7 +421,9 @@ function parseRecordUsageResult(value: unknown): RecordUsageResult {
       (status !== "applied" &&
         status !== "already_applied" &&
         status !== "rejected") ||
-      (outcome.reason !== undefined && typeof outcome.reason !== "string")
+      (outcome.reason !== undefined && typeof outcome.reason !== "string") ||
+      (outcome.retryable !== undefined &&
+        typeof outcome.retryable !== "boolean")
     ) {
       throw new Error("convex ingest result has invalid settlement outcome");
     }
@@ -419,6 +432,9 @@ function parseRecordUsageResult(value: unknown): RecordUsageResult {
       status,
     };
     if (typeof outcome.reason === "string") parsed.reason = outcome.reason;
+    if (typeof outcome.retryable === "boolean") {
+      parsed.retryable = outcome.retryable;
+    }
     results.push(parsed);
   }
 
