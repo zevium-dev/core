@@ -1,12 +1,12 @@
 {
   "name": "zevium",
   "private": true,
-  "packageManager": "pnpm@11.8.0",
+  "packageManager": "pnpm@11.8.0+sha512.c1f5e7c4cb241c8f174b743851d82f42b802324afc8b0f116b96adb15aa06664948dde36960a3ba1079ba5b4b29dd0140135b94b5b5f5263592249d68e555f26",
   "scripts": {
     "dev": "concurrently --kill-others-on-fail --names web,convex,gateway --prefix-colors blue,magenta,green \"pnpm --filter web dev\" \"pnpm exec convex dev\" \"pnpm --filter @zevium/gateway dev\"",
     "build": "turbo build",
     "audit:ci": "node scripts/audit.mjs",
-    "ci:pr": "prettier --check . && pnpm typecheck && pnpm test",
+    "ci:pr": "node scripts/audit.mjs && prettier --check . && pnpm typecheck && pnpm test",
     "test": "turbo test && pnpm test:convex && pnpm test:audit",
     "test:audit": "node --test scripts/audit.test.mjs",
     "test:convex": "vitest run --config convex/vitest.config.ts",
@@ -19,6 +19,7 @@
   "devDependencies": {
     "@clerk/backend": "^3.16.4",
     "@edge-runtime/vm": "^5.0.0",
+    "agent-browser": "0.27.1",
     "concurrently": "^10.0.4",
     "convex-test": "^0.0.54",
     "prettier": "^3.6.0",

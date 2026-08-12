@@ -1,6 +1,6 @@
 
 [hooks]
-postinstall = "pnpm install"
+postinstall = "node scripts/audit-preflight.mjs && pnpm --filter . install --frozen-lockfile --ignore-pnpmfile --ignore-scripts --registry=https://registry.npmjs.org/ --config.trust-lockfile=false --config.verify-store-integrity=true"
 
 [tasks]
 ci = "pnpm run ci:pr"

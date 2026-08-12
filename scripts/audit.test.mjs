@@ -1,5 +1,15 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { once } from "node:events";
+import {
+  cpSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import {
   createServer as createHttpServer,
   request as httpRequest,
@@ -10,6 +20,8 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
+import { parse, stringify } from "yaml";
+
 import {
   BULK_ADVISORY_URL,
   CANONICAL_REGISTRY,
@@ -19,16 +31,49 @@ import {
   renderSummaryHtml,
   runAudit,
   runBoundedChild,
+  validateAutomationPolicy,
   validateAuditArguments,
   validateAuditConfig,
   validateAuditEnvironment,
   validateWorkspaceRoot,
+  validateRegistryMetadata,
 } from "./audit.mjs";
 
 const repositoryRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "..",
 );
+
+function expectedPnpmConfig(configOverrides = {}) {
+  return {
+    registry: CANONICAL_REGISTRY,
+    "@jsr:registry": "https://npm.jsr.io/",
+    allowBuilds: {
+      "agent-browser": true,
+      "@tailwindcss/oxide": false,
+      bufferutil: true,
+      esbuild: true,
+      fsevents: false,
+      sharp: false,
+      "utf-8-validate": true,
+      workerd: true,
+    },
+    minimumReleaseAge: 720,
+    minimumReleaseAgeExclude: ["@cloudflare/workers-types", "@clerk/*"],
+    minimumReleaseAgeStrict: true,
+    overrides: {
+      "concurrently>shell-quote": "1.10.0",
+      "jayson>uuid": "11.1.1",
+      postcss: "8.5.25",
+      sharp: "0.35.0",
+    },
+    packages: ["apps/*", "packages/*"],
+    strictDepBuilds: true,
+    trustLockfile: false,
+    verifyStoreIntegrity: true,
+    ...configOverrides,
+  };
+}
 
 function graphFor(occurrences) {
   const occurrenceMap = new Map();
@@ -120,6 +165,139 @@ async function closeServer(server) {
   );
 }
 
+function makeAuditRepositoryCopy() {
+  const root = mkdtempSync(path.join(repositoryRoot, ".audit-adversarial-"));
+  for (const relativePath of [
+    "package.json",
+    "pnpm-lock.yaml",
+    "pnpm-workspace.yaml",
+    "mise.toml",
+  ]) {
+    cpSync(
+      path.join(repositoryRoot, relativePath),
+      path.join(root, relativePath),
+    );
+  }
+  for (const importerId of ["apps/gateway", "apps/web", "packages/shared"]) {
+    mkdirSync(path.join(root, importerId), { recursive: true });
+    cpSync(
+      path.join(repositoryRoot, importerId, "package.json"),
+      path.join(root, importerId, "package.json"),
+    );
+  }
+  mkdirSync(path.join(root, "scripts"), { recursive: true });
+  cpSync(
+    path.join(repositoryRoot, "scripts/audit.mjs"),
+    path.join(root, "scripts/audit.mjs"),
+  );
+  cpSync(
+    path.join(repositoryRoot, "scripts/audit-preflight.mjs"),
+    path.join(root, "scripts/audit-preflight.mjs"),
+  );
+  mkdirSync(path.join(root, "node_modules"));
+  for (const packageName of ["semver", "yaml"]) {
+    cpSync(
+      realpathSync(path.join(repositoryRoot, "node_modules", packageName)),
+      path.join(root, "node_modules", packageName),
+      { recursive: true },
+    );
+  }
+  cpSync(path.join(repositoryRoot, ".github"), path.join(root, ".github"), {
+    recursive: true,
+  });
+  return root;
+}
+
+function mutateYaml(root, relativePath, mutation) {
+  const filePath = path.join(root, relativePath);
+  const value = parse(readFileSync(filePath, "utf8"));
+  mutation(value);
+  writeFileSync(filePath, stringify(value, { lineWidth: 0 }), "utf8");
+}
+
+function mutateJson(root, relativePath, mutation) {
+  const filePath = path.join(root, relativePath);
+  const value = JSON.parse(readFileSync(filePath, "utf8"));
+  mutation(value);
+  writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+}
+
+function withAuditRepository(mutation, assertion) {
+  const root = makeAuditRepositoryCopy();
+  try {
+    mutation(root);
+    return assertion(root);
+  } finally {
+    rmSync(root, { force: true, recursive: true });
+  }
+}
+
+function runMutatedPublicCli(
+  mutation,
+  { environment: environmentOverrides = {}, offline = true } = {},
+) {
+  return withAuditRepository(mutation, (root) => {
+    const environment = {
+      ...process.env,
+      INIT_CWD: root,
+      ...(offline ? { PATH: path.join(root, "missing-path") } : {}),
+      ...environmentOverrides,
+    };
+    delete environment.GITHUB_STEP_SUMMARY;
+    delete environment.NODE_OPTIONS;
+    delete environment.NODE_PATH;
+    return spawnSync(process.execPath, ["scripts/audit.mjs"], {
+      cwd: root,
+      encoding: "utf8",
+      env: environment,
+      timeout: offline ? 15_000 : 120_000,
+    });
+  });
+}
+
+function firstObjectEntry(record, predicate = () => true) {
+  const entry = Object.entries(record).find(([key, value]) =>
+    predicate(value, key),
+  );
+  assert.ok(entry, "expected matching repository lockfile entry");
+  return entry;
+}
+
+function registryMetadataFixture(packageKey = "debug@4.4.3") {
+  const graph = loadWorkspaceAuditGraph();
+  const identity = graph.provenance.packageIdentities.get(packageKey);
+  const packageSnapshot = graph.provenance.packageSnapshots[packageKey];
+  assert.ok(identity);
+  assert.ok(packageSnapshot);
+  const variantInfos = [...graph.provenance.snapshotInfoByPath.values()]
+    .filter((info) => info.parsed.packageKey === packageKey)
+    .map((info) => ({
+      ...info,
+      edges: info.edges.map((edge) => ({
+        ...edge,
+        child: graph.provenance.snapshotInfoByPath.get(edge.depPath)?.parsed,
+      })),
+    }));
+  const metadata = {
+    name: "debug",
+    version: "4.4.3",
+    dependencies: { ms: "^2.1.3" },
+    peerDependenciesMeta: {
+      "supports-color": { optional: true },
+    },
+    engines: { node: ">=6.0" },
+    scripts: {
+      lint: "xo",
+      test: "npm run test:node",
+    },
+    dist: {
+      integrity: packageSnapshot.resolution.integrity,
+      tarball: "https://registry.npmjs.org/debug/-/debug-4.4.3.tgz",
+    },
+  };
+  return { identity, metadata, packageSnapshot, variantInfos };
+}
+
 test("parses exact repository workspace graph with every dependency type", () => {
   const graph = loadWorkspaceAuditGraph();
 
@@ -131,28 +309,971 @@ test("parses exact repository workspace graph with every dependency type", () =>
   ]);
   assert.deepEqual(graph.dependencyCounts, {
     dependencies: 283,
-    devDependencies: 214,
+    devDependencies: 215,
     optionalDependencies: 205,
-    totalDependencies: 642,
+    totalDependencies: 643,
   });
-  assert.equal(graph.occurrences.size, 642);
-  assert.equal(Object.keys(graph.request).length, 566);
+  assert.equal(graph.occurrences.size, 643);
+  assert.equal(Object.keys(graph.request).length, 567);
   assert.match(graph.lockfile.sha256, /^[a-f0-9]{64}$/);
   assert.equal(graph.lockfile.path, "pnpm-lock.yaml");
+  assert.deepEqual(graph.supplyChain.allowedRegistries, [CANONICAL_REGISTRY]);
+  assert.deepEqual(graph.supplyChain.integrity, {
+    algorithm: "sha512",
+    completeDigestBytes: 64,
+    entries: 643,
+  });
+  assert.equal(
+    graph.supplyChain.resolution,
+    "canonical-registry-identity-with-implicit-tarball",
+  );
+  assert.deepEqual(graph.supplyChain.packageExtensions, []);
+  assert.deepEqual(graph.supplyChain.patchedDependencies, []);
+  assert.deepEqual(graph.supplyChain.catalogs, []);
+  assert.deepEqual(graph.supplyChain.overrideCoverage, {
+    "concurrently>shell-quote": 1,
+    "jayson>uuid": 0,
+    postcss: 1,
+    sharp: 2,
+  });
+  assert.ok(
+    graph.supplyChain.lifecycleScripts.allowed.includes("agent-browser"),
+  );
+  assert.ok(graph.supplyChain.lifecycleScripts.denied.includes("sharp"));
 });
+
+test("validates pinned mise and immutable workflow action identities", () => {
+  assert.equal(validateAutomationPolicy(), 7);
+});
+
+test("binds registry metadata to lock identity, tarball, digest, and graph semantics", () => {
+  const fixture = registryMetadataFixture();
+  assert.doesNotThrow(() =>
+    validateRegistryMetadata(
+      fixture.metadata,
+      fixture.identity,
+      fixture.packageSnapshot,
+      fixture.variantInfos,
+    ),
+  );
+
+  const attacks = [
+    [
+      "identity name",
+      (metadata) => {
+        metadata.name = "attacker-debug";
+      },
+      /does not bind canonical name and version/,
+    ],
+    [
+      "identity version",
+      (metadata) => {
+        metadata.version = "4.4.2";
+      },
+      /does not bind canonical name and version/,
+    ],
+    [
+      "complete but wrong digest",
+      (metadata) => {
+        metadata.dist.integrity = `sha512-${Buffer.alloc(64, 0xa5).toString("base64")}`;
+      },
+      /integrity does not match pnpm-lock.yaml/,
+    ],
+    [
+      "tarball host",
+      (metadata) => {
+        metadata.dist.tarball =
+          "https://attacker.invalid/debug/-/debug-4.4.3.tgz";
+      },
+      /leaves canonical registry allowlist/,
+    ],
+    [
+      "tarball identity path",
+      (metadata) => {
+        metadata.dist.tarball = "https://registry.npmjs.org/ms/-/ms-2.1.3.tgz";
+      },
+      /does not match canonical package identity and version/,
+    ],
+    [
+      "dependency version",
+      (metadata) => {
+        metadata.dependencies.ms = ">=9.0.0";
+      },
+      /outside metadata semver ranges/,
+    ],
+    [
+      "dependency kind",
+      (metadata) => {
+        metadata.optionalDependencies = { ms: "^2.1.3" };
+      },
+      /dependency-kind classification does not match/,
+    ],
+    [
+      "peer policy",
+      (metadata) => {
+        metadata.peerDependenciesMeta = {};
+      },
+      /peerDependencies does not exactly match pinned dependency policy/,
+    ],
+    [
+      "peer metadata controls",
+      (metadata) => {
+        metadata.peerDependenciesMeta["supports-color"].injected = true;
+      },
+      /unsupported fields: injected/,
+    ],
+    [
+      "dependency metadata controls",
+      (metadata) => {
+        metadata.dependenciesMeta = { ms: { built: true } };
+      },
+      /unsupported fields: built/,
+    ],
+    [
+      "platform policy",
+      (metadata) => {
+        metadata.os = ["darwin"];
+      },
+      /\.os does not exactly match pinned dependency policy/,
+    ],
+    [
+      "install script policy",
+      (metadata) => {
+        metadata.scripts.postinstall = "node attacker.js";
+      },
+      /unclassified install lifecycle scripts/,
+    ],
+    [
+      "implicit node-gyp policy",
+      (metadata) => {
+        metadata.gypfile = true;
+      },
+      /unclassified install lifecycle scripts: implicit node-gyp/,
+    ],
+  ];
+  for (const [name, mutate, expectedError] of attacks) {
+    const metadata = structuredClone(fixture.metadata);
+    mutate(metadata);
+    assert.throws(
+      () =>
+        validateRegistryMetadata(
+          metadata,
+          fixture.identity,
+          fixture.packageSnapshot,
+          fixture.variantInfos,
+        ),
+      expectedError,
+      name,
+    );
+  }
+});
+
+test("binds lifecycle permissions to exact package versions and commands", () => {
+  const graph = loadWorkspaceAuditGraph();
+  const packageKey = "agent-browser@0.27.1";
+  const identity = graph.provenance.packageIdentities.get(packageKey);
+  const packageSnapshot = graph.provenance.packageSnapshots[packageKey];
+  assert.ok(identity);
+  assert.ok(packageSnapshot);
+  const variantInfos = [...graph.provenance.snapshotInfoByPath.values()]
+    .filter((info) => info.parsed.packageKey === packageKey)
+    .map((info) => ({
+      ...info,
+      edges: info.edges.map((edge) => ({
+        ...edge,
+        child: graph.provenance.snapshotInfoByPath.get(edge.depPath)?.parsed,
+      })),
+    }));
+  const metadata = {
+    name: identity.name,
+    version: identity.version,
+    engines: packageSnapshot.engines,
+    bin: { "agent-browser": "bin/agent-browser.js" },
+    scripts: { postinstall: "node scripts/postinstall.js" },
+    dist: {
+      integrity: packageSnapshot.resolution.integrity,
+      tarball:
+        "https://registry.npmjs.org/agent-browser/-/agent-browser-0.27.1.tgz",
+    },
+  };
+  assert.doesNotThrow(() =>
+    validateRegistryMetadata(metadata, identity, packageSnapshot, variantInfos),
+  );
+  metadata.scripts.postinstall = "node attacker.js";
+  assert.throws(
+    () =>
+      validateRegistryMetadata(
+        metadata,
+        identity,
+        packageSnapshot,
+        variantInfos,
+      ),
+    /install lifecycle scripts does not exactly match pinned dependency policy/,
+  );
+});
+
+test("public CLI rejects every previously accepted supply-chain bypass", () => {
+  const attacks = [
+    {
+      name: "identity metadata tamper",
+      mutate(root) {
+        mutateYaml(root, "pnpm-lock.yaml", (lockfile) => {
+          const [, packageSnapshot] = firstObjectEntry(lockfile.packages);
+          packageSnapshot.name = "attacker-controlled-identity";
+        });
+      },
+      error: /unsupported fields: name/,
+    },
+    {
+      name: "tarball source URL drift",
+      mutate(root) {
+        mutateYaml(root, "pnpm-lock.yaml", (lockfile) => {
+          const [, packageSnapshot] = firstObjectEntry(lockfile.packages);
+          packageSnapshot.resolution.tarball =
+            "https://attacker.invalid/package.tgz";
+        });
+      },
+      error: /unsupported fields: tarball/,
+    },
+    {
+      name: "weak SRI acceptance",
+      mutate(root) {
+        mutateYaml(root, "pnpm-lock.yaml", (lockfile) => {
+          const [, packageSnapshot] = firstObjectEntry(lockfile.packages);
+          packageSnapshot.resolution.integrity =
+            "sha1-2jmj7l5rSw0yVb/vlWAYkK/YBwk=";
+        });
+      },
+      error: /exactly one complete sha512 SRI digest/,
+    },
+    {
+      name: "pnpm override drift",
+      mutate(root) {
+        mutateYaml(root, "pnpm-lock.yaml", (lockfile) => {
+          lockfile.overrides.postcss = "8.5.24";
+        });
+      },
+      error:
+        /lockfile\.overrides does not exactly match pinned dependency policy/,
+    },
+  ];
+
+  for (const attack of attacks) {
+    const result = runMutatedPublicCli(attack.mutate);
+    assert.equal(result.error, undefined, attack.name);
+    assert.equal(result.status, 2, attack.name);
+    assert.match(result.stderr, attack.error, attack.name);
+    assert.doesNotMatch(result.stdout, /"vulnerabilities"/, attack.name);
+  }
+});
+
+test("public CLI rejects metamorphic lock, workspace, manifest, CI, and mise attacks", () => {
+  const attacks = [
+    {
+      name: "identity version metadata",
+      mutate(root) {
+        mutateYaml(root, "pnpm-lock.yaml", (lockfile) => {
+          const [, packageSnapshot] = firstObjectEntry(lockfile.packages);
+          packageSnapshot.version = "99.0.0";
+        });
+      },
+      error: /unsupported fields: version/,
+    },
+    {
+      name: "bootstrap package digest drift",
+      mutate(root) {
+        mutateYaml(root, "pnpm-lock.yaml", (lockfile) => {
+          lockfile.packages["semver@7.8.5"].resolution.integrity =
+            `sha512-${Buffer.alloc(64, 0xa5).toString("base64")}`;
+        });
+      },
+      error:
+        /bootstrap identity or sha512 integrity drifted for semver@7\.8\.5/,
+    },
+    {
+      name: "bootstrap importer source drift",
+      mutate(root) {
+        mutateYaml(root, "pnpm-lock.yaml", (lockfile) => {
+          lockfile.importers["."].devDependencies.semver.version =
+            "npm:attacker@7.8.5";
+        });
+      },
+      error: /bootstrap importer semver drifted/,
+    },
+    {
+      name: "lifecycle package version drift",
+      mutate(root) {
+        mutateJson(root, "package.json", (manifest) => {
+          manifest.devDependencies["agent-browser"] = "0.27.2";
+        });
+        mutateYaml(root, "pnpm-lock.yaml", (lockfile) => {
+          lockfile.importers["."].devDependencies["agent-browser"] = {
+            specifier: "0.27.2",
+            version: "0.27.2",
+          };
+          lockfile.packages["agent-browser@0.27.2"] =
+            lockfile.packages["agent-browser@0.27.1"];
+          delete lockfile.packages["agent-browser@0.27.1"];
+          lockfile.snapshots["agent-browser@0.27.2"] = {};
+          delete lockfile.snapshots["agent-browser@0.27.1"];
+        });
+      },
+      error:
+        /Lifecycle package policy agent-browser@0\.27\.1 has no exact lockfile identity/,
+    },
+    {
+      name: "resolution registry field",
+      mutate(root) {
+        mutateYaml(root, "pnpm-lock.yaml", (lockfile) => {
+          const [, packageSnapshot] = firstObjectEntry(lockfile.packages);
+          packageSnapshot.resolution.registry = "https://attacker.invalid/";
+        });
+      },
+      error: /unsupported fields: registry/,
+    },
+    ...[
+      "sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=",
+      `sha512-${Buffer.alloc(63, 0xa5).toString("base64")}`,
+      `sha512-${Buffer.alloc(64, 0xa5).toString("base64")} sha512-${Buffer.alloc(64, 0x5a).toString("base64")}`,
+      `sha512-${"A".repeat(86)}=x`,
+    ].map((integrity, index) => ({
+      name: `weak or malformed SRI variant ${String(index + 1)}`,
+      mutate(root) {
+        mutateYaml(root, "pnpm-lock.yaml", (lockfile) => {
+          const [, packageSnapshot] = firstObjectEntry(lockfile.packages);
+          packageSnapshot.resolution.integrity = integrity;
+        });
+      },
+      error: /complete sha512 SRI digest|canonical 64-byte sha512 digest/,
+    })),
+    {
+      name: "override policy in workspace",
+      mutate(root) {
+        mutateYaml(root, "pnpm-workspace.yaml", (workspace) => {
+          workspace.overrides.postcss = "8.5.24";
+        });
+      },
+      error:
+        /workspace\.overrides does not exactly match pinned dependency policy/,
+    },
+    {
+      name: "override application in graph",
+      mutate(root) {
+        mutateYaml(root, "pnpm-lock.yaml", (lockfile) => {
+          lockfile.packages["shell-quote@1.9.0"] = structuredClone(
+            lockfile.packages["shell-quote@1.10.0"],
+          );
+          lockfile.snapshots["shell-quote@1.9.0"] = {};
+          lockfile.snapshots["concurrently@10.0.4"].dependencies[
+            "shell-quote"
+          ] = "1.9.0";
+        });
+      },
+      error:
+        /Pinned override concurrently>shell-quote drifted to shell-quote@1\.9\.0/,
+    },
+    {
+      name: "lock package extensions",
+      mutate(root) {
+        mutateYaml(root, "pnpm-lock.yaml", (lockfile) => {
+          lockfile.packageExtensionsChecksum = `sha256-${"a".repeat(64)}`;
+        });
+      },
+      error: /unsupported fields: packageExtensionsChecksum/,
+    },
+    {
+      name: "workspace package extensions",
+      mutate(root) {
+        mutateYaml(root, "pnpm-workspace.yaml", (workspace) => {
+          workspace.packageExtensions = { "debug@*": { dependencies: {} } };
+        });
+      },
+      error: /unsupported fields: packageExtensions/,
+    },
+    {
+      name: "patched dependencies",
+      mutate(root) {
+        mutateYaml(root, "pnpm-lock.yaml", (lockfile) => {
+          lockfile.patchedDependencies = {
+            "debug@4.4.3": "attacker-hash",
+          };
+        });
+      },
+      error: /unsupported fields: patchedDependencies/,
+    },
+    {
+      name: "patch directory",
+      mutate(root) {
+        mkdirSync(path.join(root, "patches"));
+        writeFileSync(
+          path.join(root, "patches", "debug.patch"),
+          "attacker patch\n",
+          "utf8",
+        );
+      },
+      error: /Repository patches path is forbidden/,
+    },
+    {
+      name: "catalog drift",
+      mutate(root) {
+        mutateYaml(root, "pnpm-lock.yaml", (lockfile) => {
+          lockfile.catalogs = { default: { debug: "4.4.3" } };
+        });
+      },
+      error: /unsupported fields: catalogs/,
+    },
+    {
+      name: "workspace importer omission",
+      mutate(root) {
+        mutateYaml(root, "pnpm-lock.yaml", (lockfile) => {
+          delete lockfile.importers["packages/shared"];
+        });
+      },
+      error: /Lockfile importers do not exactly match workspace/,
+    },
+    {
+      name: "workspace glob drift",
+      mutate(root) {
+        mutateYaml(root, "pnpm-workspace.yaml", (workspace) => {
+          workspace.packages = ["apps/web"];
+        });
+      },
+      error:
+        /workspace\.packages does not exactly match pinned dependency policy/,
+    },
+    {
+      name: "registry drift",
+      mutate(root) {
+        mutateYaml(root, "pnpm-workspace.yaml", (workspace) => {
+          workspace.registry = "https://attacker.invalid/";
+        });
+      },
+      error: /workspace\.registry must be canonical/,
+    },
+    {
+      name: "untracked npmrc",
+      mutate(root) {
+        writeFileSync(
+          path.join(root, ".npmrc"),
+          "registry=https://attacker.invalid/\n",
+          "utf8",
+        );
+      },
+      error: /\.npmrc is forbidden during dependency audit bootstrap/,
+    },
+    {
+      name: "untracked pnpm hook",
+      mutate(root) {
+        writeFileSync(
+          path.join(root, ".pnpmfile.cjs"),
+          "module.exports = {}\n",
+          "utf8",
+        );
+      },
+      error: /\.pnpmfile\.cjs is forbidden during dependency audit bootstrap/,
+    },
+    {
+      name: "local audit parser shadow",
+      mutate(root) {
+        mkdirSync(path.join(root, "scripts/node_modules/yaml"), {
+          recursive: true,
+        });
+        writeFileSync(
+          path.join(root, "scripts/node_modules/yaml/package.json"),
+          '{"name":"yaml","version":"2.9.0"}\n',
+          "utf8",
+        );
+      },
+      error:
+        /scripts\/node_modules is forbidden during dependency audit bootstrap/,
+    },
+    {
+      name: "installed audit parser content tamper",
+      mutate(root) {
+        const modulePath = path.join(root, "node_modules/yaml/dist/index.js");
+        writeFileSync(
+          modulePath,
+          `${readFileSync(modulePath, "utf8")}\n// attacker mutation\n`,
+          "utf8",
+        );
+      },
+      error:
+        /Installed audit bootstrap package yaml tree does not match pinned sha512/,
+    },
+    {
+      name: "lifecycle script",
+      mutate(root) {
+        mutateJson(root, "package.json", (manifest) => {
+          manifest.scripts.postinstall = "node attacker.js";
+        });
+      },
+      error: /lifecycle script postinstall is not allowlisted/,
+    },
+    {
+      name: "nested pnpm policy",
+      mutate(root) {
+        mutateJson(root, "apps/web/package.json", (manifest) => {
+          manifest.pnpm = { onlyBuiltDependencies: ["attacker"] };
+        });
+      },
+      error: /contains unsupported fields: pnpm/,
+    },
+    {
+      name: "workspace platform selector",
+      mutate(root) {
+        mutateJson(root, "apps/web/package.json", (manifest) => {
+          manifest.os = ["linux"];
+        });
+      },
+      error: /contains unsupported fields: os/,
+    },
+    {
+      name: "wildcard direct dependency",
+      mutate(root) {
+        mutateJson(root, "apps/web/package.json", (manifest) => {
+          manifest.dependencies["@tanstack/react-router"] = "*";
+        });
+        mutateYaml(root, "pnpm-lock.yaml", (lockfile) => {
+          lockfile.importers["apps/web"].dependencies[
+            "@tanstack/react-router"
+          ].specifier = "*";
+        });
+      },
+      error: /uses mutable or non-registry specifier "\*"/,
+    },
+    {
+      name: "mutable direct dependency",
+      mutate(root) {
+        mutateJson(root, "apps/web/package.json", (manifest) => {
+          manifest.dependencies["@tanstack/react-router"] = "latest";
+        });
+        mutateYaml(root, "pnpm-lock.yaml", (lockfile) => {
+          lockfile.importers["apps/web"].dependencies[
+            "@tanstack/react-router"
+          ].specifier = "latest";
+        });
+      },
+      error: /uses mutable or non-registry specifier "latest"/,
+    },
+    ...[
+      "github:attacker/router#main",
+      "git+https://github.com/attacker/router.git#main",
+      "file:../../attacker",
+      "https://attacker.invalid/router.tgz",
+    ].map((specifier, index) => ({
+      name: `non-registry direct source ${String(index + 1)}`,
+      mutate(root) {
+        mutateJson(root, "apps/web/package.json", (manifest) => {
+          manifest.dependencies["@tanstack/react-router"] = specifier;
+        });
+        mutateYaml(root, "pnpm-lock.yaml", (lockfile) => {
+          const dependency =
+            lockfile.importers["apps/web"].dependencies[
+              "@tanstack/react-router"
+            ];
+          dependency.specifier = specifier;
+          dependency.version = specifier;
+        });
+      },
+      error: /uses mutable or non-registry specifier/,
+    })),
+    {
+      name: "workspace link drift",
+      mutate(root) {
+        mutateYaml(root, "pnpm-lock.yaml", (lockfile) => {
+          lockfile.importers["apps/web"].dependencies[
+            "@zevium/shared"
+          ].version = "link:../gateway";
+        });
+      },
+      error: /workspace link must be exactly link:\.\.\/\.\.\/packages\/shared/,
+    },
+    {
+      name: "peer range drift",
+      mutate(root) {
+        mutateYaml(root, "pnpm-lock.yaml", (lockfile) => {
+          lockfile.packages["react-dom@19.2.7"].peerDependencies.react =
+            ">=999.0.0";
+        });
+      },
+      error: /peer dependency react@19\.2\.7 violates declared range/,
+    },
+    {
+      name: "optional flag drift",
+      mutate(root) {
+        mutateYaml(root, "pnpm-lock.yaml", (lockfile) => {
+          const [, snapshot] = firstObjectEntry(
+            lockfile.snapshots,
+            (candidate) => candidate.optional === true,
+          );
+          delete snapshot.optional;
+        });
+      },
+      error: /optional classification does not match complete importer graph/,
+    },
+    {
+      name: "platform selector drift",
+      mutate(root) {
+        mutateYaml(root, "pnpm-lock.yaml", (lockfile) => {
+          lockfile.packages["@esbuild/linux-x64@0.28.1"].cpu.push("x64");
+        });
+      },
+      error: /\.cpu contains duplicate platforms/,
+    },
+    {
+      name: "transitive local source",
+      mutate(root) {
+        mutateYaml(root, "pnpm-lock.yaml", (lockfile) => {
+          lockfile.snapshots["debug@4.4.3"].dependencies.ms =
+            "file:../../attacker";
+        });
+      },
+      error: /forbidden local, URL, git, or protocol source/,
+    },
+    {
+      name: "duplicate YAML key",
+      mutate(root) {
+        const lockfilePath = path.join(root, "pnpm-lock.yaml");
+        writeFileSync(
+          lockfilePath,
+          `${readFileSync(lockfilePath, "utf8")}\nsettings:\n  autoInstallPeers: true\n`,
+          "utf8",
+        );
+      },
+      error: /invalid or non-deterministic YAML: Map keys must be unique/,
+    },
+    {
+      name: "duplicate JSON key",
+      mutate(root) {
+        const manifestPath = path.join(root, "package.json");
+        const manifest = readFileSync(manifestPath, "utf8").replace(
+          '  "name": "zevium",',
+          '  "name": "zevium",\n  "name": "attacker",',
+        );
+        writeFileSync(manifestPath, manifest, "utf8");
+      },
+      error: /contains duplicate JSON key name/,
+    },
+    {
+      name: "mutable action tag",
+      mutate(root) {
+        const workflowPath = path.join(root, ".github/workflows/ci.yml");
+        writeFileSync(
+          workflowPath,
+          readFileSync(workflowPath, "utf8").replace(
+            /actions\/checkout@[a-f0-9]{40}/,
+            "actions/checkout@v6",
+          ),
+          "utf8",
+        );
+      },
+      error:
+        /uses mutable or malformed action reference "actions\/checkout@v6"/,
+    },
+    {
+      name: "mise tool drift",
+      mutate(root) {
+        const misePath = path.join(root, "mise.toml");
+        writeFileSync(
+          misePath,
+          readFileSync(misePath, "utf8").replace(
+            'node = "24.15.0"',
+            'node = "24.15.1"',
+          ),
+          "utf8",
+        );
+      },
+      error:
+        /mise\.toml toolchain policy does not exactly match pinned dependency policy/,
+    },
+    {
+      name: "mise bootstrap bypass",
+      mutate(root) {
+        const misePath = path.join(root, "mise.toml");
+        writeFileSync(
+          misePath,
+          readFileSync(misePath, "utf8").replace(
+            "node scripts/audit-preflight.mjs && ",
+            "",
+          ),
+          "utf8",
+        );
+      },
+      error:
+        /mise\.toml toolchain policy does not exactly match pinned dependency policy/,
+    },
+    {
+      name: "CI audit removal",
+      mutate(root) {
+        const workflowPath = path.join(root, ".github/workflows/ci.yml");
+        writeFileSync(
+          workflowPath,
+          readFileSync(workflowPath, "utf8").replace(
+            "run: node scripts/audit.mjs",
+            "run: echo bypassed",
+          ),
+          "utf8",
+        );
+      },
+      error:
+        /must use exact root bootstrap before inline audit or exact full install after upstream audit/,
+    },
+    {
+      name: "lifecycle allowlist drift",
+      mutate(root) {
+        mutateYaml(root, "pnpm-workspace.yaml", (workspace) => {
+          workspace.allowBuilds.sharp = true;
+        });
+      },
+      error:
+        /workspace\.allowBuilds does not exactly match pinned dependency policy/,
+    },
+    {
+      name: "workflow global npm install",
+      mutate(root) {
+        mutateYaml(root, ".github/workflows/payment-drill.yml", (workflow) => {
+          const step = workflow.jobs["real-sandbox-checkout"].steps.find(
+            (candidate) => candidate.name === "Install browser runtime",
+          );
+          step.run = "npm install --global attacker@1.0.0";
+        });
+      },
+      error: /uses forbidden mutable package-manager install/,
+    },
+    {
+      name: "workflow install scripts enabled",
+      mutate(root) {
+        const workflowPath = path.join(root, ".github/workflows/ci.yml");
+        writeFileSync(
+          workflowPath,
+          readFileSync(workflowPath, "utf8").replace(
+            "pnpm --filter . install --frozen-lockfile --ignore-pnpmfile --ignore-scripts --registry=https://registry.npmjs.org/ --config.trust-lockfile=false --config.verify-store-integrity=true",
+            "pnpm --filter . install --frozen-lockfile --ignore-pnpmfile --registry=https://registry.npmjs.org/ --config.trust-lockfile=false --config.verify-store-integrity=true",
+          ),
+          "utf8",
+        );
+      },
+      error: /uses forbidden mutable package-manager install/,
+    },
+    {
+      name: "workflow pnpm hook enabled",
+      mutate(root) {
+        const workflowPath = path.join(root, ".github/workflows/ci.yml");
+        writeFileSync(
+          workflowPath,
+          readFileSync(workflowPath, "utf8").replace(
+            "pnpm --filter . install --frozen-lockfile --ignore-pnpmfile --ignore-scripts --registry=https://registry.npmjs.org/ --config.trust-lockfile=false --config.verify-store-integrity=true",
+            "pnpm --filter . install --frozen-lockfile --ignore-scripts --registry=https://registry.npmjs.org/ --config.trust-lockfile=false --config.verify-store-integrity=true",
+          ),
+          "utf8",
+        );
+      },
+      error: /uses forbidden mutable package-manager install/,
+    },
+    {
+      name: "audit failure suppression",
+      mutate(root) {
+        mutateYaml(root, ".github/workflows/ci.yml", (workflow) => {
+          const step = workflow.jobs.security.steps.find(
+            (candidate) => candidate.run === "node scripts/audit.mjs",
+          );
+          step["continue-on-error"] = true;
+        });
+      },
+      error: /contains unsupported fields: continue-on-error/,
+    },
+    {
+      name: "downstream audit dependency removal",
+      mutate(root) {
+        mutateYaml(root, ".github/workflows/ci.yml", (workflow) => {
+          delete workflow.jobs.quality.needs;
+        });
+      },
+      error:
+        /quality can execute dependency code without successful audit dependency/,
+    },
+    {
+      name: "downstream failed-audit status bypass",
+      mutate(root) {
+        mutateYaml(root, ".github/workflows/ci.yml", (workflow) => {
+          workflow.jobs.quality.if = "always()";
+        });
+      },
+      error: /quality can bypass failed audit with status condition/,
+    },
+    {
+      name: "workflow dependency environment override",
+      mutate(root) {
+        mutateYaml(root, ".github/workflows/ci.yml", (workflow) => {
+          workflow.jobs.quality.env = {
+            NPM_CONFIG_REGISTRY: "https://attacker.invalid/",
+          };
+        });
+      },
+      error: /overrides protected dependency environment NPM_CONFIG_REGISTRY/,
+    },
+    {
+      name: "setup-node input drift",
+      mutate(root) {
+        mutateYaml(root, ".github/workflows/ci.yml", (workflow) => {
+          const step = workflow.jobs.security.steps.find(
+            (candidate) =>
+              typeof candidate.uses === "string" &&
+              candidate.uses.startsWith("actions/setup-node@"),
+          );
+          step.with["package-manager-cache"] = true;
+        });
+      },
+      error:
+        /must pin exact Node 24\.15\.0 without mutable version or package-manager cache resolution/,
+    },
+    {
+      name: "workflow preflight removal",
+      mutate(root) {
+        const workflowPath = path.join(root, ".github/workflows/ci.yml");
+        writeFileSync(
+          workflowPath,
+          readFileSync(workflowPath, "utf8").replace(
+            "run: node scripts/audit-preflight.mjs",
+            "run: node --version",
+          ),
+          "utf8",
+        );
+      },
+      error:
+        /must use exact root bootstrap before inline audit or exact full install after upstream audit/,
+    },
+    {
+      name: "workflow package manager bootstrap drift",
+      mutate(root) {
+        const workflowPath = path.join(root, ".github/workflows/ci.yml");
+        writeFileSync(
+          workflowPath,
+          readFileSync(workflowPath, "utf8").replace(
+            "run: corepack enable pnpm",
+            "run: corepack install --global pnpm@latest",
+          ),
+          "utf8",
+        );
+      },
+      error: /uses forbidden mutable package-manager bootstrap/,
+    },
+    {
+      name: "package manager integrity drift",
+      mutate(root) {
+        mutateJson(root, "package.json", (manifest) => {
+          manifest.packageManager = "pnpm@11.8.0";
+        });
+      },
+      error: /identity or package manager drifted during audit bootstrap/,
+    },
+    {
+      name: "Corepack environment override file",
+      mutate(root) {
+        writeFileSync(
+          path.join(root, ".corepack.env"),
+          "COREPACK_ENABLE_STRICT=0\n",
+          "utf8",
+        );
+      },
+      error: /\.corepack\.env is forbidden during dependency audit bootstrap/,
+    },
+    {
+      name: "Corepack environment integrity bypass",
+      mutate() {},
+      environment: { COREPACK_INTEGRITY_KEYS: "0" },
+      error:
+        /COREPACK_INTEGRITY_KEYS is forbidden during dependency audit bootstrap/,
+    },
+    {
+      name: "lifecycle rebuild before audit",
+      mutate(root) {
+        mutateYaml(
+          root,
+          ".github/workflows/deploy-production.yml",
+          (workflow) => {
+            const steps = workflow.jobs.deploy.steps;
+            const auditIndex = steps.findIndex(
+              (candidate) => candidate.run === "node scripts/audit.mjs",
+            );
+            const rebuildIndex = steps.findIndex(
+              (candidate) => candidate.run === "pnpm rebuild",
+            );
+            [steps[auditIndex], steps[rebuildIndex]] = [
+              steps[rebuildIndex],
+              steps[auditIndex],
+            ];
+          },
+        );
+      },
+      error:
+        /executes dependency code before audit|must rebuild only after dependency gate/,
+    },
+  ];
+
+  for (const attack of attacks) {
+    const result = runMutatedPublicCli(attack.mutate, {
+      environment: attack.environment,
+    });
+    assert.equal(result.error, undefined, attack.name);
+    assert.equal(result.status, 2, attack.name);
+    assert.match(result.stderr, attack.error, attack.name);
+    assert.doesNotMatch(result.stdout, /"vulnerabilities"/, attack.name);
+  }
+});
+
+test(
+  "public CLI rejects internally well-formed digest and dependency-kind forgeries",
+  { timeout: 180_000 },
+  () => {
+    const attacks = [
+      {
+        name: "complete sha512 digest forgery",
+        mutate(root) {
+          mutateYaml(root, "pnpm-lock.yaml", (lockfile) => {
+            lockfile.packages["@acemir/cssom@0.9.31"].resolution.integrity =
+              `sha512-${Buffer.alloc(64, 0xa5).toString("base64")}`;
+          });
+        },
+        error:
+          /registry metadata @acemir\/cssom@0\.9\.31 integrity does not match pnpm-lock\.yaml/,
+        offline: false,
+      },
+      {
+        name: "dependency kind forgery",
+        mutate(root) {
+          mutateYaml(root, "pnpm-lock.yaml", (lockfile) => {
+            const snapshot = lockfile.snapshots["debug@4.4.3"];
+            snapshot.optionalDependencies = { ms: snapshot.dependencies.ms };
+            delete snapshot.dependencies;
+          });
+        },
+        error:
+          /Dependency snapshot ms@2\.1\.3 optional classification does not match complete importer graph/,
+        offline: true,
+      },
+    ];
+    for (const attack of attacks) {
+      const result = runMutatedPublicCli(attack.mutate, {
+        offline: attack.offline,
+      });
+      assert.equal(result.error, undefined, attack.name);
+      assert.equal(result.status, 2, attack.name);
+      assert.match(result.stderr, attack.error, attack.name);
+      assert.doesNotMatch(result.stdout, /"vulnerabilities"/, attack.name);
+    }
+  },
+);
 
 test("rejects hostile registry config and every dependency-scope selector", () => {
   assert.throws(
-    () => validateAuditConfig({ registry: "https://hostile.invalid/" }),
+    () =>
+      validateAuditConfig(
+        expectedPnpmConfig({ registry: "https://hostile.invalid/" }),
+      ),
     /registry overrides canonical/,
   );
-  assert.deepEqual(
-    validateAuditConfig({
-      registry: CANONICAL_REGISTRY,
-      "@jsr:registry": "https://npm.jsr.io/",
-    }),
-    [],
-  );
+  assert.deepEqual(validateAuditConfig(expectedPnpmConfig()), []);
 
   const overrides = [
     ["production", true],
@@ -171,7 +1292,7 @@ test("rejects hostile registry config and every dependency-scope selector", () =
   ];
   for (const [key, value] of overrides) {
     assert.throws(
-      () => validateAuditConfig({ registry: CANONICAL_REGISTRY, [key]: value }),
+      () => validateAuditConfig(expectedPnpmConfig({ [key]: value })),
       /overrides audit scope or workspace selection/,
       key,
     );
@@ -189,7 +1310,7 @@ test("rejects alternate lockfile, workspace, filtering, and suppressions", () =>
     ["globalconfig", "/tmp/hostile.npmrc"],
   ]) {
     assert.throws(
-      () => validateAuditConfig({ registry: CANONICAL_REGISTRY, [key]: value }),
+      () => validateAuditConfig(expectedPnpmConfig({ [key]: value })),
       /audit scope or workspace selection/,
       key,
     );
@@ -203,18 +1324,23 @@ test("rejects alternate lockfile, workspace, filtering, and suppressions", () =>
     { auditConfig: { ignoreRegistryErrors: true } },
     { "audit-config-ignore-ghsas": ["GHSA-1111-2222-3333"] },
   ]) {
-    assert.throws(() => validateAuditConfig(config), /no suppressions/);
+    assert.throws(
+      () => validateAuditConfig(expectedPnpmConfig(config)),
+      /no suppressions/,
+    );
   }
   assert.deepEqual(
-    validateAuditConfig({
-      auditConfig: {
-        ignoreGhsas: [],
-        ignoreCves: [],
-        ignore: {},
-        ignoreUnfixable: false,
-        ignoreRegistryErrors: false,
-      },
-    }),
+    validateAuditConfig(
+      expectedPnpmConfig({
+        auditConfig: {
+          ignoreGhsas: [],
+          ignoreCves: [],
+          ignore: {},
+          ignoreUnfixable: false,
+          ignoreRegistryErrors: false,
+        },
+      }),
+    ),
     [],
   );
 });
@@ -239,10 +1365,14 @@ test("rejects environment and CLI target overrides", () => {
     "PNPM_FILTER",
     "PNPM_LOCKFILE_DIR",
     "PNPM_REGISTRY",
+    "COREPACK_ENABLE_PROJECT_SPEC",
+    "COREPACK_ENABLE_STRICT",
+    "COREPACK_INTEGRITY_KEYS",
+    "COREPACK_NPM_REGISTRY",
   ]) {
     assert.throws(
       () => validateAuditEnvironment({ [key]: "hostile" }),
-      /overrides audit scope, registry, lockfile, (?:or filtering|filtering, or suppression) policy/,
+      /overrides audit scope, registry, lockfile, (?:or filtering|filtering, or suppression) policy|changes package-manager identity, source, or integrity policy/,
       key,
     );
   }
@@ -253,6 +1383,7 @@ test("rejects environment and CLI target overrides", () => {
   assert.doesNotThrow(() =>
     validateAuditEnvironment({
       NODE_ENV: "test",
+      COREPACK_ROOT: "/tooling/corepack",
       PNPM_HOME: "/tooling",
       npm_config_user_agent: "pnpm/11.8.0",
     }),
@@ -726,7 +1857,11 @@ test("bounded child terminates a hanging process", async () => {
 test("full audit pins pnpm/config/root while allowing deterministic transport", async () => {
   let capturedRequest;
   let capturedAuthorization;
+  let capturedProvenanceGraph;
   const outcome = await runAudit({
+    verifyProvenance: async (graph) => {
+      capturedProvenanceGraph = graph;
+    },
     requestAdvisories: async (request, authorization) => {
       capturedRequest = request;
       capturedAuthorization = authorization;
@@ -735,7 +1870,8 @@ test("full audit pins pnpm/config/root while allowing deterministic transport", 
   });
 
   assert.equal(outcome.exitCode, 0);
-  assert.equal(Object.keys(capturedRequest).length, 566);
+  assert.equal(capturedProvenanceGraph.supplyChain.integrity.entries, 643);
+  assert.equal(Object.keys(capturedRequest).length, 567);
   assert.equal(
     capturedAuthorization === undefined ||
       /^Bearer [^\s]+$/.test(capturedAuthorization),
@@ -748,7 +1884,7 @@ test("full audit pins pnpm/config/root while allowing deterministic transport", 
     high: 0,
     critical: 0,
   });
-  assert.equal(outcome.summary.dependencyGraph.totalDependencies, 642);
+  assert.equal(outcome.summary.dependencyGraph.totalDependencies, 643);
 });
 
 test(
