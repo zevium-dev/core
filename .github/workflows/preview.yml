@@ -76,18 +76,7 @@ jobs:
             exit 1
           }
           preview_sha="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" \
-            | python3 -c '
-              import json, os, re, sys
-              pr = json.load(sys.stdin)
-              if pr["state"] != "open": raise SystemExit("preview target PR is not open")
-              if pr["head"]["repo"]["full_name"] != os.environ["GITHUB_REPOSITORY"]:
-                  raise SystemExit("fork previews cannot receive deployment secrets")
-              if pr["user"]["login"] != "tnfssc":
-                  raise SystemExit("preview target author is not trusted maintainer")
-              if not re.fullmatch(r"[0-9a-f]{40}", pr.get("merge_commit_sha") or ""):
-                  raise SystemExit("preview merge commit is not ready")
-              sys.stdout.write(pr["merge_commit_sha"])
-            ')"
+            | python3 -c 'import json, os, re, sys; pr = json.load(sys.stdin); assert pr["state"] == "open", "preview target PR is not open"; assert pr["head"]["repo"]["full_name"] == os.environ["GITHUB_REPOSITORY"], "fork previews cannot receive deployment secrets"; assert pr["user"]["login"] == "tnfssc", "preview target author is not trusted maintainer"; assert re.fullmatch(r"[0-9a-f]{40}", pr.get("merge_commit_sha") or ""), "preview merge commit is not ready"; sys.stdout.write(pr["merge_commit_sha"])')"
           echo "ref=$preview_sha" >> "$GITHUB_OUTPUT"
 
   preview-convex:
@@ -322,13 +311,7 @@ jobs:
           fi
 
           wait_for_http_200 "$GATEWAY_URL/health" e2e/artifacts/gateway-health.json
-          python3 -c '
-            import json, os
-            health = json.load(open("e2e/artifacts/gateway-health.json"))
-            if (health.get("ok") is not True or health.get("service") != "zevium-gateway"
-                    or health.get("release") != os.environ["RELEASE_SHA"] or health.get("contract") != 1):
-                raise SystemExit("Unexpected gateway health response")
-          '
+          python3 -c 'import json, os; health = json.load(open("e2e/artifacts/gateway-health.json")); assert health.get("ok") is True and health.get("service") == "zevium-gateway" and health.get("release") == os.environ["RELEASE_SHA"] and health.get("contract") == 1, "Unexpected gateway health response"'
 
           preflight_status="$(curl --silent --show-error \
             --connect-timeout 1 --max-time 2 \
@@ -358,12 +341,7 @@ jobs:
           test "$missing_status" = "404"
           grep --ignore-case --quiet '^content-type: application/json' \
             e2e/artifacts/gateway-404.headers
-          python3 -c '
-            import json
-            body = json.load(open("e2e/artifacts/gateway-404.json"))
-            if body.get("error") != "not found" or len(body) != 1:
-                raise SystemExit("Unexpected gateway 404 contract")
-          '
+          python3 -c 'import json; body = json.load(open("e2e/artifacts/gateway-404.json")); assert body.get("error") == "not found" and len(body) == 1, "Unexpected gateway 404 contract"'
 
       - name: Upload contract failure evidence
         if: failure()
