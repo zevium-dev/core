@@ -17,7 +17,7 @@
     "lint": "node scripts/quality/check-turbo-lint.mjs && turbo lint && pnpm lint:repo",
     "lint:repo": "oxlint --config .oxlintrc.json --deny-warnings --report-unused-disable-directives convex scripts/*.ts scripts/quality/*.mjs .github/scripts",
     "quality:actions": "mise exec -- actionlint",
-    "quality:gitleaks": "mise exec -- gitleaks dir --no-banner --redact .",
+    "quality:gitleaks": "node scripts/quality/check-gitleaks.mjs",
     "quality:shell": "mise exec -- shellcheck --severity=warning e2e/*.sh",
     "quality:static": "pnpm quality:structured && pnpm quality:tests && pnpm quality:actions && pnpm quality:shell && pnpm quality:gitleaks",
     "quality:structured": "node scripts/quality/check-structured-data.mjs",

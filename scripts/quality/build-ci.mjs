@@ -1,15 +1,16 @@
+import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
-import { assertGeneratedFileFresh } from "./check-generated-routes.mjs";
 
 const repositoryRoot = resolve(import.meta.dirname, "../..");
-const webRoot = resolve(repositoryRoot, "apps/web");
-
 try {
-  assertGeneratedFileFresh({
-    cwd: webRoot,
-    file: "src/routeTree.gen.ts",
-    command: "pnpm",
-    args: ["build"],
+  const drift = spawnSync(
+    process.execPath,
+    [resolve(import.meta.dirname, "check-generated-routes.mjs")],
+    { cwd: repositoryRoot, stdio: "inherit", env: process.env },
+  );
+  if (drift.status !== 0) throw new Error("Generated drift check failed");
+  const build = spawnSync("pnpm", ["--filter", "web", "build"], {
+    cwd: repositoryRoot,
     stdio: "inherit",
     env: {
       ...process.env,
@@ -19,9 +20,7 @@ try {
       VITE_GATEWAY_URL: "https://ci.invalid",
     },
   });
-  process.stdout.write(
-    "Generated route tree stayed fresh during production build\n",
-  );
+  if (build.status !== 0) throw new Error("Production build failed");
 } catch (error) {
   process.stderr.write(
     `${error instanceof Error ? error.message : String(error)}\n`,
