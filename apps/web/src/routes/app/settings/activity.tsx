@@ -318,7 +318,7 @@ function ActivityContent({ orgSlug }: { orgSlug: string }) {
                         </td>
                         <td className="px-2 py-2.5 font-mono text-xs">
                           <span className="text-muted-foreground">
-                            {event.method}
+                            {event.method.toUpperCase()}
                           </span>{" "}
                           {event.endpoint}
                         </td>
