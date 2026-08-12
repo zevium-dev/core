@@ -103,7 +103,6 @@ export default defineSchema({
     .index("by_status", ["status"])
     .index("by_org_status", ["organizationId", "status"])
     .index("by_org_slug", ["organizationId", "slug"])
-<<<<<<< HEAD
     .index("by_visibility_status", ["visibility", "status"])
     .index("by_sunset", ["sunsetAt"])
     .index("by_retirement_state_sunset", ["retirementState", "sunsetAt"]),
@@ -128,10 +127,6 @@ export default defineSchema({
     .index("by_org_slug", ["organizationId", "projectSlug"])
     .index("by_public_url", ["publisherHandle", "projectSlug"])
     .index("by_handle", ["publisherHandle"]),
-=======
-    .index("by_status", ["status"])
-    .index("by_visibility_status", ["visibility", "status"]),
->>>>>>> codex/ui-flagship
 
   // Publisher-owned headers injected by gateway after consumer auth headers are stripped.
   // Values never return through member-facing queries after write.
@@ -389,8 +384,6 @@ export default defineSchema({
     status: v.number(),
     latencyMs: v.number(),
     keyId: v.string(),
-    /** Key owner snapshotted at settlement time for durable attribution. */
-    ownerUserId: v.optional(v.string()),
     at: v.number(),
     /**
      * Stable gateway settlement reference (`settle:{reservationId}`).
@@ -413,7 +406,6 @@ export default defineSchema({
     .index("by_org", ["organizationId"])
     .index("by_project", ["projectId"])
     .index("by_org_at", ["organizationId", "at"])
-<<<<<<< HEAD
     .index("by_org_owner_at", ["organizationId", "ownerUserId", "at"])
     .index("by_org_project_at", ["organizationId", "projectId", "at"])
     .index("by_org_owner_project_at", [
@@ -453,10 +445,6 @@ export default defineSchema({
       "billingOutcome",
       "settleRefId",
     ])
-=======
-    .index("by_org_project_at", ["organizationId", "projectId", "at"])
-    .index("by_org_key_at", ["organizationId", "keyId", "at"])
-    .index("by_org_owner_at", ["organizationId", "ownerUserId", "at"])
     .index("by_org_endpoint_at", ["organizationId", "endpoint", "at"])
     .index("by_org_endpoint_method_at", [
       "organizationId",
@@ -464,7 +452,7 @@ export default defineSchema({
       "method",
       "at",
     ])
->>>>>>> codex/ui-flagship
+
     .index("by_project_at", ["projectId", "at"])
     .index("by_at", ["at"]),
 
@@ -711,9 +699,10 @@ export default defineSchema({
   keySettings: defineTable({
     clerkOrgId: v.string(),
     keyId: v.string(),
-<<<<<<< HEAD
     /** Verified Clerk subject. Optional only during legacy backfill. */
     ownerUserId: v.optional(v.string()),
+    /** Display metadata stamped by authenticated key creation/rotation. */
+    keyName: v.optional(v.string()),
     subjectUserId: v.optional(v.string()),
     budgetId: v.optional(v.string()),
     budgetRevision: v.optional(v.number()),
@@ -728,11 +717,7 @@ export default defineSchema({
     ),
     expiresAt: v.optional(v.number()),
     revokedAt: v.optional(v.number()),
-=======
-    /** Display metadata stamped by authenticated key creation/rotation. */
-    keyName: v.optional(v.string()),
-    ownerUserId: v.optional(v.string()),
->>>>>>> codex/ui-flagship
+
     /** Monthly credit cap; undefined = unlimited. Enforced by the wallet DO. */
     monthlyCapCredits: v.optional(v.number()),
     disabled: v.boolean(),
