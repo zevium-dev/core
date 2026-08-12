@@ -19,11 +19,15 @@ export type NotificationsPage = {
   isDone: boolean;
   continueCursor: string;
   unreadCount: number;
+  unreadCountCapped: boolean;
 };
+
+const UNREAD_BATCH_SIZE = 100;
 
 /**
  * Paginated notifications for the caller's org, newest first.
- * Includes unreadCount across all notifications (not just this page).
+ * Includes an exact unread count up to the UI's 99+ display threshold.
+ * The indexed `take` keeps this realtime query bounded for noisy orgs.
  */
 export const listForOrg = query({
   args: {
@@ -39,13 +43,12 @@ export const listForOrg = query({
       .order("desc")
       .paginate(args.paginationOpts);
 
-    // Count unread — bounded scan of the by_org index (readAt undefined).
-    // This is a background/dashboard query, not a hot path.
     const unreadRows = await ctx.db
       .query("notifications")
-      .withIndex("by_org", (q) => q.eq("clerkOrgId", org.clerkOrgId))
-      .filter((q) => q.eq(q.field("readAt"), undefined))
-      .collect();
+      .withIndex("by_org_read", (q) =>
+        q.eq("clerkOrgId", org.clerkOrgId).eq("readAt", undefined),
+      )
+      .take(UNREAD_BATCH_SIZE);
 
     return {
       page: result.page.map((n) => ({
@@ -60,6 +63,7 @@ export const listForOrg = query({
       isDone: result.isDone,
       continueCursor: result.continueCursor,
       unreadCount: unreadRows.length,
+      unreadCountCapped: unreadRows.length === UNREAD_BATCH_SIZE,
     };
   },
 });
@@ -91,18 +95,39 @@ export const markRead = mutation({
  * Mark all unread notifications as read for the caller's org.
  */
 export const markAllRead = mutation({
-  args: { orgSlug: v.string() },
-  handler: async (ctx, args): Promise<{ updated: number }> => {
+  args: { orgSlug: v.string(), through: v.optional(v.number()) },
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{ updated: number; hasMore: boolean; through: number }> => {
     const { org } = await requireOrgMemberBySlug(ctx, args.orgSlug);
     const now = Date.now();
+    // First batch captures server time. Follow-up batches reuse it so new
+    // notifications stay unread and client clock skew cannot move the cutoff.
+    const through = args.through ?? now;
     const unread = await ctx.db
       .query("notifications")
-      .withIndex("by_org", (q) => q.eq("clerkOrgId", org.clerkOrgId))
-      .filter((q) => q.eq(q.field("readAt"), undefined))
-      .collect();
+      .withIndex("by_org_read", (q) =>
+        q
+          .eq("clerkOrgId", org.clerkOrgId)
+          .eq("readAt", undefined)
+          .lte("createdAt", through),
+      )
+      .take(UNREAD_BATCH_SIZE);
     for (const n of unread) {
       await ctx.db.patch(n._id, { readAt: now });
     }
-    return { updated: unread.length };
+    const hasMore =
+      unread.length === UNREAD_BATCH_SIZE &&
+      (await ctx.db
+        .query("notifications")
+        .withIndex("by_org_read", (q) =>
+          q
+            .eq("clerkOrgId", org.clerkOrgId)
+            .eq("readAt", undefined)
+            .lte("createdAt", through),
+        )
+        .first()) !== null;
+    return { updated: unread.length, hasMore, through };
   },
 });

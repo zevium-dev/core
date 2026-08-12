@@ -169,6 +169,7 @@ describe("notifications.listForOrg — data", () => {
     expect(page1.isDone).toBe(false);
     // 4 unread (5 total - 1 read)
     expect(page1.unreadCount).toBe(4);
+    expect(page1.unreadCountCapped).toBe(false);
   });
 
   it("returns all notifications across pages", async () => {
@@ -287,8 +288,11 @@ describe("notifications.markAllRead", () => {
     const as = asMember(t);
     const result = await as.mutation(api.notifications.markAllRead, {
       orgSlug: "test-co",
+      through: Number.MAX_SAFE_INTEGER,
     });
     expect(result.updated).toBe(3);
+    expect(result).toMatchObject({ updated: 3, hasMore: false });
+    expect(result.through).toBe(Number.MAX_SAFE_INTEGER);
 
     const unread = await t.run(async (ctx) => {
       return await ctx.db
@@ -297,5 +301,92 @@ describe("notifications.markAllRead", () => {
         .collect();
     });
     expect(unread).toHaveLength(0);
+  });
+
+  it("clears an exact snapshot in bounded batches", async () => {
+    const t = convexTest(schema, modules);
+    await t.run(async (ctx) => {
+      await ctx.db.insert("organizations", {
+        clerkOrgId: "org_test",
+        name: "Test",
+        slug: "test-co",
+      });
+      for (let i = 0; i < 205; i++) {
+        await ctx.db.insert("notifications", {
+          clerkOrgId: "org_test",
+          kind: "low_balance",
+          title: `N${i}`,
+          body: "B",
+          refId: `batch_${i}`,
+          createdAt: i,
+        });
+      }
+    });
+
+    const as = asMember(t);
+    const capped = await as.query(api.notifications.listForOrg, {
+      orgSlug: "test-co",
+      paginationOpts: { numItems: 1, cursor: null },
+    });
+    expect(capped.unreadCount).toBe(100);
+    expect(capped.unreadCountCapped).toBe(true);
+
+    let totalUpdated = 0;
+    let hasMore = true;
+    let through: number | undefined = 204;
+    while (hasMore) {
+      const result = await as.mutation(api.notifications.markAllRead, {
+        orgSlug: "test-co",
+        through,
+      });
+      totalUpdated += result.updated;
+      through = result.through;
+      hasMore = result.hasMore;
+    }
+    expect(totalUpdated).toBe(205);
+
+    const final = await as.query(api.notifications.listForOrg, {
+      orgSlug: "test-co",
+      paginationOpts: { numItems: 1, cursor: null },
+    });
+    expect(final.unreadCount).toBe(0);
+    expect(final.unreadCountCapped).toBe(false);
+  });
+
+  it("leaves notifications created after the click snapshot unread", async () => {
+    const t = convexTest(schema, modules);
+    await t.run(async (ctx) => {
+      await ctx.db.insert("organizations", {
+        clerkOrgId: "org_test",
+        name: "Test",
+        slug: "test-co",
+      });
+      for (const createdAt of [10, 20, 30]) {
+        await ctx.db.insert("notifications", {
+          clerkOrgId: "org_test",
+          kind: "low_balance",
+          title: `N${createdAt}`,
+          body: "B",
+          refId: `snapshot_${createdAt}`,
+          createdAt,
+        });
+      }
+    });
+
+    const as = asMember(t);
+    const result = await as.mutation(api.notifications.markAllRead, {
+      orgSlug: "test-co",
+      through: 20,
+    });
+    expect(result).toEqual({ updated: 2, hasMore: false, through: 20 });
+
+    const page = await as.query(api.notifications.listForOrg, {
+      orgSlug: "test-co",
+      paginationOpts: { numItems: 10, cursor: null },
+    });
+    expect(page.unreadCount).toBe(1);
+    expect(
+      page.page.find((row) => row.createdAt === 30)?.readAt,
+    ).toBeUndefined();
   });
 });

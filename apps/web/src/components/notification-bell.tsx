@@ -117,6 +117,9 @@ function BellWithOrg({ orgSlug }: { orgSlug: string }) {
   const unread = notificationsQuery.isSuccess
     ? notificationsQuery.data.unreadCount
     : 0;
+  const unreadCountCapped = notificationsQuery.isSuccess
+    ? notificationsQuery.data.unreadCountCapped
+    : false;
 
   const markReadMut = useConvexMutation(api.notifications.markRead);
   const markAllMut = useConvexMutation(api.notifications.markAllRead);
@@ -129,13 +132,24 @@ function BellWithOrg({ orgSlug }: { orgSlug: string }) {
   });
 
   const { mutate: markAllRead, isPending: markingAll } = useMutation({
-    mutationFn: () => markAllMut({ orgSlug }),
+    mutationFn: async () => {
+      let through: number | undefined;
+      let hasMore = true;
+      while (hasMore) {
+        const result = await markAllMut({ orgSlug, through });
+        through = result.through;
+        hasMore = result.hasMore;
+      }
+    },
     onError: (err: unknown) =>
       toast.error(humanError(err, "Could not mark all read")),
   });
 
   const page = notificationsQuery.isSuccess ? notificationsQuery.data.page : [];
-  const unreadLabel = unread > 99 ? "99+" : String(unread);
+  const unreadLabel = unreadCountCapped ? "99+" : String(unread);
+  const unreadAccessibleLabel = unreadCountCapped
+    ? "more than 99 unread"
+    : `${unread} unread`;
 
   function onRowClick(notificationId: Id<"notifications">, kind: string) {
     markRead(notificationId);
@@ -153,7 +167,7 @@ function BellWithOrg({ orgSlug }: { orgSlug: string }) {
           variant="ghost"
           size="icon"
           className="relative"
-          aria-label={`Notifications${unread > 0 ? `, ${unread} unread` : ""}`}
+          aria-label={`Notifications${unread > 0 ? `, ${unreadAccessibleLabel}` : ""}`}
         >
           <Bell className="size-4" />
           {unread > 0 ? (

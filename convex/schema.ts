@@ -171,6 +171,7 @@ export default defineSchema({
     createdAt: v.number(),
   })
     .index("by_org", ["clerkOrgId", "createdAt"])
+    .index("by_org_read", ["clerkOrgId", "readAt", "createdAt"])
     .index("by_ref", ["refId"]),
 
   // Publisher webhook endpoints (one per project)

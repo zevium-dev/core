@@ -529,7 +529,6 @@ function KeyRow({
   );
   const [capBusy, setCapBusy] = useState(false);
   const [capError, setCapError] = useState<string | null>(null);
-  const capInputRef = useRef<HTMLInputElement>(null);
   const capErrorId = useId();
   const [toggleBusy, setToggleBusy] = useState(false);
   const [now, setNow] = useState(() => Date.now());
@@ -551,7 +550,6 @@ function KeyRow({
     const parsed = parseMonthlyCap(capInput);
     if (!parsed.ok) {
       setCapError(parsed.error);
-      capInputRef.current?.focus();
       return;
     }
     setCapError(null);
@@ -562,7 +560,6 @@ function KeyRow({
       await setCap({ keyId: apiKey.id, monthlyCapCredits: parsed.cap });
     } catch (err) {
       setCapError(humanError(err, "Could not save cap. Retry."));
-      capInputRef.current?.focus();
     } finally {
       setCapBusy(false);
     }
@@ -606,7 +603,6 @@ function KeyRow({
           Monthly cap
         </span>
         <Input
-          ref={capInputRef}
           type="number"
           min={1}
           step={1}
