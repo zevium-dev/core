@@ -18,6 +18,7 @@ export default defineConfig({
     }),
   ],
   test: {
+    allowOnly: false,
     // Keep fuzz runs deterministic-ish; individual tests set their own seeds.
     testTimeout: 60_000,
   },

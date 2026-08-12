@@ -50,7 +50,7 @@ vi.mock("@convex-dev/react-query", () => ({
   useConvexMutation: () => state.moderate,
 }));
 
-import { AdminReviewsQueue } from "./reviews";
+import { AdminReviewsQueue } from "./-reviews-ui";
 
 function Providers({ children }: { children: ReactNode }) {
   const client = new QueryClient({

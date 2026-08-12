@@ -7,8 +7,10 @@ const APP_ROOT = "/app";
  */
 export function safeAppReturnPath(value: unknown): string {
   if (typeof value !== "string" || !value.startsWith("/")) return APP_ROOT;
-  if (value.startsWith("//") || /[\\\u0000-\u001f\u007f]/u.test(value)) {
-    return APP_ROOT;
+  if (value.startsWith("//")) return APP_ROOT;
+  for (const char of value) {
+    const code = char.charCodeAt(0);
+    if (char === "\\" || code < 32 || code === 127) return APP_ROOT;
   }
 
   try {

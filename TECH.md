@@ -66,6 +66,8 @@ packages/shared/ # spec parsing, x-zevium-* extraction, types shared web↔gatew
 
 Turborepo drives build/typecheck/test/lint pipelines with caching. Runtime pieces deploy through a compatibility-first release protocol: Convex expansion, gateway, then web; destructive Convex contraction is a later manual phase. Vendors remain independently deployed and cross-vendor atomicity does not exist. See [production deploy protocol](docs/production-deploy.md).
 
+Oxlint runs one non-skippable task for each workspace package plus root/Convex scripts, with native TypeScript, React Hooks, accessibility, import, and Vitest rules and targeted TanStack Router/security plugins. `pnpm ci:pr` forces the full quality gate: formatting, lint graph validation, structured-file/action/shell/secret checks, focused-test rejection, strict typechecks, tests, environment-validated production build, generated-route freshness, measured bundle budgets, and Git diff hygiene.
+
 ## Architecture
 
 ```

@@ -23,7 +23,7 @@ import { internal } from "./_generated/api";
 import type { Doc } from "./_generated/dataModel";
 import { summarizePublishedPricing, type PublicListing } from "./catalogue";
 import { getActiveOrgById } from "./lib/auth";
-import { toQualitySnapshotContract } from "./quality";
+import { qualitySnapshotContract } from "./lib/qualityContract";
 import {
   getActivePublicRouteBinding,
   isOrganizationActive,
@@ -363,7 +363,7 @@ export const fetchSearchListings = internalQuery({
           latest === null ||
           snapshot.specVersionId !== latest._id
             ? null
-            : toQualitySnapshotContract(snapshot),
+            : qualitySnapshotContract(snapshot),
         score: args.scores[i] ?? 0,
       });
     }

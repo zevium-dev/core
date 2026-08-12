@@ -84,7 +84,7 @@ pnpm seed               # test user + org (test+clerk_test@zevium.dev)
 Verification:
 
 ```sh
-pnpm typecheck && pnpm test && pnpm build   # 394 unit tests across 4 suites
+pnpm ci:pr              # 431 product tests + 8 quality failure tests and every PR gate
 bash e2e/run-all.sh                         # browser e2e: auth, publish, consume
 ```
 

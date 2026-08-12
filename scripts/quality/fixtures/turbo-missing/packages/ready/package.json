@@ -1,0 +1,7 @@
+{
+  "name": "@fixture/ready",
+  "private": true,
+  "scripts": {
+    "lint": "node --check index.js"
+  }
+}

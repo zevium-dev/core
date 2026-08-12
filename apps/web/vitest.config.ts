@@ -8,6 +8,7 @@ export default defineConfig({
     },
   },
   test: {
+    allowOnly: false,
     environment: "node",
   },
 });

@@ -9,7 +9,7 @@ import { internalMutation, query, type MutationCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
 import { getActiveOrgById, getOrgByClerkId } from "./lib/auth";
-import { toQualitySnapshotContract } from "./quality";
+import { qualitySnapshotContract } from "./lib/qualityContract";
 import { resolveActivePublicRoute } from "./lib/publicRoutes";
 
 const PAGE_SIZE = 24;
@@ -152,7 +152,7 @@ async function adjustCatalogueFacets(
     .withIndex("by_key", (q) => q.eq("key", CATALOGUE_STATS_KEY))
     .unique();
   if (stats === null) return;
-  const tags = { ...(stats.tagCounts ?? {}) };
+  const tags = { ...stats.tagCounts };
   let freeTierCount = stats.freeTierCount ?? 0;
   if (previous?.discoverable) {
     for (const tag of previous.tags)
@@ -520,7 +520,7 @@ export const listPublic = query({
             qualitySnapshot === null ||
             qualitySnapshot.specVersionId !== latest._id
               ? null
-              : toQualitySnapshotContract(qualitySnapshot),
+              : qualitySnapshotContract(qualitySnapshot),
         });
       }
       items.sort((a, b) => {
@@ -747,7 +747,7 @@ export const listPublic = query({
             quality:
               snapshot === null || snapshot.specVersionId !== latest._id
                 ? null
-                : toQualitySnapshotContract(snapshot),
+                : qualitySnapshotContract(snapshot),
           };
         }),
       ),
@@ -857,7 +857,7 @@ export const getPublicDetail = query({
         latest === null ||
         snapshot.specVersionId !== latest._id
           ? null
-          : toQualitySnapshotContract(snapshot),
+          : qualitySnapshotContract(snapshot),
     };
   },
 });

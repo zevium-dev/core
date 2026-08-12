@@ -14,7 +14,7 @@ refund_failed_checkout() {
 
   local session_json payment_status payment_intent refund_json refund_status
   session_json="$(
-    curl -fsS -u "$STRIPE_SECRET_KEY:" \
+    curl -fsS --oauth2-bearer "$STRIPE_SECRET_KEY" \
       "https://api.stripe.com/v1/checkout/sessions/$checkout_id"
   )" || return 0
   payment_status="$(node -e 'const x=JSON.parse(process.argv[1]); console.log(x.payment_status || "")' "$session_json")"
@@ -23,7 +23,7 @@ refund_failed_checkout() {
   [[ "$payment_intent" == pi_* ]] || return 0
 
   refund_json="$(
-    curl -fsS -u "$STRIPE_SECRET_KEY:" -X POST \
+    curl -fsS --oauth2-bearer "$STRIPE_SECRET_KEY" -X POST \
       -H "Idempotency-Key: zevium-drill-$checkout_id" \
       https://api.stripe.com/v1/refunds \
       --data-urlencode "payment_intent=$payment_intent" \
@@ -105,10 +105,10 @@ wait_for_text "Confirmed" 90
 step "refund Stripe sandbox payment"
 session_json="$E2E_ARTIFACTS/checkout-session.json"
 refund_json="$E2E_ARTIFACTS/refund.json"
-curl -fsS -u "$STRIPE_SECRET_KEY:" "https://api.stripe.com/v1/checkout/sessions/$checkout_id" >"$session_json"
+curl -fsS --oauth2-bearer "$STRIPE_SECRET_KEY" "https://api.stripe.com/v1/checkout/sessions/$checkout_id" >"$session_json"
 payment_intent="$(node -e 'const x=require(process.argv[1]); console.log(x.payment_intent || "")' "$session_json")"
 [[ "$payment_intent" == pi_* ]] || fail "checkout session lacks payment intent"
-curl -fsS -u "$STRIPE_SECRET_KEY:" -X POST https://api.stripe.com/v1/refunds \
+curl -fsS --oauth2-bearer "$STRIPE_SECRET_KEY" -X POST https://api.stripe.com/v1/refunds \
   -H "Idempotency-Key: zevium-drill-$checkout_id" \
   --data-urlencode "payment_intent=$payment_intent" \
   --data-urlencode "metadata[zevium_drill]=true" >"$refund_json"

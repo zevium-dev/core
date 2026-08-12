@@ -42,13 +42,13 @@ export async function listAllPublic(
   const seenCursors = new Set<string>();
   let cursor: string | undefined;
 
-  do {
+  for (;;) {
     const page = await source.listPublic({ ...args, cursor });
     items.push(...page.items);
     cursor = page.nextCursor ?? undefined;
     if (cursor === undefined || seenCursors.has(cursor)) break;
     seenCursors.add(cursor);
-  } while (true);
+  }
 
   return items;
 }

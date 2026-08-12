@@ -25,7 +25,7 @@ describe("credential-free upstream SSRF guard", () => {
       "192.0.2.1",
       "224.0.0.1",
     ]) {
-      expect(isPublicIpv4(address), address).toBe(false);
+      expect(isPublicIpv4(address)).toBe(false);
     }
   });
 
@@ -44,7 +44,7 @@ describe("credential-free upstream SSRF guard", () => {
       "3fff::1",
       "::ffff:127.0.0.1",
     ]) {
-      expect(isPublicAddress(address), address).toBe(false);
+      expect(isPublicAddress(address)).toBe(false);
     }
   });
 

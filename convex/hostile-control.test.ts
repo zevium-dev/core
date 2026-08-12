@@ -153,7 +153,6 @@ describe("hostile control-plane state", () => {
       });
       return { projectId, versionId };
     });
-    const member = asIdentity(t, "org:member");
     await t.mutation(internal.keySettings.recordProviderVerifiedKey, {
       keyId: "key_owned",
       ownerUserId: "user_hostile",

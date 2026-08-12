@@ -49,22 +49,17 @@ jobs:
             exit 1
           }
           preview_sha="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" \
-            | node -e '
-              let input="";
-              process.stdin.on("data", d => input += d).on("end", () => {
-                const pr = JSON.parse(input);
-                if (pr.state !== "open") throw new Error("preview target PR is not open");
-                if (pr.head.repo.full_name !== process.env.GITHUB_REPOSITORY) {
-                  throw new Error("fork previews cannot receive deployment secrets");
-                }
-                if (pr.user.login !== "tnfssc") {
-                  throw new Error("preview target author is not trusted maintainer");
-                }
-                if (!/^[0-9a-f]{40}$/.test(pr.merge_commit_sha ?? "")) {
-                  throw new Error("preview merge commit is not ready");
-                }
-                process.stdout.write(pr.merge_commit_sha);
-              });
+            | python3 -c '
+              import json, os, re, sys
+              pr = json.load(sys.stdin)
+              if pr["state"] != "open": raise SystemExit("preview target PR is not open")
+              if pr["head"]["repo"]["full_name"] != os.environ["GITHUB_REPOSITORY"]:
+                  raise SystemExit("fork previews cannot receive deployment secrets")
+              if pr["user"]["login"] != "tnfssc":
+                  raise SystemExit("preview target author is not trusted maintainer")
+              if not re.fullmatch(r"[0-9a-f]{40}", pr.get("merge_commit_sha") or ""):
+                  raise SystemExit("preview merge commit is not ready")
+              sys.stdout.write(pr["merge_commit_sha"])
             ')"
           echo "ref=$preview_sha" >> "$GITHUB_OUTPUT"
 
@@ -85,9 +80,17 @@ jobs:
         with:
           path: ~/.local/share/pnpm/store
           key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pnpm-store-
-      - uses: jdx/mise-action@v4
+      - uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4
+        with:
+          version: 2026.7.13
+          install: true
+          install_args: node@24.15.0 npm:pnpm@11.8.0 actionlint@1.7.12 gitleaks@8.30.1 shellcheck@0.11.0
+      - name: Verify exact Node and pnpm
+        run: |
+          test "$(node --version)" = "v24.15.0"
+          test "$(pnpm --version)" = "11.8.0"
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
 
       - name: Deploy isolated Convex backend
         id: deploy
@@ -118,9 +121,17 @@ jobs:
         with:
           path: ~/.local/share/pnpm/store
           key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pnpm-store-
-      - uses: jdx/mise-action@v4
+      - uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4
+        with:
+          version: 2026.7.13
+          install: true
+          install_args: node@24.15.0 npm:pnpm@11.8.0 actionlint@1.7.12 gitleaks@8.30.1 shellcheck@0.11.0
+      - name: Verify exact Node and pnpm
+        run: |
+          test "$(node --version)" = "v24.15.0"
+          test "$(pnpm --version)" = "11.8.0"
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
       - name: Deploy isolated gateway Worker
         id: deploy
         env:
@@ -156,9 +167,17 @@ jobs:
         with:
           path: ~/.local/share/pnpm/store
           key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pnpm-store-
-      - uses: jdx/mise-action@v4
+      - uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4
+        with:
+          version: 2026.7.13
+          install: true
+          install_args: node@24.15.0 npm:pnpm@11.8.0 actionlint@1.7.12 gitleaks@8.30.1 shellcheck@0.11.0
+      - name: Verify exact Node and pnpm
+        run: |
+          test "$(node --version)" = "v24.15.0"
+          test "$(pnpm --version)" = "11.8.0"
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
       - name: Build isolated web Worker
         env:
           CLERK_PUBLISHABLE_KEY: ${{ secrets.CLERK_PREVIEW_PUBLISHABLE_KEY }}
@@ -191,9 +210,17 @@ jobs:
         with:
           path: ~/.local/share/pnpm/store
           key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pnpm-store-
-      - uses: jdx/mise-action@v4
+      - uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4
+        with:
+          version: 2026.7.13
+          install: true
+          install_args: node@24.15.0 npm:pnpm@11.8.0 actionlint@1.7.12 gitleaks@8.30.1 shellcheck@0.11.0
+      - name: Verify exact Node and pnpm
+        run: |
+          test "$(node --version)" = "v24.15.0"
+          test "$(pnpm --version)" = "11.8.0"
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
       - name: Deploy isolated web Worker
         id: deploy
         env:
@@ -268,13 +295,12 @@ jobs:
           fi
 
           wait_for_http_200 "$GATEWAY_URL/health" e2e/artifacts/gateway-health.json
-          node -e '
-            const fs = require("node:fs");
-            const health = JSON.parse(fs.readFileSync("e2e/artifacts/gateway-health.json", "utf8"));
-            if (health.ok !== true || health.service !== "zevium-gateway" ||
-                health.release !== process.env.RELEASE_SHA || health.contract !== 1) {
-              throw new Error("Unexpected gateway health response");
-            }
+          python3 -c '
+            import json, os
+            health = json.load(open("e2e/artifacts/gateway-health.json"))
+            if (health.get("ok") is not True or health.get("service") != "zevium-gateway"
+                    or health.get("release") != os.environ["RELEASE_SHA"] or health.get("contract") != 1):
+                raise SystemExit("Unexpected gateway health response")
           '
 
           preflight_status="$(curl --silent --show-error \
@@ -305,12 +331,11 @@ jobs:
           test "$missing_status" = "404"
           grep --ignore-case --quiet '^content-type: application/json' \
             e2e/artifacts/gateway-404.headers
-          node -e '
-            const fs = require("node:fs");
-            const body = JSON.parse(fs.readFileSync("e2e/artifacts/gateway-404.json", "utf8"));
-            if (body.error !== "not found" || Object.keys(body).length !== 1) {
-              throw new Error("Unexpected gateway 404 contract");
-            }
+          python3 -c '
+            import json
+            body = json.load(open("e2e/artifacts/gateway-404.json"))
+            if body.get("error") != "not found" or len(body) != 1:
+                raise SystemExit("Unexpected gateway 404 contract")
           '
 
       - name: Upload contract failure evidence
@@ -354,9 +379,17 @@ jobs:
         with:
           path: ~/.local/share/pnpm/store
           key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pnpm-store-
-      - uses: jdx/mise-action@v4
+      - uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4
+        with:
+          version: 2026.7.13
+          install: true
+          install_args: node@24.15.0 npm:pnpm@11.8.0 actionlint@1.7.12 gitleaks@8.30.1 shellcheck@0.11.0
+      - name: Verify exact Node and pnpm
+        run: |
+          test "$(node --version)" = "v24.15.0"
+          test "$(pnpm --version)" = "11.8.0"
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
       - name: Install browser runtime
         run: |
           npm install --global agent-browser@0.27.1

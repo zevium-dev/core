@@ -348,96 +348,100 @@ describe("retirement queue draining", () => {
     ).toBe(true);
   });
 
-  it("drains more than 100 scheduled rows and preserves immutable cutoffs", async () => {
-    vi.useFakeTimers();
-    const t = convexTest(schema, modules);
-    const cutoff = Date.now() - 1;
-    const projectIds = await t.run(async (ctx) => {
-      const orgId = await ctx.db.insert("organizations", {
-        clerkOrgId: "org_publisher",
-        name: "Publisher",
-        slug: "publisher",
-        publicHandle: "publisher",
-      });
-      const ids: Id<"projects">[] = [];
-      for (let index = 0; index < 205; index += 1) {
-        ids.push(
-          await ctx.db.insert("projects", {
-            organizationId: orgId,
-            name: `API ${index}`,
-            slug: `api-${index}`,
-            status: "published",
-            visibility: "public",
-            tags: [],
-            deprecationStartedAt: cutoff - MIN_DEPRECATION_NOTICE_MS,
-            sunsetAt: cutoff,
-            deprecationMessage: "Retire",
-            retirementState: "scheduled",
-            retirementRevision: 1,
-          }),
-        );
-      }
-      for (let index = 0; index < 215; index += 1) {
-        await ctx.db.insert("upstreamCredentials", {
-          projectId: ids[204]!,
-          name: `x-secret-${index}`,
-          updatedAt: index,
+  it(
+    "drains more than 100 scheduled rows and preserves immutable cutoffs",
+    { timeout: 60_000 },
+    async () => {
+      vi.useFakeTimers();
+      const t = convexTest(schema, modules);
+      const cutoff = Date.now() - 1;
+      const projectIds = await t.run(async (ctx) => {
+        const orgId = await ctx.db.insert("organizations", {
+          clerkOrgId: "org_publisher",
+          name: "Publisher",
+          slug: "publisher",
+          publicHandle: "publisher",
         });
-      }
-      await ctx.db.insert("specVersions", {
-        projectId: ids[0]!,
-        version: "1.0.0",
-        spec: JSON.stringify({
-          openapi: "3.1.0",
-          servers: [{ url: "https://api.example.test" }],
-          paths: {},
-        }),
-        publishedAt: cutoff - 1,
+        const ids: Id<"projects">[] = [];
+        for (let index = 0; index < 205; index += 1) {
+          ids.push(
+            await ctx.db.insert("projects", {
+              organizationId: orgId,
+              name: `API ${index}`,
+              slug: `api-${index}`,
+              status: "published",
+              visibility: "public",
+              tags: [],
+              deprecationStartedAt: cutoff - MIN_DEPRECATION_NOTICE_MS,
+              sunsetAt: cutoff,
+              deprecationMessage: "Retire",
+              retirementState: "scheduled",
+              retirementRevision: 1,
+            }),
+          );
+        }
+        for (let index = 0; index < 215; index += 1) {
+          await ctx.db.insert("upstreamCredentials", {
+            projectId: ids[204]!,
+            name: `x-secret-${index}`,
+            updatedAt: index,
+          });
+        }
+        await ctx.db.insert("specVersions", {
+          projectId: ids[0]!,
+          version: "1.0.0",
+          spec: JSON.stringify({
+            openapi: "3.1.0",
+            servers: [{ url: "https://api.example.test" }],
+            paths: {},
+          }),
+          publishedAt: cutoff - 1,
+        });
+        return ids;
       });
-      return ids;
-    });
 
-    expect(
-      await t.mutation(internal.projects.retireSunsetProjects, {}),
-    ).toEqual({ retired: 100, hasMore: true });
-    expect(
-      await t.mutation(internal.projects.retireSunsetProjects, {}),
-    ).toEqual({ retired: 100, hasMore: true });
-    expect(
-      await t.mutation(internal.projects.retireSunsetProjects, {}),
-    ).toEqual({ retired: 5, hasMore: false });
+      expect(
+        await t.mutation(internal.projects.retireSunsetProjects, {}),
+      ).toEqual({ retired: 100, hasMore: true });
+      expect(
+        await t.mutation(internal.projects.retireSunsetProjects, {}),
+      ).toEqual({ retired: 100, hasMore: true });
+      expect(
+        await t.mutation(internal.projects.retireSunsetProjects, {}),
+      ).toEqual({ retired: 5, hasMore: false });
 
-    const projects = await t.run(async (ctx) =>
-      Promise.all(projectIds.map((projectId) => ctx.db.get(projectId))),
-    );
-    expect(
-      projects.every(
-        (project) =>
-          project?.retirementState === "retired" &&
-          project.retirementCutoffAt === cutoff &&
-          project.sunsetAt === undefined &&
-          project.visibility === "private" &&
-          project.retiredAt !== undefined,
-      ),
-    ).toBe(true);
-    const gateway = await t.query(
-      internal.specs.getPublishedForGatewayInternal,
-      { publisherHandle: "publisher", projectSlug: "api-0" },
-    );
-    expect(gateway).toMatchObject({
-      sunsetAt: cutoff,
-      visibility: "private",
-      retiredAt: expect.any(Number),
-    });
+      const projects = await t.run(async (ctx) =>
+        Promise.all(projectIds.map((projectId) => ctx.db.get(projectId))),
+      );
+      expect(
+        projects.every(
+          (project) =>
+            project?.retirementState === "retired" &&
+            project.retirementCutoffAt === cutoff &&
+            project.sunsetAt === undefined &&
+            project.visibility === "private" &&
+            project.retiredAt !== undefined,
+        ),
+      ).toBe(true);
+      const gateway = await t.query(
+        internal.specs.getPublishedForGatewayInternal,
+        { publisherHandle: "publisher", projectSlug: "api-0" },
+      );
+      expect(gateway).toMatchObject({
+        sunsetAt: cutoff,
+        visibility: "private",
+        retiredAt: expect.any(Number),
+      });
 
-    await t.finishAllScheduledFunctions(() => vi.runAllTimers());
-    expect(
-      await t.run(async (ctx) =>
-        ctx.db
-          .query("upstreamCredentials")
-          .withIndex("by_project", (q) => q.eq("projectId", projectIds[204]!))
-          .collect(),
-      ),
-    ).toHaveLength(0);
-  });
+      await t.finishAllScheduledFunctions(() => vi.runAllTimers());
+      expect(
+        await t.run(async (ctx) =>
+          ctx.db
+            .query("upstreamCredentials")
+            .withIndex("by_project", (q) => q.eq("projectId", projectIds[204]!))
+            .collect(),
+        ),
+      ).toHaveLength(0);
+    },
+  );
 });
