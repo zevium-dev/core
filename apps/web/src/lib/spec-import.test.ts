@@ -239,7 +239,10 @@ describe("fetchSpecFromUrlForRequest", () => {
       fixture.runtime,
     );
 
-    expect(result.text).toBe(NORMALIZED_SPEC);
+    expect(result).toEqual({
+      text: `openapi: 3.1.0\ninfo:\n  title: Imported API\n  version: 1.0.0\nservers:\n  - url: https://api.example.com\npaths: {}`,
+      contentType: "application/yaml",
+    });
     expect(cancel).toHaveBeenCalledOnce();
     expect(fixture.resolveHostname).toHaveBeenNthCalledWith(1, "example.com");
     expect(fixture.resolveHostname).toHaveBeenNthCalledWith(2, "cdn.example");

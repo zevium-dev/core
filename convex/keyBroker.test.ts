@@ -186,7 +186,9 @@ describe("Clerk key broker public boundary", () => {
         name: "Production",
       }),
     ]);
-    await vi.waitFor(() => expect(clerk.create).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(clerk.create).toHaveBeenCalledOnce(), {
+      timeout: 5_000,
+    });
     releaseCreate?.();
     const results = await settled;
 
@@ -597,7 +599,7 @@ describe("Clerk key broker public boundary", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]?.id).toBe("key_page_0500");
     expect(clerk.membership).toHaveBeenCalledOnce();
-    expect(clerk.list).toHaveBeenCalledTimes(2);
+    expect(clerk.list).toHaveBeenCalledTimes(4);
     expect(clerk.get).not.toHaveBeenCalled();
     await expect(
       asOwner(t).query(api.keySettings.getForOrg, {}),
@@ -657,5 +659,379 @@ describe("Clerk key broker public boundary", () => {
     ).rejects.toThrow("changed while it was being read");
     expect(clerk.list).toHaveBeenCalledTimes(2);
     expect(clerk.get).not.toHaveBeenCalled();
+  });
+
+  it("rejects same-count provider churn between two complete snapshots", async () => {
+    const t = convexTest(schema, modules);
+    await seedOrganization(t);
+    const stable = Array.from({ length: 501 }, (_, index) =>
+      fakeKey(`key_churn_${String(index).padStart(4, "0")}`, {
+        claims: { org_id: "org_other" },
+      }),
+    );
+    const hiddenScoped = fakeKey("key_hidden_scoped", {
+      claims: { org_id: "org_acme" },
+    });
+    clerk.list
+      .mockResolvedValueOnce({ data: stable.slice(0, 500), totalCount: 501 })
+      .mockResolvedValueOnce({ data: stable.slice(500), totalCount: 501 })
+      .mockResolvedValueOnce({
+        data: [hiddenScoped, ...stable.slice(1, 500)],
+        totalCount: 501,
+      })
+      .mockResolvedValueOnce({ data: stable.slice(500), totalCount: 501 });
+
+    await expect(
+      asOwner(t).action(api.keyBroker.createManagedKey, {
+        operationId: "same-count-churn",
+        name: "Must not mint",
+      }),
+    ).rejects.toThrow("changed while it was being read");
+    expect(clerk.list).toHaveBeenCalledTimes(4);
+    expect(clerk.create).not.toHaveBeenCalled();
+  });
+
+  it("compensates create when post-create provider set contains another scoped key", async () => {
+    const t = convexTest(schema, modules);
+    await seedOrganization(t);
+    const hidden = fakeKey("key_hidden_after_create");
+    clerk.list
+      .mockResolvedValueOnce({ data: [], totalCount: 0 })
+      .mockImplementationOnce(async () => ({
+        data: [clerk.keys[0]!, hidden],
+        totalCount: 2,
+      }));
+
+    await expect(
+      asOwner(t).action(api.keyBroker.createManagedKey, {
+        operationId: "post-create-compensation",
+        name: "Compensate",
+      }),
+    ).rejects.toThrow("New key was revoked");
+    expect(clerk.create).toHaveBeenCalledOnce();
+    expect(clerk.revoke).toHaveBeenCalledWith({
+      apiKeyId: "key_created_1",
+      revocationReason: "Provider key set changed during creation",
+    });
+    expect(clerk.keys[0]).toMatchObject({ revoked: true });
+  });
+
+  it("compensates rotation when post-create provider set is unexpected", async () => {
+    const t = convexTest(schema, modules);
+    await seedOrganization(t);
+    const old = fakeKey("key_rotation_old", { name: "Old" });
+    const hidden = fakeKey("key_hidden_after_rotation");
+    clerk.keys.push(old);
+    await t.run(async (ctx) => {
+      await ctx.db.insert("keySettings", {
+        clerkOrgId: "org_acme",
+        ownerUserId: "user_owner",
+        keyId: old.id,
+        managed: true,
+        familyId: old.id,
+        disabled: false,
+        updatedAt: 1,
+      });
+    });
+    clerk.list
+      .mockResolvedValueOnce({ data: [old], totalCount: 1 })
+      .mockImplementationOnce(async () => ({
+        data: [old, clerk.keys[1]!, hidden],
+        totalCount: 3,
+      }));
+
+    await expect(
+      asOwner(t).action(api.keyBroker.rotateManagedKey, {
+        operationId: "post-rotation-compensation",
+        oldKeyId: old.id,
+        name: "Replacement",
+      }),
+    ).rejects.toThrow("Replacement was revoked");
+    expect(clerk.revoke).toHaveBeenCalledWith({
+      apiKeyId: "key_created_1",
+      revocationReason: "Provider key set changed during rotation",
+    });
+    expect(clerk.keys.find((key) => key.id === old.id)?.revoked).toBe(false);
+    expect(
+      clerk.keys.find((key) => key.id === "key_created_1")?.revoked,
+    ).toBe(true);
+  });
+
+  it("keeps membership cleanup durable past five failures and duplicate receipt", async () => {
+    const t = convexTest(schema, modules);
+    await seedOrganization(t);
+    await t.run(async (ctx) => {
+      await ctx.db.insert("clerkWebhookReceipts", {
+        svixId: "membership-cleanup-replay",
+        eventType: "organizationMembership.deleted",
+        receivedAt: 1,
+      });
+      await ctx.db.insert("clerkMembershipStates", {
+        clerkOrgId: "org_acme",
+        userId: "user_owner",
+        status: "revoked",
+        revision: 9,
+        updatedAt: 1,
+      });
+      await ctx.db.insert("membershipCleanupJobs", {
+        clerkOrgId: "org_acme",
+        userId: "user_owner",
+        membershipRevision: 9,
+        status: "pending",
+        attempts: 0,
+        zeroVerificationPasses: 0,
+        nextRunAt: 0,
+        createdAt: 1,
+        updatedAt: 1,
+      });
+    });
+
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      const leaseToken = `membership-cleanup-lease-${attempt}`;
+      await expect(
+        t.mutation(internal.keySettings.claimMembershipCleanup, {
+          clerkOrgId: "org_acme",
+          userId: "user_owner",
+          leaseToken,
+        }),
+      ).resolves.toMatchObject({ membershipRevision: 9 });
+      await t.mutation(internal.keySettings.retryMembershipCleanup, {
+        clerkOrgId: "org_acme",
+        userId: "user_owner",
+        membershipRevision: 9,
+        leaseToken,
+        errorCode: "provider_unavailable",
+      });
+    }
+    let job = await t.run(async (ctx) =>
+      ctx.db
+        .query("membershipCleanupJobs")
+        .withIndex("by_membership", (q) =>
+          q.eq("clerkOrgId", "org_acme").eq("userId", "user_owner"),
+        )
+        .unique(),
+    );
+    expect(job).toMatchObject({
+      status: "pending",
+      attempts: 8,
+      lastErrorCode: "provider_unavailable",
+    });
+    expect(job?.completedAt).toBeUndefined();
+
+    await expect(
+      t.mutation(internal.keySettings.revokeMembershipVerified, {
+        clerkOrgId: "org_acme",
+        userId: "user_owner",
+        svixId: "membership-cleanup-replay",
+      }),
+    ).resolves.toEqual({ duplicate: true, keyIds: [] });
+    job = await t.run(async (ctx) =>
+      ctx.db
+        .query("membershipCleanupJobs")
+        .withIndex("by_membership", (q) =>
+          q.eq("clerkOrgId", "org_acme").eq("userId", "user_owner"),
+        )
+        .unique(),
+    );
+    expect(job).toMatchObject({ status: "pending", nextRunAt: expect.any(Number) });
+    expect(job?.leaseToken).toBeUndefined();
+  });
+
+  it("completes membership cleanup only after provider relist proves zero twice", async () => {
+    const t = convexTest(schema, modules);
+    await seedOrganization(t);
+    const live = fakeKey("key_membership_cleanup_live");
+    clerk.keys.push(live);
+    await t.run(async (ctx) => {
+      await ctx.db.insert("clerkMembershipStates", {
+        clerkOrgId: "org_acme",
+        userId: "user_owner",
+        status: "revoked",
+        revision: 1,
+        updatedAt: 1,
+      });
+      await ctx.db.insert("membershipCleanupJobs", {
+        clerkOrgId: "org_acme",
+        userId: "user_owner",
+        membershipRevision: 1,
+        status: "pending",
+        attempts: 0,
+        zeroVerificationPasses: 0,
+        nextRunAt: 0,
+        createdAt: 1,
+        updatedAt: 1,
+      });
+    });
+
+    await t.action(internal.keyBroker.revokeMembershipKeys, {
+      clerkOrgId: "org_acme",
+      userId: "user_owner",
+    });
+    expect(clerk.keys[0]).toMatchObject({ revoked: true });
+    await t.action(internal.keyBroker.revokeMembershipKeys, {
+      clerkOrgId: "org_acme",
+      userId: "user_owner",
+    });
+    let job = await t.run(async (ctx) =>
+      ctx.db
+        .query("membershipCleanupJobs")
+        .withIndex("by_membership", (q) =>
+          q.eq("clerkOrgId", "org_acme").eq("userId", "user_owner"),
+        )
+        .unique(),
+    );
+    expect(job).toMatchObject({
+      status: "pending",
+      zeroVerificationPasses: 1,
+    });
+    await t.action(internal.keyBroker.revokeMembershipKeys, {
+      clerkOrgId: "org_acme",
+      userId: "user_owner",
+    });
+    job = await t.run(async (ctx) =>
+      ctx.db
+        .query("membershipCleanupJobs")
+        .withIndex("by_membership", (q) =>
+          q.eq("clerkOrgId", "org_acme").eq("userId", "user_owner"),
+        )
+        .unique(),
+    );
+    expect(job).toMatchObject({
+      status: "completed",
+      zeroVerificationPasses: 2,
+      completedAt: expect.any(Number),
+    });
+  });
+
+  it("durably pages past 1,000 unrelated keys before revoking malformed tail", async () => {
+    const t = convexTest(schema, modules);
+    await seedOrganization(t);
+    clerk.keys.push(
+      ...Array.from({ length: 1_000 }, (_, index) =>
+        fakeKey(`key_other_${String(index).padStart(4, "0")}`, {
+          claims: { org_id: "org_other" },
+        }),
+      ),
+      fakeKey("key_membership_cleanup_tail"),
+    );
+    await t.run(async (ctx) => {
+      await ctx.db.insert("clerkMembershipStates", {
+        clerkOrgId: "org_acme",
+        userId: "user_owner",
+        status: "revoked",
+        revision: 1,
+        updatedAt: 1,
+      });
+      await ctx.db.insert("membershipCleanupJobs", {
+        clerkOrgId: "org_acme",
+        userId: "user_owner",
+        membershipRevision: 1,
+        status: "pending",
+        attempts: 0,
+        zeroVerificationPasses: 0,
+        cursorOffset: 0,
+        nextRunAt: 0,
+        createdAt: 1,
+        updatedAt: 1,
+      });
+    });
+    const run = async () =>
+      await t.action(internal.keyBroker.revokeMembershipKeys, {
+        clerkOrgId: "org_acme",
+        userId: "user_owner",
+      });
+    const job = async () =>
+      await t.run(async (ctx) =>
+        ctx.db
+          .query("membershipCleanupJobs")
+          .withIndex("by_membership", (q) =>
+            q.eq("clerkOrgId", "org_acme").eq("userId", "user_owner"),
+          )
+          .unique(),
+      );
+
+    await run();
+    expect(await job()).toMatchObject({ status: "pending", cursorOffset: 500 });
+    await run();
+    expect(await job()).toMatchObject({
+      status: "pending",
+      cursorOffset: 1_000,
+    });
+    expect(clerk.keys.at(-1)).toMatchObject({ revoked: false });
+
+    await run();
+    expect(clerk.keys.at(-1)).toMatchObject({ revoked: true });
+    expect(await job()).toMatchObject({
+      status: "pending",
+      cursorOffset: 0,
+      zeroVerificationPasses: 0,
+    });
+
+    for (let pass = 0; pass < 4; pass += 1) await run();
+    expect(await job()).toMatchObject({
+      status: "completed",
+      attempts: 7,
+      cursorOffset: 0,
+      zeroVerificationPasses: 2,
+      completedAt: expect.any(Number),
+    });
+  });
+
+  it("reclaims crashed membership cleanup lease without losing cursor", async () => {
+    let now = 1_800_000_000_000;
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    const t = convexTest(schema, modules);
+    await seedOrganization(t);
+    await t.run(async (ctx) => {
+      await ctx.db.insert("clerkMembershipStates", {
+        clerkOrgId: "org_acme",
+        userId: "user_owner",
+        status: "revoked",
+        revision: 4,
+        updatedAt: now,
+      });
+      await ctx.db.insert("membershipCleanupJobs", {
+        clerkOrgId: "org_acme",
+        userId: "user_owner",
+        membershipRevision: 4,
+        status: "pending",
+        attempts: 0,
+        zeroVerificationPasses: 0,
+        cursorOffset: 500,
+        scanExpectedTotal: 600,
+        scanProviderIds: Array.from(
+          { length: 500 },
+          (_, index) => `key_seen_${index}`,
+        ),
+        nextRunAt: now,
+        createdAt: now,
+        updatedAt: now,
+      });
+    });
+    await expect(
+      t.mutation(internal.keySettings.claimMembershipCleanup, {
+        clerkOrgId: "org_acme",
+        userId: "user_owner",
+        leaseToken: "membership-crashed-lease",
+      }),
+    ).resolves.toMatchObject({ cursorOffset: 500, scanExpectedTotal: 600 });
+
+    now += 2 * 60_000 + 1;
+    await expect(
+      t.mutation(internal.keySettings.claimMembershipCleanup, {
+        clerkOrgId: "org_acme",
+        userId: "user_owner",
+        leaseToken: "membership-recovered-lease",
+      }),
+    ).resolves.toMatchObject({ cursorOffset: 500, scanExpectedTotal: 600 });
+    const stored = await t.run(async (ctx) =>
+      ctx.db.query("membershipCleanupJobs").first(),
+    );
+    expect(stored).toMatchObject({
+      status: "running",
+      attempts: 2,
+      leaseToken: "membership-recovered-lease",
+      cursorOffset: 500,
+    });
   });
 });

@@ -147,9 +147,10 @@ describe("registry sync outbox", () => {
     const snapshot = await t.query(internal.registrySync.materializeRoute, {
       projectId,
     });
-    expect(snapshot?.snapshot.upstreamHeaders).toEqual({
-      authorization: "publisher-secret",
-    });
+    // v1 materialize must never decrypt publisher secrets into transport body.
+    // Canonical encrypted credential bundles wait on Registry v2 receiver.
+    expect(snapshot?.snapshot.upstreamHeaders).toEqual({});
+    expect(JSON.stringify(snapshot)).not.toContain("publisher-secret");
 
     await asAdmin(t).mutation(api.projects.remove, { projectId });
     const rows = await t.run(async (ctx) =>

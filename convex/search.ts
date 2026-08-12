@@ -313,12 +313,11 @@ export const fetchSearchListings = internalQuery({
         latest === null ? null : summarizePublishedPricing(latest.spec);
 
       out.push({
-        projectId: project._id,
+        listingId: `${org.publicHandle}/${project.slug}`,
         name: project.name,
         slug: project.slug,
         description: project.description,
         tags: project.tags,
-        organizationId: org._id,
         orgName: org.name,
         publisherHandle: org.publicHandle,
         publishedAt: latest?.publishedAt ?? null,

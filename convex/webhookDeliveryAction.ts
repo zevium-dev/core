@@ -45,7 +45,7 @@ export const deliverWebhook = internalAction({
     try {
       signingSecret = await decryptSecret(
         requireEncryptedSecret(info.encryptedSecret),
-        webhookBinding(info.projectId),
+        webhookBinding(info.projectId, info.secretVersion),
       );
     } catch {
       await ctx.runMutation(internal.webhooks.recordDeliveryAttempt, {
@@ -82,6 +82,7 @@ export const deliverWebhook = internalAction({
         // Retry bodies get fresh signed attempt time while retaining stable id.
         timestamp: Date.now(),
         deliveryId: String(args.deliveryId),
+        secretVersion: info.secretVersion,
       },
       deliverPinnedHttps,
     );

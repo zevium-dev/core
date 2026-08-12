@@ -1,5 +1,23 @@
-import { env } from "cloudflare:workers";
+import {
+  createExecutionContext,
+  env,
+  evictDurableObject,
+  waitOnExecutionContext,
+} from "cloudflare:test";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import {
+  EDGE_KEY_REVOCATION_ACK_SIGNATURE_HEADER,
+  EDGE_KEY_REVOCATION_NONCE_HEADER,
+  EDGE_KEY_REVOCATION_SCHEMA_VERSION,
+  EDGE_KEY_REVOCATION_SIGNATURE_HEADER,
+  EDGE_KEY_REVOCATION_TIMESTAMP_HEADER,
+  edgeKeyRevocationBody,
+  edgeKeyRevocationBodySha256,
+  parseEdgeKeyRevocationAck,
+  signEdgeKeyRevocationRequest,
+  verifyEdgeKeyRevocationAck,
+} from "@zevium/shared";
+import worker, { type Env } from "../src/index";
 import {
   __setTestGrantsFetcher,
   type KeySetting,
@@ -221,6 +239,63 @@ describe("WalletDO key controls — reserve enforcement", () => {
     const res = await stub.reserve("r1", 10);
     expect(res.status).toBe("reserved");
   });
+
+  it("applies monotonic revocation immediately and survives stale sync plus restart", async () => {
+    const stub = walletStub("key-immediate-revocation");
+    await seed(stub, {
+      balance: 1_000,
+      keySettings: [
+        { keyId: "k1", familyId: "family-1", disabled: false },
+      ],
+    });
+
+    await expect(stub.applyKeyRevocation(ORG, "k1", 9)).resolves.toEqual({
+      status: "applied",
+      revision: 9,
+    });
+    const attempts = await Promise.all(
+      Array.from({ length: 32 }, (_, index) =>
+        stub.reserve(`revoked-${index}`, 1, {
+          keyId: "k1",
+          clerkOrgId: ORG,
+        }),
+      ),
+    );
+    expect(attempts).toEqual(
+      Array.from({ length: 32 }, () => ({
+        status: "rejected",
+        reason: "key_disabled",
+      })),
+    );
+
+    await expect(stub.applyKeyRevocation(ORG, "k1", 8)).resolves.toEqual({
+      status: "stale",
+      revision: 9,
+    });
+    __setTestGrantsFetcher(async () => ({
+      wallet: { clerkOrgId: ORG, balance: 1_000, sequence: 1 },
+      keySettings: [
+        { keyId: "k1", familyId: "family-1", disabled: false },
+      ],
+    }));
+    await expect(
+      stub.syncGrants(ORG, Date.now() + 61_000),
+    ).resolves.toMatchObject({ status: "ok" });
+    __setTestGrantsFetcher(null);
+    await expect(stub.authorizeKey("k1", ORG)).resolves.toEqual({
+      status: "rejected",
+      reason: "key_disabled",
+    });
+
+    await evictDurableObject(stub);
+    await expect(stub.authorizeKey("k1", ORG)).resolves.toEqual({
+      status: "rejected",
+      reason: "key_disabled",
+    });
+    await expect(
+      stub.applyKeyRevocation("org_wrong", "k1", 10),
+    ).resolves.toEqual({ status: "rejected", reason: "org_mismatch" });
+  });
 });
 
 describe("WalletDO key controls — lazy single-flight refresh", () => {
@@ -348,5 +423,153 @@ describe("WalletDO key controls — lazy single-flight refresh", () => {
       expect(r).toEqual({ status: "rejected", reason: "key_disabled" });
     }
     expect(fetchCount).toBe(1);
+  });
+});
+
+describe("HTTP edge key revocation", () => {
+  beforeEach(() => {
+    __setTestGrantsFetcher(null);
+  });
+  afterEach(() => {
+    __setTestGrantsFetcher(null);
+  });
+
+  it("applies signed revocation immediately and returns bound ACK", async () => {
+    const secret = "gateway-internal-secret-32bytes!!";
+    const testEnv = {
+      ...env,
+      GATEWAY_INTERNAL_SECRET: secret,
+    } as Env;
+    // HTTP path selects Wallet DO by clerkOrgId name, same as grant/sync.
+    const stub = walletStub(ORG);
+    await seed(stub, {
+      balance: 500,
+      keySettings: [{ keyId: "k1", familyId: "family-1", disabled: false }],
+    });
+
+    const event = {
+      schemaVersion: EDGE_KEY_REVOCATION_SCHEMA_VERSION,
+      eventId: "ekr_http_test_0001",
+      clerkOrgId: ORG,
+      keyId: "k1",
+      revision: 4,
+      occurredAt: Date.now(),
+      reason: "membership_deleted" as const,
+    };
+    const body = edgeKeyRevocationBody(event);
+    const timestamp = String(Date.now());
+    const nonce = "nonce_http_edge_revoc_01";
+    const signature = await signEdgeKeyRevocationRequest(
+      secret,
+      timestamp,
+      nonce,
+      body,
+    );
+    const ctx = createExecutionContext();
+    const response = await worker.fetch(
+      new Request("https://gateway.test/internal/key-revocation", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          [EDGE_KEY_REVOCATION_TIMESTAMP_HEADER]: timestamp,
+          [EDGE_KEY_REVOCATION_NONCE_HEADER]: nonce,
+          [EDGE_KEY_REVOCATION_SIGNATURE_HEADER]: signature,
+        },
+        body,
+      }),
+      testEnv,
+      ctx,
+    );
+    await waitOnExecutionContext(ctx);
+    expect(response.status).toBe(200);
+    const rawAck = await response.text();
+    const ackSig =
+      response.headers.get(EDGE_KEY_REVOCATION_ACK_SIGNATURE_HEADER) ?? "";
+    await expect(
+      verifyEdgeKeyRevocationAck(secret, timestamp, nonce, rawAck, ackSig),
+    ).resolves.toBe(true);
+    const ack = parseEdgeKeyRevocationAck(JSON.parse(rawAck) as unknown);
+    expect(ack.eventId).toBe(event.eventId);
+    expect(ack.bodySha256).toBe(await edgeKeyRevocationBodySha256(body));
+    expect(ack.status).toBe("applied");
+    expect(ack.revision).toBe(4);
+
+    await expect(
+      stub.reserve("post-revocation", 1, { keyId: "k1", clerkOrgId: ORG }),
+    ).resolves.toEqual({ status: "rejected", reason: "key_disabled" });
+
+    // Replay with same revision is stale/duplicate style identity ACK.
+    const replayCtx = createExecutionContext();
+    const replay = await worker.fetch(
+      new Request("https://gateway.test/internal/key-revocation", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          [EDGE_KEY_REVOCATION_TIMESTAMP_HEADER]: timestamp,
+          [EDGE_KEY_REVOCATION_NONCE_HEADER]: nonce,
+          [EDGE_KEY_REVOCATION_SIGNATURE_HEADER]: signature,
+        },
+        body,
+      }),
+      testEnv,
+      replayCtx,
+    );
+    await waitOnExecutionContext(replayCtx);
+    expect(replay.status).toBe(200);
+    const replayAck = parseEdgeKeyRevocationAck(
+      JSON.parse(await replay.text()) as unknown,
+    );
+    expect(replayAck.status).toBe("stale");
+  });
+
+  it("rejects forged signature before wallet mutation", async () => {
+    const secret = "gateway-internal-secret-32bytes!!";
+    const testEnv = {
+      ...env,
+      GATEWAY_INTERNAL_SECRET: secret,
+    } as Env;
+    const forgedOrg = "org_forged_sig";
+    const stub = walletStub(forgedOrg);
+    __setTestGrantsFetcher(async () => ({
+      wallet: { clerkOrgId: forgedOrg, balance: 500, sequence: 0 },
+      keySettings: [
+        { keyId: "k_forged", familyId: "family-forged", disabled: false },
+      ],
+    }));
+    await stub.syncGrants(forgedOrg);
+    __setTestGrantsFetcher(null);
+    const event = {
+      schemaVersion: EDGE_KEY_REVOCATION_SCHEMA_VERSION,
+      eventId: "ekr_http_forged_0001",
+      clerkOrgId: forgedOrg,
+      keyId: "k_forged",
+      revision: 9,
+      occurredAt: Date.now(),
+      reason: "admin_revoked" as const,
+    };
+    const body = edgeKeyRevocationBody(event);
+    const ctx = createExecutionContext();
+    const response = await worker.fetch(
+      new Request("https://gateway.test/internal/key-revocation", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          [EDGE_KEY_REVOCATION_TIMESTAMP_HEADER]: String(Date.now()),
+          [EDGE_KEY_REVOCATION_NONCE_HEADER]: "nonce_http_edge_forged01",
+          [EDGE_KEY_REVOCATION_SIGNATURE_HEADER]: `v1=${"ab".repeat(32)}`,
+        },
+        body,
+      }),
+      testEnv,
+      ctx,
+    );
+    await waitOnExecutionContext(ctx);
+    expect(response.status).toBe(401);
+    await expect(
+      stub.reserve("still-live", 1, {
+        keyId: "k_forged",
+        clerkOrgId: forgedOrg,
+      }),
+    ).resolves.toMatchObject({ status: "reserved" });
   });
 });

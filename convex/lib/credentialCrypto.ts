@@ -261,8 +261,22 @@ export function credentialBinding(
   };
 }
 
-export function webhookBinding(projectId: string): SecretBinding {
-  return { purpose: "webhook-signing-secret", resource: projectId };
+export function webhookBinding(
+  projectId: string,
+  secretVersion: number = 1,
+): SecretBinding {
+  if (!Number.isSafeInteger(secretVersion) || secretVersion < 1) {
+    throw new Error("Webhook secret version is invalid");
+  }
+  // Generation 1 keeps its original binding so staged rows remain readable.
+  // Every rotated generation is cryptographically non-swappable.
+  return {
+    purpose: "webhook-signing-secret",
+    resource:
+      secretVersion === 1
+        ? projectId
+        : `${projectId}:secret-version:${secretVersion}`,
+  };
 }
 
 export function hasLegacyEnvelope(

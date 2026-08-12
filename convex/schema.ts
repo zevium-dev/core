@@ -57,6 +57,8 @@ export default defineSchema({
     sealedKeyVersion: v.optional(v.string()),
     sealedVersion: v.optional(v.literal("v2")),
     secret: v.optional(v.string()),
+    /** Strictly monotonic per-row revision. Wall-clock equality cannot hide writes. */
+    revision: v.optional(v.number()),
     updatedAt: v.number(),
   })
     .index("by_project", ["projectId"])
@@ -129,6 +131,8 @@ export default defineSchema({
 
   // Per-call metering events (gateway → Convex, async)
   usageEvents: defineTable({
+    /** Public opaque row identity; Convex document ids never cross member APIs. */
+    publicId: v.optional(v.string()),
     organizationId: v.id("organizations"),
     projectId: v.id("projects"),
     endpoint: v.string(),
@@ -137,6 +141,8 @@ export default defineSchema({
     status: v.number(),
     latencyMs: v.number(),
     keyId: v.string(),
+    /** Derived from authoritative keySettings during ingest, never from gateway input. */
+    ownerUserId: v.optional(v.string()),
     at: v.number(),
     /**
      * Stable gateway settlement reference (`settle:{reservationId}`).
@@ -148,6 +154,7 @@ export default defineSchema({
     .index("by_org", ["organizationId"])
     .index("by_project", ["projectId"])
     .index("by_org_at", ["organizationId", "at"])
+    .index("by_org_owner_at", ["organizationId", "ownerUserId", "at"])
     .index("by_project_at", ["projectId", "at"])
     .index("by_at", ["at"]),
 
@@ -186,6 +193,20 @@ export default defineSchema({
     sealedKeyVersion: v.optional(v.string()),
     sealedVersion: v.optional(v.literal("v2")),
     secret: v.optional(v.string()),
+    /** Current signing-secret generation. Legacy rows are generation 1. */
+    secretVersion: v.optional(v.number()),
+    /** Current generation can be revealed once, then only rotation reveals again. */
+    secretRevealedAt: v.optional(v.number()),
+    /** One prior encrypted generation survives only for bounded retry grace. */
+    previousCiphertext: v.optional(v.string()),
+    previousIv: v.optional(v.string()),
+    previousKeyVersion: v.optional(v.string()),
+    previousSealedCiphertext: v.optional(v.string()),
+    previousSealedIv: v.optional(v.string()),
+    previousSealedKeyVersion: v.optional(v.string()),
+    previousSealedVersion: v.optional(v.literal("v2")),
+    previousSecretVersion: v.optional(v.number()),
+    previousValidUntil: v.optional(v.number()),
     active: v.boolean(),
     /** Inactive tombstone retained while delivery rows retire in pages. */
     retiringAt: v.optional(v.number()),
@@ -195,6 +216,8 @@ export default defineSchema({
   // Webhook delivery log
   webhookDeliveries: defineTable({
     endpointId: v.id("webhookEndpoints"),
+    /** Immutable signing generation selected when delivery is enqueued. */
+    secretVersion: v.optional(v.number()),
     event: v.string(),
     status: v.union(
       v.literal("pending"),
@@ -231,6 +254,11 @@ export default defineSchema({
     graceUntil: v.optional(v.number()),
     revokedAt: v.optional(v.number()),
     membershipRevokedAt: v.optional(v.number()),
+    /**
+     * Monotonic edge-revocation revision. Bumped on every disable/revoke so the
+     * wallet DO can apply immediate fail-closed state without waiting for sync.
+     */
+    edgeRevision: v.optional(v.number()),
     updatedAt: v.number(),
   })
     .index("by_org", ["clerkOrgId"])
@@ -408,7 +436,116 @@ export default defineSchema({
     status: v.union(v.literal("active"), v.literal("revoked")),
     revision: v.number(),
     updatedAt: v.number(),
-  }).index("by_membership", ["clerkOrgId", "userId"]),
+  })
+    .index("by_membership", ["clerkOrgId", "userId"])
+    .index("by_status", ["status", "updatedAt"]),
+
+  /**
+   * Durable signed edge key-revocation outbox. Delivery retries until the wallet
+   * DO returns a request-bound HMAC acknowledgement. No secrets in body.
+   */
+  edgeKeyRevocationOutbox: defineTable({
+    eventId: v.string(),
+    clerkOrgId: v.string(),
+    keyId: v.string(),
+    revision: v.number(),
+    reason: v.union(
+      v.literal("membership_deleted"),
+      v.literal("admin_revoked"),
+      v.literal("rotated"),
+      v.literal("provider_revoked"),
+      v.literal("disabled"),
+    ),
+    bodyJson: v.string(),
+    bodySha256: v.string(),
+    status: v.union(
+      v.literal("pending"),
+      v.literal("delivering"),
+      v.literal("acked"),
+    ),
+    attempts: v.number(),
+    nextAttemptAt: v.number(),
+    leaseToken: v.optional(v.string()),
+    leaseUntil: v.optional(v.number()),
+    lastErrorCode: v.optional(v.string()),
+    ackJson: v.optional(v.string()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+    ackedAt: v.optional(v.number()),
+  })
+    .index("by_event", ["eventId"])
+    .index("by_key_revision", ["keyId", "revision"])
+    .index("by_status_next", ["status", "nextAttemptAt"])
+    .index("by_status_lease", ["status", "leaseUntil"]),
+
+  /**
+   * Durable provider cleanup after membership revocation. Jobs never age out on
+   * failure; completion requires two identical provider snapshots with zero
+   * scoped live keys for the exact revoked membership revision.
+   */
+  membershipCleanupJobs: defineTable({
+    clerkOrgId: v.string(),
+    userId: v.string(),
+    membershipRevision: v.number(),
+    status: v.union(
+      v.literal("pending"),
+      v.literal("running"),
+      v.literal("completed"),
+    ),
+    attempts: v.number(),
+    zeroVerificationPasses: v.number(),
+    /** Durable offset through one bounded provider verification pass. */
+    cursorOffset: v.optional(v.number()),
+    scanExpectedTotal: v.optional(v.number()),
+    /** At most 2,000 opaque provider ids; used only to prove stable snapshots. */
+    scanProviderIds: v.optional(v.array(v.string())),
+    previousZeroFingerprint: v.optional(v.string()),
+    leaseToken: v.optional(v.string()),
+    leaseUntil: v.optional(v.number()),
+    nextRunAt: v.number(),
+    lastErrorCode: v.optional(v.string()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+    completedAt: v.optional(v.number()),
+  })
+    .index("by_membership", ["clerkOrgId", "userId"])
+    .index("by_due", ["status", "nextRunAt"])
+    .index("by_lease", ["status", "leaseUntil"]),
+
+  /** OCC hotspot fencing every credential/webhook-secret writer. */
+  securityRolloutState: defineTable({
+    singleton: v.literal("security-rollout"),
+    generation: v.number(),
+    updatedAt: v.number(),
+  }).index("by_singleton", ["singleton"]),
+
+  /** Read-only secret audit progress. No row repair or scrub occurs here. */
+  securityRolloutAudits: defineTable({
+    auditId: v.string(),
+    generation: v.number(),
+    /** Immutable creation-time fence captured before first page. */
+    highWaterCreationTime: v.number(),
+    phase: v.union(
+      v.literal("credentials"),
+      v.literal("webhooks"),
+      v.literal("completed"),
+      v.literal("invalidated"),
+    ),
+    credentialCursor: v.optional(v.union(v.string(), v.null())),
+    webhookCursor: v.optional(v.union(v.string(), v.null())),
+    credentialsScanned: v.number(),
+    webhooksScanned: v.number(),
+    current: v.number(),
+    old: v.number(),
+    plaintext: v.number(),
+    corrupt: v.number(),
+    broken: v.number(),
+    zeroCorruption: v.boolean(),
+    createdAt: v.number(),
+    completedAt: v.optional(v.number()),
+  })
+    .index("by_audit", ["auditId"])
+    .index("by_phase", ["phase", "createdAt"]),
 
   /** Tombstones make large archive/secret retirement bounded and resumable. */
   retirementJobs: defineTable({

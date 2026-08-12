@@ -4,7 +4,7 @@ import { ConvexHttpClient } from "convex/browser";
 import { isIP } from "node:net";
 import { resolve4, resolve6 } from "node:dns/promises";
 import { api } from "#/lib/convex-api";
-import { convertSpecInputToJson, MAX_EXPANDED_SPEC_BYTES } from "./spec-yaml";
+import { MAX_EXPANDED_SPEC_BYTES } from "./spec-yaml";
 import { MAX_SPEC_IMPORT_BYTES, type ImportSpecUrlInput } from "./spec-import";
 
 const FETCH_TIMEOUT_MS = 10_000;
@@ -260,13 +260,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-/** Parse JSON/YAML, enforce OpenAPI 3 required shape, return canonical JSON. */
+/** Parse JSON only. YAML is returned raw for browser worker isolation. */
 export function normalizeImportedOpenApi(text: string): string {
-  const converted = convertSpecInputToJson(text);
-  if (!converted.ok) throw new Error(INVALID_SPEC_ERROR);
   let raw: unknown;
   try {
-    raw = JSON.parse(converted.json) as unknown;
+    raw = JSON.parse(text) as unknown;
   } catch {
     throw new Error(INVALID_SPEC_ERROR);
   }
@@ -367,8 +365,11 @@ async function fetchAuthorizedSpec(
   await waitForAbortable(renewPermit(), signal);
   if (signal.aborted) throw new Error(GENERIC_FETCH_ERROR);
   return {
-    text: normalizeImportedOpenApi(text),
-    contentType: "application/json",
+    text:
+      mediaType(contentType)?.endsWith("json") === true
+        ? normalizeImportedOpenApi(text)
+        : text,
+    contentType: mediaType(contentType) ?? "application/octet-stream",
   };
 }
 

@@ -86,6 +86,15 @@ async function seedWallet(t: TestConvex<typeof schema>): Promise<SeededWallet> {
       )
       .unique();
     if (project === null) throw new Error("Failed to seed project");
+    await ctx.db.insert("keySettings", {
+      clerkOrgId: "org_consumer",
+      ownerUserId: "user_consumer",
+      keyId: "key_test",
+      managed: true,
+      familyId: "family_test",
+      disabled: false,
+      updatedAt: 1,
+    });
     return {
       consumerOrganizationId,
       publisherOrganizationId,
@@ -165,7 +174,7 @@ describe("wallet settlement ingest contract", () => {
       },
       body: JSON.stringify({
         events: [
-          usageEvent(seed, "settle:one"),
+          { ...usageEvent(seed, "settle:one"), ownerUserId: "user_attacker" },
           usageEvent(seed, "settle:too-expensive", 200),
         ],
       }),
@@ -194,6 +203,16 @@ describe("wallet settlement ingest contract", () => {
       results: [{ refId: "settle:one", status: "already_applied" }],
       wallet: { clerkOrgId: "org_consumer", balance: 85, sequence: 2 },
     });
+    const storedUsage = await t.run(async (ctx) =>
+      ctx.db.query("usageEvents").collect(),
+    );
+    expect(storedUsage).toEqual([
+      expect.objectContaining({
+        keyId: "key_test",
+        ownerUserId: "user_consumer",
+        publicId: expect.any(String),
+      }),
+    ]);
   });
 
   it("keeps materialized balance and sequence equal to the append-only ledger", async () => {

@@ -26,8 +26,8 @@ export function useEnsureMirror() {
     void (async () => {
       try {
         await convex.mutation(api.users.ensureUser, {});
-      } catch (err) {
-        console.warn("[ensureUser] failed:", err);
+      } catch {
+        console.warn("[ensureUser] failed");
         // Allow retry on next effect if mutation failed before mirror.
         ranFor.current = null;
         return;
@@ -45,8 +45,8 @@ export function useEnsureMirror() {
           slug,
           imageUrl: organization.imageUrl,
         });
-      } catch (err) {
-        console.warn("[ensureOrganization] failed:", err);
+      } catch {
+        console.warn("[ensureOrganization] failed");
         ranFor.current = null;
       }
     })();

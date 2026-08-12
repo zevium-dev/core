@@ -1,12 +1,13 @@
 import { paginationOptsValidator } from "convex/server";
 import { v } from "convex/values";
+
 import { query } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
-import { requireOrgMemberBySlug } from "./lib/auth";
+import { orgCapabilities, requireOrgMemberBySlug } from "./lib/auth";
+import { maskedSuffix, publicReference } from "./lib/publicIds";
 
 export type UsageListItem = {
-  _id: Id<"usageEvents">;
-  projectId: Id<"projects">;
+  id: string;
   projectName: string | null;
   projectSlug: string | null;
   endpoint: string;
@@ -14,15 +15,13 @@ export type UsageListItem = {
   credits: number;
   status: number;
   latencyMs: number;
-  keyId: string;
+  keyRef: string;
+  keyLabel: string;
+  ownerRef?: string;
   at: number;
 };
 
-/**
- * Paginated consumer call log for the org that paid (organizationId on events).
- * Index range: by_org_at. projectId/keyId filtered after the index scan.
- * Newest first.
- */
+/** Capability-filtered consumer call log. Members see own-key rows only. */
 export const listForOrg = query({
   args: {
     orgSlug: v.string(),
@@ -33,34 +32,44 @@ export const listForOrg = query({
     until: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
-    const { org } = await requireOrgMemberBySlug(ctx, args.orgSlug);
+    const { claims, org } = await requireOrgMemberBySlug(ctx, args.orgSlug);
+    const capabilities = orgCapabilities(claims);
 
-    const result = await ctx.db
-      .query("usageEvents")
-      .withIndex("by_org_at", (q) => {
-        const base = q.eq("organizationId", org._id);
-        if (args.since !== undefined && args.until !== undefined) {
-          return base.gte("at", args.since).lt("at", args.until);
-        }
-        if (args.since !== undefined) {
-          return base.gte("at", args.since);
-        }
-        if (args.until !== undefined) {
-          return base.lt("at", args.until);
-        }
-        return base;
-      })
-      .order("desc")
-      .paginate(args.paginationOpts);
+    const result = capabilities.canViewOrgUsage
+      ? await ctx.db
+          .query("usageEvents")
+          .withIndex("by_org_at", (q) => {
+            const base = q.eq("organizationId", org._id);
+            if (args.since !== undefined && args.until !== undefined) {
+              return base.gte("at", args.since).lt("at", args.until);
+            }
+            if (args.since !== undefined) return base.gte("at", args.since);
+            if (args.until !== undefined) return base.lt("at", args.until);
+            return base;
+          })
+          .order("desc")
+          .paginate(args.paginationOpts)
+      : await ctx.db
+          .query("usageEvents")
+          .withIndex("by_org_owner_at", (q) => {
+            const base = q
+              .eq("organizationId", org._id)
+              .eq("ownerUserId", claims.subject);
+            if (args.since !== undefined && args.until !== undefined) {
+              return base.gte("at", args.since).lt("at", args.until);
+            }
+            if (args.since !== undefined) return base.gte("at", args.since);
+            if (args.until !== undefined) return base.lt("at", args.until);
+            return base;
+          })
+          .order("desc")
+          .paginate(args.paginationOpts);
 
     const projectCache = new Map<
       Id<"projects">,
       { name: string; slug: string } | null
     >();
-
-    async function resolveProject(
-      projectId: Id<"projects">,
-    ): Promise<{ name: string; slug: string } | null> {
+    async function resolveProject(projectId: Id<"projects">) {
       if (projectCache.has(projectId)) {
         return projectCache.get(projectId) ?? null;
       }
@@ -76,13 +85,19 @@ export const listForOrg = query({
       if (args.projectId !== undefined && event.projectId !== args.projectId) {
         continue;
       }
-      if (args.keyId !== undefined && event.keyId !== args.keyId) {
+      if (args.keyId !== undefined && event.keyId !== args.keyId) continue;
+      // Legacy rows without an authoritative owner fail closed for members.
+      if (
+        !capabilities.canViewOrgUsage &&
+        event.ownerUserId !== claims.subject
+      ) {
         continue;
       }
       const project = await resolveProject(event.projectId);
       page.push({
-        _id: event._id,
-        projectId: event.projectId,
+        id:
+          event.publicId ??
+          (await publicReference("usage-event", String(event._id))),
         projectName: project?.name ?? null,
         projectSlug: project?.slug ?? null,
         endpoint: event.endpoint,
@@ -90,14 +105,19 @@ export const listForOrg = query({
         credits: event.credits,
         status: event.status,
         latencyMs: event.latencyMs,
-        keyId: event.keyId,
+        keyRef: await publicReference("api-key", event.keyId),
+        keyLabel: maskedSuffix(event.keyId),
+        ...(capabilities.canViewOrgUsage && event.ownerUserId !== undefined
+          ? {
+              ownerRef: await publicReference(
+                "org-member",
+                event.ownerUserId,
+              ),
+            }
+          : {}),
         at: event.at,
       });
     }
-
-    return {
-      ...result,
-      page,
-    };
+    return { ...result, page };
   },
 });

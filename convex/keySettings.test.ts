@@ -35,6 +35,14 @@ function asUser(t: ReturnType<typeof convexTest>, userId = "user_owner") {
   } as { subject: string });
 }
 
+function asAdmin(t: ReturnType<typeof convexTest>) {
+  return t.withIdentity({
+    subject: "user_admin",
+    org_id: "org_acme",
+    org_role: "org:admin",
+  } as { subject: string });
+}
+
 async function register(
   t: ReturnType<typeof convexTest>,
   keyId = KEY_A,
@@ -71,6 +79,45 @@ describe("user-owned key settings", () => {
 
     const rows = await asUser(t).query(api.keySettings.getForOrg, {});
     expect(rows.map((row) => row.keyId)).toEqual([KEY_A]);
+  });
+
+  it("gives exact org admins opaque attribution and policy controls", async () => {
+    const t = convexTest(schema, modules);
+    await seedWorld(t);
+    await register(t, KEY_A, "user_owner");
+    await register(t, KEY_B, "user_sibling");
+
+    const policies = await asAdmin(t).query(api.keySettings.listOrgPolicy, {});
+    expect(policies).toHaveLength(2);
+    expect(policies.every((policy) => /^[0-9a-f]{32}$/.test(policy.policyId))).toBe(
+      true,
+    );
+    expect(policies.every((policy) => /^[0-9a-f]{32}$/.test(policy.ownerRef))).toBe(
+      true,
+    );
+    expect(JSON.stringify(policies)).not.toContain(KEY_A);
+    expect(JSON.stringify(policies)).not.toContain(KEY_B);
+    expect(policies.every((policy) => !Reflect.has(policy, "_id"))).toBe(true);
+
+    const selected = policies.find((policy) => policy.keyLabel === "••••AAAA");
+    if (selected === undefined) throw new Error("Missing key policy");
+    const updated = await asAdmin(t).mutation(api.keySettings.setOrgPolicy, {
+      policyId: selected.policyId,
+      monthlyCapCredits: 250,
+      disabled: true,
+    });
+    expect(updated).toMatchObject({
+      policyId: selected.policyId,
+      monthlyCapCredits: 250,
+      disabled: true,
+      lifecycle: "disabled",
+    });
+    await expect(
+      asUser(t).mutation(api.keySettings.setOrgPolicy, {
+        policyId: selected.policyId,
+        disabled: false,
+      }),
+    ).rejects.toThrow("Org admin role required");
   });
 
   it("rejects same-org sibling IDOR for cap and disable writes", async () => {

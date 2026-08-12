@@ -63,6 +63,7 @@ async function seedWorld(t: ReturnType<typeof convexTest>): Promise<Seeded> {
       status: 200,
       latencyMs: 40,
       keyId: "key_alpha",
+      ownerUserId: "user_member",
       at: inMonth,
     });
     await ctx.db.insert("usageEvents", {
@@ -74,6 +75,7 @@ async function seedWorld(t: ReturnType<typeof convexTest>): Promise<Seeded> {
       status: 200,
       latencyMs: 55,
       keyId: "key_alpha",
+      ownerUserId: "user_member",
       at: inMonth + 1,
     });
     await ctx.db.insert("usageEvents", {
@@ -85,6 +87,7 @@ async function seedWorld(t: ReturnType<typeof convexTest>): Promise<Seeded> {
       status: 201,
       latencyMs: 90,
       keyId: "key_beta",
+      ownerUserId: "user_sibling",
       at: inMonth + 2,
     });
     // Prior month — must not land in cycleBreakdown.
@@ -97,6 +100,7 @@ async function seedWorld(t: ReturnType<typeof convexTest>): Promise<Seeded> {
       status: 200,
       latencyMs: 10,
       keyId: "key_alpha",
+      ownerUserId: "user_member",
       at: prevMonth,
     });
     // 5xx still recorded by gateway — counts for cycle totals.
@@ -109,6 +113,7 @@ async function seedWorld(t: ReturnType<typeof convexTest>): Promise<Seeded> {
       status: 502,
       latencyMs: 1200,
       keyId: "key_beta",
+      ownerUserId: "user_sibling",
       at: inMonth + 3,
     });
 
@@ -131,6 +136,20 @@ function asMember(t: ReturnType<typeof convexTest>, clerkOrgId: string) {
     org_id: clerkOrgId,
     org_slug: clerkOrgId === "org_consumer" ? "consumer-co" : "publisher-co",
     org_role: "org:admin",
+  } as {
+    subject: string;
+    org_id: string;
+    org_slug: string;
+    org_role: string;
+  });
+}
+
+function asOrgMember(t: ReturnType<typeof convexTest>, userId: string) {
+  return t.withIdentity({
+    subject: userId,
+    org_id: "org_consumer",
+    org_slug: "consumer-co",
+    org_role: "org:member",
   } as {
     subject: string;
     org_id: string;
@@ -204,7 +223,12 @@ describe("usage.listForOrg", () => {
       paginationOpts: { numItems: 50, cursor: null },
       keyId: "key_alpha",
     });
-    expect(onlyAlpha.page.every((e) => e.keyId === "key_alpha")).toBe(true);
+    expect(onlyAlpha.page.every((event) => event.keyLabel === "••••lpha")).toBe(
+      true,
+    );
+    expect(onlyAlpha.page.every((event) => !Reflect.has(event, "keyId"))).toBe(
+      true,
+    );
     expect(onlyAlpha.page.length).toBe(3);
 
     // projectId filter.
@@ -225,6 +249,42 @@ describe("usage.listForOrg", () => {
     });
     expect(monthOnly.page.every((e) => e.at >= seed.monthStart)).toBe(true);
     expect(monthOnly.page.some((e) => e.credits === 999)).toBe(false);
+  });
+
+  it("shows members only own usage while admin retains opaque org attribution", async () => {
+    const t = convexTest(schema, modules);
+    await seedWorld(t);
+    const memberRows = await asOrgMember(t, "user_member").query(
+      api.usage.listForOrg,
+      {
+        orgSlug: "consumer-co",
+        paginationOpts: { numItems: 50, cursor: null },
+      },
+    );
+    expect(memberRows.page).toHaveLength(3);
+    expect(memberRows.page.every((event) => event.keyLabel === "••••lpha")).toBe(
+      true,
+    );
+    expect(memberRows.page.every((event) => event.ownerRef === undefined)).toBe(
+      true,
+    );
+    expect(JSON.stringify(memberRows.page)).not.toContain("key_alpha");
+    expect(JSON.stringify(memberRows.page)).not.toContain("user_member");
+
+    const adminRows = await asMember(t, "org_consumer").query(
+      api.usage.listForOrg,
+      {
+        orgSlug: "consumer-co",
+        paginationOpts: { numItems: 50, cursor: null },
+      },
+    );
+    expect(adminRows.page).toHaveLength(5);
+    expect(adminRows.page.every((event) => event.ownerRef !== undefined)).toBe(
+      true,
+    );
+    expect(adminRows.page.every((event) => !Reflect.has(event, "projectId"))).toBe(
+      true,
+    );
   });
 });
 
@@ -263,10 +323,13 @@ describe("billing.cycleBreakdown", () => {
     expect(breakdown.cycleStart).toBeLessThanOrEqual(Date.now());
     expect(breakdown.cycleEnd).toBeGreaterThan(breakdown.cycleStart);
 
-    const alpha = breakdown.byKey.find((k) => k.keyId === "key_alpha");
-    const beta = breakdown.byKey.find((k) => k.keyId === "key_beta");
+    const alpha = breakdown.byKey.find((key) => key.keyLabel === "••••lpha");
+    const beta = breakdown.byKey.find((key) => key.keyLabel === "••••beta");
     expect(alpha).toMatchObject({ calls: 2, credits: 30 });
     expect(beta).toMatchObject({ calls: 2, credits: 55 });
+    expect(breakdown.byKey.every((key) => !Reflect.has(key, "keyId"))).toBe(
+      true,
+    );
 
     const weather = breakdown.byProject.find((p) => p.slug === "weather");
     const maps = breakdown.byProject.find((p) => p.slug === "maps");
@@ -276,5 +339,19 @@ describe("billing.cycleBreakdown", () => {
       credits: 35,
     });
     expect(maps).toMatchObject({ name: "Maps API", calls: 1, credits: 50 });
+  });
+
+  it("filters member billing totals to server-derived ownership", async () => {
+    const t = convexTest(schema, modules);
+    await seedWorld(t);
+    const breakdown = await asOrgMember(t, "user_member").query(
+      api.billing.cycleBreakdown,
+      { orgSlug: "consumer-co" },
+    );
+    expect(breakdown).toMatchObject({ totalCalls: 2, totalCredits: 30 });
+    expect(breakdown.byKey).toEqual([
+      expect.objectContaining({ keyLabel: "••••lpha", calls: 2, credits: 30 }),
+    ]);
+    expect(breakdown.byKey[0]).not.toHaveProperty("ownerRef");
   });
 });

@@ -13,6 +13,10 @@ import {
   requireProjectMember,
 } from "./lib/auth";
 import { enqueueRouteUpsert } from "./registrySync";
+import {
+  bumpSecurityRolloutGeneration,
+  requireCompletedSecurityAudit,
+} from "./securityRollout";
 
 const HEADER_NAME = /^[!#$%&'*+\-.^_`|~0-9a-z]+$/;
 const BLOCKED_HEADERS = new Set([
@@ -87,13 +91,14 @@ export const upsert = mutation({
     const name = normalizeName(args.name);
     const secret = validateSecret(args.secret);
     const encrypted = await encryptCredential(secret, args.projectId, name);
-    const updatedAt = Date.now();
     const existing = await ctx.db
       .query("upstreamCredentials")
       .withIndex("by_project_name", (q) =>
         q.eq("projectId", args.projectId).eq("name", name),
       )
       .unique();
+    const updatedAt = Date.now();
+    const revision = (existing?.revision ?? 0) + 1;
 
     let id: Id<"upstreamCredentials">;
     if (existing === null) {
@@ -101,6 +106,7 @@ export const upsert = mutation({
         projectId: args.projectId,
         name,
         ...encrypted,
+        revision,
         updatedAt,
       });
     } else {
@@ -108,9 +114,11 @@ export const upsert = mutation({
       await ctx.db.patch(existing._id, {
         ...encrypted,
         secret: undefined,
+        revision,
         updatedAt,
       });
     }
+    await bumpSecurityRolloutGeneration(ctx);
     await enqueueRouteUpsert(ctx, args.projectId);
     return { id, name, updatedAt };
   },
@@ -136,6 +144,7 @@ export const remove = mutation({
       throw new Error("Upstream credential unavailable");
     }
     await ctx.db.delete(credential._id);
+    await bumpSecurityRolloutGeneration(ctx);
     await enqueueRouteUpsert(ctx, credential.projectId);
     return { deleted: credential._id };
   },
@@ -158,10 +167,12 @@ export type CredentialMigrationPage = {
 /** Cursor-bounded dual-envelope migration. Repeat until isDone, then audit again. */
 export const migrateLegacyPlaintext = internalMutation({
   args: {
+    auditId: v.string(),
     cursor: v.optional(v.union(v.string(), v.null())),
     numItems: v.optional(v.number()),
   },
   handler: async (ctx, args): Promise<CredentialMigrationPage> => {
+    const audit = await requireCompletedSecurityAudit(ctx, args.auditId);
     const requested = args.numItems ?? 50;
     const numItems = Math.max(1, Math.min(100, Math.floor(requested)));
     const result = await ctx.db.query("upstreamCredentials").paginate({
@@ -180,6 +191,9 @@ export const migrateLegacyPlaintext = internalMutation({
       scrubbed: 0,
     };
     for (const row of result.page) {
+      if (row._creationTime > audit.highWaterCreationTime) {
+        throw new Error("Credential row exceeds audited high-water fence");
+      }
       const migration = await migrateStoredSecret(
         row,
         credentialBinding(row.projectId, row.name),
@@ -195,6 +209,7 @@ export const migrateLegacyPlaintext = internalMutation({
       if (migration.patch) {
         await ctx.db.patch(row._id, {
           ...migration.patch,
+          revision: (row.revision ?? 0) + 1,
           updatedAt: Date.now(),
         });
       }

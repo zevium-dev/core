@@ -25,6 +25,22 @@ import { handleDiscoveryRequest, type DiscoveryDeps } from "./discovery";
 import { handleMcpRequest, type McpDeps } from "./mcp";
 import { corsPreflight, withCors } from "./cors";
 import { handleMockRequest, parseMockPath, type MockDeps } from "./mock";
+import { applyGatewaySecurityHeaders } from "./security-headers";
+import {
+  EDGE_KEY_REVOCATION_ACK_SIGNATURE_HEADER,
+  EDGE_KEY_REVOCATION_MAX_BODY_BYTES,
+  EDGE_KEY_REVOCATION_NONCE_HEADER,
+  EDGE_KEY_REVOCATION_PATH,
+  EDGE_KEY_REVOCATION_SCHEMA_VERSION,
+  EDGE_KEY_REVOCATION_SIGNATURE_HEADER,
+  EDGE_KEY_REVOCATION_TIMESTAMP_HEADER,
+  canonicalJson,
+  edgeKeyRevocationBodySha256,
+  parseEdgeKeyRevocationEvent,
+  signEdgeKeyRevocationAck,
+  verifyEdgeKeyRevocationRequest,
+  type EdgeKeyRevocationAck,
+} from "@zevium/shared";
 
 export { WalletDO };
 export { __setTestUsageMutation, __setTestGrantsFetcher } from "./wallet";
@@ -204,14 +220,14 @@ function timingSafeEqual(a: string, b: string): boolean {
  * - /mcp — MCP Streamable HTTP (search / docs / metered call_api)
  * - /internal/grant — control-plane grant projection (shared secret)
  * - /internal/sync — control-plane checkpoint refresh (shared secret)
+ * - /internal/key-revocation — monotonic signed key revoke (shared secret HMAC)
  * - /health
  */
-export default {
-  async fetch(
-    request: Request,
-    env: Env,
-    ctx: ExecutionContext,
-  ): Promise<Response> {
+async function dispatchRequest(
+  request: Request,
+  env: Env,
+  ctx: ExecutionContext,
+): Promise<Response> {
     const url = new URL(request.url);
     const parts = url.pathname.split("/").filter(Boolean);
 
@@ -246,6 +262,15 @@ export default {
     // POST /internal/sync { clerkOrgId }
     if (parts[0] === "internal" && parts[1] === "sync" && parts.length === 2) {
       return handleInternalSync(request, env);
+    }
+
+    // POST /internal/key-revocation — signed, request-bound ACK
+    if (
+      parts[0] === "internal" &&
+      parts[1] === "key-revocation" &&
+      parts.length === 2
+    ) {
+      return handleInternalKeyRevocation(request, env);
     }
 
     // GET /discovery — public machine-readable index
@@ -286,7 +311,24 @@ export default {
       );
     }
 
-    return withCors(Response.json({ error: "not found" }, { status: 404 }));
+  return withCors(Response.json({ error: "not found" }, { status: 404 }));
+}
+
+export default {
+  async fetch(
+    request: Request,
+    env: Env,
+    ctx: ExecutionContext,
+  ): Promise<Response> {
+    let response: Response;
+    try {
+      response = await dispatchRequest(request, env, ctx);
+    } catch {
+      response = withCors(
+        Response.json({ error: "internal error" }, { status: 500 }),
+      );
+    }
+    return applyGatewaySecurityHeaders(request, response);
   },
 } satisfies ExportedHandler<Env>;
 
@@ -396,4 +438,87 @@ async function handleInternalSync(
 
   const id = env.WALLET.idFromName(clerkOrgId);
   return Response.json(await env.WALLET.get(id).syncGrants(clerkOrgId));
+}
+
+async function handleInternalKeyRevocation(
+  request: Request,
+  env: Env,
+): Promise<Response> {
+  if (request.method !== "POST") {
+    return Response.json({ error: "method not allowed" }, { status: 405 });
+  }
+  if (new URL(request.url).pathname !== EDGE_KEY_REVOCATION_PATH) {
+    return Response.json({ error: "not found" }, { status: 404 });
+  }
+  const secret = env.GATEWAY_INTERNAL_SECRET;
+  if (!secret || secret.length < 32) {
+    return Response.json(
+      { error: "misconfigured", message: "GATEWAY_INTERNAL_SECRET not set" },
+      { status: 500 },
+    );
+  }
+  const timestamp =
+    request.headers.get(EDGE_KEY_REVOCATION_TIMESTAMP_HEADER) ?? "";
+  const nonce = request.headers.get(EDGE_KEY_REVOCATION_NONCE_HEADER) ?? "";
+  const signature =
+    request.headers.get(EDGE_KEY_REVOCATION_SIGNATURE_HEADER) ?? "";
+  const rawBody = await request.text();
+  if (new TextEncoder().encode(rawBody).byteLength > EDGE_KEY_REVOCATION_MAX_BODY_BYTES) {
+    return Response.json({ error: "payload_too_large" }, { status: 413 });
+  }
+  const ok = await verifyEdgeKeyRevocationRequest(
+    secret,
+    timestamp,
+    nonce,
+    rawBody,
+    signature,
+  );
+  if (!ok) {
+    return Response.json({ error: "unauthorized" }, { status: 401 });
+  }
+  let event;
+  try {
+    event = parseEdgeKeyRevocationEvent(JSON.parse(rawBody) as unknown);
+  } catch {
+    return Response.json({ error: "invalid_body" }, { status: 400 });
+  }
+  const bodySha256 = await edgeKeyRevocationBodySha256(rawBody);
+  const id = env.WALLET.idFromName(event.clerkOrgId);
+  const result = await env.WALLET.get(id).applyKeyRevocation(
+    event.clerkOrgId,
+    event.keyId,
+    event.revision,
+  );
+  const status =
+    result.status === "applied"
+      ? "applied"
+      : result.status === "stale"
+        ? "stale"
+        : "rejected";
+  const receiverRevision =
+    result.status === "rejected" ? -1 : result.revision;
+  const ack: EdgeKeyRevocationAck = {
+    schemaVersion: EDGE_KEY_REVOCATION_SCHEMA_VERSION,
+    eventId: event.eventId,
+    bodySha256,
+    clerkOrgId: event.clerkOrgId,
+    keyId: event.keyId,
+    revision: event.revision,
+    status,
+    receiverRevision,
+  };
+  const rawAck = canonicalJson(ack);
+  const ackSignature = await signEdgeKeyRevocationAck(
+    secret,
+    timestamp,
+    nonce,
+    rawAck,
+  );
+  return new Response(rawAck, {
+    status: 200,
+    headers: {
+      "content-type": "application/json",
+      [EDGE_KEY_REVOCATION_ACK_SIGNATURE_HEADER]: ackSignature,
+    },
+  });
 }

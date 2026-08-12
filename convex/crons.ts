@@ -28,6 +28,18 @@ crons.interval(
   internal.keySettings.resumeDueAutoRevokes,
 );
 
+crons.interval(
+  "resume-membership-key-cleanup",
+  { minutes: 1 },
+  internal.keySettings.scheduleMembershipCleanupDue,
+);
+
+crons.interval(
+  "resume-edge-key-revocation",
+  { minutes: 1 },
+  internal.edgeKeyRevocation.scheduleDue,
+);
+
 /**
  * Hourly release of risk-held earnings that have matured past their hold.
  * Each org is released in its own transaction with per-org error isolation,

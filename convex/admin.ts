@@ -14,6 +14,10 @@ import {
   credentialKeyringPreflight,
   type CredentialKeyringPreflight,
 } from "./lib/credentialCrypto";
+import {
+  requireCompletedSecurityAudit,
+  securityRolloutGeneration,
+} from "./securityRollout";
 
 /** Cap for month-to-date usage count (by_at index range scan). */
 const USAGE_STATS_CAP = 50_000;
@@ -37,15 +41,24 @@ export const isAdminQuery = query({
 /** Read-only deploy preflight; never returns key material. */
 export const securityRolloutPreflight = query({
   args: {},
-  handler: async (ctx): Promise<CredentialKeyringPreflight> => {
+  handler: async (
+    ctx,
+  ): Promise<
+    CredentialKeyringPreflight & { generation: number; auditRequired: true }
+  > => {
     await requireAdmin(ctx);
-    return credentialKeyringPreflight();
+    return {
+      ...credentialKeyringPreflight(),
+      generation: await securityRolloutGeneration(ctx),
+      auditRequired: true,
+    };
   },
 });
 
 /** Bounded, idempotent rollout step; run repeatedly until remaining is zero. */
 export const migrateSecurityRollout = mutation({
   args: {
+    auditId: v.string(),
     credentialsCursor: v.optional(v.union(v.string(), v.null())),
     webhookCursor: v.optional(v.union(v.string(), v.null())),
     numItems: v.optional(v.number()),
@@ -60,6 +73,7 @@ export const migrateSecurityRollout = mutation({
     handles: { updated: number; collisions: number };
   }> => {
     await requireAdmin(ctx);
+    await requireCompletedSecurityAudit(ctx, args.auditId);
     const keyring = credentialKeyringPreflight();
     if (!keyring.boundEnvelopeReady) {
       throw new Error(
@@ -69,6 +83,7 @@ export const migrateSecurityRollout = mutation({
     const credentials = await ctx.runMutation(
       internal.upstreamCredentials.migrateLegacyPlaintext,
       {
+        auditId: args.auditId,
         cursor: args.credentialsCursor ?? null,
         ...(args.numItems === undefined ? {} : { numItems: args.numItems }),
       },
@@ -76,6 +91,7 @@ export const migrateSecurityRollout = mutation({
     const webhookSecrets = await ctx.runMutation(
       internal.webhooks.migrateLegacyPlaintext,
       {
+        auditId: args.auditId,
         cursor: args.webhookCursor ?? null,
         ...(args.numItems === undefined ? {} : { numItems: args.numItems }),
       },

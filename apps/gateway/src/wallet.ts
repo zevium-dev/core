@@ -152,6 +152,11 @@ export type SyncGrantsResult =
   | { status: "rate_limited"; retryAfterSeconds: number }
   | { status: "sync_failed"; error: string; balance: number; sequence: number };
 
+export type ApplyKeyRevocationResult =
+  | { status: "applied"; revision: number }
+  | { status: "stale"; revision: number }
+  | { status: "rejected"; reason: "invalid" | "org_mismatch" };
+
 /** Per-key control metadata mirrored from the control-plane keySettings table. */
 export type KeySetting = {
   keyId: string;
@@ -184,6 +189,8 @@ const K_FLUSH_SEQ = "flushSeq";
 const K_FREE_PREFIX = "free:";
 const K_KEY_SETTINGS = "keySettings";
 const K_KEY_SETTINGS_AT = "keySettingsSyncedAt";
+const K_KEY_REVOCATIONS = "keyRevocations";
+const K_CLERK_ORG_ID = "clerkOrgId";
 const K_SETTLED_PREFIX = "settled:";
 const K_SYNC_GRANTS_AT = "syncGrantsAt";
 const SYNC_GRANTS_WINDOW_MS = 60_000;
@@ -287,6 +294,8 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
   #terminal: Record<string, TerminalStatus> = {};
   #keySettings: Map<string, KeySetting> = new Map();
   #keySettingsSyncedAt = 0;
+  #keyRevocations: Record<string, number> = {};
+  #clerkOrgId: string | null = null;
   #syncInFlight: Promise<SyncGrantsResult> | null = null;
   #flushSeq = 0;
   #loaded = false;
@@ -302,6 +311,7 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
   async #load(): Promise<void> {
     const stored = await this.ctx.storage.get<
       | number
+      | string
       | Record<string, InFlightEntry>
       | string[]
       | PendingSettlement[]
@@ -317,6 +327,8 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
       K_FLUSH_SEQ,
       K_KEY_SETTINGS,
       K_KEY_SETTINGS_AT,
+      K_KEY_REVOCATIONS,
+      K_CLERK_ORG_ID,
     ]);
 
     this.#balance = (stored.get(K_BALANCE) as number | undefined) ?? 0;
@@ -338,6 +350,11 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
     this.#keySettings = new Map(Object.entries(settingsMap));
     this.#keySettingsSyncedAt =
       (stored.get(K_KEY_SETTINGS_AT) as number | undefined) ?? 0;
+    this.#keyRevocations =
+      (stored.get(K_KEY_REVOCATIONS) as Record<string, number> | undefined) ??
+      {};
+    this.#clerkOrgId =
+      (stored.get(K_CLERK_ORG_ID) as string | undefined) ?? null;
     this.#loaded = true;
   }
 
@@ -388,6 +405,8 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
       flushSeq: number;
       keySettings: Record<string, KeySetting>;
       keySettingsSyncedAt: number;
+      keyRevocations: Record<string, number>;
+      clerkOrgId: string;
       settledCounter: { storageKey: string; amount: number };
     }>,
   ): Promise<void> {
@@ -407,6 +426,10 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
         await txn.put(K_KEY_SETTINGS, keys.keySettings);
       if (keys.keySettingsSyncedAt !== undefined)
         await txn.put(K_KEY_SETTINGS_AT, keys.keySettingsSyncedAt);
+      if (keys.keyRevocations !== undefined)
+        await txn.put(K_KEY_REVOCATIONS, keys.keyRevocations);
+      if (keys.clerkOrgId !== undefined)
+        await txn.put(K_CLERK_ORG_ID, keys.clerkOrgId);
       if (keys.settledCounter !== undefined) {
         const current =
           (await txn.get<number>(keys.settledCounter.storageKey)) ?? 0;
@@ -451,6 +474,51 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
       });
 
       return { status: "applied", balance: this.#balance };
+    });
+  }
+
+  /**
+   * Security-owned v2 registry consumer hook. Receiver authenticates/hash-chain
+   * verifies event, then invokes this on wallet selected by clerkOrgId.
+   * Terminal membership revocation bypasses 60s checkpoint throttling.
+   */
+  async applyKeyRevocation(
+    clerkOrgId: string,
+    keyId: string,
+    revision: number,
+  ): Promise<ApplyKeyRevocationResult> {
+    if (
+      clerkOrgId.trim() === "" ||
+      keyId.trim() === "" ||
+      !Number.isSafeInteger(revision) ||
+      revision < 0
+    ) {
+      return { status: "rejected", reason: "invalid" };
+    }
+    return await this.#mutate(async () => {
+      if (this.#clerkOrgId !== null && this.#clerkOrgId !== clerkOrgId) {
+        return { status: "rejected", reason: "org_mismatch" };
+      }
+      const currentRevision = this.#keyRevocations[keyId] ?? -1;
+      if (revision <= currentRevision) {
+        return { status: "stale", revision: currentRevision };
+      }
+      this.#clerkOrgId = clerkOrgId;
+      this.#keyRevocations[keyId] = revision;
+      const existing = this.#keySettings.get(keyId);
+      this.#keySettings.set(keyId, {
+        keyId,
+        familyId: existing?.familyId ?? keyId,
+        monthlyCapCredits: existing?.monthlyCapCredits,
+        disabled: true,
+        rotatedFromKeyId: existing?.rotatedFromKeyId,
+      });
+      await this.#persist({
+        clerkOrgId,
+        keyRevocations: { ...this.#keyRevocations },
+        keySettings: Object.fromEntries(this.#keySettings),
+      });
+      return { status: "applied", revision };
     });
   }
 
@@ -910,15 +978,11 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
       (err: unknown) => ({ ok: false as const, err }),
     );
     if (!usageResult.ok) {
-      const message =
-        usageResult.err instanceof Error
-          ? usageResult.err.message
-          : String(usageResult.err);
       return {
         flushed: 0,
         acked: 0,
         remaining: this.#pendingSettlements.length,
-        error: message,
+        error: "usage flush failed",
       };
     }
 
@@ -1000,6 +1064,14 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
     nowMs: number = Date.now(),
   ): Promise<SyncGrantsResult> {
     return this.#mutate(async () => {
+      if (this.#clerkOrgId !== null && this.#clerkOrgId !== clerkOrgId) {
+        return {
+          status: "sync_failed",
+          error: "wallet organization mismatch",
+          balance: this.#balance,
+          sequence: this.#sequence,
+        };
+      }
       const last = (await this.ctx.storage.get<number>(K_SYNC_GRANTS_AT)) ?? 0;
       if (nowMs - last < SYNC_GRANTS_WINDOW_MS) {
         return {
@@ -1026,6 +1098,17 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
       this.#keySettings = new Map(
         synced.keySettings.map((setting) => [setting.keyId, setting]),
       );
+      for (const keyId of Object.keys(this.#keyRevocations)) {
+        const existing = this.#keySettings.get(keyId);
+        this.#keySettings.set(keyId, {
+          keyId,
+          familyId: existing?.familyId ?? keyId,
+          monthlyCapCredits: existing?.monthlyCapCredits,
+          disabled: true,
+          rotatedFromKeyId: existing?.rotatedFromKeyId,
+        });
+      }
+      this.#clerkOrgId = clerkOrgId;
       this.#keySettingsSyncedAt = nowMs;
       this.#acceptCheckpoint(synced.wallet);
 
@@ -1034,6 +1117,7 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
         sequence: this.#sequence,
         keySettings: Object.fromEntries(this.#keySettings),
         keySettingsSyncedAt: this.#keySettingsSyncedAt,
+        clerkOrgId,
       });
 
       return {

@@ -17,12 +17,11 @@ export type ListingPricingSummary = {
 };
 
 export type PublicListing = {
-  projectId: Doc<"projects">["_id"];
+  listingId: string;
   name: string;
   slug: string;
   description: string | undefined;
   tags: string[];
-  organizationId: Doc<"organizations">["_id"];
   orgName: string;
   publisherHandle: string;
   publishedAt: number | null;
@@ -227,12 +226,11 @@ export const listPublic = query({
 
     return {
       items: page.map(({ project, org, publishedAt, pricing }) => ({
-        projectId: project._id,
+        listingId: `${org.publicHandle!}/${project.slug}`,
         name: project.name,
         slug: project.slug,
         description: project.description,
         tags: project.tags,
-        organizationId: org._id,
         orgName: org.name,
         publisherHandle: org.publicHandle!,
         publishedAt,
@@ -254,7 +252,6 @@ export const getPublicDetail = query({
     args,
   ): Promise<{
     project: {
-      _id: Doc<"projects">["_id"];
       name: string;
       slug: string;
       description: string | undefined;
@@ -263,7 +260,6 @@ export const getPublicDetail = query({
       visibility: Doc<"projects">["visibility"];
     };
     org: {
-      _id: Doc<"organizations">["_id"];
       name: string;
       publisherHandle: string;
       imageUrl: string | undefined;
@@ -305,7 +301,6 @@ export const getPublicDetail = query({
 
     return {
       project: {
-        _id: project._id,
         name: project.name,
         slug: project.slug,
         description: project.description,
@@ -314,7 +309,6 @@ export const getPublicDetail = query({
         visibility: project.visibility,
       },
       org: {
-        _id: org._id,
         name: org.name,
         publisherHandle: org.publicHandle,
         imageUrl: org.imageUrl,

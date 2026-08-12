@@ -36,8 +36,8 @@ export function EditorToolbar({ onApplyText, disabled }: EditorToolbarProps) {
   const [url, setUrl] = useState("");
   const [urlPending, setUrlPending] = useState(false);
 
-  function applyImportedRaw(raw: string) {
-    const converted = convertSpecInputToJson(raw);
+  async function applyImportedRaw(raw: string) {
+    const converted = await convertSpecInputToJson(raw);
     if (!converted.ok) {
       toast.error(converted.error);
       return;
@@ -55,7 +55,7 @@ export function EditorToolbar({ onApplyText, disabled }: EditorToolbarProps) {
     if (!file) return;
     try {
       const raw = await file.text();
-      applyImportedRaw(raw);
+      await applyImportedRaw(raw);
     } catch (err) {
       toast.error(humanError(err, "Could not read file"));
     } finally {
@@ -72,7 +72,7 @@ export function EditorToolbar({ onApplyText, disabled }: EditorToolbarProps) {
     setUrlPending(true);
     try {
       const result = await fetchSpecFromUrl({ data: parsed.data });
-      applyImportedRaw(result.text);
+      await applyImportedRaw(result.text);
       setUrlOpen(false);
       setUrl("");
     } catch (err) {

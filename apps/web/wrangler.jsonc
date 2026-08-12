@@ -7,6 +7,7 @@
   "workers_dev": true,
   "preview_urls": true,
   "observability": { "enabled": true },
-  "main": "@tanstack/react-start/server-entry",
+  "main": "./src/server.ts",
+  "assets": { "binding": "ASSETS", "run_worker_first": true },
   "routes": [{ "pattern": "www.zevium.dev", "custom_domain": true }],
 }

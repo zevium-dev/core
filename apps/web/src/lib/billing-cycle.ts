@@ -42,14 +42,14 @@ export type CycleBreakdownLike = {
   totalCalls: number;
   totalCredits: number;
   byProject: readonly {
-    projectId: string;
     name: string;
     slug: string;
     calls: number;
     credits: number;
   }[];
   byKey: readonly {
-    keyId: string;
+    keyRef: string;
+    keyLabel: string;
     calls: number;
     credits: number;
   }[];

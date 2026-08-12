@@ -16,10 +16,16 @@ import {
   requireEncryptedSecret,
   webhookBinding,
   type EncryptedSecret,
+  type StoredEncryptedSecret,
 } from "./lib/credentialCrypto";
 import { createNotification } from "./lib/notifications";
 import { validateWebhookUrl } from "./lib/webhookDelivery";
 import { beginWebhookRetirement } from "./retirementJobs";
+import { publicReference } from "./lib/publicIds";
+import {
+  bumpSecurityRolloutGeneration,
+  requireCompletedSecurityAudit,
+} from "./securityRollout";
 
 export { validateWebhookUrl } from "./lib/webhookDelivery";
 
@@ -32,6 +38,8 @@ export const MAX_WEBHOOK_ATTEMPTS = 3;
 
 /** Backoff seconds between retries: after attempt 1 → 60s, after attempt 2 → 300s. */
 export const WEBHOOK_BACKOFF_SECONDS = [60, 300] as const;
+export const DEFAULT_WEBHOOK_SECRET_GRACE_SECONDS = 60 * 60;
+export const MAX_WEBHOOK_SECRET_GRACE_SECONDS = 24 * 60 * 60;
 
 // ---------------------------------------------------------------------------
 // Validation helpers
@@ -43,9 +51,9 @@ function generateSecret(): string {
 }
 
 export type WebhookEndpointMetadata = {
-  id: Id<"webhookEndpoints">;
   url: string;
   active: boolean;
+  secretVersion: number;
   createdAt: number;
 };
 
@@ -53,9 +61,9 @@ function endpointMetadata(
   endpoint: Doc<"webhookEndpoints">,
 ): WebhookEndpointMetadata {
   return {
-    id: endpoint._id,
     url: endpoint.url,
     active: endpoint.active,
+    secretVersion: endpoint.secretVersion ?? 1,
     createdAt: endpoint.createdAt,
   };
 }
@@ -83,8 +91,10 @@ export async function fireWebhookEvent(
 
   const timestamp = Date.now();
   const payload = JSON.stringify({ event, data, timestamp });
+  const secretVersion = endpoint.secretVersion ?? 1;
   const deliveryId = await ctx.db.insert("webhookDeliveries", {
     endpointId: endpoint._id,
+    secretVersion,
     event,
     status: "pending",
     attempts: 0,
@@ -142,11 +152,13 @@ export const upsertEndpoint = mutation({
         projectId: args.projectId,
         url,
         ...encryptedSecret,
+        secretVersion: 1,
         active: args.active ?? true,
         createdAt: Date.now(),
       });
       const created = await ctx.db.get(id);
       if (created === null) throw new Error("Failed to create endpoint");
+      await bumpSecurityRolloutGeneration(ctx);
       return endpointMetadata(created);
     }
     if (existing.retiringAt !== undefined) {
@@ -157,6 +169,7 @@ export const upsertEndpoint = mutation({
       url,
       active: args.active ?? existing.active,
     });
+    await bumpSecurityRolloutGeneration(ctx);
     const updated = await ctx.db.get(existing._id);
     if (updated === null) throw new Error("Failed to load endpoint");
     return endpointMetadata(updated);
@@ -188,17 +201,100 @@ export const revealSecret = mutation({
       .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
       .unique();
     if (endpoint === null || endpoint.retiringAt !== undefined) return null;
+    if (endpoint.secretRevealedAt !== undefined) return null;
 
     try {
+      const secret = await decryptSecret(
+        requireEncryptedSecret(endpoint),
+        webhookBinding(args.projectId, endpoint.secretVersion ?? 1),
+      );
+      await ctx.db.patch(endpoint._id, { secretRevealedAt: Date.now() });
+      await bumpSecurityRolloutGeneration(ctx);
       return {
-        secret: await decryptSecret(
-          requireEncryptedSecret(endpoint),
-          webhookBinding(args.projectId),
-        ),
+        secret,
       };
     } catch {
       throw new Error("Signing secret is unavailable");
     }
+  },
+});
+
+/** Rotate signing material. Returned cleartext is the sole reveal for this version. */
+export const rotateSecret = mutation({
+  args: {
+    projectId: v.id("projects"),
+    graceSeconds: v.optional(v.number()),
+  },
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{
+    secret: string;
+    secretVersion: number;
+    previousValidUntil: number;
+  }> => {
+    await requireProjectAdmin(ctx, args.projectId);
+    const graceSeconds =
+      args.graceSeconds ?? DEFAULT_WEBHOOK_SECRET_GRACE_SECONDS;
+    if (
+      !Number.isSafeInteger(graceSeconds) ||
+      graceSeconds < 0 ||
+      graceSeconds > MAX_WEBHOOK_SECRET_GRACE_SECONDS
+    ) {
+      throw new Error("Webhook secret grace must be 0 to 86400 seconds");
+    }
+    const endpoint = await ctx.db
+      .query("webhookEndpoints")
+      .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
+      .unique();
+    if (endpoint === null || endpoint.retiringAt !== undefined) {
+      throw new Error("Webhook endpoint not found");
+    }
+    if ((endpoint.previousValidUntil ?? 0) > Date.now()) {
+      throw new Error("Previous webhook secret grace period is still active");
+    }
+    const currentVersion = endpoint.secretVersion ?? 1;
+    try {
+      await decryptSecret(
+        requireEncryptedSecret(endpoint),
+        webhookBinding(args.projectId, currentVersion),
+      );
+    } catch {
+      throw new Error("Signing secret is unavailable");
+    }
+
+    const secretVersion = currentVersion + 1;
+    const secret = generateSecret();
+    let encrypted: EncryptedSecret;
+    try {
+      encrypted = await encryptSecret(
+        secret,
+        webhookBinding(args.projectId, secretVersion),
+      );
+    } catch {
+      throw new Error("Signing secret could not be rotated");
+    }
+    const now = Date.now();
+    const previousValidUntil = now + graceSeconds * 1000;
+    await ctx.db.patch(endpoint._id, {
+      ...encrypted,
+      secret: undefined,
+      secretVersion,
+      // Rotation response is the one-time reveal.
+      secretRevealedAt: now,
+      previousCiphertext: endpoint.ciphertext,
+      previousIv: endpoint.iv,
+      previousKeyVersion: endpoint.keyVersion,
+      previousSealedCiphertext: endpoint.sealedCiphertext,
+      previousSealedIv: endpoint.sealedIv,
+      previousSealedKeyVersion: endpoint.sealedKeyVersion,
+      previousSealedVersion:
+        endpoint.sealedVersion === "v2" ? "v2" : undefined,
+      previousSecretVersion: currentVersion,
+      previousValidUntil,
+    });
+    await bumpSecurityRolloutGeneration(ctx);
+    return { secret, secretVersion, previousValidUntil };
   },
 });
 
@@ -231,16 +327,41 @@ export const listDeliveries = query({
       .unique();
     if (endpoint === null) {
       return {
-        page: [] as Doc<"webhookDeliveries">[],
+        page: [] as Array<{
+          id: string;
+          event: string;
+          status: Doc<"webhookDeliveries">["status"];
+          attempts: number;
+          lastError?: string;
+          createdAt: number;
+          secretVersion: number;
+        }>,
         isDone: true,
         continueCursor: "",
       };
     }
-    return await ctx.db
+    const result = await ctx.db
       .query("webhookDeliveries")
       .withIndex("by_endpoint", (q) => q.eq("endpointId", endpoint._id))
       .order("desc")
       .paginate(args.paginationOpts);
+    return {
+      ...result,
+      page: await Promise.all(
+        result.page.map(async (delivery) => ({
+          id: await publicReference(
+            "webhook-delivery",
+            String(delivery._id),
+          ),
+          event: delivery.event,
+          status: delivery.status,
+          attempts: delivery.attempts,
+          lastError: delivery.lastError,
+          createdAt: delivery.createdAt,
+          secretVersion: delivery.secretVersion ?? 1,
+        })),
+      ),
+    };
   },
 });
 
@@ -249,6 +370,35 @@ export const listDeliveries = query({
 // ---------------------------------------------------------------------------
 
 const WEBHOOK_DELIVERY_LEASE_MS = 30_000;
+
+function currentSecretEnvelope(
+  endpoint: Doc<"webhookEndpoints">,
+): StoredEncryptedSecret {
+  return {
+    ciphertext: endpoint.ciphertext,
+    iv: endpoint.iv,
+    keyVersion: endpoint.keyVersion,
+    sealedCiphertext: endpoint.sealedCiphertext,
+    sealedIv: endpoint.sealedIv,
+    sealedKeyVersion: endpoint.sealedKeyVersion,
+    sealedVersion: endpoint.sealedVersion,
+    secret: endpoint.secret,
+  };
+}
+
+function previousSecretEnvelope(
+  endpoint: Doc<"webhookEndpoints">,
+): StoredEncryptedSecret {
+  return {
+    ciphertext: endpoint.previousCiphertext,
+    iv: endpoint.previousIv,
+    keyVersion: endpoint.previousKeyVersion,
+    sealedCiphertext: endpoint.previousSealedCiphertext,
+    sealedIv: endpoint.previousSealedIv,
+    sealedKeyVersion: endpoint.previousSealedKeyVersion,
+    sealedVersion: endpoint.previousSealedVersion,
+  };
+}
 
 /** Transactional claim prevents concurrent scheduled actions from double-POSTing. */
 export const claimDelivery = internalMutation({
@@ -292,6 +442,26 @@ export const claimDelivery = internalMutation({
       });
       return null;
     }
+    const secretVersion = delivery.secretVersion ?? 1;
+    const currentVersion = endpoint.secretVersion ?? 1;
+    let encryptedSecret: StoredEncryptedSecret;
+    if (secretVersion === currentVersion) {
+      encryptedSecret = currentSecretEnvelope(endpoint);
+    } else if (
+      secretVersion === endpoint.previousSecretVersion &&
+      (endpoint.previousValidUntil ?? 0) > now
+    ) {
+      encryptedSecret = previousSecretEnvelope(endpoint);
+    } else {
+      await ctx.db.patch(delivery._id, {
+        status: "failed",
+        attempts: delivery.attempts + 1,
+        lastError: "Signing secret generation expired",
+        leaseToken: undefined,
+        leaseUntil: undefined,
+      });
+      return null;
+    }
     const leaseUntil = now + WEBHOOK_DELIVERY_LEASE_MS;
     await ctx.db.patch(delivery._id, {
       status: "delivering",
@@ -309,16 +479,8 @@ export const claimDelivery = internalMutation({
     );
     return {
       url: endpoint.url,
-      encryptedSecret: {
-        ciphertext: endpoint.ciphertext,
-        iv: endpoint.iv,
-        keyVersion: endpoint.keyVersion,
-        sealedCiphertext: endpoint.sealedCiphertext,
-        sealedIv: endpoint.sealedIv,
-        sealedKeyVersion: endpoint.sealedKeyVersion,
-        sealedVersion: endpoint.sealedVersion,
-        secret: endpoint.secret,
-      },
+      encryptedSecret,
+      secretVersion,
       projectId: endpoint.projectId,
       active: endpoint.active && endpoint.retiringAt === undefined,
       event: delivery.event,
@@ -345,10 +507,12 @@ export type WebhookSecretMigrationPage = {
 /** Cursor-bounded dual-envelope migration. Repeat until isDone, then audit again. */
 export const migrateLegacyPlaintext = internalMutation({
   args: {
+    auditId: v.string(),
     cursor: v.optional(v.union(v.string(), v.null())),
     numItems: v.optional(v.number()),
   },
   handler: async (ctx, args): Promise<WebhookSecretMigrationPage> => {
+    const audit = await requireCompletedSecurityAudit(ctx, args.auditId);
     const requested = args.numItems ?? 50;
     const numItems = Math.max(1, Math.min(100, Math.floor(requested)));
     const result = await ctx.db.query("webhookEndpoints").paginate({
@@ -368,9 +532,13 @@ export const migrateLegacyPlaintext = internalMutation({
     };
 
     for (const row of result.page) {
+      if (row._creationTime > audit.highWaterCreationTime) {
+        throw new Error("Webhook row exceeds audited high-water fence");
+      }
+      const secretVersion = row.secretVersion ?? 1;
       const migration = await migrateStoredSecret(
         row,
-        webhookBinding(row.projectId),
+        webhookBinding(row.projectId, secretVersion),
       );
       if (migration.plaintext) counts.plaintext += 1;
       if (migration.old) counts.old += 1;
@@ -380,7 +548,33 @@ export const migrateLegacyPlaintext = internalMutation({
       if (migration.recovered) counts.recovered += 1;
       if (migration.rewrapped) counts.rewrapped += 1;
       if (migration.scrubbed) counts.scrubbed += 1;
-      if (migration.patch) await ctx.db.patch(row._id, migration.patch);
+      const patch: Partial<Doc<"webhookEndpoints">> = {};
+      if (migration.patch) Object.assign(patch, migration.patch);
+
+      if (row.previousSecretVersion !== undefined) {
+        const previous = await migrateStoredSecret(
+          previousSecretEnvelope(row),
+          webhookBinding(row.projectId, row.previousSecretVersion),
+        );
+        if (previous.plaintext) counts.plaintext += 1;
+        if (previous.old) counts.old += 1;
+        if (previous.corrupt) counts.corrupt += 1;
+        if (previous.broken) counts.broken += 1;
+        else counts.current += 1;
+        if (previous.recovered) counts.recovered += 1;
+        if (previous.rewrapped) counts.rewrapped += 1;
+        if (previous.scrubbed) counts.scrubbed += 1;
+        if (previous.patch) {
+          patch.previousCiphertext = previous.patch.ciphertext;
+          patch.previousIv = previous.patch.iv;
+          patch.previousKeyVersion = previous.patch.keyVersion;
+          patch.previousSealedCiphertext = previous.patch.sealedCiphertext;
+          patch.previousSealedIv = previous.patch.sealedIv;
+          patch.previousSealedKeyVersion = previous.patch.sealedKeyVersion;
+          patch.previousSealedVersion = previous.patch.sealedVersion;
+        }
+      }
+      if (Object.keys(patch).length > 0) await ctx.db.patch(row._id, patch);
     }
 
     return {

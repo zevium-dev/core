@@ -9,6 +9,7 @@ import { extractApiKey, type KeyVerifier } from "./key-verifier";
 import type { SpecSource } from "./spec-source";
 import { filterRequestHeaders, filterResponseHeaders } from "./headers";
 import type { UsageSink } from "./usage";
+import { logDependencyFailure } from "./telemetry";
 import { jsonError } from "./errors";
 import { paymentRequiredResponse } from "./x402";
 import { assertSafeUpstreamTarget } from "./upstream-safety";
@@ -540,8 +541,8 @@ function emitUsage(
   event: Parameters<UsageSink["emit"]>[0],
 ): void {
   ctx.waitUntil(
-    Promise.resolve(deps.usageSink.emit(event)).catch((err) => {
-      console.error("usage emit failed", err);
+    Promise.resolve(deps.usageSink.emit(event)).catch(() => {
+      logDependencyFailure("usage_sink");
     }),
   );
 }

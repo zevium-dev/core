@@ -670,22 +670,36 @@ function WebhooksCard({ project }: { project: Doc<"projects"> }) {
       setRevealedSecret(null);
       setCopiedSecret(false);
     }
-  }, [endpoint?.id, endpoint?.url, endpoint?.active]);
+  }, [endpoint?.url, endpoint?.active, endpoint?.secretVersion]);
 
   const upsertMut = useConvexMutation(api.webhooks.upsertEndpoint);
   const revealMut = useConvexMutation(api.webhooks.revealSecret);
+  const rotateMut = useConvexMutation(api.webhooks.rotateSecret);
 
   const revealMutation = useMutation({
     mutationFn: () => revealMut({ projectId: project._id }),
     onSuccess: (result) => {
       if (result === null) {
-        toast.error("Save a webhook endpoint before revealing its secret");
+        toast.error("Secret was already revealed. Rotate it to get a new one.");
         return;
       }
       setRevealedSecret(result.secret);
     },
     onError: (err: unknown) =>
       toast.error(humanError(err, "Could not reveal signing secret")),
+  });
+
+  const rotateMutation = useMutation({
+    mutationFn: () =>
+      rotateMut({ projectId: project._id, graceSeconds: 60 * 60 }),
+    onSuccess: (result) => {
+      setRevealedSecret(result.secret);
+      setCopiedSecret(false);
+      revealMutation.reset();
+      toast.success("Signing secret rotated; prior version works for 1 hour");
+    },
+    onError: (err: unknown) =>
+      toast.error(humanError(err, "Could not rotate signing secret")),
   });
 
   const { mutate: saveEndpoint, isPending: saving } = useMutation({
@@ -816,6 +830,14 @@ function WebhooksCard({ project }: { project: Doc<"projects"> }) {
                     <Copy className="size-4" />
                   )}
                 </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => rotateMutation.mutate()}
+                  disabled={rotateMutation.isPending}
+                >
+                  {rotateMutation.isPending ? "Rotating…" : "Rotate"}
+                </Button>
               </div>
             ) : (
               <p className="text-xs text-muted-foreground">
@@ -920,7 +942,7 @@ function WebhookDeliveryHistory({
             const error = truncateError(delivery.lastError);
             return (
               <li
-                key={delivery._id}
+                key={delivery.id}
                 className="flex items-start justify-between gap-2 rounded-md border border-border px-2.5 py-2 text-sm"
               >
                 <div className="min-w-0 space-y-0.5">

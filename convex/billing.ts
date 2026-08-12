@@ -13,8 +13,10 @@ import type { Doc, Id } from "./_generated/dataModel";
 import {
   requireActiveOrgAdmin,
   requireIdentity,
+  orgCapabilities,
   requireOrgMemberBySlug,
 } from "./lib/auth";
+import { maskedSuffix, publicReference } from "./lib/publicIds";
 
 /** Pinned alongside `stripe@22.3.1`; upgrade only as an explicit migration. */
 export const STRIPE_API_VERSION = "2026-06-24.dahlia" as const;
@@ -960,7 +962,8 @@ function endOfUtcMonth(now: number): number {
 export const cycleBreakdown = query({
   args: { orgSlug: v.string() },
   handler: async (ctx, args) => {
-    const { org } = await requireOrgMemberBySlug(ctx, args.orgSlug);
+    const { claims, org } = await requireOrgMemberBySlug(ctx, args.orgSlug);
+    const capabilities = orgCapabilities(claims);
     const cycleStart = startOfUtcMonth(Date.now());
     const cycleEnd = endOfUtcMonth(Date.now());
     const events = await ctx.db
@@ -972,13 +975,23 @@ export const cycleBreakdown = query({
           .lt("at", cycleEnd),
       )
       .collect();
-    const byKey = new Map<string, { calls: number; credits: number }>();
+    const visibleEvents = capabilities.canViewOrgUsage
+      ? events
+      : events.filter((event) => event.ownerUserId === claims.subject);
+    const byKey = new Map<
+      string,
+      { calls: number; credits: number; ownerUserId?: string }
+    >();
     const byProject = new Map<
       Id<"projects">,
       { calls: number; credits: number }
     >();
-    for (const event of events) {
-      const key = byKey.get(event.keyId) ?? { calls: 0, credits: 0 };
+    for (const event of visibleEvents) {
+      const key = byKey.get(event.keyId) ?? {
+        calls: 0,
+        credits: 0,
+        ownerUserId: event.ownerUserId,
+      };
       key.calls += 1;
       key.credits += event.credits;
       byKey.set(event.keyId, key);
@@ -994,7 +1007,6 @@ export const cycleBreakdown = query({
       [...byProject.entries()].map(async ([projectId, row]) => {
         const project = await ctx.db.get(projectId);
         return {
-          projectId,
           name: project?.name ?? "Unknown project",
           slug: project?.slug ?? "unknown",
           ...row,
@@ -1004,15 +1016,33 @@ export const cycleBreakdown = query({
     return {
       cycleStart,
       cycleEnd,
-      totalCalls: events.length,
-      totalCredits: events.reduce((total, event) => total + event.credits, 0),
-      byKey: [...byKey.entries()]
-        .map(([keyId, row]) => ({ keyId, ...row }))
-        .sort(
+      totalCalls: visibleEvents.length,
+      totalCredits: visibleEvents.reduce(
+        (total, event) => total + event.credits,
+        0,
+      ),
+      byKey: await Promise.all(
+        [...byKey.entries()].map(async ([keyId, row]) => ({
+          keyRef: await publicReference("api-key", keyId),
+          keyLabel: maskedSuffix(keyId),
+          ...(capabilities.canViewOrgUsage && row.ownerUserId !== undefined
+            ? {
+                ownerRef: await publicReference(
+                  "org-member",
+                  row.ownerUserId,
+                ),
+              }
+            : {}),
+          calls: row.calls,
+          credits: row.credits,
+        })),
+      ).then((rows) =>
+        rows.sort(
           (left, right) =>
             right.credits - left.credits ||
-            left.keyId.localeCompare(right.keyId),
+            left.keyRef.localeCompare(right.keyRef),
         ),
+      ),
       byProject: projects.sort(
         (left, right) =>
           right.credits - left.credits || left.slug.localeCompare(right.slug),

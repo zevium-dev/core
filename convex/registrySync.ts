@@ -22,11 +22,6 @@ import {
   type ActionCtx,
   type MutationCtx,
 } from "./_generated/server";
-import {
-  decryptCredential,
-  requireEncryptedCredential,
-} from "./lib/credentialCrypto";
-
 const DELIVERY_LEASE_MS = 15_000;
 const DELIVERY_TIMEOUT_MS = 10_000;
 const MAX_ACK_BYTES = 64 * 1024;
@@ -258,22 +253,10 @@ export const materializeRoute = internalQuery({
       .order("desc")
       .first();
     if (latest === null) return null;
-    const credentials = await ctx.db
-      .query("upstreamCredentials")
-      .withIndex("by_project", (q) => q.eq("projectId", project._id))
-      .collect();
-    const upstreamHeaders = Object.fromEntries(
-      await Promise.all(
-        credentials.map(async (row) => [
-          row.name,
-          await decryptCredential(
-            requireEncryptedCredential(row),
-            row.projectId,
-            row.name,
-          ),
-        ]),
-      ),
-    );
+    // v1 must never put plaintext publisher credentials into outbox/transport.
+    // Canonical Registry v2 encrypted credential transport is owned with the
+    // receiver cutover elsewhere. Empty headers fail closed at the edge.
+    const upstreamHeaders: Record<string, string> = {};
     return {
       publisherHandle: publicHandle(org),
       projectSlug: project.slug,
@@ -619,12 +602,14 @@ export const dispatchEvent = internalAction({
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Registry delivery failed";
-      console.error("registry sync delivery failed", {
-        eventId: event.eventId,
-        operation: event.operation,
-        attempt: event.attempts,
-        message,
-      });
+      console.error(
+        JSON.stringify({
+          schema: 1,
+          type: "zevium.dependency_failure",
+          component: "registry_delivery",
+          code: "delivery_failed",
+        }),
+      );
       await ctx.runMutation(internal.registrySync.markFailed, {
         outboxId: event._id,
         attempt: event.attempts,

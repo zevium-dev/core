@@ -1,14 +1,18 @@
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
-import type { Doc, Id } from "./_generated/dataModel";
+import type { Doc } from "./_generated/dataModel";
 import {
   internalMutation,
+  mutation,
   query,
   type MutationCtx,
   type QueryCtx,
 } from "./_generated/server";
-import { requireIdentity } from "./lib/auth";
+import { enqueueEdgeKeyRevocation } from "./edgeKeyRevocation";
+import { orgCapabilities, requireIdentity } from "./lib/auth";
+import { maskedSuffix, publicReference } from "./lib/publicIds";
 import { enqueueKeyState, enqueueKeyUpsert } from "./registrySync";
+import type { EdgeKeyRevocationReason } from "@zevium/shared";
 
 const OPERATION_TTL_MS = 5 * 60_000;
 const SAGA_RECONCILE_DELAY_MS = 60_000;
@@ -16,7 +20,6 @@ const AUTO_REVOKE_LEASE_MS = 5 * 60_000;
 export const ROTATION_GRACE_MS = 24 * 60 * 60_000;
 
 export type KeySettingView = {
-  _id: Id<"keySettings">;
   keyId: string;
   managed: boolean;
   familyId: string;
@@ -27,14 +30,17 @@ export type KeySettingView = {
   updatedAt: number;
 };
 
-export type GatewayKeySettingRow = Omit<
-  KeySettingView,
-  "_id" | "updatedAt" | "managed"
->;
+export type GatewayKeySettingRow = {
+  keyId: string;
+  familyId: string;
+  monthlyCapCredits?: number;
+  disabled: boolean;
+  rotatedFromKeyId?: string;
+  graceUntil?: number;
+};
 
 function toView(doc: Doc<"keySettings">): KeySettingView {
   return {
-    _id: doc._id,
     keyId: doc.keyId,
     managed: doc.managed === true,
     familyId: doc.familyId ?? doc.keyId,
@@ -64,7 +70,11 @@ type DbCtx = QueryCtx | MutationCtx;
 
 async function requireOrgScope(
   ctx: DbCtx,
-): Promise<{ clerkOrgId: string; userId: string }> {
+): Promise<{
+  clerkOrgId: string;
+  userId: string;
+  canManageOrgKeyPolicy: boolean;
+}> {
   const claims = await requireIdentity(ctx);
   if (!claims.orgId) {
     throw new Error("Select an organization before managing API keys");
@@ -74,13 +84,28 @@ async function requireOrgScope(
     .withIndex("by_clerk_org", (q) => q.eq("clerkOrgId", claims.orgId!))
     .unique();
   if (org === null) throw new Error("Organization not found");
-  return { clerkOrgId: claims.orgId, userId: claims.subject };
+  return {
+    clerkOrgId: claims.orgId,
+    userId: claims.subject,
+    canManageOrgKeyPolicy: orgCapabilities(claims).canManageOrgKeyPolicy,
+  };
 }
 
 function validId(value: string, label: string): string {
   const id = value.trim();
   if (id.length < 8 || id.length > 256) throw new Error(`${label} is invalid`);
   return id;
+}
+
+/** Registry projection plus durable signed edge revocation that bypasses 60s sync. */
+async function publishTerminalKeyState(
+  ctx: MutationCtx,
+  row: Doc<"keySettings">,
+  lifecycle: "disabled" | "revoked",
+  reason: EdgeKeyRevocationReason,
+): Promise<void> {
+  await enqueueKeyState(ctx, row, lifecycle);
+  await enqueueEdgeKeyRevocation(ctx, row, reason);
 }
 
 async function ownedRow(
@@ -269,6 +294,134 @@ export const getForOrg = query({
   },
 });
 
+export type OrgKeyPolicyView = {
+  policyId: string;
+  ownerRef: string;
+  keyLabel: string;
+  monthlyCapCredits?: number;
+  disabled: boolean;
+  lifecycle: "active" | "disabled" | "grace" | "revoked";
+  updatedAt: number;
+};
+
+async function toOrgPolicyView(
+  row: Doc<"keySettings">,
+): Promise<OrgKeyPolicyView> {
+  const lifecycle =
+    row.revokedAt !== undefined || row.membershipRevokedAt !== undefined
+      ? "revoked"
+      : currentLifecycle(row);
+  return {
+    policyId: await publicReference("key-policy", row.keyId),
+    ownerRef: await publicReference("org-member", row.ownerUserId ?? "unknown"),
+    keyLabel: maskedSuffix(row.keyId),
+    monthlyCapCredits: row.monthlyCapCredits,
+    disabled: row.managed !== true || row.disabled,
+    lifecycle,
+    updatedAt: row.updatedAt,
+  };
+}
+
+/** Org admins get policy attribution without provider or Convex identifiers. */
+export const listOrgPolicy = query({
+  args: {},
+  handler: async (ctx): Promise<OrgKeyPolicyView[]> => {
+    const scope = await requireOrgScope(ctx);
+    if (!scope.canManageOrgKeyPolicy) throw new Error("Org admin role required");
+    const rows = await ctx.db
+      .query("keySettings")
+      .withIndex("by_org", (q) => q.eq("clerkOrgId", scope.clerkOrgId))
+      .take(2_000);
+    return await Promise.all(
+      rows.filter((row) => row.managed === true).map(toOrgPolicyView),
+    );
+  },
+});
+
+/** Admin cap/disable controls resolve opaque policy ids server-side. */
+export const setOrgPolicy = mutation({
+  args: {
+    policyId: v.string(),
+    monthlyCapCredits: v.optional(v.union(v.number(), v.null())),
+    disabled: v.optional(v.boolean()),
+  },
+  handler: async (ctx, args): Promise<OrgKeyPolicyView> => {
+    const scope = await requireOrgScope(ctx);
+    if (!scope.canManageOrgKeyPolicy) throw new Error("Org admin role required");
+    if (args.monthlyCapCredits === undefined && args.disabled === undefined) {
+      throw new Error("Key policy change is required");
+    }
+    if (
+      args.monthlyCapCredits !== undefined &&
+      args.monthlyCapCredits !== null &&
+      (!Number.isSafeInteger(args.monthlyCapCredits) ||
+        args.monthlyCapCredits <= 0)
+    ) {
+      throw new Error("Cap must be a positive whole number of credits");
+    }
+    const rows = await ctx.db
+      .query("keySettings")
+      .withIndex("by_org", (q) => q.eq("clerkOrgId", scope.clerkOrgId))
+      .take(2_000);
+    let selected: Doc<"keySettings"> | null = null;
+    for (const row of rows) {
+      if ((await publicReference("key-policy", row.keyId)) === args.policyId) {
+        selected = row;
+        break;
+      }
+    }
+    if (selected === null || selected.ownerUserId === undefined) {
+      throw new Error("Key policy unavailable");
+    }
+    if (
+      args.disabled === false &&
+      (selected.revokedAt !== undefined ||
+        selected.membershipRevokedAt !== undefined ||
+        (selected.graceUntil !== undefined &&
+          selected.graceUntil <= Date.now()))
+    ) {
+      throw new Error("Revoked keys cannot be enabled");
+    }
+    const familyId = selected.familyId ?? selected.keyId;
+    const family = await ctx.db
+      .query("keySettings")
+      .withIndex("by_family", (q) =>
+        q
+          .eq("clerkOrgId", scope.clerkOrgId)
+          .eq("ownerUserId", selected!.ownerUserId)
+          .eq("familyId", familyId),
+      )
+      .take(2_000);
+    const targets = family.some((row) => row._id === selected!._id)
+      ? family
+      : [selected, ...family];
+    const now = Date.now();
+    let updatedSelected: Doc<"keySettings"> | null = null;
+    for (const row of targets) {
+      const patch: Partial<Doc<"keySettings">> = { updatedAt: now };
+      if (args.monthlyCapCredits !== undefined) {
+        patch.monthlyCapCredits =
+          args.monthlyCapCredits === null
+            ? undefined
+            : args.monthlyCapCredits;
+      }
+      if (args.disabled !== undefined) patch.disabled = args.disabled;
+      await ctx.db.patch(row._id, patch);
+      const updated = await ctx.db.get(row._id);
+      if (updated === null) throw new Error("Key policy unavailable");
+      const lifecycle = currentLifecycle(updated);
+      if (lifecycle === "disabled") {
+        await publishTerminalKeyState(ctx, updated, "disabled", "disabled");
+      } else {
+        await enqueueKeyState(ctx, updated, lifecycle);
+      }
+      if (row._id === selected._id) updatedSelected = updated;
+    }
+    if (updatedSelected === null) throw new Error("Key policy unavailable");
+    return await toOrgPolicyView(updatedSelected);
+  },
+});
+
 /**
  * Record provider-visible keys without granting authority. Unknown keys enter a
  * disabled quarantine and can only be revoked; lifecycle completion is the only
@@ -292,7 +445,12 @@ export const observeVerified = internalMutation({
       );
       if (observed.changed) {
         await enqueueKeyUpsert(ctx, observed.row);
-        await enqueueKeyState(ctx, observed.row, "disabled");
+        await publishTerminalKeyState(
+          ctx,
+          observed.row,
+          "disabled",
+          "provider_revoked",
+        );
       }
       views.push(toView(observed.row));
     }
@@ -387,7 +545,12 @@ export const setDisabledVerified = internalMutation({
       args.keyId,
       { disabled: args.disabled },
     );
-    await enqueueKeyState(ctx, updated, currentLifecycle(updated));
+    const lifecycle = currentLifecycle(updated);
+    if (lifecycle === "disabled") {
+      await publishTerminalKeyState(ctx, updated, "disabled", "disabled");
+    } else {
+      await enqueueKeyState(ctx, updated, lifecycle);
+    }
     return toView(updated);
   },
 });
@@ -690,7 +853,14 @@ export const compensateCreatedKeyVerified = internalMutation({
         updatedAt: now,
       });
       const revoked = await ctx.db.get(row._id);
-      if (revoked !== null) await enqueueKeyState(ctx, revoked, "revoked");
+      if (revoked !== null) {
+        await publishTerminalKeyState(
+          ctx,
+          revoked,
+          "revoked",
+          "provider_revoked",
+        );
+      }
     }
     await ctx.db.patch(op._id, {
       status: "failed",
@@ -790,7 +960,7 @@ export const beginRevokeVerified = internalMutation({
     });
     const disabled = await ctx.db.get(row._id);
     if (disabled === null) throw new Error("Key unavailable");
-    await enqueueKeyState(ctx, disabled, "disabled");
+    await publishTerminalKeyState(ctx, disabled, "disabled", "admin_revoked");
     await ctx.scheduler.runAt(
       leaseExpiresAt,
       internal.keyBroker.reconcileRevokedKey,
@@ -830,7 +1000,7 @@ export const completeRevokeVerified = internalMutation({
     });
     const revoked = await ctx.db.get(row._id);
     if (revoked === null) throw new Error("Key unavailable");
-    await enqueueKeyState(ctx, revoked, "revoked");
+    await publishTerminalKeyState(ctx, revoked, "revoked", "admin_revoked");
     await ctx.db.patch(op._id, {
       status: "completed",
       orphanReconciledAt: now,
@@ -866,7 +1036,7 @@ export const failRevokeVerified = internalMutation({
       });
       const closed = await ctx.db.get(row._id);
       if (closed === null) throw new Error("Key unavailable");
-      await enqueueKeyState(ctx, closed, "revoked");
+      await publishTerminalKeyState(ctx, closed, "revoked", "admin_revoked");
     }
     await ctx.db.patch(op._id, {
       status: "failed",
@@ -1227,7 +1397,14 @@ export const compensateRotationVerified = internalMutation({
         updatedAt: now,
       });
       const revoked = await ctx.db.get(replacement._id);
-      if (revoked !== null) await enqueueKeyState(ctx, revoked, "revoked");
+      if (revoked !== null) {
+        await publishTerminalKeyState(
+          ctx,
+          revoked,
+          "revoked",
+          "provider_revoked",
+        );
+      }
     }
     const old = await ctx.db
       .query("keySettings")
@@ -1599,7 +1776,7 @@ export const claimExpiredRotationRevoke = internalMutation({
     });
     const disabled = await ctx.db.get(old._id);
     if (disabled === null) throw new Error("Rotation key unavailable");
-    await enqueueKeyState(ctx, disabled, "revoked");
+    await publishTerminalKeyState(ctx, disabled, "revoked", "rotated");
     await ctx.db.patch(op._id, {
       autoRevokeStatus: "revoking",
       autoRevokeAttempts: (op.autoRevokeAttempts ?? 0) + 1,
@@ -1764,6 +1941,72 @@ export const resumeDueAutoRevokes = internalMutation({
   },
 });
 
+const MEMBERSHIP_CLEANUP_LEASE_MS = 2 * 60_000;
+
+async function ensureMembershipCleanupJob(
+  ctx: MutationCtx,
+  clerkOrgId: string,
+  userId: string,
+  membershipRevision: number,
+  resume = false,
+): Promise<void> {
+  const now = Date.now();
+  let shouldSchedule = true;
+  const existing = await ctx.db
+    .query("membershipCleanupJobs")
+    .withIndex("by_membership", (q) =>
+      q.eq("clerkOrgId", clerkOrgId).eq("userId", userId),
+    )
+    .unique();
+  if (existing === null) {
+    await ctx.db.insert("membershipCleanupJobs", {
+      clerkOrgId,
+      userId,
+      membershipRevision,
+      status: "pending",
+      attempts: 0,
+      zeroVerificationPasses: 0,
+      cursorOffset: 0,
+      nextRunAt: now,
+      createdAt: now,
+      updatedAt: now,
+    });
+  } else if (existing.membershipRevision !== membershipRevision) {
+    await ctx.db.patch(existing._id, {
+      membershipRevision,
+      status: "pending",
+      attempts: 0,
+      zeroVerificationPasses: 0,
+      cursorOffset: 0,
+      scanExpectedTotal: undefined,
+      scanProviderIds: undefined,
+      previousZeroFingerprint: undefined,
+      leaseToken: undefined,
+      leaseUntil: undefined,
+      nextRunAt: now,
+      lastErrorCode: undefined,
+      updatedAt: now,
+      completedAt: undefined,
+    });
+  } else if (resume && existing.status !== "completed") {
+    await ctx.db.patch(existing._id, {
+      status: "pending",
+      leaseToken: undefined,
+      leaseUntil: undefined,
+      nextRunAt: now,
+      updatedAt: now,
+    });
+  } else if (existing.status === "completed") {
+    shouldSchedule = false;
+  }
+  if (shouldSchedule) {
+    await ctx.scheduler.runAfter(0, internal.keyBroker.revokeMembershipKeys, {
+      clerkOrgId,
+      userId,
+    });
+  }
+}
+
 /** Verified Clerk membership deletion closes every local spending gate first. */
 export const revokeMembershipVerified = internalMutation({
   args: {
@@ -1779,7 +2022,24 @@ export const revokeMembershipVerified = internalMutation({
       .query("clerkWebhookReceipts")
       .withIndex("by_svix_id", (q) => q.eq("svixId", args.svixId))
       .unique();
-    if (prior !== null) return { duplicate: true, keyIds: [] };
+    if (prior !== null) {
+      const membership = await ctx.db
+        .query("clerkMembershipStates")
+        .withIndex("by_membership", (q) =>
+          q.eq("clerkOrgId", args.clerkOrgId).eq("userId", args.userId),
+        )
+        .unique();
+      if (membership?.status === "revoked") {
+        await ensureMembershipCleanupJob(
+          ctx,
+          args.clerkOrgId,
+          args.userId,
+          membership.revision,
+          true,
+        );
+      }
+      return { duplicate: true, keyIds: [] };
+    }
     const now = Date.now();
     await ctx.db.insert("clerkWebhookReceipts", {
       svixId: args.svixId,
@@ -1792,18 +2052,20 @@ export const revokeMembershipVerified = internalMutation({
         q.eq("clerkOrgId", args.clerkOrgId).eq("userId", args.userId),
       )
       .unique();
+    const membershipRevision =
+      membership === null ? 1 : membership.revision + 1;
     if (membership === null) {
       await ctx.db.insert("clerkMembershipStates", {
         clerkOrgId: args.clerkOrgId,
         userId: args.userId,
         status: "revoked",
-        revision: 1,
+        revision: membershipRevision,
         updatedAt: now,
       });
     } else {
       await ctx.db.patch(membership._id, {
         status: "revoked",
-        revision: membership.revision + 1,
+        revision: membershipRevision,
         updatedAt: now,
       });
     }
@@ -1830,7 +2092,14 @@ export const revokeMembershipVerified = internalMutation({
         updatedAt: now,
       });
       const disabled = await ctx.db.get(row._id);
-      if (disabled !== null) await enqueueKeyState(ctx, disabled, "revoked");
+      if (disabled !== null) {
+        await publishTerminalKeyState(
+          ctx,
+          disabled,
+          "revoked",
+          "membership_deleted",
+        );
+      }
     }
     for (const rotation of rotations) {
       if (rotation.status === "reserved") {
@@ -1886,6 +2155,343 @@ export const revokeMembershipVerified = internalMutation({
         );
       }
     }
+    await ensureMembershipCleanupJob(
+      ctx,
+      args.clerkOrgId,
+      args.userId,
+      membershipRevision,
+      true,
+    );
     return { duplicate: false, keyIds: rows.map((row) => row.keyId) };
+  },
+});
+
+/** Lease one exact revoked-membership cleanup revision. */
+export const claimMembershipCleanup = internalMutation({
+  args: {
+    clerkOrgId: v.string(),
+    userId: v.string(),
+    leaseToken: v.string(),
+  },
+  handler: async (ctx, args) => {
+    if (args.leaseToken.length < 16 || args.leaseToken.length > 128) {
+      throw new Error("Membership cleanup lease is invalid");
+    }
+    const job = await ctx.db
+      .query("membershipCleanupJobs")
+      .withIndex("by_membership", (q) =>
+        q.eq("clerkOrgId", args.clerkOrgId).eq("userId", args.userId),
+      )
+      .unique();
+    if (job === null || job.status === "completed") return null;
+    const membership = await ctx.db
+      .query("clerkMembershipStates")
+      .withIndex("by_membership", (q) =>
+        q.eq("clerkOrgId", args.clerkOrgId).eq("userId", args.userId),
+      )
+      .unique();
+    if (
+      membership === null ||
+      membership.status !== "revoked" ||
+      membership.revision !== job.membershipRevision
+    ) {
+      const now = Date.now();
+      await ctx.db.patch(job._id, {
+        status: "completed",
+        leaseToken: undefined,
+        leaseUntil: undefined,
+        lastErrorCode: "superseded",
+        nextRunAt: now,
+        updatedAt: now,
+        completedAt: now,
+      });
+      return null;
+    }
+    const now = Date.now();
+    if (job.status === "running" && (job.leaseUntil ?? 0) > now) return null;
+    const leaseUntil = now + MEMBERSHIP_CLEANUP_LEASE_MS;
+    await ctx.db.patch(job._id, {
+      status: "running",
+      attempts: job.attempts + 1,
+      leaseToken: args.leaseToken,
+      leaseUntil,
+      updatedAt: now,
+    });
+    return {
+      membershipRevision: job.membershipRevision,
+      zeroVerificationPasses: job.zeroVerificationPasses,
+      cursorOffset: job.cursorOffset ?? 0,
+      scanExpectedTotal: job.scanExpectedTotal,
+    };
+  },
+});
+
+/**
+ * Persist one provider page. Revocations restart from offset zero; only two
+ * identical, complete zero-live-key snapshots can complete cleanup.
+ */
+export const recordMembershipCleanupPage = internalMutation({
+  args: {
+    clerkOrgId: v.string(),
+    userId: v.string(),
+    membershipRevision: v.number(),
+    leaseToken: v.string(),
+    cursorOffset: v.number(),
+    totalCount: v.number(),
+    providerIds: v.array(v.string()),
+    liveKeysObserved: v.boolean(),
+  },
+  handler: async (ctx, args): Promise<boolean> => {
+    const job = await ctx.db
+      .query("membershipCleanupJobs")
+      .withIndex("by_membership", (q) =>
+        q.eq("clerkOrgId", args.clerkOrgId).eq("userId", args.userId),
+      )
+      .unique();
+    if (
+      job === null ||
+      job.status !== "running" ||
+      job.membershipRevision !== args.membershipRevision ||
+      job.leaseToken !== args.leaseToken
+    ) {
+      return false;
+    }
+    const membership = await ctx.db
+      .query("clerkMembershipStates")
+      .withIndex("by_membership", (q) =>
+        q.eq("clerkOrgId", args.clerkOrgId).eq("userId", args.userId),
+      )
+      .unique();
+    if (
+      membership === null ||
+      membership.status !== "revoked" ||
+      membership.revision !== args.membershipRevision
+    ) {
+      return false;
+    }
+    const now = Date.now();
+    const schedule = async (delayMs: number) => {
+      await ctx.scheduler.runAfter(
+        delayMs,
+        internal.keyBroker.revokeMembershipKeys,
+        {
+          clerkOrgId: args.clerkOrgId,
+          userId: args.userId,
+        },
+      );
+    };
+    const restart = async (errorCode?: string) => {
+      await ctx.db.patch(job._id, {
+        status: "pending",
+        zeroVerificationPasses: 0,
+        cursorOffset: 0,
+        scanExpectedTotal: undefined,
+        scanProviderIds: undefined,
+        previousZeroFingerprint: undefined,
+        leaseToken: undefined,
+        leaseUntil: undefined,
+        nextRunAt: now + 1_000,
+        lastErrorCode: errorCode,
+        updatedAt: now,
+      });
+      await schedule(1_000);
+    };
+
+    if (args.liveKeysObserved) {
+      await restart();
+      return false;
+    }
+    if (
+      !Number.isSafeInteger(args.cursorOffset) ||
+      args.cursorOffset < 0 ||
+      args.cursorOffset !== (job.cursorOffset ?? 0) ||
+      !Number.isSafeInteger(args.totalCount) ||
+      args.totalCount < 0 ||
+      args.totalCount > 2_000 ||
+      args.providerIds.length > 500 ||
+      args.providerIds.some((id) => id.length < 1 || id.length > 256)
+    ) {
+      await restart("provider_page_invalid");
+      return false;
+    }
+    if (
+      job.scanExpectedTotal !== undefined &&
+      job.scanExpectedTotal !== args.totalCount
+    ) {
+      await restart("provider_changed");
+      return false;
+    }
+    const priorIds = job.scanProviderIds ?? [];
+    const seen = new Set(priorIds);
+    if (
+      args.providerIds.some((id) => {
+        if (seen.has(id)) return true;
+        seen.add(id);
+        return false;
+      })
+    ) {
+      await restart("provider_changed");
+      return false;
+    }
+    const allIds = [...priorIds, ...args.providerIds];
+    const nextOffset = args.cursorOffset + args.providerIds.length;
+    if (
+      nextOffset > args.totalCount ||
+      (args.providerIds.length === 0 && nextOffset < args.totalCount)
+    ) {
+      await restart("provider_page_invalid");
+      return false;
+    }
+    if (nextOffset < args.totalCount) {
+      await ctx.db.patch(job._id, {
+        status: "pending",
+        cursorOffset: nextOffset,
+        scanExpectedTotal: args.totalCount,
+        scanProviderIds: allIds,
+        leaseToken: undefined,
+        leaseUntil: undefined,
+        nextRunAt: now,
+        lastErrorCode: undefined,
+        updatedAt: now,
+      });
+      await schedule(0);
+      return false;
+    }
+    if (allIds.length !== args.totalCount) {
+      await restart("provider_page_invalid");
+      return false;
+    }
+
+    const fingerprint = await publicReference(
+      "membership-cleanup-snapshot",
+      JSON.stringify([...allIds].sort((left, right) => left.localeCompare(right))),
+    );
+    const sameAsPrevious =
+      job.zeroVerificationPasses >= 1 &&
+      job.previousZeroFingerprint === fingerprint;
+    if (sameAsPrevious) {
+      await ctx.db.patch(job._id, {
+        status: "completed",
+        zeroVerificationPasses: 2,
+        cursorOffset: 0,
+        scanExpectedTotal: undefined,
+        scanProviderIds: undefined,
+        previousZeroFingerprint: fingerprint,
+        leaseToken: undefined,
+        leaseUntil: undefined,
+        nextRunAt: now,
+        lastErrorCode: undefined,
+        updatedAt: now,
+        completedAt: now,
+      });
+      return true;
+    }
+    await ctx.db.patch(job._id, {
+      status: "pending",
+      zeroVerificationPasses: 1,
+      cursorOffset: 0,
+      scanExpectedTotal: undefined,
+      scanProviderIds: undefined,
+      previousZeroFingerprint: fingerprint,
+      leaseToken: undefined,
+      leaseUntil: undefined,
+      nextRunAt: now + 1_000,
+      lastErrorCode: undefined,
+      updatedAt: now,
+    });
+    await schedule(1_000);
+    return false;
+  },
+});
+
+/** Failures remain durable forever with bounded backoff and safe error codes. */
+export const retryMembershipCleanup = internalMutation({
+  args: {
+    clerkOrgId: v.string(),
+    userId: v.string(),
+    membershipRevision: v.number(),
+    leaseToken: v.string(),
+    errorCode: v.union(
+      v.literal("provider_rate_limited"),
+      v.literal("provider_unavailable"),
+      v.literal("provider_rejected"),
+    ),
+  },
+  handler: async (ctx, args): Promise<void> => {
+    const job = await ctx.db
+      .query("membershipCleanupJobs")
+      .withIndex("by_membership", (q) =>
+        q.eq("clerkOrgId", args.clerkOrgId).eq("userId", args.userId),
+      )
+      .unique();
+    if (
+      job === null ||
+      job.status !== "running" ||
+      job.membershipRevision !== args.membershipRevision ||
+      job.leaseToken !== args.leaseToken
+    ) {
+      return;
+    }
+    const delay = Math.min(60 * 60_000, 2 ** Math.min(job.attempts, 10) * 1_000);
+    const now = Date.now();
+    await ctx.db.patch(job._id, {
+      status: "pending",
+      zeroVerificationPasses: 0,
+      cursorOffset: 0,
+      scanExpectedTotal: undefined,
+      scanProviderIds: undefined,
+      previousZeroFingerprint: undefined,
+      leaseToken: undefined,
+      leaseUntil: undefined,
+      nextRunAt: now + delay,
+      lastErrorCode: args.errorCode,
+      updatedAt: now,
+    });
+    await ctx.scheduler.runAfter(delay, internal.keyBroker.revokeMembershipKeys, {
+      clerkOrgId: args.clerkOrgId,
+      userId: args.userId,
+    });
+  },
+});
+
+/** Cron recovery for lost schedules, crashed leases, and old revoked rows. */
+export const scheduleMembershipCleanupDue = internalMutation({
+  args: {},
+  handler: async (ctx): Promise<{ scheduled: number }> => {
+    const now = Date.now();
+    const [pending, expired, revoked] = await Promise.all([
+      ctx.db
+        .query("membershipCleanupJobs")
+        .withIndex("by_due", (q) =>
+          q.eq("status", "pending").lte("nextRunAt", now),
+        )
+        .take(50),
+      ctx.db
+        .query("membershipCleanupJobs")
+        .withIndex("by_lease", (q) =>
+          q.eq("status", "running").lte("leaseUntil", now),
+        )
+        .take(50),
+      ctx.db
+        .query("clerkMembershipStates")
+        .withIndex("by_status", (q) => q.eq("status", "revoked"))
+        .take(50),
+    ]);
+    for (const membership of revoked) {
+      await ensureMembershipCleanupJob(
+        ctx,
+        membership.clerkOrgId,
+        membership.userId,
+        membership.revision,
+      );
+    }
+    const scopes = new Map<string, { clerkOrgId: string; userId: string }>();
+    for (const job of [...pending, ...expired]) {
+      scopes.set(`${job.clerkOrgId}\u0000${job.userId}`, job);
+    }
+    for (const scope of scopes.values()) {
+      await ctx.scheduler.runAfter(0, internal.keyBroker.revokeMembershipKeys, scope);
+    }
+    return { scheduled: scopes.size + revoked.length };
   },
 });

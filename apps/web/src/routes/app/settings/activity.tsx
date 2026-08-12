@@ -71,8 +71,7 @@ export const Route = createFileRoute("/app/settings/activity")({
 });
 
 type UsageListItem = {
-  _id: string;
-  projectId: string;
+  id: string;
   projectName: string | null;
   projectSlug: string | null;
   endpoint: string;
@@ -80,7 +79,6 @@ type UsageListItem = {
   credits: number;
   status: number;
   latencyMs: number;
-  keyId: string;
   at: number;
 };
 
@@ -309,7 +307,7 @@ function ActivityContent({ orgSlug }: { orgSlug: string }) {
                   </thead>
                   <tbody>
                     {rows.map((event) => (
-                      <tr key={event._id} className="border-b last:border-0">
+                      <tr key={event.id} className="border-b last:border-0">
                         <td className="whitespace-nowrap px-2 py-2.5 text-muted-foreground">
                           {new Date(event.at).toLocaleString()}
                         </td>

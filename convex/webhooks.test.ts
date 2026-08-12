@@ -1,5 +1,5 @@
 /// <reference types="vite/client" />
-import { convexTest } from "convex-test";
+import { convexTest, type TestConvex } from "convex-test";
 import { createHmac } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api, internal } from "./_generated/api";
@@ -28,9 +28,12 @@ const TEST_KEYRING = JSON.stringify({
   },
 });
 const previousEncryptionKeys = process.env.UPSTREAM_CREDENTIAL_ENCRYPTION_KEYS;
+const previousAdminIds = process.env.ADMIN_USER_IDS;
+const ADMIN = "webhook_security_admin";
 
 beforeEach(() => {
   process.env.UPSTREAM_CREDENTIAL_ENCRYPTION_KEYS = TEST_KEYRING;
+  process.env.ADMIN_USER_IDS = ADMIN;
 });
 
 afterEach(() => {
@@ -39,6 +42,8 @@ afterEach(() => {
   } else {
     process.env.UPSTREAM_CREDENTIAL_ENCRYPTION_KEYS = previousEncryptionKeys;
   }
+  if (previousAdminIds === undefined) delete process.env.ADMIN_USER_IDS;
+  else process.env.ADMIN_USER_IDS = previousAdminIds;
 });
 
 // ---------------------------------------------------------------------------
@@ -116,6 +121,7 @@ describe("postWebhook — injectable transport", () => {
         data: { projectId: "p1", version: "1.0.0" },
         timestamp: 123,
         deliveryId: "delivery_123",
+        secretVersion: 7,
       },
       transport,
     );
@@ -129,6 +135,7 @@ describe("postWebhook — injectable transport", () => {
     expect(headers["x-zevium-signature"]).toMatch(/^[0-9a-f]{64}$/);
     expect(headers["Content-Type"]).toBe("application/json");
     expect(headers["X-Zevium-Delivery-Id"]).toBe("delivery_123");
+    expect(headers["x-zevium-secret-version"]).toBe("7");
 
     const body = JSON.parse(input.body);
     expect(body).toEqual({
@@ -219,6 +226,40 @@ async function seedWorld(t: ReturnType<typeof convexTest>): Promise<Seeded> {
     });
     return { orgId, projectId };
   });
+}
+
+async function endpointIdFor(
+  t: TestConvex<typeof schema>,
+  projectId: Id<"projects">,
+): Promise<Id<"webhookEndpoints">> {
+  return await t.run(async (ctx) => {
+    const endpoint = await ctx.db
+      .query("webhookEndpoints")
+      .withIndex("by_project", (q) => q.eq("projectId", projectId))
+      .unique();
+    if (endpoint === null) throw new Error("Missing webhook endpoint");
+    return endpoint._id;
+  });
+}
+
+async function completeSecurityAudit(
+  t: TestConvex<typeof schema>,
+): Promise<string> {
+  const admin = t.withIdentity({ subject: ADMIN } as { subject: string });
+  let audit = await admin.mutation(api.securityRollout.startAudit, {});
+  while (audit.phase !== "completed" && audit.phase !== "invalidated") {
+    audit = await admin.mutation(api.securityRollout.auditPage, {
+      auditId: audit.auditId,
+      numItems: 100,
+    });
+  }
+  expect(audit).toMatchObject({
+    phase: "completed",
+    zeroCorruption: true,
+    corrupt: 0,
+    broken: 0,
+  });
+  return audit.auditId;
 }
 
 function asPublisher(t: ReturnType<typeof convexTest>) {
@@ -331,8 +372,10 @@ describe("webhooks.upsertEndpoint — CRUD + auth", () => {
     expect(ep).not.toHaveProperty("ciphertext");
     expect(ep).not.toHaveProperty("iv");
     expect(ep).not.toHaveProperty("keyVersion");
+    expect(ep).not.toHaveProperty("id");
 
-    const stored = await t.run(async (ctx) => ctx.db.get(ep.id));
+    const endpointId = await endpointIdFor(t, seed.projectId);
+    const stored = await t.run(async (ctx) => ctx.db.get(endpointId));
     expect(stored?.secret).toBeUndefined();
     expect(stored?.ciphertext).toBeTruthy();
     expect(stored?.ciphertext).not.toContain("webhook-test");
@@ -349,7 +392,8 @@ describe("webhooks.upsertEndpoint — CRUD + auth", () => {
       projectId: seed.projectId,
       url: "https://example.com/old",
     });
-    const storedBefore = await t.run(async (ctx) => ctx.db.get(ep1.id));
+    const endpointId = await endpointIdFor(t, seed.projectId);
+    const storedBefore = await t.run(async (ctx) => ctx.db.get(endpointId));
 
     const ep2 = await as.mutation(api.webhooks.upsertEndpoint, {
       projectId: seed.projectId,
@@ -359,9 +403,10 @@ describe("webhooks.upsertEndpoint — CRUD + auth", () => {
 
     expect(ep2.url).toBe("https://example.com/new");
     expect(ep2.active).toBe(false);
-    expect(ep2.id).toBe(ep1.id);
+    expect(ep2).not.toHaveProperty("id");
+    expect(ep2.secretVersion).toBe(ep1.secretVersion);
 
-    const storedAfter = await t.run(async (ctx) => ctx.db.get(ep2.id));
+    const storedAfter = await t.run(async (ctx) => ctx.db.get(endpointId));
     expect(storedAfter?.ciphertext).toBe(storedBefore?.ciphertext);
     expect(storedAfter?.iv).toBe(storedBefore?.iv);
     expect(storedAfter?.keyVersion).toBe(storedBefore?.keyVersion);
@@ -397,7 +442,7 @@ describe("webhooks.getEndpoint", () => {
     });
     expect(none).toBeNull();
 
-    const created = await as.mutation(api.webhooks.upsertEndpoint, {
+    await as.mutation(api.webhooks.upsertEndpoint, {
       projectId: seed.projectId,
       url: "https://example.com/hook",
     });
@@ -443,7 +488,7 @@ describe("webhooks.revealSecret", () => {
     const t = convexTest(schema, modules);
     const seed = await seedWorld(t);
     const admin = asPublisher(t);
-    const created = await admin.mutation(api.webhooks.upsertEndpoint, {
+    await admin.mutation(api.webhooks.upsertEndpoint, {
       projectId: seed.projectId,
       url: "https://example.com/hook",
     });
@@ -452,8 +497,14 @@ describe("webhooks.revealSecret", () => {
       projectId: seed.projectId,
     });
     expect(result?.secret.length).toBeGreaterThan(20);
+    await expect(
+      admin.mutation(api.webhooks.revealSecret, {
+        projectId: seed.projectId,
+      }),
+    ).resolves.toBeNull();
 
-    const stored = await t.run(async (ctx) => ctx.db.get(created.id));
+    const endpointId = await endpointIdFor(t, seed.projectId);
+    const stored = await t.run(async (ctx) => ctx.db.get(endpointId));
     expect(stored?.secret).toBeUndefined();
     expect(await decryptSecret(stored!, webhookBinding(seed.projectId))).toBe(
       result?.secret,
@@ -463,11 +514,12 @@ describe("webhooks.revealSecret", () => {
   it("rejects members and cross-org callers without changing the row", async () => {
     const t = convexTest(schema, modules);
     const seed = await seedWorld(t);
-    const created = await asPublisher(t).mutation(api.webhooks.upsertEndpoint, {
+    await asPublisher(t).mutation(api.webhooks.upsertEndpoint, {
       projectId: seed.projectId,
       url: "https://example.com/hook",
     });
-    const before = await t.run(async (ctx) => ctx.db.get(created.id));
+    const endpointId = await endpointIdFor(t, seed.projectId);
+    const before = await t.run(async (ctx) => ctx.db.get(endpointId));
 
     await expect(
       asMember(t).mutation(api.webhooks.revealSecret, {
@@ -480,7 +532,7 @@ describe("webhooks.revealSecret", () => {
       }),
     ).rejects.toThrow(/Project not found/);
 
-    expect(await t.run(async (ctx) => ctx.db.get(created.id))).toEqual(before);
+    expect(await t.run(async (ctx) => ctx.db.get(endpointId))).toEqual(before);
   });
 
   it("keeps plaintext-only rollout rows readable and maps crypto failures safely", async () => {
@@ -536,8 +588,154 @@ describe("webhooks.revealSecret", () => {
   });
 });
 
+describe("webhooks.rotateSecret", () => {
+  afterEach(() => {
+    pinnedTransportMock.mockReset();
+  });
+
+  it("binds queued retries to previous version throughout bounded grace", async () => {
+    const t = convexTest(schema, modules);
+    const seed = await seedWorld(t);
+    const owner = asPublisher(t);
+    await owner.mutation(api.webhooks.upsertEndpoint, {
+      projectId: seed.projectId,
+      url: "https://example.com/hook",
+    });
+    const firstReveal = await owner.mutation(api.webhooks.revealSecret, {
+      projectId: seed.projectId,
+    });
+    if (firstReveal === null) throw new Error("Missing first reveal");
+    const endpointId = await endpointIdFor(t, seed.projectId);
+    const deliveryId = await t.run(async (ctx) =>
+      ctx.db.insert("webhookDeliveries", {
+        endpointId,
+        secretVersion: 1,
+        event: "spec.published",
+        status: "pending",
+        attempts: 0,
+        createdAt: Date.now(),
+        payload: JSON.stringify({
+          event: "spec.published",
+          data: { version: "1.0.0" },
+          timestamp: Date.now(),
+        }),
+      }),
+    );
+
+    const rotated = await owner.mutation(api.webhooks.rotateSecret, {
+      projectId: seed.projectId,
+      graceSeconds: 60,
+    });
+    expect(rotated.secretVersion).toBe(2);
+    expect(rotated.secret).not.toBe(firstReveal.secret);
+    await expect(
+      owner.mutation(api.webhooks.revealSecret, {
+        projectId: seed.projectId,
+      }),
+    ).resolves.toBeNull();
+    await expect(
+      owner.mutation(api.webhooks.rotateSecret, {
+        projectId: seed.projectId,
+        graceSeconds: 60,
+      }),
+    ).rejects.toThrow("grace period is still active");
+
+    pinnedTransportMock
+      .mockResolvedValueOnce({ status: 503 })
+      .mockResolvedValueOnce({ status: 204 });
+    await t.action(internal.webhookDeliveryAction.deliverWebhook, {
+      deliveryId,
+    });
+    await t.action(internal.webhookDeliveryAction.deliverWebhook, {
+      deliveryId,
+    });
+
+    expect(pinnedTransportMock).toHaveBeenCalledTimes(2);
+    for (const call of pinnedTransportMock.mock.calls) {
+      const posted = call[0];
+      expect(posted.headers["x-zevium-secret-version"]).toBe("1");
+      expect(posted.headers["x-zevium-signature"]).toBe(
+        createHmac("sha256", firstReveal.secret)
+          .update(posted.body)
+          .digest("hex"),
+      );
+    }
+    const delivery = await t.run(async (ctx) => ctx.db.get(deliveryId));
+    expect(delivery).toMatchObject({
+      status: "ok",
+      attempts: 2,
+      secretVersion: 1,
+    });
+
+    const stored = await t.run(async (ctx) => ctx.db.get(endpointId));
+    expect(stored?.secret).toBeUndefined();
+    expect(stored?.previousSecretVersion).toBe(1);
+    expect(
+      await decryptSecret(stored!, webhookBinding(seed.projectId, 2)),
+    ).toBe(rotated.secret);
+  });
+
+  it("expires previous generation, permits later rotation, and rejects members", async () => {
+    const t = convexTest(schema, modules);
+    const seed = await seedWorld(t);
+    const owner = asPublisher(t);
+    await owner.mutation(api.webhooks.upsertEndpoint, {
+      projectId: seed.projectId,
+      url: "https://example.com/hook",
+    });
+    await expect(
+      asMember(t).mutation(api.webhooks.rotateSecret, {
+        projectId: seed.projectId,
+        graceSeconds: 1,
+      }),
+    ).rejects.toThrow("Org admin role required");
+    await owner.mutation(api.webhooks.rotateSecret, {
+      projectId: seed.projectId,
+      graceSeconds: 1,
+    });
+    const endpointId = await endpointIdFor(t, seed.projectId);
+    const deliveryId = await t.run(async (ctx) => {
+      await ctx.db.patch(endpointId, { previousValidUntil: 0 });
+      return await ctx.db.insert("webhookDeliveries", {
+        endpointId,
+        secretVersion: 1,
+        event: "spec.published",
+        status: "pending",
+        attempts: 0,
+        createdAt: Date.now(),
+        payload: JSON.stringify({
+          event: "spec.published",
+          data: {},
+          timestamp: Date.now(),
+        }),
+      });
+    });
+    await expect(
+      t.mutation(internal.webhooks.claimDelivery, {
+        deliveryId,
+        leaseToken: "expired-generation-lease",
+      }),
+    ).resolves.toBeNull();
+    await expect(t.run(async (ctx) => ctx.db.get(deliveryId))).resolves.toMatchObject(
+      {
+        status: "failed",
+        lastError: "Signing secret generation expired",
+      },
+    );
+
+    const next = await owner.mutation(api.webhooks.rotateSecret, {
+      projectId: seed.projectId,
+      graceSeconds: 0,
+    });
+    expect(next.secretVersion).toBe(3);
+    const stored = await t.run(async (ctx) => ctx.db.get(endpointId));
+    expect(stored?.previousSecretVersion).toBe(2);
+    expect(stored?.previousValidUntil).toBeLessThanOrEqual(Date.now());
+  });
+});
+
 describe("webhooks.migrateLegacyPlaintext", () => {
-  it("encrypts legacy rows, scrubs hybrid plaintext, and reports idempotent counts", async () => {
+  it("scrubs only after an independent zero-corruption audit", async () => {
     const t = convexTest(schema, modules);
     const seed = await seedWorld(t);
     const alreadyEncrypted = await encryptSecret(
@@ -560,7 +758,7 @@ describe("webhooks.migrateLegacyPlaintext", () => {
         projectId: seed.projectId,
         url: "https://example.com/hybrid",
         ...hybridEncrypted,
-        secret: "stale-plaintext-copy",
+        secret: "hybrid-encrypted-value",
         active: true,
         createdAt: 2,
       }),
@@ -571,24 +769,20 @@ describe("webhooks.migrateLegacyPlaintext", () => {
         active: true,
         createdAt: 3,
       }),
-      broken: await ctx.db.insert("webhookEndpoints", {
-        projectId: seed.projectId,
-        url: "https://example.com/broken",
-        active: false,
-        createdAt: 4,
-      }),
     }));
 
+    const auditId = await completeSecurityAudit(t);
+
     expect(
-      await t.mutation(internal.webhooks.migrateLegacyPlaintext, {}),
+      await t.mutation(internal.webhooks.migrateLegacyPlaintext, { auditId }),
     ).toMatchObject({
-      scanned: 4,
+      scanned: 3,
       current: 3,
-      old: 2,
-      broken: 1,
-      corrupt: 1,
+      old: 1,
+      broken: 0,
+      corrupt: 0,
       plaintext: 2,
-      recovered: 1,
+      recovered: 0,
       scrubbed: 2,
       isDone: true,
     });
@@ -597,7 +791,6 @@ describe("webhooks.migrateLegacyPlaintext", () => {
       legacy: await ctx.db.get(ids.legacy),
       hybrid: await ctx.db.get(ids.hybrid),
       encrypted: await ctx.db.get(ids.encrypted),
-      broken: await ctx.db.get(ids.broken),
     }));
     expect(rows.legacy?.secret).toBeUndefined();
     expect(
@@ -607,17 +800,16 @@ describe("webhooks.migrateLegacyPlaintext", () => {
     expect(rows.hybrid?.ciphertext).not.toBe(hybridEncrypted.ciphertext);
     expect(
       await decryptSecret(rows.hybrid!, webhookBinding(seed.projectId)),
-    ).toBe("stale-plaintext-copy");
+    ).toBe("hybrid-encrypted-value");
     expect(rows.encrypted?.ciphertext).toBe(alreadyEncrypted.ciphertext);
-    expect(rows.broken?.ciphertext).toBeUndefined();
 
     expect(
-      await t.mutation(internal.webhooks.migrateLegacyPlaintext, {}),
+      await t.mutation(internal.webhooks.migrateLegacyPlaintext, { auditId }),
     ).toMatchObject({
-      scanned: 4,
+      scanned: 3,
       current: 3,
-      old: 1,
-      broken: 1,
+      old: 0,
+      broken: 0,
       plaintext: 0,
       scrubbed: 0,
       isDone: true,
@@ -643,10 +835,11 @@ describe("webhooks.migrateLegacyPlaintext", () => {
         createdAt: 2,
       }),
     ]);
+    const auditId = await completeSecurityAudit(t);
     delete process.env.UPSTREAM_CREDENTIAL_ENCRYPTION_KEYS;
 
     await expect(
-      t.mutation(internal.webhooks.migrateLegacyPlaintext, {}),
+      t.mutation(internal.webhooks.migrateLegacyPlaintext, { auditId }),
     ).rejects.toThrow(/keyring/);
 
     const rows = await t.run(async (ctx) =>
@@ -666,13 +859,14 @@ describe("webhooks.deleteEndpoint", () => {
     const seed = await seedWorld(t);
     const as = asPublisher(t);
 
-    const created = await as.mutation(api.webhooks.upsertEndpoint, {
+    await as.mutation(api.webhooks.upsertEndpoint, {
       projectId: seed.projectId,
       url: "https://example.com/hook",
     });
+    const endpointId = await endpointIdFor(t, seed.projectId);
     const deliveryId = await t.run(async (ctx) =>
       ctx.db.insert("webhookDeliveries", {
-        endpointId: created.id,
+        endpointId,
         event: "spec.published",
         status: "pending",
         attempts: 0,
@@ -683,7 +877,7 @@ describe("webhooks.deleteEndpoint", () => {
     await t.run(async (ctx) => {
       for (let index = 0; index < 120; index += 1) {
         await ctx.db.insert("webhookDeliveries", {
-          endpointId: created.id,
+          endpointId,
           event: "spec.published",
           status: "pending",
           attempts: 0,
@@ -706,7 +900,7 @@ describe("webhooks.deleteEndpoint", () => {
       const job = await ctx.db
         .query("retirementJobs")
         .withIndex("by_resource", (q) =>
-          q.eq("resourceKey", `webhook:${created.id}`),
+          q.eq("resourceKey", `webhook:${endpointId}`),
         )
         .unique();
       if (job === null) throw new Error("Missing retirement job");
@@ -716,16 +910,16 @@ describe("webhooks.deleteEndpoint", () => {
     const bounded = await t.run(async (ctx) =>
       ctx.db
         .query("webhookDeliveries")
-        .withIndex("by_endpoint", (q) => q.eq("endpointId", created.id))
+        .withIndex("by_endpoint", (q) => q.eq("endpointId", endpointId))
         .collect(),
     );
     expect(bounded).toHaveLength(71);
-    expect(await t.run(async (ctx) => ctx.db.get(created.id))).not.toBeNull();
+    expect(await t.run(async (ctx) => ctx.db.get(endpointId))).not.toBeNull();
     for (let step = 0; step < 4; step += 1) {
       await t.mutation(internal.retirementJobs.step, { jobId });
     }
     const retired = await t.run(async (ctx) => ({
-      endpoint: await ctx.db.get(created.id),
+      endpoint: await ctx.db.get(endpointId),
       delivery: await ctx.db.get(deliveryId),
       job: await ctx.db.get(jobId),
     }));
@@ -737,10 +931,11 @@ describe("webhooks.deleteEndpoint", () => {
   it("rejects same-org members without deleting endpoint", async () => {
     const t = convexTest(schema, modules);
     const seed = await seedWorld(t);
-    const created = await asPublisher(t).mutation(api.webhooks.upsertEndpoint, {
+    await asPublisher(t).mutation(api.webhooks.upsertEndpoint, {
       projectId: seed.projectId,
       url: "https://example.com/hook",
     });
+    const endpointId = await endpointIdFor(t, seed.projectId);
 
     await expect(
       asMember(t).mutation(api.webhooks.deleteEndpoint, {
@@ -748,7 +943,7 @@ describe("webhooks.deleteEndpoint", () => {
       }),
     ).rejects.toThrow(/Org admin role required/);
 
-    const stored = await t.run(async (ctx) => ctx.db.get(created.id));
+    const stored = await t.run(async (ctx) => ctx.db.get(endpointId));
     expect(stored).not.toBeNull();
     expect(stored?.ciphertext).toBeTruthy();
   });
@@ -756,13 +951,14 @@ describe("webhooks.deleteEndpoint", () => {
   it("masks cross-org deletes without touching endpoint or deliveries", async () => {
     const t = convexTest(schema, modules);
     const seed = await seedWorld(t);
-    const created = await asPublisher(t).mutation(api.webhooks.upsertEndpoint, {
+    await asPublisher(t).mutation(api.webhooks.upsertEndpoint, {
       projectId: seed.projectId,
       url: "https://example.com/hook",
     });
+    const endpointId = await endpointIdFor(t, seed.projectId);
     const deliveryId = await t.run(async (ctx) =>
       ctx.db.insert("webhookDeliveries", {
-        endpointId: created.id,
+        endpointId,
         event: "spec.published",
         status: "pending",
         attempts: 0,
@@ -771,7 +967,7 @@ describe("webhooks.deleteEndpoint", () => {
       }),
     );
     const before = await t.run(async (ctx) => ({
-      endpoint: await ctx.db.get(created.id),
+      endpoint: await ctx.db.get(endpointId),
       delivery: await ctx.db.get(deliveryId),
     }));
 
@@ -783,7 +979,7 @@ describe("webhooks.deleteEndpoint", () => {
 
     expect(
       await t.run(async (ctx) => ({
-        endpoint: await ctx.db.get(created.id),
+        endpoint: await ctx.db.get(endpointId),
         delivery: await ctx.db.get(deliveryId),
       })),
     ).toEqual(before);

@@ -260,7 +260,9 @@ describe("catalogue.listPublic", () => {
       endpointCount: 2,
       hasFreeTier: false,
     });
-    expect(bySlug.cheap?.projectId).toBe(seed.cheapId);
+    expect(bySlug.cheap?.listingId).toBe("pub-co/cheap");
+    expect(bySlug.cheap).not.toHaveProperty("projectId");
+    expect(bySlug.cheap).not.toHaveProperty("organizationId");
   });
 
   it("filters by hasFreeTier", async () => {

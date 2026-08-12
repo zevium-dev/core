@@ -46,6 +46,56 @@ export {
   type RegistrySyncPayloadMap,
 } from "./registry-sync.js";
 
+/** Exact canonical Registry v2 seam. Receiver cutover owned elsewhere. */
+export {
+  REGISTRY_PROTOCOL_VERSION,
+  REGISTRY_EVENT_PATH,
+  REGISTRY_V2_PRODUCER_CONTRACT,
+  REGISTRY_RECEIVER_SECURITY_CONTRACT,
+  REGISTRY_MAX_EVENT_BYTES,
+  REGISTRY_MAX_SPEC_BYTES,
+  type RegistryOperation as RegistryV2Operation,
+  type RegistryEvent as RegistryV2Event,
+  type RegistryAck as RegistryV2Ack,
+  type RegistryEncryptedCredentials,
+  type RegistryPayloadMap as RegistryV2PayloadMap,
+  type RegistryOutboxRow as RegistryV2OutboxRow,
+  type RegistryManifestPage,
+  createRegistryEvent,
+  validateRegistryEvent,
+  validateRegistryAck,
+  signRegistryEventRequest,
+  verifyRegistryEventRequest,
+  signRegistryAck,
+  verifyRegistryAck,
+  encryptRegistryCredentials,
+  decryptRegistryCredentials,
+} from "./registry-v2.js";
+
+export {
+  EDGE_KEY_REVOCATION_SCHEMA_VERSION,
+  EDGE_KEY_REVOCATION_PATH,
+  EDGE_KEY_REVOCATION_TIMESTAMP_HEADER,
+  EDGE_KEY_REVOCATION_NONCE_HEADER,
+  EDGE_KEY_REVOCATION_SIGNATURE_HEADER,
+  EDGE_KEY_REVOCATION_ACK_SIGNATURE_HEADER,
+  EDGE_KEY_REVOCATION_MAX_BODY_BYTES,
+  EDGE_KEY_REVOCATION_MAX_ACK_BYTES,
+  edgeKeyRevocationBody,
+  edgeKeyRevocationBodySha256,
+  signEdgeKeyRevocationRequest,
+  signEdgeKeyRevocationAck,
+  verifyEdgeKeyRevocationRequest,
+  verifyEdgeKeyRevocationAck,
+  parseEdgeKeyRevocationEvent,
+  parseEdgeKeyRevocationAck,
+  ackMatchesEdgeKeyRevocationEvent,
+  type EdgeKeyRevocationEvent,
+  type EdgeKeyRevocationAck,
+  type EdgeKeyRevocationReason,
+  type EdgeKeyRevocationAckStatus,
+} from "./edge-key-revocation.js";
+
 export {
   isValidSlug,
   isValidSemver,

@@ -34,12 +34,18 @@ export async function draftFingerprint(value: string): Promise<string> {
 
 /** Stable hash over complete credential membership, identity, and revision. */
 export async function credentialSetFingerprint(
-  rows: readonly { _id: unknown; name: string; updatedAt: number }[],
+  rows: readonly {
+    _id: unknown;
+    name: string;
+    revision?: number;
+    updatedAt: number;
+  }[],
 ): Promise<string> {
   const canonical = rows
     .map((row) => ({
       id: String(row._id),
       name: row.name,
+      revision: row.revision ?? row.updatedAt,
       updatedAt: row.updatedAt,
     }))
     .sort((left, right) =>
@@ -48,6 +54,15 @@ export async function credentialSetFingerprint(
         : left.id.localeCompare(right.id),
     );
   return await draftFingerprint(JSON.stringify(canonical));
+}
+
+function credentialRevision(
+  rows: readonly { revision?: number; updatedAt: number }[],
+): number {
+  return rows.reduce(
+    (latest, row) => Math.max(latest, row.revision ?? row.updatedAt),
+    0,
+  );
 }
 
 /**
@@ -126,10 +141,7 @@ export const getTarget = internalQuery({
     return {
       url,
       draftHash: draft ? await draftFingerprint(draft.draft) : null,
-      credentialRevision: credentials.reduce(
-        (latest, row) => Math.max(latest, row.updatedAt),
-        0,
-      ),
+      credentialRevision: credentialRevision(credentials),
       credentialFingerprint: await credentialSetFingerprint(credentials),
       headers: Object.fromEntries(
         await Promise.all(
@@ -164,15 +176,12 @@ export const recordPassingTest = internalMutation({
       .query("upstreamCredentials")
       .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
       .collect();
-    const credentialRevision = credentials.reduce(
-      (latest, row) => Math.max(latest, row.updatedAt),
-      0,
-    );
+    const currentCredentialRevision = credentialRevision(credentials);
     const credentialFingerprint = await credentialSetFingerprint(credentials);
     if (
       draft === null ||
       args.draftHash !== (await draftFingerprint(draft.draft)) ||
-      args.credentialRevision !== credentialRevision ||
+      args.credentialRevision !== currentCredentialRevision ||
       args.credentialFingerprint !== credentialFingerprint
     ) {
       return false;
@@ -215,15 +224,12 @@ export const getCurrent = query({
       .query("upstreamCredentials")
       .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
       .collect();
-    const credentialRevision = credentials.reduce(
-      (latest, row) => Math.max(latest, row.updatedAt),
-      0,
-    );
+    const currentCredentialRevision = credentialRevision(credentials);
     const credentialFingerprint = await credentialSetFingerprint(credentials);
     const validity = await readinessValidity(
       readiness,
       draft?.draft ?? null,
-      credentialRevision,
+      currentCredentialRevision,
       credentialFingerprint,
     );
     return {

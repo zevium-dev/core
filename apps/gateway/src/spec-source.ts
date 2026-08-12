@@ -6,6 +6,7 @@
 
 import { ConvexHttpClient } from "convex/browser";
 import { makeFunctionReference } from "convex/server";
+import { logDependencyFailure } from "./telemetry";
 import { trimTrailingSlashes } from "@zevium/shared";
 
 export type PublishedSpec = {
@@ -148,8 +149,8 @@ export class ConvexSpecSource implements SpecSource {
         projectSlug,
       });
       return parsePublishedSpecPayload(value);
-    } catch (err) {
-      console.error("ConvexSpecSource.getPublishedSpec failed", err);
+    } catch {
+      logDependencyFailure("public_spec_source");
       return null;
     }
   }
@@ -190,9 +191,7 @@ export class InternalHttpSpecSource implements SpecSource {
       });
       if (response.status === 404) return null;
       if (!response.ok) {
-        console.error("InternalHttpSpecSource.getPublishedSpec failed", {
-          status: response.status,
-        });
+        logDependencyFailure("internal_spec_source", response.status);
         throw new SpecSourceUnavailableError(
           "Internal spec source unavailable",
         );
@@ -200,7 +199,7 @@ export class InternalHttpSpecSource implements SpecSource {
       return parsePublishedSpecPayload(await response.json());
     } catch (err) {
       if (err instanceof SpecSourceUnavailableError) throw err;
-      console.error("InternalHttpSpecSource.getPublishedSpec failed", err);
+      logDependencyFailure("internal_spec_source");
       throw new SpecSourceUnavailableError("Internal spec source unavailable");
     }
   }

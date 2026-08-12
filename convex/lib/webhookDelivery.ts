@@ -7,6 +7,7 @@ export type PostWebhookParams = {
   data: unknown;
   timestamp: number;
   deliveryId: string;
+  secretVersion?: number;
 };
 
 export type PostWebhookResult = {
@@ -234,6 +235,7 @@ export async function postWebhook(
     "Content-Type": "application/json",
     "x-zevium-event": params.event,
     "x-zevium-signature": signature,
+    "x-zevium-secret-version": String(params.secretVersion ?? 1),
   };
   headers["X-Zevium-Delivery-Id"] = params.deliveryId;
 

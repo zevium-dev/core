@@ -46,12 +46,16 @@ export function parseActivityTimeRange(raw: unknown): ActivityTimeRange {
   return "all";
 }
 
-export type UsageRowId = { _id: string };
+export type UsageRowId = { id: string } | { _id: string };
+
+function rowIdentity(row: UsageRowId): string {
+  return "id" in row ? row.id : row._id;
+}
 
 /**
  * Merge a fetched page into the accumulated list.
  * `replace` clears previous pages (filter reset / first page).
- * Dedupe by `_id` so StrictMode double-effects don't double-append.
+ * Dedupe by opaque public id so StrictMode double-effects don't double-append.
  */
 export function mergeUsagePages<T extends UsageRowId>(
   existing: readonly T[],
@@ -64,11 +68,12 @@ export function mergeUsagePages<T extends UsageRowId>(
   if (incoming.length === 0) {
     return [...existing];
   }
-  const seen = new Set(existing.map((row) => row._id));
+  const seen = new Set(existing.map(rowIdentity));
   const next = [...existing];
   for (const row of incoming) {
-    if (!seen.has(row._id)) {
-      seen.add(row._id);
+    const id = rowIdentity(row);
+    if (!seen.has(id)) {
+      seen.add(id);
       next.push(row);
     }
   }

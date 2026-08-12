@@ -6,14 +6,14 @@
 
 import { ConvexHttpClient } from "convex/browser";
 import { makeFunctionReference } from "convex/server";
+import { logDependencyFailure } from "./telemetry";
 
 export type CatalogueListing = {
-  projectId: string;
+  listingId: string;
   name: string;
   slug: string;
   description: string | undefined;
   tags: string[];
-  organizationId: string;
   orgName: string;
   publisherHandle: string;
   publishedAt: number | null;
@@ -49,12 +49,11 @@ const listPublicRef = makeFunctionReference<
   { search?: string; tag?: string; cursor?: string },
   {
     items: Array<{
-      projectId: string;
+      listingId: string;
       name: string;
       slug: string;
       description?: string;
       tags: string[];
-      organizationId: string;
       orgName: string;
       publisherHandle: string;
       publishedAt: number | null;
@@ -143,8 +142,8 @@ export class ConvexCatalogueSource implements CatalogueSource {
         cursor: args?.cursor,
       });
       return parseCataloguePage(value) ?? { items: [], nextCursor: null };
-    } catch (err) {
-      console.error("ConvexCatalogueSource.listPublic failed", err);
+    } catch {
+      logDependencyFailure("catalogue_source");
       return { items: [], nextCursor: null };
     }
   }
@@ -167,17 +166,15 @@ function asNumberOrNull(value: unknown): number | null | undefined {
 function parseListing(raw: unknown): CatalogueListing | null {
   if (!isRecord(raw)) return null;
 
-  const projectId = asString(raw.projectId);
+  const listingId = asString(raw.listingId);
   const name = asString(raw.name);
   const slug = asString(raw.slug);
-  const organizationId = asString(raw.organizationId);
   const orgName = asString(raw.orgName);
   const publisherHandle = asString(raw.publisherHandle);
   if (
-    projectId === undefined ||
+    listingId === undefined ||
     name === undefined ||
     slug === undefined ||
-    organizationId === undefined ||
     orgName === undefined ||
     publisherHandle === undefined
   ) {
@@ -194,12 +191,11 @@ function parseListing(raw: unknown): CatalogueListing | null {
 
   const publishedAt = asNumberOrNull(raw.publishedAt);
   return {
-    projectId,
+    listingId,
     name,
     slug,
     description,
     tags,
-    organizationId,
     orgName,
     publisherHandle,
     publishedAt: publishedAt === undefined ? null : publishedAt,

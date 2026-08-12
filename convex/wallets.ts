@@ -257,10 +257,9 @@ export const getGatewayWallet = internalQuery({
 });
 
 export type WalletEntryView = {
-  _id: Id<"walletEntries">;
+  id: string;
   kind: Doc<"walletEntries">["kind"];
   amount: number;
-  refId: string;
   sequence: number;
   createdAt: number;
 };
@@ -268,7 +267,6 @@ export type WalletEntryView = {
 export type WalletView = {
   balance: number;
   sequence: number;
-  walletId: Id<"wallets"> | null;
   entries: WalletEntryView[];
 };
 
@@ -278,7 +276,7 @@ async function walletView(
 ): Promise<WalletView> {
   const wallet = await getWalletForOrg(ctx, organizationId);
   if (wallet === null) {
-    return { balance: 0, sequence: 0, walletId: null, entries: [] };
+    return { balance: 0, sequence: 0, entries: [] };
   }
   const entries = await ctx.db
     .query("walletEntries")
@@ -288,12 +286,10 @@ async function walletView(
   return {
     balance: wallet.balance,
     sequence: wallet.sequence,
-    walletId: wallet._id,
     entries: entries.map((entry) => ({
-      _id: entry._id,
+      id: `ledger-${entry.sequence}`,
       kind: entry.kind,
       amount: entry.amount,
-      refId: entry.refId,
       sequence: entry.sequence,
       createdAt: entry.createdAt,
     })),
@@ -405,6 +401,31 @@ export const recordUsage = internalMutation({
         });
         continue;
       }
+      if (project.organizationId !== event.organizationId) {
+        results.push({
+          refId: event.settleRefId,
+          status: "rejected",
+          reason: "project publisher mismatch",
+        });
+        continue;
+      }
+      const keySetting = await ctx.db
+        .query("keySettings")
+        .withIndex("by_key", (q) => q.eq("keyId", event.keyId))
+        .unique();
+      if (
+        keySetting === null ||
+        keySetting.clerkOrgId !== clerkOrgId ||
+        keySetting.ownerUserId === undefined ||
+        keySetting.managed !== true
+      ) {
+        results.push({
+          refId: event.settleRefId,
+          status: "rejected",
+          reason: "key ownership unavailable",
+        });
+        continue;
+      }
       if (wallet.balance - event.credits < 0) {
         results.push({
           refId: event.settleRefId,
@@ -415,6 +436,7 @@ export const recordUsage = internalMutation({
       }
 
       const usageEventId = await ctx.db.insert("usageEvents", {
+        publicId: crypto.randomUUID(),
         organizationId: consumerOrg._id,
         projectId: event.projectId,
         endpoint: event.endpoint,
@@ -423,6 +445,7 @@ export const recordUsage = internalMutation({
         status: event.status,
         latencyMs: event.latencyMs,
         keyId: event.keyId,
+        ownerUserId: keySetting.ownerUserId,
         at: event.at,
         settleRefId: event.settleRefId,
       });

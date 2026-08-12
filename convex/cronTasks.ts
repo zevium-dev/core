@@ -105,11 +105,15 @@ export const releaseMatureEarningsCron = internalAction({
           publisherOrganizationId: orgId,
         });
         released += 1;
-      } catch (err) {
+      } catch {
         failed += 1;
         console.error(
-          `[releaseMatureEarningsCron] release failed for org ${orgId}`,
-          err,
+          JSON.stringify({
+            schema: 1,
+            type: "zevium.dependency_failure",
+            component: "earnings_release",
+            code: "mutation_failed",
+          }),
         );
       }
     }

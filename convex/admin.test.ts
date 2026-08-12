@@ -8,6 +8,26 @@ import { decryptSecret, webhookBinding } from "./lib/credentialCrypto";
 const modules = import.meta.glob("./**/*.ts");
 const ADMIN = "admin_user";
 
+async function completeSecurityAudit(
+  t: TestConvex<typeof schema>,
+): Promise<string> {
+  const admin = t.withIdentity({ subject: ADMIN } as { subject: string });
+  let audit = await admin.mutation(api.securityRollout.startAudit, {});
+  while (audit.phase !== "completed" && audit.phase !== "invalidated") {
+    audit = await admin.mutation(api.securityRollout.auditPage, {
+      auditId: audit.auditId,
+      numItems: 100,
+    });
+  }
+  expect(audit).toMatchObject({
+    phase: "completed",
+    zeroCorruption: true,
+    corrupt: 0,
+    broken: 0,
+  });
+  return audit.auditId;
+}
+
 async function seedTransfer(t: TestConvex<typeof schema>): Promise<void> {
   return await t.run(async (ctx) => {
     const organizationId = await ctx.db.insert("organizations", {
@@ -77,7 +97,11 @@ describe("admin publisher transfer operations", () => {
     });
     const admin = t.withIdentity({ subject: ADMIN } as { subject: string });
 
-    const first = await admin.mutation(api.admin.migrateSecurityRollout, {});
+    const auditId = await completeSecurityAudit(t);
+
+    const first = await admin.mutation(api.admin.migrateSecurityRollout, {
+      auditId,
+    });
     expect(first.webhookSecrets).toMatchObject({
       scanned: 1,
       current: 1,
@@ -93,7 +117,9 @@ describe("admin publisher transfer operations", () => {
       await decryptSecret(stored!, webhookBinding(stored!.projectId)),
     ).toBe("legacy-webhook-plaintext");
 
-    const second = await admin.mutation(api.admin.migrateSecurityRollout, {});
+    const second = await admin.mutation(api.admin.migrateSecurityRollout, {
+      auditId,
+    });
     expect(second.webhookSecrets).toMatchObject({
       scanned: 1,
       current: 1,
@@ -133,7 +159,7 @@ describe("admin publisher transfer operations", () => {
     await expect(
       t
         .withIdentity({ subject: "not-admin" } as { subject: string })
-        .mutation(api.admin.migrateSecurityRollout, {}),
+        .mutation(api.admin.migrateSecurityRollout, { auditId: "denied" }),
     ).rejects.toThrow("Not authorized as admin");
 
     expect(await t.run(async (ctx) => ctx.db.get(endpointId))).toMatchObject({
@@ -178,11 +204,24 @@ describe("admin publisher transfer operations", () => {
       boundEnvelopeReady: false,
       legacyCompatibleVersions: ["legacy-v1"],
       legacyOnlyVersions: ["legacy-v1"],
+      generation: 0,
+      auditRequired: true,
     });
 
+    const audit = await admin.mutation(api.securityRollout.startAudit, {});
+    expect(audit).toMatchObject({ phase: "credentials", generation: 0 });
     await expect(
-      admin.mutation(api.admin.migrateSecurityRollout, {}),
-    ).rejects.toThrow("canonical padded base64");
+      admin.mutation(api.securityRollout.auditPage, {
+        auditId: audit.auditId,
+        numItems: 100,
+      }),
+    ).resolves.toMatchObject({ phase: "webhooks" });
+    await expect(
+      admin.mutation(api.securityRollout.auditPage, {
+        auditId: audit.auditId,
+        numItems: 100,
+      }),
+    ).rejects.toThrow("unavailable for bound envelopes");
 
     const stored = await t.run(async (ctx) => ctx.db.get(endpointId));
     expect(stored).toMatchObject({ secret: "preflight-must-not-scrub" });

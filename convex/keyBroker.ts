@@ -3,7 +3,6 @@
 import { createClerkClient, type APIKey } from "@clerk/backend";
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
-import type { Id } from "./_generated/dataModel";
 import { action, internalAction, type ActionCtx } from "./_generated/server";
 import { requireIdentity } from "./lib/auth";
 
@@ -11,6 +10,7 @@ const CLERK_KEY_PAGE_SIZE = 500;
 const MAX_KEYS_PER_USER = 2_000;
 const MAX_ACTIVE_KEYS_PER_ORG = 2;
 const MAX_RECONCILE_ATTEMPTS = 5;
+const MEMBERSHIP_CLEANUP_REVOKE_BATCH = 25;
 
 const SAGA_OPERATION_CLAIM = "zevium_operation_id";
 const SAGA_LEASE_CLAIM = "zevium_lease_token";
@@ -51,7 +51,6 @@ export type BrokerCreatedKey = {
 export type BrokerRotatedKey = BrokerCreatedKey & { graceUntil: number };
 
 type BrokerKeySettingView = {
-  _id: Id<"keySettings">;
   keyId: string;
   managed: boolean;
   familyId: string;
@@ -133,14 +132,21 @@ function toRow(key: APIKey): BrokerKeyRow {
   };
 }
 
-/** Bounded pagination: no per-key GETs and no silent newest-page truncation. */
-async function listScopedKeys(
+type ProviderKeySnapshot = {
+  keys: APIKey[];
+  providerIds: string[];
+  pages: number;
+};
+
+/** One bounded offset pass. Caller repeats multi-page reads for stability. */
+async function readProviderKeySnapshot(
   scope: FreshScope,
   options: { reserveProviderSlot?: boolean } = {},
-): Promise<APIKey[]> {
+): Promise<ProviderKeySnapshot> {
   const keys = new Map<string, APIKey>();
   const seenProviderIds = new Set<string>();
   let offset = 0;
+  let pages = 0;
   let expectedTotal: number | undefined;
   for (;;) {
     let page: Awaited<ReturnType<FreshScope["client"]["apiKeys"]["list"]>>;
@@ -154,6 +160,7 @@ async function listScopedKeys(
     } catch {
       throw new Error("API key list is temporarily unavailable. Try again.");
     }
+    pages += 1;
     expectedTotal ??= page.totalCount;
     if (page.totalCount !== expectedTotal) {
       throw new Error(
@@ -196,7 +203,48 @@ async function listScopedKeys(
       );
     }
   }
-  return [...keys.values()];
+  return {
+    keys: [...keys.values()],
+    providerIds: [...seenProviderIds].sort((left, right) =>
+      left.localeCompare(right),
+    ),
+    pages,
+  };
+}
+
+function identicalProviderSnapshots(
+  left: ProviderKeySnapshot,
+  right: ProviderKeySnapshot,
+): boolean {
+  return (
+    left.providerIds.length === right.providerIds.length &&
+    left.providerIds.every((id, index) => id === right.providerIds[index])
+  );
+}
+
+/**
+ * Clerk exposes offset pagination, not a snapshot cursor. Two identical full
+ * passes close same-count delete/create churn for every multi-page operation.
+ */
+async function listScopedKeys(
+  scope: FreshScope,
+  options: { reserveProviderSlot?: boolean } = {},
+): Promise<APIKey[]> {
+  const first = await readProviderKeySnapshot(scope, options);
+  if (first.pages <= 1) return first.keys;
+  const second = await readProviderKeySnapshot(scope, options);
+  if (!identicalProviderSnapshots(first, second)) {
+    throw new Error("API key list changed while it was being read. Try again.");
+  }
+  return second.keys;
+}
+
+function sameKeyIds(keys: readonly APIKey[], expected: ReadonlySet<string>) {
+  const actual = new Set(keys.map((key) => key.id));
+  return (
+    actual.size === expected.size &&
+    [...actual].every((keyId) => expected.has(keyId))
+  );
 }
 
 async function observeKeys(
@@ -341,10 +389,6 @@ async function projectFreshMembershipLoss(
     userId: scope.userId,
     svixId: `fresh-membership:${scope.clerkOrgId}:${scope.userId}:${operationId}`,
   });
-  await ctx.scheduler.runAfter(0, internal.keyBroker.revokeMembershipKeys, {
-    clerkOrgId: scope.clerkOrgId,
-    userId: scope.userId,
-  });
 }
 
 export const listOwnedKeys = action({
@@ -424,6 +468,23 @@ export const createManagedKey = action({
         "Creation secret was not returned",
       );
       throw new Error("Key created but secret missing. Contact support.");
+    }
+    let postCreateValid = false;
+    try {
+      postCreateValid = sameKeyIds(await listScopedKeys(scope), new Set([created.id]));
+    } catch {
+      postCreateValid = false;
+    }
+    if (!postCreateValid) {
+      await failCreateAfterCompensation(
+        ctx,
+        scope,
+        args.operationId,
+        leaseToken,
+        created,
+        "Provider key set changed during creation",
+      );
+      throw new Error("API key set changed during creation. New key was revoked.");
     }
     if (
       !(await hasFreshMembership(scope.client, scope.clerkOrgId, scope.userId))
@@ -618,6 +679,29 @@ export const rotateManagedKey = action({
         "Rotation secret was not returned",
       );
       throw new Error("Key created but secret missing. Contact support.");
+    }
+    let postRotationValid = false;
+    try {
+      postRotationValid = sameKeyIds(
+        await listScopedKeys(scope),
+        new Set([old.id, created.id]),
+      );
+    } catch {
+      postRotationValid = false;
+    }
+    if (!postRotationValid) {
+      await failRotationAfterCompensation(
+        ctx,
+        scope,
+        args.operationId,
+        leaseToken,
+        old.id,
+        created,
+        "Provider key set changed during rotation",
+      );
+      throw new Error(
+        "API key set changed during rotation. Replacement was revoked.",
+      );
     }
     if (
       !(await hasFreshMembership(scope.client, scope.clerkOrgId, scope.userId))
@@ -878,36 +962,72 @@ export const revokeExpiredRotation = internalAction({
   },
 });
 
-/** Physical cleanup follows fail-closed membership projection; retries bounded. */
+/** Physical cleanup follows fail-closed projection and retries until zero proof. */
 export const revokeMembershipKeys = internalAction({
   args: {
     clerkOrgId: v.string(),
     userId: v.string(),
-    attempt: v.optional(v.number()),
   },
   handler: async (ctx, args): Promise<void> => {
+    const leaseToken = crypto.randomUUID();
+    const claimed = await ctx.runMutation(
+      internal.keySettings.claimMembershipCleanup,
+      { ...args, leaseToken },
+    );
+    if (claimed === null) return;
     try {
       const scope: FreshScope = {
         clerkOrgId: args.clerkOrgId,
         userId: args.userId,
         client: client(),
       };
-      const keys = await listScopedKeys(scope);
-      for (const key of keys) {
+      const page = await scope.client.apiKeys.list({
+        subject: scope.userId,
+        includeInvalid: false,
+        limit: CLERK_KEY_PAGE_SIZE,
+        offset: claimed.cursorOffset,
+      });
+      if (
+        !Number.isSafeInteger(page.totalCount) ||
+        page.totalCount < 0 ||
+        page.totalCount > MAX_KEYS_PER_USER ||
+        page.data.length > CLERK_KEY_PAGE_SIZE
+      ) {
+        throw new Error("Provider key page is invalid");
+      }
+      const keys = page.data.filter((key) => belongsToScope(key, scope));
+      for (const key of keys.slice(0, MEMBERSHIP_CLEANUP_REVOKE_BATCH)) {
         await revokeProviderKey(
           scope.client,
           key,
           "Clerk organization membership deleted",
         );
       }
-    } catch (error) {
-      const attempt = args.attempt ?? 0;
-      if (attempt + 1 >= MAX_RECONCILE_ATTEMPTS) throw error;
-      await ctx.scheduler.runAfter(
-        2 ** attempt * 60_000,
-        internal.keyBroker.revokeMembershipKeys,
-        { ...args, attempt: attempt + 1 },
+      await ctx.runMutation(
+        internal.keySettings.recordMembershipCleanupPage,
+        {
+          ...args,
+          membershipRevision: claimed.membershipRevision,
+          leaseToken,
+          cursorOffset: claimed.cursorOffset,
+          totalCount: page.totalCount,
+          providerIds: page.data.map((key) => key.id),
+          liveKeysObserved: keys.length > 0,
+        },
       );
+    } catch (error) {
+      const status = providerStatus(error);
+      await ctx.runMutation(internal.keySettings.retryMembershipCleanup, {
+        ...args,
+        membershipRevision: claimed.membershipRevision,
+        leaseToken,
+        errorCode:
+          status === 429
+            ? "provider_rate_limited"
+            : status !== undefined && status >= 400 && status < 500
+              ? "provider_rejected"
+              : "provider_unavailable",
+      });
     }
   },
 });

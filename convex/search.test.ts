@@ -191,7 +191,9 @@ describe("search.fetchSearchListings", () => {
     const only = result[0];
     expect(only).toBeDefined();
     expect(only?.slug).toBe("weather");
-    expect(only?.projectId).toBe(seed.publicId);
+    expect(only?.listingId).toBe("search-co/weather");
+    expect(only).not.toHaveProperty("projectId");
+    expect(only).not.toHaveProperty("organizationId");
     expect(only?.score).toBe(0.95);
     expect(only?.name).toBe("Weather API");
     expect(only?.publisherHandle).toBe("search-co");

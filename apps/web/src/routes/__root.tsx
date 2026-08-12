@@ -7,6 +7,7 @@ import {
   Outlet,
   Scripts,
   createRootRouteWithContext,
+  useRouter,
 } from "@tanstack/react-router";
 import { TanStackRouterDevtoolsPanel } from "@tanstack/react-router-devtools";
 import { createServerFn } from "@tanstack/react-start";
@@ -51,7 +52,8 @@ const fetchConvexAuth = createServerFn({ method: "GET" }).handler(
 const themeInitScript = `(function(){try{var k='zevium-theme';var t=localStorage.getItem(k);var d=window.matchMedia('(prefers-color-scheme: dark)').matches;var dark=t==='dark'||(t!=='light'&&d);var r=document.documentElement;r.classList.toggle('dark',dark);r.style.colorScheme=dark?'dark':'light';}catch(e){}})();`;
 
 export const Route = createRootRouteWithContext<RouterContext>()({
-  beforeLoad: async ({ context }): Promise<ConvexAuthSnapshot> => {
+  beforeLoad: async (options): Promise<ConvexAuthSnapshot> => {
+    const { context } = options;
     // Client nav: no server round-trip. Clerk browser state is sync.
     // token stays null — ConvexProviderWithClerk owns browser Convex auth.
     if (typeof window !== "undefined") {
@@ -67,6 +69,11 @@ export const Route = createRootRouteWithContext<RouterContext>()({
         orgId: client.orgId,
       };
     }
+
+    const serverContext = (
+      options as typeof options & { serverContext?: { nonce?: string } }
+    ).serverContext;
+    if (serverContext?.nonce) context.applySsrNonce(serverContext.nonce);
 
     const { userId, token, orgSlug, orgId } = await fetchConvexAuth();
 
@@ -116,6 +123,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
 
 function RootComponent() {
   const { convexQueryClient } = Route.useRouteContext();
+  const nonce = useRouter().options.ssr?.nonce;
 
   return (
     <ClerkProvider appearance={{ theme: shadcn }}>
@@ -123,7 +131,7 @@ function RootComponent() {
         client={convexQueryClient.convexClient}
         useAuth={useAuth}
       >
-        <ThemeProvider>
+        <ThemeProvider nonce={nonce}>
           <TooltipProvider>
             <Outlet />
             <Toaster />

@@ -512,7 +512,7 @@ function SemanticResults({
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {items?.map((item) => (
-            <CatalogueCard key={item.projectId} item={item} />
+            <CatalogueCard key={item.listingId} item={item} />
           ))}
         </div>
       )}
@@ -596,7 +596,7 @@ function CatalogueList({
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {data.items.map((item) => (
-            <CatalogueCard key={item.projectId} item={item} />
+            <CatalogueCard key={item.listingId} item={item} />
           ))}
         </div>
       )}

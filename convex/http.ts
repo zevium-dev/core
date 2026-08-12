@@ -119,7 +119,7 @@ http.route({
         ) {
           return new Response("Invalid membership event", { status: 400 });
         }
-        const revoked = await ctx.runMutation(
+        await ctx.runMutation(
           internal.keySettings.revokeMembershipVerified,
           {
             clerkOrgId: data.organization.id,
@@ -127,16 +127,6 @@ http.route({
             svixId,
           },
         );
-        if (!revoked.duplicate) {
-          await ctx.scheduler.runAfter(
-            0,
-            internal.keyBroker.revokeMembershipKeys,
-            {
-              clerkOrgId: data.organization.id,
-              userId: data.public_user_data.user_id,
-            },
-          );
-        }
         break;
       }
       default:
@@ -194,7 +184,17 @@ function stripeWebhookRoute(
       } catch (error) {
         const message =
           error instanceof Error ? error.message : "Invalid Stripe signature";
-        console.error("stripe webhook verification failed", { path, message });
+        console.error(
+          JSON.stringify({
+            schema: 1,
+            type: "zevium.dependency_failure",
+            component: "stripe_webhook_verification",
+            code:
+              message === "Webhook secret is not configured"
+                ? "misconfigured"
+                : "invalid_signature",
+          }),
+        );
         const status =
           message === "Webhook secret is not configured" ? 503 : 400;
         return new Response(
@@ -422,9 +422,15 @@ http.route({
         })),
       });
       return json(result, 200);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "ingest failed";
-      console.error("ingest-usage failed", { message });
+    } catch {
+      console.error(
+        JSON.stringify({
+          schema: 1,
+          type: "zevium.dependency_failure",
+          component: "usage_ingest",
+          code: "mutation_failed",
+        }),
+      );
       return json({ error: "ingest failed" }, 500);
     }
   }),
@@ -452,10 +458,15 @@ http.route({
         await ctx.runQuery(internal.wallets.getGatewayWallet, { clerkOrgId }),
         200,
       );
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "wallet checkpoint failed";
-      console.error("wallet checkpoint failed", { message });
+    } catch {
+      console.error(
+        JSON.stringify({
+          schema: 1,
+          type: "zevium.dependency_failure",
+          component: "wallet_checkpoint",
+          code: "query_failed",
+        }),
+      );
       return json({ error: "wallet checkpoint failed" }, 500);
     }
   }),
@@ -490,10 +501,15 @@ http.route({
         },
       );
       return json(payload, 200);
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "gateway spec failed";
-      console.error("gateway spec failed", { message });
+    } catch {
+      console.error(
+        JSON.stringify({
+          schema: 1,
+          type: "zevium.dependency_failure",
+          component: "gateway_spec",
+          code: "query_failed",
+        }),
+      );
       return json({ error: "gateway spec failed" }, 500);
     }
   }),

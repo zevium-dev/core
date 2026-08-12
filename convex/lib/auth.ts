@@ -257,6 +257,22 @@ export function requireOrgAdmin(claims: OrgIdentityClaims): OrgIdentityClaims {
 
 export type ActiveOrgAdminClaims = OrgIdentityClaims & { orgId: string };
 
+export type OrgCapabilities = {
+  canViewOrgUsage: boolean;
+  canManageOrgKeyPolicy: boolean;
+};
+
+/** One exact role mapping shared by usage, billing, and key-policy surfaces. */
+export function orgCapabilities(
+  claims: OrgIdentityClaims,
+): OrgCapabilities {
+  const admin = claims.orgRole === "org:admin";
+  return {
+    canViewOrgUsage: admin,
+    canManageOrgKeyPolicy: admin,
+  };
+}
+
 /** Authenticate an action and require an active Clerk org-admin membership. */
 export async function requireActiveOrgAdmin(
   ctx: AuthCtx,

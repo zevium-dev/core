@@ -7,6 +7,7 @@ import { internalMutation } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
 import { validateOpenApiSpec } from "./lib/validate";
+import { bumpSecurityRolloutGeneration } from "./securityRollout";
 
 // ---------------------------------------------------------------------------
 // cleanupTestProjects
@@ -94,6 +95,7 @@ export const cleanupTestProjects = internalMutation({
         await ctx.db.delete(endpoint._id);
         counts.webhookEndpoints += 1;
       }
+      if (endpoints.length > 0) await bumpSecurityRolloutGeneration(ctx);
 
       await ctx.db.delete(project._id);
       counts.projects += 1;

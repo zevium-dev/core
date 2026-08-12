@@ -12,6 +12,7 @@ import {
   enqueueKeyState,
   enqueueRouteArchive,
 } from "./registrySync";
+import { bumpSecurityRolloutGeneration } from "./securityRollout";
 
 const PAGE_SIZE = 50;
 const KEY_PAGE_SIZE = 25;
@@ -97,6 +98,7 @@ export async function beginProjectRetirement(
       active: false,
       retiringAt: endpoint.retiringAt ?? now,
     });
+    await bumpSecurityRolloutGeneration(ctx);
   }
   return await createJob(ctx, {
     resourceKey,
@@ -122,6 +124,7 @@ export async function beginWebhookRetirement(
     active: false,
     retiringAt: endpoint.retiringAt ?? now,
   });
+  await bumpSecurityRolloutGeneration(ctx);
   return await createJob(ctx, {
     resourceKey,
     kind: "webhook",
@@ -201,6 +204,7 @@ async function stepProject(
       .withIndex("by_project", (q) => q.eq("projectId", projectId))
       .take(PAGE_SIZE);
     for (const row of rows) await ctx.db.delete(row._id);
+    if (rows.length > 0) await bumpSecurityRolloutGeneration(ctx);
     return await queueNext(
       ctx,
       job,
@@ -238,6 +242,7 @@ async function stepProject(
         active: false,
         retiringAt: endpoint.retiringAt ?? Date.now(),
       });
+      await bumpSecurityRolloutGeneration(ctx);
     }
     const rows = await ctx.db
       .query("webhookDeliveries")
@@ -246,6 +251,7 @@ async function stepProject(
     for (const row of rows) await ctx.db.delete(row._id);
     if (rows.length > 0) return await queueNext(ctx, job);
     await ctx.db.delete(endpoint._id);
+    await bumpSecurityRolloutGeneration(ctx);
     return await queueNext(ctx, job, "final");
   }
   if (job.phase !== "final")
@@ -275,6 +281,7 @@ async function stepWebhook(
     active: false,
     retiringAt: endpoint.retiringAt ?? Date.now(),
   });
+  await bumpSecurityRolloutGeneration(ctx);
   const rows = await ctx.db
     .query("webhookDeliveries")
     .withIndex("by_endpoint", (q) => q.eq("endpointId", endpointId))
@@ -282,6 +289,7 @@ async function stepWebhook(
   for (const row of rows) await ctx.db.delete(row._id);
   if (rows.length > 0) return await queueNext(ctx, job);
   await ctx.db.delete(endpointId);
+  await bumpSecurityRolloutGeneration(ctx);
   await completeJob(ctx, job);
 }
 

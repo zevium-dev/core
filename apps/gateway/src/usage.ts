@@ -5,6 +5,7 @@
 
 import { ConvexHttpClient } from "convex/browser";
 import { makeFunctionReference } from "convex/server";
+import { costBucket, latencyBucket } from "./telemetry";
 
 /** Hot-path event emitted by the pipeline (tests / optional logging). */
 export type UsageEvent = {
@@ -77,8 +78,12 @@ export class ConsoleUsageSink implements UsageSink {
   emit(event: UsageEvent): void {
     console.log(
       JSON.stringify({
+        schema: 1,
         type: "zevium.usage",
-        ...event,
+        outcome: event.outcome,
+        statusClass: `${Math.floor(event.status / 100)}xx`,
+        latencyBucket: latencyBucket(event.latencyMs),
+        costBucket: costBucket(event.cost),
       }),
     );
   }
@@ -222,8 +227,8 @@ export class ConvexUsageClient {
       body: JSON.stringify({ events }),
     });
     if (!res.ok) {
-      const text = await res.text().catch(() => "");
-      throw new Error(`convex ingest failed: ${res.status} ${text}`);
+      await res.body?.cancel().catch(() => undefined);
+      throw new Error(`convex ingest failed: ${res.status}`);
     }
     let json: unknown;
     try {
@@ -253,8 +258,8 @@ export class ConvexUsageClient {
       }),
     });
     if (!res.ok) {
-      const text = await res.text().catch(() => "");
-      throw new Error(`convex mutation failed: ${res.status} ${text}`);
+      await res.body?.cancel().catch(() => undefined);
+      throw new Error(`convex mutation failed: ${res.status}`);
     }
     let json: unknown;
     try {

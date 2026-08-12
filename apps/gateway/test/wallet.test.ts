@@ -389,7 +389,7 @@ describe("WalletDO unit", () => {
 // ---------------------------------------------------------------------------
 
 describe("WalletDO property/fuzz", () => {
-  it("200 random ops preserve non-negative balance and ledger invariant at quiescence", async () => {
+  it("1024 random crash/property ops preserve ledger invariant at quiescence", async () => {
     const seed = 0xc0ffee;
     const rng = mulberry32(seed);
     const stub = walletStub(`fuzz-${seed}`);
@@ -415,7 +415,7 @@ describe("WalletDO property/fuzz", () => {
       expect(state.available).toBe(state.balance - state.inFlightTotal);
     };
 
-    const OPS = 200;
+    const OPS = 1_024;
     for (let i = 0; i < OPS; i++) {
       const roll = rng();
 
