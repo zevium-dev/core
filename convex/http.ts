@@ -353,8 +353,49 @@ export function parseIngestUsageBody(
 function json(body: unknown, status: number): Response {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      "Cache-Control": "no-store",
+    },
   });
+}
+
+const RELEASE_REQUEST_ID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
+export function parseReleaseProbeBody(
+  body: unknown,
+): { ok: true; requestId: string } | { ok: false } {
+  if (body === null || typeof body !== "object" || Array.isArray(body)) {
+    return { ok: false };
+  }
+  const record = body as Record<string, unknown>;
+  if (
+    Object.keys(record).length !== 1 ||
+    typeof record.requestId !== "string" ||
+    !RELEASE_REQUEST_ID_RE.test(record.requestId)
+  ) {
+    return { ok: false };
+  }
+  return { ok: true, requestId: record.requestId };
+}
+
+/** Constant-work comparison for fixed release probe credentials. */
+export function releaseProbeSecretMatches(
+  expected: string | undefined,
+  received: string | null,
+): boolean {
+  if (expected === undefined || expected.length === 0 || received === null) {
+    return false;
+  }
+  const expectedBytes = new TextEncoder().encode(expected);
+  const receivedBytes = new TextEncoder().encode(received);
+  const length = Math.max(expectedBytes.length, receivedBytes.length);
+  let difference = expectedBytes.length ^ receivedBytes.length;
+  for (let index = 0; index < length; index += 1) {
+    difference |= (expectedBytes[index] ?? 0) ^ (receivedBytes[index] ?? 0);
+  }
+  return difference === 0;
 }
 
 http.route({
@@ -390,6 +431,51 @@ http.route({
       const message = error instanceof Error ? error.message : "ingest failed";
       console.error("ingest-usage failed", { message });
       return json({ error: "ingest failed" }, 500);
+    }
+  }),
+});
+
+/**
+ * Read-only, request-scoped release proof. Separate credential prevents release
+ * automation from gaining gateway ingest, deploy, or general Convex read power.
+ */
+http.route({
+  path: "/release-probe-accounting",
+  method: "POST",
+  handler: httpAction(async (ctx, request) => {
+    const configuredSecret = process.env.RELEASE_PROBE_SECRET;
+    if (configuredSecret === undefined || configuredSecret.length === 0) {
+      return json({ error: "release probe unavailable" }, 503);
+    }
+    if (
+      !releaseProbeSecretMatches(
+        configuredSecret,
+        request.headers.get("x-release-probe-secret"),
+      )
+    ) {
+      return json({ error: "unauthorized" }, 401);
+    }
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return json({ error: "invalid body" }, 400);
+    }
+    const parsed = parseReleaseProbeBody(body);
+    if (!parsed.ok) return json({ error: "invalid body" }, 400);
+
+    try {
+      const accounting = await ctx.runQuery(
+        internal.wallets.getReleaseProbeAccounting,
+        { requestId: parsed.requestId },
+      );
+      if (accounting === null) return json({ status: "pending" }, 202);
+      return json({ status: "settled", accounting }, 200);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "release probe failed";
+      console.error("release probe accounting failed", { message });
+      return json({ error: "release probe failed" }, 500);
     }
   }),
 });

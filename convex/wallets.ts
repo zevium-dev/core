@@ -26,6 +26,30 @@ export type SettlementResult = {
   reason?: string;
 };
 
+export type ReleaseProbeAccounting = {
+  requestId: string;
+  settlementRefId: string;
+  usage: {
+    credits: number;
+    status: number;
+    method: string;
+    endpoint: string;
+  };
+  ledger: {
+    kind: "usage_settlement";
+    amount: number;
+    sequence: number;
+  };
+  publisher: {
+    publicHandle: string | null;
+    projectSlug: string;
+    grossCredits: number;
+    platformFeeCredits: number;
+    netCredits: number;
+    status: Doc<"publisherEarnings">["status"];
+  };
+};
+
 async function getOrCreateWallet(
   ctx: MutationCtx,
   organizationId: Id<"organizations">,
@@ -249,6 +273,78 @@ export const getGatewayWallet = internalQuery({
           ? { clerkOrgId: args.clerkOrgId, balance: 0, sequence: 0 }
           : checkpoint(args.clerkOrgId, wallet),
       keySettings: settings.map(toGatewayRow),
+    };
+  },
+});
+
+/**
+ * Least-privilege release correlation. HTTP auth lives in convex/http.ts; this
+ * query returns no consumer identity, key id, wallet balance, or secret data.
+ * One indexed settlement lookup proves usage, debit, and publisher accounting
+ * committed atomically for exact gateway request id.
+ */
+export const getReleaseProbeAccounting = internalQuery({
+  args: { requestId: v.string() },
+  handler: async (ctx, args): Promise<ReleaseProbeAccounting | null> => {
+    const settlementRefId = `settle:${args.requestId}`;
+    const ledger = await ctx.db
+      .query("walletEntries")
+      .withIndex("by_ref", (q) => q.eq("refId", settlementRefId))
+      .unique();
+    if (ledger === null) return null;
+    if (
+      ledger.kind !== "usage_settlement" ||
+      ledger.usageEventId === undefined
+    ) {
+      throw new Error("Release probe settlement has invalid ledger linkage");
+    }
+
+    const usage = await ctx.db.get(ledger.usageEventId);
+    if (usage === null || usage.settleRefId !== settlementRefId) {
+      throw new Error("Release probe usage linkage is invalid");
+    }
+    const project = await ctx.db.get(usage.projectId);
+    if (project === null) throw new Error("Release probe project is missing");
+    const publisherOrganization = await ctx.db.get(project.organizationId);
+    if (publisherOrganization === null) {
+      throw new Error("Release probe publisher is missing");
+    }
+    const earning = await ctx.db
+      .query("publisherEarnings")
+      .withIndex("by_settlement", (q) =>
+        q.eq("usageSettlementRefId", settlementRefId),
+      )
+      .unique();
+    if (
+      earning === null ||
+      earning.projectId !== project._id ||
+      earning.publisherOrganizationId !== project.organizationId
+    ) {
+      throw new Error("Release probe publisher accounting is invalid");
+    }
+
+    return {
+      requestId: args.requestId,
+      settlementRefId,
+      usage: {
+        credits: usage.credits,
+        status: usage.status,
+        method: usage.method,
+        endpoint: usage.endpoint,
+      },
+      ledger: {
+        kind: ledger.kind,
+        amount: ledger.amount,
+        sequence: ledger.sequence,
+      },
+      publisher: {
+        publicHandle: publisherOrganization.publicHandle ?? null,
+        projectSlug: project.slug,
+        grossCredits: earning.grossCredits,
+        platformFeeCredits: earning.platformFeeCredits,
+        netCredits: earning.netCredits,
+        status: earning.status,
+      },
     };
   },
 });

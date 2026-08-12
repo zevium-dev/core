@@ -4,6 +4,8 @@ import { pathToFileURL } from "node:url";
 
 const SHA_RE = /^[0-9a-f]{40}$/;
 const INTEGER_RE = /^[1-9]\d*$/;
+const REQUEST_ID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const MEDIA_TYPE_RE =
   /^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*(?:\s*;\s*charset=[a-z0-9-]+)?$/i;
@@ -16,6 +18,15 @@ export function validateRelease(release) {
     throw new Error("release must be a lowercase 40-character git SHA");
   }
   return release;
+}
+
+export function validateCurrentDevelop(release, currentDevelop) {
+  const expected = validateRelease(release);
+  const current = validateRelease(currentDevelop);
+  if (current !== expected) {
+    throw new Error("release stopped being current develop during approval");
+  }
+  return expected;
 }
 
 export function validateConvexTarget(expected, actual) {
@@ -62,6 +73,26 @@ function validateOrigin(value, name) {
     );
   }
   return url.origin;
+}
+
+function validateAccountingUrl(value) {
+  if (typeof value !== "string" || value.length === 0) {
+    throw new Error("accounting URL is required");
+  }
+  const url = new URL(value);
+  if (
+    url.protocol !== "https:" ||
+    url.pathname !== "/release-probe-accounting" ||
+    url.search ||
+    url.hash ||
+    url.username ||
+    url.password
+  ) {
+    throw new Error(
+      "accounting URL must be an HTTPS /release-probe-accounting endpoint",
+    );
+  }
+  return url.toString();
 }
 
 function validateProbePath(value, prefix, name) {
@@ -212,6 +243,13 @@ export function validateProbeOptions(options) {
     options.requestBody,
     options.contentType,
   );
+  const accountingUrl = validateAccountingUrl(options.accountingUrl);
+  if (
+    typeof options.probeSecret !== "string" ||
+    options.probeSecret.trim().length === 0
+  ) {
+    throw new Error("RELEASE_PROBE_SECRET is required");
+  }
 
   return {
     release,
@@ -229,6 +267,8 @@ export function validateProbeOptions(options) {
     requestBody: request.body,
     requestContentType: request.contentType,
     apiKey: options.apiKey,
+    accountingUrl,
+    probeSecret: options.probeSecret,
   };
 }
 
@@ -266,6 +306,11 @@ async function waitForReady({
       const result = await request(fetchImpl, requestUrl, init, 2_000);
       lastStatus = result.response.status;
       const inspected = await inspect(result.response);
+      if (inspected.terminal) {
+        const error = new Error(`${name} failed: ${inspected.reason}`);
+        error.terminal = true;
+        throw error;
+      }
       if (inspected.ready) {
         return {
           ...inspected,
@@ -276,6 +321,14 @@ async function waitForReady({
       }
       lastFailure = inspected.reason;
     } catch (error) {
+      if (error?.terminal === true) {
+        error.probeDetails = {
+          status: lastStatus,
+          attempts: attempt,
+          durationMs: Date.now() - startedAt,
+        };
+        throw error;
+      }
       lastFailure = errorMessage(error);
     }
 
@@ -430,6 +483,8 @@ export async function probeRelease(options, fetchImpl = fetch) {
       requestBody,
       requestContentType,
       apiKey,
+      accountingUrl,
+      probeSecret,
     } = normalized;
     evidence.release = release;
 
@@ -684,18 +739,114 @@ export async function probeRelease(options, fetchImpl = fetch) {
         Number(cost) === declaredCost,
         "metered response cost differs from published discovery price",
       );
+      const requestId =
+        result.response.headers.get("x-zevium-request-id")?.trim() ?? "";
       assert(
-        Boolean(result.response.headers.get("x-zevium-request-id")),
-        "metered response request id missing",
+        REQUEST_ID_RE.test(requestId),
+        "metered request id is not canonical",
       );
       await result.response.body?.cancel();
       return {
         status: result.response.status,
         durationMs: result.durationMs,
         cost: Number(cost),
+        requestId,
       };
     });
-    record("metered-wallet-upstream", metered, { cost: metered.cost });
+    record("metered-wallet-upstream", metered, {
+      cost: metered.cost,
+      requestId: metered.requestId,
+    });
+
+    const accounting = await runCheck("authoritative-usage-accounting", () =>
+      waitForReady({
+        fetchImpl,
+        url: accountingUrl,
+        attempts,
+        intervalMs,
+        sleep,
+        name: "authoritative usage accounting",
+        init: {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-release-probe-secret": probeSecret,
+          },
+          body: JSON.stringify({ requestId: metered.requestId }),
+        },
+        inspect: async (response) => {
+          let body;
+          try {
+            body = await response.json();
+          } catch {
+            return {
+              ready: false,
+              terminal: response.status !== 202,
+              reason: "accounting response was not JSON",
+            };
+          }
+          if (response.status === 202 && body?.status === "pending") {
+            return { ready: false, reason: "settlement still pending" };
+          }
+          if (response.status !== 200 || body?.status !== "settled") {
+            return {
+              ready: false,
+              terminal: true,
+              reason: `accounting endpoint returned HTTP ${response.status}`,
+            };
+          }
+
+          const actual = body.accounting;
+          const expectedFee = Math.floor((metered.cost * 500) / 10_000);
+          const expectedNet = metered.cost - expectedFee;
+          const validPublisherStatuses = new Set([
+            "pending_risk",
+            "available",
+            "allocated_to_transfer",
+            "transferred",
+          ]);
+          const exact =
+            actual?.requestId === metered.requestId &&
+            actual?.settlementRefId === `settle:${metered.requestId}` &&
+            actual?.usage?.credits === metered.cost &&
+            actual?.usage?.status === metered.status &&
+            actual?.usage?.method === meteredMethod &&
+            actual?.usage?.endpoint === target.endpoint &&
+            actual?.ledger?.kind === "usage_settlement" &&
+            actual?.ledger?.amount === -metered.cost &&
+            Number.isSafeInteger(actual?.ledger?.sequence) &&
+            actual.ledger.sequence > 0 &&
+            actual?.publisher?.publicHandle === target.publisherHandle &&
+            actual?.publisher?.projectSlug === target.slug &&
+            actual?.publisher?.grossCredits === metered.cost &&
+            actual?.publisher?.platformFeeCredits === expectedFee &&
+            actual?.publisher?.netCredits === expectedNet &&
+            validPublisherStatuses.has(actual?.publisher?.status);
+          if (!exact) {
+            return {
+              ready: false,
+              terminal: true,
+              reason: "usage, ledger, or publisher accounting mismatch",
+            };
+          }
+          return {
+            ready: true,
+            requestId: metered.requestId,
+            settlementRefId: actual.settlementRefId,
+            cost: metered.cost,
+            platformFeeCredits: expectedFee,
+            publisherNetCredits: expectedNet,
+          };
+        },
+      }),
+    );
+    record("authoritative-usage-accounting", accounting, {
+      requestId: accounting.requestId,
+      settlementRefId: accounting.settlementRefId,
+      cost: accounting.cost,
+      platformFeeCredits: accounting.platformFeeCredits,
+      publisherNetCredits: accounting.publisherNetCredits,
+    });
 
     evidence.outcome = "passed";
     return evidence;
@@ -730,6 +881,10 @@ async function writeEvidence(output, evidence) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
+  if (args["validate-current-develop"] === "true") {
+    validateCurrentDevelop(args.release, process.env.CURRENT_DEVELOP_SHA);
+    return;
+  }
   const options = {
     release: args.release,
     web: args.web,
@@ -746,6 +901,8 @@ async function main() {
     contentType: args["content-type"],
     requestBody: process.env.RELEASE_PROBE_REQUEST_BODY || undefined,
     apiKey: process.env.RELEASE_PROBE_API_KEY,
+    accountingUrl: args.accounting,
+    probeSecret: process.env.RELEASE_PROBE_SECRET,
   };
   if (args["current-release"] === "true") {
     process.stdout.write(await resolveCurrentRelease(options));

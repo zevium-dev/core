@@ -3,11 +3,17 @@ import { convexTest, type TestConvex } from "convex-test";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
-import { parseIngestUsageBody } from "./http";
+import {
+  parseIngestUsageBody,
+  parseReleaseProbeBody,
+  releaseProbeSecretMatches,
+} from "./http";
 import schema from "./schema";
 
 const modules = import.meta.glob("./**/*.ts");
 const SECRET = "test-gateway-internal-secret";
+const RELEASE_SECRET = "test-release-probe-secret";
+const REQUEST_ID = "123e4567-e89b-42d3-a456-426614174000";
 
 type SeededWallet = {
   consumerOrganizationId: Id<"organizations">;
@@ -113,14 +119,37 @@ function usageEvent(seed: SeededWallet, refId: string, credits = 15) {
 
 describe("wallet settlement ingest contract", () => {
   const previousSecret = process.env.GATEWAY_INTERNAL_SECRET;
+  const previousReleaseSecret = process.env.RELEASE_PROBE_SECRET;
 
   beforeEach(() => {
     process.env.GATEWAY_INTERNAL_SECRET = SECRET;
+    process.env.RELEASE_PROBE_SECRET = RELEASE_SECRET;
   });
   afterEach(() => {
     if (previousSecret === undefined)
       delete process.env.GATEWAY_INTERNAL_SECRET;
     else process.env.GATEWAY_INTERNAL_SECRET = previousSecret;
+    if (previousReleaseSecret === undefined)
+      delete process.env.RELEASE_PROBE_SECRET;
+    else process.env.RELEASE_PROBE_SECRET = previousReleaseSecret;
+  });
+
+  it("accepts only canonical request ids and exact release probe secrets", () => {
+    expect(parseReleaseProbeBody({ requestId: REQUEST_ID })).toEqual({
+      ok: true,
+      requestId: REQUEST_ID,
+    });
+    expect(parseReleaseProbeBody({ requestId: "paid-request" }).ok).toBe(false);
+    expect(
+      parseReleaseProbeBody({ requestId: REQUEST_ID, extra: true }).ok,
+    ).toBe(false);
+    expect(releaseProbeSecretMatches(RELEASE_SECRET, RELEASE_SECRET)).toBe(
+      true,
+    );
+    expect(
+      releaseProbeSecretMatches(RELEASE_SECRET, `${RELEASE_SECRET}x`),
+    ).toBe(false);
+    expect(releaseProbeSecretMatches(undefined, RELEASE_SECRET)).toBe(false);
   });
 
   it("requires one consumer organization in every parsed batch", () => {
@@ -194,6 +223,79 @@ describe("wallet settlement ingest contract", () => {
       results: [{ refId: "settle:one", status: "already_applied" }],
       wallet: { clerkOrgId: "org_consumer", balance: 85, sequence: 2 },
     });
+  });
+
+  it("correlates one paid request to exact usage, ledger, and publisher split", async () => {
+    const t = convexTest(schema, modules);
+    const seed = await seedWallet(t);
+    await t.run(async (ctx) => {
+      await ctx.db.patch(seed.publisherOrganizationId, {
+        publicHandle: "publisher",
+      });
+    });
+    await t.mutation(internal.wallets.grantPaymentCredits, {
+      organizationId: seed.consumerOrganizationId,
+      paymentId: seed.paymentId,
+      amount: 100,
+      refId: "stripe:payment_intent:pi_test",
+    });
+
+    const pending = await t.fetch("/release-probe-accounting", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-release-probe-secret": RELEASE_SECRET,
+      },
+      body: JSON.stringify({ requestId: REQUEST_ID }),
+    });
+    expect(pending.status).toBe(202);
+    expect(await pending.json()).toEqual({ status: "pending" });
+
+    await t.mutation(internal.wallets.recordUsage, {
+      events: [usageEvent(seed, `settle:${REQUEST_ID}`, 15)],
+    });
+    const settled = await t.fetch("/release-probe-accounting", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-release-probe-secret": RELEASE_SECRET,
+      },
+      body: JSON.stringify({ requestId: REQUEST_ID }),
+    });
+    expect(settled.status).toBe(200);
+    await expect(settled.json()).resolves.toEqual({
+      status: "settled",
+      accounting: {
+        requestId: REQUEST_ID,
+        settlementRefId: `settle:${REQUEST_ID}`,
+        usage: {
+          credits: 15,
+          status: 200,
+          method: "GET",
+          endpoint: "/forecast",
+        },
+        ledger: { kind: "usage_settlement", amount: -15, sequence: 2 },
+        publisher: {
+          publicHandle: "publisher",
+          projectSlug: "publisher-api",
+          grossCredits: 15,
+          platformFeeCredits: 0,
+          netCredits: 15,
+          status: "pending_risk",
+        },
+      },
+    });
+
+    const unauthorized = await t.fetch("/release-probe-accounting", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-release-probe-secret": "stale-secret",
+      },
+      body: JSON.stringify({ requestId: REQUEST_ID }),
+    });
+    expect(unauthorized.status).toBe(401);
+    expect(await unauthorized.text()).not.toContain(RELEASE_SECRET);
   });
 
   it("keeps materialized balance and sequence equal to the append-only ledger", async () => {

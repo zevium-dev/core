@@ -134,6 +134,7 @@ jobs:
       VERSION_TAG: ${{ needs.preflight.outputs.release }}-${{ github.run_id }}-${{ github.run_attempt }}
       STAGING_WEB_URL: ${{ vars.STAGING_WEB_URL }}
       STAGING_GATEWAY_URL: ${{ vars.STAGING_GATEWAY_URL }}
+      STAGING_CONVEX_SITE_URL: ${{ vars.STAGING_CONVEX_SITE_URL }}
       RELEASE_PROBE_MOCK_PATH: ${{ vars.RELEASE_PROBE_MOCK_PATH }}
       RELEASE_PROBE_MOCK_METHOD: ${{ vars.RELEASE_PROBE_MOCK_METHOD }}
       RELEASE_PROBE_METERED_PATH: ${{ vars.RELEASE_PROBE_METERED_PATH }}
@@ -143,6 +144,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           ref: ${{ needs.preflight.outputs.release }}
+          fetch-depth: 0
           persist-credentials: false
       - uses: actions/cache@v5
         with:
@@ -164,6 +166,7 @@ jobs:
           GATEWAY_STAGING_INTERNAL_SECRET: ${{ secrets.GATEWAY_STAGING_INTERNAL_SECRET }}
           CONVEX_STAGING_DEPLOY_KEY: ${{ secrets.CONVEX_STAGING_DEPLOY_KEY }}
           RELEASE_PROBE_API_KEY: ${{ secrets.STAGING_RELEASE_PROBE_API_KEY }}
+          RELEASE_PROBE_SECRET: ${{ secrets.STAGING_RELEASE_PROBE_SECRET }}
           STAGING_E2E_EMAIL: ${{ secrets.STAGING_E2E_EMAIL }}
           STAGING_E2E_PASSWORD: ${{ secrets.STAGING_E2E_PASSWORD }}
           STAGING_E2E_API_KEY: ${{ secrets.STAGING_E2E_API_KEY }}
@@ -176,7 +179,7 @@ jobs:
             CLOUDFLARE_API_TOKEN CLERK_STAGING_PUBLISHABLE_KEY
             CLERK_STAGING_SECRET_KEY GATEWAY_STAGING_INTERNAL_SECRET
             CONVEX_STAGING_DEPLOY_KEY
-            RELEASE_PROBE_API_KEY STAGING_E2E_EMAIL
+            RELEASE_PROBE_API_KEY RELEASE_PROBE_SECRET STAGING_E2E_EMAIL
             STAGING_E2E_PASSWORD STAGING_E2E_API_KEY
           )
           missing=()
@@ -212,7 +215,8 @@ jobs:
             --mock-method="$RELEASE_PROBE_MOCK_METHOD" \
             --metered-path="$RELEASE_PROBE_METERED_PATH" \
             --metered-method="$RELEASE_PROBE_METERED_METHOD" \
-            --content-type="$RELEASE_PROBE_CONTENT_TYPE"
+            --content-type="$RELEASE_PROBE_CONTENT_TYPE" \
+            --accounting="$STAGING_CONVEX_SITE_URL/release-probe-accounting"
 
       - name: Prove staging Convex deploy key target without mutation
         env:
@@ -291,6 +295,7 @@ jobs:
         env:
           RELEASE_PROBE_API_KEY: ${{ secrets.STAGING_RELEASE_PROBE_API_KEY }}
           RELEASE_PROBE_REQUEST_BODY: ${{ secrets.STAGING_RELEASE_PROBE_REQUEST_BODY }}
+          RELEASE_PROBE_SECRET: ${{ secrets.STAGING_RELEASE_PROBE_SECRET }}
         run: |
           node .github/scripts/release-contract.mjs \
             --release="$RELEASE_SHA" --web="$STAGING_WEB_URL" \
@@ -300,6 +305,7 @@ jobs:
             --metered-path="$RELEASE_PROBE_METERED_PATH" \
             --metered-method="$RELEASE_PROBE_METERED_METHOD" \
             --content-type="$RELEASE_PROBE_CONTENT_TYPE" \
+            --accounting="$STAGING_CONVEX_SITE_URL/release-probe-accounting" \
             --output=release-evidence/staging-contract.json
 
       - name: Install browser runtime
@@ -351,6 +357,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           ref: ${{ needs.preflight.outputs.release }}
+          fetch-depth: 0
           persist-credentials: false
       - uses: actions/cache@v5
         with:
@@ -368,13 +375,14 @@ jobs:
           CLERK_PRODUCTION_SECRET_KEY: ${{ secrets.CLERK_PRODUCTION_SECRET_KEY }}
           CONVEX_PRODUCTION_DEPLOY_KEY: ${{ secrets.CONVEX_PRODUCTION_DEPLOY_KEY }}
           RELEASE_PROBE_API_KEY: ${{ secrets.PRODUCTION_RELEASE_PROBE_API_KEY }}
+          RELEASE_PROBE_SECRET: ${{ secrets.PRODUCTION_RELEASE_PROBE_SECRET }}
         run: |
           required=(
             RELEASE_PROBE_MOCK_PATH RELEASE_PROBE_MOCK_METHOD
             RELEASE_PROBE_METERED_PATH RELEASE_PROBE_METERED_METHOD
             CLOUDFLARE_API_TOKEN CLERK_PRODUCTION_PUBLISHABLE_KEY
             CLERK_PRODUCTION_SECRET_KEY CONVEX_PRODUCTION_DEPLOY_KEY
-            RELEASE_PROBE_API_KEY
+            RELEASE_PROBE_API_KEY RELEASE_PROBE_SECRET
           )
           missing=()
           for name in "${required[@]}"; do
@@ -391,7 +399,8 @@ jobs:
             --mock-method="$RELEASE_PROBE_MOCK_METHOD" \
             --metered-path="$RELEASE_PROBE_METERED_PATH" \
             --metered-method="$RELEASE_PROBE_METERED_METHOD" \
-            --content-type="$RELEASE_PROBE_CONTENT_TYPE"
+            --content-type="$RELEASE_PROBE_CONTENT_TYPE" \
+            --accounting="$PRODUCTION_CONVEX_SITE_URL/release-probe-accounting"
 
       - name: Prove production Convex deploy key target without mutation
         env:
@@ -403,13 +412,39 @@ jobs:
           printf '%s' "$convex_dry_run" \
             | node .github/scripts/release-contract.mjs --validate-convex-dry-run=true
 
-      - name: Prove production baseline and probe dependencies before mutation
+      - name: Build immutable production web artifact after approval
         env:
+          VITE_RELEASE_SHA: ${{ env.RELEASE_SHA }}
+          CLERK_PUBLISHABLE_KEY: ${{ secrets.CLERK_PRODUCTION_PUBLISHABLE_KEY }}
+          CLERK_SECRET_KEY: ${{ secrets.CLERK_PRODUCTION_SECRET_KEY }}
+        run: pnpm --filter web build
+
+      - name: Re-resolve production, gate lifecycle, and upload immutable Worker versions
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_PROBE_API_KEY: ${{ secrets.PRODUCTION_RELEASE_PROBE_API_KEY }}
           RELEASE_PROBE_REQUEST_BODY: ${{ secrets.PRODUCTION_RELEASE_PROBE_REQUEST_BODY }}
+          RELEASE_PROBE_SECRET: ${{ secrets.PRODUCTION_RELEASE_PROBE_SECRET }}
         run: |
-          release_args=(--release="$ACTIVE_RELEASE")
-          if [[ "$ACTIVE_RELEASE" == "legacy" ]]; then
+          assert_release_is_current() {
+            test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
+            current_develop="$(gh api "repos/$GITHUB_REPOSITORY/commits/develop" --jq .sha)"
+            CURRENT_DEVELOP_SHA="$current_develop" \
+              node .github/scripts/release-contract.mjs \
+                --validate-current-develop=true --release="$RELEASE_SHA"
+          }
+
+          assert_release_is_current
+          current_active="$(node .github/scripts/release-contract.mjs \
+            --current-release=true --web="$PRODUCTION_WEB_URL" \
+            --gateway="$PRODUCTION_GATEWAY_URL")"
+          test "$current_active" = "$ACTIVE_RELEASE" || {
+            echo "Production identity changed during approval" >&2
+            exit 1
+          }
+          release_args=(--release="$current_active")
+          if [[ "$current_active" == "legacy" ]]; then
             release_args=(--legacy=true)
           fi
           node .github/scripts/release-contract.mjs \
@@ -420,24 +455,53 @@ jobs:
             --metered-path="$RELEASE_PROBE_METERED_PATH" \
             --metered-method="$RELEASE_PROBE_METERED_METHOD" \
             --content-type="$RELEASE_PROBE_CONTENT_TYPE" \
+            --accounting="$PRODUCTION_CONVEX_SITE_URL/release-probe-accounting" \
             --output=release-evidence/production-baseline.json
 
-      - name: Build immutable production web artifact after approval
-        env:
-          VITE_RELEASE_SHA: ${{ env.RELEASE_SHA }}
-          CLERK_PUBLISHABLE_KEY: ${{ secrets.CLERK_PRODUCTION_PUBLISHABLE_KEY }}
-          CLERK_SECRET_KEY: ${{ secrets.CLERK_PRODUCTION_SECRET_KEY }}
-        run: pnpm --filter web build
-
-      - name: Capture rollback pointers and upload immutable Worker versions
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-        run: |
           mkdir -p release-evidence
           pnpm --filter gateway exec wrangler deployments list --json > release-evidence/gateway-before.json
           pnpm --filter web exec wrangler deployments list \
             --config dist/server/wrangler.json --json > release-evidence/web-before.json
           node .github/scripts/release-state.mjs capture release-evidence
+
+          gateway_previous="$(node .github/scripts/release-state.mjs get release-evidence gateway)"
+          lifecycle_dir="$(mktemp -d "$RUNNER_TEMP/zevium-lifecycle.XXXXXX")"
+          export LIFECYCLE_DIR="$lifecycle_dir"
+          cleanup_lifecycle() {
+            node -e 'require("node:fs").rmSync(process.env.LIFECYCLE_DIR, { recursive: true, force: true })'
+          }
+          trap cleanup_lifecycle EXIT
+          umask 077
+          pnpm --filter gateway exec wrangler versions view "$gateway_previous" --json \
+            > "$lifecycle_dir/active-version.json"
+          lifecycle_marker="$(gh api \
+            "repos/$GITHUB_REPOSITORY/commits/$RELEASE_SHA/status" \
+            | node -e '
+              let input="";
+              process.stdin.on("data", (chunk) => input += chunk).on("end", () => {
+                const payload = JSON.parse(input);
+                const marker = payload.statuses?.find(
+                  (status) => status.context === "zevium/gateway-do-lifecycle",
+                );
+                process.stdout.write(marker?.state ?? "missing");
+              });
+            ')"
+          lifecycle_args=(
+            --candidate=apps/gateway/wrangler.jsonc
+            --active-version="$lifecycle_dir/active-version.json"
+            --marker="$lifecycle_marker"
+          )
+          if [[ "$current_active" != "legacy" ]]; then
+            git show "$current_active:apps/gateway/wrangler.jsonc" \
+              > "$lifecycle_dir/active-wrangler.jsonc"
+            lifecycle_args+=(--active="$lifecycle_dir/active-wrangler.jsonc")
+          fi
+          node .github/scripts/release-lifecycle.mjs check-generic \
+            "${lifecycle_args[@]}"
+
+          # Approval can sit for hours; read-only checks can race a branch push.
+          # Re-resolve directly before first Cloudflare write too.
+          assert_release_is_current
 
           WRANGLER_OUTPUT_FILE=release-evidence/gateway-upload.ndjson \
           pnpm --filter gateway exec wrangler versions upload --strict \
@@ -455,6 +519,8 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           RELEASE_PROBE_API_KEY: ${{ secrets.PRODUCTION_RELEASE_PROBE_API_KEY }}
           RELEASE_PROBE_REQUEST_BODY: ${{ secrets.PRODUCTION_RELEASE_PROBE_REQUEST_BODY }}
+          RELEASE_PROBE_SECRET: ${{ secrets.PRODUCTION_RELEASE_PROBE_SECRET }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           wait_for_gateway() {
             expected_release="${1:-}"
@@ -580,17 +646,29 @@ jobs:
               --message "Automated rollback after release $RELEASE_SHA failed" --yes \
               && web_command=success
 
-            gateway_ready=false
-            web_ready=false
-            wait_for_gateway && gateway_ready=true
-            wait_for_web && web_ready=true
+            rollback_contract=false
+            rollback_args=(--release="$ACTIVE_RELEASE")
+            if [[ "$ACTIVE_RELEASE" == "legacy" ]]; then
+              rollback_args=(--legacy=true)
+            fi
+            node .github/scripts/release-contract.mjs \
+              "${rollback_args[@]}" --web="$PRODUCTION_WEB_URL" \
+              --gateway="$PRODUCTION_GATEWAY_URL" \
+              --mock-path="$RELEASE_PROBE_MOCK_PATH" \
+              --mock-method="$RELEASE_PROBE_MOCK_METHOD" \
+              --metered-path="$RELEASE_PROBE_METERED_PATH" \
+              --metered-method="$RELEASE_PROBE_METERED_METHOD" \
+              --content-type="$RELEASE_PROBE_CONTENT_TYPE" \
+              --accounting="$PRODUCTION_CONVEX_SITE_URL/release-probe-accounting" \
+              --output=release-evidence/rollback-contract.json \
+              && rollback_contract=true
             pnpm --filter gateway exec wrangler deployments list --json \
               > release-evidence/gateway-after-rollback.json
             pnpm --filter web exec wrangler deployments list \
               --config dist/server/wrangler.json --json \
               > release-evidence/web-after-rollback.json
             node .github/scripts/release-state.mjs recover release-evidence \
-              "$gateway_command" "$web_command" "$gateway_ready" "$web_ready"
+              "$gateway_command" "$web_command" "$rollback_contract" "$rollback_contract"
             exit "$failure_status"
           }
           trap 'rollback_workers $?' ERR
@@ -602,14 +680,21 @@ jobs:
           pnpm exec convex deploy --yes --message "production expansion $RELEASE_SHA"
           node .github/scripts/release-state.mjs mark release-evidence convex_expanded
 
-          # Old Workers must still work against expanded Convex before traffic moves.
-          curl --fail --silent --show-error "$PRODUCTION_GATEWAY_URL/discovery" \
-            | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const x=JSON.parse(s);if(!Array.isArray(x.apis))process.exit(1)})'
-          old_catalogue="$(curl --fail --location --silent --show-error \
-            "$PRODUCTION_WEB_URL/catalogue?q=&sort=newest")"
-          [[ "$old_catalogue" == *'<title>Catalogue · Zevium</title>'* \
-            && "$old_catalogue" == *'Public APIs with per-call credits'* \
-            && "$old_catalogue" != *'Something went wrong'* ]]
+          # Old authenticated paid contract must survive expanded Convex.
+          compatibility_args=(--release="$ACTIVE_RELEASE")
+          if [[ "$ACTIVE_RELEASE" == "legacy" ]]; then
+            compatibility_args=(--legacy=true)
+          fi
+          node .github/scripts/release-contract.mjs \
+            "${compatibility_args[@]}" --web="$PRODUCTION_WEB_URL" \
+            --gateway="$PRODUCTION_GATEWAY_URL" \
+            --mock-path="$RELEASE_PROBE_MOCK_PATH" \
+            --mock-method="$RELEASE_PROBE_MOCK_METHOD" \
+            --metered-path="$RELEASE_PROBE_METERED_PATH" \
+            --metered-method="$RELEASE_PROBE_METERED_METHOD" \
+            --content-type="$RELEASE_PROBE_CONTENT_TYPE" \
+            --accounting="$PRODUCTION_CONVEX_SITE_URL/release-probe-accounting" \
+            --output=release-evidence/expanded-control-plane-contract.json
 
           gateway_previous="$(node .github/scripts/release-state.mjs get release-evidence gateway previous)"
           gateway_candidate="$(node .github/scripts/release-state.mjs get release-evidence gateway candidate)"
@@ -625,6 +710,7 @@ jobs:
             --metered-path="$RELEASE_PROBE_METERED_PATH" \
             --metered-method="$RELEASE_PROBE_METERED_METHOD" \
             --content-type="$RELEASE_PROBE_CONTENT_TYPE" \
+            --accounting="$PRODUCTION_CONVEX_SITE_URL/release-probe-accounting" \
             --output=release-evidence/gateway-candidate-contract.json
           pnpm --filter gateway exec wrangler versions deploy \
             "$gateway_candidate" --yes
@@ -650,6 +736,7 @@ jobs:
             --metered-path="$RELEASE_PROBE_METERED_PATH" \
             --metered-method="$RELEASE_PROBE_METERED_METHOD" \
             --content-type="$RELEASE_PROBE_CONTENT_TYPE" \
+            --accounting="$PRODUCTION_CONVEX_SITE_URL/release-probe-accounting" \
             --output=release-evidence/production-contract.json
           trap - ERR TERM INT
 
