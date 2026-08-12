@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Shared helpers for Zevium browser E2E scripts (agent-browser).
+# Callers source this file and use different subsets of shared E2E defaults.
 # shellcheck disable=SC2034
 
 set -euo pipefail
@@ -142,7 +143,8 @@ wait_for_url_pattern() {
         # e.g. **/app/projects/** → */app/projects/*
         local bash_pat
         bash_pat="$(printf '%s' "$pattern" | sed 's/\*\*/\*/g')"
-        # shellcheck disable=SC2254
+        # Runtime route pattern intentionally uses bash glob matching.
+        # shellcheck disable=SC2053
         if [[ "$url" == $bash_pat ]]; then
           return 0
         fi

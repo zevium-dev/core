@@ -354,7 +354,7 @@ export async function handleGatewayRequest(
   let upstreamRes: Response;
   try {
     upstreamRes = await fetchImpl(upstreamUrl.toString(), init);
-  } catch (err) {
+  } catch {
     if (!usedFree && !unmetered) {
       await wallet.refund(reservationId);
     } else if (usedFree) {

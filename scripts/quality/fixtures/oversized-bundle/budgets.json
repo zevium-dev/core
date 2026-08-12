@@ -1,0 +1,22 @@
+{
+  "budgets": {
+    "client": {
+      ".js": {
+        "maxFiles": 0,
+        "maxTotalBytes": 0,
+        "maxTotalGzipBytes": 0,
+        "maxFileBytes": 0,
+        "maxFileGzipBytes": 0
+      }
+    },
+    "server": {
+      ".js": {
+        "maxFiles": 0,
+        "maxTotalBytes": 0,
+        "maxTotalGzipBytes": 0,
+        "maxFileBytes": 0,
+        "maxFileGzipBytes": 0
+      }
+    }
+  }
+}

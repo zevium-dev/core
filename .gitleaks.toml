@@ -1,0 +1,18 @@
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Generated production bundles are untracked derivatives of scanned source."
+paths = ['''^apps/web/dist/''']
+
+[[allowlists]]
+description = "Exact public documentation and deterministic test placeholders, never credentials."
+regexTarget = "match"
+regexes = [
+  '''ak_your_api_key''',
+  '''sk_live_abcdefghijklmnop''',
+  '''whsec_dGVzdC13ZWJob29rLXNlY3JldA==''',
+  '''pk_test_ZmFrZS5jbGVyay5hY2NvdW50JA''',
+  '''sk_test_ZmFrZS5jbGVyay5hY2NvdW50JA''',
+  '''\$STRIPE_SECRET_KEY''',
+]

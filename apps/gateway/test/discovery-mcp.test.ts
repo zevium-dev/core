@@ -24,7 +24,6 @@ const ORG_SLUG = "acme";
 const PROJECT_SLUG = "demo";
 const KEY_SECRET = "zev_test_secret_mcp_1";
 const KEY_ID = "ak_mcp_1";
-const CLERK_ORG = "org_clerk_mcp";
 const CONVEX_ORG = "org_convex_mcp";
 
 const SPEC = JSON.stringify({

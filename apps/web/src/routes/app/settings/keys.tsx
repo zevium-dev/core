@@ -317,7 +317,6 @@ function KeysContent() {
                 onChange={(e) => setName(e.target.value)}
                 placeholder="Local dev"
                 maxLength={64}
-                autoFocus
                 disabled={createMutation.isPending}
               />
             </div>
@@ -613,6 +612,7 @@ function KeyRow({
           <Button
             variant="ghost"
             size="sm"
+            aria-label="Rotate API key"
             onClick={onRotate}
             disabled={graceActive || graceExpired}
             title="Rotate key (old key works 24h)"

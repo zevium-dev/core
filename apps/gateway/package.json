@@ -6,7 +6,8 @@
     "dev": "wrangler dev --port 8787",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "lint": "oxlint --config ../../.oxlintrc.json --deny-warnings --report-unused-disable-directives src test vitest.config.ts"
   },
   "dependencies": {
     "@zevium/shared": "workspace:*",

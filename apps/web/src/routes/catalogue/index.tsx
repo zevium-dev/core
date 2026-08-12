@@ -189,7 +189,15 @@ function CataloguePage() {
       },
       replace: true,
     });
-  }, [activeTag, freeOnly, maxCostInput, navigate, searchInput, sort]);
+  }, [
+    activeTag,
+    freeOnly,
+    maxCostInput,
+    navigate,
+    routeSearch.semantic,
+    searchInput,
+    sort,
+  ]);
 
   useEffect(() => {
     setSearchInput(routeSearch.q);

@@ -278,7 +278,6 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
   #keySettingsSyncedAt = 0;
   #syncInFlight: Promise<SyncGrantsResult> | null = null;
   #flushSeq = 0;
-  #loaded = false;
   #mutationTail: Promise<void> = Promise.resolve();
 
   constructor(ctx: DurableObjectState, env: Cloudflare.Env) {
@@ -327,7 +326,6 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
     this.#keySettings = new Map(Object.entries(settingsMap));
     this.#keySettingsSyncedAt =
       (stored.get(K_KEY_SETTINGS_AT) as number | undefined) ?? 0;
-    this.#loaded = true;
   }
 
   #available(): number {

@@ -64,7 +64,7 @@ convex/          # Convex schema + functions (control plane)
 packages/shared/ # spec parsing, x-zevium-* extraction, types shared web↔gateway
 ```
 
-Turborepo drives build/typecheck/test/lint pipelines with caching; each app deploys independently (web → its host, gateway → Cloudflare, convex → `npx convex deploy`).
+Turborepo drives build/typecheck/test/lint pipelines with caching; each app deploys independently (web → its host, gateway → Cloudflare, convex → `npx convex deploy`). Oxlint runs one non-skippable task for each workspace package plus root/Convex scripts, with native TypeScript, React Hooks, accessibility, import, and Vitest rules and targeted TanStack Router/security plugins. `pnpm ci:pr` forces the full quality gate: formatting, lint graph validation, structured-file/action/shell/secret checks, focused-test rejection, strict typechecks, tests, environment-validated production build, generated-route freshness, measured bundle budgets, and Git diff hygiene.
 
 ## Architecture
 

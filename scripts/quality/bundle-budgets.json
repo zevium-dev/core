@@ -1,0 +1,42 @@
+{
+  "measurement": {
+    "command": "pnpm build:ci",
+    "baselineCommit": "235bc10434f5e3751b396ec2229449590ddba697",
+    "headroomPercent": 5,
+    "reason": "Five percent absorbs hash/minifier drift while blocking dependency-sized regressions."
+  },
+  "budgets": {
+    "client": {
+      ".js": {
+        "maxFiles": 113,
+        "maxTotalBytes": 2068000,
+        "maxTotalGzipBytes": 658000,
+        "maxFileBytes": 836000,
+        "maxFileGzipBytes": 261000
+      },
+      ".css": {
+        "maxFiles": 1,
+        "maxTotalBytes": 117000,
+        "maxTotalGzipBytes": 19000,
+        "maxFileBytes": 117000,
+        "maxFileGzipBytes": 19000
+      }
+    },
+    "server": {
+      ".js": {
+        "maxFiles": 176,
+        "maxTotalBytes": 5475000,
+        "maxTotalGzipBytes": 1300000,
+        "maxFileBytes": 1556000,
+        "maxFileGzipBytes": 399000
+      },
+      ".css": {
+        "maxFiles": 1,
+        "maxTotalBytes": 117000,
+        "maxTotalGzipBytes": 19000,
+        "maxFileBytes": 117000,
+        "maxFileGzipBytes": 19000
+      }
+    }
+  }
+}

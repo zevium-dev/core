@@ -216,7 +216,7 @@ export function SpecRailEndpoints({
                     ) : null}
                   </div>
                   <div className="flex shrink-0 flex-col items-end gap-1">
-                    <label className="flex items-center gap-1 text-xs text-muted-foreground">
+                    <div className="flex items-center gap-1 text-xs text-muted-foreground">
                       <span className="tabular-nums">cr</span>
                       <Input
                         value={v.cost}
@@ -228,8 +228,8 @@ export function SpecRailEndpoints({
                         aria-label={`Cost for ${ep.method.toUpperCase()} ${ep.path}`}
                         className="h-7 w-16 text-right font-mono text-xs"
                       />
-                    </label>
-                    <label className="flex items-center gap-1 text-xs text-muted-foreground">
+                    </div>
+                    <div className="flex items-center gap-1 text-xs text-muted-foreground">
                       <span className="tabular-nums">free/day</span>
                       <Input
                         value={v.freeTier}
@@ -242,7 +242,7 @@ export function SpecRailEndpoints({
                         aria-label={`Free tier for ${ep.method.toUpperCase()} ${ep.path}`}
                         className="h-7 w-16 text-right font-mono text-xs"
                       />
-                    </label>
+                    </div>
                   </div>
                 </li>
               );
