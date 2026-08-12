@@ -1,0 +1,12 @@
+6624eb6da0647d83547732b3930b036c43cafb88:packages/shared/src/registry-sync.test.ts:generic-api-key:23
+6624eb6da0647d83547732b3930b036c43cafb88:convex/registrySync.test.ts:generic-api-key:30
+f638df59039a5c208402d1e6e87fa219c2e854b1:docs/production-deploy.md:generic-api-key:309
+0893c6e4869c4e53c8b848301e064ba91caa4299:convex/auth.config.ts:generic-api-key:4
+0a031dc6117255327afd6060fc11a5ceea2cb278:.env.example:generic-api-key:20
+712ee030f775618d192314ee88cce528afa3a800:src/routes/settings/keys/$.tsx:curl-auth-header:178
+d0b3736ed96f60503bb05a9de5bfb92f5afa0ca5:src/routes/settings/keys/$.lazy.tsx:generic-api-key:50
+d0b3736ed96f60503bb05a9de5bfb92f5afa0ca5:src/routes/settings/keys/$.lazy.tsx:generic-api-key:59
+d0b3736ed96f60503bb05a9de5bfb92f5afa0ca5:src/routes/settings/keys/$.lazy.tsx:generic-api-key:68
+d0b3736ed96f60503bb05a9de5bfb92f5afa0ca5:src/routes/settings/keys/$.lazy.tsx:generic-api-key:77
+d0b3736ed96f60503bb05a9de5bfb92f5afa0ca5:src/routes/settings/keys/$.lazy.tsx:generic-api-key:86
+d0b3736ed96f60503bb05a9de5bfb92f5afa0ca5:src/routes/settings/keys/$.lazy.tsx:curl-auth-header:166

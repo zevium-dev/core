@@ -7,6 +7,7 @@ const convexDir = path.dirname(fileURLToPath(import.meta.url));
 export default defineConfig({
   root: convexDir,
   test: {
+    allowOnly: false,
     environment: "edge-runtime",
     include: ["**/*.test.ts"],
     // Keep vitest out of apps/* — this config is convex-only.

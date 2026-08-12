@@ -3,25 +3,51 @@ import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import {
   copyFileSync,
-  cpSync,
+  existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import test from "node:test";
-import { assertGeneratedTargetsFresh } from "./check-generated-routes.mjs";
-import { resolveScanRange } from "./check-gitleaks.mjs";
-import { checkBundles } from "./check-bundles.mjs";
+import {
+  compareBundleMeasurements,
+  measureBundle,
+  overlayCandidateSnapshot,
+  resolveBundleBaseline,
+  validateBundleContract,
+} from "./check-bundles.mjs";
+import {
+  assertAnonymousLocalConvex,
+  assertGeneratedTargetsFresh,
+  sanitizedConvexEnvironment,
+} from "./check-generated-routes.mjs";
+import {
+  gitleaksCommands,
+  resolveScanPlan,
+  validateGitleaksPolicy,
+} from "./check-gitleaks.mjs";
 import { findBlockedTests } from "./check-test-focus.mjs";
-import { inspectTurboLint, validateLintGraph } from "./check-turbo-lint.mjs";
+import {
+  attestLintTask,
+  inspectTurboLint,
+  validateLintGraph,
+} from "./check-turbo-lint.mjs";
+import {
+  checkWorkflowToolchains,
+  validateWorkflowToolchain,
+} from "./check-workflow-toolchains.mjs";
+import { runTrackedCommand } from "./tracked-tree.mjs";
 
 const repositoryRoot = resolve(import.meta.dirname, "../..");
 const fixtures = resolve(import.meta.dirname, "fixtures");
 const node = process.execPath;
 const oxlint = resolve(repositoryRoot, "node_modules/.bin/oxlint");
+const zeroSha = "0".repeat(40);
 
 function run(script, args = [], options = {}) {
   return spawnSync(node, [resolve(import.meta.dirname, script), ...args], {
@@ -31,27 +57,101 @@ function run(script, args = [], options = {}) {
   });
 }
 
-test("Turbo lint graph contains one runnable task per workspace package", () => {
-  assert.deepEqual(inspectTurboLint(join(fixtures, "turbo-complete")), {
-    packages: 2,
-    tasks: 2,
-    fileCounts: { "@fixture/alpha": 2, "@fixture/beta": 2 },
-  });
+function write(path, source) {
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, source);
+}
+
+function gitRepository() {
+  const directory = mkdtempSync(join(tmpdir(), "zevium-git-fixture-"));
+  const git = (...args) =>
+    spawnSync("git", args, { cwd: directory, encoding: "utf8" });
+  assert.equal(git("init", "--quiet", "--initial-branch=develop").status, 0);
+  assert.equal(
+    git("config", "user.email", "fixture@invalid.example").status,
+    0,
+  );
+  assert.equal(git("config", "user.name", "Quality Fixture").status, 0);
+  write(join(directory, "README.md"), "base\n");
+  assert.equal(git("add", ".").status, 0);
+  assert.equal(git("commit", "--quiet", "-m", "fixture: base").status, 0);
+  const base = git("rev-parse", "HEAD").stdout.trim();
+  write(join(directory, "README.md"), "head\n");
+  assert.equal(git("add", ".").status, 0);
+  assert.equal(git("commit", "--quiet", "-m", "fixture: head").status, 0);
+  const head = git("rev-parse", "HEAD").stdout.trim();
+  return { directory, git, base, head };
+}
+
+test("workflow toolchains pin mise, Node, pnpm, and frozen installs", () => {
+  assert.equal(checkWorkflowToolchains(), 7);
+  const source = readFileSync(
+    resolve(repositoryRoot, ".github/workflows/ci.yml"),
+    "utf8",
+  );
+  const hostile = [
+    source.replace("version: 2026.7.13", "version: latest"),
+    source.replace(
+      "pnpm install --frozen-lockfile",
+      "pnpm install --no-frozen-lockfile",
+    ),
+    source.replace(
+      "jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654",
+      "jdx/mise-action@v4",
+    ),
+    source.replace("install_args: node@24.15.0", "install_args: node@latest"),
+    source.replace(
+      "      - name: Run uncached PR quality gate",
+      "      - name: Hostile mutable reinstall\n        run: pnpm install --no-frozen-lockfile\n      - name: Run uncached PR quality gate",
+    ),
+    source.replace(
+      'test "$(pnpm --version)" = "11.8.0"',
+      'test "$(pnpm --version)" = "11.8.0"\n          pnpm config set verify-store-integrity false',
+    ),
+    source.replace(
+      [
+        "      - uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4",
+        "        with:",
+        "          version: 2026.7.13",
+        "          install: true",
+        "          install_args: node@24.15.0 npm:pnpm@11.8.0 actionlint@1.7.12 gitleaks@8.30.1 shellcheck@0.11.0",
+      ].join("\n"),
+      "      - name: Hostile dependency bootstrap\n        run: npx vitest",
+    ),
+  ];
+  for (const [index, workflow] of hostile.entries()) {
+    const directory = mkdtempSync(join(tmpdir(), "zevium-workflow-hostile-"));
+    const path = join(directory, `hostile-${index}.yml`);
+    write(path, workflow);
+    assert.throws(
+      () => validateWorkflowToolchain(path),
+      /mise action|mise bootstrap|binary version|install_args|verification|frozen pnpm install|additional pnpm install|dependency command/,
+    );
+  }
 });
 
-test("Turbo lint graph rejects package that can silently skip lint", () => {
+test("Turbo lint attests every exact owned file and executes production commands", () => {
+  const result = inspectTurboLint(join(fixtures, "turbo-complete"));
+  assert.deepEqual(result.fileCounts, {
+    "@fixture/alpha": 2,
+    "@fixture/beta": 2,
+  });
+  assert.deepEqual(result.ownedFiles["@fixture/alpha"], [
+    "packages/alpha/src/extra.js",
+    "packages/alpha/src/index.js",
+  ]);
+  assert.deepEqual(result.ownedFiles["@fixture/beta"], [
+    "packages/beta/src/extra.js",
+    "packages/beta/src/index.js",
+  ]);
+});
+
+test("Turbo lint rejects missing, partial, ignored, and weakened scopes", () => {
   assert.throws(
     () => inspectTurboLint(join(fixtures, "turbo-missing")),
     /@fixture\/missing: missing lint command/,
   );
-});
-
-test("Turbo lint graph rejects true, echo, and no-file bypass commands", () => {
-  for (const command of [
-    "true",
-    "echo linted",
-    "oxlint --config ../../.oxlintrc.json missing",
-  ]) {
+  for (const command of ["true", "echo linted"]) {
     assert.throws(
       () =>
         validateLintGraph(
@@ -63,7 +163,40 @@ test("Turbo lint graph rejects true, echo, and no-file bypass commands", () => {
           },
           repositoryRoot,
         ),
-      /must execute oxlint directly|lint target does not exist/,
+      /must execute oxlint directly/,
+    );
+  }
+
+  const workspace = join(fixtures, "turbo-complete");
+  const prefix =
+    "oxlint --config ../../../../../../.oxlintrc.json --deny-warnings --report-unused-disable-directives";
+  for (const [command, pattern] of [
+    [`${prefix} src/index.js`, /ignored\/missing owned file/],
+    [`${prefix} --allow=correctness src`, /weakening or config override/],
+    [
+      `${prefix} --ignore-pattern=src/extra.js src`,
+      /weakening or config override/,
+    ],
+    [
+      "oxlint --config package.json --deny-warnings --report-unused-disable-directives src",
+      /exact root config/,
+    ],
+    [
+      "oxlint --config ../../../../../../.oxlintrc.json --report-unused-disable-directives src",
+      /deny warnings/,
+    ],
+  ]) {
+    assert.throws(
+      () =>
+        attestLintTask({
+          workspace,
+          task: {
+            package: "@fixture/alpha",
+            directory: "packages/alpha",
+            command,
+          },
+        }),
+      pattern,
     );
   }
 });
@@ -86,18 +219,22 @@ test("Oxlint rejects real hooks, accessibility, and security violations", () => 
   assert.match(output, /no-eval|detect-eval-with-expression/);
 });
 
-test("focused and skipped test calls fail against source fixture", () => {
-  const result = run("check-test-focus.mjs", [join(fixtures, "focused-tests")]);
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /describe\.only/);
-  assert.match(result.stderr, /test\.skip/);
-  assert.match(result.stderr, /test\.only/);
-  assert.match(result.stderr, /suite\.skip/);
-  assert.match(result.stderr, /fdescribe/);
-  const allowed = mkdtempSync(join(tmpdir(), "zevium-focus-allowed-"));
+test("focus scanner catches computed, assigned, aliased, and wrapper imports", () => {
+  const focusedRoot = join(fixtures, "focused-tests");
+  const violations = findBlockedTests([focusedRoot]);
+  const output = violations.join("\n");
+  assert.match(output, /focused\.test\.ts.*describe\.only/);
+  assert.match(output, /focused\.test\.ts.*test\.skip/);
+  assert.match(output, /focused\.test\.ts.*test\.only/);
+  assert.match(output, /focused\.test\.ts.*suite\.skip/);
+  assert.match(output, /focused\.test\.ts.*fdescribe/);
+  assert.match(output, /wrapper-consumer\.test\.ts.*test\.only/);
+  assert.match(output, /wrapper-consumer\.test\.ts.*test\.skip/);
+
+  const allowed = mkdtempSync(join(tmpdir(), "zevium-focus-shadowed-"));
   copyFileSync(
-    join(fixtures, "focused-tests", "allowed.ts"),
-    join(allowed, "allowed.ts"),
+    join(focusedRoot, "shadowed.test.ts"),
+    join(allowed, "shadowed.test.ts"),
   );
   assert.deepEqual(findBlockedTests([allowed]), []);
 });
@@ -111,7 +248,7 @@ test("invalid JSON and YAML files fail parser checks", () => {
   assert.match(result.stderr, /broken\.yaml/);
 });
 
-test("generated freshness isolates writes and detects every target mutation", () => {
+test("generated freshness isolates writes and catches target plus collateral drift", () => {
   const directory = mkdtempSync(join(tmpdir(), "zevium-route-fixture-"));
   for (const file of ["generated.ts", "collateral.ts", "change.mjs"])
     copyFileSync(join(fixtures, "generator", file), join(directory, file));
@@ -125,7 +262,7 @@ test("generated freshness isolates writes and detects every target mutation", ()
     () =>
       assertGeneratedTargetsFresh({
         cwd: directory,
-        targets: ["generated.ts", "collateral.ts"],
+        targets: ["generated.ts"],
         command: node,
         args: ["change.mjs"],
       }),
@@ -141,77 +278,458 @@ test("generated freshness isolates writes and detects every target mutation", ()
   );
 });
 
-test("oversized physical bundle fails measured budget", () => {
-  const result = run("check-bundles.mjs", [
-    "--root",
-    join(fixtures, "oversized-bundle", "dist"),
-    "--config",
-    join(fixtures, "oversized-bundle", "budgets.json"),
-  ]);
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /Bundle budget failures/);
-});
+test("Convex generation strips live targets and requires anonymous loopback config", () => {
+  const environment = sanitizedConvexEnvironment({
+    CONVEX_AGENT_MODE: "production",
+    CONVEX_DEPLOYMENT: "prod:hostile",
+    CONVEX_SELF_HOSTED_URL: "https://hostile.invalid",
+    CONVEX_URL: "https://hostile.invalid",
+    SAFE_VALUE: "preserved",
+  });
+  assert.equal(environment.CONVEX_AGENT_MODE, "anonymous");
+  assert.equal(environment.CLERK_JWT_ISSUER_DOMAIN, "https://clerk.invalid");
+  assert.equal(environment.SAFE_VALUE, "preserved");
+  assert.equal(Object.hasOwn(environment, "CONVEX_DEPLOYMENT"), false);
+  assert.equal(Object.hasOwn(environment, "CONVEX_SELF_HOSTED_URL"), false);
+  assert.equal(Object.hasOwn(environment, "CONVEX_URL"), false);
 
-test("bundle gate rejects missing extensions and forged provenance", () => {
-  const directory = mkdtempSync(join(tmpdir(), "zevium-bundle-fixture-"));
-  cpSync(join(fixtures, "oversized-bundle"), directory, { recursive: true });
-  rmSync(join(directory, "dist", "server", "chunk.js"));
-  assert.throws(
-    () =>
-      checkBundles({
-        bundleRoot: join(directory, "dist"),
-        configPath: join(directory, "budgets.json"),
-      }),
-    /server \.js has no measured artifacts|exceeds/,
+  const directory = mkdtempSync(join(tmpdir(), "zevium-convex-local-"));
+  write(
+    join(directory, ".env.local"),
+    [
+      "CONVEX_DEPLOYMENT=anonymous:fixture",
+      "CONVEX_URL=http://127.0.0.1:3210",
+      "CONVEX_SITE_URL=http://127.0.0.1:3211",
+      "",
+    ].join("\n"),
   );
-
-  const config = JSON.parse(
-    readFileSync(join(directory, "budgets.json"), "utf8"),
+  assert.doesNotThrow(() => assertAnonymousLocalConvex(directory));
+  write(
+    join(directory, ".env.local"),
+    [
+      "CONVEX_DEPLOYMENT=prod:hostile",
+      "CONVEX_URL=https://hostile.invalid",
+      "CONVEX_SITE_URL=https://hostile.invalid",
+      "",
+    ].join("\n"),
   );
-  config.measurement.baselineCommit = "0".repeat(40);
-  writeFileSync(join(directory, "bad-provenance.json"), JSON.stringify(config));
   assert.throws(
-    () =>
-      checkBundles({
-        bundleRoot: join(directory, "dist"),
-        configPath: join(directory, "bad-provenance.json"),
-      }),
-    /baseline commit is missing or not an ancestor/,
-  );
-
-  config.measurement.baselineCommit =
-    "e5e67d86037bed76e1b916a6970d7a87b4249fd4";
-  config.measurement.headroomPercent = 99;
-  writeFileSync(join(directory, "bad-headroom.json"), JSON.stringify(config));
-  assert.throws(
-    () =>
-      checkBundles({
-        bundleRoot: join(directory, "dist"),
-        configPath: join(directory, "bad-headroom.json"),
-      }),
-    /headroomPercent must be between 0 and 20/,
+    () => assertAnonymousLocalConvex(directory),
+    /not pinned to anonymous local deployment/,
   );
 });
 
-test("gitleaks commit-range mode catches a secret deleted from current tree", () => {
-  const directory = mkdtempSync(join(tmpdir(), "zevium-gitleaks-fixture-"));
+test("tracked-tree guard catches mutations missed by git diff --check", () => {
+  const { directory } = gitRepository();
+  write(
+    join(directory, "mutate.mjs"),
+    'import { writeFileSync } from "node:fs"; writeFileSync("README.md", "mutated\\n");\n',
+  );
   const git = (...args) =>
     spawnSync("git", args, { cwd: directory, encoding: "utf8" });
-  assert.equal(git("init", "--quiet").status, 0);
+  assert.equal(git("add", "mutate.mjs").status, 0);
+  assert.equal(git("commit", "--quiet", "-m", "fixture: mutator").status, 0);
+  assert.throws(
+    () =>
+      runTrackedCommand({
+        cwd: directory,
+        command: node,
+        args: ["mutate.mjs"],
+        stdio: "pipe",
+      }),
+    /mutated tracked tree:[\s\S]*README\.md/,
+  );
+});
+
+function measurement(value) {
+  return new Map(
+    [
+      ["client", ".js"],
+      ["client", ".css"],
+      ["server", ".js"],
+      ["server", ".css"],
+    ].map(([target, extension]) => [
+      `${target}:${extension}`,
+      {
+        target,
+        extension,
+        files: value,
+        totalBytes: value * 100,
+        totalGzipBytes: value * 50,
+        fileBytes: value * 20,
+        fileGzipBytes: value * 10,
+      },
+    ]),
+  );
+}
+
+test("bundle comparison uses measured baseline, permits reductions, rejects inflation", () => {
+  assert.doesNotThrow(() =>
+    compareBundleMeasurements(measurement(10), measurement(9)),
+  );
+  const splitReduction = measurement(9);
+  splitReduction.get("client:.js").files = 20;
+  assert.doesNotThrow(() =>
+    compareBundleMeasurements(measurement(10), splitReduction),
+  );
+  const inflated = measurement(10);
+  inflated.get("client:.js").totalBytes = 1_051;
+  assert.throws(
+    () => compareBundleMeasurements(measurement(10), inflated),
+    /exceeds measured baseline/,
+  );
+});
+
+function bundleFixture() {
+  const repository = mkdtempSync(join(tmpdir(), "zevium-bundle-contract-"));
+  const bundleRoot = join(repository, "apps/web/dist");
+  const client = join(bundleRoot, "client");
+  const server = join(bundleRoot, "server");
+  write(join(repository, "apps/web/src/routes/__root.tsx"), "export {};\n");
+  write(join(repository, "apps/web/src/routes/index.tsx"), "export {};\n");
+  write(join(client, "assets/index.js"), "export const route = 1;\n");
+  write(join(client, "assets/styles.css"), ":root{color:black}\n");
+  write(join(server, "assets/index.js"), "export const route = 1;\n");
+  write(join(server, "assets/styles.css"), ":root{color:black}\n");
+  write(join(server, "index.js"), "export default {};\n");
+  write(
+    join(server, "wrangler.json"),
+    JSON.stringify({ main: "index.js", assets: { directory: "../client" } }),
+  );
+  const routeEntry = {
+    "src/routes/index.tsx?tsr-split=component": {
+      file: "assets/index.js",
+    },
+  };
+  const serverEntry = {
+    ...routeEntry,
+    "src/routes/__root.tsx?tss-serverfn-split": {
+      file: "assets/index.js",
+    },
+  };
+  const ssrEntry = {
+    "src/routes/__root.tsx": ["/assets/index.js"],
+    "src/routes/index.tsx": ["/assets/index.js"],
+  };
+  write(join(client, ".vite/manifest.json"), JSON.stringify(routeEntry));
+  write(join(client, ".vite/ssr-manifest.json"), JSON.stringify(ssrEntry));
+  write(join(server, ".vite/manifest.json"), JSON.stringify(serverEntry));
+  write(join(server, ".vite/ssr-manifest.json"), JSON.stringify(ssrEntry));
+  return { repository, bundleRoot, client, server };
+}
+
+test("bundle artifacts reject missing, zero, and route/manifest bypasses", () => {
+  const fixture = bundleFixture();
   assert.equal(
-    git("config", "user.email", "fixture@invalid.example").status,
+    validateBundleContract({
+      bundleRoot: fixture.bundleRoot,
+      repository: fixture.repository,
+    }),
+    2,
+  );
+  assert.equal(measureBundle(fixture.bundleRoot).size, 4);
+
+  write(join(fixture.client, "assets/index.js"), "");
+  assert.throws(() => measureBundle(fixture.bundleRoot), /zero-byte artifact/);
+  write(join(fixture.client, "assets/index.js"), "export const route = 1;\n");
+  symlinkSync("index.js", join(fixture.client, "assets/linked.js"));
+  assert.throws(
+    () => measureBundle(fixture.bundleRoot),
+    /non-regular artifact/,
+  );
+  rmSync(join(fixture.client, "assets/linked.js"));
+  write(
+    join(fixture.client, ".vite/manifest.json"),
+    JSON.stringify({ fake: {} }),
+  );
+  assert.throws(
+    () =>
+      validateBundleContract({
+        bundleRoot: fixture.bundleRoot,
+        repository: fixture.repository,
+      }),
+    /omits route/,
+  );
+
+  const missingSsr = bundleFixture();
+  rmSync(join(missingSsr.server, ".vite/ssr-manifest.json"));
+  assert.throws(
+    () =>
+      validateBundleContract({
+        bundleRoot: missingSsr.bundleRoot,
+        repository: missingSsr.repository,
+      }),
+    /SSR module manifest is missing/,
+  );
+
+  const noConfig = run("check-bundles.mjs", ["--config", "forged.json"]);
+  assert.notEqual(noConfig.status, 0);
+  assert.match(noConfig.stderr, /accepts no PR-controlled config/);
+});
+
+test("bundle baseline policy handles PR, push, tag creation, deletion, and override attacks", () => {
+  const { directory, base, head } = gitRepository();
+  const common = { repository: { default_branch: "develop" } };
+  assert.equal(
+    resolveBundleBaseline(directory, {
+      event: { ...common, pull_request: { base: { sha: base } } },
+      environment: {},
+    }),
+    base,
+  );
+  assert.equal(
+    resolveBundleBaseline(directory, {
+      event: {
+        ...common,
+        before: base,
+        after: head,
+        created: false,
+        deleted: false,
+      },
+      environment: {},
+    }),
+    base,
+  );
+  assert.equal(
+    resolveBundleBaseline(directory, {
+      event: {
+        ...common,
+        ref: "refs/tags/v1.0.0",
+        before: zeroSha,
+        after: head,
+        created: true,
+        deleted: false,
+      },
+      environment: {},
+    }),
+    head,
+  );
+  assert.equal(
+    resolveBundleBaseline(directory, {
+      event: {
+        ...common,
+        before: head,
+        after: zeroSha,
+        created: false,
+        deleted: true,
+      },
+      environment: {},
+    }),
+    head,
+  );
+  assert.throws(
+    () =>
+      resolveBundleBaseline(directory, {
+        event: undefined,
+        environment: { QUALITY_BUNDLE_BASE: base },
+      }),
+    /overrides are forbidden/,
+  );
+  assert.throws(
+    () =>
+      resolveBundleBaseline(directory, {
+        event: {
+          ...common,
+          before: zeroSha,
+          after: head,
+          created: false,
+          deleted: false,
+        },
+        environment: {},
+      }),
+    /Zero bundle push base requires created=true/,
+  );
+  assert.throws(
+    () =>
+      resolveBundleBaseline(directory, {
+        event: {
+          ...common,
+          before: base,
+          after: zeroSha,
+          created: false,
+          deleted: false,
+        },
+        environment: {},
+      }),
+    /Zero bundle push head requires deleted=true/,
+  );
+});
+
+test("bundle candidate snapshot includes modified, untracked, and deleted files", () => {
+  const { directory, git } = gitRepository();
+  const tempRoot = mkdtempSync(join(tmpdir(), "zevium-bundle-overlay-"));
+  const worktree = join(tempRoot, "candidate");
+  assert.equal(
+    git("worktree", "add", "--quiet", "--detach", worktree, "HEAD").status,
     0,
   );
-  assert.equal(git("config", "user.name", "Quality Fixture").status, 0);
-  writeFileSync(join(directory, "README.md"), "fixture\n");
-  assert.equal(git("add", ".").status, 0);
-  assert.equal(git("commit", "--quiet", "-m", "fixture: base").status, 0);
-  assert.throws(
-    () => resolveScanRange(directory, "refs/remotes/origin/missing"),
-    /base is unavailable; full history fetch required/,
+  try {
+    write(join(directory, "README.md"), "pending candidate\n");
+    write(join(directory, "new-source.ts"), "export const pending = true;\n");
+    const firstTree = overlayCandidateSnapshot(directory, worktree);
+    assert.equal(
+      readFileSync(join(worktree, "README.md"), "utf8"),
+      "pending candidate\n",
+    );
+    assert.equal(
+      readFileSync(join(worktree, "new-source.ts"), "utf8"),
+      "export const pending = true;\n",
+    );
+    assert.equal(
+      spawnSync("git", ["write-tree"], {
+        cwd: worktree,
+        encoding: "utf8",
+      }).stdout.trim(),
+      firstTree,
+    );
+
+    rmSync(join(directory, "README.md"));
+    const secondTree = overlayCandidateSnapshot(directory, worktree);
+    assert.equal(existsSync(join(worktree, "README.md")), false);
+    assert.notEqual(secondTree, firstTree);
+  } finally {
+    git("worktree", "remove", "--force", worktree);
+    rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("gitleaks scan planning handles PR, push, tag creation, deletion, and zero bases", () => {
+  const { directory, base, head } = gitRepository();
+  const common = { repository: { default_branch: "develop" } };
+  const plans = [
+    resolveScanPlan(directory, {
+      event: { ...common, pull_request: { base: { sha: base } } },
+      environment: {},
+    }),
+    resolveScanPlan(directory, {
+      event: {
+        ...common,
+        before: base,
+        after: head,
+        created: false,
+        deleted: false,
+      },
+      environment: {},
+    }),
+    resolveScanPlan(directory, {
+      event: {
+        ...common,
+        ref: "refs/tags/v1.0.0",
+        before: zeroSha,
+        after: head,
+        created: true,
+        deleted: false,
+      },
+      environment: {},
+    }),
+    resolveScanPlan(directory, {
+      event: {
+        ...common,
+        before: head,
+        after: zeroSha,
+        created: false,
+        deleted: true,
+      },
+      environment: {},
+    }),
+  ];
+  assert.deepEqual(
+    plans.map((plan) => plan.eventKind),
+    ["pull_request", "push", "create", "delete"],
   );
-  const base = git("rev-parse", "HEAD").stdout.trim();
-  writeFileSync(
+  assert.match(plans[2].range, new RegExp(`${head}(?:\\^!)?$`));
+  assert.match(plans[3].range, new RegExp(`${head}(?:\\^!)?$`));
+  for (const plan of plans) {
+    assert.equal(plan.history, "--all --full-history");
+    assert.ok(plan.range.length > 0);
+    assert.deepEqual(
+      gitleaksCommands(plan).map((command) => command[0]),
+      ["git", "git", "dir"],
+    );
+    assert.equal(
+      gitleaksCommands(plan)[0].find((argument) =>
+        argument.startsWith("--log-opts="),
+      ),
+      "--log-opts=--all --full-history",
+    );
+  }
+  assert.throws(
+    () =>
+      resolveScanPlan(directory, {
+        event: {
+          ...common,
+          before: zeroSha,
+          after: head,
+          created: false,
+          deleted: false,
+        },
+        environment: {},
+      }),
+    /Zero push base requires created=true/,
+  );
+  assert.throws(
+    () =>
+      resolveScanPlan(directory, {
+        event: {
+          ...common,
+          before: base,
+          after: zeroSha,
+          created: false,
+          deleted: false,
+        },
+        environment: {},
+      }),
+    /Zero push head requires deleted=true/,
+  );
+  assert.throws(
+    () =>
+      resolveScanPlan(directory, {
+        event: {
+          ...common,
+          before: zeroSha,
+          after: zeroSha,
+          created: true,
+          deleted: true,
+        },
+        environment: {},
+      }),
+    /cannot be both created and deleted/,
+  );
+});
+
+test("gitleaks policy rejects broad config and ignore weakening", () => {
+  const directory = mkdtempSync(join(tmpdir(), "zevium-gitleaks-policy-"));
+  const configPath = join(directory, ".gitleaks.toml");
+  const ignorePath = join(directory, ".gitleaksignore");
+  const config = readFileSync(
+    resolve(repositoryRoot, ".gitleaks.toml"),
+    "utf8",
+  );
+  const ignore = readFileSync(
+    resolve(repositoryRoot, ".gitleaksignore"),
+    "utf8",
+  );
+  write(configPath, config);
+  write(ignorePath, ignore);
+  assert.doesNotThrow(() => validateGitleaksPolicy({ configPath, ignorePath }));
+
+  write(ignorePath, `${ignore}*\n`);
+  assert.throws(
+    () => validateGitleaksPolicy({ configPath, ignorePath }),
+    /only exact audited historical fingerprints/,
+  );
+
+  write(ignorePath, ignore);
+  write(configPath, config.replace("^apps/web/dist/", ".*"));
+  assert.throws(
+    () => validateGitleaksPolicy({ configPath, ignorePath }),
+    /differs from fail-closed approved policy/,
+  );
+});
+
+test("gitleaks full history catches a secret deleted from current tree", () => {
+  const { directory, git } = gitRepository();
+  write(
     join(directory, "leak.env"),
     `GITHUB_TOKEN=${"ghp_" + randomBytes(27).toString("base64url")}\n`,
   );
@@ -223,15 +741,19 @@ test("gitleaks commit-range mode catches a secret deleted from current tree", ()
     git("commit", "--quiet", "-m", "fixture: delete secret").status,
     0,
   );
-  const gitleaks = spawnSync("mise", ["which", "gitleaks"], {
+  const lookup = spawnSync("mise", ["which", "gitleaks"], {
     encoding: "utf8",
-  }).stdout.trim();
+  });
+  assert.equal(lookup.status, 0, lookup.stdout + lookup.stderr);
+  const gitleaks = lookup.stdout.trim();
+  assert.ok(gitleaks.length > 0 && existsSync(gitleaks));
   const result = spawnSync(
     gitleaks,
-    ["git", "--no-banner", "--redact", `--log-opts=${base}..HEAD`, "."],
+    ["git", "--no-banner", "--redact", "--log-opts=--all --full-history", "."],
     { cwd: directory, encoding: "utf8" },
   );
-  assert.notEqual(result.status, 0, result.stdout + result.stderr);
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  assert.match(result.stdout + result.stderr, /leaks found/i);
 });
 
 test("production build environment cannot be bypassed with skip flags", () => {

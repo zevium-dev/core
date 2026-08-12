@@ -23,8 +23,16 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pnpm-store-
       - uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4
+        with:
+          version: 2026.7.13
+          install: true
+          install_args: node@24.15.0 npm:pnpm@11.8.0 actionlint@1.7.12 gitleaks@8.30.1 shellcheck@0.11.0
+      - name: Verify exact Node and pnpm
+        run: |
+          test "$(node --version)" = "v24.15.0"
+          test "$(pnpm --version)" = "11.8.0"
       - name: Install dependencies
-        run: pnpm install
+        run: pnpm install --frozen-lockfile
       - name: Run format script
         run: pnpm run format
       - name: Commit and push changes

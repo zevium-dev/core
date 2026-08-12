@@ -7,6 +7,7 @@ import { defineConfig } from "vite";
 
 export default defineConfig({
   resolve: { tsconfigPaths: true },
+  build: { manifest: true, ssrManifest: true },
   plugins: [
     cloudflare({ viteEnvironment: { name: "ssr" } }),
     devtools(),

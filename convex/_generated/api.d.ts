@@ -24,6 +24,7 @@ import type * as lib_credentialCrypto from "../lib/credentialCrypto.js";
 import type * as lib_notifications from "../lib/notifications.js";
 import type * as lib_validate from "../lib/validate.js";
 import type * as lib_webhookDelivery from "../lib/webhookDelivery.js";
+import type * as lib_webhookTransport from "../lib/webhookTransport.js";
 import type * as notifications from "../notifications.js";
 import type * as organizations from "../organizations.js";
 import type * as payouts from "../payouts.js";
@@ -62,6 +63,7 @@ declare const fullApi: ApiFromModules<{
   "lib/notifications": typeof lib_notifications;
   "lib/validate": typeof lib_validate;
   "lib/webhookDelivery": typeof lib_webhookDelivery;
+  "lib/webhookTransport": typeof lib_webhookTransport;
   notifications: typeof notifications;
   organizations: typeof organizations;
   payouts: typeof payouts;

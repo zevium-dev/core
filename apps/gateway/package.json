@@ -7,7 +7,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "lint": "oxlint --config ../../.oxlintrc.json --deny-warnings --report-unused-disable-directives src test vitest.config.ts"
+    "lint": "oxlint --config ../../.oxlintrc.json --deny-warnings --report-unused-disable-directives src test vitest.config.ts worker-configuration.d.ts"
   },
   "dependencies": {
     "@zevium/shared": "workspace:*",

@@ -1,6 +1,9 @@
 [extend]
 useDefault = true
 
+# Historical false positives use exact finding fingerprints in .gitleaksignore.
+# Never suppress an entire commit or source path.
+
 [[allowlists]]
 description = "Generated production bundles are untracked derivatives of scanned source."
 paths = ['''^apps/web/dist/''']

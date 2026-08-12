@@ -2,6 +2,6 @@
   "name": "@fixture/beta",
   "private": true,
   "scripts": {
-    "lint": "oxlint --config ../../../../../../.oxlintrc.json src"
+    "lint": "oxlint --config ../../../../../../.oxlintrc.json --deny-warnings --report-unused-disable-directives src"
   }
 }
