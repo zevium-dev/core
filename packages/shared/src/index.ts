@@ -7,6 +7,9 @@ export const CREDITS_PER_DOLLAR = 10_000;
 /** Platform cut: 5%. Publishers keep 95%. */
 export const PLATFORM_CUT = 0.05;
 
+/** Hard cap shared by gateway queue batches and Convex usage ingestion. */
+export const MAX_USAGE_INGEST_EVENTS = 100;
+
 export {
   MAX_DAILY_FREE_TIER_CALLS,
   MAX_ENDPOINT_COST_CREDITS,
@@ -18,6 +21,8 @@ export {
   MAX_OPENAPI_SPEC_BYTES,
   matchOperation,
   extractPricing,
+  parseCreditExtension,
+  extractHealthCheckTarget,
   trimTrailingSlashes,
   normalizePath,
   matchPathTemplate,
@@ -28,6 +33,7 @@ export {
   type OpenApiPathItem,
   type ParsedOpenApiSpec,
   type MatchedOperation,
+  type HealthCheckTarget,
 } from "./openapi.js";
 
 export { generateMockResponse, type GeneratedMockResponse } from "./mock.js";

@@ -12,9 +12,11 @@
  *   (atomic). Settlement id is stable: `settle:${reservationId}`.
  * - refund: remove from inFlight only (credit returns to available).
  * - grant: if new grantId, balance += amount, record grantId (idempotent).
- * - flush/ack: flush returns all pending settlements (stable ids). After the
- *   ledger appends them, ack removes them. If ack is lost, re-flush yields the
- *   same settlement ids; the ledger dedupes by settlementId.
+ * - queue: pending rows live in transactional 100-row storage partitions.
+ * - flush/ack: the test ledger can read all stable ids. Production sends one
+ *   bounded partition, rotates retryable outcomes, bisects row-scoped batch
+ *   failures, and terminally dead-letters only permanent singleton poison.
+ *   Lost acknowledgements replay the same ids; the ledger dedupes them.
  * - free tier: positive wallet balance is required; calls skip reserve/settle,
  *   use per-consumer-operation per-UTC-day counters, and enqueue usage at 0 credits.
  * - alarm (~5s): when pending non-empty, batch → wallets:recordUsage → ack.
@@ -28,10 +30,19 @@ import { DurableObject } from "cloudflare:workers";
 import {
   ConvexUsageClient,
   pendingToUsageRecord,
+  usageFailureDisposition,
   type ConvexUsageRecord,
   type SettlementOutcome,
   type WalletCheckpoint,
 } from "./usage";
+import {
+  inspectSettlementQueue,
+  readSettlementQueue,
+  SETTLEMENT_QUEUE_PARTITION_SIZE,
+  submitWithPoisonBisection,
+  writeSettlementQueue,
+  type SettlementQueueLayout,
+} from "./settlement-queue";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -51,11 +62,14 @@ export type SettlementUsage = {
   /** Consumer's Clerk org id — the org whose wallet actually pays. */
   consumerClerkOrgId: string;
   projectId: string;
+  specVersionId: string;
   endpoint: string;
   method: string;
   status: number;
   latencyMs: number;
   keyId: string;
+  billingOutcome: "settled" | "refunded" | "free";
+  qualityOutcome: "success" | "client_error" | "server_error" | "network_error";
 };
 
 export type PendingSettlement = {
@@ -145,6 +159,8 @@ export type FlushResult = {
 
 export type AckFlushResult = {
   removed: number;
+  rejected: number;
+  retryable: number;
   remaining: number;
   /** Permanently rejected settlements parked into the dead-letter queue. */
   deadLettered: number;
@@ -153,8 +169,19 @@ export type AckFlushResult = {
 export type FlushToConvexResult = {
   flushed: number;
   acked: number;
+  rejected: number;
+  retryable: number;
+  blocked: number;
   remaining: number;
   error?: string;
+};
+
+export type SettlementDeadLetter = {
+  settlement: PendingSettlement;
+  reason: string;
+  rejectedAt: number;
+  terminal: true;
+  source: "outcome" | "batch";
 };
 export type SyncGrantsResult =
   | { status: "ok"; balance: number; sequence: number }
@@ -194,6 +221,7 @@ const K_KEY_SETTINGS = "keySettings";
 const K_KEY_SETTINGS_AT = "keySettingsSyncedAt";
 const K_ORG_ARCHIVED = "organizationArchived";
 const K_SETTLED_PREFIX = "settled:";
+const K_DEAD_LETTER_PREFIX = "dead-letter:";
 const K_SYNC_GRANTS_AT = "syncGrantsAt";
 const K_DEAD_LETTERS = "deadLetterSettlements";
 const K_LAST_COMPACTION_AT = "lastCompactionAt";
@@ -212,6 +240,7 @@ export const MAX_DEAD_LETTERS = 100;
 const MAINTENANCE_ALARM_MS = 60_000;
 /** Counter compaction runs at most once per hour. */
 const COMPACTION_INTERVAL_MS = 60 * 60_000;
+export const USAGE_FLUSH_BATCH_SIZE = SETTLEMENT_QUEUE_PARTITION_SIZE;
 
 function settlementIdFor(reservationId: string): string {
   return `settle:${reservationId}`;
@@ -364,8 +393,20 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
       {};
     const grants = (stored.get(K_APPLIED_GRANTS) as string[] | undefined) ?? [];
     this.#appliedGrantIds = new Set(grants);
-    this.#pendingSettlements =
-      (stored.get(K_PENDING) as PendingSettlement[] | undefined) ?? [];
+    const partitionedQueue = await readSettlementQueue<PendingSettlement>(
+      this.ctx.storage,
+    );
+    const legacyQueue = stored.get(K_PENDING) as
+      PendingSettlement[] | undefined;
+    this.#pendingSettlements = partitionedQueue ?? legacyQueue ?? [];
+    if (partitionedQueue === null && legacyQueue !== undefined) {
+      await this.ctx.storage.transaction(async (txn) => {
+        await writeSettlementQueue(txn, legacyQueue);
+        await txn.delete(K_PENDING);
+      });
+    } else if (partitionedQueue !== null && legacyQueue !== undefined) {
+      await this.ctx.storage.delete(K_PENDING);
+    }
     const rawTerminal =
       (stored.get(K_TERMINAL) as
         Record<string, TerminalStatus | TerminalRecord> | undefined) ?? {};
@@ -474,6 +515,7 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
       keySettingsSyncedAt: number;
       organizationArchived: boolean;
       settledCounter: { storageKey: string; amount: number };
+      settlementDeadLetters: SettlementDeadLetter[];
     }>,
   ): Promise<void> {
     for (const value of [keys.balance, keys.sequence, keys.flushSeq]) {
@@ -488,8 +530,10 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
         await txn.put(K_IN_FLIGHT, keys.inFlight);
       if (keys.appliedGrantIds !== undefined)
         await txn.put(K_APPLIED_GRANTS, keys.appliedGrantIds);
-      if (keys.pendingSettlements !== undefined)
-        await txn.put(K_PENDING, keys.pendingSettlements);
+      if (keys.pendingSettlements !== undefined) {
+        await writeSettlementQueue(txn, keys.pendingSettlements);
+        await txn.delete(K_PENDING);
+      }
       if (keys.terminal !== undefined) await txn.put(K_TERMINAL, keys.terminal);
       if (keys.flushSeq !== undefined)
         await txn.put(K_FLUSH_SEQ, keys.flushSeq);
@@ -511,6 +555,12 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
           throw new Error("Settled usage counter exceeds safe integer range");
         }
         await txn.put(keys.settledCounter.storageKey, next);
+      }
+      for (const deadLetter of keys.settlementDeadLetters ?? []) {
+        await txn.put(
+          `${K_DEAD_LETTER_PREFIX}${deadLetter.settlement.settlementId}`,
+          deadLetter,
+        );
       }
     });
   }
@@ -770,7 +820,10 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
     });
   }
 
-  async refund(reservationId: string): Promise<RefundResult> {
+  async refund(
+    reservationId: string,
+    usage?: SettlementUsage,
+  ): Promise<RefundResult> {
     if (!reservationId) return { status: "unknown" };
 
     return this.#mutate(async () => {
@@ -797,11 +850,24 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
       delete this.#inFlight[reservationId];
       this.#terminal[reservationId] = { status: "refunded", at: refundedAt };
       this.#pruneTerminal(refundedAt);
+      if (usage) {
+        this.#pendingSettlements.push({
+          settlementId: settlementIdFor(reservationId),
+          reservationId,
+          cost: 0,
+          settledAt: Date.now(),
+          usage,
+        });
+      }
 
       await this.#persist({
         inFlight: { ...this.#inFlight },
         terminal: { ...this.#terminal },
+        pendingSettlements: this.#pendingSettlements.map((entry) => ({
+          ...entry,
+        })),
       });
+      if (usage) await this.#scheduleFlushAlarm();
 
       return { status: "refunded", available: this.#available() };
     });
@@ -977,26 +1043,59 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
 
   /**
    * Persist ledger acknowledgements. Applied outcomes leave the retry queue.
-   * Rejected outcomes from the ledger are permanent validation verdicts
-   * (payload conflict, wrong wallet, unknown project, insufficient
-   * authoritative balance) — retrying them every five seconds would alarm
-   * forever, so they move to a bounded dead-letter queue for reconciliation.
-   * Transient Convex failures never reach this path: recordUsage throws and
-   * the whole batch stays pending.
+   * Retryable rejections rotate behind later work. Permanent rejections are
+   * validation verdicts — retrying them forever would alarm pointlessly, so
+   * they move to a bounded dead-letter queue plus a durable per-settlement
+   * proof record for reconciliation. Transient Convex failures never reach
+   * this path: recordUsage throws and the whole batch stays pending.
    */
   async applySettlementResults(
     results: SettlementOutcome[],
     checkpoint: WalletCheckpoint,
   ): Promise<AckFlushResult> {
     return this.#mutate(async () => {
+      const outcomes = new Map(results.map((result) => [result.refId, result]));
+      const retryableRefs = new Set(
+        results.flatMap((result) =>
+          result.status === "rejected" && result.retryable
+            ? [result.refId]
+            : [],
+        ),
+      );
       const removable = new Set(
-        results
-          .filter(
-            (result) =>
-              result.status === "applied" ||
-              result.status === "already_applied",
-          )
-          .map((result) => result.refId),
+        results.flatMap((result) =>
+          result.status === "rejected" && result.retryable
+            ? []
+            : [result.refId],
+        ),
+      );
+      const deadLetters = this.#pendingSettlements.flatMap((settlement) => {
+        const outcome = outcomes.get(settlement.settlementId);
+        return outcome?.status === "rejected" && !outcome.retryable
+          ? [
+              {
+                settlement: { ...settlement },
+                reason: outcome.reason,
+                rejectedAt: Date.now(),
+                terminal: true as const,
+                source: "outcome" as const,
+              },
+            ]
+          : [];
+      });
+      // A sync or concurrent flush may already have installed this checkpoint
+      // while these rows were still subtracted as pending. If it is stale now,
+      // removing terminal rows must undo that extra local deduction.
+      const staleCheckpointAdjustment = this.#pendingSettlements.reduce(
+        (total, settlement) => {
+          const outcome = outcomes.get(settlement.settlementId);
+          return outcome?.status === "applied" ||
+            outcome?.status === "already_applied" ||
+            (outcome?.status === "rejected" && !outcome.retryable)
+            ? total + settlement.cost
+            : total;
+        },
+        0,
       );
       const rejected = new Map(
         results
@@ -1006,21 +1105,24 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
       const now = Date.now();
       const before = this.#pendingSettlements.length;
       const deadLettered: DeadLetterSettlement[] = [];
-      if (removable.size > 0 || rejected.size > 0) {
-        const kept: PendingSettlement[] = [];
-        for (const settlement of this.#pendingSettlements) {
-          if (removable.has(settlement.settlementId)) continue;
+      const retryableRows: PendingSettlement[] = [];
+      const retainedRows: PendingSettlement[] = [];
+      for (const settlement of this.#pendingSettlements) {
+        if (removable.has(settlement.settlementId)) {
           const reason = rejected.get(settlement.settlementId);
           if (reason !== undefined) {
             deadLettered.push({ ...settlement, reason, deadAt: now });
-            continue;
           }
-          kept.push(settlement);
+          continue;
         }
-        this.#pendingSettlements = kept;
+        if (retryableRefs.has(settlement.settlementId)) {
+          retryableRows.push(settlement);
+        } else {
+          retainedRows.push(settlement);
+        }
       }
-      const removed =
-        before - this.#pendingSettlements.length - deadLettered.length;
+      this.#pendingSettlements = [...retainedRows, ...retryableRows];
+      const removed = before - this.#pendingSettlements.length;
 
       if (deadLettered.length > 0) {
         this.#deadLetters = [...this.#deadLetters, ...deadLettered].slice(
@@ -1029,7 +1131,15 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
       }
 
       const checkpointAccepted = this.#acceptCheckpoint(checkpoint);
-      if (removed > 0 || deadLettered.length > 0 || checkpointAccepted) {
+      if (!checkpointAccepted && staleCheckpointAdjustment > 0) {
+        this.#balance += staleCheckpointAdjustment;
+      }
+      if (
+        removed > 0 ||
+        deadLettered.length > 0 ||
+        retryableRows.length > 0 ||
+        checkpointAccepted
+      ) {
         await this.#persist({
           balance: this.#balance,
           sequence: this.#sequence,
@@ -1037,14 +1147,56 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
             ...settlement,
           })),
           deadLetters: [...this.#deadLetters],
+          settlementDeadLetters: deadLetters,
         });
       }
 
       return {
         removed,
+        rejected: deadLettered.length,
+        retryable: retryableRows.length,
         remaining: this.#pendingSettlements.length,
         deadLettered: deadLettered.length,
       };
+    });
+  }
+
+  /** Permanently terminate one deterministic batch poison with durable proof. */
+  async #deadLetterSingleton(
+    settlementId: string,
+    reason: string,
+  ): Promise<boolean> {
+    return this.#mutate(async () => {
+      const index = this.#pendingSettlements.findIndex(
+        (settlement) => settlement.settlementId === settlementId,
+      );
+      if (index < 0) return false;
+      const settlement = this.#pendingSettlements[index]!;
+      this.#pendingSettlements.splice(index, 1);
+      // Deterministic batch failure never committed this row upstream. Remove
+      // its local pending deduction so working balance matches ledger truth.
+      this.#balance += settlement.cost;
+      this.#deadLetters = [
+        ...this.#deadLetters,
+        { ...settlement, reason, deadAt: Date.now() },
+      ].slice(-MAX_DEAD_LETTERS);
+      await this.#persist({
+        balance: this.#balance,
+        pendingSettlements: this.#pendingSettlements.map((entry) => ({
+          ...entry,
+        })),
+        deadLetters: [...this.#deadLetters],
+        settlementDeadLetters: [
+          {
+            settlement: { ...settlement },
+            reason,
+            rejectedAt: Date.now(),
+            terminal: true,
+            source: "batch",
+          },
+        ],
+      });
+      return true;
     });
   }
 
@@ -1059,18 +1211,29 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
    */
   async flushToConvex(): Promise<FlushToConvexResult> {
     if (this.#pendingSettlements.length === 0) {
-      return { flushed: 0, acked: 0, remaining: 0 };
+      return {
+        flushed: 0,
+        acked: 0,
+        rejected: 0,
+        retryable: 0,
+        blocked: 0,
+        remaining: 0,
+      };
     }
 
     const flushable = await this.#mutate(async () =>
       this.#pendingSettlements
         .filter((settlement) => settlement.usage !== undefined)
+        .slice(0, USAGE_FLUSH_BATCH_SIZE)
         .map((settlement) => ({ ...settlement })),
     );
     if (flushable.length === 0) {
       return {
         flushed: 0,
         acked: 0,
+        rejected: 0,
+        retryable: 0,
+        blocked: 0,
         remaining: this.#pendingSettlements.length,
       };
     }
@@ -1087,11 +1250,14 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
           organizationId: usage.organizationId,
           consumerClerkOrgId: usage.consumerClerkOrgId,
           projectId: usage.projectId,
+          specVersionId: usage.specVersionId,
           endpoint: usage.endpoint,
           method: usage.method,
           status: usage.status,
           latencyMs: usage.latencyMs,
           keyId: usage.keyId,
+          billingOutcome: usage.billingOutcome,
+          qualityOutcome: usage.qualityOutcome,
         }),
       );
     }
@@ -1101,36 +1267,62 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
       return {
         flushed: 0,
         acked: 0,
+        rejected: 0,
+        retryable: 0,
+        blocked: 0,
         remaining: this.#pendingSettlements.length,
         error: "convex client not configured",
       };
     }
 
-    const usageResult = await client.recordUsage(events).then(
-      (r) => ({ ok: true as const, value: r }),
-      (err: unknown) => ({ ok: false as const, err }),
+    const submissions = await submitWithPoisonBisection(
+      events,
+      async (batch) => await client.recordUsage([...batch]),
+      usageFailureDisposition,
     );
-    if (!usageResult.ok) {
-      const message =
-        usageResult.err instanceof Error
-          ? usageResult.err.message
-          : String(usageResult.err);
-      return {
-        flushed: 0,
-        acked: 0,
-        remaining: this.#pendingSettlements.length,
-        error: message,
-      };
+
+    let acked = 0;
+    let rejected = 0;
+    let retryable = submissions.retryable.length;
+    const blocked = submissions.blocked.length;
+    for (const submission of submissions.successes) {
+      const ack = await this.applySettlementResults(
+        submission.result.results,
+        submission.result.wallet,
+      );
+      acked += ack.removed - ack.rejected;
+      rejected += ack.rejected;
+      retryable += ack.retryable;
+    }
+    for (const terminal of submissions.terminals) {
+      if (
+        await this.#deadLetterSingleton(
+          terminal.item.settleRefId,
+          terminal.error,
+        )
+      ) {
+        rejected += 1;
+      }
     }
 
-    const ack = await this.applySettlementResults(
-      usageResult.value.results,
-      usageResult.value.wallet,
-    );
     return {
-      flushed: events.length,
-      acked: ack.removed,
-      remaining: ack.remaining,
+      flushed:
+        events.length -
+        submissions.retryable.length -
+        submissions.blocked.length,
+      acked,
+      rejected,
+      retryable,
+      blocked,
+      remaining: this.#pendingSettlements.length,
+      ...(retryable > 0 || blocked > 0
+        ? {
+            error:
+              submissions.retryableErrors[0] ??
+              submissions.blockedErrors[0] ??
+              `${retryable + blocked} settlement(s) unresolved`,
+          }
+        : {}),
     };
   }
 
@@ -1168,6 +1360,21 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
 
   async getState(): Promise<WalletState> {
     return this.#snapshot();
+  }
+
+  async getSettlementQueueLayout(): Promise<SettlementQueueLayout> {
+    return await inspectSettlementQueue(this.ctx.storage);
+  }
+
+  async getSettlementDeadLetter(
+    settlementId: string,
+  ): Promise<SettlementDeadLetter | null> {
+    if (!settlementId || typeof settlementId !== "string") return null;
+    return (
+      (await this.ctx.storage.get<SettlementDeadLetter>(
+        `${K_DEAD_LETTER_PREFIX}${settlementId}`,
+      )) ?? null
+    );
   }
 
   async getFreeTierUsed(opts: {

@@ -128,13 +128,12 @@ export function SpecWorkspace({
   const [makePublicOpen, setMakePublicOpen] = useState(false);
   const [connectionResult, setConnectionResult] = useState<{
     status:
-      | "ok"
-      | "auth_rejected"
-      | "reachable_unconfirmed"
+      | "ready"
+      | "reachable_unhealthy"
       | "blocked_target"
       | "timeout"
       | "unreachable"
-      | "missing_server";
+      | "missing_health_check";
     statusCode?: number;
     latencyMs?: number;
     message: string;
@@ -351,11 +350,11 @@ export function SpecWorkspace({
             projectId,
           }).queryKey,
         });
-        if (result.status === "ok") {
+        if (result.status === "ready") {
           toast.success(
             result.latencyMs === undefined
-              ? "Upstream server is reachable"
-              : `Upstream server is reachable in ${result.latencyMs} ms`,
+              ? "Declared health endpoint is ready"
+              : `Declared health endpoint is ready in ${result.latencyMs} ms`,
           );
         }
       },
@@ -455,7 +454,7 @@ export function SpecWorkspace({
           : "A valid OpenAPI draft is saved.",
     },
     {
-      label: "Server URL and reachability",
+      label: "Declared health reachability",
       complete: readinessCurrent,
       detail:
         connectionResult?.message ??
@@ -469,22 +468,14 @@ export function SpecWorkspace({
                 ? "Credentials changed after the passing test. Run it again."
                 : persistedReadiness.data?.readiness
                   ? "Saved test is no longer valid. Run it again."
-                  : "Run a secure connection test against servers[0].url."),
+                  : "Opt in one safe GET or HEAD operation with x-zevium-health-check, then test its reachability."),
     },
     {
-      label: "Publisher credentials (when required)",
+      label: "Credential-free health contract",
       complete:
-        connectionResult === null ||
-        (connectionResult.status === "ok" &&
-          connectionResult.statusCode !== 401 &&
-          connectionResult.statusCode !== 403),
+        connectionResult === null || connectionResult.status === "ready",
       detail:
-        connectionResult === null
-          ? "Keyless upstreams can publish without credentials. Add credentials only when the upstream requires them."
-          : connectionResult.statusCode === 401 ||
-              connectionResult?.statusCode === 403
-            ? "Configured credentials were rejected. Replace them in Settings, then test again."
-            : "Keyless upstreams can publish without credentials. Add credentials only when the upstream requires them.",
+        "Health checks never send publisher or consumer credentials. Keep declared operation safe and parameter-free.",
     },
     {
       label: "Pricing",

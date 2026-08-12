@@ -131,7 +131,7 @@ describe("hostile control-plane state", () => {
   it("records provider ownership and keeps unattributed usage fail-closed", async () => {
     const t = convexTest(schema, modules);
     const organizationId = await seedOrg(t);
-    const projectId = await t.run(async (ctx) => {
+    const seeded = await t.run(async (ctx) => {
       const projectId = await ctx.db.insert("projects", {
         organizationId,
         name: "Owned API",
@@ -145,7 +145,13 @@ describe("hostile control-plane state", () => {
         balance: 10,
         sequence: 0,
       });
-      return projectId;
+      const versionId = await ctx.db.insert("specVersions", {
+        projectId,
+        version: "1.0.0",
+        publishedAt: 1,
+        spec: "{}",
+      });
+      return { projectId, versionId };
     });
     const member = asIdentity(t, "org:member");
     await t.mutation(internal.keySettings.recordProviderVerifiedKey, {
@@ -157,7 +163,7 @@ describe("hostile control-plane state", () => {
       events: [
         {
           organizationId,
-          projectId,
+          projectId: seeded.projectId,
           endpoint: "/run",
           method: "GET",
           credits: 1,
@@ -167,6 +173,9 @@ describe("hostile control-plane state", () => {
           at: 1,
           settleRefId: "settle:owned",
           consumerClerkOrgId: "org_hostile",
+          specVersionId: seeded.versionId,
+          billingOutcome: "settled",
+          qualityOutcome: "success",
         },
       ],
     });

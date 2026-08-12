@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   extractPricing,
+  extractHealthCheckTarget,
   joinUpstreamUrl,
   matchOperation,
   matchPathTemplate,
@@ -237,5 +238,54 @@ describe("normalizePath / joinUpstreamUrl", () => {
     expect(joinUpstreamUrl("https://api.example.com/", "/")).toMatch(
       /https:\/\/api\.example\.com\/?/,
     );
+  });
+});
+
+describe("extractHealthCheckTarget", () => {
+  it("joins the one explicit safe operation to the upstream base", () => {
+    const spec = parseSpec(
+      JSON.stringify({
+        servers: [{ url: "https://api.example.com/v1" }],
+        paths: {
+          "/health": {
+            head: { "x-zevium-health-check": true, "x-zevium-cost": 0 },
+          },
+        },
+      }),
+    );
+    expect(extractHealthCheckTarget(spec)).toEqual({
+      url: "https://api.example.com/v1/health",
+      method: "HEAD",
+      path: "/health",
+    });
+  });
+
+  it("returns null without opt-in and rejects ambiguous or parameterized targets", () => {
+    expect(extractHealthCheckTarget(parseSpec(SAMPLE))).toBeNull();
+    expect(() =>
+      extractHealthCheckTarget(
+        parseSpec(
+          JSON.stringify({
+            servers: [{ url: "https://api.example.com" }],
+            paths: {
+              "/one": { get: { "x-zevium-health-check": true } },
+              "/two": { head: { "x-zevium-health-check": true } },
+            },
+          }),
+        ),
+      ),
+    ).toThrow("exactly one");
+    expect(() =>
+      extractHealthCheckTarget(
+        parseSpec(
+          JSON.stringify({
+            servers: [{ url: "https://api.example.com" }],
+            paths: {
+              "/users/{id}": { get: { "x-zevium-health-check": true } },
+            },
+          }),
+        ),
+      ),
+    ).toThrow("parameter-free");
   });
 });

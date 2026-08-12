@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   isPublicAddress,
+  consumeProbeHeaders,
   isPublicIpv4,
   isPublicIpv6,
   pinnedLookupResult,
   probePublicHttps,
+  remoteAddressMatchesPin,
   resolveSafeHttpsUrl,
 } from "./qualityProbeAction";
 
@@ -98,6 +100,25 @@ describe("credential-free upstream SSRF guard", () => {
       address: "93.184.216.34",
       family: 4,
     });
+    expect(
+      remoteAddressMatchesPin("::ffff:93.184.216.34", "93.184.216.34"),
+    ).toBe(true);
+    expect(remoteAddressMatchesPin("93.184.216.35", "93.184.216.34")).toBe(
+      false,
+    );
+  });
+
+  it("destroys an endless response body as soon as headers arrive", () => {
+    let destroyed = false;
+    const result = consumeProbeHeaders({
+      statusCode: 204,
+      headers: {},
+      destroy: () => {
+        destroyed = true;
+      },
+    });
+    expect(destroyed).toBe(true);
+    expect(result).toEqual({ statusCode: 204 });
   });
 
   it("pins vetted DNS and revalidates every redirect before another socket", async () => {
@@ -105,7 +126,7 @@ describe("credential-free upstream SSRF guard", () => {
     const resolver = async () => [
       { address: "93.184.216.34", family: 4 as const },
     ];
-    const result = await probePublicHttps("https://example.com/start", {
+    const result = await probePublicHttps("https://example.com/start", "HEAD", {
       resolver,
       requestHead: async (url, pinned) => {
         requested.push({ host: url.hostname, address: pinned.address });
@@ -123,7 +144,7 @@ describe("credential-free upstream SSRF guard", () => {
       { address: "93.184.216.34", family: 4 as const },
     ];
     let requests = 0;
-    const redirected = await probePublicHttps("https://example.com", {
+    const redirected = await probePublicHttps("https://example.com", "HEAD", {
       resolver,
       requestHead: async () => {
         requests += 1;
@@ -136,7 +157,7 @@ describe("credential-free upstream SSRF guard", () => {
     });
     expect(requests).toBe(3);
 
-    const timedOut = await probePublicHttps("https://example.com", {
+    const timedOut = await probePublicHttps("https://example.com", "HEAD", {
       resolver: async () => await new Promise<never>(() => undefined),
       requestHead: async () => ({ statusCode: 204 }),
       timeoutMs: 5,
@@ -148,7 +169,7 @@ describe("credential-free upstream SSRF guard", () => {
     const resolver = async () => [
       { address: "93.184.216.34", family: 4 as const },
     ];
-    const http = await probePublicHttps("https://example.com", {
+    const http = await probePublicHttps("https://example.com", "HEAD", {
       resolver,
       requestHead: async () => ({ statusCode: 401 }),
     });
@@ -157,7 +178,7 @@ describe("credential-free upstream SSRF guard", () => {
       statusCode: 401,
       finalOrigin: "https://example.com",
     });
-    const invalidHttp = await probePublicHttps("https://example.com", {
+    const invalidHttp = await probePublicHttps("https://example.com", "HEAD", {
       resolver,
       requestHead: async () => ({ statusCode: 0 }),
     });
@@ -166,7 +187,7 @@ describe("credential-free upstream SSRF guard", () => {
       message: "Upstream returned an invalid HTTP response.",
     });
 
-    const tls = await probePublicHttps("https://example.com", {
+    const tls = await probePublicHttps("https://example.com", "HEAD", {
       resolver,
       requestHead: async () => {
         throw Object.assign(new Error("private certificate path"), {

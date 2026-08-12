@@ -6,6 +6,7 @@ import {
   HeadContent,
   Outlet,
   Scripts,
+  type ErrorComponentProps,
   createRootRouteWithContext,
 } from "@tanstack/react-router";
 import { TanStackRouterDevtoolsPanel } from "@tanstack/react-router-devtools";
@@ -15,6 +16,7 @@ import { ConvexProviderWithClerk } from "convex/react-clerk";
 import { ThemeProvider } from "#/components/theme-provider";
 import { Toaster } from "#/components/ui/sonner";
 import { TooltipProvider } from "#/components/ui/tooltip";
+import { Button } from "#/components/ui/button";
 import { readClientClerkAuth } from "#/lib/clerk-client";
 import type { RouterContext } from "#/router";
 
@@ -103,8 +105,25 @@ export const Route = createRootRouteWithContext<RouterContext>()({
     scripts: [{ children: themeInitScript }],
   }),
   component: RootComponent,
+  errorComponent: RootError,
   shellComponent: RootDocument,
 });
+
+function RootError({ error, reset }: ErrorComponentProps) {
+  return (
+    <main className="mx-auto flex min-h-dvh max-w-xl flex-col justify-center gap-4 px-6">
+      <h1 className="text-2xl font-semibold">Page failed to load</h1>
+      <p className="text-sm text-muted-foreground">
+        {error instanceof Error
+          ? error.message
+          : "Unexpected application error"}
+      </p>
+      <Button className="self-start" onClick={reset}>
+        Retry
+      </Button>
+    </main>
+  );
+}
 
 function RootDocument({ children }: { children: React.ReactNode }) {
   return (

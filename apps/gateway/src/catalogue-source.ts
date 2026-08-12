@@ -30,6 +30,7 @@ export type CatalogueListArgs = {
 
 export interface CatalogueSource {
   listPublic(args?: CatalogueListArgs): Promise<CataloguePage>;
+  invalidate?(): void;
 }
 
 /** Read every catalogue page while preserving caller filters. */
@@ -123,6 +124,10 @@ export class CachedCatalogueSource implements CatalogueSource {
     }
     this.#cache.set(key, { value, expiresAt: now + this.#ttlMs });
     return value;
+  }
+
+  invalidate(): void {
+    this.#cache.clear();
   }
 }
 

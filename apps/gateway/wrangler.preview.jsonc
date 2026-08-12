@@ -9,7 +9,13 @@
   "preview_urls": true,
   "observability": { "enabled": true },
   "durable_objects": {
-    "bindings": [{ "name": "WALLET", "class_name": "WalletDO" }],
+    "bindings": [
+      { "name": "WALLET", "class_name": "WalletDO" },
+      { "name": "CONTROL", "class_name": "ControlDO" },
+    ],
   },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["WalletDO"] }],
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["WalletDO"] },
+    { "tag": "v2", "new_sqlite_classes": ["ControlDO"] },
+  ],
 }

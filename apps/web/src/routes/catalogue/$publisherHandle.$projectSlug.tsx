@@ -20,6 +20,8 @@ import {
 import { toast } from "sonner";
 
 import { PublicHeader } from "#/components/public-header";
+import { QualityBadges } from "#/components/quality-badges";
+import { ReviewSection } from "#/components/review-section";
 import { SyntaxCode } from "#/components/syntax-code";
 import { Badge } from "#/components/ui/badge";
 import { Button } from "#/components/ui/button";
@@ -335,6 +337,9 @@ function ApiDetailBody({
           <Badge variant="secondary" className="shrink-0">
             {data.org.name}
           </Badge>
+          {endpoints.length > 0 ? (
+            <Badge variant="secondary">Agent-ready</Badge>
+          ) : null}
         </div>
 
         {data.project.tags.length > 0 ? (
@@ -369,6 +374,8 @@ function ApiDetailBody({
 
       <PricingTable endpoints={endpoints} />
 
+      <QualityBadges quality={data.quality} />
+
       <Tabs defaultValue="docs" className="gap-4">
         <TabsList variant="line">
           <TabsTrigger value="docs">Docs</TabsTrigger>
@@ -395,6 +402,8 @@ function ApiDetailBody({
           />
         </TabsContent>
       </Tabs>
+
+      <ReviewSection projectId={data.project._id} />
     </div>
   );
 }

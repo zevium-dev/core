@@ -335,7 +335,6 @@ function KeysContent() {
                 onChange={(e) => setName(e.target.value)}
                 placeholder="Local dev"
                 maxLength={64}
-                autoFocus
                 disabled={createMutation.isPending}
               />
             </div>

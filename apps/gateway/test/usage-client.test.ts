@@ -1,14 +1,17 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   ConvexUsageClient,
+  UsageIngestError,
   type ConvexUsageRecord,
   type RecordUsageResult,
 } from "../src/usage";
+import { MAX_USAGE_INGEST_EVENTS } from "@zevium/shared";
 
 const sampleEvent: ConvexUsageRecord = {
   organizationId: "org_1",
   consumerClerkOrgId: "org_clerk_consumer_1",
   projectId: "proj_1",
+  specVersionId: "version_1",
   endpoint: "/echo",
   method: "POST",
   credits: 3,
@@ -17,6 +20,8 @@ const sampleEvent: ConvexUsageRecord = {
   keyId: "key_1",
   at: 1_700_000_000_000,
   settleRefId: "settle:res-1",
+  billingOutcome: "settled",
+  qualityOutcome: "success",
 };
 
 describe("ConvexUsageClient ingest path", () => {
@@ -72,9 +77,65 @@ describe("ConvexUsageClient ingest path", () => {
       fetchImpl: fetchImpl as typeof fetch,
     });
 
-    await expect(client.recordUsage([sampleEvent])).rejects.toThrow(
-      /convex ingest failed: 401/,
-    );
+    await expect(client.recordUsage([sampleEvent])).rejects.toMatchObject({
+      message: expect.stringMatching(/convex ingest failed: 401/),
+      retryable: false,
+      bisectable: false,
+    });
+  });
+
+  it("marks deterministic 400 payload failures as bisectable", async () => {
+    const client = new ConvexUsageClient({
+      convexUrl: "https://example.convex.cloud",
+      ingestUrl: "https://example.convex.site/ingest-usage",
+      internalSecret: "secret-1",
+      fetchImpl: (async () =>
+        new Response(JSON.stringify({ error: "invalid event" }), {
+          status: 400,
+        })) as typeof fetch,
+    });
+    await expect(client.recordUsage([sampleEvent])).rejects.toMatchObject({
+      retryable: false,
+      bisectable: true,
+    });
+  });
+
+  it("bisects deterministic failures on the direct Convex fallback too", async () => {
+    const httpFailure = new ConvexUsageClient({
+      convexUrl: "https://example.convex.cloud",
+      adminKey: "test-admin-key",
+      fetchImpl: (async () =>
+        new Response(JSON.stringify({ error: "invalid event" }), {
+          status: 400,
+        })) as typeof fetch,
+    });
+    await expect(httpFailure.recordUsage([sampleEvent])).rejects.toMatchObject({
+      retryable: false,
+      bisectable: true,
+    });
+
+    const mutationFailure = new ConvexUsageClient({
+      convexUrl: "https://example.convex.cloud",
+      adminKey: "test-admin-key",
+      fetchImpl: (async () =>
+        new Response(
+          JSON.stringify({
+            status: "error",
+            errorMessage: "validator rejected one event",
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        )) as typeof fetch,
+    });
+    await expect(
+      mutationFailure.recordUsage([sampleEvent]),
+    ).rejects.toMatchObject({
+      message: "validator rejected one event",
+      retryable: false,
+      bisectable: true,
+    });
   });
 
   it("throws on 500", async () => {
@@ -91,14 +152,20 @@ describe("ConvexUsageClient ingest path", () => {
       fetchImpl: fetchImpl as typeof fetch,
     });
 
-    await expect(client.recordUsage([sampleEvent])).rejects.toThrow(
-      /convex ingest failed: 500/,
-    );
+    await expect(client.recordUsage([sampleEvent])).rejects.toMatchObject({
+      message: expect.stringMatching(/convex ingest failed: 500/),
+      retryable: true,
+    });
   });
 
   it("prefers mutationFn over ingest for tests", async () => {
     const mutationFn = vi.fn(async () => ({
-      results: [{ refId: sampleEvent.settleRefId, status: "already_applied" }],
+      results: [
+        {
+          refId: sampleEvent.settleRefId,
+          status: "already_applied" as const,
+        },
+      ],
       wallet: {
         clerkOrgId: sampleEvent.consumerClerkOrgId,
         balance: 97,
@@ -134,5 +201,92 @@ describe("ConvexUsageClient ingest path", () => {
       "recordUsage requires at least one settlement",
     );
     expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("rejects oversized and duplicate-ref batches before transport", async () => {
+    const fetchImpl = vi.fn();
+    const client = new ConvexUsageClient({
+      convexUrl: "https://example.convex.cloud",
+      ingestUrl: "https://example.convex.site/ingest-usage",
+      internalSecret: "secret-1",
+      fetchImpl: fetchImpl as typeof fetch,
+    });
+    await expect(
+      client.recordUsage(
+        Array.from({ length: MAX_USAGE_INGEST_EVENTS + 1 }, (_, index) => ({
+          ...sampleEvent,
+          settleRefId: `settle:${index}`,
+        })),
+      ),
+    ).rejects.toMatchObject({ retryable: false });
+    await expect(
+      client.recordUsage([sampleEvent, { ...sampleEvent }]),
+    ).rejects.toMatchObject({
+      message: "usage batch contains duplicate settlement references",
+      retryable: false,
+    });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("requires one exact classified outcome for every submitted ref", async () => {
+    const omitted = new ConvexUsageClient({
+      convexUrl: "https://test.invalid",
+      mutationFn: async () => ({
+        results: [],
+        wallet: {
+          clerkOrgId: sampleEvent.consumerClerkOrgId,
+          balance: 1,
+          sequence: 1,
+        },
+      }),
+    });
+    await expect(omitted.recordUsage([sampleEvent])).rejects.toMatchObject({
+      message: "convex ingest omitted settlement outcomes",
+      retryable: false,
+      bisectable: false,
+    });
+
+    const unclassified = new ConvexUsageClient({
+      convexUrl: "https://example.convex.cloud",
+      ingestUrl: "https://example.convex.site/ingest-usage",
+      internalSecret: "secret-1",
+      fetchImpl: (async () =>
+        new Response(
+          JSON.stringify({
+            results: [
+              {
+                refId: sampleEvent.settleRefId,
+                status: "rejected",
+                reason: "no classification",
+              },
+            ],
+            wallet: {
+              clerkOrgId: sampleEvent.consumerClerkOrgId,
+              balance: 1,
+              sequence: 1,
+            },
+          }),
+          { status: 200 },
+        )) as typeof fetch,
+    });
+    await expect(unclassified.recordUsage([sampleEvent])).rejects.toMatchObject(
+      { retryable: false },
+    );
+  });
+
+  it("classifies ambiguous transport failure as retryable", async () => {
+    const client = new ConvexUsageClient({
+      convexUrl: "https://example.convex.cloud",
+      ingestUrl: "https://example.convex.site/ingest-usage",
+      internalSecret: "secret-1",
+      fetchImpl: (async () => {
+        throw new Error("connection reset");
+      }) as typeof fetch,
+    });
+    await expect(client.recordUsage([sampleEvent])).rejects.toEqual(
+      expect.objectContaining<Partial<UsageIngestError>>({
+        retryable: true,
+      }),
+    );
   });
 });

@@ -13,6 +13,7 @@ type SeededWallet = {
   consumerOrganizationId: Id<"organizations">;
   publisherOrganizationId: Id<"organizations">;
   projectId: Id<"projects">;
+  specVersionId: Id<"specVersions">;
   paymentId: Id<"payments">;
 };
 
@@ -55,9 +56,9 @@ async function seedWallet(t: TestConvex<typeof schema>): Promise<SeededWallet> {
       amount: 1000,
       currency: "usd",
       grantedCredits: 100,
+      reversedCredits: 0,
       refundedAmount: 0,
       refundedCredits: 0,
-      reversedCredits: 0,
       publisherClawbackTargetCredits: 0,
       status: "paid",
       createdAt: 1,
@@ -89,10 +90,17 @@ async function seedWallet(t: TestConvex<typeof schema>): Promise<SeededWallet> {
       )
       .unique();
     if (project === null) throw new Error("Failed to seed project");
+    const specVersionId = await ctx.db.insert("specVersions", {
+      projectId: project._id,
+      version: "1.0.0",
+      spec: "{}",
+      publishedAt: 1,
+    });
     return {
       consumerOrganizationId,
       publisherOrganizationId,
       projectId: project._id,
+      specVersionId,
       paymentId,
     };
   });
@@ -102,6 +110,7 @@ function usageEvent(seed: SeededWallet, refId: string, credits = 15) {
   return {
     organizationId: seed.publisherOrganizationId,
     projectId: seed.projectId,
+    specVersionId: seed.specVersionId,
     endpoint: "/forecast",
     method: "GET",
     credits,
@@ -111,6 +120,8 @@ function usageEvent(seed: SeededWallet, refId: string, credits = 15) {
     at: 10,
     settleRefId: refId,
     consumerClerkOrgId: "org_consumer",
+    billingOutcome: credits === 0 ? ("free" as const) : ("settled" as const),
+    qualityOutcome: "success" as const,
   };
 }
 
@@ -131,6 +142,7 @@ describe("wallet settlement ingest contract", () => {
     const base = {
       organizationId: "publisher",
       projectId: "project",
+      specVersionId: "version",
       endpoint: "/x",
       method: "GET",
       credits: 1,
@@ -139,6 +151,8 @@ describe("wallet settlement ingest contract", () => {
       keyId: "key",
       at: 1,
       settleRefId: "settle:one",
+      billingOutcome: "settled",
+      qualityOutcome: "success",
     };
     expect(parseIngestUsageBody({ events: [base] }).ok).toBe(false);
     expect(
@@ -149,6 +163,27 @@ describe("wallet settlement ingest contract", () => {
         ],
       }).ok,
     ).toBe(false);
+    expect(
+      parseIngestUsageBody({
+        events: Array.from({ length: 101 }, (_, index) => ({
+          ...base,
+          settleRefId: `settle:${index}`,
+          consumerClerkOrgId: "org_one",
+        })),
+      }),
+    ).toEqual({ ok: false, status: 400, error: "invalid event count" });
+    expect(
+      parseIngestUsageBody({
+        events: [
+          { ...base, consumerClerkOrgId: "org_one" },
+          { ...base, consumerClerkOrgId: "org_one" },
+        ],
+      }),
+    ).toEqual({
+      ok: false,
+      status: 400,
+      error: "duplicate settlement reference",
+    });
   });
 
   it("returns applied, already_applied, rejected and an authoritative checkpoint", async () => {
@@ -181,6 +216,7 @@ describe("wallet settlement ingest contract", () => {
           refId: "settle:too-expensive",
           status: "rejected",
           reason: "insufficient authoritative balance",
+          retryable: true,
         },
       ],
       wallet: { clerkOrgId: "org_consumer", balance: 85, sequence: 2 },
@@ -196,6 +232,32 @@ describe("wallet settlement ingest contract", () => {
     expect(await duplicate.json()).toEqual({
       results: [{ refId: "settle:one", status: "already_applied" }],
       wallet: { clerkOrgId: "org_consumer", balance: 85, sequence: 2 },
+    });
+    const durableEvidence = await t.run(async (ctx) => ({
+      usage: await ctx.db
+        .query("usageEvents")
+        .withIndex("by_org_project_settlement", (q) =>
+          q
+            .eq("organizationId", seed.consumerOrganizationId)
+            .eq("projectId", seed.projectId)
+            .eq("settleRefId", "settle:one"),
+        )
+        .unique(),
+      quality: await ctx.db
+        .query("gatewayQualitySamples")
+        .withIndex("by_ref", (q) => q.eq("refId", "settle:one"))
+        .unique(),
+    }));
+    expect(durableEvidence.usage).toMatchObject({
+      specVersionId: seed.specVersionId,
+      billingOutcome: "settled",
+      qualityOutcome: "success",
+    });
+    expect(durableEvidence.quality).toMatchObject({
+      projectId: seed.projectId,
+      specVersionId: seed.specVersionId,
+      refId: "settle:one",
+      outcome: "success",
     });
 
     const alteredReplay = await t.fetch("/ingest-usage", {
@@ -214,6 +276,7 @@ describe("wallet settlement ingest contract", () => {
           refId: "settle:one",
           status: "rejected",
           reason: "settlement reference payload conflict",
+          retryable: false,
         },
       ],
       wallet: { clerkOrgId: "org_consumer", balance: 85, sequence: 2 },
@@ -238,6 +301,11 @@ describe("wallet settlement ingest contract", () => {
           latencyMs: 86_400_001,
         },
         {
+          ...usageEvent(seed, "settle:forged-outcome"),
+          status: 503,
+          qualityOutcome: "success",
+        },
+        {
           ...usageEvent(seed, "settle:wrong-publisher"),
           organizationId: seed.consumerOrganizationId,
         },
@@ -249,16 +317,25 @@ describe("wallet settlement ingest contract", () => {
         refId: "settle:bad-status",
         status: "rejected",
         reason: "invalid settlement",
+        retryable: false,
       },
       {
         refId: "settle:bad-latency",
         status: "rejected",
         reason: "invalid settlement",
+        retryable: false,
+      },
+      {
+        refId: "settle:forged-outcome",
+        status: "rejected",
+        reason: "invalid settlement",
+        retryable: false,
       },
       {
         refId: "settle:wrong-publisher",
         status: "rejected",
         reason: "settlement publisher does not own project",
+        retryable: false,
       },
     ]);
     expect(result.wallet).toMatchObject({ balance: 100, sequence: 1 });
@@ -289,6 +366,7 @@ describe("wallet settlement ingest contract", () => {
         refId: "settle:new-after-freeze",
         status: "rejected",
         reason: "consumer became eligible after retirement freeze",
+        retryable: false,
       },
     ]);
 

@@ -1,5 +1,8 @@
 import Stripe from "stripe";
-import { MAX_ENDPOINT_COST_CREDITS } from "@zevium/shared";
+import {
+  MAX_ENDPOINT_COST_CREDITS,
+  MAX_USAGE_INGEST_EVENTS,
+} from "@zevium/shared";
 import { httpRouter } from "convex/server";
 import { Webhook } from "svix";
 import { internal } from "./_generated/api";
@@ -256,11 +259,12 @@ http.route({
   }),
 });
 
-const MAX_INGEST_EVENTS = 500;
+const MAX_INGEST_EVENTS = MAX_USAGE_INGEST_EVENTS;
 
 type IngestUsageEvent = {
   organizationId: string;
   projectId: string;
+  specVersionId: string;
   endpoint: string;
   method: string;
   credits: number;
@@ -270,6 +274,8 @@ type IngestUsageEvent = {
   at: number;
   settleRefId: string;
   consumerClerkOrgId: string;
+  billingOutcome: "settled" | "refunded" | "free";
+  qualityOutcome: "success" | "client_error" | "server_error" | "network_error";
 };
 
 /** Parse exactly the one-wallet settlement batch accepted from a Wallet DO. */
@@ -291,6 +297,7 @@ export function parseIngestUsageBody(
     return { ok: false, status: 400, error: "invalid event count" };
   }
   const events: IngestUsageEvent[] = [];
+  const seenSettleRefs = new Set<string>();
   let consumerClerkOrgId: string | null = null;
   for (const raw of candidate.events) {
     if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
@@ -300,6 +307,7 @@ export function parseIngestUsageBody(
     const requiredStrings = [
       event.organizationId,
       event.projectId,
+      event.specVersionId,
       event.endpoint,
       event.method,
       event.keyId,
@@ -337,14 +345,39 @@ export function parseIngestUsageBody(
     ) {
       return { ok: false, status: 400, error: "invalid event" };
     }
+    if (
+      (event.billingOutcome !== "settled" &&
+        event.billingOutcome !== "refunded" &&
+        event.billingOutcome !== "free") ||
+      (event.qualityOutcome !== "success" &&
+        event.qualityOutcome !== "client_error" &&
+        event.qualityOutcome !== "server_error" &&
+        event.qualityOutcome !== "network_error")
+    ) {
+      return { ok: false, status: 400, error: "invalid event" };
+    }
     const consumer = event.consumerClerkOrgId as string;
     if (consumerClerkOrgId !== null && consumerClerkOrgId !== consumer) {
       return { ok: false, status: 400, error: "mixed consumer organizations" };
     }
+    const settleRefId = event.settleRefId as string;
+    if (seenSettleRefs.has(settleRefId)) {
+      return {
+        ok: false,
+        status: 400,
+        error: "duplicate settlement reference",
+      };
+    }
+    seenSettleRefs.add(settleRefId);
     consumerClerkOrgId = consumer;
     events.push({
       organizationId: event.organizationId as string,
       projectId: event.projectId as string,
+      specVersionId: event.specVersionId as string,
+      billingOutcome:
+        event.billingOutcome as IngestUsageEvent["billingOutcome"],
+      qualityOutcome:
+        event.qualityOutcome as IngestUsageEvent["qualityOutcome"],
       endpoint: event.endpoint as string,
       method: event.method as string,
       credits: event.credits,
@@ -392,6 +425,7 @@ http.route({
           ...event,
           organizationId: event.organizationId as Id<"organizations">,
           projectId: event.projectId as Id<"projects">,
+          specVersionId: event.specVersionId as Id<"specVersions">,
         })),
       });
       return json(result, 200);

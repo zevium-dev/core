@@ -18,19 +18,31 @@ const DRAFT_A = JSON.stringify({
   openapi: "3.1.0",
   info: { title: "A", version: "1.0.0" },
   servers: [{ url: "https://api.example.com" }],
-  paths: { "/ping": { get: { "x-zevium-cost": 1 } } },
+  paths: {
+    "/ping": {
+      get: { "x-zevium-cost": 1, "x-zevium-health-check": true },
+    },
+  },
 });
 const DRAFT_B = JSON.stringify({
   openapi: "3.1.0",
   info: { title: "B", version: "1.0.0" },
   servers: [{ url: "https://api.example.com" }],
-  paths: { "/ping": { get: { "x-zevium-cost": 1 } } },
+  paths: {
+    "/ping": {
+      get: { "x-zevium-cost": 1, "x-zevium-health-check": true },
+    },
+  },
 });
 const ACTION_DRAFT = JSON.stringify({
   openapi: "3.1.0",
   info: { title: "Action readiness", version: "1.0.0" },
   servers: [{ url: "https://example.com" }],
-  paths: { "/health": { get: { "x-zevium-cost": 1 } } },
+  paths: {
+    "/health": {
+      get: { "x-zevium-cost": 1, "x-zevium-health-check": true },
+    },
+  },
 });
 
 type Seed = { projectId: Id<"projects"> };
@@ -147,14 +159,16 @@ describe("publish readiness validity", () => {
       await t.mutation(internal.publishReadiness.recordPassingTest, {
         projectId,
         draftHash: newHash,
-        serverOrigin: "https://api.example.com",
+        healthCheckUrl: "https://api.example.com/ping",
+        healthCheckMethod: "GET",
       }),
     ).toBe(true);
     expect(
       await t.mutation(internal.publishReadiness.recordPassingTest, {
         projectId,
         draftHash: oldHash,
-        serverOrigin: "https://api.example.com",
+        healthCheckUrl: "https://api.example.com/ping",
+        healthCheckMethod: "GET",
       }),
     ).toBe(false);
 
@@ -176,7 +190,8 @@ describe("publish readiness validity", () => {
       await t.mutation(internal.publishReadiness.recordPassingTest, {
         projectId,
         draftHash: oldHash,
-        serverOrigin: "https://api.example.com",
+        healthCheckUrl: "https://api.example.com/ping",
+        healthCheckMethod: "GET",
       }),
     ).toBe(true);
 
@@ -190,7 +205,8 @@ describe("publish readiness validity", () => {
       await t.mutation(internal.publishReadiness.recordPassingTest, {
         projectId,
         draftHash: oldHash,
-        serverOrigin: "https://api.example.com",
+        healthCheckUrl: "https://api.example.com/ping",
+        healthCheckMethod: "GET",
       }),
     ).toBe(false);
     const readiness = await t.run(async (ctx) =>
@@ -217,7 +233,8 @@ describe("publish readiness validity", () => {
       await t.mutation(internal.publishReadiness.recordPassingTest, {
         projectId,
         draftHash: initialSave.draftHash,
-        serverOrigin: "https://api.example.com",
+        healthCheckUrl: "https://api.example.com/ping",
+        healthCheckMethod: "GET",
       }),
     ).toBe(true);
 
@@ -262,7 +279,7 @@ describe("publish readiness validity", () => {
       });
     });
     probeMock.mockResolvedValueOnce({
-      outcome: "success",
+      outcome: "healthy",
       statusCode: 204,
       latencyMs: 12,
       finalOrigin: "https://example.com",
@@ -272,7 +289,7 @@ describe("publish readiness validity", () => {
       asAdmin(t).action(api.publishReadinessAction.testConnection, {
         projectId,
       }),
-    ).resolves.toMatchObject({ status: "ok", statusCode: 204 });
+    ).resolves.toMatchObject({ status: "ready", statusCode: 204 });
 
     await expect(
       asAdmin(t).query(api.publishReadiness.getCurrent, { projectId }),
@@ -282,13 +299,14 @@ describe("publish readiness validity", () => {
       readiness: {
         status: "ok",
         draftHash: await draftFingerprint(ACTION_DRAFT),
-        serverOrigin: "https://example.com",
+        healthCheckUrl: "https://example.com/health",
+        healthCheckMethod: "GET",
       },
     });
-    expect(probeMock).toHaveBeenCalledWith("https://example.com");
+    expect(probeMock).toHaveBeenCalledWith("https://example.com/health", "GET");
   });
 
-  it("treats an unauthenticated HTTP response as reachable without inventing HTTP success", async () => {
+  it("reports reachability but rejects an unhealthy declared health response", async () => {
     const t = convexTest(schema, modules);
     const { projectId } = await seed(t);
     probeMock.mockResolvedValueOnce({
@@ -304,19 +322,19 @@ describe("publish readiness validity", () => {
         projectId,
       }),
     ).resolves.toMatchObject({
-      status: "reachable_unconfirmed",
+      status: "reachable_unhealthy",
       statusCode: 401,
     });
     await expect(
       asAdmin(t).query(api.publishReadiness.getCurrent, { projectId }),
-    ).resolves.toMatchObject({ current: true });
+    ).resolves.toMatchObject({ current: false });
   });
 
   it("blocks 5xx and invalidates an earlier pass for the same draft", async () => {
     const t = convexTest(schema, modules);
     const { projectId } = await seed(t);
     probeMock.mockResolvedValueOnce({
-      outcome: "success",
+      outcome: "healthy",
       statusCode: 204,
       latencyMs: 8,
       finalOrigin: "https://api.example.com",
@@ -342,7 +360,7 @@ describe("publish readiness validity", () => {
         projectId,
       }),
     ).resolves.toMatchObject({
-      status: "reachable_unconfirmed",
+      status: "reachable_unhealthy",
       statusCode: 503,
       message: expect.stringContaining("Publication gate failed"),
     });
@@ -376,7 +394,8 @@ describe("publish readiness validity", () => {
       await t.mutation(internal.publishReadiness.recordPassingTest, {
         projectId,
         draftHash: newHash,
-        serverOrigin: "https://api.example.com",
+        healthCheckUrl: "https://api.example.com/ping",
+        healthCheckMethod: "GET",
       }),
     ).toBe(true);
     expect(

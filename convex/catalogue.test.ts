@@ -295,15 +295,18 @@ describe("catalogue.listPublic", () => {
       await ctx.db.insert("qualitySnapshots", {
         projectId: seed.cheapId,
         specVersionId: version1._id,
-        sampleSize: 3,
-        responseCount: 3,
-        successCount: 3,
-        availabilityPercent: 100,
-        successRatePercent: 100,
-        latencyP50Ms: 12,
-        insufficientData: false,
-        lastOutcome: "success",
-        lastCheckedAt: seed.t2,
+        reachabilitySampleSize: 3,
+        reachabilityResponseCount: 3,
+        reachabilityPercent: 100,
+        reachabilityLatencyP50Ms: 12,
+        insufficientReachabilityData: false,
+        apiSampleSize: 20,
+        apiSuccessCount: 20,
+        apiSuccessRatePercent: 100,
+        apiLatencyP50Ms: 12,
+        insufficientApiData: false,
+        lastProbeOutcome: "healthy",
+        lastProbedAt: seed.t2,
         publishedAt: version1.publishedAt,
         updatedAt: seed.t2,
       });
@@ -312,14 +315,14 @@ describe("catalogue.listPublic", () => {
     expect(
       current.items.find((item) => item.slug === "cheap")?.quality,
     ).toMatchObject({
-      sampleSize: 3,
-      successRatePercent: 100,
+      reachabilitySampleSize: 3,
+      apiSuccessRatePercent: 100,
     });
     const detail = await t.query(api.catalogue.getPublicDetail, {
       publisherHandle: "pub-co",
       projectSlug: "cheap",
     });
-    expect(detail?.quality).toMatchObject({ latencyP50Ms: 12 });
+    expect(detail?.quality).toMatchObject({ reachabilityLatencyP50Ms: 12 });
 
     await t.run(async (ctx) => {
       await ctx.db.insert("specVersions", {
@@ -430,7 +433,7 @@ describe("catalogue.listPublic", () => {
       publisherHandle: "pub-co",
       projectSlug: "cheap",
     });
-    expect(publicDetail?.project).not.toHaveProperty("_id");
+    expect(publicDetail?.project._id).toBeDefined();
     expect(publicDetail?.org).not.toHaveProperty("_id");
     expect(publicDetail?.project.slug).toBe("cheap");
     expect(publicDetail?.latestVersion?.version).toBe("1.0.0");

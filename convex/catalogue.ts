@@ -781,6 +781,7 @@ export const getPublicDetail = query({
     args,
   ): Promise<{
     project: {
+      _id: Id<"projects">;
       name: string;
       slug: string;
       description: string | undefined;
@@ -826,6 +827,7 @@ export const getPublicDetail = query({
 
     return {
       project: {
+        _id: project._id,
         name: project.name,
         slug: project.slug,
         description: project.description,

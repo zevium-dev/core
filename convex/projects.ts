@@ -31,8 +31,7 @@ export const MIN_DEPRECATION_NOTICE_MS = 7 * 24 * 60 * 60 * 1000;
 const RETIREMENT_BATCH_SIZE = 100;
 const RETIREMENT_REPAIR_BATCH_SIZE = 25;
 const NOTICE_USAGE_PAGE_SIZE = 100;
-const INLINE_CREDENTIAL_CLEANUP_SIZE = 10;
-const CREDENTIAL_CLEANUP_PAGE_SIZE = 100;
+const CLEANUP_PAGE_SIZE = 50;
 
 async function cleanupProjectRuntime(
   ctx: MutationCtx,
@@ -43,19 +42,6 @@ async function cleanupProjectRuntime(
     .withIndex("by_project", (q) => q.eq("projectId", projectId))
     .unique();
   if (draft !== null) await ctx.db.delete(draft._id);
-
-  const credentials = await ctx.db
-    .query("upstreamCredentials")
-    .withIndex("by_project", (q) => q.eq("projectId", projectId))
-    .take(INLINE_CREDENTIAL_CLEANUP_SIZE);
-  for (const credential of credentials) await ctx.db.delete(credential._id);
-  if (credentials.length === INLINE_CREDENTIAL_CLEANUP_SIZE) {
-    await ctx.scheduler.runAfter(
-      0,
-      internal.projects.deleteProjectCredentialsPage,
-      { projectId },
-    );
-  }
 
   const readiness = await ctx.db
     .query("publishReadiness")
@@ -74,26 +60,222 @@ async function cleanupProjectRuntime(
     .withIndex("by_project", (q) => q.eq("projectId", projectId))
     .unique();
   if (webhook !== null) await ctx.db.patch(webhook._id, { active: false });
+
+  const target = await ctx.db
+    .query("qualityProbeTargets")
+    .withIndex("by_project", (q) => q.eq("projectId", projectId))
+    .unique();
+  if (target !== null) {
+    await ctx.db.patch(target._id, {
+      enabled: false,
+      leaseId: undefined,
+      leaseExpiresAt: undefined,
+      updatedAt: Date.now(),
+    });
+  }
+
+  const project = await ctx.db.get(projectId);
+  const deleteEvidence = project?.status === "draft";
+  if (deleteEvidence) {
+    if (target !== null) await ctx.db.delete(target._id);
+    const snapshot = await ctx.db
+      .query("qualitySnapshots")
+      .withIndex("by_project", (q) => q.eq("projectId", projectId))
+      .unique();
+    if (snapshot !== null) await ctx.db.delete(snapshot._id);
+    const subscriptionAggregate = await ctx.db
+      .query("listingSubscriptionAggregates")
+      .withIndex("by_project", (q) => q.eq("projectId", projectId))
+      .unique();
+    if (subscriptionAggregate !== null)
+      await ctx.db.delete(subscriptionAggregate._id);
+    const reviewAggregate = await ctx.db
+      .query("reviewAggregates")
+      .withIndex("by_project", (q) => q.eq("projectId", projectId))
+      .unique();
+    if (reviewAggregate !== null) await ctx.db.delete(reviewAggregate._id);
+  }
+
+  const existingJob = await ctx.db
+    .query("projectCleanupJobs")
+    .withIndex("by_project", (q) => q.eq("projectId", projectId))
+    .unique();
+  if (existingJob === null) {
+    await ctx.db.insert("projectCleanupJobs", {
+      projectId,
+      phase: deleteEvidence ? "quality_results" : "credentials",
+      batchesCompleted: 0,
+      updatedAt: Date.now(),
+    });
+  }
+  await ctx.scheduler.runAfter(0, internal.projects.runProjectCleanupPage, {
+    projectId,
+  });
 }
 
-/** Drain legacy/high-cardinality credential sets without an unbounded mutation. */
-export const deleteProjectCredentialsPage = internalMutation({
+/** Drain every destructive phase in bounded head pages; retries are idempotent. */
+export const runProjectCleanupPage = internalMutation({
   args: { projectId: v.id("projects") },
-  handler: async (ctx, args): Promise<{ deleted: number; done: boolean }> => {
-    const credentials = await ctx.db
-      .query("upstreamCredentials")
+  handler: async (ctx, args): Promise<{ phase: string; deleted: number }> => {
+    const job = await ctx.db
+      .query("projectCleanupJobs")
       .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
-      .take(CREDENTIAL_CLEANUP_PAGE_SIZE);
-    for (const credential of credentials) await ctx.db.delete(credential._id);
-    const done = credentials.length < CREDENTIAL_CLEANUP_PAGE_SIZE;
-    if (!done) {
+      .unique();
+    if (job === null || job.phase === "finished") {
+      return { phase: "finished", deleted: 0 };
+    }
+    let deleted = 0;
+    let nextPhase: Doc<"projectCleanupJobs">["phase"] = job.phase;
+    if (job.phase === "quality_results") {
+      const rows = await ctx.db
+        .query("qualityProbeResults")
+        .withIndex("by_project_checked", (q) =>
+          q.eq("projectId", args.projectId),
+        )
+        .take(CLEANUP_PAGE_SIZE);
+      for (const row of rows) await ctx.db.delete(row._id);
+      deleted = rows.length;
+      if (rows.length < CLEANUP_PAGE_SIZE) nextPhase = "quality_samples";
+    } else if (job.phase === "quality_samples") {
+      const rows = await ctx.db
+        .query("gatewayQualitySamples")
+        .withIndex("by_project_at", (q) => q.eq("projectId", args.projectId))
+        .take(CLEANUP_PAGE_SIZE);
+      for (const row of rows) await ctx.db.delete(row._id);
+      deleted = rows.length;
+      if (rows.length < CLEANUP_PAGE_SIZE) nextPhase = "incidents";
+    } else if (job.phase === "incidents") {
+      const rows = await ctx.db
+        .query("qualityIncidents")
+        .withIndex("by_project_opened", (q) =>
+          q.eq("projectId", args.projectId),
+        )
+        .take(CLEANUP_PAGE_SIZE);
+      for (const row of rows) await ctx.db.delete(row._id);
+      deleted = rows.length;
+      if (rows.length < CLEANUP_PAGE_SIZE) nextPhase = "subscriptions";
+    } else if (job.phase === "subscriptions") {
+      const rows = await ctx.db
+        .query("listingSubscriptions")
+        .withIndex("by_project_active", (q) =>
+          q.eq("projectId", args.projectId),
+        )
+        .take(CLEANUP_PAGE_SIZE);
+      for (const row of rows) await ctx.db.delete(row._id);
+      deleted = rows.length;
+      if (rows.length < CLEANUP_PAGE_SIZE) nextPhase = "reviews";
+    } else if (job.phase === "reviews") {
+      const review = await ctx.db
+        .query("reviews")
+        .withIndex("by_project_sort", (q) => q.eq("projectId", args.projectId))
+        .first();
+      if (review === null) {
+        nextPhase = "spec_versions";
+      } else {
+        const reports = await ctx.db
+          .query("reviewReports")
+          .withIndex("by_review_status", (q) => q.eq("reviewId", review._id))
+          .take(CLEANUP_PAGE_SIZE);
+        const edits = await ctx.db
+          .query("reviewEdits")
+          .withIndex("by_review", (q) => q.eq("reviewId", review._id))
+          .take(CLEANUP_PAGE_SIZE);
+        const actions = await ctx.db
+          .query("reviewModerationActions")
+          .withIndex("by_review", (q) => q.eq("reviewId", review._id))
+          .take(CLEANUP_PAGE_SIZE);
+        for (const row of reports) await ctx.db.delete(row._id);
+        for (const row of edits) await ctx.db.delete(row._id);
+        for (const row of actions) await ctx.db.delete(row._id);
+        deleted = reports.length + edits.length + actions.length;
+        const response = await ctx.db
+          .query("publisherReviewResponses")
+          .withIndex("by_review", (q) => q.eq("reviewId", review._id))
+          .unique();
+        if (response !== null) {
+          const responseEdits = await ctx.db
+            .query("publisherReviewResponseEdits")
+            .withIndex("by_response", (q) => q.eq("responseId", response._id))
+            .take(CLEANUP_PAGE_SIZE);
+          for (const row of responseEdits) await ctx.db.delete(row._id);
+          deleted += responseEdits.length;
+          if (responseEdits.length < CLEANUP_PAGE_SIZE) {
+            await ctx.db.delete(response._id);
+            deleted += 1;
+          }
+        }
+        const thread = await ctx.db
+          .query("reviewReportThreads")
+          .withIndex("by_review", (q) => q.eq("reviewId", review._id))
+          .unique();
+        if (thread !== null) await ctx.db.delete(thread._id);
+        if (
+          reports.length < CLEANUP_PAGE_SIZE &&
+          edits.length < CLEANUP_PAGE_SIZE &&
+          actions.length < CLEANUP_PAGE_SIZE &&
+          response === null
+        ) {
+          await ctx.db.delete(review._id);
+          deleted += 1;
+        }
+      }
+    } else if (job.phase === "spec_versions") {
+      const rows = await ctx.db
+        .query("specVersions")
+        .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
+        .take(CLEANUP_PAGE_SIZE);
+      for (const row of rows) await ctx.db.delete(row._id);
+      deleted = rows.length;
+      if (rows.length < CLEANUP_PAGE_SIZE) nextPhase = "credentials";
+    } else if (job.phase === "credentials") {
+      const rows = await ctx.db
+        .query("upstreamCredentials")
+        .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
+        .take(CLEANUP_PAGE_SIZE);
+      for (const row of rows) await ctx.db.delete(row._id);
+      deleted = rows.length;
+      if (rows.length < CLEANUP_PAGE_SIZE) nextPhase = "webhook_deliveries";
+    } else {
+      const endpoint = await ctx.db
+        .query("webhookEndpoints")
+        .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
+        .unique();
+      if (job.phase === "webhook_deliveries") {
+        if (endpoint === null) {
+          nextPhase = "webhook_endpoint";
+        } else {
+          const rows = await ctx.db
+            .query("webhookDeliveries")
+            .withIndex("by_endpoint", (q) => q.eq("endpointId", endpoint._id))
+            .take(CLEANUP_PAGE_SIZE);
+          for (const row of rows) await ctx.db.delete(row._id);
+          deleted = rows.length;
+          if (rows.length < CLEANUP_PAGE_SIZE) nextPhase = "webhook_endpoint";
+        }
+      } else if (job.phase === "webhook_endpoint") {
+        if (endpoint !== null) await ctx.db.delete(endpoint._id);
+        deleted = endpoint === null ? 0 : 1;
+        nextPhase = "finished";
+      }
+    }
+    await ctx.db.patch(job._id, {
+      phase: nextPhase,
+      batchesCompleted: job.batchesCompleted + 1,
+      updatedAt: Date.now(),
+    });
+    if (nextPhase === "finished") {
+      const project = await ctx.db.get(args.projectId);
+      if (project !== null) {
+        await ctx.db.patch(project._id, { deletionState: "cleaned" });
+      }
+    } else {
       await ctx.scheduler.runAfter(
         0,
-        internal.projects.deleteProjectCredentialsPage,
+        internal.projects.runProjectCleanupPage,
         args,
       );
     }
-    return { deleted: credentials.length, done };
+    return { phase: nextPhase, deleted };
   },
 });
 
@@ -337,6 +519,12 @@ export const remove = mutation({
   ): Promise<{ archived: Id<"projects">; retiredAt: number }> => {
     const { claims, project } = await requireProjectMember(ctx, args.projectId);
     requireOrgAdmin(claims);
+    if (
+      project.retiredAt !== undefined &&
+      project.deletionState !== undefined
+    ) {
+      throw new Error("Retired project cannot be deleted");
+    }
 
     if (project.status === "published") {
       if (project.sunsetAt === undefined) {
@@ -350,20 +538,18 @@ export const remove = mutation({
     }
 
     const retiredAt = Date.now();
+    await ctx.db.patch(args.projectId, {
+      visibility: "private",
+      desiredVisibility: "private",
+      retirementState: "retired",
+      retirementRevision: (project.retirementRevision ?? 0) + 1,
+      retirementCutoffAt:
+        project.retirementCutoffAt ?? project.sunsetAt ?? retiredAt,
+      sunsetAt: undefined,
+      retiredAt: project.retiredAt ?? retiredAt,
+      deletionState: "tombstoned",
+    });
     await cleanupProjectRuntime(ctx, args.projectId);
-
-    if (project.status === "draft") {
-      await ctx.db.delete(args.projectId);
-    } else {
-      await ctx.db.patch(args.projectId, {
-        visibility: "private",
-        retirementState: "retired",
-        retirementRevision: (project.retirementRevision ?? 0) + 1,
-        retirementCutoffAt: project.retirementCutoffAt ?? project.sunsetAt,
-        sunsetAt: undefined,
-        retiredAt,
-      });
-    }
     await syncCatalogueListing(ctx, args.projectId);
     if (project.status === "published") {
       const organization = await getActiveOrgById(ctx, project.organizationId);
@@ -379,6 +565,42 @@ export const remove = mutation({
       }
     }
     return { archived: args.projectId, retiredAt };
+  },
+});
+
+export const retire = mutation({
+  args: { projectId: v.id("projects") },
+  handler: async (ctx, args): Promise<Doc<"projects">> => {
+    const { claims, project } = await requireProjectMember(ctx, args.projectId);
+    requireOrgAdmin(claims);
+    if (project.status !== "published") {
+      throw new Error("Only published projects can be retired");
+    }
+    if (project.retiredAt !== undefined) return project;
+    const now = Date.now();
+    await ctx.db.patch(project._id, {
+      visibility: "private",
+      desiredVisibility: "private",
+      qualityStatus: "suspended",
+      qualitySuspendedAt: now,
+      qualitySuspensionReason: "Publisher permanently retired this listing",
+      retirementState: "retired",
+      retirementCutoffAt: project.retirementCutoffAt ?? now,
+      retiredAt: now,
+      deletionState: "tombstoned",
+      sunsetAt: undefined,
+    });
+    await cleanupProjectRuntime(ctx, project._id);
+    const organization = await getActiveOrgById(ctx, project.organizationId);
+    if (organization !== null) {
+      await retirePublicRoute(ctx, project, organization, now);
+      const route = await enqueueRouteArchive(ctx, project, organization, now);
+      await enqueueCatalogueSnapshot(ctx, project._id, route);
+    }
+    await syncCatalogueListing(ctx, project._id);
+    const retired = await ctx.db.get(project._id);
+    if (retired === null) throw new Error("Project retirement failed");
+    return retired;
   },
 });
 

@@ -1,6 +1,7 @@
 declare namespace Cloudflare {
   interface Env {
     WALLET: DurableObjectNamespace;
+    CONTROL?: DurableObjectNamespace;
     CLERK_SECRET_KEY?: string;
     CONVEX_URL?: string;
     /** Convex .convex.site origin for httpActions (ingest-usage). */

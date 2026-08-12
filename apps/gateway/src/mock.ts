@@ -108,9 +108,9 @@ export async function handleMockRequest(
     matched = matchOperation(parsed, request.method, route.remainderPath);
   } catch {
     return jsonError(
-      404,
+      422,
       "invalid_spec",
-      "Published spec has invalid pricing",
+      "Published spec pricing is invalid",
       requestId,
     );
   }

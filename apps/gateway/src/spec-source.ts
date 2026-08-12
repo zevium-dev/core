@@ -11,6 +11,8 @@ import { trimTrailingSlashes } from "@zevium/shared";
 export type PublishedSpec = {
   /** Raw OpenAPI JSON string. */
   spec: string;
+  /** Exact immutable version used for privacy-safe quality attribution. */
+  specVersionId: string;
   projectId: string;
   /** Convex organizations table id (ledger / usage). */
   organizationId: string;
@@ -38,6 +40,7 @@ export interface SpecSource {
     publisherHandle: string,
     projectSlug: string,
   ): Promise<PublishedSpec | null>;
+  invalidate?(publisherHandle?: string, projectSlug?: string): void;
 }
 
 export type PublicPublishedSpec = Pick<
@@ -55,6 +58,7 @@ export interface PublicSpecSource {
     publisherHandle: string,
     projectSlug: string,
   ): Promise<PublicPublishedSpec | null>;
+  invalidate?(publisherHandle?: string, projectSlug?: string): void;
 }
 
 export class SpecSourceUnavailableError extends Error {}
@@ -80,8 +84,11 @@ const getPublishedPublicRef = makeFunctionReference<
   { publisherHandle: string; projectSlug: string },
   {
     spec: string;
-    version: string;
-    visibility: "public" | "private";
+    specVersionId: string;
+    projectId: string;
+    organizationId: string;
+    clerkOrgId: string;
+    visibility?: "public" | "private";
     deprecatedAt?: number;
     sunsetAt?: number;
     deprecationMessage?: string;
@@ -137,6 +144,14 @@ export class CachedSpecSource implements SpecSource {
     }
     this.#cache.set(key, { value, expiresAt: now + this.#ttlMs });
     return value;
+  }
+
+  invalidate(publisherHandle?: string, projectSlug?: string): void {
+    if (publisherHandle && projectSlug) {
+      this.#cache.delete(`${publisherHandle}/${projectSlug}`);
+    } else {
+      this.#cache.clear();
+    }
   }
 }
 
@@ -345,6 +360,13 @@ export function parsePublishedSpecPayload(json: unknown): PublishedSpec | null {
   ) {
     return null;
   }
+  if (
+    !("specVersionId" in candidate) ||
+    typeof candidate.specVersionId !== "string" ||
+    candidate.specVersionId.length === 0
+  ) {
+    return null;
+  }
 
   // Prefer clerkOrgId; fall back to organizationId only when absent (legacy fixtures).
   let clerkOrgId: string;
@@ -365,6 +387,7 @@ export function parsePublishedSpecPayload(json: unknown): PublishedSpec | null {
 
   const published: PublishedSpec = {
     spec: candidate.spec,
+    specVersionId: candidate.specVersionId,
     projectId: candidate.projectId,
     organizationId: candidate.organizationId,
     clerkOrgId,

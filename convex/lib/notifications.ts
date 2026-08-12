@@ -10,7 +10,9 @@ export type NotificationKind =
   | "webhook_failed"
   | "visibility_changed"
   | "transfer_failed"
-  | "transfer_sent";
+  | "transfer_sent"
+  | "quality_suspended"
+  | "quality_restored";
 
 export type CreateNotificationArgs = {
   clerkOrgId: string;

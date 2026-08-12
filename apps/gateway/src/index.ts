@@ -18,7 +18,7 @@ import {
   FixtureCatalogueSource,
   type CatalogueSource,
 } from "./catalogue-source";
-import { ConsoleUsageSink, ConvexUsageSink, NoopUsageSink } from "./usage";
+import { ConvexUsageSink, NoopUsageSink } from "./usage";
 import {
   handleGatewayRequest,
   parseGatewayPath,
@@ -28,12 +28,14 @@ import { handleDiscoveryRequest, type DiscoveryDeps } from "./discovery";
 import { handleMcpRequest, type McpDeps } from "./mcp";
 import { corsPreflight, withCors } from "./cors";
 import { handleMockRequest, parseMockPath, type MockDeps } from "./mock";
+import { ControlDO, verifyControlRequest } from "./control";
 
-export { WalletDO };
+export { WalletDO, ControlDO };
 export { __setTestUsageMutation, __setTestGrantsFetcher } from "./wallet";
 
 export interface Env {
   WALLET: DurableObjectNamespace<WalletDO>;
+  CONTROL?: DurableObjectNamespace<ControlDO>;
   CLERK_SECRET_KEY?: string;
   CONVEX_URL?: string;
   /** Convex .convex.site origin for httpActions (ingest-usage). */
@@ -129,14 +131,11 @@ function buildDeps(env: Env): WorkerDeps {
     ? new ConvexCatalogueSource({ convexUrl: env.CONVEX_URL })
     : testMode
       ? new FixtureCatalogueSource()
-      : testMode
-        ? new FixtureCatalogueSource()
-        : new FailClosedCatalogueSource();
+      : new FailClosedCatalogueSource();
 
-  const usageSink = env.CONVEX_URL
-    ? // Pipeline emit is best-effort logging; authoritative flush is DO alarm.
-      new ConsoleUsageSink()
-    : new NoopUsageSink();
+  // Durable call evidence rides the Wallet DO settlement outbox. This sink is
+  // observability/test-only and must never become a second Convex write path.
+  const usageSink = new NoopUsageSink();
 
   // Keep ConvexUsageSink constructable for tests / future dual-write.
   void ConvexUsageSink;
@@ -150,6 +149,17 @@ function buildDeps(env: Env): WorkerDeps {
       ttlMs: 60_000,
     }),
     usageSink,
+    routeAllowed: env.CONTROL
+      ? async (publisherHandle, projectSlug) => {
+          const stub = env.CONTROL!.get(env.CONTROL!.idFromName("global"));
+          const response = await stub.fetch(
+            `https://control.invalid/gate?route=${encodeURIComponent(`${publisherHandle}/${projectSlug}`)}`,
+          );
+          if (!response.ok) return false;
+          const gate = (await response.json()) as { allowed?: boolean } | null;
+          return gate?.allowed !== false;
+        }
+      : undefined,
   };
   cachedProdDeps = { fingerprint, deps };
   return deps;
@@ -163,6 +173,7 @@ function pipelineOnly(deps: WorkerDeps): PipelineDeps {
     fetchImpl: deps.fetchImpl,
     idGenerator: deps.idGenerator,
     now: deps.now,
+    routeAllowed: deps.routeAllowed,
   };
 }
 
@@ -249,6 +260,13 @@ export default {
       );
     }
 
+    if (
+      request.method === "POST" &&
+      url.pathname.startsWith("/internal/registry/v1/")
+    ) {
+      return handleGatewayControl(request, env);
+    }
+
     // POST /internal/grant { clerkOrgId, amount, refId }
     if (parts[0] === "internal" && parts[1] === "grant" && parts.length === 2) {
       return handleInternalGrant(request, env);
@@ -300,6 +318,44 @@ export default {
     return withCors(Response.json({ error: "not found" }, { status: 404 }));
   },
 } satisfies ExportedHandler<Env>;
+
+async function handleGatewayControl(
+  request: Request,
+  env: Env,
+): Promise<Response> {
+  if (!env.GATEWAY_INTERNAL_SECRET || !env.CONTROL) {
+    return Response.json({ error: "misconfigured" }, { status: 503 });
+  }
+  const verified = await verifyControlRequest(
+    request,
+    env.GATEWAY_INTERNAL_SECRET,
+  );
+  if (verified === null) {
+    return Response.json({ error: "unauthorized" }, { status: 401 });
+  }
+  const stub = env.CONTROL.get(env.CONTROL.idFromName("global"));
+  const applied = await stub.fetch("https://control.invalid/apply", {
+    method: "POST",
+    body: verified.body,
+  });
+  if (!applied.ok) return applied;
+  const result = (await applied.json()) as { status: string };
+  const deps = buildDeps(env);
+  deps.specSource.invalidate?.(
+    verified.payload.publisherHandle,
+    verified.payload.projectSlug,
+  );
+  deps.publicSpecSource.invalidate?.(
+    verified.payload.publisherHandle,
+    verified.payload.projectSlug,
+  );
+  deps.catalogueSource.invalidate?.();
+  return Response.json({
+    status: result.status,
+    sourceRevision: verified.payload.sourceRevision,
+    operation: verified.payload.operation,
+  });
+}
 
 async function handleInternalGrant(
   request: Request,

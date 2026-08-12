@@ -33,21 +33,21 @@ One account can be several personas at once (a publisher is usually also a consu
 
 - **Public, no auth** — SEO surface + agents + zero-friction evaluation
 - Search (semantic), tag filters, sort (relevance / popularity / recently updated), filters (price range, has-free-tier)
-- Listing cards: name, org, description, price range, quality badges (latency, success rate, freshness), agent-ready badge
+- Listing cards: name, org, description, price range, quality badges for real-call success/latency and declared-health reachability, plus freshness and agent-ready badge. Each unavailable metric says "insufficient data" with current/evidence-floor samples.
 - Any paid action (key, real playground call) gates to sign-up
 
 ### 1.3 API detail page — `/catalogue/{org}/{api}` (public)
 
 The listing's product page — shareable URL, the API's landing page. Spec metadata drives everything.
 
-- Header: name, org, tags, quality badges (latency p50, success rate, uptime, freshness), agent-ready badge
+- Header: name, org, tags, quality evidence (real-call latency p50 and success rate; declared-health reachability and latency; freshness), agent-ready badge. Reachability copy explicitly says it does not prove other operations succeed.
 - Pricing table: per-endpoint credits, free tier highlighted
 - Docs: rendered from the published spec — three-column pattern (nav / prose / runnable code samples in curl/js/python), prose↔code hover-sync
 - **Try it** panel: one-click use-my-key (or paste key), run request in-page, live response. Key held in browser session storage only; test mode visually loud
 - **Mock mode**: free spec-generated mock responses — exercise the API shape without spending credits. Implemented: keyless and anonymous by design (never executes upstream, 0 credits), ahead of its P1 tag
 - **Connect your agent** tab: copy-paste agent-tool config per client + agent-readable usage notes
 - Version picker: published versions, spec-diff changelog between versions (P2)
-- Reviews/ratings (P2): aggregate plus paginated verified-consumer reviews. Empty state says no verified reviews yet. Reviewers may edit or withdraw their one organization-level review; public attribution stays anonymous. Publisher responses sit beneath criticism and cannot delete it. Hidden reviews disappear from public counts and lists; staff moderation is auditable.
+- Reviews/ratings (P2): aggregate plus stable paginated verified-consumer reviews. Empty state says no verified reviews yet. Signed-in users see exact eligibility reason. Eligible reviewers may create, edit, withdraw, or reactivate their one organization-level review; public attribution stays anonymous. Publisher responses sit beneath criticism and cannot delete it. Other signed-in organizations may report content. Hidden reviews disappear from public counts and lists; staff moderation is auditable.
 
 ### 1.4 Auth — `/auth/*`
 
@@ -205,7 +205,7 @@ Org-scoped — the org owns the wallet; admins manage it, members view their own
 
 ## 6. Platform admin flow (staff-only, `/admin`)
 
-- **Moderation queue**: new/updated public listings; approve / delist with reason
+- **Moderation queue**: responsive review queues for active, hidden, reported, and moderation history. Staff inspect review content, listing, publisher response, reports, and latest action; hide or restore requires reason. Platform-admin role gate applies to query and screen.
 - **Quality dashboard**: listings failing uptime/security gates, auto-delist toggles
 - **Users & orgs**: search, account state (wallet, keys, calls), suspend/ban
 - **Billing ops**: top-up/refund lookup, manual credit grants (promotional credits), webhook replay

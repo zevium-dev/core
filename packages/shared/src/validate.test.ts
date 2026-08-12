@@ -21,6 +21,7 @@ const validBase = {
       get: {
         summary: "Health",
         "x-zevium-cost": 1,
+        "x-zevium-health-check": true,
       },
     },
   },
@@ -198,7 +199,7 @@ describe("validateOpenApiSpec", () => {
         ...validBase,
         paths: {
           "/x": {
-            get: { summary: "no cost" },
+            get: { summary: "no cost", "x-zevium-health-check": true },
           },
         },
       }),
@@ -222,12 +223,42 @@ describe("validateOpenApiSpec", () => {
         openapi: "3.1.0",
         servers: [{ url: "https://api.example.com" }],
         paths: {
-          "/a": { get: {} },
+          "/a": { get: { "x-zevium-health-check": true } },
           "/b": { get: { "x-zevium-cost": -1 } },
         },
       }),
     );
     expect(issues.map((i) => i.level)).toEqual(["warning", "error"]);
     expect(hasErrors(issues)).toBe(true);
+  });
+
+  it("requires one parameter-free safe health operation", () => {
+    const multiple = validateOpenApiSpec(
+      JSON.stringify({
+        ...validBase,
+        paths: {
+          "/health": { get: { "x-zevium-health-check": true } },
+          "/ready": { head: { "x-zevium-health-check": true } },
+        },
+      }),
+    );
+    expect(multiple.errors).toEqual([
+      expect.objectContaining({
+        message: expect.stringContaining("Exactly one"),
+      }),
+    ]);
+    const parameterized = validateOpenApiSpec(
+      JSON.stringify({
+        ...validBase,
+        paths: {
+          "/users/{id}": { get: { "x-zevium-health-check": true } },
+        },
+      }),
+    );
+    expect(parameterized.errors).toEqual([
+      expect.objectContaining({
+        message: expect.stringContaining("parameter-free"),
+      }),
+    ]);
   });
 });

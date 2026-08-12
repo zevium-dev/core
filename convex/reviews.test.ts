@@ -1,7 +1,7 @@
 /// <reference types="vite/client" />
 import { convexTest, type TestConvex } from "convex-test";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { api } from "./_generated/api";
+import { api, internal } from "./_generated/api";
 import schema from "./schema";
 
 const modules = import.meta.glob("./**/*.ts");
@@ -44,6 +44,8 @@ async function seed(t: TestConvex<typeof schema>, withUsage = true) {
         keyId: "key",
         at: Date.now(),
         settleRefId: "settle:verified",
+        billingOutcome: "settled",
+        qualityOutcome: "success",
       });
     }
     return { publisherId, consumerId, otherId, projectId };
@@ -102,6 +104,22 @@ describe("verified reviews", () => {
         keyId: "legacy",
         at: Date.now(),
       });
+      for (const billingOutcome of ["refunded", "free"] as const) {
+        await ctx.db.insert("usageEvents", {
+          organizationId: seeded.otherId,
+          projectId: seeded.projectId,
+          endpoint: `/${billingOutcome}`,
+          method: "GET",
+          credits: 0,
+          status: 200,
+          latencyMs: 1,
+          keyId: "gateway-key",
+          at: Date.now(),
+          settleRefId: `settle:${billingOutcome}`,
+          billingOutcome,
+          qualityOutcome: "success",
+        });
+      }
     });
     await expect(
       t
@@ -111,6 +129,11 @@ describe("verified reviews", () => {
           rating: 5,
         }),
     ).rejects.toThrow("settled call");
+    await expect(
+      t
+        .withIdentity({ subject: "other", org_id: "org_other" })
+        .query(api.reviews.getViewerState, { projectId: seeded.projectId }),
+    ).resolves.toMatchObject({ canReview: false });
     await expect(
       t.withIdentity(publisherIdentity).mutation(api.reviews.upsert, {
         projectId: seeded.projectId,
@@ -217,8 +240,10 @@ describe("verified reviews", () => {
       reviewId: review._id,
       action: "hidden",
       reason: "Needs moderation",
+      expectedModerationGeneration: review.moderationGeneration ?? 0,
+      expectedContentRevision: review.contentRevision ?? 0,
     });
-    await consumer.mutation(api.reviews.upsert, {
+    const edited = await consumer.mutation(api.reviews.upsert, {
       projectId: seeded.projectId,
       rating: 1,
       body: "Edited while hidden",
@@ -227,29 +252,35 @@ describe("verified reviews", () => {
       t.query(api.reviews.getAggregate, { projectId: seeded.projectId }),
     ).resolves.toMatchObject({ count: 0, averageRating: null });
 
-    await admin.mutation(api.reviews.moderate, {
+    const restored = await admin.mutation(api.reviews.moderate, {
       reviewId: review._id,
       action: "restored",
       reason: "Content now acceptable",
+      expectedModerationGeneration: (review.moderationGeneration ?? 0) + 1,
+      expectedContentRevision: edited.contentRevision ?? 0,
     });
     await admin.mutation(api.reviews.moderate, {
       reviewId: review._id,
       action: "restored",
       reason: "Idempotent retry",
+      expectedModerationGeneration: restored.moderationGeneration ?? 0,
+      expectedContentRevision: restored.contentRevision ?? 0,
     });
     await expect(
       t.query(api.reviews.getAggregate, { projectId: seeded.projectId }),
     ).resolves.toMatchObject({ count: 1, averageRating: 1 });
 
-    await consumer.mutation(api.reviews.withdraw, {
+    const withdrawn = await consumer.mutation(api.reviews.withdraw, {
       projectId: seeded.projectId,
     });
     await admin.mutation(api.reviews.moderate, {
       reviewId: review._id,
       action: "hidden",
       reason: "Hide withdrawn review",
+      expectedModerationGeneration: restored.moderationGeneration ?? 0,
+      expectedContentRevision: withdrawn.contentRevision ?? 0,
     });
-    await consumer.mutation(api.reviews.upsert, {
+    const reactivated = await consumer.mutation(api.reviews.upsert, {
       projectId: seeded.projectId,
       rating: 3,
     });
@@ -260,6 +291,8 @@ describe("verified reviews", () => {
       reviewId: review._id,
       action: "restored",
       reason: "Restored after appeal",
+      expectedModerationGeneration: reactivated.moderationGeneration ?? 0,
+      expectedContentRevision: reactivated.contentRevision ?? 0,
     });
     await expect(
       t.query(api.reviews.getAggregate, { projectId: seeded.projectId }),
@@ -318,6 +351,8 @@ describe("verified reviews", () => {
         .collect(),
     );
     expect(responseAudit).toHaveLength(2);
+    const currentReview = await t.run(async (ctx) => ctx.db.get(review._id));
+    if (currentReview === null) throw new Error("review missing");
 
     const admin = t.withIdentity({ subject: "admin_user" });
     await expect(
@@ -325,32 +360,40 @@ describe("verified reviews", () => {
         reviewId: review._id,
         action: "hidden",
         reason: "x",
+        expectedModerationGeneration: currentReview.moderationGeneration ?? 0,
+        expectedContentRevision: currentReview.contentRevision ?? 0,
       }),
     ).rejects.toThrow("at least 3");
-    await admin.mutation(api.reviews.moderate, {
+    const hidden = await admin.mutation(api.reviews.moderate, {
       reviewId: review._id,
       action: "hidden",
       reason: "Contains abusive content",
+      expectedModerationGeneration: currentReview.moderationGeneration ?? 0,
+      expectedContentRevision: currentReview.contentRevision ?? 0,
     });
     expect(
       (await t.query(api.reviews.getAggregate, { projectId: seeded.projectId }))
         .count,
     ).toBe(0);
-    const hidden = await t.query(api.reviews.listPublic, {
+    const hiddenReviews = await t.query(api.reviews.listPublic, {
       projectId: seeded.projectId,
-      paginationOpts: { numItems: 10, cursor: null },
+      limit: 10,
     });
-    expect(hidden.page).toHaveLength(0);
+    expect(hiddenReviews.page).toHaveLength(0);
     const duplicate = await admin.mutation(api.reviews.moderate, {
       reviewId: review._id,
       action: "hidden",
       reason: "Duplicate moderation",
+      expectedModerationGeneration: hidden.moderationGeneration ?? 0,
+      expectedContentRevision: hidden.contentRevision ?? 0,
     });
     expect(duplicate.hidden).toBe(true);
     await admin.mutation(api.reviews.moderate, {
       reviewId: review._id,
       action: "restored",
       reason: "Appeal accepted",
+      expectedModerationGeneration: hidden.moderationGeneration ?? 0,
+      expectedContentRevision: hidden.contentRevision ?? 0,
     });
     expect(
       (await t.query(api.reviews.getAggregate, { projectId: seeded.projectId }))
@@ -358,7 +401,7 @@ describe("verified reviews", () => {
     ).toBe(1);
     const visible = await t.query(api.reviews.listPublic, {
       projectId: seeded.projectId,
-      paginationOpts: { numItems: 10, cursor: null },
+      limit: 10,
     });
     expect(visible.page).toEqual([
       expect.objectContaining({
@@ -376,7 +419,7 @@ describe("verified reviews", () => {
     expect(visible.page[0]).not.toHaveProperty("consumerOrganizationName");
     const audit = await admin.query(api.reviews.moderationHistory, {
       reviewId: review._id,
-      paginationOpts: { numItems: 10, cursor: null },
+      limit: 10,
     });
     expect(
       audit.page.map((row) => [row.action, row.actorUserId, row.reason]),
@@ -387,8 +430,373 @@ describe("verified reviews", () => {
     await expect(
       t.query(api.reviews.listPublic, {
         projectId: seeded.projectId,
-        paginationOpts: { numItems: 51, cursor: null },
+        limit: 51,
       }),
     ).rejects.toThrow("Page size");
+  });
+
+  it("exposes eligibility, reports, and recoverable admin queues behind role gates", async () => {
+    const t = convexTest(schema, modules);
+    const seeded = await seed(t);
+    const consumer = t.withIdentity(consumerIdentity);
+    const publisher = t.withIdentity(publisherIdentity);
+    const other = t.withIdentity({
+      subject: "other_user",
+      org_id: "org_other",
+    });
+    const admin = t.withIdentity({ subject: "admin_user" });
+    const review = await consumer.mutation(api.reviews.upsert, {
+      projectId: seeded.projectId,
+      rating: 4,
+      body: "Accurate but slow",
+    });
+
+    await expect(
+      t.query(api.reviews.getViewerState, { projectId: seeded.projectId }),
+    ).resolves.toMatchObject({ signedIn: false, canReview: false });
+    await expect(
+      consumer.query(api.reviews.getViewerState, {
+        projectId: seeded.projectId,
+      }),
+    ).resolves.toMatchObject({ signedIn: true, canReview: true });
+    await expect(
+      publisher.query(api.reviews.getViewerState, {
+        projectId: seeded.projectId,
+      }),
+    ).resolves.toMatchObject({ isPublisher: true, canReview: false });
+
+    await expect(
+      consumer.mutation(api.reviews.report, {
+        reviewId: review._id,
+        reason: "This is my own review and should fail",
+      }),
+    ).rejects.toThrow("cannot report");
+    await expect(
+      other.mutation(api.reviews.report, {
+        reviewId: review._id,
+        reason: "Contains a claim needing moderator review",
+      }),
+    ).resolves.toEqual({ reported: true });
+    await expect(
+      other.mutation(api.reviews.report, {
+        reviewId: review._id,
+        reason: "Contains a claim needing moderator review",
+      }),
+    ).resolves.toEqual({ reported: false });
+    await consumer.mutation(api.reviews.upsert, {
+      projectId: seeded.projectId,
+      rating: 1,
+      body: "Replacement text",
+    });
+    await consumer.mutation(api.reviews.withdraw, {
+      projectId: seeded.projectId,
+    });
+    await expect(
+      admin.query(api.reviews.listModerationQueue, { mode: "reported" }),
+    ).resolves.toMatchObject({
+      page: [
+        expect.objectContaining({
+          item: expect.objectContaining({
+            rating: 1,
+            body: "Replacement text",
+            active: false,
+          }),
+        }),
+      ],
+    });
+    await publisher.mutation(api.reviews.respondAsPublisher, {
+      reviewId: review._id,
+      body: "Publisher response",
+    });
+    await consumer.mutation(api.reviews.upsert, {
+      projectId: seeded.projectId,
+      rating: 1,
+      body: "Replacement text",
+    });
+    await expect(
+      consumer.query(api.reviews.listModerationQueue, {
+        mode: "reported",
+      }),
+    ).rejects.toThrow("Not authorized as admin");
+
+    const reported = await admin.query(api.reviews.listModerationQueue, {
+      mode: "reported",
+    });
+    expect(reported.page[0]).toMatchObject({
+      kind: "review",
+      item: {
+        reviewId: review._id,
+        projectName: "Reviewed API",
+        publisherName: "Publisher",
+        reportCount: 1,
+        response: { body: "Publisher response" },
+        expectedModerationGeneration: expect.any(Number),
+        expectedContentRevision: expect.any(Number),
+      },
+    });
+    expect(JSON.stringify(reported)).not.toContain("org_consumer");
+    const queuedReview = await t.run(async (ctx) => ctx.db.get(review._id));
+    if (queuedReview === null) throw new Error("review missing");
+    await consumer.mutation(api.reviews.upsert, {
+      projectId: seeded.projectId,
+      rating: 2,
+      body: "Newer content after queue load",
+    });
+    await expect(
+      admin.mutation(api.reviews.moderate, {
+        reviewId: review._id,
+        action: "hidden",
+        reason: "Stale queue action",
+        expectedModerationGeneration: queuedReview.moderationGeneration ?? 0,
+        expectedContentRevision: queuedReview.contentRevision ?? 0,
+      }),
+    ).rejects.toThrow("stale");
+    const currentReview = await t.run(async (ctx) => ctx.db.get(review._id));
+    if (currentReview === null) throw new Error("review missing");
+    await admin.mutation(api.reviews.moderate, {
+      reviewId: review._id,
+      action: "hidden",
+      reason: "Investigating reported claim",
+      expectedModerationGeneration: currentReview.moderationGeneration ?? 0,
+      expectedContentRevision: currentReview.contentRevision ?? 0,
+    });
+    await expect(
+      admin.query(api.reviews.listModerationQueue, { mode: "reported" }),
+    ).resolves.toMatchObject({ page: [] });
+    await expect(
+      admin.query(api.reviews.listModerationQueue, { mode: "hidden" }),
+    ).resolves.toMatchObject({
+      page: [
+        expect.objectContaining({
+          item: expect.objectContaining({ reviewId: review._id }),
+        }),
+      ],
+    });
+    await expect(
+      admin.mutation(api.reviews.moderate, {
+        reviewId: review._id,
+        action: "restored",
+        reason: "Stale generation action",
+        expectedModerationGeneration: currentReview.moderationGeneration ?? 0,
+        expectedContentRevision: currentReview.contentRevision ?? 0,
+      }),
+    ).rejects.toThrow("stale");
+    await admin.mutation(api.reviews.moderate, {
+      reviewId: review._id,
+      action: "restored",
+      reason: "Claim is acceptable",
+      expectedModerationGeneration:
+        (currentReview.moderationGeneration ?? 0) + 1,
+      expectedContentRevision: currentReview.contentRevision ?? 0,
+    });
+    const history = await admin.query(api.reviews.listModerationQueue, {
+      mode: "history",
+    });
+    expect(history.page.map((row) => row.kind)).toEqual(["history", "history"]);
+  });
+
+  it("preserves report generations through edits/reactivation and resumes more than 50 resolutions", async () => {
+    const t = convexTest(schema, modules);
+    const seeded = await seed(t);
+    const consumer = t.withIdentity(consumerIdentity);
+    const other = t.withIdentity({
+      subject: "other_user",
+      org_id: "org_other",
+    });
+    const admin = t.withIdentity({ subject: "admin_user" });
+    const review = await consumer.mutation(api.reviews.upsert, {
+      projectId: seeded.projectId,
+      rating: 3,
+      body: "Needs moderation",
+    });
+
+    await expect(
+      other.mutation(api.reviews.report, {
+        reviewId: review._id,
+        reason: "Original report before review edits",
+      }),
+    ).resolves.toEqual({ reported: true });
+    const edited = await consumer.mutation(api.reviews.upsert, {
+      projectId: seeded.projectId,
+      rating: 2,
+      body: "Edited after the first report",
+    });
+    expect(edited.moderationGeneration).toBe(review.moderationGeneration);
+    await consumer.mutation(api.reviews.withdraw, {
+      projectId: seeded.projectId,
+    });
+    const reactivated = await consumer.mutation(api.reviews.upsert, {
+      projectId: seeded.projectId,
+      rating: 2,
+      body: "Reactivated after the first report",
+    });
+    expect(reactivated.moderationGeneration).toBe(review.moderationGeneration);
+
+    await t.run(async (ctx) => {
+      for (let index = 1; index < 75; index += 1) {
+        await ctx.db.insert("reviewReports", {
+          reviewId: review._id,
+          reporterUserId: `legacy_reporter_${index}`,
+          reason: `Original report ${index}`,
+          status: "open",
+          createdAt: index + 1,
+          sortKey: `${String(index + 1).padStart(16, "0")}:original-${index}`,
+          moderationGeneration: review.moderationGeneration,
+        });
+      }
+      const thread = await ctx.db
+        .query("reviewReportThreads")
+        .withIndex("by_review", (q) => q.eq("reviewId", review._id))
+        .unique();
+      if (thread === null) throw new Error("report thread missing");
+      await ctx.db.patch(thread._id, {
+        openCount: 75,
+        latestReason: "Original report 74",
+        latestReportedAt: 75,
+        latestSortKey: `${String(75).padStart(16, "0")}:original-74`,
+        rating: reactivated.rating,
+        body: reactivated.body,
+        active: true,
+        hidden: false,
+        updatedAt: 75,
+      });
+      await ctx.db.patch(review._id, { openReportCount: 75 });
+    });
+
+    const hidden = await admin.mutation(api.reviews.moderate, {
+      reviewId: review._id,
+      action: "hidden",
+      reason: "Investigating original reports",
+      expectedModerationGeneration: reactivated.moderationGeneration ?? 0,
+      expectedContentRevision: reactivated.contentRevision ?? 0,
+    });
+    await admin.mutation(api.reviews.moderate, {
+      reviewId: review._id,
+      action: "restored",
+      reason: "Original reports reviewed",
+      expectedModerationGeneration: hidden.moderationGeneration ?? 0,
+      expectedContentRevision: hidden.contentRevision ?? 0,
+    });
+    await t.run(async (ctx) => {
+      await ctx.db.insert("organizations", {
+        clerkOrgId: "org_future_reporter",
+        name: "Future reporter",
+        slug: "future-reporter",
+      });
+    });
+    await expect(
+      t
+        .withIdentity({
+          subject: "future_reporter",
+          org_id: "org_future_reporter",
+        })
+        .mutation(api.reviews.report, {
+          reviewId: review._id,
+          reason: "New evidence after the moderation decision",
+        }),
+    ).resolves.toEqual({ reported: true });
+
+    const resumed = await t.mutation(internal.reviews.resolveReportsPage, {
+      reviewId: review._id,
+      actorUserId: "admin_user",
+      moderationGeneration: review.moderationGeneration,
+    });
+    expect(resumed).toEqual({ resolved: 25, done: true });
+    await expect(
+      t.mutation(internal.reviews.resolveReportsPage, {
+        reviewId: review._id,
+        actorUserId: "admin_user",
+        moderationGeneration: review.moderationGeneration,
+      }),
+    ).resolves.toEqual({ resolved: 0, done: true });
+    const remaining = await t.run(async (ctx) => ({
+      review: await ctx.db.get(review._id),
+      reports: await ctx.db
+        .query("reviewReports")
+        .withIndex("by_review_status", (q) =>
+          q.eq("reviewId", review._id).eq("status", "open"),
+        )
+        .collect(),
+      thread: await ctx.db
+        .query("reviewReportThreads")
+        .withIndex("by_review", (q) => q.eq("reviewId", review._id))
+        .unique(),
+    }));
+    expect(remaining.reports).toHaveLength(1);
+    expect(remaining.reports[0]?.reason).toContain("New evidence");
+    expect(remaining.reports[0]?.moderationGeneration).toBe(
+      (review.moderationGeneration ?? 0) + 2,
+    );
+    expect(remaining.review?.openReportCount).toBe(1);
+    expect(remaining.thread).toMatchObject({ openCount: 1, status: "open" });
+  });
+
+  it("uses immutable filter-bound keysets for public review pages", async () => {
+    const t = convexTest(schema, modules);
+    const seeded = await seed(t, false);
+    const ids = await t.run(async (ctx) => {
+      const created: Id<"reviews">[] = [];
+      for (let index = 1; index <= 3; index += 1) {
+        const organizationId = await ctx.db.insert("organizations", {
+          clerkOrgId: `org_page_${index}`,
+          name: `Page ${index}`,
+          slug: `page-${index}`,
+        });
+        created.push(
+          await ctx.db.insert("reviews", {
+            projectId: seeded.projectId,
+            consumerOrganizationId: organizationId,
+            rating: index,
+            body: `Review ${index}`,
+            active: true,
+            hidden: false,
+            createdBy: `user_${index}`,
+            updatedBy: `user_${index}`,
+            createdAt: index,
+            updatedAt: index,
+            sortKey: `${String(index).padStart(16, "0")}:fixed-${index}`,
+          }),
+        );
+      }
+      return created;
+    });
+    const first = await t.query(api.reviews.listPublic, {
+      projectId: seeded.projectId,
+      limit: 2,
+    });
+    expect(first.page.map((review) => review.body)).toEqual([
+      "Review 3",
+      "Review 2",
+    ]);
+    expect(first.nextCursor).toBeTruthy();
+    await t.run(async (ctx) => {
+      await ctx.db.patch(ids[1]!, {
+        updatedAt: 99_999,
+        body: "Edited review 2",
+      });
+    });
+    const second = await t.query(api.reviews.listPublic, {
+      projectId: seeded.projectId,
+      limit: 2,
+      cursor: first.nextCursor!,
+    });
+    expect(second.page.map((review) => review.body)).toEqual(["Review 1"]);
+    const otherProject = await t.run(async (ctx) =>
+      ctx.db.insert("projects", {
+        organizationId: seeded.publisherId,
+        name: "Other",
+        slug: "other",
+        status: "published",
+        visibility: "public",
+        tags: [],
+      }),
+    );
+    await expect(
+      t.query(api.reviews.listPublic, {
+        projectId: otherProject,
+        limit: 2,
+        cursor: first.nextCursor!,
+      }),
+    ).rejects.toThrow("does not match");
   });
 });
