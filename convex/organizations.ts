@@ -145,22 +145,9 @@ export const deleteFromClerk = internalMutation({
       return;
     }
 
-    const wallet = await ctx.db
-      .query("wallets")
-      .withIndex("by_organization", (q) => q.eq("organizationId", existing._id))
-      .unique();
-    if (wallet !== null) {
-      const entries = await ctx.db
-        .query("walletEntries")
-        .withIndex("by_wallet", (q) => q.eq("walletId", wallet._id))
-        .collect();
-      for (const entry of entries) {
-        await ctx.db.delete(entry._id);
-      }
-      await ctx.db.delete(wallet._id);
-    }
-
-    await ctx.db.delete(existing._id);
+    await ctx.db.patch(existing._id, {
+      archivedAt: Date.now(),
+    });
   },
 });
 

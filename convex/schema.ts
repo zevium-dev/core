@@ -11,6 +11,7 @@ export default defineSchema({
     /** Stable, publisher-controlled public URL segment. */
     publicHandle: v.optional(v.string()),
     imageUrl: v.optional(v.string()),
+    archivedAt: v.optional(v.number()),
   })
     .index("by_clerk_org", ["clerkOrgId"])
     .index("by_slug", ["slug"])

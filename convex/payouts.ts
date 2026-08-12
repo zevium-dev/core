@@ -183,6 +183,9 @@ function normalizedPublisherCountry(country: string | null): string {
   if (country === null || !/^[A-Z]{2}$/.test(country)) {
     throw new Error("Publisher country must be a two-letter ISO country code");
   }
+  if (country === "ZZ") {
+    throw new Error("Country ZZ not supported for Connect recipients");
+  }
   return country;
 }
 
@@ -836,6 +839,7 @@ export const prepareConnectLinkOperation = internalMutation({
       }
       await ctx.db.patch(pending._id, {
         status: "expired",
+        contactEmail: null,
         updatedAt: now,
       });
     }
@@ -884,6 +888,7 @@ export const expireConnectLinkOperation = internalMutation({
     ) {
       await ctx.db.patch(operation._id, {
         status: "expired",
+        contactEmail: null,
         updatedAt: Date.now(),
       });
     }
@@ -999,6 +1004,15 @@ export const projectConnectedAccount = internalMutation({
 });
 
 export function connectAccountProjection(account: Stripe.V2.Core.Account) {
+  if (account.closed === true) {
+    return {
+      detailsSubmitted: false,
+      chargesEnabled: false,
+      payoutsEnabled: false,
+      disabledReason: "account_closed",
+      requirements: [],
+    };
+  }
   const transferCapability =
     account.configuration?.recipient?.capabilities?.stripe_balance
       ?.stripe_transfers;
@@ -1034,7 +1048,6 @@ export const refreshConnectedAccount = internalAction({
       args.stripeConnectedAccountId,
       { include: ["configuration.recipient", "requirements"] },
     );
-    if (account.closed === true) return;
     await ctx.runMutation(internal.payouts.projectConnectedAccount, {
       stripeConnectedAccountId: account.id,
       ...connectAccountProjection(account),
@@ -2231,7 +2244,7 @@ export async function transferToStripe(
   } catch (error) {
     // Network/client failure is ambiguous. Only a verified provider snapshot
     // or transfer.failed webhook may classify external money as failed.
-    throw error;
+    throw new Error("Provider transfer failed. Try again or contact support.");
   }
 }
 

@@ -1580,6 +1580,7 @@ export const processStripeEvent = internalAction({
           });
           break;
         }
+        case "v2.core.account.closed":
         case "v2.core.account.updated":
         case "v2.core.account[configuration.recipient].updated":
         case "v2.core.account[configuration.recipient].capability_status_updated":
