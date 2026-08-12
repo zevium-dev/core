@@ -11,8 +11,8 @@
 | **Visitor**        | Anonymous browser                        | Landing, public catalogue, auth                                              |
 | **Consumer**       | Human dev buying API calls               | Catalogue, API detail, playground, keys, wallet                              |
 | **Agent**          | AI agent consuming APIs programmatically | Discovery index, agent-tool endpoint, gateway (no screens — machine surface) |
-| **Publisher**      | Org member selling APIs                  | Projects, spec editor, analytics, earnings                                   |
-| **Org admin**      | Owner/admin of an organization           | Org settings, members, wallet, invitations                                   |
+| **Publisher**      | Org member collaborating on API drafts   | Projects, spec editor, analytics, earnings                                   |
+| **Org admin**      | Owner/admin of an organization           | Project/listing lifecycle, secrets, payouts, wallet, members, invitations    |
 | **Platform admin** | Zevium staff                             | Moderation, quality gates, support tooling                                   |
 
 One account can be several personas at once (a publisher is usually also a consumer). Every user belongs to at least one org (a personal org is created at signup) — the org owns the wallet.
@@ -33,21 +33,21 @@ One account can be several personas at once (a publisher is usually also a consu
 
 - **Public, no auth** — SEO surface + agents + zero-friction evaluation
 - Search (semantic), tag filters, sort (relevance / popularity / recently updated), filters (price range, has-free-tier)
-- Listing cards: name, org, description, price range, quality badges for real-call success/latency and declared-health reachability, plus freshness and agent-ready badge. Each unavailable metric says "insufficient data" with current/evidence-floor samples.
+- Listing cards: name, org, description, price range, quality badges (latency, success rate, freshness), agent-ready badge
 - Any paid action (key, real playground call) gates to sign-up
 
 ### 1.3 API detail page — `/catalogue/{org}/{api}` (public)
 
 The listing's product page — shareable URL, the API's landing page. Spec metadata drives everything.
 
-- Header: name, org, tags, quality evidence (real-call latency p50 and success rate; declared-health reachability and latency; freshness), agent-ready badge. Reachability copy explicitly says it does not prove other operations succeed.
+- Header: name, org, tags, quality badges (latency p50, success rate, uptime, freshness), agent-ready badge
 - Pricing table: per-endpoint credits, free tier highlighted
 - Docs: rendered from the published spec — three-column pattern (nav / prose / runnable code samples in curl/js/python), prose↔code hover-sync
 - **Try it** panel: one-click use-my-key (or paste key), run request in-page, live response. Key held in browser session storage only; test mode visually loud
 - **Mock mode**: free spec-generated mock responses — exercise the API shape without spending credits. Implemented: keyless and anonymous by design (never executes upstream, 0 credits), ahead of its P1 tag
 - **Connect your agent** tab: copy-paste agent-tool config per client + agent-readable usage notes
 - Version picker: published versions, spec-diff changelog between versions (P2)
-- Reviews/ratings (P2): aggregate plus stable paginated verified-consumer reviews. Empty state says no verified reviews yet. Signed-in users see exact eligibility reason. Eligible reviewers may create, edit, withdraw, or reactivate their one organization-level review; public attribution stays anonymous. Publisher responses sit beneath criticism and cannot delete it. Other signed-in organizations may report content. Hidden reviews disappear from public counts and lists; staff moderation is auditable.
+- Reviews/ratings (P2)
 
 ### 1.4 Auth — `/auth/*`
 
@@ -82,7 +82,6 @@ The listing's product page — shareable URL, the API's landing page. Spec metad
 Org-scoped — the org owns the wallet; admins manage it, members view their own attribution.
 
 - Balance (live), Buy Credits (hosted checkout, credit-pack products — larger denominations surfaced first), top-up history
-- Checkout returns show inline processing, confirmed, failed, or canceled state; payment history distinguishes partial from full refunds and shows refunded credits
 - Usage: current-cycle consumption + **projected** end-of-cycle spend; breakdown per member, per key, per API, per endpoint
 - Charges history: itemized, each charge links to the exact call
 - Spend controls (P1): budget with 50/75/100% threshold alerts (email + in-app), signed budget webhooks, hard-cap toggle
@@ -140,21 +139,22 @@ Org-scoped — the org owns the wallet; admins manage it, members view their own
 
 ### 4.3 Projects — `/app/organizations/{org}/projects`
 
-- Card list, New Project, empty state with CTA
+- Card list for all members; New Project and its empty-state CTA for org admins
 
 ### 4.4 Create project — `.../projects/create`
 
-- Name (slug auto-derived), description → project page
+- Org admin only: name (slug auto-derived), description → project page
 
 ### 4.5 Project page — `.../projects/{project}`
 
-- Header: name, slug, status badge (draft/published), visibility badge (private/public), Make Public action
+- Header: name, slug, status badge (draft/published), visibility badge (private/public), admin-only Make Public action
 - Tabs: Overview / Spec / Analytics / Earnings / Settings
-- Settings tab: description, tags, **upstream credentials** (encrypted secrets attached to forwarded calls), spec variables, danger zone
+- Settings tab: admin-only description, tags, **upstream credentials** (encrypted secrets attached to forwarded calls), webhook secret/config, spec variables, danger zone
 
 ### 4.6 Spec editor — `.../projects/{project}/spec`
 
-- Code editor with live validation, Issues panel, Save draft, Publish (semver dialog)
+- Members: code editor with live validation, Issues panel, Save draft
+- Org admins: connection gate, Publish (semver dialog), visibility, deprecate/restore lifecycle
 - JSON + YAML both accepted
 - Pricing lint: warn on operations missing `x-zevium-cost`; pricing summary sidebar ("12 endpoints, 2–10 credits, free tier on 3")
 - Import from URL / file upload
@@ -171,18 +171,17 @@ Org-scoped — the org owns the wallet; admins manage it, members view their own
 ### 4.8 Earnings & payouts — `.../organizations/{org}/earnings` (P2)
 
 - Accumulated publisher share (95%), settlement schedule, payout history, payout method, statement export
-- Implemented ahead of its P2 tag with Stripe Connect: `/app/org` handles publisher onboarding and remediation; `/app/earnings` separates pending-risk, available, allocated, transferred, reversed, and failed earnings and shows transfer/bank-payout history. `/admin/payouts` retries failed Connect transfers; bank destinations stay inside Stripe.
+- Implemented ahead of its P2 tag with Stripe Connect: members can view state and history; org admins handle publisher onboarding, remediation, and transfers from `/app/org` and `/app/earnings`. Earnings separate pending-risk, available, allocated, transferred, reversed, and failed states. `/admin/payouts` retries failed Connect transfers; bank destinations stay inside Stripe.
 
 ### 4.9 Listing lifecycle
 
-- Organization owners/admins alone may change visibility, publish, deprecate, or permanently archive a listing. Members may edit mutable drafts and metadata.
-- Publish: auto-publish with automated gates (spec valid, upstream reachable, uptime probe); post-hoc review may delist
-- Deprecate/unpublish (P1): cannot silently kill an API with active consumers — set sunset date at least 7 days ahead → consumers notified (banner + email), gateway signals deprecation, new subscriptions freeze, wind-down, hard cutoff
-
-- Archive: terminal. Preserve immutable versions and public URL as a tombstone; neither publisher handle nor project slug may resurrect that URL.- Quality surface (P2): uptime status on own listing, security-scan results, freshness nudges
+- Org admins publish through automated gates (spec valid, upstream reachable, uptime probe); post-hoc review may delist
+- Org admins deprecate/unpublish (P1): cannot silently kill an API with active consumers — set sunset date → consumers notified (banner + email), gateway signals deprecation, new subscriptions freeze, wind-down, hard cutoff
+- Quality surface (P2): uptime status on own listing, security-scan results, freshness nudges
 
 ### 4.10 Publisher webhooks (P1)
 
+- Org admins configure the signed endpoint and read its signing secret; members can review delivery history
 - Subscribe to: new consumer, usage spike / abnormal traffic, revenue milestone, key revoked
 
 ---
@@ -206,7 +205,7 @@ Org-scoped — the org owns the wallet; admins manage it, members view their own
 
 ## 6. Platform admin flow (staff-only, `/admin`)
 
-- **Moderation queue**: responsive review queues for active, hidden, reported, and moderation history. Staff inspect review content, listing, publisher response, reports, and latest action; hide or restore requires reason. Platform-admin role gate applies to query and screen.
+- **Moderation queue**: new/updated public listings; approve / delist with reason
 - **Quality dashboard**: listings failing uptime/security gates, auto-delist toggles
 - **Users & orgs**: search, account state (wallet, keys, calls), suspend/ban
 - **Billing ops**: top-up/refund lookup, manual credit grants (promotional credits), webhook replay

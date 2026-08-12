@@ -74,6 +74,11 @@ export const repositoryExclusions = Object.freeze([
   { path: "apps/web/dist-ssr", provenance: "web SSR build output" },
   { path: "apps/web/node_modules", provenance: "pnpm dependency tree" },
   {
+    path: "apps/web/scripts/csrf-runtime-runner.mjs",
+    provenance:
+      "runtime CSRF proof runner imports the built worker via a computed file URL",
+  },
+  {
     path: "apps/web/src/routeTree.gen.ts",
     provenance: "route generator output checked by routes:check",
     importable: true,

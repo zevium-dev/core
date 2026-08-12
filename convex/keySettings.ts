@@ -768,3 +768,68 @@ export const recordProviderVerifiedKey = internalMutation({
     return toView(updated);
   },
 });
+
+/**
+ * organizationMembership.deleted: terminally disable every key the departed
+ * member owned in this org. Idempotent by Svix receipt; gateway learns through
+ * the registry outbox like any other revocation.
+ */
+export const revokeMembershipVerified = internalMutation({
+  args: {
+    clerkOrgId: v.string(),
+    userId: v.string(),
+    svixId: v.string(),
+  },
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{ duplicate: boolean; keyIds: string[] }> => {
+    if (args.svixId.trim() === "")
+      throw new Error("Invalid Clerk webhook envelope");
+    const prior = await ctx.db
+      .query("clerkWebhookReceipts")
+      .withIndex("by_svix_id", (q) => q.eq("svixId", args.svixId))
+      .unique();
+    if (prior !== null) return { duplicate: true, keyIds: [] };
+    const now = Date.now();
+    await ctx.db.insert("clerkWebhookReceipts", {
+      svixId: args.svixId,
+      eventType: "organizationMembership.deleted",
+      eventTimestamp: now,
+      status: "processed",
+      attempts: 1,
+      lastAttemptAt: now,
+      receivedAt: now,
+      processedAt: now,
+    });
+    const rows = await ctx.db
+      .query("keySettings")
+      .withIndex("by_owner_status", (q) =>
+        q
+          .eq("clerkOrgId", args.clerkOrgId)
+          .eq("ownerUserId", args.userId)
+          .eq("disabled", false),
+      )
+      .collect();
+    const keyIds: string[] = [];
+    for (const row of rows) {
+      await ctx.db.patch(row._id, {
+        disabled: true,
+        membershipRevokedAt: now,
+        lifecycle: "disabled",
+        updatedAt: now,
+      });
+      keyIds.push(row.keyId);
+      const updated = await ctx.db.get(row._id);
+      if (
+        updated !== null &&
+        updated.secretSha256 !== undefined &&
+        updated.ownerUserId !== undefined &&
+        updated.budgetId !== undefined
+      ) {
+        await enqueueKeyRevoke(ctx, updated, "provider_revoked");
+      }
+    }
+    return { duplicate: false, keyIds };
+  },
+});

@@ -307,7 +307,11 @@ async function upstreamHeaders(
     await Promise.all(
       rows.map(async (row) => [
         row.name,
-        await decryptCredential(requireEncryptedCredential(row)),
+        await decryptCredential(
+          requireEncryptedCredential(row),
+          row.projectId,
+          row.name,
+        ),
       ]),
     ),
   );
@@ -376,6 +380,7 @@ export async function enqueueRouteArchive(
   ctx: MutationCtx,
   project: Doc<"projects">,
   org: Doc<"organizations">,
+
   archivedAt: number,
   handleOverride?: string,
   replacementStreamKey: string | null = null,
@@ -824,12 +829,14 @@ async function readBounded(response: Response): Promise<string> {
     const chunk = await reader.read();
     if (chunk.done) break;
     size += chunk.value.byteLength;
+
     if (size > REGISTRY_MAX_ACK_BYTES) {
       await reader.cancel();
       throw new Error("Registry acknowledgement is too large");
     }
     chunks.push(chunk.value);
   }
+
   const bytes = new Uint8Array(size);
   let offset = 0;
   for (const chunk of chunks) {
@@ -911,6 +918,7 @@ export const dispatchEvent = internalAction({
         await response.body?.cancel();
         throw new Error(`Registry receiver returned HTTP ${response.status}`);
       }
+
       const rawAck = await readBounded(response);
       const ackSignature =
         response.headers.get(REGISTRY_ACK_SIGNATURE_HEADER) ?? "";

@@ -144,6 +144,15 @@ export default defineSchema({
     ciphertext: v.optional(v.string()),
     iv: v.optional(v.string()),
     keyVersion: v.optional(v.string()),
+    // v2 envelope is purpose/resource-bound with AES-GCM AAD. Legacy envelope
+    // remains during staged rollout so previous release can still roll back.
+    sealedCiphertext: v.optional(v.string()),
+    sealedIv: v.optional(v.string()),
+    sealedKeyVersion: v.optional(v.string()),
+    sealedVersion: v.optional(v.literal("v2")),
+    secret: v.optional(v.string()),
+    /** Strictly monotonic per-row revision. Wall-clock equality cannot hide writes. */
+    revision: v.optional(v.number()),
     updatedAt: v.number(),
   })
     .index("by_project", ["projectId"])
@@ -157,6 +166,8 @@ export default defineSchema({
     credentialRevision: v.optional(v.number()),
     healthCheckUrl: v.optional(v.string()),
     healthCheckMethod: v.optional(v.union(v.literal("GET"), v.literal("HEAD"))),
+    /** Hash of every credential identity + revision; deletion changes it. */
+    credentialFingerprint: v.optional(v.string()),
     status: v.literal("ok"),
     testedAt: v.number(),
   }).index("by_project", ["projectId"]),
@@ -543,6 +554,8 @@ export default defineSchema({
 
   // Per-call metering events (gateway → Convex, async)
   usageEvents: defineTable({
+    /** Public opaque row identity; Convex document ids never cross member APIs. */
+    publicId: v.optional(v.string()),
     organizationId: v.id("organizations"),
     /** Server-derived Clerk user that owned key at settlement time. */
     ownerUserId: v.optional(v.string()),
@@ -860,17 +873,51 @@ export default defineSchema({
   webhookEndpoints: defineTable({
     projectId: v.id("projects"),
     url: v.string(),
-    secret: v.string(),
+    // Transitional rollout mirrors upstreamCredentials: legacy plaintext is
+    // removed by migrateSecurityRollout before these become required.
+    ciphertext: v.optional(v.string()),
+    iv: v.optional(v.string()),
+    keyVersion: v.optional(v.string()),
+    sealedCiphertext: v.optional(v.string()),
+    sealedIv: v.optional(v.string()),
+    sealedKeyVersion: v.optional(v.string()),
+    sealedVersion: v.optional(v.literal("v2")),
+    secret: v.optional(v.string()),
+    /** Current signing-secret generation. Legacy rows are generation 1. */
+    secretVersion: v.optional(v.number()),
+    /** Current generation can be revealed once, then only rotation reveals again. */
+    secretRevealedAt: v.optional(v.number()),
+    /** One prior encrypted generation survives only for bounded retry grace. */
+    previousCiphertext: v.optional(v.string()),
+    previousIv: v.optional(v.string()),
+    previousKeyVersion: v.optional(v.string()),
+    previousSealedCiphertext: v.optional(v.string()),
+    previousSealedIv: v.optional(v.string()),
+    previousSealedKeyVersion: v.optional(v.string()),
+    previousSealedVersion: v.optional(v.literal("v2")),
+    previousSecretVersion: v.optional(v.number()),
+    previousValidUntil: v.optional(v.number()),
     active: v.boolean(),
+    /** Inactive tombstone retained while delivery rows retire in pages. */
+    retiringAt: v.optional(v.number()),
     createdAt: v.number(),
   }).index("by_project", ["projectId"]),
 
   // Webhook delivery log
   webhookDeliveries: defineTable({
     endpointId: v.id("webhookEndpoints"),
+    /** Immutable signing generation selected when delivery is enqueued. */
+    secretVersion: v.optional(v.number()),
     event: v.string(),
-    status: v.union(v.literal("pending"), v.literal("ok"), v.literal("failed")),
+    status: v.union(
+      v.literal("pending"),
+      v.literal("delivering"),
+      v.literal("ok"),
+      v.literal("failed"),
+    ),
     attempts: v.number(),
+    leaseToken: v.optional(v.string()),
+    leaseUntil: v.optional(v.number()),
     lastError: v.optional(v.string()),
     createdAt: v.number(),
     payload: v.string(),
@@ -899,9 +946,10 @@ export default defineSchema({
   // Gateway pulls these via the internal-secret ledger sync — never per-request.
   keySettings: defineTable({
     clerkOrgId: v.string(),
-    keyId: v.string(),
-    /** Verified Clerk subject. Optional only during legacy backfill. */
+    // Transitional optional only for pre-policy rows. Member queries and all
+    // writes ignore unclaimed rows until Clerk-backed broker verifies owner.
     ownerUserId: v.optional(v.string()),
+    keyId: v.string(),
     /** Display metadata stamped by authenticated key creation/rotation. */
     keyName: v.optional(v.string()),
     subjectUserId: v.optional(v.string()),
@@ -921,6 +969,8 @@ export default defineSchema({
 
     /** Stable across rotations; settlement identity never follows mutable keys. */
     keyFamilyId: v.optional(v.string()),
+    /** False means Clerk key was observed but never provisioned by Zevium. */
+    managed: v.optional(v.boolean()),
     /** Monthly credit cap; undefined = unlimited. Enforced by the wallet DO. */
     monthlyCapCredits: v.optional(v.number()),
     disabled: v.boolean(),
@@ -930,10 +980,18 @@ export default defineSchema({
     graceUntil: v.optional(v.number()),
     /** Transitional deny state when legacy raw material cannot be re-hashed. */
     rotationRequiredAt: v.optional(v.number()),
+    membershipRevokedAt: v.optional(v.number()),
+    /**
+     * Monotonic edge-revocation revision. Bumped on every disable/revoke so the
+     * wallet DO can apply immediate fail-closed state without waiting for sync.
+     */
+    edgeRevision: v.optional(v.number()),
     updatedAt: v.number(),
   })
     .index("by_org", ["clerkOrgId"])
     .index("by_owner", ["clerkOrgId", "ownerUserId"])
+    .index("by_owner_status", ["clerkOrgId", "ownerUserId", "disabled"])
+    .index("by_family", ["clerkOrgId", "ownerUserId", "keyFamilyId"])
     .index("by_key", ["keyId"]),
 
   /** Denormalized, bounded public catalogue/search projection. */
@@ -1213,6 +1271,11 @@ export default defineSchema({
     userId: v.string(),
     operationId: v.string(),
     oldKeyId: v.string(),
+    requestedName: v.optional(v.string()),
+    /** Membership projection revision fenced when provider membership was fresh. */
+    membershipRevision: v.optional(v.number()),
+    leaseToken: v.optional(v.string()),
+    leaseExpiresAt: v.optional(v.number()),
     status: v.union(
       v.literal("reserved"),
       v.literal("completed"),
@@ -1220,26 +1283,140 @@ export default defineSchema({
     ),
     newKeyId: v.optional(v.string()),
     graceUntil: v.optional(v.number()),
+    autoRevokeStatus: v.optional(
+      v.union(
+        v.literal("scheduled"),
+        v.literal("revoking"),
+        v.literal("revoked"),
+        v.literal("failed"),
+      ),
+    ),
+    autoRevokeAttempts: v.optional(v.number()),
+    autoRevokeLeaseUntil: v.optional(v.number()),
+    autoRevokeFailure: v.optional(v.string()),
+    oldKeyRevokedAt: v.optional(v.number()),
+    orphanReconciledAt: v.optional(v.number()),
     failure: v.optional(v.string()),
     createdAt: v.number(),
     updatedAt: v.number(),
   })
     .index("by_operation", ["clerkOrgId", "userId", "operationId"])
-    .index("by_active_old_key", ["clerkOrgId", "oldKeyId", "status"]),
+    .index("by_active_old_key", ["clerkOrgId", "oldKeyId", "status"])
+    .index("by_auto_revoke", ["autoRevokeStatus", "updatedAt"])
+    .index("by_auto_revoke_due", ["autoRevokeStatus", "graceUntil"])
+    .index("by_auto_revoke_lease", ["autoRevokeStatus", "autoRevokeLeaseUntil"])
+    .index("by_lease_expiry", ["status", "leaseExpiresAt"])
+    .index("by_reconcile", ["status", "orphanReconciledAt", "updatedAt"]),
 
-  // Catalogue semantic search (embedded on publish; Gemini text-embedding-004)
-  specEmbeddings: defineTable({
-    projectId: v.id("projects"),
-    /** Text that was embedded (name + description + tags + endpoint summaries). */
-    text: v.string(),
-    embedding: v.array(v.float64()),
+  keyLifecycleOperations: defineTable({
+    clerkOrgId: v.string(),
+    userId: v.string(),
+    operationId: v.string(),
+    kind: v.union(v.literal("create"), v.literal("revoke")),
+    requestedName: v.optional(v.string()),
+    /** Membership projection revision fenced when provider membership was fresh. */
+    membershipRevision: v.optional(v.number()),
+    leaseToken: v.optional(v.string()),
+    leaseExpiresAt: v.optional(v.number()),
+    status: v.union(
+      v.literal("reserved"),
+      v.literal("completed"),
+      v.literal("failed"),
+    ),
+    keyId: v.optional(v.string()),
+    previousDisabled: v.optional(v.boolean()),
+    orphanReconciledAt: v.optional(v.number()),
+    failure: v.optional(v.string()),
+    createdAt: v.number(),
     updatedAt: v.number(),
   })
-    .index("by_project", ["projectId"])
-    .vectorIndex("by_embedding", {
-      vectorField: "embedding",
-      dimensions: 768,
-    }),
+    .index("by_operation", ["clerkOrgId", "userId", "operationId"])
+    .index("by_active_kind", ["clerkOrgId", "userId", "kind", "status"])
+    .index("by_lease_expiry", ["status", "leaseExpiresAt"])
+    .index("by_reconcile", ["status", "orphanReconciledAt", "updatedAt"]),
+
+  // Transactional control-plane → gateway registry stream heads. Streams are
+  // never deleted, so a route/key source revision can never move backwards.
+  registrySyncStreams: defineTable({
+    streamKey: v.string(),
+    sourceRevision: v.number(),
+    operation: v.union(
+      v.literal("route.upsert"),
+      v.literal("route.archive"),
+      v.literal("key.upsert"),
+      v.literal("key.state"),
+      v.literal("org.archive"),
+      v.literal("catalogue.replace"),
+    ),
+    payloadJson: v.string(),
+    payloadDigest: v.string(),
+    occurredAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_stream", ["streamKey"])
+    .index("by_updated", ["updatedAt"]),
+
+  // Durable at-least-once outbox. Receiver sourceRevision checks make retries
+  // and out-of-order delivery safe; failed rows remain queued indefinitely.
+  registrySyncOutbox: defineTable({
+    eventId: v.string(),
+    streamKey: v.string(),
+    sourceRevision: v.number(),
+    operation: v.union(
+      v.literal("route.upsert"),
+      v.literal("route.archive"),
+      v.literal("key.upsert"),
+      v.literal("key.state"),
+      v.literal("org.archive"),
+      v.literal("catalogue.replace"),
+    ),
+    payloadJson: v.string(),
+    payloadDigest: v.string(),
+    status: v.union(
+      v.literal("pending"),
+      v.literal("delivering"),
+      v.literal("delivered"),
+    ),
+    attempts: v.number(),
+    nextAttemptAt: v.number(),
+    leaseUntil: v.optional(v.number()),
+    lastError: v.optional(v.string()),
+    occurredAt: v.number(),
+    updatedAt: v.number(),
+    deliveredAt: v.optional(v.number()),
+  })
+    .index("by_event", ["eventId"])
+    .index("by_stream_revision", ["streamKey", "sourceRevision"])
+    .index("by_due", ["status", "nextAttemptAt"]),
+
+  // Cross-isolate lease + fixed-window limiter for authenticated spec imports.
+  specImportLimits: defineTable({
+    clerkOrgId: v.string(),
+    userId: v.string(),
+    windowStartedAt: v.number(),
+    requestsInWindow: v.number(),
+    leases: v.array(
+      v.object({
+        id: v.string(),
+        expiresAt: v.number(),
+      }),
+    ),
+    updatedAt: v.number(),
+  }).index("by_scope", ["clerkOrgId", "userId"]),
+
+  /** Cross-tenant import ceiling. Updated in same OCC transaction as user lease. */
+  specImportGlobalLimits: defineTable({
+    singleton: v.literal("global"),
+    windowStartedAt: v.number(),
+    requestsInWindow: v.number(),
+    leases: v.array(
+      v.object({
+        id: v.string(),
+        expiresAt: v.number(),
+      }),
+    ),
+    updatedAt: v.number(),
+  }).index("by_singleton", ["singleton"]),
 
   // Stripe identifiers are organization-owned. No bank details are stored.
   organizationPayments: defineTable({
@@ -1762,4 +1939,53 @@ export default defineSchema({
   })
     .index("by_connected_account", ["stripeConnectedAccountId", "updatedAt"])
     .index("by_stripe_payout", ["stripePayoutId"]),
+
+  /** OCC hotspot fencing every credential/webhook-secret writer. */
+  securityRolloutState: defineTable({
+    singleton: v.literal("security-rollout"),
+    generation: v.number(),
+    updatedAt: v.number(),
+  }).index("by_singleton", ["singleton"]),
+
+  /** Read-only secret audit progress. No row repair or scrub occurs here. */
+  securityRolloutAudits: defineTable({
+    auditId: v.string(),
+    generation: v.number(),
+    /** Immutable creation-time fence captured before first page. */
+    highWaterCreationTime: v.number(),
+    phase: v.union(
+      v.literal("credentials"),
+      v.literal("webhooks"),
+      v.literal("completed"),
+      v.literal("invalidated"),
+    ),
+    credentialCursor: v.optional(v.union(v.string(), v.null())),
+    webhookCursor: v.optional(v.union(v.string(), v.null())),
+    credentialsScanned: v.number(),
+    webhooksScanned: v.number(),
+    current: v.number(),
+    old: v.number(),
+    plaintext: v.number(),
+    corrupt: v.number(),
+    broken: v.number(),
+    zeroCorruption: v.boolean(),
+    createdAt: v.number(),
+    completedAt: v.optional(v.number()),
+  })
+    .index("by_audit", ["auditId"])
+    .index("by_phase", ["phase", "createdAt"]),
+
+  // Catalogue semantic search (embedded on publish; Gemini text-embedding-004)
+  specEmbeddings: defineTable({
+    projectId: v.id("projects"),
+    /** Text that was embedded (name + description + tags + endpoint summaries). */
+    text: v.string(),
+    embedding: v.array(v.float64()),
+    updatedAt: v.number(),
+  })
+    .index("by_project", ["projectId"])
+    .vectorIndex("by_embedding", {
+      vectorField: "embedding",
+      dimensions: 768,
+    }),
 });

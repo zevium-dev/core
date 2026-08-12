@@ -12,9 +12,20 @@ import {
 } from "./payouts";
 import { stripeClient } from "./billing";
 import { internal } from "./_generated/api";
+
 import { enqueuePublishedProjectProjection } from "./registrySync";
 import { toRegistryRolloutManifest } from "./registryRollout";
 import type { RegistryRolloutManifest } from "@zevium/shared";
+import type { CredentialMigrationPage } from "./upstreamCredentials";
+import type { WebhookSecretMigrationPage } from "./webhooks";
+import {
+  credentialKeyringPreflight,
+  type CredentialKeyringPreflight,
+} from "./lib/credentialCrypto";
+import {
+  requireCompletedSecurityAudit,
+  securityRolloutGeneration,
+} from "./securityRollout";
 
 /** Cap for month-to-date usage count (by_at index range scan). */
 const USAGE_STATS_CAP = 50_000;
@@ -37,7 +48,7 @@ export const isAdminQuery = query({
 });
 
 /** Start or resume singleton bounded producer rollout. Safe to call repeatedly. */
-export const migrateSecurityRollout = mutation({
+export const migrateRegistryRollout = mutation({
   args: {},
   handler: async (ctx): Promise<RegistryRolloutManifest> => {
     await requireAdmin(ctx);
@@ -45,7 +56,7 @@ export const migrateSecurityRollout = mutation({
   },
 });
 
-export const getSecurityRollout = query({
+export const getRegistryRollout = query({
   args: {},
   handler: async (ctx): Promise<RegistryRolloutManifest | null> => {
     await requireAdmin(ctx);
@@ -54,6 +65,75 @@ export const getSecurityRollout = query({
       .withIndex("by_key", (q) => q.eq("key", "registry-v2-initial"))
       .unique();
     return rollout === null ? null : toRegistryRolloutManifest(rollout);
+  },
+});
+
+/** Read-only deploy preflight; never returns key material. */
+export const securityRolloutPreflight = query({
+  args: {},
+  handler: async (
+    ctx,
+  ): Promise<
+    CredentialKeyringPreflight & { generation: number; auditRequired: true }
+  > => {
+    await requireAdmin(ctx);
+    return {
+      ...credentialKeyringPreflight(),
+      generation: await securityRolloutGeneration(ctx),
+      auditRequired: true,
+    };
+  },
+});
+
+/** Bounded, idempotent rollout step; run repeatedly until remaining is zero. */
+export const migrateSecurityRollout = mutation({
+  args: {
+    auditId: v.string(),
+    credentialsCursor: v.optional(v.union(v.string(), v.null())),
+    webhookCursor: v.optional(v.union(v.string(), v.null())),
+    numItems: v.optional(v.number()),
+  },
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{
+    keyring: CredentialKeyringPreflight;
+    credentials: CredentialMigrationPage;
+    webhookSecrets: WebhookSecretMigrationPage;
+    handles: { updated: number; collisions: number };
+  }> => {
+    await requireAdmin(ctx);
+    await requireCompletedSecurityAudit(ctx, args.auditId);
+    const keyring = credentialKeyringPreflight();
+    if (!keyring.boundEnvelopeReady) {
+      throw new Error(
+        "Current credential key must be canonical padded base64 for 32 bytes",
+      );
+    }
+    const credentials = await ctx.runMutation(
+      internal.upstreamCredentials.migrateLegacyPlaintext,
+      {
+        auditId: args.auditId,
+        cursor: args.credentialsCursor ?? null,
+        ...(args.numItems === undefined ? {} : { numItems: args.numItems }),
+      },
+    );
+    const webhookSecrets = await ctx.runMutation(
+      internal.webhooks.migrateLegacyPlaintext,
+      {
+        auditId: args.auditId,
+        cursor: args.webhookCursor ?? null,
+        ...(args.numItems === undefined ? {} : { numItems: args.numItems }),
+      },
+    );
+    const handles: { updated: number; collisions: number } =
+      await ctx.runMutation(internal.organizations.backfillPublicHandles, {});
+    return {
+      keyring,
+      credentials,
+      webhookSecrets,
+      handles,
+    };
   },
 });
 
@@ -319,6 +399,7 @@ export const setProjectVisibility = mutation({
     if (updated === null) {
       throw new Error("Failed to load project");
     }
+    await enqueuePublishedProjectProjection(ctx, project._id);
     return updated;
   },
 });

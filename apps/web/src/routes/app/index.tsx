@@ -1,4 +1,5 @@
 import { useAuth, useOrganization } from "@clerk/tanstack-react-start";
+import { isPrivilegedOrgRole } from "#/lib/org-capabilities";
 import { convexQuery } from "@convex-dev/react-query";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { Link, createFileRoute } from "@tanstack/react-router";
@@ -35,6 +36,7 @@ import { Separator } from "#/components/ui/separator";
 import { Skeleton } from "#/components/ui/skeleton";
 import { listKeys } from "#/lib/api-keys";
 import { api } from "#/lib/convex-api";
+
 import {
   deriveOnboardingFlags,
   nextOnboardingStep,
@@ -108,6 +110,7 @@ function DashboardPage() {
 
 function DashboardContent({
   orgSlug,
+
   userId,
   orgId,
 }: {
@@ -115,6 +118,8 @@ function DashboardContent({
   userId: string;
   orgId: string;
 }) {
+  const { membership } = useOrganization();
+  const canAdministerWallet = isPrivilegedOrgRole(membership?.role);
   const { data: overview } = useSuspenseQuery(
     convexQuery(api.analytics.orgOverview, { orgSlug }),
   );
@@ -151,9 +156,11 @@ function DashboardContent({
         </div>
         {keysLoaded && !showOnboarding ? (
           <div className="flex flex-wrap gap-2">
-            <Button asChild>
-              <Link to="/app/billing">Top up</Link>
-            </Button>
+            {canAdministerWallet ? (
+              <Button asChild>
+                <Link to="/app/billing">Top up</Link>
+              </Button>
+            ) : null}
             <Button asChild variant="outline">
               <Link to="/app/settings/keys">Manage keys</Link>
             </Button>
@@ -457,6 +464,7 @@ function OnboardingChecklist({
                     <p className="text-sm text-muted-foreground">{step.body}</p>
                   </div>
                 </div>
+
                 {!step.done && step.id === nextStep ? (
                   <Button asChild size="sm" className="w-full sm:w-auto">
                     <Link to={step.href}>{step.cta}</Link>

@@ -57,6 +57,7 @@ export type SpecWorkspaceProps = {
   visibility: "public" | "private";
   /** Nudges the publish flow to remind publishers to fill this in. */
   description: string | undefined;
+
   /** Admin-only lifecycle controls; members may still edit and save drafts. */
   canAdminister: boolean;
   savedDraft: string;
@@ -176,6 +177,15 @@ export function SpecWorkspace({
 
   const textRef = useRef(text);
   textRef.current = text;
+  const yamlRevisionRef = useRef(0);
+  const yamlTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (yamlTimerRef.current !== null) clearTimeout(yamlTimerRef.current);
+      yamlRevisionRef.current += 1;
+    },
+    [],
+  );
   // Last text the server has accepted or pushed. Used to detect whether the
   // user has in-progress edits before adopting a remotely-pushed draft, so a
   // concurrent tab/session save never clobbers unsaved keystrokes.
@@ -430,6 +440,7 @@ export function SpecWorkspace({
 
   function commitEditorReplacement(replacement: string) {
     resetAutosaveCircuit();
+
     setText(replacement);
     setPendingReplacement(null);
   }
@@ -451,11 +462,26 @@ export function SpecWorkspace({
       !next.trimStart().startsWith("{") &&
       !next.trimStart().startsWith("[")
     ) {
-      const converted = convertSpecInputToJson(next);
-      if (converted.ok && converted.convertedFromYaml) {
-        setText(converted.json);
-        toast.success("Converted YAML to JSON");
-        return;
+      const revision = ++yamlRevisionRef.current;
+      if (yamlTimerRef.current !== null) clearTimeout(yamlTimerRef.current);
+      yamlTimerRef.current = setTimeout(() => {
+        void convertSpecInputToJson(next).then((converted) => {
+          if (
+            revision !== yamlRevisionRef.current ||
+            !converted.ok ||
+            !converted.convertedFromYaml
+          ) {
+            return;
+          }
+          setText(converted.json);
+          toast.success("Converted YAML to JSON");
+        });
+      }, 150);
+    } else {
+      yamlRevisionRef.current += 1;
+      if (yamlTimerRef.current !== null) {
+        clearTimeout(yamlTimerRef.current);
+        yamlTimerRef.current = null;
       }
     }
     setText(next);
@@ -796,10 +822,10 @@ export function SpecWorkspace({
             versions={versions}
             publishSlot={publishSlot}
             projectId={projectId}
+            canAdminister={canAdminister}
             onSelectVersion={(id) =>
               setVersionDialogId(id as Id<"specVersions">)
             }
-            canAdminister={canAdminister}
           />
         </div>
       </div>

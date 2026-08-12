@@ -61,7 +61,7 @@ describe("bounded Registry v2 rollout", () => {
       });
     });
     const started = await admin(t).mutation(
-      api.admin.migrateSecurityRollout,
+      api.admin.migrateRegistryRollout,
       {},
     );
     expect(started.phase).toBe("credentials");
@@ -136,7 +136,7 @@ describe("bounded Registry v2 rollout", () => {
       }
     });
     let manifest = await admin(t).mutation(
-      api.admin.migrateSecurityRollout,
+      api.admin.migrateRegistryRollout,
       {},
     );
     const rolloutId = manifest.rolloutId;
@@ -186,7 +186,7 @@ describe("bounded Registry v2 rollout", () => {
       });
     });
     let manifest = await admin(t).mutation(
-      api.admin.migrateSecurityRollout,
+      api.admin.migrateRegistryRollout,
       {},
     );
     while (manifest.phase !== "verify_sources")

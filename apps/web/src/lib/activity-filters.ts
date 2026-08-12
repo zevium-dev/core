@@ -84,7 +84,7 @@ function usageRowIdentity(row: UsageRowIdentity): string {
 /**
  * Merge a fetched page into the accumulated list.
  * `replace` clears previous pages (filter reset / first page).
- * Dedupe by `_id` so StrictMode double-effects don't double-append.
+ * Dedupe by opaque public id so StrictMode double-effects don't double-append.
  */
 function mergePages<T>(
   existing: readonly T[],
@@ -98,6 +98,7 @@ function mergePages<T>(
   if (incoming.length === 0) {
     return [...existing];
   }
+
   const seen = new Set(existing.map(identityFor));
   const next = [...existing];
   for (const row of incoming) {

@@ -5,6 +5,7 @@ const repositoryRoot = resolve(import.meta.dirname, "../..");
 const commands = [
   ["pnpm", ["exec", "turbo", "test"]],
   ["pnpm", ["run", "test:convex"]],
+  ["pnpm", ["--dir", "apps/web", "run", "test:csrf-runtime"]],
   ["pnpm", ["run", "test:build-contract"]],
   ["pnpm", ["run", "test:e2e-harness"]],
   ["pnpm", ["run", "test:quality"]],

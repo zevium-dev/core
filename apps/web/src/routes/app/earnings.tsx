@@ -28,6 +28,7 @@ import { Input } from "#/components/ui/input";
 import { Label } from "#/components/ui/label";
 import { api } from "#/lib/convex-api";
 import { humanError } from "#/lib/human-error";
+
 import { isPrivilegedOrgRole } from "#/lib/org-capabilities";
 import { formatCreditsAsUsd } from "#/lib/project-helpers";
 import {
@@ -181,6 +182,12 @@ function EarningsContent() {
         </CardHeader>
         <CardContent className="space-y-3">
           <p className="text-sm text-muted-foreground">{connect.description}</p>
+          {!canManagePayouts ? (
+            <p className="rounded-md border bg-muted/40 p-3 text-sm text-muted-foreground">
+              Organization admins manage Stripe onboarding and transfers. You
+              can review payout status and earnings history here.
+            </p>
+          ) : null}
           {profile.requirements.length > 0 ? (
             <ul className="list-disc space-y-1 pl-4 text-sm text-muted-foreground">
               {profile.requirements.map((requirement) => (
@@ -188,6 +195,7 @@ function EarningsContent() {
               ))}
             </ul>
           ) : null}
+
           {!canManagePayouts ? (
             <p className="text-sm text-muted-foreground">
               An organization admin manages Stripe onboarding and payout
@@ -240,6 +248,7 @@ function EarningsContent() {
               Your share after Zevium&apos;s 5% fee.
             </p>
           </div>
+
           {profile.status === "enabled" && canManagePayouts ? (
             <Button
               disabled={transferPending || !canTransfer}

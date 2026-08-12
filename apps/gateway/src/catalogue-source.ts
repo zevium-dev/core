@@ -6,6 +6,7 @@
 
 import { ConvexHttpClient } from "convex/browser";
 import { makeFunctionReference } from "convex/server";
+import { logDependencyFailure } from "./telemetry";
 
 export type CatalogueListing = {
   name: string;
@@ -164,8 +165,8 @@ export class ConvexCatalogueSource implements CatalogueSource {
         cursor: args?.cursor,
       });
       return parseCataloguePage(value) ?? { items: [], nextCursor: null };
-    } catch (err) {
-      console.error("ConvexCatalogueSource.listPublic failed", err);
+    } catch {
+      logDependencyFailure("catalogue_source");
       return { items: [], nextCursor: null };
     }
   }

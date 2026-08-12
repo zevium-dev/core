@@ -347,16 +347,16 @@ export type SpecRailVersionsProps = {
   versions: SpecVersionRow[];
   publishSlot: ReactNode;
   projectId: Id<"projects">;
-  onSelectVersion?: (versionId: SpecVersionRow["_id"]) => void;
   canAdminister: boolean;
+  onSelectVersion?: (versionId: SpecVersionRow["_id"]) => void;
 };
 
 export function SpecRailVersions({
   versions,
   publishSlot,
   projectId,
-  onSelectVersion,
   canAdminister,
+  onSelectVersion,
 }: SpecRailVersionsProps) {
   const queryClient = useQueryClient();
   const [deprecateTarget, setDeprecateTarget] = useState<SpecVersionRow | null>(
@@ -434,7 +434,7 @@ export function SpecRailVersions({
       </CardContent>
 
       <DeprecateDialog
-        target={deprecateTarget}
+        target={canAdminister ? deprecateTarget : null}
         pending={deprecating}
         onConfirm={(input) => confirmDeprecate(input)}
         onOpenChange={(open) => {
@@ -442,7 +442,7 @@ export function SpecRailVersions({
         }}
       />
       <UndeprecateDialog
-        target={undeprecateTarget}
+        target={canAdminister ? undeprecateTarget : null}
         pending={undeprecating}
         onConfirm={() => {
           if (undeprecateTarget !== null) {
@@ -462,15 +462,15 @@ function VersionRow({
   onSelect,
   onDeprecate,
   onUndeprecate,
-  busy,
   canAdminister,
+  busy,
 }: {
   version: SpecVersionRow;
   onSelect?: (versionId: SpecVersionRow["_id"]) => void;
   onDeprecate: (row: SpecVersionRow) => void;
   onUndeprecate: (row: SpecVersionRow) => void;
-  busy: boolean;
   canAdminister: boolean;
+  busy: boolean;
 }) {
   const deprecated = version.deprecatedAt !== undefined;
   const sunsetReached =
@@ -506,6 +506,7 @@ function VersionRow({
               <Button
                 variant="ghost"
                 size="icon"
+
                 className="size-7 shrink-0 transition-opacity duration-[var(--dur-instant)] ease-[var(--ease)] [@media(hover:hover)_and_(pointer:fine)]:opacity-0 [@media(hover:hover)_and_(pointer:fine)]:group-hover:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100"
                 disabled={busy}
                 aria-label={`Actions for version ${version.version}`}

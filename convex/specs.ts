@@ -13,7 +13,12 @@ import {
   decryptCredential,
   requireEncryptedCredential,
 } from "./lib/credentialCrypto";
-import { draftFingerprint, readinessValidity } from "./publishReadiness";
+
+import {
+  credentialSetFingerprint,
+  draftFingerprint,
+  readinessValidity,
+} from "./publishReadiness";
 import { syncCatalogueListing } from "./catalogue";
 import { enqueuePublishedProjectProjection } from "./registrySync";
 import { resolveActivePublicRoute } from "./lib/publicRoutes";
@@ -156,6 +161,16 @@ export const publish = mutation({
       .query("specs")
       .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
       .unique();
+    const credentialRows = await ctx.db
+      .query("upstreamCredentials")
+      .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
+      .collect();
+    const credentialRevision = credentialRows.reduce(
+      (latest, row) => Math.max(latest, row.updatedAt),
+      0,
+    );
+    const credentialFingerprint =
+      await credentialSetFingerprint(credentialRows);
     const readiness = await ctx.db
       .query("publishReadiness")
       .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
@@ -163,6 +178,8 @@ export const publish = mutation({
     const readinessState = await readinessValidity(
       readiness,
       draftForReadiness?.draft ?? null,
+      credentialRevision,
+      credentialFingerprint,
     );
     if (!readinessState.current) {
       const readinessMessages = {
@@ -268,6 +285,7 @@ export const publish = mutation({
     await ctx.scheduler.runAfter(0, internal.search.embedProject, {
       projectId: args.projectId,
     });
+
     await ctx.scheduler.runAfter(0, internal.quality.syncPublishedTarget, {
       projectId: args.projectId,
       specVersionId: versionId,
@@ -488,7 +506,11 @@ export const getPublishedForGatewayInternal = internalQuery({
         await Promise.all(
           upstreamHeaders.map(async (row) => [
             row.name,
-            await decryptCredential(requireEncryptedCredential(row)),
+            await decryptCredential(
+              requireEncryptedCredential(row),
+              row.projectId,
+              row.name,
+            ),
           ]),
         ),
       ),
@@ -571,6 +593,7 @@ export const undeprecateVersion = mutation({
   args: { versionId: v.id("specVersions") },
   handler: async (ctx, args): Promise<Doc<"specVersions">> => {
     const { version } = await requireSpecVersionAdmin(ctx, args.versionId);
+
     if (version.sunsetAt !== undefined && version.sunsetAt <= Date.now()) {
       throw new Error("A version cannot be restored after its sunset");
     }

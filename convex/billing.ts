@@ -2024,6 +2024,7 @@ export const cycleBreakdown = query({
       Id<"projects">,
       { name: string; slug: string; calls: number; credits: number }
     >();
+
     const byEndpoint = new Map<
       string,
       {
@@ -2081,6 +2082,7 @@ export const cycleBreakdown = query({
       endpoint.credits += event.credits;
       byEndpoint.set(endpointKey, endpoint);
     }
+
     const projectDocs = new Map<Id<"projects">, Doc<"projects"> | null>();
     await Promise.all(
       [...byProject.keys()].map(async (projectId) => {
@@ -2178,6 +2180,7 @@ export const cycleBreakdown = query({
       scope: canViewOrgUsage ? ("organization" as const) : ("member" as const),
       cycleStart,
       cycleEnd,
+
       asOf,
       totalCalls: visibleEvents.length,
       totalCredits,

@@ -42,7 +42,7 @@ beforeEach(() => {
   process.env.GATEWAY_REGISTRY_TRANSPORT_KEYRING = TRANSPORT_KEYRING;
   process.env.UPSTREAM_CREDENTIAL_ENCRYPTION_KEYS = JSON.stringify({
     current: "upstream-v1",
-    keys: { "upstream-v1": "upstream-test-material" },
+    keys: { "upstream-v1": "QkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkI=" },
   });
 });
 afterEach(() => {
@@ -92,7 +92,11 @@ async function seedPublished(t: ReturnType<typeof convexTest>) {
     await ctx.db.insert("upstreamCredentials", {
       projectId,
       name: "authorization",
-      ...(await encryptCredential("Bearer publisher-secret")),
+      ...(await encryptCredential(
+        "Bearer publisher-secret",
+        projectId,
+        "authorization",
+      )),
       updatedAt: 100,
     });
     return { organizationId, projectId, versionId };

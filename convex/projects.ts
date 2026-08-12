@@ -6,6 +6,7 @@ import {
   type MutationCtx,
 } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
+
 import { internal } from "./_generated/api";
 import {
   getActiveOrgById,
@@ -508,6 +509,7 @@ export const update = mutation({
     if (updated === null) {
       throw new Error("Failed to load updated project");
     }
+
     await syncCatalogueListing(ctx, updated._id);
     await enqueuePublishedProjectProjection(ctx, args.projectId);
     return updated;
@@ -516,6 +518,7 @@ export const update = mutation({
 
 export const remove = mutation({
   args: { projectId: v.id("projects") },
+
   handler: async (
     ctx,
     args,

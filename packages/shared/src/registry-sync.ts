@@ -461,6 +461,7 @@ function assertJsonValue(
       throw new Error("Canonical JSON rejects non-finite numbers");
     return;
   }
+
   if (typeof value !== "object")
     throw new Error("Canonical JSON rejects unsupported values");
   if (seen.has(value)) throw new Error("Canonical JSON rejects cyclic values");
@@ -472,6 +473,7 @@ function assertJsonValue(
     if (prototype !== Object.prototype && prototype !== null) {
       throw new Error("Canonical JSON accepts plain objects only");
     }
+
     for (const [key, item] of Object.entries(value)) {
       if (item === undefined)
         throw new Error(`Canonical JSON rejects undefined field ${key}`);
@@ -1373,6 +1375,7 @@ async function hmac(
     false,
     ["sign"],
   );
+
   return toHex(await crypto.subtle.sign("HMAC", key, message));
 }
 

@@ -11,9 +11,10 @@
     "deploy": "pnpm build && wrangler deploy",
     "dev": "vite dev --port 3000",
     "generate-routes": "tsr generate",
-    "lint": "oxlint --config ../../.oxlintrc.json --deny-warnings --report-unused-disable-directives --no-ignore --disable-nested-config src scripts vite.config.ts vitest.config.ts",
+    "lint": "oxlint --config ../../.oxlintrc.json --deny-warnings --report-unused-disable-directives --no-ignore --disable-nested-config src scripts/build-env.mjs scripts/build-env.test.mjs scripts/build.mjs scripts/test-csrf-runtime.mjs vite.config.ts vitest.config.ts",
     "preview": "vite preview",
     "test": "vitest run --allowOnly=false",
+    "test:csrf-runtime": "node scripts/test-csrf-runtime.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

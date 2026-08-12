@@ -27,7 +27,9 @@ import { handleDiscoveryRequest, type DiscoveryDeps } from "./discovery";
 import { handleMcpRequest, type McpDeps } from "./mcp";
 import { corsPreflight, withCors } from "./cors";
 import { handleMockRequest, parseMockPath, type MockDeps } from "./mock";
+
 import { ControlDO, verifyControlRequest } from "./control";
+import { applyGatewaySecurityHeaders } from "./security-headers";
 
 export { WalletDO, ControlDO };
 export { __setTestUsageMutation, __setTestGrantsFetcher } from "./wallet";
@@ -220,101 +222,112 @@ function timingSafeEqual(a: string, b: string): boolean {
  * - /mcp — MCP Streamable HTTP (search / docs / metered call_api)
  * - /internal/grant — control-plane grant projection (shared secret)
  * - /internal/sync — control-plane checkpoint refresh (shared secret)
+ * - /internal/key-revocation — monotonic signed key revoke (shared secret HMAC)
  * - /health
  */
+async function dispatchRequest(
+  request: Request,
+  env: Env,
+  ctx: ExecutionContext,
+): Promise<Response> {
+  const url = new URL(request.url);
+  const parts = url.pathname.split("/").filter(Boolean);
+
+  // Public API: browsers preflight cross-origin calls with Authorization.
+  if (request.method === "OPTIONS") {
+    return corsPreflight();
+  }
+
+  if (url.pathname === "/" || url.pathname === "/health") {
+    const testMode = env.GATEWAY_TEST_MODE === "1";
+    const specConfigReady =
+      testMode ||
+      Boolean(
+        env.CONVEX_URL &&
+        env.CONVEX_SITE_URL &&
+        env.GATEWAY_INTERNAL_SECRET &&
+        env.CLERK_SECRET_KEY,
+      );
+    return withCors(
+      Response.json(
+        {
+          ok: specConfigReady,
+          service: "zevium-gateway",
+          release: env.ZEVIUM_RELEASE ?? "development",
+          contract: 1,
+        },
+        { status: specConfigReady ? 200 : 503 },
+      ),
+    );
+  }
+
+  if (
+    request.method === "POST" &&
+    url.pathname.startsWith("/internal/registry/v1/")
+  ) {
+    return handleGatewayControl(request, env);
+  }
+
+  // POST /internal/grant { clerkOrgId, amount, refId }
+  if (parts[0] === "internal" && parts[1] === "grant" && parts.length === 2) {
+    return handleInternalGrant(request, env);
+  }
+
+  // POST /internal/sync { clerkOrgId }
+  if (parts[0] === "internal" && parts[1] === "sync" && parts.length === 2) {
+    return handleInternalSync(request, env);
+  }
+
+  // GET /discovery — public machine-readable index
+  if (parts[0] === "discovery" && parts.length === 1) {
+    const deps = buildDeps(env);
+    return withCors(
+      await handleDiscoveryRequest(request, discoveryDeps(deps, request)),
+    );
+  }
+
+  // /mcp — MCP Streamable HTTP
+  if (parts[0] === "mcp" && parts.length === 1) {
+    const deps = buildDeps(env);
+    return withCors(
+      await handleMcpRequest(request, mcpDeps(deps, env, request), ctx),
+    );
+  }
+
+  const route = parseGatewayPath(url.pathname);
+  if (route) {
+    const deps = buildDeps(env);
+    return withCors(
+      await handleGatewayRequest(request, env, pipelineOnly(deps), ctx, route),
+    );
+  }
+
+  const mockRoute = parseMockPath(url.pathname);
+  if (mockRoute) {
+    const deps = buildDeps(env);
+    return withCors(
+      await handleMockRequest(request, mockDeps(deps), mockRoute),
+    );
+  }
+
+  return withCors(Response.json({ error: "not found" }, { status: 404 }));
+}
+
 export default {
   async fetch(
     request: Request,
     env: Env,
     ctx: ExecutionContext,
   ): Promise<Response> {
-    const url = new URL(request.url);
-    const parts = url.pathname.split("/").filter(Boolean);
-
-    // Public API: browsers preflight cross-origin calls with Authorization.
-    if (request.method === "OPTIONS") {
-      return corsPreflight();
-    }
-
-    if (url.pathname === "/" || url.pathname === "/health") {
-      const testMode = env.GATEWAY_TEST_MODE === "1";
-      const specConfigReady =
-        testMode ||
-        Boolean(
-          env.CONVEX_URL &&
-          env.CONVEX_SITE_URL &&
-          env.GATEWAY_INTERNAL_SECRET &&
-          env.CLERK_SECRET_KEY,
-        );
-      return withCors(
-        Response.json(
-          {
-            ok: specConfigReady,
-            service: "zevium-gateway",
-            release: env.ZEVIUM_RELEASE ?? "development",
-            contract: 1,
-          },
-          { status: specConfigReady ? 200 : 503 },
-        ),
+    let response: Response;
+    try {
+      response = await dispatchRequest(request, env, ctx);
+    } catch {
+      response = withCors(
+        Response.json({ error: "internal error" }, { status: 500 }),
       );
     }
-
-    if (
-      request.method === "POST" &&
-      url.pathname.startsWith("/internal/registry/v1/")
-    ) {
-      return handleGatewayControl(request, env);
-    }
-
-    // POST /internal/grant { clerkOrgId, amount, refId }
-    if (parts[0] === "internal" && parts[1] === "grant" && parts.length === 2) {
-      return handleInternalGrant(request, env);
-    }
-
-    // POST /internal/sync { clerkOrgId }
-    if (parts[0] === "internal" && parts[1] === "sync" && parts.length === 2) {
-      return handleInternalSync(request, env);
-    }
-
-    // GET /discovery — public machine-readable index
-    if (parts[0] === "discovery" && parts.length === 1) {
-      const deps = buildDeps(env);
-      return withCors(
-        await handleDiscoveryRequest(request, discoveryDeps(deps, request)),
-      );
-    }
-
-    // /mcp — MCP Streamable HTTP
-    if (parts[0] === "mcp" && parts.length === 1) {
-      const deps = buildDeps(env);
-      return withCors(
-        await handleMcpRequest(request, mcpDeps(deps, env, request), ctx),
-      );
-    }
-
-    const route = parseGatewayPath(url.pathname);
-    if (route) {
-      const deps = buildDeps(env);
-      return withCors(
-        await handleGatewayRequest(
-          request,
-          env,
-          pipelineOnly(deps),
-          ctx,
-          route,
-        ),
-      );
-    }
-
-    const mockRoute = parseMockPath(url.pathname);
-    if (mockRoute) {
-      const deps = buildDeps(env);
-      return withCors(
-        await handleMockRequest(request, mockDeps(deps), mockRoute),
-      );
-    }
-
-    return withCors(Response.json({ error: "not found" }, { status: 404 }));
+    return applyGatewaySecurityHeaders(request, response);
   },
 } satisfies ExportedHandler<Env>;
 
