@@ -141,8 +141,15 @@ describe("Stripe Connect publisher accounting", () => {
             return { id: "acct_v2_recipient" };
           },
         },
-        accountLinks: {
-          create: async () => ({ url: "https://connect.stripe.test/onboard" }),
+        accountLinksV2: {
+          create: async (params) => {
+            createCalls.push(params);
+            return {
+              account: "acct_v2_recipient",
+              livemode: false,
+              url: "https://connect.stripe.com/onboard",
+            };
+          },
         },
       },
       {
@@ -178,6 +185,21 @@ describe("Stripe Connect publisher accounting", () => {
         identity: { country: "AE" },
         contact_email: "publisher@example.com",
       }),
+      {
+        account: "acct_v2_recipient",
+        use_case: {
+          type: "account_onboarding",
+          account_onboarding: {
+            configurations: ["recipient"],
+            collection_options: {
+              fields: "eventually_due",
+              future_requirements: "include",
+            },
+            refresh_url: "https://zevium.test/refresh",
+            return_url: "https://zevium.test/return",
+          },
+        },
+      },
     ]);
   });
 

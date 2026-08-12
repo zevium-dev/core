@@ -49,7 +49,7 @@ jobs:
           EXPECTED_REF: refs/heads/develop
         run: test "$GITHUB_REF" = "$EXPECTED_REF"
 
-  real-sandbox-checkout:
+  real-zevium-stripe-acceptance:
     if: github.event_name == 'workflow_dispatch'
     needs: [deterministic-contracts, manual-staging-ref]
     runs-on: blacksmith-2vcpu-ubuntu-2404
@@ -78,13 +78,23 @@ jobs:
           E2E_EMAIL: ${{ secrets.STAGING_E2E_EMAIL }}
           E2E_OTP: ${{ secrets.STAGING_E2E_OTP }}
           E2E_PASSWORD: ${{ secrets.STAGING_E2E_PASSWORD }}
+          E2E_PUBLISHER_CLERK_ORG_ID: ${{ vars.STAGING_PUBLISHER_CLERK_ORG_ID }}
+          GATEWAY_URL: ${{ vars.STAGING_GATEWAY_URL }}
           PAYMENT_DRILL_PHASE: grant
           STRIPE_CHECKOUT_PROOF_KEY: ${{ secrets.STAGING_STRIPE_CHECKOUT_PROOF_KEY }}
+          STRIPE_CONNECT_PLATFORM_ACCOUNT_ID: ${{ vars.STAGING_STRIPE_PLATFORM_ACCOUNT_ID }}
+          STRIPE_CONNECT_PROOF_KEY: ${{ secrets.STAGING_STRIPE_CONNECT_PROOF_KEY }}
+          STRIPE_CONNECT_SETTLEMENT_ACCOUNT_ID: ${{ vars.STAGING_STRIPE_SETTLEMENT_ACCOUNT_ID }}
           STRIPE_PROOF_RUN_REF: ${{ github.run_id }}-${{ github.run_attempt }}
           STRIPE_WEBHOOK_ADMIN_KEY: ${{ secrets.STAGING_STRIPE_WEBHOOK_ADMIN_KEY }}
           STRIPE_WEBHOOK_CANARY_URL: ${{ vars.STAGING_STRIPE_WEBHOOK_CANARY_URL }}
           STRIPE_WEBHOOK_ENDPOINT_ID: ${{ vars.STAGING_STRIPE_WEBHOOK_ENDPOINT_ID }}
           STRIPE_WEBHOOK_ENDPOINT_URL: ${{ vars.STAGING_CONVEX_SITE_URL }}/stripe-webhook
+          ZEVIUM_CONVEX_DEPLOYMENT_ID: ${{ vars.STAGING_CONVEX_DEPLOYMENT_ID }}
+          ZEVIUM_DEPLOYMENT_MAX_AGE_SECONDS: ${{ vars.STAGING_DEPLOYMENT_MAX_AGE_SECONDS }}
+          ZEVIUM_DEPLOYMENT_MODE: staging
+          ZEVIUM_GATEWAY_DEPLOYMENT_ID: ${{ vars.STAGING_GATEWAY_DEPLOYMENT_ID }}
+          ZEVIUM_WEB_DEPLOYMENT_ID: ${{ vars.STAGING_WEB_DEPLOYMENT_ID }}
         run: e2e/04-payment-drill.sh
       - name: Run authenticated publish and paid metered-call journey
         env:
@@ -103,24 +113,46 @@ jobs:
           E2E_EMAIL: ${{ secrets.STAGING_E2E_EMAIL }}
           E2E_OTP: ${{ secrets.STAGING_E2E_OTP }}
           E2E_PASSWORD: ${{ secrets.STAGING_E2E_PASSWORD }}
+          E2E_PUBLISHER_CLERK_ORG_ID: ${{ vars.STAGING_PUBLISHER_CLERK_ORG_ID }}
+          GATEWAY_URL: ${{ vars.STAGING_GATEWAY_URL }}
           PAYMENT_DRILL_PHASE: refund
           STRIPE_CHECKOUT_PROOF_KEY: ${{ secrets.STAGING_STRIPE_CHECKOUT_PROOF_KEY }}
+          STRIPE_CONNECT_PLATFORM_ACCOUNT_ID: ${{ vars.STAGING_STRIPE_PLATFORM_ACCOUNT_ID }}
+          STRIPE_CONNECT_PROOF_KEY: ${{ secrets.STAGING_STRIPE_CONNECT_PROOF_KEY }}
+          STRIPE_CONNECT_SETTLEMENT_ACCOUNT_ID: ${{ vars.STAGING_STRIPE_SETTLEMENT_ACCOUNT_ID }}
           STRIPE_PROOF_RUN_REF: ${{ github.run_id }}-${{ github.run_attempt }}
           STRIPE_WEBHOOK_ADMIN_KEY: ${{ secrets.STAGING_STRIPE_WEBHOOK_ADMIN_KEY }}
           STRIPE_WEBHOOK_CANARY_URL: ${{ vars.STAGING_STRIPE_WEBHOOK_CANARY_URL }}
           STRIPE_WEBHOOK_ENDPOINT_ID: ${{ vars.STAGING_STRIPE_WEBHOOK_ENDPOINT_ID }}
           STRIPE_WEBHOOK_ENDPOINT_URL: ${{ vars.STAGING_CONVEX_SITE_URL }}/stripe-webhook
+          ZEVIUM_CONVEX_DEPLOYMENT_ID: ${{ vars.STAGING_CONVEX_DEPLOYMENT_ID }}
+          ZEVIUM_DEPLOYMENT_MAX_AGE_SECONDS: ${{ vars.STAGING_DEPLOYMENT_MAX_AGE_SECONDS }}
+          ZEVIUM_DEPLOYMENT_MODE: staging
+          ZEVIUM_GATEWAY_DEPLOYMENT_ID: ${{ vars.STAGING_GATEWAY_DEPLOYMENT_ID }}
+          ZEVIUM_WEB_DEPLOYMENT_ID: ${{ vars.STAGING_WEB_DEPLOYMENT_ID }}
         run: e2e/04-payment-drill.sh
       - name: Recover provider and ledger state
         if: always()
         env:
           CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_STAGING_DEPLOY_KEY }}
+          E2E_BASE_URL: ${{ vars.STAGING_WEB_URL }}
+          E2E_PUBLISHER_CLERK_ORG_ID: ${{ vars.STAGING_PUBLISHER_CLERK_ORG_ID }}
+          GATEWAY_URL: ${{ vars.STAGING_GATEWAY_URL }}
           PAYMENT_DRILL_PHASE: cleanup
           STRIPE_CHECKOUT_PROOF_KEY: ${{ secrets.STAGING_STRIPE_CHECKOUT_PROOF_KEY }}
+          STRIPE_CONNECT_PLATFORM_ACCOUNT_ID: ${{ vars.STAGING_STRIPE_PLATFORM_ACCOUNT_ID }}
+          STRIPE_CONNECT_PROOF_KEY: ${{ secrets.STAGING_STRIPE_CONNECT_PROOF_KEY }}
+          STRIPE_CONNECT_SETTLEMENT_ACCOUNT_ID: ${{ vars.STAGING_STRIPE_SETTLEMENT_ACCOUNT_ID }}
           STRIPE_PROOF_RUN_REF: ${{ github.run_id }}-${{ github.run_attempt }}
           STRIPE_WEBHOOK_ADMIN_KEY: ${{ secrets.STAGING_STRIPE_WEBHOOK_ADMIN_KEY }}
+          STRIPE_WEBHOOK_CANARY_URL: ${{ vars.STAGING_STRIPE_WEBHOOK_CANARY_URL }}
           STRIPE_WEBHOOK_ENDPOINT_ID: ${{ vars.STAGING_STRIPE_WEBHOOK_ENDPOINT_ID }}
           STRIPE_WEBHOOK_ENDPOINT_URL: ${{ vars.STAGING_CONVEX_SITE_URL }}/stripe-webhook
+          ZEVIUM_CONVEX_DEPLOYMENT_ID: ${{ vars.STAGING_CONVEX_DEPLOYMENT_ID }}
+          ZEVIUM_DEPLOYMENT_MAX_AGE_SECONDS: ${{ vars.STAGING_DEPLOYMENT_MAX_AGE_SECONDS }}
+          ZEVIUM_DEPLOYMENT_MODE: staging
+          ZEVIUM_GATEWAY_DEPLOYMENT_ID: ${{ vars.STAGING_GATEWAY_DEPLOYMENT_ID }}
+          ZEVIUM_WEB_DEPLOYMENT_ID: ${{ vars.STAGING_WEB_DEPLOYMENT_ID }}
         run: e2e/04-payment-drill.sh
       - name: Sanitize browser and provider evidence
         id: sanitize
@@ -128,13 +160,24 @@ jobs:
         env:
           E2E_API_KEY: ${{ secrets.STAGING_E2E_API_KEY }}
           E2E_ARTIFACTS: e2e/artifacts
+          E2E_EVIDENCE_HASH_KEY: ${{ secrets.STAGING_EVIDENCE_HASH_KEY }}
           E2E_EMAIL: ${{ secrets.STAGING_E2E_EMAIL }}
           E2E_OTP: ${{ secrets.STAGING_E2E_OTP }}
           E2E_PASSWORD: ${{ secrets.STAGING_E2E_PASSWORD }}
+          E2E_PUBLISHER_CLERK_ORG_ID: ${{ vars.STAGING_PUBLISHER_CLERK_ORG_ID }}
           E2E_SANITIZED_ARTIFACTS: e2e/artifacts-sanitized
           CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_STAGING_DEPLOY_KEY }}
           STRIPE_CHECKOUT_PROOF_KEY: ${{ secrets.STAGING_STRIPE_CHECKOUT_PROOF_KEY }}
+          STRIPE_CONNECT_PLATFORM_ACCOUNT_ID: ${{ vars.STAGING_STRIPE_PLATFORM_ACCOUNT_ID }}
+          STRIPE_CONNECT_PROOF_KEY: ${{ secrets.STAGING_STRIPE_CONNECT_PROOF_KEY }}
+          STRIPE_CONNECT_SETTLEMENT_ACCOUNT_ID: ${{ vars.STAGING_STRIPE_SETTLEMENT_ACCOUNT_ID }}
+          STRIPE_PROOF_RUN_REF: ${{ github.run_id }}-${{ github.run_attempt }}
           STRIPE_WEBHOOK_ADMIN_KEY: ${{ secrets.STAGING_STRIPE_WEBHOOK_ADMIN_KEY }}
+          ZEVIUM_CONVEX_DEPLOYMENT_ID: ${{ vars.STAGING_CONVEX_DEPLOYMENT_ID }}
+          ZEVIUM_DEPLOYMENT_MAX_AGE_SECONDS: ${{ vars.STAGING_DEPLOYMENT_MAX_AGE_SECONDS }}
+          ZEVIUM_DEPLOYMENT_MODE: staging
+          ZEVIUM_GATEWAY_DEPLOYMENT_ID: ${{ vars.STAGING_GATEWAY_DEPLOYMENT_ID }}
+          ZEVIUM_WEB_DEPLOYMENT_ID: ${{ vars.STAGING_WEB_DEPLOYMENT_ID }}
         run: node e2e/sanitize-artifacts.mjs
       # actions/upload-artifact v7
       - name: Upload sanitized payment evidence
@@ -142,11 +185,11 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: payment-drill-evidence
-          path: e2e/artifacts-sanitized
+          path: e2e/artifacts-sanitized/payment-proof-report.json
           if-no-files-found: error
           retention-days: 14
 
-  provider-sandbox-primitives:
+  provider-sandbox-primitives-supplemental:
     if: github.event_name == 'workflow_dispatch'
     needs: [deterministic-contracts, manual-staging-ref]
     runs-on: blacksmith-2vcpu-ubuntu-2404
@@ -166,7 +209,7 @@ jobs:
             ${{ runner.os }}-pnpm-store-
       # jdx/mise-action v4
       - uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654
-      - name: Verify Stripe onboarding-link, transfer, reversal, and payout primitives
+      - name: Verify supplemental Stripe primitives (non-acceptance)
         env:
           STRIPE_CONNECT_PROOF_KEY: ${{ secrets.STAGING_STRIPE_CONNECT_PROOF_KEY }}
           STRIPE_CONNECT_SETTLEMENT_ACCOUNT_ID: ${{ vars.STAGING_STRIPE_SETTLEMENT_ACCOUNT_ID }}
@@ -186,15 +229,17 @@ jobs:
         if: always()
         env:
           E2E_ARTIFACTS: e2e/provider-artifacts
+          E2E_EVIDENCE_HASH_KEY: ${{ secrets.STAGING_EVIDENCE_HASH_KEY }}
           E2E_SANITIZED_ARTIFACTS: e2e/provider-artifacts-sanitized
           STRIPE_CONNECT_PROOF_KEY: ${{ secrets.STAGING_STRIPE_CONNECT_PROOF_KEY }}
+          STRIPE_PROOF_RUN_REF: ${{ github.run_id }}-${{ github.run_attempt }}
         run: node e2e/sanitize-artifacts.mjs
       # actions/upload-artifact v7
       - name: Upload sanitized provider-primitives evidence
         if: always() && steps.sanitize.outcome == 'success'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: stripe-provider-primitives-evidence
-          path: e2e/provider-artifacts-sanitized/stripe-provider-proof.json
+          name: stripe-provider-primitives-supplemental
+          path: e2e/provider-artifacts-sanitized/stripe-provider-supplemental.json
           if-no-files-found: error
           retention-days: 14

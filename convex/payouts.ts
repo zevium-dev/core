@@ -101,11 +101,13 @@ export type ConnectOnboardingClient = {
       options?: Stripe.RequestOptions,
     ) => Promise<Pick<Stripe.V2.Core.Account, "id">>;
   };
-  accountLinks: {
+  accountLinksV2: {
     create: (
-      params: Stripe.AccountLinkCreateParams,
+      params: Stripe.V2.Core.AccountLinkCreateParams,
       options?: Stripe.RequestOptions,
-    ) => Promise<Pick<Stripe.AccountLink, "url">>;
+    ) => Promise<
+      Pick<Stripe.V2.Core.AccountLink, "account" | "livemode" | "url">
+    >;
   };
 };
 
@@ -154,14 +156,38 @@ export async function createOnboardingLink(
     );
     connectedAccountId = account.id;
   }
-  const link = await stripe.accountLinks.create({
+  const link = await stripe.accountLinksV2.create({
     account: connectedAccountId,
-    type: "account_onboarding",
-    refresh_url: args.refreshUrl,
-    return_url: args.returnUrl,
+    use_case: {
+      type: "account_onboarding",
+      account_onboarding: {
+        configurations: ["recipient"],
+        collection_options: {
+          fields: "eventually_due",
+          future_requirements: "include",
+        },
+        refresh_url: args.refreshUrl,
+        return_url: args.returnUrl,
+      },
+    },
   });
-  if (link.url.trim() === "")
-    throw new Error("Stripe did not return an onboarding URL");
+  if (link.account !== connectedAccountId)
+    throw new Error("Stripe Account Link changed connected account");
+  if (
+    link.livemode !== false &&
+    process.env.STRIPE_SECRET_KEY?.startsWith("sk_test_")
+  )
+    throw new Error("Stripe returned a live Account Link in test mode");
+  const hostedUrl = new URL(link.url);
+  if (
+    hostedUrl.protocol !== "https:" ||
+    (hostedUrl.hostname !== "connect.stripe.com" &&
+      !hostedUrl.hostname.endsWith(".connect.stripe.com")) ||
+    hostedUrl.username !== "" ||
+    hostedUrl.password !== ""
+  ) {
+    throw new Error("Stripe returned an invalid hosted onboarding URL");
+  }
   return { connectedAccountId, url: link.url };
 }
 
@@ -326,7 +352,7 @@ export const startOnboarding = action({
     const created = await createOnboardingLink(
       {
         accountsV2: stripe.v2.core.accounts,
-        accountLinks: stripe.accountLinks,
+        accountLinksV2: stripe.v2.core.accountLinks,
       },
       {
         connectedAccountId: prepared.stripeConnectedAccountId,

@@ -12,6 +12,9 @@ E2E_PASSWORD="${E2E_PASSWORD:-zevium-test-password}"
 E2E_OTP="${E2E_OTP:-424242}"
 E2E_SESSION="${E2E_SESSION:-zevium-e2e}"
 E2E_STEP="${E2E_STEP:-unknown}"
+E2E_ISOLATED_RUNNER="$E2E_ROOT/run-isolated.mjs"
+E2E_NODE_BIN="$(command -v node)"
+E2E_PNPM_BIN="$(command -v pnpm)"
 
 # Isolate browser session for the whole suite/script run.
 export AGENT_BROWSER_SESSION="$E2E_SESSION"
@@ -19,7 +22,15 @@ export AGENT_BROWSER_SESSION="$E2E_SESSION"
 mkdir -p "$E2E_ARTIFACTS"
 
 ab() {
-  pnpm exec agent-browser "$@"
+  "$E2E_NODE_BIN" "$E2E_ISOLATED_RUNNER" browser -- \
+    "$E2E_PNPM_BIN" exec agent-browser "$@"
+}
+
+ab_timeout() {
+  local duration="$1"
+  shift
+  timeout "$duration" "$E2E_NODE_BIN" "$E2E_ISOLATED_RUNNER" browser -- \
+    "$E2E_PNPM_BIN" exec agent-browser "$@"
 }
 
 log() {
@@ -37,10 +48,10 @@ fail() {
   ts="$(date +%Y%m%d-%H%M%S)"
   slug="$(printf '%s' "$E2E_STEP" | tr -cs '[:alnum:]._-' '_' | cut -c1-80)"
   shot="$E2E_ARTIFACTS/${ts}-${slug}.png"
-  timeout 10s pnpm exec agent-browser screenshot "$shot" >/dev/null 2>&1 || true
-  timeout 10s pnpm exec agent-browser get url \
+  ab_timeout 10s screenshot "$shot" >/dev/null 2>&1 || true
+  ab_timeout 10s get url \
     >"$E2E_ARTIFACTS/${ts}-${slug}.url.txt" 2>/dev/null || true
-  timeout 10s pnpm exec agent-browser snapshot \
+  ab_timeout 10s snapshot \
     >"$E2E_ARTIFACTS/${ts}-${slug}.snapshot.txt" 2>/dev/null || true
   printf '[e2e] FAIL: %s\n' "$msg" >&2
   printf '[e2e] screenshot: %s\n' "$shot" >&2
@@ -442,7 +453,7 @@ sign_in() {
 }
 
 close_browser() {
-  timeout 10s pnpm exec agent-browser close >/dev/null 2>&1 || true
+  ab_timeout 10s close >/dev/null 2>&1 || true
 }
 
 # Unique-ish stamp for project names/slugs.

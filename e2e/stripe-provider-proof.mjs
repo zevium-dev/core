@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { promisify } from "node:util";
@@ -9,6 +10,10 @@ import {
   MAX_PROVIDER_OBJECTS,
   STRIPE_API_VERSION,
   assertExclusiveEndpointTopology,
+  assertAcceptanceReport,
+  assertAppPathEvidence,
+  assertCompensationEvidence,
+  assertDeploymentBinding,
   assertLedgerEvidence,
   assertNoCompetingEventDestinations,
   assertPendingCanaryEvent,
@@ -26,6 +31,9 @@ const reportPath =
   process.env.STRIPE_PROVIDER_REPORT ??
   new URL("./provider-artifacts/stripe-provider-proof.json", import.meta.url)
     .pathname;
+const acceptanceReportPath =
+  process.env.PAYMENT_PROOF_REPORT ??
+  new URL("./artifacts/payment-proof-report.json", import.meta.url).pathname;
 const refundEventType = "charge.refunded";
 const canaryPurpose = "zevium_payment_drill_canary";
 
@@ -72,8 +80,11 @@ async function writeSafeJson(path, value) {
 }
 
 async function updateState(patch) {
-  const state = (await readStateOrNull()) ?? { schemaVersion: 2 };
-  const next = { ...state, schemaVersion: 2, ...patch };
+  const state = (await readStateOrNull()) ?? {
+    schemaVersion: 3,
+    startedAt: new Date().toISOString(),
+  };
+  const next = { ...state, schemaVersion: 3, ...patch };
   await writeSafeJson(statePath, next);
   return next;
 }
@@ -120,6 +131,138 @@ async function collectBounded(iterable, label) {
     );
   }
   return values;
+}
+
+async function convexRunFunction(functionName, args = {}) {
+  invariant(process.env.CONVEX_DEPLOY_KEY, "CONVEX_DEPLOY_KEY is required");
+  const { stdout } = await execFileAsync(
+    "pnpm",
+    [
+      "exec",
+      "convex",
+      "run",
+      "--codegen",
+      "disable",
+      functionName,
+      JSON.stringify(args),
+    ],
+    { env: process.env, maxBuffer: 2_000_000, timeout: 30_000 },
+  );
+  try {
+    return JSON.parse(stdout.trim());
+  } catch {
+    throw new Error(`Convex ${functionName} did not return JSON`);
+  }
+}
+
+async function convexInline(source, label) {
+  invariant(process.env.CONVEX_DEPLOY_KEY, "CONVEX_DEPLOY_KEY is required");
+  const { stdout } = await execFileAsync(
+    "pnpm",
+    ["exec", "convex", "run", "--codegen", "disable", "--inline-query", source],
+    { env: process.env, maxBuffer: 2_000_000, timeout: 30_000 },
+  );
+  try {
+    return JSON.parse(stdout.trim());
+  } catch {
+    throw new Error(`Convex ${label} did not return JSON`);
+  }
+}
+
+function requiredDeploymentExpectation() {
+  const githubSha = requireId(
+    process.env.GITHUB_SHA?.trim(),
+    /^[0-9a-f]{40}$/,
+    "GITHUB_SHA",
+  );
+  const mode = process.env.ZEVIUM_DEPLOYMENT_MODE?.trim();
+  invariant(mode === "staging", "ZEVIUM_DEPLOYMENT_MODE must be staging");
+  const deploymentIds = {
+    web: requireId(
+      process.env.ZEVIUM_WEB_DEPLOYMENT_ID?.trim(),
+      /^[A-Za-z0-9][A-Za-z0-9._:-]{7,159}$/,
+      "Web deployment id",
+    ),
+    gateway: requireId(
+      process.env.ZEVIUM_GATEWAY_DEPLOYMENT_ID?.trim(),
+      /^[A-Za-z0-9][A-Za-z0-9._:-]{7,159}$/,
+      "Gateway deployment id",
+    ),
+    convex: requireId(
+      process.env.ZEVIUM_CONVEX_DEPLOYMENT_ID?.trim(),
+      /^[A-Za-z0-9][A-Za-z0-9._:-]{7,159}$/,
+      "Convex deployment id",
+    ),
+  };
+  const maxAgeSeconds = Number(
+    process.env.ZEVIUM_DEPLOYMENT_MAX_AGE_SECONDS ?? "86400",
+  );
+  invariant(
+    Number.isSafeInteger(maxAgeSeconds) &&
+      maxAgeSeconds >= 60 &&
+      maxAgeSeconds <= 7 * 24 * 60 * 60,
+    "Deployment freshness window must be 60 seconds to 7 days",
+  );
+  return {
+    githubSha,
+    mode,
+    deploymentIds,
+    maxAgeMs: maxAgeSeconds * 1_000,
+  };
+}
+
+async function fetchJson(url, label) {
+  const response = await fetch(url, {
+    headers: { accept: "application/json" },
+    redirect: "error",
+    signal: AbortSignal.timeout(15_000),
+  });
+  invariant(response.status === 200, `${label} returned ${response.status}`);
+  invariant(
+    response.headers.get("content-type")?.includes("application/json"),
+    `${label} did not return JSON`,
+  );
+  return await response.json();
+}
+
+async function verifyDeployments() {
+  const expected = requiredDeploymentExpectation();
+  const runRef = normalizeRunRef(process.env.STRIPE_PROOF_RUN_REF);
+  const existing = await readStateOrNull();
+  invariant(
+    existing === null ||
+      (existing.runRef === runRef && existing.githubSha === expected.githubSha),
+    "Payment proof state belongs to another run or Git SHA",
+  );
+  if (existing === null) {
+    await updateState({ runRef, githubSha: expected.githubSha });
+  }
+  const baseUrl = new URL(process.env.E2E_BASE_URL);
+  const gatewayUrl = new URL(process.env.GATEWAY_URL);
+  invariant(
+    baseUrl.protocol === "https:" && gatewayUrl.protocol === "https:",
+    "Staging deployment proof requires HTTPS",
+  );
+  const [web, gatewayHealth, convex] = await Promise.all([
+    fetchJson(
+      new URL("/.well-known/zevium-deployment.json", baseUrl),
+      "Web deployment manifest",
+    ),
+    fetchJson(new URL("/health", gatewayUrl), "Gateway deployment manifest"),
+    convexRunFunction("deploymentProof:get"),
+  ]);
+  invariant(gatewayHealth?.ok === true, "Gateway health is not ready");
+  const proof = {
+    manifests: [web, gatewayHealth.deployment, convex],
+    verifiedAt: new Date().toISOString(),
+  };
+  assertDeploymentBinding(proof, expected);
+  await updateState({
+    runRef,
+    githubSha: expected.githubSha,
+    deploymentProof: proof,
+  });
+  process.stdout.write("exact fresh deployment revisions verified\n");
 }
 
 async function findEvent({
@@ -440,10 +583,26 @@ async function cleanupWebhookCanary() {
   const runRef = normalizeRunRef(process.env.STRIPE_PROOF_RUN_REF);
   const deleted = await deleteCanaries(stripe, runRef);
   const endpoints = await listWebhookEndpoints(stripe);
-  canonicalEndpoint(endpoints);
+  const canonical = canonicalEndpoint(endpoints);
+  const state = await readStateOrNull();
+  const expectedCanonicalId = state?.webhookCanary?.canonicalEndpointId;
+  invariant(
+    expectedCanonicalId === undefined || canonical.id === expectedCanonicalId,
+    "Canonical webhook identity changed during cleanup",
+  );
   await updateState({
     webhookCanaryCleanup: {
-      deletedEndpointIds: deleted,
+      deletedEndpointIds: [
+        ...new Set([
+          ...(state?.webhookCanaryCleanup?.deletedEndpointIds ?? []),
+          ...deleted,
+        ]),
+      ],
+      canonicalEndpointId: canonical.id,
+      canonicalUnchanged:
+        state?.webhookCanaryCleanup?.canonicalUnchanged !== false &&
+        (expectedCanonicalId === undefined ||
+          canonical.id === expectedCanonicalId),
       verifiedAt: new Date().toISOString(),
     },
   });
@@ -499,12 +658,14 @@ async function proveCanaryAndReplay() {
     !postDelete.some((endpoint) => endpoint.id === canaryId),
     "Disposable webhook canary was not deleted",
   );
+  const canaryDeletedAt = new Date().toISOString();
   await stripe.rawRequest(
     "POST",
     `/v1/events/${encodeURIComponent(eventId)}/retry`,
     { webhook_endpoint: canonical.id },
     { idempotencyKey: `zevium-canonical-replay:${eventId}:${canonical.id}` },
   );
+  const canonicalReplayRequestedAt = new Date().toISOString();
   await updateState({
     failedWebhookDelivery: {
       eventId,
@@ -514,8 +675,14 @@ async function proveCanaryAndReplay() {
       canonicalReceiptDeliveries: 1,
       exclusiveV1SubscriberIds: [canonical.id, canaryId],
       competingV2SubscriberCount: competingV2Destinations.length,
-      canaryDeletedAt: new Date().toISOString(),
-      canonicalReplayRequestedAt: new Date().toISOString(),
+      canaryDeletedAt,
+      canonicalReplayRequestedAt,
+    },
+    webhookCanaryCleanup: {
+      deletedEndpointIds: [canaryId],
+      canonicalEndpointId: canonical.id,
+      canonicalUnchanged: true,
+      verifiedAt: new Date().toISOString(),
     },
   });
   process.stdout.write(
@@ -531,7 +698,7 @@ async function convexEvidence(checkoutSessionId, eventId) {
 const payments = await ctx.db.query("payments").withIndex("by_checkout_session", q => q.eq("stripeCheckoutSessionId", ${checkoutLiteral})).take(2);
 if (payments.length > 1) throw new Error("duplicate payment projection");
 const payment = payments[0] ?? null;
-if (payment === null) return { payment: null, wallet: null, event: null, reversalJournalCredits: 0, disputeCount: 0 };
+if (payment === null) return { payment: null, wallet: null, event: null, reversalJournalCredits: 0, disputeCount: 0, reconciliation: null, exposures: [], clawbacks: [], earnings: [], publishers: [] };
 const wallets = await ctx.db.query("wallets").withIndex("by_organization", q => q.eq("organizationId", payment.organizationId)).take(2);
 if (wallets.length > 1) throw new Error("duplicate organization wallet");
 const wallet = wallets[0] ?? null;
@@ -541,9 +708,117 @@ const reversals = await ctx.db.query("walletFundingReversals").withIndex("by_pay
 if (reversals.length > 500) throw new Error("reversal journal proof exceeded 500 rows");
 const disputes = await ctx.db.query("paymentDisputes").withIndex("by_payment", q => q.eq("paymentId", payment._id)).take(101);
 if (disputes.length > 100) throw new Error("dispute proof exceeded 100 rows");
+const jobs = await ctx.db.query("publisherReconciliationJobs").withIndex("by_payment", q => q.eq("paymentId", payment._id)).take(2);
+if (jobs.length > 1) throw new Error("duplicate publisher reconciliation job");
+const exposures = await ctx.db.query("paymentExposures").withIndex("by_payment_created", q => q.eq("paymentId", payment._id)).order("asc").take(501);
+if (exposures.length > 500) throw new Error("payment exposure proof exceeded 500 rows");
+const clawbackRows = await ctx.db.query("publisherClawbacks").withIndex("by_payment", q => q.eq("paymentId", payment._id)).order("asc").take(501);
+if (clawbackRows.length > 500) throw new Error("publisher clawback proof exceeded 500 rows");
+const earningIds = [...new Set(clawbackRows.map(row => String(row.earningId)))];
+const earnings = [];
+for (const earningId of earningIds) {
+  const normalized = ctx.db.normalizeId("publisherEarnings", earningId);
+  if (normalized === null) throw new Error("publisher earning id is invalid");
+  const earning = await ctx.db.get(normalized);
+  if (earning === null) throw new Error("publisher earning is missing");
+  const allClawbacks = await ctx.db.query("publisherClawbacks").withIndex("by_earning", q => q.eq("earningId", earning._id)).take(501);
+  if (allClawbacks.length > 500) throw new Error("earning clawback proof exceeded 500 rows");
+  const activeClawbackGrossCredits = allClawbacks.reduce((sum, row) => sum + row.grossCredits - (row.restoredGrossCredits ?? 0), 0);
+  const activeClawbackAtoms = allClawbacks.reduce((sum, row) => sum + row.amountAtoms - (row.restoredAtoms ?? 0), 0);
+  earnings.push({
+    id: String(earning._id),
+    publisherOrganizationId: String(earning.publisherOrganizationId),
+    consumerOrganizationId: String(earning.consumerOrganizationId),
+    projectId: earning.projectId === undefined ? null : String(earning.projectId),
+    usageSettlementRefId: earning.usageSettlementRefId,
+    grossCredits: earning.grossCredits,
+    platformFeeAtoms: earning.platformFeeAtoms,
+    publisherNetAtoms: earning.publisherNetAtoms,
+    clawedBackGrossCredits: earning.clawedBackGrossCredits,
+    clawedBackAtoms: earning.clawedBackAtoms,
+    releasedAtoms: earning.releasedAtoms,
+    status: earning.status,
+    activeClawbackGrossCredits,
+    activeClawbackAtoms
+  });
+}
+const clawbacks = [];
+for (const row of clawbackRows) {
+  const journalRef = row.sourceRef + ":clawback:" + String(row._id);
+  const journals = await ctx.db.query("publisherSettlementEntries").withIndex("by_ref", q => q.eq("refId", journalRef)).take(2);
+  if (journals.length > 1) throw new Error("duplicate publisher clawback journal");
+  const journal = journals[0];
+  clawbacks.push({
+    id: String(row._id),
+    paymentId: String(row.paymentId),
+    consumerOrganizationId: String(row.consumerOrganizationId),
+    publisherOrganizationId: String(row.publisherOrganizationId),
+    earningId: String(row.earningId),
+    sourceKind: row.sourceKind,
+    sourceRef: row.sourceRef,
+    grossCredits: row.grossCredits,
+    amountAtoms: row.amountAtoms,
+    restoredGrossCredits: row.restoredGrossCredits ?? 0,
+    restoredAtoms: row.restoredAtoms ?? 0,
+    state: row.state ?? "active",
+    journal: journal === undefined ? null : {
+      kind: journal.kind,
+      refId: journal.refId,
+      publisherOrganizationId: String(journal.publisherOrganizationId),
+      sequence: journal.sequence,
+      availableDeltaAtoms: journal.availableDeltaAtoms,
+      allocatedDeltaAtoms: journal.allocatedDeltaAtoms,
+      paidDeltaAtoms: journal.paidDeltaAtoms,
+      paymentId: journal.paymentId === undefined ? null : String(journal.paymentId),
+      earningId: journal.earningId === undefined ? null : String(journal.earningId)
+    }
+  });
+}
+const publisherIds = [...new Set(clawbackRows.map(row => String(row.publisherOrganizationId)))];
+const publishers = [];
+for (const publisherId of publisherIds) {
+  const normalized = ctx.db.normalizeId("organizations", publisherId);
+  if (normalized === null) throw new Error("publisher organization id is invalid");
+  const balances = await ctx.db.query("publisherBalances").withIndex("by_publisher", q => q.eq("publisherOrganizationId", normalized)).take(2);
+  if (balances.length !== 1) throw new Error("publisher balance is missing or duplicated");
+  const balance = balances[0];
+  const entries = await ctx.db.query("publisherSettlementEntries").withIndex("by_publisher", q => q.eq("publisherOrganizationId", normalized)).order("asc").take(501);
+  if (entries.length > 500) throw new Error("publisher settlement proof exceeded 500 rows");
+  const allEarnings = await ctx.db.query("publisherEarnings").withIndex("by_publisher", q => q.eq("publisherOrganizationId", normalized)).take(501);
+  if (allEarnings.length > 500) throw new Error("publisher earning proof exceeded 500 rows");
+  const allTransfers = await ctx.db.query("publisherTransfers").withIndex("by_publisher", q => q.eq("publisherOrganizationId", normalized)).take(501);
+  if (allTransfers.length > 500) throw new Error("publisher transfer proof exceeded 500 rows");
+  publishers.push({
+    organizationId: publisherId,
+    balance: {
+      availableAtoms: balance.availableAtoms,
+      allocatedAtoms: balance.allocatedAtoms,
+      paidAtoms: balance.paidAtoms,
+      pendingRiskAtoms: balance.pendingRiskAtoms ?? 0,
+      reversedAtoms: balance.reversedAtoms ?? 0,
+      failedAtoms: balance.failedAtoms ?? 0,
+      sequence: balance.sequence
+    },
+    journalSums: {
+      availableAtoms: entries.reduce((sum, row) => sum + row.availableDeltaAtoms, 0),
+      allocatedAtoms: entries.reduce((sum, row) => sum + row.allocatedDeltaAtoms, 0),
+      paidAtoms: entries.reduce((sum, row) => sum + row.paidDeltaAtoms, 0),
+      entryCount: entries.length,
+      lastSequence: entries.at(-1)?.sequence ?? 0
+    },
+    derivedAggregates: {
+      pendingRiskAtoms: allEarnings.filter(row => row.status === "pending_risk").reduce((sum, row) => sum + row.publisherNetAtoms - row.clawedBackAtoms, 0),
+      reversedAtoms: allEarnings.reduce((sum, row) => sum + row.clawedBackAtoms, 0),
+      failedAtoms: allTransfers.filter(row => row.status === "failed").reduce((sum, row) => sum + row.amountAtoms, 0)
+    }
+  });
+}
 return {
   payment: {
     id: String(payment._id),
+    organizationId: String(payment.organizationId),
+    checkoutSessionId: payment.stripeCheckoutSessionId,
+    stripeChargeId: payment.stripeChargeId ?? null,
     status: payment.status,
     amount: payment.amount,
     currency: payment.currency,
@@ -564,7 +839,33 @@ return {
     attempts: events[0].attempts
   },
   reversalJournalCredits: reversals.reduce((sum, row) => sum + row.grossCredits, 0),
-  disputeCount: disputes.length
+  disputeCount: disputes.length,
+  reconciliation: jobs[0] === undefined ? null : {
+    paymentId: String(jobs[0].paymentId),
+    consumerOrganizationId: String(jobs[0].consumerOrganizationId),
+    status: jobs[0].status,
+    revision: jobs[0].revision,
+    processedChunks: jobs[0].processedChunks,
+    lastError: jobs[0].lastError ?? null
+  },
+  exposures: exposures.map(row => ({
+    id: String(row._id),
+    paymentId: String(row.paymentId),
+    organizationId: String(row.organizationId),
+    sourceKind: row.sourceKind,
+    sourceRef: row.sourceRef,
+    sourceAmount: row.sourceAmount,
+    sourceAmountExact: row.sourceAmountExact ?? false,
+    requestedCredits: row.requestedCredits,
+    effectiveCredits: row.effectiveCredits,
+    walletCredits: row.walletCredits,
+    publisherCredits: row.publisherCredits,
+    appliedPublisherCredits: row.appliedPublisherCredits,
+    active: row.active
+  })),
+  clawbacks,
+  earnings,
+  publishers
 };`;
   const { stdout } = await execFileAsync(
     "pnpm",
@@ -572,7 +873,10 @@ return {
     { env: process.env, maxBuffer: 2_000_000, timeout: 30_000 },
   );
   try {
-    return JSON.parse(stdout.trim());
+    return {
+      ...JSON.parse(stdout.trim()),
+      capturedAt: new Date().toISOString(),
+    };
   } catch {
     throw new Error("Convex ledger proof did not return JSON");
   }
@@ -685,7 +989,11 @@ for (const refId of ${refsLiteral}) {
   calls.push({
     entry: { refId: entries[0].refId, kind: entries[0].kind, amount: entries[0].amount, sequence: entries[0].sequence },
     usage: { settleRefId: usage.settleRefId, credits: usage.credits, status: usage.status, method: usage.method, endpoint: usage.endpoint, organizationId: String(usage.organizationId) },
-    project: { slug: project.slug }
+    project: {
+      id: String(project._id),
+      slug: project.slug,
+      publisherOrganizationId: String(project.organizationId)
+    }
   });
 }
 const intervening = await ctx.db.query("walletEntries").withIndex("by_wallet_sequence", q => q.eq("walletId", wallet._id).gt("sequence", ${baselineSequence})).order("asc").take(501);
@@ -710,7 +1018,10 @@ return {
     { env: process.env, maxBuffer: 2_000_000, timeout: 30_000 },
   );
   try {
-    return JSON.parse(stdout.trim());
+    return {
+      ...JSON.parse(stdout.trim()),
+      capturedAt: new Date().toISOString(),
+    };
   } catch {
     throw new Error("Convex usage proof did not return JSON");
   }
@@ -799,11 +1110,31 @@ async function expireCheckout() {
   process.stdout.write("Checkout expiry provider facts verified\n");
 }
 
-async function recoverPaymentDrill() {
+async function recordPaymentRecoveryBaseline() {
+  const state = await readStateOrNull();
+  if (state === null || !state.checkoutSessionId) {
+    process.stdout.write("no payment state needs a recovery baseline\n");
+    return;
+  }
+  const before = await convexEvidence(state.checkoutSessionId, null);
+  invariant(
+    before.payment !== null && before.wallet !== null,
+    "Paid checkout is absent from Convex",
+  );
+  await updateState({
+    ledgerSnapshots: {
+      ...(state.ledgerSnapshots ?? {}),
+      recoveryBaseline: before,
+    },
+  });
+  process.stdout.write("payment recovery ledger baseline recorded\n");
+}
+
+async function recoverPaymentProvider() {
   await cleanupWebhookCanary();
   const state = await readStateOrNull();
   if (state === null || !state.checkoutSessionId) {
-    process.stdout.write("no payment state to recover\n");
+    process.stdout.write("no payment provider state to recover\n");
     return;
   }
   const stripe = checkoutStripe();
@@ -821,22 +1152,24 @@ async function recoverPaymentDrill() {
     process.stdout.write("unpaid checkout expired during recovery\n");
     return;
   }
-  let before;
-  for (let attempt = 0; attempt < 90; attempt += 1) {
-    before = await convexEvidence(state.checkoutSessionId, null);
-    if (before.payment !== null && before.wallet !== null) break;
-    await sleep(2_000);
-  }
-  invariant(
-    before?.payment !== null && before?.wallet !== null,
-    "Paid checkout is absent from Convex",
-  );
   const charge = resolved.charge;
   if (charge.amount_refunded < charge.amount) await createRefund("remaining");
   const current = await stripe.charges.retrieve(charge.id);
   invariant(
     current.amount_refunded === current.amount,
     "Recovery refund is incomplete",
+  );
+  const refunds = await collectBounded(
+    stripe.refunds.list({ charge: charge.id, limit: 100 }),
+    "checkout recovery refunds",
+  );
+  const succeededRefunds = refunds.filter(
+    (refund) => refund.status === "succeeded",
+  );
+  invariant(
+    succeededRefunds.reduce((sum, refund) => sum + refund.amount, 0) ===
+      current.amount,
+    "Recovery refunds do not conserve the full charge",
   );
   const event = await findEvent({
     stripe,
@@ -847,14 +1180,649 @@ async function recoverPaymentDrill() {
       candidate.data.object.amount_refunded === charge.amount,
   });
   await updateState({
-    ledgerSnapshots: {
-      ...(state.ledgerSnapshots ?? {}),
-      recoveryBaseline: before,
-    },
     fullRefundEventId: event.id,
+    refunds: succeededRefunds
+      .map((refund) => ({
+        kind:
+          refund.amount === 250
+            ? "partial"
+            : refund.amount === 750
+              ? "remaining"
+              : "recovery",
+        id: refund.id,
+        amount: refund.amount,
+        status: refund.status,
+      }))
+      .sort((left, right) => left.amount - right.amount),
   });
-  await waitLedger("recovery", event.id, 100_000, 1, "recoveryBaseline");
+  process.stdout.write("paid checkout provider state fully recovered\n");
+}
+
+async function recoverPaymentLedger() {
+  const state = await readStateOrNull();
+  if (state === null || !state.checkoutSessionId) {
+    process.stdout.write("no payment ledger state to recover\n");
+    return;
+  }
+  invariant(
+    state.ledgerSnapshots?.recoveryBaseline,
+    "Payment recovery baseline is missing",
+  );
+  const eventId = requireId(
+    state.fullRefundEventId,
+    /^evt_[A-Za-z0-9]+$/,
+    "Full refund recovery event id",
+  );
+  await waitLedger("recovery", eventId, 100_000, 1, "recoveryBaseline");
   process.stdout.write("paid checkout and Convex ledger fully recovered\n");
+}
+
+async function convexAppSnapshot(
+  clerkOrgId,
+  transferId = null,
+  eventId = null,
+) {
+  const clerkLiteral = JSON.stringify(clerkOrgId);
+  const transferLiteral =
+    transferId === null ? "null" : JSON.stringify(transferId);
+  const eventLiteral = eventId === null ? "null" : JSON.stringify(eventId);
+  const source = `
+const organizations = await ctx.db.query("organizations").withIndex("by_clerk_org", q => q.eq("clerkOrgId", ${clerkLiteral})).take(2);
+if (organizations.length !== 1) throw new Error("active organization is missing or duplicated");
+const organization = organizations[0];
+const profiles = await ctx.db.query("organizationPayments").withIndex("by_organization", q => q.eq("organizationId", organization._id)).take(2);
+if (profiles.length !== 1) throw new Error("organization payment profile is missing or duplicated");
+const profile = profiles[0];
+const balances = await ctx.db.query("publisherBalances").withIndex("by_publisher", q => q.eq("publisherOrganizationId", organization._id)).take(2);
+if (balances.length !== 1) throw new Error("publisher balance is missing or duplicated");
+const balance = balances[0];
+const transfers = await ctx.db.query("publisherTransfers").withIndex("by_publisher", q => q.eq("publisherOrganizationId", organization._id)).order("asc").take(501);
+if (transfers.length > 500) throw new Error("publisher transfer proof exceeded 500 rows");
+let transfer = null;
+let settlementEntries = [];
+if (${transferLiteral} !== null) {
+  const normalized = ctx.db.normalizeId("publisherTransfers", ${transferLiteral});
+  if (normalized === null) throw new Error("publisher transfer id is invalid");
+  transfer = await ctx.db.get(normalized);
+  if (transfer === null) throw new Error("publisher transfer is missing");
+  settlementEntries = await ctx.db.query("publisherSettlementEntries").withIndex("by_transfer_sequence", q => q.eq("transferId", transfer._id)).order("asc").take(11);
+  if (settlementEntries.length > 10) throw new Error("transfer settlement proof exceeded 10 rows");
+}
+const allEntries = await ctx.db.query("publisherSettlementEntries").withIndex("by_publisher", q => q.eq("publisherOrganizationId", organization._id)).order("asc").take(501);
+if (allEntries.length > 500) throw new Error("publisher journal proof exceeded 500 rows");
+const events = ${eventLiteral} === null ? [] : await ctx.db.query("paymentEvents").withIndex("by_stripe_event", q => q.eq("stripeEventId", ${eventLiteral})).take(2);
+if (events.length > 1) throw new Error("transfer webhook receipt is duplicated");
+return {
+  organization: { id: String(organization._id), clerkOrgId: organization.clerkOrgId },
+  profile: {
+    id: String(profile._id),
+    organizationId: String(profile.organizationId),
+    stripeConnectedAccountId: profile.stripeConnectedAccountId ?? null,
+    payoutsEnabled: profile.payoutsEnabled,
+    disabledReason: profile.disabledReason ?? null
+  },
+  balance: {
+    availableAtoms: balance.availableAtoms,
+    allocatedAtoms: balance.allocatedAtoms,
+    paidAtoms: balance.paidAtoms,
+    pendingRiskAtoms: balance.pendingRiskAtoms ?? 0,
+    reversedAtoms: balance.reversedAtoms ?? 0,
+    failedAtoms: balance.failedAtoms ?? 0,
+    sequence: balance.sequence
+  },
+  journalSums: {
+    availableAtoms: allEntries.reduce((sum, row) => sum + row.availableDeltaAtoms, 0),
+    allocatedAtoms: allEntries.reduce((sum, row) => sum + row.allocatedDeltaAtoms, 0),
+    paidAtoms: allEntries.reduce((sum, row) => sum + row.paidDeltaAtoms, 0),
+    entryCount: allEntries.length,
+    lastSequence: allEntries.at(-1)?.sequence ?? 0
+  },
+  transferIds: transfers.map(row => String(row._id)),
+  openTransferCount: transfers.filter(row => row.status === "created" || row.status === "pending" || row.status === "failed").length,
+  transfer: transfer === null ? null : {
+    id: String(transfer._id),
+    profileId: String(profile._id),
+    publisherOrganizationId: String(transfer.publisherOrganizationId),
+    stripeConnectedAccountId: transfer.stripeConnectedAccountId,
+    amount: transfer.amount,
+    amountAtoms: transfer.amountAtoms,
+    remainderAtoms: transfer.remainderAtoms,
+    currency: transfer.currency,
+    stripeTransferId: transfer.stripeTransferId ?? null,
+    reversedAmount: transfer.reversedAmount ?? 0,
+    correlationNonce: transfer.correlationNonce ?? null,
+    correlationHmac: transfer.correlationHmac ?? null,
+    platformAccountId: transfer.platformAccountId ?? null,
+    status: transfer.status
+  },
+  settlementEntries: settlementEntries.map(row => ({
+    kind: row.kind,
+    availableDeltaAtoms: row.availableDeltaAtoms,
+    allocatedDeltaAtoms: row.allocatedDeltaAtoms,
+    paidDeltaAtoms: row.paidDeltaAtoms,
+    sequence: row.sequence,
+    refId: row.refId
+  })),
+  event: events[0] === undefined ? null : {
+    stripeEventId: events[0].stripeEventId,
+    eventType: events[0].eventType,
+    objectId: events[0].objectId,
+    status: events[0].status,
+    deliveries: events[0].deliveries,
+    attempts: events[0].attempts
+  }
+};`;
+  return await convexInline(source, "app-path proof");
+}
+
+function expectedAppIdentity() {
+  return {
+    clerkOrgId: requireId(
+      process.env.E2E_PUBLISHER_CLERK_ORG_ID?.trim(),
+      /^org_[A-Za-z0-9]+$/,
+      "Publisher Clerk organization id",
+    ),
+    connectedAccountId: requireId(
+      process.env.STRIPE_CONNECT_SETTLEMENT_ACCOUNT_ID?.trim(),
+      /^acct_[A-Za-z0-9]+$/,
+      "Settlement account id",
+    ),
+    platformAccountId: requireId(
+      process.env.STRIPE_CONNECT_PLATFORM_ACCOUNT_ID?.trim(),
+      /^acct_[A-Za-z0-9]+$/,
+      "Platform account id",
+    ),
+  };
+}
+
+async function recordAppBaseline() {
+  const expected = expectedAppIdentity();
+  const state = await readJson(statePath);
+  invariant(
+    state.clerkOrgId === expected.clerkOrgId,
+    "Checkout and publisher journey use different active organizations",
+  );
+  const snapshot = await convexAppSnapshot(expected.clerkOrgId);
+  invariant(
+    snapshot.profile.stripeConnectedAccountId === expected.connectedAccountId &&
+      snapshot.profile.payoutsEnabled === true &&
+      snapshot.profile.disabledReason === null,
+    "Exact publisher profile is not transfer-enabled",
+  );
+  invariant(
+    snapshot.openTransferCount === 0,
+    "Publisher has unfinished transfer state",
+  );
+  invariant(
+    snapshot.balance.availableAtoms >= 1_000_000_000 &&
+      snapshot.balance.allocatedAtoms === 0,
+    "Publisher fixture lacks clean $10 available earnings",
+  );
+  invariant(
+    snapshot.journalSums.availableAtoms === snapshot.balance.availableAtoms &&
+      snapshot.journalSums.allocatedAtoms === snapshot.balance.allocatedAtoms &&
+      snapshot.journalSums.paidAtoms === snapshot.balance.paidAtoms &&
+      snapshot.journalSums.entryCount === snapshot.balance.sequence &&
+      snapshot.journalSums.lastSequence === snapshot.balance.sequence,
+    "Publisher baseline journal does not materialize to balance",
+  );
+  await updateState({
+    appPath: {
+      ...(state.appPath ?? {}),
+      baseline: snapshot,
+    },
+  });
+  process.stdout.write("exact publisher app baseline recorded\n");
+}
+
+async function recordAppOnboarding(urlValue, activeClerkOrgId) {
+  const state = await readJson(statePath);
+  const baseline = state.appPath?.baseline;
+  invariant(baseline, "App baseline is missing");
+  invariant(
+    activeClerkOrgId === baseline.organization.clerkOrgId,
+    "Onboarding UI used wrong active organization",
+  );
+  const url = new URL(urlValue);
+  invariant(
+    url.protocol === "https:" &&
+      (url.hostname === "connect.stripe.com" ||
+        url.hostname.endsWith(".connect.stripe.com")) &&
+      url.username === "" &&
+      url.password === "",
+    "App onboarding did not open Stripe-hosted Connect",
+  );
+  await updateState({
+    appPath: {
+      ...state.appPath,
+      onboarding: {
+        authenticated: true,
+        activeClerkOrgId,
+        action: "payouts.startOnboarding",
+        apiSurface: "v2.core.accountLinks.create",
+        profileId: baseline.profile.id,
+        connectedAccountId: baseline.profile.stripeConnectedAccountId,
+        linkOrigin: url.origin,
+        linkHash: createHash("sha256").update(url.href).digest("hex"),
+        observedAt: new Date().toISOString(),
+      },
+    },
+  });
+  process.stdout.write("authenticated v2 onboarding app redirect recorded\n");
+}
+
+async function verifyAppOnboardingProvider() {
+  const stripe = connectStripe();
+  const state = await readJson(statePath);
+  const onboarding = state.appPath?.onboarding;
+  invariant(onboarding, "Onboarding app observation is missing");
+  const account = await stripe.v2.core.accounts.retrieve(
+    onboarding.connectedAccountId,
+    { include: ["configuration.recipient", "defaults", "requirements"] },
+  );
+  assertConnectAccount(account, "App onboarding account");
+  invariant(!account.closed, "App onboarding account is closed");
+  invariant(
+    account.dashboard === "express",
+    "App onboarding account dashboard changed",
+  );
+  const capabilities =
+    account.configuration?.recipient?.capabilities?.stripe_balance;
+  invariant(
+    capabilities?.stripe_transfers?.status === "active" &&
+      capabilities?.payouts?.status === "active",
+    "App onboarding account is not transfer/payout active",
+  );
+  await updateState({
+    appPath: {
+      ...state.appPath,
+      onboarding: {
+        ...onboarding,
+        provider: {
+          accountId: account.id,
+          dashboard: account.dashboard,
+          transferCapability: capabilities.stripe_transfers.status,
+          payoutCapability: capabilities.payouts.status,
+          verifiedAt: new Date().toISOString(),
+        },
+      },
+    },
+  });
+  process.stdout.write("app onboarding provider account verified\n");
+}
+
+async function recordAppTransferUi(activeClerkOrgId) {
+  const state = await readJson(statePath);
+  const baseline = state.appPath?.baseline;
+  invariant(baseline, "App baseline is missing");
+  invariant(
+    activeClerkOrgId === baseline.organization.clerkOrgId,
+    "Transfer UI used wrong active organization",
+  );
+  await updateState({
+    appPath: {
+      ...state.appPath,
+      transfer: {
+        ...(state.appPath?.transfer ?? {}),
+        ui: {
+          authenticated: true,
+          activeClerkOrgId,
+          action: "payouts.initiatePublisherTransfer",
+          observedAt: new Date().toISOString(),
+        },
+      },
+    },
+  });
+  process.stdout.write("authenticated publisher transfer UI action recorded\n");
+}
+
+async function waitAppTransferLedger() {
+  const state = await readJson(statePath);
+  const baseline = state.appPath?.baseline;
+  invariant(
+    baseline && state.appPath?.transfer?.ui,
+    "Transfer app baseline/UI is missing",
+  );
+  let lastError;
+  for (let attempt = 0; attempt < 90; attempt += 1) {
+    try {
+      const snapshot = await convexAppSnapshot(
+        baseline.organization.clerkOrgId,
+      );
+      const fresh = snapshot.transferIds.filter(
+        (id) => !baseline.transferIds.includes(id),
+      );
+      invariant(fresh.length === 1, "App transfer correlation is ambiguous");
+      const exact = await convexAppSnapshot(
+        baseline.organization.clerkOrgId,
+        fresh[0],
+      );
+      invariant(
+        exact.transfer.status === "succeeded" &&
+          exact.transfer.stripeTransferId !== null &&
+          exact.transfer.profileId === baseline.profile.id,
+        "App transfer has not reached succeeded state",
+      );
+      const expected = expectedAppIdentity();
+      invariant(
+        exact.transfer.stripeConnectedAccountId ===
+          expected.connectedAccountId &&
+          exact.transfer.platformAccountId === expected.platformAccountId,
+        "App transfer account/platform correlation changed",
+      );
+      invariant(
+        exact.settlementEntries.length === 2 &&
+          exact.settlementEntries[0].kind === "transfer_allocation" &&
+          exact.settlementEntries[1].kind === "transfer_succeeded",
+        "App transfer ledger is incomplete",
+      );
+      await updateState({
+        appPath: {
+          ...state.appPath,
+          transfer: {
+            ...state.appPath.transfer,
+            local: exact.transfer,
+            settlementEntries: exact.settlementEntries,
+          },
+        },
+      });
+      process.stdout.write("exact app transfer ledger verified\n");
+      return;
+    } catch (error) {
+      lastError = error;
+      await sleep(2_000);
+    }
+  }
+  throw new Error(
+    `App transfer ledger did not converge: ${lastError?.message ?? "unknown"}`,
+  );
+}
+
+async function verifyAppTransferProvider() {
+  const stripe = connectStripe();
+  const state = await readJson(statePath);
+  const local = state.appPath?.transfer?.local;
+  invariant(local, "Local app transfer proof is missing");
+  const [transfer, platform] = await Promise.all([
+    stripe.transfers.retrieve(local.stripeTransferId),
+    stripe.accounts.retrieveCurrent(),
+  ]);
+  assertTestObject(transfer, "App publisher transfer");
+  invariant(
+    platform.id === local.platformAccountId,
+    "Connect proof key belongs to another platform account",
+  );
+  const provider = {
+    id: transfer.id,
+    livemode: transfer.livemode,
+    amount: transfer.amount,
+    amountReversed: transfer.amount_reversed,
+    reversed: transfer.reversed,
+    currency: transfer.currency,
+    destination: objectId(transfer.destination),
+    platformAccountId: platform.id,
+    metadata: {
+      publisherTransferId: transfer.metadata.publisherTransferId ?? null,
+      correlationNonce: transfer.metadata.correlationNonce ?? null,
+      correlationHmac: transfer.metadata.correlationHmac ?? null,
+      platformAccountId: transfer.metadata.platformAccountId ?? null,
+    },
+    verifiedAt: new Date().toISOString(),
+  };
+  invariant(
+    provider.amount === local.amount &&
+      provider.amountReversed === 0 &&
+      provider.reversed === false &&
+      provider.destination === local.stripeConnectedAccountId &&
+      provider.metadata.publisherTransferId === local.id &&
+      provider.metadata.correlationNonce === local.correlationNonce &&
+      provider.metadata.correlationHmac === local.correlationHmac &&
+      provider.metadata.platformAccountId === local.platformAccountId,
+    "App transfer provider/HMAC facts diverged",
+  );
+  const event = await findEvent({
+    stripe,
+    type: "transfer.created",
+    objectId: transfer.id,
+    created: transfer.created,
+  });
+  await updateState({
+    appPath: {
+      ...state.appPath,
+      transfer: {
+        ...state.appPath.transfer,
+        provider,
+        providerEventId: event.id,
+      },
+    },
+  });
+  process.stdout.write("exact app transfer provider/HMAC facts verified\n");
+}
+
+async function waitAppTransferWebhook() {
+  const state = await readJson(statePath);
+  const baseline = state.appPath?.baseline;
+  const transfer = state.appPath?.transfer;
+  invariant(
+    baseline &&
+      transfer?.local &&
+      transfer.provider &&
+      transfer.providerEventId,
+    "Provider transfer proof is missing",
+  );
+  let lastError;
+  for (let attempt = 0; attempt < 90; attempt += 1) {
+    try {
+      const snapshot = await convexAppSnapshot(
+        baseline.organization.clerkOrgId,
+        transfer.local.id,
+        transfer.providerEventId,
+      );
+      const evidence = {
+        ...state.appPath,
+        transfer: {
+          ...transfer,
+          local: snapshot.transfer,
+          settlementEntries: snapshot.settlementEntries,
+          webhook: snapshot.event,
+        },
+      };
+      assertAppPathEvidence(evidence, expectedAppIdentity());
+      await updateState({ appPath: evidence });
+      process.stdout.write("exact app transfer webhook correlation verified\n");
+      return;
+    } catch (error) {
+      lastError = error;
+      await sleep(2_000);
+    }
+  }
+  throw new Error(
+    `App transfer webhook did not converge: ${lastError?.message ?? "unknown"}`,
+  );
+}
+
+async function compensateAppTransfer() {
+  const stripe = connectStripe();
+  const state = await readJson(statePath);
+  const local = state.appPath?.transfer?.local;
+  if (!local?.stripeTransferId) {
+    process.stdout.write("no app transfer exists to compensate\n");
+    return;
+  }
+  let transfer = await stripe.transfers.retrieve(local.stripeTransferId);
+  assertTestObject(transfer, "App transfer compensation");
+  invariant(
+    transfer.metadata.publisherTransferId === local.id &&
+      transfer.metadata.correlationNonce === local.correlationNonce &&
+      transfer.metadata.correlationHmac === local.correlationHmac &&
+      transfer.metadata.platformAccountId === local.platformAccountId,
+    "App transfer compensation correlation changed",
+  );
+  if (transfer.amount_reversed < transfer.amount) {
+    await stripe.transfers.createReversal(
+      transfer.id,
+      {
+        metadata: {
+          purpose: "zevium_app_proof_compensation",
+          runRef: normalizeRunRef(process.env.STRIPE_PROOF_RUN_REF),
+        },
+      },
+      {
+        idempotencyKey: `zevium-app-transfer-compensation:${normalizeRunRef(
+          process.env.STRIPE_PROOF_RUN_REF,
+        )}:${transfer.id}`,
+      },
+    );
+  }
+  transfer = await stripe.transfers.retrieve(transfer.id);
+  invariant(
+    transfer.reversed === true && transfer.amount_reversed === transfer.amount,
+    "App transfer provider compensation is incomplete",
+  );
+  const event = await findEvent({
+    stripe,
+    type: "transfer.reversed",
+    objectId: transfer.id,
+    created: transfer.created,
+    match: (candidate) =>
+      candidate.data.object.amount_reversed === transfer.amount,
+  });
+  await updateState({
+    appCompensationProvider: {
+      id: transfer.id,
+      reversed: transfer.reversed,
+      amountReversed: transfer.amount_reversed,
+      providerEventId: event.id,
+      compensatedAt: new Date().toISOString(),
+    },
+  });
+  process.stdout.write("app transfer provider state fully compensated\n");
+}
+
+async function waitAppCompensation() {
+  const state = await readJson(statePath);
+  const baseline = state.appPath?.baseline;
+  const local = state.appPath?.transfer?.local;
+  const provider = state.appCompensationProvider;
+  invariant(
+    baseline && local && provider,
+    "App compensation prerequisites are missing",
+  );
+  const full = state.ledgerSnapshots?.full ?? state.ledgerSnapshots?.recovery;
+  invariant(full, "Full payment recovery ledger is missing");
+  let lastError;
+  for (let attempt = 0; attempt < 90; attempt += 1) {
+    try {
+      const snapshot = await convexAppSnapshot(
+        baseline.organization.clerkOrgId,
+        local.id,
+        provider.providerEventId,
+      );
+      const compensation = {
+        status: "complete",
+        provider: {
+          id: provider.id,
+          reversed: provider.reversed,
+          amountReversed: provider.amountReversed,
+        },
+        providerEventId: provider.providerEventId,
+        local: snapshot.transfer,
+        webhook: snapshot.event,
+        settlementEntries: snapshot.settlementEntries,
+        publisherBalance: snapshot.balance,
+        journalSums: snapshot.journalSums,
+        payment: {
+          status: full.payment.status,
+          reconciliationStatus: full.reconciliation?.status ?? null,
+        },
+        canary: {
+          deleted:
+            state.webhookCanary === undefined ||
+            state.webhookCanaryCleanup?.deletedEndpointIds?.includes(
+              state.webhookCanary.endpointId,
+            ) === true,
+          canonicalUnchanged:
+            state.webhookCanaryCleanup?.canonicalUnchanged === true,
+          canonicalEndpointId:
+            state.webhookCanaryCleanup?.canonicalEndpointId ?? null,
+          verifiedAt: state.webhookCanaryCleanup?.verifiedAt ?? null,
+        },
+        completedAt: new Date().toISOString(),
+      };
+      assertCompensationEvidence(compensation, state.appPath, full);
+      await updateState({ compensation });
+      process.stdout.write(
+        "app transfer and publisher ledger fully compensated\n",
+      );
+      return;
+    } catch (error) {
+      lastError = error;
+      await sleep(2_000);
+    }
+  }
+  throw new Error(
+    `App compensation did not converge: ${lastError?.message ?? "unknown"}`,
+  );
+}
+
+async function finalizeAcceptanceReport() {
+  const state = await readJson(statePath);
+  const runRef = normalizeRunRef(process.env.STRIPE_PROOF_RUN_REF);
+  const finalRefund =
+    state.ledgerSnapshots?.full ?? state.ledgerSnapshots?.recovery;
+  const refundBaseline =
+    state.ledgerSnapshots?.replay ?? state.ledgerSnapshots?.recoveryBaseline;
+  invariant(
+    finalRefund && refundBaseline,
+    "Final refund ledger evidence is missing",
+  );
+  const report = {
+    schemaVersion: 3,
+    reportType: "zevium-stripe-acceptance",
+    acceptance: true,
+    status: "passed",
+    run: {
+      runRef,
+      githubSha: state.githubSha,
+      mode: "staging",
+      startedAt: state.startedAt,
+      completedAt: new Date().toISOString(),
+    },
+    deployment: state.deploymentProof,
+    appPath: state.appPath,
+    ledger: {
+      usageExpected: state.usageProof?.calls,
+      usageBaseline: state.ledgerSnapshots?.grant,
+      usage: state.ledgerSnapshots?.usage,
+      partial: state.ledgerSnapshots?.partial,
+      refundBaseline,
+      refund: finalRefund,
+    },
+    provider: {
+      checkoutSessionId: state.checkoutSessionId,
+      chargeId: state.chargeId,
+      refundIds: state.refunds?.map((refund) => refund.id),
+      partialRefundEventId: state.partialRefundEventId,
+      refundEventId: finalRefund.event?.stripeEventId,
+      checkoutVerifiedAt: state.checkoutVerifiedAt,
+      webhookCanary: state.failedWebhookDelivery,
+    },
+    compensation: state.compensation,
+    primitives: {
+      acceptanceRole: "supplemental_only",
+      requiredForAcceptance: false,
+    },
+  };
+  const deployment = requiredDeploymentExpectation();
+  const appPath = expectedAppIdentity();
+  assertAcceptanceReport(report, {
+    runRef,
+    githubSha: deployment.githubSha,
+    deployment,
+    appPath,
+  });
+  await writeSafeJson(acceptanceReportPath, report);
+  process.stdout.write("Stripe acceptance report v3 passed\n");
 }
 
 function assertConnectAccount(account, label) {
@@ -985,6 +1953,7 @@ async function onboardingProof(stripe, runRef, report) {
     });
     report.onboarding = {
       accountId: account.id,
+      apiSurface: "v2.core.accountLinks.create",
       hostedLinkCreated: true,
       onboardingCompleted: false,
       closed: false,
@@ -1465,12 +2434,15 @@ async function cleanupProviderRun() {
   } catch (error) {
     if (error?.code !== "ENOENT") throw error;
     report = {
-      schemaVersion: 2,
+      schemaVersion: 3,
+      reportType: "stripe-provider-supplemental",
+      acceptance: false,
+      acceptanceRole: "supplemental_only",
       generatedAt: new Date().toISOString(),
       runRef,
       status: "recovery_only",
       liveMoneyUsed: false,
-      scope: "stripe-provider-primitives-only",
+      scope: "direct-stripe-primitives",
       provesZeviumLedgerCorrelation: false,
       onboardingCompleted: false,
     };
@@ -1574,12 +2546,15 @@ async function providerSettlementProof() {
   const stripe = connectStripe();
   const runRef = normalizeRunRef(process.env.STRIPE_PROOF_RUN_REF);
   const report = {
-    schemaVersion: 2,
+    schemaVersion: 3,
+    reportType: "stripe-provider-supplemental",
+    acceptance: false,
+    acceptanceRole: "supplemental_only",
     generatedAt: new Date().toISOString(),
     runRef,
     status: "running",
     liveMoneyUsed: false,
-    scope: "stripe-provider-primitives-only",
+    scope: "direct-stripe-primitives",
     provesZeviumLedgerCorrelation: false,
     onboardingCompleted: false,
   };
@@ -1661,7 +2636,8 @@ async function providerSettlementProof() {
 
 const [command, ...args] = process.argv.slice(2);
 try {
-  if (command === "checkout") await checkoutSnapshot();
+  if (command === "verify-deployments") await verifyDeployments();
+  else if (command === "checkout") await checkoutSnapshot();
   else if (command === "refund" && ["partial", "remaining"].includes(args[0])) {
     await createRefund(args[0]);
   } else if (command === "begin-webhook-canary") await beginWebhookCanary();
@@ -1678,9 +2654,26 @@ try {
     );
   } else if (command === "record-usage-proof") await recordUsageProof(args[0]);
   else if (command === "wait-usage") await waitUsage();
+  else if (command === "app-baseline") await recordAppBaseline();
+  else if (command === "record-app-onboarding")
+    await recordAppOnboarding(args[0], args[1]);
+  else if (command === "verify-app-onboarding")
+    await verifyAppOnboardingProvider();
+  else if (command === "record-app-transfer-ui")
+    await recordAppTransferUi(args[0]);
+  else if (command === "wait-app-transfer") await waitAppTransferLedger();
+  else if (command === "verify-app-transfer") await verifyAppTransferProvider();
+  else if (command === "wait-app-transfer-webhook")
+    await waitAppTransferWebhook();
+  else if (command === "compensate-app-transfer") await compensateAppTransfer();
+  else if (command === "wait-app-compensation") await waitAppCompensation();
+  else if (command === "finalize-acceptance") await finalizeAcceptanceReport();
   else if (command === "state-field") await printStateField(args[0]);
   else if (command === "expire-checkout") await expireCheckout();
-  else if (command === "recover") await recoverPaymentDrill();
+  else if (command === "record-recovery-baseline")
+    await recordPaymentRecoveryBaseline();
+  else if (command === "recover-provider") await recoverPaymentProvider();
+  else if (command === "recover-ledger") await recoverPaymentLedger();
   else if (command === "provider-settlement") await providerSettlementProof();
   else if (command === "provider-cleanup") await cleanupProviderRun();
   else if (command === "record-balance") await recordBalance(args[0], args[1]);

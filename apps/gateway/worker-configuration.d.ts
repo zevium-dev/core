@@ -8,6 +8,10 @@ declare namespace Cloudflare {
     CONVEX_DEPLOY_KEY?: string;
     GATEWAY_INTERNAL_SECRET?: string;
     GATEWAY_TEST_MODE?: string;
+    ZEVIUM_GIT_SHA?: string;
+    ZEVIUM_GATEWAY_DEPLOYMENT_ID?: string;
+    ZEVIUM_DEPLOYED_AT?: string;
+    ZEVIUM_DEPLOYMENT_MODE?: string;
   }
 }
 

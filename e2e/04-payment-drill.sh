@@ -9,15 +9,45 @@ source "$SCRIPT_DIR/lib.sh"
 PAYMENT_DRILL_PHASE="${PAYMENT_DRILL_PHASE:-grant}"
 PAYMENT_DRILL_STATE="${PAYMENT_DRILL_STATE:-$E2E_ARTIFACTS/payment-drill-state.json}"
 export PAYMENT_DRILL_STATE
+PAYMENT_PROOF_REPORT="${PAYMENT_PROOF_REPORT:-$E2E_ARTIFACTS/payment-proof-report.json}"
+export PAYMENT_PROOF_REPORT
 STRIPE_PROOF="$SCRIPT_DIR/stripe-provider-proof.mjs"
+ISOLATED_RUNNER="$SCRIPT_DIR/run-isolated.mjs"
+NODE_BIN="$(command -v node)"
 GRANT_CREDITS=100000
 PARTIAL_REFUND_CREDITS=25000
+
+isolated() {
+  local mode="$1"
+  shift
+  "$NODE_BIN" "$ISOLATED_RUNNER" "$mode" -- "$@"
+}
+
+state_exec() {
+  isolated state "$@"
+}
+
+state_proof() {
+  isolated state "$NODE_BIN" "$STRIPE_PROOF" "$@"
+}
+
+provider_proof() {
+  isolated provider "$NODE_BIN" "$STRIPE_PROOF" "$@"
+}
+
+ledger_proof() {
+  isolated ledger "$NODE_BIN" "$STRIPE_PROOF" "$@"
+}
 
 cleanup() {
   local code="$?"
   if (( code != 0 )) && [[ "$PAYMENT_DRILL_PHASE" != "cleanup" ]] \
     && [[ -f "$PAYMENT_DRILL_STATE" ]]; then
-    node "$STRIPE_PROOF" recover >/dev/null 2>&1 || true
+    ledger_proof record-recovery-baseline >/dev/null 2>&1 || true
+    provider_proof recover-provider >/dev/null 2>&1 || true
+    ledger_proof recover-ledger >/dev/null 2>&1 || true
+    provider_proof compensate-app-transfer >/dev/null 2>&1 || true
+    ledger_proof wait-app-compensation >/dev/null 2>&1 || true
   fi
   close_browser
 }
@@ -31,18 +61,38 @@ on_error() {
 trap 'on_error "$LINENO"' ERR
 
 : "${STRIPE_CHECKOUT_PROOF_KEY:?STRIPE_CHECKOUT_PROOF_KEY is required}"
+: "${STRIPE_CONNECT_PROOF_KEY:?STRIPE_CONNECT_PROOF_KEY is required}"
 : "${STRIPE_WEBHOOK_ADMIN_KEY:?STRIPE_WEBHOOK_ADMIN_KEY is required}"
+: "${E2E_PUBLISHER_CLERK_ORG_ID:?E2E_PUBLISHER_CLERK_ORG_ID is required}"
+: "${STRIPE_CONNECT_SETTLEMENT_ACCOUNT_ID:?STRIPE_CONNECT_SETTLEMENT_ACCOUNT_ID is required}"
+: "${STRIPE_CONNECT_PLATFORM_ACCOUNT_ID:?STRIPE_CONNECT_PLATFORM_ACCOUNT_ID is required}"
 if [[ ! "$STRIPE_CHECKOUT_PROOF_KEY" =~ ^rk_test_ ]]; then
   fail "payment drill requires a restricted Stripe checkout test key"
 fi
 if [[ ! "$STRIPE_WEBHOOK_ADMIN_KEY" =~ ^rk_test_ ]]; then
   fail "payment drill requires a restricted Stripe webhook-admin test key"
 fi
+if [[ ! "$STRIPE_CONNECT_PROOF_KEY" =~ ^rk_test_ ]]; then
+  fail "payment drill requires a restricted Stripe Connect test key"
+fi
 if [[ "$PAYMENT_DRILL_PHASE" != "grant" \
   && "$PAYMENT_DRILL_PHASE" != "refund" \
   && "$PAYMENT_DRILL_PHASE" != "cleanup" ]]; then
   fail "PAYMENT_DRILL_PHASE must be grant, refund, or cleanup"
 fi
+
+active_clerk_org_id() {
+  local raw
+  raw="$(ab eval 'window.Clerk?.organization?.id ?? ""' 2>/dev/null || true)"
+  printf '%s' "$raw" | tr -d '"[:space:]'
+}
+
+assert_exact_active_org() {
+  local active
+  active="$(active_clerk_org_id)"
+  assert_eq "$active" "$E2E_PUBLISHER_CLERK_ORG_ID" \
+    "browser active organization changed"
+}
 
 read_wallet_balance() {
   local raw
@@ -99,6 +149,7 @@ sign_in_to_billing() {
   ab open "$E2E_BASE_URL/" >/dev/null
   ab cookies clear >/dev/null
   sign_in
+  assert_exact_active_org
   open_path "/app/billing"
   wait_for_text "Buy credits" 30
 }
@@ -107,19 +158,22 @@ run_grant_phase() {
   local wallet_before checkout_url checkout_id billing_url returned_checkout_id
   local expected_wallet wallet_after
 
+  ledger_proof verify-deployments
   sign_in_to_billing
   wallet_before="$(read_wallet_balance)"
-  node "$STRIPE_PROOF" record-balance walletBeforeGrant "$wallet_before"
+  assert_eq "$wallet_before" "0" \
+    "publisher proof fixture must start with zero consumer credits"
+  state_proof record-balance walletBeforeGrant "$wallet_before"
 
   step "start real hosted Stripe Checkout"
   ab find role button click --name "Buy \$10.00" >/dev/null
   wait_for_url_pattern "https://checkout.stripe.com/" 30
-  timeout 15s pnpm exec agent-browser wait --load domcontentloaded >/dev/null 2>&1 || true
+  ab_timeout 15s wait --load domcontentloaded >/dev/null 2>&1 || true
   wait_for_text "Payment method" 30
   checkout_url="$(ab get url)"
-  checkout_id="$(node -e 'const match=new URL(process.argv[1]).pathname.match(/cs_test_[A-Za-z0-9]+/); console.log(match?.[0] || "")' "$checkout_url")"
+  checkout_id="$(state_exec "$NODE_BIN" -e 'const match=new URL(process.argv[1]).pathname.match(/cs_test_[A-Za-z0-9]+/); console.log(match?.[0] || "")' "$checkout_url")"
   [[ "$checkout_id" == cs_test_* ]] || fail "Stripe sandbox URL lacks Checkout Session id"
-  node "$STRIPE_PROOF" record-provider-id checkoutSessionId "$checkout_id"
+  state_proof record-provider-id checkoutSessionId "$checkout_id"
 
   step "complete real Stripe sandbox card payment"
   if ab get count 'input[name="email"]' | grep -qv '^0$'; then
@@ -161,19 +215,19 @@ run_grant_phase() {
   wait_for_url_pattern "/app/billing?checkout=" 90
 
   billing_url="$(ab get url)"
-  returned_checkout_id="$(node -e 'console.log(new URL(process.argv[1]).searchParams.get("checkout") || "")' "$billing_url")"
+  returned_checkout_id="$(state_exec "$NODE_BIN" -e 'console.log(new URL(process.argv[1]).searchParams.get("checkout") || "")' "$billing_url")"
   assert_eq "$returned_checkout_id" "$checkout_id" "checkout return changed Stripe session id"
   wait_for_text "Confirmed" 120
 
   step "verify immutable provider facts and exact Convex wallet grant"
-  node "$STRIPE_PROOF" checkout
-  grant_event_id="$(node "$STRIPE_PROOF" state-field grantEventId)"
-  node "$STRIPE_PROOF" wait-ledger grant "$grant_event_id" 1 0
-  ledger_wallet="$(node "$STRIPE_PROOF" state-field ledgerSnapshots.grant.wallet.balance)"
+  provider_proof checkout
+  grant_event_id="$(state_proof state-field grantEventId)"
+  ledger_proof wait-ledger grant "$grant_event_id" 1 0
+  ledger_wallet="$(state_proof state-field ledgerSnapshots.grant.wallet.balance)"
   expected_wallet=$((wallet_before + GRANT_CREDITS))
   assert_eq "$ledger_wallet" "$expected_wallet" "Convex grant projection changed pack value"
   wallet_after="$(wait_for_wallet_balance "$ledger_wallet" 120)"
-  node "$STRIPE_PROOF" record-balance walletAfterGrant "$wallet_after"
+  state_proof record-balance walletAfterGrant "$wallet_after"
   log "grant phase PASS wallet=$wallet_before->$wallet_after"
 }
 
@@ -185,60 +239,91 @@ run_refund_phase() {
   [[ -f "$PAYMENT_DRILL_STATE" ]] || fail "payment drill state is missing"
   sign_in_to_billing
 
+  step "exercise authenticated v2 onboarding and publisher transfer app actions"
+  ledger_proof app-baseline
+  open_path "/app/earnings?onboarding=refresh"
+  wait_for_url_pattern "https://connect.stripe.com/" 45
+  onboarding_url="$(ab get url)"
+  state_proof record-app-onboarding "$onboarding_url" \
+    "$E2E_PUBLISHER_CLERK_ORG_ID"
+  provider_proof verify-app-onboarding
+  open_path "/app/earnings"
+  wait_for_text "Earnings" 30
+  assert_exact_active_org
+  click_button "Transfer available earnings" \
+    || fail "publisher transfer action is missing or disabled"
+  wait_for_text "Publisher transfer submitted to Stripe." 60
+  state_proof record-app-transfer-ui "$E2E_PUBLISHER_CLERK_ORG_ID"
+  ledger_proof wait-app-transfer
+  provider_proof verify-app-transfer
+  ledger_proof wait-app-transfer-webhook
+
   step "expire a real unpaid Checkout and prove terminal recovery"
   terminal_before="$(read_wallet_balance)"
   ab find role button click --name "Buy \$10.00" >/dev/null
   wait_for_url_pattern "https://checkout.stripe.com/" 30
   terminal_url="$(ab get url)"
-  terminal_id="$(node -e 'const match=new URL(process.argv[1]).pathname.match(/cs_test_[A-Za-z0-9]+/); console.log(match?.[0] || "")' "$terminal_url")"
+  terminal_id="$(state_exec "$NODE_BIN" -e 'const match=new URL(process.argv[1]).pathname.match(/cs_test_[A-Za-z0-9]+/); console.log(match?.[0] || "")' "$terminal_url")"
   [[ "$terminal_id" == cs_test_* ]] || fail "terminal proof lacks Checkout Session id"
-  node "$STRIPE_PROOF" record-provider-id terminalCheckoutSessionId "$terminal_id"
-  node "$STRIPE_PROOF" expire-checkout
+  state_proof record-provider-id terminalCheckoutSessionId "$terminal_id"
+  provider_proof expire-checkout
   open_path "/app/billing?checkout=$terminal_id"
   wait_for_text "Payment was not completed" 120
   wait_for_text "Not completed" 30
   terminal_after="$(read_wallet_balance)"
   assert_eq "$terminal_after" "$terminal_before" "expired Checkout changed wallet"
 
-  state_granted="$(node -e 'const x=require(process.argv[1]); console.log(x.walletAfterGrant)' "$PAYMENT_DRILL_STATE")"
+  state_granted="$(state_proof state-field walletAfterGrant)"
   [[ "$state_granted" =~ ^-?[0-9]+$ ]] || fail "grant wallet proof is missing"
-  node "$STRIPE_PROOF" record-usage-proof \
+  state_proof record-usage-proof \
     "$E2E_ARTIFACTS/gateway-paid-call-proof.json"
-  node "$STRIPE_PROOF" wait-usage
-  wallet_before="$(node "$STRIPE_PROOF" state-field ledgerSnapshots.usage.wallet.balance)"
+  ledger_proof wait-usage
+  wallet_before="$(state_proof state-field ledgerSnapshots.usage.wallet.balance)"
   (( wallet_before < state_granted )) \
     || fail "paid journey did not settle usage below granted wallet"
   wait_for_wallet_balance "$wallet_before" 120 >/dev/null
   consumed=$((state_granted - wallet_before))
 
   step "install isolated signed-webhook failure canary"
-  node "$STRIPE_PROOF" begin-webhook-canary
-  node "$STRIPE_PROOF" refund partial
-  partial_event_id="$(node "$STRIPE_PROOF" state-field partialRefundEventId)"
-  node "$STRIPE_PROOF" wait-ledger partial "$partial_event_id" 1 \
+  provider_proof begin-webhook-canary
+  provider_proof refund partial
+  partial_event_id="$(state_proof state-field partialRefundEventId)"
+  ledger_proof wait-ledger partial "$partial_event_id" 1 \
     "$PARTIAL_REFUND_CREDITS" usage 1
-  wallet_partial="$(node "$STRIPE_PROOF" state-field ledgerSnapshots.partial.wallet.balance)"
+  wallet_partial="$(state_proof state-field ledgerSnapshots.partial.wallet.balance)"
   wait_for_wallet_balance "$wallet_partial" 120 >/dev/null
   wait_for_text "25,000 credits refunded" 30
 
   step "prove exact failed canary, replay canonical receipt, and verify idempotency"
-  node "$STRIPE_PROOF" prove-canary-and-replay
-  node "$STRIPE_PROOF" wait-ledger replay "$partial_event_id" 2 \
-    "$PARTIAL_REFUND_CREDITS" partial
-  wallet_replayed="$(node "$STRIPE_PROOF" state-field ledgerSnapshots.replay.wallet.balance)"
+  provider_proof prove-canary-and-replay
+  ledger_proof wait-ledger replay "$partial_event_id" 2 \
+    "$PARTIAL_REFUND_CREDITS" partial 2
+  wallet_replayed="$(state_proof state-field ledgerSnapshots.replay.wallet.balance)"
   assert_eq "$wallet_replayed" "$wallet_partial" "webhook replay duplicated refund reversal"
   wait_for_wallet_balance "$wallet_replayed" 120 >/dev/null
 
   step "create remaining provider refund and prove full Convex reversal"
-  node "$STRIPE_PROOF" refund remaining
-  full_event_id="$(node "$STRIPE_PROOF" state-field fullRefundEventId)"
-  node "$STRIPE_PROOF" wait-ledger full "$full_event_id" 1 "$GRANT_CREDITS" replay
-  wallet_full="$(node "$STRIPE_PROOF" state-field ledgerSnapshots.full.wallet.balance)"
+  provider_proof refund remaining
+  full_event_id="$(state_proof state-field fullRefundEventId)"
+  ledger_proof wait-ledger full "$full_event_id" 1 "$GRANT_CREDITS" replay 1
+  wallet_full="$(state_proof state-field ledgerSnapshots.full.wallet.balance)"
   wait_for_wallet_balance "$wallet_full" 120 >/dev/null
   wait_for_text "100,000 credits refunded" 30
   wait_for_text "Refunded" 30
-  node "$STRIPE_PROOF" cleanup-webhook-canary
+  provider_proof cleanup-webhook-canary
   log "refund phase PASS consumed=$consumed wallet=$wallet_before->$wallet_full"
+}
+
+run_cleanup_phase() {
+  local cleanup_failed=0
+  ledger_proof record-recovery-baseline || cleanup_failed=1
+  provider_proof recover-provider || cleanup_failed=1
+  ledger_proof recover-ledger || cleanup_failed=1
+  provider_proof cleanup-webhook-canary || cleanup_failed=1
+  provider_proof compensate-app-transfer || cleanup_failed=1
+  ledger_proof wait-app-compensation || cleanup_failed=1
+  ledger_proof finalize-acceptance || cleanup_failed=1
+  (( cleanup_failed == 0 )) || fail "payment/provider compensation did not fully reconcile"
 }
 
 case "$PAYMENT_DRILL_PHASE" in
@@ -249,7 +334,7 @@ case "$PAYMENT_DRILL_PHASE" in
     run_refund_phase
     ;;
   cleanup)
-    node "$STRIPE_PROOF" recover
+    run_cleanup_phase
     ;;
 esac
 

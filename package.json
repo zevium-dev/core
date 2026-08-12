@@ -8,7 +8,7 @@
     "ci:pr": "prettier --check . && pnpm typecheck && pnpm test",
     "test": "turbo test && pnpm test:convex && pnpm test:proofs",
     "test:convex": "vitest run --config convex/vitest.config.ts",
-    "test:proofs": "tsc --noEmit --allowJs --checkJs --strict false --skipLibCheck --target ES2024 --module NodeNext --moduleResolution NodeNext e2e/stripe-provider-proof.mjs e2e/stripe-provider-proof-lib.mjs && node --test e2e/sanitize-artifacts.test.mjs e2e/stripe-provider-proof-lib.test.mjs",
+    "test:proofs": "tsc --noEmit --allowJs --checkJs --strict false --skipLibCheck --target ES2024 --module NodeNext --moduleResolution NodeNext e2e/stripe-provider-proof.mjs e2e/stripe-provider-proof-lib.mjs e2e/sanitize-artifacts.mjs e2e/run-isolated.mjs scripts/generate-deployment-manifests.mjs && node --test e2e/sanitize-artifacts.test.mjs e2e/stripe-provider-proof-lib.test.mjs e2e/run-isolated.test.mjs",
     "typecheck": "turbo typecheck",
     "lint": "turbo lint",
     "format": "prettier --write .",

@@ -649,6 +649,7 @@ export default defineSchema({
     .index("by_payment", ["paymentId", "createdAt"])
     .index("by_source", ["sourceRef"])
     .index("by_source_state_created", ["sourceRef", "state", "createdAt"])
+    .index("by_earning", ["earningId", "createdAt"])
     .index("by_allocation", ["allocationId"]),
 
   publisherTransfers: defineTable({

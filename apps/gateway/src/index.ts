@@ -39,6 +39,11 @@ export interface Env {
   CONVEX_DEPLOY_KEY?: string;
   /** Shared secret for POST /internal/grant + Convex /ingest-usage. */
   GATEWAY_INTERNAL_SECRET?: string;
+  /** Immutable build identity. All four values are part of one Worker version. */
+  ZEVIUM_GIT_SHA?: string;
+  ZEVIUM_GATEWAY_DEPLOYMENT_ID?: string;
+  ZEVIUM_DEPLOYED_AT?: string;
+  ZEVIUM_DEPLOYMENT_MODE?: string;
   /**
    * Test-only: when set, Worker uses fixture key/spec sources populated via
    * internal test helpers (see test/pipeline.test.ts). Not for production.
@@ -63,6 +68,30 @@ export function __setTestPipelineDeps(deps: WorkerDeps | null): void {
 
 export function __getTestPipelineDeps(): WorkerDeps | null {
   return testDeps;
+}
+
+function gatewayDeploymentProof(env: Env) {
+  return {
+    schemaVersion: 1,
+    service: "gateway",
+    mode: env.ZEVIUM_DEPLOYMENT_MODE ?? "",
+    gitSha: env.ZEVIUM_GIT_SHA ?? "",
+    deploymentId: env.ZEVIUM_GATEWAY_DEPLOYMENT_ID ?? "",
+    deployedAt: env.ZEVIUM_DEPLOYED_AT ?? "",
+  } as const;
+}
+
+function validGatewayDeploymentProof(
+  proof: ReturnType<typeof gatewayDeploymentProof>,
+): boolean {
+  const deployedAt = Date.parse(proof.deployedAt);
+  return (
+    /^(preview|production|staging)$/.test(proof.mode) &&
+    /^[0-9a-f]{40}$/.test(proof.gitSha) &&
+    /^[A-Za-z0-9][A-Za-z0-9._:-]{7,159}$/.test(proof.deploymentId) &&
+    Number.isFinite(deployedAt) &&
+    new Date(deployedAt).toISOString() === proof.deployedAt
+  );
 }
 
 // Module-scoped prod deps, lazily built on first request and reused across
@@ -222,17 +251,23 @@ export default {
 
     if (url.pathname === "/" || url.pathname === "/health") {
       const testMode = env.GATEWAY_TEST_MODE === "1";
+      const deployment = gatewayDeploymentProof(env);
       const specConfigReady =
         testMode ||
         Boolean(
           env.CONVEX_URL &&
           env.CONVEX_SITE_URL &&
           env.GATEWAY_INTERNAL_SECRET &&
-          env.CLERK_SECRET_KEY,
+          env.CLERK_SECRET_KEY &&
+          validGatewayDeploymentProof(deployment),
         );
       return withCors(
         Response.json(
-          { ok: specConfigReady, service: "zevium-gateway" },
+          {
+            ok: specConfigReady,
+            service: "zevium-gateway",
+            deployment,
+          },
           { status: specConfigReady ? 200 : 503 },
         ),
       );

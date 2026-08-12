@@ -16,6 +16,8 @@ import type * as catalogue from "../catalogue.js";
 import type * as cronTasks from "../cronTasks.js";
 import type * as crons from "../crons.js";
 import type * as dev from "../dev.js";
+import type * as deploymentManifest_generated from "../deploymentManifest.generated.js";
+import type * as deploymentProof from "../deploymentProof.js";
 import type * as earnings from "../earnings.js";
 import type * as financeMigration from "../financeMigration.js";
 import type * as http from "../http.js";
@@ -56,6 +58,8 @@ declare const fullApi: ApiFromModules<{
   cronTasks: typeof cronTasks;
   crons: typeof crons;
   dev: typeof dev;
+  "deploymentManifest.generated": typeof deploymentManifest_generated;
+  deploymentProof: typeof deploymentProof;
   earnings: typeof earnings;
   financeMigration: typeof financeMigration;
   http: typeof http;
