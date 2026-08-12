@@ -2,21 +2,25 @@ packages:
   - apps/*
   - packages/*
 
+registry: https://registry.npmjs.org/
+trustLockfile: false
+verifyStoreIntegrity: true
+strictDepBuilds: true
+
 allowBuilds:
-  "@parcel/watcher": true
-  "@tailwindcss/oxide": true
+  agent-browser: true
+  "@tailwindcss/oxide": false
   bufferutil: true
-  core-js: true
   esbuild: true
-  protobufjs: true
+  fsevents: false
   # sharp ships prebuilt platform binaries; running its install script can
   # incorrectly force a source build when system libvips is present.
   sharp: false
   utf-8-validate: true
-  vue-demi: true
   workerd: true
 
 minimumReleaseAge: 720
+minimumReleaseAgeStrict: true
 minimumReleaseAgeExclude:
   - "@cloudflare/workers-types"
   - "@clerk/*"

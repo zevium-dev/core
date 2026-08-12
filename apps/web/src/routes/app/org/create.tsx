@@ -1,9 +1,9 @@
 import { CreateOrganization } from "@clerk/tanstack-react-start";
-import { shadcn } from "@clerk/ui/themes";
 import { createFileRoute } from "@tanstack/react-router";
 
 import { FadeIn } from "#/components/motion/fade-in";
 import { Skeleton } from "#/components/ui/skeleton";
+import { clerkShadcnTheme } from "#/lib/clerk-theme";
 
 export const Route = createFileRoute("/app/org/create")({
   component: CreateOrgPage,
@@ -27,7 +27,7 @@ function CreateOrgPage() {
 
       <div className="flex min-h-[22rem] justify-center">
         <CreateOrganization
-          appearance={{ theme: shadcn }}
+          appearance={{ theme: clerkShadcnTheme }}
           afterCreateOrganizationUrl="/app"
           routing="hash"
         />

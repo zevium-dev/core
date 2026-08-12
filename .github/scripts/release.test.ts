@@ -504,7 +504,7 @@ describe("production workflow invariants", () => {
   it("bounds preview propagation and checks response contracts", () => {
     expect(previewWorkflow).toContain("for attempt in $(seq 1 30)");
     expect(previewWorkflow).toContain("<title>Catalogue · Zevium</title>");
-    expect(previewWorkflow).toContain('health.get("contract") != 1');
+    expect(previewWorkflow).toContain('health.get("contract") == 1');
     expect(previewWorkflow).toContain("access-control-allow-origin");
   });
 
@@ -531,12 +531,14 @@ describe("production workflow invariants", () => {
       "Validate trusted preview target with gh CLI",
     );
     expect(previewWorkflow).toContain(
-      'pr["head"]["repo"]["full_name"] != os.environ["GITHUB_REPOSITORY"]',
+      'pr["head"]["repo"]["full_name"] == os.environ["GITHUB_REPOSITORY"]',
     );
-    expect(previewWorkflow).toContain('pr["user"]["login"] != "tnfssc"');
+    expect(previewWorkflow).toContain('pr["user"]["login"] == "tnfssc"');
     expect(
       previewWorkflow.indexOf("Validate trusted preview target with gh CLI"),
-    ).toBeLessThan(previewWorkflow.indexOf("actions/checkout@v6"));
+    ).toBeLessThan(
+      previewWorkflow.indexOf("ref: ${{ needs.preview-target.outputs.ref }}"),
+    );
   });
 });
 

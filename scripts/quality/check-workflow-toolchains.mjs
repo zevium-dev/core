@@ -15,6 +15,9 @@ export const toolchainPolicy = Object.freeze({
     "node@24.15.0 npm:pnpm@11.8.0 actionlint@1.7.12 gitleaks@8.30.1 shellcheck@0.11.0",
 });
 const exactMiseConfig = [
+  "[hooks]",
+  'postinstall = "node scripts/audit-preflight.mjs && pnpm --filter . install --frozen-lockfile --ignore-pnpmfile --ignore-scripts --registry=https://registry.npmjs.org/ --config.trust-lockfile=false --config.verify-store-integrity=true"',
+  "",
   "[tasks]",
   'ci = "pnpm run ci:pr"',
   "",
@@ -87,13 +90,26 @@ export function validateWorkflowToolchain(path) {
       .filter(([run]) => run === exactVerification)
       .map(([, index]) => index);
     const verifyIndex = verifyIndexes[0] ?? -1;
+    const runsAudit = steps.some(
+      (step) => runText(step) === "node scripts/audit.mjs",
+    );
+    const auditBootstrapInstall =
+      "pnpm --filter . install --frozen-lockfile --ignore-pnpmfile --ignore-scripts --registry=https://registry.npmjs.org/ --config.trust-lockfile=false --config.verify-store-integrity=true";
     const installIndexes = steps
       .map((step, index) => [runText(step), index])
-      .filter(([run]) => run === "pnpm install --frozen-lockfile")
+      .filter(([run]) =>
+        runsAudit
+          ? run === auditBootstrapInstall
+          : run === "pnpm install --frozen-lockfile",
+      )
       .map(([, index]) => index);
     const allInstallIndexes = steps
       .map((step, index) => [runText(step), index])
-      .filter(([run]) => /(^|\s)pnpm\s+(?:install|i)(?:\s|$)/m.test(run))
+      .filter(
+        ([run]) =>
+          /(^|\s)pnpm\s+(?:install|i)(?:\s|$)/m.test(run) ||
+          (runsAudit && run === auditBootstrapInstall),
+      )
       .map(([, index]) => index);
     if (verifyIndexes.length !== 1 || verifyIndex <= miseIndex) {
       failures.push(
@@ -124,6 +140,7 @@ export function validateWorkflowToolchain(path) {
       if (
         index < installIndex &&
         index !== verifyIndex &&
+        !(runsAudit && run === "node scripts/audit-preflight.mjs") &&
         dependencyCommand.test(run)
       ) {
         failures.push(
@@ -157,8 +174,11 @@ export function checkWorkflowToolchains(root = repositoryRoot) {
       "mise.toml must match exact task and five-tool version policy",
     );
   }
-  if (packageJson.packageManager !== `pnpm@${toolchainPolicy.pnpmVersion}`) {
-    throw new Error("packageManager pnpm pin disagrees with workflow policy");
+  const expectedPackageManager = `pnpm@${toolchainPolicy.pnpmVersion}+sha512.c1f5e7c4cb241c8f174b743851d82f42b802324afc8b0f116b96adb15aa06664948dde36960a3ba1079ba5b4b29dd0140135b94b5b5f5263592249d68e555f26`;
+  if (packageJson.packageManager !== expectedPackageManager) {
+    throw new Error(
+      "packageManager pnpm integrity pin disagrees with workflow policy",
+    );
   }
   return workflows.length;
 }

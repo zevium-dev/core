@@ -7,6 +7,7 @@ const commands = [
   ["pnpm", ["run", "test:convex"]],
   ["pnpm", ["run", "test:quality"]],
   ["pnpm", ["run", "test:release"]],
+  ["pnpm", ["run", "test:audit"]],
 ];
 
 try {

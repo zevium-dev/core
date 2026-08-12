@@ -1,5 +1,4 @@
 import { Show, UserButton } from "@clerk/tanstack-react-start";
-import { shadcn } from "@clerk/ui/themes";
 import { Link } from "@tanstack/react-router";
 import { Github, Menu, X } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -7,6 +6,7 @@ import { useEffect, useState } from "react";
 import { BrandMark } from "#/components/brand-mark";
 import { ThemeToggle } from "#/components/theme-toggle";
 import { Button } from "#/components/ui/button";
+import { clerkShadcnTheme } from "#/lib/clerk-theme";
 import { cn } from "#/lib/utils";
 
 type PublicHeaderProps = {
@@ -98,7 +98,7 @@ export function PublicHeader({ active = null, className }: PublicHeaderProps) {
                   <Button asChild variant="ghost" size="sm">
                     <Link to="/app">Dashboard</Link>
                   </Button>
-                  <UserButton appearance={{ theme: shadcn }} />
+                  <UserButton appearance={{ theme: clerkShadcnTheme }} />
                 </>
               }
             >

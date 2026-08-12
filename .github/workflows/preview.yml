@@ -23,6 +23,33 @@ env:
   CLOUDFLARE_ACCOUNT_ID: 1ea9299555b026a6a7484c8323c5a953
 
 jobs:
+  security:
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: ~/.local/share/pnpm/store
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+      - uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4
+        with:
+          version: 2026.7.13
+          install: true
+          install_args: node@24.15.0 npm:pnpm@11.8.0 actionlint@1.7.12 gitleaks@8.30.1 shellcheck@0.11.0
+      - name: Verify exact Node and pnpm
+        run: |
+          test "$(node --version)" = "v24.15.0"
+          test "$(pnpm --version)" = "11.8.0"
+      - name: Verify dependency bootstrap policy
+        run: node scripts/audit-preflight.mjs
+      - name: Install dependencies without lifecycle scripts
+        run: pnpm --filter . install --frozen-lockfile --ignore-pnpmfile --ignore-scripts --registry=https://registry.npmjs.org/ --config.trust-lockfile=false --config.verify-store-integrity=true
+      - name: Verify dependency supply chain
+        run: node scripts/audit.mjs
+
   preview-target:
     if: >-
       github.event_name == 'workflow_dispatch' || github.event.action != 'labeled' ||
@@ -49,22 +76,11 @@ jobs:
             exit 1
           }
           preview_sha="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" \
-            | python3 -c '
-              import json, os, re, sys
-              pr = json.load(sys.stdin)
-              if pr["state"] != "open": raise SystemExit("preview target PR is not open")
-              if pr["head"]["repo"]["full_name"] != os.environ["GITHUB_REPOSITORY"]:
-                  raise SystemExit("fork previews cannot receive deployment secrets")
-              if pr["user"]["login"] != "tnfssc":
-                  raise SystemExit("preview target author is not trusted maintainer")
-              if not re.fullmatch(r"[0-9a-f]{40}", pr.get("merge_commit_sha") or ""):
-                  raise SystemExit("preview merge commit is not ready")
-              sys.stdout.write(pr["merge_commit_sha"])
-            ')"
+            | python3 -c 'import json, os, re, sys; pr = json.load(sys.stdin); assert pr["state"] == "open", "preview target PR is not open"; assert pr["head"]["repo"]["full_name"] == os.environ["GITHUB_REPOSITORY"], "fork previews cannot receive deployment secrets"; assert pr["user"]["login"] == "tnfssc", "preview target author is not trusted maintainer"; assert re.fullmatch(r"[0-9a-f]{40}", pr.get("merge_commit_sha") or ""), "preview merge commit is not ready"; sys.stdout.write(pr["merge_commit_sha"])')"
           echo "ref=$preview_sha" >> "$GITHUB_OUTPUT"
 
   preview-convex:
-    needs: preview-target
+    needs: [security, preview-target]
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 10
     environment: preview
@@ -72,11 +88,11 @@ jobs:
       convex_url: ${{ steps.deploy.outputs.convex_url }}
       convex_site_url: ${{ steps.deploy.outputs.convex_site_url }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           ref: ${{ needs.preview-target.outputs.ref }}
           persist-credentials: false
-      - uses: actions/cache@v5
+      - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: ~/.local/share/pnpm/store
           key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
@@ -102,7 +118,7 @@ jobs:
             --cmd-url-env-var-name CONVEX_URL
 
   gateway-preview:
-    needs: [preview-target, preview-convex]
+    needs: [security, preview-target, preview-convex]
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 10
     environment: preview
@@ -113,11 +129,11 @@ jobs:
       VITE_CONVEX_URL: ${{ needs.preview-convex.outputs.convex_url }}
       CONVEX_SITE_URL: ${{ needs.preview-convex.outputs.convex_site_url }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           ref: ${{ needs.preview-target.outputs.ref }}
           persist-credentials: false
-      - uses: actions/cache@v5
+      - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: ~/.local/share/pnpm/store
           key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
@@ -151,7 +167,7 @@ jobs:
           echo "release_sha=$release_sha" >> "$GITHUB_OUTPUT"
 
   web-build:
-    needs: [preview-target, preview-convex]
+    needs: [security, preview-target, preview-convex]
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 10
     environment: preview
@@ -159,11 +175,11 @@ jobs:
       VITE_CONVEX_URL: ${{ needs.preview-convex.outputs.convex_url }}
       VITE_GATEWAY_URL: https://zevium-gateway-pr-${{ github.event.pull_request.number || inputs.pr_number }}.zevium-dev.workers.dev
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           ref: ${{ needs.preview-target.outputs.ref }}
           persist-credentials: false
-      - uses: actions/cache@v5
+      - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: ~/.local/share/pnpm/store
           key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
@@ -184,29 +200,29 @@ jobs:
           CLERK_SECRET_KEY: ${{ secrets.CLERK_PREVIEW_SECRET_KEY }}
         run: VITE_RELEASE_SHA="$(git rev-parse HEAD)" pnpm --filter web build
       - name: Upload web Worker build
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: preview-web-${{ env.PR_NUMBER }}
           path: apps/web/dist
           if-no-files-found: error
 
   web-preview:
-    needs: [preview-target, web-build]
+    needs: [security, preview-target, web-build]
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 10
     environment: preview
     outputs:
       web_url: ${{ steps.deploy.outputs.web_url }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           ref: ${{ needs.preview-target.outputs.ref }}
           persist-credentials: false
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: preview-web-${{ env.PR_NUMBER }}
           path: apps/web/dist
-      - uses: actions/cache@v5
+      - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: ~/.local/share/pnpm/store
           key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
@@ -295,13 +311,7 @@ jobs:
           fi
 
           wait_for_http_200 "$GATEWAY_URL/health" e2e/artifacts/gateway-health.json
-          python3 -c '
-            import json, os
-            health = json.load(open("e2e/artifacts/gateway-health.json"))
-            if (health.get("ok") is not True or health.get("service") != "zevium-gateway"
-                    or health.get("release") != os.environ["RELEASE_SHA"] or health.get("contract") != 1):
-                raise SystemExit("Unexpected gateway health response")
-          '
+          python3 -c 'import json, os; health = json.load(open("e2e/artifacts/gateway-health.json")); assert health.get("ok") is True and health.get("service") == "zevium-gateway" and health.get("release") == os.environ["RELEASE_SHA"] and health.get("contract") == 1, "Unexpected gateway health response"'
 
           preflight_status="$(curl --silent --show-error \
             --connect-timeout 1 --max-time 2 \
@@ -331,16 +341,11 @@ jobs:
           test "$missing_status" = "404"
           grep --ignore-case --quiet '^content-type: application/json' \
             e2e/artifacts/gateway-404.headers
-          python3 -c '
-            import json
-            body = json.load(open("e2e/artifacts/gateway-404.json"))
-            if body.get("error") != "not found" or len(body) != 1:
-                raise SystemExit("Unexpected gateway 404 contract")
-          '
+          python3 -c 'import json; body = json.load(open("e2e/artifacts/gateway-404.json")); assert body.get("error") == "not found" and len(body) == 1, "Unexpected gateway 404 contract"'
 
       - name: Upload contract failure evidence
         if: failure()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: preview-contract-${{ env.PR_NUMBER }}
           path: e2e/artifacts
@@ -348,7 +353,7 @@ jobs:
 
       - name: Publish preview links
         if: github.event_name == 'pull_request'
-        uses: actions/github-script@v8
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         with:
           script: |
             const marker = '<!-- zevium-preview -->'
@@ -371,11 +376,11 @@ jobs:
       E2E_BASE_URL: ${{ needs.deploy-and-test.outputs.web_url }}
       PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           ref: ${{ needs.preview-target.outputs.ref }}
           persist-credentials: false
-      - uses: actions/cache@v5
+      - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: ~/.local/share/pnpm/store
           key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
@@ -392,8 +397,7 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Install browser runtime
         run: |
-          npm install --global agent-browser@0.27.1
-          agent-browser install --with-deps
+          pnpm exec agent-browser install --with-deps
       - name: Run authenticated publish and catalogue journey
         env:
           GATEWAY_URL: ""
@@ -411,7 +415,7 @@ jobs:
 
       - name: Upload failure evidence
         if: failure()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: preview-e2e-${{ env.PR_NUMBER }}
           path: |

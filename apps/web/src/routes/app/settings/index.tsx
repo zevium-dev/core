@@ -1,6 +1,7 @@
 import { UserProfile } from "@clerk/tanstack-react-start";
-import { shadcn } from "@clerk/ui/themes";
 import { createFileRoute } from "@tanstack/react-router";
+
+import { clerkShadcnTheme } from "#/lib/clerk-theme";
 
 export const Route = createFileRoute("/app/settings/")({
   component: SettingsPage,
@@ -23,7 +24,7 @@ function SettingsPage() {
         <UserProfile
           routing="hash"
           appearance={{
-            theme: shadcn,
+            theme: clerkShadcnTheme,
             elements: {
               rootBox: "w-full!",
               cardBox: "w-full! max-w-none!",
