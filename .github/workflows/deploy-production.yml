@@ -218,7 +218,10 @@ jobs:
         env:
           CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_STAGING_DEPLOY_KEY }}
           EXPECTED_CONVEX_URL: ${{ vars.STAGING_CONVEX_URL }}
+          STAGING_CONVEX_URL: ${{ vars.STAGING_CONVEX_URL }}
         run: |
+          staging_slug="${STAGING_CONVEX_URL#https://}"
+          export CONVEX_DEPLOYMENT="dev:${staging_slug%.convex.cloud}"
           convex_dry_run="$(pnpm exec convex deploy --dry-run --yes \
             --codegen disable --typecheck disable 2>&1)"
           printf '%s' "$convex_dry_run" \
@@ -236,7 +239,11 @@ jobs:
       - name: Deploy backward-compatible staging control plane
         env:
           CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_STAGING_DEPLOY_KEY }}
-        run: pnpm exec convex deploy --yes --message "staging release $RELEASE_SHA"
+          STAGING_CONVEX_URL: ${{ vars.STAGING_CONVEX_URL }}
+        run: |
+          staging_slug="${STAGING_CONVEX_URL#https://}"
+          export CONVEX_DEPLOYMENT="dev:${staging_slug%.convex.cloud}"
+          pnpm exec convex deploy --yes --message "staging release $RELEASE_SHA"
 
       - name: Deploy immutable staging gateway and web candidates
         env:
@@ -398,6 +405,8 @@ jobs:
           CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_PRODUCTION_DEPLOY_KEY }}
           EXPECTED_CONVEX_URL: ${{ env.PRODUCTION_CONVEX_URL }}
         run: |
+          prod_slug="${PRODUCTION_CONVEX_URL#https://}"
+          export CONVEX_DEPLOYMENT="prod:${prod_slug%.convex.cloud}"
           convex_dry_run="$(pnpm exec convex deploy --dry-run --yes \
             --codegen disable --typecheck disable 2>&1)"
           printf '%s' "$convex_dry_run" \
@@ -599,6 +608,8 @@ jobs:
           # Mark before mutation: provider failure can still mean commit won.
           # Evidence must never claim production stayed untouched.
           node .github/scripts/release-state.mjs mark release-evidence convex_mutation_started
+          prod_slug="${PRODUCTION_CONVEX_URL#https://}"
+          export CONVEX_DEPLOYMENT="prod:${prod_slug%.convex.cloud}"
           pnpm exec convex deploy --yes --message "production expansion $RELEASE_SHA"
           node .github/scripts/release-state.mjs mark release-evidence convex_expanded
 
