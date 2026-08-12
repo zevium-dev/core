@@ -169,7 +169,8 @@ x-zevium-signature: <hex HMAC-SHA256 of body>
       />
       <p>
         Verify the signature before trusting the payload. The signing secret is
-        generated server-side when you create the endpoint and shown once:
+        generated and encrypted server-side when you create the endpoint. Org
+        admins can explicitly reveal it from project Settings:
       </p>
       <DocsCodeBlock lang="typescript" code={VERIFY_WEBHOOK} />
     </DocsPage>

@@ -34,9 +34,12 @@ export const migrateSecurityRollout = mutation({
     ctx,
   ): Promise<{
     credentials: { migrated: number; remaining: number };
+    webhookSecrets: { migrated: number; remaining: number };
     handles: { updated: number; collisions: number };
     remainingPlaintext: number;
     remainingUnencrypted: number;
+    remainingWebhookPlaintext: number;
+    remainingWebhookUnencrypted: number;
     remainingMissingHandles: number;
   }> => {
     await requireAdmin(ctx);
@@ -45,15 +48,25 @@ export const migrateSecurityRollout = mutation({
         internal.upstreamCredentials.migrateLegacyPlaintext,
         {},
       );
+    const webhookSecrets: { migrated: number; remaining: number } =
+      await ctx.runMutation(internal.webhooks.migrateLegacyPlaintext, {});
     const handles: { updated: number; collisions: number } =
       await ctx.runMutation(internal.organizations.backfillPublicHandles, {});
     const rows = await ctx.db.query("upstreamCredentials").collect();
+    const webhookEndpoints = await ctx.db.query("webhookEndpoints").collect();
     const organizations = await ctx.db.query("organizations").collect();
     return {
       credentials,
+      webhookSecrets,
       handles,
-      remainingPlaintext: rows.filter((row) => Boolean(row.secret)).length,
+      remainingPlaintext: rows.filter((row) => row.secret !== undefined).length,
       remainingUnencrypted: rows.filter(
+        (row) => !row.ciphertext || !row.iv || !row.keyVersion,
+      ).length,
+      remainingWebhookPlaintext: webhookEndpoints.filter(
+        (row) => row.secret !== undefined,
+      ).length,
+      remainingWebhookUnencrypted: webhookEndpoints.filter(
         (row) => !row.ciphertext || !row.iv || !row.keyVersion,
       ).length,
       remainingMissingHandles: organizations.filter(

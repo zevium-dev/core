@@ -3,6 +3,7 @@
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import { internalAction } from "./_generated/server";
+import { decryptSecret, requireEncryptedSecret } from "./lib/credentialCrypto";
 import { postWebhook } from "./lib/webhookDelivery";
 import { deliverPinnedHttps } from "./lib/webhookTransport";
 
@@ -29,6 +30,21 @@ export const deliverWebhook = internalAction({
       return;
     }
 
+    let signingSecret: string;
+    try {
+      signingSecret = await decryptSecret(
+        requireEncryptedSecret(info.encryptedSecret),
+      );
+    } catch {
+      await ctx.runMutation(internal.webhooks.recordDeliveryAttempt, {
+        deliveryId: args.deliveryId,
+        ok: false,
+        error: "Signing secret unavailable",
+        retryable: false,
+      });
+      return;
+    }
+
     const parsed = JSON.parse(info.payload) as {
       event: string;
       data: unknown;
@@ -38,7 +54,7 @@ export const deliverWebhook = internalAction({
     const result = await postWebhook(
       {
         url: info.url,
-        secret: info.secret,
+        secret: signingSecret,
         event: parsed.event,
         data: parsed.data,
         timestamp: parsed.timestamp,

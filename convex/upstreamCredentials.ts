@@ -125,8 +125,14 @@ export const migrateLegacyPlaintext = internalMutation({
     let migrated = 0;
     let remaining = 0;
     for (const row of rows) {
-      if (row.ciphertext && row.iv && row.keyVersion) continue;
-      if (!row.secret) {
+      if (row.ciphertext && row.iv && row.keyVersion) {
+        if (row.secret !== undefined) {
+          await ctx.db.patch(row._id, { secret: undefined });
+          migrated += 1;
+        }
+        continue;
+      }
+      if (row.secret === undefined) {
         remaining += 1;
         continue;
       }

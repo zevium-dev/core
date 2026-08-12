@@ -10,6 +10,12 @@ import {
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import { requireProjectAdmin, requireProjectMember } from "./lib/auth";
+import {
+  decryptSecret,
+  encryptSecret,
+  requireEncryptedSecret,
+  type EncryptedSecret,
+} from "./lib/credentialCrypto";
 import { createNotification } from "./lib/notifications";
 import { validateWebhookUrl } from "./lib/webhookDelivery";
 
@@ -32,6 +38,24 @@ export const WEBHOOK_BACKOFF_SECONDS = [60, 300] as const;
 /** Generate a random signing secret. */
 function generateSecret(): string {
   return `${crypto.randomUUID()}.${crypto.randomUUID()}`;
+}
+
+export type WebhookEndpointMetadata = {
+  id: Id<"webhookEndpoints">;
+  url: string;
+  active: boolean;
+  createdAt: number;
+};
+
+function endpointMetadata(
+  endpoint: Doc<"webhookEndpoints">,
+): WebhookEndpointMetadata {
+  return {
+    id: endpoint._id,
+    url: endpoint.url,
+    active: endpoint.active,
+    createdAt: endpoint.createdAt,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -89,7 +113,7 @@ export const upsertEndpoint = mutation({
     url: v.string(),
     active: v.optional(v.boolean()),
   },
-  handler: async (ctx, args): Promise<Doc<"webhookEndpoints">> => {
+  handler: async (ctx, args): Promise<WebhookEndpointMetadata> => {
     await requireProjectAdmin(ctx, args.projectId);
 
     const url = args.url.trim();
@@ -103,16 +127,22 @@ export const upsertEndpoint = mutation({
       .unique();
 
     if (existing === null) {
+      let encryptedSecret: EncryptedSecret;
+      try {
+        encryptedSecret = await encryptSecret(generateSecret());
+      } catch {
+        throw new Error("Signing secret could not be created");
+      }
       const id = await ctx.db.insert("webhookEndpoints", {
         projectId: args.projectId,
         url,
-        secret: generateSecret(),
+        ...encryptedSecret,
         active: args.active ?? true,
         createdAt: Date.now(),
       });
       const created = await ctx.db.get(id);
       if (created === null) throw new Error("Failed to create endpoint");
-      return created;
+      return endpointMetadata(created);
     }
 
     await ctx.db.patch(existing._id, {
@@ -121,19 +151,41 @@ export const upsertEndpoint = mutation({
     });
     const updated = await ctx.db.get(existing._id);
     if (updated === null) throw new Error("Failed to load endpoint");
-    return updated;
+    return endpointMetadata(updated);
   },
 });
 
-/** Fetch the webhook endpoint for a project (null if none). */
+/** Fetch non-secret webhook endpoint metadata for an admin. */
 export const getEndpoint = query({
   args: { projectId: v.id("projects") },
-  handler: async (ctx, args): Promise<Doc<"webhookEndpoints"> | null> => {
+  handler: async (ctx, args): Promise<WebhookEndpointMetadata | null> => {
     await requireProjectAdmin(ctx, args.projectId);
-    return await ctx.db
+    const endpoint = await ctx.db
       .query("webhookEndpoints")
       .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
       .unique();
+    return endpoint === null ? null : endpointMetadata(endpoint);
+  },
+});
+
+/** Explicit, ephemeral signing-secret reveal. Never returned from CRUD reads. */
+export const revealSecret = mutation({
+  args: { projectId: v.id("projects") },
+  handler: async (ctx, args): Promise<{ secret: string } | null> => {
+    await requireProjectAdmin(ctx, args.projectId);
+    const endpoint = await ctx.db
+      .query("webhookEndpoints")
+      .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
+      .unique();
+    if (endpoint === null) return null;
+
+    try {
+      return {
+        secret: await decryptSecret(requireEncryptedSecret(endpoint)),
+      };
+    } catch {
+      throw new Error("Signing secret is unavailable");
+    }
   },
 });
 
@@ -191,7 +243,11 @@ export const getDeliveryForAction = internalQuery({
     args,
   ): Promise<{
     url: string;
-    secret: string;
+    encryptedSecret: {
+      ciphertext?: string;
+      iv?: string;
+      keyVersion?: string;
+    };
     active: boolean;
     event: string;
     payload: string;
@@ -204,13 +260,50 @@ export const getDeliveryForAction = internalQuery({
     if (endpoint === null) return null;
     return {
       url: endpoint.url,
-      secret: endpoint.secret,
+      encryptedSecret: {
+        ciphertext: endpoint.ciphertext,
+        iv: endpoint.iv,
+        keyVersion: endpoint.keyVersion,
+      },
       active: endpoint.active,
       event: delivery.event,
       payload: delivery.payload,
       attempts: delivery.attempts,
       status: delivery.status,
     };
+  },
+});
+
+/** One-shot rollout migration. Idempotent; plaintext is scrubbed on success. */
+export const migrateLegacyPlaintext = internalMutation({
+  args: {},
+  handler: async (ctx): Promise<{ migrated: number; remaining: number }> => {
+    const rows = await ctx.db.query("webhookEndpoints").collect();
+    let migrated = 0;
+    let remaining = 0;
+
+    for (const row of rows) {
+      const fullyEncrypted = Boolean(
+        row.ciphertext && row.iv && row.keyVersion,
+      );
+      if (fullyEncrypted) {
+        if (row.secret !== undefined) {
+          await ctx.db.patch(row._id, { secret: undefined });
+          migrated += 1;
+        }
+        continue;
+      }
+      if (row.secret === undefined) {
+        remaining += 1;
+        continue;
+      }
+
+      const encrypted = await encryptSecret(row.secret);
+      await ctx.db.patch(row._id, { ...encrypted, secret: undefined });
+      migrated += 1;
+    }
+
+    return { migrated, remaining };
   },
 });
 

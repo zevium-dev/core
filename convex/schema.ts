@@ -164,7 +164,12 @@ export default defineSchema({
   webhookEndpoints: defineTable({
     projectId: v.id("projects"),
     url: v.string(),
-    secret: v.string(),
+    // Transitional rollout mirrors upstreamCredentials: legacy plaintext is
+    // removed by migrateSecurityRollout before these become required.
+    ciphertext: v.optional(v.string()),
+    iv: v.optional(v.string()),
+    keyVersion: v.optional(v.string()),
+    secret: v.optional(v.string()),
     active: v.boolean(),
     createdAt: v.number(),
   }).index("by_project", ["projectId"]),

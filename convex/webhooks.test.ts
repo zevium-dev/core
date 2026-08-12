@@ -1,9 +1,10 @@
 /// <reference types="vite/client" />
 import { convexTest } from "convex-test";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api, internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import schema from "./schema";
+import { decryptSecret, encryptSecret } from "./lib/credentialCrypto";
 import { computeSignature, postWebhook } from "./lib/webhookDelivery";
 import { validateWebhookUrl } from "./webhooks";
 
@@ -15,6 +16,23 @@ vi.mock("./lib/webhookTransport", () => ({
 }));
 
 const modules = import.meta.glob("./**/*.ts");
+const TEST_KEYRING = JSON.stringify({
+  current: "webhook-test-v1",
+  keys: { "webhook-test-v1": "webhook-encryption-test-material" },
+});
+const previousEncryptionKeys = process.env.UPSTREAM_CREDENTIAL_ENCRYPTION_KEYS;
+
+beforeEach(() => {
+  process.env.UPSTREAM_CREDENTIAL_ENCRYPTION_KEYS = TEST_KEYRING;
+});
+
+afterEach(() => {
+  if (previousEncryptionKeys === undefined) {
+    delete process.env.UPSTREAM_CREDENTIAL_ENCRYPTION_KEYS;
+  } else {
+    process.env.UPSTREAM_CREDENTIAL_ENCRYPTION_KEYS = previousEncryptionKeys;
+  }
+});
 
 // ---------------------------------------------------------------------------
 // Pure unit tests — no Convex context needed
@@ -242,6 +260,9 @@ describe("webhooks.upsertEndpoint — CRUD + auth", () => {
         url: "https://example.com/hook",
       }),
     ).rejects.toThrow(/Project not found/);
+    expect(
+      await t.run(async (ctx) => ctx.db.query("webhookEndpoints").collect()),
+    ).toEqual([]);
   });
 
   it("rejects same-org members before creating an endpoint", async () => {
@@ -282,7 +303,7 @@ describe("webhooks.upsertEndpoint — CRUD + auth", () => {
     ).rejects.toThrow(/https/);
   });
 
-  it("creates endpoint with generated secret", async () => {
+  it("creates an encrypted endpoint and returns metadata only", async () => {
     const t = convexTest(schema, modules);
     const seed = await seedWorld(t);
 
@@ -293,10 +314,20 @@ describe("webhooks.upsertEndpoint — CRUD + auth", () => {
 
     expect(ep.url).toBe("https://example.com/hook");
     expect(ep.active).toBe(true);
-    expect(ep.secret.length).toBeGreaterThan(20);
+    expect(ep).not.toHaveProperty("secret");
+    expect(ep).not.toHaveProperty("ciphertext");
+    expect(ep).not.toHaveProperty("iv");
+    expect(ep).not.toHaveProperty("keyVersion");
+
+    const stored = await t.run(async (ctx) => ctx.db.get(ep.id));
+    expect(stored?.secret).toBeUndefined();
+    expect(stored?.ciphertext).toBeTruthy();
+    expect(stored?.ciphertext).not.toContain("webhook-test");
+    expect(stored?.iv).toBeTruthy();
+    expect(stored?.keyVersion).toBe("webhook-test-v1");
   });
 
-  it("upsert preserves secret on update, changes url", async () => {
+  it("upsert preserves encrypted secret on update and changes metadata", async () => {
     const t = convexTest(schema, modules);
     const seed = await seedWorld(t);
     const as = asPublisher(t);
@@ -305,6 +336,7 @@ describe("webhooks.upsertEndpoint — CRUD + auth", () => {
       projectId: seed.projectId,
       url: "https://example.com/old",
     });
+    const storedBefore = await t.run(async (ctx) => ctx.db.get(ep1.id));
 
     const ep2 = await as.mutation(api.webhooks.upsertEndpoint, {
       projectId: seed.projectId,
@@ -314,10 +346,30 @@ describe("webhooks.upsertEndpoint — CRUD + auth", () => {
 
     expect(ep2.url).toBe("https://example.com/new");
     expect(ep2.active).toBe(false);
-    // Secret preserved across update
-    expect(ep2.secret).toBe(ep1.secret);
-    // One endpoint per project
-    expect(ep2._id).toBe(ep1._id);
+    expect(ep2.id).toBe(ep1.id);
+
+    const storedAfter = await t.run(async (ctx) => ctx.db.get(ep2.id));
+    expect(storedAfter?.ciphertext).toBe(storedBefore?.ciphertext);
+    expect(storedAfter?.iv).toBe(storedBefore?.iv);
+    expect(storedAfter?.keyVersion).toBe(storedBefore?.keyVersion);
+    expect(storedAfter?.secret).toBeUndefined();
+  });
+
+  it("fails closed without encryption keys and creates no row", async () => {
+    const t = convexTest(schema, modules);
+    const seed = await seedWorld(t);
+    delete process.env.UPSTREAM_CREDENTIAL_ENCRYPTION_KEYS;
+
+    await expect(
+      asPublisher(t).mutation(api.webhooks.upsertEndpoint, {
+        projectId: seed.projectId,
+        url: "https://example.com/hook",
+      }),
+    ).rejects.toThrow("Signing secret could not be created");
+
+    expect(
+      await t.run(async (ctx) => ctx.db.query("webhookEndpoints").collect()),
+    ).toEqual([]);
   });
 });
 
@@ -341,6 +393,10 @@ describe("webhooks.getEndpoint", () => {
       projectId: seed.projectId,
     });
     expect(ep?.url).toBe("https://example.com/hook");
+    expect(ep).not.toHaveProperty("secret");
+    expect(ep).not.toHaveProperty("ciphertext");
+    expect(ep).not.toHaveProperty("iv");
+    expect(ep).not.toHaveProperty("keyVersion");
   });
 
   it("never reveals signing secrets to same-org members", async () => {
@@ -366,6 +422,209 @@ describe("webhooks.getEndpoint", () => {
         projectId: seed.projectId,
       }),
     ).rejects.toThrow(/Project not found/);
+  });
+});
+
+describe("webhooks.revealSecret", () => {
+  it("reveals a new encrypted row only to its org admin", async () => {
+    const t = convexTest(schema, modules);
+    const seed = await seedWorld(t);
+    const admin = asPublisher(t);
+    const created = await admin.mutation(api.webhooks.upsertEndpoint, {
+      projectId: seed.projectId,
+      url: "https://example.com/hook",
+    });
+
+    const result = await admin.mutation(api.webhooks.revealSecret, {
+      projectId: seed.projectId,
+    });
+    expect(result?.secret.length).toBeGreaterThan(20);
+
+    const stored = await t.run(async (ctx) => ctx.db.get(created.id));
+    expect(stored?.secret).toBeUndefined();
+    expect(
+      await decryptSecret({
+        ciphertext: stored!.ciphertext!,
+        iv: stored!.iv!,
+        keyVersion: stored!.keyVersion!,
+      }),
+    ).toBe(result?.secret);
+  });
+
+  it("rejects members and cross-org callers without changing the row", async () => {
+    const t = convexTest(schema, modules);
+    const seed = await seedWorld(t);
+    const created = await asPublisher(t).mutation(api.webhooks.upsertEndpoint, {
+      projectId: seed.projectId,
+      url: "https://example.com/hook",
+    });
+    const before = await t.run(async (ctx) => ctx.db.get(created.id));
+
+    await expect(
+      asMember(t).mutation(api.webhooks.revealSecret, {
+        projectId: seed.projectId,
+      }),
+    ).rejects.toThrow(/Org admin role required/);
+    await expect(
+      asStranger(t).mutation(api.webhooks.revealSecret, {
+        projectId: seed.projectId,
+      }),
+    ).rejects.toThrow(/Project not found/);
+
+    expect(await t.run(async (ctx) => ctx.db.get(created.id))).toEqual(before);
+  });
+
+  it("maps legacy, missing-key, and corrupt-ciphertext failures safely", async () => {
+    const legacyTest = convexTest(schema, modules);
+    const legacySeed = await seedWorld(legacyTest);
+    await legacyTest.run(async (ctx) => {
+      await ctx.db.insert("webhookEndpoints", {
+        projectId: legacySeed.projectId,
+        url: "https://example.com/legacy",
+        secret: "plaintext-must-not-leak",
+        active: true,
+        createdAt: 1,
+      });
+    });
+    await expect(
+      asPublisher(legacyTest).mutation(api.webhooks.revealSecret, {
+        projectId: legacySeed.projectId,
+      }),
+    ).rejects.toThrow("Signing secret is unavailable");
+
+    const missingKeyTest = convexTest(schema, modules);
+    const missingKeySeed = await seedWorld(missingKeyTest);
+    await asPublisher(missingKeyTest).mutation(api.webhooks.upsertEndpoint, {
+      projectId: missingKeySeed.projectId,
+      url: "https://example.com/missing-key",
+    });
+    delete process.env.UPSTREAM_CREDENTIAL_ENCRYPTION_KEYS;
+    await expect(
+      asPublisher(missingKeyTest).mutation(api.webhooks.revealSecret, {
+        projectId: missingKeySeed.projectId,
+      }),
+    ).rejects.toThrow("Signing secret is unavailable");
+
+    process.env.UPSTREAM_CREDENTIAL_ENCRYPTION_KEYS = TEST_KEYRING;
+    const corruptTest = convexTest(schema, modules);
+    const corruptSeed = await seedWorld(corruptTest);
+    await corruptTest.run(async (ctx) => {
+      await ctx.db.insert("webhookEndpoints", {
+        projectId: corruptSeed.projectId,
+        url: "https://example.com/corrupt",
+        ciphertext: "not-ciphertext",
+        iv: "not-an-iv",
+        keyVersion: "webhook-test-v1",
+        active: true,
+        createdAt: 1,
+      });
+    });
+    await expect(
+      asPublisher(corruptTest).mutation(api.webhooks.revealSecret, {
+        projectId: corruptSeed.projectId,
+      }),
+    ).rejects.toThrow("Signing secret is unavailable");
+  });
+});
+
+describe("webhooks.migrateLegacyPlaintext", () => {
+  it("encrypts legacy rows, scrubs hybrid plaintext, and reports idempotent counts", async () => {
+    const t = convexTest(schema, modules);
+    const seed = await seedWorld(t);
+    const alreadyEncrypted = await encryptSecret("already-encrypted");
+    const hybridEncrypted = await encryptSecret("hybrid-encrypted-value");
+    const ids = await t.run(async (ctx) => ({
+      legacy: await ctx.db.insert("webhookEndpoints", {
+        projectId: seed.projectId,
+        url: "https://example.com/legacy",
+        secret: "legacy-plaintext",
+        active: true,
+        createdAt: 1,
+      }),
+      hybrid: await ctx.db.insert("webhookEndpoints", {
+        projectId: seed.projectId,
+        url: "https://example.com/hybrid",
+        ...hybridEncrypted,
+        secret: "stale-plaintext-copy",
+        active: true,
+        createdAt: 2,
+      }),
+      encrypted: await ctx.db.insert("webhookEndpoints", {
+        projectId: seed.projectId,
+        url: "https://example.com/encrypted",
+        ...alreadyEncrypted,
+        active: true,
+        createdAt: 3,
+      }),
+      broken: await ctx.db.insert("webhookEndpoints", {
+        projectId: seed.projectId,
+        url: "https://example.com/broken",
+        active: false,
+        createdAt: 4,
+      }),
+    }));
+
+    expect(
+      await t.mutation(internal.webhooks.migrateLegacyPlaintext, {}),
+    ).toEqual({ migrated: 2, remaining: 1 });
+
+    const rows = await t.run(async (ctx) => ({
+      legacy: await ctx.db.get(ids.legacy),
+      hybrid: await ctx.db.get(ids.hybrid),
+      encrypted: await ctx.db.get(ids.encrypted),
+      broken: await ctx.db.get(ids.broken),
+    }));
+    expect(rows.legacy?.secret).toBeUndefined();
+    expect(
+      await decryptSecret({
+        ciphertext: rows.legacy!.ciphertext!,
+        iv: rows.legacy!.iv!,
+        keyVersion: rows.legacy!.keyVersion!,
+      }),
+    ).toBe("legacy-plaintext");
+    expect(rows.hybrid?.secret).toBeUndefined();
+    expect(rows.hybrid?.ciphertext).toBe(hybridEncrypted.ciphertext);
+    expect(rows.encrypted?.ciphertext).toBe(alreadyEncrypted.ciphertext);
+    expect(rows.broken?.ciphertext).toBeUndefined();
+
+    expect(
+      await t.mutation(internal.webhooks.migrateLegacyPlaintext, {}),
+    ).toEqual({ migrated: 0, remaining: 1 });
+  });
+
+  it("rolls back every row when encryption keys are missing", async () => {
+    const t = convexTest(schema, modules);
+    const seed = await seedWorld(t);
+    const ids = await t.run(async (ctx) => [
+      await ctx.db.insert("webhookEndpoints", {
+        projectId: seed.projectId,
+        url: "https://example.com/one",
+        secret: "first-plaintext",
+        active: true,
+        createdAt: 1,
+      }),
+      await ctx.db.insert("webhookEndpoints", {
+        projectId: seed.projectId,
+        url: "https://example.com/two",
+        secret: "second-plaintext",
+        active: true,
+        createdAt: 2,
+      }),
+    ]);
+    delete process.env.UPSTREAM_CREDENTIAL_ENCRYPTION_KEYS;
+
+    await expect(
+      t.mutation(internal.webhooks.migrateLegacyPlaintext, {}),
+    ).rejects.toThrow(/keyring/);
+
+    const rows = await t.run(async (ctx) =>
+      Promise.all(ids.map(async (id) => await ctx.db.get(id))),
+    );
+    expect(rows.map((row) => row?.secret)).toEqual([
+      "first-plaintext",
+      "second-plaintext",
+    ]);
+    expect(rows.every((row) => row?.ciphertext === undefined)).toBe(true);
   });
 });
 
@@ -405,8 +664,45 @@ describe("webhooks.deleteEndpoint", () => {
       }),
     ).rejects.toThrow(/Org admin role required/);
 
-    const stored = await t.run(async (ctx) => ctx.db.get(created._id));
-    expect(stored?.secret).toBe(created.secret);
+    const stored = await t.run(async (ctx) => ctx.db.get(created.id));
+    expect(stored).not.toBeNull();
+    expect(stored?.ciphertext).toBeTruthy();
+  });
+
+  it("masks cross-org deletes without touching endpoint or deliveries", async () => {
+    const t = convexTest(schema, modules);
+    const seed = await seedWorld(t);
+    const created = await asPublisher(t).mutation(api.webhooks.upsertEndpoint, {
+      projectId: seed.projectId,
+      url: "https://example.com/hook",
+    });
+    const deliveryId = await t.run(async (ctx) =>
+      ctx.db.insert("webhookDeliveries", {
+        endpointId: created.id,
+        event: "spec.published",
+        status: "pending",
+        attempts: 0,
+        createdAt: 1,
+        payload: "{}",
+      }),
+    );
+    const before = await t.run(async (ctx) => ({
+      endpoint: await ctx.db.get(created.id),
+      delivery: await ctx.db.get(deliveryId),
+    }));
+
+    await expect(
+      asStranger(t).mutation(api.webhooks.deleteEndpoint, {
+        projectId: seed.projectId,
+      }),
+    ).rejects.toThrow(/Project not found/);
+
+    expect(
+      await t.run(async (ctx) => ({
+        endpoint: await ctx.db.get(created.id),
+        delivery: await ctx.db.get(deliveryId),
+      })),
+    ).toEqual(before);
   });
 });
 
@@ -432,10 +728,11 @@ describe("recordDeliveryAttempt — state machine", () => {
         visibility: "public",
         tags: [],
       });
+      const encryptedSecret = await encryptSecret("s3cr3t");
       const endpointId = await ctx.db.insert("webhookEndpoints", {
         projectId,
         url: "https://example.com/hook",
-        secret: "s3cr3t",
+        ...encryptedSecret,
         active: true,
         createdAt: Date.now(),
       });
@@ -490,10 +787,11 @@ describe("recordDeliveryAttempt — state machine", () => {
         visibility: "public",
         tags: [],
       });
+      const encryptedSecret = await encryptSecret("s3cr3t");
       const endpointId = await ctx.db.insert("webhookEndpoints", {
         projectId,
         url: "https://example.com/hook",
-        secret: "s3cr3t",
+        ...encryptedSecret,
         active: true,
         createdAt: Date.now(),
       });
@@ -554,10 +852,11 @@ describe("recordDeliveryAttempt — state machine", () => {
         visibility: "public",
         tags: [],
       });
+      const encryptedSecret = await encryptSecret("s3cr3t");
       const endpointId = await ctx.db.insert("webhookEndpoints", {
         projectId,
         url: "https://example.com/hook",
-        secret: "s3cr3t",
+        ...encryptedSecret,
         active: true,
         createdAt: Date.now(),
       });
@@ -619,10 +918,13 @@ describe("deliverWebhook — action integration", () => {
         visibility: "public",
         tags: [],
       });
+      const encryptedSecret = await encryptSecret(
+        "delivery-plaintext-never-returned",
+      );
       const endpointId = await ctx.db.insert("webhookEndpoints", {
         projectId,
         url: "https://example.com/hook",
-        secret: "secret",
+        ...encryptedSecret,
         active: true,
         createdAt: Date.now(),
       });
@@ -646,6 +948,14 @@ describe("deliverWebhook — action integration", () => {
     const pendingId = await seedDelivery(t);
     pinnedTransportMock.mockResolvedValue({ status: 200 });
 
+    const queryResult = await t.query(internal.webhooks.getDeliveryForAction, {
+      deliveryId: pendingId,
+    });
+    expect(queryResult).not.toHaveProperty("secret");
+    expect(JSON.stringify(queryResult)).not.toContain(
+      "delivery-plaintext-never-returned",
+    );
+
     await t.action(internal.webhookDeliveryAction.deliverWebhook, {
       deliveryId: pendingId,
     });
@@ -658,6 +968,25 @@ describe("deliverWebhook — action integration", () => {
       deliveryId: pendingId,
     });
     expect(pinnedTransportMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails closed without decryption keys and never reaches transport", async () => {
+    const t = convexTest(schema, modules);
+    const deliveryId = await seedDelivery(t);
+    delete process.env.UPSTREAM_CREDENTIAL_ENCRYPTION_KEYS;
+
+    await t.action(internal.webhookDeliveryAction.deliverWebhook, {
+      deliveryId,
+    });
+
+    expect(pinnedTransportMock).not.toHaveBeenCalled();
+    const delivery = await t.run(async (ctx) => ctx.db.get(deliveryId));
+    expect(delivery).toMatchObject({
+      status: "failed",
+      attempts: 1,
+      lastError: "Signing secret unavailable",
+    });
+    expect(JSON.stringify(delivery)).not.toContain("webhook-encryption-test");
   });
 
   it("does not retry a terminal 4xx response", async () => {

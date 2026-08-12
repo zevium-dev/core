@@ -40,7 +40,6 @@ import type { Doc, Id } from "#/lib/convex-data-model";
 import { humanError } from "#/lib/human-error";
 import { parseTagsInput } from "#/lib/project-helpers";
 import { deliveryStatusView, truncateError } from "#/lib/webhook-delivery";
-import { maskSecret } from "#/lib/webhook-secret";
 import { formatRelativeTime } from "#/lib/relative-time";
 
 export function ProjectSettingsPanel({
@@ -645,9 +644,8 @@ function UpstreamCredentialsCard({ project }: { project: Doc<"projects"> }) {
 
 // ---------------------------------------------------------------------------
 // Webhooks — endpoint config + recent deliveries.
-// The signing secret is generated server-side by webhooks.upsertEndpoint and
-// returned in the endpoint doc; we surface it here (masked by default) with a
-// copy + reveal toggle. Deliveries come from webhooks.listDeliveries.
+// Endpoint reads contain metadata only. Admins explicitly decrypt the signing
+// secret on demand; hiding it drops the plaintext from component state.
 // ---------------------------------------------------------------------------
 function WebhooksCard({ project }: { project: Doc<"projects"> }) {
   const endpointQuery = useQuery(
@@ -665,7 +663,7 @@ function WebhooksCard({ project }: { project: Doc<"projects"> }) {
 
   const [url, setUrl] = useState("");
   const [active, setActive] = useState(true);
-  const [revealSecret, setRevealSecret] = useState(false);
+  const [revealedSecret, setRevealedSecret] = useState<string | null>(null);
   const [copiedSecret, setCopiedSecret] = useState(false);
 
   // Sync local form from the realtime endpoint doc once it loads.
@@ -673,10 +671,26 @@ function WebhooksCard({ project }: { project: Doc<"projects"> }) {
     if (endpoint !== null) {
       setUrl(endpoint.url);
       setActive(endpoint.active);
+      setRevealedSecret(null);
+      setCopiedSecret(false);
     }
-  }, [endpoint?._id, endpoint?.url, endpoint?.active]);
+  }, [endpoint?.id, endpoint?.url, endpoint?.active]);
 
   const upsertMut = useConvexMutation(api.webhooks.upsertEndpoint);
+  const revealMut = useConvexMutation(api.webhooks.revealSecret);
+
+  const revealMutation = useMutation({
+    mutationFn: () => revealMut({ projectId: project._id }),
+    onSuccess: (result) => {
+      if (result === null) {
+        toast.error("Save a webhook endpoint before revealing its secret");
+        return;
+      }
+      setRevealedSecret(result.secret);
+    },
+    onError: (err: unknown) =>
+      toast.error(humanError(err, "Could not reveal signing secret")),
+  });
 
   const { mutate: saveEndpoint, isPending: saving } = useMutation({
     mutationFn: (input: { url: string; active: boolean }) =>
@@ -685,7 +699,12 @@ function WebhooksCard({ project }: { project: Doc<"projects"> }) {
         url: input.url,
         active: input.active,
       }),
-    onSuccess: () => toast.success("Webhook endpoint saved"),
+    onSuccess: () => {
+      setRevealedSecret(null);
+      setCopiedSecret(false);
+      revealMutation.reset();
+      toast.success("Webhook endpoint saved");
+    },
     onError: (err: unknown) =>
       toast.error(humanError(err, "Could not save webhook endpoint")),
   });
@@ -704,11 +723,11 @@ function WebhooksCard({ project }: { project: Doc<"projects"> }) {
   }
 
   async function copySecret() {
-    if (!endpoint?.secret) return;
+    if (revealedSecret === null) return;
     try {
-      await navigator.clipboard.writeText(endpoint.secret);
+      await navigator.clipboard.writeText(revealedSecret);
       setCopiedSecret(true);
-      setTimeout(() => setCopiedSecret(false), 1500);
+      window.setTimeout(() => setCopiedSecret(false), 1500);
     } catch {
       toast.error("Could not copy secret");
     }
@@ -742,32 +761,46 @@ function WebhooksCard({ project }: { project: Doc<"projects"> }) {
             />
             {trimmedUrl.length > 0 && !urlValid ? (
               <p className="text-xs text-destructive">
-                URL must be https (http://localhost allowed for dev).
+                Enter a public HTTPS URL without embedded credentials.
               </p>
             ) : null}
           </div>
 
           <div className="space-y-2">
             <Label htmlFor="webhook-secret">Signing secret</Label>
-            {endpoint?.secret ? (
+            {endpoint !== null ? (
               <div className="flex items-center gap-2">
                 <Input
                   id="webhook-secret"
                   readOnly
                   value={
-                    revealSecret ? endpoint.secret : maskSecret(endpoint.secret)
+                    revealMutation.isPending
+                      ? "Decrypting…"
+                      : (revealedSecret ?? "••••••••••••••••••••••••••••••••")
                   }
                   className="font-mono text-sm"
                   aria-label="Webhook signing secret"
+                  aria-busy={revealMutation.isPending}
                 />
                 <Button
                   type="button"
                   variant="outline"
                   size="icon"
-                  onClick={() => setRevealSecret((v) => !v)}
-                  aria-label={revealSecret ? "Hide secret" : "Reveal secret"}
+                  onClick={() => {
+                    if (revealedSecret !== null) {
+                      setRevealedSecret(null);
+                      setCopiedSecret(false);
+                      revealMutation.reset();
+                      return;
+                    }
+                    revealMutation.mutate();
+                  }}
+                  disabled={revealMutation.isPending}
+                  aria-label={
+                    revealedSecret !== null ? "Hide secret" : "Reveal secret"
+                  }
                 >
-                  {revealSecret ? (
+                  {revealedSecret !== null ? (
                     <EyeOff className="size-4" />
                   ) : (
                     <Eye className="size-4" />
@@ -778,6 +811,7 @@ function WebhooksCard({ project }: { project: Doc<"projects"> }) {
                   variant="outline"
                   size="icon"
                   onClick={copySecret}
+                  disabled={revealedSecret === null}
                   aria-label="Copy secret"
                 >
                   {copiedSecret ? (
@@ -882,7 +916,7 @@ function WebhooksCard({ project }: { project: Doc<"projects"> }) {
   );
 }
 
-/** Mirrors convex/webhooks.ts validateWebhookUrl (https or http://localhost). */
+/** Fast client check; server performs authoritative public-target validation. */
 function isValidWebhookUrl(url: string): boolean {
   let parsed: URL;
   try {
@@ -890,9 +924,14 @@ function isValidWebhookUrl(url: string): boolean {
   } catch {
     return false;
   }
-  if (parsed.protocol === "https:") return true;
-  if (parsed.protocol === "http:" && parsed.hostname === "localhost") {
-    return true;
-  }
-  return false;
+  const hostname = parsed.hostname.toLowerCase();
+  return (
+    parsed.protocol === "https:" &&
+    parsed.username.length === 0 &&
+    parsed.password.length === 0 &&
+    hostname !== "localhost" &&
+    !hostname.endsWith(".localhost") &&
+    !hostname.endsWith(".local") &&
+    !hostname.endsWith(".internal")
+  );
 }

@@ -52,21 +52,21 @@ async function cryptoKey(keyId: string): Promise<CryptoKey> {
   ]);
 }
 
-export type EncryptedCredential = {
+export type EncryptedSecret = {
   ciphertext: string;
   iv: string;
   keyVersion: string;
 };
 
-export function requireEncryptedCredential(input: {
+export type EncryptedCredential = EncryptedSecret;
+
+export function requireEncryptedSecret(input: {
   ciphertext?: string;
   iv?: string;
   keyVersion?: string;
-}): EncryptedCredential {
+}): EncryptedSecret {
   if (!input.ciphertext || !input.iv || !input.keyVersion) {
-    throw new Error(
-      "Stored upstream credential is pending encryption migration",
-    );
+    throw new Error("Stored secret is pending encryption migration");
   }
   return {
     ciphertext: input.ciphertext,
@@ -75,9 +75,21 @@ export function requireEncryptedCredential(input: {
   };
 }
 
-export async function encryptCredential(
-  secret: string,
-): Promise<EncryptedCredential> {
+export function requireEncryptedCredential(input: {
+  ciphertext?: string;
+  iv?: string;
+  keyVersion?: string;
+}): EncryptedCredential {
+  try {
+    return requireEncryptedSecret(input);
+  } catch {
+    throw new Error(
+      "Stored upstream credential is pending encryption migration",
+    );
+  }
+}
+
+export async function encryptSecret(secret: string): Promise<EncryptedSecret> {
   const keyVersion = keyring().current;
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const encrypted = await crypto.subtle.encrypt(
@@ -92,9 +104,7 @@ export async function encryptCredential(
   };
 }
 
-export async function decryptCredential(
-  input: EncryptedCredential,
-): Promise<string> {
+export async function decryptSecret(input: EncryptedSecret): Promise<string> {
   try {
     const iv = fromBase64(input.iv);
     const ciphertext = fromBase64(input.ciphertext);
@@ -113,6 +123,22 @@ export async function decryptCredential(
       ) as ArrayBuffer,
     );
     return new TextDecoder().decode(decrypted);
+  } catch {
+    throw new Error("Stored secret cannot be decrypted");
+  }
+}
+
+export async function encryptCredential(
+  secret: string,
+): Promise<EncryptedCredential> {
+  return await encryptSecret(secret);
+}
+
+export async function decryptCredential(
+  input: EncryptedCredential,
+): Promise<string> {
+  try {
+    return await decryptSecret(input);
   } catch {
     throw new Error("Stored upstream credential cannot be decrypted");
   }

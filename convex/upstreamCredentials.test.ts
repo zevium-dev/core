@@ -2,8 +2,9 @@
 import { convexTest } from "convex-test";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { api } from "./_generated/api";
+import { api, internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
+import { decryptCredential } from "./lib/credentialCrypto";
 import schema from "./schema";
 
 const modules = import.meta.glob("./**/*.ts");
@@ -249,5 +250,48 @@ describe("upstream credentials", () => {
         projectId,
       }),
     ).toEqual([]);
+  });
+
+  it("migrates legacy plaintext and scrubs stale plaintext from encrypted rows", async () => {
+    const t = convexTest(schema, modules);
+    const { projectId } = await seedProject(t);
+    const created = await asPublisher(t).mutation(
+      api.upstreamCredentials.upsert,
+      {
+        projectId,
+        name: "authorization",
+        secret: "encrypted-value",
+      },
+    );
+    const legacyId = await t.run(async (ctx) => {
+      await ctx.db.patch(created.id, { secret: "stale-plaintext-copy" });
+      return await ctx.db.insert("upstreamCredentials", {
+        projectId,
+        name: "x-api-key",
+        secret: "legacy-value",
+        updatedAt: 1,
+      });
+    });
+
+    expect(
+      await t.mutation(internal.upstreamCredentials.migrateLegacyPlaintext, {}),
+    ).toEqual({ migrated: 2, remaining: 0 });
+
+    const rows = await t.run(async (ctx) => ({
+      encrypted: await ctx.db.get(created.id),
+      legacy: await ctx.db.get(legacyId),
+    }));
+    expect(rows.encrypted?.secret).toBeUndefined();
+    expect(rows.legacy?.secret).toBeUndefined();
+    expect(
+      await decryptCredential({
+        ciphertext: rows.legacy!.ciphertext!,
+        iv: rows.legacy!.iv!,
+        keyVersion: rows.legacy!.keyVersion!,
+      }),
+    ).toBe("legacy-value");
+    expect(
+      await t.mutation(internal.upstreamCredentials.migrateLegacyPlaintext, {}),
+    ).toEqual({ migrated: 0, remaining: 0 });
   });
 });
