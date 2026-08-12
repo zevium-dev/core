@@ -27,6 +27,12 @@ import type { SpecSource } from "./spec-source";
 
 const PROTOCOL_VERSION = "2024-11-05";
 const SERVER_INFO = { name: "zevium-gateway", version: "0.1.0" } as const;
+const MAX_REQUEST_BODY_BYTES = 1024 * 1024;
+const MAX_BATCH_SIZE = 100;
+const MAX_RESPONSE_BODY_BYTES = 1024 * 1024;
+const TOOL_EXECUTION_TIMEOUT_MS = 10_000;
+
+class BodyLimitError extends Error {}
 
 export type McpDeps = {
   catalogueSource: CatalogueSource;
@@ -196,6 +202,49 @@ function toolError(message: string): {
   return { content: [{ type: "text", text: message }], isError: true };
 }
 
+async function readLimitedText(
+  body: ReadableStream<Uint8Array> | null,
+  maxBytes: number,
+  message: string,
+  signal?: AbortSignal,
+): Promise<string> {
+  if (body === null) return "";
+
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let bytesRead = 0;
+  let text = "";
+  const abortRead = () => {
+    void reader.cancel(signal?.reason);
+  };
+  signal?.addEventListener("abort", abortRead, { once: true });
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (signal?.aborted) throw signal.reason;
+      if (done) return text + decoder.decode();
+
+      bytesRead += value.byteLength;
+      if (bytesRead > maxBytes) {
+        await reader.cancel(message);
+        throw new BodyLimitError(message);
+      }
+      text += decoder.decode(value, { stream: true });
+    }
+  } finally {
+    signal?.removeEventListener("abort", abortRead);
+    reader.releaseLock();
+  }
+}
+
+function contentLengthExceeds(request: Request | Response, limit: number) {
+  const raw = request.headers.get("content-length");
+  if (raw === null) return false;
+  const length = Number(raw);
+  return Number.isFinite(length) && length > limit;
+}
+
 async function handleSearchApis(
   deps: McpDeps,
   args: Record<string, unknown>,
@@ -293,6 +342,7 @@ async function handleCallApi(
   args: Record<string, unknown>,
   mcpRequest: Request,
   ctx: ExecutionContext,
+  signal: AbortSignal,
 ): Promise<unknown> {
   const org = asString(args.org);
   const project = asString(args.project);
@@ -360,6 +410,7 @@ async function handleCallApi(
   const init: RequestInit = {
     method,
     headers,
+    signal,
   };
   if (body !== undefined && method !== "GET" && method !== "HEAD") {
     init.body = body;
@@ -375,7 +426,23 @@ async function handleCallApi(
     route,
   );
 
-  const responseText = await response.text();
+  if (contentLengthExceeds(response, MAX_RESPONSE_BODY_BYTES)) {
+    await response.body?.cancel();
+    return toolError("Upstream response exceeds 1 MiB limit");
+  }
+
+  let responseText: string;
+  try {
+    responseText = await readLimitedText(
+      response.body,
+      MAX_RESPONSE_BODY_BYTES,
+      "Upstream response exceeds 1 MiB limit",
+      signal,
+    );
+  } catch (err) {
+    if (err instanceof BodyLimitError) return toolError(err.message);
+    throw err;
+  }
   const cost = response.headers.get("x-zevium-cost");
   const requestId = response.headers.get("x-zevium-request-id");
 
@@ -405,6 +472,7 @@ async function dispatchTool(
   deps: McpDeps,
   mcpRequest: Request,
   ctx: ExecutionContext,
+  signal: AbortSignal,
 ): Promise<unknown> {
   switch (name) {
     case "search_apis":
@@ -412,7 +480,7 @@ async function dispatchTool(
     case "get_api_docs":
       return handleGetApiDocs(deps, args);
     case "call_api":
-      return handleCallApi(deps, args, mcpRequest, ctx);
+      return handleCallApi(deps, args, mcpRequest, ctx, signal);
     default:
       return toolError(`Unknown tool: ${name}`);
   }
@@ -423,6 +491,7 @@ async function handleRpc(
   deps: McpDeps,
   mcpRequest: Request,
   ctx: ExecutionContext,
+  signal: AbortSignal,
 ): Promise<JsonRpcResponse | null> {
   const id: JsonRpcId = req.id === undefined ? null : req.id;
   const isNotification = req.id === undefined;
@@ -461,7 +530,20 @@ async function handleRpc(
         args = req.params.arguments;
       }
       try {
-        const result = await dispatchTool(name, args, deps, mcpRequest, ctx);
+        const timeoutMessage = "Tool execution timed out after 10 seconds";
+        let resolveTimeout: ((result: unknown) => void) | undefined;
+        const onAbort = () => resolveTimeout?.(toolError(timeoutMessage));
+        const timeoutResult = new Promise<unknown>((resolve) => {
+          resolveTimeout = resolve;
+          if (signal.aborted) onAbort();
+          else signal.addEventListener("abort", onAbort, { once: true });
+        });
+        const result = await Promise.race([
+          dispatchTool(name, args, deps, mcpRequest, ctx, signal),
+          timeoutResult,
+        ]).finally(() => {
+          signal.removeEventListener("abort", onAbort);
+        });
         return success(id, result);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
@@ -509,50 +591,91 @@ export async function handleMcpRequest(
     );
   }
 
+  if (contentLengthExceeds(request, MAX_REQUEST_BODY_BYTES)) {
+    return Response.json(
+      failure(null, -32600, "Request body exceeds 1 MiB limit"),
+      { status: 413 },
+    );
+  }
+
   let raw: unknown;
   try {
-    raw = await request.json();
-  } catch {
+    const requestText = await readLimitedText(
+      request.body,
+      MAX_REQUEST_BODY_BYTES,
+      "Request body exceeds 1 MiB limit",
+    );
+    raw = JSON.parse(requestText);
+  } catch (err) {
+    if (err instanceof BodyLimitError) {
+      return Response.json(failure(null, -32600, err.message), { status: 413 });
+    }
     return Response.json(failure(null, -32700, "Parse error: invalid JSON"), {
       status: 400,
     });
   }
 
-  // Batch
-  if (Array.isArray(raw)) {
-    if (raw.length === 0) {
-      return Response.json(
-        failure(null, -32600, "Invalid Request: empty batch"),
-        { status: 400 },
-      );
-    }
-    const responses: JsonRpcResponse[] = [];
-    for (const item of raw) {
-      const parsed = parseJsonRpcRequest(item);
-      if (!parsed) {
-        responses.push(failure(null, -32600, "Invalid Request"));
-        continue;
+  const controller = new AbortController();
+  const executionTimeout = setTimeout(
+    () => controller.abort(new Error("MCP request execution timed out")),
+    TOOL_EXECUTION_TIMEOUT_MS,
+  );
+
+  try {
+    // Batch
+    if (Array.isArray(raw)) {
+      if (raw.length === 0) {
+        return Response.json(
+          failure(null, -32600, "Invalid Request: empty batch"),
+          { status: 400 },
+        );
       }
-      const res = await handleRpc(parsed, deps, request, ctx);
-      if (res) responses.push(res);
+      if (raw.length > MAX_BATCH_SIZE) {
+        return Response.json(
+          failure(
+            null,
+            -32600,
+            `Invalid Request: batch limit is ${MAX_BATCH_SIZE}`,
+          ),
+          { status: 400 },
+        );
+      }
+      const responses: JsonRpcResponse[] = [];
+      for (const item of raw) {
+        const parsed = parseJsonRpcRequest(item);
+        if (!parsed) {
+          responses.push(failure(null, -32600, "Invalid Request"));
+          continue;
+        }
+        const res = await handleRpc(
+          parsed,
+          deps,
+          request,
+          ctx,
+          controller.signal,
+        );
+        if (res) responses.push(res);
+      }
+      if (responses.length === 0) {
+        return new Response(null, { status: 202 });
+      }
+      return Response.json(responses);
     }
-    if (responses.length === 0) {
+
+    const parsed = parseJsonRpcRequest(raw);
+    if (!parsed) {
+      return Response.json(failure(null, -32600, "Invalid Request"), {
+        status: 400,
+      });
+    }
+
+    const res = await handleRpc(parsed, deps, request, ctx, controller.signal);
+    if (!res) {
+      // Notification accepted
       return new Response(null, { status: 202 });
     }
-    return Response.json(responses);
+    return Response.json(res);
+  } finally {
+    clearTimeout(executionTimeout);
   }
-
-  const parsed = parseJsonRpcRequest(raw);
-  if (!parsed) {
-    return Response.json(failure(null, -32600, "Invalid Request"), {
-      status: 400,
-    });
-  }
-
-  const res = await handleRpc(parsed, deps, request, ctx);
-  if (!res) {
-    // Notification accepted
-    return new Response(null, { status: 202 });
-  }
-  return Response.json(res);
 }
