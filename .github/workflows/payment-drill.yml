@@ -41,7 +41,7 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
       - name: Verify checkout, metering, refunds, and Connect settlement
-        run: pnpm exec vitest run --config convex/vitest.config.ts convex/stripe-billing.test.ts convex/stripe-connect.test.ts convex/ingest-usage.test.ts
+        run: pnpm exec vitest run --allowOnly=false --config convex/vitest.config.ts convex/stripe-billing.test.ts convex/stripe-connect.test.ts convex/ingest-usage.test.ts
 
   real-sandbox-checkout:
     if: github.event_name == 'workflow_dispatch'

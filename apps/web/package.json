@@ -11,7 +11,7 @@
     "preview": "vite preview",
     "deploy": "pnpm build && wrangler deploy",
     "cf-typegen": "wrangler types",
-    "test": "vitest run --allowOnly=false --passWithNoTests",
+    "test": "vitest run --allowOnly=false",
     "typecheck": "tsc --noEmit",
     "lint": "oxlint --config ../../.oxlintrc.json --deny-warnings --report-unused-disable-directives --no-ignore --disable-nested-config src scripts vite.config.ts vitest.config.ts"
   },

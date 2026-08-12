@@ -241,6 +241,11 @@ export function attestVitestCommands(root = repositoryRoot) {
         `${packagePath}#${scriptName} must force exactly --allowOnly=false`,
       );
     }
+    if (command.includes("--passWithNoTests")) {
+      throw new Error(
+        `${packagePath}#${scriptName} must reject --passWithNoTests; require discovered tests`,
+      );
+    }
   }
   return requiredVitestCommands.length;
 }
