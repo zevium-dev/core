@@ -140,10 +140,7 @@ export function recoveryPlan(manifestInput, observed, strategy) {
   const state = manifest.lastVerifiedState;
   const controlPlaneMayHaveChanged =
     typeof state !== "string" ||
-    ![
-      "rollback_pointers_captured_no_traffic_mutation",
-      "artifacts_uploaded_no_traffic_mutation",
-    ].includes(state);
+    state !== "rollback_pointers_captured_no_traffic_mutation";
   const selected =
     strategy === "auto"
       ? controlPlaneMayHaveChanged
@@ -580,9 +577,7 @@ export function run(argv = process.argv.slice(2)) {
       state.lastVerifiedState = lastVerifiedState;
       if (
         lastVerifiedState === "failed_before_artifact_upload" ||
-        lastVerifiedState ===
-          "rollback_pointers_captured_no_traffic_mutation" ||
-        lastVerifiedState === "artifacts_uploaded_no_traffic_mutation"
+        lastVerifiedState === "rollback_pointers_captured_no_traffic_mutation"
       ) {
         state.state = "aborted_without_traffic_change";
       } else state.state = "ambiguous_recovery_required";

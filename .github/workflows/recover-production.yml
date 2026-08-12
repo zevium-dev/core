@@ -200,7 +200,7 @@ jobs:
                   const fs=require("node:fs");
                   const manifest=JSON.parse(fs.readFileSync(process.env.MANIFEST,"utf8"));
                   const state=JSON.parse(fs.readFileSync(process.env.STATE_PATH,"utf8"));
-                  const safe=new Set(["rollback_pointers_captured_no_traffic_mutation","artifacts_uploaded_no_traffic_mutation"]);
+                  const safe=new Set(["rollback_pointers_captured_no_traffic_mutation"]);
                   const last=state.lastVerifiedState ?? state.state;
                   if (state.state === "aborted_without_traffic_change" && safe.has(last)) {
                     manifest.lastVerifiedState=last;

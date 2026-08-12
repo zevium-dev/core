@@ -230,7 +230,7 @@ describe("wallet settlement and one-time release proof", () => {
     ).toBe(false);
   });
 
-  it("moves pending to one minimal settled proof and rejects replay", async () => {
+  it("moves pending to one minimal settled proof and replays the exact result", async () => {
     const t = convexTest(schema, modules);
     const seed = await seedWallet(t);
     await grant(t, seed);
@@ -277,8 +277,28 @@ describe("wallet settlement and one-time release proof", () => {
       },
       body: JSON.stringify(body),
     });
-    expect(replay.status).toBe(409);
-    expect(await replay.json()).toEqual({ error: "release probe rejected" });
+    expect(replay.status).toBe(200);
+    expect(await replay.json()).toEqual({
+      status: "settled",
+      requestId: REQUEST_ID,
+      challenge: CHALLENGE,
+      credits: 15,
+      platformFeeCredits: 0,
+      publisherNetCredits: 15,
+    });
+
+    const mismatchedReplay = await t.fetch("/release-probe-accounting", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-release-probe-secret": RELEASE_SECRET,
+      },
+      body: JSON.stringify({ ...body, notBefore: body.notBefore + 1 }),
+    });
+    expect(mismatchedReplay.status).toBe(409);
+    expect(await mismatchedReplay.json()).toEqual({
+      error: "release probe rejected",
+    });
   });
 
   it("deduplicates settlement without duplicate usage, ledger, or earning", async () => {

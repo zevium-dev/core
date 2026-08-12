@@ -152,7 +152,11 @@ export default defineSchema({
     requestId: v.string(),
     settlementRefId: v.string(),
     expectedGatewayRelease: v.string(),
+    notBefore: v.number(),
     claimedAt: v.number(),
+    credits: v.number(),
+    platformFeeCredits: v.number(),
+    publisherNetCredits: v.number(),
   })
     .index("by_challenge", ["challenge"])
     .index("by_request", ["requestId"]),

@@ -33,6 +33,7 @@ import {
   findProtectedRequirements,
   verifyProtectedAttestation,
 } from "./release-attestation.mjs";
+import { classifyConvexContract } from "./release-convex-contract.mjs";
 import {
   main as runWithClerkKey,
   resolveClerkReleaseKey,
@@ -1001,11 +1002,24 @@ describe("provider recovery and cancellation fixtures", () => {
     });
     const safe = {
       ...manifest,
-      lastVerifiedState: "artifacts_uploaded_no_traffic_mutation",
+      lastVerifiedState: "rollback_pointers_captured_no_traffic_mutation",
     };
     expect(
       recoveryPlan(safe, { gateway: previous, web: previous }, "rollback"),
     ).toMatchObject({ action: "rollback", requiresConvexRollForward: false });
+    expect(
+      recoveryPlan(
+        {
+          ...manifest,
+          lastVerifiedState: "artifacts_uploaded_no_traffic_mutation",
+        },
+        { gateway: previous, web: previous },
+        "auto",
+      ),
+    ).toMatchObject({
+      action: "roll-forward",
+      requiresConvexRollForward: true,
+    });
     expect(() =>
       recoveryPlan(
         {
@@ -1263,7 +1277,10 @@ describe("protected workflow provenance", () => {
       mkdirSync("apps/gateway", { recursive: true });
       mkdirSync("convex", { recursive: true });
       writeFileSync("apps/gateway/wrangler.jsonc", JSON.stringify(legacyBase));
-      writeFileSync("convex/schema.ts", "export const schema = 1;\n");
+      writeFileSync(
+        "convex/schema.ts",
+        'import { defineSchema, defineTable } from "convex/server";\nimport { v } from "convex/values";\nexport default defineSchema({ items: defineTable({ value: v.optional(v.string()) }).index("by_value", ["value"]) });\n',
+      );
       execFileSync("git", ["add", "."]);
       execFileSync("git", ["commit", "-qm", "feat: base"]);
       const base = execFileSync("git", ["rev-parse", "HEAD"], {
@@ -1284,12 +1301,15 @@ describe("protected workflow provenance", () => {
         encoding: "utf8",
       }).trim();
 
-      writeFileSync("convex/schema.ts", "export const schema = 2;\n");
+      writeFileSync(
+        "convex/schema.ts",
+        'import { defineSchema, defineTable } from "convex/server";\nimport { v } from "convex/values";\nexport default defineSchema({ items: defineTable({ value: v.string() }) });\n',
+      );
       execFileSync("git", ["add", "."]);
       execFileSync("git", [
         "commit",
         "-qm",
-        "contract(convex): remove legacy field",
+        "fix: remove legacy field without protected prefix",
       ]);
       const contractSha = execFileSync("git", ["rev-parse", "HEAD"], {
         encoding: "utf8",
@@ -1309,6 +1329,13 @@ describe("protected workflow provenance", () => {
           protectedBase: lifecycleSha,
         }),
       ]);
+      expect(classifyConvexContract(lifecycleSha, contractSha)).toMatchObject({
+        hasContraction: true,
+        reasons: expect.arrayContaining([
+          "table validator narrowed: items",
+          "index removed: items.by_value",
+        ]),
+      });
     } finally {
       process.chdir(originalCwd);
     }

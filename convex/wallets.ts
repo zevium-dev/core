@@ -320,7 +320,22 @@ export const claimReleaseProbeAccounting = internalMutation({
       .withIndex("by_challenge", (q) => q.eq("challenge", args.challenge))
       .unique();
     if (priorClaim !== null) {
-      throw new Error("Release probe challenge was already claimed");
+      if (
+        priorClaim.requestId !== args.requestId ||
+        priorClaim.expectedGatewayRelease !== args.expectedGatewayRelease ||
+        priorClaim.notBefore !== args.notBefore
+      ) {
+        throw new Error(
+          "Release probe challenge was already claimed differently",
+        );
+      }
+      return {
+        requestId: priorClaim.requestId,
+        challenge: priorClaim.challenge,
+        credits: priorClaim.credits,
+        platformFeeCredits: priorClaim.platformFeeCredits,
+        publisherNetCredits: priorClaim.publisherNetCredits,
+      };
     }
 
     const settlementRefId = `settle:${args.requestId}`;
@@ -400,7 +415,11 @@ export const claimReleaseProbeAccounting = internalMutation({
       requestId: args.requestId,
       settlementRefId,
       expectedGatewayRelease: args.expectedGatewayRelease,
+      notBefore: args.notBefore,
       claimedAt: args.now,
+      credits: usage.credits,
+      platformFeeCredits: earning.platformFeeCredits,
+      publisherNetCredits: earning.netCredits,
     });
 
     return {

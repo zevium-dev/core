@@ -15,6 +15,7 @@ import {
   lifecycleDigest,
   parseJsonc,
 } from "./release-lifecycle.mjs";
+import { classifyConvexContract } from "./release-convex-contract.mjs";
 
 const SHA_RE = /^[0-9a-f]{40}$/;
 const DIGEST_RE = /^[0-9a-f]{64}$/;
@@ -138,8 +139,8 @@ export function findProtectedRequirements(base, target, environment) {
     if (parents.length === 0)
       throw new Error(`Protected commit ${commit} has no parent`);
     const parent = parents[0];
-    const subject = git(["show", "-s", "--format=%s", commit]);
-    if (subject.startsWith("contract(convex):")) {
+    const convex = classifyConvexContract(parent, commit);
+    if (convex.hasContraction) {
       requirements.push({
         kind: "contract",
         targetSha: commit,
