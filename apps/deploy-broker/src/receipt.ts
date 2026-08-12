@@ -10,6 +10,28 @@ const SHA_PATTERN = /^[0-9a-f]{40}$/;
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
+function targetMatchesProfile(
+  profile: DeploymentProfile,
+  target: string,
+): boolean {
+  switch (profile) {
+    case "preview-gateway":
+      return /^zevium-gateway-pr-[1-9][0-9]{0,9}$/.test(target);
+    case "preview-web":
+      return /^zevium-web-pr-[1-9][0-9]{0,9}$/.test(target);
+    case "staging-gateway":
+      return target === "zevium-gateway-staging";
+    case "staging-web":
+      return target === "zevium-web-staging";
+    case "production-gateway":
+      return target === "zevium-gateway";
+    case "production-web":
+      return target === "zevium-dev";
+    case "preview-cleanup":
+      return false;
+  }
+}
+
 export type DeploymentReceiptPhase =
   | "activated"
   | "prepared"
@@ -120,9 +142,6 @@ export function parseDeploymentReceipt(value: unknown): DeploymentReceipt {
       typeof value.manifestDigest === "string" &&
       DIGEST_PATTERN.test(value.manifestDigest) &&
       typeof value.target === "string" &&
-      /^zevium-(?:gateway|web)(?:-staging|-pr-[1-9][0-9]{0,9})?$/.test(
-        value.target,
-      ) &&
       typeof value.profile === "string" &&
       [
         "preview-gateway",
@@ -195,16 +214,76 @@ export function parseDeploymentReceipt(value: unknown): DeploymentReceipt {
     value.artifactDigests.staticAssets,
     "staticAssets",
   );
+  const profile = value.profile as DeploymentProfile;
+  const phase = value.phase as DeploymentReceiptPhase;
+  invariant(
+    targetMatchesProfile(profile, value.target),
+    400,
+    "receipt_rejected",
+    "Deployment receipt target does not match profile",
+  );
+  invariant(
+    (priorDeploymentId === null) === (priorVersionId === null),
+    400,
+    "receipt_rejected",
+    "Deployment receipt prior selectors are incomplete",
+  );
+
+  const phaseIsValid =
+    (phase === "prepared" &&
+      deploymentId === null &&
+      versionId === null &&
+      parsedRecovery === null) ||
+    (phase === "version_uploaded" &&
+      deploymentId === null &&
+      versionId !== null &&
+      parsedRecovery === null) ||
+    (phase === "activated" &&
+      deploymentId !== null &&
+      versionId !== null &&
+      parsedRecovery === null) ||
+    (phase === "recovery_prepared" &&
+      deploymentId === null &&
+      versionId !== null &&
+      priorVersionId === versionId &&
+      parsedRecovery !== null &&
+      parsedRecovery.mode === null) ||
+    (phase === "recovered" &&
+      deploymentId !== null &&
+      versionId !== null &&
+      priorVersionId === versionId &&
+      parsedRecovery !== null &&
+      parsedRecovery.mode !== null);
+  invariant(
+    phaseIsValid,
+    400,
+    "receipt_rejected",
+    "Deployment receipt phase state is impossible",
+  );
+  if (parsedRecovery !== null) {
+    invariant(
+      priorDeploymentId !== null &&
+        priorVersionId !== null &&
+        (parsedRecovery.failedDeploymentId === null ||
+          (parsedRecovery.failedVersionId !== null &&
+            parsedRecovery.failedDeploymentId !== priorDeploymentId)) &&
+        (parsedRecovery.failedVersionId === null ||
+          parsedRecovery.failedVersionId !== priorVersionId),
+      400,
+      "receipt_rejected",
+      "Deployment recovery selectors are inconsistent",
+    );
+  }
   return {
     artifactDigests: { modules, staticAssets },
     createdAt: value.createdAt,
     deploymentId,
     gitSha: value.gitSha,
     manifestDigest: value.manifestDigest,
-    phase: value.phase as DeploymentReceiptPhase,
+    phase,
     priorDeploymentId,
     priorVersionId,
-    profile: value.profile as DeploymentProfile,
+    profile,
     recovery: parsedRecovery,
     schema: DEPLOYMENT_RECEIPT_SCHEMA,
     target: value.target,

@@ -624,6 +624,12 @@ export function buildManifest(input: ManifestInput): DeploymentManifest {
   ) {
     fail("staging requires workflow_dispatch");
   }
+  if (
+    persistentEnvironment === "staging" &&
+    input.headSha !== input.oidcSha
+  ) {
+    fail("staging headSha must equal checked-out OIDC SHA");
+  }
   if (!persistentEnvironment && input.eventName === "workflow_run") {
     fail("preview cannot use workflow_run");
   }

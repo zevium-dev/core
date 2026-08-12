@@ -175,6 +175,88 @@ function gatewayVersionBody(
   };
 }
 
+function stagingGatewayVersionBody(oldTag: "v1" | "v2"): {
+  body: Uint8Array;
+  contentType: string;
+} {
+  const boundary = "----zevium-staging-version";
+  const migrationSteps =
+    oldTag === "v1"
+      ? [
+          { new_sqlite_classes: ["RegistryDO"] },
+          { new_sqlite_classes: ["X402PaymentDO"] },
+        ]
+      : [{ new_sqlite_classes: ["X402PaymentDO"] }];
+  const metadata = {
+    annotations: { "workers/tag": `staging-${HEAD_SHA}` },
+    bindings: [
+      {
+        name: "CONVEX_SITE_URL",
+        text: "https://zevium-stage.convex.site",
+        type: "plain_text",
+      },
+      {
+        name: "CONVEX_URL",
+        text: "https://zevium-stage.convex.cloud",
+        type: "plain_text",
+      },
+      { name: "ZEVIUM_RELEASE", text: HEAD_SHA, type: "plain_text" },
+      {
+        class_name: "WalletDO",
+        name: "WALLET",
+        type: "durable_object_namespace",
+      },
+      {
+        class_name: "RegistryDO",
+        name: "REGISTRY",
+        type: "durable_object_namespace",
+      },
+      {
+        class_name: "X402PaymentDO",
+        name: "X402_PAYMENTS",
+        type: "durable_object_namespace",
+      },
+      {
+        name: "CLERK_SECRET_KEY",
+        text: TEST_CLERK_SECRET,
+        type: "secret_text",
+      },
+      {
+        name: "GATEWAY_INTERNAL_SECRET",
+        text: TEST_GATEWAY_SECRET,
+        type: "secret_text",
+      },
+      { name: "CF_VERSION_METADATA", type: "version_metadata" },
+    ],
+    compatibility_date: "2025-04-01",
+    compatibility_flags: ["global_fetch_strictly_public"],
+    main_module: "index.js",
+    migrations: {
+      new_tag: "v3",
+      old_tag: oldTag,
+      steps: migrationSteps,
+    },
+  };
+  const source = [
+    `--${boundary}`,
+    'Content-Disposition: form-data; name="metadata"',
+    "Content-Type: application/json",
+    "",
+    JSON.stringify(metadata),
+    `--${boundary}`,
+    'Content-Disposition: form-data; name="index.js"; filename="index.js"',
+    "Content-Type: application/javascript+module",
+    "",
+    "export default { fetch() { return new Response('ok') } }",
+    `--${boundary}--`,
+    "",
+  ].join("\r\n");
+  return {
+    body: new TextEncoder().encode(source),
+    contentType: `multipart/form-data; boundary=${boundary}`,
+  };
+}
+
 function webVersionBody(assetJwt: string): {
   body: Uint8Array;
   contentType: string;
@@ -328,6 +410,42 @@ describe("workerd deployment broker", () => {
       }),
     );
     expect(accepted.status).toBe(200);
+  });
+
+  it("rejects signed but stale migration old_tag before provider mutation", async () => {
+    const manifest = buildManifest({
+      ...TEST_MODULE_ARTIFACTS,
+      convexSiteUrl: "https://zevium-stage.convex.site",
+      convexUrl: "https://zevium-stage.convex.cloud",
+      eventName: "workflow_dispatch",
+      headSha: HEAD_SHA,
+      oidcSha: HEAD_SHA,
+      profile: "staging-gateway",
+      ref: "refs/heads/develop",
+      runAttempt: 1,
+      runId: "9003",
+      secretDigests: PREVIEW_SECRET_DIGESTS,
+      sourceRunId: "8999",
+    });
+    const registration = await registerExact(manifest, stagingClaims);
+    expect(registration.response.status).toBe(201);
+    const stale = stagingGatewayVersionBody("v1");
+    const response = await dispatch(
+      new Request(
+        `${registration.value.apiBaseUrl}/accounts/1ea9299555b026a6a7484c8323c5a953/workers/scripts/zevium-gateway-staging/versions`,
+        {
+          body: stale.body,
+          headers: {
+            authorization: `Bearer ${registration.token}`,
+            "content-type": stale.contentType,
+            "user-agent": "stale-migration-old-tag",
+          },
+          method: "POST",
+        },
+      ),
+    );
+    expect(response.status).toBe(409);
+    expect(await response.text()).toContain("migration_state_rejected");
   });
 
   it("seals asset JWT only after every provider-requested hash uploads", async () => {

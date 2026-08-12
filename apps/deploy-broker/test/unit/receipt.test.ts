@@ -46,7 +46,88 @@ describe("deployment receipt boundary", () => {
       },
     ],
     ["unknown target", { ...receipt, target: "zevium-attacker-staging" }],
+    [
+      "cross-wired profile and target",
+      { ...receipt, profile: "staging-gateway" },
+    ],
+    [
+      "activated phase without activation selectors",
+      { ...receipt, deploymentId: null, versionId: null },
+    ],
+    [
+      "version-uploaded phase with deployment selector",
+      { ...receipt, phase: "version_uploaded" },
+    ],
+    [
+      "partial prior selector pair",
+      { ...receipt, priorDeploymentId: null },
+    ],
+    [
+      "recovery payload on ordinary activation",
+      {
+        ...receipt,
+        recovery: {
+          failedDeploymentId: "55555555-5555-4555-8555-555555555555",
+          failedGitSha: "e".repeat(40),
+          failedVersionId: "66666666-6666-4666-8666-666666666666",
+          mode: "redeployed_prior",
+          sourceReceiptDigest: "f".repeat(64),
+        },
+      },
+    ],
   ])("rejects %s", (_label, value) => {
     expect(() => parseDeploymentReceipt(value)).toThrow();
+  });
+
+  it.each([
+    ["preview-gateway", "zevium-gateway-pr-42"],
+    ["preview-web", "zevium-web-pr-42"],
+    ["staging-gateway", "zevium-gateway-staging"],
+    ["staging-web", "zevium-web-staging"],
+    ["production-gateway", "zevium-gateway"],
+    ["production-web", "zevium-dev"],
+  ])("accepts exact %s target tuple", (profile, target) => {
+    expect(
+      parseDeploymentReceipt({ ...receipt, profile, target }),
+    ).toMatchObject({ profile, target });
+  });
+
+  it("accepts only coherent recovery phase transitions", () => {
+    const recovery = {
+      failedDeploymentId: "55555555-5555-4555-8555-555555555555",
+      failedGitSha: "e".repeat(40),
+      failedVersionId: "66666666-6666-4666-8666-666666666666",
+      mode: null,
+      sourceReceiptDigest: "f".repeat(64),
+    };
+    const prepared = {
+      ...receipt,
+      deploymentId: null,
+      phase: "recovery_prepared",
+      recovery,
+      versionId: receipt.priorVersionId,
+    };
+    expect(parseDeploymentReceipt(prepared)).toMatchObject(prepared);
+    expect(() =>
+      parseDeploymentReceipt({
+        ...prepared,
+        versionId: "77777777-7777-4777-8777-777777777777",
+      }),
+    ).toThrow("phase state");
+    expect(() =>
+      parseDeploymentReceipt({
+        ...prepared,
+        phase: "recovered",
+        recovery: { ...recovery, mode: null },
+      }),
+    ).toThrow("phase state");
+    expect(
+      parseDeploymentReceipt({
+        ...prepared,
+        deploymentId: "77777777-7777-4777-8777-777777777777",
+        phase: "recovered",
+        recovery: { ...recovery, mode: "redeployed_prior" },
+      }),
+    ).toMatchObject({ phase: "recovered" });
   });
 });
