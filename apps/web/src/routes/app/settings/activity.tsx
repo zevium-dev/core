@@ -55,6 +55,10 @@ import { humanError } from "#/lib/human-error";
 type ActivitySearch = {
   range?: ActivityTimeRange;
   project?: string;
+  key?: string;
+  member?: string;
+  endpoint?: string;
+  method?: string;
   event?: string;
 };
 
@@ -75,9 +79,21 @@ export const Route = createFileRoute("/app/settings/activity")({
       search.event.length <= 128
         ? search.event
         : undefined;
+    const bounded = (value: unknown, max: number) =>
+      typeof value === "string" && value.length > 0 && value.length <= max
+        ? value
+        : undefined;
+    const key = bounded(search.key, 128);
+    const member = bounded(search.member, 128);
+    const endpoint = bounded(search.endpoint, 512);
+    const method = bounded(search.method, 16)?.toUpperCase();
     return {
       ...(range && range !== "7d" ? { range } : {}),
       ...(project ? { project } : {}),
+      ...(key ? { key } : {}),
+      ...(member ? { member } : {}),
+      ...(endpoint ? { endpoint } : {}),
+      ...(method ? { method } : {}),
       ...(event ? { event } : {}),
     };
   },
@@ -182,6 +198,10 @@ function ActivityContent({ orgSlug }: { orgSlug: string }) {
       orgSlug: string;
       paginationOpts: { numItems: number; cursor: string | null };
       projectId?: Id<"projects">;
+      keyId?: string;
+      memberId?: string;
+      endpoint?: string;
+      method?: string;
       since?: number;
     } = {
       orgSlug,
@@ -193,11 +213,15 @@ function ActivityContent({ orgSlug }: { orgSlug: string }) {
     if (projectId !== "all") {
       args.projectId = projectId as Id<"projects">;
     }
+    if (search.key) args.keyId = search.key;
+    if (search.member) args.memberId = search.member;
+    if (search.endpoint) args.endpoint = search.endpoint;
+    if (search.method) args.method = search.method;
     if (since !== undefined) {
       args.since = since;
     }
     return args;
-  }, [orgSlug, cursor, projectId, since]);
+  }, [orgSlug, cursor, projectId, search, since]);
 
   const usageQuery = useQuery({
     ...convexQuery(api.usage.listForOrg, listArgs),
@@ -210,7 +234,15 @@ function ActivityContent({ orgSlug }: { orgSlug: string }) {
     setIsDone(false);
     setContinueCursor(null);
     setWindowNow(Date.now());
-  }, [timeRange, projectId, orgSlug]);
+  }, [
+    timeRange,
+    projectId,
+    orgSlug,
+    search.key,
+    search.member,
+    search.endpoint,
+    search.method,
+  ]);
 
   // Merge each successful page into the running list.
   useEffect(() => {
@@ -228,10 +260,30 @@ function ActivityContent({ orgSlug }: { orgSlug: string }) {
   const firstPagePending = usageQuery.isPending && cursor === null;
   const loadMorePending = usageQuery.isPending && cursor !== null;
   const canLoadMore =
-    !isDone && continueCursor !== null && !usageQuery.isPending;
-  const selectedEvent = search.event
+    !isDone &&
+    continueCursor !== null &&
+    !usageQuery.isPending &&
+    !usageQuery.isError;
+  const selectedFromRows = search.event
     ? (rows.find((event) => event._id === search.event) ?? null)
     : null;
+  const eventQuery = useQuery({
+    ...convexQuery(api.usage.getForOrgById, {
+      orgSlug,
+      eventId: search.event ?? "invalid",
+    }),
+    enabled: search.event !== undefined && selectedFromRows === null,
+  });
+  const selectedEvent = selectedFromRows ?? eventQuery.data ?? null;
+  const hasAttributionFilter = Boolean(
+    search.key || search.member || search.endpoint || search.method,
+  );
+  const attributionSearch = {
+    ...(search.key ? { key: search.key } : {}),
+    ...(search.member ? { member: search.member } : {}),
+    ...(search.endpoint ? { endpoint: search.endpoint } : {}),
+    ...(search.method ? { method: search.method } : {}),
+  };
 
   const inspectEvent = (eventId: string) => {
     void navigate({ search: { ...search, event: eventId } });
@@ -242,6 +294,10 @@ function ActivityContent({ orgSlug }: { orgSlug: string }) {
       search: {
         ...(search.range ? { range: search.range } : {}),
         ...(search.project ? { project: search.project } : {}),
+        ...(search.key ? { key: search.key } : {}),
+        ...(search.member ? { member: search.member } : {}),
+        ...(search.endpoint ? { endpoint: search.endpoint } : {}),
+        ...(search.method ? { method: search.method } : {}),
       },
       replace: true,
     });
@@ -272,6 +328,7 @@ function ActivityContent({ orgSlug }: { orgSlug: string }) {
                     search: {
                       ...(timeRange === "7d" ? {} : { range: timeRange }),
                       ...(value === "all" ? {} : { project: value }),
+                      ...attributionSearch,
                     },
                   })
                 }
@@ -307,6 +364,7 @@ function ActivityContent({ orgSlug }: { orgSlug: string }) {
                     search: {
                       ...(range === "7d" ? {} : { range }),
                       ...(projectId === "all" ? {} : { project: projectId }),
+                      ...attributionSearch,
                     },
                   });
                 }}
@@ -328,9 +386,50 @@ function ActivityContent({ orgSlug }: { orgSlug: string }) {
           </div>
         </CardHeader>
         <CardContent>
+          {hasAttributionFilter ? (
+            <div className="mb-4 flex flex-wrap items-center gap-2 rounded-md border bg-muted/30 p-3">
+              <span className="text-xs font-medium text-muted-foreground">
+                Billing drill-down
+              </span>
+              {search.member ? (
+                <Badge variant="secondary" className="max-w-full break-all">
+                  Member · {search.member}
+                </Badge>
+              ) : null}
+              {search.key ? (
+                <Badge variant="secondary" className="max-w-full break-all">
+                  Key · {search.key}
+                </Badge>
+              ) : null}
+              {search.endpoint ? (
+                <Badge variant="secondary" className="max-w-full break-all">
+                  Endpoint · {search.method ? `${search.method} ` : ""}
+                  {search.endpoint}
+                </Badge>
+              ) : search.method ? (
+                <Badge variant="secondary">Method · {search.method}</Badge>
+              ) : null}
+              <Button
+                type="button"
+                variant="ghost"
+                size="xs"
+                className="ml-auto"
+                onClick={() =>
+                  void navigate({
+                    search: {
+                      ...(timeRange === "7d" ? {} : { range: timeRange }),
+                      ...(projectId === "all" ? {} : { project: projectId }),
+                    },
+                  })
+                }
+              >
+                Clear drill-down
+              </Button>
+            </div>
+          ) : null}
           {firstPagePending ? (
             <ActivityTableSkeleton />
-          ) : usageQuery.isError ? (
+          ) : usageQuery.isError && rows.length === 0 ? (
             <Empty className="border border-dashed">
               <EmptyHeader>
                 <EmptyTitle>Could not load activity</EmptyTitle>
@@ -352,7 +451,24 @@ function ActivityContent({ orgSlug }: { orgSlug: string }) {
               </EmptyContent>
             </Empty>
           ) : rows.length === 0 ? (
-            <EmptyActivity />
+            <div className="space-y-4">
+              <EmptyActivity
+                filtered={hasAttributionFilter || projectId !== "all"}
+              />
+              {canLoadMore ? (
+                <div className="flex justify-center">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      if (continueCursor !== null) setCursor(continueCursor);
+                    }}
+                  >
+                    Search next page
+                  </Button>
+                </div>
+              ) : null}
+            </div>
           ) : (
             <div className="flex flex-col gap-4">
               <div className="divide-y md:hidden">
@@ -489,6 +605,25 @@ function ActivityContent({ orgSlug }: { orgSlug: string }) {
                   </Button>
                 </div>
               ) : null}
+              {usageQuery.isError && rows.length > 0 ? (
+                <div
+                  className="flex flex-wrap items-center justify-center gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-3"
+                  role="alert"
+                >
+                  <p className="text-sm text-destructive">
+                    More activity could not be loaded. Existing rows are still
+                    available.
+                  </p>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => void usageQuery.refetch()}
+                  >
+                    Retry page
+                  </Button>
+                </div>
+              ) : null}
             </div>
           )}
         </CardContent>
@@ -498,6 +633,9 @@ function ActivityContent({ orgSlug }: { orgSlug: string }) {
         open={search.event !== undefined}
         event={selectedEvent}
         requestedId={search.event}
+        pending={eventQuery.isPending && selectedFromRows === null}
+        failed={eventQuery.isError}
+        onRetry={() => void eventQuery.refetch()}
         onOpenChange={(open) => {
           if (!open) closeInspector();
         }}
@@ -510,11 +648,17 @@ function ActivityInspector({
   open,
   event,
   requestedId,
+  pending,
+  failed,
+  onRetry,
   onOpenChange,
 }: {
   open: boolean;
   event: UsageListItem | null;
   requestedId?: string;
+  pending: boolean;
+  failed: boolean;
+  onRetry: () => void;
   onOpenChange: (open: boolean) => void;
 }) {
   return (
@@ -526,7 +670,22 @@ function ActivityInspector({
             Exact usage metadata retained for this metered gateway call.
           </SheetDescription>
         </SheetHeader>
-        {event ? (
+        {pending ? (
+          <div className="space-y-3 px-4 pb-6" aria-label="Loading call">
+            <Skeleton className="h-8 w-40" />
+            <Skeleton className="h-64 w-full" />
+          </div>
+        ) : failed ? (
+          <div className="space-y-3 px-4 pb-6" role="alert">
+            <p className="text-sm font-medium">Call details did not load</p>
+            <p className="text-sm text-muted-foreground">
+              Check your connection and organization access, then retry.
+            </p>
+            <Button type="button" variant="outline" onClick={onRetry}>
+              Retry
+            </Button>
+          </div>
+        ) : event ? (
           <div className="space-y-5 px-4 pb-6">
             <div className="flex flex-wrap items-center gap-2">
               <StatusBadge status={event.status} />
@@ -564,11 +723,10 @@ function ActivityInspector({
           <div className="px-4 pb-6">
             <Empty className="border border-dashed">
               <EmptyHeader>
-                <EmptyTitle>Call is not in loaded results</EmptyTitle>
+                <EmptyTitle>Call not found</EmptyTitle>
                 <EmptyDescription>
-                  Event {requestedId ?? "requested"} may be outside the selected
-                  range or a page not loaded yet. Close inspector, adjust
-                  filters, and load more results.
+                  Event {requestedId ?? "requested"} does not exist or is not
+                  authorized for this organization.
                 </EmptyDescription>
               </EmptyHeader>
             </Empty>
@@ -598,17 +756,20 @@ function InspectorRow({
   );
 }
 
-function EmptyActivity() {
+function EmptyActivity({ filtered }: { filtered: boolean }) {
   return (
     <Empty className="border">
       <EmptyHeader>
         <EmptyMedia variant="icon">
           <Activity />
         </EmptyMedia>
-        <EmptyTitle>No activity yet</EmptyTitle>
+        <EmptyTitle>
+          {filtered ? "No matching activity" : "No activity yet"}
+        </EmptyTitle>
         <EmptyDescription>
-          Usage events land after gateway calls. Browse the catalogue, create a
-          key, and make a call.
+          {filtered
+            ? "No calls match this drill-down and time range. Clear the filter or widen the range."
+            : "Usage events land after gateway calls. Browse the catalogue, create a key, and make a call."}
         </EmptyDescription>
       </EmptyHeader>
       <EmptyContent>

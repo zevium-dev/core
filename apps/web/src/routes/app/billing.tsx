@@ -1,10 +1,10 @@
 import { useOrganization } from "@clerk/tanstack-react-start";
 import { convexQuery } from "@convex-dev/react-query";
-import { useMutation, useSuspenseQuery } from "@tanstack/react-query";
+import { useMutation, useQueries } from "@tanstack/react-query";
 import { Link, createFileRoute } from "@tanstack/react-router";
 import { useAction, useConvexAuth } from "convex/react";
 import { ChartNoAxesColumn, CreditCard, Wallet } from "lucide-react";
-import { Suspense, useState } from "react";
+import { useState } from "react";
 import { toast } from "sonner";
 
 import { NumberTicker } from "#/components/motion/number-ticker";
@@ -86,11 +86,7 @@ function BillingPage() {
     );
   }
 
-  return (
-    <Suspense fallback={<BillingSkeleton />}>
-      <BillingContent checkoutSessionId={checkout} orgSlug={orgSlug} />
-    </Suspense>
-  );
+  return <BillingContent checkoutSessionId={checkout} orgSlug={orgSlug} />;
 }
 
 function BillingContent({
@@ -100,12 +96,14 @@ function BillingContent({
   checkoutSessionId?: string;
   orgSlug: string;
 }) {
-  const { data: billing } = useSuspenseQuery(
-    convexQuery(api.billing.getBillingState, { checkoutSessionId }),
-  );
-  const { data: cycle } = useSuspenseQuery(
-    convexQuery(api.billing.cycleBreakdown, { orgSlug }),
-  );
+  const { membership } = useOrganization();
+  const canManageBilling = membership?.role === "org:admin";
+  const [billingQuery, cycleQuery] = useQueries({
+    queries: [
+      convexQuery(api.billing.getBillingState, { checkoutSessionId }),
+      convexQuery(api.billing.cycleBreakdown, { orgSlug }),
+    ],
+  });
   const createCheckout = useAction(api.billing.createCheckout);
   const [checkoutPackId, setCheckoutPackId] = useState<string | null>(null);
 
@@ -126,6 +124,43 @@ function BillingContent({
       );
     },
   });
+
+  if (billingQuery.isPending || cycleQuery.isPending) {
+    return <BillingSkeleton />;
+  }
+
+  if (
+    billingQuery.isError ||
+    cycleQuery.isError ||
+    billingQuery.data === undefined ||
+    cycleQuery.data === undefined
+  ) {
+    return (
+      <Card className="border-destructive/40">
+        <CardHeader>
+          <CardTitle>Billing did not load</CardTitle>
+          <CardDescription>
+            Check your connection, then retry. No billing state was changed.
+          </CardDescription>
+        </CardHeader>
+        <CardFooter>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => {
+              void billingQuery.refetch();
+              void cycleQuery.refetch();
+            }}
+          >
+            Retry billing
+          </Button>
+        </CardFooter>
+      </Card>
+    );
+  }
+
+  const billing = billingQuery.data;
+  const cycle = cycleQuery.data;
 
   const checkoutState = billing.checkout
     ? checkoutStateFromStatus(billing.checkout.status)
@@ -150,7 +185,10 @@ function BillingContent({
           </div>
           <div className="min-w-0">
             <p className="text-xs text-muted-foreground">Wallet balance</p>
-            <p className="text-xl font-semibold tabular-nums">
+            <p
+              className="text-xl font-semibold tabular-nums"
+              style={{ viewTransitionName: "credit-balance" }}
+            >
               <NumberTicker value={billing.wallet.balance} />
               <span className="ml-1 text-sm font-normal text-muted-foreground">
                 credits
@@ -194,6 +232,12 @@ function BillingContent({
             $1 = 10,000 credits. One-time packs at one fixed exchange rate.
           </p>
         </div>
+        {!canManageBilling ? (
+          <p className="rounded-md border bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
+            Organization admins buy credits. Every member can review wallet
+            usage and attribution below.
+          </p>
+        ) : null}
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {billing.packs.map((pack) => {
             const price = formatMoney(pack.priceCents, "USD");
@@ -220,10 +264,10 @@ function BillingContent({
                 <CardFooter>
                   <Button
                     className="w-full"
-                    disabled={button.disabled}
+                    disabled={!canManageBilling || button.disabled}
                     onClick={() => buyPack(pack.packId)}
                   >
-                    {button.label}
+                    {canManageBilling ? button.label : "Admin only"}
                   </Button>
                 </CardFooter>
               </Card>
@@ -348,8 +392,10 @@ function BillingContent({
 type CycleUsageData = {
   cycleStart: number;
   cycleEnd: number;
+  asOf: number;
   totalCalls: number;
   totalCredits: number;
+  projectedCredits: number;
   byProject: Array<{
     projectId: string;
     name: string;
@@ -357,7 +403,29 @@ type CycleUsageData = {
     calls: number;
     credits: number;
   }>;
-  byKey: Array<{ keyId: string; calls: number; credits: number }>;
+  byKey: Array<{
+    keyId: string;
+    keyName: string;
+    ownerUserId: string | null;
+    calls: number;
+    credits: number;
+  }>;
+  byMember: Array<{
+    userId: string | null;
+    name: string;
+    email: string | null;
+    calls: number;
+    credits: number;
+  }>;
+  byEndpoint: Array<{
+    projectId: string;
+    projectName: string;
+    projectSlug: string;
+    method: string;
+    endpoint: string;
+    calls: number;
+    credits: number;
+  }>;
 };
 
 function CycleUsage({ cycle }: { cycle: CycleUsageData }) {
@@ -381,11 +449,20 @@ function CycleUsage({ cycle }: { cycle: CycleUsageData }) {
         </Button>
       </CardHeader>
       <CardContent className="space-y-5">
-        <div className="grid gap-3 sm:grid-cols-2">
+        <div className="grid gap-3 sm:grid-cols-3">
           <div className="rounded-lg border bg-muted/20 p-4">
             <p className="text-xs text-muted-foreground">Calls</p>
             <p className="mt-1 text-2xl font-semibold tabular-nums">
               {formatCredits(cycle.totalCalls)}
+            </p>
+          </div>
+          <div className="rounded-lg border bg-muted/20 p-4">
+            <p className="text-xs text-muted-foreground">Projected spend</p>
+            <p className="mt-1 text-2xl font-semibold tabular-nums">
+              {formatCredits(cycle.projectedCredits)}
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Month-end estimate from usage through {formatDateTime(cycle.asOf)}
             </p>
           </div>
           <div className="rounded-lg border bg-muted/20 p-4">
@@ -409,6 +486,28 @@ function CycleUsage({ cycle }: { cycle: CycleUsageData }) {
         ) : (
           <div className="grid gap-5 lg:grid-cols-2">
             <UsageBreakdownTable
+              title="By member"
+              rows={cycle.byMember.map((row) => ({
+                id: row.userId ?? "unattributed",
+                label: row.name,
+                detail: row.email ?? "Legacy usage without member metadata",
+                calls: row.calls,
+                credits: row.credits,
+                search: row.userId ? { member: row.userId } : undefined,
+              }))}
+            />
+            <UsageBreakdownTable
+              title="By key"
+              rows={cycle.byKey.map((row) => ({
+                id: row.keyId,
+                label: row.keyName,
+                detail: truncateKeyId(row.keyId),
+                calls: row.calls,
+                credits: row.credits,
+                search: { key: row.keyId },
+              }))}
+            />
+            <UsageBreakdownTable
               title="By API"
               rows={cycle.byProject.map((row) => ({
                 id: row.projectId,
@@ -416,16 +515,22 @@ function CycleUsage({ cycle }: { cycle: CycleUsageData }) {
                 detail: row.slug,
                 calls: row.calls,
                 credits: row.credits,
+                search: { project: row.projectId },
               }))}
             />
             <UsageBreakdownTable
-              title="By key"
-              rows={cycle.byKey.map((row) => ({
-                id: row.keyId,
-                label: truncateKeyId(row.keyId),
-                detail: "Gateway key",
+              title="By endpoint"
+              rows={cycle.byEndpoint.map((row) => ({
+                id: `${row.projectId}:${row.method}:${row.endpoint}`,
+                label: row.projectName,
+                detail: `${row.method.toUpperCase()} ${row.endpoint}`,
                 calls: row.calls,
                 credits: row.credits,
+                search: {
+                  project: row.projectId,
+                  endpoint: row.endpoint,
+                  method: row.method,
+                },
               }))}
             />
           </div>
@@ -446,6 +551,13 @@ function UsageBreakdownTable({
     detail: string;
     calls: number;
     credits: number;
+    search?: {
+      project?: string;
+      key?: string;
+      member?: string;
+      endpoint?: string;
+      method?: string;
+    };
   }>;
 }) {
   return (
@@ -473,7 +585,17 @@ function UsageBreakdownTable({
               {rows.map((row) => (
                 <tr key={row.id} className="border-b last:border-0">
                   <th scope="row" className="px-3 py-2 font-medium">
-                    <span className="block">{row.label}</span>
+                    {row.search ? (
+                      <Link
+                        to="/app/settings/activity"
+                        search={row.search}
+                        className="link-draw inline-block"
+                      >
+                        {row.label}
+                      </Link>
+                    ) : (
+                      <span className="block">{row.label}</span>
+                    )}
                     <span className="block font-mono text-xs font-normal text-muted-foreground">
                       {row.detail}
                     </span>

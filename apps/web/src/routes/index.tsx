@@ -60,11 +60,20 @@ const HOW_STEPS = [
 const GITHUB_URL = "https://github.com/zevium-dev/core";
 
 export const Route = createFileRoute("/")({
-  loader: ({ context }) => {
-    // Catalogue lives below the fold. Warm it without blocking public shell
-    // HTML on a control-plane round trip; the query owns its stable skeleton.
+  loader: async ({ context }) => {
     const queryOpts = convexQuery(api.catalogue.listPublic, {});
-    void context.queryClient.prefetchQuery(queryOpts).catch(() => undefined);
+    if (typeof window !== "undefined") {
+      void context.queryClient.prefetchQuery(queryOpts);
+      return;
+    }
+
+    // Await on the server so dehydrated cache and rendered HTML cannot race.
+    // Failure still leaves the public shell available with its stable skeleton.
+    try {
+      await context.queryClient.ensureQueryData(queryOpts);
+    } catch {
+      context.queryClient.removeQueries({ queryKey: queryOpts.queryKey });
+    }
   },
   component: LandingPage,
   head: () => ({
@@ -100,12 +109,12 @@ function LandingPage() {
       <main
         id="main-content"
         tabIndex={-1}
-        className="mx-auto flex max-w-5xl flex-col gap-24 px-4 py-16 outline-none sm:py-24"
+        className="mx-auto flex w-full max-w-[100rem] flex-col gap-24 px-4 py-16 outline-none sm:py-24"
       >
         {/* Hero */}
         <section className="grid items-center gap-12 lg:grid-cols-2 lg:gap-10">
           <div className="flex max-w-xl flex-col gap-6">
-            <h1 className="text-4xl font-semibold tracking-tight sm:text-5xl">
+            <h1 className="min-w-0 text-4xl font-semibold tracking-tight [overflow-wrap:anywhere] sm:text-5xl">
               One key. Every API. Pay per call.
             </h1>
             <p className="text-lg text-muted-foreground">
@@ -115,7 +124,7 @@ function LandingPage() {
             </p>
             <div className="flex flex-wrap items-center gap-3">
               <Magnetic strength={0.3}>
-                <Button asChild size="lg">
+                <Button asChild size="lg" className="min-h-11">
                   <Link
                     to="/catalogue"
                     style={{ viewTransitionName: "catalogue-heading" }}
@@ -125,11 +134,21 @@ function LandingPage() {
                 </Button>
               </Magnetic>
               {userId ? (
-                <Button asChild variant="outline" size="lg">
+                <Button
+                  asChild
+                  variant="outline"
+                  size="lg"
+                  className="min-h-11"
+                >
                   <Link to="/app">Open dashboard</Link>
                 </Button>
               ) : (
-                <Button asChild variant="outline" size="lg">
+                <Button
+                  asChild
+                  variant="outline"
+                  size="lg"
+                  className="min-h-11"
+                >
                   <Link to="/sign-up/$">Create account</Link>
                 </Button>
               )}
@@ -139,7 +158,7 @@ function LandingPage() {
             </p>
           </div>
 
-          <div>
+          <aside aria-label="Live request lifecycle">
             <div>
               <Card>
                 <CardHeader>
@@ -173,7 +192,7 @@ function LandingPage() {
                 </CardContent>
               </Card>
             </div>
-          </div>
+          </aside>
         </section>
 
         {/* How it works */}
@@ -193,7 +212,7 @@ function LandingPage() {
                       0{step.n}
                     </span>
                     <h3 className="text-sm font-medium">{step.title}</h3>
-                    <p className="text-sm leading-relaxed text-muted-foreground">
+                    <p className="max-w-3xl text-sm leading-relaxed text-muted-foreground">
                       {step.bodyBefore}
                       {step.mono ? (
                         <span className="font-mono text-xs text-foreground">
@@ -221,8 +240,9 @@ function LandingPage() {
                 One wallet across every API
               </h2>
               <p className="text-sm leading-relaxed text-muted-foreground">
-                Fund your organization once. Issue member keys, set spend caps,
-                inspect every call, and stop automatically at zero.
+                Fund your organization once. Members create their own keys;
+                admins set spend caps, inspect every call, and stop spend at
+                zero.
               </p>
               <Button asChild variant="outline">
                 <Link to="/catalogue">Find an API</Link>
@@ -373,7 +393,7 @@ function LandingPage() {
 
       <footer>
         <Separator />
-        <div className="mx-auto flex max-w-5xl flex-col gap-5 px-4 py-8 sm:flex-row sm:items-center sm:justify-between">
+        <div className="mx-auto flex w-full max-w-[100rem] flex-col gap-5 px-4 py-8 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex min-w-0 flex-col gap-2">
             <Link
               to="/"
@@ -464,7 +484,12 @@ function McpConfigBlock({ snippet }: { snippet: string }) {
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <pre className="max-h-56 min-w-0 overflow-auto rounded-md border bg-muted/40 p-3 font-mono text-xs whitespace-pre">
+        <pre
+          tabIndex={0}
+          role="region"
+          aria-label="MCP configuration"
+          className="max-h-56 min-w-0 overflow-auto rounded-md border bg-muted/40 p-3 font-mono text-xs whitespace-pre-wrap [overflow-wrap:anywhere] focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 sm:whitespace-pre"
+        >
           <SyntaxCode code={snippet} lang="json" />
         </pre>
         <p

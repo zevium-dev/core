@@ -61,7 +61,7 @@ export const Route = createFileRoute("/app/projects/$projectSlug/spec")({
 
 function SpecEditorPage() {
   const { projectSlug } = Route.useParams();
-  const { organization, isLoaded } = useOrganization();
+  const { organization, membership, isLoaded } = useOrganization();
   const orgSlug =
     organization && typeof organization.slug === "string"
       ? organization.slug
@@ -86,7 +86,11 @@ function SpecEditorPage() {
 
   return (
     <Suspense fallback={<SpecEditorSkeleton />}>
-      <SpecEditor orgSlug={orgSlug} projectSlug={projectSlug} />
+      <SpecEditor
+        orgSlug={orgSlug}
+        projectSlug={projectSlug}
+        canAdminister={membership?.role === "org:admin"}
+      />
     </Suspense>
   );
 }
@@ -94,9 +98,11 @@ function SpecEditorPage() {
 function SpecEditor({
   orgSlug,
   projectSlug,
+  canAdminister,
 }: {
   orgSlug: string;
   projectSlug: string;
+  canAdminister: boolean;
 }) {
   const { data: project } = useSuspenseQuery(
     convexQuery(api.projects.get, { orgSlug, projectSlug }),
@@ -128,6 +134,7 @@ function SpecEditor({
         projectSlug={projectSlug}
         visibility={project.visibility}
         description={project.description}
+        canAdminister={canAdminister}
       />
     </Suspense>
   );
@@ -139,12 +146,14 @@ function SpecEditorInner({
   projectSlug,
   visibility,
   description,
+  canAdminister,
 }: {
   projectId: Id<"projects">;
   orgSlug: string;
   projectSlug: string;
   visibility: "public" | "private";
   description: string | undefined;
+  canAdminister: boolean;
 }) {
   const { data: draftRow } = useSuspenseQuery(
     convexQuery(api.specs.getDraft, { projectId }),
@@ -160,6 +169,7 @@ function SpecEditorInner({
       projectSlug={projectSlug}
       visibility={visibility}
       description={description}
+      canAdminister={canAdminister}
       savedDraft={draftRow?.draft ?? ""}
       savedDraftHash={draftRow?.draftHash ?? null}
       lastSavedAt={draftRow?.lastSavedAt ?? null}

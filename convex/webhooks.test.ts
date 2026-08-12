@@ -296,6 +296,20 @@ function asPublisher(t: ReturnType<typeof convexTest>) {
   });
 }
 
+function asOrgMember(t: ReturnType<typeof convexTest>) {
+  return t.withIdentity({
+    subject: "user_member",
+    org_id: "org_pub",
+    org_slug: "pub-co",
+    org_role: "org:member",
+  } as {
+    subject: string;
+    org_id: string;
+    org_slug: string;
+    org_role: string;
+  });
+}
+
 function asStranger(t: ReturnType<typeof convexTest>) {
   return t.withIdentity({
     subject: "user_stranger",
@@ -311,6 +325,32 @@ function asStranger(t: ReturnType<typeof convexTest>) {
 }
 
 describe("webhooks.upsertEndpoint — CRUD + auth", () => {
+  it("rejects endpoint and secret management for an ordinary org member", async () => {
+    const t = convexTest(schema, modules);
+    const seed = await seedWorld(t);
+    const admin = asPublisher(t);
+    await admin.mutation(api.webhooks.upsertEndpoint, {
+      projectId: seed.projectId,
+      url: "https://example.com/hook",
+    });
+    const member = asOrgMember(t);
+
+    await expect(
+      member.mutation(api.webhooks.upsertEndpoint, {
+        projectId: seed.projectId,
+        url: "https://example.com/other",
+      }),
+    ).rejects.toThrow(/Org admin role required/);
+    await expect(
+      member.query(api.webhooks.getEndpoint, { projectId: seed.projectId }),
+    ).rejects.toThrow(/Org admin role required/);
+    await expect(
+      member.mutation(api.webhooks.deleteEndpoint, {
+        projectId: seed.projectId,
+      }),
+    ).rejects.toThrow(/Org admin role required/);
+  });
+
   it("rejects non-member", async () => {
     const t = convexTest(schema, modules);
     const seed = await seedWorld(t);

@@ -83,7 +83,7 @@ defaultViewTransition: {
 ```
 
 - Default: **cross-fade** of `main-content` over `DUR.page` with THE easing. No directional slides on morphing routes (slides fight morphs); `navigate-forward`/`back` types are reserved for stack-like flows (e.g. multi-step checkout) only
-- **Hard loads** (refresh, direct URL — no old DOM to transition from): `.content-enter` CSS class on `<main>` — fade + 8px rise, `DUR.page`, plays once (React `isInitialLoad` flag, cleared after 400ms so soft navs never replay it)
+- **Hard loads** (refresh, direct URL — no old DOM to transition from): `.content-enter` CSS class on `<main>` — 8px rise with content visible from first paint, `DUR.page`, plays once (React `isInitialLoad` flag, cleared after 400ms so soft navs never replay it)
 
 ### Shared-element morphs (`view-transition-name`)
 
@@ -109,7 +109,7 @@ Module-level flag (`src/lib/vt.ts`): `vtState.active` set synchronously in the r
 
 Reusable primitives, built once in `src/components/motion/`:
 
-- **`<Reveal>`** — scroll-entrance wrapper: fade + `DIST`px directional rise, `DUR.slow` on landing / `DUR.base` in-app, `viewport={{ once: true, margin: "-60px" }}`, children stagger `i * STAGGER`. The only sanctioned scroll animation
+- **`<Reveal>`** — scroll-entrance wrapper: visible-first `DIST`px directional rise, `DUR.slow` on landing / `DUR.base` in-app, `viewport={{ once: true, margin: "-60px" }}`, children stagger `i * STAGGER`. Never hide SSR or no-JS content. The only sanctioned scroll animation
 - **`<Pop>`** — `SPRING.pop` scale 0→1 for badges, counts, status dots appearing
 - **`<NumberTicker>`** — count-up for credits balance, call counts, revenue stats (cubic ease-out, ≤1s; respects reduced motion by rendering final value)
 - **`.link-draw`** — CSS underline draw (background-size 0→100%, `--dur-base` `--ease`) for inline links

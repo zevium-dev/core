@@ -159,6 +159,8 @@ function ProjectShell({
   orgSlug: string;
   projectSlug: string;
 }) {
+  const { membership } = useOrganization();
+  const canAdminister = membership?.role === "org:admin";
   const { data: project } = useSuspenseQuery(
     convexQuery(api.projects.get, { orgSlug, projectSlug }),
   );
@@ -251,38 +253,44 @@ function ProjectShell({
           ) : null}
         </div>
 
-        <Dialog open={visibilityOpen} onOpenChange={setVisibilityOpen}>
-          <DialogTrigger asChild>
-            <Button variant="outline">
-              Make {nextVisibility === "public" ? "Public" : "Private"}
-            </Button>
-          </DialogTrigger>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Make project {nextVisibility}?</DialogTitle>
-              <DialogDescription>
-                {nextVisibility === "public"
-                  ? "Public projects appear in the catalogue when published. Only published specs are listed."
-                  : "Private projects stay hidden from the public catalogue."}
-              </DialogDescription>
-            </DialogHeader>
-            <DialogFooter>
-              <Button
-                variant="ghost"
-                onClick={() => setVisibilityOpen(false)}
-                disabled={visibilityPending}
-              >
-                Cancel
+        {canAdminister ? (
+          <Dialog open={visibilityOpen} onOpenChange={setVisibilityOpen}>
+            <DialogTrigger asChild>
+              <Button variant="outline">
+                Make {nextVisibility === "public" ? "Public" : "Private"}
               </Button>
-              <Button
-                onClick={() => setVisibility(nextVisibility)}
-                disabled={visibilityPending}
-              >
-                {visibilityPending ? "Updating…" : `Make ${nextVisibility}`}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Make project {nextVisibility}?</DialogTitle>
+                <DialogDescription>
+                  {nextVisibility === "public"
+                    ? "Public projects appear in the catalogue when published. Only published specs are listed."
+                    : "Private projects stay hidden from the public catalogue."}
+                </DialogDescription>
+              </DialogHeader>
+              <DialogFooter>
+                <Button
+                  variant="ghost"
+                  onClick={() => setVisibilityOpen(false)}
+                  disabled={visibilityPending}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  onClick={() => setVisibility(nextVisibility)}
+                  disabled={visibilityPending}
+                >
+                  {visibilityPending ? "Updating…" : `Make ${nextVisibility}`}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            Admins manage project visibility.
+          </p>
+        )}
       </div>
 
       <Tabs
@@ -353,7 +361,11 @@ function ProjectShell({
           <ProjectEarningsPanel orgSlug={orgSlug} projectSlug={project.slug} />
         </Suspense>
       ) : panel === "settings" ? (
-        <ProjectSettingsPanel project={project} orgSlug={orgSlug} />
+        <ProjectSettingsPanel
+          project={project}
+          orgSlug={orgSlug}
+          canAdminister={canAdminister}
+        />
       ) : (
         <ProjectOverview
           project={project}

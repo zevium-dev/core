@@ -63,7 +63,10 @@ function AdminOrgsPage() {
   const firstPagePending = orgsQuery.isPending && cursor === null;
   const loadMorePending = orgsQuery.isPending && cursor !== null;
   const canLoadMore =
-    !isDone && continueCursor !== null && !orgsQuery.isPending;
+    !isDone &&
+    continueCursor !== null &&
+    !orgsQuery.isPending &&
+    !orgsQuery.isError;
 
   return (
     <div className="flex flex-col gap-6">
@@ -82,7 +85,7 @@ function AdminOrgsPage() {
         <CardContent>
           {firstPagePending ? (
             <OrgsTableSkeleton />
-          ) : orgsQuery.isError ? (
+          ) : orgsQuery.isError && rows.length === 0 ? (
             <Empty className="border border-dashed">
               <EmptyHeader>
                 <EmptyTitle>Could not load organizations</EmptyTitle>
@@ -155,6 +158,25 @@ function AdminOrgsPage() {
                     }}
                   >
                     {loadMorePending ? "Loading…" : "Load more"}
+                  </Button>
+                </div>
+              ) : null}
+              {orgsQuery.isError && rows.length > 0 ? (
+                <div
+                  className="flex flex-wrap items-center justify-center gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-3"
+                  role="alert"
+                >
+                  <p className="text-sm text-destructive">
+                    More organizations could not be loaded. Existing rows are
+                    still available.
+                  </p>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => void orgsQuery.refetch()}
+                  >
+                    Retry page
                   </Button>
                 </div>
               ) : null}

@@ -29,7 +29,7 @@ export const Route = createFileRoute("/app/projects/create")({
 
 function CreateProjectPage() {
   const navigate = useNavigate();
-  const { organization, isLoaded } = useOrganization();
+  const { organization, membership, isLoaded } = useOrganization();
   const orgSlug =
     organization && typeof organization.slug === "string"
       ? organization.slug
@@ -125,6 +125,21 @@ function CreateProjectPage() {
           </p>
         </div>
         <Button asChild variant="outline">
+          <Link to="/app/projects">Back to projects</Link>
+        </Button>
+      </div>
+    );
+  }
+
+  if (membership?.role !== "org:admin") {
+    return (
+      <div className="mx-auto flex w-full max-w-lg flex-col gap-4">
+        <h1 className="text-2xl font-semibold tracking-tight">New project</h1>
+        <p className="text-sm text-muted-foreground">
+          Organization admins create projects. Ask an admin to create this API
+          or update your role.
+        </p>
+        <Button asChild variant="outline" className="self-start">
           <Link to="/app/projects">Back to projects</Link>
         </Button>
       </div>

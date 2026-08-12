@@ -1,9 +1,9 @@
 import { convexQuery } from "@convex-dev/react-query";
-import { useMutation, useSuspenseQuery } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useAction } from "convex/react";
 import { ArrowLeft, PackageSearch, Sparkles } from "lucide-react";
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { FadeIn } from "#/components/motion/fade-in";
 import { PublicHeader } from "#/components/public-header";
@@ -61,14 +61,40 @@ type CatalogueSort = "newest" | "name" | "cheapest";
 /** Card shape shared by browse + semantic results; `score` only on ranked hits. */
 type CatalogueCardItem = Omit<SearchListing, "score"> & { score?: number };
 
+function catalogueListArgs({
+  search,
+  tag,
+  sort,
+  freeOnly,
+  maxCost,
+}: {
+  search: string;
+  tag: string | null;
+  sort: CatalogueSort;
+  freeOnly: boolean;
+  maxCost: number | null;
+}) {
+  const trimmed = search.trim();
+  return {
+    ...(trimmed.length > 0 ? { search: trimmed } : {}),
+    ...(tag ? { tag } : {}),
+    sort,
+    ...(freeOnly ? { hasFreeTier: true } : {}),
+    ...(maxCost !== null ? { maxCost } : {}),
+  };
+}
+
 export const Route = createFileRoute("/catalogue/")({
   validateSearch: (search: Record<string, unknown>) => ({
-    q: typeof search.q === "string" ? search.q : "",
+    q:
+      typeof search.q === "string" && search.q.trim() !== ""
+        ? search.q
+        : undefined,
     tag: typeof search.tag === "string" ? search.tag : undefined,
     sort:
       search.sort === "name" || search.sort === "cheapest"
         ? search.sort
-        : ("newest" as CatalogueSort),
+        : undefined,
     free:
       search.free === true || search.free === "1" || search.free === 1
         ? true
@@ -81,9 +107,19 @@ export const Route = createFileRoute("/catalogue/")({
         ? Number(search.max)
         : undefined,
   }),
-  loader: async ({ context }) => {
+  loaderDeps: ({ search }) => search,
+  loader: async ({ context, deps }) => {
     const { queryClient } = context;
-    const queryOpts = convexQuery(api.catalogue.listPublic, {});
+    const queryOpts = convexQuery(
+      api.catalogue.listPublic,
+      catalogueListArgs({
+        search: deps.q ?? "",
+        tag: deps.tag ?? null,
+        sort: (deps.sort ?? "newest") as CatalogueSort,
+        freeOnly: deps.free ?? false,
+        maxCost: deps.max ?? null,
+      }),
+    );
     if (typeof window !== "undefined") {
       void queryClient.prefetchQuery(queryOpts);
       return;
@@ -106,51 +142,50 @@ export const Route = createFileRoute("/catalogue/")({
 function CataloguePage() {
   const routeSearch = Route.useSearch();
   const navigate = useNavigate({ from: Route.fullPath });
-  const [searchInput, setSearchInput] = useState(routeSearch.q);
-  const [debouncedSearch, setDebouncedSearch] = useState(routeSearch.q);
+  const [searchInput, setSearchInput] = useState(routeSearch.q ?? "");
+  const [debouncedSearch, setDebouncedSearch] = useState(routeSearch.q ?? "");
   const [activeTag, setActiveTag] = useState<string | null>(
     routeSearch.tag ?? null,
   );
-  const [sort, setSort] = useState<CatalogueSort>(routeSearch.sort);
+  const [sort, setSort] = useState<CatalogueSort>(routeSearch.sort ?? "newest");
   const [freeOnly, setFreeOnly] = useState(routeSearch.free ?? false);
   const [maxCostInput, setMaxCostInput] = useState(
     routeSearch.max === undefined ? "" : String(routeSearch.max),
   );
-  const [debouncedMaxCost, setDebouncedMaxCost] = useState<number | null>(null);
-
-  // Semantic results: null = browse mode; [] = searched, no genuine matches
-  // (shown as empty state); degraded → reset to null (silent substring fallback).
-  const [semanticItems, setSemanticItems] = useState<SearchListing[] | null>(
-    null,
+  const [debouncedMaxCost, setDebouncedMaxCost] = useState<number | null>(
+    routeSearch.max ?? null,
   );
-  const [semanticState, setSemanticState] = useState<
-    "idle" | "ready" | "degraded" | "error"
-  >("idle");
+
   const runSemanticAction = useAction(api.search.searchCatalogue);
-  const { mutate: runSemanticSearch, isPending: semanticPending } = useMutation(
-    {
-      mutationFn: (query: string) => runSemanticAction({ query, limit: 20 }),
-      onSuccess: (res) => {
-        setSemanticState(res.degraded ? "degraded" : "ready");
-        setSemanticItems(res.degraded ? null : res.items);
-      },
-      onError: () => {
-        setSemanticItems(null);
-        setSemanticState("error");
-      },
-    },
-  );
-
-  const inSemanticMode = semanticItems !== null || semanticPending;
-
-  useEffect(() => {
-    if (routeSearch.semantic && routeSearch.q.trim() !== "") {
-      runSemanticSearch(routeSearch.q.trim());
-    } else {
-      setSemanticItems(null);
-      setSemanticState("idle");
-    }
-  }, [routeSearch.q, routeSearch.semantic, runSemanticSearch]);
+  const semanticQueryText = routeSearch.semantic
+    ? (routeSearch.q ?? "").trim()
+    : "";
+  const semanticSearchEnabled = semanticQueryText !== "";
+  const semanticQuery = useQuery({
+    queryKey: ["catalogue", "semantic", semanticQueryText],
+    queryFn: () => runSemanticAction({ query: semanticQueryText, limit: 20 }),
+    enabled: semanticSearchEnabled,
+    retry: false,
+    staleTime: 60_000,
+  });
+  const semanticPending = semanticSearchEnabled && semanticQuery.isPending;
+  const semanticState = !semanticSearchEnabled
+    ? "idle"
+    : semanticQuery.isError
+      ? "error"
+      : semanticQuery.data?.degraded
+        ? "degraded"
+        : semanticQuery.data
+          ? "ready"
+          : "idle";
+  const semanticItems =
+    semanticQuery.data && !semanticQuery.data.degraded
+      ? semanticQuery.data.items
+      : null;
+  const inSemanticMode =
+    semanticSearchEnabled &&
+    (semanticPending ||
+      (semanticQuery.data !== undefined && !semanticQuery.data.degraded));
 
   useEffect(() => {
     const handle = window.setTimeout(() => {
@@ -177,25 +212,10 @@ function CataloguePage() {
   }, [maxCostInput]);
 
   useEffect(() => {
-    void navigate({
-      search: {
-        q: searchInput || undefined,
-        tag: activeTag ?? undefined,
-        sort: sort === "newest" ? undefined : sort,
-        free: freeOnly || undefined,
-        max:
-          maxCostInput.trim() === "" ? undefined : Number(maxCostInput.trim()),
-        semantic: routeSearch.semantic ? true : undefined,
-      },
-      replace: true,
-    });
-  }, [activeTag, freeOnly, maxCostInput, navigate, searchInput, sort]);
-
-  useEffect(() => {
-    setSearchInput(routeSearch.q);
-    setDebouncedSearch(routeSearch.q);
+    setSearchInput(routeSearch.q ?? "");
+    setDebouncedSearch(routeSearch.q ?? "");
     setActiveTag(routeSearch.tag ?? null);
-    setSort(routeSearch.sort);
+    setSort(routeSearch.sort ?? "newest");
     setFreeOnly(routeSearch.free ?? false);
     setMaxCostInput(
       routeSearch.max === undefined ? "" : String(routeSearch.max),
@@ -208,52 +228,118 @@ function CataloguePage() {
     routeSearch.tag,
   ]);
 
+  const navigateSearch = (
+    next: {
+      q: string;
+      tag: string | null;
+      sort: CatalogueSort;
+      freeOnly: boolean;
+      maxCostInput: string;
+      semantic: boolean;
+    },
+    replace = true,
+  ) => {
+    const trimmedMax = next.maxCostInput.trim();
+    const max = /^\d+$/.test(trimmedMax) ? Number(trimmedMax) : undefined;
+    void navigate({
+      search: {
+        q: next.q || undefined,
+        tag: next.tag ?? undefined,
+        sort: next.sort === "newest" ? undefined : next.sort,
+        free: next.freeOnly || undefined,
+        max,
+        semantic: next.semantic || undefined,
+      },
+      replace,
+      viewTransition: false,
+    });
+  };
+
   const handleSearchInput = (value: string) => {
     setSearchInput(value);
-    // Editing the query invalidates any prior semantic ranking → back to browse.
-    setSemanticItems(null);
-    setSemanticState("idle");
-    if (routeSearch.semantic) {
-      void navigate({
-        search: {
-          q: value || undefined,
-          tag: activeTag ?? undefined,
-          sort: sort === "newest" ? undefined : sort,
-          free: freeOnly || undefined,
-          max: maxCostInput.trim() ? Number(maxCostInput.trim()) : undefined,
-          semantic: undefined,
-        },
-        replace: true,
-      });
-    }
+    navigateSearch({
+      q: value,
+      tag: activeTag,
+      sort,
+      freeOnly,
+      maxCostInput,
+      semantic: false,
+    });
+  };
+
+  const handleTagChange = (tag: string | null) => {
+    setActiveTag(tag);
+    navigateSearch({
+      q: searchInput,
+      tag,
+      sort,
+      freeOnly,
+      maxCostInput,
+      semantic: false,
+    });
+  };
+
+  const handleSortChange = (nextSort: CatalogueSort) => {
+    setSort(nextSort);
+    navigateSearch({
+      q: searchInput,
+      tag: activeTag,
+      sort: nextSort,
+      freeOnly,
+      maxCostInput,
+      semantic: false,
+    });
+  };
+
+  const handleFreeOnlyChange = (nextFreeOnly: boolean) => {
+    setFreeOnly(nextFreeOnly);
+    navigateSearch({
+      q: searchInput,
+      tag: activeTag,
+      sort,
+      freeOnly: nextFreeOnly,
+      maxCostInput,
+      semantic: false,
+    });
+  };
+
+  const handleMaxCostChange = (nextMaxCostInput: string) => {
+    setMaxCostInput(nextMaxCostInput);
+    navigateSearch({
+      q: searchInput,
+      tag: activeTag,
+      sort,
+      freeOnly,
+      maxCostInput: nextMaxCostInput,
+      semantic: false,
+    });
   };
 
   const submitSemanticSearch = (e: React.SubmitEvent<HTMLFormElement>) => {
     e.preventDefault();
     const query = searchInput.trim();
     if (query.length === 0) return;
-    void navigate({
-      search: {
+    navigateSearch(
+      {
         q: query,
-        tag: activeTag ?? undefined,
-        sort: sort === "newest" ? undefined : sort,
-        free: freeOnly || undefined,
-        max: maxCostInput.trim() ? Number(maxCostInput.trim()) : undefined,
+        tag: activeTag,
+        sort,
+        freeOnly,
+        maxCostInput,
         semantic: true,
       },
-    });
+      false,
+    );
   };
 
   const exitSemanticMode = () => {
-    void navigate({
-      search: {
-        q: searchInput || undefined,
-        tag: activeTag ?? undefined,
-        sort: sort === "newest" ? undefined : sort,
-        free: freeOnly || undefined,
-        max: maxCostInput.trim() ? Number(maxCostInput.trim()) : undefined,
-        semantic: undefined,
-      },
+    navigateSearch({
+      q: searchInput,
+      tag: activeTag,
+      sort,
+      freeOnly,
+      maxCostInput,
+      semantic: false,
     });
   };
 
@@ -341,7 +427,7 @@ function CataloguePage() {
                       variant="link"
                       size="sm"
                       className="px-0"
-                      onClick={() => runSemanticSearch(searchInput.trim())}
+                      onClick={() => void semanticQuery.refetch()}
                     >
                       Retry semantic search
                     </Button>
@@ -351,11 +437,11 @@ function CataloguePage() {
                 {inSemanticMode ? null : (
                   <BrowseFilters
                     sort={sort}
-                    setSort={setSort}
+                    setSort={handleSortChange}
                     freeOnly={freeOnly}
-                    setFreeOnly={setFreeOnly}
+                    setFreeOnly={handleFreeOnlyChange}
                     maxCostInput={maxCostInput}
-                    setMaxCostInput={setMaxCostInput}
+                    setMaxCostInput={handleMaxCostChange}
                   />
                 )}
               </FieldGroup>
@@ -373,7 +459,7 @@ function CataloguePage() {
           <BrowsePanel
             debouncedSearch={debouncedSearch}
             activeTag={activeTag}
-            onTagChange={setActiveTag}
+            onTagChange={handleTagChange}
             sort={sort}
             freeOnly={freeOnly}
             debouncedMaxCost={debouncedMaxCost}
@@ -463,18 +549,14 @@ function BrowsePanel({
   debouncedMaxCost: number | null;
 }) {
   return (
-    <>
-      <Suspense fallback={<CatalogueGridSkeleton />}>
-        <CatalogueList
-          search={debouncedSearch}
-          activeTag={activeTag}
-          onTagChange={onTagChange}
-          sort={sort}
-          freeOnly={freeOnly}
-          maxCost={debouncedMaxCost}
-        />
-      </Suspense>
-    </>
+    <CatalogueList
+      search={debouncedSearch}
+      activeTag={activeTag}
+      onTagChange={onTagChange}
+      sort={sort}
+      freeOnly={freeOnly}
+      maxCost={debouncedMaxCost}
+    />
   );
 }
 
@@ -540,24 +622,54 @@ function CatalogueList({
   maxCost: number | null;
 }) {
   const trimmed = search.trim();
-  const { data } = useSuspenseQuery(
-    convexQuery(api.catalogue.listPublic, {
-      ...(trimmed.length > 0 ? { search: trimmed } : {}),
-      ...(activeTag ? { tag: activeTag } : {}),
-      sort,
-      ...(freeOnly ? { hasFreeTier: true } : {}),
-      ...(maxCost !== null ? { maxCost } : {}),
-    }),
+  const catalogueQuery = useQuery(
+    convexQuery(
+      api.catalogue.listPublic,
+      catalogueListArgs({
+        search,
+        tag: activeTag,
+        sort,
+        freeOnly,
+        maxCost,
+      }),
+    ),
   );
-
+  const items = catalogueQuery.data?.items;
   const tags = useMemo(() => {
     const set = new Set<string>();
-    for (const item of data.items) {
+    for (const item of items ?? []) {
       for (const tag of item.tags) set.add(tag);
     }
     if (activeTag) set.add(activeTag);
     return Array.from(set).sort((a, b) => a.localeCompare(b));
-  }, [data.items, activeTag]);
+  }, [items, activeTag]);
+
+  if (catalogueQuery.isPending) return <CatalogueGridSkeleton />;
+  if (catalogueQuery.isError || catalogueQuery.data === undefined) {
+    return (
+      <Empty className="border border-destructive/40" role="alert">
+        <EmptyHeader>
+          <EmptyMedia variant="icon">
+            <PackageSearch />
+          </EmptyMedia>
+          <EmptyTitle>Catalogue did not load</EmptyTitle>
+          <EmptyDescription>
+            Check your connection, then retry. Your filters are preserved.
+          </EmptyDescription>
+        </EmptyHeader>
+        <EmptyContent>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => void catalogueQuery.refetch()}
+          >
+            Retry catalogue
+          </Button>
+        </EmptyContent>
+      </Empty>
+    );
+  }
+  const data = catalogueQuery.data;
 
   const hasFilters =
     trimmed.length > 0 || activeTag !== null || freeOnly || maxCost !== null;

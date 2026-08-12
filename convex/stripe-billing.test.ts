@@ -14,6 +14,24 @@ import schema from "./schema";
 const modules = import.meta.glob("./**/*.ts");
 
 describe("Stripe Checkout control plane", () => {
+  it("rejects checkout from an ordinary organization member before Stripe work", async () => {
+    const t = convexTest(schema, modules);
+    const member = t.withIdentity({
+      subject: "user_member",
+      org_id: "org_purchaser",
+      org_slug: "purchaser",
+      org_role: "org:member",
+    } as {
+      subject: string;
+      org_id: string;
+      org_slug: string;
+      org_role: string;
+    });
+    await expect(
+      member.action(api.billing.createCheckout, { packId: "pack_10" }),
+    ).rejects.toThrow(/Org admin role required/);
+  });
+
   it("uses immutable server-owned credit packs and only a server-owned Price", async () => {
     expect(
       CREDIT_PACKS.map((pack) => [pack.packId, pack.priceCents, pack.credits]),

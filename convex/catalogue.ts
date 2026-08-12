@@ -46,7 +46,7 @@ export function summarizePublishedPricing(
     for (const pathItem of Object.values(spec.paths)) {
       if (pathItem === undefined) continue;
       for (const op of Object.values(pathItem)) {
-        if (op === undefined) continue;
+        if (op === undefined || Array.isArray(op)) continue;
         endpointCount += 1;
         const pricing = extractPricing(op);
         minCost = Math.min(minCost, pricing.cost);

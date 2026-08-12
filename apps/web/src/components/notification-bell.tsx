@@ -19,6 +19,7 @@ import { useEffect, useState, type ComponentType } from "react";
 import { toast } from "sonner";
 
 import { Button } from "#/components/ui/button";
+import { Skeleton } from "#/components/ui/skeleton";
 import {
   Popover,
   PopoverContent,
@@ -106,14 +107,16 @@ function BellWithOrg({ orgSlug }: { orgSlug: string }) {
     return () => clearInterval(id);
   }, []);
 
-  const { data } = useQuery(
+  const notificationsQuery = useQuery(
     convexQuery(api.notifications.listForOrg, {
       orgSlug,
       paginationOpts: { numItems: 50, cursor: null },
     }),
   );
 
-  const unread = data?.unreadCount ?? 0;
+  const unread = notificationsQuery.isSuccess
+    ? notificationsQuery.data.unreadCount
+    : 0;
 
   const markReadMut = useConvexMutation(api.notifications.markRead);
   const markAllMut = useConvexMutation(api.notifications.markAllRead);
@@ -131,7 +134,7 @@ function BellWithOrg({ orgSlug }: { orgSlug: string }) {
       toast.error(humanError(err, "Could not mark all read")),
   });
 
-  const page = data?.page ?? [];
+  const page = notificationsQuery.isSuccess ? notificationsQuery.data.page : [];
   const unreadLabel = unread > 99 ? "99+" : String(unread);
 
   function onRowClick(notificationId: Id<"notifications">, kind: string) {
@@ -186,7 +189,34 @@ function BellWithOrg({ orgSlug }: { orgSlug: string }) {
           </Button>
         </div>
 
-        {page.length === 0 ? (
+        {notificationsQuery.isPending ? (
+          <div className="space-y-3 p-3" aria-label="Loading notifications">
+            {Array.from({ length: 3 }).map((_, index) => (
+              <div key={index} className="flex items-start gap-2.5">
+                <Skeleton className="size-7 shrink-0 rounded-md" />
+                <div className="flex-1 space-y-2">
+                  <Skeleton className="h-3.5 w-3/4" />
+                  <Skeleton className="h-3 w-full" />
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : notificationsQuery.isError ? (
+          <div className="space-y-3 px-4 py-8 text-center" role="alert">
+            <p className="text-sm font-medium">Notifications did not load</p>
+            <p className="text-xs text-muted-foreground">
+              Check your connection, then retry.
+            </p>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => void notificationsQuery.refetch()}
+            >
+              Retry
+            </Button>
+          </div>
+        ) : page.length === 0 ? (
           <EmptyState />
         ) : (
           <ul className="max-h-80 overflow-y-auto">

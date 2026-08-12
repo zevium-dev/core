@@ -68,8 +68,8 @@ export function ProjectEarningsPanel({
           netCredits={data.month.netCredits}
         />
         <p className="text-xs text-muted-foreground">
-          Month figures are org-wide (all projects). Project-level month lands
-          when the control plane exposes it.
+          Month figures cover the whole organization. Use this project's total
+          above to understand its contribution.
         </p>
       </section>
 

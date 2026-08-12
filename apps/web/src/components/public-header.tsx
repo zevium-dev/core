@@ -1,6 +1,6 @@
 import { Link, useRouterState } from "@tanstack/react-router";
 import { Github, Menu, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { BrandMark } from "#/components/brand-mark";
 import { ThemeToggle } from "#/components/theme-toggle";
@@ -23,6 +23,7 @@ const GITHUB_URL = "https://github.com/zevium-dev/core";
  */
 export function PublicHeader({ active = null, className }: PublicHeaderProps) {
   const [mobileOpen, setMobileOpen] = useState(false);
+  const mobileTriggerRef = useRef<HTMLButtonElement>(null);
   const signedIn = useRouterState({
     select: (state) =>
       Boolean(
@@ -32,11 +33,14 @@ export function PublicHeader({ active = null, className }: PublicHeaderProps) {
   });
   useEffect(() => {
     const close = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setMobileOpen(false);
+      if (event.key === "Escape" && mobileOpen) {
+        setMobileOpen(false);
+        mobileTriggerRef.current?.focus();
+      }
     };
     window.addEventListener("keydown", close);
     return () => window.removeEventListener("keydown", close);
-  }, []);
+  }, [mobileOpen]);
   return (
     <>
       <a
@@ -46,7 +50,7 @@ export function PublicHeader({ active = null, className }: PublicHeaderProps) {
         Skip to content
       </a>
       <header className={cn("border-b", className)}>
-        <div className="mx-auto flex h-14 max-w-6xl items-center justify-between gap-4 px-4">
+        <div className="mx-auto flex h-14 w-full max-w-[100rem] items-center justify-between gap-4 px-4">
           <div className="flex min-w-0 items-center gap-6">
             <Link
               to="/"
@@ -85,6 +89,7 @@ export function PublicHeader({ active = null, className }: PublicHeaderProps) {
 
           <div className="flex items-center gap-2">
             <Button
+              ref={mobileTriggerRef}
               type="button"
               variant="ghost"
               size="icon"

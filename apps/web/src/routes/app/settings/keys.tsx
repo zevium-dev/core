@@ -10,7 +10,14 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useConvexAuth } from "convex/react";
 import { Check, Copy, KeyRound, Plus, RotateCw, Trash2 } from "lucide-react";
 import { m, useReducedMotion } from "motion/react";
-import { Suspense, useEffect, useRef, useState, type FormEvent } from "react";
+import {
+  Suspense,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
 import { toast } from "sonner";
 
 import { Badge } from "#/components/ui/badge";
@@ -103,6 +110,8 @@ function KeysPage() {
 }
 
 function KeysContent() {
+  const { membership } = useOrganization();
+  const canAdminister = membership?.role === "org:admin";
   const { returnTo } = Route.useSearch();
   const queryClient = useQueryClient();
   const reduce = useReducedMotion();
@@ -120,6 +129,8 @@ function KeysContent() {
 
   const [createOpen, setCreateOpen] = useState(false);
   const [name, setName] = useState("");
+  const [nameSubmitted, setNameSubmitted] = useState(false);
+  const nameInputRef = useRef<HTMLInputElement>(null);
   const [revealed, setRevealed] = useState<RevealedSecret | null>(null);
   const [copied, setCopied] = useState(false);
 
@@ -182,6 +193,7 @@ function KeysContent() {
     if (createMutation.isPending || rotateMutation.isPending) return;
     setCreateOpen(false);
     setName("");
+    setNameSubmitted(false);
     setRevealed(null);
     setCopied(false);
   }
@@ -189,9 +201,10 @@ function KeysContent() {
   function onCreateSubmit(e: FormEvent) {
     e.preventDefault();
     if (createMutation.isPending || hasKey) return;
+    setNameSubmitted(true);
     const trimmed = name.trim();
     if (trimmed.length === 0) {
-      toast.error("Name is required");
+      nameInputRef.current?.focus();
       return;
     }
     createMutation.mutate(trimmed);
@@ -202,7 +215,6 @@ function KeysContent() {
     try {
       await navigator.clipboard.writeText(revealed.secret);
       setCopied(true);
-      toast.success("Copied to clipboard");
       window.setTimeout(() => setCopied(false), 1500);
     } catch {
       toast.error("Could not copy — select and copy manually");
@@ -239,6 +251,12 @@ function KeysContent() {
             Secrets appear once. Spend caps, status changes, and rotation reach
             gateway within 1 minute.
           </CardDescription>
+          {!canAdminister ? (
+            <p className="text-sm text-muted-foreground">
+              You can create your own key. Organization admins manage caps,
+              rotation, status, and revocation.
+            </p>
+          ) : null}
         </CardHeader>
         <CardContent>
           {isLoading ? (
@@ -295,6 +313,7 @@ function KeysContent() {
                         onRotate={() => setRotateTarget(key)}
                         onRevoke={() => setRevokeTarget(key)}
                         revokePending={revokeMutation.isPending}
+                        canAdminister={canAdminister}
                       />
                     ))}
                   </tbody>
@@ -344,14 +363,29 @@ function KeysContent() {
             <div className="space-y-2">
               <Label htmlFor="key-name">Name</Label>
               <Input
+                ref={nameInputRef}
                 id="key-name"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="Local dev"
                 maxLength={64}
-                autoFocus
                 disabled={createMutation.isPending}
+                aria-invalid={nameSubmitted && name.trim() === ""}
+                aria-describedby="key-name-help"
               />
+              <p
+                id="key-name-help"
+                role={nameSubmitted && name.trim() === "" ? "alert" : undefined}
+                className={`min-h-5 text-xs ${
+                  nameSubmitted && name.trim() === ""
+                    ? "text-destructive"
+                    : "text-muted-foreground"
+                }`}
+              >
+                {nameSubmitted && name.trim() === ""
+                  ? "Enter a name so you can identify where this key is used."
+                  : "Use a short location or workload name, such as Local dev."}
+              </p>
             </div>
             <DialogFooter>
               <Button
@@ -476,6 +510,7 @@ function KeyRow({
   onRotate,
   onRevoke,
   revokePending,
+  canAdminister,
 }: {
   apiKey: ApiKeyRow;
   setting: SettingView | undefined;
@@ -484,6 +519,7 @@ function KeyRow({
   onRotate: () => void;
   onRevoke: () => void;
   revokePending: boolean;
+  canAdminister: boolean;
 }) {
   // Local cap input mirrors the persisted value; edits commit on blur.
   const [capInput, setCapInput] = useState(
@@ -492,6 +528,9 @@ function KeyRow({
       : String(setting.monthlyCapCredits),
   );
   const [capBusy, setCapBusy] = useState(false);
+  const [capError, setCapError] = useState<string | null>(null);
+  const capInputRef = useRef<HTMLInputElement>(null);
+  const capErrorId = useId();
   const [toggleBusy, setToggleBusy] = useState(false);
   const [now, setNow] = useState(() => Date.now());
 
@@ -508,29 +547,22 @@ function KeyRow({
     );
   }, [setting?.monthlyCapCredits]);
 
-  function resetCapInput() {
-    setCapInput(
-      setting?.monthlyCapCredits === undefined
-        ? ""
-        : String(setting.monthlyCapCredits),
-    );
-  }
-
   async function commitCap() {
     const parsed = parseMonthlyCap(capInput);
     if (!parsed.ok) {
-      toast.error(parsed.error);
-      resetCapInput();
+      setCapError(parsed.error);
+      capInputRef.current?.focus();
       return;
     }
+    setCapError(null);
     const current = setting?.monthlyCapCredits ?? null;
     if (parsed.cap === current) return;
     setCapBusy(true);
     try {
       await setCap({ keyId: apiKey.id, monthlyCapCredits: parsed.cap });
     } catch (err) {
-      toast.error(humanError(err, "Could not save cap"));
-      resetCapInput();
+      setCapError(humanError(err, "Could not save cap. Retry."));
+      capInputRef.current?.focus();
     } finally {
       setCapBusy(false);
     }
@@ -574,21 +606,40 @@ function KeyRow({
           Monthly cap
         </span>
         <Input
+          ref={capInputRef}
           type="number"
           min={1}
           step={1}
           inputMode="numeric"
           value={capInput}
-          onChange={(e) => setCapInput(e.target.value)}
+          onChange={(e) => {
+            const value = e.target.value;
+            setCapInput(value);
+            if (capError !== null) {
+              const parsed = parseMonthlyCap(value);
+              setCapError(parsed.ok ? null : parsed.error);
+            }
+          }}
           onBlur={() => void commitCap()}
           onKeyDown={(e) => {
             if (e.key === "Enter") (e.target as HTMLInputElement).blur();
           }}
           placeholder="Unlimited"
-          disabled={capBusy}
+          disabled={capBusy || !canAdminister}
           className="h-8 w-28 tabular-nums"
           aria-label={`Monthly credit cap for ${apiKey.name}`}
+          aria-invalid={capError !== null}
+          aria-describedby={capError ? capErrorId : undefined}
         />
+        {capError ? (
+          <p
+            id={capErrorId}
+            role="alert"
+            className="mt-1 max-w-48 text-xs text-destructive"
+          >
+            {capError}
+          </p>
+        ) : null}
       </td>
       <td className="flex items-center justify-between gap-4 md:table-cell md:px-3 md:py-2.5">
         <span className="text-xs text-muted-foreground md:hidden">Enabled</span>
@@ -596,7 +647,7 @@ function KeyRow({
           {lifecycle === "current" || lifecycle === "disabled" ? (
             <Switch
               checked={lifecycle === "current"}
-              disabled={toggleBusy}
+              disabled={toggleBusy || !canAdminister}
               onCheckedChange={(checked) => void commitToggle(checked === true)}
               aria-label={`Enable ${apiKey.name}`}
             />
@@ -641,7 +692,7 @@ function KeyRow({
             variant="ghost"
             size="sm"
             onClick={onRotate}
-            disabled={lifecycle !== "current"}
+            disabled={!canAdminister || lifecycle !== "current"}
             title="Rotate key (old key works 24h)"
           >
             <RotateCw className="size-4" />
@@ -652,7 +703,7 @@ function KeyRow({
             size="sm"
             className="text-destructive hover:text-destructive"
             onClick={onRevoke}
-            disabled={revokePending}
+            disabled={!canAdminister || revokePending}
           >
             <Trash2 className="size-4" />
             {graceActive ? "Revoke previous now" : "Revoke"}

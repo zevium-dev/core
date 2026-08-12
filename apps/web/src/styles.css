@@ -3,7 +3,8 @@
 @import "@clerk/ui/themes/shadcn.css";
 @plugin "@tailwindcss/typography";
 
-/* Hallmark · pre-emit critique: P5 H5 E5 S5 R4 V4 · genre: modern-minimal · tone: precise developer infrastructure · system: DESIGN.md stock-shadcn neutral · structure: marketplace index → mock-first workbench · contrast: pass (40–41) · honest: pass (46) · chrome: pass (47) · tokens: pass (48) · mobile: pass (34, 49, 50–57) */
+/* Hallmark · macrostructure: Marketplace Index · H2 hero knobs: split=copy/lifecycle, alignment=left, demo=semantic · nav: N1b compact · footer: Ft2 inline · enrichment: E6 live lifecycle · tone: precise developer infrastructure · anchor hue: neutral */
+/* Hallmark · pre-emit critique: P5 H5 E5 S5 R4 V4 · genre: modern-minimal · system: DESIGN.md locked stock-shadcn neutral · contrast: pass (40–41) · honest: pass (46) · chrome: pass (47) · tokens: pass (48) · responsive: pass (49) · icons: pass (30) · mobile: pass (34, 49, 50–57) */
 
 /* Clerk's hosted UI mounts after its client bundle resolves. Keep auth routes
    useful and layout-stable during that network gap, including before hydration. */
@@ -16,6 +17,11 @@
 html,
 body {
   overflow-x: clip;
+}
+
+/* Focus indicators must appear immediately; transition remains for pointer states. */
+*:focus-visible {
+  transition-property: none;
 }
 
 :root {
@@ -190,11 +196,9 @@ body {
 
 @keyframes content-enter {
   from {
-    opacity: 0;
     transform: translateY(8px);
   }
   to {
-    opacity: 1;
     transform: translateY(0);
   }
 }

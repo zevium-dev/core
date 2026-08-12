@@ -2,7 +2,11 @@ import { v } from "convex/values";
 import { internalQuery, mutation, query } from "./_generated/server";
 import type { Doc } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
-import { getOrgByPublicHandle, requireProjectMember } from "./lib/auth";
+import {
+  getOrgByPublicHandle,
+  requireOrgAdmin,
+  requireProjectMember,
+} from "./lib/auth";
 import { createNotification } from "./lib/notifications";
 import { fireWebhookEvent } from "./webhooks";
 import {
@@ -129,7 +133,8 @@ export const publish = mutation({
     version?: Doc<"specVersions">;
     project?: Doc<"projects">;
   }> => {
-    const { org } = await requireProjectMember(ctx, args.projectId);
+    const { claims, org } = await requireProjectMember(ctx, args.projectId);
+    requireOrgAdmin(claims);
 
     const version = args.version.trim();
     if (!isValidSemver(version)) {
@@ -315,10 +320,14 @@ export const getVersion = query({
   handler: async (
     ctx,
     args,
-  ): Promise<{ version: string; spec: string; publishedAt: number }> => {
+  ): Promise<{
+    version: string;
+    spec: string;
+    publishedAt: number;
+  } | null> => {
     const row = await ctx.db.get(args.versionId);
     if (row === null) {
-      throw new Error("Spec version not found");
+      return null;
     }
     await requireProjectMember(ctx, row.projectId);
     return {
@@ -457,7 +466,7 @@ export const getPublishedForGatewayInternal = internalQuery({
 
 /**
  * Deprecate a published version (metadata only — spec body immutable).
- * Auth: org member owning the project.
+ * Auth: org admin owning the project.
  * Fires version_deprecated notification + spec.deprecated webhook.
  */
 export const deprecateVersion = mutation({
@@ -471,7 +480,8 @@ export const deprecateVersion = mutation({
     if (version === null) {
       throw new Error("Version not found");
     }
-    const { org } = await requireProjectMember(ctx, version.projectId);
+    const { claims, org } = await requireProjectMember(ctx, version.projectId);
+    requireOrgAdmin(claims);
 
     const now = Date.now();
     await ctx.db.patch(args.versionId, {
@@ -504,7 +514,7 @@ export const deprecateVersion = mutation({
 
 /**
  * Clear deprecation metadata from a version.
- * Auth: org member owning the project.
+ * Auth: org admin owning the project.
  */
 export const undeprecateVersion = mutation({
   args: { versionId: v.id("specVersions") },
@@ -513,7 +523,8 @@ export const undeprecateVersion = mutation({
     if (version === null) {
       throw new Error("Version not found");
     }
-    await requireProjectMember(ctx, version.projectId);
+    const { claims } = await requireProjectMember(ctx, version.projectId);
+    requireOrgAdmin(claims);
 
     // Replace to unset optional fields — patch cannot delete them.
     await ctx.db.replace(args.versionId, {

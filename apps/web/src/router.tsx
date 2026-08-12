@@ -7,6 +7,7 @@ import {
 import { setupRouterSsrQueryIntegration } from "@tanstack/react-router-ssr-query";
 import { LazyMotion, domAnimation } from "motion/react";
 
+import { RouteError } from "#/components/route-error";
 import { markViewTransitionActive } from "#/lib/vt";
 import { routeTree } from "./routeTree.gen";
 
@@ -57,6 +58,7 @@ export function getRouter(): AnyRouter {
     // Show pending skeletons quickly instead of freezing the old screen.
     defaultPendingMs: 100,
     defaultPendingMinMs: 300,
+    defaultErrorComponent: RouteError,
     context: {
       convexQueryClient,
       queryClient,

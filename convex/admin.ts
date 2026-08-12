@@ -152,6 +152,8 @@ export type AdminProjectView = {
   status: Doc<"projects">["status"];
   visibility: Doc<"projects">["visibility"];
   organizationId: Id<"organizations">;
+  organizationName: string;
+  organizationSlug: string | null;
 };
 
 export const listProjects = query({
@@ -166,14 +168,28 @@ export const listProjects = query({
     const status = args.status;
     const visibility = args.visibility;
 
-    // When both filters present, use the composite index for precise results.
-    // Otherwise paginate all and filter in-memory (admin tool, bounded scale).
+    // Every filter shape is index-backed so pagination never produces sparse
+    // pages that force the operator to hunt for matching rows.
     let result;
     if (status !== undefined && visibility !== undefined) {
       result = await ctx.db
         .query("projects")
         .withIndex("by_visibility_status", (q) =>
           q.eq("visibility", visibility).eq("status", status),
+        )
+        .order("desc")
+        .paginate(args.paginationOpts);
+    } else if (status !== undefined) {
+      result = await ctx.db
+        .query("projects")
+        .withIndex("by_status", (q) => q.eq("status", status))
+        .order("desc")
+        .paginate(args.paginationOpts);
+    } else if (visibility !== undefined) {
+      result = await ctx.db
+        .query("projects")
+        .withIndex("by_visibility_status", (q) =>
+          q.eq("visibility", visibility),
         )
         .order("desc")
         .paginate(args.paginationOpts);
@@ -184,22 +200,21 @@ export const listProjects = query({
         .paginate(args.paginationOpts);
     }
 
-    const page: AdminProjectView[] = result.page
-      .filter((p) => {
-        if (status !== undefined && p.status !== status) return false;
-        if (visibility !== undefined && p.visibility !== visibility) {
-          return false;
-        }
-        return true;
-      })
-      .map((p) => ({
-        _id: p._id,
-        name: p.name,
-        slug: p.slug,
-        status: p.status,
-        visibility: p.visibility,
-        organizationId: p.organizationId,
-      }));
+    const page: AdminProjectView[] = await Promise.all(
+      result.page.map(async (p) => {
+        const organization = await ctx.db.get(p.organizationId);
+        return {
+          _id: p._id,
+          name: p.name,
+          slug: p.slug,
+          status: p.status,
+          visibility: p.visibility,
+          organizationId: p.organizationId,
+          organizationName: organization?.name ?? "Deleted organization",
+          organizationSlug: organization?.slug ?? null,
+        };
+      }),
+    );
 
     return { ...result, page };
   },

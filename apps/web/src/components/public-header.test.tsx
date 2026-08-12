@@ -102,4 +102,22 @@ describe("PublicHeader", () => {
       expect(link.getAttribute("aria-current")).toBe("page");
     }
   });
+
+  it("closes mobile navigation on Escape and restores trigger focus", () => {
+    render(<PublicHeader />);
+    const trigger = screen.getByRole("button", { name: "Open navigation" });
+    fireEvent.click(trigger);
+    const catalogue = within(
+      screen.getByRole("navigation", { name: "Public navigation" }),
+    ).getByRole("link", { name: "Catalogue" });
+    catalogue.focus();
+    expect(document.activeElement).toBe(catalogue);
+
+    fireEvent.keyDown(window, { key: "Escape" });
+
+    expect(
+      screen.queryByRole("navigation", { name: "Public navigation" }),
+    ).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+  });
 });

@@ -411,6 +411,15 @@ export const recordUsage = internalMutation({
         continue;
       }
 
+      const keySetting = await ctx.db
+        .query("keySettings")
+        .withIndex("by_key", (q) => q.eq("keyId", event.keyId))
+        .unique();
+      const ownerUserId =
+        keySetting?.clerkOrgId === consumerOrg.clerkOrgId
+          ? keySetting.ownerUserId
+          : undefined;
+
       const usageEventId = await ctx.db.insert("usageEvents", {
         organizationId: consumerOrg._id,
         projectId: event.projectId,
@@ -420,6 +429,7 @@ export const recordUsage = internalMutation({
         status: event.status,
         latencyMs: event.latencyMs,
         keyId: event.keyId,
+        ownerUserId,
         at: event.at,
         settleRefId: event.settleRefId,
       });

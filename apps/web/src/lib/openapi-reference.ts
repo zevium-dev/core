@@ -53,12 +53,18 @@ function resolveComponentRef(
   section: "parameters" | "requestBodies" | "responses",
   components?: Record<string, unknown>,
 ): unknown {
-  if (!isRecord(value) || typeof value.$ref !== "string") return value;
-  const prefix = `#/components/${section}/`;
-  if (!value.$ref.startsWith(prefix)) return value;
-  const records = components?.[section];
-  if (!isRecord(records)) return value;
-  return records[decodeURIComponent(value.$ref.slice(prefix.length))] ?? value;
+  let current = value;
+  const seen = new Set<string>();
+  while (isRecord(current) && typeof current.$ref === "string") {
+    if (seen.has(current.$ref)) return current;
+    seen.add(current.$ref);
+    const prefix = `#/components/${section}/`;
+    if (!current.$ref.startsWith(prefix)) return current;
+    const records = components?.[section];
+    if (!isRecord(records)) return current;
+    current = records[decodeURIComponent(current.$ref.slice(prefix.length))];
+  }
+  return current;
 }
 
 function stringValue(value: unknown): string {
@@ -82,13 +88,16 @@ export function parameterKey(
 }
 
 function extractParameters(
+  pathParameters: unknown[] | undefined,
   operation: OpenApiOperation,
   path: string,
   components?: Record<string, unknown>,
 ): ApiParameter[] {
-  const parameters: ApiParameter[] = [];
-  const seen = new Set<string>();
-  const raw = Array.isArray(operation.parameters) ? operation.parameters : [];
+  const parameters = new Map<string, ApiParameter>();
+  const raw = [
+    ...(pathParameters ?? []),
+    ...(Array.isArray(operation.parameters) ? operation.parameters : []),
+  ];
 
   for (const rawCandidate of raw) {
     const candidate = resolveComponentRef(
@@ -107,9 +116,9 @@ function extractParameters(
     const location = candidate.in;
     const schema = isRecord(candidate.schema) ? candidate.schema : {};
     const key = parameterKey(location, candidate.name);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    parameters.push({
+    // Path Item parameters apply to every operation. An operation-level entry
+    // with the same (name, in) replaces it, per OpenAPI 3.1.
+    parameters.set(key, {
       key,
       name: candidate.name,
       location,
@@ -133,8 +142,8 @@ function extractParameters(
   for (const match of path.matchAll(/\{([^}/]+)\}/g)) {
     const name = match[1]!;
     const key = parameterKey("path", name);
-    if (seen.has(key)) continue;
-    parameters.push({
+    if (parameters.has(key)) continue;
+    parameters.set(key, {
       key,
       name,
       location: "path",
@@ -144,7 +153,7 @@ function extractParameters(
     });
   }
 
-  return parameters;
+  return [...parameters.values()];
 }
 
 function extractResponses(
@@ -191,7 +200,7 @@ export function parsePublishedEndpoints(specJson: string): ApiEndpoint[] {
   const rows: ApiEndpoint[] = [];
   for (const [path, pathItem] of Object.entries(spec.paths)) {
     for (const [method, rawOperation] of Object.entries(pathItem)) {
-      if (rawOperation === undefined) continue;
+      if (method === "parameters" || !isRecord(rawOperation)) continue;
       const operation = rawOperation as OpenApiOperation;
       const resolvedRequestBody = resolveComponentRef(
         operation.requestBody,
@@ -233,7 +242,12 @@ export function parsePublishedEndpoints(specJson: string): ApiEndpoint[] {
           : [],
         cost: pricing.cost,
         freeTier: pricing.freeTier,
-        parameters: extractParameters(operation, path, spec.components),
+        parameters: extractParameters(
+          pathItem.parameters,
+          operation,
+          path,
+          spec.components,
+        ),
         requestContentType: bodyDefaults.contentType,
         requestBodyExample: bodyDefaults.body,
         requestBodyDeclared: requestBody !== null,
@@ -284,6 +298,60 @@ export function readableJsonResponse(
   }
   try {
     return JSON.stringify(JSON.parse(body) as unknown, null, 2);
+  } catch {
+    return null;
+  }
+}
+
+const SAFE_GATEWAY_ERRORS: Record<string, string> = {
+  payment_required: "Payment or valid credits are required.",
+  gateway_unavailable: "Gateway configuration is temporarily unavailable.",
+  project_not_found: "This API is unavailable.",
+  invalid_spec: "Published API configuration is unavailable.",
+  route_not_found: "This endpoint is not published.",
+  no_upstream: "This API has no configured upstream.",
+  unsafe_upstream: "This API's upstream is not permitted.",
+  key_disabled: "This API key is disabled.",
+  key_cap_exceeded: "This API key reached its monthly cap.",
+  reserve_failed: "Credits could not be reserved.",
+  upstream_timeout: "The upstream service did not respond in time.",
+  upstream_error: "The upstream request failed.",
+};
+
+/**
+ * Render only Zevium-owned error envelopes. Matching body/header request IDs
+ * prevents an arbitrary upstream JSON error from impersonating this shape.
+ */
+export function sanitizedGatewayErrorResponse(
+  body: string,
+  contentType: string | null,
+  headerRequestId: string | undefined,
+  maxLength = 20_000,
+): string | null {
+  if (
+    headerRequestId === undefined ||
+    !contentType?.toLowerCase().includes("json") ||
+    body.length > maxLength
+  ) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(body) as unknown;
+    if (
+      !isRecord(parsed) ||
+      typeof parsed.error !== "string" ||
+      typeof parsed.requestId !== "string" ||
+      parsed.requestId !== headerRequestId
+    ) {
+      return null;
+    }
+    const message = SAFE_GATEWAY_ERRORS[parsed.error];
+    if (message === undefined) return null;
+    return JSON.stringify(
+      { error: parsed.error, message, requestId: headerRequestId },
+      null,
+      2,
+    );
   } catch {
     return null;
   }

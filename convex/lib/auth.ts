@@ -9,8 +9,11 @@ export type OrgIdentityClaims = {
 };
 
 type DbCtx = QueryCtx | MutationCtx;
+type AuthCtx = Pick<QueryCtx, "auth">;
 
-export async function requireIdentity(ctx: DbCtx): Promise<OrgIdentityClaims> {
+export async function requireIdentity(
+  ctx: AuthCtx,
+): Promise<OrgIdentityClaims> {
   const identity = await ctx.auth.getUserIdentity();
   if (identity === null) {
     throw new Error("Not authenticated");
@@ -134,8 +137,9 @@ export async function requireProjectMember(
  *
  * Returns the claims for chaining. Does NOT touch the DB.
  *
- * Mutations that SHOULD call `requireOrgAdmin(claims)` (caller migration is a
- * separate PR — this helper is exported but not yet wired in):
+ * Privileged mutations and actions must call `requireOrgAdmin(claims)` after
+ * resolving identity or org/project membership. UI role checks only explain
+ * availability; this server gate remains authoritative.
  *   - projects.create / projects.update / projects.remove
  *       (project lifecycle: create, rename, transfer, delete)
  *   - specs.publish / specs.deprecateVersion / specs.undeprecateVersion

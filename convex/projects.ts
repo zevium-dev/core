@@ -1,7 +1,11 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
-import { requireOrgMemberBySlug, requireProjectMember } from "./lib/auth";
+import {
+  requireOrgAdmin,
+  requireOrgMemberBySlug,
+  requireProjectMember,
+} from "./lib/auth";
 import { isValidSlug } from "./lib/validate";
 
 export const list = query({
@@ -39,7 +43,8 @@ export const create = mutation({
     description: v.optional(v.string()),
   },
   handler: async (ctx, args): Promise<Doc<"projects">> => {
-    const { org } = await requireOrgMemberBySlug(ctx, args.orgSlug);
+    const { claims, org } = await requireOrgMemberBySlug(ctx, args.orgSlug);
+    requireOrgAdmin(claims);
 
     const name = args.name.trim();
     if (name.length === 0) {
@@ -110,7 +115,8 @@ export const update = mutation({
     }),
   },
   handler: async (ctx, args): Promise<Doc<"projects">> => {
-    await requireProjectMember(ctx, args.projectId);
+    const { claims } = await requireProjectMember(ctx, args.projectId);
+    requireOrgAdmin(claims);
 
     const current = await ctx.db.get(args.projectId);
     if (current === null) {
@@ -200,7 +206,8 @@ export const update = mutation({
 export const remove = mutation({
   args: { projectId: v.id("projects") },
   handler: async (ctx, args): Promise<{ deleted: Id<"projects"> }> => {
-    await requireProjectMember(ctx, args.projectId);
+    const { claims } = await requireProjectMember(ctx, args.projectId);
+    requireOrgAdmin(claims);
 
     const draft = await ctx.db
       .query("specs")

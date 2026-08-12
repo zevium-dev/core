@@ -52,6 +52,20 @@ function asStranger(t: ReturnType<typeof convexTest>) {
     subject: "user_stranger",
     org_id: "org_other",
     org_slug: "other",
+    org_role: "org:admin",
+  } as {
+    subject: string;
+    org_id: string;
+    org_slug: string;
+    org_role: string;
+  });
+}
+
+function asOrgMember(t: ReturnType<typeof convexTest>) {
+  return t.withIdentity({
+    subject: "user_member",
+    org_id: "org_acme",
+    org_slug: "acme",
     org_role: "org:member",
   } as {
     subject: string;
@@ -119,6 +133,45 @@ describe("keySettings.getForOrg — auth", () => {
 });
 
 describe("keySettings.setCap — upsert + validation", () => {
+  it("rejects cap, status, and rotation control for an ordinary member", async () => {
+    const t = convexTest(schema, modules);
+    await seedWorld(t);
+    const member = asOrgMember(t);
+    await expect(
+      member.mutation(api.keySettings.setCap, {
+        keyId: KEY_A,
+        monthlyCapCredits: 500,
+      }),
+    ).rejects.toThrow(/Org admin role required/);
+    await expect(
+      member.mutation(api.keySettings.setDisabled, {
+        keyId: KEY_A,
+        disabled: true,
+      }),
+    ).rejects.toThrow(/Org admin role required/);
+    await expect(
+      member.mutation(api.keySettings.beginRotation, {
+        operationId: "blocked-rotation",
+        oldKeyId: KEY_A,
+      }),
+    ).rejects.toThrow(/Org admin role required/);
+  });
+
+  it("records key name and owner from the authenticated identity", async () => {
+    const t = convexTest(schema, modules);
+    await seedWorld(t);
+    const view = await asOrgMember(t).mutation(
+      api.keySettings.registerOwnedKey,
+      { keyId: KEY_A, keyName: "Local dev" },
+    );
+    expect(view).toMatchObject({
+      keyId: KEY_A,
+      keyName: "Local dev",
+      ownerUserId: "user_member",
+      disabled: false,
+    });
+  });
+
   it("creates a row with the cap when none exists", async () => {
     const t = convexTest(schema, modules);
     await seedWorld(t);

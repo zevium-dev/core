@@ -65,7 +65,7 @@ export function buildEmbedText(
       for (const [path, item] of Object.entries(spec.paths)) {
         if (item === undefined) continue;
         for (const [method, op] of Object.entries(item)) {
-          if (op === undefined) continue;
+          if (op === undefined || Array.isArray(op)) continue;
           const summary =
             typeof op.summary === "string" && op.summary.length > 0
               ? op.summary

@@ -95,6 +95,8 @@ function ProjectsIndexPage() {
 }
 
 function ProjectsList({ orgSlug }: { orgSlug: string }) {
+  const { membership } = useOrganization();
+  const canCreate = membership?.role === "org:admin";
   const { data: projects } = useSuspenseQuery(
     convexQuery(api.projects.list, { orgSlug }),
   );
@@ -108,7 +110,7 @@ function ProjectsList({ orgSlug }: { orgSlug: string }) {
             Publish APIs from OpenAPI specs.
           </p>
         </div>
-        {projects.length > 0 ? (
+        {projects.length > 0 && canCreate ? (
           <Button asChild>
             <Link to="/app/projects/create">
               <Plus data-icon="inline-start" />
@@ -119,7 +121,7 @@ function ProjectsList({ orgSlug }: { orgSlug: string }) {
       </div>
 
       {projects.length === 0 ? (
-        <EmptyProjects />
+        <EmptyProjects canCreate={canCreate} />
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {projects.map((project) => (
@@ -171,7 +173,7 @@ function ProjectsList({ orgSlug }: { orgSlug: string }) {
   );
 }
 
-function EmptyProjects() {
+function EmptyProjects({ canCreate }: { canCreate: boolean }) {
   return (
     <Empty className="min-h-80 border">
       <EmptyHeader>
@@ -180,18 +182,21 @@ function EmptyProjects() {
         </EmptyMedia>
         <EmptyTitle>No projects yet</EmptyTitle>
         <EmptyDescription>
-          Create a project, paste an OpenAPI spec, set per-call pricing, and
-          publish to the catalogue.
+          {canCreate
+            ? "Create a project, paste an OpenAPI spec, set per-call pricing, and publish to the catalogue."
+            : "Organization admins create projects. Ask an admin to add the first API."}
         </EmptyDescription>
       </EmptyHeader>
-      <EmptyContent>
-        <Button asChild>
-          <Link to="/app/projects/create">
-            <Plus data-icon="inline-start" />
-            New project
-          </Link>
-        </Button>
-      </EmptyContent>
+      {canCreate ? (
+        <EmptyContent>
+          <Button asChild>
+            <Link to="/app/projects/create">
+              <Plus data-icon="inline-start" />
+              New project
+            </Link>
+          </Button>
+        </EmptyContent>
+      ) : null}
     </Empty>
   );
 }

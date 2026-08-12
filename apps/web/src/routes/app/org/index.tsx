@@ -276,6 +276,8 @@ function PublicHandleCard() {
 }
 
 function PublisherPaymentsCard() {
+  const { membership } = useOrganization();
+  const isAdmin = membership?.role === "org:admin";
   const [publisherCountry, setPublisherCountry] = useState("");
   const payoutState = useQuery(convexQuery(api.payouts.getPayoutState, {}));
   const startOnboarding = useAction(api.payouts.startOnboarding);
@@ -295,7 +297,7 @@ function PublisherPaymentsCard() {
     },
   });
 
-  if (payoutState.isPending || !payoutState.data) {
+  if (payoutState.isPending) {
     return (
       <Card>
         <CardHeader>
@@ -304,6 +306,28 @@ function PublisherPaymentsCard() {
         </CardHeader>
         <CardContent>
           <Skeleton className="h-9 w-44" />
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (payoutState.isError || !payoutState.data) {
+    return (
+      <Card role="alert">
+        <CardHeader>
+          <CardTitle>Publisher payout status did not load</CardTitle>
+          <CardDescription>
+            Check your connection, then retry. No payout settings were changed.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => void payoutState.refetch()}
+          >
+            Retry payout status
+          </Button>
         </CardContent>
       </Card>
     );
@@ -339,7 +363,11 @@ function PublisherPaymentsCard() {
             ))}
           </ul>
         ) : null}
-        {display.action && display.actionLabel ? (
+        {!isAdmin ? (
+          <p className="text-sm text-muted-foreground">
+            An organization admin manages Stripe onboarding and payout details.
+          </p>
+        ) : display.action && display.actionLabel ? (
           <div className="space-y-3">
             {profile.status === "not_started" ? (
               <div className="max-w-xs space-y-2">

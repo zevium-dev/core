@@ -71,4 +71,53 @@ describe("admin publisher transfer operations", () => {
     });
     expect(result.page[0]).not.toHaveProperty("destination");
   });
+
+  it("returns organization labels with only the requested indexed project page", async () => {
+    const t = convexTest(schema, modules);
+    await t.run(async (ctx) => {
+      const alpha = await ctx.db.insert("organizations", {
+        clerkOrgId: "org_alpha",
+        name: "Alpha Labs",
+        slug: "alpha-labs",
+      });
+      const beta = await ctx.db.insert("organizations", {
+        clerkOrgId: "org_beta",
+        name: "Beta Labs",
+        slug: "beta-labs",
+      });
+      await ctx.db.insert("projects", {
+        organizationId: alpha,
+        name: "Alpha draft",
+        slug: "alpha-draft",
+        status: "draft",
+        visibility: "private",
+        tags: [],
+      });
+      await ctx.db.insert("projects", {
+        organizationId: beta,
+        name: "Beta API",
+        slug: "beta-api",
+        status: "published",
+        visibility: "public",
+        tags: [],
+      });
+    });
+
+    const result = await t
+      .withIdentity({ subject: ADMIN } as { subject: string })
+      .query(api.admin.listProjects, {
+        paginationOpts: { numItems: 1, cursor: null },
+        status: "published",
+        visibility: "public",
+      });
+
+    expect(result.page).toEqual([
+      expect.objectContaining({
+        name: "Beta API",
+        organizationName: "Beta Labs",
+        organizationSlug: "beta-labs",
+      }),
+    ]);
+    expect(result.isDone).toBe(true);
+  });
 });

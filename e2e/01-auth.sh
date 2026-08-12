@@ -40,9 +40,8 @@ ab wait --load networkidle >/dev/null 2>&1 || ab wait 1200 >/dev/null
 assert_url_contains "/app/projects" "expected projects route after auth"
 snap="$(page_text)"
 assert_not_contains "$snap" "Something went wrong" "projects page error banner"
-# Soft accept either list chrome or no-org empty (auth ok either way).
-if [[ "$snap" != *"Projects"* && "$snap" != *"New project"* && "$snap" != *"organization"* ]]; then
-  fail "projects page missing expected chrome (Projects / New project / org)"
-fi
+assert_not_contains "$snap" "No active organization" "seed organization must be active"
+assert_contains "$snap" "Projects" "projects heading missing"
+assert_contains "$snap" "New project" "admin project action missing"
 
 log "01-auth PASS"

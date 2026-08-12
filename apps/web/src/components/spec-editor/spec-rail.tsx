@@ -332,6 +332,7 @@ export type SpecRailVersionsProps = {
   publishSlot: ReactNode;
   projectId: Id<"projects">;
   onSelectVersion?: (versionId: SpecVersionRow["_id"]) => void;
+  canAdminister: boolean;
 };
 
 export function SpecRailVersions({
@@ -339,6 +340,7 @@ export function SpecRailVersions({
   publishSlot,
   projectId,
   onSelectVersion,
+  canAdminister,
 }: SpecRailVersionsProps) {
   const queryClient = useQueryClient();
   const [deprecateTarget, setDeprecateTarget] = useState<SpecVersionRow | null>(
@@ -404,6 +406,7 @@ export function SpecRailVersions({
                 onSelect={onSelectVersion}
                 onDeprecate={setDeprecateTarget}
                 onUndeprecate={setUndeprecateTarget}
+                canAdminister={canAdminister}
                 busy={
                   (deprecating && deprecateTarget?._id === v._id) ||
                   (undeprecating && undeprecateTarget?._id === v._id)
@@ -444,12 +447,14 @@ function VersionRow({
   onDeprecate,
   onUndeprecate,
   busy,
+  canAdminister,
 }: {
   version: SpecVersionRow;
   onSelect?: (versionId: SpecVersionRow["_id"]) => void;
   onDeprecate: (row: SpecVersionRow) => void;
   onUndeprecate: (row: SpecVersionRow) => void;
   busy: boolean;
+  canAdminister: boolean;
 }) {
   const deprecated = version.deprecatedAt !== undefined;
 
@@ -477,32 +482,34 @@ function VersionRow({
         <span className="shrink-0 text-xs text-muted-foreground">
           {VERSION_DATE_FORMATTER.format(version.publishedAt)}
         </span>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="size-7 shrink-0 opacity-0 transition-opacity duration-[var(--dur-instant)] ease-[var(--ease)] group-hover:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100"
-              disabled={busy}
-              aria-label={`Actions for version ${version.version}`}
-            >
-              <MoreHorizontal className="size-4" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-40">
-            {deprecated ? (
-              <DropdownMenuItem onClick={() => onUndeprecate(version)}>
-                <RotateCcw className="size-4" />
-                Undeprecate
-              </DropdownMenuItem>
-            ) : (
-              <DropdownMenuItem onClick={() => onDeprecate(version)}>
-                <Archive className="size-4" />
-                Deprecate…
-              </DropdownMenuItem>
-            )}
-          </DropdownMenuContent>
-        </DropdownMenu>
+        {canAdminister ? (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="size-7 shrink-0 transition-opacity duration-[var(--dur-instant)] ease-[var(--ease)] [@media(hover:hover)_and_(pointer:fine)]:opacity-0 [@media(hover:hover)_and_(pointer:fine)]:group-hover:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100"
+                disabled={busy}
+                aria-label={`Actions for version ${version.version}`}
+              >
+                <MoreHorizontal className="size-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-40">
+              {deprecated ? (
+                <DropdownMenuItem onClick={() => onUndeprecate(version)}>
+                  <RotateCcw className="size-4" />
+                  Undeprecate
+                </DropdownMenuItem>
+              ) : (
+                <DropdownMenuItem onClick={() => onDeprecate(version)}>
+                  <Archive className="size-4" />
+                  Deprecate…
+                </DropdownMenuItem>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : null}
       </div>
     </li>
   );

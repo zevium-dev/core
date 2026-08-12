@@ -61,7 +61,12 @@ export function DocsCodeBlock({ code, lang, className }: DocsCodeBlockProps) {
           {copied ? "Copied" : "Copy"}
         </Button>
       </div>
-      <pre className="overflow-x-auto p-4 font-mono text-xs leading-relaxed text-foreground">
+      <pre
+        tabIndex={0}
+        role="region"
+        aria-label={`${lang ?? "Code"} example`}
+        className="overflow-x-auto p-4 font-mono text-xs leading-relaxed text-foreground focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-inset focus-visible:ring-ring/50"
+      >
         <SyntaxCode code={code} lang={lang} />
       </pre>
     </div>

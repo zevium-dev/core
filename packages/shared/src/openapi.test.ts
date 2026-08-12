@@ -56,7 +56,7 @@ describe("parseSpec", () => {
     expect(() => parseSpec("[]")).toThrow(/root must be an object/);
   });
 
-  it("ignores non-http path keys like parameters", () => {
+  it("preserves path-level parameters without treating them as operations", () => {
     const spec = parseSpec(
       JSON.stringify({
         paths: {
@@ -68,7 +68,8 @@ describe("parseSpec", () => {
       }),
     );
     expect(spec.paths["/x"]?.get?.summary).toBe("ok");
-    expect(spec.paths["/x"]?.parameters).toBeUndefined();
+    expect(spec.paths["/x"]?.parameters).toEqual([{ name: "q", in: "query" }]);
+    expect(matchOperation(spec, "parameters", "/x")).toBeNull();
   });
 });
 

@@ -52,7 +52,6 @@ import { Textarea } from "#/components/ui/textarea";
 import { ToggleGroup, ToggleGroupItem } from "#/components/ui/toggle-group";
 import { api } from "#/lib/convex-api";
 import { creditsLabel } from "#/lib/credits-label";
-import { humanError } from "#/lib/human-error";
 import {
   buildMcpConfigSnippet,
   mcpEndpointUrl,
@@ -64,6 +63,7 @@ import {
   buildRequestPath,
   parsePublishedEndpoints,
   readableJsonResponse,
+  sanitizedGatewayErrorResponse,
   type ApiEndpoint,
   type ApiParameter,
 } from "#/lib/openapi-reference";
@@ -342,7 +342,12 @@ function ApiDetailBody({
                 <>
                   {" "}
                   ·{" "}
-                  <span className="tabular-nums text-foreground">
+                  <span
+                    className="tabular-nums text-foreground"
+                    style={{
+                      viewTransitionName: `api-price-${data.org.publisherHandle}-${data.project.slug}`,
+                    }}
+                  >
                     {priceRange}
                   </span>
                 </>
@@ -894,13 +899,13 @@ function TryItPanel({
         contentType: res.headers.get("content-type"),
         requestId: res.headers.get("x-zevium-request-id") ?? undefined,
       });
-    } catch (err) {
+    } catch {
       const ms = Math.round(performance.now() - t0);
       setResult({
         status: 0,
         statusText: "Network error",
         ms,
-        body: humanError(err, "Request failed. Check gateway URL and CORS."),
+        body: "The browser could not reach the gateway.",
         mock,
         contentType: null,
       });
@@ -954,7 +959,13 @@ function TryItPanel({
   }
 
   const readableResultBody = result
-    ? readableJsonResponse(result.body, result.contentType)
+    ? result.status >= 400
+      ? sanitizedGatewayErrorResponse(
+          result.body,
+          result.contentType,
+          result.requestId,
+        )
+      : readableJsonResponse(result.body, result.contentType)
     : null;
 
   return (
@@ -1285,7 +1296,17 @@ function TryItPanel({
                   </span>
                 ) : null}
               </div>
-              {result.status >= 400 ? (
+              {result.status === 0 ? (
+                <div className="space-y-1 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm">
+                  <p className="font-medium text-destructive">
+                    Gateway could not be reached
+                  </p>
+                  <p className="text-muted-foreground">
+                    Check your connection and gateway URL. If this persists,
+                    allow this site in gateway CORS settings, then retry.
+                  </p>
+                </div>
+              ) : result.status >= 400 ? (
                 <p className="text-sm text-muted-foreground">
                   {result.status === 401
                     ? "Your API key was not accepted. Create or rotate a key, then try again."
@@ -1298,8 +1319,7 @@ function TryItPanel({
                           : "Check the request fields and try again."}
                 </p>
               ) : null}
-              {result.status > 0 &&
-              (result.status < 400 || readableResultBody !== null) ? (
+              {result.status > 0 && readableResultBody !== null ? (
                 <pre className="max-h-80 overflow-auto rounded-md border bg-muted/40 p-3 font-mono text-xs whitespace-pre-wrap break-all">
                   <SyntaxCode
                     code={readableResultBody ?? (result.body || "(empty body)")}
@@ -1310,12 +1330,12 @@ function TryItPanel({
                     }
                   />
                 </pre>
-              ) : (
+              ) : result.status > 0 ? (
                 <p className="text-xs text-muted-foreground">
-                  Response body is unavailable because it was not valid, bounded
-                  JSON. Use request ID above when contacting support.
+                  Response body is hidden because it is not a verified Zevium
+                  error envelope. Use request ID above when contacting support.
                 </p>
-              )}
+              ) : null}
             </div>
           ) : null}
         </form>

@@ -2,7 +2,7 @@
 import { convexTest, type TestConvex } from "convex-test";
 import type Stripe from "stripe";
 import { describe, expect, it } from "vitest";
-import { internal } from "./_generated/api";
+import { api, internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { publisherEarningSplit } from "./accounting";
 import { connectAccountProjection, createOnboardingLink } from "./payouts";
@@ -46,6 +46,29 @@ async function seedConnect(t: TestConvex<typeof schema>): Promise<ConnectSeed> {
 }
 
 describe("Stripe Connect publisher accounting", () => {
+  it("rejects onboarding and transfers from an ordinary organization member", async () => {
+    const t = convexTest(schema, modules);
+    const member = t.withIdentity({
+      subject: "user_member",
+      org_id: "org_publisher",
+      org_slug: "publisher",
+      org_role: "org:member",
+      email: "member@example.com",
+    } as {
+      subject: string;
+      org_id: string;
+      org_slug: string;
+      org_role: string;
+      email: string;
+    });
+    await expect(
+      member.action(api.payouts.startOnboarding, {}),
+    ).rejects.toThrow(/Org admin role required/);
+    await expect(
+      member.action(api.payouts.initiatePublisherTransfer, {}),
+    ).rejects.toThrow(/Org admin role required/);
+  });
+
   it("projects Accounts v2 recipient capability and requirements", () => {
     const projection = connectAccountProjection({
       id: "acct_recipient",

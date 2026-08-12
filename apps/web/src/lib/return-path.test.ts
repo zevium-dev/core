@@ -12,6 +12,8 @@ describe("safeReturnPath", () => {
   it("rejects external, protocol-relative, and control-character paths", () => {
     expect(safeReturnPath("https://evil.test", "/app")).toBe("/app");
     expect(safeReturnPath("//evil.test", "/app")).toBe("/app");
+    expect(safeReturnPath("/\\evil.test/path", "/app")).toBe("/app");
+    expect(safeReturnPath("/%5Cevil.test/path", "/app")).toBe("/app");
     expect(safeReturnPath("/ok\nLocation: https://evil.test", "/app")).toBe(
       "/app",
     );

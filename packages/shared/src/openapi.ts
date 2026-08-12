@@ -32,8 +32,9 @@ export type OpenApiOperation = {
   [key: string]: unknown;
 };
 
-export type OpenApiPathItem = {
-  [method: string]: OpenApiOperation | undefined;
+export type OpenApiPathItem = Partial<Record<HttpMethod, OpenApiOperation>> & {
+  /** Parameters inherited by every operation in this Path Item. */
+  parameters?: unknown[];
 };
 
 export type ParsedOpenApiSpec = {
@@ -105,10 +106,14 @@ export function parseSpec(json: string): ParsedOpenApiSpec {
       const item: OpenApiPathItem = {};
       for (const [method, opVal] of Object.entries(pathVal)) {
         const lower = method.toLowerCase();
+        if (lower === "parameters" && Array.isArray(opVal)) {
+          item.parameters = opVal;
+          continue;
+        }
         if (!(lower in HTTP_METHODS)) continue;
         if (!isRecord(opVal)) continue;
         // Operation objects are free-form OpenAPI maps; we only read known keys later.
-        item[lower] = opVal;
+        item[lower as HttpMethod] = opVal;
       }
       paths[pathKey] = item;
     }

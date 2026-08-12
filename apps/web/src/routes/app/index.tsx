@@ -53,6 +53,17 @@ const DATE_TIME_FORMATTER = new Intl.DateTimeFormat("en-US", {
 });
 
 export const Route = createFileRoute("/app/")({
+  loader: async ({ context }) => {
+    if (!context.orgSlug) return;
+    await Promise.all([
+      context.queryClient.prefetchQuery(
+        convexQuery(api.analytics.orgOverview, { orgSlug: context.orgSlug }),
+      ),
+      context.queryClient.prefetchQuery(
+        convexQuery(api.wallets.getMyWallet, { orgSlug: context.orgSlug }),
+      ),
+    ]);
+  },
   component: DashboardPage,
   head: () => ({
     meta: [{ title: "Dashboard · Zevium" }],
@@ -109,8 +120,10 @@ function DashboardContent({ orgSlug }: { orgSlug: string }) {
     staleTime: 30_000,
   });
 
-  const keyCount = keysQuery.data?.filter((key) => key.current).length ?? 0;
-  const keysLoaded = !keysQuery.isPending;
+  const keyCount = keysQuery.isSuccess
+    ? keysQuery.data.filter((key) => key.current).length
+    : 0;
+  const keysLoaded = keysQuery.isSuccess;
   const flags = deriveOnboardingFlags({
     keyCount,
     callsCycle: overview.callsCycle,
@@ -200,6 +213,24 @@ function DashboardContent({ orgSlug }: { orgSlug: string }) {
 
       {keysQuery.isPending ? (
         <OnboardingSkeleton />
+      ) : keysQuery.isError ? (
+        <Card role="alert">
+          <CardHeader>
+            <CardTitle>API key status did not load</CardTitle>
+            <CardDescription>
+              Onboarding progress is paused until key status is available.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => void keysQuery.refetch()}
+            >
+              Retry key status
+            </Button>
+          </CardContent>
+        </Card>
       ) : showOnboarding ? (
         <OnboardingChecklist
           hasKey={flags.hasKey}

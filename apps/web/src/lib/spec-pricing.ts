@@ -29,7 +29,7 @@ export function summarizeDraftPricing(draft: string): PricingSummary | null {
 
     for (const pathItem of Object.values(spec.paths)) {
       for (const op of Object.values(pathItem)) {
-        if (op === undefined) continue;
+        if (op === undefined || Array.isArray(op)) continue;
         endpointCount += 1;
         const pricing = extractPricing(op);
         const cost = pricing.cost;

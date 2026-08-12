@@ -45,11 +45,8 @@ import { mergeUsagePages } from "#/lib/activity-filters";
 import {
   ADMIN_STATUS_OPTIONS,
   ADMIN_VISIBILITY_OPTIONS,
-  buildOrgNameMap,
-  orgDisplayName,
   parseProjectStatus,
   parseProjectVisibility,
-  type OrgNameEntry,
   type ProjectStatusFilter,
   type ProjectVisibilityFilter,
 } from "#/lib/admin-filters";
@@ -59,7 +56,6 @@ import { humanError } from "#/lib/human-error";
 import type { AdminProjectView } from "../../../../../convex/admin";
 
 const PROJECT_PAGE_SIZE = 25;
-const ORG_MAP_PAGE_SIZE = 100;
 
 type AdminProjectsSearch = {
   status?: ProjectStatusFilter;
@@ -99,8 +95,6 @@ function AdminProjectsPage() {
   const [isDone, setIsDone] = useState(false);
   const [continueCursor, setContinueCursor] = useState<string | null>(null);
   const [killTarget, setKillTarget] = useState<KillSwitchTarget | null>(null);
-
-  const orgMap = useOrgNameMap();
 
   const listArgs = useMemo(() => {
     const args: {
@@ -166,7 +160,10 @@ function AdminProjectsPage() {
   const firstPagePending = projectsQuery.isPending && cursor === null;
   const loadMorePending = projectsQuery.isPending && cursor !== null;
   const canLoadMore =
-    !isDone && continueCursor !== null && !projectsQuery.isPending;
+    !isDone &&
+    continueCursor !== null &&
+    !projectsQuery.isPending &&
+    !projectsQuery.isError;
 
   return (
     <div className="flex flex-col gap-6">
@@ -255,7 +252,7 @@ function AdminProjectsPage() {
         <CardContent>
           {firstPagePending ? (
             <ProjectsTableSkeleton />
-          ) : projectsQuery.isError ? (
+          ) : projectsQuery.isError && rows.length === 0 ? (
             <Empty className="border border-dashed">
               <EmptyHeader>
                 <EmptyTitle>Could not load projects</EmptyTitle>
@@ -309,10 +306,7 @@ function AdminProjectsPage() {
                       <ProjectRow
                         key={project._id}
                         project={project}
-                        orgLabel={orgDisplayName(
-                          project.organizationId,
-                          orgMap,
-                        )}
+                        orgLabel={project.organizationName}
                         disabled={toggleMutation.isPending}
                         onToggle={(target) =>
                           setKillTarget({ project, target })
@@ -338,6 +332,12 @@ function AdminProjectsPage() {
                   </Button>
                 </div>
               ) : null}
+              {projectsQuery.isError && rows.length > 0 ? (
+                <PaginationError
+                  label="More projects could not be loaded. Existing rows are still available."
+                  onRetry={() => void projectsQuery.refetch()}
+                />
+              ) : null}
             </div>
           )}
         </CardContent>
@@ -355,6 +355,26 @@ function AdminProjectsPage() {
           });
         }}
       />
+    </div>
+  );
+}
+
+function PaginationError({
+  label,
+  onRetry,
+}: {
+  label: string;
+  onRetry: () => void;
+}) {
+  return (
+    <div
+      className="flex flex-wrap items-center justify-center gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-3"
+      role="alert"
+    >
+      <p className="text-sm text-destructive">{label}</p>
+      <Button type="button" size="sm" variant="outline" onClick={onRetry}>
+        Retry page
+      </Button>
     </div>
   );
 }
@@ -473,45 +493,6 @@ function KillSwitchDialog({
       </DialogContent>
     </Dialog>
   );
-}
-
-/**
- * Background org-name lookup. `listProjects` returns only `organizationId`,
- * so page through every org once (admin tool, bounded scale) and build a
- * complete id → name map. Realtime: stays fresh via the Convex subscription.
- */
-function useOrgNameMap() {
-  const [orgs, setOrgs] = useState<OrgNameEntry[]>([]);
-  const [cursor, setCursor] = useState<string | null>(null);
-  const [isDone, setIsDone] = useState(false);
-  const [continueCursor, setContinueCursor] = useState<string | null>(null);
-
-  const args = useMemo(
-    () => ({ paginationOpts: { numItems: ORG_MAP_PAGE_SIZE, cursor } }),
-    [cursor],
-  );
-  const orgsQuery = useQuery(convexQuery(api.admin.listOrgs, args));
-
-  useEffect(() => {
-    if (!orgsQuery.data || orgsQuery.isPending) return;
-    setOrgs((prev) =>
-      mergeUsagePages<OrgNameEntry>(
-        prev,
-        orgsQuery.data!.page,
-        cursor === null,
-      ),
-    );
-    setIsDone(orgsQuery.data.isDone);
-    setContinueCursor(orgsQuery.data.continueCursor);
-  }, [orgsQuery.data, orgsQuery.isPending, cursor]);
-
-  // Auto-advance until every org page is loaded.
-  useEffect(() => {
-    if (isDone || orgsQuery.isPending) return;
-    if (continueCursor !== null) setCursor(continueCursor);
-  }, [isDone, continueCursor, orgsQuery.isPending]);
-
-  return useMemo(() => buildOrgNameMap(orgs), [orgs]);
 }
 
 function EmptyProjects() {

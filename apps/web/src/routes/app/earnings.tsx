@@ -100,6 +100,8 @@ function EarningsPage() {
 }
 
 function EarningsContent() {
+  const { membership } = useOrganization();
+  const canManagePayouts = membership?.role === "org:admin";
   const { onboarding } = Route.useSearch();
   const refreshStarted = useRef(false);
   const [publisherCountry, setPublisherCountry] = useState("");
@@ -124,10 +126,11 @@ function EarningsContent() {
   });
   const { profile, earnings, payouts, transfers } = payoutState;
   useEffect(() => {
-    if (onboarding !== "refresh" || refreshStarted.current) return;
+    if (!canManagePayouts || onboarding !== "refresh" || refreshStarted.current)
+      return;
     refreshStarted.current = true;
     openOnboarding();
-  }, [onboarding, openOnboarding]);
+  }, [canManagePayouts, onboarding, openOnboarding]);
   const initiatePublisherTransfer = useAction(
     api.payouts.initiatePublisherTransfer,
   );
@@ -182,7 +185,12 @@ function EarningsContent() {
               ))}
             </ul>
           ) : null}
-          {connect.action && connect.actionLabel ? (
+          {!canManagePayouts ? (
+            <p className="text-sm text-muted-foreground">
+              An organization admin manages Stripe onboarding and payout
+              transfers.
+            </p>
+          ) : connect.action && connect.actionLabel ? (
             <div className="space-y-3">
               {profile.status === "not_started" ? (
                 <div className="max-w-xs space-y-2">
@@ -229,7 +237,7 @@ function EarningsContent() {
               Your share after Zevium&apos;s 5% fee.
             </p>
           </div>
-          {profile.status === "enabled" ? (
+          {profile.status === "enabled" && canManagePayouts ? (
             <Button
               disabled={transferPending || !canTransfer}
               onClick={() => initiateTransfer()}

@@ -6,6 +6,7 @@ import {
   parameterKey,
   parsePublishedEndpoints,
   readableJsonResponse,
+  sanitizedGatewayErrorResponse,
 } from "./openapi-reference";
 
 const SPEC = JSON.stringify({
@@ -84,6 +85,72 @@ describe("parsePublishedEndpoints", () => {
       example: '{\n  "id": "item_1"\n}',
     });
   });
+
+  it("inherits referenced path parameters and lets operations override by name and location", () => {
+    const [endpoint] = parsePublishedEndpoints(
+      JSON.stringify({
+        openapi: "3.1.0",
+        components: {
+          parameters: {
+            ItemId: {
+              name: "id",
+              in: "path",
+              required: true,
+              schema: { type: "string", example: "shared-id" },
+            },
+          },
+        },
+        paths: {
+          "/items/{id}": {
+            parameters: [
+              { $ref: "#/components/parameters/ItemId" },
+              {
+                name: "x-tenant",
+                in: "header",
+                description: "Shared tenant",
+                schema: { type: "string", default: "shared" },
+              },
+            ],
+            get: {
+              parameters: [
+                {
+                  name: "x-tenant",
+                  in: "header",
+                  description: "Operation tenant",
+                  required: true,
+                  schema: { type: "string", default: "operation" },
+                },
+                {
+                  name: "limit",
+                  in: "query",
+                  schema: { type: "integer", default: 25 },
+                },
+              ],
+            },
+          },
+        },
+      }),
+    );
+
+    expect(endpoint?.parameters).toEqual([
+      expect.objectContaining({
+        key: "path:id",
+        required: true,
+        initialValue: "shared-id",
+      }),
+      expect.objectContaining({
+        key: "header:x-tenant",
+        description: "Operation tenant",
+        required: true,
+        initialValue: "operation",
+      }),
+      expect.objectContaining({
+        key: "query:limit",
+        type: "integer",
+        initialValue: "25",
+      }),
+    ]);
+  });
 });
 
 describe("request URL helpers", () => {
@@ -114,6 +181,57 @@ describe("readableJsonResponse", () => {
     expect(readableJsonResponse("secret", "text/plain")).toBeNull();
     expect(
       readableJsonResponse('{"ok":true}', "application/json", 2),
+    ).toBeNull();
+  });
+});
+
+describe("sanitizedGatewayErrorResponse", () => {
+  it("renders only an allowlisted gateway envelope with matching request ID", () => {
+    expect(
+      sanitizedGatewayErrorResponse(
+        JSON.stringify({
+          error: "upstream_timeout",
+          requestId: "req_safe",
+          stack: "secret stack",
+          token: "secret token",
+        }),
+        "application/json",
+        "req_safe",
+      ),
+    ).toBe(
+      JSON.stringify(
+        {
+          error: "upstream_timeout",
+          message: "The upstream service did not respond in time.",
+          requestId: "req_safe",
+        },
+        null,
+        2,
+      ),
+    );
+  });
+
+  it("rejects arbitrary upstream JSON, unknown codes, and mismatched IDs", () => {
+    expect(
+      sanitizedGatewayErrorResponse(
+        '{"error":"database exploded","stack":"secret"}',
+        "application/json",
+        "req_1",
+      ),
+    ).toBeNull();
+    expect(
+      sanitizedGatewayErrorResponse(
+        '{"error":"upstream_error","requestId":"spoofed"}',
+        "application/json",
+        "req_1",
+      ),
+    ).toBeNull();
+    expect(
+      sanitizedGatewayErrorResponse(
+        '{"error":"upstream_error","requestId":"req_1"}',
+        "text/plain",
+        "req_1",
+      ),
     ).toBeNull();
   });
 });

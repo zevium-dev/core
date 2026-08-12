@@ -10,7 +10,11 @@ import {
 } from "./_generated/server";
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
-import { requireIdentity, requireOrgMemberBySlug } from "./lib/auth";
+import {
+  requireIdentity,
+  requireOrgAdmin,
+  requireOrgMemberBySlug,
+} from "./lib/auth";
 
 /** Pinned alongside `stripe@22.3.1`; upgrade only as an explicit migration. */
 export const STRIPE_API_VERSION = "2026-06-24.dahlia" as const;
@@ -138,27 +142,6 @@ function stringId(
     return value.id;
   }
   return null;
-}
-
-function activeClerkOrgId(identity: unknown): string {
-  if (identity === null || typeof identity !== "object") {
-    throw new Error("Not authenticated");
-  }
-  const raw = identity as Record<string, unknown>;
-  const orgId =
-    typeof raw.org_id === "string"
-      ? raw.org_id
-      : typeof raw.orgId === "string"
-        ? raw.orgId
-        : undefined;
-  if (orgId === undefined || orgId.trim() === "") {
-    throw new Error("Active organization required");
-  }
-  return orgId;
-}
-
-async function requireActiveClerkOrgInAction(ctx: ActionCtx): Promise<string> {
-  return activeClerkOrgId(await ctx.auth.getUserIdentity());
 }
 
 export type StripeCheckoutCreator = {
@@ -334,7 +317,12 @@ export const createCheckout = action({
     ctx,
     args,
   ): Promise<{ url: string; checkoutIntentId: Id<"checkoutIntents"> }> => {
-    const clerkOrgId = await requireActiveClerkOrgInAction(ctx);
+    const claims = await requireIdentity(ctx);
+    requireOrgAdmin(claims);
+    const clerkOrgId = claims.orgId;
+    if (clerkOrgId === undefined) {
+      throw new Error("Active organization required");
+    }
     const stripePriceId = stripePriceForPack(args.packId);
     const prepared = await ctx.runMutation(
       internal.billing.prepareCheckoutIntent,
@@ -1093,12 +1081,30 @@ function endOfUtcMonth(now: number): number {
   return Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1);
 }
 
+/** Linear month-end projection from elapsed cycle usage. */
+export function projectedCycleCredits(
+  totalCredits: number,
+  cycleStart: number,
+  cycleEnd: number,
+  asOf: number,
+): number {
+  if (totalCredits <= 0) return 0;
+  const duration = cycleEnd - cycleStart;
+  const elapsed = Math.min(Math.max(asOf - cycleStart, 1), duration);
+  if (duration <= 0) return totalCredits;
+  return Math.max(
+    totalCredits,
+    Math.round((totalCredits * duration) / elapsed),
+  );
+}
+
 export const cycleBreakdown = query({
   args: { orgSlug: v.string() },
   handler: async (ctx, args) => {
     const { org } = await requireOrgMemberBySlug(ctx, args.orgSlug);
-    const cycleStart = startOfUtcMonth(Date.now());
-    const cycleEnd = endOfUtcMonth(Date.now());
+    const asOf = Date.now();
+    const cycleStart = startOfUtcMonth(asOf);
+    const cycleEnd = endOfUtcMonth(asOf);
     const events = await ctx.db
       .query("usageEvents")
       .withIndex("by_org_at", (q) =>
@@ -1109,10 +1115,26 @@ export const cycleBreakdown = query({
       )
       .collect();
     const byKey = new Map<string, { calls: number; credits: number }>();
+    const byMember = new Map<string, { calls: number; credits: number }>();
     const byProject = new Map<
       Id<"projects">,
       { calls: number; credits: number }
     >();
+    const byEndpoint = new Map<
+      string,
+      {
+        projectId: Id<"projects">;
+        method: string;
+        endpoint: string;
+        calls: number;
+        credits: number;
+      }
+    >();
+    const keySettings = await ctx.db
+      .query("keySettings")
+      .withIndex("by_org", (q) => q.eq("clerkOrgId", org.clerkOrgId))
+      .collect();
+    const keyMetadata = new Map(keySettings.map((row) => [row.keyId, row]));
     for (const event of events) {
       const key = byKey.get(event.keyId) ?? { calls: 0, credits: 0 };
       key.calls += 1;
@@ -1125,25 +1147,85 @@ export const cycleBreakdown = query({
       project.calls += 1;
       project.credits += event.credits;
       byProject.set(event.projectId, project);
+
+      const ownerUserId =
+        event.ownerUserId ?? keyMetadata.get(event.keyId)?.ownerUserId;
+      const memberKey = ownerUserId ?? "unattributed";
+      const member = byMember.get(memberKey) ?? { calls: 0, credits: 0 };
+      member.calls += 1;
+      member.credits += event.credits;
+      byMember.set(memberKey, member);
+
+      const endpointKey = `${event.projectId}\u0000${event.method}\u0000${event.endpoint}`;
+      const endpoint = byEndpoint.get(endpointKey) ?? {
+        projectId: event.projectId,
+        method: event.method,
+        endpoint: event.endpoint,
+        calls: 0,
+        credits: 0,
+      };
+      endpoint.calls += 1;
+      endpoint.credits += event.credits;
+      byEndpoint.set(endpointKey, endpoint);
     }
-    const projects = await Promise.all(
-      [...byProject.entries()].map(async ([projectId, row]) => {
-        const project = await ctx.db.get(projectId);
+    const projectDocs = new Map<Id<"projects">, Doc<"projects"> | null>();
+    await Promise.all(
+      [...byProject.keys()].map(async (projectId) => {
+        projectDocs.set(projectId, await ctx.db.get(projectId));
+      }),
+    );
+    const projects = [...byProject.entries()].map(([projectId, row]) => {
+      const project = projectDocs.get(projectId);
+      return {
+        projectId,
+        name: project?.name ?? "Deleted API",
+        slug: project?.slug ?? "deleted",
+        ...row,
+      };
+    });
+    const members = await Promise.all(
+      [...byMember.entries()].map(async ([userId, row]) => {
+        const user =
+          userId === "unattributed"
+            ? null
+            : await ctx.db
+                .query("users")
+                .withIndex("by_clerk_user", (q) => q.eq("clerkUserId", userId))
+                .unique();
         return {
-          projectId,
-          name: project?.name ?? "Unknown project",
-          slug: project?.slug ?? "unknown",
+          userId: userId === "unattributed" ? null : userId,
+          name: user?.name ?? "Unattributed member",
+          email: user?.email ?? null,
           ...row,
         };
       }),
     );
+    const totalCredits = events.reduce(
+      (total, event) => total + event.credits,
+      0,
+    );
     return {
       cycleStart,
       cycleEnd,
+      asOf,
       totalCalls: events.length,
-      totalCredits: events.reduce((total, event) => total + event.credits, 0),
+      totalCredits,
+      projectedCredits: projectedCycleCredits(
+        totalCredits,
+        cycleStart,
+        cycleEnd,
+        asOf,
+      ),
       byKey: [...byKey.entries()]
-        .map(([keyId, row]) => ({ keyId, ...row }))
+        .map(([keyId, row]) => {
+          const metadata = keyMetadata.get(keyId);
+          return {
+            keyId,
+            keyName: metadata?.keyName ?? "Unnamed key",
+            ownerUserId: metadata?.ownerUserId ?? null,
+            ...row,
+          };
+        })
         .sort(
           (left, right) =>
             right.credits - left.credits ||
@@ -1152,6 +1234,24 @@ export const cycleBreakdown = query({
       byProject: projects.sort(
         (left, right) =>
           right.credits - left.credits || left.slug.localeCompare(right.slug),
+      ),
+      byEndpoint: [...byEndpoint.values()]
+        .map((row) => {
+          const project = projectDocs.get(row.projectId);
+          return {
+            ...row,
+            projectName: project?.name ?? "Deleted API",
+            projectSlug: project?.slug ?? "deleted",
+          };
+        })
+        .sort(
+          (left, right) =>
+            right.credits - left.credits ||
+            left.endpoint.localeCompare(right.endpoint),
+        ),
+      byMember: members.sort(
+        (left, right) =>
+          right.credits - left.credits || left.name.localeCompare(right.name),
       ),
     };
   },

@@ -48,9 +48,11 @@ import { formatRelativeTime } from "#/lib/relative-time";
 export function ProjectSettingsPanel({
   project,
   orgSlug,
+  canAdminister,
 }: {
   project: Doc<"projects">;
   orgSlug: string;
+  canAdminister: boolean;
 }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -187,6 +189,20 @@ export function ProjectSettingsPanel({
       description: trimmedDescription === "" ? null : trimmedDescription,
       tags: tagsPreview,
     });
+  }
+
+  if (!canAdminister) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>Admin access required</CardTitle>
+          <CardDescription>
+            Organization admins manage project metadata, visibility, upstream
+            credentials, webhooks, and deletion. Your access remains read-only.
+          </CardDescription>
+        </CardHeader>
+      </Card>
+    );
   }
 
   return (

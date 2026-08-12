@@ -152,7 +152,10 @@ function AdminPayoutsPage() {
   const firstPagePending = transfersQuery.isPending && cursor === null;
   const loadMorePending = transfersQuery.isPending && cursor !== null;
   const canLoadMore =
-    !isDone && continueCursor !== null && !transfersQuery.isPending;
+    !isDone &&
+    continueCursor !== null &&
+    !transfersQuery.isPending &&
+    !transfersQuery.isError;
 
   function selectFilter(nextFilter: TransferFilter) {
     if (nextFilter === filter) return;
@@ -204,7 +207,7 @@ function AdminPayoutsPage() {
         <CardContent>
           {firstPagePending ? (
             <TransferTableSkeleton />
-          ) : transfersQuery.isError ? (
+          ) : transfersQuery.isError && rows.length === 0 ? (
             <Empty className="border border-dashed py-8">
               <EmptyHeader>
                 <EmptyTitle>Could not load transfers</EmptyTitle>
@@ -256,6 +259,25 @@ function AdminPayoutsPage() {
                 }}
               >
                 {loadMorePending ? "Loading…" : "Load more"}
+              </Button>
+            </div>
+          ) : null}
+          {transfersQuery.isError && rows.length > 0 ? (
+            <div
+              className="mt-4 flex flex-wrap items-center justify-center gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-3"
+              role="alert"
+            >
+              <p className="text-sm text-destructive">
+                More transfers could not be loaded. Existing rows are still
+                available.
+              </p>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => void transfersQuery.refetch()}
+              >
+                Retry page
               </Button>
             </div>
           ) : null}

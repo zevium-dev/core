@@ -4,7 +4,7 @@
  * media type — no upstream call, no credits.
  */
 
-import type { ParsedOpenApiSpec } from "./openapi.js";
+import type { HttpMethod, ParsedOpenApiSpec } from "./openapi.js";
 
 export type GeneratedMockResponse = {
   status: number;
@@ -191,7 +191,7 @@ export function generateMockResponse(
   pathTemplate: string,
   method: string,
 ): GeneratedMockResponse | null {
-  const op = spec.paths[pathTemplate]?.[method.toLowerCase()];
+  const op = spec.paths[pathTemplate]?.[method.toLowerCase() as HttpMethod];
   if (!op) return null;
 
   const content = extractResponseContent(op);

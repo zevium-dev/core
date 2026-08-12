@@ -50,6 +50,12 @@ export function VersionDialog({
   return (
     <Dialog open={versionId !== null} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-3xl">
+        <DialogHeader>
+          <DialogTitle>Published version</DialogTitle>
+          <DialogDescription>
+            Review an immutable snapshot or restore it into the current draft.
+          </DialogDescription>
+        </DialogHeader>
         {versionId !== null ? (
           <VersionDialogBody
             versionId={versionId}
@@ -79,7 +85,7 @@ function VersionDialogBody({
   onRestore,
   onClose,
 }: BodyProps) {
-  const { data, isPending } = useQuery(
+  const { data, isPending, isError, refetch } = useQuery(
     convexQuery(api.specs.getVersion, { versionId }),
   );
   const [confirming, setConfirming] = useState(false);
@@ -89,27 +95,63 @@ function VersionDialogBody({
     [data, savedDraft],
   );
 
-  if (isPending || data === undefined || diff === null) {
-    return <Skeleton className="h-[32rem] w-full" />;
+  if (isPending) {
+    return (
+      <Skeleton className="h-[28rem] w-full" aria-label="Loading version" />
+    );
   }
+
+  if (isError || data === undefined) {
+    return (
+      <div className="space-y-3 rounded-md border border-destructive/40 bg-destructive/10 p-4">
+        <p className="font-medium text-destructive">
+          Published version could not be loaded
+        </p>
+        <p className="text-sm text-muted-foreground">
+          Check your connection and organization access, then retry.
+        </p>
+        <Button type="button" variant="outline" onClick={() => void refetch()}>
+          Retry
+        </Button>
+      </div>
+    );
+  }
+
+  if (data === null) {
+    return (
+      <div className="space-y-3 rounded-md border border-dashed p-4">
+        <p className="font-medium">Published version not found</p>
+        <p className="text-sm text-muted-foreground">
+          It may have been removed. Close this dialog and choose another
+          version.
+        </p>
+        <Button type="button" variant="outline" onClick={onClose}>
+          Close
+        </Button>
+      </div>
+    );
+  }
+
+  if (diff === null) return null;
+  const version = data;
 
   function handleRestore() {
     if (dirty && !confirming) {
       setConfirming(true);
       return;
     }
-    onRestore(data!.spec);
+    onRestore(version.spec);
     onClose();
   }
 
   return (
     <>
-      <DialogHeader>
-        <DialogTitle className="font-mono">v{data.version}</DialogTitle>
-        <DialogDescription>
-          Published {PUBLISHED_AT_FORMATTER.format(data.publishedAt)}.
-        </DialogDescription>
-      </DialogHeader>
+      <p className="text-sm text-muted-foreground">
+        <span className="font-mono font-medium text-foreground">
+          v{version.version}
+        </span>{" "}
+        · Published {PUBLISHED_AT_FORMATTER.format(version.publishedAt)}.
+      </p>
 
       <Tabs defaultValue="spec" className="w-full">
         <TabsList>
@@ -117,7 +159,7 @@ function VersionDialogBody({
           <TabsTrigger value="diff">Diff vs draft</TabsTrigger>
         </TabsList>
         <TabsContent value="spec">
-          <JsonCodeEditor value={data.spec} readOnly />
+          <JsonCodeEditor value={version.spec} readOnly />
         </TabsContent>
         <TabsContent value="diff">
           <DiffView lines={diff} />

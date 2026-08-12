@@ -197,7 +197,7 @@ export const createKey = createServerFn({ method: "POST" })
     });
     if (active) {
       throw new Error(
-        "Only one API key per organization. Revoke the existing key first.",
+        "Only one API key per member in this organization. Ask an admin to revoke or rotate the existing key.",
       );
     }
 
@@ -212,6 +212,19 @@ export const createKey = createServerFn({ method: "POST" })
     if (typeof secret !== "string" || secret.length === 0) {
       // create should return secret once; fail closed rather than show empty
       throw new Error("Key created but secret missing. Contact support.");
+    }
+
+    try {
+      await convex.mutation(api.keySettings.registerOwnedKey, {
+        keyId: created.id,
+        keyName: created.name,
+      });
+    } catch (error) {
+      await client.apiKeys.revoke({
+        apiKeyId: created.id,
+        revocationReason: "Zevium attribution recording failed",
+      });
+      throw error;
     }
 
     return {
@@ -413,6 +426,10 @@ export const rotateKey = createServerFn({ method: "POST" })
         oldKeyId: old.id,
         newKeyId: created.id,
         graceUntil,
+      });
+      await convex.mutation(api.keySettings.registerOwnedKey, {
+        keyId: created.id,
+        keyName: created.name,
       });
       return {
         id: created.id,

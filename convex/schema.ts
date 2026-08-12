@@ -34,6 +34,7 @@ export default defineSchema({
   })
     .index("by_org", ["organizationId"])
     .index("by_org_slug", ["organizationId", "slug"])
+    .index("by_status", ["status"])
     .index("by_visibility_status", ["visibility", "status"]),
 
   // Publisher-owned headers injected by gateway after consumer auth headers are stripped.
@@ -125,6 +126,8 @@ export default defineSchema({
     status: v.number(),
     latencyMs: v.number(),
     keyId: v.string(),
+    /** Key owner snapshotted at settlement time for durable attribution. */
+    ownerUserId: v.optional(v.string()),
     at: v.number(),
     /**
      * Stable gateway settlement reference (`settle:{reservationId}`).
@@ -136,6 +139,16 @@ export default defineSchema({
     .index("by_org", ["organizationId"])
     .index("by_project", ["projectId"])
     .index("by_org_at", ["organizationId", "at"])
+    .index("by_org_project_at", ["organizationId", "projectId", "at"])
+    .index("by_org_key_at", ["organizationId", "keyId", "at"])
+    .index("by_org_owner_at", ["organizationId", "ownerUserId", "at"])
+    .index("by_org_endpoint_at", ["organizationId", "endpoint", "at"])
+    .index("by_org_endpoint_method_at", [
+      "organizationId",
+      "endpoint",
+      "method",
+      "at",
+    ])
     .index("by_project_at", ["projectId", "at"])
     .index("by_at", ["at"]),
 
@@ -185,6 +198,9 @@ export default defineSchema({
   keySettings: defineTable({
     clerkOrgId: v.string(),
     keyId: v.string(),
+    /** Display metadata stamped by authenticated key creation/rotation. */
+    keyName: v.optional(v.string()),
+    ownerUserId: v.optional(v.string()),
     /** Monthly credit cap; undefined = unlimited. Enforced by the wallet DO. */
     monthlyCapCredits: v.optional(v.number()),
     disabled: v.boolean(),

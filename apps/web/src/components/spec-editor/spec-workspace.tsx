@@ -57,6 +57,8 @@ export type SpecWorkspaceProps = {
   visibility: "public" | "private";
   /** Nudges the publish flow to remind publishers to fill this in. */
   description: string | undefined;
+  /** Admin-only lifecycle controls; members may still edit and save drafts. */
+  canAdminister: boolean;
   savedDraft: string;
   savedDraftHash: string | null;
   lastSavedAt: number | null;
@@ -113,6 +115,7 @@ export function SpecWorkspace({
   projectSlug,
   visibility,
   description,
+  canAdminister,
   savedDraft,
   savedDraftHash,
   lastSavedAt: initialLastSavedAt,
@@ -515,7 +518,7 @@ export function SpecWorkspace({
     }
   }
 
-  const publishSlot = (
+  const publishSlot = canAdminister ? (
     <div className="space-y-3">
       <SpecRailVisibilityNudge
         visibility={visibility}
@@ -685,6 +688,14 @@ export function SpecWorkspace({
         </p>
       ) : null}
     </div>
+  ) : (
+    <div className="rounded-md border bg-muted/30 p-3 text-sm">
+      <p className="font-medium">Admin access required to publish</p>
+      <p className="mt-1 text-muted-foreground">
+        You can edit and save this draft. An organization admin must test the
+        upstream, publish versions, and change listing visibility.
+      </p>
+    </div>
   );
 
   return (
@@ -763,6 +774,7 @@ export function SpecWorkspace({
             onSelectVersion={(id) =>
               setVersionDialogId(id as Id<"specVersions">)
             }
+            canAdminister={canAdminister}
           />
         </div>
       </div>

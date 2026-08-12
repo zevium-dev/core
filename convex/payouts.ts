@@ -10,33 +10,12 @@ import {
 import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { CREDITS_PER_USD_CENT, creditsToUsdCents } from "./accounting";
-import { requireIdentity } from "./lib/auth";
+import { requireIdentity, requireOrgAdmin } from "./lib/auth";
 import { createNotification } from "./lib/notifications";
 import { stripeClient } from "./billing";
 
 export type ConnectProfileStatus =
   "not_started" | "incomplete" | "restricted" | "enabled";
-
-function activeClerkOrgId(identity: unknown): string {
-  if (identity === null || typeof identity !== "object") {
-    throw new Error("Not authenticated");
-  }
-  const raw = identity as Record<string, unknown>;
-  const orgId =
-    typeof raw.org_id === "string"
-      ? raw.org_id
-      : typeof raw.orgId === "string"
-        ? raw.orgId
-        : undefined;
-  if (orgId === undefined || orgId.trim() === "") {
-    throw new Error("Active organization required");
-  }
-  return orgId;
-}
-
-async function requireActiveClerkOrgInAction(ctx: ActionCtx): Promise<string> {
-  return activeClerkOrgId(await ctx.auth.getUserIdentity());
-}
 
 /** Test seam for deterministic account-link creation. */
 export type ConnectOnboardingClient = {
@@ -246,9 +225,14 @@ export const refreshConnectedAccount = internalAction({
 export const startOnboarding = action({
   args: { country: v.optional(v.string()) },
   handler: async (ctx, args): Promise<{ url: string }> => {
+    const claims = await requireIdentity(ctx);
+    requireOrgAdmin(claims);
+    if (claims.orgId === undefined) {
+      throw new Error("Active organization required");
+    }
     const country = args.country?.trim().toUpperCase() ?? null;
     const identity = await ctx.auth.getUserIdentity();
-    const clerkOrgId = activeClerkOrgId(identity);
+    const clerkOrgId = claims.orgId;
     const contactEmail =
       identity !== null && typeof identity.email === "string"
         ? identity.email.trim()
@@ -645,7 +629,12 @@ async function transferToStripe(
 export const initiatePublisherTransfer = action({
   args: {},
   handler: async (ctx): Promise<{ transferId: Id<"publisherTransfers"> }> => {
-    const clerkOrgId = await requireActiveClerkOrgInAction(ctx);
+    const claims = await requireIdentity(ctx);
+    requireOrgAdmin(claims);
+    const clerkOrgId = claims.orgId;
+    if (clerkOrgId === undefined) {
+      throw new Error("Active organization required");
+    }
     const profile = await ctx.runMutation(
       internal.payouts.getConnectProfileForActiveOrg,
       { clerkOrgId },
