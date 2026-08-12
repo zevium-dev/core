@@ -97,76 +97,397 @@ async function requireActiveClerkOrgAdminInAction(
   return { clerkOrgId, identity: raw };
 }
 
-/** Test seam for deterministic account-link creation. */
+const CONNECT_ACCOUNT_RECONCILIATION_LIMIT = 1_000;
+const STRIPE_V2_IDEMPOTENCY_WINDOW_MS = 30 * 24 * 60 * 60 * 1_000;
+const CONNECT_LINK_RETRY_WINDOW_MS = 4 * 60 * 1_000;
+const CONNECT_LINK_MIN_VALIDITY_MS = 30 * 1_000;
+const CONNECT_OPERATION_ID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const STRIPE_ACCOUNT_ID_PATTERN = /^acct_[A-Za-z0-9]+$/;
+
+type ConnectedAccountExpectation = {
+  accountId?: string;
+  clerkOrgId: string;
+  organizationId: string;
+  expectedLivemode: boolean;
+  operationId?: string;
+  country?: string;
+};
+
+/** Narrow provider seam. Params stay pinned to stripe-node's Accounts v2 types. */
 export type ConnectOnboardingClient = {
   accountsV2: {
     create: (
       params: Stripe.V2.Core.AccountCreateParams,
       options?: Stripe.RequestOptions,
-    ) => Promise<Pick<Stripe.V2.Core.Account, "id">>;
-  };
-  accountLinks: {
-    create: (
-      params: Stripe.AccountLinkCreateParams,
+    ) => Promise<Stripe.V2.Core.Account>;
+    retrieve: (
+      id: string,
+      params?: Stripe.V2.Core.AccountRetrieveParams,
       options?: Stripe.RequestOptions,
-    ) => Promise<Pick<Stripe.AccountLink, "url">>;
+    ) => Promise<Stripe.V2.Core.Account>;
+    listRecipientAccounts: (limit: number) => Promise<Stripe.V2.Core.Account[]>;
+  };
+  accountLinksV2: {
+    create: (
+      params: Stripe.V2.Core.AccountLinkCreateParams,
+      options?: Stripe.RequestOptions,
+    ) => Promise<Stripe.V2.Core.AccountLink>;
   };
 };
 
-export async function createOnboardingLink(
+export function stripeLivemodeFromSecretKey(secretKey: string | undefined) {
+  const value = secretKey?.trim() ?? "";
+  if (/^(?:sk|rk)_live_/.test(value)) return true;
+  if (/^(?:sk|rk)_test_/.test(value)) return false;
+  throw new Error("STRIPE_SECRET_KEY must identify Stripe test or live mode");
+}
+
+export function connectOnboardingUrls(rawOrigin: string | undefined): {
+  refreshUrl: string;
+  returnUrl: string;
+} {
+  if (
+    rawOrigin === undefined ||
+    rawOrigin.trim() === "" ||
+    rawOrigin.length > 2_048
+  ) {
+    throw new Error("APP_ORIGIN is not configured");
+  }
+  let origin: URL;
+  try {
+    origin = new URL(rawOrigin);
+  } catch {
+    throw new Error("APP_ORIGIN must be an absolute HTTPS URL");
+  }
+  if (origin.protocol !== "https:") {
+    throw new Error("APP_ORIGIN must use HTTPS");
+  }
+  return {
+    refreshUrl: `${origin.origin}/app/earnings?onboarding=refresh`,
+    returnUrl: `${origin.origin}/app/earnings?onboarding=return`,
+  };
+}
+
+function connectOperationIdempotencyKey(
+  kind: "account" | "link",
+  operationId: string,
+): string {
+  if (!CONNECT_OPERATION_ID_PATTERN.test(operationId)) {
+    throw new Error("Invalid Connect operation identity");
+  }
+  return `zevium-connect-${kind}:${operationId}`;
+}
+
+function normalizedPublisherCountry(country: string | null): string {
+  if (country === null || !/^[A-Z]{2}$/.test(country)) {
+    throw new Error("Publisher country must be a two-letter ISO country code");
+  }
+  return country;
+}
+
+function boundedContactEmail(contactEmail: string | null): string {
+  if (
+    contactEmail === null ||
+    contactEmail.length > 254 ||
+    !/^[^\s@]+@[^\s@]+$/.test(contactEmail)
+  ) {
+    throw new Error("Signed-in user email is required for Stripe onboarding");
+  }
+  return contactEmail;
+}
+
+function boundedDisplayName(displayName: string): string {
+  const value = displayName.trim();
+  if (value === "") return "Zevium publisher";
+  return [...value].slice(0, 100).join("");
+}
+
+function assertHttpsUrl(value: string, field: string): URL {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error(`${field} must be an absolute HTTPS URL`);
+  }
+  if (url.protocol !== "https:") {
+    throw new Error(`${field} must use HTTPS`);
+  }
+  return url;
+}
+
+function accountMatchesOperationMetadata(
+  account: Stripe.V2.Core.Account,
+  expected: ConnectedAccountExpectation & { operationId: string },
+): boolean {
+  return (
+    account.metadata?.zevium_connect_operation_id === expected.operationId &&
+    account.metadata.zevium_clerk_org_id === expected.clerkOrgId &&
+    account.metadata.zevium_organization_id === expected.organizationId
+  );
+}
+
+export function assertConnectedAccountIdentity(
+  account: Stripe.V2.Core.Account,
+  expected: ConnectedAccountExpectation,
+): void {
+  if (
+    account.object !== "v2.core.account" ||
+    !STRIPE_ACCOUNT_ID_PATTERN.test(account.id) ||
+    (expected.accountId !== undefined && account.id !== expected.accountId)
+  ) {
+    throw new Error("Stripe returned an unexpected connected account");
+  }
+  if (account.livemode !== expected.expectedLivemode) {
+    throw new Error(
+      "Stripe connected account mode does not match configuration",
+    );
+  }
+  if (
+    account.closed === true ||
+    !account.applied_configurations.includes("recipient") ||
+    account.dashboard !== "express" ||
+    account.defaults?.responsibilities.fees_collector !== "application" ||
+    account.defaults.responsibilities.losses_collector !== "application"
+  ) {
+    throw new Error(
+      "Stripe connected account recipient configuration is invalid",
+    );
+  }
+  const metadataClerkOrgId =
+    account.metadata?.zevium_clerk_org_id ?? account.metadata?.clerkOrgId;
+  if (metadataClerkOrgId !== expected.clerkOrgId) {
+    throw new Error("Stripe connected account organization does not match");
+  }
+  const metadataOrganizationId = account.metadata?.zevium_organization_id;
+  if (
+    metadataOrganizationId !== undefined &&
+    metadataOrganizationId !== expected.organizationId
+  ) {
+    throw new Error("Stripe connected account identity does not match");
+  }
+  if (
+    expected.operationId !== undefined &&
+    account.metadata?.zevium_connect_operation_id !== expected.operationId
+  ) {
+    throw new Error("Stripe connected account operation does not match");
+  }
+  if (
+    expected.country !== undefined &&
+    account.identity?.country?.toUpperCase() !== expected.country
+  ) {
+    throw new Error("Stripe connected account country does not match");
+  }
+}
+
+export async function createConnectedAccountForOperation(
   stripe: ConnectOnboardingClient,
   args: {
-    connectedAccountId: string | null;
+    operationId: string;
     clerkOrgId: string;
     organizationId: string;
-    country: string | null;
+    organizationName: string;
+    country: string;
     contactEmail: string;
-    refreshUrl: string;
-    returnUrl: string;
+    expectedLivemode: boolean;
   },
-): Promise<{ connectedAccountId: string; url: string }> {
-  let connectedAccountId = args.connectedAccountId;
-  if (connectedAccountId === null) {
-    if (args.country === null || !/^[A-Z]{2}$/.test(args.country)) {
-      throw new Error(
-        "Publisher country must be a two-letter ISO country code",
-      );
-    }
-    const account = await stripe.accountsV2.create(
-      {
-        dashboard: "express",
-        defaults: {
-          responsibilities: {
-            fees_collector: "application",
-            losses_collector: "application",
-          },
+): Promise<Stripe.V2.Core.Account> {
+  const country = normalizedPublisherCountry(args.country);
+  const contactEmail = boundedContactEmail(args.contactEmail);
+  const account = await stripe.accountsV2.create(
+    {
+      dashboard: "express",
+      defaults: {
+        responsibilities: {
+          fees_collector: "application",
+          losses_collector: "application",
         },
-        configuration: {
-          recipient: {
-            capabilities: {
-              stripe_balance: {
-                stripe_transfers: { requested: true },
-              },
+      },
+      configuration: {
+        recipient: {
+          capabilities: {
+            stripe_balance: {
+              stripe_transfers: { requested: true },
             },
           },
         },
-        contact_email: args.contactEmail,
-        identity: { country: args.country },
-        metadata: { clerkOrgId: args.clerkOrgId },
       },
-      { idempotencyKey: `connect-account:${args.organizationId}` },
-    );
-    connectedAccountId = account.id;
-  }
-  const link = await stripe.accountLinks.create({
-    account: connectedAccountId,
-    type: "account_onboarding",
-    refresh_url: args.refreshUrl,
-    return_url: args.returnUrl,
+      contact_email: contactEmail,
+      display_name: boundedDisplayName(args.organizationName),
+      identity: { country: country.toLowerCase() },
+      include: [
+        "configuration.recipient",
+        "defaults",
+        "identity",
+        "requirements",
+      ],
+      metadata: {
+        zevium_clerk_org_id: args.clerkOrgId,
+        zevium_connect_operation_id: args.operationId,
+        zevium_organization_id: args.organizationId,
+      },
+    },
+    {
+      idempotencyKey: connectOperationIdempotencyKey(
+        "account",
+        args.operationId,
+      ),
+    },
+  );
+  assertConnectedAccountIdentity(account, {
+    clerkOrgId: args.clerkOrgId,
+    organizationId: args.organizationId,
+    expectedLivemode: args.expectedLivemode,
+    operationId: args.operationId,
+    country,
   });
-  if (link.url.trim() === "")
-    throw new Error("Stripe did not return an onboarding URL");
-  return { connectedAccountId, url: link.url };
+  return account;
+}
+
+export async function resolveConnectedAccountForOperation(
+  stripe: ConnectOnboardingClient,
+  args: Parameters<typeof createConnectedAccountForOperation>[1] & {
+    reconcileFirst: boolean;
+    operationStartedAt: number;
+    now: number;
+  },
+): Promise<Stripe.V2.Core.Account> {
+  if (args.reconcileFirst) {
+    const listed = await stripe.accountsV2.listRecipientAccounts(
+      CONNECT_ACCOUNT_RECONCILIATION_LIMIT,
+    );
+    const expected = {
+      clerkOrgId: args.clerkOrgId,
+      organizationId: args.organizationId,
+      expectedLivemode: args.expectedLivemode,
+      operationId: args.operationId,
+    };
+    const matching = listed.filter(
+      (account) =>
+        accountMatchesOperationMetadata(account, expected) ||
+        (account.metadata?.clerkOrgId === args.clerkOrgId &&
+          account.metadata.zevium_clerk_org_id === undefined &&
+          account.metadata.zevium_connect_operation_id === undefined &&
+          account.metadata.zevium_organization_id === undefined),
+    );
+    if (matching.length > 1) {
+      throw new Error("Stripe connected account reconciliation is ambiguous");
+    }
+    if (listed.length >= CONNECT_ACCOUNT_RECONCILIATION_LIMIT) {
+      throw new Error("Stripe connected account reconciliation scan is full");
+    }
+    if (matching.length === 1) {
+      const matchesCurrentOperation = accountMatchesOperationMetadata(
+        matching[0],
+        expected,
+      );
+      const account = await stripe.accountsV2.retrieve(matching[0].id, {
+        include: ["configuration.recipient", "defaults", "identity"],
+      });
+      assertConnectedAccountIdentity(account, {
+        accountId: matching[0].id,
+        clerkOrgId: args.clerkOrgId,
+        organizationId: args.organizationId,
+        expectedLivemode: args.expectedLivemode,
+        ...(matchesCurrentOperation ? { operationId: args.operationId } : {}),
+        country: args.country,
+      });
+      return account;
+    }
+  }
+  if (
+    args.reconcileFirst &&
+    args.now - args.operationStartedAt >= STRIPE_V2_IDEMPOTENCY_WINDOW_MS
+  ) {
+    throw new Error("Stripe connected account reconciliation is required");
+  }
+  return await createConnectedAccountForOperation(stripe, args);
+}
+
+export async function retrieveConnectedAccount(
+  stripe: ConnectOnboardingClient,
+  expected: ConnectedAccountExpectation & { accountId: string },
+): Promise<Stripe.V2.Core.Account> {
+  const account = await stripe.accountsV2.retrieve(expected.accountId, {
+    include: ["configuration.recipient", "defaults", "identity"],
+  });
+  assertConnectedAccountIdentity(account, expected);
+  return account;
+}
+
+export async function createAccountLinkForOperation(
+  stripe: ConnectOnboardingClient,
+  args: {
+    operationId: string;
+    connectedAccountId: string;
+    expectedLivemode: boolean;
+    refreshUrl: string;
+    returnUrl: string;
+  },
+): Promise<{ url: string; expiresAt: number }> {
+  assertHttpsUrl(args.refreshUrl, "Stripe refresh URL");
+  assertHttpsUrl(args.returnUrl, "Stripe return URL");
+  const link = await stripe.accountLinksV2.create(
+    {
+      account: args.connectedAccountId,
+      use_case: {
+        type: "account_onboarding",
+        account_onboarding: {
+          configurations: ["recipient"],
+          collection_options: {
+            fields: "eventually_due",
+            future_requirements: "include",
+          },
+          refresh_url: args.refreshUrl,
+          return_url: args.returnUrl,
+        },
+      },
+    },
+    {
+      idempotencyKey: connectOperationIdempotencyKey("link", args.operationId),
+    },
+  );
+  if (
+    link.object !== "v2.core.account_link" ||
+    link.account !== args.connectedAccountId
+  ) {
+    throw new Error("Stripe returned an onboarding link for another account");
+  }
+  if (link.livemode !== args.expectedLivemode) {
+    throw new Error("Stripe onboarding link mode does not match configuration");
+  }
+  if (
+    link.use_case.type !== "account_onboarding" ||
+    link.use_case.account_onboarding?.configurations.length !== 1 ||
+    link.use_case.account_onboarding.configurations[0] !== "recipient"
+  ) {
+    throw new Error("Stripe returned an unexpected onboarding link use case");
+  }
+  assertHttpsUrl(link.url, "Stripe onboarding URL");
+  const expiresAt = Date.parse(link.expires_at);
+  if (!Number.isFinite(expiresAt)) {
+    throw new Error("Stripe returned an invalid onboarding link expiry");
+  }
+  return { url: link.url, expiresAt };
+}
+
+function connectOnboardingClient(stripe: Stripe): ConnectOnboardingClient {
+  return {
+    accountsV2: {
+      create: async (params, options) =>
+        await stripe.v2.core.accounts.create(params, options),
+      retrieve: async (id, params, options) =>
+        await stripe.v2.core.accounts.retrieve(id, params, options),
+      listRecipientAccounts: async (limit) =>
+        await stripe.v2.core.accounts
+          .list({ applied_configurations: ["recipient"], limit: 100 })
+          .autoPagingToArray({ limit }),
+    },
+    accountLinksV2: {
+      create: async (params, options) =>
+        await stripe.v2.core.accountLinks.create(params, options),
+    },
+  };
 }
 
 export const getConnectProfileForActiveOrg = internalMutation({
@@ -200,6 +521,425 @@ export const getConnectProfileForActiveOrg = internalMutation({
       organizationId: organization._id,
       stripeConnectedAccountId: profile.stripeConnectedAccountId ?? null,
     };
+  },
+});
+
+export type PreparedConnectAccount = {
+  organizationId: Id<"organizations">;
+  organizationName: string;
+  connectedAccountId: string | null;
+  connectedAccountLivemode: boolean | null;
+  operation: {
+    operationId: string;
+    country: string;
+    contactEmail: string;
+    startedAt: number;
+    isRetry: boolean;
+  } | null;
+};
+
+export const prepareConnectAccountOperation = internalMutation({
+  args: {
+    clerkOrgId: v.string(),
+    candidateOperationId: v.string(),
+    expectedLivemode: v.boolean(),
+    country: v.optional(v.string()),
+    contactEmail: v.optional(v.string()),
+    requireExistingAccount: v.boolean(),
+  },
+  handler: async (ctx, args): Promise<PreparedConnectAccount> => {
+    if (
+      args.clerkOrgId.length > 128 ||
+      !/^org_[A-Za-z0-9_-]+$/.test(args.clerkOrgId)
+    ) {
+      throw new Error("Active organization is invalid");
+    }
+    const organization = await ctx.db
+      .query("organizations")
+      .withIndex("by_clerk_org", (q) => q.eq("clerkOrgId", args.clerkOrgId))
+      .unique();
+    if (organization === null) {
+      throw new Error("Active organization is not provisioned");
+    }
+    let profile = await ctx.db
+      .query("organizationPayments")
+      .withIndex("by_organization", (q) =>
+        q.eq("organizationId", organization._id),
+      )
+      .unique();
+    if (profile === null) {
+      const profileId = await ctx.db.insert("organizationPayments", {
+        organizationId: organization._id,
+        detailsSubmitted: false,
+        chargesEnabled: false,
+        payoutsEnabled: false,
+        requirements: [],
+        updatedAt: Date.now(),
+      });
+      profile = await ctx.db.get(profileId);
+      if (profile === null) throw new Error("Failed to create payment profile");
+    }
+    if (profile.stripeConnectedAccountId !== undefined) {
+      if (
+        profile.stripeConnectedAccountLivemode !== undefined &&
+        profile.stripeConnectedAccountLivemode !== args.expectedLivemode
+      ) {
+        throw new Error(
+          "Stored Stripe connected account mode does not match configuration",
+        );
+      }
+      return {
+        organizationId: organization._id,
+        organizationName: organization.name,
+        connectedAccountId: profile.stripeConnectedAccountId,
+        connectedAccountLivemode:
+          profile.stripeConnectedAccountLivemode ?? null,
+        operation: null,
+      };
+    }
+    if (args.requireExistingAccount) {
+      throw new Error(
+        "Stripe onboarding must be started before it can refresh",
+      );
+    }
+    const pending = await ctx.db
+      .query("stripeConnectOnboardingOperations")
+      .withIndex("by_organization_kind_status", (q) =>
+        q
+          .eq("organizationId", organization._id)
+          .eq("kind", "account_create")
+          .eq("status", "prepared"),
+      )
+      .order("desc")
+      .first();
+    if (pending !== null) {
+      if (
+        pending.expectedLivemode !== args.expectedLivemode ||
+        pending.country === undefined ||
+        pending.contactEmail === undefined
+      ) {
+        throw new Error("Stripe account creation requires reconciliation");
+      }
+      return {
+        organizationId: organization._id,
+        organizationName: organization.name,
+        connectedAccountId: null,
+        connectedAccountLivemode: null,
+        operation: {
+          operationId: pending.operationId,
+          country: pending.country,
+          contactEmail: pending.contactEmail,
+          startedAt: pending.createdAt,
+          isRetry: true,
+        },
+      };
+    }
+    if (!CONNECT_OPERATION_ID_PATTERN.test(args.candidateOperationId)) {
+      throw new Error("Invalid Connect operation identity");
+    }
+    const operationCollision = await ctx.db
+      .query("stripeConnectOnboardingOperations")
+      .withIndex("by_operation", (q) =>
+        q.eq("operationId", args.candidateOperationId),
+      )
+      .unique();
+    if (operationCollision !== null) {
+      throw new Error("Connect operation identity collision");
+    }
+    const country = normalizedPublisherCountry(args.country ?? null);
+    const contactEmail = boundedContactEmail(args.contactEmail ?? null);
+    const now = Date.now();
+    await ctx.db.insert("stripeConnectOnboardingOperations", {
+      organizationId: organization._id,
+      operationId: args.candidateOperationId,
+      kind: "account_create",
+      status: "prepared",
+      expectedLivemode: args.expectedLivemode,
+      country,
+      contactEmail,
+      createdAt: now,
+      updatedAt: now,
+    });
+    return {
+      organizationId: organization._id,
+      organizationName: organization.name,
+      connectedAccountId: null,
+      connectedAccountLivemode: null,
+      operation: {
+        operationId: args.candidateOperationId,
+        country,
+        contactEmail,
+        startedAt: now,
+        isRetry: false,
+      },
+    };
+  },
+});
+
+export const commitConnectAccountOperation = internalMutation({
+  args: {
+    organizationId: v.id("organizations"),
+    operationId: v.string(),
+    stripeConnectedAccountId: v.string(),
+    expectedLivemode: v.boolean(),
+  },
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{ accepted: boolean; connectedAccountId: string }> => {
+    if (!STRIPE_ACCOUNT_ID_PATTERN.test(args.stripeConnectedAccountId)) {
+      throw new Error("Stripe returned an invalid connected account ID");
+    }
+    const operation = await ctx.db
+      .query("stripeConnectOnboardingOperations")
+      .withIndex("by_operation", (q) => q.eq("operationId", args.operationId))
+      .unique();
+    if (
+      operation === null ||
+      operation.organizationId !== args.organizationId ||
+      operation.kind !== "account_create" ||
+      operation.expectedLivemode !== args.expectedLivemode ||
+      (operation.status !== "prepared" &&
+        operation.status !== "account_persisted")
+    ) {
+      throw new Error("Stripe account creation operation is invalid");
+    }
+    const profile = await ctx.db
+      .query("organizationPayments")
+      .withIndex("by_organization", (q) =>
+        q.eq("organizationId", args.organizationId),
+      )
+      .unique();
+    if (profile === null) throw new Error("Payment profile not found");
+    if (
+      profile.stripeConnectedAccountId !== undefined &&
+      (profile.stripeConnectedAccountId !== args.stripeConnectedAccountId ||
+        (profile.stripeConnectedAccountLivemode !== undefined &&
+          profile.stripeConnectedAccountLivemode !== args.expectedLivemode))
+    ) {
+      await ctx.db.patch(operation._id, {
+        status: "requires_reconciliation",
+        stripeConnectedAccountId: args.stripeConnectedAccountId,
+        updatedAt: Date.now(),
+      });
+      return {
+        accepted: false,
+        connectedAccountId: profile.stripeConnectedAccountId,
+      };
+    }
+    const now = Date.now();
+    await ctx.db.patch(profile._id, {
+      stripeConnectedAccountId: args.stripeConnectedAccountId,
+      stripeConnectedAccountLivemode: args.expectedLivemode,
+      updatedAt: now,
+    });
+    await ctx.db.patch(operation._id, {
+      status: "account_persisted",
+      stripeConnectedAccountId: args.stripeConnectedAccountId,
+      updatedAt: now,
+    });
+    return {
+      accepted: true,
+      connectedAccountId: args.stripeConnectedAccountId,
+    };
+  },
+});
+
+export const confirmConnectAccountIdentity = internalMutation({
+  args: {
+    organizationId: v.id("organizations"),
+    stripeConnectedAccountId: v.string(),
+    expectedLivemode: v.boolean(),
+  },
+  handler: async (ctx, args): Promise<void> => {
+    const profile = await ctx.db
+      .query("organizationPayments")
+      .withIndex("by_organization", (q) =>
+        q.eq("organizationId", args.organizationId),
+      )
+      .unique();
+    if (
+      profile === null ||
+      profile.stripeConnectedAccountId !== args.stripeConnectedAccountId
+    ) {
+      throw new Error("Stored Stripe connected account does not match");
+    }
+    if (
+      profile.stripeConnectedAccountLivemode !== undefined &&
+      profile.stripeConnectedAccountLivemode !== args.expectedLivemode
+    ) {
+      throw new Error(
+        "Stored Stripe connected account mode does not match configuration",
+      );
+    }
+    if (profile.stripeConnectedAccountLivemode === undefined) {
+      await ctx.db.patch(profile._id, {
+        stripeConnectedAccountLivemode: args.expectedLivemode,
+        updatedAt: Date.now(),
+      });
+    }
+  },
+});
+
+export type PreparedConnectLink = {
+  operationId: string;
+  connectedAccountId: string;
+  expectedLivemode: boolean;
+  isRetry: boolean;
+};
+
+export const prepareConnectLinkOperation = internalMutation({
+  args: {
+    organizationId: v.id("organizations"),
+    candidateOperationId: v.string(),
+    expectedLivemode: v.boolean(),
+    forceFresh: v.boolean(),
+  },
+  handler: async (ctx, args): Promise<PreparedConnectLink> => {
+    const profile = await ctx.db
+      .query("organizationPayments")
+      .withIndex("by_organization", (q) =>
+        q.eq("organizationId", args.organizationId),
+      )
+      .unique();
+    if (
+      profile === null ||
+      profile.stripeConnectedAccountId === undefined ||
+      profile.stripeConnectedAccountLivemode !== args.expectedLivemode
+    ) {
+      throw new Error("Connected account must be persisted before onboarding");
+    }
+    const now = Date.now();
+    const pending = await ctx.db
+      .query("stripeConnectOnboardingOperations")
+      .withIndex("by_organization_kind_status", (q) =>
+        q
+          .eq("organizationId", args.organizationId)
+          .eq("kind", "account_link")
+          .eq("status", "prepared"),
+      )
+      .order("desc")
+      .first();
+    if (pending !== null) {
+      const canRetry =
+        !args.forceFresh &&
+        pending.expectedLivemode === args.expectedLivemode &&
+        pending.stripeConnectedAccountId === profile.stripeConnectedAccountId &&
+        now - pending.createdAt < CONNECT_LINK_RETRY_WINDOW_MS;
+      if (canRetry) {
+        return {
+          operationId: pending.operationId,
+          connectedAccountId: profile.stripeConnectedAccountId,
+          expectedLivemode: args.expectedLivemode,
+          isRetry: true,
+        };
+      }
+      await ctx.db.patch(pending._id, {
+        status: "expired",
+        updatedAt: now,
+      });
+    }
+    if (!CONNECT_OPERATION_ID_PATTERN.test(args.candidateOperationId)) {
+      throw new Error("Invalid Connect operation identity");
+    }
+    const operationCollision = await ctx.db
+      .query("stripeConnectOnboardingOperations")
+      .withIndex("by_operation", (q) =>
+        q.eq("operationId", args.candidateOperationId),
+      )
+      .unique();
+    if (operationCollision !== null) {
+      throw new Error("Connect operation identity collision");
+    }
+    await ctx.db.insert("stripeConnectOnboardingOperations", {
+      organizationId: args.organizationId,
+      operationId: args.candidateOperationId,
+      kind: "account_link",
+      status: "prepared",
+      expectedLivemode: args.expectedLivemode,
+      stripeConnectedAccountId: profile.stripeConnectedAccountId,
+      createdAt: now,
+      updatedAt: now,
+    });
+    return {
+      operationId: args.candidateOperationId,
+      connectedAccountId: profile.stripeConnectedAccountId,
+      expectedLivemode: args.expectedLivemode,
+      isRetry: false,
+    };
+  },
+});
+
+export const expireConnectLinkOperation = internalMutation({
+  args: { operationId: v.string() },
+  handler: async (ctx, args): Promise<void> => {
+    const operation = await ctx.db
+      .query("stripeConnectOnboardingOperations")
+      .withIndex("by_operation", (q) => q.eq("operationId", args.operationId))
+      .unique();
+    if (
+      operation !== null &&
+      operation.kind === "account_link" &&
+      operation.status === "prepared"
+    ) {
+      await ctx.db.patch(operation._id, {
+        status: "expired",
+        updatedAt: Date.now(),
+      });
+    }
+  },
+});
+
+export const completeConnectLinkOperation = internalMutation({
+  args: {
+    organizationId: v.id("organizations"),
+    operationId: v.string(),
+    stripeConnectedAccountId: v.string(),
+    expectedLivemode: v.boolean(),
+    providerExpiresAt: v.number(),
+  },
+  handler: async (ctx, args): Promise<boolean> => {
+    const operation = await ctx.db
+      .query("stripeConnectOnboardingOperations")
+      .withIndex("by_operation", (q) => q.eq("operationId", args.operationId))
+      .unique();
+    if (operation?.status === "link_created") {
+      return (
+        operation.organizationId === args.organizationId &&
+        operation.stripeConnectedAccountId === args.stripeConnectedAccountId &&
+        operation.expectedLivemode === args.expectedLivemode
+      );
+    }
+    if (
+      operation === null ||
+      operation.kind !== "account_link" ||
+      operation.status !== "prepared" ||
+      operation.organizationId !== args.organizationId ||
+      operation.stripeConnectedAccountId !== args.stripeConnectedAccountId ||
+      operation.expectedLivemode !== args.expectedLivemode ||
+      !Number.isSafeInteger(args.providerExpiresAt)
+    ) {
+      return false;
+    }
+    const profile = await ctx.db
+      .query("organizationPayments")
+      .withIndex("by_organization", (q) =>
+        q.eq("organizationId", args.organizationId),
+      )
+      .unique();
+    if (
+      profile === null ||
+      profile.stripeConnectedAccountId !== args.stripeConnectedAccountId ||
+      profile.stripeConnectedAccountLivemode !== args.expectedLivemode
+    ) {
+      return false;
+    }
+    await ctx.db.patch(operation._id, {
+      status: "link_created",
+      providerExpiresAt: args.providerExpiresAt,
+      updatedAt: Date.now(),
+    });
+    return true;
   },
 });
 
@@ -302,52 +1042,240 @@ export const refreshConnectedAccount = internalAction({
   },
 });
 
+export type ConnectOnboardingStore = {
+  prepareAccount: (args: {
+    clerkOrgId: string;
+    candidateOperationId: string;
+    expectedLivemode: boolean;
+    country?: string;
+    contactEmail?: string;
+    requireExistingAccount: boolean;
+  }) => Promise<PreparedConnectAccount>;
+  commitAccount: (args: {
+    organizationId: Id<"organizations">;
+    operationId: string;
+    stripeConnectedAccountId: string;
+    expectedLivemode: boolean;
+  }) => Promise<{ accepted: boolean; connectedAccountId: string }>;
+  confirmAccount: (args: {
+    organizationId: Id<"organizations">;
+    stripeConnectedAccountId: string;
+    expectedLivemode: boolean;
+  }) => Promise<void>;
+  prepareLink: (args: {
+    organizationId: Id<"organizations">;
+    candidateOperationId: string;
+    expectedLivemode: boolean;
+    forceFresh: boolean;
+  }) => Promise<PreparedConnectLink>;
+  expireLink: (args: { operationId: string }) => Promise<void>;
+  completeLink: (args: {
+    organizationId: Id<"organizations">;
+    operationId: string;
+    stripeConnectedAccountId: string;
+    expectedLivemode: boolean;
+    providerExpiresAt: number;
+  }) => Promise<boolean>;
+};
+
+export type ConnectOnboardingWorkflowDependencies = {
+  stripe: ConnectOnboardingClient;
+  store: ConnectOnboardingStore;
+  expectedLivemode: boolean;
+  refreshUrl: string;
+  returnUrl: string;
+  newOperationId: () => string;
+  now: () => number;
+};
+
+export async function runConnectOnboardingWorkflow(
+  actor: {
+    clerkOrgId: string;
+    contactEmail: string | null;
+  },
+  input: {
+    country: string | null;
+    forceFreshLink: boolean;
+    requireExistingAccount: boolean;
+  },
+  dependencies: ConnectOnboardingWorkflowDependencies,
+): Promise<{ url: string }> {
+  const prepared = await dependencies.store.prepareAccount({
+    clerkOrgId: actor.clerkOrgId,
+    candidateOperationId: dependencies.newOperationId(),
+    expectedLivemode: dependencies.expectedLivemode,
+    ...(input.country === null ? {} : { country: input.country }),
+    ...(actor.contactEmail === null
+      ? {}
+      : { contactEmail: actor.contactEmail }),
+    requireExistingAccount: input.requireExistingAccount,
+  });
+
+  let connectedAccountId = prepared.connectedAccountId;
+  if (connectedAccountId === null) {
+    if (prepared.operation === null) {
+      throw new Error("Stripe account creation operation is missing");
+    }
+    const account = await resolveConnectedAccountForOperation(
+      dependencies.stripe,
+      {
+        operationId: prepared.operation.operationId,
+        clerkOrgId: actor.clerkOrgId,
+        organizationId: prepared.organizationId,
+        organizationName: prepared.organizationName,
+        country: prepared.operation.country,
+        contactEmail: prepared.operation.contactEmail,
+        expectedLivemode: dependencies.expectedLivemode,
+        // First run also scans for a 5f8-era account created before the old
+        // v1 Account Link failure prevented its local persistence.
+        reconcileFirst: true,
+        operationStartedAt: prepared.operation.startedAt,
+        now: dependencies.now(),
+      },
+    );
+    const committed = await dependencies.store.commitAccount({
+      organizationId: prepared.organizationId,
+      operationId: prepared.operation.operationId,
+      stripeConnectedAccountId: account.id,
+      expectedLivemode: dependencies.expectedLivemode,
+    });
+    if (!committed.accepted || committed.connectedAccountId !== account.id) {
+      throw new Error("Stripe connected account reconciliation is required");
+    }
+    connectedAccountId = account.id;
+  } else {
+    await retrieveConnectedAccount(dependencies.stripe, {
+      accountId: connectedAccountId,
+      clerkOrgId: actor.clerkOrgId,
+      organizationId: prepared.organizationId,
+      expectedLivemode: dependencies.expectedLivemode,
+    });
+    await dependencies.store.confirmAccount({
+      organizationId: prepared.organizationId,
+      stripeConnectedAccountId: connectedAccountId,
+      expectedLivemode: dependencies.expectedLivemode,
+    });
+  }
+
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const linkOperation = await dependencies.store.prepareLink({
+      organizationId: prepared.organizationId,
+      candidateOperationId: dependencies.newOperationId(),
+      expectedLivemode: dependencies.expectedLivemode,
+      forceFresh: input.forceFreshLink || attempt > 0,
+    });
+    const link = await createAccountLinkForOperation(dependencies.stripe, {
+      operationId: linkOperation.operationId,
+      connectedAccountId,
+      expectedLivemode: dependencies.expectedLivemode,
+      refreshUrl: dependencies.refreshUrl,
+      returnUrl: dependencies.returnUrl,
+    });
+    if (link.expiresAt <= dependencies.now() + CONNECT_LINK_MIN_VALIDITY_MS) {
+      await dependencies.store.expireLink({
+        operationId: linkOperation.operationId,
+      });
+      continue;
+    }
+    const completed = await dependencies.store.completeLink({
+      organizationId: prepared.organizationId,
+      operationId: linkOperation.operationId,
+      stripeConnectedAccountId: connectedAccountId,
+      expectedLivemode: dependencies.expectedLivemode,
+      providerExpiresAt: link.expiresAt,
+    });
+    if (completed) return { url: link.url };
+  }
+  throw new Error("Could not create a fresh Stripe onboarding link");
+}
+
+function connectOnboardingStore(ctx: ActionCtx): ConnectOnboardingStore {
+  return {
+    prepareAccount: async (args) =>
+      await ctx.runMutation(
+        internal.payouts.prepareConnectAccountOperation,
+        args,
+      ),
+    commitAccount: async (args) =>
+      await ctx.runMutation(
+        internal.payouts.commitConnectAccountOperation,
+        args,
+      ),
+    confirmAccount: async (args) => {
+      await ctx.runMutation(
+        internal.payouts.confirmConnectAccountIdentity,
+        args,
+      );
+    },
+    prepareLink: async (args) =>
+      await ctx.runMutation(internal.payouts.prepareConnectLinkOperation, args),
+    expireLink: async (args) => {
+      await ctx.runMutation(internal.payouts.expireConnectLinkOperation, args);
+    },
+    completeLink: async (args) =>
+      await ctx.runMutation(
+        internal.payouts.completeConnectLinkOperation,
+        args,
+      ),
+  };
+}
+
+async function runConnectOnboardingAction(
+  ctx: ActionCtx,
+  args: {
+    country: string | null;
+    forceFreshLink: boolean;
+    requireExistingAccount: boolean;
+  },
+): Promise<{ url: string }> {
+  const { clerkOrgId, identity } =
+    await requireActiveClerkOrgAdminInAction(ctx);
+  if (args.country !== null && args.country.length > 8) {
+    throw new Error("Publisher country must be a two-letter ISO country code");
+  }
+  const input = {
+    ...args,
+    country: args.country?.trim().toUpperCase() ?? null,
+  };
+  const rawEmail = typeof identity.email === "string" ? identity.email : "";
+  const contactEmail = rawEmail.trim() === "" ? null : rawEmail.trim();
+  const expectedLivemode = stripeLivemodeFromSecretKey(
+    process.env.STRIPE_SECRET_KEY,
+  );
+  const urls = connectOnboardingUrls(process.env.APP_ORIGIN);
+  const stripe = stripeClient();
+  return await runConnectOnboardingWorkflow(
+    { clerkOrgId, contactEmail },
+    input,
+    {
+      stripe: connectOnboardingClient(stripe),
+      store: connectOnboardingStore(ctx),
+      expectedLivemode,
+      ...urls,
+      newOperationId: () => crypto.randomUUID(),
+      now: () => Date.now(),
+    },
+  );
+}
+
 export const startOnboarding = action({
   args: { country: v.optional(v.string()) },
-  handler: async (ctx, args): Promise<{ url: string }> => {
-    const country = args.country?.trim().toUpperCase() ?? null;
-    const { clerkOrgId, identity } =
-      await requireActiveClerkOrgAdminInAction(ctx);
-    const contactEmail =
-      typeof identity.email === "string" ? identity.email.trim() : "";
-    if (contactEmail === "") {
-      throw new Error("Signed-in user email is required for Stripe onboarding");
-    }
-    const prepared = await ctx.runMutation(
-      internal.payouts.getConnectProfileForActiveOrg,
-      {
-        clerkOrgId,
-      },
-    );
-    const origin = process.env.APP_ORIGIN;
-    if (origin === undefined || origin.trim() === "")
-      throw new Error("APP_ORIGIN is not configured");
-    const url = new URL(origin);
-    if (url.protocol !== "https:" && url.hostname !== "localhost") {
-      throw new Error("APP_ORIGIN must use HTTPS outside localhost");
-    }
-    const stripe = stripeClient();
-    const created = await createOnboardingLink(
-      {
-        accountsV2: stripe.v2.core.accounts,
-        accountLinks: stripe.accountLinks,
-      },
-      {
-        connectedAccountId: prepared.stripeConnectedAccountId,
-        clerkOrgId,
-        organizationId: prepared.organizationId,
-        country,
-        contactEmail,
-        refreshUrl: `${url.origin}/app/earnings?onboarding=refresh`,
-        returnUrl: `${url.origin}/app/earnings?onboarding=return`,
-      },
-    );
-    await ctx.runMutation(internal.payouts.setConnectedAccount, {
-      organizationId: prepared.organizationId,
-      stripeConnectedAccountId: created.connectedAccountId,
-    });
-    return { url: created.url };
-  },
+  handler: async (ctx, args): Promise<{ url: string }> =>
+    await runConnectOnboardingAction(ctx, {
+      country: args.country ?? null,
+      forceFreshLink: false,
+      requireExistingAccount: false,
+    }),
+});
+
+export const refreshOnboarding = action({
+  args: {},
+  handler: async (ctx): Promise<{ url: string }> =>
+    await runConnectOnboardingAction(ctx, {
+      country: null,
+      forceFreshLink: true,
+      requireExistingAccount: true,
+    }),
 });
 
 export const releaseMatureEarnings = internalMutation({

@@ -405,6 +405,7 @@ export default defineSchema({
     organizationId: v.id("organizations"),
     stripeCustomerId: v.optional(v.string()),
     stripeConnectedAccountId: v.optional(v.string()),
+    stripeConnectedAccountLivemode: v.optional(v.boolean()),
     detailsSubmitted: v.boolean(),
     chargesEnabled: v.boolean(),
     payoutsEnabled: v.boolean(),
@@ -415,6 +416,30 @@ export default defineSchema({
     .index("by_organization", ["organizationId"])
     .index("by_customer", ["stripeCustomerId"])
     .index("by_connected_account", ["stripeConnectedAccountId"]),
+
+  // Server-issued operations make Connect provider retries durable without
+  // storing Stripe's single-use onboarding URLs.
+  stripeConnectOnboardingOperations: defineTable({
+    organizationId: v.id("organizations"),
+    operationId: v.string(),
+    kind: v.union(v.literal("account_create"), v.literal("account_link")),
+    status: v.union(
+      v.literal("prepared"),
+      v.literal("account_persisted"),
+      v.literal("link_created"),
+      v.literal("expired"),
+      v.literal("requires_reconciliation"),
+    ),
+    expectedLivemode: v.boolean(),
+    country: v.optional(v.string()),
+    contactEmail: v.optional(v.string()),
+    stripeConnectedAccountId: v.optional(v.string()),
+    providerExpiresAt: v.optional(v.number()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_operation", ["operationId"])
+    .index("by_organization_kind_status", ["organizationId", "kind", "status"]),
 
   // Checkout state is server-owned: browser-supplied metadata never grants.
   checkoutIntents: defineTable({
