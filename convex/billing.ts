@@ -5,6 +5,7 @@ import {
   internalAction,
   internalMutation,
   internalQuery,
+  mutation,
   query,
   type ActionCtx,
   type MutationCtx,
@@ -14,12 +15,27 @@ import type { Doc, Id } from "./_generated/dataModel";
 import {
   getOrgByClerkId,
   requireActiveOrg,
+  requireAdmin,
   requireIdentity,
   requireOrgAdmin,
   requireOrgMemberBySlug,
 } from "./lib/auth";
-import { reconcilePaymentPublisherClawback } from "./lib/publisherLedger";
+import {
+  enqueuePaymentPublisherReconciliation,
+  processPaymentPublisherReconciliationChunk,
+} from "./lib/publisherLedger";
 import { appendWalletEntry, getOrCreateWallet } from "./wallets";
+import {
+  commitPaymentReversal,
+  preflightPaymentReversal,
+  recordPositiveFundingSource,
+  requireVerifiedWalletFunding,
+} from "./lib/funding";
+import { assertFinanceMigrationAllowsRuntime } from "./lib/financeMigrationGate";
+import {
+  paymentStatusForProjection,
+  terminalDisputeStatus,
+} from "./lib/paymentStatus";
 
 /** Pinned alongside `stripe@22.3.1`; upgrade only as an explicit migration. */
 export const STRIPE_API_VERSION = "2026-06-24.dahlia" as const;
@@ -215,6 +231,7 @@ export const prepareCheckoutIntent = internalMutation({
     stripePriceId: v.string(),
   },
   handler: async (ctx, args) => {
+    await assertFinanceMigrationAllowsRuntime(ctx);
     const organization = await getOrgByClerkId(ctx, args.clerkOrgId);
     if (organization === null)
       throw new Error("Active organization is not provisioned");
@@ -263,6 +280,7 @@ export const setStripeCustomer = internalMutation({
     stripeCustomerId: v.string(),
   },
   handler: async (ctx, args): Promise<string> => {
+    await assertFinanceMigrationAllowsRuntime(ctx);
     const intent = await ctx.db.get(args.checkoutIntentId);
     if (intent === null) throw new Error("Checkout intent not found");
     const profile = await ctx.db
@@ -292,6 +310,7 @@ export const attachCheckoutSession = internalMutation({
     stripeCheckoutSessionId: v.string(),
   },
   handler: async (ctx, args): Promise<void> => {
+    await assertFinanceMigrationAllowsRuntime(ctx);
     const intent = await ctx.db.get(args.checkoutIntentId);
     if (intent === null) throw new Error("Checkout intent not found");
     if (
@@ -303,6 +322,34 @@ export const attachCheckoutSession = internalMutation({
     await ctx.db.patch(intent._id, {
       stripeCheckoutSessionId: args.stripeCheckoutSessionId,
       status: "open",
+      updatedAt: Date.now(),
+    });
+  },
+});
+
+export const markCheckoutIntentTerminal = internalMutation({
+  args: {
+    stripeCheckoutSessionId: v.string(),
+    status: v.union(v.literal("failed"), v.literal("expired")),
+  },
+  handler: async (ctx, args): Promise<void> => {
+    await assertFinanceMigrationAllowsRuntime(ctx);
+    const intent = await ctx.db
+      .query("checkoutIntents")
+      .withIndex("by_checkout_session", (q) =>
+        q.eq("stripeCheckoutSessionId", args.stripeCheckoutSessionId),
+      )
+      .unique();
+    if (intent === null) return;
+    if (
+      intent.status === "complete" ||
+      intent.status === "failed" ||
+      intent.status === "expired"
+    ) {
+      return;
+    }
+    await ctx.db.patch(intent._id, {
+      status: args.status,
       updatedAt: Date.now(),
     });
   },
@@ -361,7 +408,7 @@ export const createCheckout = action({
       clerkOrgId,
       packId: args.packId,
       successUrl: `${origin}/app/billing?checkout={CHECKOUT_SESSION_ID}`,
-      cancelUrl: `${origin}/app/billing`,
+      cancelUrl: `${origin}/app/billing?checkout_cancel=${prepared.checkoutIntentId}`,
     });
     await ctx.runMutation(internal.billing.attachCheckoutSession, {
       checkoutIntentId: prepared.checkoutIntentId,
@@ -389,6 +436,102 @@ function stripeRetryDelay(attempts: number): number {
   ];
 }
 
+export function stripeEventRequiresProviderReconciliation(
+  eventType: string,
+): boolean {
+  return (
+    eventType.startsWith("checkout.session.") ||
+    eventType.startsWith("payment_intent.") ||
+    eventType === "charge.refunded" ||
+    eventType.startsWith("refund.") ||
+    eventType.startsWith("charge.dispute.") ||
+    eventType.startsWith("transfer.") ||
+    eventType.startsWith("payout.")
+  );
+}
+
+async function getStripeOutbox(
+  ctx: MutationCtx,
+  stripeEventId: string,
+): Promise<Doc<"stripeEventOutbox"> | null> {
+  return await ctx.db
+    .query("stripeEventOutbox")
+    .withIndex("by_stripe_event", (q) => q.eq("stripeEventId", stripeEventId))
+    .unique();
+}
+
+async function ensureStripeOutbox(
+  ctx: MutationCtx,
+  event: Doc<"paymentEvents">,
+): Promise<Doc<"stripeEventOutbox">> {
+  const existing = await getStripeOutbox(ctx, event.stripeEventId);
+  if (existing !== null) {
+    if (
+      existing.paymentEventId !== event._id ||
+      existing.eventType !== event.eventType ||
+      existing.objectId !== event.objectId
+    ) {
+      throw new Error("Stripe outbox immutable receipt facts changed");
+    }
+    return existing;
+  }
+  const terminalState =
+    event.status === "processed"
+      ? ("applied" as const)
+      : event.status === "ignored"
+        ? ("ignored" as const)
+        : event.status === "provider_reconciliation_required"
+          ? ("provider_reconciliation_required" as const)
+          : event.status === "dead_letter"
+            ? ("dead_letter" as const)
+            : event.status === "failed" &&
+                event.attempts >= STRIPE_EVENT_MAX_ATTEMPTS
+              ? stripeEventRequiresProviderReconciliation(event.eventType)
+                ? ("provider_reconciliation_required" as const)
+                : ("dead_letter" as const)
+              : event.status === "failed"
+                ? ("retry_wait" as const)
+                : ("queued" as const);
+  const now = Date.now();
+  const id = await ctx.db.insert("stripeEventOutbox", {
+    paymentEventId: event._id,
+    stripeEventId: event.stripeEventId,
+    eventType: event.eventType,
+    objectId: event.objectId,
+    state: terminalState,
+    attemptCycle:
+      event.status === "received"
+        ? 0
+        : Math.min(event.attempts, STRIPE_EVENT_MAX_ATTEMPTS),
+    totalAttempts: event.attempts,
+    lastError: event.lastError,
+    reconciliationReason:
+      terminalState === "provider_reconciliation_required" ||
+      terminalState === "dead_letter"
+        ? event.lastError
+        : undefined,
+    nextAttemptAt:
+      terminalState === "retry_wait" ? (event.nextAttemptAt ?? now) : undefined,
+    appliedAt: event.processedAt,
+    createdAt: event.receivedAt,
+    updatedAt: now,
+  });
+  const created = await ctx.db.get(id);
+  if (created === null) throw new Error("Stripe outbox creation failed");
+  if (
+    event.status === "failed" &&
+    (terminalState === "provider_reconciliation_required" ||
+      terminalState === "dead_letter")
+  ) {
+    await ctx.db.patch(event._id, {
+      status: terminalState,
+      nextAttemptAt: undefined,
+      leaseExpiresAt: undefined,
+    });
+  }
+  return created;
+}
+
 export const receiveStripeEvent = internalMutation({
   args: {
     stripeEventId: v.string(),
@@ -400,6 +543,10 @@ export const receiveStripeEvent = internalMutation({
     ctx,
     args,
   ): Promise<{ isNew: boolean; scheduled: boolean }> => {
+    // Migration must either see an accepted receipt or reject its transaction
+    // so Stripe retries it later. Never admit a post-fence row that cannot be
+    // included in the stable global watermark.
+    await assertFinanceMigrationAllowsRuntime(ctx);
     if (
       args.stripeEventId.trim() === "" ||
       args.stripeAccount.trim() === "" ||
@@ -422,45 +569,16 @@ export const receiveStripeEvent = internalMutation({
       ) {
         throw new Error("Stripe event id was redelivered with different data");
       }
-      const now = Date.now();
       await ctx.db.patch(existing._id, {
         deliveries: existing.deliveries + 1,
       });
-      const retryable = existing.status === "failed";
-      const abandonedLease =
-        existing.status === "processing" &&
-        existing.attempts < STRIPE_EVENT_MAX_ATTEMPTS &&
-        (existing.leaseExpiresAt ?? 0) <= now;
-      if (retryable || abandonedLease) {
-        await ctx.scheduler.runAfter(0, internal.billing.processStripeEvent, {
-          stripeEventId: args.stripeEventId,
-        });
-        await ctx.db.patch(existing._id, {
-          status: "received",
-          attempts:
-            retryable && existing.attempts >= STRIPE_EVENT_MAX_ATTEMPTS
-              ? 0
-              : existing.attempts,
-          nextAttemptAt: undefined,
-          leaseExpiresAt: undefined,
-        });
-        return { isNew: false, scheduled: true };
-      }
-      if (
-        existing.status === "processing" &&
-        existing.attempts >= STRIPE_EVENT_MAX_ATTEMPTS &&
-        (existing.leaseExpiresAt ?? 0) <= now
-      ) {
-        await ctx.db.patch(existing._id, {
-          status: "failed",
-          lastError: "Stripe event processing lease expired at retry limit",
-          leaseExpiresAt: undefined,
-        });
-      }
+      await ensureStripeOutbox(ctx, existing);
+      // HTTP redelivery is evidence, not operator intent. It must never reset
+      // attempts, skip backoff, or revive poison receipts. Cron owns recovery.
       return { isNew: false, scheduled: false };
     }
     const now = Date.now();
-    await ctx.db.insert("paymentEvents", {
+    const paymentEventId = await ctx.db.insert("paymentEvents", {
       stripeEventId: args.stripeEventId,
       stripeAccount: args.stripeAccount,
       eventType: args.eventType,
@@ -470,12 +588,79 @@ export const receiveStripeEvent = internalMutation({
       deliveries: 1,
       receivedAt: now,
     });
+    await ctx.db.insert("stripeEventOutbox", {
+      paymentEventId,
+      stripeEventId: args.stripeEventId,
+      eventType: args.eventType,
+      objectId: args.objectId,
+      state: "queued",
+      attemptCycle: 0,
+      totalAttempts: 0,
+      createdAt: now,
+      updatedAt: now,
+    });
     // Scheduler write commits atomically with receipt. Returning 200 now means
     // event is durably queued, not merely stored and forgotten.
     await ctx.scheduler.runAfter(0, internal.billing.processStripeEvent, {
       stripeEventId: args.stripeEventId,
     });
     return { isNew: true, scheduled: true };
+  },
+});
+
+/** Explicit operator resume. Cumulative attempts remain immutable evidence. */
+export const replayStripeEvent = mutation({
+  args: { stripeEventId: v.string() },
+  handler: async (ctx, args): Promise<{ scheduled: true }> => {
+    const claims = await requireAdmin(ctx);
+    const event = await ctx.db
+      .query("paymentEvents")
+      .withIndex("by_stripe_event", (q) =>
+        q.eq("stripeEventId", args.stripeEventId),
+      )
+      .unique();
+    if (event === null) throw new Error("Stripe event not found");
+    if (
+      event.status !== "failed" &&
+      event.status !== "provider_reconciliation_required" &&
+      event.status !== "dead_letter"
+    ) {
+      throw new Error("Only blocked Stripe events can be resumed");
+    }
+    const now = Date.now();
+    const outbox = await ensureStripeOutbox(ctx, event);
+    if (
+      outbox.state !== "retry_wait" &&
+      outbox.state !== "provider_reconciliation_required" &&
+      outbox.state !== "dead_letter"
+    ) {
+      throw new Error("Stripe event outbox is not resumable");
+    }
+    await ctx.db.patch(outbox._id, {
+      state: "queued",
+      attemptCycle: 0,
+      leaseToken: undefined,
+      leaseExpiresAt: undefined,
+      nextAttemptAt: undefined,
+      lastError: undefined,
+      reconciliationReason: undefined,
+      resumedAt: now,
+      resumedBy: claims.subject,
+      updatedAt: now,
+    });
+    await ctx.db.patch(event._id, {
+      status: "received",
+      nextAttemptAt: undefined,
+      leaseExpiresAt: undefined,
+      lastError: undefined,
+      lastReplayedAt: now,
+      lastReplayedBy: claims.subject,
+      replayCount: (event.replayCount ?? 0) + 1,
+    });
+    await ctx.scheduler.runAfter(0, internal.billing.processStripeEvent, {
+      stripeEventId: args.stripeEventId,
+    });
+    return { scheduled: true };
   },
 });
 
@@ -490,30 +675,68 @@ export const claimStripeEvent = internalMutation({
       .unique();
     if (event === null) return null;
     const now = Date.now();
-    if (event.status === "processed" || event.status === "ignored") return null;
-    if (event.attempts >= STRIPE_EVENT_MAX_ATTEMPTS) return null;
-    if (event.status === "processing" && (event.leaseExpiresAt ?? 0) > now) {
-      return null;
-    }
+    const outbox = await ensureStripeOutbox(ctx, event);
     if (
-      event.status === "failed" &&
-      (event.attempts >= STRIPE_EVENT_MAX_ATTEMPTS ||
-        (event.nextAttemptAt ?? 0) > now)
+      outbox.state === "applied" ||
+      outbox.state === "ignored" ||
+      outbox.state === "provider_reconciliation_required" ||
+      outbox.state === "dead_letter"
     ) {
       return null;
     }
+    if (outbox.state === "leased" && (outbox.leaseExpiresAt ?? 0) > now) {
+      return null;
+    }
+    if (outbox.state === "retry_wait" && (outbox.nextAttemptAt ?? 0) > now) {
+      return null;
+    }
+    if (outbox.attemptCycle >= STRIPE_EVENT_MAX_ATTEMPTS) {
+      const money = stripeEventRequiresProviderReconciliation(event.eventType);
+      const status = money
+        ? ("provider_reconciliation_required" as const)
+        : ("dead_letter" as const);
+      const reason =
+        outbox.lastError ?? "Stripe event exhausted its processing lease";
+      await ctx.db.patch(outbox._id, {
+        state: status,
+        leaseToken: undefined,
+        leaseExpiresAt: undefined,
+        nextAttemptAt: undefined,
+        reconciliationReason: reason,
+        updatedAt: now,
+      });
+      await ctx.db.patch(event._id, {
+        status,
+        lastError: reason,
+        nextAttemptAt: undefined,
+        leaseExpiresAt: undefined,
+      });
+      return null;
+    }
+    const leaseToken = crypto.randomUUID();
     await ctx.db.patch(event._id, {
       status: "processing",
-      attempts: event.attempts + 1,
+      attempts: outbox.totalAttempts + 1,
       nextAttemptAt: undefined,
       leaseExpiresAt: now + STRIPE_EVENT_LEASE_MS,
       lastError: undefined,
+    });
+    await ctx.db.patch(outbox._id, {
+      state: "leased",
+      attemptCycle: outbox.attemptCycle + 1,
+      totalAttempts: outbox.totalAttempts + 1,
+      leaseToken,
+      leaseExpiresAt: now + STRIPE_EVENT_LEASE_MS,
+      nextAttemptAt: undefined,
+      lastError: undefined,
+      updatedAt: now,
     });
     return {
       stripeEventId: event.stripeEventId,
       stripeAccount: event.stripeAccount,
       eventType: event.eventType,
       objectId: event.objectId,
+      leaseToken,
     };
   },
 });
@@ -521,6 +744,7 @@ export const claimStripeEvent = internalMutation({
 export const finishStripeEvent = internalMutation({
   args: {
     stripeEventId: v.string(),
+    leaseToken: v.string(),
     status: v.union(v.literal("processed"), v.literal("ignored")),
   },
   handler: async (ctx, args): Promise<void> => {
@@ -531,7 +755,14 @@ export const finishStripeEvent = internalMutation({
       )
       .unique();
     if (event === null) return;
-    if (event.status === "processed" || event.status === "ignored") return;
+    const outbox = await getStripeOutbox(ctx, event.stripeEventId);
+    if (
+      outbox === null ||
+      outbox.state !== "leased" ||
+      outbox.leaseToken !== args.leaseToken
+    ) {
+      return;
+    }
     await ctx.db.patch(event._id, {
       status: args.status,
       lastError: undefined,
@@ -539,11 +770,24 @@ export const finishStripeEvent = internalMutation({
       leaseExpiresAt: undefined,
       processedAt: Date.now(),
     });
+    await ctx.db.patch(outbox._id, {
+      state: args.status === "processed" ? "applied" : "ignored",
+      leaseToken: undefined,
+      leaseExpiresAt: undefined,
+      nextAttemptAt: undefined,
+      lastError: undefined,
+      appliedAt: Date.now(),
+      updatedAt: Date.now(),
+    });
   },
 });
 
 export const failStripeEvent = internalMutation({
-  args: { stripeEventId: v.string(), error: v.string() },
+  args: {
+    stripeEventId: v.string(),
+    leaseToken: v.string(),
+    error: v.string(),
+  },
   handler: async (ctx, args): Promise<void> => {
     const event = await ctx.db
       .query("paymentEvents")
@@ -551,21 +795,38 @@ export const failStripeEvent = internalMutation({
         q.eq("stripeEventId", args.stripeEventId),
       )
       .unique();
+    if (event === null) {
+      return;
+    }
+    const outbox = await getStripeOutbox(ctx, event.stripeEventId);
     if (
-      event === null ||
-      event.status === "processed" ||
-      event.status === "ignored"
+      outbox === null ||
+      outbox.state !== "leased" ||
+      outbox.leaseToken !== args.leaseToken
     ) {
       return;
     }
-    const retry = event.attempts < STRIPE_EVENT_MAX_ATTEMPTS;
-    const delay = stripeRetryDelay(event.attempts);
-    const nextAttemptAt = retry ? Date.now() + delay : undefined;
+    const retry = outbox.attemptCycle < STRIPE_EVENT_MAX_ATTEMPTS;
+    const delay = stripeRetryDelay(outbox.attemptCycle);
+    const now = Date.now();
+    const nextAttemptAt = retry ? now + delay : undefined;
+    const terminal = stripeEventRequiresProviderReconciliation(event.eventType)
+      ? ("provider_reconciliation_required" as const)
+      : ("dead_letter" as const);
     await ctx.db.patch(event._id, {
-      status: "failed",
+      status: retry ? "failed" : terminal,
       lastError: args.error.slice(0, 240),
       nextAttemptAt,
       leaseExpiresAt: undefined,
+    });
+    await ctx.db.patch(outbox._id, {
+      state: retry ? "retry_wait" : terminal,
+      leaseToken: undefined,
+      leaseExpiresAt: undefined,
+      nextAttemptAt,
+      lastError: args.error.slice(0, 240),
+      reconciliationReason: retry ? undefined : args.error.slice(0, 240),
+      updatedAt: now,
     });
     if (retry) {
       await ctx.scheduler.runAfter(delay, internal.billing.processStripeEvent, {
@@ -580,34 +841,52 @@ export const recoverStripeEvents = internalMutation({
   args: {},
   handler: async (ctx): Promise<{ scheduled: number }> => {
     const now = Date.now();
-    const failed = await ctx.db
-      .query("paymentEvents")
-      .withIndex("by_status_next_attempt", (q) => q.eq("status", "failed"))
+    const queued = await ctx.db
+      .query("stripeEventOutbox")
+      .withIndex("by_state_next_attempt", (q) => q.eq("state", "queued"))
+      .take(100);
+    const retrying = await ctx.db
+      .query("stripeEventOutbox")
+      .withIndex("by_state_next_attempt", (q) => q.eq("state", "retry_wait"))
       .filter((q) => q.lte(q.field("nextAttemptAt"), now))
       .take(100);
     const expired = await ctx.db
-      .query("paymentEvents")
-      .withIndex("by_status_lease", (q) => q.eq("status", "processing"))
+      .query("stripeEventOutbox")
+      .withIndex("by_state_lease", (q) => q.eq("state", "leased"))
       .filter((q) => q.lte(q.field("leaseExpiresAt"), now))
       .take(100);
     let scheduled = 0;
-    for (const event of [...failed, ...expired]) {
-      if (event.attempts >= STRIPE_EVENT_MAX_ATTEMPTS) {
-        if (event.status === "processing") {
-          await ctx.db.patch(event._id, {
-            status: "failed",
-            lastError: "Stripe event processing lease expired at retry limit",
-            leaseExpiresAt: undefined,
-          });
-        }
-        continue;
-      }
+    const ids = new Set<string>();
+    for (const outbox of [...queued, ...retrying, ...expired]) {
+      if (ids.has(outbox.stripeEventId)) continue;
+      ids.add(outbox.stripeEventId);
       await ctx.scheduler.runAfter(0, internal.billing.processStripeEvent, {
-        stripeEventId: event.stripeEventId,
+        stripeEventId: outbox.stripeEventId,
       });
       scheduled += 1;
     }
     return { scheduled };
+  },
+});
+
+/** Public operator visibility for every accepted but unresolved receipt. */
+export const listStripeReconciliationQueue = query({
+  args: {},
+  handler: async (ctx) => {
+    await requireAdmin(ctx);
+    const reconciliation = await ctx.db
+      .query("stripeEventOutbox")
+      .withIndex("by_state_next_attempt", (q) =>
+        q.eq("state", "provider_reconciliation_required"),
+      )
+      .take(100);
+    const deadLetters = await ctx.db
+      .query("stripeEventOutbox")
+      .withIndex("by_state_next_attempt", (q) => q.eq("state", "dead_letter"))
+      .take(100);
+    return [...reconciliation, ...deadLetters].sort(
+      (left, right) => left.updatedAt - right.updatedAt,
+    );
   },
 });
 
@@ -622,6 +901,7 @@ export const upsertPaidPayment = internalMutation({
     stripeChargeId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    await assertFinanceMigrationAllowsRuntime(ctx);
     const intent = await ctx.db
       .query("checkoutIntents")
       .withIndex("by_checkout_session", (q) =>
@@ -646,9 +926,20 @@ export const upsertPaidPayment = internalMutation({
       .unique();
     const now = Date.now();
     if (existing !== null) {
-      if (existing.organizationId !== intent.organizationId) {
-        throw new Error("Payment intent belongs to another organization");
+      if (
+        existing.organizationId !== intent.organizationId ||
+        existing.checkoutIntentId !== intent._id ||
+        existing.stripeCheckoutSessionId !== args.stripeCheckoutSessionId ||
+        existing.amount !== intent.amount ||
+        existing.currency !== intent.currency ||
+        existing.grantedCredits !== intent.credits ||
+        (existing.stripeChargeId !== undefined &&
+          args.stripeChargeId !== undefined &&
+          existing.stripeChargeId !== args.stripeChargeId)
+      ) {
+        throw new Error("Payment replay changed immutable provider facts");
       }
+      requireVerifiedPaymentFinance(existing);
       await ctx.db.patch(existing._id, {
         stripeChargeId: args.stripeChargeId ?? existing.stripeChargeId,
         status: existing.status === "pending" ? "paid" : existing.status,
@@ -672,7 +963,10 @@ export const upsertPaidPayment = internalMutation({
       refundedAmount: 0,
       refundedCredits: 0,
       reversedCredits: 0,
+      walletReversedCredits: 0,
       publisherClawbackTargetCredits: 0,
+      reversalSequence: 0,
+      financeMigrationStatus: "verified",
       status: "paid",
       createdAt: now,
       updatedAt: now,
@@ -693,6 +987,7 @@ export const upsertPaidPayment = internalMutation({
 export const markPaymentGrantRecorded = internalMutation({
   args: { paymentId: v.id("payments") },
   handler: async (ctx, args): Promise<void> => {
+    await assertFinanceMigrationAllowsRuntime(ctx);
     const payment = await ctx.db.get(args.paymentId);
     if (payment === null) throw new Error("Payment not found");
     if (payment.status === "pending") {
@@ -715,51 +1010,87 @@ const stripeDisputeStatus = v.union(
   v.literal("prevented"),
 );
 
+const stripeRefundStatus = v.union(
+  v.literal("pending"),
+  v.literal("requires_action"),
+  v.literal("succeeded"),
+  v.literal("failed"),
+  v.literal("canceled"),
+);
+
+type StripeRefundStatus = Doc<"paymentExposures">["sourceStatus"] & string;
+
+function requireVerifiedPaymentFinance(payment: Doc<"payments">): {
+  walletReversedCredits: number;
+  publisherClawbackTargetCredits: number;
+  reversalSequence: number;
+} {
+  if (
+    payment.financeMigrationStatus !== "verified" ||
+    payment.financeMigrationJobId !== undefined ||
+    payment.walletReversedCredits === undefined ||
+    payment.publisherClawbackTargetCredits === undefined ||
+    payment.reversalSequence === undefined
+  ) {
+    throw new Error("Payment finance migration is not verified");
+  }
+  if (
+    payment.walletReversedCredits < 0 ||
+    payment.publisherClawbackTargetCredits < 0 ||
+    payment.reversalSequence < 0
+  ) {
+    throw new Error("Payment finance projection is invalid");
+  }
+  return {
+    walletReversedCredits: payment.walletReversedCredits,
+    publisherClawbackTargetCredits: payment.publisherClawbackTargetCredits,
+    reversalSequence: payment.reversalSequence,
+  };
+}
+
+function refundStatusActive(status: StripeRefundStatus): boolean {
+  return status !== "failed" && status !== "canceled";
+}
+
+function safeIntegerSum(left: number, right: number, label: string): number {
+  const value = left + right;
+  if (!Number.isSafeInteger(value)) throw new Error(`${label} overflow`);
+  return value;
+}
+
+function normalizedStripeRefundStatus(
+  status: Stripe.Refund["status"],
+): StripeRefundStatus {
+  if (
+    status === "pending" ||
+    status === "requires_action" ||
+    status === "succeeded" ||
+    status === "failed" ||
+    status === "canceled"
+  ) {
+    return status;
+  }
+  throw new Error("Stripe refund returned an unsupported status");
+}
+
 const stripeDisputeMovement = v.union(
   v.literal("none"),
   v.literal("funds_withdrawn"),
   v.literal("funds_reinstated"),
 );
 
-function terminalDisputeStatus(
-  status: Doc<"paymentDisputes">["status"],
-): boolean {
-  return (
-    status === "warning_closed" ||
-    status === "won" ||
-    status === "lost" ||
-    status === "prevented"
-  );
-}
-
-function paymentStatusForProjection(args: {
-  grantedCredits: number;
-  refundedCredits: number;
-  disputes: Doc<"paymentDisputes">[];
-}): Doc<"payments">["status"] {
-  const moneyOutstanding = args.disputes.filter(
-    (dispute) => dispute.fundsWithdrawn && !dispute.fundsReinstated,
-  );
-  const open = args.disputes.some(
-    (dispute) => !terminalDisputeStatus(dispute.status),
-  );
-  if (open || moneyOutstanding.some((dispute) => dispute.status !== "lost")) {
-    return "disputed";
+async function boundedPaymentDisputes(
+  ctx: MutationCtx,
+  paymentId: Id<"payments">,
+): Promise<Doc<"paymentDisputes">[]> {
+  const disputes = await ctx.db
+    .query("paymentDisputes")
+    .withIndex("by_payment", (q) => q.eq("paymentId", paymentId))
+    .take(101);
+  if (disputes.length > 100) {
+    throw new Error("Payment exceeds 100 bounded dispute sources");
   }
-  if (moneyOutstanding.length > 0) return "dispute_lost";
-  if (args.refundedCredits === args.grantedCredits) return "refunded";
-  if (args.refundedCredits > 0) return "partially_refunded";
-  if (args.disputes.some((dispute) => dispute.status === "lost")) {
-    return "dispute_lost";
-  }
-  if (
-    args.disputes.some(
-      (dispute) => dispute.status === "won" || dispute.status === "prevented",
-    )
-  ) {
-    return "dispute_won";
-  }
-  return "paid";
+  return disputes;
 }
 
 async function applyEffectivePaymentReversal(
@@ -771,52 +1102,283 @@ async function applyEffectivePaymentReversal(
     disputes: Doc<"paymentDisputes">[];
     sourceKind: "refund" | "dispute";
     sourceRef: string;
+    sourceAmount: number;
+    sourceRequestedCredits: number;
+    sourceActive: boolean;
+    sourceStatus?: StripeRefundStatus;
   },
 ): Promise<{ walletDelta: number; targetReversedCredits: number }> {
-  const disputedCredits = args.disputes.reduce(
-    (sum, dispute) =>
-      sum +
-      (dispute.fundsWithdrawn && !dispute.fundsReinstated
-        ? dispute.creditsAtRisk
-        : 0),
-    0,
-  );
-  const targetReversedCredits = Math.min(
-    args.payment.grantedCredits,
-    args.refundedCredits + disputedCredits,
-  );
-  const walletDelta = targetReversedCredits - args.payment.reversedCredits;
-  if (walletDelta !== 0) {
-    const wallet = await getOrCreateWallet(ctx, args.payment.organizationId);
-    await appendWalletEntry(ctx, {
-      wallet,
-      kind:
-        walletDelta > 0
-          ? args.sourceKind === "refund"
-            ? "refund_reversal"
-            : "dispute_reversal"
-          : "dispute_restoration",
-      amount: -walletDelta,
-      refId: `${args.sourceRef}:wallet:${targetReversedCredits}`,
+  const verified = requireVerifiedPaymentFinance(args.payment);
+  if (
+    !Number.isSafeInteger(args.sourceRequestedCredits) ||
+    args.sourceRequestedCredits < 0 ||
+    !Number.isSafeInteger(args.sourceAmount) ||
+    args.sourceAmount < 0
+  ) {
+    throw new Error("Invalid payment exposure source amount");
+  }
+  const existingSource = await ctx.db
+    .query("paymentExposures")
+    .withIndex("by_source", (q) => q.eq("sourceRef", args.sourceRef))
+    .unique();
+  if (
+    existingSource !== null &&
+    existingSource.paymentId !== args.payment._id
+  ) {
+    throw new Error("Payment exposure source belongs to another payment");
+  }
+  const now = Date.now();
+  if (args.sourceKind === "refund" && args.sourceStatus === undefined) {
+    throw new Error("Stripe refund status is required");
+  }
+  if (existingSource === null) {
+    await ctx.db.insert("paymentExposures", {
       paymentId: args.payment._id,
+      organizationId: args.payment.organizationId,
+      sourceKind: args.sourceKind,
+      sourceRef: args.sourceRef,
+      sourceAmount: args.sourceAmount,
+      sourceAmountExact: true,
+      sourceStatus: args.sourceStatus,
+      migrationBackfilled: false,
+      requestedCredits: args.sourceRequestedCredits,
+      effectiveCredits: 0,
+      walletCredits: 0,
+      publisherCredits: 0,
+      appliedPublisherCredits: 0,
+      active: args.sourceActive,
+      createdAt: now,
+      updatedAt: now,
+    });
+  } else {
+    if (
+      existingSource.sourceKind !== args.sourceKind ||
+      ((existingSource.sourceAmountExact ?? true) &&
+        existingSource.sourceAmount !== args.sourceAmount)
+    ) {
+      throw new Error("Payment exposure immutable source facts changed");
+    }
+    const priorStatus = existingSource.sourceStatus;
+    if (
+      priorStatus !== undefined &&
+      priorStatus !== args.sourceStatus &&
+      (priorStatus === "succeeded" ||
+        priorStatus === "failed" ||
+        priorStatus === "canceled")
+    ) {
+      throw new Error("Stripe refund terminal status changed");
+    }
+    await ctx.db.patch(existingSource._id, {
+      sourceAmount: args.sourceAmount,
+      sourceAmountExact: true,
+      migrationBackfilled: false,
+      sourceStatus: args.sourceStatus,
+      requestedCredits: args.sourceRequestedCredits,
+      active: args.sourceActive,
+      updatedAt: now,
     });
   }
 
-  await reconcilePaymentPublisherClawback(ctx, {
-    paymentId: args.payment._id,
-    consumerOrganizationId: args.payment.organizationId,
-    targetGrossCredits: targetReversedCredits,
-    sourceKind: args.sourceKind,
-    sourceRef: args.sourceRef,
+  const exposures = await ctx.db
+    .query("paymentExposures")
+    .withIndex("by_payment_created", (q) => q.eq("paymentId", args.payment._id))
+    .order("asc")
+    .take(101);
+  if (exposures.length > 100) {
+    throw new Error("Payment exceeds 100 bounded exposure sources");
+  }
+  const ordered = [...exposures].sort((left, right) => {
+    if (left.sourceKind !== right.sourceKind) {
+      return left.sourceKind === "refund" ? -1 : 1;
+    }
+    if (left.createdAt !== right.createdAt) {
+      return left.createdAt - right.createdAt;
+    }
+    return left.sourceRef.localeCompare(right.sourceRef);
   });
+  const activeRefundedAmount = Math.min(
+    args.payment.amount,
+    ordered
+      .filter(
+        (exposure) =>
+          exposure.sourceKind === "refund" &&
+          exposure.active &&
+          exposure.sourceStatus !== undefined &&
+          refundStatusActive(exposure.sourceStatus),
+      )
+      .reduce((sum, exposure) => sum + exposure.sourceAmount, 0),
+  );
+  if (!Number.isSafeInteger(activeRefundedAmount)) {
+    throw new Error("Stripe refund aggregate overflow");
+  }
+  const activeRefundedCredits = cumulativeRefundCredits({
+    grantedCredits: args.payment.grantedCredits,
+    reversedCredits: 0,
+    paidAmount: args.payment.amount,
+    totalRefundedAmount: activeRefundedAmount,
+  }).targetReversedCredits;
+  let capRemaining = args.payment.grantedCredits;
+  let refundAmountRunning = 0;
+  let refundCreditsRunning = 0;
+  const effectiveById = new Map<Id<"paymentExposures">, number>();
+  for (const exposure of ordered) {
+    let requestedEffective = 0;
+    if (exposure.active && exposure.sourceKind === "refund") {
+      refundAmountRunning = Math.min(
+        args.payment.amount,
+        safeIntegerSum(
+          refundAmountRunning,
+          exposure.sourceAmount,
+          "Stripe refund aggregate",
+        ),
+      );
+      const cumulativeCredits = cumulativeRefundCredits({
+        grantedCredits: args.payment.grantedCredits,
+        reversedCredits: 0,
+        paidAmount: args.payment.amount,
+        totalRefundedAmount: refundAmountRunning,
+      }).targetReversedCredits;
+      requestedEffective = cumulativeCredits - refundCreditsRunning;
+      refundCreditsRunning = cumulativeCredits;
+    } else if (exposure.active) {
+      requestedEffective = exposure.requestedCredits;
+    }
+    const effective = Math.min(requestedEffective, capRemaining);
+    effectiveById.set(exposure._id, effective);
+    capRemaining -= effective;
+  }
+  if (refundCreditsRunning !== activeRefundedCredits) {
+    throw new Error("Stripe refund sources do not conserve cumulative credits");
+  }
+  const targetReversedCredits = args.payment.grantedCredits - capRemaining;
+  const currentWalletReversedCredits = verified.walletReversedCredits;
+  const currentPublisherClawbackCredits =
+    verified.publisherClawbackTargetCredits;
+  const effectiveDelta = targetReversedCredits - args.payment.reversedCredits;
+  const wallet = await getOrCreateWallet(ctx, args.payment.organizationId);
+  let targetWalletReversedCredits = currentWalletReversedCredits;
+  let walletDelta = 0;
+
+  if (effectiveDelta > 0) {
+    const reversalPlan = await preflightPaymentReversal(ctx, {
+      wallet,
+      paymentId: args.payment._id,
+      requestedCredits: effectiveDelta,
+    });
+    walletDelta = reversalPlan.walletCredits;
+    targetWalletReversedCredits += walletDelta;
+    if (walletDelta > 0) {
+      const reversal = await appendWalletEntry(ctx, {
+        wallet,
+        kind:
+          args.sourceKind === "refund" ? "refund_reversal" : "dispute_reversal",
+        amount: -walletDelta,
+        refId: `${args.sourceRef}:wallet:reverse:${verified.reversalSequence + 1}:${targetWalletReversedCredits}`,
+        paymentId: args.payment._id,
+      });
+      const provenance = await commitPaymentReversal(ctx, {
+        plan: reversalPlan,
+        walletSequence: reversal.wallet.sequence,
+        now,
+      });
+      await ctx.db.insert("walletFundingReversals", {
+        walletId: wallet._id,
+        organizationId: args.payment.organizationId,
+        walletEntryId: reversal.entryId,
+        paymentId: args.payment._id,
+        grossCredits: walletDelta,
+        provenance,
+        createdAt: now,
+      });
+    }
+  } else if (effectiveDelta < 0) {
+    // Restore publisher exposure first. Only remaining reduction recreates
+    // wallet inventory, preserving unspent-first reversal policy.
+    const creditsToRestore = Math.min(
+      Math.max(0, -effectiveDelta - currentPublisherClawbackCredits),
+      currentWalletReversedCredits,
+    );
+    walletDelta = -creditsToRestore;
+    targetWalletReversedCredits -= creditsToRestore;
+    if (creditsToRestore > 0) {
+      const restored = await appendWalletEntry(ctx, {
+        wallet,
+        kind:
+          args.sourceKind === "refund"
+            ? "refund_restoration"
+            : "dispute_restoration",
+        amount: creditsToRestore,
+        refId: `${args.sourceRef}:wallet:restore:${verified.reversalSequence + 1}:${targetWalletReversedCredits}`,
+        paymentId: args.payment._id,
+      });
+      const entry = await ctx.db.get(restored.entryId);
+      if (entry === null)
+        throw new Error("Restoration ledger entry is missing");
+      await recordPositiveFundingSource(ctx, {
+        wallet: restored.wallet,
+        sourceKind: "restoration",
+        sourceRef: entry.refId,
+        amount: creditsToRestore,
+        refundable: true,
+        paymentId: args.payment._id,
+        createdAt: entry.createdAt,
+      });
+    }
+  }
+
+  const targetPublisherClawbackCredits =
+    targetReversedCredits - targetWalletReversedCredits;
+  if (targetPublisherClawbackCredits < 0) {
+    throw new Error("Payment publisher exposure cannot be negative");
+  }
+  let walletCoverageRemaining = targetWalletReversedCredits;
+  let publisherTargetSum = 0;
+  let publisherTargetsChanged = false;
+  for (const exposure of ordered) {
+    const effectiveCredits = effectiveById.get(exposure._id) ?? 0;
+    const walletCredits = Math.min(effectiveCredits, walletCoverageRemaining);
+    const publisherCredits = effectiveCredits - walletCredits;
+    walletCoverageRemaining -= walletCredits;
+    publisherTargetSum += publisherCredits;
+    if (exposure.publisherCredits !== publisherCredits) {
+      publisherTargetsChanged = true;
+    }
+    await ctx.db.patch(exposure._id, {
+      effectiveCredits,
+      walletCredits,
+      publisherCredits,
+      allocationCursor:
+        exposure.publisherCredits === publisherCredits
+          ? exposure.allocationCursor
+          : undefined,
+      updatedAt: now,
+    });
+  }
+  if (
+    walletCoverageRemaining !== 0 ||
+    publisherTargetSum !== targetPublisherClawbackCredits
+  ) {
+    throw new Error("Payment reversal source allocation does not balance");
+  }
+  if (publisherTargetsChanged) {
+    await enqueuePaymentPublisherReconciliation(ctx, {
+      paymentId: args.payment._id,
+      consumerOrganizationId: args.payment.organizationId,
+    });
+  }
   await ctx.db.patch(args.payment._id, {
-    refundedAmount: args.refundedAmount,
-    refundedCredits: args.refundedCredits,
+    refundedAmount: activeRefundedAmount,
+    refundedCredits: activeRefundedCredits,
     reversedCredits: targetReversedCredits,
-    publisherClawbackTargetCredits: targetReversedCredits,
+    walletReversedCredits: targetWalletReversedCredits,
+    publisherClawbackTargetCredits: targetPublisherClawbackCredits,
+    reversalSequence:
+      effectiveDelta === 0
+        ? verified.reversalSequence
+        : verified.reversalSequence + 1,
     status: paymentStatusForProjection({
       grantedCredits: args.payment.grantedCredits,
-      refundedCredits: args.refundedCredits,
+      refundedCredits: activeRefundedCredits,
       disputes: args.disputes,
     }),
     updatedAt: Date.now(),
@@ -829,9 +1391,12 @@ export const applyRefundProjection = internalMutation({
   args: {
     stripeRefundId: v.string(),
     stripeChargeId: v.string(),
+    refundAmount: v.optional(v.number()),
     totalRefundedAmount: v.number(),
+    status: stripeRefundStatus,
   },
   handler: async (ctx, args) => {
+    await assertFinanceMigrationAllowsRuntime(ctx);
     const payment = await ctx.db
       .query("payments")
       .withIndex("by_charge", (q) =>
@@ -839,34 +1404,55 @@ export const applyRefundProjection = internalMutation({
       )
       .unique();
     if (payment === null) return { kind: "ignored" as const };
+    requireVerifiedPaymentFinance(payment);
     if (
       !Number.isSafeInteger(args.totalRefundedAmount) ||
-      args.totalRefundedAmount < 0
+      args.totalRefundedAmount < 0 ||
+      args.totalRefundedAmount > payment.amount
     ) {
       throw new Error("Invalid Stripe refund amount");
     }
-    // Stripe charge snapshots are cumulative. Ignore stale out-of-order views.
-    const refundedAmount = Math.max(
-      payment.refundedAmount,
-      Math.min(args.totalRefundedAmount, payment.amount),
-    );
-    const refundedCredits = cumulativeRefundCredits({
+    const sourceRef = `stripe:refund:${args.stripeRefundId}`;
+    const existingExposure = await ctx.db
+      .query("paymentExposures")
+      .withIndex("by_source", (q) => q.eq("sourceRef", sourceRef))
+      .unique();
+    const sourceAmount =
+      existingExposure !== null &&
+      !(existingExposure.sourceAmountExact ?? true) &&
+      args.refundAmount !== undefined
+        ? args.refundAmount
+        : (existingExposure?.sourceAmount ??
+          args.refundAmount ??
+          Math.max(0, args.totalRefundedAmount - payment.refundedAmount));
+    if (!Number.isSafeInteger(sourceAmount) || sourceAmount <= 0) {
+      if (existingExposure !== null) {
+        return {
+          kind: "refund" as const,
+          walletDelta: 0,
+          targetReversedCredits: payment.reversedCredits,
+        };
+      }
+      throw new Error("Stripe refund source amount must be positive");
+    }
+    const sourceRequestedCredits = cumulativeRefundCredits({
       grantedCredits: payment.grantedCredits,
       reversedCredits: 0,
       paidAmount: payment.amount,
-      totalRefundedAmount: refundedAmount,
+      totalRefundedAmount: Math.min(sourceAmount, payment.amount),
     }).targetReversedCredits;
-    const disputes = await ctx.db
-      .query("paymentDisputes")
-      .withIndex("by_payment", (q) => q.eq("paymentId", payment._id))
-      .collect();
+    const disputes = await boundedPaymentDisputes(ctx, payment._id);
     const projected = await applyEffectivePaymentReversal(ctx, {
       payment,
-      refundedAmount,
-      refundedCredits,
+      refundedAmount: payment.refundedAmount,
+      refundedCredits: payment.refundedCredits,
       disputes,
       sourceKind: "refund",
-      sourceRef: `stripe:refund:${args.stripeRefundId}`,
+      sourceRef,
+      sourceAmount,
+      sourceRequestedCredits,
+      sourceActive: refundStatusActive(args.status),
+      sourceStatus: args.status,
     });
     return { kind: "refund" as const, ...projected };
   },
@@ -887,6 +1473,7 @@ export const applyDisputeProjection = internalMutation({
     movement: stripeDisputeMovement,
   },
   handler: async (ctx, args) => {
+    await assertFinanceMigrationAllowsRuntime(ctx);
     if (!Number.isSafeInteger(args.amount) || args.amount <= 0) {
       throw new Error("Invalid Stripe dispute amount");
     }
@@ -897,6 +1484,7 @@ export const applyDisputeProjection = internalMutation({
       )
       .unique();
     if (payment === null) return { kind: "ignored" as const };
+    requireVerifiedPaymentFinance(payment);
     if (payment.currency !== args.currency) {
       throw new Error("Stripe dispute currency does not match payment");
     }
@@ -909,10 +1497,16 @@ export const applyDisputeProjection = internalMutation({
     if (existing !== null && existing.paymentId !== payment._id) {
       throw new Error("Stripe dispute belongs to another payment");
     }
-    const status =
+    if (
       existing !== null &&
-      terminalDisputeStatus(existing.status) &&
-      !terminalDisputeStatus(args.status)
+      (existing.stripeChargeId !== args.stripeChargeId ||
+        existing.amount !== args.amount ||
+        existing.currency !== args.currency)
+    ) {
+      throw new Error("Stripe dispute immutable facts changed");
+    }
+    const status =
+      existing !== null && terminalDisputeStatus(existing.status)
         ? existing.status
         : args.status;
     const creditsAtRisk = cumulativeRefundCredits({
@@ -954,19 +1548,48 @@ export const applyDisputeProjection = internalMutation({
         updatedAt: now,
       });
     }
-    const disputes = await ctx.db
-      .query("paymentDisputes")
-      .withIndex("by_payment", (q) => q.eq("paymentId", payment._id))
-      .collect();
+    const disputes = await boundedPaymentDisputes(ctx, payment._id);
     const projected = await applyEffectivePaymentReversal(ctx, {
       payment,
       refundedAmount: payment.refundedAmount,
       refundedCredits: payment.refundedCredits,
       disputes,
       sourceKind: "dispute",
-      sourceRef: `stripe:dispute:${args.stripeEventId}`,
+      sourceRef: `stripe:dispute:${args.stripeDisputeId}`,
+      sourceAmount: args.amount,
+      sourceRequestedCredits: creditsAtRisk,
+      sourceActive: fundsWithdrawn && !fundsReinstated,
     });
     return { kind: "dispute" as const, ...projected };
+  },
+});
+
+export const processPublisherReconciliation = internalMutation({
+  args: { paymentId: v.id("payments") },
+  handler: async (ctx, args) =>
+    await processPaymentPublisherReconciliationChunk(ctx, args.paymentId),
+});
+
+/** Crash recovery schedules a bounded number of unfinished journals. */
+export const recoverPublisherReconciliations = internalMutation({
+  args: {},
+  handler: async (ctx): Promise<{ scheduled: number }> => {
+    const pending = await ctx.db
+      .query("publisherReconciliationJobs")
+      .withIndex("by_status_updated", (q) => q.eq("status", "pending"))
+      .take(25);
+    const running = await ctx.db
+      .query("publisherReconciliationJobs")
+      .withIndex("by_status_updated", (q) => q.eq("status", "running"))
+      .take(25);
+    for (const job of [...pending, ...running]) {
+      await ctx.scheduler.runAfter(
+        0,
+        internal.billing.processPublisherReconciliation,
+        { paymentId: job.paymentId },
+      );
+    }
+    return { scheduled: pending.length + running.length };
   },
 });
 
@@ -1083,15 +1706,54 @@ export const processStripeEvent = internalAction({
           await fulfillStripeSession(ctx, stripe, args.objectId);
           break;
         case "checkout.session.async_payment_failed":
+          await ctx.runMutation(internal.billing.markCheckoutIntentTerminal, {
+            stripeCheckoutSessionId: args.objectId,
+            status: "failed",
+          });
+          break;
+        case "checkout.session.expired":
+          await ctx.runMutation(internal.billing.markCheckoutIntentTerminal, {
+            stripeCheckoutSessionId: args.objectId,
+            status: "expired",
+          });
+          break;
         case "payment_intent.payment_failed":
           break;
         case "charge.refunded": {
           const charge = await stripe.charges.retrieve(args.objectId);
           await fulfillPaymentForCharge(ctx, stripe, charge);
+          const refunds = await stripe.refunds.list({
+            charge: charge.id,
+            limit: 100,
+          });
+          if (refunds.has_more) {
+            throw new Error("Charge exceeds bounded 100-refund projection cap");
+          }
+          for (const refund of refunds.data) {
+            await ctx.runMutation(internal.billing.applyRefundProjection, {
+              stripeRefundId: refund.id,
+              stripeChargeId: charge.id,
+              refundAmount: refund.amount,
+              totalRefundedAmount: charge.amount_refunded,
+              status: normalizedStripeRefundStatus(refund.status),
+            });
+          }
+          break;
+        }
+        case "refund.created":
+        case "refund.updated":
+        case "refund.failed": {
+          const refund = await stripe.refunds.retrieve(args.objectId);
+          const chargeId = stringId(refund.charge);
+          if (chargeId === null) break;
+          const charge = await stripe.charges.retrieve(chargeId);
+          await fulfillPaymentForCharge(ctx, stripe, charge);
           await ctx.runMutation(internal.billing.applyRefundProjection, {
-            stripeRefundId: args.stripeEventId,
+            stripeRefundId: refund.id,
             stripeChargeId: charge.id,
+            refundAmount: refund.amount,
             totalRefundedAmount: charge.amount_refunded,
+            status: normalizedStripeRefundStatus(refund.status),
           });
           break;
         }
@@ -1140,12 +1802,20 @@ export const processStripeEvent = internalAction({
           const transfer = await stripe.transfers.retrieve(args.objectId);
           await ctx.runMutation(internal.payouts.projectStripeTransfer, {
             stripeTransferId: transfer.id,
-            state:
-              args.eventType === "transfer.reversed"
-                ? "reversed"
-                : args.eventType === "transfer.failed"
-                  ? "failed"
-                  : "succeeded",
+            publisherTransferId: transfer.metadata.publisherTransferId,
+            amount: transfer.amount,
+            amountReversed: transfer.amount_reversed,
+            currency: transfer.currency,
+            destination: stringId(transfer.destination) ?? "",
+            platformAccountId: transfer.metadata.platformAccountId,
+            correlationNonce: transfer.metadata.correlationNonce,
+            correlationHmac: transfer.metadata.correlationHmac,
+            metadataRepairVersion:
+              transfer.metadata.metadataRepairVersion === undefined
+                ? undefined
+                : Number(transfer.metadata.metadataRepairVersion),
+            requestFingerprint: transfer.metadata.requestFingerprint,
+            failed: args.eventType === "transfer.failed",
             failureReason: undefined,
           });
           break;
@@ -1185,12 +1855,14 @@ export const processStripeEvent = internalAction({
         default:
           await ctx.runMutation(internal.billing.finishStripeEvent, {
             stripeEventId: args.stripeEventId,
+            leaseToken: args.leaseToken,
             status: "ignored",
           });
           return;
       }
       await ctx.runMutation(internal.billing.finishStripeEvent, {
         stripeEventId: args.stripeEventId,
+        leaseToken: args.leaseToken,
         status: "processed",
       });
     } catch (error) {
@@ -1200,6 +1872,7 @@ export const processStripeEvent = internalAction({
           : "Stripe event processing failed";
       await ctx.runMutation(internal.billing.failStripeEvent, {
         stripeEventId: args.stripeEventId,
+        leaseToken: args.leaseToken,
         error: message,
       });
     }
@@ -1207,8 +1880,12 @@ export const processStripeEvent = internalAction({
 });
 
 export const getBillingState = query({
-  args: { checkoutSessionId: v.optional(v.string()) },
+  args: {
+    checkoutSessionId: v.optional(v.string()),
+    checkoutIntentId: v.optional(v.string()),
+  },
   handler: async (ctx, args) => {
+    await assertFinanceMigrationAllowsRuntime(ctx);
     const { access, org: organization } = await requireActiveOrg(ctx);
     const canManageBilling = access.capabilities.manageBilling;
     const wallet = await ctx.db
@@ -1226,7 +1903,16 @@ export const getBillingState = query({
           .order("desc")
           .take(50)
       : [];
-    let checkout: { status: Doc<"checkoutIntents">["status"] } | null = null;
+    let checkout: {
+      id: Id<"checkoutIntents">;
+      status: Doc<"checkoutIntents">["status"] | "canceled";
+    } | null = null;
+    if (canManageBilling) {
+      if (wallet !== null) {
+        await requireVerifiedWalletFunding(ctx, wallet);
+      }
+      for (const payment of payments) requireVerifiedPaymentFinance(payment);
+    }
     if (canManageBilling && args.checkoutSessionId !== undefined) {
       const intent = await ctx.db
         .query("checkoutIntents")
@@ -1235,7 +1921,19 @@ export const getBillingState = query({
         )
         .unique();
       if (intent !== null && intent.organizationId === organization._id) {
-        checkout = { status: intent.status };
+        checkout = { id: intent._id, status: intent.status };
+      }
+    } else if (args.checkoutIntentId !== undefined) {
+      const intentId = ctx.db.normalizeId(
+        "checkoutIntents",
+        args.checkoutIntentId,
+      );
+      const intent = intentId === null ? null : await ctx.db.get(intentId);
+      if (intent !== null && intent.organizationId === organization._id) {
+        checkout = {
+          id: intent._id,
+          status: intent.status === "complete" ? "complete" : "canceled",
+        };
       }
     }
     return {
@@ -1251,6 +1949,7 @@ export const getBillingState = query({
         amount: payment.amount,
         currency: payment.currency,
         credits: payment.grantedCredits,
+        refundedCredits: payment.refundedCredits,
         createdAt: payment.createdAt,
         failureReason: payment.failureReason,
       })),
@@ -1288,6 +1987,7 @@ export function projectedCycleCredits(
 export const cycleBreakdown = query({
   args: { orgSlug: v.string() },
   handler: async (ctx, args) => {
+    await assertFinanceMigrationAllowsRuntime(ctx);
     const { access, claims, org } = await requireOrgMemberBySlug(
       ctx,
       args.orgSlug,
@@ -1322,7 +2022,7 @@ export const cycleBreakdown = query({
     const byMember = new Map<string, { calls: number; credits: number }>();
     const byProject = new Map<
       Id<"projects">,
-      { calls: number; credits: number }
+      { name: string; slug: string; calls: number; credits: number }
     >();
     const byEndpoint = new Map<
       string,
@@ -1344,10 +2044,17 @@ export const cycleBreakdown = query({
       key.calls += 1;
       key.credits += event.credits;
       byKey.set(event.keyId, key);
+      if (event.projectName === undefined || event.projectSlug === undefined) {
+        throw new Error("Billing cycle migration is not verified");
+      }
       const project = byProject.get(event.projectId) ?? {
+        name: event.projectName,
+        slug: event.projectSlug,
         calls: 0,
         credits: 0,
       };
+      project.name = event.projectName;
+      project.slug = event.projectSlug;
       project.calls += 1;
       project.credits += event.credits;
       byProject.set(event.projectId, project);
@@ -1397,15 +2104,10 @@ export const cycleBreakdown = query({
         );
       }),
     );
-    const projects = [...byProject.entries()].map(([projectId, row]) => {
-      const project = projectDocs.get(projectId);
-      return {
-        projectRef: projectRefs.get(projectId) ?? null,
-        name: project?.name ?? "Deleted API",
-        slug: project?.slug ?? "deleted",
-        ...row,
-      };
-    });
+    const projects = [...byProject.entries()].map(([projectId, row]) => ({
+      projectRef: projectRefs.get(projectId) ?? null,
+      ...row,
+    }));
     const members = await Promise.all(
       [...byMember.entries()].map(async ([userId, row]) => {
         const user =

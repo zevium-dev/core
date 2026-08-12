@@ -14,6 +14,8 @@ export type PublishedSpec = {
   /** Exact immutable version used for privacy-safe quality attribution. */
   specVersionId: string;
   projectId: string;
+  /** Exact immutable version selected by control plane. */
+  version: string;
   /** Convex organizations table id (ledger / usage). */
   organizationId: string;
   /** Clerk org id — wallet DO idFromName key. */
@@ -85,9 +87,7 @@ const getPublishedPublicRef = makeFunctionReference<
   {
     spec: string;
     specVersionId: string;
-    projectId: string;
-    organizationId: string;
-    clerkOrgId: string;
+    version: string;
     visibility?: "public" | "private";
     deprecatedAt?: number;
     sunsetAt?: number;
@@ -355,6 +355,16 @@ export function parsePublishedSpecPayload(json: unknown): PublishedSpec | null {
     return null;
   }
   if (
+    !("specVersionId" in candidate) ||
+    typeof candidate.specVersionId !== "string" ||
+    candidate.specVersionId.length === 0 ||
+    !("version" in candidate) ||
+    typeof candidate.version !== "string" ||
+    candidate.version.length === 0
+  ) {
+    return null;
+  }
+  if (
     !("organizationId" in candidate) ||
     typeof candidate.organizationId !== "string"
   ) {
@@ -389,6 +399,7 @@ export function parsePublishedSpecPayload(json: unknown): PublishedSpec | null {
     spec: candidate.spec,
     specVersionId: candidate.specVersionId,
     projectId: candidate.projectId,
+    version: candidate.version,
     organizationId: candidate.organizationId,
     clerkOrgId,
     visibility,

@@ -4,7 +4,7 @@
  */
 
 import { joinUpstreamUrl, matchOperation, parseSpec } from "@zevium/shared";
-import type { SettlementUsage, WalletDO } from "./wallet";
+import type { KeyBudgetSnapshot, SettlementUsage, WalletDO } from "./wallet";
 import {
   extractApiKey,
   type KeyVerifier,
@@ -210,6 +210,15 @@ export async function handleGatewayRequest(
   if (!matched) {
     return jsonError(404, "route_not_found", "Unknown route", requestId);
   }
+  // Keep settlement identity total even during a rolling shared-package
+  // upgrade where an older matcher result may omit the new derived field.
+  const operationId =
+    typeof matched.operationId === "string" && matched.operationId.trim() !== ""
+      ? matched.operationId
+      : typeof matched.operation.operationId === "string" &&
+          matched.operation.operationId.trim() !== ""
+        ? matched.operation.operationId
+        : `${matched.method.toUpperCase()} ${matched.pathTemplate}`;
 
   if (!matched.upstreamBaseUrl) {
     return jsonError(
@@ -254,6 +263,8 @@ export async function handleGatewayRequest(
 
   let usedFree = false;
   let unmetered = false;
+  let freeTierUsedBefore: number | undefined;
+  let keyBudget: KeyBudgetSnapshot | undefined;
   if (cost === 0) {
     const authorization = await wallet.authorizeKey(
       verified.keyId,
@@ -267,6 +278,8 @@ export async function handleGatewayRequest(
         consumerClerkOrgId: verified.orgId,
         projectId: published.projectId,
         specVersionId: published.specVersionId,
+        specVersion: published.version,
+        operationId,
         keyId: verified.keyId,
         orgSlug: route.publisherHandle,
         projectSlug: route.projectSlug,
@@ -295,6 +308,7 @@ export async function handleGatewayRequest(
       }
       return jsonError(403, "key_disabled", "API key is disabled", requestId);
     }
+    keyBudget = authorization.keyBudget;
     unmetered = true;
   } else if (freeTier !== undefined && freeTier > 0) {
     const freeResult = await wallet.consumeFreeTier(freeTier, {
@@ -304,6 +318,10 @@ export async function handleGatewayRequest(
     });
     if (freeResult.status === "consumed") {
       usedFree = true;
+      freeTierUsedBefore = freeResult.usedBefore;
+      keyBudget = freeResult.keyBudget;
+    } else if (freeResult.status === "exhausted") {
+      freeTierUsedBefore = freeResult.used;
     } else if (
       freeResult.status === "rejected" &&
       freeResult.reason === "insufficient_credits"
@@ -314,6 +332,8 @@ export async function handleGatewayRequest(
         consumerClerkOrgId: verified.orgId,
         projectId: published.projectId,
         specVersionId: published.specVersionId,
+        specVersion: published.version,
+        operationId,
         keyId: verified.keyId,
         orgSlug: route.publisherHandle,
         projectSlug: route.projectSlug,
@@ -341,6 +361,8 @@ export async function handleGatewayRequest(
         consumerClerkOrgId: verified.orgId,
         projectId: published.projectId,
         specVersionId: published.specVersionId,
+        specVersion: published.version,
+        operationId,
         keyId: verified.keyId,
         orgSlug: route.publisherHandle,
         projectSlug: route.projectSlug,
@@ -375,6 +397,8 @@ export async function handleGatewayRequest(
         consumerClerkOrgId: verified.orgId,
         projectId: published.projectId,
         specVersionId: published.specVersionId,
+        specVersion: published.version,
+        operationId,
         keyId: verified.keyId,
         orgSlug: route.publisherHandle,
         projectSlug: route.projectSlug,
@@ -406,6 +430,8 @@ export async function handleGatewayRequest(
         consumerClerkOrgId: verified.orgId,
         projectId: published.projectId,
         specVersionId: published.specVersionId,
+        specVersion: published.version,
+        operationId,
         keyId: verified.keyId,
         orgSlug: route.publisherHandle,
         projectSlug: route.projectSlug,
@@ -436,7 +462,38 @@ export async function handleGatewayRequest(
         requestId,
       );
     }
+    keyBudget = reserve.keyBudget;
   }
+
+  if (keyBudget === undefined) {
+    return jsonError(
+      500,
+      "pricing_identity_failed",
+      "Credit identity could not be recorded",
+      requestId,
+    );
+  }
+  const immutableUsageIdentity = {
+    specVersionId: published.specVersionId,
+    specVersion: published.version,
+    operationId,
+    keyFamilyId: keyBudget.keyFamilyId,
+    listedCostCredits: cost,
+    ...(freeTier === undefined ? {} : { freeTierLimit: freeTier }),
+    ...(freeTierUsedBefore === undefined ? {} : { freeTierUsedBefore }),
+    pricingDecision: usedFree
+      ? ("free_tier" as const)
+      : cost === 0
+        ? ("zero_price" as const)
+        : ("listed_price" as const),
+    ...(keyBudget.monthlyCapCredits === undefined
+      ? {}
+      : { monthlyCapCredits: keyBudget.monthlyCapCredits }),
+    budgetPeriod: keyBudget.period,
+    budgetUsedBefore: keyBudget.usedBefore,
+    budgetReservedBefore: keyBudget.reservedBefore,
+    budgetReservationCredits: keyBudget.reservationCredits,
+  };
 
   const upstreamHeaders = filterRequestHeaders(request.headers);
   for (const [name, value] of Object.entries(published.upstreamHeaders ?? {})) {
@@ -474,7 +531,7 @@ export async function handleGatewayRequest(
         organizationId: published.organizationId,
         consumerClerkOrgId: verified.orgId,
         projectId: published.projectId,
-        specVersionId: published.specVersionId,
+        ...immutableUsageIdentity,
         endpoint: matched.pathTemplate,
         method: matched.method,
         status: 502,
@@ -492,7 +549,7 @@ export async function handleGatewayRequest(
         organizationId: published.organizationId,
         consumerClerkOrgId: verified.orgId,
         projectId: published.projectId,
-        specVersionId: published.specVersionId,
+        ...immutableUsageIdentity,
         endpoint: matched.pathTemplate,
         method: matched.method,
         status: 502,
@@ -506,7 +563,7 @@ export async function handleGatewayRequest(
         organizationId: published.organizationId,
         consumerClerkOrgId: verified.orgId,
         projectId: published.projectId,
-        specVersionId: published.specVersionId,
+        ...immutableUsageIdentity,
         endpoint: matched.pathTemplate,
         method: matched.method,
         status: 502,
@@ -522,6 +579,8 @@ export async function handleGatewayRequest(
       consumerClerkOrgId: verified.orgId,
       projectId: published.projectId,
       specVersionId: published.specVersionId,
+      specVersion: published.version,
+      operationId,
       keyId: verified.keyId,
       orgSlug: route.publisherHandle,
       projectSlug: route.projectSlug,
@@ -553,12 +612,12 @@ export async function handleGatewayRequest(
     organizationId: published.organizationId,
     consumerClerkOrgId: verified.orgId,
     projectId: published.projectId,
-    specVersionId: published.specVersionId,
+    ...immutableUsageIdentity,
     endpoint: matched.pathTemplate,
     method: matched.method,
     status,
     latencyMs,
-    keyId: verified.keyId,
+    keyId: keyBudget.keyId,
     billingOutcome: usedFree || unmetered ? "free" : "settled",
     qualityOutcome: qualityOutcomeForStatus(status),
   };
@@ -568,11 +627,14 @@ export async function handleGatewayRequest(
     if (status >= 200 && status < 300) {
       await wallet.enqueueFreeUsage(reservationId, usageMeta);
       emitUsage(ctx, deps, {
+        ...immutableUsageIdentity,
         requestId,
         organizationId: published.organizationId,
         consumerClerkOrgId: verified.orgId,
         projectId: published.projectId,
         specVersionId: published.specVersionId,
+        specVersion: published.version,
+        operationId,
         keyId: verified.keyId,
         orgSlug: route.publisherHandle,
         projectSlug: route.projectSlug,
@@ -596,11 +658,14 @@ export async function handleGatewayRequest(
         billingOutcome: "refunded",
       });
       emitUsage(ctx, deps, {
+        ...immutableUsageIdentity,
         requestId,
         organizationId: published.organizationId,
         consumerClerkOrgId: verified.orgId,
         projectId: published.projectId,
         specVersionId: published.specVersionId,
+        specVersion: published.version,
+        operationId,
         keyId: verified.keyId,
         orgSlug: route.publisherHandle,
         projectSlug: route.projectSlug,
@@ -616,11 +681,14 @@ export async function handleGatewayRequest(
   } else if (status >= 200 && status < 300) {
     await wallet.settle(reservationId, usageMeta);
     emitUsage(ctx, deps, {
+      ...immutableUsageIdentity,
       requestId,
       organizationId: published.organizationId,
       consumerClerkOrgId: verified.orgId,
       projectId: published.projectId,
       specVersionId: published.specVersionId,
+      specVersion: published.version,
+      operationId,
       keyId: verified.keyId,
       orgSlug: route.publisherHandle,
       projectSlug: route.projectSlug,
@@ -638,11 +706,14 @@ export async function handleGatewayRequest(
       billingOutcome: "refunded",
     });
     emitUsage(ctx, deps, {
+      ...immutableUsageIdentity,
       requestId,
       organizationId: published.organizationId,
       consumerClerkOrgId: verified.orgId,
       projectId: published.projectId,
       specVersionId: published.specVersionId,
+      specVersion: published.version,
+      operationId,
       keyId: verified.keyId,
       orgSlug: route.publisherHandle,
       projectSlug: route.projectSlug,

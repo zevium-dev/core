@@ -4,7 +4,7 @@ import type { badgeVariants } from "#/components/ui/badge";
 
 type BadgeVariant = NonNullable<VariantProps<typeof badgeVariants>["variant"]>;
 
-export type CheckoutState = "processing" | "succeeded" | "failed";
+export type CheckoutState = "processing" | "succeeded" | "failed" | "canceled";
 
 export type CheckoutDisplay = {
   title: string;
@@ -31,6 +31,13 @@ export function checkoutDisplay(state: CheckoutState): CheckoutDisplay {
         description: "No credits were added. Choose a pack to try again.",
         variant: "destructive",
       };
+    case "canceled":
+      return {
+        title: "Checkout canceled",
+        description:
+          "No payment was confirmed and no credits were added. Your open checkout expires automatically.",
+        variant: "outline",
+      };
     case "processing":
       return {
         title: "Confirming payment",
@@ -51,9 +58,10 @@ export function checkoutStateFromStatus(status: string): CheckoutState {
     case "failed":
     case "payment_failed":
     case "expired":
+      return "failed";
     case "canceled":
     case "cancelled":
-      return "failed";
+      return "canceled";
     default:
       return "processing";
   }
@@ -82,6 +90,7 @@ export type PaymentStatus =
   | "pending"
   | "succeeded"
   | "failed"
+  | "partially_refunded"
   | "refunded"
   | "disputed"
   | "dispute_won"
@@ -100,6 +109,8 @@ export function paymentStatusLabel(status: string): string {
       return "Failed";
     case "refunded":
       return "Refunded";
+    case "partially_refunded":
+      return "Partially refunded";
     case "disputed":
       return "Disputed";
     case "dispute_won":
@@ -126,6 +137,7 @@ export function paymentStatusVariant(status: string): BadgeVariant {
       return "secondary";
     case "pending":
     case "refunded":
+    case "partially_refunded":
       return "outline";
     default:
       return "outline";

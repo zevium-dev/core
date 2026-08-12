@@ -82,6 +82,7 @@ The listing's product page — shareable URL, the API's landing page. Spec metad
 Org-scoped — the org owns the wallet; admins manage it, members view their own attribution.
 
 - Balance (live), Buy Credits (hosted checkout, credit-pack products — larger denominations surfaced first), top-up history
+- Checkout returns show inline processing, confirmed, failed, or canceled state; payment history distinguishes partial from full refunds and shows refunded credits
 - Usage: current-cycle consumption + **projected** end-of-cycle spend; breakdown per member, per key, per API, per endpoint
 - Charges history: itemized, each charge links to the exact call
 - Spend controls (P1): budget with 50/75/100% threshold alerts (email + in-app), signed budget webhooks, hard-cap toggle

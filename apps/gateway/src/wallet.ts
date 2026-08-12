@@ -53,6 +53,18 @@ export type InFlightEntry = {
   createdAt: number;
   /** Present for keyed reservations so their aggregate is cap-enforced. */
   keyId?: string;
+  /** Immutable cap/family facts captured before this reservation. */
+  keyBudget?: KeyBudgetSnapshot;
+};
+
+export type KeyBudgetSnapshot = {
+  keyId: string;
+  keyFamilyId: string;
+  monthlyCapCredits?: number;
+  period: string;
+  usedBefore: number;
+  reservedBefore: number;
+  reservationCredits: number;
 };
 
 /** Usage metadata required to flush a settlement to Convex. */
@@ -63,13 +75,29 @@ export type SettlementUsage = {
   consumerClerkOrgId: string;
   projectId: string;
   specVersionId: string;
+  specVersion: string;
+  operationId: string;
   endpoint: string;
   method: string;
+  listedCostCredits: number;
+  freeTierLimit?: number;
+  freeTierUsedBefore?: number;
+  pricingDecision: "listed_price" | "free_tier" | "zero_price";
   status: number;
   latencyMs: number;
   keyId: string;
   billingOutcome: "settled" | "refunded" | "free";
   qualityOutcome: "success" | "client_error" | "server_error" | "network_error";
+  keyFamilyId: string;
+  monthlyCapCredits?: number;
+  budgetPeriod: string;
+  budgetUsedBefore: number;
+  budgetReservedBefore: number;
+  budgetReservationCredits: number;
+  /** Origin dispatch happened but no authoritative response was observed. */
+  ambiguous?: boolean;
+  /** Stable platform-generated key sent to publisher for replay protection. */
+  publisherIdempotencyKey?: string;
 };
 
 export type PendingSettlement = {
@@ -102,6 +130,7 @@ export type WalletState = {
   appliedGrantIds: string[];
   pendingSettlements: PendingSettlement[];
   available: number;
+  deadLetterCount: number;
 };
 
 export type GrantResult =
@@ -110,8 +139,8 @@ export type GrantResult =
   | { status: "rejected"; reason: string };
 
 export type ReserveResult =
-  | { status: "reserved"; available: number }
-  | { status: "duplicate"; available: number }
+  | { status: "reserved"; available: number; keyBudget: KeyBudgetSnapshot }
+  | { status: "duplicate"; available: number; keyBudget: KeyBudgetSnapshot }
   | { status: "conflict"; reason: string }
   | { status: "insufficient"; available: number; cost: number }
   | { status: "rejected"; reason: string };
@@ -131,7 +160,13 @@ export type RefundResult =
   | { status: "unknown" };
 
 export type FreeTierResult =
-  | { status: "consumed"; used: number; limit: number }
+  | {
+      status: "consumed";
+      used: number;
+      usedBefore: number;
+      limit: number;
+      keyBudget: KeyBudgetSnapshot;
+    }
   | { status: "exhausted"; used: number; limit: number }
   | {
       status: "rejected";
@@ -140,7 +175,7 @@ export type FreeTierResult =
     };
 
 export type KeyAuthorizationResult =
-  | { status: "allowed" }
+  | { status: "allowed"; keyBudget: KeyBudgetSnapshot }
   | {
       status: "rejected";
       reason: "key_disabled" | "insufficient_credits" | "organization_archived";
@@ -191,6 +226,7 @@ export type SyncGrantsResult =
 /** Per-key control metadata mirrored from the control-plane keySettings table. */
 export type KeySetting = {
   keyId: string;
+  keyFamilyId?: string;
   /** Absent = unlimited. */
   monthlyCapCredits?: number;
   disabled: boolean;
@@ -316,6 +352,9 @@ function parseKeySettings(raw: unknown): KeySetting[] {
     if (typeof r.keyId !== "string" || r.keyId.length === 0) continue;
     if (typeof r.disabled !== "boolean") continue;
     const setting: KeySetting = { keyId: r.keyId, disabled: r.disabled };
+    if (typeof r.keyFamilyId === "string" && r.keyFamilyId.length > 0) {
+      setting.keyFamilyId = r.keyFamilyId;
+    }
     if (typeof r.monthlyCapCredits === "number") {
       setting.monthlyCapCredits = r.monthlyCapCredits;
     }
@@ -471,6 +510,7 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
       appliedGrantIds: [...this.#appliedGrantIds],
       pendingSettlements: this.#pendingSettlements.map((s) => ({ ...s })),
       available: Math.max(0, this.#balance - inFlightTotal),
+      deadLetterCount: this.#deadLetters.length,
     };
   }
 
@@ -690,7 +730,17 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
       const existing = this.#inFlight[reservationId];
       if (existing) {
         if (existing.cost === cost) {
-          return { status: "duplicate", available: this.#available() };
+          if (existing.keyBudget === undefined) {
+            return {
+              status: "conflict",
+              reason: "legacy reservation lacks immutable budget identity",
+            };
+          }
+          return {
+            status: "duplicate",
+            available: this.#available(),
+            keyBudget: existing.keyBudget,
+          };
         }
         return {
           status: "conflict",
@@ -710,6 +760,13 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
       const currentSetting = opts.keyId
         ? (this.#keySettings.get(opts.keyId) ?? setting)
         : null;
+      const keyId = opts.keyId ?? "unscoped";
+      const period = utcMonthKey(now);
+      const used =
+        (await this.ctx.storage.get<number>(
+          settledStorageKey(keyId, period),
+        )) ?? 0;
+      const reserved = sumInFlightForKey(this.#inFlight, keyId);
       if (opts.keyId && currentSetting) {
         if (this.#isKeyDisabled(currentSetting, now)) {
           return { status: "rejected", reason: "key_disabled" };
@@ -736,15 +793,28 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
         return { status: "insufficient", available, cost };
       }
 
+      const reservedAt = now;
+      const keyBudget: KeyBudgetSnapshot = {
+        keyId,
+        keyFamilyId: currentSetting?.keyFamilyId ?? keyId,
+        ...(currentSetting?.monthlyCapCredits === undefined
+          ? {}
+          : { monthlyCapCredits: currentSetting.monthlyCapCredits }),
+        period,
+        usedBefore: used,
+        reservedBefore: reserved,
+        reservationCredits: cost,
+      };
       this.#inFlight[reservationId] = {
         cost,
-        createdAt: now,
+        createdAt: reservedAt,
         ...(opts.keyId ? { keyId: opts.keyId } : {}),
+        keyBudget,
       };
       await this.#persist({ inFlight: { ...this.#inFlight } });
       await this.#scheduleMaintenanceAlarm();
 
-      return { status: "reserved", available: this.#available() };
+      return { status: "reserved", available: this.#available(), keyBudget };
     });
   }
 
@@ -777,6 +847,23 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
       const settlementId = settlementIdFor(reservationId);
       const settledAt = Date.now();
       const { cost } = entry;
+      let authoritativeUsage = usage;
+      if (usage !== undefined) {
+        if (entry.keyBudget === undefined) {
+          return { status: "unknown" };
+        }
+        const budget = entry.keyBudget;
+        authoritativeUsage = {
+          ...usage,
+          keyId: budget.keyId,
+          keyFamilyId: budget.keyFamilyId,
+          monthlyCapCredits: budget.monthlyCapCredits,
+          budgetPeriod: budget.period,
+          budgetUsedBefore: budget.usedBefore,
+          budgetReservedBefore: budget.reservedBefore,
+          budgetReservationCredits: budget.reservationCredits,
+        };
+      }
 
       delete this.#inFlight[reservationId];
       const nextBalance = this.#balance - cost;
@@ -791,7 +878,7 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
         cost,
         settledAt,
       };
-      if (usage) pending.usage = usage;
+      if (authoritativeUsage) pending.usage = authoritativeUsage;
       this.#pendingSettlements.push(pending);
 
       this.#pruneTerminal(settledAt);
@@ -800,12 +887,12 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
         inFlight: { ...this.#inFlight },
         pendingSettlements: this.#pendingSettlements.map((s) => ({ ...s })),
         terminal: { ...this.#terminal },
-        ...(usage?.keyId && cost > 0
+        ...(authoritativeUsage?.keyId && cost > 0
           ? {
               settledCounter: {
                 storageKey: settledStorageKey(
-                  usage.keyId,
-                  utcMonthKey(settledAt),
+                  authoritativeUsage.keyId,
+                  authoritativeUsage.budgetPeriod,
                 ),
                 amount: cost,
               },
@@ -930,7 +1017,19 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
         return { status: "rejected", reason: "free-tier counter overflow" };
       }
       await this.ctx.storage.put(storageKey, next);
-      return { status: "consumed", used: next, limit };
+      const keyBudget = await this.#keyBudgetSnapshot(
+        opts.keyId,
+        currentSetting,
+        nowMs,
+        0,
+      );
+      return {
+        status: "consumed",
+        used: next,
+        usedBefore: used,
+        limit,
+        keyBudget,
+      };
     });
   }
 
@@ -956,7 +1055,15 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
           available: this.#available(),
         };
       }
-      return { status: "allowed" };
+      return {
+        status: "allowed",
+        keyBudget: await this.#keyBudgetSnapshot(
+          keyId,
+          currentSetting,
+          nowMs,
+          0,
+        ),
+      };
     });
   }
 
@@ -1243,19 +1350,34 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
       events.push(
         pendingToUsageRecord({
           settlementId: s.settlementId,
+          reservationId: s.reservationId,
           cost: s.cost,
           settledAt: s.settledAt,
           organizationId: usage.organizationId,
           consumerClerkOrgId: usage.consumerClerkOrgId,
           projectId: usage.projectId,
           specVersionId: usage.specVersionId,
+          specVersion: usage.specVersion,
+          operationId: usage.operationId,
           endpoint: usage.endpoint,
           method: usage.method,
+          listedCostCredits: usage.listedCostCredits,
+          freeTierLimit: usage.freeTierLimit,
+          freeTierUsedBefore: usage.freeTierUsedBefore,
+          pricingDecision: usage.pricingDecision,
           status: usage.status,
           latencyMs: usage.latencyMs,
           keyId: usage.keyId,
           billingOutcome: usage.billingOutcome,
           qualityOutcome: usage.qualityOutcome,
+          keyFamilyId: usage.keyFamilyId,
+          monthlyCapCredits: usage.monthlyCapCredits,
+          budgetPeriod: usage.budgetPeriod,
+          budgetUsedBefore: usage.budgetUsedBefore,
+          budgetReservedBefore: usage.budgetReservedBefore,
+          budgetReservationCredits: usage.budgetReservationCredits,
+          ambiguous: usage.ambiguous,
+          publisherIdempotencyKey: usage.publisherIdempotencyKey,
         }),
       );
     }
@@ -1482,6 +1604,29 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
     return this.#keySettings.get(keyId) ?? null;
   }
 
+  async #keyBudgetSnapshot(
+    keyId: string,
+    setting: KeySetting | null,
+    nowMs: number,
+    reservationCredits: number,
+  ): Promise<KeyBudgetSnapshot> {
+    const period = utcMonthKey(nowMs);
+    const usedBefore =
+      (await this.ctx.storage.get<number>(settledStorageKey(keyId, period))) ??
+      0;
+    return {
+      keyId,
+      keyFamilyId: setting?.keyFamilyId ?? keyId,
+      ...(setting?.monthlyCapCredits === undefined
+        ? {}
+        : { monthlyCapCredits: setting.monthlyCapCredits }),
+      period,
+      usedBefore,
+      reservedBefore: sumInFlightForKey(this.#inFlight, keyId),
+      reservationCredits,
+    };
+  }
+
   #isKeyDisabled(setting: KeySetting, nowMs: number): boolean {
     return (
       setting.disabled ||
@@ -1491,9 +1636,9 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
   }
 
   /**
-   * Accept a strictly newer ledger projection. Pending local settlements are
-   * deducted from its signed balance until their per-reference outcome is
-   * acknowledged; reservations remain represented in #inFlight.
+   * Accept a newer ledger projection, or a direct settlement response at the
+   * current sequence. Pending local settlements are deducted until their
+   * per-reference outcome is acknowledged; holds stay in #inFlight.
    */
   #acceptCheckpoint(checkpoint: WalletCheckpoint): boolean {
     if (

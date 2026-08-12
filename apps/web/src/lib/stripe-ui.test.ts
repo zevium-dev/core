@@ -32,6 +32,14 @@ describe("checkoutDisplay", () => {
     });
   });
 
+  it("renders authorized Checkout cancellation as an inline terminal state", () => {
+    expect(checkoutStateFromStatus("canceled")).toBe("canceled");
+    expect(checkoutDisplay("canceled")).toMatchObject({
+      title: "Checkout canceled",
+      variant: "outline",
+    });
+  });
+
   it("treats unknown redirect status as processing rather than a client-side grant", () => {
     expect(checkoutStateFromStatus("paid")).toBe("succeeded");
     expect(checkoutStateFromStatus("complete")).toBe("succeeded");
@@ -44,6 +52,7 @@ describe("checkoutDisplay", () => {
     expect(paymentStatusLabel("succeeded")).toBe("Paid");
     expect(paymentStatusLabel("failed")).toBe("Failed");
     expect(paymentStatusLabel("refunded")).toBe("Refunded");
+    expect(paymentStatusLabel("partially_refunded")).toBe("Partially refunded");
     expect(paymentStatusLabel("disputed")).toBe("Disputed");
     expect(paymentStatusLabel("dispute_won")).toBe("Dispute won");
     expect(paymentStatusLabel("dispute_lost")).toBe("Dispute lost");

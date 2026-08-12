@@ -18,6 +18,7 @@ import {
   upsertProjectRetirementConsumerNotice,
 } from "./lib/notifications";
 import { fireWebhookEvent } from "./webhooks";
+import { assertFinanceMigrationAllowsRuntime } from "./lib/financeMigrationGate";
 import { isValidSlug } from "./lib/validate";
 import { syncCatalogueListing } from "./catalogue";
 import { isProjectRetired, retirePublicRoute } from "./lib/publicRoutes";
@@ -324,6 +325,7 @@ export const create = mutation({
   handler: async (ctx, args): Promise<Doc<"projects">> => {
     const { claims, org } = await requireOrgMemberBySlug(ctx, args.orgSlug);
     requireOrgAdmin(claims);
+    await assertFinanceMigrationAllowsRuntime(ctx);
 
     const name = args.name.trim();
     if (name.length === 0) {
@@ -520,6 +522,7 @@ export const remove = mutation({
   ): Promise<{ archived: Id<"projects">; retiredAt: number }> => {
     const { claims, project } = await requireProjectMember(ctx, args.projectId);
     requireOrgAdmin(claims);
+    await assertFinanceMigrationAllowsRuntime(ctx);
     if (
       project.retiredAt !== undefined &&
       project.deletionState !== undefined
@@ -574,6 +577,7 @@ export const retire = mutation({
   handler: async (ctx, args): Promise<Doc<"projects">> => {
     const { claims, project } = await requireProjectMember(ctx, args.projectId);
     requireOrgAdmin(claims);
+    await assertFinanceMigrationAllowsRuntime(ctx);
     if (project.status !== "published") {
       throw new Error("Only published projects can be retired");
     }

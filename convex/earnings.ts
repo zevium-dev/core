@@ -3,6 +3,10 @@ import { query } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { requireOrgMemberBySlug } from "./lib/auth";
 import { atomsToCredits } from "./accounting";
+import { assertFinanceMigrationAllowsRuntime } from "./lib/financeMigrationGate";
+import { assertPublisherBalanceReady } from "./lib/publisherLedger";
+
+const MAX_STATEMENT_EARNINGS = 5_000;
 
 export type EarningsBucket = {
   calls: number;
@@ -32,6 +36,7 @@ export type OrgEarnings = {
 export const forOrg = query({
   args: { orgSlug: v.string() },
   handler: async (ctx, args): Promise<OrgEarnings> => {
+    await assertFinanceMigrationAllowsRuntime(ctx);
     const { org } = await requireOrgMemberBySlug(ctx, args.orgSlug);
     const now = Date.now();
     const monthStart = Date.UTC(
@@ -44,10 +49,32 @@ export const forOrg = query({
       .withIndex("by_publisher", (q) =>
         q.eq("publisherOrganizationId", org._id),
       )
-      .collect();
+      .take(MAX_STATEMENT_EARNINGS + 1);
+    if (earnings.length > MAX_STATEMENT_EARNINGS) {
+      throw new Error("Publisher statement requires paginated export");
+    }
+    const publisherBalance = await ctx.db
+      .query("publisherBalances")
+      .withIndex("by_publisher", (q) =>
+        q.eq("publisherOrganizationId", org._id),
+      )
+      .unique();
+    if (publisherBalance === null) {
+      if (earnings.length > 0) {
+        throw new Error("Publisher finance migration is not verified");
+      }
+    } else {
+      assertPublisherBalanceReady(publisherBalance);
+    }
     const rows = new Map<
       Id<"projects">,
-      { calls: number; grossCredits: number; netCredits: number }
+      {
+        name: string;
+        slug: string;
+        calls: number;
+        grossCredits: number;
+        netCredits: number;
+      }
     >();
     let monthCalls = 0;
     let monthGross = 0;
@@ -65,28 +92,31 @@ export const forOrg = query({
         monthNet += netCredits;
       }
       if (earning.projectId === undefined) continue;
+      if (
+        earning.projectName === undefined ||
+        earning.projectSlug === undefined
+      ) {
+        throw new Error("Publisher statement migration is not verified");
+      }
       const row = rows.get(earning.projectId) ?? {
+        name: earning.projectName,
+        slug: earning.projectSlug,
         calls: 0,
         grossCredits: 0,
         netCredits: 0,
       };
+      row.name = earning.projectName;
+      row.slug = earning.projectSlug;
       row.calls += 1;
       row.grossCredits += earning.grossCredits;
       row.netCredits += netCredits;
       rows.set(earning.projectId, row);
     }
 
-    const byProject = await Promise.all(
-      [...rows.entries()].map(async ([projectId, row]) => {
-        const project = await ctx.db.get(projectId);
-        return {
-          projectId,
-          name: project?.name ?? "Unknown project",
-          slug: project?.slug ?? "unknown",
-          ...row,
-        };
-      }),
-    );
+    const byProject = [...rows.entries()].map(([projectId, row]) => ({
+      projectId,
+      ...row,
+    }));
     byProject.sort(
       (left, right) =>
         left.name.localeCompare(right.name) ||

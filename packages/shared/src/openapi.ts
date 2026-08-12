@@ -58,6 +58,8 @@ export type MatchedOperation = {
   method: HttpMethod;
   /** Spec path template, e.g. `/users/{id}` */
   pathTemplate: string;
+  /** Stable OpenAPI operation identity; deterministic fallback when omitted. */
+  operationId: string;
   /** Captured path params from the request path. */
   params: Record<string, string>;
   pricing: EndpointPricing;
@@ -191,12 +193,17 @@ export function matchOperation(
   }
 
   if (selected === undefined) return null;
+  const op = selected.operation;
   return {
-    operation: selected.operation,
+    operation: op,
     method: m,
     pathTemplate: selected.template,
+    operationId:
+      typeof op.operationId === "string" && op.operationId.trim() !== ""
+        ? op.operationId
+        : `${m.toUpperCase()} ${normalizePath(selected.template)}`,
     params: selected.params,
-    pricing: extractPricing(selected.operation),
+    pricing: extractPricing(op),
     upstreamBaseUrl,
   };
 }

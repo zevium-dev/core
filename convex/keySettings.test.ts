@@ -6,7 +6,7 @@ import {
 } from "@zevium/shared";
 import { convexTest } from "convex-test";
 import { describe, expect, it } from "vitest";
-import { api } from "./_generated/api";
+import { api, internal } from "./_generated/api";
 import schema from "./schema";
 
 const modules = import.meta.glob("./**/*.ts");
@@ -157,6 +157,104 @@ describe("keySettings role gates and attribution", () => {
       keyName: "Local dev",
       ownerUserId: "user_member",
       disabled: false,
+    });
+  });
+});
+
+async function seedWorld(t: ReturnType<typeof convexTest>) {
+  return await t.run(async (ctx) => {
+    const orgId = await ctx.db.insert("organizations", {
+      clerkOrgId: "org_acme",
+      name: "Acme",
+      slug: "acme",
+    });
+    const strangerOrgId = await ctx.db.insert("organizations", {
+      clerkOrgId: "org_other",
+      name: "Other",
+      slug: "other",
+    });
+    return { orgId, strangerOrgId };
+  });
+}
+
+const KEY_A = "key_live_AAAA";
+const KEY_B = "key_live_BBBB";
+
+describe("wallets.getGatewayWallet — checkpoint and keySettings", () => {
+  it("returns the wallet checkpoint alongside keySettings", async () => {
+    const t = convexTest(schema, modules);
+    const seed = await seedWorld(t);
+
+    // Wallet + grant + two key settings.
+    await t.run(async (ctx) => {
+      const walletId = await ctx.db.insert("wallets", {
+        organizationId: seed.orgId,
+        balance: 1000,
+        sequence: 1,
+      });
+      await ctx.db.insert("walletEntries", {
+        walletId,
+        kind: "payment_grant",
+        amount: 1000,
+        refId: "grant-1",
+        sequence: 1,
+        createdAt: 1,
+      });
+      await ctx.db.insert("walletFundingStates", {
+        walletId,
+        organizationId: seed.orgId,
+        nonrefundableAvailableCredits: 1_000,
+        refundableAvailableCredits: 0,
+        allocatedCredits: 0,
+        reversedCredits: 0,
+        sequence: 1,
+        migrationStatus: "verified",
+        migrationWatermarkSequence: 1,
+        updatedAt: 1,
+      });
+      await ctx.db.insert("keySettings", {
+        clerkOrgId: "org_acme",
+        keyId: KEY_A,
+        disabled: true,
+        monthlyCapCredits: 250,
+        updatedAt: 3,
+      });
+      await ctx.db.insert("keySettings", {
+        clerkOrgId: "org_acme",
+        keyId: KEY_B,
+        disabled: false,
+        updatedAt: 4,
+      });
+    });
+
+    const view = await t.query(internal.wallets.getGatewayWallet, {
+      clerkOrgId: "org_acme",
+    });
+    expect(view.wallet).toEqual({
+      clerkOrgId: "org_acme",
+      balance: 1000,
+      sequence: 1,
+    });
+    expect(view.keySettings).toHaveLength(2);
+    const byId = new Map(view.keySettings.map((r) => [r.keyId, r]));
+    expect(byId.get(KEY_A)!.disabled).toBe(true);
+    expect(byId.get(KEY_A)!.monthlyCapCredits).toBe(250);
+    expect(byId.get(KEY_B)!.disabled).toBe(false);
+    expect(byId.get(KEY_B)!.monthlyCapCredits).toBeUndefined();
+  });
+
+  it("returns a zero checkpoint when wallet is missing", async () => {
+    const t = convexTest(schema, modules);
+    await seedWorld(t);
+
+    const view = await t.query(internal.wallets.getGatewayWallet, {
+      clerkOrgId: "org_acme",
+    });
+    expect(view.keySettings).toEqual([]);
+    expect(view.wallet).toEqual({
+      clerkOrgId: "org_acme",
+      balance: 0,
+      sequence: 0,
     });
   });
 });

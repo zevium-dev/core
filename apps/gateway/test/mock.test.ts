@@ -100,6 +100,7 @@ async function installFixtures(opts: {
   const specs = new FixtureSpecSource();
   specs.set(ORG_SLUG, PROJECT_SLUG, {
     specVersionId: "version_demo",
+    version: "1.0.0",
     spec: opts.spec ?? SPEC,
     projectId: "proj_demo",
     organizationId: opts.clerkOrgId,
