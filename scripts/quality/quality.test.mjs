@@ -14,6 +14,22 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import test from "node:test";
+
+const githubTokenAlphabet =
+  "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+
+function fakeGithubToken() {
+  const limit = 256 - (256 % githubTokenAlphabet.length);
+  let suffix = "";
+  while (suffix.length < 36) {
+    for (const byte of randomBytes(36)) {
+      if (byte >= limit) continue;
+      suffix += githubTokenAlphabet[byte % githubTokenAlphabet.length];
+      if (suffix.length === 36) break;
+    }
+  }
+  return `ghp_${suffix}`;
+}
 import {
   compareBundleMeasurements,
   measureBundle,
@@ -966,10 +982,7 @@ test("gitleaks current snapshot includes Git candidates and excludes ignored loc
 
 test("gitleaks full history catches a secret deleted from current tree", () => {
   const { directory, git } = gitRepository();
-  write(
-    join(directory, "leak.env"),
-    `GITHUB_TOKEN=${"ghp_" + randomBytes(27).toString("base64url")}\n`,
-  );
+  write(join(directory, "leak.env"), `GITHUB_TOKEN=${fakeGithubToken()}\n`);
   assert.equal(git("add", ".").status, 0);
   assert.equal(git("commit", "--quiet", "-m", "fixture: add secret").status, 0);
   rmSync(join(directory, "leak.env"));
@@ -1001,7 +1014,7 @@ test("gitleaks exact fingerprint baseline rejects same-line mutation", () => {
   assert.equal(lookup.status, 0, lookup.stdout + lookup.stderr);
   const gitleaks = lookup.stdout.trim();
   const report = join(directory, "report.json");
-  const first = "ghp_" + randomBytes(27).toString("base64url");
+  const first = fakeGithubToken();
   write(join(directory, "leak.env"), `GITHUB_TOKEN=${first}\n`);
   assert.equal(git("add", "leak.env").status, 0);
   assert.equal(
@@ -1025,7 +1038,7 @@ test("gitleaks exact fingerprint baseline rejects same-line mutation", () => {
   const [finding] = JSON.parse(readFileSync(report, "utf8"));
   write(join(directory, ".gitleaksignore"), `${finding.Fingerprint}\n`);
 
-  const second = "ghp_" + randomBytes(27).toString("base64url");
+  const second = fakeGithubToken();
   write(join(directory, "leak.env"), `GITHUB_TOKEN=${second}\n`);
   assert.equal(git("add", "leak.env").status, 0);
   assert.equal(
@@ -1092,6 +1105,7 @@ test("production build environment cannot be bypassed with skip flags", () => {
         ![
           "CLERK_PUBLISHABLE_KEY",
           "CLERK_SECRET_KEY",
+          "VITE_BUILD_SHA",
           "VITE_CLERK_PUBLISHABLE_KEY",
           "VITE_CONVEX_URL",
           "VITE_GATEWAY_URL",
@@ -1113,6 +1127,7 @@ test("production build environment cannot be bypassed with skip flags", () => {
       ...strippedEnvironment,
       CLERK_PUBLISHABLE_KEY: "fixture-public",
       CLERK_SECRET_KEY: "fixture-secret",
+      VITE_BUILD_SHA: "1".repeat(40),
       VITE_CONVEX_URL: "https://fixture.invalid",
       VITE_GATEWAY_URL: "https://fixture.invalid",
     },

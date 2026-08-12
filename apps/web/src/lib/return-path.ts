@@ -8,10 +8,13 @@ export function safeReturnPath(value: unknown, fallback: string): string {
     !trimmed.startsWith("/") ||
     trimmed.startsWith("//") ||
     trimmed.includes("\\") ||
-    /%5c/i.test(trimmed) ||
-    /[\u0000-\u001f\u007f]/.test(trimmed)
+    /%5c/i.test(trimmed)
   ) {
     return fallback;
+  }
+  for (const char of trimmed) {
+    const code = char.charCodeAt(0);
+    if (code < 32 || code === 127) return fallback;
   }
   try {
     const parsed = new URL(trimmed, CANONICAL_APP_ORIGIN);

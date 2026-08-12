@@ -3,7 +3,6 @@ import { internalQuery, mutation, query } from "./_generated/server";
 import type { Doc } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
 import {
-  getOrgByPublicHandle,
   requireOrgAdmin,
   requireProjectMember,
   requireSpecVersionAdmin,

@@ -18,7 +18,9 @@ vi.mock("@tanstack/react-router", () => ({
       fullPath: "/app/billing",
       useSearch: () => ({}),
     }),
-  Link: ({ children }: { children: ReactNode }) => <a>{children}</a>,
+  Link: ({ children }: { children: ReactNode }) => (
+    <a href="/app/billing">{children}</a>
+  ),
 }));
 
 import { CycleUsage } from "./billing";

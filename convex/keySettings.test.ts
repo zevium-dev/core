@@ -95,3 +95,68 @@ describe("canonical key projection producers", () => {
     ).rejects.toThrow("budget");
   });
 });
+
+function asOrgMember(t: ReturnType<typeof convexTest>) {
+  return t.withIdentity({
+    subject: "user_member",
+    org_id: "org_member",
+    org_slug: "member-co",
+    org_role: "org:member",
+  } as {
+    subject: string;
+    org_id: string;
+    org_slug: string;
+    org_role: string;
+  });
+}
+
+describe("keySettings role gates and attribution", () => {
+  async function seedMemberOrg(t: ReturnType<typeof convexTest>) {
+    await t.run(async (ctx) => {
+      await ctx.db.insert("organizations", {
+        clerkOrgId: "org_member",
+        name: "Member Co",
+        slug: "member-co",
+      });
+    });
+  }
+
+  it("rejects cap, status, and rotation control for an ordinary member", async () => {
+    const t = convexTest(schema, modules);
+    await seedMemberOrg(t);
+    const member = asOrgMember(t);
+    await expect(
+      member.mutation(api.keySettings.setCap, {
+        keyId: "key_live_member",
+        monthlyCapCredits: 500,
+      }),
+    ).rejects.toThrow(/Org admin or owner role required/);
+    await expect(
+      member.mutation(api.keySettings.setDisabled, {
+        keyId: "key_live_member",
+        disabled: true,
+      }),
+    ).rejects.toThrow(/Org admin or owner role required/);
+    await expect(
+      member.mutation(api.keySettings.beginRotation, {
+        operationId: "blocked-rotation",
+        oldKeyId: "key_live_member",
+      }),
+    ).rejects.toThrow(/Org admin or owner role required/);
+  });
+
+  it("records key name and owner from the authenticated identity", async () => {
+    const t = convexTest(schema, modules);
+    await seedMemberOrg(t);
+    const view = await asOrgMember(t).mutation(
+      api.keySettings.registerOwnedKey,
+      { keyId: "key_live_member", keyName: "Local dev" },
+    );
+    expect(view).toMatchObject({
+      keyId: "key_live_member",
+      keyName: "Local dev",
+      ownerUserId: "user_member",
+      disabled: false,
+    });
+  });
+});

@@ -1231,10 +1231,7 @@ export const getBillingState = query({
       const intent = await ctx.db
         .query("checkoutIntents")
         .withIndex("by_checkout_session", (q) =>
-          q.eq(
-            "stripeCheckoutSessionId",
-            args.checkoutSessionId as string,
-          ),
+          q.eq("stripeCheckoutSessionId", args.checkoutSessionId as string),
         )
         .unique();
       if (intent !== null && intent.organizationId === organization._id) {

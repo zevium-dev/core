@@ -136,7 +136,7 @@ redact_dom_for_artifact() {
     input.value = '[redacted]';
     input.setAttribute('value', '[redacted]');
   }
-  for (const editable of document.querySelectorAll('[contenteditable="true"]')) editable.textContent = '[redacted]';
+  for (const editable of document.querySelectorAll('[contenteditable]')) editable.textContent = '[redacted]';
   for (const image of document.querySelectorAll('img')) image.style.visibility = 'hidden';
   const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
   while (walker.nextNode()) walker.currentNode.nodeValue = (walker.currentNode.nodeValue || '').replace(sensitive, '[redacted]');
@@ -275,7 +275,8 @@ wait_for_url_pattern() {
         # e.g. **/app/projects/** → */app/projects/*
         local bash_pat
         bash_pat="$(printf '%s' "$pattern" | sed 's/\*\*/\*/g')"
-        # shellcheck disable=SC2254
+        # Runtime route pattern intentionally uses bash glob matching.
+        # shellcheck disable=SC2053
         if [[ "$url" == $bash_pat ]]; then
           return 0
         fi

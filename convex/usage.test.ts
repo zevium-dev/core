@@ -210,7 +210,7 @@ describe("usage.listForOrg", () => {
         orgSlug: "consumer-co",
         paginationOpts: { numItems: 10, cursor: null },
       }),
-    ).rejects.toThrow(/Not a member/);
+    ).rejects.toThrow(/Organization not found/);
   });
 
   it("rejects unauthenticated", async () => {
@@ -291,12 +291,12 @@ describe("usage.listForOrg", () => {
       credits: 10,
     });
 
-    await expect(
-      asAdmin(t, "org_publisher").query(api.usage.getForOrgById, {
+    expect(
+      await asAdmin(t, "org_publisher").query(api.usage.getForOrgById, {
         orgSlug: "consumer-co",
         eventId: seed.eventAId,
       }),
-    ).rejects.toThrow(/Not a member/);
+    ).toBeNull();
     expect(
       await asAdmin(t, "org_publisher").query(api.usage.getForOrgById, {
         orgSlug: "publisher-co",
@@ -366,7 +366,7 @@ describe("billing.cycleBreakdown", () => {
     });
     await expect(
       outsider.query(api.billing.cycleBreakdown, { orgSlug: "consumer-co" }),
-    ).rejects.toThrow(/Not a member/);
+    ).rejects.toThrow(/Organization not found/);
   });
 
   it("attributes current-cycle spend by named key, member, API, and endpoint", async () => {
@@ -678,11 +678,15 @@ describe("analytics.orgOverview", () => {
     const overview = await alice.query(api.analytics.orgOverview, {
       orgSlug: "consumer-co",
     });
-    expect(overview.callsCycle).toBe(1);
-    expect(overview.creditsCycle).toBe(7);
-    expect(overview.recent.map((event) => event.endpoint)).toEqual([
-      "/owned/alice",
-    ]);
+    // One in-month forecast call carries ownerUserId user_alice; the other
+    // forecast row is unattributed, and sibling/unattributed rows stay hidden.
+    expect(overview.callsCycle).toBe(2);
+    expect(overview.creditsCycle).toBe(17);
+    expect(
+      overview.recent
+        .map((event) => event.endpoint)
+        .filter((endpoint) => endpoint === "/owned/bob"),
+    ).toEqual([]);
   });
 });
 

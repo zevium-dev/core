@@ -29,33 +29,39 @@ describe("project lifecycle authorization", () => {
     ["org:owner", true],
     ["org:admin", true],
     ["org:member", false],
-  ] as const)("projects server capabilities for %s", async (role, privileged) => {
-    const t = convexTest(schema, modules);
-    await t.run(async (ctx) => {
-      await ctx.db.insert("organizations", {
-        clerkOrgId: "org_acme",
-        name: "Acme",
-        slug: "acme",
+  ] as const)(
+    "projects server capabilities for %s",
+    async (role, privileged) => {
+      const t = convexTest(schema, modules);
+      await t.run(async (ctx) => {
+        await ctx.db.insert("organizations", {
+          clerkOrgId: "org_acme",
+          name: "Acme",
+          slug: "acme",
+        });
       });
-    });
-    const actor = t.withIdentity({
-      subject: `user_${role}`,
-      org_id: "org_acme",
-      org_slug: "acme",
-      org_role: role,
-    } as {
-      subject: string;
-      org_id: string;
-      org_slug: string;
-      org_role: string;
-    });
+      const actor = t.withIdentity({
+        subject: `user_${role}`,
+        org_id: "org_acme",
+        org_slug: "acme",
+        org_role: role,
+      } as {
+        subject: string;
+        org_id: string;
+        org_slug: string;
+        org_role: string;
+      });
 
-    const access = await actor.query(api.organizations.activeCapabilities, {});
-    expect(access.role).toBe(role);
-    expect(access.capabilities.managePublisher).toBe(privileged);
-    expect(access.capabilities.viewOrgUsage).toBe(privileged);
-    expect(access.capabilities.viewOwnUsage).toBe(true);
-  });
+      const access = await actor.query(
+        api.organizations.activeCapabilities,
+        {},
+      );
+      expect(access.role).toBe(role);
+      expect(access.capabilities.managePublisher).toBe(privileged);
+      expect(access.capabilities.viewOrgUsage).toBe(privileged);
+      expect(access.capabilities.viewOwnUsage).toBe(true);
+    },
+  );
 
   it("lets members read projects but rejects create, update, and delete", async () => {
     const t = convexTest(schema, modules);

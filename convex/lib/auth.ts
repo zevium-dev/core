@@ -301,7 +301,6 @@ export async function requireSpecVersionAdmin(
 export function requireOrgAdmin(claims: OrgIdentityClaims): OrgIdentityClaims {
   if (!isPrivilegedOrgRole(claims.orgRole)) {
     throw new Error("Org admin or owner role required");
-
   }
   return claims;
 }

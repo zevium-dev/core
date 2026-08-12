@@ -52,8 +52,8 @@ sign_in
 step "start Stripe Checkout"
 open_path "/app/billing"
 ab wait --text "Buy credits" >/dev/null
-if ! ab find text "Buy $10.00" click --exact >/dev/null 2>&1; then
-  ab find role button click --name "Buy $10.00" >/dev/null
+if ! ab find text 'Buy $10.00' click --exact >/dev/null 2>&1; then
+  ab find role button click --name 'Buy $10.00' >/dev/null
 fi
 ab wait --url "https://checkout.stripe.com/**" >/dev/null
 

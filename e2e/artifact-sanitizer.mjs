@@ -1,12 +1,6 @@
 #!/usr/bin/env node
 
-import {
-  lstatSync,
-  mkdirSync,
-  readFileSync,
-  realpathSync,
-  writeFileSync,
-} from "node:fs";
+import { lstatSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";

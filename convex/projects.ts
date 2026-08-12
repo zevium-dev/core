@@ -525,7 +525,6 @@ export const remove = mutation({
       project.deletionState !== undefined
     ) {
       throw new Error("Retired project cannot be deleted");
-
     }
 
     if (project.status === "published") {
