@@ -6,6 +6,9 @@ on:
 env:
   MISE_EXPERIMENTAL: true
 
+permissions:
+  contents: read
+
 jobs:
   security:
     runs-on: blacksmith-2vcpu-ubuntu-2404

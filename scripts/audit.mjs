@@ -3454,9 +3454,9 @@ export function postBoundedJson(
 }
 
 function encodeRegistryPackageName(packageName) {
-  return packageName.startsWith("@")
-    ? packageName.replace("/", "%2F")
-    : encodeURIComponent(packageName);
+  if (!packageName.startsWith("@")) return encodeURIComponent(packageName);
+  const separator = packageName.indexOf("/");
+  return `${packageName.slice(0, separator)}%2F${packageName.slice(separator + 1)}`;
 }
 
 function getBoundedJson(

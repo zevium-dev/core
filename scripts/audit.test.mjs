@@ -1643,6 +1643,7 @@ test("escapes complete summary for GitHub HTML output", () => {
     html,
     /&lt;script&gt;\\&quot;hostile\\&quot; &amp; &#39;payload&#39;&lt;\/script&gt;/,
   );
+  // codeql[js/bad-tag-filter] -- assertion proves escaping removed every tag; lowercase-only check is the invariant under test
   assert.doesNotMatch(html, /<script>/);
   assert.match(html, /fixture-package/);
   assert.match(html, /vulnerabilities/);
@@ -1741,6 +1742,7 @@ test("network connect timeout aborts a stalled TLS handshake", async () => {
         { package: ["1.0.0"] },
         {
           requestImpl: httpsRequest,
+          // codeql[js/disabling-certificate-validation] -- loopback fixture simulates a hostile TLS peer to prove connect-timeout handling
           requestOptions: { rejectUnauthorized: false },
           connectTimeoutMs: 80,
           idleTimeoutMs: 500,
