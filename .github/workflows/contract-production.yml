@@ -167,8 +167,7 @@ jobs:
           EXPECTED_CONVEX_URL: ${{ vars.STAGING_CONVEX_URL }}
           STAGING_CONVEX_URL: ${{ vars.STAGING_CONVEX_URL }}
         run: |
-          staging_slug="${STAGING_CONVEX_URL#https://}"
-          export CONVEX_DEPLOYMENT="dev:${staging_slug%.convex.cloud}"
+          export CONVEX_DEPLOYMENT="${CONVEX_DEPLOY_KEY%%|*}"
           convex_dry_run="$(pnpm exec convex deploy --dry-run --yes \
             --codegen disable --typecheck disable 2>&1)"
           printf '%s' "$convex_dry_run" \
@@ -186,8 +185,7 @@ jobs:
           CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_STAGING_DEPLOY_KEY }}
           STAGING_CONVEX_URL: ${{ vars.STAGING_CONVEX_URL }}
         run: |
-          staging_slug="${STAGING_CONVEX_URL#https://}"
-          export CONVEX_DEPLOYMENT="dev:${staging_slug%.convex.cloud}"
+          export CONVEX_DEPLOYMENT="${CONVEX_DEPLOY_KEY%%|*}"
           pnpm exec convex deploy --yes --message "staging contract $CONTRACT_SHA"
 
       - name: Install browser runtime
@@ -287,8 +285,7 @@ jobs:
           CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_PRODUCTION_DEPLOY_KEY }}
           EXPECTED_CONVEX_URL: ${{ env.PRODUCTION_CONVEX_URL }}
         run: |
-          prod_slug="${PRODUCTION_CONVEX_URL#https://}"
-          export CONVEX_DEPLOYMENT="prod:${prod_slug%.convex.cloud}"
+          export CONVEX_DEPLOYMENT="${CONVEX_DEPLOY_KEY%%|*}"
           convex_dry_run="$(pnpm exec convex deploy --dry-run --yes \
             --codegen disable --typecheck disable 2>&1)"
           printf '%s' "$convex_dry_run" \
@@ -331,8 +328,7 @@ jobs:
         env:
           CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_PRODUCTION_DEPLOY_KEY }}
         run: |
-          prod_slug="${PRODUCTION_CONVEX_URL#https://}"
-          export CONVEX_DEPLOYMENT="prod:${prod_slug%.convex.cloud}"
+          export CONVEX_DEPLOYMENT="${CONVEX_DEPLOY_KEY%%|*}"
           pnpm exec convex deploy --yes --message "production contract $CONTRACT_SHA"
 
       - name: Deep probe contracted state
