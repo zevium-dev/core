@@ -47,17 +47,19 @@ describe("deployment workflow security", () => {
     );
   });
 
-  it("keeps remote dry-run ahead of all Durable Object writes", async () => {
+  it("rate-limits remote dry-run before auth and allows JWKS caching", async () => {
     const broker = await readFile(
       new URL("../../src/index.ts", import.meta.url),
       "utf8",
     );
-    const dryRunExit = broker.indexOf("if (dryRun)");
     const rateWrite = broker.indexOf("await consumeRegistrationRate");
+    const oidcVerification = broker.indexOf("await verifyGitHubOidc");
+    const dryRunExit = broker.indexOf("if (dryRun)");
 
     expect(dryRunExit).toBeGreaterThan(0);
-    expect(rateWrite).toBeGreaterThan(dryRunExit);
-    expect(broker).toContain("cacheJwks: !dryRun");
+    expect(rateWrite).toBeLessThan(oidcVerification);
+    expect(oidcVerification).toBeLessThan(dryRunExit);
+    expect(broker).not.toContain("cacheJwks: !dryRun");
   });
 
   it("rejects stale source CI before executing candidate code", async () => {

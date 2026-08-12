@@ -1,9 +1,12 @@
-import { BrokerError } from "./errors";
+import { BrokerError } from "./errors.ts";
 
 class StrictJsonParser {
   private index = 0;
+  private readonly source: string;
 
-  constructor(private readonly source: string) {}
+  constructor(source: string) {
+    this.source = source;
+  }
 
   parse(): unknown {
     const value = this.parseValue();

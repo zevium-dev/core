@@ -18,6 +18,7 @@ export type ApiRouteKind =
   | "asset-upload-bulk"
   | "asset-upload-single"
   | "deployment-create"
+  | "deployment-list"
   | "script-delete"
   | "service-read"
   | "subdomain-write"
@@ -295,6 +296,17 @@ export function authorizeApiRoute(
     };
   }
 
+  if (suffix === "deployments" && method === "GET") {
+    invariant(
+      hasOperation(target, "deployment:create"),
+      403,
+      "operation_rejected",
+      "Deployment read is not declared",
+    );
+    requireQuery(search, "");
+    return noBody("deployment-list", target);
+  }
+
   throw new BrokerError(
     403,
     "endpoint_rejected",
@@ -377,6 +389,14 @@ function validateBindings(
       explicitSecrets.push({ name: binding.name, text: binding.text });
       continue;
     }
+    if (
+      binding.type === "version_metadata" &&
+      exactKeys(binding, ["name", "type"]) &&
+      binding.name === target.versionMetadataBinding
+    ) {
+      normalized.push(`version_metadata:${binding.name}`);
+      continue;
+    }
     throw new BrokerError(
       400,
       "binding_type_rejected",
@@ -392,6 +412,7 @@ function validateBindings(
         `durable_object_namespace:${binding.name}:${binding.className}`,
     ),
     ...target.allowedSecrets.map((binding) => `secret_text:${binding.name}`),
+    `version_metadata:${target.versionMetadataBinding}`,
   ];
   invariant(
     normalized.sort().join("\n") === expected.sort().join("\n"),
@@ -403,7 +424,8 @@ function validateBindings(
 }
 
 function validateMigration(value: unknown, target: TargetManifest): void {
-  if (target.migration === null) {
+  const finalMigration = target.migrations.at(-1);
+  if (!finalMigration) {
     invariant(
       value === undefined,
       400,
@@ -420,22 +442,44 @@ function validateMigration(value: unknown, target: TargetManifest): void {
     "Worker migration is missing",
   );
   invariant(
-    exactKeys(value, ["new_tag", "steps"]) &&
-      value.new_tag === target.migration.tag &&
+    Object.keys(value).every(
+      (key) => key === "new_tag" || key === "old_tag" || key === "steps",
+    ) &&
+      Object.keys(value).length === (value.old_tag === undefined ? 2 : 3) &&
+      value.new_tag === finalMigration.tag &&
       Array.isArray(value.steps) &&
-      value.steps.length === 1,
+      value.steps.length >= 1 &&
+      value.steps.length <= target.migrations.length,
     400,
     "migration_rejected",
     "Worker migration does not match manifest",
   );
-  const step = value.steps[0];
+  const oldTag = value.old_tag;
   invariant(
-    isRecord(step) &&
-      exactKeys(step, ["new_sqlite_classes"]) &&
-      sameStringArray(
-        step.new_sqlite_classes,
-        target.migration.newSqliteClasses,
-      ),
+    oldTag === undefined ||
+      (typeof oldTag === "string" &&
+        target.migrations.some((migration) => migration.tag === oldTag)),
+    400,
+    "migration_rejected",
+    "Durable Object lifecycle does not match manifest",
+  );
+  const startIndex =
+    oldTag === undefined
+      ? 0
+      : target.migrations.findIndex((migration) => migration.tag === oldTag) +
+        1;
+  const expectedSteps = target.migrations.slice(startIndex);
+  invariant(
+    value.steps.length === expectedSteps.length &&
+      value.steps.every((step, index) => {
+        const expected = expectedSteps[index];
+        return (
+          expected !== undefined &&
+          isRecord(step) &&
+          exactKeys(step, ["new_sqlite_classes"]) &&
+          sameStringArray(step.new_sqlite_classes, expected.newSqliteClasses)
+        );
+      }),
     400,
     "migration_rejected",
     "Durable Object lifecycle does not match manifest",
@@ -677,11 +721,12 @@ export function validateDeploymentDetail(
  * version can receive traffic. Secret values are write-only, so their values
  * are proved by the signed upload bytes and their names/types by this readback.
  */
-export function validateVersionDetail(
+function validateVersionDetailInternal(
   value: unknown,
   target: TargetManifest,
   versionId: string,
-): void {
+  recovery: boolean,
+): string | null {
   invariant(
     isRecord(value) &&
       value.id === versionId &&
@@ -697,10 +742,10 @@ export function validateVersionDetail(
         value.resources.script_runtime.compatibility_flags,
         target.compatibilityFlags,
       ) &&
-      (target.migration === null
+      (target.migrations.length === 0
         ? value.resources.script_runtime.migration_tag === undefined
         : value.resources.script_runtime.migration_tag ===
-          target.migration.tag),
+          target.migrations.at(-1)?.tag),
     502,
     "version_verification_failed",
     "Cloudflare version state does not match signed manifest",
@@ -708,6 +753,7 @@ export function validateVersionDetail(
 
   const actual: string[] = [];
   const names = new Set<string>();
+  let recoveredReleaseSha: string | null = null;
   for (const binding of value.resources.bindings) {
     invariant(
       isRecord(binding) &&
@@ -719,6 +765,15 @@ export function validateVersionDetail(
     );
     names.add(binding.name);
     if (binding.type === "plain_text" && typeof binding.text === "string") {
+      if (recovery && binding.name === "ZEVIUM_RELEASE") {
+        invariant(
+          /^[0-9a-f]{40}$/.test(binding.text),
+          502,
+          "version_binding_rejected",
+          "Recovery version release identity is invalid",
+        );
+        recoveredReleaseSha = binding.text;
+      }
       actual.push(`plain_text:${binding.name}:${binding.text}`);
       continue;
     }
@@ -739,6 +794,13 @@ export function validateVersionDetail(
       actual.push(`secret_text:${binding.name}`);
       continue;
     }
+    if (
+      binding.type === "version_metadata" &&
+      binding.name === target.versionMetadataBinding
+    ) {
+      actual.push(`version_metadata:${binding.name}`);
+      continue;
+    }
     throw new BrokerError(
       502,
       "version_binding_rejected",
@@ -748,13 +810,19 @@ export function validateVersionDetail(
 
   const expected = [
     ...target.plainTextBindings.map(
-      (binding) => `plain_text:${binding.name}:${binding.text}`,
+      (binding) =>
+        `plain_text:${binding.name}:${
+          recovery && binding.name === "ZEVIUM_RELEASE"
+            ? (recoveredReleaseSha ?? "")
+            : binding.text
+        }`,
     ),
     ...target.durableObjectBindings.map(
       (binding) =>
         `durable_object_namespace:${binding.name}:${binding.className}`,
     ),
     ...target.allowedSecrets.map((binding) => `secret_text:${binding.name}`),
+    `version_metadata:${target.versionMetadataBinding}`,
   ];
   invariant(
     actual.sort().join("\n") === expected.sort().join("\n"),
@@ -762,6 +830,42 @@ export function validateVersionDetail(
     "version_binding_rejected",
     "Cloudflare version binding set is not closed over signed manifest",
   );
+  return recoveredReleaseSha;
+}
+
+export function validateVersionDetail(
+  value: unknown,
+  target: TargetManifest,
+  versionId: string,
+): void {
+  validateVersionDetailInternal(value, target, versionId, false);
+}
+
+export function validateRecoveryVersionDetail(
+  value: unknown,
+  target: TargetManifest,
+  versionId: string,
+): string {
+  invariant(
+    target.scriptName === "zevium-gateway-staging" ||
+      target.scriptName === "zevium-web-staging",
+    403,
+    "recovery_rejected",
+    "Recovery is allowed only for stable staging targets",
+  );
+  const releaseSha = validateVersionDetailInternal(
+    value,
+    target,
+    versionId,
+    true,
+  );
+  invariant(
+    releaseSha !== null,
+    502,
+    "version_binding_rejected",
+    "Recovery version lacks immutable release identity",
+  );
+  return releaseSha;
 }
 
 export function validateAssetInitBody(

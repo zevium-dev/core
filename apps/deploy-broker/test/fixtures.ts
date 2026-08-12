@@ -155,6 +155,44 @@ export function productionClaims(
   };
 }
 
+export function stagingClaims(
+  audience: string,
+  overrides: Partial<GitHubOidcClaims> = {},
+): GitHubOidcClaims {
+  const now = Math.floor(Date.now() / 1_000);
+  return {
+    actor: "tnfssc",
+    actor_id: "29162020",
+    aud: audience,
+    base_ref: "",
+    environment: "staging",
+    event_name: "workflow_dispatch",
+    exp: now + 300,
+    head_ref: "",
+    iat: now,
+    iss: "https://token.actions.githubusercontent.com",
+    job_workflow_ref:
+      "zevium-dev/core/.github/workflows/cloudflare-staging.yml@refs/heads/develop",
+    job_workflow_sha: HEAD_SHA,
+    jti: `test-jti-${crypto.randomUUID()}`,
+    nbf: now - 5,
+    ref: "refs/heads/develop",
+    repository: "zevium-dev/core",
+    repository_id: "1044451612",
+    repository_owner: "zevium-dev",
+    repository_owner_id: "228443220",
+    repository_visibility: "public",
+    run_attempt: "1",
+    run_id: "9003",
+    sha: HEAD_SHA,
+    sub: "repo:zevium-dev/core:environment:staging",
+    workflow_ref:
+      "zevium-dev/core/.github/workflows/staging-proof.yml@refs/heads/develop",
+    workflow_sha: HEAD_SHA,
+    ...overrides,
+  };
+}
+
 export async function signClaims(
   claims: GitHubOidcClaims,
   header: Record<string, unknown> = {

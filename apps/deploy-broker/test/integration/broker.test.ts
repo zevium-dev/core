@@ -18,7 +18,14 @@ import {
   TEST_STATIC_ASSETS,
   previewClaims,
   signClaims,
+  stagingClaims,
 } from "../fixtures";
+
+const FAILED_STAGING_DEPLOYMENT_ID = "66666666-6666-4666-8666-666666666666";
+const FAILED_STAGING_VERSION_ID = "77777777-7777-4777-8777-777777777777";
+const PRIOR_STAGING_DEPLOYMENT_ID = "88888888-8888-4888-8888-888888888888";
+const PRIOR_STAGING_VERSION_ID = "99999999-9999-4999-8999-999999999999";
+const RECOVERY_STAGING_DEPLOYMENT_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 
 const SECOND_ASSET = {
   bytes: new TextEncoder().encode("second bound asset"),
@@ -73,8 +80,15 @@ async function register(
     "preview-cleanup" | "preview-gateway" | "preview-web" = "preview-gateway",
 ) {
   const manifest = previewManifest(profile);
+  return registerExact(manifest, previewClaims);
+}
+
+async function registerExact(
+  manifest: ReturnType<typeof buildManifest>,
+  claimsFactory: typeof previewClaims | typeof stagingClaims,
+) {
   const digest = await manifestDigest(manifest);
-  const token = await signClaims(previewClaims(`${AUDIENCE_PREFIX}${digest}`));
+  const token = await signClaims(claimsFactory(`${AUDIENCE_PREFIX}${digest}`));
   const response = await dispatch(
     new Request("https://deploy-broker.zevium.dev/v1/manifest", {
       body: JSON.stringify(manifest),
@@ -127,6 +141,7 @@ function gatewayVersionBody(
         text: gatewaySecret,
         type: "secret_text",
       },
+      { name: "CF_VERSION_METADATA", type: "version_metadata" },
     ],
     compatibility_date: "2025-04-01",
     compatibility_flags: ["global_fetch_strictly_public"],
@@ -174,6 +189,7 @@ function webVersionBody(assetJwt: string): {
         text: TEST_CLERK_SECRET,
         type: "secret_text",
       },
+      { name: "CF_VERSION_METADATA", type: "version_metadata" },
     ],
     compatibility_date: "2026-07-18",
     compatibility_flags: ["nodejs_compat"],
@@ -399,6 +415,136 @@ describe("workerd deployment broker", () => {
     expect(sealed.status, await sealed.clone().text()).toBe(200);
   });
 
+  it("supports Cloudflare JWT-selected single-asset uploads with exact bytes", async () => {
+    const registration = await register("preview-web");
+    const base = String(registration.value.apiBaseUrl);
+    const account = `${base}/accounts/1ea9299555b026a6a7484c8323c5a953/workers`;
+    const initial = await dispatch(
+      new Request(
+        `${account}/scripts/zevium-web-pr-123/assets-upload-session`,
+        {
+          body: JSON.stringify({
+            manifest: {
+              "/copy.css": {
+                hash: SECOND_ASSET.cloudflareHash,
+                size: SECOND_ASSET.size,
+              },
+              "/copy.js": {
+                hash: TEST_STATIC_ASSETS.staticAssets[0]!.cloudflareHash,
+                size: TEST_STATIC_ASSETS.staticAssets[0]!.size,
+              },
+            },
+          }),
+          headers: {
+            authorization: `Bearer ${registration.token}`,
+            "content-type": "application/json",
+            "user-agent": "single-assets-test",
+          },
+          method: "POST",
+        },
+      ),
+    );
+    expect(initial.status).toBe(200);
+    const initialValue = (await initial.json()) as {
+      result: { jwt: string };
+    };
+    const assetJwt = initialValue.result.jwt;
+
+    const first = TEST_STATIC_ASSETS.staticAssets[0]!;
+    const tampered = await dispatch(
+      new Request(`${account}/assets/upload/${first.cloudflareHash}`, {
+        body: new Uint8Array(first.size).fill(0),
+        headers: {
+          authorization: `Bearer ${assetJwt}`,
+          "content-length": String(first.size),
+          "content-type": first.contentType,
+        },
+        method: "POST",
+      }),
+    );
+    expect(tampered.status).toBe(400);
+    expect(await tampered.text()).toContain("artifact_rejected");
+
+    for (const asset of [
+      { ...first, bytes: TEST_ASSET_BYTES },
+      { ...SECOND_ASSET, bytes: SECOND_ASSET.bytes },
+    ]) {
+      const upload = await dispatch(
+        new Request(`${account}/assets/upload/${asset.cloudflareHash}`, {
+          body: asset.bytes,
+          headers: {
+            authorization: `Bearer ${assetJwt}`,
+            "content-length": String(asset.bytes.byteLength),
+            "content-type": asset.contentType,
+          },
+          method: "POST",
+        }),
+      );
+      expect(upload.status, await upload.clone().text()).toBe(200);
+    }
+
+    const version = webVersionBody("asset-completion-token.segment.signature");
+    const sealed = await dispatch(
+      new Request(`${account}/scripts/zevium-web-pr-123/versions`, {
+        body: version.body,
+        headers: {
+          authorization: `Bearer ${registration.token}`,
+          "content-type": version.contentType,
+        },
+        method: "POST",
+      }),
+    );
+    expect(sealed.status, await sealed.clone().text()).toBe(200);
+  });
+
+  it("waits for delayed immutable version visibility", async () => {
+    const registration = await register("preview-gateway");
+    const version = gatewayVersionBody(false);
+    const response = await dispatch(
+      new Request(
+        `${registration.value.apiBaseUrl}/accounts/1ea9299555b026a6a7484c8323c5a953/workers/scripts/zevium-gateway-pr-123/versions`,
+        {
+          body: version.body,
+          headers: {
+            authorization: `Bearer ${registration.token}`,
+            "content-type": version.contentType,
+            "user-agent": "delayed-version-readback",
+          },
+          method: "POST",
+        },
+      ),
+    );
+    expect(response.status, await response.clone().text()).toBe(200);
+    expect(await response.json()).toMatchObject({
+      result: { id: "33333333-3333-4333-8333-333333333333" },
+    });
+  });
+
+  it("resumes version readback without repeating successful provider mutation", async () => {
+    const registration = await register("preview-gateway");
+    const version = gatewayVersionBody(false);
+    const url = `${registration.value.apiBaseUrl}/accounts/1ea9299555b026a6a7484c8323c5a953/workers/scripts/zevium-gateway-pr-123/versions`;
+    const request = () =>
+      new Request(url, {
+        body: version.body,
+        headers: {
+          authorization: `Bearer ${registration.token}`,
+          "content-type": version.contentType,
+          "user-agent": "resume-version-readback",
+        },
+        method: "POST",
+      });
+    const pending = await dispatch(request());
+    expect(pending.status).toBe(503);
+    expect(await pending.text()).toContain("version_verification_pending");
+
+    const resumed = await dispatch(request());
+    expect(resumed.status, await resumed.clone().text()).toBe(200);
+    expect(await resumed.json()).toMatchObject({
+      result: { id: "44444444-4444-4444-8444-444444444444" },
+    });
+  });
+
   it("forwards only fully validated canonical multipart with exact length", async () => {
     const registration = await register("preview-gateway");
     const version = gatewayVersionBody(false);
@@ -494,6 +640,132 @@ describe("workerd deployment broker", () => {
     expect(await exact.json()).toMatchObject({
       result: { id: "22222222-2222-4222-8222-222222222222" },
       success: true,
+    });
+  });
+
+  it("resumes deployment readback without creating duplicate traffic mutation", async () => {
+    const registration = await register("preview-gateway");
+    const base = String(registration.value.apiBaseUrl);
+    const version = gatewayVersionBody(false);
+    const versionResponse = await dispatch(
+      new Request(
+        `${base}/accounts/1ea9299555b026a6a7484c8323c5a953/workers/scripts/zevium-gateway-pr-123/versions`,
+        {
+          body: version.body,
+          headers: {
+            authorization: `Bearer ${registration.token}`,
+            "content-type": version.contentType,
+          },
+          method: "POST",
+        },
+      ),
+    );
+    expect(versionResponse.status).toBe(200);
+
+    const url = `${base}/accounts/1ea9299555b026a6a7484c8323c5a953/workers/scripts/zevium-gateway-pr-123/deployments`;
+    const body = JSON.stringify({
+      annotations: { "workers/message": "recoverable exact deployment" },
+      strategy: "percentage",
+      versions: [
+        {
+          percentage: 100,
+          version_id: "11111111-1111-4111-8111-111111111111",
+        },
+      ],
+    });
+    const request = () =>
+      new Request(url, {
+        body,
+        headers: {
+          authorization: `Bearer ${registration.token}`,
+          "content-type": "application/json",
+          "user-agent": "resume-deployment-readback",
+        },
+        method: "POST",
+      });
+    const pending = await dispatch(request());
+    expect(pending.status).toBe(503);
+    expect(await pending.text()).toContain("deployment_verification_pending");
+
+    const resumed = await dispatch(request());
+    expect(resumed.status, await resumed.clone().text()).toBe(200);
+    expect(await resumed.json()).toMatchObject({
+      result: { id: "55555555-5555-4555-8555-555555555555" },
+    });
+  });
+
+  it("recovers only provider-proven immediately-prior lifecycle-compatible staging version", async () => {
+    const recoveryInput: Parameters<typeof buildManifest>[0] = {
+      convexSiteUrl: "https://zevium-stage.convex.site",
+      convexUrl: "https://zevium-stage.convex.cloud",
+      eventName: "workflow_dispatch",
+      headSha: HEAD_SHA,
+      oidcSha: HEAD_SHA,
+      profile: "staging-gateway",
+      recovery: {
+        failedDeploymentId: FAILED_STAGING_DEPLOYMENT_ID,
+        failedManifestDigest: "d".repeat(64),
+        failedVersionId: FAILED_STAGING_VERSION_ID,
+        priorDeploymentId: PRIOR_STAGING_DEPLOYMENT_ID,
+        priorVersionId: PRIOR_STAGING_VERSION_ID,
+        sourceReceiptDigest: "e".repeat(64),
+      },
+      ref: "refs/heads/develop",
+      runAttempt: 1,
+      runId: "9003",
+      secretDigests: PREVIEW_SECRET_DIGESTS,
+      sourceRunId: "8999",
+    };
+    const manifest = buildManifest(recoveryInput);
+    const registration = await registerExact(manifest, stagingClaims);
+    expect(registration.response.status).toBe(201);
+    const url = `${registration.value.apiBaseUrl}/accounts/1ea9299555b026a6a7484c8323c5a953/workers/scripts/zevium-gateway-staging/deployments`;
+    const body = JSON.stringify({
+      annotations: { "workers/message": "provider-proven staging recovery" },
+      strategy: "percentage",
+      versions: [{ percentage: 100, version_id: PRIOR_STAGING_VERSION_ID }],
+    });
+    const recovered = await dispatch(
+      new Request(url, {
+        body,
+        headers: {
+          authorization: `Bearer ${registration.token}`,
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
+    expect(recovered.status, await recovered.clone().text()).toBe(200);
+    expect(await recovered.json()).toMatchObject({
+      result: {
+        id: RECOVERY_STAGING_DEPLOYMENT_ID,
+        recovery_mode: "redeployed_prior",
+        recovery_release_sha: "d".repeat(40),
+      },
+    });
+
+    const secondManifest = buildManifest(recoveryInput);
+    const second = await registerExact(secondManifest, stagingClaims);
+    const noOp = await dispatch(
+      new Request(
+        `${second.value.apiBaseUrl}/accounts/1ea9299555b026a6a7484c8323c5a953/workers/scripts/zevium-gateway-staging/deployments`,
+        {
+          body,
+          headers: {
+            authorization: `Bearer ${second.token}`,
+            "content-type": "application/json",
+          },
+          method: "POST",
+        },
+      ),
+    );
+    expect(noOp.status, await noOp.clone().text()).toBe(200);
+    expect(await noOp.json()).toMatchObject({
+      result: {
+        id: RECOVERY_STAGING_DEPLOYMENT_ID,
+        recovery_mode: "already_active",
+        recovery_release_sha: "d".repeat(40),
+      },
     });
   });
 
@@ -615,43 +887,42 @@ describe("workerd deployment broker", () => {
     expect(crossResponse.status).toBe(403);
   });
 
-  it("keeps dry-run storage-free while rate-limiting live registration", async () => {
+  it("rate-limits forged dry-run tokens before unbounded JWKS verification", async () => {
     const manifest = previewManifest("preview-gateway");
     const digest = await manifestDigest(manifest);
     const token = await signClaims(
       previewClaims(`${AUDIENCE_PREFIX}${digest}`),
     );
-    for (let index = 0; index < 7; index += 1) {
+    const parts = token.split(".");
+    const signature = parts[2] ?? "";
+    parts[2] = `${signature.slice(0, -1)}${signature.endsWith("A") ? "B" : "A"}`;
+    const forged = parts.join(".");
+    for (let index = 0; index < 6; index += 1) {
       const response = await dispatch(
         new Request("https://deploy-broker.zevium.dev/v1/manifest/dry-run", {
           body: JSON.stringify(manifest),
           headers: {
-            authorization: `Bearer ${token}`,
+            authorization: `Bearer ${forged}`,
             "cf-connecting-ip": "203.0.113.88",
             "content-type": "application/json",
           },
           method: "POST",
         }),
       );
-      expect(response.status).toBe(200);
+      expect(response.status).toBe(401);
     }
-
-    let lastStatus = 0;
-    for (let index = 0; index < 7; index += 1) {
-      const response = await dispatch(
-        new Request("https://deploy-broker.zevium.dev/v1/manifest", {
-          body: JSON.stringify(manifest),
-          headers: {
-            authorization: `Bearer ${token}`,
-            "cf-connecting-ip": "203.0.113.88",
-            "content-type": "application/json",
-          },
-          method: "POST",
-        }),
-      );
-      lastStatus = response.status;
-    }
-    expect(lastStatus).toBe(429);
+    const limited = await dispatch(
+      new Request("https://deploy-broker.zevium.dev/v1/manifest/dry-run", {
+        body: JSON.stringify(manifest),
+        headers: {
+          authorization: `Bearer ${forged}`,
+          "cf-connecting-ip": "203.0.113.88",
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
+    expect(limited.status).toBe(429);
   });
 
   it("fails closed on missing broker credential", async () => {

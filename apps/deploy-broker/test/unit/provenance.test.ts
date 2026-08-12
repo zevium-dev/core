@@ -11,6 +11,7 @@ import {
   TEST_WEB_SECRET_DIGESTS,
   previewClaims,
   productionClaims,
+  stagingClaims,
   pullRequestFixture,
 } from "../fixtures";
 
@@ -170,5 +171,48 @@ describe("GitHub immutable provenance", () => {
           Response.json({ ...source, conclusion: "failure" }),
       }),
     ).rejects.toMatchObject({ code: "source_run_rejected" });
+  });
+
+  it("binds staging dispatch to exact protected workflows and successful CI", async () => {
+    const manifest = buildManifest({
+      ...TEST_MODULE_ARTIFACTS,
+      convexSiteUrl: "https://zevium-stage.convex.site",
+      convexUrl: "https://zevium-stage.convex.cloud",
+      eventName: "workflow_dispatch",
+      headSha: HEAD_SHA,
+      oidcSha: HEAD_SHA,
+      profile: "staging-gateway",
+      ref: "refs/heads/develop",
+      runAttempt: 1,
+      runId: "9003",
+      secretDigests: PREVIEW_SECRET_DIGESTS,
+      sourceRunId: "8999",
+    });
+    const source = {
+      conclusion: "success",
+      event: "push",
+      head_branch: "develop",
+      head_repository: { id: 1044451612 },
+      head_sha: HEAD_SHA,
+      id: 8999,
+      name: "Continuous Integration",
+      path: ".github/workflows/ci.yml",
+      repository: { id: 1044451612 },
+      status: "completed",
+    };
+    await expect(
+      verifyProvenance(manifest, stagingClaims(AUDIENCE), {
+        fetcher: async () => Response.json(source),
+      }),
+    ).resolves.toBeUndefined();
+    expect(() =>
+      validateIdentityClaims(
+        manifest,
+        stagingClaims(AUDIENCE, {
+          workflow_ref:
+            "zevium-dev/core/.github/workflows/deploy-production.yml@refs/heads/develop",
+        }),
+      ),
+    ).toThrow("caller workflow");
   });
 });

@@ -4,6 +4,7 @@ import {
   validateAssetInitBody,
   validateDeploymentBody,
   validateDeploymentDetail,
+  validateRecoveryVersionDetail,
   validateSubdomainBody,
   validateVersionDetail,
   type ApiRoute,
@@ -41,6 +42,7 @@ const MUTATION_STORAGE_PREFIX = "mutation:";
 const SESSION_REQUEST_LIMIT = 2_100;
 const SESSION_REQUESTS_PER_MINUTE = 1_800;
 const MAX_CONTROL_RESPONSE_BYTES = 512 * 1024;
+const VERIFICATION_RETRY_DELAYS_MS = [0, 100, 250, 500, 1_000] as const;
 const SESSION_ID_PATTERN = /^[0-9a-f]{64}$/;
 const VERSION_ID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -83,6 +85,36 @@ interface CloudflareEnvelope {
 interface TargetScriptState {
   migrationTag?: string;
   scriptName: string;
+}
+
+interface ReservedMutationRecord {
+  createdAt: number;
+  kind: "reserved";
+}
+
+interface VersionMutationRecord {
+  createdAt: number;
+  id: string;
+  kind: "version";
+  scriptName: string;
+}
+
+interface DeploymentMutationRecord {
+  createdAt: number;
+  id: string;
+  kind: "deployment";
+  scriptName: string;
+  versionId: string;
+}
+
+type MutationRecord =
+  DeploymentMutationRecord | ReservedMutationRecord | VersionMutationRecord;
+
+class RetryableVerificationError extends Error {
+  constructor() {
+    super("Cloudflare readback is not visible yet");
+    this.name = "RetryableVerificationError";
+  }
 }
 
 function rawPathAndSearch(url: string): { pathname: string; search: string } {
@@ -293,6 +325,36 @@ function assertNoRedirect(response: Response): void {
   );
 }
 
+function transientReadStatus(status: number): boolean {
+  return (
+    status === 404 ||
+    status === 408 ||
+    status === 425 ||
+    status === 429 ||
+    status >= 500
+  );
+}
+
+async function cloudflareFetch(
+  url: string,
+  init: RequestInit,
+  retryTransient = false,
+): Promise<Response> {
+  let response: Response;
+  try {
+    response = await fetch(url, init);
+  } catch (error) {
+    if (retryTransient) throw new RetryableVerificationError();
+    throw error;
+  }
+  assertNoRedirect(response);
+  if (retryTransient && transientReadStatus(response.status)) {
+    await response.body?.cancel("Cloudflare readback is not visible yet");
+    throw new RetryableVerificationError();
+  }
+  return response;
+}
+
 function validateAssetJwt(value: unknown): string {
   invariant(
     typeof value === "string" &&
@@ -487,23 +549,120 @@ export class DeploySessionDO extends DurableObject<BrokerEnv> {
     });
   }
 
-  private async reserveMutation(key: string): Promise<void> {
+  private mutationStorageKey(key: string): string {
     invariant(
       /^[A-Za-z0-9:._-]{1,256}$/.test(key),
       500,
       "mutation_key_invalid",
       "Mutation key is invalid",
     );
+    return `${MUTATION_STORAGE_PREFIX}${key}`;
+  }
+
+  private async loadMutation(key: string): Promise<MutationRecord | undefined> {
+    const value = await this.state.storage.get<unknown>(
+      this.mutationStorageKey(key),
+    );
+    if (value === undefined) return undefined;
+    // Sessions created by the previous broker revision stored the reservation
+    // timestamp directly. Preserve fail-safe replay rejection during rollout.
+    if (typeof value === "number" && Number.isSafeInteger(value)) {
+      return { createdAt: value, kind: "reserved" };
+    }
+    invariant(
+      isRecord(value) &&
+        typeof value.createdAt === "number" &&
+        Number.isSafeInteger(value.createdAt),
+      500,
+      "mutation_state_corrupt",
+      "Deployment mutation state failed integrity validation",
+    );
+    if (value.kind === "reserved") {
+      invariant(
+        exactKeys(value, ["createdAt", "kind"]),
+        500,
+        "mutation_state_corrupt",
+        "Deployment mutation state failed integrity validation",
+      );
+      return { createdAt: value.createdAt, kind: "reserved" };
+    }
+    if (value.kind === "version") {
+      invariant(
+        exactKeys(value, ["createdAt", "id", "kind", "scriptName"]) &&
+          typeof value.id === "string" &&
+          VERSION_ID_PATTERN.test(value.id) &&
+          typeof value.scriptName === "string",
+        500,
+        "mutation_state_corrupt",
+        "Deployment mutation state failed integrity validation",
+      );
+      return {
+        createdAt: value.createdAt,
+        id: value.id,
+        kind: "version",
+        scriptName: value.scriptName,
+      };
+    }
+    invariant(
+      value.kind === "deployment" &&
+        exactKeys(value, [
+          "createdAt",
+          "id",
+          "kind",
+          "scriptName",
+          "versionId",
+        ]) &&
+        typeof value.id === "string" &&
+        VERSION_ID_PATTERN.test(value.id) &&
+        typeof value.scriptName === "string" &&
+        typeof value.versionId === "string" &&
+        VERSION_ID_PATTERN.test(value.versionId),
+      500,
+      "mutation_state_corrupt",
+      "Deployment mutation state failed integrity validation",
+    );
+    return {
+      createdAt: value.createdAt,
+      id: value.id,
+      kind: "deployment",
+      scriptName: value.scriptName,
+      versionId: value.versionId,
+    };
+  }
+
+  private async reserveMutation(key: string): Promise<void> {
+    const storageKey = this.mutationStorageKey(key);
     await this.state.storage.transaction(async (transaction) => {
-      const storageKey = `${MUTATION_STORAGE_PREFIX}${key}`;
-      const existing = await transaction.get<number>(storageKey);
+      const existing = await transaction.get<unknown>(storageKey);
       invariant(
         existing === undefined,
         409,
         "mutation_replay_rejected",
         "Deployment mutation was already attempted",
       );
-      await transaction.put(storageKey, Date.now());
+      const record: ReservedMutationRecord = {
+        createdAt: Date.now(),
+        kind: "reserved",
+      };
+      await transaction.put(storageKey, record);
+    });
+  }
+
+  private async storeMutationCandidate(
+    key: string,
+    record: DeploymentMutationRecord | VersionMutationRecord,
+  ): Promise<void> {
+    const storageKey = this.mutationStorageKey(key);
+    await this.state.storage.transaction(async (transaction) => {
+      const current = await transaction.get<unknown>(storageKey);
+      invariant(
+        (typeof current === "number" && Number.isSafeInteger(current)) ||
+          (isRecord(current) && current.kind === "reserved"),
+        500,
+        "mutation_state_corrupt",
+        "Deployment mutation reservation was lost",
+      );
+      await transaction.put(storageKey, record);
     });
   }
 
@@ -615,14 +774,17 @@ export class DeploySessionDO extends DurableObject<BrokerEnv> {
   ): Promise<void> {
     validateEnvironment(this.env, { requireCloudflareToken: true });
     const path = `/client/v4/accounts/${this.env.CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${target.scriptName}/versions/${versionId}`;
-    const response = await fetch(`${CLOUDFLARE_API_ORIGIN}${path}`, {
-      headers: {
-        accept: "application/json",
-        authorization: `Bearer ${this.env.CLOUDFLARE_BROKER_API_TOKEN}`,
+    const response = await cloudflareFetch(
+      `${CLOUDFLARE_API_ORIGIN}${path}`,
+      {
+        headers: {
+          accept: "application/json",
+          authorization: `Bearer ${this.env.CLOUDFLARE_BROKER_API_TOKEN}`,
+        },
+        redirect: "manual",
       },
-      redirect: "manual",
-    });
-    assertNoRedirect(response);
+      true,
+    );
     invariant(
       response.status === 200,
       502,
@@ -632,7 +794,181 @@ export class DeploySessionDO extends DurableObject<BrokerEnv> {
     const envelope = parseCloudflareEnvelope(
       await boundedResponseBytes(response, MAX_CONTROL_RESPONSE_BYTES),
     );
-    validateVersionDetail(envelope.result, target, versionId);
+    try {
+      validateVersionDetail(envelope.result, target, versionId);
+    } catch (error) {
+      if (
+        error instanceof BrokerError &&
+        error.code === "version_verification_failed"
+      ) {
+        throw new RetryableVerificationError();
+      }
+      throw error;
+    }
+  }
+
+  private async retryVerification<T>(
+    verify: () => Promise<T>,
+    failureCode: string,
+    failureMessage: string,
+  ): Promise<T> {
+    for (const delay of VERIFICATION_RETRY_DELAYS_MS) {
+      if (delay > 0) await scheduler.wait(delay);
+      try {
+        return await verify();
+      } catch (error) {
+        if (!(error instanceof RetryableVerificationError)) throw error;
+      }
+    }
+    throw new BrokerError(503, failureCode, failureMessage);
+  }
+
+  private async verifyRecoveryEligibility(
+    manifest: DeploymentManifest,
+    target: TargetManifest,
+  ): Promise<{
+    activeDeploymentId: string;
+    mode: "already_active" | "redeployed_prior";
+    releaseSha: string;
+  }> {
+    const recovery = manifest.recovery;
+    invariant(
+      recovery,
+      500,
+      "recovery_state_invalid",
+      "Recovery authorization is missing",
+    );
+    validateEnvironment(this.env, { requireCloudflareToken: true });
+    const authorization = `Bearer ${this.env.CLOUDFLARE_BROKER_API_TOKEN}`;
+    const root = `/client/v4/accounts/${this.env.CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${target.scriptName}`;
+    const listResponse = await cloudflareFetch(
+      `${CLOUDFLARE_API_ORIGIN}${root}/deployments`,
+      {
+        headers: { accept: "application/json", authorization },
+        redirect: "manual",
+      },
+      true,
+    );
+    invariant(
+      listResponse.status === 200,
+      502,
+      "recovery_verification_failed",
+      "Cloudflare deployment history could not be verified",
+    );
+    const listEnvelope = parseCloudflareEnvelope(
+      await boundedResponseBytes(listResponse, MAX_CONTROL_RESPONSE_BYTES),
+    );
+    const deployments = listEnvelope.result.deployments;
+    invariant(
+      Array.isArray(deployments) && deployments.length > 0,
+      409,
+      "recovery_rejected",
+      "Cloudflare deployment history cannot prove the prior release",
+    );
+    const latest = deployments[0];
+    const latestVersion =
+      isRecord(latest) && Array.isArray(latest.versions)
+        ? latest.versions[0]
+        : undefined;
+    invariant(
+      isRecord(latest) &&
+        typeof latest.id === "string" &&
+        isRecord(latestVersion) &&
+        typeof latestVersion.version_id === "string",
+      502,
+      "recovery_verification_failed",
+      "Cloudflare latest deployment is invalid",
+    );
+
+    let mode: "already_active" | "redeployed_prior";
+    if (latestVersion.version_id === recovery.priorVersionId) {
+      validateDeploymentDetail(latest, latest.id, recovery.priorVersionId);
+      mode = "already_active";
+    } else {
+      if (recovery.failedDeploymentId !== null) {
+        invariant(
+          latest.id === recovery.failedDeploymentId,
+          409,
+          "recovery_rejected",
+          "Active deployment is not the failed receipt deployment",
+        );
+      }
+      if (recovery.failedVersionId !== null) {
+        invariant(
+          latestVersion.version_id === recovery.failedVersionId,
+          409,
+          "recovery_rejected",
+          "Active version is not the failed receipt version",
+        );
+      } else {
+        invariant(
+          recovery.failedDeploymentId !== null,
+          409,
+          "recovery_rejected",
+          "Receipt cannot identify a superseding failed release",
+        );
+      }
+      const prior = deployments[1];
+      validateDeploymentDetail(
+        prior,
+        recovery.priorDeploymentId,
+        recovery.priorVersionId,
+      );
+      mode = "redeployed_prior";
+    }
+
+    const priorDeploymentResponse = await cloudflareFetch(
+      `${CLOUDFLARE_API_ORIGIN}${root}/deployments/${recovery.priorDeploymentId}`,
+      {
+        headers: { accept: "application/json", authorization },
+        redirect: "manual",
+      },
+      true,
+    );
+    invariant(
+      priorDeploymentResponse.status === 200,
+      502,
+      "recovery_verification_failed",
+      "Prior Cloudflare deployment could not be verified",
+    );
+    const priorDeployment = parseCloudflareEnvelope(
+      await boundedResponseBytes(
+        priorDeploymentResponse,
+        MAX_CONTROL_RESPONSE_BYTES,
+      ),
+    );
+    validateDeploymentDetail(
+      priorDeployment.result,
+      recovery.priorDeploymentId,
+      recovery.priorVersionId,
+    );
+
+    const priorVersionResponse = await cloudflareFetch(
+      `${CLOUDFLARE_API_ORIGIN}${root}/versions/${recovery.priorVersionId}`,
+      {
+        headers: { accept: "application/json", authorization },
+        redirect: "manual",
+      },
+      true,
+    );
+    invariant(
+      priorVersionResponse.status === 200,
+      502,
+      "recovery_verification_failed",
+      "Prior Cloudflare version could not be verified",
+    );
+    const priorVersion = parseCloudflareEnvelope(
+      await boundedResponseBytes(
+        priorVersionResponse,
+        MAX_CONTROL_RESPONSE_BYTES,
+      ),
+    );
+    const releaseSha = validateRecoveryVersionDetail(
+      priorVersion.result,
+      target,
+      recovery.priorVersionId,
+    );
+    return { activeDeploymentId: latest.id, mode, releaseSha };
   }
 
   private async sealedVersionId(target: TargetManifest): Promise<string> {
@@ -665,8 +1001,9 @@ export class DeploySessionDO extends DurableObject<BrokerEnv> {
     invariant(
       migrationTag === undefined ||
         (typeof migrationTag === "string" &&
-          route.target.migration !== null &&
-          migrationTag === route.target.migration.tag),
+          route.target.migrations.some(
+            (migration) => migration.tag === migrationTag,
+          )),
       409,
       "migration_state_rejected",
       "Cloudflare Durable Object migration state differs from manifest",
@@ -682,9 +1019,65 @@ export class DeploySessionDO extends DurableObject<BrokerEnv> {
     });
   }
 
+  private async captureDeploymentList(
+    route: ApiRoute,
+    response: Response,
+  ): Promise<Response> {
+    invariant(
+      route.target,
+      500,
+      "route_invalid",
+      "Deployment target is missing",
+    );
+    if (response.status !== 200) return discardAndSanitizeFailure(response);
+    const envelope = parseCloudflareEnvelope(
+      await boundedResponseBytes(response, MAX_CONTROL_RESPONSE_BYTES),
+    );
+    const deployments = envelope.result.deployments;
+    invariant(
+      Array.isArray(deployments),
+      502,
+      "deployment_verification_failed",
+      "Cloudflare deployment inventory is invalid",
+    );
+    if (deployments.length === 0) {
+      return responseFromResult(response, { deployments: [] });
+    }
+    const latest = deployments[0];
+    const version =
+      isRecord(latest) && Array.isArray(latest.versions)
+        ? latest.versions[0]
+        : undefined;
+    invariant(
+      isRecord(latest) &&
+        typeof latest.id === "string" &&
+        VERSION_ID_PATTERN.test(latest.id) &&
+        latest.strategy === "percentage" &&
+        Array.isArray(latest.versions) &&
+        latest.versions.length === 1 &&
+        isRecord(version) &&
+        typeof version.version_id === "string" &&
+        VERSION_ID_PATTERN.test(version.version_id) &&
+        version.percentage === 100,
+      502,
+      "deployment_verification_failed",
+      "Cloudflare active deployment is not one immutable version at 100%",
+    );
+    return responseFromResult(response, {
+      deployments: [
+        {
+          id: latest.id,
+          strategy: "percentage",
+          versions: [{ percentage: 100, version_id: version.version_id }],
+        },
+      ],
+    });
+  }
+
   private async captureVersionUpload(
     route: ApiRoute,
     response: Response,
+    mutationKey: string,
   ): Promise<Response> {
     const bytes = await boundedResponseBytes(
       response,
@@ -700,7 +1093,17 @@ export class DeploySessionDO extends DurableObject<BrokerEnv> {
         "version_verification_failed",
         "Cloudflare upload did not return an immutable version ID",
       );
-      await this.verifyVersionState(route.target, versionId);
+      await this.storeMutationCandidate(mutationKey, {
+        createdAt: Date.now(),
+        id: versionId,
+        kind: "version",
+        scriptName: route.target.scriptName,
+      });
+      await this.retryVerification(
+        () => this.verifyVersionState(route.target!, versionId),
+        "version_verification_pending",
+        "Cloudflare version verification is pending; retry same request",
+      );
       await this.state.storage.put(
         `${SEALED_VERSION_STORAGE_PREFIX}${route.target.scriptName}`,
         versionId,
@@ -716,7 +1119,7 @@ export class DeploySessionDO extends DurableObject<BrokerEnv> {
     deploymentId: string,
   ): Promise<void> {
     const deploymentPath = `/client/v4/accounts/${this.env.CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${target.scriptName}/deployments/${deploymentId}`;
-    const deploymentResponse = await fetch(
+    const deploymentResponse = await cloudflareFetch(
       `${CLOUDFLARE_API_ORIGIN}${deploymentPath}`,
       {
         headers: {
@@ -725,8 +1128,8 @@ export class DeploySessionDO extends DurableObject<BrokerEnv> {
         },
         redirect: "manual",
       },
+      true,
     );
-    assertNoRedirect(deploymentResponse);
     invariant(
       deploymentResponse.status === 200,
       502,
@@ -739,21 +1142,34 @@ export class DeploySessionDO extends DurableObject<BrokerEnv> {
         MAX_CONTROL_RESPONSE_BYTES,
       ),
     );
-    validateDeploymentDetail(
-      deploymentEnvelope.result,
-      deploymentId,
-      versionId,
-    );
+    try {
+      validateDeploymentDetail(
+        deploymentEnvelope.result,
+        deploymentId,
+        versionId,
+      );
+    } catch (error) {
+      if (
+        error instanceof BrokerError &&
+        error.code === "deployment_verification_failed"
+      ) {
+        throw new RetryableVerificationError();
+      }
+      throw error;
+    }
 
     const listPath = `/client/v4/accounts/${this.env.CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${target.scriptName}/deployments`;
-    const response = await fetch(`${CLOUDFLARE_API_ORIGIN}${listPath}`, {
-      headers: {
-        accept: "application/json",
-        authorization: `Bearer ${this.env.CLOUDFLARE_BROKER_API_TOKEN}`,
+    const response = await cloudflareFetch(
+      `${CLOUDFLARE_API_ORIGIN}${listPath}`,
+      {
+        headers: {
+          accept: "application/json",
+          authorization: `Bearer ${this.env.CLOUDFLARE_BROKER_API_TOKEN}`,
+        },
+        redirect: "manual",
       },
-      redirect: "manual",
-    });
-    assertNoRedirect(response);
+      true,
+    );
     invariant(
       response.status === 200,
       502,
@@ -765,24 +1181,30 @@ export class DeploySessionDO extends DurableObject<BrokerEnv> {
     );
     const deployments = envelope.result.deployments;
     const latest = Array.isArray(deployments) ? deployments[0] : undefined;
-    invariant(
-      isRecord(latest) && latest.id === deploymentId,
-      502,
-      "deployment_verification_failed",
-      "Cloudflare active deployment is not the created deployment",
-    );
-    validateDeploymentDetail(latest, deploymentId, versionId);
-    if (target.migration !== null) {
+    if (!isRecord(latest) || latest.id !== deploymentId) {
+      throw new RetryableVerificationError();
+    }
+    try {
+      validateDeploymentDetail(latest, deploymentId, versionId);
+    } catch (error) {
+      if (
+        error instanceof BrokerError &&
+        error.code === "deployment_verification_failed"
+      ) {
+        throw new RetryableVerificationError();
+      }
+      throw error;
+    }
+    const finalMigration = target.migrations.at(-1);
+    if (finalMigration) {
       const scriptState = await this.readTargetScriptState(
         target,
         `Bearer ${this.env.CLOUDFLARE_BROKER_API_TOKEN}`,
+        true,
       );
-      invariant(
-        scriptState?.migrationTag === target.migration.tag,
-        502,
-        "deployment_verification_failed",
-        "Cloudflare Durable Object migration did not reach signed state",
-      );
+      if (scriptState?.migrationTag !== finalMigration.tag) {
+        throw new RetryableVerificationError();
+      }
     }
   }
 
@@ -790,6 +1212,8 @@ export class DeploySessionDO extends DurableObject<BrokerEnv> {
     route: ApiRoute,
     versionId: string,
     response: Response,
+    mutationKey: string,
+    recoveryReleaseSha: string | undefined,
   ): Promise<Response> {
     const bytes = await boundedResponseBytes(
       response,
@@ -812,8 +1236,28 @@ export class DeploySessionDO extends DurableObject<BrokerEnv> {
         "Cloudflare deployment did not return an immutable deployment ID",
       );
       validateDeploymentDetail(envelope.result, deploymentId, versionId);
-      await this.verifyDeploymentState(route.target, versionId, deploymentId);
-      return responseFromResult(response, { id: deploymentId });
+      await this.storeMutationCandidate(mutationKey, {
+        createdAt: Date.now(),
+        id: deploymentId,
+        kind: "deployment",
+        scriptName: route.target.scriptName,
+        versionId,
+      });
+      await this.retryVerification(
+        () =>
+          this.verifyDeploymentState(route.target!, versionId, deploymentId),
+        "deployment_verification_pending",
+        "Cloudflare deployment verification is pending; retry same request",
+      );
+      return responseFromResult(response, {
+        id: deploymentId,
+        ...(recoveryReleaseSha
+          ? {
+              recovery_mode: "redeployed_prior",
+              recovery_release_sha: recoveryReleaseSha,
+            }
+          : {}),
+      });
     }
     return sanitizedFailure(response);
   }
@@ -821,13 +1265,17 @@ export class DeploySessionDO extends DurableObject<BrokerEnv> {
   private async readTargetScriptState(
     target: TargetManifest,
     authorization: string,
+    retryTransient = false,
   ): Promise<TargetScriptState | null> {
     const path = `/client/v4/accounts/${this.env.CLOUDFLARE_ACCOUNT_ID}/workers/services/${target.scriptName}`;
-    const response = await fetch(`${CLOUDFLARE_API_ORIGIN}${path}`, {
-      headers: { accept: "application/json", authorization },
-      redirect: "manual",
-    });
-    assertNoRedirect(response);
+    const response = await cloudflareFetch(
+      `${CLOUDFLARE_API_ORIGIN}${path}`,
+      {
+        headers: { accept: "application/json", authorization },
+        redirect: "manual",
+      },
+      retryTransient,
+    );
     if (response.status === 404) {
       await response.body?.cancel("target does not exist");
       return null;
@@ -849,8 +1297,9 @@ export class DeploySessionDO extends DurableObject<BrokerEnv> {
     invariant(
       migrationTag === undefined ||
         (typeof migrationTag === "string" &&
-          target.migration !== null &&
-          migrationTag === target.migration.tag),
+          target.migrations.some(
+            (migration) => migration.tag === migrationTag,
+          )),
       409,
       "migration_state_rejected",
       "Cloudflare Durable Object migration state differs from manifest",
@@ -872,7 +1321,8 @@ export class DeploySessionDO extends DurableObject<BrokerEnv> {
       "migration_state_invalid",
       "Worker multipart migration state is missing",
     );
-    if (target.migration === null) {
+    const finalMigration = target.migrations.at(-1);
+    if (!finalMigration) {
       invariant(
         migrationMode === "none",
         400,
@@ -882,8 +1332,19 @@ export class DeploySessionDO extends DurableObject<BrokerEnv> {
       return;
     }
     const current = await this.readTargetScriptState(target, authorization);
+    const currentIndex = current?.migrationTag
+      ? target.migrations.findIndex(
+          (migration) => migration.tag === current.migrationTag,
+        )
+      : -1;
+    invariant(
+      current === null || currentIndex >= 0,
+      409,
+      "migration_state_rejected",
+      "Worker migration is outside signed lifecycle state",
+    );
     const expected =
-      current?.migrationTag === target.migration.tag ? "none" : "initial";
+      current?.migrationTag === finalMigration.tag ? "none" : "initial";
     invariant(
       migrationMode === expected,
       409,
@@ -1033,8 +1494,13 @@ export class DeploySessionDO extends DurableObject<BrokerEnv> {
     let body: BodyInit | null = null;
     let forwardedContentLength: number | null | undefined;
     let mutationKey = route.mutationKey;
+    let mutation: MutationRecord | undefined;
     let deploymentVersionId: string | undefined;
+    let recoveryMode: "already_active" | "redeployed_prior" | undefined;
+    let recoveryActiveDeploymentId: string | undefined;
+    let recoveryReleaseSha: string | undefined;
     let uploadedAssetHashes: string[] = [];
+    let versionMigrationMode: "initial" | "none" | undefined;
     if (route.maximumBodyBytes === 0) {
       ensureNoBody(request);
     } else if (
@@ -1065,14 +1531,34 @@ export class DeploySessionDO extends DurableObject<BrokerEnv> {
         await this.initializeAssetState(route, assetManifest);
       } else {
         const deployment = validateDeploymentBody(parsed.value, route.target);
-        const sealedVersionId = await this.sealedVersionId(route.target);
-        invariant(
-          timingSafeEqual(deployment.versionId, sealedVersionId),
-          403,
-          "version_not_sealed",
-          "Deployment version is not exact broker-sealed candidate",
-        );
-        await this.verifyVersionState(route.target, deployment.versionId);
+        if (session.manifest.recovery) {
+          invariant(
+            timingSafeEqual(
+              deployment.versionId,
+              session.manifest.recovery.priorVersionId,
+            ),
+            403,
+            "recovery_rejected",
+            "Recovery version is not the provider-proven prior version",
+          );
+          const eligibility = await this.retryVerification(
+            () =>
+              this.verifyRecoveryEligibility(session.manifest, route.target!),
+            "recovery_verification_pending",
+            "Cloudflare recovery verification is pending; retry same request",
+          );
+          recoveryMode = eligibility.mode;
+          recoveryActiveDeploymentId = eligibility.activeDeploymentId;
+          recoveryReleaseSha = eligibility.releaseSha;
+        } else {
+          const sealedVersionId = await this.sealedVersionId(route.target);
+          invariant(
+            timingSafeEqual(deployment.versionId, sealedVersionId),
+            403,
+            "version_not_sealed",
+            "Deployment version is not exact broker-sealed candidate",
+          );
+        }
         deploymentVersionId = deployment.versionId;
         mutationKey = `${route.mutationKey}:${deployment.versionId}`;
       }
@@ -1086,14 +1572,10 @@ export class DeploySessionDO extends DurableObject<BrokerEnv> {
         },
         route.maximumBodyBytes,
       );
-      await this.verifyMigrationState(
-        route.target,
-        inspected.migrationMode,
-        authorization,
-      );
       await this.verifyCompletionJwt(route, inspected.assetsJwt);
       body = inspected.body;
       forwardedContentLength = inspected.contentLength;
+      versionMigrationMode = inspected.migrationMode;
     } else if (route.kind === "asset-upload-bulk") {
       invariant(
         route.target && assetState,
@@ -1155,7 +1637,133 @@ export class DeploySessionDO extends DurableObject<BrokerEnv> {
       mutationKey = undefined;
     }
 
-    if (mutationKey) await this.reserveMutation(mutationKey);
+    if (mutationKey) {
+      mutation = await this.loadMutation(mutationKey);
+      if (
+        route.kind === "deployment-create" &&
+        recoveryMode === "already_active" &&
+        mutation === undefined
+      ) {
+        const output = responseFromResult(new Response(null, { status: 200 }), {
+          id:
+            recoveryActiveDeploymentId ??
+            session.manifest.recovery!.priorDeploymentId,
+          recovery_mode: "already_active",
+          recovery_release_sha: recoveryReleaseSha,
+        });
+        audit(
+          {
+            decision: "allow",
+            method: request.method,
+            route: route.kind,
+            sessionId: session.sessionId,
+            status: output.status,
+            target: route.target!.scriptName,
+          },
+          session.manifest,
+        );
+        return output;
+      }
+      if (mutation === undefined) {
+        if (route.kind === "version-upload") {
+          await this.verifyMigrationState(
+            route.target!,
+            versionMigrationMode,
+            authorization,
+          );
+        } else if (route.kind === "deployment-create") {
+          if (!session.manifest.recovery) {
+            await this.retryVerification(
+              () =>
+                this.verifyVersionState(route.target!, deploymentVersionId!),
+              "version_verification_pending",
+              "Cloudflare version verification is pending; retry same request",
+            );
+          }
+        }
+        await this.reserveMutation(mutationKey);
+      } else if (route.kind === "version-upload") {
+        invariant(
+          mutation.kind === "version" &&
+            mutation.scriptName === route.target?.scriptName,
+          409,
+          "mutation_replay_rejected",
+          "Deployment mutation was already attempted",
+        );
+        const candidate = mutation as VersionMutationRecord;
+        await this.retryVerification(
+          () => this.verifyVersionState(route.target!, candidate.id),
+          "version_verification_pending",
+          "Cloudflare version verification is pending; retry same request",
+        );
+        await this.state.storage.put(
+          `${SEALED_VERSION_STORAGE_PREFIX}${route.target.scriptName}`,
+          candidate.id,
+        );
+        const output = responseFromResult(new Response(null, { status: 200 }), {
+          id: candidate.id,
+        });
+        audit(
+          {
+            decision: "allow",
+            method: request.method,
+            route: route.kind,
+            sessionId: session.sessionId,
+            status: output.status,
+            target: route.target.scriptName,
+          },
+          session.manifest,
+        );
+        return output;
+      } else if (route.kind === "deployment-create") {
+        invariant(
+          mutation.kind === "deployment" &&
+            mutation.scriptName === route.target?.scriptName &&
+            mutation.versionId === deploymentVersionId,
+          409,
+          "mutation_replay_rejected",
+          "Deployment mutation was already attempted",
+        );
+        const deployment = mutation as DeploymentMutationRecord;
+        await this.retryVerification(
+          () =>
+            this.verifyDeploymentState(
+              route.target!,
+              deployment.versionId,
+              deployment.id,
+            ),
+          "deployment_verification_pending",
+          "Cloudflare deployment verification is pending; retry same request",
+        );
+        const output = responseFromResult(new Response(null, { status: 200 }), {
+          id: deployment.id,
+          ...(session.manifest.recovery
+            ? {
+                recovery_mode: "redeployed_prior",
+                recovery_release_sha: recoveryReleaseSha,
+              }
+            : {}),
+        });
+        audit(
+          {
+            decision: "allow",
+            method: request.method,
+            route: route.kind,
+            sessionId: session.sessionId,
+            status: output.status,
+            target: route.target.scriptName,
+          },
+          session.manifest,
+        );
+        return output;
+      } else {
+        throw new BrokerError(
+          409,
+          "mutation_replay_rejected",
+          "Deployment mutation was already attempted",
+        );
+      }
+    }
 
     const upstreamUrl = `${CLOUDFLARE_API_ORIGIN}/client/v4${api.pathname}${api.search}`;
     const response = await fetch(upstreamUrl, {
@@ -1169,10 +1777,18 @@ export class DeploySessionDO extends DurableObject<BrokerEnv> {
     let output: Response;
     if (route.kind === "service-read") {
       output = await this.captureServiceRead(route, response);
+    } else if (route.kind === "deployment-list") {
+      output = await this.captureDeploymentList(route, response);
     } else if (route.kind === "asset-init") {
       output = await this.captureAssetInitialization(route, response);
     } else if (route.kind === "version-upload") {
-      output = await this.captureVersionUpload(route, response);
+      invariant(
+        mutationKey,
+        500,
+        "route_invalid",
+        "Version mutation key is missing",
+      );
+      output = await this.captureVersionUpload(route, response, mutationKey);
     } else if (route.kind === "deployment-create") {
       invariant(
         deploymentVersionId,
@@ -1180,10 +1796,18 @@ export class DeploySessionDO extends DurableObject<BrokerEnv> {
         "route_invalid",
         "Deployment version is missing",
       );
+      invariant(
+        mutationKey,
+        500,
+        "route_invalid",
+        "Deployment mutation key is missing",
+      );
       output = await this.captureDeployment(
         route,
         deploymentVersionId,
         response,
+        mutationKey,
+        recoveryReleaseSha,
       );
     } else if (
       route.kind === "asset-upload-bulk" ||

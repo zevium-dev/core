@@ -17,6 +17,8 @@ export type DeploymentProfile =
   | "preview-gateway"
   | "preview-web"
   | "preview-cleanup"
+  | "staging-gateway"
+  | "staging-web"
   | "production-gateway"
   | "production-web";
 
@@ -36,6 +38,11 @@ export interface PlainTextBindingManifest {
 export interface DurableObjectBindingManifest {
   className: string;
   name: string;
+}
+
+export interface DurableObjectMigrationManifest {
+  newSqliteClasses: string[];
+  tag: string;
 }
 
 export interface SecretBindingManifest {
@@ -65,16 +72,14 @@ export interface TargetManifest {
   compatibilityFlags: string[];
   component: "gateway" | "web";
   durableObjectBindings: DurableObjectBindingManifest[];
-  migration: null | {
-    newSqliteClasses: string[];
-    tag: string;
-  };
+  migrations: DurableObjectMigrationManifest[];
   mainModule: null | string;
   modules: ModuleArtifactManifest[];
   operations: ManifestOperation[];
   plainTextBindings: PlainTextBindingManifest[];
   scriptName: string;
   staticAssets: StaticAssetArtifactManifest[];
+  versionMetadataBinding: string;
   versionTag: null | string;
   workersDev: null | {
     enabled: boolean;
@@ -84,13 +89,14 @@ export interface TargetManifest {
 
 export interface DeploymentManifest {
   accountId: string;
-  environment: "preview" | "production";
+  environment: "preview" | "production" | "staging";
   eventName: "pull_request" | "workflow_dispatch" | "workflow_run";
   headSha: string;
   oidcSha: string;
   prNumber: null | number;
   profile: DeploymentProfile;
   ref: string;
+  recovery: RecoveryAuthorization | null;
   repository: string;
   repositoryId: string;
   repositoryOwnerId: string;
@@ -99,6 +105,15 @@ export interface DeploymentManifest {
   schema: typeof MANIFEST_SCHEMA;
   sourceRunId: null | string;
   targets: TargetManifest[];
+}
+
+export interface RecoveryAuthorization {
+  failedDeploymentId: string | null;
+  failedManifestDigest: string;
+  failedVersionId: string | null;
+  priorDeploymentId: string;
+  priorVersionId: string;
+  sourceReceiptDigest: string;
 }
 
 export interface ManifestInput {
@@ -112,6 +127,7 @@ export interface ManifestInput {
   prNumber?: number;
   profile: DeploymentProfile;
   ref: string;
+  recovery?: RecoveryAuthorization;
   runAttempt: number;
   runId: string;
   secretDigests?: SecretBindingManifest[];
@@ -124,6 +140,8 @@ const RUN_ID_PATTERN = /^[1-9][0-9]{0,19}$/;
 const CONVEX_DEPLOYMENT_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/;
 const ASSET_HASH_PATTERN = /^[0-9a-f]{32}$/;
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const MODULE_CONTENT_TYPES = new Set([
   "application/javascript",
   "application/javascript+module",
@@ -346,8 +364,7 @@ function validateConvexUrls(
   cloud: string;
   site: string;
 } {
-  if (!convexUrl || !convexSiteUrl)
-    fail("preview gateway requires Convex URLs");
+  if (!convexUrl || !convexSiteUrl) fail("gateway requires Convex URLs");
 
   const cloud = new URL(convexUrl);
   const site = new URL(convexSiteUrl);
@@ -419,21 +436,38 @@ function validateSecretDigests(
 
 function gatewayTarget(
   scriptName: string,
-  mode: "preview" | "production",
+  mode: "preview" | "production" | "staging",
   convexUrl: string,
   convexSiteUrl: string,
+  releaseSha: string | null,
   versionTag: string | null,
   allowedSecrets: SecretBindingManifest[],
   artifacts: ReturnType<typeof validateModules>,
 ): TargetManifest {
+  const migrations =
+    mode === "preview"
+      ? [{ newSqliteClasses: ["WalletDO"], tag: "v1" }]
+      : [
+          { newSqliteClasses: ["WalletDO"], tag: "v1" },
+          { newSqliteClasses: ["RegistryDO"], tag: "v2" },
+          { newSqliteClasses: ["X402PaymentDO"], tag: "v3" },
+        ];
+  const durableObjectBindings = migrations.map(
+    ({ newSqliteClasses }, index) => ({
+      className: newSqliteClasses[0] ?? fail("migration class is missing"),
+      name:
+        ["WALLET", "REGISTRY", "X402_PAYMENTS"][index] ??
+        fail("migration binding is missing"),
+    }),
+  );
   return {
     allowedSecrets,
     assets: false,
     compatibilityDate: "2025-04-01",
     compatibilityFlags: ["global_fetch_strictly_public"],
     component: "gateway",
-    durableObjectBindings: [{ className: "WalletDO", name: "WALLET" }],
-    migration: { newSqliteClasses: ["WalletDO"], tag: "v1" },
+    durableObjectBindings,
+    migrations,
     mainModule: artifacts.mainModule,
     modules: artifacts.modules,
     operations:
@@ -448,9 +482,18 @@ function gatewayTarget(
     plainTextBindings: [
       { name: "CONVEX_SITE_URL", text: convexSiteUrl },
       { name: "CONVEX_URL", text: convexUrl },
+      ...(mode === "preview"
+        ? []
+        : [
+            {
+              name: "ZEVIUM_RELEASE",
+              text: releaseSha ?? fail("persistent release SHA is missing"),
+            },
+          ]),
     ],
     scriptName,
     staticAssets: [],
+    versionMetadataBinding: "CF_VERSION_METADATA",
     versionTag,
     workersDev:
       mode === "preview" ? { enabled: true, previewsEnabled: true } : null,
@@ -459,7 +502,8 @@ function gatewayTarget(
 
 function webTarget(
   scriptName: string,
-  mode: "preview" | "production",
+  mode: "preview" | "production" | "staging",
+  releaseSha: string | null,
   versionTag: string | null,
   artifacts: ReturnType<typeof validateModules>,
   staticAssets: StaticAssetArtifactManifest[],
@@ -472,7 +516,7 @@ function webTarget(
     compatibilityFlags: ["nodejs_compat"],
     component: "web",
     durableObjectBindings: [],
-    migration: null,
+    migrations: [],
     mainModule: artifacts.mainModule,
     modules: artifacts.modules,
     operations:
@@ -484,9 +528,18 @@ function webTarget(
             "subdomain:write",
           ]
         : ["assets:upload", "deployment:create", "script:upload"],
-    plainTextBindings: [],
+    plainTextBindings:
+      mode === "preview"
+        ? []
+        : [
+            {
+              name: "ZEVIUM_RELEASE",
+              text: releaseSha ?? fail("persistent release SHA is missing"),
+            },
+          ],
     scriptName,
     staticAssets,
+    versionMetadataBinding: "CF_VERSION_METADATA",
     versionTag,
     workersDev:
       mode === "preview" ? { enabled: true, previewsEnabled: true } : null,
@@ -507,12 +560,71 @@ export function buildManifest(input: ManifestInput): DeploymentManifest {
   if (!input.ref.startsWith("refs/") || input.ref.length > 256)
     fail("ref is invalid");
 
-  const isProduction = input.profile.startsWith("production-");
-  const environment = isProduction ? "production" : "preview";
-  if (isProduction && input.eventName !== "workflow_run") {
+  const persistentEnvironment = input.profile.startsWith("production-")
+    ? "production"
+    : input.profile.startsWith("staging-")
+      ? "staging"
+      : null;
+  const environment = persistentEnvironment ?? "preview";
+  const requestedRecovery = input.recovery ?? null;
+  let recovery: RecoveryAuthorization | null = null;
+  if (requestedRecovery !== null) {
+    if (
+      persistentEnvironment !== "staging" ||
+      !isRecord(requestedRecovery) ||
+      !Object.keys(requestedRecovery).every((key) =>
+        [
+          "failedDeploymentId",
+          "failedManifestDigest",
+          "failedVersionId",
+          "priorDeploymentId",
+          "priorVersionId",
+          "sourceReceiptDigest",
+        ].includes(key),
+      ) ||
+      Object.keys(requestedRecovery).length !== 6 ||
+      typeof requestedRecovery.failedManifestDigest !== "string" ||
+      !DIGEST_PATTERN.test(requestedRecovery.failedManifestDigest) ||
+      typeof requestedRecovery.sourceReceiptDigest !== "string" ||
+      !DIGEST_PATTERN.test(requestedRecovery.sourceReceiptDigest) ||
+      typeof requestedRecovery.priorDeploymentId !== "string" ||
+      !UUID_PATTERN.test(requestedRecovery.priorDeploymentId) ||
+      typeof requestedRecovery.priorVersionId !== "string" ||
+      !UUID_PATTERN.test(requestedRecovery.priorVersionId) ||
+      (requestedRecovery.failedDeploymentId !== null &&
+        (typeof requestedRecovery.failedDeploymentId !== "string" ||
+          !UUID_PATTERN.test(requestedRecovery.failedDeploymentId))) ||
+      (requestedRecovery.failedVersionId !== null &&
+        (typeof requestedRecovery.failedVersionId !== "string" ||
+          !UUID_PATTERN.test(requestedRecovery.failedVersionId))) ||
+      requestedRecovery.failedDeploymentId ===
+        requestedRecovery.priorDeploymentId ||
+      requestedRecovery.failedVersionId === requestedRecovery.priorVersionId
+    ) {
+      fail("recovery authorization is invalid");
+    }
+    recovery = {
+      failedDeploymentId: requestedRecovery.failedDeploymentId,
+      failedManifestDigest: requestedRecovery.failedManifestDigest,
+      failedVersionId: requestedRecovery.failedVersionId,
+      priorDeploymentId: requestedRecovery.priorDeploymentId,
+      priorVersionId: requestedRecovery.priorVersionId,
+      sourceReceiptDigest: requestedRecovery.sourceReceiptDigest,
+    };
+  }
+  if (
+    persistentEnvironment === "production" &&
+    input.eventName !== "workflow_run"
+  ) {
     fail("production requires workflow_run");
   }
-  if (!isProduction && input.eventName === "workflow_run") {
+  if (
+    persistentEnvironment === "staging" &&
+    input.eventName !== "workflow_dispatch"
+  ) {
+    fail("staging requires workflow_dispatch");
+  }
+  if (!persistentEnvironment && input.eventName === "workflow_run") {
     fail("preview cannot use workflow_run");
   }
 
@@ -520,44 +632,80 @@ export function buildManifest(input: ManifestInput): DeploymentManifest {
   let sourceRunId: string | null = null;
   let targets: TargetManifest[];
   const cleanup = input.profile === "preview-cleanup";
-  const artifacts = validateModules(input.modules, input.mainModule, !cleanup);
+  const artifacts = validateModules(
+    input.modules,
+    input.mainModule,
+    !cleanup && recovery === null,
+  );
   const staticAssets = validateStaticAssets(
     input.staticAssets,
-    !cleanup && input.profile.endsWith("-web"),
+    !cleanup && recovery === null && input.profile.endsWith("-web"),
   );
-  if (isProduction) {
-    if (!input.sourceRunId) fail("production requires sourceRunId");
+  if (persistentEnvironment) {
+    if (!input.sourceRunId) {
+      fail(`${persistentEnvironment} requires sourceRunId`);
+    }
     assertRunId(input.sourceRunId, "sourceRunId");
     sourceRunId = input.sourceRunId;
-    const versionTag = `ci-${input.runId}-${input.runAttempt}`;
-    targets =
-      input.profile === "production-gateway"
-        ? [
-            gatewayTarget(
-              "zevium-gateway",
-              "production",
-              PRODUCTION_CONVEX_URL,
-              PRODUCTION_CONVEX_SITE_URL,
-              versionTag,
-              validateSecretDigests(input.secretDigests, [
-                "CLERK_SECRET_KEY",
-                "GATEWAY_INTERNAL_SECRET",
-              ]),
-              artifacts,
-            ),
-          ]
-        : [
-            webTarget(
-              "zevium-dev",
-              "production",
-              versionTag,
-              artifacts,
-              staticAssets,
-              validateSecretDigests(input.secretDigests, [
-                "CLERK_SECRET_KEY",
-              ])[0] ?? fail("production web secret digest is missing"),
-            ),
-          ];
+    const versionTag = `${persistentEnvironment}-${input.headSha}`;
+    const convex =
+      persistentEnvironment === "staging"
+        ? validateConvexUrls(input.convexUrl, input.convexSiteUrl)
+        : {
+            cloud: PRODUCTION_CONVEX_URL,
+            site: PRODUCTION_CONVEX_SITE_URL,
+          };
+    if (
+      persistentEnvironment === "staging" &&
+      (convex.cloud === PRODUCTION_CONVEX_URL ||
+        convex.site === PRODUCTION_CONVEX_SITE_URL)
+    ) {
+      fail("staging cannot target production Convex");
+    }
+    targets = input.profile.endsWith("-gateway")
+      ? [
+          gatewayTarget(
+            persistentEnvironment === "production"
+              ? "zevium-gateway"
+              : "zevium-gateway-staging",
+            persistentEnvironment,
+            convex.cloud,
+            convex.site,
+            input.headSha,
+            versionTag,
+            validateSecretDigests(input.secretDigests, [
+              "CLERK_SECRET_KEY",
+              "GATEWAY_INTERNAL_SECRET",
+            ]),
+            artifacts,
+          ),
+        ]
+      : [
+          webTarget(
+            persistentEnvironment === "production"
+              ? "zevium-dev"
+              : "zevium-web-staging",
+            persistentEnvironment,
+            input.headSha,
+            versionTag,
+            artifacts,
+            staticAssets,
+            validateSecretDigests(input.secretDigests, [
+              "CLERK_SECRET_KEY",
+            ])[0] ??
+              fail(`${persistentEnvironment} web secret digest is missing`),
+          ),
+        ];
+    if (recovery !== null) {
+      targets = targets.map((target) => ({
+        ...target,
+        assets: false,
+        mainModule: null,
+        modules: [],
+        operations: ["deployment:create"],
+        staticAssets: [],
+      }));
+    }
   } else {
     prNumber = assertPreviewNumber(input.prNumber);
     const versionTag = `preview-${input.runId}-${input.runAttempt}`;
@@ -567,6 +715,7 @@ export function buildManifest(input: ManifestInput): DeploymentManifest {
           ...webTarget(
             `zevium-web-pr-${prNumber}`,
             "preview",
+            null,
             null,
             { mainModule: null, modules: [] },
             [],
@@ -587,6 +736,7 @@ export function buildManifest(input: ManifestInput): DeploymentManifest {
             "https://unused.invalid",
             "https://unused.invalid",
             null,
+            null,
             [],
             { mainModule: null, modules: [] },
           ),
@@ -604,6 +754,7 @@ export function buildManifest(input: ManifestInput): DeploymentManifest {
           "preview",
           convex.cloud,
           convex.site,
+          null,
           versionTag,
           validateSecretDigests(input.secretDigests, [
             "CLERK_SECRET_KEY",
@@ -617,6 +768,7 @@ export function buildManifest(input: ManifestInput): DeploymentManifest {
         webTarget(
           `zevium-web-pr-${prNumber}`,
           "preview",
+          null,
           versionTag,
           artifacts,
           staticAssets,
@@ -640,6 +792,7 @@ export function buildManifest(input: ManifestInput): DeploymentManifest {
     prNumber,
     profile: input.profile,
     ref: input.ref,
+    recovery,
     repository: GITHUB_REPOSITORY,
     repositoryId: GITHUB_REPOSITORY_ID,
     repositoryOwnerId: GITHUB_REPOSITORY_OWNER_ID,
@@ -675,6 +828,7 @@ export function parseManifest(value: unknown): DeploymentManifest {
       "prNumber",
       "profile",
       "ref",
+      "recovery",
       "repository",
       "repositoryId",
       "repositoryOwnerId",
@@ -691,6 +845,8 @@ export function parseManifest(value: unknown): DeploymentManifest {
     "preview-gateway",
     "preview-web",
     "preview-cleanup",
+    "staging-gateway",
+    "staging-web",
     "production-gateway",
     "production-web",
   ];
@@ -767,6 +923,9 @@ export function parseManifest(value: unknown): DeploymentManifest {
     ...(typeof value.prNumber === "number" ? { prNumber: value.prNumber } : {}),
     profile: value.profile as DeploymentProfile,
     ref: String(value.ref),
+    ...(isRecord(value.recovery)
+      ? { recovery: value.recovery as unknown as RecoveryAuthorization }
+      : {}),
     runAttempt: Number(value.runAttempt),
     runId: String(value.runId),
     ...(secretDigests.length === 0 ? {} : { secretDigests }),

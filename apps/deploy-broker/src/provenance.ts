@@ -28,6 +28,12 @@ function workflowPaths(manifest: DeploymentManifest): {
       reusable: ".github/workflows/cloudflare-production.yml",
     };
   }
+  if (manifest.profile.startsWith("staging-")) {
+    return {
+      caller: ".github/workflows/staging-proof.yml",
+      reusable: ".github/workflows/cloudflare-staging.yml",
+    };
+  }
   if (manifest.profile === "preview-cleanup") {
     return {
       caller: ".github/workflows/preview-cleanup.yml",
@@ -391,6 +397,19 @@ export async function verifyProvenance(
       403,
       "production_ref_rejected",
       "Production must run from develop workflow_run",
+    );
+    await verifyWorkflowRun(manifest, fetcher);
+    return;
+  }
+  if (manifest.profile.startsWith("staging-")) {
+    invariant(
+      claims.event_name === "workflow_dispatch" &&
+        claims.ref === "refs/heads/develop" &&
+        (claims.base_ref === undefined || claims.base_ref === "") &&
+        (claims.head_ref === undefined || claims.head_ref === ""),
+      403,
+      "staging_ref_rejected",
+      "Staging must run from a develop workflow dispatch",
     );
     await verifyWorkflowRun(manifest, fetcher);
     return;

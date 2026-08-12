@@ -11,12 +11,16 @@ import {
   type ModuleArtifactManifest,
   type StaticAssetArtifactManifest,
 } from "../src/manifest.ts";
+import { parseDeploymentReceipt } from "../src/receipt.ts";
+import { parseStrictJson } from "../src/strict-json.ts";
 
 const BROKER_ORIGIN = "https://deploy-broker.zevium.dev";
 const PROFILE_VALUES: DeploymentProfile[] = [
   "preview-gateway",
   "preview-web",
   "preview-cleanup",
+  "staging-gateway",
+  "staging-web",
   "production-gateway",
   "production-web",
 ];
@@ -24,6 +28,7 @@ const PROFILE_VALUES: DeploymentProfile[] = [
 interface Arguments {
   dryRun: boolean;
   profile: DeploymentProfile;
+  recoveryReceiptPath?: string;
   remoteDryRun: boolean;
 }
 
@@ -34,6 +39,7 @@ function fail(message: string): never {
 function parseArguments(argv: string[]): Arguments {
   let dryRun = false;
   let remoteDryRun = false;
+  let recoveryReceiptPath: string | undefined;
   let profile: DeploymentProfile | undefined;
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
@@ -54,11 +60,29 @@ function parseArguments(argv: string[]): Arguments {
       index += 1;
       continue;
     }
+    if (
+      argument === "--recovery-receipt" &&
+      recoveryReceiptPath === undefined
+    ) {
+      const value = argv[index + 1];
+      if (!value) fail("--recovery-receipt is invalid");
+      recoveryReceiptPath = value;
+      index += 1;
+      continue;
+    }
     fail(`unknown argument ${JSON.stringify(argument)}`);
   }
   if (!profile) fail("--profile is required");
   if (dryRun && remoteDryRun) fail("dry-run modes are mutually exclusive");
-  return { dryRun, profile, remoteDryRun };
+  if (recoveryReceiptPath && !profile.startsWith("staging-")) {
+    fail("recovery is staging-only");
+  }
+  return {
+    dryRun,
+    profile,
+    ...(recoveryReceiptPath === undefined ? {} : { recoveryReceiptPath }),
+    remoteDryRun,
+  };
 }
 
 export function requiredEnvironment(name: string): string {
@@ -246,6 +270,37 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+export async function readRecoveryReceipt(pathInput: string) {
+  const path = resolve(pathInput);
+  const state = await lstat(path).catch(() => null);
+  if (
+    !state?.isFile() ||
+    state.isSymbolicLink() ||
+    (state.mode & 0o777) !== 0o600 ||
+    state.size < 2 ||
+    state.size > 512 * 1024
+  ) {
+    fail("recovery receipt must be a bounded 0600 regular file");
+  }
+  const bytes = await readFile(path);
+  let source: string;
+  try {
+    source = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    fail("recovery receipt is not UTF-8");
+  }
+  const receipt = parseDeploymentReceipt(parseStrictJson(source));
+  if (
+    !receipt.profile.startsWith("staging-") ||
+    receipt.recovery !== null ||
+    receipt.priorDeploymentId === null ||
+    receipt.priorVersionId === null
+  ) {
+    fail("recovery receipt does not authorize a staging prior deployment");
+  }
+  return { digest: sha256(bytes), receipt };
+}
+
 async function requestOidcToken(audience: string): Promise<string> {
   const endpoint = new URL(requiredEnvironment("ACTIONS_ID_TOKEN_REQUEST_URL"));
   if (
@@ -283,7 +338,12 @@ async function requestOidcToken(audience: string): Promise<string> {
   return value.value;
 }
 
-export async function buildFromEnvironment(profile: DeploymentProfile) {
+export async function buildFromEnvironment(
+  profile: DeploymentProfile,
+  options: {
+    recoveryReceipt?: Awaited<ReturnType<typeof readRecoveryReceipt>>;
+  } = {},
+) {
   const prNumber = optionalInteger("PR_NUMBER");
   const sourceRunId = process.env.SOURCE_RUN_ID;
   const secretSources = profile.endsWith("-gateway")
@@ -312,12 +372,28 @@ export async function buildFromEnvironment(profile: DeploymentProfile) {
       .digest("hex"),
   }));
   const cleanup = profile === "preview-cleanup";
-  const modules = cleanup
-    ? []
-    : await moduleInventory(requiredEnvironment("DEPLOY_MODULE_ROOT"));
-  const staticAssets = profile.endsWith("-web")
-    ? await staticAssetInventory(requiredEnvironment("DEPLOY_ASSET_ROOT"))
-    : [];
+  const recoveryReceipt = options.recoveryReceipt;
+  if (recoveryReceipt) {
+    const { receipt } = recoveryReceipt;
+    if (
+      receipt.profile !== profile ||
+      receipt.gitSha !== requiredEnvironment("DEPLOY_HEAD_SHA") ||
+      receipt.target !==
+        (profile === "staging-gateway"
+          ? "zevium-gateway-staging"
+          : "zevium-web-staging")
+    ) {
+      fail("recovery receipt does not match current staging release target");
+    }
+  }
+  const modules =
+    cleanup || recoveryReceipt
+      ? []
+      : await moduleInventory(requiredEnvironment("DEPLOY_MODULE_ROOT"));
+  const staticAssets =
+    profile.endsWith("-web") && !recoveryReceipt
+      ? await staticAssetInventory(requiredEnvironment("DEPLOY_ASSET_ROOT"))
+      : [];
   return buildManifest({
     ...(process.env.CONVEX_SITE_URL
       ? { convexSiteUrl: process.env.CONVEX_SITE_URL }
@@ -328,7 +404,7 @@ export async function buildFromEnvironment(profile: DeploymentProfile) {
     eventName: requiredEnvironment("GITHUB_EVENT_NAME") as
       "pull_request" | "workflow_dispatch" | "workflow_run",
     headSha: requiredEnvironment("DEPLOY_HEAD_SHA"),
-    ...(cleanup
+    ...(cleanup || recoveryReceipt
       ? {}
       : { mainModule: requiredEnvironment("DEPLOY_MAIN_MODULE") }),
     ...(modules.length === 0 ? {} : { modules }),
@@ -336,6 +412,18 @@ export async function buildFromEnvironment(profile: DeploymentProfile) {
     ...(prNumber === undefined ? {} : { prNumber }),
     profile,
     ref: requiredEnvironment("GITHUB_REF"),
+    ...(recoveryReceipt
+      ? {
+          recovery: {
+            failedDeploymentId: recoveryReceipt.receipt.deploymentId,
+            failedManifestDigest: recoveryReceipt.receipt.manifestDigest,
+            failedVersionId: recoveryReceipt.receipt.versionId,
+            priorDeploymentId: recoveryReceipt.receipt.priorDeploymentId!,
+            priorVersionId: recoveryReceipt.receipt.priorVersionId!,
+            sourceReceiptDigest: recoveryReceipt.digest,
+          },
+        }
+      : {}),
     runAttempt: Number(requiredEnvironment("GITHUB_RUN_ATTEMPT")),
     runId: requiredEnvironment("GITHUB_RUN_ID"),
     ...(secretDigests.length === 0 ? {} : { secretDigests }),
@@ -346,7 +434,12 @@ export async function buildFromEnvironment(profile: DeploymentProfile) {
 
 async function main(): Promise<void> {
   const arguments_ = parseArguments(process.argv.slice(2));
-  const manifest = await buildFromEnvironment(arguments_.profile);
+  const recoveryReceipt = arguments_.recoveryReceiptPath
+    ? await readRecoveryReceipt(arguments_.recoveryReceiptPath)
+    : undefined;
+  const manifest = await buildFromEnvironment(arguments_.profile, {
+    ...(recoveryReceipt === undefined ? {} : { recoveryReceipt }),
+  });
   const digest = await manifestDigest(manifest);
   const audience = `${AUDIENCE_PREFIX}${digest}`;
 
@@ -398,10 +491,20 @@ async function main(): Promise<void> {
     fail("broker registration response is invalid");
   }
   const brokerEnvironment = requiredEnvironment("BROKER_ENV_FILE");
+  const brokerEnvironmentState = await lstat(brokerEnvironment).catch(
+    () => null,
+  );
+  if (
+    !brokerEnvironmentState?.isFile() ||
+    brokerEnvironmentState.isSymbolicLink() ||
+    (brokerEnvironmentState.mode & 0o777) !== 0o600
+  ) {
+    fail("BROKER_ENV_FILE must be a 0600 regular file");
+  }
   process.stdout.write(`::add-mask::${token}\n`);
   await appendFile(
     brokerEnvironment,
-    `CLOUDFLARE_API_BASE_URL=${value.apiBaseUrl}\nCLOUDFLARE_API_TOKEN=${token}\n`,
+    `CLOUDFLARE_API_BASE_URL=${value.apiBaseUrl}\nCLOUDFLARE_API_TOKEN=${token}\nCLOUDFLARE_DEPLOY_MANIFEST_DIGEST=${digest}\n`,
     { encoding: "utf8", mode: 0o600 },
   );
   process.stdout.write(

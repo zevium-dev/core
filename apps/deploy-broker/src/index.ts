@@ -74,7 +74,7 @@ function policySummary(manifest: DeploymentManifest): Record<string, unknown> {
       component: target.component,
       durableObjectBindings: target.durableObjectBindings,
       mainModule: target.mainModule,
-      migration: target.migration,
+      migrations: target.migrations,
       moduleCount: target.modules.length,
       moduleBytes: target.modules.reduce(
         (total, module) => total + module.size,
@@ -91,6 +91,7 @@ function policySummary(manifest: DeploymentManifest): Record<string, unknown> {
         0,
       ),
       versionTag: target.versionTag,
+      versionMetadataBinding: target.versionMetadataBinding,
       workersDev: target.workersDev,
     })),
   };
@@ -102,13 +103,15 @@ async function registerManifest(
   dryRun: boolean,
 ): Promise<Response> {
   validateEnvironment(env, { requireCloudflareToken: !dryRun });
+  // This gate must run before body parsing and signature verification. Otherwise
+  // forged dry-run tokens can amplify requests to GitHub's JWKS endpoint.
+  await consumeRegistrationRate(request, env);
   const { value } = await readJsonBounded(request, 128 * 1024);
   const manifest = parseManifest(value);
   const digest = await manifestDigest(manifest);
   const claims = await verifyGitHubOidc(
     bearerToken(request),
     `${AUDIENCE_PREFIX}${digest}`,
-    { cacheJwks: !dryRun },
   );
   await verifyProvenance(manifest, claims);
 
@@ -131,8 +134,6 @@ async function registerManifest(
       policy: policySummary(manifest),
     });
   }
-
-  await consumeRegistrationRate(request, env);
 
   const sessionId = await sha256Hex(`${claims.jti}\0${digest}`);
   const jtiHash = await sha256Hex(claims.jti);

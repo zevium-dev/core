@@ -73,7 +73,8 @@ describe("Wrangler 4.119.0 observed transcript", () => {
           url.pathname.replace("/client/v4", ""),
           url.search,
         );
-      if (index === 3 || index === 4) expect(authorization).not.toThrow();
+      if (index === 0 || index === 3 || index === 4)
+        expect(authorization).not.toThrow();
       else expect(authorization).toThrow();
     }
   });

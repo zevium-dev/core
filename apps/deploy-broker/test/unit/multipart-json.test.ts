@@ -124,6 +124,7 @@ function versionMetadata(): Record<string, unknown> {
         text: TEST_GATEWAY_SECRET,
         type: "secret_text",
       },
+      { name: "CF_VERSION_METADATA", type: "version_metadata" },
     ],
     compatibility_date: "2025-04-01",
     compatibility_flags: ["global_fetch_strictly_public"],
@@ -137,9 +138,13 @@ function versionMetadata(): Record<string, unknown> {
 
 function webVersionMetadata(secret: string): Record<string, unknown> {
   return {
-    annotations: { "workers/tag": "ci-9002-1" },
+    annotations: { "workers/tag": `production-${HEAD_SHA}` },
     assets: { config: {}, jwt: "a.b.c".repeat(10) },
-    bindings: [{ name: "CLERK_SECRET_KEY", text: secret, type: "secret_text" }],
+    bindings: [
+      { name: "ZEVIUM_RELEASE", text: HEAD_SHA, type: "plain_text" },
+      { name: "CLERK_SECRET_KEY", text: secret, type: "secret_text" },
+      { name: "CF_VERSION_METADATA", type: "version_metadata" },
+    ],
     compatibility_date: "2026-07-18",
     compatibility_flags: ["nodejs_compat"],
     main_module: "index.js",
