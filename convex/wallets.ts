@@ -26,7 +26,7 @@ export type SettlementResult = {
   reason?: string;
 };
 
-async function getOrCreateWallet(
+export async function getOrCreateWallet(
   ctx: MutationCtx,
   organizationId: Id<"organizations">,
 ): Promise<Doc<"wallets">> {
@@ -66,7 +66,7 @@ async function getOrganizationByClerkId(
     .unique();
 }
 
-function checkpoint(
+export function checkpoint(
   clerkOrgId: string,
   wallet: Pick<Doc<"wallets">, "balance" | "sequence">,
 ): WalletCheckpoint {
@@ -83,7 +83,7 @@ type WalletEntryKind = Doc<"walletEntries">["kind"];
  * Append one signed ledger entry and materialize the new balance/version in the
  * same Convex transaction. Callers must use a stable, globally unique refId.
  */
-async function appendWalletEntry(
+export async function appendWalletEntry(
   ctx: MutationCtx,
   args: {
     wallet: Doc<"wallets">;
@@ -99,6 +99,9 @@ async function appendWalletEntry(
     .withIndex("by_ref", (q) => q.eq("refId", args.refId))
     .unique();
   if (existing !== null) {
+    if (existing.walletId !== args.wallet._id) {
+      throw new Error("Wallet ledger reference belongs to another wallet");
+    }
     const wallet = await ctx.db.get(existing.walletId);
     if (wallet === null) throw new Error("Wallet missing for existing entry");
     return { applied: false, wallet };
@@ -443,11 +446,17 @@ export const recordUsage = internalMutation({
         const now = Date.now();
         await ctx.db.insert("publisherEarnings", {
           publisherOrganizationId: project.organizationId,
+          consumerOrganizationId: consumerOrg._id,
           projectId: project._id,
           usageSettlementRefId: event.settleRefId,
           grossCredits: split.grossCredits,
+          platformFeeAtoms: split.platformFeeAtoms,
+          publisherNetAtoms: split.publisherNetAtoms,
           platformFeeCredits: split.platformFeeCredits,
           netCredits: split.publisherNetCredits,
+          clawedBackGrossCredits: 0,
+          clawedBackAtoms: 0,
+          releasedAtoms: 0,
           availableAt: now + PUBLISHER_RISK_HOLD_MS,
           status: "pending_risk",
           createdAt: now,

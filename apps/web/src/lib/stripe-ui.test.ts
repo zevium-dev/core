@@ -34,6 +34,7 @@ describe("checkoutDisplay", () => {
 
   it("treats unknown redirect status as processing rather than a client-side grant", () => {
     expect(checkoutStateFromStatus("paid")).toBe("succeeded");
+    expect(checkoutStateFromStatus("complete")).toBe("succeeded");
     expect(checkoutStateFromStatus("payment_failed")).toBe("failed");
     expect(checkoutStateFromStatus("created")).toBe("processing");
   });
@@ -44,6 +45,8 @@ describe("checkoutDisplay", () => {
     expect(paymentStatusLabel("failed")).toBe("Failed");
     expect(paymentStatusLabel("refunded")).toBe("Refunded");
     expect(paymentStatusLabel("disputed")).toBe("Disputed");
+    expect(paymentStatusLabel("dispute_won")).toBe("Dispute won");
+    expect(paymentStatusLabel("dispute_lost")).toBe("Dispute lost");
   });
 
   it("disables duplicate pack selection while one hosted Checkout redirect starts", () => {

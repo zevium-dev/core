@@ -2,6 +2,7 @@ import { v } from "convex/values";
 import { query } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { requireOrgMemberBySlug } from "./lib/auth";
+import { atomsToCredits } from "./accounting";
 
 export type EarningsBucket = {
   calls: number;
@@ -25,8 +26,8 @@ export type OrgEarnings = {
 };
 
 /**
- * Publisher-facing statement derived only from immutable `publisherEarnings`.
- * It never replays mutable usage rows or recomputes a percentage split.
+ * Publisher-facing statement reads canonical atom splits persisted alongside
+ * each earning. It never replays usage rows or recomputes percentages.
  */
 export const forOrg = query({
   args: { orgSlug: v.string() },
@@ -55,12 +56,13 @@ export const forOrg = query({
     let allNet = 0;
 
     for (const earning of earnings) {
+      const netCredits = atomsToCredits(earning.publisherNetAtoms);
       allGross += earning.grossCredits;
-      allNet += earning.netCredits;
+      allNet += netCredits;
       if (earning.createdAt >= monthStart) {
         monthCalls += 1;
         monthGross += earning.grossCredits;
-        monthNet += earning.netCredits;
+        monthNet += netCredits;
       }
       if (earning.projectId === undefined) continue;
       const row = rows.get(earning.projectId) ?? {
@@ -70,7 +72,7 @@ export const forOrg = query({
       };
       row.calls += 1;
       row.grossCredits += earning.grossCredits;
-      row.netCredits += earning.netCredits;
+      row.netCredits += netCredits;
       rows.set(earning.projectId, row);
     }
 

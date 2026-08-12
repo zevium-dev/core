@@ -9,9 +9,19 @@ import {
 } from "./_generated/server";
 import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
-import { creditsToUsdCents } from "./accounting";
+import {
+  ACCOUNTING_ATOMS_PER_USD_CENT,
+  PUBLISHER_MINIMUM_PAYOUT_ATOMS,
+  atomsToCredits,
+  atomsToUsdCents,
+} from "./accounting";
 import { requireIdentity } from "./lib/auth";
 import { createNotification } from "./lib/notifications";
+import {
+  appendPublisherSettlementEntry,
+  getOrCreatePublisherBalance,
+  releasePublisherEarning,
+} from "./lib/publisherLedger";
 import { stripeClient } from "./billing";
 
 export type ConnectProfileStatus =
@@ -306,41 +316,11 @@ export const releaseMatureEarnings = internalMutation({
       .collect();
     for (const earning of pending) {
       if (earning.availableAt <= now) {
-        await ctx.db.patch(earning._id, {
-          status: "available",
-          updatedAt: now,
-        });
+        await releasePublisherEarning(ctx, earning);
       }
     }
   },
 });
-
-/**
- * Build a Stripe-safe idempotency key for a publisher transfer.
- *
- * Joining earning ids directly exceeds Stripe's 255-character idempotency key
- * limit at ~9 earnings (each Convex id is ~32 chars + separator), causing
- * every non-trivial payout to fail. Instead, hash the sorted earning ids with
- * SHA-256 (64 hex chars) and prefix with `payout_` for a deterministic,
- * length-capped key. Same earnings → same key, so retries dedupe.
- */
-async function publisherTransferIdempotencyKey(
-  publisherOrganizationId: Id<"organizations">,
-  earnings: { _id: Id<"publisherEarnings"> }[],
-): Promise<string> {
-  const payload = `${publisherOrganizationId}:${earnings
-    .map((earning) => earning._id)
-    .sort()
-    .join(",")}`;
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(payload),
-  );
-  const hex = Array.from(new Uint8Array(digest))
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
-  return `payout_${hex}`;
-}
 
 export const preparePublisherTransfer = internalMutation({
   args: { publisherOrganizationId: v.id("organizations") },
@@ -377,28 +357,24 @@ export const preparePublisherTransfer = internalMutation({
         transferId: retry._id,
         connectedAccountId: retry.stripeConnectedAccountId,
         amount: retry.amount,
+        remainderAtoms: retry.remainderAtoms,
         currency: retry.currency,
         idempotencyKey: retry.idempotencyKey,
       };
     }
-    const now = Date.now();
-    const earnings = await ctx.db
-      .query("publisherEarnings")
-      .withIndex("by_publisher", (q) =>
-        q.eq("publisherOrganizationId", args.publisherOrganizationId),
-      )
-      .filter((q) => q.eq(q.field("status"), "available"))
-      .collect();
-    const credits = earnings.reduce(
-      (total, earning) => total + earning.netCredits,
-      0,
-    );
-    const amount = creditsToUsdCents(credits);
-    if (amount <= 0) throw new Error("Available earnings are below one cent");
-    const idempotencyKey = await publisherTransferIdempotencyKey(
+    const balance = await getOrCreatePublisherBalance(
+      ctx,
       args.publisherOrganizationId,
-      earnings,
     );
+    if (balance.availableAtoms < PUBLISHER_MINIMUM_PAYOUT_ATOMS) {
+      throw new Error(
+        "Available earnings must reach the $10.00 payout minimum",
+      );
+    }
+    const amount = atomsToUsdCents(balance.availableAtoms);
+    const amountAtoms = amount * ACCOUNTING_ATOMS_PER_USD_CENT;
+    const remainderAtoms = balance.availableAtoms - amountAtoms;
+    const idempotencyKey = `publisher-transfer:${args.publisherOrganizationId}:${balance.sequence + 1}`;
     const existing = await ctx.db
       .query("publisherTransfers")
       .withIndex("by_idempotency_key", (q) =>
@@ -410,31 +386,38 @@ export const preparePublisherTransfer = internalMutation({
         transferId: existing._id,
         connectedAccountId: existing.stripeConnectedAccountId,
         amount: existing.amount,
+        remainderAtoms: existing.remainderAtoms,
         currency: existing.currency,
         idempotencyKey: existing.idempotencyKey,
       };
     }
+    const now = Date.now();
     const transferId = await ctx.db.insert("publisherTransfers", {
       publisherOrganizationId: args.publisherOrganizationId,
       stripeConnectedAccountId: profile.stripeConnectedAccountId,
       amount,
+      amountAtoms,
+      remainderAtoms,
       currency: "usd",
       idempotencyKey,
       status: "created",
       createdAt: now,
       updatedAt: now,
     });
-    for (const earning of earnings) {
-      await ctx.db.patch(earning._id, {
-        status: "allocated_to_transfer",
-        transferId,
-        updatedAt: now,
-      });
-    }
+    await appendPublisherSettlementEntry(ctx, {
+      balance,
+      kind: "transfer_allocation",
+      availableDeltaAtoms: -amountAtoms,
+      allocatedDeltaAtoms: amountAtoms,
+      paidDeltaAtoms: 0,
+      refId: `publisher:transfer:${transferId}:allocated`,
+      transferId,
+    });
     return {
       transferId,
       connectedAccountId: profile.stripeConnectedAccountId,
       amount,
+      remainderAtoms,
       currency: "usd",
       idempotencyKey,
     };
@@ -458,7 +441,27 @@ export const markPublisherTransferSucceeded = internalMutation({
   handler: async (ctx, args): Promise<void> => {
     const transfer = await ctx.db.get(args.transferId);
     if (transfer === null) throw new Error("Publisher transfer not found");
+    if (transfer.status === "succeeded") {
+      if (transfer.stripeTransferId !== args.stripeTransferId) {
+        throw new Error("Publisher transfer Stripe id changed");
+      }
+      return;
+    }
+    if (transfer.status === "reversed") return;
     const now = Date.now();
+    const balance = await getOrCreatePublisherBalance(
+      ctx,
+      transfer.publisherOrganizationId,
+    );
+    await appendPublisherSettlementEntry(ctx, {
+      balance,
+      kind: "transfer_succeeded",
+      availableDeltaAtoms: 0,
+      allocatedDeltaAtoms: -transfer.amountAtoms,
+      paidDeltaAtoms: transfer.amountAtoms,
+      refId: `publisher:transfer:${transfer._id}:succeeded`,
+      transferId: transfer._id,
+    });
     await ctx.db.patch(transfer._id, {
       stripeTransferId: args.stripeTransferId,
       status: "succeeded",
@@ -466,19 +469,6 @@ export const markPublisherTransferSucceeded = internalMutation({
       attemptedAt: now,
       updatedAt: now,
     });
-    const earnings = await ctx.db
-      .query("publisherEarnings")
-      .withIndex("by_publisher", (q) =>
-        q.eq("publisherOrganizationId", transfer.publisherOrganizationId),
-      )
-      .filter((q) => q.eq(q.field("transferId"), transfer._id))
-      .collect();
-    for (const earning of earnings) {
-      await ctx.db.patch(earning._id, {
-        status: "transferred",
-        updatedAt: now,
-      });
-    }
   },
 });
 
@@ -494,16 +484,6 @@ export const markPublisherTransferFailed = internalMutation({
       attemptedAt: now,
       updatedAt: now,
     });
-    const earnings = await ctx.db
-      .query("publisherEarnings")
-      .withIndex("by_publisher", (q) =>
-        q.eq("publisherOrganizationId", transfer.publisherOrganizationId),
-      )
-      .filter((q) => q.eq(q.field("transferId"), transfer._id))
-      .collect();
-    for (const earning of earnings) {
-      await ctx.db.patch(earning._id, { status: "failed", updatedAt: now });
-    }
     const org = await ctx.db.get(transfer.publisherOrganizationId);
     if (org !== null) {
       await createNotification(ctx, {
@@ -535,27 +515,47 @@ export const projectStripeTransfer = internalMutation({
       )
       .unique();
     if (transfer === null) return;
+    if (transfer.status === args.state) return;
+    if (
+      (transfer.status === "succeeded" || transfer.status === "reversed") &&
+      args.state === "failed"
+    ) {
+      return;
+    }
+    if (transfer.status === "reversed" && args.state === "succeeded") return;
     const now = Date.now();
+    const balance = await getOrCreatePublisherBalance(
+      ctx,
+      transfer.publisherOrganizationId,
+    );
+    if (args.state === "succeeded") {
+      await appendPublisherSettlementEntry(ctx, {
+        balance,
+        kind: "transfer_succeeded",
+        availableDeltaAtoms: 0,
+        allocatedDeltaAtoms: -transfer.amountAtoms,
+        paidDeltaAtoms: transfer.amountAtoms,
+        refId: `publisher:transfer:${transfer._id}:succeeded`,
+        transferId: transfer._id,
+      });
+    } else if (args.state === "reversed") {
+      await appendPublisherSettlementEntry(ctx, {
+        balance,
+        kind: "transfer_reversal",
+        availableDeltaAtoms: transfer.amountAtoms,
+        allocatedDeltaAtoms:
+          transfer.status === "succeeded" ? 0 : -transfer.amountAtoms,
+        paidDeltaAtoms:
+          transfer.status === "succeeded" ? -transfer.amountAtoms : 0,
+        refId: `publisher:transfer:${transfer._id}:reversed`,
+        transferId: transfer._id,
+      });
+    }
     await ctx.db.patch(transfer._id, {
       status: args.state,
       failureReason: args.failureReason,
       updatedAt: now,
     });
-    const earnings = await ctx.db
-      .query("publisherEarnings")
-      .withIndex("by_publisher", (q) =>
-        q.eq("publisherOrganizationId", transfer.publisherOrganizationId),
-      )
-      .filter((q) => q.eq(q.field("transferId"), transfer._id))
-      .collect();
-    const earningStatus =
-      args.state === "succeeded" ? "transferred" : args.state;
-    for (const earning of earnings) {
-      await ctx.db.patch(earning._id, {
-        status: earningStatus,
-        updatedAt: now,
-      });
-    }
   },
 });
 
@@ -689,6 +689,12 @@ export const getPayoutState = query({
       )
       .order("desc")
       .take(100);
+    const publisherBalance = await ctx.db
+      .query("publisherBalances")
+      .withIndex("by_publisher", (q) =>
+        q.eq("publisherOrganizationId", organization._id),
+      )
+      .unique();
     const transfers = await ctx.db
       .query("publisherTransfers")
       .withIndex("by_publisher", (q) =>
@@ -711,25 +717,24 @@ export const getPayoutState = query({
             .take(100);
     const totals = {
       pendingRisk: 0,
-      available: 0,
-      allocated: 0,
-      transferred: 0,
+      available: atomsToCredits(publisherBalance?.availableAtoms ?? 0),
+      allocated: atomsToCredits(publisherBalance?.allocatedAtoms ?? 0),
+      transferred: atomsToCredits(publisherBalance?.paidAtoms ?? 0),
       reversed: 0,
       failed: 0,
     };
     for (const earning of earnings) {
       if (earning.status === "pending_risk")
-        totals.pendingRisk += earning.netCredits;
-      else if (earning.status === "available")
-        totals.available += earning.netCredits;
-      else if (earning.status === "allocated_to_transfer")
-        totals.allocated += earning.netCredits;
-      else if (earning.status === "transferred")
-        totals.transferred += earning.netCredits;
-      else if (earning.status === "reversed")
-        totals.reversed += earning.netCredits;
-      else totals.failed += earning.netCredits;
+        totals.pendingRisk += atomsToCredits(
+          earning.publisherNetAtoms - earning.clawedBackAtoms,
+        );
+      totals.reversed += atomsToCredits(earning.clawedBackAtoms);
     }
+    totals.failed = atomsToCredits(
+      transfers
+        .filter((transfer) => transfer.status === "failed")
+        .reduce((sum, transfer) => sum + transfer.amountAtoms, 0),
+    );
     const profileStatus: ConnectProfileStatus =
       profile === null || profile.stripeConnectedAccountId === undefined
         ? "not_started"
@@ -746,11 +751,16 @@ export const getPayoutState = query({
       },
       earnings: {
         ...totals,
+        minimumPayoutCredits: atomsToCredits(PUBLISHER_MINIMUM_PAYOUT_ATOMS),
+        canTransfer:
+          (publisherBalance?.availableAtoms ?? 0) >=
+          PUBLISHER_MINIMUM_PAYOUT_ATOMS,
         rows: earnings.map((earning) => ({
           id: earning._id,
           grossCredits: earning.grossCredits,
-          platformFeeCredits: earning.platformFeeCredits,
-          netCredits: earning.netCredits,
+          platformFeeCredits: atomsToCredits(earning.platformFeeAtoms),
+          netCredits: atomsToCredits(earning.publisherNetAtoms),
+          clawedBackCredits: atomsToCredits(earning.clawedBackAtoms),
           availableAt: earning.availableAt,
           status: earning.status,
           createdAt: earning.createdAt,

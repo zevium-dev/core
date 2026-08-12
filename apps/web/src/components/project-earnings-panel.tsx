@@ -129,7 +129,7 @@ function EarningsStatGrid({
         <CardHeader className="pb-2">
           <CardDescription>Net credits (you keep 95%)</CardDescription>
           <CardTitle className="text-2xl tabular-nums">
-            <NumberTicker value={netCredits} />
+            <NumberTicker value={netCredits} decimals={2} />
           </CardTitle>
         </CardHeader>
         <CardContent className="text-xs text-muted-foreground">
