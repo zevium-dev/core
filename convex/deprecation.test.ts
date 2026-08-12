@@ -115,7 +115,6 @@ describe("specs.deprecateVersion — auth", () => {
         projectId: seed.projectId,
         draftHash: await draftFingerprint(SPEC_BODY),
         serverOrigin: "https://api.example.com",
-        credentialRevision: 0,
         status: "ok",
         testedAt: Date.now(),
       });
@@ -385,7 +384,6 @@ describe("specs.publish — fires spec_published notification", () => {
         projectId: seed.projectId,
         draftHash: await draftFingerprint(SPEC_BODY),
         serverOrigin: "https://api.example.com",
-        credentialRevision: 0,
         status: "ok",
         testedAt: Date.now(),
       });
@@ -430,7 +428,6 @@ describe("specs.publish — fires spec_published notification", () => {
         projectId: seed.projectId,
         draftHash: await draftFingerprint(SPEC_BODY),
         serverOrigin: "https://api.example.com",
-        credentialRevision: 0,
         status: "ok",
         testedAt: Date.now(),
       });
@@ -491,7 +488,6 @@ describe("specs.publish — gateway-safe pricing invariant", () => {
         projectId: seed.projectId,
         draftHash: await draftFingerprint(unsafeSpec),
         serverOrigin: "https://api.example.com",
-        credentialRevision: 0,
         status: "ok",
         testedAt: Date.now(),
       });

@@ -154,14 +154,6 @@ export const publish = mutation({
       .query("specs")
       .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
       .unique();
-    const credentialRows = await ctx.db
-      .query("upstreamCredentials")
-      .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
-      .collect();
-    const credentialRevision = credentialRows.reduce(
-      (latest, row) => Math.max(latest, row.updatedAt),
-      0,
-    );
     const readiness = await ctx.db
       .query("publishReadiness")
       .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
@@ -169,7 +161,6 @@ export const publish = mutation({
     const readinessState = await readinessValidity(
       readiness,
       draftForReadiness?.draft ?? null,
-      credentialRevision,
     );
     if (!readinessState.current) {
       const readinessMessages = {
@@ -182,7 +173,7 @@ export const publish = mutation({
         draft_changed:
           "The saved draft changed after the connection test. Run it again before publishing.",
         credentials_changed:
-          "Credentials changed after the connection test. Run it again before publishing.",
+          "Run a new credential-free reachability test before publishing.",
       } as const;
       return {
         ok: false,
@@ -268,6 +259,10 @@ export const publish = mutation({
     // Rebuild the catalogue search embedding from the new published spec.
     await ctx.scheduler.runAfter(0, internal.search.embedProject, {
       projectId: args.projectId,
+    });
+    await ctx.scheduler.runAfter(0, internal.quality.syncPublishedTarget, {
+      projectId: args.projectId,
+      specVersionId: versionId,
     });
 
     return {

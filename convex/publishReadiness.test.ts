@@ -10,8 +10,8 @@ import {
 } from "./publishReadiness";
 import schema from "./schema";
 
-const lookupMock = vi.hoisted(() => vi.fn());
-vi.mock("node:dns/promises", () => ({ lookup: lookupMock }));
+const probeMock = vi.hoisted(() => vi.fn());
+vi.mock("./qualityProbeAction", () => ({ probePublicHttps: probeMock }));
 
 const modules = import.meta.glob("./**/*.ts");
 const DRAFT_A = JSON.stringify({
@@ -69,17 +69,40 @@ function asAdmin(t: TestConvex<typeof schema>) {
 }
 
 describe("publish readiness validity", () => {
-  it("rejects missing, stale, changed, credential-changed, and non-2xx readiness", async () => {
+  it("requires org admin membership before any upstream probe", async () => {
+    const t = convexTest(schema, modules);
+    const { projectId } = await seed(t);
+    await expect(
+      t
+        .withIdentity({
+          subject: "member",
+          org_id: "org_readiness",
+          org_role: "org:member",
+        })
+        .action(api.publishReadinessAction.testConnection, { projectId }),
+    ).rejects.toThrow("organization admins");
+    await expect(
+      t
+        .withIdentity({
+          subject: "foreign_admin",
+          org_id: "org_foreign",
+          org_role: "org:admin",
+        })
+        .action(api.publishReadinessAction.testConnection, { projectId }),
+    ).rejects.toThrow("Not a member");
+    expect(probeMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects missing, stale, changed, and non-passing readiness", async () => {
     const now = Date.UTC(2026, 6, 19, 12, 0, 0);
     const hash = await draftFingerprint(DRAFT_A);
     const passing = {
       status: "ok",
       draftHash: hash,
-      credentialRevision: 10,
       testedAt: now,
     };
 
-    await expect(readinessValidity(null, DRAFT_A, 10, now)).resolves.toEqual({
+    await expect(readinessValidity(null, DRAFT_A, now)).resolves.toEqual({
       current: false,
       reason: "missing",
     });
@@ -87,31 +110,20 @@ describe("publish readiness validity", () => {
       readinessValidity(
         { ...passing, status: "reachable_unconfirmed" },
         DRAFT_A,
-        10,
         now,
       ),
     ).resolves.toEqual({ current: false, reason: "status_not_ok" });
     await expect(
-      readinessValidity(passing, DRAFT_A, 10, now + READINESS_TTL_MS + 1),
+      readinessValidity(passing, DRAFT_A, now + READINESS_TTL_MS + 1),
     ).resolves.toEqual({ current: false, reason: "expired" });
-    await expect(readinessValidity(passing, DRAFT_B, 10, now)).resolves.toEqual(
-      {
-        current: false,
-        reason: "draft_changed",
-      },
-    );
-    await expect(readinessValidity(passing, DRAFT_A, 11, now)).resolves.toEqual(
-      {
-        current: false,
-        reason: "credentials_changed",
-      },
-    );
-    await expect(readinessValidity(passing, DRAFT_A, 10, now)).resolves.toEqual(
-      {
-        current: true,
-        reason: null,
-      },
-    );
+    await expect(readinessValidity(passing, DRAFT_B, now)).resolves.toEqual({
+      current: false,
+      reason: "draft_changed",
+    });
+    await expect(readinessValidity(passing, DRAFT_A, now)).resolves.toEqual({
+      current: true,
+      reason: null,
+    });
   });
 
   it("does not let a delayed test overwrite readiness for a newer saved draft", async () => {
@@ -136,7 +148,6 @@ describe("publish readiness validity", () => {
         projectId,
         draftHash: newHash,
         serverOrigin: "https://api.example.com",
-        credentialRevision: 0,
       }),
     ).toBe(true);
     expect(
@@ -144,7 +155,6 @@ describe("publish readiness validity", () => {
         projectId,
         draftHash: oldHash,
         serverOrigin: "https://api.example.com",
-        credentialRevision: 0,
       }),
     ).toBe(false);
 
@@ -167,7 +177,6 @@ describe("publish readiness validity", () => {
         projectId,
         draftHash: oldHash,
         serverOrigin: "https://api.example.com",
-        credentialRevision: 0,
       }),
     ).toBe(true);
 
@@ -182,7 +191,6 @@ describe("publish readiness validity", () => {
         projectId,
         draftHash: oldHash,
         serverOrigin: "https://api.example.com",
-        credentialRevision: 0,
       }),
     ).toBe(false);
     const readiness = await t.run(async (ctx) =>
@@ -210,7 +218,6 @@ describe("publish readiness validity", () => {
         projectId,
         draftHash: initialSave.draftHash,
         serverOrigin: "https://api.example.com",
-        credentialRevision: 0,
       }),
     ).toBe(true);
 
@@ -254,19 +261,18 @@ describe("publish readiness validity", () => {
         lastSavedAt: Date.now(),
       });
     });
-    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
-    vi.stubGlobal("fetch", fetchMock);
-    lookupMock.mockResolvedValue([{ address: "93.184.216.34", family: 4 }]);
-    try {
-      await expect(
-        asAdmin(t).action(api.publishReadinessAction.testConnection, {
-          projectId,
-        }),
-      ).resolves.toMatchObject({ status: "ok", statusCode: 204 });
-    } finally {
-      vi.unstubAllGlobals();
-      lookupMock.mockReset();
-    }
+    probeMock.mockResolvedValueOnce({
+      outcome: "success",
+      statusCode: 204,
+      latencyMs: 12,
+      finalOrigin: "https://example.com",
+      message: "Upstream responded successfully without credentials.",
+    });
+    await expect(
+      asAdmin(t).action(api.publishReadinessAction.testConnection, {
+        projectId,
+      }),
+    ).resolves.toMatchObject({ status: "ok", statusCode: 204 });
 
     await expect(
       asAdmin(t).query(api.publishReadiness.getCurrent, { projectId }),
@@ -276,10 +282,111 @@ describe("publish readiness validity", () => {
       readiness: {
         status: "ok",
         draftHash: await draftFingerprint(ACTION_DRAFT),
-        credentialRevision: 0,
         serverOrigin: "https://example.com",
       },
     });
-    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(probeMock).toHaveBeenCalledWith("https://example.com");
+  });
+
+  it("treats an unauthenticated HTTP response as reachable without inventing HTTP success", async () => {
+    const t = convexTest(schema, modules);
+    const { projectId } = await seed(t);
+    probeMock.mockResolvedValueOnce({
+      outcome: "http_error",
+      statusCode: 401,
+      latencyMs: 9,
+      finalOrigin: "https://api.example.com",
+      message:
+        "Upstream is reachable without credentials but returned HTTP 401.",
+    });
+    await expect(
+      asAdmin(t).action(api.publishReadinessAction.testConnection, {
+        projectId,
+      }),
+    ).resolves.toMatchObject({
+      status: "reachable_unconfirmed",
+      statusCode: 401,
+    });
+    await expect(
+      asAdmin(t).query(api.publishReadiness.getCurrent, { projectId }),
+    ).resolves.toMatchObject({ current: true });
+  });
+
+  it("blocks 5xx and invalidates an earlier pass for the same draft", async () => {
+    const t = convexTest(schema, modules);
+    const { projectId } = await seed(t);
+    probeMock.mockResolvedValueOnce({
+      outcome: "success",
+      statusCode: 204,
+      latencyMs: 8,
+      finalOrigin: "https://api.example.com",
+      message: "Upstream responded successfully without credentials.",
+    });
+    await asAdmin(t).action(api.publishReadinessAction.testConnection, {
+      projectId,
+    });
+    await expect(
+      asAdmin(t).query(api.publishReadiness.getCurrent, { projectId }),
+    ).resolves.toMatchObject({ current: true });
+
+    probeMock.mockResolvedValueOnce({
+      outcome: "http_error",
+      statusCode: 503,
+      latencyMs: 11,
+      finalOrigin: "https://api.example.com",
+      message:
+        "Upstream is reachable without credentials but returned HTTP 503.",
+    });
+    await expect(
+      asAdmin(t).action(api.publishReadinessAction.testConnection, {
+        projectId,
+      }),
+    ).resolves.toMatchObject({
+      status: "reachable_unconfirmed",
+      statusCode: 503,
+      message: expect.stringContaining("Publication gate failed"),
+    });
+    await expect(
+      asAdmin(t).query(api.publishReadiness.getCurrent, { projectId }),
+    ).resolves.toMatchObject({ current: false, reason: "missing" });
+    await expect(
+      asAdmin(t).mutation(api.specs.publish, {
+        projectId,
+        version: "1.0.0",
+      }),
+    ).resolves.toMatchObject({
+      ok: false,
+      issues: [expect.objectContaining({ path: "readiness" })],
+    });
+    expect(
+      await t.run(async (ctx) => ctx.db.query("specVersions").collect()),
+    ).toHaveLength(0);
+  });
+
+  it("does not let a delayed failed probe clear a pass for a newer draft", async () => {
+    const t = convexTest(schema, modules);
+    const { projectId } = await seed(t);
+    const oldHash = await draftFingerprint(DRAFT_A);
+    await asAdmin(t).mutation(api.specs.saveDraft, {
+      projectId,
+      spec: DRAFT_B,
+    });
+    const newHash = await draftFingerprint(DRAFT_B);
+    expect(
+      await t.mutation(internal.publishReadiness.recordPassingTest, {
+        projectId,
+        draftHash: newHash,
+        serverOrigin: "https://api.example.com",
+      }),
+    ).toBe(true);
+    expect(
+      await t.mutation(internal.publishReadiness.clearPassingTest, {
+        projectId,
+        draftHash: oldHash,
+      }),
+    ).toBe(false);
+    await expect(
+      asAdmin(t).query(api.publishReadiness.getCurrent, { projectId }),
+    ).resolves.toMatchObject({ current: true });
   });
 });

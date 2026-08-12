@@ -104,9 +104,125 @@ export default defineSchema({
     projectId: v.id("projects"),
     draftHash: v.string(),
     serverOrigin: v.string(),
-    credentialRevision: v.number(),
     status: v.literal("ok"),
     testedAt: v.number(),
+  }).index("by_project", ["projectId"]),
+
+  // Credential-free, DNS-pinned scheduled checks for the latest published spec.
+  qualityProbeTargets: defineTable({
+    projectId: v.id("projects"),
+    specVersionId: v.id("specVersions"),
+    url: v.string(),
+    enabled: v.boolean(),
+    nextProbeAt: v.number(),
+    leaseId: v.optional(v.string()),
+    leaseExpiresAt: v.optional(v.number()),
+    updatedAt: v.number(),
+  })
+    .index("by_project", ["projectId"])
+    .index("by_due", ["enabled", "nextProbeAt"]),
+
+  qualityProbeResults: defineTable({
+    projectId: v.id("projects"),
+    specVersionId: v.id("specVersions"),
+    executionId: v.string(),
+    checkedAt: v.number(),
+    outcome: v.union(
+      v.literal("success"),
+      v.literal("http_error"),
+      v.literal("timeout"),
+      v.literal("dns_error"),
+      v.literal("tls_error"),
+      v.literal("network_error"),
+      v.literal("blocked_target"),
+    ),
+    statusCode: v.optional(v.number()),
+    latencyMs: v.optional(v.number()),
+  })
+    .index("by_execution", ["executionId"])
+    .index("by_project_checked", ["projectId", "checkedAt"])
+    .index("by_project_version_checked", [
+      "projectId",
+      "specVersionId",
+      "checkedAt",
+    ]),
+
+  // One query-ready truth row per project; derived only from stored samples.
+  qualitySnapshots: defineTable({
+    projectId: v.id("projects"),
+    specVersionId: v.id("specVersions"),
+    sampleSize: v.number(),
+    responseCount: v.number(),
+    successCount: v.number(),
+    availabilityPercent: v.optional(v.number()),
+    successRatePercent: v.optional(v.number()),
+    latencyP50Ms: v.optional(v.number()),
+    insufficientData: v.boolean(),
+    lastOutcome: v.optional(
+      v.union(
+        v.literal("success"),
+        v.literal("http_error"),
+        v.literal("timeout"),
+        v.literal("dns_error"),
+        v.literal("tls_error"),
+        v.literal("network_error"),
+        v.literal("blocked_target"),
+      ),
+    ),
+    lastCheckedAt: v.optional(v.number()),
+    publishedAt: v.number(),
+    updatedAt: v.number(),
+  }).index("by_project", ["projectId"]),
+
+  qualityIncidents: defineTable({
+    projectId: v.id("projects"),
+    specVersionId: v.id("specVersions"),
+    openedAt: v.number(),
+    closedAt: v.optional(v.number()),
+    status: v.union(
+      v.literal("open"),
+      v.literal("resolved"),
+      v.literal("superseded"),
+    ),
+    startedByExecutionId: v.string(),
+    resolvedByExecutionId: v.optional(v.string()),
+    failureCount: v.number(),
+    lastOutcome: v.union(
+      v.literal("success"),
+      v.literal("http_error"),
+      v.literal("timeout"),
+      v.literal("dns_error"),
+      v.literal("tls_error"),
+      v.literal("network_error"),
+      v.literal("blocked_target"),
+    ),
+    updatedAt: v.number(),
+  })
+    .index("by_project_opened", ["projectId", "openedAt"])
+    .index("by_project_status", ["projectId", "status"])
+    .index("by_project_version_status", [
+      "projectId",
+      "specVersionId",
+      "status",
+    ]),
+
+  listingSubscriptions: defineTable({
+    consumerOrganizationId: v.id("organizations"),
+    projectId: v.id("projects"),
+    active: v.boolean(),
+    createdBy: v.string(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_consumer_project", ["consumerOrganizationId", "projectId"])
+    .index("by_consumer_active", ["consumerOrganizationId", "active"])
+    .index("by_project_active", ["projectId", "active"]),
+
+  // Transactional count avoids table scans on publisher/status surfaces.
+  listingSubscriptionAggregates: defineTable({
+    projectId: v.id("projects"),
+    count: v.number(),
+    updatedAt: v.number(),
   }).index("by_project", ["projectId"]),
 
   // Mutable draft OpenAPI document per project
@@ -217,6 +333,11 @@ export default defineSchema({
       "keyId",
       "at",
     ])
+    .index("by_org_project_settlement", [
+      "organizationId",
+      "projectId",
+      "settleRefId",
+    ])
     .index("by_project_at", ["projectId", "at"])
     .index("by_at", ["at"]),
 
@@ -229,6 +350,81 @@ export default defineSchema({
   })
     .index("by_project_consumer", ["projectId", "consumerOrganizationId"])
     .index("by_consumer", ["consumerOrganizationId", "projectId"]),
+
+  reviews: defineTable({
+    projectId: v.id("projects"),
+    consumerOrganizationId: v.id("organizations"),
+    rating: v.number(),
+    body: v.optional(v.string()),
+    active: v.boolean(),
+    hidden: v.boolean(),
+    createdBy: v.string(),
+    updatedBy: v.string(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_consumer_project", ["consumerOrganizationId", "projectId"])
+    .index("by_project_visible", [
+      "projectId",
+      "active",
+      "hidden",
+      "updatedAt",
+    ]),
+
+  reviewEdits: defineTable({
+    reviewId: v.id("reviews"),
+    actorUserId: v.string(),
+    action: v.union(
+      v.literal("created"),
+      v.literal("edited"),
+      v.literal("withdrawn"),
+      v.literal("reactivated"),
+    ),
+    previousRating: v.optional(v.number()),
+    previousBody: v.optional(v.string()),
+    rating: v.optional(v.number()),
+    body: v.optional(v.string()),
+    at: v.number(),
+  }).index("by_review", ["reviewId", "at"]),
+
+  reviewAggregates: defineTable({
+    projectId: v.id("projects"),
+    count: v.number(),
+    ratingSum: v.number(),
+    oneStar: v.number(),
+    twoStar: v.number(),
+    threeStar: v.number(),
+    fourStar: v.number(),
+    fiveStar: v.number(),
+    updatedAt: v.number(),
+  }).index("by_project", ["projectId"]),
+
+  publisherReviewResponses: defineTable({
+    reviewId: v.id("reviews"),
+    body: v.string(),
+    createdBy: v.string(),
+    updatedBy: v.string(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index("by_review", ["reviewId"]),
+
+  publisherReviewResponseEdits: defineTable({
+    responseId: v.id("publisherReviewResponses"),
+    actorUserId: v.string(),
+    previousBody: v.optional(v.string()),
+    body: v.string(),
+    at: v.number(),
+  }).index("by_response", ["responseId", "at"]),
+
+  reviewModerationActions: defineTable({
+    reviewId: v.id("reviews"),
+    action: v.union(v.literal("hidden"), v.literal("restored")),
+    reason: v.string(),
+    actorUserId: v.string(),
+    at: v.number(),
+  })
+    .index("by_review", ["reviewId", "at"])
+    .index("by_actor", ["actorUserId", "at"]),
 
   // In-app notifications (org-scoped, idempotent by refId)
   notifications: defineTable({

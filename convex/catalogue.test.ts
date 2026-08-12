@@ -266,6 +266,67 @@ describe("catalogue.listPublic", () => {
     expect(bySlug.cheap).not.toHaveProperty("organizationId");
   });
 
+  it("shows quality only when snapshot belongs to latest immutable version", async () => {
+    const t = convexTest(schema, modules);
+    const seed = await seedCatalogue(t);
+    const version1 = await t.run(async (ctx) =>
+      ctx.db
+        .query("specVersions")
+        .withIndex("by_project", (q) => q.eq("projectId", seed.cheapId))
+        .unique(),
+    );
+    if (version1 === null) throw new Error("version missing");
+    await t.run(async (ctx) => {
+      await ctx.db.insert("qualitySnapshots", {
+        projectId: seed.cheapId,
+        specVersionId: version1._id,
+        sampleSize: 3,
+        responseCount: 3,
+        successCount: 3,
+        availabilityPercent: 100,
+        successRatePercent: 100,
+        latencyP50Ms: 12,
+        insufficientData: false,
+        lastOutcome: "success",
+        lastCheckedAt: seed.t2,
+        publishedAt: version1.publishedAt,
+        updatedAt: seed.t2,
+      });
+    });
+    const current = await t.query(api.catalogue.listPublic, { sort: "name" });
+    expect(
+      current.items.find((item) => item.slug === "cheap")?.quality,
+    ).toMatchObject({
+      sampleSize: 3,
+      successRatePercent: 100,
+    });
+    const detail = await t.query(api.catalogue.getPublicDetail, {
+      publisherHandle: "pub-co",
+      projectSlug: "cheap",
+    });
+    expect(detail?.quality).toMatchObject({ latencyP50Ms: 12 });
+
+    await t.run(async (ctx) => {
+      await ctx.db.insert("specVersions", {
+        projectId: seed.cheapId,
+        version: "2.0.0",
+        publishedAt: seed.t2 + 1,
+        spec: openapiSpec({
+          "/ping": { get: { "x-zevium-cost": 2 } },
+        }),
+      });
+    });
+    const stale = await t.query(api.catalogue.listPublic, { sort: "name" });
+    expect(
+      stale.items.find((item) => item.slug === "cheap")?.quality,
+    ).toBeNull();
+    const staleDetail = await t.query(api.catalogue.getPublicDetail, {
+      publisherHandle: "pub-co",
+      projectSlug: "cheap",
+    });
+    expect(staleDetail?.quality).toBeNull();
+  });
+
   it("filters by hasFreeTier", async () => {
     const t = convexTest(schema, modules);
     await seedCatalogue(t);
