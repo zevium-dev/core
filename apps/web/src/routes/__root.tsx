@@ -1,6 +1,5 @@
 import { ClerkProvider, useAuth } from "@clerk/tanstack-react-start";
 import { auth } from "@clerk/tanstack-react-start/server";
-import { shadcn } from "@clerk/ui/themes";
 import { TanStackDevtools } from "@tanstack/react-devtools";
 import {
   HeadContent,
@@ -16,6 +15,7 @@ import { ThemeProvider } from "#/components/theme-provider";
 import { Toaster } from "#/components/ui/sonner";
 import { TooltipProvider } from "#/components/ui/tooltip";
 import { readClientClerkAuth } from "#/lib/clerk-client";
+import { clerkShadcnTheme } from "#/lib/clerk-theme";
 import type { RouterContext } from "#/router";
 
 import appCss from "../styles.css?url";
@@ -118,7 +118,7 @@ function RootComponent() {
   const { convexQueryClient } = Route.useRouteContext();
 
   return (
-    <ClerkProvider appearance={{ theme: shadcn }}>
+    <ClerkProvider appearance={{ theme: clerkShadcnTheme }}>
       <ConvexProviderWithClerk
         client={convexQueryClient.convexClient}
         useAuth={useAuth}

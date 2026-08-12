@@ -1,9 +1,10 @@
 
 [hooks]
-postinstall = "yes | npm i -g pnpm && pnpm install"
+postinstall = "pnpm install"
 
 [tasks]
 ci = "pnpm run ci:pr"
 
 [tools]
-node = "lts"
+node = "24.15.0"
+pnpm = "11.8.0"

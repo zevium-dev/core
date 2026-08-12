@@ -5,8 +5,10 @@
   "scripts": {
     "dev": "concurrently --kill-others-on-fail --names web,convex,gateway --prefix-colors blue,magenta,green \"pnpm --filter web dev\" \"pnpm exec convex dev\" \"pnpm --filter @zevium/gateway dev\"",
     "build": "turbo build",
+    "audit:ci": "node scripts/audit.mjs",
     "ci:pr": "prettier --check . && pnpm typecheck && pnpm test",
-    "test": "turbo test && pnpm test:convex",
+    "test": "turbo test && pnpm test:convex && pnpm test:audit",
+    "test:audit": "node --test scripts/audit.test.mjs",
     "test:convex": "vitest run --config convex/vitest.config.ts",
     "typecheck": "turbo typecheck",
     "lint": "turbo lint",
@@ -15,7 +17,7 @@
     "e2e": "bash e2e/run-all.sh"
   },
   "devDependencies": {
-    "@clerk/backend": "^3.14.0",
+    "@clerk/backend": "^3.16.4",
     "@edge-runtime/vm": "^5.0.0",
     "concurrently": "^10.0.4",
     "convex-test": "^0.0.54",

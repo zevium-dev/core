@@ -3,7 +3,6 @@ import {
   OrganizationProfile,
   useOrganization,
 } from "@clerk/tanstack-react-start";
-import { shadcn } from "@clerk/ui/themes";
 import { convexQuery, useConvexMutation } from "@convex-dev/react-query";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link, createFileRoute } from "@tanstack/react-router";
@@ -42,6 +41,7 @@ import { Skeleton } from "#/components/ui/skeleton";
 import { Input } from "#/components/ui/input";
 import { Label } from "#/components/ui/label";
 import { api } from "#/lib/convex-api";
+import { clerkShadcnTheme } from "#/lib/clerk-theme";
 import { humanError } from "#/lib/human-error";
 import { connectedAccountDisplay } from "#/lib/stripe-ui";
 
@@ -108,7 +108,7 @@ function OrgHomePage() {
         <OrganizationProfile
           routing="hash"
           appearance={{
-            theme: shadcn,
+            theme: clerkShadcnTheme,
             elements: {
               rootBox: "w-full!",
               cardBox: "w-full! max-w-none!",
@@ -395,7 +395,7 @@ function NoActiveOrg() {
 
       <div className="flex justify-center">
         <OrganizationList
-          appearance={{ theme: shadcn }}
+          appearance={{ theme: clerkShadcnTheme }}
           hidePersonal={false}
           afterSelectOrganizationUrl="/app/org"
           afterCreateOrganizationUrl="/app"

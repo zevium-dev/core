@@ -1,6 +1,7 @@
 import { SignIn } from "@clerk/tanstack-react-start";
-import { shadcn } from "@clerk/ui/themes";
 import { createFileRoute } from "@tanstack/react-router";
+
+import { clerkShadcnTheme } from "#/lib/clerk-theme";
 
 export const Route = createFileRoute("/sign-in/$")({
   component: Page,
@@ -12,7 +13,7 @@ export const Route = createFileRoute("/sign-in/$")({
 function Page() {
   return (
     <div className="flex min-h-svh items-center justify-center p-4">
-      <SignIn appearance={{ theme: shadcn }} />
+      <SignIn appearance={{ theme: clerkShadcnTheme }} />
     </div>
   );
 }

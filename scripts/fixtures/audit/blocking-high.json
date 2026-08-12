@@ -1,0 +1,33 @@
+{
+  "advisories": {
+    "1003": {
+      "id": 1003,
+      "github_advisory_id": "GHSA-high-test",
+      "module_name": "unsafe-package",
+      "severity": "high",
+      "title": "Unsafe <script>alert('hostile')</script> & package",
+      "vulnerable_versions": "<3.0.0",
+      "patched_versions": ">=3.0.0",
+      "recommendation": "Upgrade now.",
+      "findings": [
+        {
+          "version": "2.0.0",
+          "paths": [".>parent@1.0.0>unsafe-package@2.0.0"]
+        }
+      ]
+    }
+  },
+  "metadata": {
+    "vulnerabilities": {
+      "info": 0,
+      "low": 0,
+      "moderate": 0,
+      "high": 1,
+      "critical": 0
+    },
+    "dependencies": 2,
+    "devDependencies": 0,
+    "optionalDependencies": 0,
+    "totalDependencies": 2
+  }
+}

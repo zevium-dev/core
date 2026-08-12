@@ -1,5 +1,5 @@
 @import "tailwindcss";
-@import "@clerk/ui/themes/shadcn.css";
+@source "./lib/clerk-theme.ts";
 @import "tw-animate-css";
 @plugin "@tailwindcss/typography";
 

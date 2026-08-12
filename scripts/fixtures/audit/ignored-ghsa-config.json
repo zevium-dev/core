@@ -1,0 +1,5 @@
+{
+  "auditConfig": {
+    "ignoreGhsas": ["GHSA-hostile-test"]
+  }
+}
