@@ -21,6 +21,7 @@
   "devDependencies": {
     "@clerk/backend": "3.14.0",
     "@edge-runtime/vm": "^5.0.0",
+    "agent-browser": "0.27.1",
     "concurrently": "^10.0.4",
     "convex-test": "^0.0.54",
     "prettier": "^3.6.0",

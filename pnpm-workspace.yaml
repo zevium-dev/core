@@ -5,6 +5,7 @@ packages:
 allowBuilds:
   "@parcel/watcher": true
   "@tailwindcss/oxide": true
+  agent-browser: true
   bufferutil: true
   core-js: true
   esbuild: true

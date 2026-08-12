@@ -300,7 +300,6 @@ jobs:
       ACTIVE_RELEASE: ${{ needs.classify.outputs.active_release }}
       LIFECYCLE_PHASE: ${{ needs.classify.outputs.phase }}
       LIFECYCLE_DIGEST: ${{ needs.classify.outputs.digest }}
-      VERSION_TAG: ${{ needs.classify.outputs.release }}-${{ github.run_id }}-${{ github.run_attempt }}
       RELEASE_PROBE_MOCK_PATH: ${{ vars.RELEASE_PROBE_MOCK_PATH }}
       RELEASE_PROBE_MOCK_METHOD: ${{ vars.RELEASE_PROBE_MOCK_METHOD }}
       RELEASE_PROBE_METERED_PATH: ${{ vars.RELEASE_PROBE_METERED_PATH }}
@@ -360,26 +359,19 @@ jobs:
           pnpm --filter gateway exec wrangler deployments list --json > release-evidence/gateway-before.json
           pnpm --filter web exec wrangler deployments list --config dist/server/wrangler.json --json \
             > release-evidence/web-before.json
-          gateway_previous="$(node .github/scripts/release-state.mjs get-active-version release-evidence/gateway-before.json)"
-          web_previous="$(node .github/scripts/release-state.mjs get-active-version release-evidence/web-before.json)"
-          RELEASE_SHA="$RELEASE_SHA" ACTIVE_RELEASE="$ACTIVE_RELEASE" DIGEST="$LIFECYCLE_DIGEST" \
-            PHASE="$LIFECYCLE_PHASE" GATEWAY_PREVIOUS="$gateway_previous" WEB_PREVIOUS="$web_previous" \
-            RUN_ID="$GITHUB_RUN_ID" RUN_ATTEMPT="$GITHUB_RUN_ATTEMPT" node -e '
-              const fs=require("node:fs");
-              const value={schemaVersion:2,release:process.env.RELEASE_SHA,protectedTarget:process.env.LIFECYCLE_TARGET_SHA,
-                protectedBase:process.env.LIFECYCLE_PROTECTED_BASE,activeBase:process.env.ACTIVE_RELEASE,
-                lifecycle:{digest:process.env.DIGEST,phase:process.env.PHASE,rollbackAllowed:false},
-                source:{runId:Number(process.env.RUN_ID),runAttempt:Number(process.env.RUN_ATTEMPT),workflowPath:".github/workflows/gateway-do-lifecycle.yml"},
-                gateway:{previousVersion:process.env.GATEWAY_PREVIOUS},web:{previousVersion:process.env.WEB_PREVIOUS},
-                state:"intent_before_mutation",createdAt:new Date().toISOString()};
-              fs.writeFileSync("release-evidence/lifecycle-recovery-manifest.json",JSON.stringify(value,null,2)+"\n",{mode:0o600});
-            '
+          node .github/scripts/release-state.mjs capture release-evidence
+          node .github/scripts/release-state.mjs intent release-evidence \
+            "$RELEASE_SHA" "$ACTIVE_RELEASE" "$LIFECYCLE_DIGEST" "$LIFECYCLE_PHASE" false \
+            "$GITHUB_RUN_ID" .github/workflows/gateway-do-lifecycle.yml "$GITHUB_RUN_ATTEMPT" \
+            "$LIFECYCLE_TARGET_SHA" "$LIFECYCLE_PROTECTED_BASE"
+          lineage_token="$(node .github/scripts/release-state.mjs get-lineage-token release-evidence)"
+          echo "RECOVERY_LINEAGE_TOKEN=$lineage_token" >> "$GITHUB_ENV"
 
       - name: Persist lifecycle recovery manifest before first mutation
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: lifecycle-recovery-${{ github.run_id }}-${{ github.run_attempt }}
-          path: release-evidence/lifecycle-recovery-manifest.json
+          name: lifecycle-recovery-initial-${{ github.run_id }}-${{ github.run_attempt }}
+          path: release-evidence/recovery-manifest.json
           if-no-files-found: error
           retention-days: 30
 
@@ -412,7 +404,7 @@ jobs:
           pnpm --filter web exec wrangler deployments list --config dist/server/wrangler.json --json \
             > "$RUNNER_TEMP/lifecycle-web-before.json"
           web_previous="$(node .github/scripts/release-state.mjs get-active-version "$RUNNER_TEMP/lifecycle-web-before.json")"
-          recorded_web="$(MANIFEST=release-evidence/lifecycle-recovery-manifest.json node -e '
+          recorded_web="$(MANIFEST=release-evidence/recovery-manifest.json node -e '
             process.stdout.write(JSON.parse(require("node:fs").readFileSync(process.env.MANIFEST,"utf8")).web.previousVersion)
           ')"
           test "$web_previous" = "$recorded_web"
@@ -424,7 +416,7 @@ jobs:
           '
           WRANGLER_OUTPUT_FILE=release-evidence/web-upload.ndjson \
             pnpm --filter web exec wrangler versions upload --config dist/server/wrangler.json \
-              --strict --tag "$VERSION_TAG"
+              --strict --tag "$RECOVERY_LINEAGE_TOKEN"
 
       - name: Guard active DO metadata and deploy lifecycle atomically
         env:
@@ -441,7 +433,7 @@ jobs:
           git show "$ACTIVE_RELEASE:apps/gateway/wrangler.jsonc" > "$RUNNER_TEMP/lifecycle-active.jsonc"
           pnpm --filter gateway exec wrangler deployments list --json > "$RUNNER_TEMP/lifecycle-gateway-before.json"
           gateway_previous="$(node .github/scripts/release-state.mjs get-active-version "$RUNNER_TEMP/lifecycle-gateway-before.json")"
-          recorded_gateway="$(MANIFEST=release-evidence/lifecycle-recovery-manifest.json node -e '
+          recorded_gateway="$(MANIFEST=release-evidence/recovery-manifest.json node -e '
             process.stdout.write(JSON.parse(require("node:fs").readFileSync(process.env.MANIFEST,"utf8")).gateway.previousVersion)
           ')"
           test "$gateway_previous" = "$recorded_gateway"
@@ -454,7 +446,7 @@ jobs:
             --expected-version="$gateway_previous" \
             --phase="$LIFECYCLE_PHASE"
           pnpm --filter gateway exec wrangler deploy --strict \
-            --tag "$VERSION_TAG" --var "ZEVIUM_RELEASE:$RELEASE_SHA" \
+            --tag "$RECOVERY_LINEAGE_TOKEN" --var "ZEVIUM_RELEASE:$RELEASE_SHA" \
             --var "CONVEX_URL:$PRODUCTION_CONVEX_URL" \
             --var "CONVEX_SITE_URL:$PRODUCTION_CONVEX_SITE_URL"
           pnpm --filter gateway exec wrangler deployments list --json \
@@ -473,22 +465,14 @@ jobs:
         run: |
           gateway_candidate="$(node .github/scripts/release-state.mjs get-active-version release-evidence/gateway-after-lifecycle.json)"
           web_candidate="$(node .github/scripts/release-state.mjs get-uploaded-version release-evidence/web-upload.ndjson)"
-          GATEWAY_CANDIDATE="$gateway_candidate" WEB_CANDIDATE="$web_candidate" node -e '
-            const fs=require("node:fs");
-            const path="release-evidence/lifecycle-recovery-manifest.json";
-            const value=JSON.parse(fs.readFileSync(path,"utf8"));
-            value.gateway.candidateVersion=process.env.GATEWAY_CANDIDATE;
-            value.web.candidateVersion=process.env.WEB_CANDIDATE;
-            value.state="lifecycle_applied_gateway_active_web_pending";
-            value.updatedAt=new Date().toISOString();
-            fs.writeFileSync(path,JSON.stringify(value,null,2)+"\n",{mode:0o600});
-          '
+          node .github/scripts/release-state.mjs finalize-attempt release-evidence \
+            "$gateway_candidate" "$web_candidate" lifecycle_applied_gateway_active_web_pending
 
       - name: Upload final lifecycle recovery manifest
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: lifecycle-recovery-final-${{ github.run_id }}-${{ github.run_attempt }}
-          path: release-evidence/lifecycle-recovery-manifest.json
+          path: release-evidence/recovery-manifest.json
           if-no-files-found: error
           retention-days: 30
 
@@ -505,7 +489,7 @@ jobs:
           test "$(gh api "repos/$GITHUB_REPOSITORY/commits/develop" --jq .sha)" = "$RELEASE_SHA"
           pnpm --filter web exec wrangler deployments list --config dist/server/wrangler.json --json \
             > "$RUNNER_TEMP/lifecycle-web-current.json"
-          web_previous="$(MANIFEST=release-evidence/lifecycle-recovery-manifest.json node -e '
+          web_previous="$(MANIFEST=release-evidence/recovery-manifest.json node -e '
             process.stdout.write(JSON.parse(require("node:fs").readFileSync(process.env.MANIFEST,"utf8")).web.previousVersion)
           ')"
           test "$(node .github/scripts/release-state.mjs get-active-version \
@@ -523,10 +507,10 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
-          gateway_candidate="$(MANIFEST=release-evidence/lifecycle-recovery-manifest.json node -e '
+          gateway_candidate="$(MANIFEST=release-evidence/recovery-manifest.json node -e '
             process.stdout.write(JSON.parse(require("node:fs").readFileSync(process.env.MANIFEST,"utf8")).gateway.candidateVersion)
           ')"
-          web_candidate="$(MANIFEST=release-evidence/lifecycle-recovery-manifest.json node -e '
+          web_candidate="$(MANIFEST=release-evidence/recovery-manifest.json node -e '
             process.stdout.write(JSON.parse(require("node:fs").readFileSync(process.env.MANIFEST,"utf8")).web.candidateVersion)
           ')"
           pnpm --filter gateway exec wrangler deployments list --json > "$RUNNER_TEMP/lifecycle-gateway-after.json"

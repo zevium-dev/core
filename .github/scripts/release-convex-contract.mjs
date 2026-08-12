@@ -1,8 +1,51 @@
+import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
+import { pathToFileURL } from "node:url";
 import ts from "typescript";
 
 const SHA_RE = /^[0-9a-f]{40}$/;
-const FUNCTION_KINDS = new Set(["query", "mutation", "action"]);
+const FUNCTION_KINDS = new Set([
+  "query",
+  "mutation",
+  "action",
+  "internalQuery",
+  "internalMutation",
+  "internalAction",
+]);
+const INDEX_METHODS = new Set(["index", "searchIndex", "vectorIndex"]);
+const NUMBER_VALIDATORS = new Set(["number", "float64"]);
+const KNOWN_VALIDATOR_IMPORTS = new Map([
+  [
+    "convex/server:paginationOptsValidator",
+    {
+      type: "object",
+      source: "convex/server:paginationOptsValidator",
+      fields: {
+        numItems: { type: "number" },
+        cursor: {
+          type: "union",
+          values: [{ type: "null" }, { type: "string" }],
+        },
+        endCursor: {
+          type: "optional",
+          value: {
+            type: "union",
+            values: [{ type: "null" }, { type: "string" }],
+          },
+        },
+        id: { type: "optional", value: { type: "number" } },
+        maximumRowsRead: {
+          type: "optional",
+          value: { type: "number" },
+        },
+        maximumBytesRead: {
+          type: "optional",
+          value: { type: "number" },
+        },
+      },
+    },
+  ],
+]);
 
 function git(args) {
   return execFileSync("git", args, {
@@ -27,6 +70,12 @@ function equal(left, right) {
   return JSON.stringify(canonical(left)) === JSON.stringify(canonical(right));
 }
 
+function digest(value) {
+  return createHash("sha256")
+    .update(JSON.stringify(canonical(value)))
+    .digest("hex");
+}
+
 function propertyName(node) {
   if (
     ts.isIdentifier(node) ||
@@ -38,97 +87,258 @@ function propertyName(node) {
   throw new Error("Convex contract contains a computed property name");
 }
 
-function literal(node) {
-  if (ts.isStringLiteral(node) || ts.isNumericLiteral(node)) return node.text;
-  if (node.kind === ts.SyntaxKind.TrueKeyword) return true;
-  if (node.kind === ts.SyntaxKind.FalseKeyword) return false;
-  if (node.kind === ts.SyntaxKind.NullKeyword) return null;
+function unwrap(node) {
+  let current = node;
+  while (
+    ts.isParenthesizedExpression(current) ||
+    ts.isAsExpression(current) ||
+    ts.isTypeAssertionExpression(current) ||
+    ts.isSatisfiesExpression(current) ||
+    ts.isNonNullExpression(current)
+  ) {
+    current = current.expression;
+  }
+  return current;
+}
+
+function literalAst(node) {
+  const current = unwrap(node);
+  if (
+    ts.isStringLiteral(current) ||
+    ts.isNoSubstitutionTemplateLiteral(current)
+  ) {
+    return { kind: "string", value: current.text };
+  }
+  if (ts.isNumericLiteral(current)) {
+    const value = Number(current.text);
+    if (!Number.isFinite(value))
+      throw new Error("Numeric literal is not finite");
+    return { kind: "number", value };
+  }
+  if (ts.isBigIntLiteral(current)) {
+    return { kind: "bigint", value: current.text.replace(/n$/, "") };
+  }
+  if (
+    ts.isPrefixUnaryExpression(current) &&
+    (current.operator === ts.SyntaxKind.MinusToken ||
+      current.operator === ts.SyntaxKind.PlusToken)
+  ) {
+    if (ts.isNumericLiteral(current.operand)) {
+      const magnitude = Number(current.operand.text);
+      const value =
+        current.operator === ts.SyntaxKind.MinusToken ? -magnitude : magnitude;
+      if (!Number.isFinite(value))
+        throw new Error("Numeric literal is not finite");
+      return { kind: "number", value };
+    }
+    if (ts.isBigIntLiteral(current.operand)) {
+      const magnitude = current.operand.text.replace(/n$/, "");
+      return {
+        kind: "bigint",
+        value:
+          current.operator === ts.SyntaxKind.MinusToken
+            ? `-${magnitude}`
+            : magnitude,
+      };
+    }
+  }
+  if (current.kind === ts.SyntaxKind.TrueKeyword) {
+    return { kind: "boolean", value: true };
+  }
+  if (current.kind === ts.SyntaxKind.FalseKeyword) {
+    return { kind: "boolean", value: false };
+  }
+  if (current.kind === ts.SyntaxKind.NullKeyword) {
+    return { kind: "null", value: null };
+  }
   return undefined;
 }
 
-function objectValidator(node, constants, resolving) {
-  if (!ts.isObjectLiteralExpression(node)) {
+function resolveConstant(node, constants, resolving) {
+  const current = unwrap(node);
+  if (!ts.isIdentifier(current)) return current;
+  const value = constants.get(current.text);
+  if (value === undefined) return current;
+  if (value.knownValidator !== undefined) {
+    throw new Error(
+      `Known validator ${current.text} used outside a validator position`,
+    );
+  }
+  if (resolving.has(current.text)) {
+    throw new Error(`Recursive Convex contract constant: ${current.text}`);
+  }
+  return resolveConstant(
+    value,
+    constants,
+    new Set([...resolving, current.text]),
+  );
+}
+
+function expressionAst(node, constants, resolving = new Set()) {
+  const current = resolveConstant(node, constants, resolving);
+  const scalar = literalAst(current);
+  if (scalar !== undefined) return scalar;
+  if (ts.isIdentifier(current)) {
+    return { kind: "reference", name: current.text };
+  }
+  if (ts.isArrayLiteralExpression(current)) {
+    return {
+      kind: "array",
+      values: current.elements.map((entry) =>
+        expressionAst(entry, constants, resolving),
+      ),
+    };
+  }
+  if (ts.isObjectLiteralExpression(current)) {
+    const fields = {};
+    for (const property of current.properties) {
+      if (ts.isPropertyAssignment(property)) {
+        const name = propertyName(property.name);
+        if (Object.hasOwn(fields, name)) {
+          throw new Error(`Duplicate Convex contract object field: ${name}`);
+        }
+        fields[name] = expressionAst(
+          property.initializer,
+          constants,
+          resolving,
+        );
+      } else if (ts.isShorthandPropertyAssignment(property)) {
+        const name = property.name.text;
+        if (Object.hasOwn(fields, name)) {
+          throw new Error(`Duplicate Convex contract object field: ${name}`);
+        }
+        fields[name] = expressionAst(property.name, constants, resolving);
+      } else {
+        throw new Error(
+          "Convex contract object contains an unsupported member",
+        );
+      }
+    }
+    return { kind: "object", fields };
+  }
+  throw new Error("Unsupported Convex contract expression");
+}
+
+function literalString(node, constants, name) {
+  const value = expressionAst(node, constants);
+  if (value.kind !== "string")
+    throw new Error(`${name} is not a string literal`);
+  return value.value;
+}
+
+function stringArray(node, constants, name) {
+  const value = expressionAst(node, constants);
+  if (
+    value.kind !== "array" ||
+    value.values.some((entry) => entry.kind !== "string")
+  ) {
+    throw new Error(`${name} must be an array of string literals`);
+  }
+  return value.values.map((entry) => entry.value);
+}
+
+function objectValidator(node, constants, resolving = new Set()) {
+  const current = resolveConstant(node, constants, resolving);
+  if (!ts.isObjectLiteralExpression(current)) {
     throw new Error("Convex validator object must be an object literal");
   }
   const fields = {};
-  for (const property of node.properties) {
+  for (const property of current.properties) {
     if (!ts.isPropertyAssignment(property)) {
       throw new Error("Convex validator object contains an unsupported member");
     }
-    fields[propertyName(property.name)] = validator(
-      property.initializer,
-      constants,
-      resolving,
-    );
+    const name = propertyName(property.name);
+    if (Object.hasOwn(fields, name)) {
+      throw new Error(`Duplicate Convex validator field: ${name}`);
+    }
+    fields[name] = validator(property.initializer, constants, resolving);
   }
   return { type: "object", fields };
 }
 
 function validator(node, constants, resolving = new Set()) {
-  if (ts.isParenthesizedExpression(node)) {
-    return validator(node.expression, constants, resolving);
-  }
-  if (ts.isIdentifier(node)) {
-    const value = constants.get(node.text);
-    if (value === undefined) return { type: "reference", name: node.text };
-    if (resolving.has(node.text)) {
-      throw new Error(`Recursive Convex validator: ${node.text}`);
+  const original = unwrap(node);
+  if (ts.isIdentifier(original)) {
+    const value = constants.get(original.text);
+    if (value === undefined) {
+      throw new Error(`Unresolved Convex validator: ${original.text}`);
     }
-    return validator(value, constants, new Set([...resolving, node.text]));
+    if (value.knownValidator !== undefined) {
+      return structuredClone(value.knownValidator);
+    }
+    if (resolving.has(original.text)) {
+      throw new Error(`Recursive Convex validator: ${original.text}`);
+    }
+    return validator(value, constants, new Set([...resolving, original.text]));
   }
-  if (ts.isObjectLiteralExpression(node)) {
-    return objectValidator(node, constants, resolving);
+  if (ts.isObjectLiteralExpression(original)) {
+    return objectValidator(original, constants, resolving);
   }
   if (
-    !ts.isCallExpression(node) ||
-    !ts.isPropertyAccessExpression(node.expression) ||
-    !ts.isIdentifier(node.expression.expression) ||
-    node.expression.expression.text !== "v"
+    !ts.isCallExpression(original) ||
+    !ts.isPropertyAccessExpression(original.expression) ||
+    !ts.isIdentifier(original.expression.expression) ||
+    original.expression.expression.text !== "v"
   ) {
     throw new Error("Unsupported Convex validator expression");
   }
-  const kind = node.expression.name.text;
+  const kind = original.expression.name.text;
   if (
-    ["string", "number", "float64", "boolean", "bytes", "any", "null"].includes(
-      kind,
-    )
+    [
+      "string",
+      "number",
+      "float64",
+      "int64",
+      "boolean",
+      "bytes",
+      "any",
+      "null",
+    ].includes(kind)
   ) {
-    if (node.arguments.length !== 0) {
+    if (original.arguments.length !== 0) {
       throw new Error(`v.${kind} validator has unexpected arguments`);
     }
-    return { type: kind === "float64" ? "number" : kind };
+    return { type: kind };
   }
   if (kind === "id") {
-    const table =
-      node.arguments.length === 1 ? literal(node.arguments[0]) : null;
-    if (typeof table !== "string") throw new Error("v.id table is not literal");
-    return { type: "id", table };
+    if (original.arguments.length !== 1)
+      throw new Error("v.id arity is invalid");
+    return {
+      type: "id",
+      table: literalString(original.arguments[0], constants, "v.id table"),
+    };
   }
   if (kind === "literal") {
-    if (node.arguments.length !== 1)
+    if (original.arguments.length !== 1) {
       throw new Error("v.literal arity is invalid");
-    const value = literal(node.arguments[0]);
+    }
+    const value = literalAst(
+      resolveConstant(original.arguments[0], constants, resolving),
+    );
     if (value === undefined) throw new Error("v.literal value is not literal");
     return { type: "literal", value };
   }
   if (["optional", "array"].includes(kind)) {
-    if (node.arguments.length !== 1)
+    if (original.arguments.length !== 1) {
       throw new Error(`v.${kind} arity is invalid`);
+    }
     return {
       type: kind,
-      value: validator(node.arguments[0], constants, resolving),
+      value: validator(original.arguments[0], constants, resolving),
     };
   }
   if (kind === "object") {
-    if (node.arguments.length !== 1)
+    if (original.arguments.length !== 1) {
       throw new Error("v.object arity is invalid");
-    return objectValidator(node.arguments[0], constants, resolving);
+    }
+    return objectValidator(original.arguments[0], constants, resolving);
   }
   if (kind === "union") {
-    if (node.arguments.length === 0) throw new Error("v.union cannot be empty");
+    if (original.arguments.length === 0)
+      throw new Error("v.union cannot be empty");
     return {
       type: "union",
-      values: node.arguments
+      values: original.arguments
         .map((argument) => validator(argument, constants, resolving))
         .sort((left, right) =>
           JSON.stringify(canonical(left)).localeCompare(
@@ -137,11 +347,27 @@ function validator(node, constants, resolving = new Set()) {
         ),
     };
   }
+  if (kind === "record") {
+    if (original.arguments.length !== 2) {
+      throw new Error("v.record arity is invalid");
+    }
+    return {
+      type: "record",
+      keys: validator(original.arguments[0], constants, resolving),
+      values: validator(original.arguments[1], constants, resolving),
+    };
+  }
   throw new Error(`Unsupported Convex validator v.${kind}`);
 }
 
 function accepts(candidate, base) {
   if (equal(candidate, base) || candidate.type === "any") return true;
+  if (
+    NUMBER_VALIDATORS.has(candidate.type) &&
+    NUMBER_VALIDATORS.has(base.type)
+  ) {
+    return true;
+  }
   if (candidate.type === "optional") {
     return accepts(
       candidate.value,
@@ -159,12 +385,24 @@ function accepts(candidate, base) {
     return base.values.every((value) => accepts(candidate, value));
   }
   if (base.type === "literal") {
-    if (candidate.type === typeof base.value) return true;
-    if (candidate.type === "number" && typeof base.value === "number")
+    if (base.value.kind === "string" && candidate.type === "string")
       return true;
+    if (base.value.kind === "number" && NUMBER_VALIDATORS.has(candidate.type)) {
+      return true;
+    }
+    if (base.value.kind === "bigint" && candidate.type === "int64") return true;
+    if (base.value.kind === "boolean" && candidate.type === "boolean")
+      return true;
+    if (base.value.kind === "null" && candidate.type === "null") return true;
   }
   if (candidate.type === "array" && base.type === "array") {
     return accepts(candidate.value, base.value);
+  }
+  if (candidate.type === "record" && base.type === "record") {
+    return (
+      accepts(candidate.keys, base.keys) &&
+      accepts(candidate.values, base.values)
+    );
   }
   if (candidate.type === "object" && base.type === "object") {
     for (const [name, baseField] of Object.entries(base.fields)) {
@@ -221,6 +459,21 @@ function parseSource(path, text) {
 function constantsIn(source) {
   const constants = new Map();
   for (const statement of source.statements) {
+    if (
+      ts.isImportDeclaration(statement) &&
+      ts.isStringLiteral(statement.moduleSpecifier) &&
+      statement.importClause?.namedBindings &&
+      ts.isNamedImports(statement.importClause.namedBindings)
+    ) {
+      for (const element of statement.importClause.namedBindings.elements) {
+        const imported = element.propertyName?.text ?? element.name.text;
+        const identity = `${statement.moduleSpecifier.text}:${imported}`;
+        const knownValidator = KNOWN_VALIDATOR_IMPORTS.get(identity);
+        if (knownValidator !== undefined) {
+          constants.set(element.name.text, { knownValidator });
+        }
+      }
+    }
     if (!ts.isVariableStatement(statement)) continue;
     for (const declaration of statement.declarationList.declarations) {
       if (ts.isIdentifier(declaration.name) && declaration.initializer) {
@@ -231,42 +484,88 @@ function constantsIn(source) {
   return constants;
 }
 
-function objectProperty(node, name) {
-  if (!ts.isObjectLiteralExpression(node)) return undefined;
-  for (const property of node.properties) {
+function objectProperty(node, name, constants) {
+  const current = resolveConstant(node, constants, new Set());
+  if (!ts.isObjectLiteralExpression(current)) return undefined;
+  const seen = new Set();
+  for (const property of current.properties) {
     if (
-      ts.isShorthandPropertyAssignment(property) &&
-      property.name.text === name
+      !ts.isShorthandPropertyAssignment(property) &&
+      !ts.isPropertyAssignment(property)
     ) {
+      throw new Error("Convex contract object contains an unsupported member");
+    }
+    const currentName = propertyName(property.name);
+    if (seen.has(currentName)) {
+      throw new Error(`Duplicate Convex contract property: ${currentName}`);
+    }
+    seen.add(currentName);
+  }
+  for (const property of current.properties) {
+    const currentName = propertyName(property.name);
+    if (ts.isShorthandPropertyAssignment(property) && currentName === name) {
       return property.name;
     }
-    if (
-      ts.isPropertyAssignment(property) &&
-      propertyName(property.name) === name
-    ) {
+    if (ts.isPropertyAssignment(property) && currentName === name) {
       return property.initializer;
     }
   }
   return undefined;
 }
 
+function indexDefinition(method, args, constants) {
+  if (args.length !== 2) throw new Error(`Convex ${method} arity is invalid`);
+  const name = literalString(args[0], constants, "Convex index name");
+  if (method === "index") {
+    return {
+      method,
+      name,
+      fields: stringArray(args[1], constants, `Convex index ${name} fields`),
+    };
+  }
+  const config = expressionAst(args[1], constants);
+  if (config.kind !== "object") {
+    throw new Error(
+      `Convex ${method} ${name} config must be an object literal`,
+    );
+  }
+  const fieldName = method === "searchIndex" ? "searchField" : "vectorField";
+  if (config.fields[fieldName]?.kind !== "string") {
+    throw new Error(`Convex ${method} ${name} ${fieldName} is not literal`);
+  }
+  if (
+    config.fields.filterFields !== undefined &&
+    (config.fields.filterFields.kind !== "array" ||
+      config.fields.filterFields.values.some(
+        (entry) => entry.kind !== "string",
+      ))
+  ) {
+    throw new Error(`Convex ${method} ${name} filterFields are not literal`);
+  }
+  if (
+    method === "vectorIndex" &&
+    (config.fields.dimensions?.kind !== "number" ||
+      !Number.isSafeInteger(config.fields.dimensions.value) ||
+      config.fields.dimensions.value <= 0)
+  ) {
+    throw new Error(`Convex vectorIndex ${name} dimensions are invalid`);
+  }
+  return { method, name, config };
+}
+
 function tableDefinition(node, constants) {
   const indexes = [];
-  let current = node;
+  let current = resolveConstant(node, constants, new Set());
   while (
     ts.isCallExpression(current) &&
     ts.isPropertyAccessExpression(current.expression)
   ) {
     const method = current.expression.name.text;
-    if (!["index", "searchIndex", "vectorIndex"].includes(method)) {
+    if (!INDEX_METHODS.has(method)) {
       throw new Error(`Unsupported Convex table method: ${method}`);
     }
-    const name =
-      current.arguments.length > 0 ? literal(current.arguments[0]) : null;
-    if (typeof name !== "string")
-      throw new Error("Convex index name is not literal");
-    indexes.push({ method, name });
-    current = current.expression.expression;
+    indexes.push(indexDefinition(method, [...current.arguments], constants));
+    current = unwrap(current.expression.expression);
   }
   if (
     !ts.isCallExpression(current) ||
@@ -293,20 +592,27 @@ function schemaInventory(source, constants) {
     !ts.isCallExpression(exportDefault.expression) ||
     !ts.isIdentifier(exportDefault.expression.expression) ||
     exportDefault.expression.expression.text !== "defineSchema" ||
-    exportDefault.expression.arguments.length !== 1 ||
-    !ts.isObjectLiteralExpression(exportDefault.expression.arguments[0])
+    exportDefault.expression.arguments.length !== 1
   ) {
     throw new Error("convex/schema.ts must export defineSchema object literal");
   }
+  const schema = resolveConstant(
+    exportDefault.expression.arguments[0],
+    constants,
+    new Set(),
+  );
+  if (!ts.isObjectLiteralExpression(schema)) {
+    throw new Error("convex/schema.ts must export defineSchema object literal");
+  }
   const tables = {};
-  for (const property of exportDefault.expression.arguments[0].properties) {
+  for (const property of schema.properties) {
     if (!ts.isPropertyAssignment(property)) {
       throw new Error("Convex schema contains unsupported table syntax");
     }
-    tables[propertyName(property.name)] = tableDefinition(
-      property.initializer,
-      constants,
-    );
+    const name = propertyName(property.name);
+    if (Object.hasOwn(tables, name))
+      throw new Error(`Duplicate Convex table: ${name}`);
+    tables[name] = tableDefinition(property.initializer, constants);
   }
   return tables;
 }
@@ -317,98 +623,241 @@ function exported(statement) {
   );
 }
 
-function functionInventory(path, source, constants) {
-  const functions = {};
+function exportedBindings(source) {
+  const bindings = new Map();
   for (const statement of source.statements) {
-    if (!ts.isVariableStatement(statement) || !exported(statement)) continue;
-    for (const declaration of statement.declarationList.declarations) {
-      if (
-        !ts.isIdentifier(declaration.name) ||
-        !declaration.initializer ||
-        !ts.isCallExpression(declaration.initializer) ||
-        !ts.isIdentifier(declaration.initializer.expression) ||
-        !FUNCTION_KINDS.has(declaration.initializer.expression.text) ||
-        declaration.initializer.arguments.length !== 1
-      ) {
-        continue;
+    if (ts.isVariableStatement(statement) && exported(statement)) {
+      for (const declaration of statement.declarationList.declarations) {
+        if (ts.isIdentifier(declaration.name)) {
+          bindings.set(declaration.name.text, declaration.name.text);
+        }
       }
-      const definition = declaration.initializer.arguments[0];
-      const args = objectProperty(definition, "args");
-      if (args === undefined) {
-        throw new Error(
-          `Convex function ${path}:${declaration.name.text} has no args`,
+    }
+    if (
+      ts.isExportDeclaration(statement) &&
+      statement.moduleSpecifier === undefined &&
+      statement.exportClause &&
+      ts.isNamedExports(statement.exportClause)
+    ) {
+      for (const element of statement.exportClause.elements) {
+        bindings.set(
+          element.propertyName?.text ?? element.name.text,
+          element.name.text,
         );
       }
-      const returns = objectProperty(definition, "returns");
-      functions[
-        `${path.slice("convex/".length, -3)}:${declaration.name.text}`
-      ] = {
-        kind: declaration.initializer.expression.text,
-        args: objectValidator(args, constants),
-        returns: returns === undefined ? null : validator(returns, constants),
-      };
+    }
+  }
+  return bindings;
+}
+
+function registrationAliases(source) {
+  const aliases = new Map([...FUNCTION_KINDS].map((kind) => [kind, kind]));
+  for (const statement of source.statements) {
+    if (
+      !ts.isImportDeclaration(statement) ||
+      !statement.importClause?.namedBindings ||
+      !ts.isNamedImports(statement.importClause.namedBindings)
+    ) {
+      continue;
+    }
+    for (const element of statement.importClause.namedBindings.elements) {
+      const imported = element.propertyName?.text ?? element.name.text;
+      if (FUNCTION_KINDS.has(imported))
+        aliases.set(element.name.text, imported);
+    }
+  }
+  return aliases;
+}
+
+function functionInventory(path, source, constants) {
+  const functions = {};
+  const exports = exportedBindings(source);
+  const aliases = registrationAliases(source);
+
+  function addFunction(exportedName, initializer) {
+    if (
+      !ts.isCallExpression(initializer) ||
+      !ts.isIdentifier(initializer.expression) ||
+      !aliases.has(initializer.expression.text) ||
+      initializer.arguments.length !== 1
+    ) {
+      return;
+    }
+    const definition = initializer.arguments[0];
+    const args = objectProperty(definition, "args", constants);
+    if (args === undefined) {
+      throw new Error(`Convex function ${path}:${exportedName} has no args`);
+    }
+    const argsValidator = validator(args, constants);
+    if (argsValidator.type !== "object") {
+      throw new Error(
+        `Convex function ${path}:${exportedName} args are not an object`,
+      );
+    }
+    const returns = objectProperty(definition, "returns", constants);
+    const identity = `${path.slice("convex/".length, -3)}:${exportedName}`;
+    if (Object.hasOwn(functions, identity)) {
+      throw new Error(`Duplicate Convex function: ${identity}`);
+    }
+    functions[identity] = {
+      kind: aliases.get(initializer.expression.text),
+      args: argsValidator,
+      returns: returns === undefined ? null : validator(returns, constants),
+    };
+  }
+
+  for (const statement of source.statements) {
+    if (!ts.isVariableStatement(statement)) continue;
+    for (const declaration of statement.declarationList.declarations) {
+      if (!ts.isIdentifier(declaration.name) || !declaration.initializer)
+        continue;
+      const exportedName = exports.get(declaration.name.text);
+      const initializer = resolveConstant(
+        declaration.initializer,
+        constants,
+        new Set(),
+      );
+      if (exportedName !== undefined) addFunction(exportedName, initializer);
+    }
+  }
+  for (const statement of source.statements) {
+    if (ts.isExportAssignment(statement) && !statement.isExportEquals) {
+      addFunction(
+        "default",
+        resolveConstant(statement.expression, constants, new Set()),
+      );
     }
   }
   return functions;
 }
 
-function httpInventory(source) {
+function enclosingFunction(node) {
+  let current = node.parent;
+  while (current !== undefined) {
+    if (
+      ts.isFunctionDeclaration(current) ||
+      ts.isFunctionExpression(current) ||
+      ts.isArrowFunction(current)
+    ) {
+      return current;
+    }
+    current = current.parent;
+  }
+  return undefined;
+}
+
+function httpInventory(source, constants) {
   const routes = {};
+  const routers = new Set();
+  for (const statement of source.statements) {
+    if (!ts.isVariableStatement(statement)) continue;
+    for (const declaration of statement.declarationList.declarations) {
+      const initializer =
+        declaration.initializer && unwrap(declaration.initializer);
+      if (
+        ts.isIdentifier(declaration.name) &&
+        initializer &&
+        ts.isCallExpression(initializer) &&
+        ts.isIdentifier(initializer.expression) &&
+        initializer.expression.text === "httpRouter"
+      ) {
+        routers.add(declaration.name.text);
+      }
+    }
+  }
+  if (routers.size === 0)
+    throw new Error("Convex HTTP router declaration is missing");
+  const exportDefault = source.statements.find(ts.isExportAssignment);
+  const exportedRouter = exportDefault && unwrap(exportDefault.expression);
+  if (
+    !exportedRouter ||
+    !ts.isIdentifier(exportedRouter) ||
+    !routers.has(exportedRouter.text)
+  ) {
+    throw new Error("Convex HTTP default export is not an inventoried router");
+  }
+
+  function addRoute(registration, method, path) {
+    const identity = `${method}:${path}`;
+    const value = { registration, method, path };
+    if (Object.hasOwn(routes, identity) && !equal(routes[identity], value)) {
+      throw new Error(`Duplicate Convex HTTP route: ${identity}`);
+    }
+    routes[identity] = value;
+  }
+
+  const factories = new Map();
   function visit(node) {
     if (
       ts.isCallExpression(node) &&
       ts.isPropertyAccessExpression(node.expression) &&
       ts.isIdentifier(node.expression.expression) &&
-      node.expression.expression.text === "http" &&
-      node.expression.name.text === "route" &&
+      routers.has(node.expression.expression.text) &&
+      ["route", "routePrefix"].includes(node.expression.name.text) &&
       node.arguments.length === 1
     ) {
-      const pathNode = objectProperty(node.arguments[0], "path");
-      const methodNode = objectProperty(node.arguments[0], "method");
-      if (pathNode === undefined && methodNode === undefined) {
-        ts.forEachChild(node, visit);
-        return;
+      const registration = node.expression.name.text;
+      const pathKey = registration === "route" ? "path" : "pathPrefix";
+      const pathNode = objectProperty(node.arguments[0], pathKey, constants);
+      const methodNode = objectProperty(node.arguments[0], "method", constants);
+      if (pathNode === undefined || methodNode === undefined) {
+        throw new Error(`Convex HTTP ${registration} identity is incomplete`);
       }
-      const path = pathNode === undefined ? null : literal(pathNode);
-      const method = methodNode === undefined ? null : literal(methodNode);
-      if (
-        pathNode !== undefined &&
-        ts.isShorthandPropertyAssignment(pathNode.parent)
-      ) {
-        // Route factories are represented by their stable declaration call.
-        // A semantic factory change still alters this source file's contract
-        // digest and requires explicit review when a route disappears.
-        const declaredPaths = source.statements
-          .filter(ts.isExpressionStatement)
-          .map((statement) => statement.expression)
-          .filter(
-            (expression) =>
-              ts.isCallExpression(expression) &&
-              ts.isIdentifier(expression.expression) &&
-              expression.expression.text === "stripeWebhookRoute" &&
-              expression.arguments.length > 0,
-          )
-          .map((expression) => literal(expression.arguments[0]))
-          .filter((value) => typeof value === "string");
-        for (const declaredPath of declaredPaths) {
-          routes[`${String(method)}:${declaredPath}`] = true;
+      const method = literalString(methodNode, constants, "Convex HTTP method");
+      const owner = enclosingFunction(node);
+      if (owner === undefined) {
+        addRoute(
+          registration,
+          method,
+          literalString(pathNode, constants, `Convex HTTP ${pathKey}`),
+        );
+      } else if (ts.isFunctionDeclaration(owner) && owner.name) {
+        const path = unwrap(pathNode);
+        if (!ts.isIdentifier(path)) {
+          throw new Error("Convex HTTP route factory path must be a parameter");
         }
-        return;
-      }
-      if (typeof path !== "string" || typeof method !== "string") {
-        const sourceFile = node.getSourceFile();
-        const location = sourceFile.getLineAndCharacterOfPosition(
-          node.getStart(),
+        const parameterIndex = owner.parameters.findIndex(
+          (parameter) =>
+            ts.isIdentifier(parameter.name) &&
+            parameter.name.text === path.text,
         );
-        throw new Error(
-          `Convex HTTP route identity must be literal at ${sourceFile.fileName}:${location.line + 1}`,
-        );
+        if (parameterIndex < 0) {
+          throw new Error("Convex HTTP route factory path is not a parameter");
+        }
+        const entries = factories.get(owner.name.text) ?? [];
+        entries.push({ registration, method, parameterIndex });
+        factories.set(owner.name.text, entries);
+      } else {
+        throw new Error("Unsupported Convex HTTP route factory");
       }
-      routes[`${method}:${path}`] = true;
     }
     ts.forEachChild(node, visit);
   }
   visit(source);
+
+  function visitFactoryCalls(node) {
+    const expression = ts.isCallExpression(node) && unwrap(node.expression);
+    if (expression && ts.isIdentifier(expression)) {
+      const descriptors = factories.get(expression.text);
+      if (descriptors !== undefined) {
+        for (const descriptor of descriptors) {
+          const argument = node.arguments[descriptor.parameterIndex];
+          if (argument === undefined) {
+            throw new Error(
+              "Convex HTTP route factory call has no path argument",
+            );
+          }
+          addRoute(
+            descriptor.registration,
+            descriptor.method,
+            literalString(argument, constants, "Convex HTTP factory path"),
+          );
+        }
+      }
+    }
+    ts.forEachChild(node, visitFactoryCalls);
+  }
+  visitFactoryCalls(source);
   return routes;
 }
 
@@ -427,7 +876,7 @@ export function convexContractAt(sha) {
       functionInventory(path, source, constants),
     );
     if (path === "convex/http.ts") {
-      Object.assign(inventory.routes, httpInventory(source));
+      Object.assign(inventory.routes, httpInventory(source, constants));
     }
   }
   if (Object.keys(inventory.tables).length === 0) {
@@ -437,6 +886,9 @@ export function convexContractAt(sha) {
 }
 
 export function classifyConvexContract(baseSha, candidateSha) {
+  if (!SHA_RE.test(baseSha ?? "") || !SHA_RE.test(candidateSha ?? "")) {
+    throw new Error("Exact Convex contract base and target SHAs are required");
+  }
   const base = convexContractAt(baseSha);
   const candidate = convexContractAt(candidateSha);
   const reasons = [];
@@ -449,13 +901,16 @@ export function classifyConvexContract(baseSha, candidateSha) {
     if (!accepts(next.fields, table.fields)) {
       reasons.push(`table validator narrowed: ${name}`);
     }
-    const candidateIndexes = new Set(
-      next.indexes.map((index) => `${index.method}:${index.name}`),
+    const candidateIndexes = new Map(
+      next.indexes.map((index) => [`${index.method}:${index.name}`, index]),
     );
     for (const index of table.indexes) {
       const identity = `${index.method}:${index.name}`;
-      if (!candidateIndexes.has(identity)) {
+      const candidateIndex = candidateIndexes.get(identity);
+      if (candidateIndex === undefined) {
         reasons.push(`index removed: ${name}.${index.name}`);
+      } else if (!equal(candidateIndex, index)) {
+        reasons.push(`index definition changed: ${name}.${index.name}`);
       }
     }
   }
@@ -466,19 +921,71 @@ export function classifyConvexContract(baseSha, candidateSha) {
       continue;
     }
     if (next.kind !== fn.kind) reasons.push(`function kind changed: ${name}`);
-    if (!accepts(next.args, fn.args))
+    if (!accepts(next.args, fn.args)) {
       reasons.push(`function args narrowed: ${name}`);
+    }
     if (!equal(next.returns, fn.returns)) {
       reasons.push(`function return validator changed: ${name}`);
     }
   }
-  for (const route of Object.keys(base.routes)) {
-    if (candidate.routes[route] !== true)
-      reasons.push(`HTTP route removed: ${route}`);
+  for (const [identity, route] of Object.entries(base.routes)) {
+    const next = candidate.routes[identity];
+    if (next === undefined) {
+      reasons.push(`HTTP route removed: ${identity}`);
+    } else if (!equal(next, route)) {
+      reasons.push(`HTTP route changed: ${identity}`);
+    }
   }
   return {
+    baseSha,
+    candidateSha,
+    baseDigest: digest(base),
+    candidateDigest: digest(candidate),
     hasChange: !equal(base, candidate),
     hasContraction: reasons.length > 0,
-    reasons,
+    reasons: reasons.sort(),
   };
+}
+
+function parseArgs(argv) {
+  const [command, ...raw] = argv;
+  const args = {};
+  for (const entry of raw) {
+    if (!entry.startsWith("--") || !entry.includes("=")) {
+      throw new Error(`Invalid argument: ${entry}`);
+    }
+    const [name, ...value] = entry.slice(2).split("=");
+    if (Object.hasOwn(args, name))
+      throw new Error(`Duplicate argument: ${name}`);
+    args[name] = value.join("=");
+  }
+  return { command, args };
+}
+
+export function run(argv = process.argv.slice(2)) {
+  const { command, args } = parseArgs(argv);
+  if (command === "inventory") {
+    const inventory = convexContractAt(args.sha);
+    process.stdout.write(`${JSON.stringify(inventory)}\n`);
+    return inventory;
+  }
+  if (command === "classify") {
+    const classification = classifyConvexContract(args.base, args.target);
+    process.stdout.write(`${JSON.stringify(classification)}\n`);
+    return classification;
+  }
+  throw new Error(
+    "Usage: release-convex-contract.mjs inventory --sha=<sha> | classify --base=<sha> --target=<sha>",
+  );
+}
+
+if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
+  try {
+    run();
+  } catch (error) {
+    console.error(
+      error instanceof Error ? error.message : "Convex contract check failed",
+    );
+    process.exitCode = 1;
+  }
 }

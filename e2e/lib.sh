@@ -12,6 +12,7 @@ E2E_PASSWORD="${E2E_PASSWORD:-zevium-test-password}"
 E2E_OTP="${E2E_OTP:-424242}"
 E2E_SESSION="${E2E_SESSION:-zevium-e2e}"
 E2E_STEP="${E2E_STEP:-unknown}"
+AGENT_BROWSER_BIN="${AGENT_BROWSER_BIN:-$E2E_ROOT/../node_modules/.bin/agent-browser}"
 
 # Isolate browser session for the whole suite/script run.
 export AGENT_BROWSER_SESSION="$E2E_SESSION"
@@ -19,7 +20,11 @@ export AGENT_BROWSER_SESSION="$E2E_SESSION"
 mkdir -p "$E2E_ARTIFACTS"
 
 ab() {
-  agent-browser "$@"
+  if [[ ! -x "$AGENT_BROWSER_BIN" ]]; then
+    printf '[e2e] locked agent-browser binary missing: %s\n' "$AGENT_BROWSER_BIN" >&2
+    return 127
+  fi
+  "$AGENT_BROWSER_BIN" "$@"
 }
 
 log() {

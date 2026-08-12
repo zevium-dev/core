@@ -6,6 +6,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs";
+import { createHash } from "node:crypto";
 
 const TRANSITIONS = new Map([
   [
@@ -34,6 +35,299 @@ const SHA_RE = /^[0-9a-f]{40}$/;
 const DIGEST_RE = /^[0-9a-f]{64}$/;
 const VERSION_RE =
   /^(?:[0-9a-f]{32}|[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})$/;
+const RECOVERY_WORKFLOW = ".github/workflows/recover-production.yml";
+const ROOT_WORKFLOWS = new Map([
+  [".github/workflows/deploy-production.yml", true],
+  [".github/workflows/gateway-do-lifecycle.yml", false],
+]);
+
+function canonical(value) {
+  if (Array.isArray(value)) return value.map(canonical);
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, entry]) => [key, canonical(entry)]),
+    );
+  }
+  return value;
+}
+
+function equal(left, right) {
+  return JSON.stringify(canonical(left)) === JSON.stringify(canonical(right));
+}
+
+function sha256(value) {
+  return createHash("sha256")
+    .update(JSON.stringify(canonical(value)))
+    .digest("hex");
+}
+
+function runIdentity(value, context, allowRecovery = true) {
+  if (
+    !Number.isSafeInteger(value?.runId) ||
+    value.runId <= 0 ||
+    !Number.isSafeInteger(value?.runAttempt) ||
+    value.runAttempt <= 0 ||
+    (!ROOT_WORKFLOWS.has(value?.workflowPath) &&
+      (!allowRecovery || value?.workflowPath !== RECOVERY_WORKFLOW))
+  ) {
+    throw new Error(`Invalid recovery run identity in ${context}`);
+  }
+  return {
+    runId: value.runId,
+    runAttempt: value.runAttempt,
+    workflowPath: value.workflowPath,
+  };
+}
+
+function lineageIdentity(manifest) {
+  return canonical({
+    schemaVersion: 3,
+    release: manifest.release,
+    activeBase: manifest.activeBase,
+    lifecycle: manifest.lifecycle,
+    root: manifest.root,
+    gatewayPreviousVersion: manifest.gateway?.previousVersion,
+    webPreviousVersion: manifest.web?.previousVersion,
+    ...(manifest.protectedTarget === undefined
+      ? {}
+      : {
+          protectedTarget: manifest.protectedTarget,
+          protectedBase: manifest.protectedBase,
+        }),
+  });
+}
+
+function attemptToken(seed, parentDigest, source) {
+  return sha256({
+    kind: "recovery-candidate-attempt",
+    seed,
+    parentDigest,
+    source,
+  });
+}
+
+function finalizedAttemptDigest(attempt) {
+  return sha256({
+    kind: "recovery-candidate-final",
+    token: attempt.token,
+    gatewayVersion: attempt.gatewayVersion,
+    webVersion: attempt.webVersion,
+  });
+}
+
+function validateBaseManifest(manifest) {
+  if (
+    manifest?.schemaVersion !== 3 ||
+    !SHA_RE.test(manifest.release) ||
+    !SHA_RE.test(manifest.activeBase) ||
+    !DIGEST_RE.test(manifest.lifecycle?.digest) ||
+    !["none", "expand", "contract"].includes(manifest.lifecycle?.phase) ||
+    typeof manifest.lifecycle?.rollbackAllowed !== "boolean" ||
+    !VERSION_RE.test(manifest.gateway?.previousVersion) ||
+    !VERSION_RE.test(manifest.web?.previousVersion)
+  ) {
+    throw new Error("Recovery manifest identity is invalid or incomplete");
+  }
+  const root = runIdentity(manifest.root, "root", false);
+  const source = runIdentity(manifest.source, "source");
+  if (
+    ROOT_WORKFLOWS.get(root.workflowPath) !== manifest.lifecycle.rollbackAllowed
+  ) {
+    throw new Error("Recovery root workflow and rollback policy disagree");
+  }
+  const hasProtectedTarget = manifest.protectedTarget !== undefined;
+  const hasProtectedBase = manifest.protectedBase !== undefined;
+  if (
+    hasProtectedTarget !== hasProtectedBase ||
+    (!manifest.lifecycle.rollbackAllowed &&
+      (!SHA_RE.test(manifest.protectedTarget ?? "") ||
+        !SHA_RE.test(manifest.protectedBase ?? ""))) ||
+    (manifest.lifecycle.rollbackAllowed && hasProtectedTarget)
+  ) {
+    throw new Error("Recovery protected lifecycle identity is invalid");
+  }
+  return { root, source };
+}
+
+function validateLineage(manifest) {
+  const { root, source } = validateBaseManifest(manifest);
+  const lineage = manifest.lineage;
+  const expectedSeed = sha256(lineageIdentity(manifest));
+  if (
+    !DIGEST_RE.test(lineage?.seed ?? "") ||
+    lineage.seed !== expectedSeed ||
+    !DIGEST_RE.test(lineage?.head ?? "") ||
+    !Array.isArray(lineage?.attempts) ||
+    lineage.attempts.length === 0
+  ) {
+    throw new Error("Recovery candidate lineage root is invalid");
+  }
+  let head = expectedSeed;
+  let latestFinal = null;
+  const identities = new Set();
+  for (const [index, rawAttempt] of lineage.attempts.entries()) {
+    const attemptSource = runIdentity(
+      rawAttempt?.source,
+      `lineage attempt ${index}`,
+    );
+    if (index === 0 && !equal(attemptSource, root)) {
+      throw new Error("Recovery candidate lineage root attempt is invalid");
+    }
+    const identity = `${attemptSource.workflowPath}:${attemptSource.runId}:${attemptSource.runAttempt}`;
+    if (identities.has(identity)) {
+      throw new Error("Recovery candidate lineage repeats a workflow attempt");
+    }
+    identities.add(identity);
+    if (
+      rawAttempt.parentDigest !== head ||
+      rawAttempt.token !== attemptToken(expectedSeed, head, attemptSource)
+    ) {
+      throw new Error("Recovery candidate lineage hash chain is invalid");
+    }
+    head = rawAttempt.token;
+    const hasGateway = rawAttempt.gatewayVersion !== undefined;
+    const hasWeb = rawAttempt.webVersion !== undefined;
+    const hasDigest = rawAttempt.digest !== undefined;
+    if (hasGateway !== hasWeb || hasGateway !== hasDigest) {
+      throw new Error("Recovery candidate lineage attempt is partial");
+    }
+    if (hasGateway) {
+      if (
+        !VERSION_RE.test(rawAttempt.gatewayVersion) ||
+        !VERSION_RE.test(rawAttempt.webVersion) ||
+        rawAttempt.digest !== finalizedAttemptDigest(rawAttempt)
+      ) {
+        throw new Error("Recovery candidate lineage finalization is invalid");
+      }
+      head = rawAttempt.digest;
+      latestFinal = rawAttempt;
+    }
+  }
+  if (lineage.head !== head) {
+    throw new Error("Recovery candidate lineage head is invalid");
+  }
+  const latestAttempt = lineage.attempts.at(-1);
+  if (!equal(latestAttempt?.source, source)) {
+    throw new Error("Recovery manifest source is not latest lineage attempt");
+  }
+  const hasGatewayCandidate = manifest.gateway?.candidateVersion !== undefined;
+  const hasWebCandidate = manifest.web?.candidateVersion !== undefined;
+  if (hasGatewayCandidate !== hasWebCandidate) {
+    throw new Error("Recovery artifact has a partial candidate identity");
+  }
+  if (
+    (latestFinal === null && hasGatewayCandidate) ||
+    (latestFinal !== null &&
+      (!hasGatewayCandidate ||
+        manifest.gateway.candidateVersion !== latestFinal.gatewayVersion ||
+        manifest.web.candidateVersion !== latestFinal.webVersion))
+  ) {
+    throw new Error("Recovery manifest candidate is not lineage head");
+  }
+  return { latestFinal, latestAttempt };
+}
+
+export function createRecoveryIntent(manifestInput) {
+  const manifest = canonical(manifestInput);
+  const { root, source: baseSource } = validateBaseManifest(manifest);
+  if (!equal(root, baseSource)) {
+    throw new Error("Initial recovery source must equal root workflow attempt");
+  }
+  const seed = sha256(lineageIdentity(manifest));
+  const source = runIdentity(manifest.source, "initial source", false);
+  const attempt = {
+    parentDigest: seed,
+    source,
+    token: attemptToken(seed, seed, source),
+  };
+  const initialized = {
+    ...manifest,
+    lineage: { seed, head: attempt.token, attempts: [attempt] },
+  };
+  validateLineage(initialized);
+  return initialized;
+}
+
+export function beginRecoveryAttempt(manifestInput, sourceInput) {
+  validateRecoveryArtifact(manifestInput);
+  const source = runIdentity(sourceInput, "new recovery attempt");
+  const manifest = structuredClone(manifestInput);
+  const parentDigest = manifest.lineage.head;
+  manifest.lineage.attempts.push({
+    parentDigest,
+    source,
+    token: attemptToken(manifest.lineage.seed, parentDigest, source),
+  });
+  manifest.lineage.head = manifest.lineage.attempts.at(-1).token;
+  manifest.source = source;
+  manifest.state = "recovery_attempt_bound_before_mutation";
+  manifest.updatedAt = new Date().toISOString();
+  validateRecoveryArtifact(manifest);
+  return manifest;
+}
+
+export function finalizeRecoveryAttempt(
+  manifestInput,
+  gatewayVersion,
+  webVersion,
+  state = "recovery_candidates_bound",
+) {
+  validateRecoveryArtifact(manifestInput);
+  if (!VERSION_RE.test(gatewayVersion) || !VERSION_RE.test(webVersion)) {
+    throw new Error("Recovery candidate versions are invalid");
+  }
+  const manifest = structuredClone(manifestInput);
+  const attempt = manifest.lineage.attempts.at(-1);
+  if (
+    attempt?.digest !== undefined ||
+    manifest.lineage.head !== attempt?.token ||
+    !equal(attempt?.source, manifest.source)
+  ) {
+    throw new Error("Latest recovery attempt cannot be finalized");
+  }
+  attempt.gatewayVersion = gatewayVersion;
+  attempt.webVersion = webVersion;
+  attempt.digest = finalizedAttemptDigest(attempt);
+  manifest.lineage.head = attempt.digest;
+  manifest.gateway.candidateVersion = gatewayVersion;
+  manifest.web.candidateVersion = webVersion;
+  manifest.state = state;
+  manifest.updatedAt = new Date().toISOString();
+  validateManifest(manifest);
+  return manifest;
+}
+
+function finalizedVersions(manifest, component) {
+  const { latestFinal } = validateLineage(manifest);
+  if (latestFinal === null) {
+    throw new Error("Recovery candidate lineage has no finalized versions");
+  }
+  return manifest.lineage.attempts
+    .filter((attempt) => attempt.digest !== undefined)
+    .map((attempt) => attempt[`${component}Version`]);
+}
+
+export function verifyRecoveryVersionLineage(manifestInput, remotePayload) {
+  validateRecoveryArtifact(manifestInput);
+  const result = remotePayload?.result ?? remotePayload;
+  const id = versionId(result, "recovery lineage version metadata");
+  const tag =
+    result?.annotations?.["workers/tag"] ??
+    result?.metadata?.annotations?.["workers/tag"];
+  const pendingTokens = new Set(
+    manifestInput.lineage.attempts
+      .filter((attempt) => attempt.digest === undefined)
+      .map((attempt) => attempt.token),
+  );
+  if (typeof tag !== "string" || !pendingTokens.has(tag)) {
+    throw new Error(
+      "Active recovery version lacks cryptographic lineage token",
+    );
+  }
+  return { id, token: tag };
+}
 
 function versionId(value, context) {
   const id = value?.version_id ?? value?.versionId ?? value?.id;
@@ -56,50 +350,16 @@ function percentage(value, context) {
 }
 
 function validateManifest(manifest) {
-  if (
-    manifest?.schemaVersion !== 2 ||
-    !SHA_RE.test(manifest.release) ||
-    !SHA_RE.test(manifest.activeBase) ||
-    !DIGEST_RE.test(manifest.lifecycle?.digest) ||
-    !["none", "expand", "contract"].includes(manifest.lifecycle?.phase) ||
-    typeof manifest.lifecycle?.rollbackAllowed !== "boolean" ||
-    !VERSION_RE.test(manifest.gateway?.previousVersion) ||
-    !VERSION_RE.test(manifest.gateway?.candidateVersion) ||
-    !VERSION_RE.test(manifest.web?.previousVersion) ||
-    !VERSION_RE.test(manifest.web?.candidateVersion) ||
-    !Number.isSafeInteger(manifest.source?.runId) ||
-    manifest.source.runId <= 0 ||
-    manifest.source.workflowPath !==
-      (manifest.lifecycle?.rollbackAllowed
-        ? ".github/workflows/deploy-production.yml"
-        : ".github/workflows/gateway-do-lifecycle.yml") ||
-    !Number.isSafeInteger(manifest.source.runAttempt) ||
-    manifest.source.runAttempt <= 0
-  ) {
+  const { latestFinal } = validateLineage(manifest);
+  if (latestFinal === null) {
     throw new Error("Recovery manifest is invalid or incomplete");
   }
   return manifest;
 }
 
 function validateIntent(intent) {
-  if (
-    intent?.schemaVersion !== 2 ||
-    !SHA_RE.test(intent.release) ||
-    !SHA_RE.test(intent.activeBase) ||
-    !DIGEST_RE.test(intent.lifecycle?.digest) ||
-    !["none", "expand", "contract"].includes(intent.lifecycle?.phase) ||
-    typeof intent.lifecycle?.rollbackAllowed !== "boolean" ||
-    !VERSION_RE.test(intent.gateway?.previousVersion) ||
-    !VERSION_RE.test(intent.web?.previousVersion) ||
-    !Number.isSafeInteger(intent.source?.runId) ||
-    intent.source.runId <= 0 ||
-    intent.source.workflowPath !==
-      (intent.lifecycle?.rollbackAllowed
-        ? ".github/workflows/deploy-production.yml"
-        : ".github/workflows/gateway-do-lifecycle.yml") ||
-    !Number.isSafeInteger(intent.source.runAttempt) ||
-    intent.source.runAttempt <= 0
-  ) {
+  const { latestFinal } = validateLineage(intent);
+  if (latestFinal !== null) {
     throw new Error("Recovery intent is invalid or incomplete");
   }
   return intent;
@@ -126,12 +386,13 @@ export function recoveryPlan(manifestInput, observed, strategy) {
   }
   for (const component of ["gateway", "web"]) {
     const value = observed[component];
-    if (
-      value !== manifest[component].previousVersion &&
-      value !== manifest[component].candidateVersion
-    ) {
+    const allowed = new Set([
+      manifest[component].previousVersion,
+      ...finalizedVersions(manifest, component),
+    ]);
+    if (!allowed.has(value)) {
       throw new Error(
-        `${component} active version is outside recovery manifest`,
+        `${component} active version is outside cryptographic recovery lineage`,
       );
     }
   }
@@ -255,6 +516,49 @@ export function boundedDeploymentVersion(
   return candidateTraffic > 0 ? candidateVersion : previousVersion;
 }
 
+export function boundedDeploymentLineageVersion(
+  path,
+  manifestInput,
+  component,
+) {
+  const manifest = validateManifest(manifestInput);
+  if (component !== "gateway" && component !== "web") {
+    throw new Error("Recovery lineage component is invalid");
+  }
+  const previous = manifest[component].previousVersion;
+  const candidates = new Set(finalizedVersions(manifest, component));
+  const allowed = new Set([previous, ...candidates]);
+  const deployments = readJson(path);
+  const versions = Array.isArray(deployments)
+    ? deployments.at(-1)?.versions
+    : null;
+  if (!Array.isArray(versions) || versions.length < 1 || versions.length > 2) {
+    throw new Error("Cloudflare deployment shape is outside recovery bounds");
+  }
+  let total = 0;
+  const activeCandidates = new Set();
+  const seen = new Set();
+  for (const version of versions) {
+    const id = versionId(version, path);
+    const weight = percentage(version?.percentage, path);
+    if (!allowed.has(id) || seen.has(id)) {
+      throw new Error(
+        "Cloudflare deployment contains version outside cryptographic recovery lineage",
+      );
+    }
+    seen.add(id);
+    total += weight;
+    if (id !== previous && weight > 0) activeCandidates.add(id);
+  }
+  if (total !== 100) {
+    throw new Error("Cloudflare deployment weights do not total 100");
+  }
+  if (activeCandidates.size > 1) {
+    throw new Error("Cloudflare deployment mixes recovery candidate lineages");
+  }
+  return [...activeCandidates][0] ?? previous;
+}
+
 function readRollbackVersion(directory, component) {
   const path = `${directory}/${component}-after-rollback.json`;
   try {
@@ -299,13 +603,76 @@ export function run(argv = process.argv.slice(2)) {
     );
     return;
   }
+  if (command === "get-bounded-lineage-version") {
+    const [manifestPath, component] = args;
+    if (!manifestPath || !component) {
+      throw new Error("Recovery lineage manifest and component are required");
+    }
+    process.stdout.write(
+      boundedDeploymentLineageVersion(
+        directory,
+        readJson(manifestPath),
+        component,
+      ),
+    );
+    return;
+  }
   if (command === "validate-recovery") {
     process.stdout.write(
       validateRecoveryArtifact(readJson(`${directory}/recovery-manifest.json`)),
     );
     return;
   }
+  if (command === "get-lineage-token") {
+    const manifest = readJson(`${directory}/recovery-manifest.json`);
+    validateRecoveryArtifact(manifest);
+    const attempt = manifest.lineage.attempts.at(-1);
+    if (
+      attempt?.digest !== undefined ||
+      !DIGEST_RE.test(attempt?.token ?? "")
+    ) {
+      throw new Error("Latest recovery attempt has no pending lineage token");
+    }
+    process.stdout.write(attempt.token);
+    return;
+  }
+  if (command === "verify-lineage-version") {
+    const versionPath = args[0];
+    if (!versionPath) throw new Error("Recovery version metadata is required");
+    const proof = verifyRecoveryVersionLineage(
+      readJson(`${directory}/recovery-manifest.json`),
+      readJson(versionPath),
+    );
+    process.stdout.write(`${JSON.stringify(proof)}\n`);
+    return;
+  }
   const statePath = `${directory}/state.json`;
+
+  if (command === "begin-attempt") {
+    const [runId, workflowPath, runAttempt] = args;
+    const manifest = beginRecoveryAttempt(
+      readJson(`${directory}/recovery-manifest.json`),
+      {
+        runId: Number(runId),
+        workflowPath,
+        runAttempt: Number(runAttempt),
+      },
+    );
+    writeState(`${directory}/recovery-manifest.json`, manifest);
+    return manifest;
+  }
+
+  if (command === "finalize-attempt") {
+    const [gatewayVersion, webVersion, state] = args;
+    const manifest = finalizeRecoveryAttempt(
+      readJson(`${directory}/recovery-manifest.json`),
+      gatewayVersion,
+      webVersion,
+      state,
+    );
+    writeState(`${directory}/recovery-manifest.json`, manifest);
+    return manifest;
+  }
 
   if (command === "capture") {
     mkdirSync(directory, { recursive: true });
@@ -359,6 +726,8 @@ export function run(argv = process.argv.slice(2)) {
       runId,
       workflowPath,
       runAttempt,
+      protectedTarget,
+      protectedBase,
     ] = args;
     if (rollbackAllowed !== "true" && rollbackAllowed !== "false") {
       throw new Error("rollbackAllowed must be true or false");
@@ -367,8 +736,13 @@ export function run(argv = process.argv.slice(2)) {
     if (state.state !== "rollback_pointers_captured_no_traffic_mutation") {
       throw new Error(`Cannot create recovery intent from ${state.state}`);
     }
-    const intent = validateIntent({
-      schemaVersion: 2,
+    const source = {
+      runId: Number(runId),
+      workflowPath,
+      runAttempt: Number(runAttempt),
+    };
+    const intent = createRecoveryIntent({
+      schemaVersion: 3,
       createdAt: new Date().toISOString(),
       state: state.state,
       release,
@@ -378,14 +752,15 @@ export function run(argv = process.argv.slice(2)) {
         phase,
         rollbackAllowed: rollbackAllowed === "true",
       },
-      source: {
-        runId: Number(runId),
-        workflowPath,
-        runAttempt: Number(runAttempt),
-      },
+      root: source,
+      source,
       gateway: { previousVersion: state.gateway.previousVersion },
       web: { previousVersion: state.web.previousVersion },
+      ...(protectedTarget === undefined && protectedBase === undefined
+        ? {}
+        : { protectedTarget, protectedBase }),
     });
+    validateIntent(intent);
     writeState(`${directory}/recovery-manifest.json`, intent);
     return intent;
   }
@@ -411,39 +786,26 @@ export function run(argv = process.argv.slice(2)) {
     const intent = validateIntent(
       readJson(`${directory}/recovery-manifest.json`),
     );
-    const manifest = validateManifest({
-      schemaVersion: 2,
-      createdAt: new Date().toISOString(),
-      state: state.state,
-      release,
-      activeBase,
-      lifecycle: {
-        digest,
-        phase,
-        rollbackAllowed: rollbackAllowed === "true",
-      },
-      source: {
-        runId: Number(runId),
-        workflowPath,
-        runAttempt: Number(runAttempt),
-      },
-      gateway: { ...state.gateway },
-      web: { ...state.web },
-    });
     if (
-      intent.release !== manifest.release ||
-      intent.activeBase !== manifest.activeBase ||
-      intent.lifecycle.digest !== manifest.lifecycle.digest ||
-      intent.lifecycle.phase !== manifest.lifecycle.phase ||
-      intent.lifecycle.rollbackAllowed !== manifest.lifecycle.rollbackAllowed ||
-      intent.source.runId !== manifest.source.runId ||
-      intent.source.workflowPath !== manifest.source.workflowPath ||
-      intent.source.runAttempt !== manifest.source.runAttempt ||
-      intent.gateway.previousVersion !== manifest.gateway.previousVersion ||
-      intent.web.previousVersion !== manifest.web.previousVersion
+      intent.release !== release ||
+      intent.activeBase !== activeBase ||
+      intent.lifecycle.digest !== digest ||
+      intent.lifecycle.phase !== phase ||
+      intent.lifecycle.rollbackAllowed !== (rollbackAllowed === "true") ||
+      intent.source.runId !== Number(runId) ||
+      intent.source.workflowPath !== workflowPath ||
+      intent.source.runAttempt !== Number(runAttempt) ||
+      intent.gateway.previousVersion !== state.gateway.previousVersion ||
+      intent.web.previousVersion !== state.web.previousVersion
     ) {
       throw new Error("Final recovery manifest differs from persisted intent");
     }
+    const manifest = finalizeRecoveryAttempt(
+      { ...intent, state: state.state },
+      state.gateway.candidateVersion,
+      state.web.candidateVersion,
+      state.state,
+    );
     writeState(`${directory}/recovery-manifest.json`, manifest);
     return manifest;
   }
@@ -587,7 +949,7 @@ export function run(argv = process.argv.slice(2)) {
   }
 
   throw new Error(
-    "Usage: release-state.mjs get-active-version|get-uploaded-version|get-bounded-version|verify-zero-traffic|validate-recovery|capture|intent|uploaded|manifest|get|mark|ambiguous|plan-recovery|recovery-final|final <path>",
+    "Usage: release-state.mjs get-active-version|get-uploaded-version|get-bounded-version|get-bounded-lineage-version|verify-zero-traffic|validate-recovery|get-lineage-token|verify-lineage-version|begin-attempt|finalize-attempt|capture|intent|uploaded|manifest|get|mark|ambiguous|plan-recovery|recovery-final|final <path>",
   );
 }
 

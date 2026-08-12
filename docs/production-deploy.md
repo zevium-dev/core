@@ -13,8 +13,10 @@ cancellation disabled:
 - **Deploy Production** ships backward-compatible Convex expansion, gateway,
   then web. It never carries a Durable Object lifecycle diff or unapplied
   Convex contract.
-- **Contract Production Schema** applies one reviewed destructive Convex commit
-  after proving old consumers against staging and production.
+- **Contract Production Schema** applies one reviewed semantic Convex
+  contraction after proving old consumers against staging and production. Exact
+  parent/target contract inventories decide eligibility; commit subjects and
+  non-Convex companion files carry no authority.
 - **Gateway Durable Object Lifecycle** owns every staging and production DO
   lifecycle mutation. Generic release classifies complete lifecycle state before
   any staging environment or provider mutation and exits successfully with
@@ -31,9 +33,13 @@ it. Protected contract/lifecycle commits cannot disappear: generic preflight
 enumerates every such commit between active production and candidate and blocks
 until each exact commit has verified protected-workflow provenance. Dedicated
 workflows accept `contract_sha` or `lifecycle_sha` when protected commit is
-buried under later normal commits and reject any second protected commit around
-it. Thus replacement can coalesce normal releases, but cannot silently bypass a
-protected release.
+buried under later commits. Contract runs require every earlier protected
+requirement through target parent to have verified provenance, then install and
+deploy target commit from its own frozen checkout; later protected commits stay
+undeployed and blocked until their own ordered run. Contract recovery deploys
+only its reviewed one-commit Convex roll-forward fix. Thus replacement can
+coalesce normal releases, but cannot silently bypass or deadlock multiple
+protected releases.
 
 ## Compatibility rule
 
@@ -43,10 +49,15 @@ Normal release is expand-only:
 - Retain old Convex functions, validators, fields, indexes, and response shapes
   while any deployed Worker can use them.
 - Run idempotent backfills separately and prove completion.
-- Remove old behavior only in later isolated `contract(convex):` commit.
+- Remove old behavior only in a later reviewed candidate whose exact
+  parent/target semantic inventory proves contraction.
 
-Split pull requests that mix expansion and contraction. Convex failure after a
-deploy starts is ambiguous and always recovers by compatible roll-forward.
+Prefer split pull requests for expansion and contraction. Release automation
+does not trust naming discipline: it inventories every public and internal
+query, mutation, and action (arguments and return validators), every table and
+full index/search/vector configuration, typed validator literals, and HTTP
+route identity directly from exact git objects. Convex failure after a deploy
+starts is ambiguous and always recovers by compatible roll-forward.
 
 ## Trust and provenance
 
@@ -55,7 +66,10 @@ checkout, cache restore, Node setup, or dependency install. It requires exact
 lowercase 40-character current `develop` SHA and exactly one successful push run
 of `.github/workflows/ci.yml`. Remote actions use full commit SHAs. Node is fixed
 at `24.15.0`, pnpm at `11.8.0`, and install is frozen. Candidate-controlled Mise
-or global package installation is forbidden.
+or global package installation is forbidden. Browser E2E executes exact
+workspace `agent-browser` binary whose package tarball integrity is frozen in
+`pnpm-lock.yaml`; no ad-hoc npm install runs before protected credentials enter
+a step.
 
 Raw commit status is never trusted. Contract and lifecycle production jobs emit
 GitHub-signed custom attestations whose predicate binds:
@@ -196,15 +210,27 @@ Signal traps do one fast local action: atomically record
 claim rollback. Every production lane also handles `failure() || cancelled()`
 and uploads available evidence.
 
-Dispatch **Recover Production** with failed run ID/attempt and reviewed action.
-Recovery downloads exact manifest artifact from that run, validates workflow and
-SHA lineage, re-resolves GitHub/current provider state, and permits only manifest
-version IDs. Missing or mixed state fails. Convex ambiguous/contract state forces
-roll-forward. Normal gateway/web may roll forward to captured candidates or
-rollback to captured previous versions when lifecycle digest allows. Lifecycle
-always rolls forward. Recovery ends only after exact provider state and paid
-accounting proof; protected lifecycle recovery emits signed recovery attestation
-bound to failed source run.
+Dispatch **Recover Production** with failed run ID and reviewed action. Failed,
+cancelled, or timed-out deploy, lifecycle, and recovery runs are valid sources.
+Resolution binds exact run attempt and downloads its exact attempt-named
+manifest artifact. Stable release/root identity survives recursive recovery.
+
+Every source manifest contains a SHA-256 candidate lineage. Each recovery run
+persists a new attempt token before provider mutation, stamps that token into
+uploaded Worker metadata, finalizes exact gateway/web version IDs into the hash
+chain, and uploads the finalized attempt manifest before traffic convergence.
+An active version is accepted only when its ID is finalized in that chain or
+when exact provider metadata proves a still-pending lineage token; arbitrary
+lookalike versions fail closed. This also covers cancellation after a recovery
+candidate becomes active. Missing, partial, tampered, mixed, or expired lineage
+fails.
+
+Convex ambiguous/contract state forces roll-forward. Normal gateway/web may
+roll forward to lineage-bound candidates or roll back to captured previous
+versions when lifecycle digest allows. Lifecycle always rolls forward.
+Recovery ends only after exact provider state and paid accounting proof;
+protected lifecycle recovery emits signed recovery attestation bound to root
+failed lifecycle run.
 
 ## Required GitHub environments
 
@@ -229,8 +255,9 @@ or E2E API-key secret.
 
 ## Evidence and external bootstrap
 
-Artifacts contain SHAs, timestamps, state, provider version pointers, minimal
-accounting totals, and failure screenshots. They exclude keys, challenge,
+Artifacts contain SHAs, run IDs and attempts, candidate-lineage digests,
+timestamps, state, provider version pointers, minimal accounting totals, and
+failure screenshots. They exclude keys, challenge,
 headers, cookies, request/response bodies, environment dumps, and consumer
 identity. Staging retention is 14 days; production/recovery 30 days; protected
 attestation subject 90 days.

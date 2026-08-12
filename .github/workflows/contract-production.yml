@@ -45,6 +45,7 @@ jobs:
       protected_base: ${{ steps.contract.outputs.protected_base }}
       digest: ${{ steps.contract.outputs.digest }}
       recovery_of: ${{ steps.contract.outputs.recovery_of }}
+      deploy_sha: ${{ steps.contract.outputs.deploy_sha }}
     steps:
       - name: Candidate-independent stale and CI guard
         id: guard
@@ -87,6 +88,7 @@ jobs:
           CONTRACT_SHA: ${{ inputs.contract_sha }}
           ACTIVE_RELEASE: ${{ inputs.expected_active_release }}
           RECOVERY_OF: ${{ inputs.recovery_of }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           [[ "$ACTIVE_RELEASE" =~ ^[0-9a-f]{40}$ ]]
           test "$(git rev-parse HEAD)" = "$RUN_HEAD"
@@ -97,16 +99,6 @@ jobs:
             protected_base="$(git rev-parse "$target^")"
             git merge-base --is-ancestor "$ACTIVE_RELEASE" "$protected_base"
             git merge-base --is-ancestor "$target" "$RUN_HEAD"
-            [[ "$(git show -s --format=%s "$target")" == contract\(convex\):* ]]
-            before_requirements="$(node .github/scripts/release-attestation.mjs requirements \
-              --base="$ACTIVE_RELEASE" --target="$protected_base")"
-            after_requirements="$(node .github/scripts/release-attestation.mjs requirements \
-              --base="$target" --target="$RUN_HEAD")"
-            BEFORE="$before_requirements" AFTER="$after_requirements" node -e '
-              if (JSON.parse(process.env.BEFORE).length !== 0 || JSON.parse(process.env.AFTER).length !== 0) {
-                throw new Error("coalesced contract run crosses another protected commit");
-              }
-            '
           else
             test -z "$CONTRACT_SHA"
             [[ "$RECOVERY_OF" =~ ^[0-9a-f]{40}$ ]]
@@ -116,23 +108,46 @@ jobs:
             protected_base="$(git rev-parse "$target^")"
             test "$protected_base" = "$ACTIVE_RELEASE"
             git merge-base --is-ancestor "$target" "$RUN_HEAD"
-            [[ "$(git show -s --format=%s "$target")" == contract\(convex\):* ]]
-            [[ "$(git show -s --format=%s "$RUN_HEAD")" == fix\(convex\):* ]]
           fi
-          invalid_target_paths="$(git diff --name-only "$protected_base" "$target" | awk '$0 !~ /^convex\// { print }')"
-          test -z "$invalid_target_paths" || {
-            echo "Contract target changed files outside convex/:" >&2
-            printf '%s\n' "$invalid_target_paths" >&2
-            exit 1
-          }
           if [[ -n "$RECOVERY_OF" ]]; then
             invalid_fix_paths="$(git diff --name-only "$target" "$RUN_HEAD" | awk '$0 !~ /^convex\// { print }')"
             test -z "$invalid_fix_paths"
           fi
+          classification="$(node .github/scripts/release-convex-contract.mjs classify \
+            --base="$protected_base" --target="$target")"
           digest="$(node .github/scripts/release-attestation.mjs contract-digest \
             --base="$protected_base" --target="$target")"
+          requirements="$(node .github/scripts/release-attestation.mjs requirements \
+            --base="$ACTIVE_RELEASE" --target="$target")"
+          after_requirements="$(node .github/scripts/release-attestation.mjs requirements \
+            --base="$target" --target="$RUN_HEAD")"
+          CLASSIFICATION="$classification" REQUIREMENTS="$requirements" \
+            AFTER="$after_requirements" TARGET="$target" PROTECTED_BASE="$protected_base" \
+            ACTIVE_RELEASE="$ACTIVE_RELEASE" DIGEST="$digest" RECOVERY_OF="$RECOVERY_OF" node -e '
+              const classification=JSON.parse(process.env.CLASSIFICATION);
+              const requirements=JSON.parse(process.env.REQUIREMENTS);
+              const after=JSON.parse(process.env.AFTER);
+              const exact=requirements.filter((row) => row.kind === "contract" &&
+                row.targetSha === process.env.TARGET && row.protectedBase === process.env.PROTECTED_BASE &&
+                row.activeBase === process.env.ACTIVE_RELEASE && row.phase === "contract" &&
+                row.digest === process.env.DIGEST);
+              if (classification.baseSha !== process.env.PROTECTED_BASE ||
+                  classification.candidateSha !== process.env.TARGET ||
+                  !classification.hasChange || !classification.hasContraction ||
+                  exact.length !== 1 || requirements.at(-1) !== exact[0] ||
+                  (process.env.RECOVERY_OF !== "" && after.length !== 0)) {
+                throw new Error("exact semantic contraction is not final protected requirement through target");
+              }
+            '
+          node .github/scripts/release-attestation.mjs verify-remote \
+            --base="$ACTIVE_RELEASE" --target="$protected_base"
+          deploy_sha="$target"
+          if [[ -n "$RECOVERY_OF" ]]; then
+            deploy_sha="$RUN_HEAD"
+          fi
           {
             echo "target=$target"
+            echo "deploy_sha=$deploy_sha"
             echo "active_release=$ACTIVE_RELEASE"
             echo "protected_base=$protected_base"
             echo "digest=$digest"
@@ -148,8 +163,11 @@ jobs:
     environment: staging
     env:
       RUN_HEAD: ${{ needs.resolve.outputs.run_head }}
+      TARGET_SHA: ${{ needs.resolve.outputs.target }}
+      DEPLOY_SHA: ${{ needs.resolve.outputs.deploy_sha }}
       ACTIVE_RELEASE: ${{ needs.resolve.outputs.active_release }}
       PROTECTED_BASE: ${{ needs.resolve.outputs.protected_base }}
+      CONTRACT_DIGEST: ${{ needs.resolve.outputs.digest }}
       STAGING_WEB_URL: ${{ vars.STAGING_WEB_URL }}
       STAGING_GATEWAY_URL: ${{ vars.STAGING_GATEWAY_URL }}
       STAGING_CONVEX_URL: ${{ vars.STAGING_CONVEX_URL }}
@@ -178,6 +196,11 @@ jobs:
           ref: ${{ needs.resolve.outputs.run_head }}
           fetch-depth: 0
           persist-credentials: false
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ needs.resolve.outputs.deploy_sha }}
+          path: .release-contract-candidate
+          persist-credentials: false
       - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25
         with:
           path: ~/.local/share/pnpm/store
@@ -192,6 +215,7 @@ jobs:
           corepack enable
           corepack prepare pnpm@11.8.0 --activate
           pnpm install --frozen-lockfile
+          pnpm --dir .release-contract-candidate install --frozen-lockfile
 
       - name: Prove paid staging baseline with runtime Clerk key
         env:
@@ -225,12 +249,23 @@ jobs:
           EXPECTED_CONVEX_URL: ${{ env.STAGING_CONVEX_URL }}
         run: |
           test "$(git rev-parse HEAD)" = "$RUN_HEAD"
+          test "$(git -C .release-contract-candidate rev-parse HEAD)" = "$DEPLOY_SHA"
           test "$(gh api "repos/$GITHUB_REPOSITORY/commits/develop" --jq .sha)" = "$RUN_HEAD"
-          convex_dry_run="$(pnpm exec convex deploy --dry-run --yes \
+          classification="$(node .github/scripts/release-convex-contract.mjs classify \
+            --base="$PROTECTED_BASE" --target="$TARGET_SHA")"
+          CLASSIFICATION="$classification" node -e '
+            const row=JSON.parse(process.env.CLASSIFICATION);
+            if (row.baseSha !== process.env.PROTECTED_BASE || row.candidateSha !== process.env.TARGET_SHA ||
+                !row.hasContraction) throw new Error("exact staging contraction classification drifted");
+          '
+          test "$(node .github/scripts/release-attestation.mjs contract-digest \
+            --base="$PROTECTED_BASE" --target="$TARGET_SHA")" = "$CONTRACT_DIGEST"
+          convex_dry_run="$(cd .release-contract-candidate && pnpm exec convex deploy --dry-run --yes \
             --codegen disable --typecheck disable 2>&1)"
           printf '%s' "$convex_dry_run" \
             | node .github/scripts/release-contract.mjs --validate-convex-dry-run=true
-          pnpm exec convex deploy --yes --message "staging contract $RUN_HEAD"
+          (cd .release-contract-candidate && \
+            pnpm exec convex deploy --yes --message "staging contract $DEPLOY_SHA")
 
       - name: Prove paid staging contracted state with runtime Clerk key
         env:
@@ -279,6 +314,7 @@ jobs:
     env:
       RUN_HEAD: ${{ needs.resolve.outputs.run_head }}
       TARGET_SHA: ${{ needs.resolve.outputs.target }}
+      DEPLOY_SHA: ${{ needs.resolve.outputs.deploy_sha }}
       ACTIVE_RELEASE: ${{ needs.resolve.outputs.active_release }}
       PROTECTED_BASE: ${{ needs.resolve.outputs.protected_base }}
       CONTRACT_DIGEST: ${{ needs.resolve.outputs.digest }}
@@ -307,6 +343,11 @@ jobs:
           ref: ${{ needs.resolve.outputs.run_head }}
           fetch-depth: 0
           persist-credentials: false
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ needs.resolve.outputs.deploy_sha }}
+          path: .release-contract-candidate
+          persist-credentials: false
       - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25
         with:
           path: ~/.local/share/pnpm/store
@@ -321,6 +362,7 @@ jobs:
           corepack enable
           corepack prepare pnpm@11.8.0 --activate
           pnpm install --frozen-lockfile
+          pnpm --dir .release-contract-candidate install --frozen-lockfile
 
       - name: Prove production baseline with runtime Clerk key
         env:
@@ -345,11 +387,13 @@ jobs:
       - name: Persist forward-recovery manifest before mutation
         run: |
           mkdir -p release-evidence
-          RUN_HEAD="$RUN_HEAD" TARGET_SHA="$TARGET_SHA" ACTIVE_RELEASE="$ACTIVE_RELEASE" \
+          RUN_HEAD="$RUN_HEAD" TARGET_SHA="$TARGET_SHA" DEPLOY_SHA="$DEPLOY_SHA" \
+            ACTIVE_RELEASE="$ACTIVE_RELEASE" \
             CONTRACT_DIGEST="$CONTRACT_DIGEST" RUN_ID="$GITHUB_RUN_ID" \
             RUN_ATTEMPT="$GITHUB_RUN_ATTEMPT" node -e '
               const fs=require("node:fs");
               const value={schemaVersion:2,runHead:process.env.RUN_HEAD,targetSha:process.env.TARGET_SHA,
+                deploySha:process.env.DEPLOY_SHA,
                 activeBase:process.env.ACTIVE_RELEASE,protectedBase:process.env.PROTECTED_BASE,digest:process.env.CONTRACT_DIGEST,
                 recovery:"roll-forward-only",
                 source:{runId:Number(process.env.RUN_ID),runAttempt:Number(process.env.RUN_ATTEMPT),workflowPath:".github/workflows/contract-production.yml"},
@@ -379,14 +423,25 @@ jobs:
           trap 'record_signal SIGINT' INT
           trap 'record_signal SIGTERM' TERM
           test "$(git rev-parse HEAD)" = "$RUN_HEAD"
+          test "$(git -C .release-contract-candidate rev-parse HEAD)" = "$DEPLOY_SHA"
           test "$(gh api "repos/$GITHUB_REPOSITORY/commits/develop" --jq .sha)" = "$RUN_HEAD"
           test "$(node .github/scripts/release-contract.mjs --current-release=true \
             --web="$PRODUCTION_WEB_URL" --gateway="$PRODUCTION_GATEWAY_URL")" = "$ACTIVE_RELEASE"
-          convex_dry_run="$(pnpm exec convex deploy --dry-run --yes \
+          classification="$(node .github/scripts/release-convex-contract.mjs classify \
+            --base="$PROTECTED_BASE" --target="$TARGET_SHA")"
+          CLASSIFICATION="$classification" node -e '
+            const row=JSON.parse(process.env.CLASSIFICATION);
+            if (row.baseSha !== process.env.PROTECTED_BASE || row.candidateSha !== process.env.TARGET_SHA ||
+                !row.hasContraction) throw new Error("exact production contraction classification drifted");
+          '
+          test "$(node .github/scripts/release-attestation.mjs contract-digest \
+            --base="$PROTECTED_BASE" --target="$TARGET_SHA")" = "$CONTRACT_DIGEST"
+          convex_dry_run="$(cd .release-contract-candidate && pnpm exec convex deploy --dry-run --yes \
             --codegen disable --typecheck disable 2>&1)"
           printf '%s' "$convex_dry_run" \
             | node .github/scripts/release-contract.mjs --validate-convex-dry-run=true
-          pnpm exec convex deploy --yes --message "production contract $TARGET_SHA"
+          (cd .release-contract-candidate && \
+            pnpm exec convex deploy --yes --message "production contract $DEPLOY_SHA")
 
       - name: Prove production contracted accounting with runtime Clerk key
         env:

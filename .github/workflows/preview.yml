@@ -391,12 +391,12 @@ jobs:
           corepack enable
           corepack prepare pnpm@11.8.0 --activate
           pnpm install --frozen-lockfile
-      - name: Install browser runtime
+      - name: Install workspace-locked browser runtime
         run: |
-          browser_prefix="$RUNNER_TEMP/agent-browser"
-          npm install --prefix "$browser_prefix" --ignore-scripts --no-audit --no-fund agent-browser@0.27.1
-          "$browser_prefix/node_modules/.bin/agent-browser" install --with-deps
-          echo "$browser_prefix/node_modules/.bin" >> "$GITHUB_PATH"
+          locked_browser="$GITHUB_WORKSPACE/node_modules/.bin/agent-browser"
+          test -x "$locked_browser"
+          "$locked_browser" install --with-deps
+          echo "AGENT_BROWSER_BIN=$locked_browser" >> "$GITHUB_ENV"
       - name: Run authenticated publish and catalogue journey
         env:
           GATEWAY_URL: ""

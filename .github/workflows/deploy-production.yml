@@ -302,12 +302,12 @@ jobs:
               --accounting="$STAGING_CONVEX_SITE_URL/release-probe-accounting" \
               --output=release-evidence/staging-contract.json
 
-      - name: Install pinned browser runtime without global mutation
+      - name: Install workspace-locked browser runtime
         run: |
-          browser_prefix="$RUNNER_TEMP/agent-browser"
-          npm install --prefix "$browser_prefix" --ignore-scripts --no-audit --no-fund agent-browser@0.27.1
-          "$browser_prefix/node_modules/.bin/agent-browser" install --with-deps
-          echo "$browser_prefix/node_modules/.bin" >> "$GITHUB_PATH"
+          locked_browser="$GITHUB_WORKSPACE/node_modules/.bin/agent-browser"
+          test -x "$locked_browser"
+          "$locked_browser" install --with-deps
+          echo "AGENT_BROWSER_BIN=$locked_browser" >> "$GITHUB_ENV"
 
       - name: Run exact-request staging E2E with runtime Clerk key
         env:
@@ -346,7 +346,6 @@ jobs:
       RELEASE_SHA: ${{ needs.preflight.outputs.release }}
       ACTIVE_RELEASE: ${{ needs.preflight.outputs.active_release }}
       LIFECYCLE_DIGEST: ${{ needs.preflight.outputs.lifecycle_digest }}
-      VERSION_TAG: ${{ needs.preflight.outputs.release }}-${{ github.run_id }}-${{ github.run_attempt }}
       RELEASE_PROBE_MOCK_PATH: ${{ vars.RELEASE_PROBE_MOCK_PATH }}
       RELEASE_PROBE_MOCK_METHOD: ${{ vars.RELEASE_PROBE_MOCK_METHOD }}
       RELEASE_PROBE_METERED_PATH: ${{ vars.RELEASE_PROBE_METERED_PATH }}
@@ -431,6 +430,8 @@ jobs:
           node .github/scripts/release-state.mjs intent release-evidence \
             "$RELEASE_SHA" "$ACTIVE_RELEASE" "$LIFECYCLE_DIGEST" none true \
             "$GITHUB_RUN_ID" .github/workflows/deploy-production.yml "$GITHUB_RUN_ATTEMPT"
+          lineage_token="$(node .github/scripts/release-state.mjs get-lineage-token release-evidence)"
+          echo "RECOVERY_LINEAGE_TOKEN=$lineage_token" >> "$GITHUB_ENV"
 
       - name: Persist recovery manifest before first provider mutation
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
@@ -461,7 +462,7 @@ jobs:
             --expected-version="$current_id"
           WRANGLER_OUTPUT_FILE=release-evidence/gateway-upload.ndjson \
             pnpm --filter gateway exec wrangler versions upload --strict \
-              --tag "$VERSION_TAG" --var "ZEVIUM_RELEASE:$RELEASE_SHA" \
+              --tag "$RECOVERY_LINEAGE_TOKEN" --var "ZEVIUM_RELEASE:$RELEASE_SHA" \
               --var "CONVEX_URL:$PRODUCTION_CONVEX_URL" \
               --var "CONVEX_SITE_URL:$PRODUCTION_CONVEX_SITE_URL"
 
@@ -486,7 +487,7 @@ jobs:
           '
           WRANGLER_OUTPUT_FILE=release-evidence/web-upload.ndjson \
             pnpm --filter web exec wrangler versions upload \
-              --config dist/server/wrangler.json --strict --tag "$VERSION_TAG"
+              --config dist/server/wrangler.json --strict --tag "$RECOVERY_LINEAGE_TOKEN"
 
       - name: Finalize bounded recovery manifest
         run: |

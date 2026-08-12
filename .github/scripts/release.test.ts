@@ -15,10 +15,15 @@ import {
 } from "./release-contract.mjs";
 import {
   activeVersion,
+  beginRecoveryAttempt,
+  boundedDeploymentLineageVersion,
   boundedDeploymentVersion,
+  createRecoveryIntent,
+  finalizeRecoveryAttempt,
   recoveryPlan,
   uploadedVersion,
   validateRecoveryArtifact,
+  verifyRecoveryVersionLineage,
   verifyZeroTraffic,
 } from "./release-state.mjs";
 import {
@@ -33,7 +38,10 @@ import {
   findProtectedRequirements,
   verifyProtectedAttestation,
 } from "./release-attestation.mjs";
-import { classifyConvexContract } from "./release-convex-contract.mjs";
+import {
+  classifyConvexContract,
+  convexContractAt,
+} from "./release-convex-contract.mjs";
 import {
   main as runWithClerkKey,
   resolveClerkReleaseKey,
@@ -899,20 +907,28 @@ describe("provider recovery and cancellation fixtures", () => {
     annotations: { "workers/message": "protected release" },
     versions,
   });
-  const manifest = {
-    schemaVersion: 2,
+  const rootSource = {
+    runId: 42,
+    runAttempt: 1,
+    workflowPath: ".github/workflows/deploy-production.yml",
+  };
+  const intent = createRecoveryIntent({
+    schemaVersion: 3,
     release: SHA,
     activeBase: OLD_SHA,
     lifecycle: { digest: "d".repeat(64), phase: "none", rollbackAllowed: true },
-    source: {
-      runId: 42,
-      runAttempt: 1,
-      workflowPath: ".github/workflows/deploy-production.yml",
-    },
-    gateway: { previousVersion: previous, candidateVersion: candidate },
-    web: { previousVersion: previous, candidateVersion: candidate },
-    state: "artifacts_uploaded_no_traffic_mutation",
-  };
+    root: rootSource,
+    source: rootSource,
+    gateway: { previousVersion: previous },
+    web: { previousVersion: previous },
+    state: "rollback_pointers_captured_no_traffic_mutation",
+  });
+  const manifest = finalizeRecoveryAttempt(
+    intent,
+    candidate,
+    candidate,
+    "artifacts_uploaded_no_traffic_mutation",
+  );
 
   it("uses newest single-version deployment and exact zero-traffic weights", () => {
     const dir = mkdtempSync(join(tmpdir(), "zevium-state-"));
@@ -981,12 +997,23 @@ describe("provider recovery and cancellation fixtures", () => {
   });
 
   it("defaults ambiguous cancellation to roll-forward and forbids lifecycle rollback", () => {
+    expect(() =>
+      createRecoveryIntent({
+        schemaVersion: 3,
+        release: SHA,
+        activeBase: OLD_SHA,
+        lifecycle: {
+          digest: "d".repeat(64),
+          phase: "none",
+          rollbackAllowed: true,
+        },
+        root: rootSource,
+        source: { ...rootSource, runId: rootSource.runId + 1 },
+        gateway: { previousVersion: previous },
+        web: { previousVersion: previous },
+      }),
+    ).toThrow(/equal root/);
     expect(validateRecoveryArtifact(manifest)).toBe("manifest");
-    const intent = {
-      ...manifest,
-      gateway: { previousVersion: previous },
-      web: { previousVersion: previous },
-    };
     expect(validateRecoveryArtifact(intent)).toBe("intent");
     expect(() =>
       validateRecoveryArtifact({
@@ -1020,20 +1047,403 @@ describe("provider recovery and cancellation fixtures", () => {
       action: "roll-forward",
       requiresConvexRollForward: true,
     });
+    const lifecycleSource = {
+      runId: 43,
+      runAttempt: 1,
+      workflowPath: ".github/workflows/gateway-do-lifecycle.yml",
+    };
+    const lifecycleIntent = createRecoveryIntent({
+      schemaVersion: 3,
+      release: SHA,
+      activeBase: OLD_SHA,
+      protectedTarget: SHA,
+      protectedBase: OLD_SHA,
+      lifecycle: {
+        digest: "e".repeat(64),
+        phase: "expand",
+        rollbackAllowed: false,
+      },
+      root: lifecycleSource,
+      source: lifecycleSource,
+      gateway: { previousVersion: previous },
+      web: { previousVersion: previous },
+      state: "rollback_pointers_captured_no_traffic_mutation",
+    });
+    const lifecycleManifest = finalizeRecoveryAttempt(
+      lifecycleIntent,
+      candidate,
+      candidate,
+    );
     expect(() =>
       recoveryPlan(
-        {
-          ...safe,
-          lifecycle: { ...safe.lifecycle, rollbackAllowed: false },
-          source: {
-            ...safe.source,
-            workflowPath: ".github/workflows/gateway-do-lifecycle.yml",
-          },
-        },
+        lifecycleManifest,
         { gateway: previous, web: previous },
         "rollback",
       ),
     ).toThrow(/prohibits rollback/);
+  });
+
+  it("recovers recursively and rejects versions outside the hash-bound lineage", () => {
+    const recoverySource = {
+      runId: 84,
+      runAttempt: 3,
+      workflowPath: ".github/workflows/recover-production.yml",
+    };
+    const pending = beginRecoveryAttempt(manifest, recoverySource);
+    expect(validateRecoveryArtifact(pending)).toBe("manifest");
+    const token = pending.lineage.attempts.at(-1)?.token;
+    const recoveryGateway = "33333333-3333-3333-3333-333333333333";
+    const recoveryWeb = "44444444-4444-4444-4444-444444444444";
+    expect(
+      verifyRecoveryVersionLineage(pending, {
+        result: {
+          id: recoveryGateway,
+          annotations: { "workers/tag": token },
+        },
+      }),
+    ).toMatchObject({ id: recoveryGateway, token });
+    expect(() =>
+      verifyRecoveryVersionLineage(pending, {
+        result: {
+          id: recoveryGateway,
+          annotations: { "workers/tag": "f".repeat(64) },
+        },
+      }),
+    ).toThrow(/cryptographic lineage/);
+
+    const recursive = finalizeRecoveryAttempt(
+      pending,
+      recoveryGateway,
+      recoveryWeb,
+    );
+    expect(
+      recoveryPlan(
+        recursive,
+        { gateway: candidate, web: candidate },
+        "roll-forward",
+      ),
+    ).toMatchObject({
+      gatewayVersion: recoveryGateway,
+      webVersion: recoveryWeb,
+    });
+    expect(() =>
+      recoveryPlan(
+        recursive,
+        {
+          gateway: "55555555-5555-5555-5555-555555555555",
+          web: recoveryWeb,
+        },
+        "roll-forward",
+      ),
+    ).toThrow(/cryptographic recovery lineage/);
+
+    const deploymentPath = join(
+      mkdtempSync(join(tmpdir(), "zevium-lineage-")),
+      "deployments.json",
+    );
+    writeJson(deploymentPath, [
+      deployment("recovered", "2026-08-12T11:00:00.000Z", [
+        { version_id: candidate, percentage: 100 },
+      ]),
+    ]);
+    expect(
+      boundedDeploymentLineageVersion(deploymentPath, recursive, "gateway"),
+    ).toBe(candidate);
+    writeJson(deploymentPath, [
+      deployment("forged", "2026-08-12T11:01:00.000Z", [
+        {
+          version_id: "55555555-5555-5555-5555-555555555555",
+          percentage: 100,
+        },
+      ]),
+    ]);
+    expect(() =>
+      boundedDeploymentLineageVersion(deploymentPath, recursive, "gateway"),
+    ).toThrow(/cryptographic recovery lineage/);
+
+    const tampered = structuredClone(recursive);
+    tampered.lineage.attempts.at(-1)!.gatewayVersion =
+      "66666666-6666-6666-6666-666666666666";
+    expect(() => validateRecoveryArtifact(tampered)).toThrow(/lineage/);
+  });
+
+  it("keeps every finalized candidate recoverable across repeated cancellation handoffs", () => {
+    let recursive = manifest;
+    const gatewayVersions = [candidate];
+    const webVersions = [candidate];
+    for (let attempt = 2; attempt <= 6; attempt += 1) {
+      const source = {
+        runId: 100 + attempt,
+        runAttempt: attempt,
+        workflowPath: ".github/workflows/recover-production.yml",
+      };
+      const pending = beginRecoveryAttempt(recursive, source);
+      const byte = String(attempt).repeat(8);
+      const gateway = `${byte}-${byte.slice(0, 4)}-${byte.slice(0, 4)}-${byte.slice(0, 4)}-${byte}${byte.slice(0, 4)}`;
+      const webByte = String(attempt + 1).repeat(8);
+      const web = `${webByte}-${webByte.slice(0, 4)}-${webByte.slice(0, 4)}-${webByte.slice(0, 4)}-${webByte}${webByte.slice(0, 4)}`;
+      recursive = finalizeRecoveryAttempt(pending, gateway, web);
+      gatewayVersions.push(gateway);
+      webVersions.push(web);
+      for (let index = 0; index < gatewayVersions.length; index += 1) {
+        expect(() =>
+          recoveryPlan(
+            recursive,
+            {
+              gateway: gatewayVersions[index],
+              web: webVersions[index],
+            },
+            "roll-forward",
+          ),
+        ).not.toThrow();
+      }
+    }
+  });
+
+  it("hash-chains every cancelled pending attempt before another recovery starts", () => {
+    let cancelled = manifest;
+    for (let attempt = 2; attempt <= 8; attempt += 1) {
+      cancelled = beginRecoveryAttempt(cancelled, {
+        runId: 300 + attempt,
+        runAttempt: attempt,
+        workflowPath: ".github/workflows/recover-production.yml",
+      });
+      expect(validateRecoveryArtifact(cancelled)).toBe("manifest");
+      expect(
+        recoveryPlan(
+          cancelled,
+          { gateway: candidate, web: candidate },
+          "roll-forward",
+        ),
+      ).toMatchObject({
+        gatewayVersion: candidate,
+        webVersion: candidate,
+      });
+    }
+    const tampered = structuredClone(cancelled);
+    tampered.lineage.attempts.splice(2, 1);
+    expect(() => validateRecoveryArtifact(tampered)).toThrow(/hash chain/);
+  });
+});
+
+describe("exact Convex semantic contract inventory", () => {
+  it("tracks all public/internal kinds, typed literals, full indexes, returns, and HTTP routes", () => {
+    const originalCwd = process.cwd();
+    const repo = mkdtempSync(join(tmpdir(), "zevium-convex-contract-"));
+    try {
+      process.chdir(repo);
+      execFileSync("git", ["init", "-q"]);
+      execFileSync("git", ["config", "user.email", "test@example.com"]);
+      execFileSync("git", ["config", "user.name", "Release Test"]);
+      mkdirSync("convex", { recursive: true });
+      writeFileSync(
+        "convex/schema.ts",
+        `import { defineSchema, defineTable } from "convex/server";
+import { v } from "convex/values";
+export default defineSchema({
+  items: defineTable({
+    mode: v.union(v.literal(1), v.literal("1")),
+    body: v.string(),
+    group: v.string(),
+    embedding: v.array(v.float64()),
+  })
+    .index("by_mode", ["mode"])
+    .searchIndex("search_body", { searchField: "body", filterFields: ["group"] })
+    .vectorIndex("by_embedding", { vectorField: "embedding", dimensions: 3, filterFields: ["group"] }),
+});
+`,
+      );
+      writeFileSync(
+        "convex/api.ts",
+        `import { paginationOptsValidator } from "convex/server";
+import { v } from "convex/values";
+import { query, mutation, action, internalQuery, internalMutation, internalAction as registerInternalAction } from "./_generated/server";
+const result = v.object({ ok: v.literal(1) });
+export const publicQ = query({ args: { value: v.union(v.literal(1), v.literal("1"), v.literal(-1n)), paginationOpts: paginationOptsValidator }, returns: result, handler: async () => ({ ok: 1 }) });
+export const publicM = mutation({ args: {}, returns: v.null(), handler: async () => null });
+export const publicA = action({ args: {}, handler: async () => null });
+export const internalQ = internalQuery({ args: { value: v.union(v.literal(1), v.literal("1"), v.literal(-1n)) }, returns: result, handler: async () => ({ ok: 1 }) });
+export const internalM = internalMutation({ args: {}, returns: v.null(), handler: async () => null });
+const internalActionImpl = registerInternalAction({ args: {}, handler: async () => null });
+export { internalActionImpl as internalA };
+`,
+      );
+      writeFileSync(
+        "convex/http.ts",
+        `import { httpRouter } from "convex/server";
+import { httpAction } from "./_generated/server";
+const http = httpRouter();
+http.route({ path: "/direct", method: "POST", handler: httpAction(async () => new Response()) });
+http.routePrefix({ pathPrefix: "/prefix/", method: "GET", handler: httpAction(async () => new Response()) });
+function webhook(path: string) {
+  http.route({ path, method: "POST", handler: httpAction(async () => new Response()) });
+}
+webhook("/factory");
+export default http;
+`,
+      );
+      writeFileSync(
+        "convex/defaultApi.ts",
+        `import { v } from "convex/values";
+import { action as registerAction } from "./_generated/server";
+export default registerAction({ args: {}, returns: v.null(), handler: async () => null });
+`,
+      );
+      execFileSync("git", ["add", "."]);
+      execFileSync("git", ["commit", "-qm", "anything: semantic base"]);
+      const base = execFileSync("git", ["rev-parse", "HEAD"], {
+        encoding: "utf8",
+      }).trim();
+      const inventory = convexContractAt(base);
+      expect(
+        Object.values(inventory.functions).map((entry) => entry.kind),
+      ).toEqual(
+        expect.arrayContaining([
+          "query",
+          "mutation",
+          "action",
+          "internalQuery",
+          "internalMutation",
+          "internalAction",
+        ]),
+      );
+      expect(inventory.tables.items.indexes).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ method: "index", fields: ["mode"] }),
+          expect.objectContaining({
+            method: "searchIndex",
+            config: expect.objectContaining({
+              fields: expect.objectContaining({
+                searchField: { kind: "string", value: "body" },
+                filterFields: expect.objectContaining({
+                  values: [{ kind: "string", value: "group" }],
+                }),
+              }),
+            }),
+          }),
+          expect.objectContaining({
+            method: "vectorIndex",
+            config: expect.objectContaining({
+              fields: expect.objectContaining({
+                dimensions: { kind: "number", value: 3 },
+              }),
+            }),
+          }),
+        ]),
+      );
+      expect(Object.keys(inventory.routes)).toEqual([
+        "GET:/prefix/",
+        "POST:/direct",
+        "POST:/factory",
+      ]);
+      expect(
+        inventory.functions["api:publicQ"].args.fields.paginationOpts,
+      ).toMatchObject({
+        type: "object",
+        source: "convex/server:paginationOptsValidator",
+        fields: {
+          numItems: { type: "number" },
+          cursor: { type: "union" },
+        },
+      });
+      expect(inventory.functions["api:publicA"].returns).toBeNull();
+      expect(inventory.functions["api:internalA"].kind).toBe("internalAction");
+      expect(inventory.functions["defaultApi:default"].kind).toBe("action");
+      expect(JSON.stringify(inventory)).not.toContain('"type":"reference"');
+      const literalValues = inventory.functions[
+        "api:internalQ"
+      ].args.fields.value.values.map((entry) => entry.value);
+      expect(literalValues).toEqual(
+        expect.arrayContaining([
+          { kind: "number", value: 1 },
+          { kind: "string", value: "1" },
+          { kind: "bigint", value: "-1" },
+        ]),
+      );
+
+      writeFileSync(
+        "convex/schema.ts",
+        `import { defineSchema, defineTable } from "convex/server";
+import { v } from "convex/values";
+export default defineSchema({
+  items: defineTable({
+    mode: v.union(v.literal(1), v.literal("1")),
+    body: v.string(),
+    group: v.string(),
+    embedding: v.array(v.float64()),
+  })
+    .index("by_mode", ["group"])
+    .searchIndex("search_body", { searchField: "body", filterFields: ["mode"] })
+    .vectorIndex("by_embedding", { vectorField: "embedding", dimensions: 4, filterFields: ["mode"] }),
+});
+`,
+      );
+      writeFileSync(
+        "convex/api.ts",
+        `import { v } from "convex/values";
+import { query, mutation, action, internalQuery, internalMutation } from "./_generated/server";
+const result = v.object({ ok: v.literal(1) });
+export const publicQ = query({ args: { value: v.union(v.literal(1), v.literal("1")) }, returns: v.object({ ok: v.string() }), handler: async () => ({ ok: "1" }) });
+export const publicM = mutation({ args: {}, returns: v.null(), handler: async () => null });
+export const publicA = action({ args: {}, handler: async () => null });
+export const internalQ = internalQuery({ args: { value: v.literal("1") }, returns: result, handler: async () => ({ ok: 1 }) });
+export const internalM = internalMutation({ args: {}, returns: v.null(), handler: async () => null });
+`,
+      );
+      writeFileSync(
+        "convex/http.ts",
+        `import { httpRouter } from "convex/server";
+import { httpAction } from "./_generated/server";
+const http = httpRouter();
+http.route({ path: "/direct", method: "POST", handler: httpAction(async () => new Response()) });
+http.routePrefix({ pathPrefix: "/prefix/", method: "GET", handler: httpAction(async () => new Response()) });
+export default http;
+`,
+      );
+      execFileSync("git", ["add", "."]);
+      execFileSync("git", ["commit", "-qm", "no protected subject anywhere"]);
+      const target = execFileSync("git", ["rev-parse", "HEAD"], {
+        encoding: "utf8",
+      }).trim();
+      const classification = classifyConvexContract(base, target);
+      expect(classification).toMatchObject({
+        baseSha: base,
+        candidateSha: target,
+        hasChange: true,
+        hasContraction: true,
+        reasons: expect.arrayContaining([
+          "function args narrowed: api:internalQ",
+          "function removed: api:internalA",
+          "function return validator changed: api:publicQ",
+          "HTTP route removed: POST:/factory",
+          "index definition changed: items.by_mode",
+          "index definition changed: items.search_body",
+          "index definition changed: items.by_embedding",
+        ]),
+      });
+      expect(classification.baseDigest).toMatch(/^[0-9a-f]{64}$/);
+      expect(classification.candidateDigest).toMatch(/^[0-9a-f]{64}$/);
+      expect(classification.baseDigest).not.toBe(
+        classification.candidateDigest,
+      );
+
+      writeFileSync(
+        "convex/api.ts",
+        `import { v } from "convex/values";
+import { query } from "./_generated/server";
+const hidden = { args: { value: v.string() }, returns: v.null() };
+export const bypass = query({ ...hidden, handler: async () => null });
+`,
+      );
+      execFileSync("git", ["add", "."]);
+      execFileSync("git", ["commit", "-qm", "try validator spread bypass"]);
+      const bypass = execFileSync("git", ["rev-parse", "HEAD"], {
+        encoding: "utf8",
+      }).trim();
+      expect(() => convexContractAt(bypass)).toThrow(/unsupported member/);
+    } finally {
+      process.chdir(originalCwd);
+    }
   });
 });
 
@@ -1336,6 +1746,28 @@ describe("protected workflow provenance", () => {
           "index removed: items.by_value",
         ]),
       });
+
+      writeFileSync(
+        "convex/schema.ts",
+        'import { defineSchema, defineTable } from "convex/server";\nimport { v } from "convex/values";\nexport default defineSchema({ items: defineTable({ value: v.literal("fixed") }) });\n',
+      );
+      execFileSync("git", ["add", "."]);
+      execFileSync("git", [
+        "commit",
+        "-qm",
+        "chore: second contraction with arbitrary subject",
+      ]);
+      const secondContractSha = execFileSync("git", ["rev-parse", "HEAD"], {
+        encoding: "utf8",
+      }).trim();
+      const stacked = findProtectedRequirements(base, secondContractSha);
+      expect(stacked).toHaveLength(3);
+      expect(stacked.at(-1)).toMatchObject({
+        kind: "contract",
+        targetSha: secondContractSha,
+        activeBase: base,
+        protectedBase: contractSha,
+      });
     } finally {
       process.chdir(originalCwd);
     }
@@ -1395,10 +1827,49 @@ describe("semantic workflow security contracts", () => {
       const source = readFileSync(path, "utf8");
       expect(source).not.toContain("mise");
       expect(source).not.toContain("npm install --global");
+      expect(source).not.toMatch(/(^|\s)npm\s+install\b/m);
       expect(source).not.toContain("PRODUCTION_RELEASE_PROBE_API_KEY");
       expect(source).not.toContain("STAGING_RELEASE_PROBE_API_KEY");
       expect(source).not.toContain("secrets.STAGING_E2E_API_KEY");
     }
+    const packageJson = JSON.parse(readFileSync("package.json", "utf8"));
+    expect(packageJson.devDependencies["agent-browser"]).toBe("0.27.1");
+    const lockfile = readFileSync("pnpm-lock.yaml", "utf8");
+    expect(lockfile).toContain("agent-browser@0.27.1:");
+    expect(lockfile).toContain(
+      "sha512-lLzpWDV7nlVsA5km7yMCH1wppvnLLNx160hLwLdDUkCst9x38UhhxoiTmmJ2qreOnCa/Hp4/Gm6Adkahhtb6Hg==",
+    );
+    for (const path of [
+      ".github/workflows/deploy-production.yml",
+      ".github/workflows/payment-drill.yml",
+      ".github/workflows/preview.yml",
+    ]) {
+      const source = readFileSync(path, "utf8");
+      expect(source).toContain(
+        "$GITHUB_WORKSPACE/node_modules/.bin/agent-browser",
+      );
+      expect(source).toContain('"$locked_browser" install --with-deps');
+    }
+  });
+
+  it("derives contract protection from exact semantic diff, never commit subject", () => {
+    const source = readFileSync(
+      ".github/workflows/contract-production.yml",
+      "utf8",
+    );
+    expect(source).toContain("release-convex-contract.mjs classify");
+    expect(source).toContain("classification.hasContraction");
+    expect(source).toContain("requirements.at(-1) !== exact[0]");
+    expect(source).toContain(
+      '--base="$ACTIVE_RELEASE" --target="$protected_base"',
+    );
+    expect(source).toContain("ref: ${{ needs.resolve.outputs.deploy_sha }}");
+    expect(source).toContain("pnpm --dir .release-contract-candidate install");
+    expect(source).toContain(
+      "cd .release-contract-candidate && pnpm exec convex deploy",
+    );
+    expect(source).not.toContain("git show -s --format=%s");
+    expect(source).not.toContain("contract\\(convex\\):");
   });
 
   it("runs API stale guard before checkout/cache/setup in every protected release job", () => {
@@ -1544,6 +2015,43 @@ describe("semantic workflow security contracts", () => {
         step.name?.includes("Prove recovered paid accounting"),
       ),
     ).toBe(true);
+    const recoverySource = readFileSync(
+      ".github/workflows/recover-production.yml",
+      "utf8",
+    );
+    expect(recoverySource).toContain(
+      '".github/workflows/recover-production.yml"',
+    );
+    expect(recoverySource).toContain(
+      "recovery-manifest-initial-${{ github.run_id }}-${{ github.run_attempt }}",
+    );
+    expect(recoverySource).toContain(
+      "recovery-manifest-final-${{ github.run_id }}-${{ github.run_attempt }}",
+    );
+    expect(recoverySource).toContain(
+      "lifecycle-recovery-initial-${{ github.run_id }}-${{ github.run_attempt }}",
+    );
+    expect(recoverySource).toContain(
+      "lifecycle-recovery-final-${{ github.run_id }}-${{ github.run_attempt }}",
+    );
+    expect(recoverySource).toContain("verify-lineage-version");
+    expect(recoverySource).toContain("get-bounded-lineage-version");
+    expect(recoverySource).toContain(
+      "production-recovery-${{ needs.resolve.outputs.run_id }}-${{ github.run_id }}-${{ github.run_attempt }}",
+    );
+    const recoverySteps = recovery.jobs?.recover?.steps ?? [];
+    const firstRecoveryMutation = recoverySteps.findIndex(
+      (step) =>
+        step.run &&
+        /convex deploy --yes\b|wrangler (?:versions upload|deploy|versions deploy)\b/.test(
+          step.run,
+        ),
+    );
+    const initialRecoveryManifest = recoverySteps.findIndex((step) =>
+      step.name?.includes("recursive recovery intent before mutation"),
+    );
+    expect(initialRecoveryManifest).toBeGreaterThan(-1);
+    expect(firstRecoveryMutation).toBeGreaterThan(initialRecoveryManifest);
     const lifecycle = workflow(".github/workflows/gateway-do-lifecycle.yml");
     const lifecycleProduction = lifecycle.jobs?.production;
     const gatewayMutation = lifecycleProduction?.steps?.find((step) =>
