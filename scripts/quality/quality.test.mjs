@@ -14,6 +14,18 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import test from "node:test";
+
+const githubTokenAlphabet =
+  "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+
+function fakeGithubToken() {
+  const bytes = randomBytes(36);
+  let suffix = "";
+  for (const byte of bytes) {
+    suffix += githubTokenAlphabet[byte % githubTokenAlphabet.length];
+  }
+  return `ghp_${suffix}`;
+}
 import {
   compareBundleMeasurements,
   measureBundle,
@@ -966,10 +978,7 @@ test("gitleaks current snapshot includes Git candidates and excludes ignored loc
 
 test("gitleaks full history catches a secret deleted from current tree", () => {
   const { directory, git } = gitRepository();
-  write(
-    join(directory, "leak.env"),
-    `GITHUB_TOKEN=${"ghp_" + randomBytes(27).toString("base64url")}\n`,
-  );
+  write(join(directory, "leak.env"), `GITHUB_TOKEN=${fakeGithubToken()}\n`);
   assert.equal(git("add", ".").status, 0);
   assert.equal(git("commit", "--quiet", "-m", "fixture: add secret").status, 0);
   rmSync(join(directory, "leak.env"));
@@ -1001,7 +1010,7 @@ test("gitleaks exact fingerprint baseline rejects same-line mutation", () => {
   assert.equal(lookup.status, 0, lookup.stdout + lookup.stderr);
   const gitleaks = lookup.stdout.trim();
   const report = join(directory, "report.json");
-  const first = "ghp_" + randomBytes(27).toString("base64url");
+  const first = fakeGithubToken();
   write(join(directory, "leak.env"), `GITHUB_TOKEN=${first}\n`);
   assert.equal(git("add", "leak.env").status, 0);
   assert.equal(
@@ -1025,7 +1034,7 @@ test("gitleaks exact fingerprint baseline rejects same-line mutation", () => {
   const [finding] = JSON.parse(readFileSync(report, "utf8"));
   write(join(directory, ".gitleaksignore"), `${finding.Fingerprint}\n`);
 
-  const second = "ghp_" + randomBytes(27).toString("base64url");
+  const second = fakeGithubToken();
   write(join(directory, "leak.env"), `GITHUB_TOKEN=${second}\n`);
   assert.equal(git("add", "leak.env").status, 0);
   assert.equal(
