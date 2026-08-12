@@ -8,6 +8,7 @@ import {
 import type { Doc, Id } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
 import {
+  getActiveOrgById,
   requireOrgAdmin,
   requireOrgMemberBySlug,
   requireProjectMember,
@@ -198,14 +199,18 @@ export const update = mutation({
     }),
   },
   handler: async (ctx, args): Promise<Doc<"projects">> => {
-    await requireProjectMember(ctx, args.projectId);
-
-    const current = await ctx.db.get(args.projectId);
-    if (current === null) {
-      throw new Error("Project not found");
-    }
+    const { claims, project: current } = await requireProjectMember(
+      ctx,
+      args.projectId,
+    );
     if (current.retiredAt !== undefined) {
       throw new Error("Project is retired");
+    }
+    if (
+      args.patch.visibility !== undefined &&
+      args.patch.visibility !== current.visibility
+    ) {
+      requireOrgAdmin(claims);
     }
 
     let name = current.name;
@@ -511,8 +516,8 @@ export const notifyRetirementConsumersPage = internalMutation({
     if (!current || project === null) {
       return { scanned: 0, notified: 0, done: true };
     }
-    const publisher = await ctx.db.get(project.organizationId);
-    if (publisher === null || publisher.archivedAt !== undefined) {
+    const publisher = await getActiveOrgById(ctx, project.organizationId);
+    if (publisher === null) {
       return { scanned: 0, notified: 0, done: true };
     }
 
@@ -527,8 +532,8 @@ export const notifyRetirementConsumersPage = internalMutation({
     let notified = 0;
     for (const organizationId of consumerIds) {
       if (organizationId === project.organizationId) continue;
-      const consumer = await ctx.db.get(organizationId);
-      if (consumer === null || consumer.archivedAt !== undefined) continue;
+      const consumer = await getActiveOrgById(ctx, organizationId);
+      if (consumer === null) continue;
       await upsertProjectRetirementConsumerNotice(ctx, {
         consumerClerkOrgId: consumer.clerkOrgId,
         projectId: project._id,
@@ -566,12 +571,11 @@ export const reconcileRetirementConsumerNotice = internalMutation({
   handler: async (ctx, args): Promise<{ notified: boolean }> => {
     const [project, consumer] = await Promise.all([
       ctx.db.get(args.projectId),
-      ctx.db.get(args.consumerOrganizationId),
+      getActiveOrgById(ctx, args.consumerOrganizationId),
     ]);
     if (
       project === null ||
       consumer === null ||
-      consumer.archivedAt !== undefined ||
       project.organizationId === consumer._id ||
       project.retirementState !== "scheduled" ||
       project.sunsetAt === undefined ||
@@ -579,8 +583,8 @@ export const reconcileRetirementConsumerNotice = internalMutation({
     ) {
       return { notified: false };
     }
-    const publisher = await ctx.db.get(project.organizationId);
-    if (publisher === null || publisher.archivedAt !== undefined) {
+    const publisher = await getActiveOrgById(ctx, project.organizationId);
+    if (publisher === null) {
       return { notified: false };
     }
     await upsertProjectRetirementConsumerNotice(ctx, {

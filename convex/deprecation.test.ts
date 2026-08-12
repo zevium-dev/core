@@ -310,7 +310,7 @@ describe("specs.getPublishedForGateway — deprecation metadata", () => {
     expect(result).not.toHaveProperty("clerkOrgId");
   });
 
-  it("includes deprecation metadata after deprecate", async () => {
+  it("keeps version sunset informational until project retirement", async () => {
     const t = convexTest(schema, modules);
     const seed = await seedWorld(t);
     const sunsetAt = Date.now() + MIN_DEPRECATION_NOTICE_MS + 60_000;
@@ -328,7 +328,7 @@ describe("specs.getPublishedForGateway — deprecation metadata", () => {
 
     expect(result).not.toBeNull();
     expect(result!.deprecatedAt).toBeGreaterThan(0);
-    expect(result!.sunsetAt).toBe(sunsetAt);
+    expect(result!.sunsetAt).toBeUndefined();
     expect(result!.deprecationMessage).toBe("Sunsetting");
   });
 
@@ -377,6 +377,51 @@ describe("catalogue.getPublicDetail — deprecation metadata", () => {
 });
 
 describe("specs.publish — fires spec_published notification", () => {
+  it("rejects member publication and public-visibility changes", async () => {
+    const t = convexTest(schema, modules);
+    const seed = await seedWorld(t);
+    await t.run(async (ctx) => {
+      await ctx.db.insert("publishReadiness", {
+        projectId: seed.projectId,
+        draftHash: await draftFingerprint(SPEC_BODY),
+        serverOrigin: "https://api.example.com",
+        credentialRevision: 0,
+        status: "ok",
+        testedAt: Date.now(),
+      });
+      await ctx.db.patch(seed.projectId, { visibility: "private" });
+    });
+
+    await expect(
+      asPublisherMember(t).mutation(api.specs.publish, {
+        projectId: seed.projectId,
+        version: "1.1.0",
+      }),
+    ).rejects.toThrow(/admin/);
+    await expect(
+      asPublisherMember(t).mutation(api.projects.update, {
+        projectId: seed.projectId,
+        patch: { visibility: "public" },
+      }),
+    ).rejects.toThrow(/admin/);
+    await expect(
+      asPublisherMember(t).mutation(api.projects.update, {
+        projectId: seed.projectId,
+        patch: { name: "Member-edited metadata" },
+      }),
+    ).resolves.toMatchObject({ name: "Member-edited metadata" });
+
+    const published = await t.run(async (ctx) =>
+      ctx.db
+        .query("specVersions")
+        .withIndex("by_project_version", (q) =>
+          q.eq("projectId", seed.projectId).eq("version", "1.1.0"),
+        )
+        .unique(),
+    );
+    expect(published).toBeNull();
+  });
+
   it("creates notification on successful publish", async () => {
     const t = convexTest(schema, modules);
     const seed = await seedWorld(t);

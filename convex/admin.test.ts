@@ -73,3 +73,62 @@ describe("admin publisher transfer operations", () => {
     expect(result.page[0]).not.toHaveProperty("destination");
   });
 });
+
+describe("admin project pagination", () => {
+  const priorAdminIds = process.env.ADMIN_USER_IDS;
+  beforeEach(() => {
+    process.env.ADMIN_USER_IDS = ADMIN;
+  });
+  afterEach(() => {
+    if (priorAdminIds === undefined) delete process.env.ADMIN_USER_IDS;
+    else process.env.ADMIN_USER_IDS = priorAdminIds;
+  });
+
+  it("applies single filters before pagination and clamps page size", async () => {
+    const t = convexTest(schema, modules);
+    await t.run(async (ctx) => {
+      const organizationId = await ctx.db.insert("organizations", {
+        clerkOrgId: "org_admin_filter",
+        name: "Filter owner",
+        slug: "filter-owner",
+      });
+      await ctx.db.insert("projects", {
+        organizationId,
+        name: "Buried published project",
+        slug: "buried-published",
+        status: "published",
+        visibility: "public",
+        tags: [],
+      });
+      for (let index = 0; index < 80; index += 1) {
+        await ctx.db.insert("projects", {
+          organizationId,
+          name: `New draft ${index}`,
+          slug: `new-draft-${index}`,
+          status: "draft",
+          visibility: "public",
+          tags: [],
+        });
+      }
+    });
+    const admin = t.withIdentity({ subject: ADMIN } as { subject: string });
+
+    const published = await admin.query(api.admin.listProjects, {
+      status: "published",
+      paginationOpts: { numItems: 10, cursor: null },
+    });
+    expect(published.page.map((project) => project.slug)).toEqual([
+      "buried-published",
+    ]);
+
+    const capped = await admin.query(api.admin.listProjects, {
+      visibility: "public",
+      paginationOpts: { numItems: 10_000, cursor: null },
+    });
+    expect(capped.page).toHaveLength(50);
+    expect(capped.isDone).toBe(false);
+    expect(
+      capped.page.every((project) => project.visibility === "public"),
+    ).toBe(true);
+  });
+});

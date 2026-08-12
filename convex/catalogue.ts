@@ -7,8 +7,11 @@ import { v } from "convex/values";
 import { internalMutation, query, type MutationCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
-import { getOrgByPublicHandle } from "./lib/auth";
-import { enqueueGatewayControl } from "./organizations";
+import {
+  getActiveOrgById,
+  getOrgByClerkId,
+  getOrgByPublicHandle,
+} from "./lib/auth";
 
 const PAGE_SIZE = 24;
 const PROJECTION_BACKFILL_PAGE_SIZE = 25;
@@ -148,34 +151,18 @@ export async function syncCatalogueListing(
     if (existing !== null) {
       await ctx.db.delete(existing._id);
       await adjustCatalogueCount(ctx, existing.discoverable ? -1 : 0);
-      await enqueueGatewayControl(ctx, {
-        clerkOrgId: existing.clerkOrgId,
-        entityKey: `catalogue:${projectId}`,
-        sourceRevision: existing.sourceRevision + 1,
-        operation: "catalogue.state",
-        payload: { discoverable: false, projectId },
-      });
     }
     return null;
   }
   if (project.status !== "published" && existing === null) return null;
-  const organization = await ctx.db.get(project.organizationId);
+  const organization = await getActiveOrgById(ctx, project.organizationId);
   if (organization === null || organization.publicHandle === undefined) {
     if (existing !== null && existing.discoverable) {
-      const sourceRevision = existing.sourceRevision + 1;
       await ctx.db.patch(existing._id, {
         discoverable: false,
-        sourceRevision,
         updatedAt: Date.now(),
       });
       await adjustCatalogueCount(ctx, -1);
-      await enqueueGatewayControl(ctx, {
-        clerkOrgId: existing.clerkOrgId,
-        entityKey: `catalogue:${projectId}`,
-        sourceRevision,
-        operation: "catalogue.state",
-        payload: { discoverable: false, projectId },
-      });
     }
     return null;
   }
@@ -193,10 +180,6 @@ export async function syncCatalogueListing(
     .first();
   const pricing =
     latest === null ? null : summarizePublishedPricing(latest.spec);
-  const sourceRevision = (existing?.sourceRevision ?? 0) + 1;
-  if (!Number.isSafeInteger(sourceRevision)) {
-    throw new Error("Catalogue source revision exhausted");
-  }
   const next = {
     projectId,
     clerkOrgId: organization.clerkOrgId,
@@ -220,7 +203,6 @@ export async function syncCatalogueListing(
     endpointCount: pricing?.endpointCount ?? 0,
     hasFreeTier: pricing?.hasFreeTier ?? false,
     discoverable,
-    sourceRevision,
     updatedAt: Date.now(),
   };
   const unchanged =
@@ -255,19 +237,6 @@ export async function syncCatalogueListing(
     ctx,
     Number(discoverable) - Number(existing?.discoverable ?? false),
   );
-  await enqueueGatewayControl(ctx, {
-    clerkOrgId: organization.clerkOrgId,
-    entityKey: `catalogue:${projectId}`,
-    sourceRevision,
-    operation: "catalogue.state",
-    publisherHandle: organization.publicHandle,
-    payload: {
-      discoverable,
-      projectId,
-      publisherHandle: organization.publicHandle,
-      projectSlug: project.slug,
-    },
-  });
   return await ctx.db.get(listingId);
 }
 
@@ -432,7 +401,10 @@ export const listPublic = query({
         ) {
           continue;
         }
-        const organization = await ctx.db.get(project.organizationId);
+        const organization = await getActiveOrgById(
+          ctx,
+          project.organizationId,
+        );
         if (
           organization === null ||
           organization.archivedAt !== undefined ||
@@ -543,8 +515,20 @@ export const listPublic = query({
       }
       return true;
     });
+    const active = await Promise.all(
+      filtered.map(async (listing) => {
+        const organization = await getOrgByClerkId(ctx, listing.clerkOrgId);
+        return organization?.publicHandle === listing.publisherHandle
+          ? listing
+          : null;
+      }),
+    );
     return {
-      items: filtered.map(publicListing),
+      items: active
+        .filter((listing): listing is Doc<"catalogueListings"> =>
+          Boolean(listing),
+        )
+        .map(publicListing),
       nextCursor: page.isDone ? null : page.continueCursor,
       total: stats.publicCount,
     };

@@ -134,7 +134,8 @@ export const publish = mutation({
     version?: Doc<"specVersions">;
     project?: Doc<"projects">;
   }> => {
-    const { org } = await requireProjectMember(ctx, args.projectId);
+    const { claims, org } = await requireProjectMember(ctx, args.projectId);
+    requireOrgAdmin(claims);
 
     const version = args.version.trim();
     if (!isValidSemver(version)) {
@@ -381,8 +382,9 @@ export const getPublishedForGateway = query({
       version: latest.version,
       visibility: project.visibility,
       deprecatedAt: project.deprecationStartedAt ?? latest.deprecatedAt,
-      sunsetAt:
-        project.sunsetAt ?? project.retirementCutoffAt ?? latest.sunsetAt,
+      // Version sunset is informational. Only project retirement may cut off
+      // execution, because that lifecycle owns consumer notice and wind-down.
+      sunsetAt: project.sunsetAt ?? project.retirementCutoffAt,
       deprecationMessage:
         project.deprecationMessage ?? latest.deprecationMessage,
       retiredAt: project.retiredAt,
@@ -459,8 +461,7 @@ export const getPublishedForGatewayInternal = internalQuery({
         ),
       ),
       deprecatedAt: project.deprecationStartedAt ?? latest.deprecatedAt,
-      sunsetAt:
-        project.sunsetAt ?? project.retirementCutoffAt ?? latest.sunsetAt,
+      sunsetAt: project.sunsetAt ?? project.retirementCutoffAt,
       deprecationMessage:
         project.deprecationMessage ?? latest.deprecationMessage,
       retiredAt: project.retiredAt,

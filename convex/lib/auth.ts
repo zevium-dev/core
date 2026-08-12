@@ -10,6 +10,18 @@ export type OrgIdentityClaims = {
 
 type DbCtx = QueryCtx | MutationCtx;
 
+async function hasOrganizationTombstone(
+  ctx: DbCtx,
+  clerkOrgId: string,
+): Promise<boolean> {
+  return (
+    (await ctx.db
+      .query("organizationTombstones")
+      .withIndex("by_clerk_org", (q) => q.eq("clerkOrgId", clerkOrgId))
+      .unique()) !== null
+  );
+}
+
 export async function requireIdentity(ctx: DbCtx): Promise<OrgIdentityClaims> {
   const identity = await ctx.auth.getUserIdentity();
   if (identity === null) {
@@ -51,10 +63,34 @@ export async function getOrgByClerkId(
   ctx: DbCtx,
   clerkOrgId: string,
 ): Promise<Doc<"organizations"> | null> {
-  return await ctx.db
+  const org = await ctx.db
     .query("organizations")
     .withIndex("by_clerk_org", (q) => q.eq("clerkOrgId", clerkOrgId))
     .unique();
+  if (
+    org === null ||
+    org.archivedAt !== undefined ||
+    (await hasOrganizationTombstone(ctx, clerkOrgId))
+  ) {
+    return null;
+  }
+  return org;
+}
+
+/** Resolve an active organization by internal id with tombstone authority. */
+export async function getActiveOrgById(
+  ctx: DbCtx,
+  organizationId: Id<"organizations">,
+): Promise<Doc<"organizations"> | null> {
+  const org = await ctx.db.get(organizationId);
+  if (
+    org === null ||
+    org.archivedAt !== undefined ||
+    (await hasOrganizationTombstone(ctx, org.clerkOrgId))
+  ) {
+    return null;
+  }
+  return org;
 }
 
 /** Public routing uses the product handle, never the Clerk slug. */
@@ -68,7 +104,14 @@ export async function getOrgByPublicHandle(
       q.eq("publicHandle", handle.trim().toLowerCase()),
     )
     .unique();
-  return org?.archivedAt === undefined ? org : null;
+  if (
+    org === null ||
+    org.archivedAt !== undefined ||
+    (await hasOrganizationTombstone(ctx, org.clerkOrgId))
+  ) {
+    return null;
+  }
+  return org;
 }
 
 /**
@@ -117,12 +160,9 @@ export async function requireProjectMember(
     throw new Error("Project not found");
   }
 
-  const org = await ctx.db.get(project.organizationId);
+  const org = await getActiveOrgById(ctx, project.organizationId);
   if (org === null) {
     throw new Error("Organization not found");
-  }
-  if (org.archivedAt !== undefined) {
-    throw new Error("Organization is archived");
   }
   if (org.clerkOrgId !== claims.orgId) {
     throw new Error("Not a member of this organization");
@@ -140,21 +180,9 @@ export async function requireProjectMember(
  *
  * Returns the claims for chaining. Does NOT touch the DB.
  *
- * Mutations that SHOULD call `requireOrgAdmin(claims)` (caller migration is a
- * separate PR — this helper is exported but not yet wired in):
- *   - projects.create / projects.update / projects.remove
- *       (project lifecycle: create, rename, transfer, delete)
- *   - specs.publish / specs.deprecateVersion / specs.undeprecateVersion
- *       (publishing + deprecation lifecycle; `specs.saveDraft` stays member-level)
- *   - webhooks.upsertEndpoint / webhooks.deleteEndpoint
- *       (webhook endpoint config + signing-secret surface)
- *   - keySettings.setCap / keySettings.setDisabled / keySettings rotation state machine
- *       (gateway key provisioning, caps, rotation)
- *   - organizations.ensureOrganization stays identity-scoped (bootstrap/sync);
- *       any future org-level settings mutation should adopt this gate.
- *
- * Read-only queries and per-member mutations (draft save, wallet view, payout
- * state) intentionally stay at `requireOrgMemberBySlug` / `requireProjectMember`.
+ * Publication, public visibility, retirement, credential/webhook policy, and
+ * organization-wide key policy call this gate. Draft editing and own-key reads
+ * intentionally remain member-scoped.
  */
 export function requireOrgAdmin(claims: OrgIdentityClaims): OrgIdentityClaims {
   if (claims.orgRole !== "org:admin") {

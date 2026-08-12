@@ -309,6 +309,72 @@ describe("usage.listForOrg", () => {
       }),
     ).rejects.toThrow(/before end time/);
   });
+
+  it("shows members only provider-attributed usage while admins see the org", async () => {
+    const t = convexTest(schema, modules);
+    const seed = await seedWorld(t);
+    await t.run(async (ctx) => {
+      await ctx.db.insert("usageEvents", {
+        organizationId: seed.consumerOrgId,
+        ownerUserId: "user_alice",
+        projectId: seed.projectAId,
+        endpoint: "/owned/alice",
+        method: "GET",
+        credits: 7,
+        status: 200,
+        latencyMs: 7,
+        keyId: "key_alice",
+        at: Date.now(),
+      });
+      await ctx.db.insert("usageEvents", {
+        organizationId: seed.consumerOrgId,
+        ownerUserId: "user_bob",
+        projectId: seed.projectAId,
+        endpoint: "/owned/bob",
+        method: "GET",
+        credits: 11,
+        status: 200,
+        latencyMs: 11,
+        keyId: "key_bob",
+        at: Date.now() + 1,
+      });
+    });
+    const alice = t.withIdentity({
+      subject: "user_alice",
+      org_id: "org_consumer",
+      org_slug: "consumer-co",
+      org_role: "org:member",
+    } as {
+      subject: string;
+      org_id: string;
+      org_slug: string;
+      org_role: string;
+    });
+    const admin = asMember(t, "org_consumer");
+
+    const memberLog = await alice.query(api.usage.listForOrg, {
+      orgSlug: "consumer-co",
+      paginationOpts: { numItems: 50, cursor: null },
+    });
+    expect(memberLog.page.map((event) => event.endpoint)).toEqual([
+      "/owned/alice",
+    ]);
+
+    const siblingKey = await alice.query(api.usage.listForOrg, {
+      orgSlug: "consumer-co",
+      keyId: "key_bob",
+      paginationOpts: { numItems: 50, cursor: null },
+    });
+    expect(siblingKey.page).toEqual([]);
+
+    const adminLog = await admin.query(api.usage.listForOrg, {
+      orgSlug: "consumer-co",
+      paginationOpts: { numItems: 50, cursor: null },
+    });
+    expect(adminLog.page.map((event) => event.endpoint)).toEqual(
+      expect.arrayContaining(["/owned/alice", "/owned/bob", "/v1/forecast"]),
+    );
+  });
 });
 
 describe("analytics.orgOverview", () => {
@@ -360,6 +426,49 @@ describe("analytics.orgOverview", () => {
     );
     expect(result?.netCredits).toBe(95);
     expect(result?.netCredits).not.toBe(100);
+  });
+
+  it("does not expose sibling or unattributed usage in member rollups", async () => {
+    const t = convexTest(schema, modules);
+    const seed = await seedWorld(t);
+    await t.run(async (ctx) => {
+      for (const [ownerUserId, endpoint, credits] of [
+        ["user_alice", "/owned/alice", 7],
+        ["user_bob", "/owned/bob", 11],
+      ] as const) {
+        await ctx.db.insert("usageEvents", {
+          organizationId: seed.consumerOrgId,
+          ownerUserId,
+          projectId: seed.projectAId,
+          endpoint,
+          method: "GET",
+          credits,
+          status: 200,
+          latencyMs: credits,
+          keyId: `key_${ownerUserId}`,
+          at: Date.now(),
+        });
+      }
+    });
+    const alice = t.withIdentity({
+      subject: "user_alice",
+      org_id: "org_consumer",
+      org_slug: "consumer-co",
+      org_role: "org:member",
+    } as {
+      subject: string;
+      org_id: string;
+      org_slug: string;
+      org_role: string;
+    });
+    const overview = await alice.query(api.analytics.orgOverview, {
+      orgSlug: "consumer-co",
+    });
+    expect(overview.callsCycle).toBe(1);
+    expect(overview.creditsCycle).toBe(7);
+    expect(overview.recent.map((event) => event.endpoint)).toEqual([
+      "/owned/alice",
+    ]);
   });
 });
 
@@ -420,5 +529,57 @@ describe("billing.cycleBreakdown", () => {
       credits: 35,
     });
     expect(maps).toMatchObject({ name: "Maps API", calls: 1, credits: 50 });
+    expect(breakdown.truncated).toBe(false);
+    expect(breakdown.scanCap).toBe(10_000);
+  });
+
+  it("keeps member billing attribution private from sibling key owners", async () => {
+    const t = convexTest(schema, modules);
+    const seed = await seedWorld(t);
+    await t.run(async (ctx) => {
+      await ctx.db.insert("usageEvents", {
+        organizationId: seed.consumerOrgId,
+        ownerUserId: "user_alice",
+        projectId: seed.projectAId,
+        endpoint: "/owned/alice",
+        method: "GET",
+        credits: 7,
+        status: 200,
+        latencyMs: 7,
+        keyId: "key_alice",
+        at: Date.now(),
+      });
+      await ctx.db.insert("usageEvents", {
+        organizationId: seed.consumerOrgId,
+        ownerUserId: "user_bob",
+        projectId: seed.projectAId,
+        endpoint: "/owned/bob",
+        method: "GET",
+        credits: 11,
+        status: 200,
+        latencyMs: 11,
+        keyId: "key_bob",
+        at: Date.now() + 1,
+      });
+    });
+    const alice = t.withIdentity({
+      subject: "user_alice",
+      org_id: "org_consumer",
+      org_slug: "consumer-co",
+      org_role: "org:member",
+    } as {
+      subject: string;
+      org_id: string;
+      org_slug: string;
+      org_role: string;
+    });
+    const result = await alice.query(api.billing.cycleBreakdown, {
+      orgSlug: "consumer-co",
+    });
+    expect(result.totalCalls).toBe(1);
+    expect(result.totalCredits).toBe(7);
+    expect(result.byKey).toEqual([
+      { keyId: "key_alice", calls: 1, credits: 7 },
+    ]);
   });
 });

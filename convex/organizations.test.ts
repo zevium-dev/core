@@ -73,90 +73,93 @@ describe("stable public handles", () => {
 });
 
 describe("organization archive ordering and scale", () => {
-  it("delivers one canonical archive event with HMAC-bound raw bytes", async () => {
-    const previousBaseUrl = process.env.GATEWAY_CONTROL_BASE_URL;
-    const previousSecret = process.env.GATEWAY_INTERNAL_SECRET;
-    process.env.GATEWAY_CONTROL_BASE_URL = "https://gateway.test";
-    process.env.GATEWAY_INTERNAL_SECRET = "control-test-secret";
-    try {
-      const t = convexTest(schema, modules);
-      await t.run(async (ctx) => {
-        await ctx.db.insert("organizations", {
-          clerkOrgId: "org_signed_archive",
-          name: "Signed Archive",
-          slug: "signed-archive",
-          publicHandle: "signed-archive",
-        });
+  it("treats the permanent tombstone as authoritative across public and gateway reads", async () => {
+    const t = convexTest(schema, modules);
+    await t.run(async (ctx) => {
+      const orgId = await ctx.db.insert("organizations", {
+        clerkOrgId: "org_tombstoned",
+        name: "Restored-looking org",
+        slug: "restored-looking",
+        publicHandle: "restored-looking",
       });
-      await t.mutation(internal.organizations.archiveFromClerk, {
-        clerkOrgId: "org_signed_archive",
+      const projectId = await ctx.db.insert("projects", {
+        organizationId: orgId,
+        name: "Should stay dead",
+        slug: "dead-api",
+        status: "published",
+        visibility: "public",
+        tags: [],
       });
-      await t.mutation(internal.organizations.archiveFromClerk, {
-        clerkOrgId: "org_signed_archive",
-      });
-      const outbox = await t.run(async (ctx) =>
-        ctx.db.query("gatewayControlOutbox").collect(),
-      );
-      expect(outbox).toHaveLength(1);
-
-      let signedRequest: Request | undefined;
-      vi.stubGlobal(
-        "fetch",
-        vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-          signedRequest = new Request(input, init);
-          const body = JSON.parse(await signedRequest.clone().text()) as {
-            operation: string;
-            sourceRevision: number;
-          };
-          return Response.json({
-            status: "applied",
-            operation: body.operation,
-            sourceRevision: body.sourceRevision,
-          });
+      await ctx.db.insert("specVersions", {
+        projectId,
+        version: "1.0.0",
+        spec: JSON.stringify({
+          openapi: "3.1.0",
+          info: { title: "Dead", version: "1.0.0" },
+          servers: [{ url: "https://api.example.com" }],
+          paths: {},
         }),
-      );
+        publishedAt: 1,
+      });
+      const walletId = await ctx.db.insert("wallets", {
+        organizationId: orgId,
+        balance: 91,
+        sequence: 1,
+      });
+      await ctx.db.insert("walletEntries", {
+        walletId,
+        kind: "admin_adjustment",
+        amount: 91,
+        refId: "seed:tombstone-wallet",
+        sequence: 1,
+        createdAt: 1,
+      });
+      await ctx.db.insert("keySettings", {
+        clerkOrgId: "org_tombstoned",
+        keyId: "key_must_fail_closed",
+        disabled: false,
+        updatedAt: 1,
+      });
+      // Hostile state: mutable mirror looks active beside terminal tombstone.
+      await ctx.db.insert("organizationTombstones", {
+        clerkOrgId: "org_tombstoned",
+        archivedAt: 2,
+      });
+    });
 
-      await expect(
-        t.action(internal.organizations.deliverGatewayControlOutbox, {
-          outboxId: outbox[0]!._id,
-        }),
-      ).resolves.toEqual({ delivered: true });
-      expect(signedRequest?.url).toBe(
-        "https://gateway.test/internal/registry/v1/org/archive",
-      );
-      const timestamp = signedRequest?.headers.get("x-zevium-timestamp");
-      const nonce = signedRequest?.headers.get("x-zevium-nonce");
-      const signature = signedRequest?.headers.get("x-zevium-signature");
-      const rawBody = await signedRequest!.clone().text();
-      expect(timestamp).toMatch(/^\d+$/);
-      expect(nonce).toMatch(/^[0-9a-f-]{36}$/i);
-      const key = await crypto.subtle.importKey(
-        "raw",
-        new TextEncoder().encode("control-test-secret"),
-        { name: "HMAC", hash: "SHA-256" },
-        false,
-        ["sign"],
-      );
-      const expectedBytes = await crypto.subtle.sign(
-        "HMAC",
-        key,
-        new TextEncoder().encode(`${timestamp}.${nonce}.${rawBody}`),
-      );
-      const expected = [...new Uint8Array(expectedBytes)]
-        .map((value) => value.toString(16).padStart(2, "0"))
-        .join("");
-      expect(signature).toBe(`v1=${expected}`);
-      expect(
-        await t.run(async (ctx) => ctx.db.get(outbox[0]!._id)),
-      ).toMatchObject({ status: "acked", attempts: 1 });
-    } finally {
-      if (previousBaseUrl === undefined)
-        delete process.env.GATEWAY_CONTROL_BASE_URL;
-      else process.env.GATEWAY_CONTROL_BASE_URL = previousBaseUrl;
-      if (previousSecret === undefined)
-        delete process.env.GATEWAY_INTERNAL_SECRET;
-      else process.env.GATEWAY_INTERNAL_SECRET = previousSecret;
-    }
+    await expect(
+      t.query(api.organizations.getByPublicHandle, {
+        handle: "restored-looking",
+      }),
+    ).resolves.toBeNull();
+    await expect(
+      t.query(api.catalogue.getPublicDetail, {
+        publisherHandle: "restored-looking",
+        projectSlug: "dead-api",
+      }),
+    ).resolves.toBeNull();
+    await expect(
+      t.query(api.specs.getPublishedForGateway, {
+        publisherHandle: "restored-looking",
+        projectSlug: "dead-api",
+      }),
+    ).resolves.toBeNull();
+    await expect(
+      t.query(internal.specs.getPublishedForGatewayInternal, {
+        publisherHandle: "restored-looking",
+        projectSlug: "dead-api",
+      }),
+    ).resolves.toBeNull();
+    const checkpoint = await t.query(internal.wallets.getGatewayWallet, {
+      clerkOrgId: "org_tombstoned",
+    });
+    expect(checkpoint.wallet).toMatchObject({ balance: 0, sequence: 0 });
+    expect(checkpoint.keySettings).toEqual([
+      expect.objectContaining({
+        keyId: "key_must_fail_closed",
+        disabled: true,
+      }),
+    ]);
   });
 
   it("retains a delete-before-create tombstone and never resurrects the org", async () => {

@@ -66,7 +66,14 @@ async function getOrganizationByClerkId(
     .query("organizations")
     .withIndex("by_clerk_org", (q) => q.eq("clerkOrgId", clerkOrgId))
     .unique();
-  return organization?.archivedAt === undefined ? organization : null;
+  if (organization === null || organization.archivedAt !== undefined) {
+    return null;
+  }
+  const tombstone = await ctx.db
+    .query("organizationTombstones")
+    .withIndex("by_clerk_org", (q) => q.eq("clerkOrgId", clerkOrgId))
+    .unique();
+  return tombstone === null ? organization : null;
 }
 
 export function checkpoint(
@@ -256,7 +263,10 @@ export const getGatewayWallet = internalQuery({
         wallet === null
           ? { clerkOrgId: args.clerkOrgId, balance: 0, sequence: 0 }
           : checkpoint(args.clerkOrgId, wallet),
-      keySettings: settings.map(toGatewayRow),
+      keySettings: settings.map((setting) => ({
+        ...toGatewayRow(setting),
+        disabled: organization === null ? true : setting.disabled,
+      })),
     };
   },
 });
@@ -557,8 +567,18 @@ export const recordUsage = internalMutation({
         continue;
       }
 
+      const keySetting = await ctx.db
+        .query("keySettings")
+        .withIndex("by_key", (q) => q.eq("keyId", event.keyId))
+        .unique();
+      const ownerUserId =
+        keySetting?.clerkOrgId === clerkOrgId
+          ? keySetting.ownerUserId
+          : undefined;
+
       const usageEventId = await ctx.db.insert("usageEvents", {
         organizationId: consumerOrg._id,
+        ownerUserId,
         projectId: event.projectId,
         endpoint: event.endpoint,
         method: event.method,

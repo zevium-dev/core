@@ -10,6 +10,7 @@ import { internal } from "./_generated/api";
 
 /** Cap for month-to-date usage count (by_at index range scan). */
 const USAGE_STATS_CAP = 50_000;
+const ADMIN_PAGE_SIZE_MAX = 50;
 
 function startOfUtcMonth(now: number): number {
   const d = new Date(now);
@@ -165,41 +166,54 @@ export const listProjects = query({
 
     const status = args.status;
     const visibility = args.visibility;
+    const paginationOpts = {
+      ...args.paginationOpts,
+      numItems: Number.isSafeInteger(args.paginationOpts.numItems)
+        ? Math.min(
+            Math.max(args.paginationOpts.numItems, 1),
+            ADMIN_PAGE_SIZE_MAX,
+          )
+        : ADMIN_PAGE_SIZE_MAX,
+      maximumRowsRead: ADMIN_PAGE_SIZE_MAX + 1,
+      maximumBytesRead: 256 * 1024,
+    };
 
-    // When both filters present, use the composite index for precise results.
-    // Otherwise paginate all and filter in-memory (admin tool, bounded scale).
-    let result;
-    if (status !== undefined && visibility !== undefined) {
-      result = await ctx.db
-        .query("projects")
-        .withIndex("by_visibility_status", (q) =>
-          q.eq("visibility", visibility).eq("status", status),
-        )
-        .order("desc")
-        .paginate(args.paginationOpts);
-    } else {
-      result = await ctx.db
-        .query("projects")
-        .order("desc")
-        .paginate(args.paginationOpts);
-    }
+    const result =
+      visibility !== undefined && status !== undefined
+        ? await ctx.db
+            .query("projects")
+            .withIndex("by_visibility_status", (q) =>
+              q.eq("visibility", visibility).eq("status", status),
+            )
+            .order("desc")
+            .paginate(paginationOpts)
+        : visibility !== undefined
+          ? await ctx.db
+              .query("projects")
+              .withIndex("by_visibility_status", (q) =>
+                q.eq("visibility", visibility),
+              )
+              .order("desc")
+              .paginate(paginationOpts)
+          : status !== undefined
+            ? await ctx.db
+                .query("projects")
+                .withIndex("by_status", (q) => q.eq("status", status))
+                .order("desc")
+                .paginate(paginationOpts)
+            : await ctx.db
+                .query("projects")
+                .order("desc")
+                .paginate(paginationOpts);
 
-    const page: AdminProjectView[] = result.page
-      .filter((p) => {
-        if (status !== undefined && p.status !== status) return false;
-        if (visibility !== undefined && p.visibility !== visibility) {
-          return false;
-        }
-        return true;
-      })
-      .map((p) => ({
-        _id: p._id,
-        name: p.name,
-        slug: p.slug,
-        status: p.status,
-        visibility: p.visibility,
-        organizationId: p.organizationId,
-      }));
+    const page: AdminProjectView[] = result.page.map((p) => ({
+      _id: p._id,
+      name: p.name,
+      slug: p.slug,
+      status: p.status,
+      visibility: p.visibility,
+      organizationId: p.organizationId,
+    }));
 
     return { ...result, page };
   },

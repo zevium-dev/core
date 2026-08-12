@@ -132,7 +132,7 @@ function projectLinearSpend(
 export const orgOverview = query({
   args: { orgSlug: v.string() },
   handler: async (ctx, args): Promise<OrgOverview> => {
-    const { org } = await requireOrgMemberBySlug(ctx, args.orgSlug);
+    const { claims, org } = await requireOrgMemberBySlug(ctx, args.orgSlug);
     const now = Date.now();
     const dayStart = startOfUtcDay(now);
     const cycleStart = startOfUtcMonth(now);
@@ -142,26 +142,51 @@ export const orgOverview = query({
       .withIndex("by_organization", (q) => q.eq("organizationId", org._id))
       .unique();
 
-    const scanned = await ctx.db
-      .query("usageEvents")
-      .withIndex("by_org_at", (q) =>
-        q
-          .eq("organizationId", org._id)
-          .gte("at", cycleStart)
-          .lt("at", now + 1),
-      )
-      .order("desc")
-      .take(ORG_SCAN_CAP);
+    const scanned =
+      claims.orgRole === "org:admin"
+        ? await ctx.db
+            .query("usageEvents")
+            .withIndex("by_org_at", (q) =>
+              q
+                .eq("organizationId", org._id)
+                .gte("at", cycleStart)
+                .lt("at", now + 1),
+            )
+            .order("desc")
+            .take(ORG_SCAN_CAP)
+        : await ctx.db
+            .query("usageEvents")
+            .withIndex("by_org_owner_at", (q) =>
+              q
+                .eq("organizationId", org._id)
+                .eq("ownerUserId", claims.subject)
+                .gte("at", cycleStart)
+                .lt("at", now + 1),
+            )
+            .order("desc")
+            .take(ORG_SCAN_CAP);
 
     // Recent activity is independent of the UTC-month aggregation window, so
     // month boundaries never produce an empty or undersized activity list.
-    const recentEvents = await ctx.db
-      .query("usageEvents")
-      .withIndex("by_org_at", (q) =>
-        q.eq("organizationId", org._id).lt("at", now + 1),
-      )
-      .order("desc")
-      .take(RECENT_LIMIT);
+    const recentEvents =
+      claims.orgRole === "org:admin"
+        ? await ctx.db
+            .query("usageEvents")
+            .withIndex("by_org_at", (q) =>
+              q.eq("organizationId", org._id).lt("at", now + 1),
+            )
+            .order("desc")
+            .take(RECENT_LIMIT)
+        : await ctx.db
+            .query("usageEvents")
+            .withIndex("by_org_owner_at", (q) =>
+              q
+                .eq("organizationId", org._id)
+                .eq("ownerUserId", claims.subject)
+                .lt("at", now + 1),
+            )
+            .order("desc")
+            .take(RECENT_LIMIT);
 
     const truncated = scanned.length >= ORG_SCAN_CAP;
 

@@ -434,49 +434,6 @@ http.route({
   }),
 });
 
-/** Version-pinned, paginated org/key bootstrap for edge control receivers. */
-http.route({
-  path: "/gateway-control-manifest",
-  method: "GET",
-  handler: httpAction(async (ctx, request) => {
-    const secret = process.env.GATEWAY_INTERNAL_SECRET;
-    if (
-      secret === undefined ||
-      secret.length === 0 ||
-      request.headers.get("x-internal-secret") !== secret
-    ) {
-      return json({ error: "unauthorized" }, 401);
-    }
-    const url = new URL(request.url);
-    const clerkOrgId = url.searchParams.get("clerkOrgId")?.trim() ?? "";
-    const revisionText = url.searchParams.get("sourceRevision") ?? "";
-    const sourceRevision = Number(revisionText);
-    const cursor = url.searchParams.get("cursor");
-    if (
-      clerkOrgId === "" ||
-      !Number.isSafeInteger(sourceRevision) ||
-      sourceRevision <= 0
-    ) {
-      return json(
-        { error: "clerkOrgId and positive sourceRevision required" },
-        400,
-      );
-    }
-    try {
-      const page = await ctx.runQuery(
-        internal.organizations.getGatewayControlManifestPage,
-        { clerkOrgId, sourceRevision, cursor },
-      );
-      return json(page, page.status === "stale" ? 409 : 200);
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "control manifest failed";
-      console.error("gateway control manifest failed", { message });
-      return json({ error: "control manifest failed" }, 500);
-    }
-  }),
-});
-
 /** Published spec plus publisher credentials; gateway-only. */
 http.route({
   path: "/gateway-spec",

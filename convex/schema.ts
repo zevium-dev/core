@@ -30,51 +30,6 @@ export default defineSchema({
     archivedAt: v.number(),
   }).index("by_clerk_org", ["clerkOrgId"]),
 
-  /** Monotonic edge-control source of truth, independent from wallet sequence. */
-  gatewayOrgControls: defineTable({
-    clerkOrgId: v.string(),
-    sourceRevision: v.number(),
-    archived: v.boolean(),
-    publisherHandle: v.optional(v.string()),
-    updatedAt: v.number(),
-  }).index("by_clerk_org", ["clerkOrgId"]),
-
-  /**
-   * Transactional control-plane outbox. `payload` is immutable canonical JSON;
-   * delivery headers carry retry-specific timestamp/nonce/signature values.
-   */
-  gatewayControlOutbox: defineTable({
-    clerkOrgId: v.string(),
-    entityKey: v.string(),
-    sourceRevision: v.number(),
-    operation: v.union(
-      v.literal("org.state"),
-      v.literal("org.archive"),
-      v.literal("route.upsert"),
-      v.literal("route.archive"),
-      v.literal("key.upsert"),
-      v.literal("key.state"),
-      v.literal("spec.state"),
-      v.literal("catalogue.state"),
-    ),
-    route: v.string(),
-    payload: v.string(),
-    payloadDigest: v.optional(v.string()),
-    status: v.union(v.literal("pending"), v.literal("acked")),
-    attempts: v.number(),
-    nextAttemptAt: v.number(),
-    lastError: v.optional(v.string()),
-    createdAt: v.number(),
-    updatedAt: v.number(),
-    ackedAt: v.optional(v.number()),
-  })
-    .index("by_entity_revision_operation", [
-      "entityKey",
-      "sourceRevision",
-      "operation",
-    ])
-    .index("by_status_next_attempt", ["status", "nextAttemptAt"]),
-
   /** Durable Svix receipt prevents replay and stale organization mirror writes. */
   clerkWebhookReceipts: defineTable({
     svixId: v.string(),
@@ -122,6 +77,7 @@ export default defineSchema({
     retiredAt: v.optional(v.number()),
   })
     .index("by_org", ["organizationId"])
+    .index("by_status", ["status"])
     .index("by_org_status", ["organizationId", "status"])
     .index("by_org_slug", ["organizationId", "slug"])
     .index("by_visibility_status", ["visibility", "status"])
@@ -213,6 +169,8 @@ export default defineSchema({
   // Per-call metering events (gateway → Convex, async)
   usageEvents: defineTable({
     organizationId: v.id("organizations"),
+    /** Server-derived Clerk user that owned key at settlement time. */
+    ownerUserId: v.optional(v.string()),
     projectId: v.id("projects"),
     endpoint: v.string(),
     method: v.string(),
@@ -231,10 +189,30 @@ export default defineSchema({
     .index("by_org", ["organizationId"])
     .index("by_project", ["projectId"])
     .index("by_org_at", ["organizationId", "at"])
+    .index("by_org_owner_at", ["organizationId", "ownerUserId", "at"])
     .index("by_org_project_at", ["organizationId", "projectId", "at"])
+    .index("by_org_owner_project_at", [
+      "organizationId",
+      "ownerUserId",
+      "projectId",
+      "at",
+    ])
     .index("by_org_key_at", ["organizationId", "keyId", "at"])
+    .index("by_org_owner_key_at", [
+      "organizationId",
+      "ownerUserId",
+      "keyId",
+      "at",
+    ])
     .index("by_org_project_key_at", [
       "organizationId",
+      "projectId",
+      "keyId",
+      "at",
+    ])
+    .index("by_org_owner_project_key_at", [
+      "organizationId",
+      "ownerUserId",
       "projectId",
       "keyId",
       "at",
@@ -303,6 +281,8 @@ export default defineSchema({
   keySettings: defineTable({
     clerkOrgId: v.string(),
     keyId: v.string(),
+    /** Server-verified Clerk key owner. Legacy/unverified rows stay undefined. */
+    ownerUserId: v.optional(v.string()),
     /** Monthly credit cap; undefined = unlimited. Enforced by the wallet DO. */
     monthlyCapCredits: v.optional(v.number()),
     disabled: v.boolean(),
@@ -335,7 +315,6 @@ export default defineSchema({
     endpointCount: v.number(),
     hasFreeTier: v.boolean(),
     discoverable: v.boolean(),
-    sourceRevision: v.number(),
     updatedAt: v.number(),
   })
     .index("by_project", ["projectId"])

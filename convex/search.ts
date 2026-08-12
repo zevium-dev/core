@@ -22,6 +22,7 @@ import {
 import { internal } from "./_generated/api";
 import type { Doc } from "./_generated/dataModel";
 import { summarizePublishedPricing, type PublicListing } from "./catalogue";
+import { getActiveOrgById } from "./lib/auth";
 
 /** Max results returned by a semantic search (VectorSearchQuery.limit caps at 256). */
 const SEARCH_LIMIT_MAX = 20;
@@ -313,8 +314,8 @@ export const fetchSearchListings = internalQuery({
       if (project.status !== "published") continue;
       if (project.deprecationStartedAt !== undefined) continue;
 
-      const org = await ctx.db.get(project.organizationId);
-      if (org === null || org.archivedAt !== undefined) continue;
+      const org = await getActiveOrgById(ctx, project.organizationId);
+      if (org === null) continue;
       if (org.publicHandle === undefined || org.publicHandle === "") continue;
 
       const latest = await ctx.db
