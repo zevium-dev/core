@@ -167,11 +167,20 @@ export const getProjectForEmbed = internalQuery({
       .order("desc")
       .first();
 
+    const organization = await ctx.db.get(project.organizationId);
+    if (
+      organization === null ||
+      latest === null ||
+      !isListingPublicCopyAllowed(project, organization, latest)
+    ) {
+      return null;
+    }
+
     return {
       name: project.name,
       description: project.description,
       tags: project.tags,
-      specJson: latest === null ? null : latest.spec,
+      specJson: latest.spec,
     };
   },
 });
@@ -314,7 +323,7 @@ export const fetchSearchListings = internalQuery({
         .order("desc")
         .first();
 
-      if (!isListingPublicCopyAllowed(project, org, latest?.spec ?? null)) {
+      if (!isListingPublicCopyAllowed(project, org, latest)) {
         continue;
       }
 

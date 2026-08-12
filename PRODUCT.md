@@ -8,7 +8,7 @@
 
 Zevium is an **agent-first, per-call API marketplace**. Publishers list APIs described by OpenAPI specs; consumers — human developers **and AI agents** — pay per call via prepaid credits through a metered gateway.
 
-**The problem.** Selling API access is broken in both directions. Publishers who want to charge per call must build metering, billing, key management, and payout plumbing themselves. Consumers — increasingly AI agents — have no trustworthy place to discover, evaluate, and pay for APIs: the incumbent horizontal marketplace collapsed (RapidAPI, sold for parts in 2024), and the agent-tool ecosystem that replaced the demand is a mess of thousands of broken, unmetered, insecure community servers with no payment layer at all.
+**The problem.** Selling API access is broken in both directions. Publishers who want to charge per call must build metering, billing, key management, and payout plumbing themselves. Consumers — increasingly AI agents — lack one curated place to discover, evaluate, and pay for APIs. Existing catalogues and agent-tool directories do not combine consistent discovery, prepaid per-call pricing, quality signals, and one metered call path.
 
 **The bet.** Be the curated, metered place where both humans and agents discover and pay for APIs per call — and where publishing a paid API takes minutes, not a billing-infrastructure project.
 
@@ -45,7 +45,7 @@ Zevium takes:        5 credits (5% platform cut)
 Publisher earns:    95 credits (95% revenue share)
 ```
 
-- **Publishers keep 95%.** 20-30% take rates made horizontal marketplaces economically unsustainable for high-volume AI workloads. Market benchmarks: Apify keeps 20%, MCPize 15%, AWS Marketplace ~3-5%. At 5%, Zevium matches cloud-marketplace economics while offering full marketplace features — the strongest possible publisher acquisition pitch
+- **Publishers keep 95%.** Low platform fees preserve publisher economics for high-volume machine traffic and make the split easy to understand
 - **Exchange rate: $1 = 10,000 credits** (1 credit = $0.0001). Market per-call pricing of $0.002–$0.05 maps to 20–500 credits. Rate is a launch default, revisitable — but one global constant, never per-API
 - Credits are prepaid by consumer organizations via one-time top-up purchases
 - Platform cut + publisher share are calculated per call at charge time
@@ -155,4 +155,4 @@ Consumers see: one gateway URL per API, one key, one wallet, itemized charges. P
 
 - Subscription plans for API access (per-call credits only; subscriptions reintroduce the billing model the market is leaving)
 - Hosting publisher API backends (Zevium forwards to publisher-owned upstreams; it is not a compute platform)
-- Open unmoderated long-tail listing (curation and quality gates over catalog size — the long-tail model is what killed RapidAPI)
+- Open unmoderated long-tail listing (curation and quality gates matter more than raw catalogue size)

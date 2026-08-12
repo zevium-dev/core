@@ -7,16 +7,17 @@ import {
   type MutationCtx,
 } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
-import { requireIdentity, requireOrgAdmin } from "./lib/auth";
+import {
+  requireIdentity,
+  requireOrgAdmin,
+  requireOrgMemberBySlug,
+} from "./lib/auth";
+import {
+  assertOrganizationCopyAllowed,
+  isOrganizationCopyAllowed,
+  isOrganizationPublicSurfaceAllowed,
+} from "./lib/publicClaims";
 import { isValidSlug } from "./lib/validate";
-
-function assertOrganizationPublicCopy(name: string): void {
-  if (!isPublicCopyAllowed(name)) {
-    throw new Error(
-      "Public copy contains an unsupported compliance or absolute security claim",
-    );
-  }
-}
 
 async function ensureWallet(
   ctx: MutationCtx,
@@ -39,22 +40,25 @@ async function ensureWallet(
 export const getBySlug = query({
   args: { slug: v.string() },
   handler: async (ctx, args): Promise<Doc<"organizations"> | null> => {
-    return await ctx.db
-      .query("organizations")
-      .withIndex("by_slug", (q) => q.eq("slug", args.slug))
-      .unique();
+    const { org } = await requireOrgMemberBySlug(ctx, args.slug);
+    return org;
   },
 });
 
 export const getByPublicHandle = query({
   args: { handle: v.string() },
-  handler: async (ctx, args): Promise<Doc<"organizations"> | null> =>
-    await ctx.db
+  handler: async (ctx, args): Promise<Doc<"organizations"> | null> => {
+    const organization = await ctx.db
       .query("organizations")
       .withIndex("by_public_handle", (q) =>
         q.eq("publicHandle", args.handle.trim().toLowerCase()),
       )
-      .unique(),
+      .unique();
+    return organization !== null &&
+      isOrganizationPublicSurfaceAllowed(organization)
+      ? organization
+      : null;
+  },
 });
 
 /** Auth-scoped availability probe; never exposes another organization record. */
@@ -64,6 +68,9 @@ export const checkPublicHandleAvailability = query({
     const claims = await requireIdentity(ctx);
     if (!claims.orgId) throw new Error("No active organization");
     const handle = args.handle.trim().toLowerCase();
+    if (!isValidSlug(handle) || !isPublicCopyAllowed(handle)) {
+      return { available: false };
+    }
     const current = await ctx.db
       .query("organizations")
       .withIndex("by_clerk_org", (q) => q.eq("clerkOrgId", claims.orgId!))
@@ -99,18 +106,23 @@ export const upsertFromClerk = internalMutation({
     imageUrl: v.optional(v.string()),
   },
   handler: async (ctx, args): Promise<Id<"organizations">> => {
-    assertOrganizationPublicCopy(args.name);
     const existing = await ctx.db
       .query("organizations")
       .withIndex("by_clerk_org", (q) => q.eq("clerkOrgId", args.clerkOrgId))
       .unique();
+    const publicHandle = existing?.publicHandle ?? args.slug;
+    assertOrganizationCopyAllowed({
+      name: args.name,
+      slug: args.slug,
+      publicHandle,
+    });
 
     if (existing === null) {
       const organizationId = await ctx.db.insert("organizations", {
         clerkOrgId: args.clerkOrgId,
         name: args.name,
         slug: args.slug,
-        publicHandle: args.slug,
+        publicHandle,
         imageUrl: args.imageUrl,
       });
       await ensureWallet(ctx, organizationId);
@@ -177,19 +189,23 @@ export const ensureOrganization = mutation({
     if (claims.orgId === undefined || claims.orgId !== args.clerkOrgId) {
       throw new Error("Organization does not match authenticated identity");
     }
-    assertOrganizationPublicCopy(args.name);
-
     const existing = await ctx.db
       .query("organizations")
       .withIndex("by_clerk_org", (q) => q.eq("clerkOrgId", args.clerkOrgId))
       .unique();
+    const publicHandle = existing?.publicHandle ?? args.slug;
+    assertOrganizationCopyAllowed({
+      name: args.name,
+      slug: args.slug,
+      publicHandle,
+    });
 
     if (existing === null) {
       const organizationId = await ctx.db.insert("organizations", {
         clerkOrgId: args.clerkOrgId,
         name: args.name,
         slug: args.slug,
-        publicHandle: args.slug,
+        publicHandle,
         imageUrl: args.imageUrl,
       });
       await ensureWallet(ctx, organizationId);
@@ -228,6 +244,11 @@ export const setPublicHandle = mutation({
     if (!isValidSlug(handle)) {
       throw new Error("Public handle must be kebab-case");
     }
+    if (!isPublicCopyAllowed(handle)) {
+      throw new Error(
+        "Public copy contains an unsupported compliance or absolute security claim",
+      );
+    }
     const organization = await ctx.db
       .query("organizations")
       .withIndex("by_clerk_org", (q) => q.eq("clerkOrgId", claims.orgId!))
@@ -252,7 +273,9 @@ export const setPublicHandle = mutation({
 /** One-shot migration before publicHandle becomes required. */
 export const backfillPublicHandles = internalMutation({
   args: {},
-  handler: async (ctx): Promise<{ updated: number; collisions: number }> => {
+  handler: async (
+    ctx,
+  ): Promise<{ updated: number; collisions: number; blocked: number }> => {
     const organizations = await ctx.db.query("organizations").collect();
     const taken = new Set(
       organizations
@@ -261,18 +284,33 @@ export const backfillPublicHandles = internalMutation({
     );
     let updated = 0;
     let collisions = 0;
+    let blocked = 0;
     for (const organization of organizations) {
       if (organization.publicHandle !== undefined) continue;
       const base = organization.slug.trim().toLowerCase();
+      if (
+        !isValidSlug(base) ||
+        !isOrganizationCopyAllowed({ ...organization, publicHandle: base })
+      ) {
+        blocked += 1;
+        continue;
+      }
       let handle = base;
       if (taken.has(handle)) {
         collisions += 1;
         handle = `${base}-${organization._id.slice(-6).toLowerCase()}`;
       }
+      if (
+        !isValidSlug(handle) ||
+        !isOrganizationCopyAllowed({ ...organization, publicHandle: handle })
+      ) {
+        blocked += 1;
+        continue;
+      }
       taken.add(handle);
       await ctx.db.patch(organization._id, { publicHandle: handle });
       updated += 1;
     }
-    return { updated, collisions };
+    return { updated, collisions, blocked };
   },
 });

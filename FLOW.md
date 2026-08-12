@@ -44,7 +44,7 @@ The listing's product page — shareable URL, the API's landing page. Spec metad
 - Pricing table: per-endpoint credits, free tier highlighted
 - Docs: rendered from the published spec — three-column pattern (nav / prose / runnable code samples in curl/js/python), prose↔code hover-sync
 - **Try it** panel: one-click use-my-key (or paste key), run request in-page, live response. Key held in browser session storage only; test mode visually loud
-- **Mock mode**: free spec-generated mock responses — exercise the API shape without spending credits. Implemented: keyless and anonymous by design (never executes upstream, 0 credits), ahead of its P1 tag
+- **Mock mode**: free, anonymous spec-generated responses — exercise the API shape without spending credits or executing the upstream
 - **Connect your agent** tab: copy-paste agent-tool config per client + agent-readable usage notes
 - Version picker: published versions, spec-diff changelog between versions (P2)
 - Reviews/ratings (P2)
@@ -71,13 +71,13 @@ The listing's product page — shareable URL, the API's landing page. Spec metad
 
 - Key table: name, masked key, per-key spend limit, remaining, last used, per-key usage sparkline, enable/disable
 - Create key dialog: name → create → copy-once reveal (blur-in animation per DESIGN.md)
-- Per-key spend limits with daily/weekly/monthly reset + auto-disable on limit (P1). Implemented: monthly cap + auto-disable only, DO-enforced; daily/weekly reset windows remain P1
-- Zero-downtime rotation: roll key, old key valid through grace period (P1). Implemented: 24h grace period, DO-enforced — ahead of its P1 tag
+- Per-key spend limits with auto-disable. Monthly limits are available; daily and weekly reset choices remain P1
+- Zero-downtime rotation: roll key, old key remains usable for a 24-hour grace period
 - Programmatic key-management API for SaaS consumers (P1)
 
 ### 2.3 Wallet & billing — `/app/organizations/{org}/billing`
 
-> Implementation note: shipped as `/app/billing` — org scope comes from the Clerk **active org** (switcher-selected), not a slug segment in the URL. Same for every `/app/organizations/{org}/...` path below (§4, §5): the active-org model replaced per-org URL segments.
+Current screen: `/app/billing`. Org switcher selects workspace for this and every org-scoped screen in §4 and §5; URL does not repeat org slug.
 
 Org-scoped — the org owns the wallet; admins manage it, members view their own attribution.
 
@@ -149,7 +149,7 @@ Org-scoped — the org owns the wallet; admins manage it, members view their own
 
 - Header: name, slug, status badge (draft/published), visibility badge (private/public), Make Public action
 - Tabs: Overview / Spec / Analytics / Earnings / Settings
-- Settings tab: description, tags, **upstream credentials** (gateway-only secrets attached to forwarded calls; production encryption rollout gate is documented in TECH.md), spec variables, danger zone
+- Settings tab: description, tags, **upstream credentials** (attached to forwarded calls and never shown again after save), spec variables, danger zone
 
 ### 4.6 Spec editor — `.../projects/{project}/spec`
 
@@ -165,12 +165,12 @@ Org-scoped — the org owns the wallet; admins manage it, members view their own
 - Latency: p50 / p95 / p99 per endpoint
 - Consumers: count, top consumers by calls (anonymized), retention
 - Revenue: credits earned per endpoint per period
-- Live-updating (realtime sync per TECH.md — dashboards tick, per DESIGN.md "alive")
+- Live-updating — dashboards tick per DESIGN.md "alive"
 
 ### 4.8 Earnings & payouts — `.../organizations/{org}/earnings` (P2)
 
 - Accumulated publisher share (95%), settlement schedule, payout history, payout method, statement export
-- Implemented ahead of its P2 tag with Stripe Connect: `/app/org` handles publisher onboarding and remediation; `/app/earnings` separates pending-risk, available, allocated, transferred, reversed, and failed earnings and shows transfer/bank-payout history. `/admin/payouts` retries failed Connect transfers; bank destinations stay inside Stripe.
+- `/app/org` handles payout onboarding and remediation. `/app/earnings` separates pending-risk, available, allocated, transferred, reversed, and failed earnings and shows transfer and bank-payout history. Staff can retry failed transfers. Zevium never displays or stores bank destinations.
 
 ### 4.9 Listing lifecycle
 

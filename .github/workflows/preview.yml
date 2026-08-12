@@ -84,7 +84,9 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
           gateway_name="zevium-gateway-pr-$PR_NUMBER"
-          pnpm --filter gateway exec wrangler deploy --name "$gateway_name" --config wrangler.preview.jsonc \
+          pnpm --filter gateway build:compliance
+          node scripts/check-compliance-claims.mjs --require-generated=gateway
+          pnpm --filter gateway exec wrangler deploy .compliance-dist/index.js --no-bundle --name "$gateway_name" --config wrangler.preview.jsonc \
             --var "CONVEX_URL:$VITE_CONVEX_URL" \
             --var "CONVEX_SITE_URL:$CONVEX_SITE_URL"
           printf '%s' '${{ secrets.CLERK_PREVIEW_SECRET_KEY }}' | pnpm --filter gateway exec wrangler secret put CLERK_SECRET_KEY --name "$gateway_name" --config wrangler.preview.jsonc
@@ -115,6 +117,8 @@ jobs:
           CLERK_PUBLISHABLE_KEY: ${{ secrets.CLERK_PREVIEW_PUBLISHABLE_KEY }}
           CLERK_SECRET_KEY: ${{ secrets.CLERK_PREVIEW_SECRET_KEY }}
         run: pnpm --filter web build
+      - name: Scan exact web deploy inputs
+        run: node scripts/check-compliance-claims.mjs --require-generated=web
       - name: Upload web Worker build
         uses: actions/upload-artifact@v7
         with:
@@ -151,6 +155,7 @@ jobs:
         run: |
           web_name="zevium-web-pr-$PR_NUMBER"
           WEB_NAME="$web_name" node -e 'const fs=require("node:fs"); const p="apps/web/dist/server/wrangler.json"; const c=JSON.parse(fs.readFileSync(p)); c.name=process.env.WEB_NAME; delete c.routes; fs.writeFileSync("apps/web/dist/server/wrangler.preview.json", JSON.stringify(c));'
+          node scripts/check-compliance-claims.mjs --require-generated=web
           pnpm --filter web exec wrangler deploy --name "$web_name" --config dist/server/wrangler.preview.json
           printf '%s' '${{ secrets.CLERK_PREVIEW_SECRET_KEY }}' | pnpm --filter web exec wrangler secret put CLERK_SECRET_KEY --name "$web_name" --config dist/server/wrangler.preview.json
           echo "web_url=https://${web_name}.zevium-dev.workers.dev" >> "$GITHUB_OUTPUT"

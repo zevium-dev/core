@@ -1,10 +1,11 @@
 /**
  * Unsupported public assurance/security claim detection.
  *
- * Policy: publisher-controlled public copy is rejected automatically. Zevium
- * has no human-review approval state, so callers must fail closed instead of
- * recording a fictional review. Narrow implementation facts and explicit
- * negative/absence statements remain allowed.
+ * Policy is deliberately lexical. Zevium has no approval state for publisher
+ * assurance claims, so normalized positive claims are rejected at every public
+ * boundary. Bare framework names, evidence-analysis copy, and direct negative
+ * disclaimers are allowed. Ambiguous copy must be rephrased by its publisher;
+ * this code does not pretend to solve arbitrary natural-language entailment.
  */
 
 export type PublicClaimViolation = {
@@ -20,16 +21,22 @@ export type OpenApiPublicClaimViolation = PublicClaimViolation & {
 type NormalizedText = {
   text: string;
   originalIndexes: number[];
+  hardBreaks: boolean[];
 };
 
-type ClaimRule = {
+type FrameworkRule = {
   label: string;
   pattern: RegExp;
-  allowNegativeContext?: boolean;
 };
 
-// Common Cyrillic/Greek homoglyphs used to evade Latin policy terms. NFKD
-// below handles compatibility forms such as full-width and mathematical text.
+type DirectRule = {
+  label: string;
+  pattern: RegExp;
+  allowDirectNegation?: boolean;
+};
+
+// Common Cyrillic, Greek, and small-cap homoglyphs. NFKD separately handles
+// compatibility forms such as full-width and mathematical alphanumerics.
 const CONFUSABLES: Readonly<Record<string, string>> = {
   а: "a",
   в: "b",
@@ -48,58 +55,96 @@ const CONFUSABLES: Readonly<Record<string, string>> = {
   у: "y",
   α: "a",
   β: "b",
+  δ: "d",
   ε: "e",
+  η: "h",
   ι: "i",
   κ: "k",
   ν: "v",
   ο: "o",
   ρ: "p",
+  ϲ: "c",
   σ: "s",
   ς: "s",
   τ: "t",
   χ: "x",
+  ᴀ: "a",
+  ʙ: "b",
+  ᴄ: "c",
+  ᴅ: "d",
+  ᴇ: "e",
+  ꜰ: "f",
+  ɢ: "g",
+  ʜ: "h",
+  ɪ: "i",
+  ᴊ: "j",
+  ᴋ: "k",
+  ʟ: "l",
+  ᴍ: "m",
+  ɴ: "n",
+  ᴏ: "o",
+  ᴘ: "p",
+  ʀ: "r",
+  ꜱ: "s",
+  ᴛ: "t",
+  ᴜ: "u",
+  ᴠ: "v",
+  ᴡ: "w",
+  ʏ: "y",
+  ᴢ: "z",
 };
 
-const CLAIM_RULES: readonly ClaimRule[] = [
+// Punctuation and whitespace normalize to one separator, so dotted, dashed,
+// underscored, zero-width, and multiline spellings share one policy path.
+const FRAMEWORK_RULES: readonly FrameworkRule[] = [
   {
     label: "SOC 2 claim",
-    pattern: /\b(?:soc|s o c)\s*2(?:\s*type\s*(?:i{1,2}|1|2))?\b/gu,
-    allowNegativeContext: true,
+    pattern: /\bs\s*o\s*c\s*2(?:\s*type\s*(?:i\s*i|i|1|2))?\b/gu,
   },
   {
     label: "HIPAA claim",
-    pattern:
-      /\b(?:hipaa|h i p a a)\s*(?:compliant|compliance|certified|eligible|ready)\b/gu,
+    pattern: /\bh\s*i\s*p\s*a\s*a\b/gu,
   },
   {
-    label: "privacy-law compliance claim",
-    pattern:
-      /\b(?:(?:gdpr|ccpa|cpra)\s*(?:aligned|approved|certified|compliance|compliant|ready)|(?:meets?|satisfy|satisfies|complies)\s+(?:with\s+)?(?:all\s+)?(?:gdpr|ccpa|cpra)(?:\s+(?:requirements?|standards?))?)\b/gu,
+    label: "GDPR claim",
+    pattern: /\bg\s*d\s*p\s*r\b/gu,
   },
   {
-    label: "PCI claim",
-    pattern: /\b(?:pci|p c i)\s*(?:dss|d s s)\b/gu,
-    allowNegativeContext: true,
+    label: "CCPA claim",
+    pattern: /\bc\s*c\s*p\s*a\b/gu,
+  },
+  {
+    label: "CPRA claim",
+    pattern: /\bc\s*p\s*r\s*a\b/gu,
+  },
+  {
+    label: "PCI DSS claim",
+    pattern: /\bp\s*c\s*i\s*d\s*s\s*s\b/gu,
   },
   {
     label: "ISO 27001 claim",
-    pattern:
-      /\biso\s*(?:iec\s*)?27001\s*(?:aligned|approved|certified|compliance|compliant|ready)\b/gu,
+    pattern: /\bi\s*s\s*o(?:\s*i\s*e\s*c)?\s*2\s*7\s*0\s*0\s*1\b/gu,
   },
+];
+
+const DIRECT_RULES: readonly DirectRule[] = [
   {
     label: "security-grade superlative",
     pattern:
       /\b(?:enterprise|bank|military)\s*grade\s+(?:platform|security|secure|encryption|protection)\b/gu,
+    allowDirectNegation: true,
   },
   {
     label: "absolute security claim",
     pattern:
       /\b(?:(?:fully|completely|100\s*percent)\s+secure|secure\s+against\s+(?:all|any|every)\s+breach(?:es)?)\b/gu,
+    allowDirectNegation: true,
   },
   {
     label: "absolute risk claim",
     pattern:
-      /\b(?:zero\s+risk|breach\s*proof|hack\s*proof|unhackable|impossible\s+to\s+breach)\b/gu,
+      /\b(?:zero\s+risk|breach\s*proof|hack\s*proof|unhack(?:able)|impossible\s+to\s+breach)\b/gu,
+    allowDirectNegation: true,
   },
   {
     label: "absolute privacy claim",
@@ -110,12 +155,43 @@ const CLAIM_RULES: readonly ClaimRule[] = [
     label: "broad encryption claim",
     pattern:
       /\b(?:end\s*to\s*end\s+encrypt(?:ed|ion)|(?:all|customer|your)\s+(?:data|information)\s+(?:is|are)\s+encrypted\s+at\s+rest|(?:all\s+)?(?:data|information)\s+is\s+always\s+encrypted)\b/gu,
+    allowDirectNegation: true,
   },
 ];
+
+const POSITIVE_ASSURANCE_WORDS = new Set([
+  "aligned",
+  "approved",
+  "certified",
+  "compliant",
+  "conformant",
+  "eligible",
+  "ready",
+]);
+
+const RELATION_WORDS = new Set([
+  "already",
+  "are",
+  "been",
+  "currently",
+  "formally",
+  "fully",
+  "has",
+  "have",
+  "is",
+  "not",
+  "now",
+  "officially",
+  "remains",
+  "still",
+  "was",
+  "were",
+]);
 
 function normalizePublicClaimText(source: string): NormalizedText {
   const chars: string[] = [];
   const originalIndexes: number[] = [];
+  const hardBreaks: boolean[] = [];
 
   for (let index = 0; index < source.length;) {
     const point = source.codePointAt(index);
@@ -131,13 +207,16 @@ function normalizePublicClaimText(source: string): NormalizedText {
         for (const character of " percent ") {
           chars.push(character);
           originalIndexes.push(index);
+          hardBreaks.push(false);
         }
-      } else if (/[\p{Letter}\p{Number}]/u.test(mapped)) {
+      } else if (/^[\p{Letter}\p{Number}]$/u.test(mapped)) {
         chars.push(mapped);
         originalIndexes.push(index);
+        hardBreaks.push(false);
       } else {
         chars.push(" ");
         originalIndexes.push(index);
+        hardBreaks.push(/[.!?,;:]/u.test(decomposed));
       }
     }
     index += width;
@@ -145,29 +224,148 @@ function normalizePublicClaimText(source: string): NormalizedText {
 
   const collapsed: string[] = [];
   const collapsedIndexes: number[] = [];
+  const collapsedHardBreaks: boolean[] = [];
   for (let index = 0; index < chars.length; index += 1) {
     const character = chars[index]!;
     if (
       character === " " &&
       (collapsed.length === 0 || collapsed[collapsed.length - 1] === " ")
     ) {
+      if (collapsed.length > 0 && hardBreaks[index]) {
+        collapsedHardBreaks[collapsedHardBreaks.length - 1] = true;
+      }
       continue;
     }
     collapsed.push(character);
     collapsedIndexes.push(originalIndexes[index]!);
+    collapsedHardBreaks.push(hardBreaks[index] ?? false);
   }
 
-  return { text: collapsed.join(""), originalIndexes: collapsedIndexes };
+  return {
+    text: collapsed.join(""),
+    originalIndexes: collapsedIndexes,
+    hardBreaks: collapsedHardBreaks,
+  };
 }
 
-function hasNegativeContext(text: string, start: number, end: number): boolean {
-  const before = text.slice(Math.max(0, start - 90), start);
-  const after = text.slice(end, Math.min(text.length, end + 90));
-  const negativeBefore =
-    /(?:^|\s)(?:no|not|without|lack|lacks|lacking|never|cannot|can t|do not|does not|has no|have no)\s+(?:\w+\s+){0,6}$/u;
-  const negativeAfter =
-    /^(?:\s+\w+){0,6}\s+(?:absent|unavailable|missing|not|prohibited|forbidden|unsupported|unissued)\b/u;
-  return negativeBefore.test(before) || negativeAfter.test(after);
+function countWord(source: string, word: string): number {
+  return [...source.matchAll(new RegExp(`\\b${word}\\b`, "gu"))].length;
+}
+
+/**
+ * Only syntactically local negation is trusted. Odd negation means a negative
+ * disclaimer; even negation means a positive assertion. Remote words such as
+ * "do not deny" and "no one doubts" cannot suppress the tripwire.
+ */
+function hasDirectOddNegation(
+  normalized: NormalizedText,
+  start: number,
+  relation = "",
+  relationRange?: readonly [start: number, end: number],
+): boolean {
+  const text = normalized.text;
+  const beforeOffset = Math.max(0, start - 100);
+  const before = text.slice(Math.max(0, start - 100), start).trimEnd();
+  const words = [...before.matchAll(/\b[a-z0-9]+\b/gu)];
+  let directNegations = "";
+  let directStart = start;
+  for (let index = words.length - 1; index >= 0; index -= 1) {
+    const match = words[index]!;
+    const word = match[0];
+    if (!["no", "not", "never", "without"].includes(word)) break;
+    directNegations = `${word} ${directNegations}`;
+    directStart = beforeOffset + (match.index ?? 0);
+  }
+  const verbMatch = before.match(
+    /(?:^| )(?:do|does|did|will|would|can|could|is|are|was|were|has|have)\s+((?:(?:not|never)\s+)+)(?:claim|represent|state|assert|advertise|offer|provide|support|use|have)$/u,
+  );
+  const verbNegations = verbMatch?.[1] ?? "";
+  const suffix = directNegations === "" ? verbNegations : directNegations;
+  const suffixStart =
+    directNegations === ""
+      ? beforeOffset + (verbMatch?.index ?? before.length)
+      : directStart;
+  if (
+    suffix !== "" &&
+    normalized.hardBreaks
+      .slice(suffixStart, start)
+      .some((hardBreak) => hardBreak)
+  ) {
+    return false;
+  }
+  if (
+    relationRange !== undefined &&
+    normalized.hardBreaks
+      .slice(relationRange[0], relationRange[1])
+      .some((hardBreak) => hardBreak)
+  ) {
+    return false;
+  }
+  const local = `${suffix} ${relation}`;
+  const negations =
+    countWord(local, "not") +
+    countWord(local, "never") +
+    countWord(local, "no") +
+    countWord(local, "without");
+  return negations % 2 === 1;
+}
+
+function assuranceAfterFramework(
+  text: string,
+  end: number,
+): { end: number; relation: string } | null {
+  const tail = text.slice(end, Math.min(text.length, end + 100));
+  const words = [...tail.matchAll(/\b[a-z0-9]+\b/gu)].slice(0, 7);
+  const relation: string[] = [];
+
+  for (const word of words) {
+    const value = word[0];
+    if (POSITIVE_ASSURANCE_WORDS.has(value)) {
+      return {
+        end: end + (word.index ?? 0) + value.length,
+        relation: relation.join(" "),
+      };
+    }
+    if (!RELATION_WORDS.has(value)) break;
+    relation.push(value);
+  }
+
+  // A certification/compliance noun alone can describe reports or an API's
+  // subject. Block it only when surrounding syntax asserts achieved status.
+  const achieved = tail.match(
+    /^\s+(?:certification|compliance)\s+(?:(?:is|was|has|has\s+been)\s+)?(?:active|achieved|complete|completed|confirmed|current|guaranteed|issued|obtained|valid|not\s+pending)\b/u,
+  );
+  if (achieved !== null) {
+    return { end: end + achieved[0].length, relation: "" };
+  }
+
+  return null;
+}
+
+function hasPositiveAssuranceVerbBefore(text: string, start: number): boolean {
+  const before = text.slice(Math.max(0, start - 120), start).trimEnd();
+  const assertion = before.match(
+    /(?:^| )((?:(?:do|does|did|is|are|was|were|has|have)\s+)?(?:(?:not|never)\s+)*)((?:compliant|conformant|complies?|comply|conforms?|conform|meets?|satisfies|satisfy|aligns?|aligned|certified|approved|ready))(?:\s+(?:with|to|for))?$/u,
+  );
+  if (assertion === null) return false;
+  const negations =
+    countWord(assertion[1] ?? "", "not") +
+    countWord(assertion[1] ?? "", "never");
+  return negations % 2 === 0;
+}
+
+function addViolation(
+  violations: PublicClaimViolation[],
+  normalized: NormalizedText,
+  label: string,
+  start: number,
+  end: number,
+): void {
+  violations.push({
+    label,
+    match: normalized.text.slice(start, end).trim(),
+    index: normalized.originalIndexes[start] ?? 0,
+  });
 }
 
 export function findPublicClaimViolations(
@@ -176,21 +374,51 @@ export function findPublicClaimViolations(
   const normalized = normalizePublicClaimText(source);
   const violations: PublicClaimViolation[] = [];
 
-  for (const rule of CLAIM_RULES) {
+  for (const framework of FRAMEWORK_RULES) {
+    for (const match of normalized.text.matchAll(framework.pattern)) {
+      const start = match.index ?? 0;
+      const frameworkEnd = start + match[0].length;
+      const assurance = assuranceAfterFramework(normalized.text, frameworkEnd);
+      if (assurance !== null) {
+        if (
+          !hasDirectOddNegation(normalized, start, assurance.relation, [
+            frameworkEnd,
+            assurance.end,
+          ])
+        ) {
+          addViolation(
+            violations,
+            normalized,
+            framework.label,
+            start,
+            assurance.end,
+          );
+        }
+        continue;
+      }
+      if (hasPositiveAssuranceVerbBefore(normalized.text, start)) {
+        addViolation(
+          violations,
+          normalized,
+          framework.label,
+          start,
+          frameworkEnd,
+        );
+      }
+    }
+  }
+
+  for (const rule of DIRECT_RULES) {
     for (const match of normalized.text.matchAll(rule.pattern)) {
-      const normalizedIndex = match.index ?? 0;
-      const normalizedEnd = normalizedIndex + match[0].length;
+      const start = match.index ?? 0;
+      const end = start + match[0].length;
       if (
-        rule.allowNegativeContext === true &&
-        hasNegativeContext(normalized.text, normalizedIndex, normalizedEnd)
+        rule.allowDirectNegation === true &&
+        hasDirectOddNegation(normalized, start)
       ) {
         continue;
       }
-      violations.push({
-        label: rule.label,
-        match: match[0],
-        index: normalized.originalIndexes[normalizedIndex] ?? 0,
-      });
+      addViolation(violations, normalized, rule.label, start, end);
     }
   }
 
@@ -205,12 +433,35 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-const OPENAPI_COPY_KEYS = new Set(["title", "summary", "description"]);
+function extractRawJsonStrings(
+  source: string,
+): Array<{ value: string; index: number }> {
+  const strings: Array<{ value: string; index: number }> = [];
+  for (let cursor = 0; cursor < source.length; cursor += 1) {
+    if (source[cursor] !== '"') continue;
+    const start = cursor;
+    cursor += 1;
+    for (; cursor < source.length; cursor += 1) {
+      if (source[cursor] === "\\") {
+        cursor += 1;
+        continue;
+      }
+      if (source[cursor] !== '"') continue;
+      const value: unknown = JSON.parse(source.slice(start, cursor + 1));
+      if (typeof value !== "string") {
+        throw new Error("Valid JSON string token did not decode to text");
+      }
+      strings.push({ value, index: start });
+      break;
+    }
+  }
+  return strings;
+}
 
 /**
- * Scan OpenAPI fields that become catalogue, generated docs, discovery, mock,
- * or MCP copy. URLs, operation IDs, property names, and example payload values
- * are not marketing copy and are intentionally excluded.
+ * Raw published specs are public. Scan every object key and every string value,
+ * including technical fields, paths, examples, defaults, enums, and mock data.
+ * No field-level allowlist can be safe while raw documents are downloadable.
  */
 export function findOpenApiPublicClaimViolations(
   specText: string,
@@ -219,57 +470,58 @@ export function findOpenApiPublicClaimViolations(
   try {
     parsed = JSON.parse(specText) as unknown;
   } catch {
-    return [];
+    return [
+      {
+        label: "invalid OpenAPI JSON",
+        match: "invalid JSON",
+        index: 0,
+        path: "$",
+      },
+    ];
   }
 
   const violations: OpenApiPublicClaimViolation[] = [];
-  const visit = (
-    value: unknown,
-    path: string,
-    key: string | undefined,
-  ): void => {
+  const scan = (source: string, path: string): void => {
+    violations.push(
+      ...findPublicClaimViolations(source).map((violation) => ({
+        ...violation,
+        path,
+      })),
+    );
+  };
+  const visit = (value: unknown, path: string): void => {
     if (typeof value === "string") {
-      const topLevelTagName =
-        key === "name" && /^\$\.tags\[\d+\]\.name$/u.test(path);
-      if (
-        key !== undefined &&
-        (OPENAPI_COPY_KEYS.has(key) || topLevelTagName)
-      ) {
-        violations.push(
-          ...findPublicClaimViolations(value).map((violation) => ({
-            ...violation,
-            path,
-          })),
-        );
-      }
+      scan(value, path);
       return;
     }
     if (Array.isArray(value)) {
-      if (key === "tags") {
-        value.forEach((item, index) => {
-          if (typeof item === "string") {
-            violations.push(
-              ...findPublicClaimViolations(item).map((violation) => ({
-                ...violation,
-                path: `${path}[${index}]`,
-              })),
-            );
-          } else {
-            visit(item, `${path}[${index}]`, key);
-          }
-        });
-        return;
-      }
-      value.forEach((item, index) => visit(item, `${path}[${index}]`, key));
+      value.forEach((item, index) => visit(item, `${path}[${index}]`));
       return;
     }
     if (!isRecord(value)) return;
-    for (const [childKey, child] of Object.entries(value)) {
-      visit(child, `${path}.${childKey}`, childKey);
+    for (const [key, child] of Object.entries(value)) {
+      const childPath = `${path}.${key}`;
+      scan(key, `${childPath} (key)`);
+      visit(child, childPath);
     }
   };
 
-  visit(parsed, "$", undefined);
+  visit(parsed, "$");
+  const represented = new Set(
+    violations.map(({ label, match }) => `${label}\u0000${match}`),
+  );
+  for (const token of extractRawJsonStrings(specText)) {
+    for (const violation of findPublicClaimViolations(token.value)) {
+      const key = `${violation.label}\u0000${violation.match}`;
+      if (represented.has(key)) continue;
+      represented.add(key);
+      violations.push({
+        ...violation,
+        index: token.index,
+        path: "$ (raw JSON string)",
+      });
+    }
+  }
   return violations;
 }
 

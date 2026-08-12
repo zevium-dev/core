@@ -5,14 +5,16 @@
 
 import {
   extractPricing,
-  isOpenApiPublicCopyAllowed,
   isPublicCopyAllowed,
   parseSpec,
   type HttpMethod,
   type ParsedOpenApiSpec,
 } from "@zevium/shared";
 import { listAllPublic, type CatalogueSource } from "./catalogue-source";
-import type { SpecSource } from "./spec-source";
+import {
+  isPublishedSpecPublicCopyAllowed,
+  type SpecSource,
+} from "./spec-source";
 
 const HTTP_METHODS: readonly HttpMethod[] = [
   "get",
@@ -91,9 +93,14 @@ export async function buildDiscoveryIndex(
   for (const item of items) {
     if (
       !isPublicCopyAllowed(
-        [item.name, item.description ?? "", ...item.tags, item.orgName].join(
-          "\n",
-        ),
+        [
+          item.name,
+          item.slug,
+          item.description ?? "",
+          ...item.tags,
+          item.orgName,
+          item.publisherHandle,
+        ].join("\n"),
       )
     ) {
       continue;
@@ -102,15 +109,22 @@ export async function buildDiscoveryIndex(
       item.publisherHandle,
       item.slug,
     );
+    if (
+      published === null ||
+      !isPublishedSpecPublicCopyAllowed(
+        published,
+        item.publisherHandle,
+        item.slug,
+      )
+    ) {
+      continue;
+    }
     let endpoints: DiscoveryEndpoint[] = [];
-    if (published) {
-      if (!isOpenApiPublicCopyAllowed(published.spec)) continue;
-      try {
-        const parsed = parseSpec(published.spec);
-        endpoints = endpointsFromSpec(parsed);
-      } catch {
-        continue;
-      }
+    try {
+      const parsed = parseSpec(published.spec);
+      endpoints = endpointsFromSpec(parsed);
+    } catch {
+      continue;
     }
 
     const origin = deps.gatewayOrigin.replace(/\/+$/, "");

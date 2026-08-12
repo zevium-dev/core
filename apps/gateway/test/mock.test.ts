@@ -85,17 +85,23 @@ function walletStub(clerkOrgId: string): WalletStub {
   return env.WALLET.get(id);
 }
 
-async function installFixtures(opts: { clerkOrgId: string; credits?: number }) {
+async function installFixtures(opts: {
+  clerkOrgId: string;
+  credits?: number;
+  spec?: string;
+  version?: string;
+}) {
   const keys = new FixtureKeyVerifier({
     [KEY_SECRET]: { orgId: opts.clerkOrgId, keyId: KEY_ID, scopes: ["read"] },
   });
   const specs = new FixtureSpecSource();
   specs.set(ORG_SLUG, PROJECT_SLUG, {
-    spec: SPEC,
+    spec: opts.spec ?? SPEC,
+    version: opts.version ?? "1.0.0",
     projectId: "proj_demo",
     organizationId: opts.clerkOrgId,
     clerkOrgId: opts.clerkOrgId,
-    visibility: "private",
+    visibility: "public",
   });
 
   __setTestPipelineDeps({
@@ -113,6 +119,7 @@ async function installFixtures(opts: { clerkOrgId: string; credits?: number }) {
       opts.credits,
     );
   }
+  return { specs };
 }
 
 async function mockFetch(
@@ -177,6 +184,70 @@ describe("mock gateway route", () => {
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toBe("text/html");
     expect(await res.text()).toBe("<h1>Rendered Markdown</h1>");
+  });
+
+  it("fails closed before emitting hostile publisher mock bodies", async () => {
+    const parsed = JSON.parse(SPEC) as Record<string, unknown>;
+    const paths = parsed.paths as Record<string, unknown>;
+    const example = paths["/example"] as Record<string, unknown>;
+    const operation = example.get as Record<string, unknown>;
+    operation.responses = {
+      200: {
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              example: { message: "SOC.2 certified" },
+            },
+          },
+        },
+      },
+    };
+    await installFixtures({
+      clerkOrgId: "org_mock_unsafe_body",
+      spec: JSON.stringify(parsed),
+    });
+
+    const res = await mockFetch(`/mock/${ORG_SLUG}/${PROJECT_SLUG}/example`);
+    expect(res.status).toBe(404);
+    await expect(res.text()).resolves.not.toMatch(/soc.?2 certified/i);
+  });
+
+  it("fails closed on malformed published JSON", async () => {
+    await installFixtures({
+      clerkOrgId: "org_mock_malformed",
+      spec: "{malformed",
+    });
+
+    const res = await mockFetch(`/mock/${ORG_SLUG}/${PROJECT_SLUG}/example`);
+    expect(res.status).toBe(404);
+  });
+
+  it("fails closed on unsafe immutable release copy", async () => {
+    await installFixtures({
+      clerkOrgId: "org_mock_unsafe_version",
+      version: "I.S.O 27001 certified",
+    });
+
+    const res = await mockFetch(`/mock/${ORG_SLUG}/${PROJECT_SLUG}/example`);
+    expect(res.status).toBe(404);
+  });
+
+  it("fails closed when public lookup returns a private spec", async () => {
+    const fixtures = await installFixtures({
+      clerkOrgId: "org_mock_private",
+    });
+    fixtures.specs.set(ORG_SLUG, PROJECT_SLUG, {
+      spec: SPEC,
+      version: "1.0.0",
+      projectId: "proj_demo",
+      organizationId: "org_mock_private",
+      clerkOrgId: "org_mock_private",
+      visibility: "private",
+    });
+
+    const res = await mockFetch(`/mock/${ORG_SLUG}/${PROJECT_SLUG}/example`);
+    expect(res.status).toBe(404);
   });
 
   it("never reaches upstream — mock works at zero balance", async () => {

@@ -14,6 +14,7 @@ import {
   requireEncryptedCredential,
 } from "./lib/credentialCrypto";
 import { draftFingerprint, readinessValidity } from "./publishReadiness";
+import { isPublishedSurfaceAllowed } from "./lib/publicClaims";
 import {
   isValidSemver,
   type SpecIssue,
@@ -245,16 +246,14 @@ export const publish = mutation({
     if (projectForClaims === null) {
       throw new Error("Project not found");
     }
-    const projectCopy = [
-      projectForClaims.name,
-      projectForClaims.description ?? "",
-      ...projectForClaims.tags,
-      org.name,
-    ].join("\n");
     const issues = [
       ...validateOpenApiSpec(draftRow.draft),
       ...publicClaimIssues(draftRow.draft),
-      ...(isPublicCopyAllowed(projectCopy)
+      ...(isPublishedSurfaceAllowed(projectForClaims, org, {
+        version,
+        spec: draftRow.draft,
+        deprecationMessage: undefined,
+      })
         ? []
         : [
             {
@@ -409,6 +408,7 @@ export const getPublishedForGateway = query({
       .order("desc")
       .first();
     if (latest === null) return null;
+    if (!isPublishedSurfaceAllowed(project, org, latest)) return null;
 
     return {
       spec: latest.spec,
@@ -465,6 +465,7 @@ export const getPublishedForGatewayInternal = internalQuery({
       .order("desc")
       .first();
     if (latest === null) return null;
+    if (!isPublishedSurfaceAllowed(project, org, latest)) return null;
 
     const upstreamHeaders = await ctx.db
       .query("upstreamCredentials")

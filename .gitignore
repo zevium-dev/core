@@ -20,6 +20,7 @@ yarn.lock
 .tanstack
 .wrangler/
 /dist
+apps/gateway/.compliance-dist/
 
 # agent-browser debug artifacts (frames, recordings, screenshots)
 *.webm

@@ -1,25 +1,13 @@
 import { v } from "convex/values";
-import {
-  isOpenApiPublicCopyAllowed,
-  isPublicCopyAllowed,
-} from "@zevium/shared";
 import { mutation, query } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { requireOrgMemberBySlug, requireProjectMember } from "./lib/auth";
+import {
+  assertOrganizationCopyAllowed,
+  assertProjectCopyAllowed,
+  isPublishedSurfaceAllowed,
+} from "./lib/publicClaims";
 import { isValidSlug } from "./lib/validate";
-
-const PUBLIC_COPY_ERROR =
-  "Public copy contains an unsupported compliance or absolute security claim";
-
-function assertProjectPublicCopy(
-  name: string,
-  description: string | undefined,
-  tags: string[],
-): void {
-  if (!isPublicCopyAllowed([name, description ?? "", ...tags].join("\n"))) {
-    throw new Error(PUBLIC_COPY_ERROR);
-  }
-}
 
 export const list = query({
   args: { orgSlug: v.string() },
@@ -78,14 +66,13 @@ export const create = mutation({
     if (description !== undefined && description.length > 2000) {
       throw new Error("Description must be at most 2000 characters");
     }
-    assertProjectPublicCopy(
+    assertProjectCopyAllowed({
       name,
-      description === "" ? undefined : description,
-      [],
-    );
-    if (!isPublicCopyAllowed(org.name)) {
-      throw new Error(PUBLIC_COPY_ERROR);
-    }
+      slug,
+      description: description === "" ? undefined : description,
+      tags: [],
+    });
+    assertOrganizationCopyAllowed(org);
 
     const existing = await ctx.db
       .query("projects")
@@ -194,14 +181,23 @@ export const update = mutation({
       tags = unique;
     }
 
-    assertProjectPublicCopy(name, description, tags);
-    if (!isPublicCopyAllowed(org.name)) {
-      throw new Error(PUBLIC_COPY_ERROR);
-    }
+    const nextProject = {
+      ...current,
+      name,
+      description,
+      visibility,
+      tags,
+    };
+    const copyChanged =
+      args.patch.name !== undefined ||
+      args.patch.description !== undefined ||
+      args.patch.tags !== undefined;
+    const visibilityOnlyRemediation =
+      current.visibility === "public" &&
+      visibility === "private" &&
+      !copyChanged;
+    if (!visibilityOnlyRemediation) assertProjectCopyAllowed(nextProject);
     if (visibility === "public") {
-      if (!isPublicCopyAllowed(current.slug)) {
-        throw new Error(PUBLIC_COPY_ERROR);
-      }
       const latest = await ctx.db
         .query("specVersions")
         .withIndex("by_project_published", (q) =>
@@ -209,8 +205,10 @@ export const update = mutation({
         )
         .order("desc")
         .first();
-      if (latest !== null && !isOpenApiPublicCopyAllowed(latest.spec)) {
-        throw new Error(PUBLIC_COPY_ERROR);
+      if (!isPublishedSurfaceAllowed(nextProject, org, latest)) {
+        throw new Error(
+          "Project cannot be public until publisher, project, and published spec copy pass public policy",
+        );
       }
     }
 

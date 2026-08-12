@@ -1,33 +1,21 @@
-import {
-  extractPricing,
-  isOpenApiPublicCopyAllowed,
-  isPublicCopyAllowed,
-  parseSpec,
-} from "@zevium/shared";
+import { extractPricing, parseSpec } from "@zevium/shared";
 import { v } from "convex/values";
 import { query } from "./_generated/server";
 import type { Doc } from "./_generated/dataModel";
 import { getOrgByPublicHandle } from "./lib/auth";
+import { isPublishedSurfaceAllowed } from "./lib/publicClaims";
 
 const PAGE_SIZE = 24;
 
 export function isListingPublicCopyAllowed(
   project: Pick<Doc<"projects">, "name" | "slug" | "description" | "tags">,
-  org: Pick<Doc<"organizations">, "name" | "publicHandle">,
-  spec: string | null,
+  org: Pick<Doc<"organizations">, "name" | "slug" | "publicHandle">,
+  version: Pick<
+    Doc<"specVersions">,
+    "version" | "spec" | "deprecationMessage"
+  > | null,
 ): boolean {
-  const fields = [
-    project.name,
-    project.slug,
-    project.description ?? "",
-    ...project.tags,
-    org.name,
-    org.publicHandle ?? "",
-  ];
-  return (
-    isPublicCopyAllowed(fields.join("\n")) &&
-    (spec === null || isOpenApiPublicCopyAllowed(spec))
-  );
+  return isPublishedSurfaceAllowed(project, org, version);
 }
 
 export type CatalogueSort = "newest" | "name" | "cheapest";
@@ -55,7 +43,8 @@ export type PublicListing = {
 
 /**
  * Summarize per-endpoint costs from a published OpenAPI JSON string.
- * Invalid/unparseable specs yield null (listing still visible, no price chip).
+ * Invalid/unparseable specs yield null. Public callers exclude those listings
+ * before pricing is summarized.
  */
 export function summarizePublishedPricing(
   specJson: string,
@@ -180,7 +169,7 @@ export const listPublic = query({
         .order("desc")
         .first();
 
-      if (!isListingPublicCopyAllowed(project, org, latest?.spec ?? null)) {
+      if (!isListingPublicCopyAllowed(project, org, latest)) {
         continue;
       }
       total += 1;
@@ -317,7 +306,7 @@ export const getPublicDetail = query({
       .order("desc")
       .first();
 
-    if (!isListingPublicCopyAllowed(project, org, latest?.spec ?? null)) {
+    if (!isListingPublicCopyAllowed(project, org, latest)) {
       return null;
     }
 

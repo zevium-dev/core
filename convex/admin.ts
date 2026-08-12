@@ -7,6 +7,7 @@ import { createNotification } from "./lib/notifications";
 import { fireWebhookEvent } from "./webhooks";
 import { stripeClient } from "./billing";
 import { internal } from "./_generated/api";
+import { isPublishedSurfaceAllowed } from "./lib/publicClaims";
 
 /** Cap for month-to-date usage count (by_at index range scan). */
 const USAGE_STATS_CAP = 50_000;
@@ -34,7 +35,7 @@ export const migrateSecurityRollout = mutation({
     ctx,
   ): Promise<{
     credentials: { migrated: number; remaining: number };
-    handles: { updated: number; collisions: number };
+    handles: { updated: number; collisions: number; blocked: number };
     remainingPlaintext: number;
     remainingUnencrypted: number;
     remainingMissingHandles: number;
@@ -45,7 +46,7 @@ export const migrateSecurityRollout = mutation({
         internal.upstreamCredentials.migrateLegacyPlaintext,
         {},
       );
-    const handles: { updated: number; collisions: number } =
+    const handles: { updated: number; collisions: number; blocked: number } =
       await ctx.runMutation(internal.organizations.backfillPublicHandles, {});
     const rows = await ctx.db.query("upstreamCredentials").collect();
     const organizations = await ctx.db.query("organizations").collect();
@@ -260,6 +261,25 @@ export const setProjectVisibility = mutation({
     const project = await ctx.db.get(args.projectId);
     if (project === null) {
       throw new Error("Project not found");
+    }
+
+    if (args.visibility === "public") {
+      const organization = await ctx.db.get(project.organizationId);
+      const latest = await ctx.db
+        .query("specVersions")
+        .withIndex("by_project_published", (q) =>
+          q.eq("projectId", project._id),
+        )
+        .order("desc")
+        .first();
+      if (
+        organization === null ||
+        !isPublishedSurfaceAllowed(project, organization, latest)
+      ) {
+        throw new Error(
+          "Project cannot be public until publisher, project, and published spec copy pass public policy",
+        );
+      }
     }
 
     await ctx.db.patch(args.projectId, { visibility: args.visibility });

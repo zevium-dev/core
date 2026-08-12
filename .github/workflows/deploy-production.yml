@@ -39,6 +39,14 @@ jobs:
             ${{ runner.os }}-pnpm-store-
       - uses: jdx/mise-action@v4
 
+      - name: Build and scan exact deploy inputs
+        env:
+          CLERK_PUBLISHABLE_KEY: ${{ secrets.CLERK_PRODUCTION_PUBLISHABLE_KEY }}
+          CLERK_SECRET_KEY: ${{ secrets.CLERK_PRODUCTION_SECRET_KEY }}
+        run: |
+          pnpm build:compliance-inputs
+          pnpm check:compliance-claims:deploy
+
       - name: Deploy Convex control plane
         env:
           CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_PRODUCTION_DEPLOY_KEY }}
@@ -48,14 +56,8 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
-          pnpm --filter gateway exec wrangler versions upload --tag "$VERSION_TAG"
+          pnpm --filter gateway exec wrangler versions upload .compliance-dist/index.js --no-bundle --tag "$VERSION_TAG"
           pnpm --filter gateway exec wrangler versions deploy --version-tag "$VERSION_TAG" --yes
-
-      - name: Build web Worker
-        env:
-          CLERK_PUBLISHABLE_KEY: ${{ secrets.CLERK_PRODUCTION_PUBLISHABLE_KEY }}
-          CLERK_SECRET_KEY: ${{ secrets.CLERK_PRODUCTION_SECRET_KEY }}
-        run: pnpm --filter web build
 
       - name: Deploy web Worker
         env:

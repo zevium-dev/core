@@ -6,11 +6,17 @@
 
 import { ConvexHttpClient } from "convex/browser";
 import { makeFunctionReference } from "convex/server";
-import { trimTrailingSlashes } from "@zevium/shared";
+import {
+  isOpenApiPublicCopyAllowed,
+  isPublicCopyAllowed,
+  trimTrailingSlashes,
+} from "@zevium/shared";
 
 export type PublishedSpec = {
   /** Raw OpenAPI JSON string. */
   spec: string;
+  /** Immutable publisher-supplied release version. */
+  version: string;
   projectId: string;
   /** Convex organizations table id (ledger / usage). */
   organizationId: string;
@@ -40,6 +46,36 @@ export interface SpecSource {
 
 export class SpecSourceUnavailableError extends Error {}
 
+/** Claim-copy defense for fixtures, stale caches, and control-plane regressions. */
+export function isPublishedSpecCopyAllowed(
+  published: PublishedSpec,
+  publisherHandle: string,
+  projectSlug: string,
+): boolean {
+  return (
+    isPublicCopyAllowed(
+      [
+        publisherHandle,
+        projectSlug,
+        published.version,
+        published.deprecationMessage ?? "",
+      ].join("\n"),
+    ) && isOpenApiPublicCopyAllowed(published.spec)
+  );
+}
+
+/** Public anonymous surfaces additionally require explicit public visibility. */
+export function isPublishedSpecPublicCopyAllowed(
+  published: PublishedSpec,
+  publisherHandle: string,
+  projectSlug: string,
+): boolean {
+  return (
+    published.visibility === "public" &&
+    isPublishedSpecCopyAllowed(published, publisherHandle, projectSlug)
+  );
+}
+
 /** Production safety valve when the authenticated control-plane source is absent. */
 export class FailClosedSpecSource implements SpecSource {
   async getPublishedSpec(): Promise<PublishedSpec | null> {
@@ -55,6 +91,7 @@ const getPublishedForGatewayRef = makeFunctionReference<
   { publisherHandle: string; projectSlug: string },
   {
     spec: string;
+    version: string;
     projectId: string;
     organizationId: string;
     clerkOrgId: string;
@@ -220,6 +257,9 @@ export function parsePublishedSpecPayload(json: unknown): PublishedSpec | null {
   if (typeof candidate !== "object") return null;
 
   if (!("spec" in candidate) || typeof candidate.spec !== "string") return null;
+  if (!("version" in candidate) || typeof candidate.version !== "string") {
+    return null;
+  }
   if (!("projectId" in candidate) || typeof candidate.projectId !== "string") {
     return null;
   }
@@ -249,6 +289,7 @@ export function parsePublishedSpecPayload(json: unknown): PublishedSpec | null {
 
   const published: PublishedSpec = {
     spec: candidate.spec,
+    version: candidate.version,
     projectId: candidate.projectId,
     organizationId: candidate.organizationId,
     clerkOrgId,
@@ -286,7 +327,11 @@ export function parsePublishedSpecPayload(json: unknown): PublishedSpec | null {
   ) {
     published.deprecationMessage = candidate.deprecationMessage;
   }
-  return published;
+  return isPublicCopyAllowed(
+    [published.version, published.deprecationMessage ?? ""].join("\n"),
+  ) && isOpenApiPublicCopyAllowed(published.spec)
+    ? published
+    : null;
 }
 
 /** In-memory fixture for workerd tests. */

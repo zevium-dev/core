@@ -6,7 +6,7 @@
 import { joinUpstreamUrl, matchOperation, parseSpec } from "@zevium/shared";
 import type { SettlementUsage, WalletDO } from "./wallet";
 import { extractApiKey, type KeyVerifier } from "./key-verifier";
-import type { SpecSource } from "./spec-source";
+import { isPublishedSpecCopyAllowed, type SpecSource } from "./spec-source";
 import { filterRequestHeaders, filterResponseHeaders } from "./headers";
 import type { UsageSink } from "./usage";
 import { jsonError } from "./errors";
@@ -98,6 +98,15 @@ export async function handleGatewayRequest(
     throw error;
   }
   if (!published) {
+    return jsonError(404, "project_not_found", "Unknown project", requestId);
+  }
+  if (
+    !isPublishedSpecCopyAllowed(
+      published,
+      route.publisherHandle,
+      route.projectSlug,
+    )
+  ) {
     return jsonError(404, "project_not_found", "Unknown project", requestId);
   }
 

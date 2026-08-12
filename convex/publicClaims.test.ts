@@ -1,7 +1,7 @@
 /// <reference types="vite/client" />
 import { convexTest } from "convex-test";
 import { describe, expect, it } from "vitest";
-import { api } from "./_generated/api";
+import { api, internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { draftFingerprint } from "./publishReadiness";
 import schema from "./schema";
@@ -58,6 +58,47 @@ function asAdmin(t: ReturnType<typeof convexTest>) {
 }
 
 describe("publisher public-claim boundaries", () => {
+  it("rejects Clerk sync, explicit handle, and unsafe backfill writes", async () => {
+    const t = convexTest(schema, modules);
+    await seed(t);
+    const admin = asAdmin(t);
+
+    await expect(
+      admin.mutation(api.organizations.ensureOrganization, {
+        clerkOrgId: "org_claims",
+        name: "Claims Test Org",
+        slug: "ccpa-compliant",
+      }),
+    ).rejects.toThrow(/unsupported compliance or absolute security claim/i);
+    await expect(
+      t.mutation(internal.organizations.upsertFromClerk, {
+        clerkOrgId: "org_clerk_bad_copy",
+        name: "G.D.P.R compliant",
+        slug: "clerk-bad-copy",
+      }),
+    ).rejects.toThrow(/unsupported compliance or absolute security claim/i);
+    await expect(
+      admin.mutation(api.organizations.setPublicHandle, {
+        handle: "hipaa-compliant",
+      }),
+    ).rejects.toThrow(/unsupported compliance or absolute security claim/i);
+
+    const legacyId = await t.run(async (ctx) =>
+      ctx.db.insert("organizations", {
+        clerkOrgId: "org_legacy_bad_copy",
+        name: "Legacy",
+        slug: "iso-27001-certified",
+      }),
+    );
+    const backfill = await t.mutation(
+      internal.organizations.backfillPublicHandles,
+      {},
+    );
+    expect(backfill.blocked).toBe(1);
+    const legacy = await t.run((ctx) => ctx.db.get(legacyId));
+    expect(legacy?.publicHandle).toBeUndefined();
+  });
+
   it("rejects project name, description, and tag writes", async () => {
     const t = convexTest(schema, modules);
     const { projectId } = await seed(t);
@@ -66,8 +107,15 @@ describe("publisher public-claim boundaries", () => {
     await expect(
       admin.mutation(api.projects.create, {
         orgSlug: "claims-test",
-        name: "SOC​2",
+        name: "SOC​2 certified",
         slug: "blocked-name",
+      }),
+    ).rejects.toThrow(/unsupported compliance or absolute security claim/i);
+    await expect(
+      admin.mutation(api.projects.create, {
+        orgSlug: "claims-test",
+        name: "Blocked slug",
+        slug: "hipaa-ready",
       }),
     ).rejects.toThrow(/unsupported compliance or absolute security claim/i);
 
@@ -154,7 +202,7 @@ describe("publisher public-claim boundaries", () => {
         projectId,
         patch: { visibility: "public" },
       }),
-    ).rejects.toThrow(/unsupported compliance or absolute security claim/i);
+    ).rejects.toThrow(/public policy/i);
   });
 
   it("fails closed on public catalogue rows inserted outside mutations", async () => {
@@ -182,6 +230,176 @@ describe("publisher public-claim boundaries", () => {
         projectSlug: "claims-api",
       }),
     ).resolves.toBeNull();
+    await expect(
+      t.query(api.specs.getPublishedForGateway, {
+        publisherHandle: "claims-test",
+        projectSlug: "claims-api",
+      }),
+    ).resolves.toBeNull();
+
+    const embeddingId = await t.run(async (ctx) =>
+      ctx.db.insert("specEmbeddings", {
+        projectId,
+        text: "legacy unsafe",
+        embedding: Array.from({ length: 768 }, () => 0.1),
+        updatedAt: Date.now(),
+      }),
+    );
+    await expect(
+      t.query(internal.search.fetchSearchListings, {
+        ids: [embeddingId],
+        scores: [0.9],
+      }),
+    ).resolves.toEqual([]);
+  });
+
+  it("fails closed on unsafe legacy organization while preserving private remediation", async () => {
+    const t = convexTest(schema, modules);
+    const { projectId } = await seed(t);
+    await t.run(async (ctx) => {
+      const organization = await ctx.db
+        .query("organizations")
+        .withIndex("by_clerk_org", (q) => q.eq("clerkOrgId", "org_claims"))
+        .unique();
+      if (organization === null) throw new Error("missing organization");
+      await ctx.db.patch(organization._id, { name: "SOC.2 certified" });
+      await ctx.db.patch(projectId, {
+        status: "published",
+        visibility: "public",
+      });
+      await ctx.db.insert("specVersions", {
+        projectId,
+        version: "1.0.0",
+        spec: specWithCopy({}),
+        publishedAt: Date.now(),
+      });
+    });
+
+    await expect(
+      t.query(api.organizations.getByPublicHandle, { handle: "claims-test" }),
+    ).resolves.toBeNull();
+    await expect(t.query(api.catalogue.listPublic, {})).resolves.toMatchObject({
+      items: [],
+    });
+    await expect(
+      t.query(api.specs.getPublishedForGateway, {
+        publisherHandle: "claims-test",
+        projectSlug: "claims-api",
+      }),
+    ).resolves.toBeNull();
+
+    const mine = await asAdmin(t).query(api.organizations.listMine, {});
+    expect(mine).toHaveLength(1);
+    const privateProject = await asAdmin(t).query(api.projects.get, {
+      orgSlug: "claims-test",
+      projectSlug: "claims-api",
+    });
+    expect(privateProject?._id).toBe(projectId);
+  });
+
+  it("lets an owner hide unsafe legacy project copy before repairing it", async () => {
+    const t = convexTest(schema, modules);
+    const { projectId } = await seed(t);
+    await t.run(async (ctx) => {
+      await ctx.db.patch(projectId, {
+        name: "HIPAA ready legacy project",
+        visibility: "public",
+      });
+    });
+
+    await expect(
+      asAdmin(t).mutation(api.projects.update, {
+        projectId,
+        patch: { visibility: "private" },
+      }),
+    ).resolves.toMatchObject({ visibility: "private" });
+
+    await expect(
+      asAdmin(t).mutation(api.projects.update, {
+        projectId,
+        patch: {
+          description: "SOC.2 certified",
+          visibility: "private",
+        },
+      }),
+    ).rejects.toThrow(/unsupported compliance or absolute security claim/i);
+  });
+
+  it("admin visibility write cannot expose unsafe legacy rows", async () => {
+    const prior = process.env.ADMIN_USER_IDS;
+    process.env.ADMIN_USER_IDS = "platform_admin";
+    try {
+      const t = convexTest(schema, modules);
+      const { projectId } = await seed(t);
+      await t.run(async (ctx) => {
+        await ctx.db.patch(projectId, { status: "published" });
+        await ctx.db.insert("specVersions", {
+          projectId,
+          version: "1.0.0",
+          spec: specWithCopy({ version: "HIPAA ready" }),
+          publishedAt: Date.now(),
+        });
+      });
+      const platformAdmin = t.withIdentity({ subject: "platform_admin" });
+      await expect(
+        platformAdmin.mutation(api.admin.setProjectVisibility, {
+          projectId,
+          visibility: "public",
+        }),
+      ).rejects.toThrow(/public policy/i);
+      await expect(
+        platformAdmin.mutation(api.admin.setProjectVisibility, {
+          projectId,
+          visibility: "private",
+        }),
+      ).resolves.toMatchObject({ visibility: "private" });
+    } finally {
+      if (prior === undefined) delete process.env.ADMIN_USER_IDS;
+      else process.env.ADMIN_USER_IDS = prior;
+    }
+  });
+
+  it("direct public spec, catalogue, and search reads reject malformed JSON", async () => {
+    const t = convexTest(schema, modules);
+    const { projectId } = await seed(t);
+    const embeddingId = await t.run(async (ctx) => {
+      await ctx.db.patch(projectId, {
+        status: "published",
+        visibility: "public",
+      });
+      await ctx.db.insert("specVersions", {
+        projectId,
+        version: "1.0.0",
+        spec: "{malformed",
+        publishedAt: Date.now(),
+      });
+      return await ctx.db.insert("specEmbeddings", {
+        projectId,
+        text: "malformed",
+        embedding: Array.from({ length: 768 }, () => 0.1),
+        updatedAt: Date.now(),
+      });
+    });
+
+    const route = {
+      publisherHandle: "claims-test",
+      projectSlug: "claims-api",
+    };
+    await expect(
+      t.query(api.specs.getPublishedForGateway, route),
+    ).resolves.toBeNull();
+    await expect(
+      t.query(api.catalogue.getPublicDetail, route),
+    ).resolves.toBeNull();
+    await expect(t.query(api.catalogue.listPublic, {})).resolves.toMatchObject({
+      items: [],
+    });
+    await expect(
+      t.query(internal.search.fetchSearchListings, {
+        ids: [embeddingId],
+        scores: [1],
+      }),
+    ).resolves.toEqual([]);
   });
 
   it("rejects unsafe public deprecation copy", async () => {

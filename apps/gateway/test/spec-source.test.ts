@@ -18,6 +18,7 @@ describe("internal gateway spec source", () => {
       return Promise.resolve(
         Response.json({
           spec: '{"openapi":"3.1.0"}',
+          version: "1.0.0",
           projectId: "project",
           organizationId: "organization",
           clerkOrgId: "org_publisher",
@@ -51,6 +52,7 @@ describe("internal gateway spec source", () => {
         expect(url.searchParams.get("projectSlug")).toBe("md-to-html");
         return Response.json({
           spec: '{"openapi":"3.1.0"}',
+          version: "1.0.0",
           projectId: "project",
           organizationId: "organization",
           clerkOrgId: "org_publisher",
@@ -71,6 +73,7 @@ describe("internal gateway spec source", () => {
     expect(
       parsePublishedSpecPayload({
         spec: "{}",
+        version: "1.0.0",
         projectId: "project",
         organizationId: "organization",
         clerkOrgId: "org_publisher",
@@ -83,5 +86,33 @@ describe("internal gateway spec source", () => {
     ).toMatchObject({
       upstreamHeaders: { "x-valid": "secret" },
     });
+  });
+
+  it("fails closed on malformed JSON and unsafe publisher text", () => {
+    const base = {
+      version: "1.0.0",
+      projectId: "project",
+      organizationId: "organization",
+      clerkOrgId: "org_publisher",
+      visibility: "public",
+    };
+    expect(parsePublishedSpecPayload({ ...base, spec: "{broken" })).toBeNull();
+    expect(
+      parsePublishedSpecPayload({
+        ...base,
+        version: "G.D.P.R compliant",
+        spec: "{}",
+      }),
+    ).toBeNull();
+    expect(
+      parsePublishedSpecPayload({
+        ...base,
+        spec: JSON.stringify({
+          openapi: "3.1.0",
+          info: { title: "Demo", version: "HIPAA ready" },
+          paths: {},
+        }),
+      }),
+    ).toBeNull();
   });
 });

@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 
 const localProductionEnv = new URL("../.env.production.local", import.meta.url);
 if (existsSync(localProductionEnv)) {
@@ -36,4 +36,7 @@ const result = spawnSync("pnpm", ["exec", "vite", "build"], {
   env: process.env,
   stdio: "inherit",
 });
+// Cloudflare's Vite adapter may materialize local secrets for preview. That
+// file is never a deploy input and must not enter CI artifacts.
+rmSync(new URL("../dist/server/.dev.vars", import.meta.url), { force: true });
 process.exit(result.status ?? 1);
