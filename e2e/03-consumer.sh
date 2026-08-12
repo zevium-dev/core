@@ -30,6 +30,7 @@ configure_browser_context
 
 step "wait for base url"
 wait_for_url "$E2E_BASE_URL/" "200" 90
+verify_target_commit "consumer"
 
 step "anonymous /catalogue lists published project"
 # Ensure anonymous session (new browser session name already isolates cookies).
@@ -103,6 +104,7 @@ focused="$(ab eval "document.activeElement?.id" 2>/dev/null | tr -d '"[:space:]'
 assert_eq "$focused" "api-key" "missing-key validation did not focus API key"
 
 if [[ "$E2E_REQUIRE_PAID_CONTRACT" == "1" ]]; then
+  verify_target_commit "paid-consumer"
   : "${E2E_API_KEY:?E2E_API_KEY is required for paid consumer contract}"
   step "signed-in paid consumer contract"
   use_browser_session "${E2E_SESSION_PREFIX:-zevium-e2e}-consumer-paid-signed-in"

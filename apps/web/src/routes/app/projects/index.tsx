@@ -26,6 +26,7 @@ import {
 import { Skeleton } from "#/components/ui/skeleton";
 import { api } from "#/lib/convex-api";
 import { ensureMirrorOnServer } from "#/lib/ensure-mirror";
+import { isPrivilegedOrgRole } from "#/lib/org-capabilities";
 import type { RouterContext } from "#/router";
 
 export const Route = createFileRoute("/app/projects/")({
@@ -96,7 +97,7 @@ function ProjectsIndexPage() {
 
 function ProjectsList({ orgSlug }: { orgSlug: string }) {
   const { membership } = useOrganization();
-  const canCreate = membership?.role === "org:admin";
+  const canCreate = isPrivilegedOrgRole(membership?.role);
   const { data: projects } = useSuspenseQuery(
     convexQuery(api.projects.list, { orgSlug }),
   );

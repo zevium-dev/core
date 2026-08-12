@@ -3,7 +3,19 @@
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
-      "outputs": ["dist/**", ".output/**", ".nitro/**"]
+      "env": [
+        "VITE_BUILD_SHA",
+        "VITE_CLERK_PUBLISHABLE_KEY",
+        "VITE_CONVEX_URL",
+        "VITE_GATEWAY_URL"
+      ],
+      "passThroughEnv": ["CLERK_SECRET_KEY"],
+      "outputs": [
+        "dist/**",
+        "!dist/server/.dev.vars",
+        ".output/**",
+        ".nitro/**"
+      ]
     },
     "dev": {
       "cache": false,

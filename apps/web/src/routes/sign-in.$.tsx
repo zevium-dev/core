@@ -17,11 +17,14 @@ export const Route = createFileRoute("/sign-in/$")({
 });
 
 function Page() {
-  const { convexQueryClient } = Route.useRouteContext();
+  const { convexQueryClient, principalCache } = Route.useRouteContext();
   const { redirect } = Route.useSearch();
 
   return (
-    <AuthenticatedProviders client={convexQueryClient.convexClient}>
+    <AuthenticatedProviders
+      client={convexQueryClient.convexClient}
+      principalCache={principalCache}
+    >
       <div className="flex min-h-svh items-center justify-center p-4">
         <div className="auth-card-shell grid w-full max-w-sm place-items-center [&>*]:[grid-area:1/1]">
           <div className="auth-card-pending w-full">

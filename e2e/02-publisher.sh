@@ -28,6 +28,7 @@ configure_browser_context
 
 step "wait for base url"
 wait_for_url "$E2E_BASE_URL/" "200" 90
+verify_target_commit "publisher"
 
 step "sign_in"
 sign_in

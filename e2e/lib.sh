@@ -26,6 +26,7 @@ fi
 E2E_RAW_DIR="${E2E_RAW_DIR:-$E2E_RUNTIME_DIR/raw}"
 E2E_FIXTURES_DIR="${E2E_FIXTURES_DIR:-$E2E_RUNTIME_DIR/fixtures}"
 E2E_MANIFEST_STATE="${E2E_MANIFEST_STATE:-$E2E_RUNTIME_DIR/manifest-state.json}"
+E2E_EXPECTED_COMMIT="${E2E_EXPECTED_COMMIT:-}"
 
 case "$E2E_COLOR_SCHEME" in
   light|dark) ;;
@@ -116,8 +117,12 @@ cleanup_e2e_runtime() {
 
 sanitize_artifact() {
   local raw="$1" output="$2" mode="${3:-text}"
-  node "$E2E_ROOT/artifact-sanitizer.mjs" "$raw" "$output" "$mode"
+  if node "$E2E_ROOT/artifact-sanitizer.mjs" "$raw" "$output" "$mode"; then
+    secure_unlink "$raw"
+    return 0
+  fi
   secure_unlink "$raw"
+  return 1
 }
 
 redact_dom_for_artifact() {
@@ -136,27 +141,39 @@ redact_dom_for_artifact() {
   while (walker.nextNode()) walker.currentNode.nodeValue = (walker.currentNode.nodeValue || '').replace(sensitive, '[redacted]');
   return true;
 })()
-" >/dev/null 2>&1 || true
+" >/dev/null 2>&1
 }
 
 fail() {
   local msg="${1:-assertion failed}"
-  local ts slug shot raw_url raw_snapshot
+  local ts slug raw_shot raw_url raw_snapshot
   ts="$(date +%Y%m%d-%H%M%S)-$(date +%N)"
   slug="$(printf '%s' "$E2E_STEP" | tr -cs '[:alnum:]._-' '_' | cut -c1-80)"
-  shot="$E2E_ARTIFACTS/${ts}-${slug}.sanitized.png"
+  raw_shot="$E2E_RAW_DIR/${ts}-${slug}.raw.png"
   raw_url="$E2E_RAW_DIR/${ts}-${slug}.url.raw.txt"
   raw_snapshot="$E2E_RAW_DIR/${ts}-${slug}.snapshot.raw.txt"
-  redact_dom_for_artifact
-  ab screenshot "$shot" >/dev/null 2>&1 || true
-  if ab get url >"$raw_url" 2>/dev/null; then
-    sanitize_artifact "$raw_url" "$E2E_ARTIFACTS/${ts}-${slug}.url.txt" || true
-  fi
-  if ab snapshot >"$raw_snapshot" 2>/dev/null; then
-    sanitize_artifact "$raw_snapshot" "$E2E_ARTIFACTS/${ts}-${slug}.snapshot.txt" || true
+  if redact_dom_for_artifact; then
+    # Pixel evidence has no trustworthy generic sanitizer. Keep any capture in
+    # private runtime storage and destroy it; publish only verified text.
+    if ab screenshot "$raw_shot" >/dev/null 2>&1; then
+      secure_unlink "$raw_shot"
+    fi
+    if ab get url >"$raw_url" 2>/dev/null; then
+      sanitize_artifact "$raw_url" "$E2E_ARTIFACTS/${ts}-${slug}.url.txt" \
+        || secure_unlink "$raw_url"
+    fi
+    if ab snapshot >"$raw_snapshot" 2>/dev/null; then
+      sanitize_artifact "$raw_snapshot" "$E2E_ARTIFACTS/${ts}-${slug}.snapshot.txt" \
+        || secure_unlink "$raw_snapshot"
+    fi
+  else
+    secure_unlink "$raw_shot"
+    secure_unlink "$raw_url"
+    secure_unlink "$raw_snapshot"
+    printf '[e2e] evidence capture aborted: DOM redaction failed\n' >&2
   fi
   printf '[e2e] FAIL: %s\n' "$msg" >&2
-  printf '[e2e] sanitized evidence: %s\n' "$shot" >&2
+  printf '[e2e] verified text evidence directory: %s\n' "$E2E_ARTIFACTS" >&2
   exit 1
 }
 
@@ -339,6 +356,32 @@ JSON.stringify({
     || fail "browser evidence contract did not match declared context"
 }
 
+verify_target_commit() {
+  local lane="$1" html observed
+  [[ "$E2E_EXPECTED_COMMIT" =~ ^[0-9a-f]{40}$ ]] \
+    || fail "E2E_EXPECTED_COMMIT must be an explicit full lowercase Git SHA"
+  html="$(curl -fsS --max-time 15 "$E2E_BASE_URL/")" \
+    || fail "could not fetch target build metadata"
+  observed="$(printf '%s' "$html" | node -e '
+let source = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => { source += chunk; });
+process.stdin.on("end", () => {
+  const tag = source.match(/<meta\b[^>]*\bname=["\x27]zevium-build["\x27][^>]*>/i)?.[0] ?? "";
+  const sha = tag.match(/\bcontent=["\x27]([0-9a-f]{40})["\x27]/i)?.[1] ?? "";
+  process.stdout.write(sha);
+});
+')"
+  [[ "$observed" == "$E2E_EXPECTED_COMMIT" ]] \
+    || fail "target build mismatch for $lane (expected=$E2E_EXPECTED_COMMIT observed=${observed:-missing})"
+  node "$E2E_ROOT/evidence-manifest.mjs" target "$E2E_MANIFEST_STATE" \
+    "--lane=$lane" \
+    "--base-url=$E2E_BASE_URL" \
+    "--expected=$E2E_EXPECTED_COMMIT" \
+    "--observed=$observed" \
+    || fail "could not record target build identity"
+}
+
 record_manifest_result() {
   local lane="$1" status="$2" duration="$3" proof="$4"
   node "$E2E_ROOT/evidence-manifest.mjs" result "$E2E_MANIFEST_STATE" \
@@ -351,6 +394,7 @@ build_evidence_manifest() {
     "--output=$output" \
     "--repo=$(cd "$E2E_ROOT/.." && pwd)" \
     "--base-url=$E2E_BASE_URL" \
+    "--expected-commit=$E2E_EXPECTED_COMMIT" \
     "--run-id=$E2E_RUN_ID"
 }
 

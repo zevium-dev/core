@@ -63,10 +63,10 @@ describe("Stripe Connect publisher accounting", () => {
     });
     await expect(
       member.action(api.payouts.startOnboarding, {}),
-    ).rejects.toThrow(/Org admin role required/);
+    ).rejects.toThrow(/Org admin or owner role required/);
     await expect(
       member.action(api.payouts.initiatePublisherTransfer, {}),
-    ).rejects.toThrow(/Org admin role required/);
+    ).rejects.toThrow(/Org admin or owner role required/);
   });
 
   it("projects Accounts v2 recipient capability and requirements", () => {

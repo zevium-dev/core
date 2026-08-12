@@ -12,6 +12,7 @@ export E2E_RAW_DIR="$E2E_RUNTIME_DIR/raw"
 export E2E_FIXTURES_DIR="$E2E_RUNTIME_DIR/fixtures"
 export E2E_MANIFEST_STATE="$E2E_RUNTIME_DIR/manifest-state.json"
 export E2E_ARTIFACTS="${E2E_ARTIFACTS:-$ROOT/artifacts/$E2E_RUN_ID}"
+export E2E_EXPECTED_COMMIT="${E2E_EXPECTED_COMMIT:-}"
 
 # shellcheck source=lib.sh
 source "$ROOT/lib.sh"

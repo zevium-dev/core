@@ -196,10 +196,10 @@ body {
 
 @keyframes content-enter {
   from {
-    transform: translateY(8px);
+    opacity: 0;
   }
   to {
-    transform: translateY(0);
+    opacity: 1;
   }
 }
 
@@ -336,6 +336,11 @@ html:active-view-transition-type(nav-swap)::view-transition-new(main-content) {
 
   :where([data-slot="checkbox"], [data-slot="switch"]) {
     position: relative;
+  }
+
+  .cl-userButtonTrigger {
+    min-block-size: 2.75rem !important;
+    min-inline-size: 2.75rem !important;
   }
 
   :where([data-slot="checkbox"], [data-slot="switch"])::after {

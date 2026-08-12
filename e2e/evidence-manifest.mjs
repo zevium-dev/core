@@ -62,7 +62,9 @@ function readState(path) {
     }
     return JSON.parse(readFileSync(path, "utf8"));
   } catch (error) {
-    if (error && error.code === "ENOENT") return { contracts: [], results: [] };
+    if (error && error.code === "ENOENT") {
+      return { contracts: [], results: [], targets: [] };
+    }
     throw error;
   }
 }
@@ -258,6 +260,41 @@ export function appendResult(statePath, result) {
   writeState(statePath, state);
 }
 
+function assertFullCommit(value, label) {
+  if (!/^[0-9a-f]{40}$/.test(value)) {
+    throw new Error(`${label} must be a full lowercase Git SHA`);
+  }
+}
+
+export function appendTargetCheck(statePath, target) {
+  if (!LANES.includes(target.lane)) throw new Error("unknown manifest lane");
+  assertSafeMetadata(target.baseUrl, "target base URL");
+  assertFullCommit(target.expectedCommit, "expected commit");
+  assertFullCommit(target.observedCommit, "observed commit");
+  let url;
+  try {
+    url = new URL(target.baseUrl);
+  } catch {
+    throw new Error("target base URL must be absolute");
+  }
+  if (!["http:", "https:"].includes(url.protocol)) {
+    throw new Error("target base URL must use HTTP(S)");
+  }
+  if (target.expectedCommit !== target.observedCommit) {
+    throw new Error("observed target commit does not match expected commit");
+  }
+  const state = readState(statePath);
+  state.targets ??= [];
+  state.targets = state.targets.filter((entry) => entry.lane !== target.lane);
+  state.targets.push({
+    lane: target.lane,
+    baseUrl: target.baseUrl,
+    expectedCommit: target.expectedCommit,
+    observedCommit: target.observedCommit,
+  });
+  writeState(statePath, state);
+}
+
 function git(repoRoot, args) {
   return execFileSync("git", args, {
     cwd: repoRoot,
@@ -271,11 +308,13 @@ export function buildManifest({
   outputPath,
   repoRoot,
   baseUrl,
+  expectedCommit,
   runId,
 }) {
   const state = readState(statePath);
   assertSafeMetadata(baseUrl, "base URL");
   assertSafeMetadata(runId, "run id");
+  assertFullCommit(expectedCommit, "expected commit");
   let targetUrl;
   try {
     targetUrl = new URL(baseUrl);
@@ -290,7 +329,8 @@ export function buildManifest({
     targetUrl.hash ||
     !/^[A-Za-z0-9._-]{1,128}$/.test(runId) ||
     !Array.isArray(state.contracts) ||
-    !Array.isArray(state.results)
+    !Array.isArray(state.results) ||
+    !Array.isArray(state.targets)
   ) {
     throw new Error("invalid manifest target, run id, or state shape");
   }
@@ -322,6 +362,16 @@ export function buildManifest({
   }
   for (const result of state.results) {
     if (result.status !== "passed") continue;
+    const target = state.targets.find((entry) => entry.lane === result.lane);
+    if (
+      target?.baseUrl !== baseUrl ||
+      target?.expectedCommit !== expectedCommit ||
+      target?.observedCommit !== expectedCommit
+    ) {
+      throw new Error(
+        `passed lane ${result.lane} lacks matching target build proof`,
+      );
+    }
     for (const authMode of REQUIRED_CONTRACTS[result.lane]) {
       if (
         !state.contracts.some(
@@ -379,17 +429,26 @@ export function buildManifest({
   const hasFailures = results.some((result) => result.status === "failed");
   const worktreeClean = status === "";
   const fullCoverage = lanesPassed && worktreeClean;
+  const sourceCommit = git(repoRoot, ["rev-parse", "HEAD"]);
+  if (sourceCommit !== expectedCommit) {
+    throw new Error("expected commit does not match source HEAD");
+  }
   const manifest = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     runId,
     generatedAt: new Date().toISOString(),
     source: {
-      commit: git(repoRoot, ["rev-parse", "HEAD"]),
+      commit: sourceCommit,
       worktreeClean,
       trackedDiffSha256: sha256(diff),
       statusSha256: sha256(status),
     },
-    target: { baseUrl },
+    target: {
+      baseUrl,
+      expectedCommit,
+      observedCommit: expectedCommit,
+      laneChecks: state.targets,
+    },
     browserContracts: state.contracts,
     results,
     summary: {
@@ -422,7 +481,7 @@ function main() {
   const [command, stateArg] = process.argv.slice(2);
   if (!command || !stateArg) {
     throw new Error(
-      "usage: evidence-manifest.mjs <contract|result|build> <state> ...",
+      "usage: evidence-manifest.mjs <contract|target|result|build> <state> ...",
     );
   }
   const statePath = resolve(stateArg);
@@ -453,12 +512,22 @@ function main() {
     });
     return;
   }
+  if (command === "target") {
+    appendTargetCheck(statePath, {
+      lane: requiredFlag("lane"),
+      baseUrl: requiredFlag("base-url"),
+      expectedCommit: requiredFlag("expected"),
+      observedCommit: requiredFlag("observed"),
+    });
+    return;
+  }
   if (command === "build") {
     const manifest = buildManifest({
       statePath,
       outputPath: resolve(requiredFlag("output")),
       repoRoot: resolve(requiredFlag("repo")),
       baseUrl: requiredFlag("base-url"),
+      expectedCommit: requiredFlag("expected-commit"),
       runId: requiredFlag("run-id"),
     });
     process.stdout.write(`${manifest.summary.label}\n`);

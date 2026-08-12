@@ -88,6 +88,14 @@ pnpm typecheck && pnpm test && pnpm build   # 394 unit tests across 4 suites
 bash e2e/run-all.sh                         # browser e2e: auth, publish, consume
 ```
 
+`pnpm build` is the canonical root production build. Supply
+`CLERK_SECRET_KEY`, `VITE_CLERK_PUBLISHABLE_KEY`, `VITE_CONVEX_URL`, and
+`VITE_GATEWAY_URL` in the environment, or place them in the ignored
+`apps/web/.env.production.local`. The wrapper derives the full Git SHA,
+forwards only the four public build values through Turbo's hashed environment,
+and passes the Clerk secret through without caching it. Production output must
+never contain `dist/server/.dev.vars`.
+
 ## License
 
 [WTFPL](LICENSE)

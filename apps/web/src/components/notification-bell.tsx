@@ -176,7 +176,7 @@ function BellWithOrg({ orgSlug }: { orgSlug: string }) {
               initial={reduce ? false : { scale: 0 }}
               animate={{ scale: 1 }}
               transition={SPRING.pop}
-              className="absolute -top-0.5 -right-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-semibold leading-none text-destructive-foreground tabular-nums"
+              className="absolute -top-0.5 -right-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-foreground px-1 text-[10px] font-semibold leading-none text-background tabular-nums"
             >
               {unreadLabel}
             </m.span>

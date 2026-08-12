@@ -3,9 +3,8 @@ import { convexQuery } from "@convex-dev/react-query";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useConvexAuth } from "convex/react";
-import { makeFunctionReference } from "convex/server";
 import { Activity, Search } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
 
 import { OrgCapabilityNotice } from "#/components/org-capability-notice";
 import { Badge } from "#/components/ui/badge";
@@ -53,8 +52,8 @@ import {
 } from "#/lib/activity-filters";
 import { truncateKeyId } from "#/lib/billing-cycle";
 import { humanError } from "#/lib/human-error";
+import { api } from "#/lib/convex-api";
 import {
-  activeOrgCapabilitiesRef,
   capabilityProjectionsMatch,
   hasServerCapability,
   parseOrgCapabilityProjection,
@@ -158,24 +157,6 @@ type UsageListArgs = {
   method?: string;
   since?: number;
 };
-
-const activityCycleRef = makeFunctionReference<
-  "query",
-  { orgSlug: string },
-  ActivityCycleData
->("billing:cycleBreakdown");
-
-const usageListRef = makeFunctionReference<
-  "query",
-  UsageListArgs,
-  UsagePageData
->("usage:listForOrg");
-
-const usageEventRef = makeFunctionReference<
-  "query",
-  { orgSlug: string; eventId: string },
-  UsageListItem | null
->("usage:getForOrgById");
 
 function isNullableString(value: unknown): value is string | null {
   return value === null || typeof value === "string";
@@ -307,11 +288,14 @@ function ActivityContent({ orgSlug }: { orgSlug: string }) {
   const [isDone, setIsDone] = useState(false);
   const [continueCursor, setContinueCursor] = useState<string | null>(null);
   const [projectionRejected, setProjectionRejected] = useState(false);
+  const inspectorTriggerRef = useRef<HTMLElement | null>(null);
 
   // Freeze "now" per filter change so page fetches share the same window.
   const [windowNow, setWindowNow] = useState(() => Date.now());
 
-  const accessQuery = useQuery(convexQuery(activeOrgCapabilitiesRef, {}));
+  const accessQuery = useQuery(
+    convexQuery(api.organizations.activeCapabilities, {}),
+  );
   const capabilities = useMemo(
     () => parseOrgCapabilityProjection(accessQuery.data),
     [accessQuery.data],
@@ -328,7 +312,7 @@ function ActivityContent({ orgSlug }: { orgSlug: string }) {
     ],
   );
   const cycleQuery = useQuery({
-    ...convexQuery(activityCycleRef, { orgSlug }),
+    ...convexQuery(api.billing.cycleBreakdown, { orgSlug }),
     enabled: capabilities !== null,
   });
 
@@ -359,7 +343,7 @@ function ActivityContent({ orgSlug }: { orgSlug: string }) {
   }, [orgSlug, cursor, projectRef, attributionSearch, since]);
 
   const usageQuery = useQuery({
-    ...convexQuery(usageListRef, listArgs),
+    ...convexQuery(api.usage.listForOrg, listArgs),
     enabled: capabilities !== null,
   });
 
@@ -478,7 +462,7 @@ function ActivityContent({ orgSlug }: { orgSlug: string }) {
     ? (rows.find((event) => event.eventId === search.event) ?? null)
     : null;
   const eventQuery = useQuery({
-    ...convexQuery(usageEventRef, {
+    ...convexQuery(api.usage.getForOrgById, {
       orgSlug,
       eventId: search.event ?? "invalid",
     }),
@@ -517,7 +501,8 @@ function ActivityContent({ orgSlug }: { orgSlug: string }) {
     attributionSearch.method,
   );
 
-  const inspectEvent = (eventId: string) => {
+  const inspectEvent = (eventId: string, trigger: HTMLElement) => {
+    inspectorTriggerRef.current = trigger;
     void navigate({ search: { ...search, event: eventId } });
   };
 
@@ -771,8 +756,10 @@ function ActivityContent({ orgSlug }: { orgSlug: string }) {
                           ? "Legacy call has no public inspector ID."
                           : undefined
                       }
-                      onClick={() => {
-                        if (event.eventId !== null) inspectEvent(event.eventId);
+                      onClick={(clickEvent) => {
+                        if (event.eventId !== null) {
+                          inspectEvent(event.eventId, clickEvent.currentTarget);
+                        }
                       }}
                     >
                       <Search />
@@ -862,9 +849,13 @@ function ActivityContent({ orgSlug }: { orgSlug: string }) {
                                 ? "Legacy call has no public inspector ID."
                                 : undefined
                             }
-                            onClick={() => {
-                              if (event.eventId !== null)
-                                inspectEvent(event.eventId);
+                            onClick={(clickEvent) => {
+                              if (event.eventId !== null) {
+                                inspectEvent(
+                                  event.eventId,
+                                  clickEvent.currentTarget,
+                                );
+                              }
                             }}
                             aria-label={`Inspect ${event.method.toUpperCase()} ${event.endpoint}`}
                           >
@@ -940,6 +931,7 @@ function ActivityContent({ orgSlug }: { orgSlug: string }) {
         onOpenChange={(open) => {
           if (!open) closeInspector();
         }}
+        restoreFocusRef={inspectorTriggerRef}
       />
     </div>
   );
@@ -953,6 +945,7 @@ function ActivityInspector({
   failed,
   onRetry,
   onOpenChange,
+  restoreFocusRef,
 }: {
   open: boolean;
   event: UsageListItem | null;
@@ -961,10 +954,19 @@ function ActivityInspector({
   failed: boolean;
   onRetry: () => void;
   onOpenChange: (open: boolean) => void;
+  restoreFocusRef: RefObject<HTMLElement | null>;
 }) {
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent className="w-full overflow-y-auto sm:max-w-md">
+      <SheetContent
+        className="w-full overflow-y-auto sm:max-w-md"
+        onCloseAutoFocus={(event) => {
+          event.preventDefault();
+          const target = restoreFocusRef.current;
+          if (target?.isConnected) target.focus();
+          else document.getElementById("main-content")?.focus();
+        }}
+      >
         <SheetHeader>
           <SheetTitle>Call inspector</SheetTitle>
           <SheetDescription>

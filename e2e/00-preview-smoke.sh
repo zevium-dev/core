@@ -17,6 +17,7 @@ configure_browser_context
 
 step "preview landing hydrates"
 wait_for_url "$E2E_BASE_URL/" "200" 90
+verify_target_commit "preview"
 open_path "/"
 snap="$(page_text)"
 assert_contains "$snap" "One key. Every API. Pay per call." "landing failed to hydrate"

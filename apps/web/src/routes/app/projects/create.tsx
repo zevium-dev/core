@@ -18,6 +18,7 @@ import { Skeleton } from "#/components/ui/skeleton";
 import { Textarea } from "#/components/ui/textarea";
 import { api } from "#/lib/convex-api";
 import { humanError } from "#/lib/human-error";
+import { isPrivilegedOrgRole } from "#/lib/org-capabilities";
 import { slugify } from "#/lib/slug";
 
 export const Route = createFileRoute("/app/projects/create")({
@@ -131,7 +132,7 @@ function CreateProjectPage() {
     );
   }
 
-  if (membership?.role !== "org:admin") {
+  if (!isPrivilegedOrgRole(membership?.role)) {
     return (
       <div className="mx-auto flex w-full max-w-lg flex-col gap-4">
         <h1 className="text-2xl font-semibold tracking-tight">New project</h1>

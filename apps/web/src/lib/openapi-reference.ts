@@ -295,6 +295,27 @@ export function readableJsonResponse(
   }
 }
 
+/** Render bounded successful text as text only; binary payloads stay hidden. */
+export function readableSuccessResponse(
+  body: string,
+  contentType: string | null,
+  maxLength = 20_000,
+): string | null {
+  if (body.length === 0) return "(empty body)";
+  const json = readableJsonResponse(body, contentType, maxLength);
+  if (json !== null) return json;
+  const mediaType = contentType?.split(";", 1)[0]?.trim().toLowerCase() ?? "";
+  const textual =
+    mediaType.startsWith("text/") ||
+    mediaType.includes("json") ||
+    mediaType.includes("xml") ||
+    mediaType.includes("javascript") ||
+    mediaType === "application/x-www-form-urlencoded";
+  if (!textual) return null;
+  if (body.length <= maxLength) return body;
+  return `${body.slice(0, maxLength)}\n… [response truncated]`;
+}
+
 const SAFE_GATEWAY_ERRORS: Record<string, string> = {
   payment_required: "Payment or valid credits are required.",
   gateway_unavailable: "Gateway configuration is temporarily unavailable.",

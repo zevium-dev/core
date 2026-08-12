@@ -168,7 +168,7 @@ export function AppSidebar() {
                   theme: shadcn,
                   elements: {
                     rootBox: "flex! min-w-0 flex-1",
-                    userButtonTrigger: "w-full! min-w-0",
+                    userButtonTrigger: "min-h-11! w-full! min-w-0",
                     userButtonBox: compact
                       ? "w-full! justify-center!"
                       : "w-full! min-w-0 justify-start! gap-2!",

@@ -46,10 +46,13 @@ export const Route = createFileRoute("/admin")({
 });
 
 function AdminProviderBoundary() {
-  const { convexQueryClient } = Route.useRouteContext();
+  const { convexQueryClient, principalCache } = Route.useRouteContext();
 
   return (
-    <AuthenticatedProviders client={convexQueryClient.convexClient}>
+    <AuthenticatedProviders
+      client={convexQueryClient.convexClient}
+      principalCache={principalCache}
+    >
       <AdminLayout />
     </AuthenticatedProviders>
   );

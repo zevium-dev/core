@@ -14,6 +14,7 @@ type Seeded = {
   projectAId: Id<"projects">;
   projectBId: Id<"projects">;
   eventAId: Id<"usageEvents">;
+  eventMemberId: Id<"usageEvents">;
   monthStart: number;
   inMonth: number;
   prevMonth: number;
@@ -36,6 +37,7 @@ async function seedWorld(t: ReturnType<typeof convexTest>): Promise<Seeded> {
       clerkOrgId: "org_publisher",
       name: "Publisher Co",
       slug: "publisher-co",
+      publicHandle: "publisher-co",
     });
 
     const projectAId = await ctx.db.insert("projects", {
@@ -70,7 +72,6 @@ async function seedWorld(t: ReturnType<typeof convexTest>): Promise<Seeded> {
       keyId: "key_alpha",
       ownerUserId: "user_alice",
       keyName: "CI",
-      ownerUserId: "user_alice",
       disabled: false,
       updatedAt: 1,
     });
@@ -107,7 +108,7 @@ async function seedWorld(t: ReturnType<typeof convexTest>): Promise<Seeded> {
       keyId: "key_alpha",
       at: inMonth + 1,
     });
-    await ctx.db.insert("usageEvents", {
+    const eventMemberId = await ctx.db.insert("usageEvents", {
       organizationId: consumerOrgId,
       projectId: projectBId,
       endpoint: "/v1/geocode",
@@ -152,6 +153,7 @@ async function seedWorld(t: ReturnType<typeof convexTest>): Promise<Seeded> {
       projectAId,
       projectBId,
       eventAId,
+      eventMemberId,
       monthStart,
       inMonth,
       prevMonth,
@@ -159,19 +161,32 @@ async function seedWorld(t: ReturnType<typeof convexTest>): Promise<Seeded> {
   });
 }
 
-function asMember(t: ReturnType<typeof convexTest>, clerkOrgId: string) {
+function withRole(
+  t: ReturnType<typeof convexTest>,
+  clerkOrgId: string,
+  role: "org:admin" | "org:owner" | "org:member",
+  subject = role === "org:member" ? "user_member" : "user_alice",
+) {
   return t.withIdentity({
-    subject: "user_member",
+    subject,
     // Clerk JWT template flattens org claims onto identity.
     org_id: clerkOrgId,
     org_slug: clerkOrgId === "org_consumer" ? "consumer-co" : "publisher-co",
-    org_role: "org:admin",
+    org_role: role,
   } as {
     subject: string;
     org_id: string;
     org_slug: string;
     org_role: string;
   });
+}
+
+function asAdmin(t: ReturnType<typeof convexTest>, clerkOrgId: string) {
+  return withRole(t, clerkOrgId, "org:admin");
+}
+
+function asMember(t: ReturnType<typeof convexTest>, clerkOrgId: string) {
+  return withRole(t, clerkOrgId, "org:member");
 }
 
 describe("usage.listForOrg", () => {
@@ -212,7 +227,7 @@ describe("usage.listForOrg", () => {
   it("paginates newest first with project name+slug joined", async () => {
     const t = convexTest(schema, modules);
     const seed = await seedWorld(t);
-    const asConsumer = asMember(t, "org_consumer");
+    const asConsumer = asAdmin(t, "org_consumer");
 
     const page1 = await asConsumer.query(api.usage.listForOrg, {
       orgSlug: "consumer-co",
@@ -242,11 +257,11 @@ describe("usage.listForOrg", () => {
     expect(onlyAlpha.page.every((e) => e.keyId === "key_alpha")).toBe(true);
     expect(onlyAlpha.page.length).toBe(3);
 
-    // projectId filter.
+    // Public project reference filter. Internal Convex IDs never cross this API.
     const onlyB = await asConsumer.query(api.usage.listForOrg, {
       orgSlug: "consumer-co",
       paginationOpts: { numItems: 50, cursor: null },
-      projectId: seed.projectBId,
+      projectRef: "publisher-co/maps",
     });
     expect(onlyB.page).toHaveLength(1);
     expect(onlyB.page[0]!.projectSlug).toBe("maps");
@@ -265,29 +280,66 @@ describe("usage.listForOrg", () => {
   it("resolves an authorized deep link by ID and hides cross-org events", async () => {
     const t = convexTest(schema, modules);
     const seed = await seedWorld(t);
-    const event = await asMember(t, "org_consumer").query(
+    const event = await asAdmin(t, "org_consumer").query(
       api.usage.getForOrgById,
       { orgSlug: "consumer-co", eventId: seed.eventAId },
     );
     expect(event).toMatchObject({
-      _id: seed.eventAId,
+      eventId: String(seed.eventAId),
       projectName: "Weather API",
       endpoint: "/v1/forecast",
       credits: 10,
     });
 
     await expect(
-      asMember(t, "org_publisher").query(api.usage.getForOrgById, {
+      asAdmin(t, "org_publisher").query(api.usage.getForOrgById, {
         orgSlug: "consumer-co",
         eventId: seed.eventAId,
       }),
     ).rejects.toThrow(/Not a member/);
     expect(
-      await asMember(t, "org_publisher").query(api.usage.getForOrgById, {
+      await asAdmin(t, "org_publisher").query(api.usage.getForOrgById, {
         orgSlug: "publisher-co",
         eventId: seed.eventAId,
       }),
     ).toBeNull();
+  });
+
+  it("scopes ordinary members to their own masked usage and blocks colleague deep links", async () => {
+    const t = convexTest(schema, modules);
+    const seed = await seedWorld(t);
+    const member = asMember(t, "org_consumer");
+
+    const result = await member.query(api.usage.listForOrg, {
+      orgSlug: "consumer-co",
+      paginationOpts: { numItems: 50, cursor: null },
+    });
+    expect(result.access.role).toBe("org:member");
+    expect(result.access.capabilities.viewOrgUsage).toBe(false);
+    expect(result.page).toHaveLength(2);
+    expect(result.page.every((event) => event.keyId === "••••beta")).toBe(true);
+    expect(result.page.every((event) => !("memberId" in event))).toBe(true);
+    expect(result.page.every((event) => !("memberName" in event))).toBe(true);
+
+    expect(
+      await member.query(api.usage.getForOrgById, {
+        orgSlug: "consumer-co",
+        eventId: seed.eventAId,
+      }),
+    ).toBeNull();
+    expect(
+      await member.query(api.usage.getForOrgById, {
+        orgSlug: "consumer-co",
+        eventId: seed.eventMemberId,
+      }),
+    ).toMatchObject({ eventId: String(seed.eventMemberId), keyId: "••••beta" });
+
+    const forcedColleague = await member.query(api.usage.listForOrg, {
+      orgSlug: "consumer-co",
+      memberId: "user_alice",
+      paginationOpts: { numItems: 50, cursor: null },
+    });
+    expect(forcedColleague.page).toEqual([]);
   });
 });
 
@@ -320,7 +372,7 @@ describe("billing.cycleBreakdown", () => {
   it("attributes current-cycle spend by named key, member, API, and endpoint", async () => {
     const t = convexTest(schema, modules);
     await seedWorld(t);
-    const asConsumer = asMember(t, "org_consumer");
+    const asConsumer = asAdmin(t, "org_consumer");
 
     const breakdown = await asConsumer.query(api.billing.cycleBreakdown, {
       orgSlug: "consumer-co",
@@ -337,13 +389,13 @@ describe("billing.cycleBreakdown", () => {
     const beta = breakdown.byKey.find((k) => k.keyId === "key_beta");
     expect(alpha).toMatchObject({
       keyName: "CI",
-      ownerUserId: "user_alice",
+      memberId: "user_alice",
       calls: 2,
       credits: 30,
     });
     expect(beta).toMatchObject({
       keyName: "Production agent",
-      ownerUserId: "user_member",
+      memberId: "user_member",
       calls: 2,
       credits: 55,
     });
@@ -360,13 +412,13 @@ describe("billing.cycleBreakdown", () => {
     expect(breakdown.byMember).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          userId: "user_alice",
+          memberId: "user_alice",
           name: "Alice Admin",
           calls: 2,
           credits: 30,
         }),
         expect.objectContaining({
-          userId: "user_member",
+          memberId: "user_member",
           name: "Morgan Member",
           calls: 2,
           credits: 55,
@@ -391,5 +443,30 @@ describe("billing.cycleBreakdown", () => {
         }),
       ]),
     );
+  });
+
+  it("returns only self spend without member attribution to ordinary members", async () => {
+    const t = convexTest(schema, modules);
+    await seedWorld(t);
+
+    const breakdown = await asMember(t, "org_consumer").query(
+      api.billing.cycleBreakdown,
+      { orgSlug: "consumer-co" },
+    );
+
+    expect(breakdown.scope).toBe("member");
+    expect(breakdown.totalCalls).toBe(2);
+    expect(breakdown.totalCredits).toBe(55);
+    expect(breakdown.ownCalls).toBe(2);
+    expect(breakdown.ownCredits).toBe(55);
+    expect(breakdown.byMember).toEqual([]);
+    expect(breakdown.byKey).toEqual([
+      expect.objectContaining({
+        keyId: "••••beta",
+        memberId: null,
+        calls: 2,
+        credits: 55,
+      }),
+    ]);
   });
 });

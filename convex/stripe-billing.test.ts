@@ -29,7 +29,7 @@ describe("Stripe Checkout control plane", () => {
     });
     await expect(
       member.action(api.billing.createCheckout, { packId: "pack_10" }),
-    ).rejects.toThrow(/Org admin role required/);
+    ).rejects.toThrow(/Org admin or owner role required/);
   });
 
   it("uses immutable server-owned credit packs and only a server-owned Price", async () => {
@@ -187,14 +187,80 @@ describe("Stripe Checkout control plane", () => {
       }),
     ).toMatchObject({ applied: false, balance: 100_000, sequence: 1 });
     const outsiderState = await t
-      .withIdentity({ subject: "outside", org_id: "org_outsider" } as {
+      .withIdentity({
+        subject: "outside",
+        org_id: "org_outsider",
+        org_role: "org:admin",
+      } as {
         subject: string;
         org_id: string;
+        org_role: string;
       })
       .query(api.billing.getBillingState, { checkoutSessionId: "cs_paid" });
     expect(outsiderState.checkout).toBeNull();
     expect(seed.intentId).not.toBe(async.paymentId);
     expect(seed.outsider).not.toBe(seed.purchaser);
+  });
+
+  it("shows members wallet balance but hides packs, checkout, and payment history", async () => {
+    const t = convexTest(schema, modules);
+    await t.run(async (ctx) => {
+      const organizationId = await ctx.db.insert("organizations", {
+        clerkOrgId: "org_member_billing",
+        name: "Member Billing",
+        slug: "member-billing",
+      });
+      await ctx.db.insert("wallets", {
+        organizationId,
+        balance: 42_000,
+        sequence: 1,
+      });
+      const checkoutIntentId = await ctx.db.insert("checkoutIntents", {
+        organizationId,
+        packId: "pack_10",
+        stripePriceId: "price_private",
+        amount: 1_000,
+        currency: "usd",
+        credits: 100_000,
+        stripeCheckoutSessionId: "cs_private",
+        status: "complete",
+        createdAt: 1,
+        updatedAt: 1,
+        expiresAt: 2,
+      });
+      await ctx.db.insert("payments", {
+        organizationId,
+        checkoutIntentId,
+        stripeCheckoutSessionId: "cs_private",
+        stripePaymentIntentId: "pi_private",
+        amount: 1_000,
+        currency: "usd",
+        grantedCredits: 100_000,
+        reversedCredits: 0,
+        status: "paid",
+        createdAt: 1,
+        updatedAt: 1,
+      });
+    });
+
+    const state = await t
+      .withIdentity({
+        subject: "user_member",
+        org_id: "org_member_billing",
+        org_role: "org:member",
+      } as {
+        subject: string;
+        org_id: string;
+        org_role: string;
+      })
+      .query(api.billing.getBillingState, {
+        checkoutSessionId: "cs_private",
+      });
+    expect(state.wallet.balance).toBe(42_000);
+    expect(state.access.capabilities.manageBilling).toBe(false);
+    expect(state.packs).toEqual([]);
+    expect(state.checkout).toBeNull();
+    expect(state.payments).toEqual([]);
   });
 
   it("rejects bad Stripe signatures before a receipt can be made", async () => {

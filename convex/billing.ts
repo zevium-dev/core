@@ -11,6 +11,7 @@ import {
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import {
+  requireActiveOrg,
   requireIdentity,
   requireOrgAdmin,
   requireOrgMemberBySlug,
@@ -1014,33 +1015,25 @@ export const processStripeEvent = internalAction({
 export const getBillingState = query({
   args: { checkoutSessionId: v.optional(v.string()) },
   handler: async (ctx, args) => {
-    const claims = await requireIdentity(ctx);
-    if (claims.orgId === undefined)
-      throw new Error("Active organization required");
-    const organization = await ctx.db
-      .query("organizations")
-      .withIndex("by_clerk_org", (q) => q.eq("clerkOrgId", claims.orgId!))
-      .unique();
-    if (organization === null)
-      throw new Error("Active organization is not provisioned");
+    const { access, org: organization } = await requireActiveOrg(ctx);
+    const canManageBilling = access.capabilities.manageBilling;
     const wallet = await ctx.db
       .query("wallets")
       .withIndex("by_organization", (q) =>
         q.eq("organizationId", organization._id),
       )
       .unique();
-    const payments = await ctx.db
-      .query("payments")
-      .withIndex("by_organization", (q) =>
-        q.eq("organizationId", organization._id),
-      )
-      .order("desc")
-      .take(50);
-    let checkout: {
-      id: Id<"checkoutIntents">;
-      status: Doc<"checkoutIntents">["status"];
-    } | null = null;
-    if (args.checkoutSessionId !== undefined) {
+    const payments = canManageBilling
+      ? await ctx.db
+          .query("payments")
+          .withIndex("by_organization", (q) =>
+            q.eq("organizationId", organization._id),
+          )
+          .order("desc")
+          .take(50)
+      : [];
+    let checkout: { status: Doc<"checkoutIntents">["status"] } | null = null;
+    if (canManageBilling && args.checkoutSessionId !== undefined) {
       const intent = await ctx.db
         .query("checkoutIntents")
         .withIndex("by_checkout_session", (q) =>
@@ -1048,15 +1041,15 @@ export const getBillingState = query({
         )
         .unique();
       if (intent !== null && intent.organizationId === organization._id) {
-        checkout = { id: intent._id, status: intent.status };
+        checkout = { status: intent.status };
       }
     }
     return {
+      access,
       wallet: {
         balance: wallet?.balance ?? 0,
-        sequence: wallet?.sequence ?? 0,
       },
-      packs: [...CREDIT_PACKS],
+      packs: canManageBilling ? [...CREDIT_PACKS] : [],
       checkout,
       payments: payments.map((payment) => ({
         id: payment._id,
@@ -1101,7 +1094,11 @@ export function projectedCycleCredits(
 export const cycleBreakdown = query({
   args: { orgSlug: v.string() },
   handler: async (ctx, args) => {
-    const { org } = await requireOrgMemberBySlug(ctx, args.orgSlug);
+    const { access, claims, org } = await requireOrgMemberBySlug(
+      ctx,
+      args.orgSlug,
+    );
+    const canViewOrgUsage = access.capabilities.viewOrgUsage;
     const asOf = Date.now();
     const cycleStart = startOfUtcMonth(asOf);
     const cycleEnd = endOfUtcMonth(asOf);
@@ -1135,7 +1132,14 @@ export const cycleBreakdown = query({
       .withIndex("by_org", (q) => q.eq("clerkOrgId", org.clerkOrgId))
       .collect();
     const keyMetadata = new Map(keySettings.map((row) => [row.keyId, row]));
-    for (const event of events) {
+    const visibleEvents = canViewOrgUsage
+      ? events
+      : events.filter(
+          (event) =>
+            (event.ownerUserId ?? keyMetadata.get(event.keyId)?.ownerUserId) ===
+            claims.subject,
+        );
+    for (const event of visibleEvents) {
       const key = byKey.get(event.keyId) ?? { calls: 0, credits: 0 };
       key.calls += 1;
       key.credits += event.credits;
@@ -1150,11 +1154,13 @@ export const cycleBreakdown = query({
 
       const ownerUserId =
         event.ownerUserId ?? keyMetadata.get(event.keyId)?.ownerUserId;
-      const memberKey = ownerUserId ?? "unattributed";
-      const member = byMember.get(memberKey) ?? { calls: 0, credits: 0 };
-      member.calls += 1;
-      member.credits += event.credits;
-      byMember.set(memberKey, member);
+      if (canViewOrgUsage) {
+        const memberKey = ownerUserId ?? "unattributed";
+        const member = byMember.get(memberKey) ?? { calls: 0, credits: 0 };
+        member.calls += 1;
+        member.credits += event.credits;
+        byMember.set(memberKey, member);
+      }
 
       const endpointKey = `${event.projectId}\u0000${event.method}\u0000${event.endpoint}`;
       const endpoint = byEndpoint.get(endpointKey) ?? {
@@ -1174,10 +1180,27 @@ export const cycleBreakdown = query({
         projectDocs.set(projectId, await ctx.db.get(projectId));
       }),
     );
+    const projectRefs = new Map<Id<"projects">, string | null>();
+    await Promise.all(
+      [...byProject.keys()].map(async (projectId) => {
+        const project = projectDocs.get(projectId);
+        if (project === null || project === undefined) {
+          projectRefs.set(projectId, null);
+          return;
+        }
+        const publisher = await ctx.db.get(project.organizationId);
+        projectRefs.set(
+          projectId,
+          publisher?.publicHandle
+            ? `${publisher.publicHandle}/${project.slug}`
+            : null,
+        );
+      }),
+    );
     const projects = [...byProject.entries()].map(([projectId, row]) => {
       const project = projectDocs.get(projectId);
       return {
-        projectId,
+        projectRef: projectRefs.get(projectId) ?? null,
         name: project?.name ?? "Deleted API",
         slug: project?.slug ?? "deleted",
         ...row,
@@ -1193,66 +1216,87 @@ export const cycleBreakdown = query({
                 .withIndex("by_clerk_user", (q) => q.eq("clerkUserId", userId))
                 .unique();
         return {
-          userId: userId === "unattributed" ? null : userId,
+          memberId: userId === "unattributed" ? null : userId,
           name: user?.name ?? "Unattributed member",
-          email: user?.email ?? null,
           ...row,
         };
       }),
     );
-    const totalCredits = events.reduce(
+    const totalCredits = visibleEvents.reduce(
       (total, event) => total + event.credits,
       0,
     );
+    const dimensionLimit = 100;
+    const sortedKeys = [...byKey.entries()]
+      .map(([keyId, row]) => {
+        const metadata = keyMetadata.get(keyId);
+        return {
+          keyId: canViewOrgUsage
+            ? keyId
+            : keyId.length > 4
+              ? `••••${keyId.slice(-4)}`
+              : "••••",
+          keyName: metadata?.keyName ?? "Unnamed key",
+          memberId: canViewOrgUsage ? (metadata?.ownerUserId ?? null) : null,
+          ...row,
+        };
+      })
+      .sort(
+        (left, right) =>
+          right.credits - left.credits || left.keyId.localeCompare(right.keyId),
+      );
+    const sortedProjects = projects.sort(
+      (left, right) =>
+        right.credits - left.credits || left.slug.localeCompare(right.slug),
+    );
+    const sortedEndpoints = [...byEndpoint.values()]
+      .map((row) => {
+        const project = projectDocs.get(row.projectId);
+        return {
+          projectRef: projectRefs.get(row.projectId) ?? null,
+          projectName: project?.name ?? "Deleted API",
+          projectSlug: project?.slug ?? "deleted",
+          method: row.method,
+          endpoint: row.endpoint,
+          calls: row.calls,
+          credits: row.credits,
+        };
+      })
+      .sort(
+        (left, right) =>
+          right.credits - left.credits ||
+          left.endpoint.localeCompare(right.endpoint),
+      );
+    const sortedMembers = members.sort(
+      (left, right) =>
+        right.credits - left.credits || left.name.localeCompare(right.name),
+    );
     return {
+      access,
+      scope: canViewOrgUsage ? ("organization" as const) : ("member" as const),
       cycleStart,
       cycleEnd,
       asOf,
-      totalCalls: events.length,
+      totalCalls: visibleEvents.length,
       totalCredits,
+      ownCalls: canViewOrgUsage ? null : visibleEvents.length,
+      ownCredits: canViewOrgUsage ? null : totalCredits,
       projectedCredits: projectedCycleCredits(
         totalCredits,
         cycleStart,
         cycleEnd,
         asOf,
       ),
-      byKey: [...byKey.entries()]
-        .map(([keyId, row]) => {
-          const metadata = keyMetadata.get(keyId);
-          return {
-            keyId,
-            keyName: metadata?.keyName ?? "Unnamed key",
-            ownerUserId: metadata?.ownerUserId ?? null,
-            ...row,
-          };
-        })
-        .sort(
-          (left, right) =>
-            right.credits - left.credits ||
-            left.keyId.localeCompare(right.keyId),
-        ),
-      byProject: projects.sort(
-        (left, right) =>
-          right.credits - left.credits || left.slug.localeCompare(right.slug),
-      ),
-      byEndpoint: [...byEndpoint.values()]
-        .map((row) => {
-          const project = projectDocs.get(row.projectId);
-          return {
-            ...row,
-            projectName: project?.name ?? "Deleted API",
-            projectSlug: project?.slug ?? "deleted",
-          };
-        })
-        .sort(
-          (left, right) =>
-            right.credits - left.credits ||
-            left.endpoint.localeCompare(right.endpoint),
-        ),
-      byMember: members.sort(
-        (left, right) =>
-          right.credits - left.credits || left.name.localeCompare(right.name),
-      ),
+      byKey: sortedKeys.slice(0, dimensionLimit),
+      byProject: sortedProjects.slice(0, dimensionLimit),
+      byEndpoint: sortedEndpoints.slice(0, dimensionLimit),
+      byMember: sortedMembers.slice(0, dimensionLimit),
+      breakdownTruncated: {
+        members: sortedMembers.length > dimensionLimit,
+        keys: sortedKeys.length > dimensionLimit,
+        projects: sortedProjects.length > dimensionLimit,
+        endpoints: sortedEndpoints.length > dimensionLimit,
+      },
     };
   },
 });

@@ -1,14 +1,16 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import {
+  chmodSync,
   mkdtempSync,
   mkdirSync,
   readFileSync,
+  readdirSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import test from "node:test";
 
 import {
@@ -19,6 +21,7 @@ import {
 import {
   appendContract,
   appendResult,
+  appendTargetCheck,
   buildManifest,
 } from "./evidence-manifest.mjs";
 
@@ -126,6 +129,61 @@ test("artifact sanitizer rejects symlink inputs and outputs", () => {
     () => sanitizeArtifact({ inputPath: real, outputPath: existingOutput }),
     /new file/,
   );
+});
+
+test("failed DOM redaction publishes no screenshot bytes", () => {
+  const dir = mkdtempSync(join(tmpdir(), "zevium-e2e-fail-closed-"));
+  const bin = join(dir, "bin");
+  mkdirSync(bin);
+  const browser = join(bin, "agent-browser");
+  writeFileSync(
+    browser,
+    [
+      "#!/usr/bin/env bash",
+      'if [[ "$1" == "eval" ]]; then exit 19; fi',
+      'if [[ "$1" == "screenshot" ]]; then',
+      '  printf "UNREDACTED-AUTHENTICATED-PIXELS ak_probeSecret123456" >"$2"',
+      "fi",
+      "exit 0",
+      "",
+    ].join("\n"),
+  );
+  chmodSync(browser, 0o700);
+  const artifacts = join(dir, "artifacts");
+  const runtime = join(dir, "runtime");
+  const result = spawnSync(
+    "bash",
+    [
+      "-c",
+      'source "$1"; step "adversarial redaction"; fail "expected failure"',
+      "bash",
+      resolve(import.meta.dirname, "lib.sh"),
+    ],
+    {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        PATH: `${bin}:${process.env.PATH}`,
+        E2E_ARTIFACTS: artifacts,
+        E2E_RUNTIME_DIR: runtime,
+        E2E_OWNS_RUNTIME: "0",
+      },
+    },
+  );
+  assert.equal(result.status, 1);
+  const files = readdirSync(artifacts, { recursive: true });
+  assert.equal(
+    files.some((file) => String(file).endsWith(".png")),
+    false,
+  );
+  for (const file of files) {
+    const path = join(artifacts, String(file));
+    try {
+      assert.doesNotMatch(readFileSync(path, "utf8"), /probeSecret/);
+    } catch (error) {
+      if (error?.code !== "EISDIR") throw error;
+    }
+  }
 });
 
 test("manifest rejects signed-in cosplay in anonymous context", () => {
@@ -278,6 +336,12 @@ test("manifest requires browser contracts before a lane can pass", () => {
       proof: "adversarial fixture",
     });
   }
+  appendTargetCheck(state, {
+    lane: "consumer",
+    baseUrl: "http://localhost:3000",
+    expectedCommit: "1111111111111111111111111111111111111111",
+    observedCommit: "1111111111111111111111111111111111111111",
+  });
   assert.throws(
     () =>
       buildManifest({
@@ -285,6 +349,7 @@ test("manifest requires browser contracts before a lane can pass", () => {
         outputPath: join(dir, "manifest.json"),
         repoRoot: dir,
         baseUrl: "http://localhost:3000",
+        expectedCommit: "1111111111111111111111111111111111111111",
         runId: "missing-contract",
       }),
     /passed lane consumer lacks anonymous browser contract/,
@@ -305,6 +370,10 @@ test("full pass binds a clean commit and downgrades dirty source", () => {
   execFileSync("git", ["commit", "--quiet", "-m", "test: fixture"], {
     cwd: repo,
   });
+  const commit = execFileSync("git", ["rev-parse", "HEAD"], {
+    cwd: repo,
+    encoding: "utf8",
+  }).trim();
 
   const state = join(dir, "state.json");
   appendFixtureContract(state, "preview", "anonymous");
@@ -315,6 +384,12 @@ test("full pass binds a clean commit and downgrades dirty source", () => {
   appendFixtureContract(state, "paid-consumer", "signed-in");
   appendFixtureContract(state, "payment", "signed-in");
   for (const lane of LANES) {
+    appendTargetCheck(state, {
+      lane,
+      baseUrl: "http://localhost:3000",
+      expectedCommit: commit,
+      observedCommit: commit,
+    });
     appendResult(state, {
       lane,
       status: "passed",
@@ -328,6 +403,7 @@ test("full pass binds a clean commit and downgrades dirty source", () => {
     outputPath: join(dir, "clean-manifest.json"),
     repoRoot: repo,
     baseUrl: "http://localhost:3000",
+    expectedCommit: commit,
     runId: "clean-source",
   });
   assert.equal(clean.summary.label, "FULL E2E PASS");
@@ -353,6 +429,7 @@ test("full pass binds a clean commit and downgrades dirty source", () => {
         outputPath: join(dir, "identity-mismatch.json"),
         repoRoot: repo,
         baseUrl: "http://localhost:3000",
+        expectedCommit: commit,
         runId: "identity-mismatch",
       }),
     /inconsistent signed identity/,
@@ -365,6 +442,7 @@ test("full pass binds a clean commit and downgrades dirty source", () => {
     outputPath: join(dir, "dirty-manifest.json"),
     repoRoot: repo,
     baseUrl: "http://localhost:3000",
+    expectedCommit: commit,
     runId: "dirty-source",
   });
   assert.equal(dirty.summary.lanesPassed, true);
@@ -382,8 +460,24 @@ test("full pass binds a clean commit and downgrades dirty source", () => {
     outputPath: join(dir, "failed-manifest.json"),
     repoRoot: repo,
     baseUrl: "http://localhost:3000",
+    expectedCommit: commit,
     runId: "failed-provider",
   });
   assert.equal(failed.summary.hasFailures, true);
   assert.equal(failed.summary.label, "E2E FAILURES RECORDED");
+});
+
+test("manifest rejects a passed lane for the wrong target build", () => {
+  const dir = mkdtempSync(join(tmpdir(), "zevium-e2e-wrong-build-"));
+  const state = join(dir, "state.json");
+  assert.throws(
+    () =>
+      appendTargetCheck(state, {
+        lane: "consumer",
+        baseUrl: "https://wrong-build.invalid",
+        expectedCommit: "1111111111111111111111111111111111111111",
+        observedCommit: "2222222222222222222222222222222222222222",
+      }),
+    /does not match expected/,
+  );
 });

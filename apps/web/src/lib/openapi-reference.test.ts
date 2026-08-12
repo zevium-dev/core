@@ -6,6 +6,7 @@ import {
   parameterKey,
   parsePublishedEndpoints,
   readableJsonResponse,
+  readableSuccessResponse,
   sanitizedGatewayErrorResponse,
 } from "./openapi-reference";
 
@@ -246,6 +247,18 @@ describe("readableJsonResponse", () => {
     expect(
       readableJsonResponse('{"ok":true}', "application/json", 2),
     ).toBeNull();
+  });
+});
+
+describe("readableSuccessResponse", () => {
+  it("renders HTML as bounded text without accepting binary bytes", () => {
+    expect(
+      readableSuccessResponse("<h1>safe text</h1>", "text/html; charset=utf-8"),
+    ).toBe("<h1>safe text</h1>");
+    expect(readableSuccessResponse("abcdef", "text/plain", 3)).toBe(
+      "abc\n… [response truncated]",
+    );
+    expect(readableSuccessResponse("binary", "image/png")).toBeNull();
   });
 });
 

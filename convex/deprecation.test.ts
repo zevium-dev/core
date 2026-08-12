@@ -115,17 +115,17 @@ describe("specs.deprecateVersion — auth", () => {
         projectId: seed.projectId,
         version: "2.0.0",
       }),
-    ).rejects.toThrow(/Org admin role required/);
+    ).rejects.toThrow(/Org admin or owner role required/);
     await expect(
       member.mutation(api.specs.deprecateVersion, {
         versionId: seed.versionId,
       }),
-    ).rejects.toThrow(/Org admin role required/);
+    ).rejects.toThrow(/Org admin or owner role required/);
     await expect(
       member.mutation(api.specs.undeprecateVersion, {
         versionId: seed.versionId,
       }),
-    ).rejects.toThrow(/Org admin role required/);
+    ).rejects.toThrow(/Org admin or owner role required/);
   });
 
   it("rejects non-member", async () => {

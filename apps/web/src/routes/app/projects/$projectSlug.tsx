@@ -62,6 +62,7 @@ import {
 import { api } from "#/lib/convex-api";
 import type { Doc } from "#/lib/convex-data-model";
 import { humanError } from "#/lib/human-error";
+import { isPrivilegedOrgRole } from "#/lib/org-capabilities";
 import type { RouterContext } from "#/router";
 
 type ProjectPanel = "overview" | "analytics" | "earnings" | "settings";
@@ -160,7 +161,7 @@ function ProjectShell({
   projectSlug: string;
 }) {
   const { membership } = useOrganization();
-  const canAdminister = membership?.role === "org:admin";
+  const canAdminister = isPrivilegedOrgRole(membership?.role);
   const { data: project } = useSuspenseQuery(
     convexQuery(api.projects.get, { orgSlug, projectSlug }),
   );
@@ -362,6 +363,7 @@ function ProjectShell({
         </Suspense>
       ) : panel === "settings" ? (
         <ProjectSettingsPanel
+          key={String(project._id)}
           project={project}
           orgSlug={orgSlug}
           canAdminister={canAdminister}

@@ -340,15 +340,15 @@ describe("webhooks.upsertEndpoint — CRUD + auth", () => {
         projectId: seed.projectId,
         url: "https://example.com/other",
       }),
-    ).rejects.toThrow(/Org admin role required/);
+    ).rejects.toThrow(/Org admin or owner role required/);
     await expect(
       member.query(api.webhooks.getEndpoint, { projectId: seed.projectId }),
-    ).rejects.toThrow(/Org admin role required/);
+    ).rejects.toThrow(/Org admin or owner role required/);
     await expect(
       member.mutation(api.webhooks.deleteEndpoint, {
         projectId: seed.projectId,
       }),
-    ).rejects.toThrow(/Org admin role required/);
+    ).rejects.toThrow(/Org admin or owner role required/);
   });
 
   it("rejects non-member", async () => {

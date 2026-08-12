@@ -83,7 +83,7 @@ defaultViewTransition: {
 ```
 
 - Default: **cross-fade** of `main-content` over `DUR.page` with THE easing. No directional slides on morphing routes (slides fight morphs); `navigate-forward`/`back` types are reserved for stack-like flows (e.g. multi-step checkout) only
-- **Hard loads** (refresh, direct URL — no old DOM to transition from): `.content-enter` CSS class on `<main>` — 8px rise with content visible from first paint, `DUR.page`, plays once (React `isInitialLoad` flag, cleared after 400ms so soft navs never replay it)
+- **Hard loads** (refresh, direct URL — no old DOM to transition from): `.content-enter` CSS class on `<main>` — opacity-only reveal, `DUR.page`. Spatial transforms are forbidden here because moving the full main region creates measurable CLS; soft navigation uses View Transitions instead
 
 ### Shared-element morphs (`view-transition-name`)
 

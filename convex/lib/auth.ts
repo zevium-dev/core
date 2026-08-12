@@ -1,3 +1,10 @@
+import {
+  isPrivilegedOrgRole,
+  projectOrgCapabilities,
+  type OrgCapability,
+  type OrgCapabilityProjection,
+} from "@zevium/shared";
+
 import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "../_generated/server";
 
@@ -79,7 +86,11 @@ export async function getOrgByPublicHandle(
 export async function requireOrgMemberBySlug(
   ctx: DbCtx,
   orgSlug: string,
-): Promise<{ claims: OrgIdentityClaims; org: Doc<"organizations"> }> {
+): Promise<{
+  claims: OrgIdentityClaims;
+  org: Doc<"organizations">;
+  access: OrgCapabilityProjection;
+}> {
   const claims = await requireIdentity(ctx);
   if (claims.orgId === undefined) {
     throw new Error("No active organization on identity");
@@ -93,7 +104,29 @@ export async function requireOrgMemberBySlug(
     throw new Error("Not a member of this organization");
   }
 
-  return { claims, org };
+  const access = projectOrgCapabilities(claims.orgRole);
+  if (access === null) throw new Error("Organization role is not supported");
+  return { claims, org, access };
+}
+
+/** Resolve the active Clerk org mirror and its server-owned role projection. */
+export async function requireActiveOrg(ctx: DbCtx): Promise<{
+  claims: OrgIdentityClaims;
+  org: Doc<"organizations">;
+  access: OrgCapabilityProjection;
+}> {
+  const claims = await requireIdentity(ctx);
+  if (claims.orgId === undefined) {
+    throw new Error("No active organization on identity");
+  }
+  const org = await ctx.db
+    .query("organizations")
+    .withIndex("by_clerk_org", (q) => q.eq("clerkOrgId", claims.orgId!))
+    .unique();
+  if (org === null) throw new Error("Active organization is not provisioned");
+  const access = projectOrgCapabilities(claims.orgRole);
+  if (access === null) throw new Error("Organization role is not supported");
+  return { claims, org, access };
 }
 
 /**
@@ -129,7 +162,7 @@ export async function requireProjectMember(
 }
 
 /**
- * Enforce org-admin role from the Clerk JWT claim (`org_role === "org:admin"`).
+ * Enforce privileged org role from the Clerk JWT claim (owner or admin).
  * `claims.orgRole` is parsed by `requireIdentity` but, without this gate, any
  * org member can perform admin actions. Callers resolve claims first via
  * `requireIdentity` / `requireOrgMemberBySlug` / `requireProjectMember`, then
@@ -155,10 +188,21 @@ export async function requireProjectMember(
  * state) intentionally stay at `requireOrgMemberBySlug` / `requireProjectMember`.
  */
 export function requireOrgAdmin(claims: OrgIdentityClaims): OrgIdentityClaims {
-  if (claims.orgRole !== "org:admin") {
-    throw new Error("Org admin role required");
+  if (!isPrivilegedOrgRole(claims.orgRole)) {
+    throw new Error("Org admin or owner role required");
   }
   return claims;
+}
+
+export function requireOrgCapability(
+  claims: OrgIdentityClaims,
+  capability: OrgCapability,
+): OrgCapabilityProjection {
+  const access = projectOrgCapabilities(claims.orgRole);
+  if (access === null || !access.capabilities[capability]) {
+    throw new Error("Organization capability required");
+  }
+  return access;
 }
 
 /**

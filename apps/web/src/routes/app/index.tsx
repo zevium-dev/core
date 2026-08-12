@@ -1,4 +1,4 @@
-import { useOrganization } from "@clerk/tanstack-react-start";
+import { useAuth, useOrganization } from "@clerk/tanstack-react-start";
 import { convexQuery } from "@convex-dev/react-query";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { Link, createFileRoute } from "@tanstack/react-router";
@@ -73,13 +73,14 @@ export const Route = createFileRoute("/app/")({
 
 function DashboardPage() {
   const { organization, isLoaded } = useOrganization();
+  const { userId, orgId } = useAuth();
   const { isLoading: convexAuthLoading, isAuthenticated } = useConvexAuth();
   const orgSlug =
     organization && typeof organization.slug === "string"
       ? organization.slug
       : null;
 
-  if (!isLoaded || convexAuthLoading) {
+  if (!isLoaded || convexAuthLoading || !userId || !orgId) {
     return <DashboardSkeleton />;
   }
 
@@ -100,12 +101,20 @@ function DashboardPage() {
 
   return (
     <Suspense fallback={<DashboardSkeleton />}>
-      <DashboardContent orgSlug={orgSlug} />
+      <DashboardContent orgSlug={orgSlug} userId={userId} orgId={orgId} />
     </Suspense>
   );
 }
 
-function DashboardContent({ orgSlug }: { orgSlug: string }) {
+function DashboardContent({
+  orgSlug,
+  userId,
+  orgId,
+}: {
+  orgSlug: string;
+  userId: string;
+  orgId: string;
+}) {
   const { data: overview } = useSuspenseQuery(
     convexQuery(api.analytics.orgOverview, { orgSlug }),
   );
@@ -115,7 +124,7 @@ function DashboardContent({ orgSlug }: { orgSlug: string }) {
   );
 
   const keysQuery = useQuery({
-    queryKey: ["settings", "api-keys", "count"] as const,
+    queryKey: ["settings", "api-keys", "count", userId, orgId] as const,
     queryFn: () => listKeys(),
     staleTime: 30_000,
   });

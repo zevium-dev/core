@@ -39,14 +39,14 @@ export function DocsCodeBlock({ code, lang, className }: DocsCodeBlockProps) {
       )}
     >
       <div className="flex items-center justify-between border-b bg-muted/60 px-3 py-1.5">
-        <span className="font-mono text-[11px] uppercase tracking-wide text-muted-foreground">
+        <span className="font-mono text-[11px] uppercase tracking-wide text-foreground">
           {lang ?? "code"}
         </span>
         <Button
           type="button"
           variant="ghost"
           size="sm"
-          className="h-7 gap-1.5 px-2 text-xs text-muted-foreground"
+          className="h-7 gap-1.5 px-2 text-xs text-foreground"
           onClick={() => void onCopy()}
           aria-label="Copy code"
         >

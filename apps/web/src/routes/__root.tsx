@@ -2,6 +2,7 @@ import { auth } from "@clerk/tanstack-react-start/server";
 import { TanStackDevtools } from "@tanstack/react-devtools";
 import {
   HeadContent,
+  Link,
   Outlet,
   Scripts,
   createRootRouteWithContext,
@@ -10,8 +11,17 @@ import {
 import { TanStackRouterDevtoolsPanel } from "@tanstack/react-router-devtools";
 import { createServerFn } from "@tanstack/react-start";
 import { ConvexProvider } from "convex/react";
+import { useEffect, useRef } from "react";
 
+import { PublicHeader } from "#/components/public-header";
 import { ThemeProvider } from "#/components/theme-provider";
+import { Button } from "#/components/ui/button";
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+} from "#/components/ui/empty";
 import { Toaster } from "#/components/ui/sonner";
 import { TooltipProvider } from "#/components/ui/tooltip";
 import { readClientClerkAuth } from "#/lib/clerk-client";
@@ -49,6 +59,11 @@ const fetchConvexAuth = createServerFn({ method: "GET" }).handler(
 );
 
 const themeInitScript = `(function(){try{var k='zevium-theme';var t=localStorage.getItem(k);var d=window.matchMedia('(prefers-color-scheme: dark)').matches;var dark=t==='dark'||(t!=='light'&&d);var r=document.documentElement;r.classList.toggle('dark',dark);r.style.colorScheme=dark?'dark':'light';}catch(e){}})();`;
+const buildSha =
+  import.meta.env.VITE_BUILD_SHA ?? (import.meta.env.DEV ? "development" : "");
+if (!import.meta.env.DEV && !/^[0-9a-f]{40}$/.test(buildSha)) {
+  throw new Error("Production build lacks a full VITE_BUILD_SHA");
+}
 
 export const Route = createRootRouteWithContext<RouterContext>()({
   beforeLoad: async ({ context }): Promise<ConvexAuthSnapshot> => {
@@ -60,6 +75,7 @@ export const Route = createRootRouteWithContext<RouterContext>()({
         orgId: context.orgId,
         orgSlug: context.orgSlug,
       });
+      await context.principalCache.transition(client.userId, client.orgId);
       return {
         userId: client.userId,
         token: null,
@@ -69,6 +85,7 @@ export const Route = createRootRouteWithContext<RouterContext>()({
     }
 
     const { userId, token, orgSlug, orgId } = await fetchConvexAuth();
+    await context.principalCache.transition(userId, orgId);
 
     // SSR only: forward JWT into Convex HTTP client used by loaders.
     // Browser auth stays on ConvexProviderWithClerk.
@@ -88,6 +105,7 @@ export const Route = createRootRouteWithContext<RouterContext>()({
         content: "width=device-width, initial-scale=1",
       },
       { title: "Zevium" },
+      { name: "zevium-build", content: buildSha },
     ],
     links: [
       { rel: "stylesheet", href: appCss },
@@ -97,8 +115,59 @@ export const Route = createRootRouteWithContext<RouterContext>()({
     scripts: [{ children: themeInitScript }],
   }),
   component: RootComponent,
+  notFoundComponent: GlobalNotFound,
   shellComponent: RootDocument,
 });
+
+function GlobalNotFound() {
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  useEffect(() => {
+    headingRef.current?.focus();
+  }, []);
+
+  return (
+    <div className="min-h-screen bg-background">
+      <title>Page not found · Zevium</title>
+      <PublicHeader />
+      <main
+        id="main-content"
+        className="mx-auto max-w-3xl px-4 py-12"
+        tabIndex={-1}
+      >
+        <Empty className="min-h-80 border border-dashed">
+          <EmptyHeader>
+            <h1
+              ref={headingRef}
+              tabIndex={-1}
+              className="text-lg font-medium tracking-tight outline-none"
+            >
+              Page not found
+            </h1>
+            <EmptyDescription>
+              This address does not match a Zevium page. Choose a safe route or
+              return to your previous page.
+            </EmptyDescription>
+          </EmptyHeader>
+          <EmptyContent className="flex-row flex-wrap justify-center">
+            <Button asChild>
+              <Link to="/">Home</Link>
+            </Button>
+            <Button asChild variant="outline">
+              <Link to="/catalogue">Catalogue</Link>
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => window.history.back()}
+            >
+              Back
+            </Button>
+          </EmptyContent>
+        </Empty>
+      </main>
+    </div>
+  );
+}
 
 function RootDocument({ children }: { children: React.ReactNode }) {
   return (

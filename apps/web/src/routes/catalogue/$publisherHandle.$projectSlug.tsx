@@ -62,7 +62,7 @@ import {
   appendQueryParameters,
   buildRequestPath,
   parsePublishedEndpoints,
-  readableJsonResponse,
+  readableSuccessResponse,
   sanitizedGatewayErrorResponse,
   type ApiEndpoint,
   type ApiParameter,
@@ -965,7 +965,7 @@ function TryItPanel({
           result.contentType,
           result.requestId,
         )
-      : readableJsonResponse(result.body, result.contentType)
+      : readableSuccessResponse(result.body, result.contentType)
     : null;
 
   return (
@@ -1271,73 +1271,85 @@ function TryItPanel({
             </span>
           </div>
 
-          {result ? (
-            <div className="space-y-2" role="status" aria-live="polite">
-              <div className="flex flex-wrap items-center gap-2 text-sm">
-                <Badge
-                  variant={
-                    result.status >= 200 && result.status < 300
-                      ? "secondary"
-                      : "destructive"
-                  }
-                  className="tabular-nums"
-                >
-                  {result.status || "ERR"} {result.statusText}
-                </Badge>
-                {result.mock ? (
-                  <Badge variant="outline">mock response · 0 credits</Badge>
-                ) : null}
-                <span className="text-muted-foreground tabular-nums">
-                  {result.ms} ms
-                </span>
-                {result.requestId ? (
-                  <span className="font-mono text-xs text-muted-foreground">
-                    Request {result.requestId}
+          <div className="min-h-[24rem]" role="status" aria-live="polite">
+            {sending ? (
+              <div className="space-y-3 rounded-md border p-4">
+                <Skeleton className="h-5 w-48" />
+                <Skeleton className="h-72 w-full" />
+              </div>
+            ) : result ? (
+              <div className="space-y-2">
+                <div className="flex flex-wrap items-center gap-2 text-sm">
+                  <Badge
+                    variant={
+                      result.status >= 200 && result.status < 300
+                        ? "secondary"
+                        : "destructive"
+                    }
+                    className="tabular-nums"
+                  >
+                    {result.status || "ERR"} {result.statusText}
+                  </Badge>
+                  {result.mock ? (
+                    <Badge variant="outline">mock response · 0 credits</Badge>
+                  ) : null}
+                  <span className="text-muted-foreground tabular-nums">
+                    {result.ms} ms
                   </span>
+                  {result.requestId ? (
+                    <span className="font-mono text-xs text-muted-foreground">
+                      Request {result.requestId}
+                    </span>
+                  ) : null}
+                </div>
+                {result.status === 0 ? (
+                  <div className="space-y-1 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm">
+                    <p className="font-medium text-destructive">
+                      Gateway could not be reached
+                    </p>
+                    <p className="text-muted-foreground">
+                      Check your connection and gateway URL. If this persists,
+                      allow this site in gateway CORS settings, then retry.
+                    </p>
+                  </div>
+                ) : result.status >= 400 ? (
+                  <p className="text-sm text-muted-foreground">
+                    {result.status === 401
+                      ? "Your API key was not accepted. Create or rotate a key, then try again."
+                      : result.status === 402
+                        ? "Your organization needs credits before this call can run."
+                        : result.status === 429
+                          ? "This key reached a limit. Wait or adjust its cap."
+                          : result.status >= 500
+                            ? "The upstream service failed. Retry later."
+                            : "Check the request fields and try again."}
+                  </p>
+                ) : null}
+                {result.status > 0 && readableResultBody !== null ? (
+                  <pre className="max-h-80 overflow-auto rounded-md border bg-muted/40 p-3 font-mono text-xs whitespace-pre-wrap break-all">
+                    <SyntaxCode
+                      code={readableResultBody}
+                      lang={responseLanguage(readableResultBody)}
+                    />
+                  </pre>
+                ) : result.status >= 400 ? (
+                  <p className="text-xs text-muted-foreground">
+                    Response body is hidden because it is not a verified Zevium
+                    error envelope. Use request ID above when contacting
+                    support.
+                  </p>
+                ) : result.status > 0 ? (
+                  <p className="text-xs text-muted-foreground">
+                    Binary response body is not displayed in the browser.
+                  </p>
                 ) : null}
               </div>
-              {result.status === 0 ? (
-                <div className="space-y-1 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm">
-                  <p className="font-medium text-destructive">
-                    Gateway could not be reached
-                  </p>
-                  <p className="text-muted-foreground">
-                    Check your connection and gateway URL. If this persists,
-                    allow this site in gateway CORS settings, then retry.
-                  </p>
-                </div>
-              ) : result.status >= 400 ? (
-                <p className="text-sm text-muted-foreground">
-                  {result.status === 401
-                    ? "Your API key was not accepted. Create or rotate a key, then try again."
-                    : result.status === 402
-                      ? "Your organization needs credits before this call can run."
-                      : result.status === 429
-                        ? "This key reached a limit. Wait or adjust its cap."
-                        : result.status >= 500
-                          ? "The upstream service failed. Retry later."
-                          : "Check the request fields and try again."}
-                </p>
-              ) : null}
-              {result.status > 0 && readableResultBody !== null ? (
-                <pre className="max-h-80 overflow-auto rounded-md border bg-muted/40 p-3 font-mono text-xs whitespace-pre-wrap break-all">
-                  <SyntaxCode
-                    code={readableResultBody ?? (result.body || "(empty body)")}
-                    lang={
-                      readableResultBody !== null
-                        ? "json"
-                        : responseLanguage(result.body)
-                    }
-                  />
-                </pre>
-              ) : result.status > 0 ? (
-                <p className="text-xs text-muted-foreground">
-                  Response body is hidden because it is not a verified Zevium
-                  error envelope. Use request ID above when contacting support.
-                </p>
-              ) : null}
-            </div>
-          ) : null}
+            ) : (
+              <div className="flex h-80 items-center justify-center rounded-md border border-dashed text-sm text-muted-foreground">
+                Response appears here after you send the request.
+              </div>
+            )}
+          </div>
         </form>
       </CardContent>
     </Card>
@@ -1389,8 +1401,8 @@ function ConnectAgentPanel({
 // Gateway base: ${gatewayBaseUrl()}/${publisherHandle}/${projectSlug}`;
 
   return (
-    <div className="grid gap-4 lg:grid-cols-2">
-      <Card>
+    <div className="grid min-w-0 gap-4 lg:grid-cols-2">
+      <Card className="min-w-0">
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
             <Terminal className="size-4" />
@@ -1401,23 +1413,23 @@ function ConnectAgentPanel({
             key.
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-3">
-          <pre className="max-h-72 overflow-auto rounded-md border bg-muted/40 p-3 font-mono text-xs whitespace-pre">
+        <CardContent className="min-w-0 space-y-3">
+          <pre className="max-h-72 w-full max-w-full overflow-auto rounded-md border bg-muted/40 p-3 font-mono text-xs whitespace-pre">
             <SyntaxCode code={snippet} lang="json" />
           </pre>
           <CopyAction text={snippet} label="Copy config" />
         </CardContent>
       </Card>
 
-      <Card>
+      <Card className="min-w-0">
         <CardHeader>
           <CardTitle className="text-base">Usage notes</CardTitle>
           <CardDescription>
             Agent-readable connection path for this API.
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-3">
-          <pre className="max-h-72 overflow-auto rounded-md border bg-muted/40 p-3 font-mono text-xs whitespace-pre-wrap">
+        <CardContent className="min-w-0 space-y-3">
+          <pre className="max-h-72 w-full max-w-full overflow-auto rounded-md border bg-muted/40 p-3 font-mono text-xs whitespace-pre-wrap">
             <SyntaxCode code={notes} lang="js" />
           </pre>
           <CopyAction text={notes} label="Copy notes" />
@@ -1489,12 +1501,7 @@ function ApiDetailBodySkeleton() {
 function ApiDetailSkeleton() {
   return (
     <div className="min-h-screen bg-background">
-      <header className="border-b">
-        <div className="mx-auto flex h-14 max-w-6xl items-center justify-between gap-4 px-4">
-          <Skeleton className="h-4 w-20" />
-          <Skeleton className="h-8 w-20" />
-        </div>
-      </header>
+      <PublicHeader active="catalogue" />
       <main
         id="main-content"
         tabIndex={-1}

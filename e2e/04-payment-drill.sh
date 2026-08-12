@@ -17,6 +17,7 @@ configure_browser_context
 
 step "sign in to stable staging"
 wait_for_url "$E2E_BASE_URL/" "200" 90
+verify_target_commit "payment"
 sign_in
 
 step "start Stripe Checkout"

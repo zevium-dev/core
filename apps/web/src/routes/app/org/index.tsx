@@ -43,6 +43,7 @@ import { Input } from "#/components/ui/input";
 import { Label } from "#/components/ui/label";
 import { api } from "#/lib/convex-api";
 import { humanError } from "#/lib/human-error";
+import { isPrivilegedOrgRole } from "#/lib/org-capabilities";
 import { connectedAccountDisplay } from "#/lib/stripe-ui";
 
 export const Route = createFileRoute("/app/org/")({
@@ -146,7 +147,7 @@ function PublicHandleCard() {
   const unavailable = lookup.data?.available === false;
   const availabilityConfirmed = lookup.data?.available === true;
   const checking = lookup.isPending && valid && changed;
-  const isAdmin = membership?.role === "org:admin";
+  const isAdmin = isPrivilegedOrgRole(membership?.role);
   const { mutate: save, isPending } = useMutation({
     mutationFn: () => setPublicHandle({ handle: normalized }),
     onSuccess: () => {
@@ -277,7 +278,7 @@ function PublicHandleCard() {
 
 function PublisherPaymentsCard() {
   const { membership } = useOrganization();
-  const isAdmin = membership?.role === "org:admin";
+  const isAdmin = isPrivilegedOrgRole(membership?.role);
   const [publisherCountry, setPublisherCountry] = useState("");
   const payoutState = useQuery(convexQuery(api.payouts.getPayoutState, {}));
   const startOnboarding = useAction(api.payouts.startOnboarding);

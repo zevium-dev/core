@@ -25,6 +25,38 @@ function identity(
 }
 
 describe("project lifecycle authorization", () => {
+  it.each([
+    ["org:owner", true],
+    ["org:admin", true],
+    ["org:member", false],
+  ] as const)("projects server capabilities for %s", async (role, privileged) => {
+    const t = convexTest(schema, modules);
+    await t.run(async (ctx) => {
+      await ctx.db.insert("organizations", {
+        clerkOrgId: "org_acme",
+        name: "Acme",
+        slug: "acme",
+      });
+    });
+    const actor = t.withIdentity({
+      subject: `user_${role}`,
+      org_id: "org_acme",
+      org_slug: "acme",
+      org_role: role,
+    } as {
+      subject: string;
+      org_id: string;
+      org_slug: string;
+      org_role: string;
+    });
+
+    const access = await actor.query(api.organizations.activeCapabilities, {});
+    expect(access.role).toBe(role);
+    expect(access.capabilities.managePublisher).toBe(privileged);
+    expect(access.capabilities.viewOrgUsage).toBe(privileged);
+    expect(access.capabilities.viewOwnUsage).toBe(true);
+  });
+
   it("lets members read projects but rejects create, update, and delete", async () => {
     const t = convexTest(schema, modules);
     const projectId = await t.run(async (ctx) => {
@@ -53,16 +85,16 @@ describe("project lifecycle authorization", () => {
         name: "Blocked API",
         slug: "blocked-api",
       }),
-    ).rejects.toThrow("Org admin role required");
+    ).rejects.toThrow("Org admin or owner role required");
     await expect(
       member.mutation(api.projects.update, {
         projectId,
         patch: { visibility: "public" },
       }),
-    ).rejects.toThrow("Org admin role required");
+    ).rejects.toThrow("Org admin or owner role required");
     await expect(
       member.mutation(api.projects.remove, { projectId }),
-    ).rejects.toThrow("Org admin role required");
+    ).rejects.toThrow("Org admin or owner role required");
 
     const unchanged = await t.run(async (ctx) => await ctx.db.get(projectId));
     expect(unchanged).toMatchObject({
@@ -91,5 +123,35 @@ describe("project lifecycle authorization", () => {
       status: "draft",
       visibility: "private",
     });
+  });
+
+  it("treats an org owner as privileged", async () => {
+    const t = convexTest(schema, modules);
+    await t.run(async (ctx) => {
+      await ctx.db.insert("organizations", {
+        clerkOrgId: "org_acme",
+        name: "Acme",
+        slug: "acme",
+      });
+    });
+
+    const owner = t.withIdentity({
+      subject: "user_owner",
+      org_id: "org_acme",
+      org_slug: "acme",
+      org_role: "org:owner",
+    } as {
+      subject: string;
+      org_id: string;
+      org_slug: string;
+      org_role: string;
+    });
+    await expect(
+      owner.mutation(api.projects.create, {
+        orgSlug: "acme",
+        name: "Owner API",
+        slug: "owner-api",
+      }),
+    ).resolves.toMatchObject({ slug: "owner-api" });
   });
 });

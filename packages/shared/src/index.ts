@@ -33,6 +33,17 @@ export {
 export { generateMockResponse, type GeneratedMockResponse } from "./mock.js";
 
 export {
+  ORG_CAPABILITIES,
+  ORG_ROLES,
+  isOrgRole,
+  isPrivilegedOrgRole,
+  projectOrgCapabilities,
+  type OrgCapability,
+  type OrgCapabilityProjection,
+  type OrgRole,
+} from "./org-capabilities.js";
+
+export {
   isValidSlug,
   isValidSemver,
   collectOpenApiSpecIssues,

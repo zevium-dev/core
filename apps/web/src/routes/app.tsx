@@ -49,10 +49,13 @@ export const Route = createFileRoute("/app")({
 });
 
 function AppProviderBoundary() {
-  const { convexQueryClient } = Route.useRouteContext();
+  const { convexQueryClient, principalCache } = Route.useRouteContext();
 
   return (
-    <AuthenticatedProviders client={convexQueryClient.convexClient}>
+    <AuthenticatedProviders
+      client={convexQueryClient.convexClient}
+      principalCache={principalCache}
+    >
       <AppLayout />
     </AuthenticatedProviders>
   );
@@ -71,12 +74,12 @@ function AppLayout() {
         Skip to main content
       </a>
       <AppSidebar />
-      <SidebarInset className="md:peer-data-[state=collapsed]:ml-0!">
+      <SidebarInset className="min-w-0 md:peer-data-[state=collapsed]:ml-0!">
         <AppHeader />
         <div
           id="main-content"
           tabIndex={-1}
-          className="flex flex-1 flex-col gap-4 p-4 focus-visible:outline-none md:p-6 content-enter"
+          className="flex min-w-0 w-full flex-1 flex-col gap-4 p-4 focus-visible:outline-none md:p-6 content-enter"
           style={{ viewTransitionName: "main-content" }}
         >
           <Outlet />

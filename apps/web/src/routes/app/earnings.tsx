@@ -28,6 +28,7 @@ import { Input } from "#/components/ui/input";
 import { Label } from "#/components/ui/label";
 import { api } from "#/lib/convex-api";
 import { humanError } from "#/lib/human-error";
+import { isPrivilegedOrgRole } from "#/lib/org-capabilities";
 import { formatCreditsAsUsd } from "#/lib/project-helpers";
 import {
   connectedAccountDisplay,
@@ -101,7 +102,7 @@ function EarningsPage() {
 
 function EarningsContent() {
   const { membership } = useOrganization();
-  const canManagePayouts = membership?.role === "org:admin";
+  const canManagePayouts = isPrivilegedOrgRole(membership?.role);
   const { onboarding } = Route.useSearch();
   const refreshStarted = useRef(false);
   const [publisherCountry, setPublisherCountry] = useState("");

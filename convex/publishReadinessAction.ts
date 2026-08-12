@@ -1,6 +1,7 @@
 "use node";
 
 import { lookup } from "node:dns/promises";
+import { isPrivilegedOrgRole } from "@zevium/shared";
 import { v } from "convex/values";
 import { action } from "./_generated/server";
 import { internal } from "./_generated/api";
@@ -151,7 +152,10 @@ export const testConnection = action({
     if (!clerkOrgId) {
       throw new Error("Choose an organization before testing a connection");
     }
-    if ((identity as Record<string, unknown>).org_role !== "org:admin") {
+    const orgRole = (identity as Record<string, unknown>).org_role;
+    if (
+      !isPrivilegedOrgRole(typeof orgRole === "string" ? orgRole : undefined)
+    ) {
       throw new Error("Only organization admins can test upstream credentials");
     }
     const target = await ctx.runQuery(internal.publishReadiness.getTarget, {

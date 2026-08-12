@@ -6,7 +6,7 @@ import {
   type MutationCtx,
 } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
-import { requireIdentity, requireOrgAdmin } from "./lib/auth";
+import { requireActiveOrg, requireIdentity, requireOrgAdmin } from "./lib/auth";
 import { isValidSlug } from "./lib/validate";
 
 async function ensureWallet(
@@ -79,6 +79,15 @@ export const listMine = query({
       .withIndex("by_clerk_org", (q) => q.eq("clerkOrgId", claims.orgId!))
       .unique();
     return org === null ? [] : [org];
+  },
+});
+
+/** Auth-sensitive role projection consumed by role-shaped app routes. */
+export const activeCapabilities = query({
+  args: {},
+  handler: async (ctx) => {
+    const { access } = await requireActiveOrg(ctx);
+    return access;
   },
 });
 

@@ -1,34 +1,22 @@
-import { makeFunctionReference } from "convex/server";
+import {
+  ORG_CAPABILITIES,
+  ORG_ROLES,
+  type OrgCapability,
+  type OrgCapabilityProjection,
+} from "@zevium/shared";
 
-export const ORG_CAPABILITIES = [
-  "viewWalletTotals",
-  "viewOwnUsage",
-  "viewOrgUsage",
-  "viewPublisherEarnings",
-  "manageBilling",
-  "manageKeys",
-  "manageWebhooks",
-  "managePayouts",
-  "managePublisher",
-  "manageOrgSettings",
-] as const;
+export type {
+  OrgCapability,
+  OrgCapabilityProjection,
+  OrgRole,
+} from "@zevium/shared";
+export {
+  ORG_CAPABILITIES,
+  ORG_ROLES,
+  isPrivilegedOrgRole,
+} from "@zevium/shared";
 
-export type OrgCapability = (typeof ORG_CAPABILITIES)[number];
-export type OrgRole = "org:owner" | "org:admin" | "org:member";
-
-export type OrgCapabilityProjection = {
-  role: OrgRole;
-  capabilities: Record<OrgCapability, boolean>;
-  reasons: Record<OrgCapability, string | null>;
-};
-
-export const activeOrgCapabilitiesRef = makeFunctionReference<
-  "query",
-  Record<string, never>,
-  OrgCapabilityProjection
->("organizations:activeCapabilities");
-
-const ORG_ROLES = new Set<OrgRole>(["org:owner", "org:admin", "org:member"]);
+const ORG_ROLE_SET = new Set(ORG_ROLES);
 
 /** Validate auth-sensitive server projection and fail closed on stale payloads. */
 export function parseOrgCapabilityProjection(
@@ -36,7 +24,9 @@ export function parseOrgCapabilityProjection(
 ): OrgCapabilityProjection | null {
   if (typeof value !== "object" || value === null) return null;
   const candidate = value as Record<string, unknown>;
-  if (!ORG_ROLES.has(candidate.role as OrgRole)) return null;
+  if (!ORG_ROLE_SET.has(candidate.role as (typeof ORG_ROLES)[number])) {
+    return null;
+  }
   if (
     typeof candidate.capabilities !== "object" ||
     candidate.capabilities === null ||

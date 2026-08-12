@@ -10,7 +10,13 @@ import {
   Trash2,
   Webhook,
 } from "lucide-react";
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
 import { toast } from "sonner";
 
 import { Badge } from "#/components/ui/badge";
@@ -387,9 +393,9 @@ export function ProjectSettingsPanel({
         </CardContent>
       </Card>
 
-      <UpstreamCredentialsCard project={project} />
+      <UpstreamCredentialsCard key={String(project._id)} project={project} />
 
-      <WebhooksCard project={project} />
+      <WebhooksCard key={String(project._id)} project={project} />
 
       <Card className="border-destructive/40">
         <CardHeader>
@@ -479,38 +485,60 @@ function UpstreamCredentialsCard({ project }: { project: Doc<"projects"> }) {
     id: Id<"upstreamCredentials">;
     name: string;
   } | null>(null);
+  const activeProjectRef = useRef<Id<"projects"> | null>(project._id);
+
+  useLayoutEffect(() => {
+    activeProjectRef.current = project._id;
+    setName("x-api-key");
+    setSecret("");
+    setRevealSecret(false);
+    setCredentialError(null);
+    setCredentialToRemove(null);
+    return () => {
+      activeProjectRef.current = null;
+    };
+  }, [project._id]);
 
   const queryKey = convexQuery(api.upstreamCredentials.listForProject, {
     projectId: project._id,
   }).queryKey;
 
   const { mutate: saveCredential, isPending: saving } = useMutation({
-    mutationFn: (input: { name: string; secret: string }) =>
-      upsertCredential({
+    mutationFn: async (input: { name: string; secret: string }) => ({
+      projectId: project._id,
+      result: await upsertCredential({
         projectId: project._id,
         name: input.name,
         secret: input.secret,
       }),
-    onSuccess: async () => {
+    }),
+    onSuccess: async ({ projectId }) => {
+      if (activeProjectRef.current !== projectId) return;
       setSecret("");
       setRevealSecret(false);
       await queryClient.invalidateQueries({ queryKey });
     },
     onError: (err: unknown) => {
+      if (activeProjectRef.current !== project._id) return;
       setCredentialError(humanError(err, "Could not save upstream credential"));
       document.getElementById("upstream-header-secret")?.focus();
     },
   });
 
   const { mutate: deleteCredential, isPending: deleting } = useMutation({
-    mutationFn: (credentialId: Id<"upstreamCredentials">) =>
-      removeCredential({ credentialId }),
-    onSuccess: async () => {
+    mutationFn: async (credentialId: Id<"upstreamCredentials">) => ({
+      projectId: project._id,
+      result: await removeCredential({ credentialId }),
+    }),
+    onSuccess: async ({ projectId }) => {
+      if (activeProjectRef.current !== projectId) return;
       setCredentialToRemove(null);
       await queryClient.invalidateQueries({ queryKey });
     },
-    onError: (err: unknown) =>
-      toast.error(humanError(err, "Could not remove upstream credential")),
+    onError: (err: unknown) => {
+      if (activeProjectRef.current !== project._id) return;
+      toast.error(humanError(err, "Could not remove upstream credential"));
+    },
   });
 
   function onSave(e: FormEvent) {
@@ -749,26 +777,48 @@ function WebhooksCard({ project }: { project: Doc<"projects"> }) {
   const [revealSecret, setRevealSecret] = useState(false);
   const [copiedSecret, setCopiedSecret] = useState(false);
   const [webhookError, setWebhookError] = useState<string | null>(null);
+  const activeProjectRef = useRef<Id<"projects"> | null>(project._id);
+
+  useLayoutEffect(() => {
+    activeProjectRef.current = project._id;
+    setUrl("");
+    setActive(true);
+    setRevealSecret(false);
+    setCopiedSecret(false);
+    setWebhookError(null);
+    return () => {
+      activeProjectRef.current = null;
+    };
+  }, [project._id]);
 
   // Sync local form from the realtime endpoint doc once it loads.
   useEffect(() => {
+    if (activeProjectRef.current !== project._id) return;
     if (endpoint !== null) {
       setUrl(endpoint.url);
       setActive(endpoint.active);
+      setRevealSecret(false);
+      setCopiedSecret(false);
     }
-  }, [endpoint?._id, endpoint?.url, endpoint?.active]);
+  }, [endpoint?._id, endpoint?.url, endpoint?.active, project._id]);
 
   const upsertMut = useConvexMutation(api.webhooks.upsertEndpoint);
 
   const { mutate: saveEndpoint, isPending: saving } = useMutation({
-    mutationFn: (input: { url: string; active: boolean }) =>
-      upsertMut({
+    mutationFn: async (input: { url: string; active: boolean }) => ({
+      projectId: project._id,
+      result: await upsertMut({
         projectId: project._id,
         url: input.url,
         active: input.active,
       }),
-    onSuccess: () => setWebhookError(null),
+    }),
+    onSuccess: ({ projectId }) => {
+      if (activeProjectRef.current !== projectId) return;
+      setWebhookError(null);
+    },
     onError: (err: unknown) => {
+      if (activeProjectRef.current !== project._id) return;
       setWebhookError(humanError(err, "Could not save webhook endpoint"));
       document.getElementById("webhook-url")?.focus();
     },
@@ -799,11 +849,16 @@ function WebhooksCard({ project }: { project: Doc<"projects"> }) {
 
   async function copySecret() {
     if (!endpoint?.secret) return;
+    const projectId = project._id;
     try {
       await navigator.clipboard.writeText(endpoint.secret);
+      if (activeProjectRef.current !== projectId) return;
       setCopiedSecret(true);
-      setTimeout(() => setCopiedSecret(false), 1500);
+      setTimeout(() => {
+        if (activeProjectRef.current === projectId) setCopiedSecret(false);
+      }, 1500);
     } catch {
+      if (activeProjectRef.current !== projectId) return;
       toast.error("Could not copy secret");
     }
   }

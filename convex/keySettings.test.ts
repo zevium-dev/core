@@ -142,19 +142,19 @@ describe("keySettings.setCap — upsert + validation", () => {
         keyId: KEY_A,
         monthlyCapCredits: 500,
       }),
-    ).rejects.toThrow(/Org admin role required/);
+    ).rejects.toThrow(/Org admin or owner role required/);
     await expect(
       member.mutation(api.keySettings.setDisabled, {
         keyId: KEY_A,
         disabled: true,
       }),
-    ).rejects.toThrow(/Org admin role required/);
+    ).rejects.toThrow(/Org admin or owner role required/);
     await expect(
       member.mutation(api.keySettings.beginRotation, {
         operationId: "blocked-rotation",
         oldKeyId: KEY_A,
       }),
-    ).rejects.toThrow(/Org admin role required/);
+    ).rejects.toThrow(/Org admin or owner role required/);
   });
 
   it("records key name and owner from the authenticated identity", async () => {

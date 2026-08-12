@@ -3,7 +3,6 @@ import { convexQuery } from "@convex-dev/react-query";
 import { useMutation, useQueries, useQuery } from "@tanstack/react-query";
 import { Link, createFileRoute } from "@tanstack/react-router";
 import { useAction, useConvexAuth } from "convex/react";
-import { makeFunctionReference } from "convex/server";
 import { ChartNoAxesColumn, CreditCard, Wallet } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -36,7 +35,6 @@ import {
 } from "#/lib/billing-cycle";
 import { humanError } from "#/lib/human-error";
 import {
-  activeOrgCapabilitiesRef,
   capabilityProjectionsMatch,
   hasServerCapability,
   parseOrgCapabilityProjection,
@@ -70,12 +68,6 @@ type BillingStateData = {
     failureReason?: string;
   }>;
 };
-
-const billingStateRef = makeFunctionReference<
-  "query",
-  { checkoutSessionId?: string },
-  BillingStateData
->("billing:getBillingState");
 
 export const Route = createFileRoute("/app/billing")({
   validateSearch: (search: Record<string, unknown>): BillingSearch => {
@@ -126,19 +118,21 @@ function BillingContent({
   checkoutSessionId?: string;
   orgSlug: string;
 }) {
-  const capabilityQuery = useQuery(convexQuery(activeOrgCapabilitiesRef, {}));
+  const capabilityQuery = useQuery(
+    convexQuery(api.organizations.activeCapabilities, {}),
+  );
   const capabilities = parseOrgCapabilityProjection(capabilityQuery.data);
   const canManageBilling = hasServerCapability(capabilities, "manageBilling");
   const [billingQuery, cycleQuery] = useQueries({
     queries: [
       {
-        ...convexQuery(billingStateRef, {
+        ...convexQuery(api.billing.getBillingState, {
           checkoutSessionId: canManageBilling ? checkoutSessionId : undefined,
         }),
         enabled: capabilities !== null,
       },
       {
-        ...convexQuery(cycleBreakdownRef, { orgSlug }),
+        ...convexQuery(api.billing.cycleBreakdown, { orgSlug }),
         enabled: capabilities !== null,
       },
     ],
@@ -521,12 +515,6 @@ type CycleUsageData = {
     endpoints: boolean;
   };
 };
-
-const cycleBreakdownRef = makeFunctionReference<
-  "query",
-  { orgSlug: string },
-  CycleUsageData
->("billing:cycleBreakdown");
 
 export function CycleUsage({ cycle }: { cycle: CycleUsageData }) {
   const canViewOrgUsage = cycle.access.capabilities.viewOrgUsage;

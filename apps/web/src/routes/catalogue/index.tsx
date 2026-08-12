@@ -39,7 +39,6 @@ import {
   FieldSet,
 } from "#/components/ui/field";
 import { Input } from "#/components/ui/input";
-import { Separator } from "#/components/ui/separator";
 import { Skeleton } from "#/components/ui/skeleton";
 import { ToggleGroup, ToggleGroupItem } from "#/components/ui/toggle-group";
 import {
@@ -331,7 +330,7 @@ function CataloguePage() {
                   </FieldDescription>
                   <p
                     aria-live="polite"
-                    className="text-sm text-muted-foreground"
+                    className="min-h-5 text-sm text-muted-foreground"
                   >
                     {semanticPending
                       ? "Searching semantically…"
@@ -359,14 +358,21 @@ function CataloguePage() {
                 </Field>
 
                 {inSemanticMode ? null : (
-                  <BrowseFilters
-                    sort={sort}
-                    setSort={handleSortChange}
-                    freeOnly={freeOnly}
-                    setFreeOnly={handleFreeOnlyChange}
-                    maxCostInput={maxCostInput}
-                    setMaxCostInput={handleMaxCostChange}
-                  />
+                  <details className="group rounded-md border px-3 py-2 sm:border-0 sm:p-0">
+                    <summary className="flex min-h-11 cursor-pointer items-center text-sm font-medium outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 sm:hidden">
+                      Filters and sorting
+                    </summary>
+                    <div className="hidden pt-4 group-open:block sm:block sm:pt-0">
+                      <BrowseFilters
+                        sort={sort}
+                        setSort={handleSortChange}
+                        freeOnly={freeOnly}
+                        setFreeOnly={handleFreeOnlyChange}
+                        maxCostInput={maxCostInput}
+                        setMaxCostInput={handleMaxCostChange}
+                      />
+                    </div>
+                  </details>
                 )}
               </FieldGroup>
             </form>
@@ -590,6 +596,14 @@ function CatalogueList({
 
   return (
     <FadeIn className="flex flex-col gap-6">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-sm font-medium tabular-nums" aria-live="polite">
+          {data.total === 1 ? "1 API" : `${data.total} APIs`}
+        </p>
+        <p className="text-xs text-muted-foreground">
+          Published specs · keyless mocks · per-call pricing
+        </p>
+      </div>
       {tags.length > 0 ? (
         <FieldSet className="gap-3">
           <FieldLegend variant="label">Tags</FieldLegend>
@@ -703,6 +717,9 @@ function CatalogueCard({ item }: { item: CatalogueCardItem }) {
               </Badge>
             ) : null}
             {freeBadge ? <Badge variant="secondary">Free tier</Badge> : null}
+            {item.publishedAt !== null ? (
+              <Badge variant="secondary">Published spec</Badge>
+            ) : null}
             {endpointLabel ? (
               <Badge variant="outline">{endpointLabel}</Badge>
             ) : null}
@@ -789,13 +806,7 @@ function CatalogueGridSkeleton() {
 function CatalogueSkeleton() {
   return (
     <div className="min-h-screen bg-background">
-      <header>
-        <div className="mx-auto flex h-14 max-w-6xl items-center justify-between gap-4 px-4">
-          <Skeleton className="h-4 w-20" />
-          <Skeleton className="h-8 w-20" />
-        </div>
-        <Separator />
-      </header>
+      <PublicHeader active="catalogue" />
       <main
         id="main-content"
         tabIndex={-1}
