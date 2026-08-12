@@ -1,13 +1,11 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "zevium-dev",
+  "name": "zevium-web-staging",
   "account_id": "1ea9299555b026a6a7484c8323c5a953",
   "compatibility_date": "2026-07-18",
   "compatibility_flags": ["nodejs_compat"],
-  "workers_dev": true,
-  "preview_urls": true,
   "observability": { "enabled": true },
   "version_metadata": { "binding": "CF_VERSION_METADATA" },
   "main": "@tanstack/react-start/server-entry",
-  "routes": [{ "pattern": "www.zevium.dev", "custom_domain": true }],
+  "routes": [{ "pattern": "staging.zevium.dev", "custom_domain": true }],
 }

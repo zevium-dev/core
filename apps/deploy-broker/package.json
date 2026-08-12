@@ -1,0 +1,24 @@
+{
+  "name": "@zevium/deploy-broker",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "wrangler deploy --dry-run --outdir dist",
+    "manifest:dry-run": "node --experimental-strip-types scripts/register.ts --dry-run --profile production-gateway",
+    "test": "vitest run --config vitest.config.ts && vitest run --config vitest.integration.config.ts",
+    "test:unit": "vitest run --config vitest.config.ts",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.scripts.json"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "0.18.4",
+    "@cloudflare/workers-types": "5.20260808.1",
+    "@types/node": "22.20.1",
+    "typescript": "5.9.3",
+    "vitest": "4.1.10",
+    "wrangler": "4.119.0"
+  },
+  "dependencies": {
+    "blake3-wasm": "2.1.5"
+  }
+}

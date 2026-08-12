@@ -1,0 +1,103 @@
+name: Cloudflare Production Broker Preflight
+
+on:
+  workflow_call:
+    inputs:
+      head_sha:
+        required: true
+        type: string
+      source_run_id:
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+  id-token: write
+
+env:
+  MISE_EXPERIMENTAL: true
+  CLOUDFLARE_ACCOUNT_ID: 1ea9299555b026a6a7484c8323c5a953
+  VITE_CONVEX_URL: https://polite-ermine-809.convex.cloud
+  VITE_GATEWAY_URL: https://gateway.zevium.dev
+  VERSION_TAG: ci-${{ github.run_id }}-${{ github.run_attempt }}
+  WRANGLER_SEND_ERROR_REPORTS: false
+  WRANGLER_SEND_METRICS: false
+
+jobs:
+  deploy:
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 15
+    environment: production
+    steps:
+      - name: Reject stale or mismatched source run before checkout
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SHA: ${{ inputs.head_sha }}
+          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+        run: |
+          [[ "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$SOURCE_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          test "$(gh api "repos/$GITHUB_REPOSITORY/commits/develop" --jq .sha)" = "$RELEASE_SHA"
+          source_json="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN_ID")"
+          SOURCE_JSON="$source_json" node -e '
+            const run=JSON.parse(process.env.SOURCE_JSON)
+            if (String(run.id)!==process.env.SOURCE_RUN_ID || run.status!=="completed" ||
+                run.conclusion!=="success" || run.event!=="push" ||
+                run.head_branch!=="develop" || run.head_sha!==process.env.RELEASE_SHA ||
+                run.path!==".github/workflows/ci.yml" ||
+                String(run.repository?.id)!=="1044451612") {
+              throw new Error("production source CI provenance rejected")
+            }
+          '
+
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ inputs.head_sha }}
+          persist-credentials: false
+      - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: ~/.local/share/pnpm/store
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+      - uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4
+
+      # Production mutation belongs to release.yml. This reusable workflow is
+      # intentionally a source/artifact/provenance preflight only: caller input
+      # cannot impersonate protected release attestations or paid-call proof.
+      - name: Authorize exact gateway artifact without mutation
+        env:
+          CLERK_SECRET_KEY: ${{ secrets.CLERK_PRODUCTION_SECRET_KEY }}
+          DEPLOY_HEAD_SHA: ${{ inputs.head_sha }}
+          GATEWAY_INTERNAL_SECRET: ${{ secrets.GATEWAY_PRODUCTION_INTERNAL_SECRET }}
+          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+        run: |
+          module_root="$(mktemp -d)"
+          trap 'rm -r -- "$module_root"' EXIT
+          pnpm --filter gateway exec wrangler versions upload --dry-run \
+            --outdir "$module_root" --tag "$VERSION_TAG"
+          export DEPLOY_MODULE_ROOT="$module_root"
+          export DEPLOY_MAIN_MODULE="index.js"
+          node --experimental-strip-types \
+            apps/deploy-broker/scripts/register.ts --remote-dry-run \
+            --profile production-gateway
+
+      - name: Build web Worker
+        env:
+          CLERK_PUBLISHABLE_KEY: ${{ secrets.CLERK_PRODUCTION_PUBLISHABLE_KEY }}
+          CLERK_SECRET_KEY: ${{ secrets.CLERK_PRODUCTION_SECRET_KEY }}
+        run: pnpm --filter web build
+
+      - name: Authorize exact web artifact and secret set without mutation
+        env:
+          CLERK_SECRET_KEY: ${{ secrets.CLERK_PRODUCTION_SECRET_KEY }}
+          DEPLOY_HEAD_SHA: ${{ inputs.head_sha }}
+          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+        run: |
+          export DEPLOY_MODULE_ROOT="apps/web/dist/server"
+          export DEPLOY_ASSET_ROOT="apps/web/dist/client"
+          export DEPLOY_MAIN_MODULE="index.js"
+          node --experimental-strip-types \
+            apps/deploy-broker/scripts/register.ts --remote-dry-run \
+            --profile production-web

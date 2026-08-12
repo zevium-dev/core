@@ -1,0 +1,77 @@
+name: Cloudflare Preview Cleanup
+
+on:
+  workflow_call:
+    inputs:
+      checkout_sha:
+        required: true
+        type: string
+      head_sha:
+        required: true
+        type: string
+      pr_number:
+        required: true
+        type: number
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  cleanup:
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 5
+    environment: preview
+    env:
+      CLOUDFLARE_ACCOUNT_ID: 1ea9299555b026a6a7484c8323c5a953
+      DEPLOY_HEAD_SHA: ${{ inputs.head_sha }}
+      PR_NUMBER: ${{ inputs.pr_number }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ inputs.checkout_sha }}
+          persist-credentials: false
+      - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: ~/.local/share/pnpm/store
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+      - uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4
+
+      - name: Delete isolated Workers through broker
+        run: |
+          broker_env="$(mktemp)"
+          response_body="$(mktemp)"
+          trap 'rm -f "$broker_env" "$response_body"' EXIT
+          BROKER_ENV_FILE="$broker_env" node --experimental-strip-types \
+            apps/deploy-broker/scripts/register.ts --profile preview-cleanup
+          set -a
+          . "$broker_env"
+          set +a
+
+          delete_worker() {
+            worker="$1"
+            status="$(curl --silent --show-error --output "$response_body" \
+              --write-out '%{http_code}' --request DELETE \
+              --header "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+              "$CLOUDFLARE_API_BASE_URL/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$worker")"
+
+            if [ "$status" = "200" ]; then
+              echo "Deleted $worker"
+              return
+            fi
+            if [ "$status" = "404" ]; then
+              echo "$worker already absent"
+              return
+            fi
+            echo "Failed to delete $worker (HTTP $status)" >&2
+            return 1
+          }
+
+          failed=0
+          delete_worker "zevium-web-pr-$PR_NUMBER" || failed=1
+          delete_worker "zevium-gateway-pr-$PR_NUMBER" || failed=1
+          exit "$failed"
+      # Convex preview deployments expire automatically after five days on
+      # Free/Starter plans; Convex CLI exposes no explicit preview-delete command.

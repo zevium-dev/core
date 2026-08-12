@@ -1,0 +1,28 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "zevium-deploy-broker-test",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-07-15",
+  "compatibility_flags": ["global_fetch_strictly_public"],
+  "vars": {
+    "BROKER_ORIGIN": "https://deploy-broker.zevium.dev",
+    "CLOUDFLARE_ACCOUNT_ID": "1ea9299555b026a6a7484c8323c5a953",
+    "GITHUB_REPOSITORY": "zevium-dev/core",
+    "GITHUB_REPOSITORY_ID": "1044451612",
+    "GITHUB_REPOSITORY_OWNER_ID": "228443220",
+    "BROKER_SCRIPT_NAME": "zevium-deploy-broker",
+    "CLOUDFLARE_BROKER_API_TOKEN": "cf-test-broker-token",
+  },
+  "durable_objects": {
+    "bindings": [
+      { "name": "SESSIONS", "class_name": "DeploySessionDO" },
+      { "name": "AUTH_RATE_LIMIT", "class_name": "AuthRateLimitDO" },
+    ],
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["DeploySessionDO", "AuthRateLimitDO"],
+    },
+  ],
+}

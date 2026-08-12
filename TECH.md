@@ -1,6 +1,6 @@
 # Zevium Technical Decisions
 
-> Last updated: 2026-07-12
+> Last updated: 2026-08-12
 > Companions: [PRODUCT.md](PRODUCT.md) (what), [FLOW.md](FLOW.md) (screens), [DESIGN.md](DESIGN.md) (feel). This doc: **how it's built and why**.
 > Greenfield rules apply: zero users, data disposable, rebuild beats migrate.
 
@@ -60,6 +60,7 @@ pnpm workspace + **Turborepo** (same pattern as sharath.ai):
 ```
 apps/web/        # TanStack Start app (all screens)
 apps/gateway/    # CF Worker: proxy, wallet DO, agent endpoint
+apps/deploy-broker/ # CF Worker: GitHub OIDC deployment capability broker
 convex/          # Convex schema + functions (control plane)
 packages/shared/ # spec parsing, x-zevium-* extraction, types shared web↔gateway
 ```
@@ -129,6 +130,7 @@ Decisions made during the build that extend or sharpen the stack decision above:
 - **Semantic search**: embeddings come from `gemini-embedding-001` pinned to `outputDimensionality: 768` (matches the `specEmbeddings` `by_embedding` vectorIndex). Not `text-embedding-004` — that model was removed from the Gemini v1beta API (404) and `gemini-embedding-001` is its 768-dim replacement
 - **Publisher webhooks**: HMAC-SHA256 signed (`x-zevium-signature` header, hex digest over the raw body), delivered with up to 3 attempts and backoff of 60s then 300s between retries before marking a delivery failed
 - **Preview verification**: every trusted PR deploys isolated Convex, gateway, and web previews and runs required curl-only checks for web `/`, web `/catalogue`, gateway `/health`, gateway CORS preflight, and a stable gateway 404. After Convex provisioning, gateway deploy and web build run in parallel; web deployment and gateway deployment converge at the smoke job through explicit job outputs/artifacts. The browser runtime and authenticated publisher/consumer journey are intentionally opt-in because they are long and stateful: add the `full-e2e` label to a PR, or run **Pull Request Preview** manually on the PR head with its PR number. Publisher and consumer remain sequential because consumer verification reads the publisher-created project artifact. Closed PRs invoke the separate preview cleanup workflow.
+- **Cloudflare deployment broker**: GitHub stores no Cloudflare credential. Reusable deployment jobs mint short-lived GitHub Actions OIDC JWTs with manifest-digest audiences and register them with `zevium-deploy-broker`; a repo-owned exact API publisher uses the resulting one-JTI Durable Object session. Pinned Wrangler is build-only (`versions upload --dry-run`) for gateway module output and never mutates provider state. Broker verifies GitHub's RS256/JWKS signature and immutable repository, owner, actor, workflow, environment, run, ref, PR/source-CI provenance; it replaces OIDC authorization with its Worker secret only after exact method/path/query/multipart/JSON policy checks. Signed manifests fix stable staging/production or isolated preview script names, complete explicit bindings, append-only `WalletDO` v1 → `RegistryDO` v2 → `X402PaymentDO` v3 migrations, secret value digests, bare git SHA, native Cloudflare version metadata, asset hashes/MIME, and 100% traffic. Candidate UUID is durably recorded before bounded readback so a transient post-write failure resumes without repeating provider mutation. Publisher atomically persists `0600` provider-ID receipts before mutation. Staging recovery treats receipt UUIDs only as selectors and independently proves Cloudflare's immediately prior immutable, lifecycle-compatible version before a 100% redeploy; Durable Object migrations never roll back. Broker cannot target itself. Response/request bodies stream except bounded control metadata. Bootstrap, rotation, recovery, receipt schema, and endpoint inventory live in `docs/cloudflare-deploy-broker.md`.
 - **Deprecation signaling**: RFC 8594 headers on gateway responses for deprecated spec versions — `Deprecation: @<epoch-seconds>`, `Sunset: <HTTP-date>`, `Link: <catalogue-url>; rel="deprecation"`
 - **Admin gate**: platform-admin access is an env allowlist, `ADMIN_USER_IDS` (Clerk subject ids), checked server-side in Convex — no separate roles table
 - **Payouts**: Stripe Connect onboarding replaces free-form payout destinations. Earning-row status describes risk/clawback state; canonical money movement lives in publisher settlement entries and balance buckets. `/admin/payouts` operates failed transfer retries while Stripe payout events project bank-delivery state.
