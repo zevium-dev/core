@@ -10,6 +10,24 @@ crons.hourly(
   internal.cronTasks.checkLowBalances,
 );
 
+crons.interval(
+  "resume-retirement-jobs",
+  { minutes: 1 },
+  internal.retirementJobs.scheduleDue,
+);
+
+crons.interval(
+  "resume-key-saga-cleanup",
+  { minutes: 5 },
+  internal.keySettings.resumeStaleSagaCleanup,
+);
+
+crons.interval(
+  "resume-key-auto-revocation",
+  { minutes: 5 },
+  internal.keySettings.resumeDueAutoRevokes,
+);
+
 /**
  * Hourly release of risk-held earnings that have matured past their hold.
  * Each org is released in its own transaction with per-org error isolation,

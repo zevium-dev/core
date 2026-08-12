@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { api } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import schema from "./schema";
-import { draftFingerprint } from "./publishReadiness";
+import { credentialSetFingerprint, draftFingerprint } from "./publishReadiness";
 
 const modules = import.meta.glob("./**/*.ts");
 
@@ -115,6 +115,7 @@ describe("specs.deprecateVersion — auth", () => {
         draftHash: await draftFingerprint(SPEC_BODY),
         serverOrigin: "https://api.example.com",
         credentialRevision: 0,
+        credentialFingerprint: await credentialSetFingerprint([]),
         status: "ok",
         testedAt: Date.now(),
       });
@@ -387,6 +388,7 @@ describe("specs.publish — fires spec_published notification", () => {
         draftHash: await draftFingerprint(SPEC_BODY),
         serverOrigin: "https://api.example.com",
         credentialRevision: 0,
+        credentialFingerprint: await credentialSetFingerprint([]),
         status: "ok",
         testedAt: Date.now(),
       });

@@ -2,7 +2,13 @@ const KEYRING_ENV = "UPSTREAM_CREDENTIAL_ENCRYPTION_KEYS";
 const ENVELOPE_VERSION = "v2" as const;
 const VERSION_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 
-type Keyring = { current: string; keys: Record<string, Uint8Array> };
+type Keyring = {
+  current: string;
+  /** Exact configured text used by pre-v2 SHA-256 key derivation. */
+  legacyMaterials: Record<string, string>;
+  /** Canonical 32-byte values eligible for bound v2 envelopes. */
+  rawKeys: Record<string, Uint8Array>;
+};
 
 export type SecretBinding = {
   purpose: "upstream-credential" | "webhook-signing-secret";
@@ -37,11 +43,11 @@ export type StoredEncryptedSecret = {
   sealedIv?: string;
   sealedKeyVersion?: string;
   sealedVersion?: string;
-};
-
-export type StoredSecretForMigration = StoredEncryptedSecret & {
+  /** Transitional plaintext-only source. Never written by current code. */
   secret?: string;
 };
+
+export type StoredSecretForMigration = StoredEncryptedSecret;
 
 export type SecretMigrationResult = {
   /** Exact state observed before this row's repair. */
@@ -106,13 +112,28 @@ function keyring(): Keyring {
       throw new Error("invalid shape");
     }
 
-    const keys: Record<string, Uint8Array> = {};
+    const legacyMaterials: Record<string, string> = {};
+    const rawKeys: Record<string, Uint8Array> = {};
     for (const [version, material] of Object.entries(parsed.keys)) {
       if (!VERSION_ID.test(version)) throw new Error("invalid version");
-      keys[version] = strictKeyMaterial(material);
+      if (
+        typeof material !== "string" ||
+        material.length === 0 ||
+        material.length > 8192
+      ) {
+        throw new Error("invalid key material");
+      }
+      legacyMaterials[version] = material;
+      try {
+        rawKeys[version] = strictKeyMaterial(material);
+      } catch {
+        // Retained arbitrary strings remain valid only for legacy decrypt.
+      }
     }
-    if (!(parsed.current in keys)) throw new Error("missing current key");
-    return { current: parsed.current, keys };
+    if (!(parsed.current in legacyMaterials)) {
+      throw new Error("missing current key");
+    }
+    return { current: parsed.current, legacyMaterials, rawKeys };
   } catch {
     throw new Error("Credential encryption keyring is invalid");
   }
@@ -122,10 +143,33 @@ export function currentCredentialKeyVersion(): string {
   return keyring().current;
 }
 
+export type CredentialKeyringPreflight = {
+  current: string;
+  boundEnvelopeReady: boolean;
+  legacyCompatibleVersions: string[];
+  legacyOnlyVersions: string[];
+};
+
+/** Read-only rollout check. Old arbitrary strings stay decryptable, never writable. */
+export function credentialKeyringPreflight(): CredentialKeyringPreflight {
+  const ring = keyring();
+  const versions = Object.keys(ring.legacyMaterials).sort();
+  return {
+    current: ring.current,
+    boundEnvelopeReady: ring.rawKeys[ring.current] !== undefined,
+    legacyCompatibleVersions: versions,
+    legacyOnlyVersions: versions.filter(
+      (version) => ring.rawKeys[version] === undefined,
+    ),
+  };
+}
+
 async function rawCryptoKey(version: string): Promise<CryptoKey> {
-  const material = keyring().keys[version];
+  const material = keyring().rawKeys[version];
   if (!material) {
-    throw new Error(`Credential encryption key '${version}' is unavailable`);
+    throw new Error(
+      `Credential encryption key '${version}' is unavailable for bound envelopes`,
+    );
   }
   return await crypto.subtle.importKey(
     "raw",
@@ -138,13 +182,13 @@ async function rawCryptoKey(version: string): Promise<CryptoKey> {
 
 /** Previous releases SHA-256 hashed configured text before AES import. */
 async function legacyCryptoKey(version: string): Promise<CryptoKey> {
-  const material = keyring().keys[version];
+  const material = keyring().legacyMaterials[version];
   if (!material) {
     throw new Error(`Credential encryption key '${version}' is unavailable`);
   }
   const digest = await crypto.subtle.digest(
     "SHA-256",
-    encoder.encode(toBase64(material)),
+    encoder.encode(material),
   );
   return await crypto.subtle.importKey("raw", digest, "AES-GCM", false, [
     "encrypt",
@@ -224,24 +268,42 @@ export function webhookBinding(projectId: string): SecretBinding {
 export function hasLegacyEnvelope(
   input: StoredEncryptedSecret,
 ): input is LegacyEncryptedSecret {
-  return Boolean(input.ciphertext && input.iv && input.keyVersion);
+  return (
+    typeof input.ciphertext === "string" &&
+    input.ciphertext.length > 0 &&
+    typeof input.iv === "string" &&
+    input.iv.length > 0 &&
+    typeof input.keyVersion === "string" &&
+    input.keyVersion.length > 0
+  );
 }
 
 export function hasBoundEnvelope(
   input: StoredEncryptedSecret,
 ): input is BoundEncryptedSecret {
-  return Boolean(
+  return (
     input.sealedVersion === ENVELOPE_VERSION &&
-    input.sealedCiphertext &&
-    input.sealedIv &&
-    input.sealedKeyVersion,
+    typeof input.sealedCiphertext === "string" &&
+    input.sealedCiphertext.length > 0 &&
+    typeof input.sealedIv === "string" &&
+    input.sealedIv.length > 0 &&
+    typeof input.sealedKeyVersion === "string" &&
+    input.sealedKeyVersion.length > 0
   );
 }
 
 export function requireEncryptedSecret(
   input: StoredEncryptedSecret,
 ): StoredEncryptedSecret {
-  if (!hasBoundEnvelope(input) && !hasLegacyEnvelope(input)) {
+  const legacyComplete = hasLegacyEnvelope(input);
+  const boundComplete = hasBoundEnvelope(input);
+  if (
+    (hasAnyLegacyField(input) && !legacyComplete) ||
+    (hasAnyBoundField(input) && !boundComplete)
+  ) {
+    throw new Error("Stored secret envelope is incomplete");
+  }
+  if (!boundComplete && !legacyComplete && typeof input.secret !== "string") {
     throw new Error("Stored secret is pending encryption migration");
   }
   return input;
@@ -272,7 +334,7 @@ export async function encryptSecret(
       aad(binding, keyVersion),
     ),
   ]);
-  return {
+  const encrypted: EncryptedSecret = {
     ciphertext: legacy.ciphertext,
     iv: legacy.iv,
     keyVersion,
@@ -281,6 +343,8 @@ export async function encryptSecret(
     sealedKeyVersion: keyVersion,
     sealedVersion: ENVELOPE_VERSION,
   };
+  await verifyDualSecret(encrypted, binding, secret);
+  return encrypted;
 }
 
 export async function decryptLegacySecret(
@@ -318,11 +382,19 @@ export async function decryptSecret(
   input: StoredEncryptedSecret,
   binding: SecretBinding,
 ): Promise<string> {
-  if (hasBoundEnvelope(input)) {
-    return await decryptBoundSecret(input, binding);
+  requireEncryptedSecret(input);
+  const values: string[] = [];
+  if (hasLegacyEnvelope(input)) {
+    values.push(await decryptLegacySecret(input));
   }
-  if (hasLegacyEnvelope(input)) return await decryptLegacySecret(input);
-  throw new Error("Stored secret cannot be decrypted");
+  if (hasBoundEnvelope(input)) {
+    values.push(await decryptBoundSecret(input, binding));
+  }
+  if (typeof input.secret === "string") values.push(input.secret);
+  if (values.length === 0 || values.some((value) => value !== values[0])) {
+    throw new Error("Stored secret cannot be decrypted");
+  }
+  return values[0]!;
 }
 
 /** Verify both rollback and bound envelopes before any recoverable copy is scrubbed. */
@@ -341,15 +413,19 @@ export async function verifyDualSecret(
 }
 
 function hasAnyLegacyField(input: StoredEncryptedSecret): boolean {
-  return Boolean(input.ciphertext || input.iv || input.keyVersion);
+  return (
+    input.ciphertext !== undefined ||
+    input.iv !== undefined ||
+    input.keyVersion !== undefined
+  );
 }
 
 function hasAnyBoundField(input: StoredEncryptedSecret): boolean {
-  return Boolean(
-    input.sealedCiphertext ||
-    input.sealedIv ||
-    input.sealedKeyVersion ||
-    input.sealedVersion,
+  return (
+    input.sealedCiphertext !== undefined ||
+    input.sealedIv !== undefined ||
+    input.sealedKeyVersion !== undefined ||
+    input.sealedVersion !== undefined
   );
 }
 
@@ -400,6 +476,20 @@ export async function migrateStoredSecret(
       (boundValue !== undefined && boundValue !== input.secret))
   ) {
     corrupt = true;
+  }
+
+  // Partial envelopes are tamper evidence. Without independent plaintext,
+  // never trust the other envelope as authority or silently downgrade it.
+  if ((legacyPartial || boundPartial) && input.secret === undefined) {
+    return {
+      plaintext,
+      old: true,
+      corrupt: true,
+      broken: true,
+      recovered: false,
+      rewrapped: false,
+      scrubbed: false,
+    };
   }
 
   const canonical = input.secret ?? boundValue ?? legacyValue;

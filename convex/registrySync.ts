@@ -129,9 +129,15 @@ export async function enqueueRouteUpsert(
   projectId: Id<"projects">,
 ): Promise<RegistryOutboxReceipt | null> {
   const project = await ctx.db.get(projectId);
-  if (project === null || project.status !== "published") return null;
+  if (
+    project === null ||
+    project.status !== "published" ||
+    project.retiringAt !== undefined
+  ) {
+    return null;
+  }
   const org = await ctx.db.get(project.organizationId);
-  if (org === null) throw new Error("Organization not found");
+  if (org === null || org.retiringAt !== undefined) return null;
   const publisherHandle = publicHandle(org);
   const payload: LogicalRoutePayload = {
     publisherHandle,
@@ -159,6 +165,22 @@ export async function enqueueRouteArchive(
   return await enqueueRegistrySync(ctx, {
     operation: "route.archive",
     streamKey: routeStreamKey(publisherHandle, project.slug),
+    payload,
+  });
+}
+
+/** Canonical org-wide fail-closed tombstone used before bounded retirement. */
+export async function enqueueOrgArchive(
+  ctx: MutationCtx,
+  org: Doc<"organizations">,
+): Promise<RegistryOutboxReceipt> {
+  const payload: RegistrySyncPayloadMap["org.archive"] = {
+    clerkOrgId: org.clerkOrgId,
+    publisherHandle: publicHandle(org),
+  };
+  return await enqueueRegistrySync(ctx, {
+    operation: "org.archive",
+    streamKey: `org:${org.clerkOrgId}`,
     payload,
   });
 }
@@ -221,9 +243,15 @@ export const materializeRoute = internalQuery({
     args,
   ): Promise<RegistrySyncPayloadMap["route.upsert"] | null> => {
     const project = await ctx.db.get(args.projectId);
-    if (project === null || project.status !== "published") return null;
+    if (
+      project === null ||
+      project.status !== "published" ||
+      project.retiringAt !== undefined
+    ) {
+      return null;
+    }
     const org = await ctx.db.get(project.organizationId);
-    if (org === null) return null;
+    if (org === null || org.retiringAt !== undefined) return null;
     const latest = await ctx.db
       .query("specVersions")
       .withIndex("by_project_published", (q) => q.eq("projectId", project._id))

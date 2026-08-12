@@ -641,7 +641,7 @@ function KeyRow({
             size="sm"
             className="text-destructive hover:text-destructive"
             onClick={onRevoke}
-            disabled={revokePending || graceExpired}
+            disabled={revokePending}
           >
             <Trash2 className="size-4" />
             {graceActive ? "Revoke previous now" : "Revoke"}

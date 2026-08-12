@@ -1,10 +1,7 @@
 /// <reference types="vite/client" />
-import {
-  canonicalJson,
-  registryPayloadDigest,
-  signRegistrySyncRequest,
-} from "@zevium/shared";
+import { canonicalJson, registryPayloadDigest } from "@zevium/shared";
 import { convexTest } from "convex-test";
+import { createHmac } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api, internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
@@ -46,6 +43,25 @@ afterEach(() => {
     process.env.GATEWAY_REGISTRY_SYNC_HMAC_SECRET = priorSecret;
   }
 });
+
+async function createManagedKey(t: ReturnType<typeof convexTest>) {
+  const scope = {
+    clerkOrgId: "org_registry",
+    userId: "user_owner",
+    operationId: "registry-create-operation",
+    requestedName: "Registry key",
+    membershipVerifiedAt: Date.now(),
+    leaseToken: "registry-create-lease",
+  };
+  await t.mutation(internal.keySettings.beginCreateVerified, scope);
+  await t.mutation(internal.keySettings.completeCreateVerified, {
+    clerkOrgId: scope.clerkOrgId,
+    userId: scope.userId,
+    operationId: scope.operationId,
+    leaseToken: scope.leaseToken,
+    keyId: "key_registry_123",
+  });
+}
 
 async function seedPublishedProject(t: ReturnType<typeof convexTest>) {
   return await t.run(async (ctx) => {
@@ -155,11 +171,7 @@ describe("registry sync outbox", () => {
 
   it("publishes key upsert/state revisions and a paginated recovery manifest", async () => {
     const t = convexTest(schema, modules);
-    await t.mutation(internal.keySettings.registerVerified, {
-      clerkOrgId: "org_registry",
-      userId: "user_owner",
-      keyId: "key_registry_123",
-    });
+    await createManagedKey(t);
     await t.mutation(internal.keySettings.setCapVerified, {
       clerkOrgId: "org_registry",
       userId: "user_owner",
@@ -211,15 +223,28 @@ describe("registry sync outbox", () => {
       "fetch",
       vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
         requests.push({ url: String(input), init: init ?? {} });
-        const body = JSON.parse(String(init?.body)) as {
+        const headers = new Headers(init?.headers);
+        const timestamp = headers.get("x-zevium-timestamp") ?? "";
+        const nonce = headers.get("x-zevium-nonce") ?? "";
+        const rawBody = String(init?.body);
+        const expected = `v1=${createHmac("sha256", macTestKey)
+          .update(`${timestamp}.${nonce}.${rawBody}`)
+          .digest("hex")}`;
+        if (headers.get("x-zevium-signature") !== expected) {
+          return new Response("bad signature", { status: 401 });
+        }
+        const body = JSON.parse(rawBody) as {
           operation: string;
           sourceRevision: number;
         };
+        if (body.operation !== "key.upsert" || body.sourceRevision !== 1) {
+          return new Response("wrong event", { status: 409 });
+        }
         return new Response(
           JSON.stringify({
             status: "applied",
-            operation: body.operation,
-            sourceRevision: body.sourceRevision,
+            operation: "key.upsert",
+            sourceRevision: 1,
             keyId: "key_registry_123",
           }),
           { headers: { "content-type": "application/json" } },
@@ -227,16 +252,9 @@ describe("registry sync outbox", () => {
       }),
     );
     const t = convexTest(schema, modules);
-    await t.mutation(internal.keySettings.registerVerified, {
-      clerkOrgId: "org_registry",
-      userId: "user_owner",
-      keyId: "key_registry_123",
-    });
+    await createManagedKey(t);
 
-    vi.runAllTimers();
-    await t.finishInProgressScheduledFunctions();
-    // Lease recovery wake-up observes delivered state and stays a no-op.
-    vi.runAllTimers();
+    vi.advanceTimersByTime(1);
     await t.finishInProgressScheduledFunctions();
 
     expect(requests.map((request) => request.url)).toEqual([
@@ -258,7 +276,9 @@ describe("registry sync outbox", () => {
       payloadDigest: expect.stringMatching(/^[a-f0-9]{64}$/),
     });
     expect(headers.get("x-zevium-signature")).toBe(
-      await signRegistrySyncRequest(macTestKey, timestamp, nonce, rawBody),
+      `v1=${createHmac("sha256", macTestKey)
+        .update(`${timestamp}.${nonce}.${rawBody}`)
+        .digest("hex")}`,
     );
     const delivered = await t.run(async (ctx) =>
       ctx.db.query("registrySyncOutbox").unique(),

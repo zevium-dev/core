@@ -1,10 +1,10 @@
-import { auth } from "@clerk/tanstack-react-start/server";
+import { auth, clerkClient } from "@clerk/tanstack-react-start/server";
 import { isPublicIp, validateOpenApiSpec } from "@zevium/shared";
 import { ConvexHttpClient } from "convex/browser";
 import { isIP } from "node:net";
 import { resolve4, resolve6 } from "node:dns/promises";
 import { api } from "#/lib/convex-api";
-import { convertSpecInputToJson } from "./spec-yaml";
+import { convertSpecInputToJson, MAX_EXPANDED_SPEC_BYTES } from "./spec-yaml";
 import { MAX_SPEC_IMPORT_BYTES, type ImportSpecUrlInput } from "./spec-import";
 
 const FETCH_TIMEOUT_MS = 10_000;
@@ -42,7 +42,10 @@ export type SpecImportRuntime = {
   authenticate: () => Promise<SpecImportSession>;
   resolveHostname: (hostname: string) => Promise<ResolvedAddress[]>;
   fetch: (url: URL, init: RequestInit) => Promise<Response>;
-  acquirePermit: (session: SpecImportSession) => Promise<() => Promise<void>>;
+  acquirePermit: (session: SpecImportSession) => Promise<{
+    renew: () => Promise<void>;
+    release: () => Promise<void>;
+  }>;
 };
 
 async function releaseWithRetry(
@@ -61,6 +64,22 @@ async function releaseWithRetry(
 const productionRuntime: SpecImportRuntime = {
   authenticate: async () => {
     const session = await auth();
+    if (session.userId && session.orgId) {
+      const client = await clerkClient();
+      const memberships =
+        await client.organizations.getOrganizationMembershipList({
+          organizationId: session.orgId,
+          userId: [session.userId],
+          limit: 1,
+        });
+      if (
+        !memberships.data.some(
+          (membership) => membership.publicUserData?.userId === session.userId,
+        )
+      ) {
+        throw new Error(SESSION_ERROR);
+      }
+    }
     const convexToken =
       session.userId && session.orgId
         ? await session.getToken({ template: "convex" })
@@ -97,7 +116,12 @@ const productionRuntime: SpecImportRuntime = {
     convex.setAuth(session.convexToken);
     const leaseId = crypto.randomUUID();
     await convex.mutation(api.specImportLimits.acquire, { leaseId });
-    return async () => await releaseWithRetry(convex, leaseId);
+    return {
+      renew: async () => {
+        await convex.mutation(api.specImportLimits.renew, { leaseId });
+      },
+      release: async () => await releaseWithRetry(convex, leaseId),
+    };
   },
 };
 
@@ -262,6 +286,11 @@ export function normalizeImportedOpenApi(text: string): string {
     throw new Error(INVALID_SPEC_ERROR);
   }
   const normalized = `${JSON.stringify(raw, null, 2)}\n`;
+  if (
+    new TextEncoder().encode(normalized).byteLength > MAX_EXPANDED_SPEC_BYTES
+  ) {
+    throw new Error(INVALID_SPEC_ERROR);
+  }
   if (validateOpenApiSpec(normalized).errors.length > 0) {
     throw new Error(INVALID_SPEC_ERROR);
   }
@@ -272,6 +301,7 @@ async function fetchAuthorizedSpec(
   data: ImportSpecUrlInput,
   runtime: SpecImportRuntime,
   signal: AbortSignal,
+  renewPermit: () => Promise<void>,
 ): Promise<{ text: string; contentType: string }> {
   let current = new URL(data.url);
   let response: Response | null = null;
@@ -334,6 +364,8 @@ async function fetchAuthorizedSpec(
     throw error;
   }
   if (text.trim() === "") throw new Error(EMPTY_ERROR);
+  await waitForAbortable(renewPermit(), signal);
+  if (signal.aborted) throw new Error(GENERIC_FETCH_ERROR);
   return {
     text: normalizeImportedOpenApi(text),
     contentType: "application/json",
@@ -356,19 +388,24 @@ export async function fetchSpecFromUrlForRequest(
   }
   if (!session.orgId) throw new Error(ACTIVE_ORG_ERROR);
 
-  const release = await runtime.acquirePermit(session);
+  const permit = await runtime.acquirePermit(session);
   const controller = new AbortController();
   const timeout = setTimeout(
     () => controller.abort(new Error(GENERIC_FETCH_ERROR)),
     FETCH_TIMEOUT_MS,
   );
   try {
-    return await fetchAuthorizedSpec(data, runtime, controller.signal);
+    return await fetchAuthorizedSpec(
+      data,
+      runtime,
+      controller.signal,
+      permit.renew,
+    );
   } finally {
     clearTimeout(timeout);
     if (!controller.signal.aborted) controller.abort();
     try {
-      await release();
+      await permit.release();
     } catch {
       // Expiring server-side lease is recovery; never mask fetch result/error.
     }

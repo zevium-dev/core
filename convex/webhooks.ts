@@ -2,7 +2,6 @@ import { paginationOptsValidator } from "convex/server";
 import { v } from "convex/values";
 import {
   internalMutation,
-  internalQuery,
   mutation,
   query,
   type MutationCtx,
@@ -20,6 +19,7 @@ import {
 } from "./lib/credentialCrypto";
 import { createNotification } from "./lib/notifications";
 import { validateWebhookUrl } from "./lib/webhookDelivery";
+import { beginWebhookRetirement } from "./retirementJobs";
 
 export { validateWebhookUrl } from "./lib/webhookDelivery";
 
@@ -149,6 +149,9 @@ export const upsertEndpoint = mutation({
       if (created === null) throw new Error("Failed to create endpoint");
       return endpointMetadata(created);
     }
+    if (existing.retiringAt !== undefined) {
+      throw new Error("Webhook endpoint is being deleted");
+    }
 
     await ctx.db.patch(existing._id, {
       url,
@@ -169,7 +172,9 @@ export const getEndpoint = query({
       .query("webhookEndpoints")
       .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
       .unique();
-    return endpoint === null ? null : endpointMetadata(endpoint);
+    return endpoint === null || endpoint.retiringAt !== undefined
+      ? null
+      : endpointMetadata(endpoint);
   },
 });
 
@@ -182,7 +187,7 @@ export const revealSecret = mutation({
       .query("webhookEndpoints")
       .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
       .unique();
-    if (endpoint === null) return null;
+    if (endpoint === null || endpoint.retiringAt !== undefined) return null;
 
     try {
       return {
@@ -207,14 +212,7 @@ export const deleteEndpoint = mutation({
       .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
       .unique();
     if (existing === null) return { deleted: false };
-    const deliveries = await ctx.db
-      .query("webhookDeliveries")
-      .withIndex("by_endpoint", (q) => q.eq("endpointId", existing._id))
-      .collect();
-    // Delete endpoint in the same transaction as its queue. Scheduled actions
-    // then observe no endpoint and cannot deliver with a retired secret.
-    for (const delivery of deliveries) await ctx.db.delete(delivery._id);
-    await ctx.db.delete(existing._id);
+    await beginWebhookRetirement(ctx, existing);
     return { deleted: true };
   },
 });
@@ -250,34 +248,65 @@ export const listDeliveries = query({
 // Internal — delivery lifecycle
 // ---------------------------------------------------------------------------
 
-/** Load delivery + endpoint join for the action. */
-export const getDeliveryForAction = internalQuery({
-  args: { deliveryId: v.id("webhookDeliveries") },
-  handler: async (
-    ctx,
-    args,
-  ): Promise<{
-    url: string;
-    encryptedSecret: {
-      ciphertext?: string;
-      iv?: string;
-      keyVersion?: string;
-      sealedCiphertext?: string;
-      sealedIv?: string;
-      sealedKeyVersion?: string;
-      sealedVersion?: string;
-    };
-    projectId: Id<"projects">;
-    active: boolean;
-    event: string;
-    payload: string;
-    attempts: number;
-    status: Doc<"webhookDeliveries">["status"];
-  } | null> => {
+const WEBHOOK_DELIVERY_LEASE_MS = 30_000;
+
+/** Transactional claim prevents concurrent scheduled actions from double-POSTing. */
+export const claimDelivery = internalMutation({
+  args: {
+    deliveryId: v.id("webhookDeliveries"),
+    leaseToken: v.string(),
+    expectedExpiredLeaseToken: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    if (args.leaseToken.length < 16 || args.leaseToken.length > 128) {
+      throw new Error("Webhook delivery lease is invalid");
+    }
     const delivery = await ctx.db.get(args.deliveryId);
-    if (delivery === null) return null;
+    if (
+      delivery === null ||
+      delivery.status === "ok" ||
+      delivery.status === "failed"
+    ) {
+      return null;
+    }
+    const now = Date.now();
+    if (
+      args.expectedExpiredLeaseToken !== undefined &&
+      (delivery.status !== "delivering" ||
+        delivery.leaseToken !== args.expectedExpiredLeaseToken ||
+        (delivery.leaseUntil ?? 0) > now)
+    ) {
+      return null;
+    }
+    if (delivery.status === "delivering" && (delivery.leaseUntil ?? 0) > now) {
+      return null;
+    }
     const endpoint = await ctx.db.get(delivery.endpointId);
-    if (endpoint === null) return null;
+    if (endpoint === null) {
+      await ctx.db.patch(delivery._id, {
+        status: "failed",
+        attempts: delivery.attempts + 1,
+        lastError: "Endpoint retired",
+        leaseToken: undefined,
+        leaseUntil: undefined,
+      });
+      return null;
+    }
+    const leaseUntil = now + WEBHOOK_DELIVERY_LEASE_MS;
+    await ctx.db.patch(delivery._id, {
+      status: "delivering",
+      leaseToken: args.leaseToken,
+      leaseUntil,
+    });
+    // Lost claimant recovery. Wake-up can reacquire only after exact expiry.
+    await ctx.scheduler.runAfter(
+      WEBHOOK_DELIVERY_LEASE_MS,
+      internal.webhookDeliveryAction.deliverWebhook,
+      {
+        deliveryId: delivery._id,
+        recoveryLeaseToken: args.leaseToken,
+      },
+    );
     return {
       url: endpoint.url,
       encryptedSecret: {
@@ -288,13 +317,13 @@ export const getDeliveryForAction = internalQuery({
         sealedIv: endpoint.sealedIv,
         sealedKeyVersion: endpoint.sealedKeyVersion,
         sealedVersion: endpoint.sealedVersion,
+        secret: endpoint.secret,
       },
       projectId: endpoint.projectId,
-      active: endpoint.active,
+      active: endpoint.active && endpoint.retiringAt === undefined,
       event: delivery.event,
       payload: delivery.payload,
       attempts: delivery.attempts,
-      status: delivery.status,
     };
   },
 });
@@ -372,13 +401,19 @@ export const recordDeliveryAttempt = internalMutation({
     ok: v.boolean(),
     error: v.optional(v.string()),
     retryable: v.optional(v.boolean()),
+    leaseToken: v.string(),
   },
   handler: async (ctx, args): Promise<void> => {
     const delivery = await ctx.db.get(args.deliveryId);
     if (delivery === null) return;
     // Duplicate actions can race after both read `pending`. Convex retries this
     // mutation on OCC, so re-check makes result/schedule/notification exact-once.
-    if (delivery.status === "ok" || delivery.status === "failed") return;
+    if (
+      delivery.status !== "delivering" ||
+      delivery.leaseToken !== args.leaseToken
+    ) {
+      return;
+    }
 
     const nextAttempts = delivery.attempts + 1;
 
@@ -386,14 +421,19 @@ export const recordDeliveryAttempt = internalMutation({
       await ctx.db.patch(args.deliveryId, {
         status: "ok",
         attempts: nextAttempts,
+        leaseToken: undefined,
+        leaseUntil: undefined,
       });
       return;
     }
 
     if (args.retryable !== false && nextAttempts < MAX_WEBHOOK_ATTEMPTS) {
       await ctx.db.patch(args.deliveryId, {
+        status: "pending",
         attempts: nextAttempts,
         lastError: args.error,
+        leaseToken: undefined,
+        leaseUntil: undefined,
       });
       const backoffIndex = nextAttempts - 1;
       const backoffSec = WEBHOOK_BACKOFF_SECONDS[backoffIndex] ?? 300;
@@ -410,6 +450,8 @@ export const recordDeliveryAttempt = internalMutation({
       status: "failed",
       attempts: nextAttempts,
       lastError: args.error,
+      leaseToken: undefined,
+      leaseUntil: undefined,
     });
 
     const endpoint = await ctx.db.get(delivery.endpointId);

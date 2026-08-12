@@ -189,7 +189,7 @@ export async function handleGatewayRequest(
         method: matched.method,
         pathTemplate: matched.pathTemplate,
         cost: 0,
-        status: authorization.reason === "key_disabled" ? 403 : 402,
+        status: authorization.reason === "insufficient_credits" ? 402 : 403,
         outcome: "blocked",
         latencyMs: (deps.now ?? Date.now)() - started,
         reservationId,
@@ -201,7 +201,14 @@ export async function handleGatewayRequest(
           cost: 0,
         });
       }
-      return jsonError(403, "key_disabled", "API key is disabled", requestId);
+      return jsonError(
+        403,
+        authorization.reason,
+        authorization.reason === "key_untracked"
+          ? "API key is not managed by Zevium"
+          : "API key is disabled",
+        requestId,
+      );
     }
     unmetered = true;
   } else if (freeTier !== undefined && freeTier > 0) {
@@ -239,7 +246,8 @@ export async function handleGatewayRequest(
       });
     } else if (
       freeResult.status === "rejected" &&
-      freeResult.reason === "key_disabled"
+      (freeResult.reason === "key_disabled" ||
+        freeResult.reason === "key_untracked")
     ) {
       emitUsage(ctx, deps, {
         requestId,
@@ -257,7 +265,14 @@ export async function handleGatewayRequest(
         latencyMs: (deps.now ?? Date.now)() - started,
         reservationId,
       });
-      return jsonError(403, "key_disabled", "API key is disabled", requestId);
+      return jsonError(
+        403,
+        freeResult.reason,
+        freeResult.reason === "key_untracked"
+          ? "API key is not managed by Zevium"
+          : "API key is disabled",
+        requestId,
+      );
     }
   }
 
@@ -294,6 +309,7 @@ export async function handleGatewayRequest(
     if (
       reserve.status === "rejected" &&
       (reserve.reason === "key_disabled" ||
+        reserve.reason === "key_untracked" ||
         reserve.reason === "key_cap_exceeded")
     ) {
       emitUsage(ctx, deps, {
@@ -315,9 +331,11 @@ export async function handleGatewayRequest(
       return jsonError(
         403,
         reserve.reason,
-        reserve.reason === "key_disabled"
-          ? "API key is disabled"
-          : "Monthly credit cap reached for this key",
+        reserve.reason === "key_untracked"
+          ? "API key is not managed by Zevium"
+          : reserve.reason === "key_disabled"
+            ? "API key is disabled"
+            : "Monthly credit cap reached for this key",
         requestId,
       );
     }

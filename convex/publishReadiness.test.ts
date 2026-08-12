@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { api, internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import {
+  credentialSetFingerprint,
   draftFingerprint,
   READINESS_TTL_MS,
   readinessValidity,
@@ -75,14 +76,18 @@ describe("publish readiness validity", () => {
   it("rejects missing, stale, changed, credential-changed, and non-2xx readiness", async () => {
     const now = Date.UTC(2026, 6, 19, 12, 0, 0);
     const hash = await draftFingerprint(DRAFT_A);
+    const credentialFingerprint = "credential-fingerprint-a";
     const passing = {
       status: "ok",
       draftHash: hash,
       credentialRevision: 10,
+      credentialFingerprint,
       testedAt: now,
     };
 
-    await expect(readinessValidity(null, DRAFT_A, 10, now)).resolves.toEqual({
+    await expect(
+      readinessValidity(null, DRAFT_A, 10, credentialFingerprint, now),
+    ).resolves.toEqual({
       current: false,
       reason: "missing",
     });
@@ -91,30 +96,43 @@ describe("publish readiness validity", () => {
         { ...passing, status: "reachable_unconfirmed" },
         DRAFT_A,
         10,
+        credentialFingerprint,
         now,
       ),
     ).resolves.toEqual({ current: false, reason: "status_not_ok" });
     await expect(
-      readinessValidity(passing, DRAFT_A, 10, now + READINESS_TTL_MS + 1),
+      readinessValidity(
+        passing,
+        DRAFT_A,
+        10,
+        credentialFingerprint,
+        now + READINESS_TTL_MS + 1,
+      ),
     ).resolves.toEqual({ current: false, reason: "expired" });
-    await expect(readinessValidity(passing, DRAFT_B, 10, now)).resolves.toEqual(
-      {
-        current: false,
-        reason: "draft_changed",
-      },
-    );
-    await expect(readinessValidity(passing, DRAFT_A, 11, now)).resolves.toEqual(
-      {
-        current: false,
-        reason: "credentials_changed",
-      },
-    );
-    await expect(readinessValidity(passing, DRAFT_A, 10, now)).resolves.toEqual(
-      {
-        current: true,
-        reason: null,
-      },
-    );
+    await expect(
+      readinessValidity(passing, DRAFT_B, 10, credentialFingerprint, now),
+    ).resolves.toEqual({
+      current: false,
+      reason: "draft_changed",
+    });
+    await expect(
+      readinessValidity(passing, DRAFT_A, 11, credentialFingerprint, now),
+    ).resolves.toEqual({
+      current: false,
+      reason: "credentials_changed",
+    });
+    await expect(
+      readinessValidity(passing, DRAFT_A, 10, "deleted-set", now),
+    ).resolves.toEqual({
+      current: false,
+      reason: "credentials_changed",
+    });
+    await expect(
+      readinessValidity(passing, DRAFT_A, 10, credentialFingerprint, now),
+    ).resolves.toEqual({
+      current: true,
+      reason: null,
+    });
   });
 
   it("does not let a delayed test overwrite readiness for a newer saved draft", async () => {
@@ -122,6 +140,7 @@ describe("publish readiness validity", () => {
     const { projectId } = await seed(t);
     const oldHash = await draftFingerprint(DRAFT_A);
     const newHash = await draftFingerprint(DRAFT_B);
+    const credentialFingerprint = await credentialSetFingerprint([]);
 
     await t.run(async (ctx) => {
       const draft = await ctx.db
@@ -140,6 +159,7 @@ describe("publish readiness validity", () => {
         draftHash: newHash,
         serverOrigin: "https://api.example.com",
         credentialRevision: 0,
+        credentialFingerprint,
       }),
     ).toBe(true);
     expect(
@@ -148,6 +168,7 @@ describe("publish readiness validity", () => {
         draftHash: oldHash,
         serverOrigin: "https://api.example.com",
         credentialRevision: 0,
+        credentialFingerprint,
       }),
     ).toBe(false);
 
@@ -160,10 +181,64 @@ describe("publish readiness validity", () => {
     expect(readiness?.draftHash).toBe(newHash);
   });
 
+  it("invalidates a passing public readiness query when a non-newest credential is deleted", async () => {
+    const t = convexTest(schema, modules);
+    const { projectId } = await seed(t);
+    const admin = asAdmin(t);
+    const target = await t.run(async (ctx) => {
+      await ctx.db.insert("upstreamCredentials", {
+        projectId,
+        name: "x-older",
+        secret: "old-secret",
+        updatedAt: 10,
+      });
+      await ctx.db.insert("upstreamCredentials", {
+        projectId,
+        name: "x-newer",
+        secret: "new-secret",
+        updatedAt: 20,
+      });
+      return await ctx.runQuery(internal.publishReadiness.getTarget, {
+        projectId,
+        clerkOrgId: "org_readiness",
+      });
+    });
+    expect(
+      await t.mutation(internal.publishReadiness.recordPassingTest, {
+        projectId,
+        draftHash: target.draftHash!,
+        serverOrigin: "https://api.example.com",
+        credentialRevision: target.credentialRevision,
+        credentialFingerprint: target.credentialFingerprint,
+      }),
+    ).toBe(true);
+
+    const olderId = await t.run(async (ctx) =>
+      ctx.db
+        .query("upstreamCredentials")
+        .withIndex("by_project_name", (q) =>
+          q.eq("projectId", projectId).eq("name", "x-older"),
+        )
+        .unique(),
+    );
+    if (olderId === null) throw new Error("Missing credential");
+    await admin.mutation(api.upstreamCredentials.remove, {
+      credentialId: olderId._id,
+    });
+
+    await expect(
+      admin.query(api.publishReadiness.getCurrent, { projectId }),
+    ).resolves.toMatchObject({
+      current: false,
+      reason: "credentials_changed",
+    });
+  });
+
   it("invalidates readiness when an imported draft autosave wins a delayed test", async () => {
     const t = convexTest(schema, modules);
     const { projectId } = await seed(t);
     const oldHash = await draftFingerprint(DRAFT_A);
+    const credentialFingerprint = await credentialSetFingerprint([]);
 
     expect(
       await t.mutation(internal.publishReadiness.recordPassingTest, {
@@ -171,6 +246,7 @@ describe("publish readiness validity", () => {
         draftHash: oldHash,
         serverOrigin: "https://api.example.com",
         credentialRevision: 0,
+        credentialFingerprint,
       }),
     ).toBe(true);
 
@@ -186,6 +262,7 @@ describe("publish readiness validity", () => {
         draftHash: oldHash,
         serverOrigin: "https://api.example.com",
         credentialRevision: 0,
+        credentialFingerprint,
       }),
     ).toBe(false);
     const readiness = await t.run(async (ctx) =>
@@ -201,6 +278,7 @@ describe("publish readiness validity", () => {
     const t = convexTest(schema, modules);
     const { projectId } = await seed(t);
     const admin = asAdmin(t);
+    const credentialFingerprint = await credentialSetFingerprint([]);
     const initialSave = await admin.mutation(api.specs.saveDraft, {
       projectId,
       spec: DRAFT_B,
@@ -214,6 +292,7 @@ describe("publish readiness validity", () => {
         draftHash: initialSave.draftHash,
         serverOrigin: "https://api.example.com",
         credentialRevision: 0,
+        credentialFingerprint,
       }),
     ).toBe(true);
 

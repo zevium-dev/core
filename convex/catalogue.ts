@@ -149,6 +149,7 @@ export const listPublic = query({
     }> = [];
 
     for (const project of candidates) {
+      if (project.retiringAt !== undefined) continue;
       if (tag !== "" && !project.tags.includes(tag)) continue;
 
       if (search !== "") {
@@ -158,7 +159,7 @@ export const listPublic = query({
       }
 
       const org = await ctx.db.get(project.organizationId);
-      if (org === null) continue;
+      if (org === null || org.retiringAt !== undefined) continue;
       // Public URLs are only valid through the dedicated publisher handle.
       // Never emit an empty segment or fall back to Clerk's internal slug.
       if (org.publicHandle === undefined || org.publicHandle === "") continue;
@@ -277,7 +278,13 @@ export const getPublicDetail = query({
     } | null;
   } | null> => {
     const org = await getOrgByPublicHandle(ctx, args.publisherHandle);
-    if (org === null || org.publicHandle === undefined) return null;
+    if (
+      org === null ||
+      org.publicHandle === undefined ||
+      org.retiringAt !== undefined
+    ) {
+      return null;
+    }
 
     const project = await ctx.db
       .query("projects")
@@ -285,7 +292,7 @@ export const getPublicDetail = query({
         q.eq("organizationId", org._id).eq("slug", args.projectSlug),
       )
       .unique();
-    if (project === null) return null;
+    if (project === null || project.retiringAt !== undefined) return null;
     if (project.visibility !== "public" || project.status !== "published") {
       return null;
     }

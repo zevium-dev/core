@@ -39,6 +39,7 @@ const VERIFY_WEBHOOK = `import crypto from "node:crypto";
 // 1. Read the RAW body before JSON.parse — the signature is over exact bytes.
 const body = await request.text();
 const signature = request.headers.get("x-zevium-signature");
+const deliveryHeader = request.headers.get("x-zevium-delivery-id");
 
 // 2. Recompute HMAC-SHA256(secret, body) → lowercase hex.
 const expected = crypto
@@ -53,8 +54,24 @@ if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
   return new Response("Invalid signature", { status: 401 });
 }
 
-// 4. Now safe to parse.
-const { event, data, timestamp } = JSON.parse(body);
+// 4. Enforce signed replay fields. Zevium timestamps use epoch milliseconds.
+const { id, event, data, timestamp } = JSON.parse(body);
+if (
+  typeof id !== "string" ||
+  id !== deliveryHeader ||
+  !Number.isSafeInteger(timestamp) ||
+  Math.abs(Date.now() - timestamp) > 5 * 60_000
+) {
+  return new Response("Expired or invalid delivery", { status: 400 });
+}
+
+// 5. Atomically claim id before side effects; retain it beyond your replay window.
+const claimed = await redis.set("zevium:webhook:" + id, "1", {
+  NX: true,
+  EX: 24 * 60 * 60,
+});
+if (claimed !== "OK") return new Response(null, { status: 200 });
+
 console.log(event, data, timestamp);`;
 
 function DocsPublishingPage() {
@@ -163,14 +180,17 @@ Sunset: Wed, 31 Dec 2025 23:59:59 GMT`}
         code={`POST /your/webhook HTTP/1.1
 Content-Type: application/json
 x-zevium-event: spec.published
+x-zevium-delivery-id: <stable delivery id>
 x-zevium-signature: <hex HMAC-SHA256 of body>
 
-{"event":"spec.published","data":{"projectId":"...","version":"0.1.0"},"timestamp":1735689600000}`}
+{"id":"<same stable delivery id>","event":"spec.published","data":{"projectId":"...","version":"0.1.0"},"timestamp":1735689600000}`}
       />
       <p>
-        Verify the signature before trusting the payload. The signing secret is
-        generated and encrypted server-side when you create the endpoint. Org
-        admins can explicitly reveal it from project Settings:
+        Verify raw-body signature, signed timestamp, and signed delivery ID
+        before trusting payload. Atomically dedupe delivery ID before side
+        effects. Signing secret is generated and encrypted server-side when you
+        create endpoint. Org admins can explicitly reveal it from project
+        Settings:
       </p>
       <DocsCodeBlock lang="typescript" code={VERIFY_WEBHOOK} />
     </DocsPage>

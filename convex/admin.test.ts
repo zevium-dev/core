@@ -141,6 +141,55 @@ describe("admin publisher transfer operations", () => {
     });
   });
 
+  it("preflights legacy key material before touching any plaintext row", async () => {
+    const t = convexTest(schema, modules);
+    const endpointId = await t.run(async (ctx) => {
+      const organizationId = await ctx.db.insert("organizations", {
+        clerkOrgId: "org_legacy_preflight",
+        name: "Legacy preflight",
+        slug: "legacy-preflight",
+      });
+      const projectId = await ctx.db.insert("projects", {
+        organizationId,
+        name: "Legacy preflight project",
+        slug: "legacy-preflight-project",
+        status: "draft",
+        visibility: "private",
+        tags: [],
+      });
+      return await ctx.db.insert("webhookEndpoints", {
+        projectId,
+        url: "https://example.com/events",
+        secret: "preflight-must-not-scrub",
+        active: true,
+        createdAt: 1,
+      });
+    });
+    process.env.UPSTREAM_CREDENTIAL_ENCRYPTION_KEYS = JSON.stringify({
+      current: "legacy-v1",
+      keys: { "legacy-v1": "arbitrary legacy key material" },
+    });
+    const admin = t.withIdentity({ subject: ADMIN } as { subject: string });
+
+    await expect(
+      admin.query(api.admin.securityRolloutPreflight, {}),
+    ).resolves.toEqual({
+      current: "legacy-v1",
+      boundEnvelopeReady: false,
+      legacyCompatibleVersions: ["legacy-v1"],
+      legacyOnlyVersions: ["legacy-v1"],
+    });
+
+    await expect(
+      admin.mutation(api.admin.migrateSecurityRollout, {}),
+    ).rejects.toThrow("canonical padded base64");
+
+    const stored = await t.run(async (ctx) => ctx.db.get(endpointId));
+    expect(stored).toMatchObject({ secret: "preflight-must-not-scrub" });
+    expect(stored?.ciphertext).toBeUndefined();
+    expect(stored?.sealedCiphertext).toBeUndefined();
+  });
+
   it("fails closed for a non-admin", async () => {
     const t = convexTest(schema, modules);
     await seedTransfer(t);

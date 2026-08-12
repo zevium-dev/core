@@ -10,6 +10,10 @@ import { internal } from "./_generated/api";
 import type { CredentialMigrationPage } from "./upstreamCredentials";
 import type { WebhookSecretMigrationPage } from "./webhooks";
 import { enqueueRouteUpsert } from "./registrySync";
+import {
+  credentialKeyringPreflight,
+  type CredentialKeyringPreflight,
+} from "./lib/credentialCrypto";
 
 /** Cap for month-to-date usage count (by_at index range scan). */
 const USAGE_STATS_CAP = 50_000;
@@ -30,6 +34,15 @@ export const isAdminQuery = query({
   },
 });
 
+/** Read-only deploy preflight; never returns key material. */
+export const securityRolloutPreflight = query({
+  args: {},
+  handler: async (ctx): Promise<CredentialKeyringPreflight> => {
+    await requireAdmin(ctx);
+    return credentialKeyringPreflight();
+  },
+});
+
 /** Bounded, idempotent rollout step; run repeatedly until remaining is zero. */
 export const migrateSecurityRollout = mutation({
   args: {
@@ -41,11 +54,18 @@ export const migrateSecurityRollout = mutation({
     ctx,
     args,
   ): Promise<{
+    keyring: CredentialKeyringPreflight;
     credentials: CredentialMigrationPage;
     webhookSecrets: WebhookSecretMigrationPage;
     handles: { updated: number; collisions: number };
   }> => {
     await requireAdmin(ctx);
+    const keyring = credentialKeyringPreflight();
+    if (!keyring.boundEnvelopeReady) {
+      throw new Error(
+        "Current credential key must be canonical padded base64 for 32 bytes",
+      );
+    }
     const credentials = await ctx.runMutation(
       internal.upstreamCredentials.migrateLegacyPlaintext,
       {
@@ -63,6 +83,7 @@ export const migrateSecurityRollout = mutation({
     const handles: { updated: number; collisions: number } =
       await ctx.runMutation(internal.organizations.backfillPublicHandles, {});
     return {
+      keyring,
       credentials,
       webhookSecrets,
       handles,

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
   credentialBinding,
+  credentialKeyringPreflight,
   decryptCredential,
   decryptSecret,
   encryptCredential,
@@ -28,6 +29,53 @@ function keyring(current: string, keys: Record<string, string>) {
 }
 
 describe("credential keyring and envelopes", () => {
+  it("preflights and decrypts arbitrary legacy key material before v2 migration", async () => {
+    const material = "legacy production material was never base64";
+    keyring("legacy", { legacy: material });
+    expect(credentialKeyringPreflight()).toEqual({
+      current: "legacy",
+      boundEnvelopeReady: false,
+      legacyCompatibleVersions: ["legacy"],
+      legacyOnlyVersions: ["legacy"],
+    });
+
+    const digest = await crypto.subtle.digest(
+      "SHA-256",
+      new TextEncoder().encode(material),
+    );
+    const key = await crypto.subtle.importKey("raw", digest, "AES-GCM", false, [
+      "encrypt",
+    ]);
+    const iv = new Uint8Array(12).fill(7);
+    const ciphertext = await crypto.subtle.encrypt(
+      { name: "AES-GCM", iv },
+      key,
+      new TextEncoder().encode("legacy-secret"),
+    );
+    const legacy = {
+      ciphertext: Buffer.from(ciphertext).toString("base64"),
+      iv: Buffer.from(iv).toString("base64"),
+      keyVersion: "legacy",
+    };
+    await expect(
+      decryptSecret(legacy, webhookBinding("project_a")),
+    ).resolves.toBe("legacy-secret");
+
+    keyring("v2", { legacy: material, v2: KEY_2 });
+    const migrated = await migrateStoredSecret(
+      legacy,
+      webhookBinding("project_a"),
+    );
+    expect(migrated).toMatchObject({
+      old: true,
+      broken: false,
+      rewrapped: true,
+    });
+    await expect(
+      decryptSecret(migrated.patch!, webhookBinding("project_a")),
+    ).resolves.toBe("legacy-secret");
+  });
+
   it("dual-writes rollback envelope and AAD-bound v2 envelope", async () => {
     keyring("v1", { v1: KEY_1 });
     const encrypted = await encryptCredential(
@@ -91,7 +139,7 @@ describe("credential keyring and envelopes", () => {
     process.env.UPSTREAM_CREDENTIAL_ENCRYPTION_KEYS = JSON.stringify(value);
     await expect(
       encryptCredential("secret", "project_a", "authorization"),
-    ).rejects.toThrow("keyring is invalid");
+    ).rejects.toThrow(/keyring is invalid|unavailable for bound envelopes/);
   });
 
   it("rewraps old versions and verifies both envelopes before patch", async () => {
@@ -156,6 +204,29 @@ describe("credential keyring and envelopes", () => {
       webhookBinding("project_a"),
     );
     expect(migration).toMatchObject({ broken: true, corrupt: true });
+    expect(migration.patch).toBeUndefined();
+  });
+
+  it("fails closed on a partial bound envelope without plaintext", async () => {
+    keyring("v1", { v1: KEY_1 });
+    const encrypted = await encryptSecret(
+      "secret",
+      webhookBinding("project_a"),
+    );
+    const partial = { ...encrypted, sealedIv: undefined };
+    await expect(
+      decryptSecret(partial, webhookBinding("project_a")),
+    ).rejects.toThrow("incomplete");
+    const migration = await migrateStoredSecret(
+      partial,
+      webhookBinding("project_a"),
+    );
+    expect(migration).toMatchObject({
+      corrupt: true,
+      broken: true,
+      recovered: false,
+      scrubbed: false,
+    });
     expect(migration.patch).toBeUndefined();
   });
 });

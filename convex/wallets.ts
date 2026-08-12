@@ -241,14 +241,17 @@ export const getGatewayWallet = internalQuery({
     const settings = await ctx.db
       .query("keySettings")
       .withIndex("by_org", (q) => q.eq("clerkOrgId", args.clerkOrgId))
-      .collect();
+      .take(5_000);
+    const organizationRetiring = organization?.retiringAt !== undefined;
 
     return {
       wallet:
         wallet === null
           ? { clerkOrgId: args.clerkOrgId, balance: 0, sequence: 0 }
           : checkpoint(args.clerkOrgId, wallet),
-      keySettings: settings.map(toGatewayRow),
+      keySettings: settings.map((setting) =>
+        toGatewayRow(setting, organizationRetiring),
+      ),
     };
   },
 });

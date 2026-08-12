@@ -59,6 +59,14 @@ describe("WalletDO unit", () => {
     const clerkOrgId = "org_free_scope";
     const stub = walletStub(clerkOrgId);
     await stub.grant("free-tier-balance", 1);
+    __setTestGrantsFetcher(async () => ({
+      wallet: { clerkOrgId, balance: 1, sequence: 0 },
+      keySettings: [
+        { keyId: "key-one", familyId: "family-one", disabled: false },
+        { keyId: "key-two", familyId: "family-two", disabled: false },
+      ],
+    }));
+    await stub.syncGrants(clerkOrgId);
     const dayOne = Date.UTC(2026, 6, 19, 23, 59, 59);
     const base = {
       clerkOrgId,
@@ -124,6 +132,7 @@ describe("WalletDO unit", () => {
         })
       ).status,
     ).toBe("consumed");
+    __setTestGrantsFetcher(null);
   });
 
   it("grant idempotency — same grantId does not double-credit", async () => {

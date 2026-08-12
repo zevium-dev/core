@@ -40,8 +40,10 @@ import {
 export type InFlightEntry = {
   cost: number;
   createdAt: number;
-  /** Present for keyed reservations so their aggregate is cap-enforced. */
+  /** Physical key retained for audit/debug compatibility. */
   keyId?: string;
+  /** Stable across rotations so one cap cannot be reset by replacing a key. */
+  familyId?: string;
 };
 
 /** Usage metadata required to flush a settlement to Convex. */
@@ -120,7 +122,7 @@ export type KeyAuthorizationResult =
   | { status: "allowed" }
   | {
       status: "rejected";
-      reason: "key_disabled" | "insufficient_credits";
+      reason: "key_disabled" | "key_untracked" | "insufficient_credits";
       available?: number;
     };
 
@@ -153,6 +155,8 @@ export type SyncGrantsResult =
 /** Per-key control metadata mirrored from the control-plane keySettings table. */
 export type KeySetting = {
   keyId: string;
+  /** Stable budget identity inherited by every replacement key. */
+  familyId: string;
   /** Absent = unlimited. */
   monthlyCapCredits?: number;
   disabled: boolean;
@@ -200,11 +204,11 @@ function sumInFlight(inFlight: Record<string, InFlightEntry>): number {
 
 function sumInFlightForKey(
   inFlight: Record<string, InFlightEntry>,
-  keyId: string,
+  familyId: string,
 ): number {
   let total = 0;
   for (const entry of Object.values(inFlight)) {
-    if (entry.keyId === keyId) total += entry.cost;
+    if ((entry.familyId ?? entry.keyId) === familyId) total += entry.cost;
   }
   return total;
 }
@@ -235,8 +239,8 @@ export function utcMonthKey(ms: number = Date.now()): string {
   return new Date(ms).toISOString().slice(0, 7);
 }
 
-function settledStorageKey(keyId: string, month: string): string {
-  return `${K_SETTLED_PREFIX}${keyId}:${month}`;
+function settledStorageKey(familyId: string, month: string): string {
+  return `${K_SETTLED_PREFIX}${familyId}:${month}`;
 }
 
 /** Parse a keySettings array from the /wallet-grants JSON payload. */
@@ -248,7 +252,14 @@ function parseKeySettings(raw: unknown): KeySetting[] {
     const r = row as Record<string, unknown>;
     if (typeof r.keyId !== "string" || r.keyId.length === 0) continue;
     if (typeof r.disabled !== "boolean") continue;
-    const setting: KeySetting = { keyId: r.keyId, disabled: r.disabled };
+    const setting: KeySetting = {
+      keyId: r.keyId,
+      familyId:
+        typeof r.familyId === "string" && r.familyId.length > 0
+          ? r.familyId
+          : r.keyId,
+      disabled: r.disabled,
+    };
     if (typeof r.monthlyCapCredits === "number") {
       setting.monthlyCapCredits = r.monthlyCapCredits;
     }
@@ -482,19 +493,25 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
 
       // Per-key enforcement: disabled, expired grace, and all active holds.
       const currentSetting = opts.keyId
-        ? (this.#keySettings.get(opts.keyId) ?? setting)
+        ? setting === undefined
+          ? null
+          : (this.#keySettings.get(opts.keyId) ?? setting)
         : null;
+      if (opts.keyId && currentSetting === null) {
+        return { status: "rejected", reason: "key_untracked" };
+      }
       if (opts.keyId && currentSetting) {
         if (this.#isKeyDisabled(currentSetting, now)) {
           return { status: "rejected", reason: "key_disabled" };
         }
         if (currentSetting.monthlyCapCredits !== undefined) {
           const month = utcMonthKey(now);
+          const familyId = currentSetting.familyId ?? currentSetting.keyId;
           const used =
             (await this.ctx.storage.get<number>(
-              settledStorageKey(opts.keyId, month),
+              settledStorageKey(familyId, month),
             )) ?? 0;
-          const reserved = sumInFlightForKey(this.#inFlight, opts.keyId);
+          const reserved = sumInFlightForKey(this.#inFlight, familyId);
           if (used + reserved + cost > currentSetting.monthlyCapCredits) {
             return { status: "rejected", reason: "key_cap_exceeded" };
           }
@@ -509,7 +526,13 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
       this.#inFlight[reservationId] = {
         cost,
         createdAt: Date.now(),
-        ...(opts.keyId ? { keyId: opts.keyId } : {}),
+        ...(opts.keyId
+          ? {
+              keyId: opts.keyId,
+              familyId:
+                currentSetting?.familyId ?? currentSetting?.keyId ?? opts.keyId,
+            }
+          : {}),
       };
       await this.#persist({ inFlight: { ...this.#inFlight } });
 
@@ -564,11 +587,11 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
         inFlight: { ...this.#inFlight },
         pendingSettlements: this.#pendingSettlements.map((s) => ({ ...s })),
         terminal: { ...this.#terminal },
-        ...(usage?.keyId && cost > 0
+        ...((entry.familyId ?? entry.keyId ?? usage?.keyId) && cost > 0
           ? {
               settledCounter: {
                 storageKey: settledStorageKey(
-                  usage.keyId,
+                  entry.familyId ?? entry.keyId ?? usage!.keyId,
                   utcMonthKey(settledAt),
                 ),
                 amount: cost,
@@ -644,8 +667,14 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
     );
 
     return this.#mutate(async () => {
-      const currentSetting = this.#keySettings.get(opts.keyId) ?? setting;
-      if (currentSetting && this.#isKeyDisabled(currentSetting, nowMs)) {
+      const currentSetting =
+        setting === undefined
+          ? null
+          : (this.#keySettings.get(opts.keyId) ?? setting);
+      if (currentSetting === null) {
+        return { status: "rejected", reason: "key_untracked" };
+      }
+      if (this.#isKeyDisabled(currentSetting, nowMs)) {
         return { status: "rejected", reason: "key_disabled" };
       }
       if (this.#balance <= 0) {
@@ -682,8 +711,14 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
   ): Promise<KeyAuthorizationResult> {
     const setting = await this.#resolveKeySetting(keyId, clerkOrgId, nowMs);
     return this.#mutate(async () => {
-      const currentSetting = this.#keySettings.get(keyId) ?? setting;
-      if (currentSetting && this.#isKeyDisabled(currentSetting, nowMs)) {
+      const currentSetting =
+        setting === undefined
+          ? null
+          : (this.#keySettings.get(keyId) ?? setting);
+      if (currentSetting === null) {
+        return { status: "rejected", reason: "key_untracked" };
+      }
+      if (this.#isKeyDisabled(currentSetting, nowMs)) {
         return { status: "rejected", reason: "key_disabled" };
       }
       if (this.#balance <= 0) {
@@ -1018,10 +1053,15 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
     keyId: string,
     clerkOrgId: string | undefined,
     nowMs: number,
-  ): Promise<KeySetting | null> {
-    if (!clerkOrgId) return null;
+  ): Promise<KeySetting | null | undefined> {
+    if (!clerkOrgId) return undefined;
     if (nowMs - this.#keySettingsSyncedAt >= SYNC_GRANTS_WINDOW_MS) {
       await this.#syncGrantsSingleFlight(clerkOrgId, nowMs);
+      // Once positive control state expires, a failed refresh cannot preserve
+      // spending authority indefinitely. Missing row then fails closed.
+      if (nowMs - this.#keySettingsSyncedAt >= SYNC_GRANTS_WINDOW_MS) {
+        return undefined;
+      }
     }
     return this.#keySettings.get(keyId) ?? null;
   }

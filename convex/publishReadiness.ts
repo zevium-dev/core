@@ -32,6 +32,24 @@ export async function draftFingerprint(value: string): Promise<string> {
   ).join("");
 }
 
+/** Stable hash over complete credential membership, identity, and revision. */
+export async function credentialSetFingerprint(
+  rows: readonly { _id: unknown; name: string; updatedAt: number }[],
+): Promise<string> {
+  const canonical = rows
+    .map((row) => ({
+      id: String(row._id),
+      name: row.name,
+      updatedAt: row.updatedAt,
+    }))
+    .sort((left, right) =>
+      left.id === right.id
+        ? left.name.localeCompare(right.name)
+        : left.id.localeCompare(right.id),
+    );
+  return await draftFingerprint(JSON.stringify(canonical));
+}
+
 /**
  * A publish test is valid only for this exact saved draft and credential set.
  * Keep this pure so the UI query and authoritative publish gate cannot drift.
@@ -41,10 +59,12 @@ export async function readinessValidity(
     status: string;
     draftHash: string;
     credentialRevision: number;
+    credentialFingerprint?: string;
     testedAt: number;
   } | null,
   draft: string | null,
   credentialRevision: number,
+  credentialFingerprint: string,
   nowMs: number = Date.now(),
 ): Promise<ReadinessValidity> {
   if (readiness === null) return { current: false, reason: "missing" };
@@ -58,7 +78,10 @@ export async function readinessValidity(
   if (readiness.draftHash !== (await draftFingerprint(draft))) {
     return { current: false, reason: "draft_changed" };
   }
-  if (readiness.credentialRevision !== credentialRevision) {
+  if (
+    readiness.credentialRevision !== credentialRevision ||
+    readiness.credentialFingerprint !== credentialFingerprint
+  ) {
     return { current: false, reason: "credentials_changed" };
   }
   return { current: true, reason: null };
@@ -74,6 +97,7 @@ export const getTarget = internalQuery({
     headers: Record<string, string>;
     draftHash: string | null;
     credentialRevision: number;
+    credentialFingerprint: string;
   }> => {
     const project = await ctx.db.get(args.projectId);
     if (project === null) throw new Error("Project not found");
@@ -106,6 +130,7 @@ export const getTarget = internalQuery({
         (latest, row) => Math.max(latest, row.updatedAt),
         0,
       ),
+      credentialFingerprint: await credentialSetFingerprint(credentials),
       headers: Object.fromEntries(
         await Promise.all(
           credentials.map(async (row) => [
@@ -128,6 +153,7 @@ export const recordPassingTest = internalMutation({
     draftHash: v.string(),
     serverOrigin: v.string(),
     credentialRevision: v.number(),
+    credentialFingerprint: v.string(),
   },
   handler: async (ctx, args) => {
     const draft = await ctx.db
@@ -142,10 +168,12 @@ export const recordPassingTest = internalMutation({
       (latest, row) => Math.max(latest, row.updatedAt),
       0,
     );
+    const credentialFingerprint = await credentialSetFingerprint(credentials);
     if (
       draft === null ||
       args.draftHash !== (await draftFingerprint(draft.draft)) ||
-      args.credentialRevision !== credentialRevision
+      args.credentialRevision !== credentialRevision ||
+      args.credentialFingerprint !== credentialFingerprint
     ) {
       return false;
     }
@@ -157,6 +185,7 @@ export const recordPassingTest = internalMutation({
       draftHash: args.draftHash,
       serverOrigin: args.serverOrigin,
       credentialRevision: args.credentialRevision,
+      credentialFingerprint: args.credentialFingerprint,
       status: "ok" as const,
       testedAt: Date.now(),
     };
@@ -190,10 +219,12 @@ export const getCurrent = query({
       (latest, row) => Math.max(latest, row.updatedAt),
       0,
     );
+    const credentialFingerprint = await credentialSetFingerprint(credentials);
     const validity = await readinessValidity(
       readiness,
       draft?.draft ?? null,
       credentialRevision,
+      credentialFingerprint,
     );
     return {
       readiness,

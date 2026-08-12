@@ -11,6 +11,8 @@ export default defineSchema({
     /** Stable, publisher-controlled public URL segment. */
     publicHandle: v.optional(v.string()),
     imageUrl: v.optional(v.string()),
+    /** Set before bounded organization retirement starts. */
+    retiringAt: v.optional(v.number()),
   })
     .index("by_clerk_org", ["clerkOrgId"])
     .index("by_slug", ["slug"])
@@ -31,6 +33,8 @@ export default defineSchema({
     status: v.union(v.literal("draft"), v.literal("published")),
     visibility: v.union(v.literal("private"), v.literal("public")),
     tags: v.array(v.string()),
+    /** Route is archived before bounded child cleanup starts. */
+    retiringAt: v.optional(v.number()),
   })
     .index("by_org", ["organizationId"])
     .index("by_org_slug", ["organizationId", "slug"])
@@ -63,6 +67,8 @@ export default defineSchema({
     draftHash: v.string(),
     serverOrigin: v.string(),
     credentialRevision: v.number(),
+    /** Hash of every credential identity + revision; deletion changes it. */
+    credentialFingerprint: v.optional(v.string()),
     status: v.literal("ok"),
     testedAt: v.number(),
   }).index("by_project", ["projectId"]),
@@ -181,6 +187,8 @@ export default defineSchema({
     sealedVersion: v.optional(v.literal("v2")),
     secret: v.optional(v.string()),
     active: v.boolean(),
+    /** Inactive tombstone retained while delivery rows retire in pages. */
+    retiringAt: v.optional(v.number()),
     createdAt: v.number(),
   }).index("by_project", ["projectId"]),
 
@@ -188,8 +196,15 @@ export default defineSchema({
   webhookDeliveries: defineTable({
     endpointId: v.id("webhookEndpoints"),
     event: v.string(),
-    status: v.union(v.literal("pending"), v.literal("ok"), v.literal("failed")),
+    status: v.union(
+      v.literal("pending"),
+      v.literal("delivering"),
+      v.literal("ok"),
+      v.literal("failed"),
+    ),
     attempts: v.number(),
+    leaseToken: v.optional(v.string()),
+    leaseUntil: v.optional(v.number()),
     lastError: v.optional(v.string()),
     createdAt: v.number(),
     payload: v.string(),
@@ -203,6 +218,10 @@ export default defineSchema({
     // writes ignore unclaimed rows until Clerk-backed broker verifies owner.
     ownerUserId: v.optional(v.string()),
     keyId: v.string(),
+    /** False means Clerk key was observed but never provisioned by Zevium. */
+    managed: v.optional(v.boolean()),
+    /** Stable budget identity shared by every physical key in a rotation. */
+    familyId: v.optional(v.string()),
     /** Monthly credit cap; undefined = unlimited. Enforced by the wallet DO. */
     monthlyCapCredits: v.optional(v.number()),
     disabled: v.boolean(),
@@ -210,10 +229,14 @@ export default defineSchema({
     rotatedFromKeyId: v.optional(v.string()),
     /** Old key keeps working until this ms epoch (rotation grace). */
     graceUntil: v.optional(v.number()),
+    revokedAt: v.optional(v.number()),
+    membershipRevokedAt: v.optional(v.number()),
     updatedAt: v.number(),
   })
     .index("by_org", ["clerkOrgId"])
     .index("by_owner", ["clerkOrgId", "ownerUserId"])
+    .index("by_owner_status", ["clerkOrgId", "ownerUserId", "disabled"])
+    .index("by_family", ["clerkOrgId", "ownerUserId", "familyId"])
     .index("by_key", ["keyId"]),
 
   keyRotationOperations: defineTable({
@@ -221,6 +244,11 @@ export default defineSchema({
     userId: v.string(),
     operationId: v.string(),
     oldKeyId: v.string(),
+    requestedName: v.optional(v.string()),
+    /** Membership projection revision fenced when provider membership was fresh. */
+    membershipRevision: v.optional(v.number()),
+    leaseToken: v.optional(v.string()),
+    leaseExpiresAt: v.optional(v.number()),
     status: v.union(
       v.literal("reserved"),
       v.literal("completed"),
@@ -228,18 +256,41 @@ export default defineSchema({
     ),
     newKeyId: v.optional(v.string()),
     graceUntil: v.optional(v.number()),
+    autoRevokeStatus: v.optional(
+      v.union(
+        v.literal("scheduled"),
+        v.literal("revoking"),
+        v.literal("revoked"),
+        v.literal("failed"),
+      ),
+    ),
+    autoRevokeAttempts: v.optional(v.number()),
+    autoRevokeLeaseUntil: v.optional(v.number()),
+    autoRevokeFailure: v.optional(v.string()),
+    oldKeyRevokedAt: v.optional(v.number()),
+    orphanReconciledAt: v.optional(v.number()),
     failure: v.optional(v.string()),
     createdAt: v.number(),
     updatedAt: v.number(),
   })
     .index("by_operation", ["clerkOrgId", "userId", "operationId"])
-    .index("by_active_old_key", ["clerkOrgId", "oldKeyId", "status"]),
+    .index("by_active_old_key", ["clerkOrgId", "oldKeyId", "status"])
+    .index("by_auto_revoke", ["autoRevokeStatus", "updatedAt"])
+    .index("by_auto_revoke_due", ["autoRevokeStatus", "graceUntil"])
+    .index("by_auto_revoke_lease", ["autoRevokeStatus", "autoRevokeLeaseUntil"])
+    .index("by_lease_expiry", ["status", "leaseExpiresAt"])
+    .index("by_reconcile", ["status", "orphanReconciledAt", "updatedAt"]),
 
   keyLifecycleOperations: defineTable({
     clerkOrgId: v.string(),
     userId: v.string(),
     operationId: v.string(),
     kind: v.union(v.literal("create"), v.literal("revoke")),
+    requestedName: v.optional(v.string()),
+    /** Membership projection revision fenced when provider membership was fresh. */
+    membershipRevision: v.optional(v.number()),
+    leaseToken: v.optional(v.string()),
+    leaseExpiresAt: v.optional(v.number()),
     status: v.union(
       v.literal("reserved"),
       v.literal("completed"),
@@ -247,12 +298,15 @@ export default defineSchema({
     ),
     keyId: v.optional(v.string()),
     previousDisabled: v.optional(v.boolean()),
+    orphanReconciledAt: v.optional(v.number()),
     failure: v.optional(v.string()),
     createdAt: v.number(),
     updatedAt: v.number(),
   })
     .index("by_operation", ["clerkOrgId", "userId", "operationId"])
-    .index("by_active_kind", ["clerkOrgId", "userId", "kind", "status"]),
+    .index("by_active_kind", ["clerkOrgId", "userId", "kind", "status"])
+    .index("by_lease_expiry", ["status", "leaseExpiresAt"])
+    .index("by_reconcile", ["status", "orphanReconciledAt", "updatedAt"]),
 
   // Transactional control-plane → gateway registry stream heads. Streams are
   // never deleted, so a route/key source revision can never move backwards.
@@ -322,6 +376,66 @@ export default defineSchema({
     ),
     updatedAt: v.number(),
   }).index("by_scope", ["clerkOrgId", "userId"]),
+
+  /** Cross-tenant import ceiling. Updated in same OCC transaction as user lease. */
+  specImportGlobalLimits: defineTable({
+    singleton: v.literal("global"),
+    windowStartedAt: v.number(),
+    requestsInWindow: v.number(),
+    leases: v.array(
+      v.object({
+        id: v.string(),
+        expiresAt: v.number(),
+      }),
+    ),
+    updatedAt: v.number(),
+  }).index("by_singleton", ["singleton"]),
+
+  /** Svix ids fence replayed Clerk lifecycle events. */
+  clerkWebhookReceipts: defineTable({
+    svixId: v.string(),
+    eventType: v.string(),
+    receivedAt: v.number(),
+  }).index("by_svix_id", ["svixId"]),
+
+  /**
+   * Durable membership fence. Deletion bumps revision before any key cleanup;
+   * in-flight create/rotation completion must still match this revision.
+   */
+  clerkMembershipStates: defineTable({
+    clerkOrgId: v.string(),
+    userId: v.string(),
+    status: v.union(v.literal("active"), v.literal("revoked")),
+    revision: v.number(),
+    updatedAt: v.number(),
+  }).index("by_membership", ["clerkOrgId", "userId"]),
+
+  /** Tombstones make large archive/secret retirement bounded and resumable. */
+  retirementJobs: defineTable({
+    resourceKey: v.string(),
+    kind: v.union(
+      v.literal("project"),
+      v.literal("organization"),
+      v.literal("webhook"),
+    ),
+    resourceId: v.string(),
+    phase: v.string(),
+    status: v.union(
+      v.literal("pending"),
+      v.literal("running"),
+      v.literal("completed"),
+      v.literal("failed"),
+    ),
+    attempts: v.number(),
+    failureAttempts: v.optional(v.number()),
+    nextRunAt: v.number(),
+    lastError: v.optional(v.string()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+    completedAt: v.optional(v.number()),
+  })
+    .index("by_resource", ["resourceKey"])
+    .index("by_due", ["status", "nextRunAt"]),
 
   // Catalogue semantic search (embedded on publish; Gemini text-embedding-004)
   specEmbeddings: defineTable({

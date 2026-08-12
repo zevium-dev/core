@@ -105,7 +105,11 @@ export const upsert = mutation({
       });
     } else {
       id = existing._id;
-      await ctx.db.patch(existing._id, { ...encrypted, updatedAt });
+      await ctx.db.patch(existing._id, {
+        ...encrypted,
+        secret: undefined,
+        updatedAt,
+      });
     }
     await enqueueRouteUpsert(ctx, args.projectId);
     return { id, name, updatedAt };

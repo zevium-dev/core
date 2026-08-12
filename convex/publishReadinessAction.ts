@@ -117,6 +117,7 @@ export const testConnection = action({
           draftHash: target.draftHash,
           serverOrigin: result.finalUrl.origin,
           credentialRevision: target.credentialRevision,
+          credentialFingerprint: target.credentialFingerprint,
         });
       }
       return {

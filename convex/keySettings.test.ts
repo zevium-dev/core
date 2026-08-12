@@ -40,10 +40,17 @@ async function register(
   keyId = KEY_A,
   userId = "user_owner",
 ) {
-  return await t.mutation(internal.keySettings.registerVerified, {
-    clerkOrgId: "org_acme",
-    userId,
-    keyId,
+  return await t.run(async (ctx) => {
+    const id = await ctx.db.insert("keySettings", {
+      clerkOrgId: "org_acme",
+      ownerUserId: userId,
+      keyId,
+      managed: true,
+      familyId: keyId,
+      disabled: false,
+      updatedAt: Date.now(),
+    });
+    return await ctx.db.get(id);
   });
 }
 
@@ -112,7 +119,7 @@ describe("user-owned key settings", () => {
 });
 
 describe("key lifecycle reservations", () => {
-  it("disables locally before external revoke and compensates idempotently on failure", async () => {
+  it("stays fail-closed after an ambiguous external revoke failure", async () => {
     const t = convexTest(schema, modules);
     await seedWorld(t);
     await register(t);
@@ -139,7 +146,7 @@ describe("key lifecycle reservations", () => {
     });
     expect(
       (await asUser(t).query(api.keySettings.getForOrg, {}))[0]?.disabled,
-    ).toBe(false);
+    ).toBe(true);
   });
 
   it("keeps local gate disabled after terminal external revoke", async () => {
@@ -201,6 +208,9 @@ describe("key lifecycle reservations", () => {
       userId: "user_owner",
       operationId: "rotate-operation-race",
       oldKeyId: KEY_A,
+      requestedName: "replacement",
+      membershipVerifiedAt: Date.now(),
+      leaseToken: "rotation-lease-race",
     });
 
     await expect(
@@ -211,6 +221,102 @@ describe("key lifecycle reservations", () => {
         keyId: KEY_A,
       }),
     ).rejects.toThrow("rotation is in progress");
+  });
+
+  it("binds create completion to exact immutable key and lease", async () => {
+    const t = convexTest(schema, modules);
+    await seedWorld(t);
+    const scope = {
+      clerkOrgId: "org_acme",
+      userId: "user_owner",
+      operationId: "create-binding-operation",
+      requestedName: "Bound",
+      membershipVerifiedAt: Date.now(),
+      leaseToken: "create-binding-lease",
+    };
+    await t.mutation(internal.keySettings.beginCreateVerified, scope);
+    await t.mutation(internal.keySettings.completeCreateVerified, {
+      clerkOrgId: scope.clerkOrgId,
+      userId: scope.userId,
+      operationId: scope.operationId,
+      leaseToken: scope.leaseToken,
+      keyId: KEY_A,
+    });
+    await expect(
+      t.mutation(internal.keySettings.completeCreateVerified, {
+        clerkOrgId: scope.clerkOrgId,
+        userId: scope.userId,
+        operationId: scope.operationId,
+        leaseToken: scope.leaseToken,
+        keyId: KEY_B,
+      }),
+    ).rejects.toThrow("binding does not match");
+    await expect(
+      t.mutation(internal.keySettings.beginCreateVerified, {
+        ...scope,
+        requestedName: "Different",
+      }),
+    ).rejects.toThrow("binding does not match");
+  });
+
+  it("derives rotation grace and rejects forged completion bindings", async () => {
+    const t = convexTest(schema, modules);
+    await seedWorld(t);
+    await register(t);
+    await t.mutation(internal.keySettings.setCapVerified, {
+      clerkOrgId: "org_acme",
+      userId: "user_owner",
+      keyId: KEY_A,
+      monthlyCapCredits: 42,
+    });
+    const scope = {
+      clerkOrgId: "org_acme",
+      userId: "user_owner",
+      operationId: "rotation-binding-operation",
+      oldKeyId: KEY_A,
+      requestedName: "Replacement",
+      membershipVerifiedAt: Date.now(),
+      leaseToken: "rotation-binding-lease",
+    };
+    await t.mutation(internal.keySettings.beginRotationVerified, scope);
+    await expect(
+      t.mutation(internal.keySettings.completeRotationVerified, {
+        clerkOrgId: scope.clerkOrgId,
+        userId: scope.userId,
+        operationId: scope.operationId,
+        oldKeyId: KEY_A,
+        newKeyId: KEY_A,
+        leaseToken: scope.leaseToken,
+      }),
+    ).rejects.toThrow("must differ");
+    const before = Date.now();
+    const completed = await t.mutation(
+      internal.keySettings.completeRotationVerified,
+      {
+        clerkOrgId: scope.clerkOrgId,
+        userId: scope.userId,
+        operationId: scope.operationId,
+        oldKeyId: KEY_A,
+        newKeyId: KEY_B,
+        leaseToken: scope.leaseToken,
+      },
+    );
+    expect(completed?.graceUntil).toBeGreaterThanOrEqual(
+      before + 24 * 60 * 60_000,
+    );
+    await expect(
+      t.mutation(internal.keySettings.completeRotationVerified, {
+        clerkOrgId: scope.clerkOrgId,
+        userId: scope.userId,
+        operationId: scope.operationId,
+        oldKeyId: KEY_A,
+        newKeyId: "key_forged_CCCC",
+        leaseToken: scope.leaseToken,
+      }),
+    ).rejects.toThrow("binding does not match");
+    const rows = await asUser(t).query(api.keySettings.getForOrg, {});
+    expect(rows.every((row) => row.familyId === KEY_A)).toBe(true);
+    expect(rows.every((row) => row.monthlyCapCredits === 42)).toBe(true);
   });
 });
 
@@ -239,5 +345,37 @@ describe("wallet gateway projection", () => {
     expect(new Set(view.keySettings.map((row) => row.keyId))).toEqual(
       new Set([KEY_A, KEY_B]),
     );
+  });
+
+  it("projects legacy-unmanaged and retiring-org keys disabled", async () => {
+    const t = convexTest(schema, modules);
+    const orgId = await seedWorld(t);
+    await register(t, KEY_A);
+    await t.run(async (ctx) => {
+      await ctx.db.insert("keySettings", {
+        clerkOrgId: "org_acme",
+        ownerUserId: "user_owner",
+        keyId: "key_legacy_unknown",
+        disabled: false,
+        updatedAt: Date.now(),
+      });
+    });
+    const initial = await t.query(internal.wallets.getGatewayWallet, {
+      clerkOrgId: "org_acme",
+    });
+    expect(
+      initial.keySettings.find((row) => row.keyId === "key_legacy_unknown"),
+    ).toMatchObject({ disabled: true });
+    expect(
+      initial.keySettings.find((row) => row.keyId === KEY_A),
+    ).toMatchObject({ disabled: false });
+
+    await t.run(async (ctx) => {
+      await ctx.db.patch(orgId, { retiringAt: Date.now() });
+    });
+    const retired = await t.query(internal.wallets.getGatewayWallet, {
+      clerkOrgId: "org_acme",
+    });
+    expect(retired.keySettings.every((row) => row.disabled)).toBe(true);
   });
 });

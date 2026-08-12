@@ -1,7 +1,7 @@
 /// <reference types="vite/client" />
 import { convexTest } from "convex-test";
 import { describe, expect, it } from "vitest";
-import { api } from "./_generated/api";
+import { api, internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import schema from "./schema";
 
@@ -326,12 +326,53 @@ describe("project lifecycle authorization", () => {
   it("lets admins delete project-owned mutable state", async () => {
     const t = convexTest(schema, modules);
     const seed = await seedWorld(t);
+    await t.run(async (ctx) => {
+      for (let index = 0; index < 120; index += 1) {
+        await ctx.db.insert("specVersions", {
+          projectId: seed.projectId,
+          version: `2.0.${index}`,
+          spec: '{"openapi":"3.1.0"}',
+          publishedAt: index + 2,
+        });
+      }
+    });
 
     expect(
       await asAdmin(t).mutation(api.projects.remove, {
         projectId: seed.projectId,
       }),
-    ).toEqual({ deleted: seed.projectId });
+    ).toEqual({ retiring: seed.projectId });
+
+    const tombstone = await t.run(async (ctx) => ({
+      project: await ctx.db.get(seed.projectId),
+      endpoint: await ctx.db.get(seed.endpointId),
+    }));
+    expect(tombstone.project?.retiringAt).toEqual(expect.any(Number));
+    expect(tombstone.endpoint).toMatchObject({ active: false });
+    const jobId = await t.run(async (ctx) => {
+      const job = await ctx.db
+        .query("retirementJobs")
+        .withIndex("by_resource", (q) =>
+          q.eq("resourceKey", `project:${seed.projectId}`),
+        )
+        .unique();
+      if (job === null) throw new Error("Missing retirement job");
+      return job._id;
+    });
+    await t.mutation(internal.retirementJobs.step, { jobId });
+    const bounded = await t.run(async (ctx) => ({
+      project: await ctx.db.get(seed.projectId),
+      versions: await ctx.db
+        .query("specVersions")
+        .withIndex("by_project", (q) => q.eq("projectId", seed.projectId))
+        .collect(),
+    }));
+    expect(bounded.project).not.toBeNull();
+    expect(bounded.versions).toHaveLength(71);
+
+    for (let step = 0; step < 20; step += 1) {
+      await t.mutation(internal.retirementJobs.step, { jobId });
+    }
 
     const state = await t.run(async (ctx) => ({
       project: await ctx.db.get(seed.projectId),
@@ -342,8 +383,9 @@ describe("project lifecycle authorization", () => {
       embedding: await ctx.db.get(seed.embeddingId),
       endpoint: await ctx.db.get(seed.endpointId),
       delivery: await ctx.db.get(seed.deliveryId),
+      job: await ctx.db.get(jobId),
     }));
-    expect(state).toEqual({
+    expect(state).toMatchObject({
       project: null,
       spec: null,
       version: null,
@@ -352,6 +394,7 @@ describe("project lifecycle authorization", () => {
       embedding: null,
       endpoint: null,
       delivery: null,
+      job: { status: "completed" },
     });
   });
 });

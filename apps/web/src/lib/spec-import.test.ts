@@ -29,8 +29,9 @@ function runtimeFixture() {
       headers: { "content-type": "application/json" },
     }),
   );
+  const renew = vi.fn(async () => undefined);
   const release = vi.fn(async () => undefined);
-  const acquirePermit = vi.fn(async () => release);
+  const acquirePermit = vi.fn(async () => ({ renew, release }));
   const runtime: SpecImportRuntime = {
     authenticate,
     resolveHostname,
@@ -43,6 +44,7 @@ function runtimeFixture() {
     resolveHostname,
     fetch,
     acquirePermit,
+    renew,
     release,
   };
 }

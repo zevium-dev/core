@@ -34,6 +34,7 @@ import type * as projects from "../projects.js";
 import type * as publishReadiness from "../publishReadiness.js";
 import type * as publishReadinessAction from "../publishReadinessAction.js";
 import type * as registrySync from "../registrySync.js";
+import type * as retirementJobs from "../retirementJobs.js";
 import type * as search from "../search.js";
 import type * as specImportLimits from "../specImportLimits.js";
 import type * as specs from "../specs.js";
@@ -77,6 +78,7 @@ declare const fullApi: ApiFromModules<{
   publishReadiness: typeof publishReadiness;
   publishReadinessAction: typeof publishReadinessAction;
   registrySync: typeof registrySync;
+  retirementJobs: typeof retirementJobs;
   search: typeof search;
   specImportLimits: typeof specImportLimits;
   specs: typeof specs;

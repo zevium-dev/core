@@ -1,13 +1,13 @@
 /**
  * Pure mapping from a webhook delivery row to its badge presentation.
  *
- * Webhook delivery status is one of "ok" | "failed" | "pending" (see
+ * Webhook delivery status is one of "ok" | "failed" | "pending" | "delivering" (see
  * `convex/schema.ts`). We never reach for raw Tailwind colors — each status
  * layers semantic-token utilities (`success` / `warning` / `destructive`)
  * onto a stock outline Badge, so dark+light stay first-class.
  */
 
-export type WebhookDeliveryStatus = "ok" | "failed" | "pending";
+export type WebhookDeliveryStatus = "ok" | "failed" | "pending" | "delivering";
 
 export type DeliveryStatusView = {
   /** Label shown to users. */
@@ -36,6 +36,12 @@ const VIEWS: Record<WebhookDeliveryStatus, DeliveryStatusView> = {
   },
   pending: {
     label: "Pending",
+    badgeVariant: "outline",
+    className: "border-warning/40 bg-warning/10 text-warning-foreground",
+    dotClassName: "bg-warning",
+  },
+  delivering: {
+    label: "Delivering",
     badgeVariant: "outline",
     className: "border-warning/40 bg-warning/10 text-warning-foreground",
     dotClassName: "bg-warning",

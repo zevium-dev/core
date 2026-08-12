@@ -6,18 +6,14 @@ export type PostWebhookParams = {
   event: string;
   data: unknown;
   timestamp: number;
-  deliveryId?: string;
-  currentStatus?: DeliveryStatus;
+  deliveryId: string;
 };
-
-export type DeliveryStatus = "pending" | "ok" | "failed";
 
 export type PostWebhookResult = {
   ok: boolean;
   status: number;
   error?: string;
   retryable: boolean;
-  skipped?: boolean;
 };
 
 export type WebhookTransportInput = {
@@ -42,10 +38,6 @@ export class WebhookTransportError extends Error {
 }
 
 const RETRYABLE_4XX: Readonly<Record<number, true>> = { 408: true, 429: true };
-const TERMINAL_STATUSES: Partial<Record<DeliveryStatus, true>> = {
-  ok: true,
-  failed: true,
-};
 const TRANSPORT_ERROR_LABEL = "Delivery failed";
 
 function parseIpv4(address: string): number | null {
@@ -231,16 +223,8 @@ export async function postWebhook(
   params: PostWebhookParams,
   transport: WebhookTransport,
 ): Promise<PostWebhookResult> {
-  if (params.currentStatus && TERMINAL_STATUSES[params.currentStatus]) {
-    return {
-      ok: params.currentStatus === "ok",
-      status: 0,
-      retryable: false,
-      skipped: true,
-    };
-  }
-
   const body = JSON.stringify({
+    id: params.deliveryId,
     event: params.event,
     data: params.data,
     timestamp: params.timestamp,
@@ -251,9 +235,7 @@ export async function postWebhook(
     "x-zevium-event": params.event,
     "x-zevium-signature": signature,
   };
-  if (params.deliveryId !== undefined) {
-    headers["X-Zevium-Delivery-Id"] = params.deliveryId;
-  }
+  headers["X-Zevium-Delivery-Id"] = params.deliveryId;
 
   try {
     const response = await transport({

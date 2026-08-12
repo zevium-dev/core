@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { convertSpecInputToJson, looksLikeYaml } from "./spec-yaml";
+import {
+  convertSpecInputToJson,
+  looksLikeYaml,
+  MAX_YAML_ALIASES,
+} from "./spec-yaml";
 
 describe("looksLikeYaml", () => {
   it("detects yaml-ish paste", () => {
@@ -58,5 +62,37 @@ paths: {}
       json: "",
       convertedFromYaml: false,
     });
+  });
+
+  it("rejects alias bombs before post-expansion serialization", () => {
+    const aliases = Array.from(
+      { length: MAX_YAML_ALIASES + 1 },
+      (_, index) => `  item${index}: *seed`,
+    ).join("\n");
+    const result = convertSpecInputToJson(`seed: &seed
+  value: ${"x".repeat(1_000)}
+expanded:
+${aliases}`);
+    expect(result).toMatchObject({ ok: false });
+    if (!result.ok) expect(result.error).toMatch(/alias|complexity/i);
+  });
+
+  it("rejects exponential expansion even below alias-count ceiling", () => {
+    const result = convertSpecInputToJson(`a: &a [x, x, x, x, x, x, x, x, x, x]
+b: &b [*a, *a, *a, *a, *a, *a, *a, *a, *a, *a]
+c: &c [*b, *b, *b, *b, *b, *b, *b, *b, *b, *b]
+d: [*c, *c, *c, *c, *c, *c, *c, *c, *c, *c]`);
+    expect(result).toMatchObject({ ok: false });
+    if (!result.ok) expect(result.error).toMatch(/alias|complexity|size/i);
+  });
+
+  it("rejects post-expansion output beyond transport cap", () => {
+    const chunk = "x".repeat(220_000);
+    const aliases = Array.from({ length: 10 }, () => "  - *seed").join("\n");
+    const result = convertSpecInputToJson(`seed: &seed ${chunk}
+expanded:
+${aliases}`);
+    expect(result).toMatchObject({ ok: false });
+    if (!result.ok) expect(result.error).toMatch(/size/i);
   });
 });

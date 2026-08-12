@@ -23,9 +23,17 @@ type ClerkOrgEventData = {
   slug: string;
   image_url?: string | null;
 };
+type ClerkMembershipEventData = {
+  organization: { id: string };
+  public_user_data: { user_id: string };
+};
 type ClerkWebhookEvent = {
   type: string;
-  data: ClerkUserEventData | ClerkOrgEventData | Record<string, unknown>;
+  data:
+    | ClerkUserEventData
+    | ClerkOrgEventData
+    | ClerkMembershipEventData
+    | Record<string, unknown>;
 };
 
 http.route({
@@ -103,6 +111,34 @@ http.route({
           clerkUserId: (event.data as ClerkUserEventData).id,
         });
         break;
+      case "organizationMembership.deleted": {
+        const data = event.data as ClerkMembershipEventData;
+        if (
+          typeof data.organization?.id !== "string" ||
+          typeof data.public_user_data?.user_id !== "string"
+        ) {
+          return new Response("Invalid membership event", { status: 400 });
+        }
+        const revoked = await ctx.runMutation(
+          internal.keySettings.revokeMembershipVerified,
+          {
+            clerkOrgId: data.organization.id,
+            userId: data.public_user_data.user_id,
+            svixId,
+          },
+        );
+        if (!revoked.duplicate) {
+          await ctx.scheduler.runAfter(
+            0,
+            internal.keyBroker.revokeMembershipKeys,
+            {
+              clerkOrgId: data.organization.id,
+              userId: data.public_user_data.user_id,
+            },
+          );
+        }
+        break;
+      }
       default:
         break;
     }

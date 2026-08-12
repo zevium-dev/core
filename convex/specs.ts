@@ -14,7 +14,11 @@ import {
   decryptCredential,
   requireEncryptedCredential,
 } from "./lib/credentialCrypto";
-import { draftFingerprint, readinessValidity } from "./publishReadiness";
+import {
+  credentialSetFingerprint,
+  draftFingerprint,
+  readinessValidity,
+} from "./publishReadiness";
 import { enqueueRouteUpsert } from "./registrySync";
 import {
   isValidSemver,
@@ -162,6 +166,8 @@ export const publish = mutation({
       (latest, row) => Math.max(latest, row.updatedAt),
       0,
     );
+    const credentialFingerprint =
+      await credentialSetFingerprint(credentialRows);
     const readiness = await ctx.db
       .query("publishReadiness")
       .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
@@ -170,6 +176,7 @@ export const publish = mutation({
       readiness,
       draftForReadiness?.draft ?? null,
       credentialRevision,
+      credentialFingerprint,
     );
     if (!readinessState.current) {
       const readinessMessages = {
@@ -360,7 +367,7 @@ export const getPublishedForGateway = query({
     deprecationMessage: string | undefined;
   } | null> => {
     const org = await getOrgByPublicHandle(ctx, args.publisherHandle);
-    if (org === null) return null;
+    if (org === null || org.retiringAt !== undefined) return null;
 
     const project = await ctx.db
       .query("projects")
@@ -426,7 +433,13 @@ export const getPublishedForGatewayInternal = internalQuery({
         q.eq("organizationId", org._id).eq("slug", args.projectSlug),
       )
       .unique();
-    if (project === null || project.status !== "published") return null;
+    if (
+      project === null ||
+      project.status !== "published" ||
+      project.retiringAt !== undefined
+    ) {
+      return null;
+    }
 
     const latest = await ctx.db
       .query("specVersions")

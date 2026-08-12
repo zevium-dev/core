@@ -1,5 +1,6 @@
 /// <reference types="vite/client" />
 import { convexTest } from "convex-test";
+import { createHmac } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api, internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
@@ -114,6 +115,7 @@ describe("postWebhook — injectable transport", () => {
         event: "spec.published",
         data: { projectId: "p1", version: "1.0.0" },
         timestamp: 123,
+        deliveryId: "delivery_123",
       },
       transport,
     );
@@ -126,16 +128,19 @@ describe("postWebhook — injectable transport", () => {
     expect(headers["x-zevium-event"]).toBe("spec.published");
     expect(headers["x-zevium-signature"]).toMatch(/^[0-9a-f]{64}$/);
     expect(headers["Content-Type"]).toBe("application/json");
+    expect(headers["X-Zevium-Delivery-Id"]).toBe("delivery_123");
 
     const body = JSON.parse(input.body);
     expect(body).toEqual({
+      id: "delivery_123",
       event: "spec.published",
       data: { projectId: "p1", version: "1.0.0" },
       timestamp: 123,
     });
 
-    // Signature matches independent computation over the body
-    const expectedSig = await computeSignature("s3cr3t", input.body);
+    const expectedSig = createHmac("sha256", "s3cr3t")
+      .update(input.body)
+      .digest("hex");
     expect(headers["x-zevium-signature"]).toBe(expectedSig);
   });
 
@@ -149,6 +154,7 @@ describe("postWebhook — injectable transport", () => {
         event: "x",
         data: {},
         timestamp: 0,
+        deliveryId: "delivery_500",
       },
       transport,
     );
@@ -170,6 +176,7 @@ describe("postWebhook — injectable transport", () => {
         event: "x",
         data: {},
         timestamp: 0,
+        deliveryId: "delivery_network",
       },
       transport,
     );
@@ -476,7 +483,7 @@ describe("webhooks.revealSecret", () => {
     expect(await t.run(async (ctx) => ctx.db.get(created.id))).toEqual(before);
   });
 
-  it("maps legacy, missing-key, and corrupt-ciphertext failures safely", async () => {
+  it("keeps plaintext-only rollout rows readable and maps crypto failures safely", async () => {
     const legacyTest = convexTest(schema, modules);
     const legacySeed = await seedWorld(legacyTest);
     await legacyTest.run(async (ctx) => {
@@ -492,7 +499,7 @@ describe("webhooks.revealSecret", () => {
       asPublisher(legacyTest).mutation(api.webhooks.revealSecret, {
         projectId: legacySeed.projectId,
       }),
-    ).rejects.toThrow("Signing secret is unavailable");
+    ).resolves.toEqual({ secret: "plaintext-must-not-leak" });
 
     const missingKeyTest = convexTest(schema, modules);
     const missingKeySeed = await seedWorld(missingKeyTest);
@@ -673,6 +680,18 @@ describe("webhooks.deleteEndpoint", () => {
         payload: "{}",
       }),
     );
+    await t.run(async (ctx) => {
+      for (let index = 0; index < 120; index += 1) {
+        await ctx.db.insert("webhookDeliveries", {
+          endpointId: created.id,
+          event: "spec.published",
+          status: "pending",
+          attempts: 0,
+          createdAt: index + 2,
+          payload: "{}",
+        });
+      }
+    });
 
     const result = await as.mutation(api.webhooks.deleteEndpoint, {
       projectId: seed.projectId,
@@ -683,7 +702,36 @@ describe("webhooks.deleteEndpoint", () => {
       projectId: seed.projectId,
     });
     expect(ep).toBeNull();
-    expect(await t.run(async (ctx) => ctx.db.get(deliveryId))).toBeNull();
+    const jobId = await t.run(async (ctx) => {
+      const job = await ctx.db
+        .query("retirementJobs")
+        .withIndex("by_resource", (q) =>
+          q.eq("resourceKey", `webhook:${created.id}`),
+        )
+        .unique();
+      if (job === null) throw new Error("Missing retirement job");
+      return job._id;
+    });
+    await t.mutation(internal.retirementJobs.step, { jobId });
+    const bounded = await t.run(async (ctx) =>
+      ctx.db
+        .query("webhookDeliveries")
+        .withIndex("by_endpoint", (q) => q.eq("endpointId", created.id))
+        .collect(),
+    );
+    expect(bounded).toHaveLength(71);
+    expect(await t.run(async (ctx) => ctx.db.get(created.id))).not.toBeNull();
+    for (let step = 0; step < 4; step += 1) {
+      await t.mutation(internal.retirementJobs.step, { jobId });
+    }
+    const retired = await t.run(async (ctx) => ({
+      endpoint: await ctx.db.get(created.id),
+      delivery: await ctx.db.get(deliveryId),
+      job: await ctx.db.get(jobId),
+    }));
+    expect(retired.endpoint).toBeNull();
+    expect(retired.delivery).toBeNull();
+    expect(retired.job).toMatchObject({ status: "completed" });
   });
 
   it("rejects same-org members without deleting endpoint", async () => {
@@ -791,14 +839,21 @@ describe("recordDeliveryAttempt — state machine", () => {
     });
 
     await t.run(async (ctx) => {
+      const leaseToken = "webhook-success-lease";
+      await ctx.runMutation(internal.webhooks.claimDelivery, {
+        deliveryId,
+        leaseToken,
+      });
       await ctx.runMutation(internal.webhooks.recordDeliveryAttempt, {
         deliveryId,
         ok: true,
+        leaseToken,
       });
       await ctx.runMutation(internal.webhooks.recordDeliveryAttempt, {
         deliveryId,
         ok: false,
         error: "late duplicate",
+        leaseToken,
       });
     });
 
@@ -854,10 +909,16 @@ describe("recordDeliveryAttempt — state machine", () => {
     });
 
     await t.run(async (ctx) => {
+      const leaseToken = "webhook-failure-lease";
+      await ctx.runMutation(internal.webhooks.claimDelivery, {
+        deliveryId,
+        leaseToken,
+      });
       await ctx.runMutation(internal.webhooks.recordDeliveryAttempt, {
         deliveryId,
         ok: false,
         error: "Connection refused",
+        leaseToken,
       });
     });
 
@@ -917,17 +978,32 @@ describe("recordDeliveryAttempt — state machine", () => {
           timestamp: Date.now(),
         }),
       });
-      // Delete endpoint so scheduled retry finds no endpoint → no cascade
-      await ctx.db.delete(endpointId);
       return { deliveryId, endpointId };
     });
 
     await t.run(async (ctx) => {
+      const leaseToken = "webhook-retry-lease";
+      await ctx.runMutation(internal.webhooks.claimDelivery, {
+        deliveryId,
+        leaseToken,
+      });
+      // Delete endpoint so scheduled retry finds no endpoint → no cascade.
+      await ctx.db.delete(endpointId);
       await ctx.runMutation(internal.webhooks.recordDeliveryAttempt, {
         deliveryId,
         ok: false,
         error: "timeout",
+        leaseToken,
       });
+      const staleRecovery = await ctx.runMutation(
+        internal.webhooks.claimDelivery,
+        {
+          deliveryId,
+          leaseToken: "webhook-new-recovery-lease",
+          expectedExpiredLeaseToken: leaseToken,
+        },
+      );
+      expect(staleRecovery).toBeNull();
       // Verify state BEFORE scheduled action runs
       const delivery = await ctx.db.get(deliveryId);
       expect(delivery?.attempts).toBe(1);
@@ -994,19 +1070,14 @@ describe("deliverWebhook — action integration", () => {
     const pendingId = await seedDelivery(t);
     pinnedTransportMock.mockResolvedValue({ status: 200 });
 
-    const queryResult = await t.query(internal.webhooks.getDeliveryForAction, {
-      deliveryId: pendingId,
-    });
-    expect(queryResult).not.toHaveProperty("secret");
-    expect(JSON.stringify(queryResult)).not.toContain(
-      "delivery-plaintext-never-returned",
-    );
-
     await t.action(internal.webhookDeliveryAction.deliverWebhook, {
       deliveryId: pendingId,
     });
 
     expect(pinnedTransportMock).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(pinnedTransportMock.mock.calls[0])).not.toContain(
+      "delivery-plaintext-never-returned",
+    );
     const headers = pinnedTransportMock.mock.calls[0]![0].headers;
     expect(headers["X-Zevium-Delivery-Id"]).toBe(pendingId);
 
@@ -1014,6 +1085,44 @@ describe("deliverWebhook — action integration", () => {
       deliveryId: pendingId,
     });
     expect(pinnedTransportMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("fences concurrent action claims before either external POST completes", async () => {
+    const t = convexTest(schema, modules);
+    const deliveryId = await seedDelivery(t);
+    let releaseTransport: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => {
+      releaseTransport = resolve;
+    });
+    pinnedTransportMock.mockImplementation(async () => {
+      await gate;
+      return { status: 204 };
+    });
+
+    const first = t.action(internal.webhookDeliveryAction.deliverWebhook, {
+      deliveryId,
+    });
+    const second = t.action(internal.webhookDeliveryAction.deliverWebhook, {
+      deliveryId,
+    });
+    await vi.waitFor(() => expect(pinnedTransportMock).toHaveBeenCalledOnce());
+    releaseTransport?.();
+    await Promise.all([first, second]);
+
+    expect(pinnedTransportMock).toHaveBeenCalledOnce();
+    const posted = pinnedTransportMock.mock.calls[0]![0];
+    const body = JSON.parse(posted.body) as {
+      id: string;
+      timestamp: number;
+    };
+    expect(body.id).toBe(deliveryId);
+    expect(posted.headers["X-Zevium-Delivery-Id"]).toBe(deliveryId);
+    expect(Math.abs(Date.now() - body.timestamp)).toBeLessThan(5_000);
+    expect(posted.headers["x-zevium-signature"]).toBe(
+      createHmac("sha256", "delivery-plaintext-never-returned")
+        .update(posted.body)
+        .digest("hex"),
+    );
   });
 
   it("fails closed without decryption keys and never reaches transport", async () => {

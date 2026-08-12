@@ -95,6 +95,9 @@ export async function requireOrgMemberBySlug(
   if (org.clerkOrgId !== claims.orgId) {
     throw new Error("Not a member of this organization");
   }
+  if (org.retiringAt !== undefined) {
+    throw new Error("Organization is being deleted");
+  }
 
   return { claims, org };
 }
@@ -127,6 +130,9 @@ export async function requireProjectMember(
   if (org.clerkOrgId !== claims.orgId) {
     throw new Error("Not a member of this organization");
   }
+  if (org.retiringAt !== undefined || project.retiringAt !== undefined) {
+    throw new Error("Project is being deleted");
+  }
 
   return { claims, org, project };
 }
@@ -149,6 +155,9 @@ export async function requireOrgAdminBySlug(
   if (org === null || org.clerkOrgId !== claims.orgId) {
     throw new Error("Organization not found");
   }
+  if (org.retiringAt !== undefined) {
+    throw new Error("Organization is being deleted");
+  }
   requireOrgAdmin(claims);
 
   return { claims, org };
@@ -161,6 +170,7 @@ export async function requireOrgAdminBySlug(
 export async function requireProjectAdmin(
   ctx: DbCtx,
   projectId: Id<"projects">,
+  options?: { allowRetiring?: boolean },
 ): Promise<{
   claims: OrgIdentityClaims;
   org: Doc<"organizations">;
@@ -178,6 +188,12 @@ export async function requireProjectAdmin(
   const org = await ctx.db.get(project.organizationId);
   if (org === null || org.clerkOrgId !== claims.orgId) {
     throw new Error("Project not found");
+  }
+  if (
+    org.retiringAt !== undefined ||
+    (project.retiringAt !== undefined && options?.allowRetiring !== true)
+  ) {
+    throw new Error("Project is being deleted");
   }
   requireOrgAdmin(claims);
 
@@ -209,6 +225,9 @@ export async function requireSpecVersionAdmin(
   }
   const org = await ctx.db.get(project.organizationId);
   if (org === null || org.clerkOrgId !== claims.orgId) {
+    throw new Error("Version not found");
+  }
+  if (org.retiringAt !== undefined || project.retiringAt !== undefined) {
     throw new Error("Version not found");
   }
   requireOrgAdmin(claims);

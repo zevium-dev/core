@@ -1,9 +1,8 @@
-import { auth, clerkClient } from "@clerk/tanstack-react-start/server";
+import { auth } from "@clerk/tanstack-react-start/server";
 import { createServerFn } from "@tanstack/react-start";
 import { ConvexHttpClient } from "convex/browser";
 
 import { api } from "#/lib/convex-api";
-import { revokeWithLocalPreflight } from "./api-key-lifecycle";
 
 export type ApiKeyRow = {
   id: string;
@@ -22,17 +21,9 @@ export type CreateApiKeyResult = {
   createdAt: number;
 };
 
-export type RotateApiKeyResult = {
-  id: string;
-  name: string;
-  secret: string;
-  createdAt: number;
-  /** Old key keeps working until this ms epoch. Recorded in Convex by caller. */
+export type RotateApiKeyResult = CreateApiKeyResult & {
   graceUntil: number;
 };
-
-/** Rotation grace window: the old key stays valid at the gateway for 24h. */
-export const ROTATION_GRACE_MS = 24 * 60 * 60 * 1000;
 
 function requireUserId(userId: string | null | undefined): string {
   if (typeof userId !== "string" || userId.length === 0) {
@@ -41,40 +32,16 @@ function requireUserId(userId: string | null | undefined): string {
   return userId;
 }
 
+function requireOrganizationId(orgId: string | null | undefined): string {
+  if (typeof orgId !== "string" || orgId.length === 0) {
+    throw new Error("Select an organization before managing API keys");
+  }
+  return orgId;
+}
+
 function maskKeyId(id: string): string {
   if (id.length <= 8) return "••••••••";
   return `••••${id.slice(-4)}`;
-}
-
-function toRow(key: {
-  id: string;
-  name: string;
-  createdAt: number;
-  lastUsedAt: number | null;
-  revoked: boolean;
-}): ApiKeyRow {
-  return {
-    id: key.id,
-    name: key.name,
-    masked: maskKeyId(key.id),
-    createdAt: key.createdAt,
-    lastUsedAt: key.lastUsedAt,
-    revoked: key.revoked,
-  };
-}
-
-function keyBelongsToOrganization(
-  key: { claims?: unknown },
-  orgId: string,
-): boolean {
-  const claims = key.claims;
-  return (
-    claims !== null &&
-    typeof claims === "object" &&
-    "org_id" in claims &&
-    typeof claims.org_id === "string" &&
-    claims.org_id === orgId
-  );
 }
 
 async function authenticatedConvex(session: {
@@ -92,58 +59,34 @@ async function authenticatedConvex(session: {
   return convex;
 }
 
-/** List non-revoked API keys for signed-in user in active org. */
+/** Provider access lives behind Convex so one fenced saga owns every write. */
 export const listKeys = createServerFn({ method: "GET" }).handler(
   async (): Promise<ApiKeyRow[]> => {
     const session = await auth();
-    const userId = requireUserId(session.userId);
-    const orgId = session.orgId;
-    if (typeof orgId !== "string" || orgId.length === 0) {
-      throw new Error("Select an organization before managing API keys");
-    }
-    const client = await clerkClient();
+    requireUserId(session.userId);
+    requireOrganizationId(session.orgId);
     const convex = await authenticatedConvex(session);
-    const page = await client.apiKeys.list({
-      subject: userId,
-      includeInvalid: false,
-      limit: 100,
-    });
-    const owned = page.data
-      .filter((k) => !k.revoked && !k.expired)
-      .filter((k) => {
-        const claims = k.claims;
-        if (!claims || typeof claims !== "object") return false;
-        return (
-          "org_id" in claims &&
-          typeof claims.org_id === "string" &&
-          claims.org_id === orgId
-        );
-      });
-    // Clerk-backed action verifies ownership + fresh membership before making
-    // the row visible. Sibling key ids never enter this member's query result.
-    await Promise.all(
-      owned.map((key) =>
-        convex.action(api.keyBroker.registerOwnedKey, { keyId: key.id }),
-      ),
-    );
-    return owned.map((key) => toRow(key));
+    const keys = await convex.action(api.keyBroker.listOwnedKeys, {});
+    return keys
+      .filter((key) => !key.revoked && !key.expired)
+      .map((key) => ({
+        id: key.id,
+        name: key.name,
+        masked: maskKeyId(key.id),
+        createdAt: key.createdAt,
+        lastUsedAt: key.lastUsedAt,
+        revoked: key.revoked,
+      }));
   },
 );
 
-/** Create one key for the current user. Secret returned once. Enforces one-key rule. */
 export const createKey = createServerFn({ method: "POST" })
   .validator((input: unknown) => {
     if (input === null || typeof input !== "object" || !("name" in input)) {
       throw new Error("Name is required");
     }
-    const raw = input.name;
-    if (typeof raw !== "string") {
-      throw new Error("Name is required");
-    }
-    const name = raw.trim();
-    if (name.length === 0) {
-      throw new Error("Name is required");
-    }
+    const name = typeof input.name === "string" ? input.name.trim() : "";
+    if (name.length === 0) throw new Error("Name is required");
     if (name.length > 64) {
       throw new Error("Name must be 64 characters or fewer");
     }
@@ -158,165 +101,36 @@ export const createKey = createServerFn({ method: "POST" })
   })
   .handler(async ({ data }): Promise<CreateApiKeyResult> => {
     const session = await auth();
-    const userId = requireUserId(session.userId);
-    const orgId = session.orgId;
-    if (typeof orgId !== "string" || orgId.length === 0) {
-      throw new Error("Select an organization before creating an API key");
-    }
-    const client = await clerkClient();
+    requireUserId(session.userId);
+    requireOrganizationId(session.orgId);
     const convex = await authenticatedConvex(session);
-
-    const existing = await client.apiKeys.list({
-      subject: userId,
-      includeInvalid: false,
-      limit: 100,
-    });
-    const active = existing.data.some((k) => {
-      if (k.revoked || k.expired) return false;
-      const claims = k.claims;
-      if (!claims || typeof claims !== "object") return false;
-      return (
-        "org_id" in claims &&
-        typeof claims.org_id === "string" &&
-        claims.org_id === orgId
-      );
-    });
-    if (active) {
-      throw new Error(
-        "Only one API key per organization. Revoke the existing key first.",
-      );
-    }
-
-    const operation = await convex.action(api.keyBroker.beginCreate, {
-      operationId: data.operationId,
-    });
-    if (operation?.status === "completed") {
-      throw new Error(
-        "This key was already created. Its one-time secret cannot be shown again.",
-      );
-    }
-    if (operation?.status === "failed") {
-      throw new Error("This creation attempt expired. Start a new one.");
-    }
-
-    let created;
-    try {
-      created = await client.apiKeys.create({
-        name: data.name,
-        subject: userId,
-        createdBy: userId,
-        claims: { org_id: orgId },
-      });
-    } catch (error) {
-      await convex.action(api.keyBroker.failCreate, {
-        operationId: data.operationId,
-        message: "Clerk key creation failed",
-      });
-      throw error;
-    }
-
-    const secret = created.secret;
-    if (typeof secret !== "string" || secret.length === 0) {
-      await client.apiKeys.revoke({
-        apiKeyId: created.id,
-        revocationReason: "Creation secret was not returned",
-      });
-      await convex.action(api.keyBroker.failCreate, {
-        operationId: data.operationId,
-        message: "Clerk key secret missing",
-      });
-      throw new Error("Key created but secret missing. Contact support.");
-    }
-
-    try {
-      await convex.action(api.keyBroker.completeCreate, {
-        operationId: data.operationId,
-        keyId: created.id,
-      });
-    } catch (error) {
-      await client.apiKeys.revoke({
-        apiKeyId: created.id,
-        revocationReason: "Local ownership registration failed",
-      });
-      await convex.action(api.keyBroker.failCreate, {
-        operationId: data.operationId,
-        message: "Local ownership registration failed",
-      });
-      throw error;
-    }
-
-    return {
-      id: created.id,
-      name: created.name,
-      secret,
-      createdAt: created.createdAt,
-    };
+    return await convex.action(api.keyBroker.createManagedKey, data);
   });
 
-/** Revoke a key owned by the current user. */
 export const revokeKey = createServerFn({ method: "POST" })
   .validator((input: unknown) => {
     if (input === null || typeof input !== "object" || !("id" in input)) {
       throw new Error("Key id is required");
     }
-    const raw = input.id;
-    if (typeof raw !== "string" || raw.trim().length === 0) {
-      throw new Error("Key id is required");
-    }
+    const id = typeof input.id === "string" ? input.id.trim() : "";
     const operationId =
       "operationId" in input && typeof input.operationId === "string"
         ? input.operationId.trim()
         : "";
+    if (id.length === 0) throw new Error("Key id is required");
     if (operationId.length < 8 || operationId.length > 128) {
       throw new Error("Revocation operation is invalid");
     }
-    return { id: raw.trim(), operationId };
+    return { keyId: id, operationId };
   })
   .handler(async ({ data }): Promise<{ id: string }> => {
     const session = await auth();
-    const userId = requireUserId(session.userId);
-    const orgId = session.orgId;
-    if (typeof orgId !== "string" || orgId.length === 0) {
-      throw new Error("Select an organization before revoking an API key");
-    }
-    const client = await clerkClient();
+    requireUserId(session.userId);
+    requireOrganizationId(session.orgId);
     const convex = await authenticatedConvex(session);
-
-    await revokeWithLocalPreflight({
-      loadOwnedKey: async () => {
-        const key = await client.apiKeys.get(data.id);
-        if (key.subject !== userId || !keyBelongsToOrganization(key, orgId)) {
-          throw new Error("Key unavailable");
-        }
-        return { revoked: key.revoked };
-      },
-      reserveLocalGate: async () =>
-        await convex.action(api.keyBroker.beginRevoke, {
-          keyId: data.id,
-          operationId: data.operationId,
-        }),
-      revokeExternal: async () => {
-        await client.apiKeys.revoke({
-          apiKeyId: data.id,
-          revocationReason: "Revoked by owner from settings",
-        });
-      },
-      completeLocal: async () => {
-        await convex.action(api.keyBroker.completeRevoke, {
-          operationId: data.operationId,
-        });
-      },
-      compensateLocal: async (message) => {
-        await convex.action(api.keyBroker.failRevoke, {
-          operationId: data.operationId,
-          message,
-        });
-      },
-    });
-    return { id: data.id };
+    return await convex.action(api.keyBroker.revokeManagedKey, data);
   });
 
-/** User-owned control broker; Convex action re-verifies Clerk ownership/membership. */
 export const setKeyCap = createServerFn({ method: "POST" })
   .validator((input: unknown) => {
     if (input === null || typeof input !== "object" || !("keyId" in input)) {
@@ -339,7 +153,7 @@ export const setKeyCap = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const session = await auth();
     requireUserId(session.userId);
-    if (!session.orgId) throw new Error("Select an organization first");
+    requireOrganizationId(session.orgId);
     const convex = await authenticatedConvex(session);
     return await convex.action(api.keyBroker.setCap, data);
   });
@@ -363,137 +177,38 @@ export const setKeyDisabled = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const session = await auth();
     requireUserId(session.userId);
-    if (!session.orgId) throw new Error("Select an organization first");
+    requireOrganizationId(session.orgId);
     const convex = await authenticatedConvex(session);
     return await convex.action(api.keyBroker.setDisabled, data);
   });
 
-/**
- * Rotate a key: create a replacement (same org claim; the one-key rule does not
- * apply to rotation), keep the old key live at the gateway for the grace
- * window. The secret is returned once. The caller records the rotation
- * (graceUntil on the old key, lineage on the new) in Convex.
- */
 export const rotateKey = createServerFn({ method: "POST" })
   .validator((input: unknown) => {
     if (input === null || typeof input !== "object" || !("id" in input)) {
       throw new Error("Key id is required");
     }
-    const id = input.id;
-    if (typeof id !== "string" || id.trim().length === 0) {
-      throw new Error("Key id is required");
-    }
+    const oldKeyId = typeof input.id === "string" ? input.id.trim() : "";
     const name =
       "name" in input && typeof input.name === "string"
         ? input.name.trim()
         : "";
-    if (name.length > 64) {
-      throw new Error("Name must be 64 characters or fewer");
-    }
     const operationId =
       "operationId" in input && typeof input.operationId === "string"
         ? input.operationId.trim()
         : "";
+    if (oldKeyId.length === 0) throw new Error("Key id is required");
+    if (name.length > 64) {
+      throw new Error("Name must be 64 characters or fewer");
+    }
     if (operationId.length < 8 || operationId.length > 128) {
       throw new Error("Rotation operation is invalid");
     }
-    return { id: id.trim(), name, operationId };
+    return { oldKeyId, name, operationId };
   })
   .handler(async ({ data }): Promise<RotateApiKeyResult> => {
     const session = await auth();
-    const userId = requireUserId(session.userId);
-    const orgId = session.orgId;
-    if (typeof orgId !== "string" || orgId.length === 0) {
-      throw new Error("Select an organization before rotating an API key");
-    }
-    const client = await clerkClient();
+    requireUserId(session.userId);
+    requireOrganizationId(session.orgId);
     const convex = await authenticatedConvex(session);
-    // Verify the old key belongs to this user.
-    const old = await client.apiKeys.get(data.id);
-    if (old.subject !== userId || !keyBelongsToOrganization(old, orgId)) {
-      throw new Error("Key not found");
-    }
-    if (old.revoked || old.expired) {
-      throw new Error("This key is no longer active");
-    }
-    const settings = await convex.query(api.keySettings.getForOrg, {});
-    if (
-      settings.some(
-        (setting) =>
-          setting.graceUntil !== undefined && setting.graceUntil > Date.now(),
-      )
-    ) {
-      throw new Error("Revoke the previous grace key before rotating again");
-    }
-
-    const operation = await convex.action(api.keyBroker.beginRotation, {
-      operationId: data.operationId,
-      oldKeyId: data.id,
-    });
-    if (!operation) {
-      throw new Error("Could not reserve this rotation. Try again.");
-    }
-    if (operation.status === "completed") {
-      throw new Error(
-        "This rotation already completed. The one-time secret cannot be shown again; revoke the previous key or create a new key.",
-      );
-    }
-    if (operation.status === "failed") {
-      throw new Error("This rotation previously failed. Start a new rotation.");
-    }
-    let created;
-    try {
-      created = await client.apiKeys.create({
-        name: data.name.length > 0 ? data.name : `${old.name} (rotated)`,
-        subject: userId,
-        createdBy: userId,
-        claims: { org_id: orgId },
-      });
-    } catch (error) {
-      await convex.action(api.keyBroker.failRotation, {
-        operationId: data.operationId,
-        message: "Clerk replacement creation failed",
-      });
-      throw error;
-    }
-
-    const secret = created.secret;
-    if (typeof secret !== "string" || secret.length === 0) {
-      await client.apiKeys.revoke({
-        apiKeyId: created.id,
-        revocationReason: "Rotation secret was not returned",
-      });
-      await convex.action(api.keyBroker.failRotation, {
-        operationId: data.operationId,
-        message: "Clerk replacement secret missing",
-      });
-      throw new Error("Key created but secret missing. Contact support.");
-    }
-
-    const graceUntil = Date.now() + ROTATION_GRACE_MS;
-    try {
-      await convex.action(api.keyBroker.completeRotation, {
-        operationId: data.operationId,
-        oldKeyId: old.id,
-        newKeyId: created.id,
-        graceUntil,
-      });
-      return {
-        id: created.id,
-        name: created.name,
-        secret,
-        createdAt: created.createdAt,
-        graceUntil,
-      };
-    } catch (error) {
-      await client.apiKeys.revoke({
-        apiKeyId: created.id,
-        revocationReason: "Rotation lineage recording failed",
-      });
-      await convex.action(api.keyBroker.failRotation, {
-        operationId: data.operationId,
-        message: "Lineage recording failed",
-      });
-      throw error;
-    }
+    return await convex.action(api.keyBroker.rotateManagedKey, data);
   });
