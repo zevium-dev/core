@@ -445,16 +445,13 @@ export function validateAuditBootstrap({ requireInstalled = false } = {}) {
       upper === "NODE_PATH" &&
       typeof value === "string" &&
       value.length > 0 &&
-      value
-        .split(path.delimiter)
-        .every((entry) => {
-          if (entry.length === 0) return false;
-          const resolved = path.resolve(entry);
-          return (
-            !entry.includes("\0") &&
-            /[/\\]mise[/\\]installs[/\\]/u.test(resolved)
-          );
-        });
+      value.split(path.delimiter).every((entry) => {
+        if (entry.length === 0) return false;
+        const resolved = path.resolve(entry);
+        return (
+          !entry.includes("\0") && /[/\\]mise[/\\]installs[/\\]/u.test(resolved)
+        );
+      });
     if (
       upper === "NODE_OPTIONS" ||
       (upper === "NODE_PATH" && !miseToolNodePath) ||
