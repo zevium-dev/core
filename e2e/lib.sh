@@ -8,10 +8,15 @@ E2E_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 E2E_BASE_URL="${E2E_BASE_URL:-http://localhost:3000}"
 E2E_ARTIFACTS="${E2E_ARTIFACTS:-$E2E_ROOT/artifacts}"
 E2E_EMAIL="${E2E_EMAIL:-test+clerk_test@zevium.dev}"
-E2E_PASSWORD="${E2E_PASSWORD:-zevium-test-password}"
+E2E_PASSWORD="${E2E_PASSWORD:-}"
 E2E_OTP="${E2E_OTP:-424242}"
 E2E_SESSION="${E2E_SESSION:-zevium-e2e}"
 E2E_STEP="${E2E_STEP:-unknown}"
+
+if [[ -z "$E2E_PASSWORD" ]]; then
+  printf '[e2e] E2E_PASSWORD is required; pass it through environment or CI secrets.\n' >&2
+  exit 1
+fi
 
 # Isolate browser session for the whole suite/script run.
 export AGENT_BROWSER_SESSION="$E2E_SESSION"
