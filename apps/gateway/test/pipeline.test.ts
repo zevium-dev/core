@@ -178,6 +178,45 @@ afterEach(() => {
 });
 
 describe("gateway pipeline", () => {
+  it("returns 503 when Clerk verification is unavailable instead of caching an invalid key", async () => {
+    const clerkOrgId = "org_pipe_clerk_outage";
+    const { usage } = await installFixtures({ clerkOrgId, credits: 100 });
+    class OutageVerifier extends FixtureKeyVerifier {
+      override async verifyWithStatus() {
+        return { status: "unavailable" as const };
+      }
+      override async verify() {
+        return null;
+      }
+    }
+    const { specs } = { specs: new FixtureSpecSource() };
+    specs.set(ORG_SLUG, PROJECT_SLUG, {
+      spec: SPEC,
+      projectId: "proj_demo",
+      organizationId: clerkOrgId,
+      clerkOrgId,
+      visibility: "private",
+    });
+    __setTestPipelineDeps({
+      keyVerifier: new OutageVerifier(),
+      specSource: specs,
+      publicSpecSource: specs,
+      catalogueSource: new FixtureCatalogueSource(),
+      usageSink: usage,
+      idGenerator: () => `req_${crypto.randomUUID()}`,
+    });
+
+    const res = await gatewayFetch(
+      `/gateway/${ORG_SLUG}/${PROJECT_SLUG}/stream`,
+    );
+    expect(res.status).toBe(503);
+    await expect(res.json()).resolves.toMatchObject({
+      error: "verification_unavailable",
+    });
+    expect(usage.events).toHaveLength(0);
+    expect((await walletStub(clerkOrgId).getState()).balance).toBe(100);
+  });
+
   it("maps legacy published pricing above the ceiling to invalid_spec without charging", async () => {
     const clerkOrgId = "org_pipe_legacy_price";
     const { fetchImpl, calls } = makeFetchMock(() => new Response("no"));

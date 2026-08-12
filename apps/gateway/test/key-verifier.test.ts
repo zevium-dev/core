@@ -150,4 +150,46 @@ describe("ClerkKeyVerifier", () => {
     });
     expect(await verifier.verify("ak_bad")).toBeNull();
   });
+
+  it("marks network failure and 5xx as unavailable and never caches them", async () => {
+    let now = 1_000_000;
+    let calls = 0;
+    const fetchImpl = vi.fn(async () => {
+      calls += 1;
+      if (calls === 1) throw new Error("connection reset");
+      return new Response("clerk down", { status: 502 });
+    });
+    const verifier = new ClerkKeyVerifier({
+      secretKey: "sk_test",
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      now: () => now,
+      useCacheApi: false,
+    });
+
+    const first = await verifier.verifyWithStatus("ak_flaky");
+    expect(first.status).toBe("unavailable");
+    // Outage must not poison the negative cache: immediate retry re-fetches.
+    const second = await verifier.verifyWithStatus("ak_flaky");
+    expect(second.status).toBe("unavailable");
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it("caches definitive invalid verdicts within the TTL", async () => {
+    let now = 1_000_000;
+    const fetchImpl = vi.fn(async () => new Response("nope", { status: 404 }));
+    const verifier = new ClerkKeyVerifier({
+      secretKey: "sk_test",
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      now: () => now,
+      useCacheApi: false,
+    });
+
+    expect((await verifier.verifyWithStatus("ak_dead")).status).toBe("invalid");
+    expect((await verifier.verifyWithStatus("ak_dead")).status).toBe("invalid");
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+
+    now += 61_000;
+    await verifier.verifyWithStatus("ak_dead");
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
 });
