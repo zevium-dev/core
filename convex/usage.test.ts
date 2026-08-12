@@ -408,11 +408,17 @@ describe("analytics.orgOverview", () => {
     await t.run(async (ctx) => {
       await ctx.db.insert("publisherEarnings", {
         publisherOrganizationId: seed.publisherOrgId,
+        consumerOrganizationId: seed.consumerOrgId,
         projectId: seed.projectAId,
         usageSettlementRefId: "settle:net-analytics",
         grossCredits: 100,
+        platformFeeAtoms: 50_000,
+        publisherNetAtoms: 950_000,
         platformFeeCredits: 5,
         netCredits: 95,
+        clawedBackGrossCredits: 0,
+        clawedBackAtoms: 0,
+        releasedAtoms: 0,
         availableAt: now,
         status: "available",
         createdAt: now,

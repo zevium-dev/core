@@ -479,11 +479,10 @@ export const recordProviderVerifiedKey = internalMutation({
     clerkOrgId: v.string(),
   },
   handler: async (ctx, args): Promise<KeySettingView> => {
-    const claims = await requireIdentity(ctx);
     if (
-      claims.orgId !== args.clerkOrgId ||
-      claims.subject !== args.ownerUserId ||
-      args.keyId.trim() === ""
+      args.keyId.trim() === "" ||
+      args.ownerUserId.trim() === "" ||
+      args.clerkOrgId.trim() === ""
     ) {
       throw new Error("Provider key ownership could not be verified");
     }

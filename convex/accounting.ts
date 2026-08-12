@@ -42,7 +42,7 @@ export function publisherEarningSplit(
     grossCredits >
     Math.floor(Number.MAX_SAFE_INTEGER / ACCOUNTING_ATOMS_PER_CREDIT)
   ) {
-    throw new Error("Gross credits exceed the safe accounting range");
+    throw new Error("Gross credits exceed the safe integer accounting range");
   }
   const platformFeeAtoms = grossCredits * PLATFORM_FEE_BASIS_POINTS;
   const publisherNetAtoms =

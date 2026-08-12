@@ -15,7 +15,7 @@ import {
   atomsToCredits,
   atomsToUsdCents,
 } from "./accounting";
-import { requireIdentity } from "./lib/auth";
+import { getOrgByClerkId, requireIdentity } from "./lib/auth";
 import { createNotification } from "./lib/notifications";
 import {
   appendPublisherSettlementEntry,
@@ -123,11 +123,8 @@ export async function createOnboardingLink(
 export const getConnectProfileForActiveOrg = internalMutation({
   args: { clerkOrgId: v.string() },
   handler: async (ctx, args) => {
-    const organization = await ctx.db
-      .query("organizations")
-      .withIndex("by_clerk_org", (q) => q.eq("clerkOrgId", args.clerkOrgId))
-      .unique();
-    if (organization === null || organization.archivedAt !== undefined)
+    const organization = await getOrgByClerkId(ctx, args.clerkOrgId);
+    if (organization === null)
       throw new Error("Active organization is not provisioned");
     let profile = await ctx.db
       .query("organizationPayments")
