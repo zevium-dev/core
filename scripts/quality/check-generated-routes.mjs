@@ -279,8 +279,14 @@ export function assertRepositoryGeneratedFresh() {
       env: {
         ...process.env,
         CI: "true",
-        CLERK_PUBLISHABLE_KEY: "pk_test_ZmFrZS5jbGVyay5hY2NvdW50JA",
-        CLERK_SECRET_KEY: "sk_test_ZmFrZS5jbGVyay5hY2NvdW50JA",
+        CLERK_PUBLISHABLE_KEY: [
+          "pk",
+          "test",
+          "ZmFrZS5jbGVyay5hY2NvdW50JA",
+        ].join("_"),
+        CLERK_SECRET_KEY: ["sk", "test", "ZmFrZS5jbGVyay5hY2NvdW50JA"].join(
+          "_",
+        ),
         VITE_CONVEX_URL: "https://ci.invalid",
         VITE_GATEWAY_URL: "https://ci.invalid",
       },

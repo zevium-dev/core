@@ -14,6 +14,7 @@ try {
       cwd: repositoryRoot,
       command,
       args,
+      env: { ...process.env, CI: "true" },
       label: `test command: ${command} ${args.join(" ")}`,
     });
     if (result.status !== 0) process.exit(result.status ?? 1);

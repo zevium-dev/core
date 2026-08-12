@@ -27,26 +27,40 @@ import {
   sanitizedConvexEnvironment,
 } from "./check-generated-routes.mjs";
 import {
+  createCurrentTreeSnapshot,
   gitleaksCommands,
   resolveScanPlan,
   validateGitleaksPolicy,
 } from "./check-gitleaks.mjs";
-import { findBlockedTests } from "./check-test-focus.mjs";
+import {
+  attestVitestCommands,
+  attestVitestConfig,
+  attestVitestConfigs,
+  findBlockedTests,
+} from "./check-test-focus.mjs";
 import {
   attestLintTask,
   inspectTurboLint,
   validateLintGraph,
 } from "./check-turbo-lint.mjs";
 import {
+  attestMiseRuntime,
   checkWorkflowToolchains,
   validateWorkflowToolchain,
 } from "./check-workflow-toolchains.mjs";
+import {
+  assertNoExcludedSourceImports,
+  attestIgnorePolicies,
+  collectOwnedFiles,
+  scriptExtensions,
+} from "./source-inventory.mjs";
 import { runTrackedCommand } from "./tracked-tree.mjs";
 
 const repositoryRoot = resolve(import.meta.dirname, "../..");
 const fixtures = resolve(import.meta.dirname, "fixtures");
 const node = process.execPath;
 const oxlint = resolve(repositoryRoot, "node_modules/.bin/oxlint");
+const vitest = resolve(repositoryRoot, "node_modules/.bin/vitest");
 const zeroSha = "0".repeat(40);
 
 function run(script, args = [], options = {}) {
@@ -85,6 +99,7 @@ function gitRepository() {
 
 test("workflow toolchains pin mise, Node, pnpm, and frozen installs", () => {
   assert.equal(checkWorkflowToolchains(), 7);
+  assert.equal(attestMiseRuntime(), 5);
   const source = readFileSync(
     resolve(repositoryRoot, ".github/workflows/ci.yml"),
     "utf8",
@@ -133,10 +148,11 @@ test("workflow toolchains pin mise, Node, pnpm, and frozen installs", () => {
 test("Turbo lint attests every exact owned file and executes production commands", () => {
   const result = inspectTurboLint(join(fixtures, "turbo-complete"));
   assert.deepEqual(result.fileCounts, {
-    "@fixture/alpha": 2,
+    "@fixture/alpha": 3,
     "@fixture/beta": 2,
   });
   assert.deepEqual(result.ownedFiles["@fixture/alpha"], [
+    "packages/alpha/src/dist/nested.js",
     "packages/alpha/src/extra.js",
     "packages/alpha/src/index.js",
   ]);
@@ -169,20 +185,24 @@ test("Turbo lint rejects missing, partial, ignored, and weakened scopes", () => 
 
   const workspace = join(fixtures, "turbo-complete");
   const prefix =
-    "oxlint --config ../../../../../../.oxlintrc.json --deny-warnings --report-unused-disable-directives";
+    "oxlint --config ../../../../../../.oxlintrc.json --deny-warnings --report-unused-disable-directives --no-ignore --disable-nested-config";
   for (const [command, pattern] of [
     [`${prefix} src/index.js`, /ignored\/missing owned file/],
+    [
+      `${prefix.replace(" --disable-nested-config", "")} src`,
+      /disable nested configs/,
+    ],
     [`${prefix} --allow=correctness src`, /weakening or config override/],
     [
       `${prefix} --ignore-pattern=src/extra.js src`,
       /weakening or config override/,
     ],
     [
-      "oxlint --config package.json --deny-warnings --report-unused-disable-directives src",
+      "oxlint --config package.json --deny-warnings --report-unused-disable-directives --no-ignore --disable-nested-config src",
       /exact root config/,
     ],
     [
-      "oxlint --config ../../../../../../.oxlintrc.json --report-unused-disable-directives src",
+      "oxlint --config ../../../../../../.oxlintrc.json --report-unused-disable-directives --no-ignore --disable-nested-config src",
       /deny warnings/,
     ],
   ]) {
@@ -219,6 +239,26 @@ test("Oxlint rejects real hooks, accessibility, and security violations", () => 
   assert.match(output, /no-eval|detect-eval-with-expression/);
 });
 
+test("lint attestation rejects source-level suppression bypasses", () => {
+  const workspace = mkdtempSync(join(tmpdir(), "zevium-lint-suppression-"));
+  write(
+    join(workspace, "index.ts"),
+    `/* eslint-${"disable"} no-eval */\nexport const hidden = eval;\n`,
+  );
+  assert.throws(
+    () =>
+      attestLintTask({
+        workspace,
+        task: {
+          package: "hostile",
+          directory: ".",
+          command: `oxlint --config ${resolve(repositoryRoot, ".oxlintrc.json")} --deny-warnings --report-unused-disable-directives --no-ignore --disable-nested-config index.ts`,
+        },
+      }),
+    /lint suppression directives are forbidden/,
+  );
+});
+
 test("focus scanner catches computed, assigned, aliased, and wrapper imports", () => {
   const focusedRoot = join(fixtures, "focused-tests");
   const violations = findBlockedTests([focusedRoot]);
@@ -226,6 +266,7 @@ test("focus scanner catches computed, assigned, aliased, and wrapper imports", (
   assert.match(output, /focused\.test\.ts.*describe\.only/);
   assert.match(output, /focused\.test\.ts.*test\.skip/);
   assert.match(output, /focused\.test\.ts.*test\.only/);
+  assert.match(output, /focused\.test\.ts.*test\.<computed>/);
   assert.match(output, /focused\.test\.ts.*suite\.skip/);
   assert.match(output, /focused\.test\.ts.*fdescribe/);
   assert.match(output, /wrapper-consumer\.test\.ts.*test\.only/);
@@ -237,6 +278,176 @@ test("focus scanner catches computed, assigned, aliased, and wrapper imports", (
     join(allowed, "shadowed.test.ts"),
   );
   assert.deepEqual(findBlockedTests([allowed]), []);
+});
+
+test("Vitest configs and commands force allowOnly false without mutable indirection", () => {
+  assert.equal(attestVitestConfigs().length, 4);
+  assert.equal(attestVitestCommands(), 4);
+
+  const directory = mkdtempSync(join(tmpdir(), "zevium-vitest-config-"));
+  const configPath = join(directory, "vitest.config.ts");
+  const valid = [
+    'import { defineConfig as define } from "vitest/config";',
+    "export default define({ test: { allowOnly: false } });",
+    "",
+  ].join("\n");
+  write(configPath, valid);
+  assert.doesNotThrow(() => attestVitestConfig(configPath));
+  const nestedConfig = join(directory, "src/dist/vitest.config.ts");
+  const workspaceConfig = join(directory, "vitest.workspace.ts");
+  write(nestedConfig, valid);
+  write(workspaceConfig, valid);
+  assert.deepEqual(
+    attestVitestConfigs([directory], {
+      excludeFixtures: false,
+      requireRepositorySet: false,
+    }),
+    [nestedConfig, configPath, workspaceConfig].sort(),
+  );
+
+  const hostile = [
+    valid.replace("allowOnly: false", "allowOnly: true"),
+    [
+      'import { defineConfig } from "vitest/config";',
+      "const config = { test: { allowOnly: false } };",
+      "export default defineConfig(config);",
+      "config.test.allowOnly = true;",
+      "",
+    ].join("\n"),
+    [
+      'import { defineConfig } from "vitest/config";',
+      "const hostile = { allowOnly: true };",
+      "export default defineConfig({ test: { allowOnly: false, ...hostile } });",
+      "",
+    ].join("\n"),
+    [
+      'import { defineConfig } from "vitest/config";',
+      'export default defineConfig({ test: { ["allow" + "Only"]: false } });',
+      "",
+    ].join("\n"),
+    [
+      'import { defineConfig } from "vitest/config";',
+      "export default defineConfig({ test: { allowOnly: false, allowOnly: true } });",
+      "",
+    ].join("\n"),
+  ];
+  for (const [index, source] of hostile.entries()) {
+    const path = join(directory, `vitest.workspace.config-${index}.ts`);
+    write(path, source);
+    assert.throws(
+      () => attestVitestConfig(path),
+      /allowOnly|inline immutable|spreads|computed|exactly one/,
+    );
+  }
+});
+
+test("Vitest CLI enforcement rejects focused execution even against hostile config", () => {
+  const directory = mkdtempSync(join(tmpdir(), "zevium-vitest-runtime-"));
+  const config = join(directory, "vitest.config.mjs");
+  write(
+    config,
+    "export default { test: { allowOnly: true, globals: true } };\n",
+  );
+  write(
+    join(directory, "focus.test.js"),
+    [
+      'test("ordinary", () => {});',
+      'test.only("forbidden focus", () => {});',
+      "",
+    ].join("\n"),
+  );
+  const result = spawnSync(
+    vitest,
+    [
+      "run",
+      "--root",
+      directory,
+      "--config",
+      config,
+      "--allowOnly=false",
+      "--reporter=dot",
+    ],
+    {
+      cwd: repositoryRoot,
+      encoding: "utf8",
+      env: { ...process.env, CI: "true" },
+    },
+  );
+  assert.notEqual(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stdout + result.stderr, /Unexpected \.only modifier/);
+});
+
+test("source inventory scans nested generated-looking names and rejects excluded imports", () => {
+  const repository = mkdtempSync(join(tmpdir(), "zevium-source-inventory-"));
+  const nested = join(repository, "apps/web/src/dist/runtime.ts");
+  const entry = join(repository, "apps/web/src/entry.ts");
+  write(
+    join(repository, "apps/web/tsconfig.json"),
+    JSON.stringify({
+      compilerOptions: { paths: { "hostile/*": ["./src/*"] } },
+      include: ["src"],
+    }),
+  );
+  write(nested, "export const runtime = true;\n");
+  write(entry, 'import { runtime } from "./dist/runtime";\nvoid runtime;\n');
+  const files = collectOwnedFiles({
+    roots: [join(repository, "apps/web")],
+    repository,
+    extensions: scriptExtensions,
+  });
+  assert.ok(files.includes(nested));
+  assert.doesNotThrow(() => assertNoExcludedSourceImports(files, repository));
+
+  const excluded = join(repository, "apps/web/dist/runtime.ts");
+  write(excluded, "export const runtime = true;\n");
+  write(entry, 'import { runtime } from "../dist/runtime";\nvoid runtime;\n');
+  const owned = collectOwnedFiles({
+    roots: [join(repository, "apps/web")],
+    repository,
+    extensions: scriptExtensions,
+  });
+  assert.equal(owned.includes(excluded), false);
+  assert.throws(
+    () => assertNoExcludedSourceImports(owned, repository),
+    /imports excluded web build output/,
+  );
+
+  write(
+    entry,
+    'import { runtime } from "hostile/../dist/runtime";\nvoid runtime;\n',
+  );
+  assert.throws(
+    () => assertNoExcludedSourceImports(owned, repository),
+    /imports excluded web build output/,
+  );
+
+  write(
+    join(repository, "packages/shared/package.json"),
+    JSON.stringify({ name: "@fixture/shared", exports: "./dist/runtime.ts" }),
+  );
+  write(
+    join(repository, "packages/shared/dist/runtime.ts"),
+    "export const runtime = true;\n",
+  );
+  write(entry, 'import { runtime } from "@fixture/shared";\nvoid runtime;\n');
+  assert.throws(
+    () => assertNoExcludedSourceImports(owned, repository),
+    /imports excluded shared-package build output/,
+  );
+
+  const focused = join(repository, "apps/web/src/dist/focused.test.ts");
+  write(focused, 'test[`on${"ly"}`]("hostile", () => undefined);\n');
+  write(entry, 'import "./dist/focused.test";\n');
+  assert.match(
+    findBlockedTests([join(repository, "apps/web/src")], { repository }).join(
+      "\n",
+    ),
+    /test\.only/,
+  );
+});
+
+test("ignore policies anchor generated roots without hiding nested source", () => {
+  assert.equal(attestIgnorePolicies(repositoryRoot), 18);
 });
 
 test("invalid JSON and YAML files fail parser checks", () => {
@@ -652,6 +863,11 @@ test("gitleaks scan planning handles PR, push, tag creation, deletion, and zero 
       ),
       "--log-opts=--all --full-history",
     );
+    for (const command of gitleaksCommands(plan)) {
+      assert.ok(command.includes("--ignore-gitleaks-allow"));
+      assert.ok(command.includes("--max-decode-depth=5"));
+      assert.ok(command.includes("--max-archive-depth=1"));
+    }
   }
   assert.throws(
     () =>
@@ -716,15 +932,33 @@ test("gitleaks policy rejects broad config and ignore weakening", () => {
   write(ignorePath, `${ignore}*\n`);
   assert.throws(
     () => validateGitleaksPolicy({ configPath, ignorePath }),
-    /only exact audited historical fingerprints/,
+    /85 exact audited historical fingerprints/,
   );
 
   write(ignorePath, ignore);
-  write(configPath, config.replace("^apps/web/dist/", ".*"));
+  write(configPath, `${config}\n[[allowlists]]\npaths = ['''.*''']\n`);
   assert.throws(
     () => validateGitleaksPolicy({ configPath, ignorePath }),
     /differs from fail-closed approved policy/,
   );
+});
+
+test("gitleaks current snapshot includes Git candidates and excludes ignored local state", () => {
+  const { directory, git } = gitRepository();
+  write(join(directory, ".gitignore"), "local.env\n");
+  write(join(directory, "tracked.ts"), "export const tracked = true;\n");
+  assert.equal(git("add", ".").status, 0);
+  assert.equal(git("commit", "--quiet", "-m", "fixture: tracked").status, 0);
+  write(join(directory, "untracked.ts"), "export const pending = true;\n");
+  write(join(directory, "local.env"), "ignored-local-state\n");
+  const candidate = createCurrentTreeSnapshot(directory);
+  try {
+    assert.equal(existsSync(join(candidate.snapshot, "tracked.ts")), true);
+    assert.equal(existsSync(join(candidate.snapshot, "untracked.ts")), true);
+    assert.equal(existsSync(join(candidate.snapshot, "local.env")), false);
+  } finally {
+    candidate.cleanup();
+  }
 });
 
 test("gitleaks full history catches a secret deleted from current tree", () => {
@@ -750,6 +984,97 @@ test("gitleaks full history catches a secret deleted from current tree", () => {
   const result = spawnSync(
     gitleaks,
     ["git", "--no-banner", "--redact", "--log-opts=--all --full-history", "."],
+    { cwd: directory, encoding: "utf8" },
+  );
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  assert.match(result.stdout + result.stderr, /leaks found/i);
+});
+
+test("gitleaks exact fingerprint baseline rejects same-line mutation", () => {
+  const { directory, git } = gitRepository();
+  const lookup = spawnSync("mise", ["which", "gitleaks"], {
+    encoding: "utf8",
+  });
+  assert.equal(lookup.status, 0, lookup.stdout + lookup.stderr);
+  const gitleaks = lookup.stdout.trim();
+  const report = join(directory, "report.json");
+  const first = "ghp_" + randomBytes(27).toString("base64url");
+  write(join(directory, "leak.env"), `GITHUB_TOKEN=${first}\n`);
+  assert.equal(git("add", "leak.env").status, 0);
+  assert.equal(
+    git("commit", "--quiet", "-m", "fixture: first secret").status,
+    0,
+  );
+  const detected = spawnSync(
+    gitleaks,
+    [
+      "git",
+      "--no-banner",
+      "--redact",
+      "--report-format=json",
+      `--report-path=${report}`,
+      "--log-opts=--all --full-history",
+      ".",
+    ],
+    { cwd: directory, encoding: "utf8" },
+  );
+  assert.equal(detected.status, 1, detected.stdout + detected.stderr);
+  const [finding] = JSON.parse(readFileSync(report, "utf8"));
+  write(join(directory, ".gitleaksignore"), `${finding.Fingerprint}\n`);
+
+  const second = "ghp_" + randomBytes(27).toString("base64url");
+  write(join(directory, "leak.env"), `GITHUB_TOKEN=${second}\n`);
+  assert.equal(git("add", "leak.env").status, 0);
+  assert.equal(
+    git("commit", "--quiet", "-m", "fixture: mutate secret").status,
+    0,
+  );
+  rmSync(report);
+  const mutated = spawnSync(
+    gitleaks,
+    [
+      "git",
+      "--no-banner",
+      "--redact",
+      "--report-format=json",
+      `--report-path=${report}`,
+      "--log-opts=--all --full-history",
+      ".",
+    ],
+    { cwd: directory, encoding: "utf8" },
+  );
+  assert.equal(mutated.status, 1, mutated.stdout + mutated.stderr);
+  const findings = JSON.parse(readFileSync(report, "utf8"));
+  assert.equal(findings.length, 1);
+  assert.equal(findings[0].Commit, git("rev-parse", "HEAD").stdout.trim());
+});
+
+test("gitleaks recursively decodes encoded new secrets", () => {
+  const { directory, git } = gitRepository();
+  const lookup = spawnSync("mise", ["which", "gitleaks"], {
+    encoding: "utf8",
+  });
+  assert.equal(lookup.status, 0, lookup.stdout + lookup.stderr);
+  const token = "ghp_" + randomBytes(24).toString("hex").slice(0, 36);
+  write(
+    join(directory, "encoded.txt"),
+    `${Buffer.from(token).toString("base64")}\n`,
+  );
+  assert.equal(git("add", "encoded.txt").status, 0);
+  assert.equal(
+    git("commit", "--quiet", "-m", "fixture: encoded secret").status,
+    0,
+  );
+  const result = spawnSync(
+    lookup.stdout.trim(),
+    [
+      "git",
+      "--no-banner",
+      "--redact",
+      "--max-decode-depth=5",
+      "--log-opts=--all --full-history",
+      ".",
+    ],
     { cwd: directory, encoding: "utf8" },
   );
   assert.equal(result.status, 1, result.stdout + result.stderr);

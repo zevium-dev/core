@@ -1,7 +1,6 @@
-**/build
-**/public
-.agents/skills/
-pnpm-lock.yaml
-routeTree.gen.ts
-scripts/quality/fixtures/invalid-structured-data/
-dist/
+/apps/web/public/
+/.agents/skills/
+/pnpm-lock.yaml
+/apps/web/src/routeTree.gen.ts
+/scripts/quality/fixtures/invalid-structured-data/
+/apps/web/dist/

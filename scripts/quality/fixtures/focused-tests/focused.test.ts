@@ -5,6 +5,12 @@ describe.only("focused fixture", () => {
 const modifier = "only";
 test[modifier]("computed fixture", () => undefined);
 test["on" + "ly"]("concatenated fixture", () => undefined);
+test[`on${"ly"}`]("template fixture", () => undefined);
+const suffix = "ly";
+const computedAlias = test[`on${suffix}`];
+computedAlias("template alias fixture", () => undefined);
+const unknownModifier = process.env.TEST_MODIFIER;
+test[unknownModifier]("fail-closed computed fixture", () => undefined);
 test?.skip("optional fixture", () => undefined);
 
 const focused = test.only;

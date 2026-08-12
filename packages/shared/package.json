@@ -6,9 +6,9 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "test": "vitest run",
+    "test": "vitest run --allowOnly=false",
     "typecheck": "tsc --noEmit",
-    "lint": "oxlint --config ../../.oxlintrc.json --deny-warnings --report-unused-disable-directives src vitest.config.ts"
+    "lint": "oxlint --config ../../.oxlintrc.json --deny-warnings --report-unused-disable-directives --no-ignore --disable-nested-config src vitest.config.ts"
   },
   "devDependencies": {
     "typescript": "^5.9.0",

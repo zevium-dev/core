@@ -1,44 +1,20 @@
-import { readFileSync, readdirSync } from "node:fs";
-import { basename, extname, join, relative, resolve } from "node:path";
+import { readFileSync } from "node:fs";
+import { basename, extname, relative, resolve } from "node:path";
 import ts from "typescript";
 import { parseDocument } from "yaml";
+import {
+  collectOwnedFiles,
+  structuredDataExtensions,
+} from "./source-inventory.mjs";
 
 const repositoryRoot = resolve(import.meta.dirname, "../..");
-const ignoredDirectories = new Set([
-  ".git",
-  ".nitro",
-  ".output",
-  ".tanstack",
-  ".turbo",
-  ".wrangler",
-  "dist",
-  "node_modules",
-]);
-const supportedExtensions = new Set([".json", ".jsonc", ".yaml", ".yml"]);
-
 function collectFiles(root, excludeFixtures) {
-  const files = [];
-
-  function visit(directory) {
-    for (const entry of readdirSync(directory, { withFileTypes: true })) {
-      const path = join(directory, entry.name);
-      if (entry.isDirectory()) {
-        if (ignoredDirectories.has(entry.name)) continue;
-        if (
-          excludeFixtures &&
-          relative(repositoryRoot, path).startsWith("scripts/quality/fixtures")
-        ) {
-          continue;
-        }
-        visit(path);
-      } else if (supportedExtensions.has(extname(entry.name))) {
-        files.push(path);
-      }
-    }
-  }
-
-  visit(root);
-  return files;
+  return collectOwnedFiles({
+    roots: [root],
+    repository: repositoryRoot,
+    extensions: structuredDataExtensions,
+    excludeFixtures,
+  });
 }
 
 function parseJsonLike(path, source) {

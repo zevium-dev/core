@@ -1,45 +1,27 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { createHash } from "node:crypto";
+import {
+  copyFileSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readlinkSync,
+  rmSync,
+  symlinkSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, relative, resolve, sep } from "node:path";
 
 const repositoryRoot = resolve(import.meta.dirname, "../..");
 const zeroSha = "0".repeat(40);
-const approvedGitleaksConfig = `[extend]
-useDefault = true
-
-# Historical false positives use exact finding fingerprints in .gitleaksignore.
-# Never suppress an entire commit or source path.
-
-[[allowlists]]
-description = "Generated production bundles are untracked derivatives of scanned source."
-paths = ['''^apps/web/dist/''']
-
-[[allowlists]]
-description = "Exact public documentation and deterministic test placeholders, never credentials."
-regexTarget = "match"
-regexes = [
-  '''ak_your_api_key''',
-  '''sk_live_abcdefghijklmnop''',
-  '''whsec_dGVzdC13ZWJob29rLXNlY3JldA==''',
-  '''pk_test_ZmFrZS5jbGVyay5hY2NvdW50JA''',
-  '''sk_test_ZmFrZS5jbGVyay5hY2NvdW50JA''',
-  '''\\$STRIPE_SECRET_KEY''',
-]
-`;
-const approvedHistoricalFindings = new Set([
-  "6624eb6da0647d83547732b3930b036c43cafb88:packages/shared/src/registry-sync.test.ts:generic-api-key:23",
-  "6624eb6da0647d83547732b3930b036c43cafb88:convex/registrySync.test.ts:generic-api-key:30",
-  "f638df59039a5c208402d1e6e87fa219c2e854b1:docs/production-deploy.md:generic-api-key:309",
-  "0893c6e4869c4e53c8b848301e064ba91caa4299:convex/auth.config.ts:generic-api-key:4",
-  "0a031dc6117255327afd6060fc11a5ceea2cb278:.env.example:generic-api-key:20",
-  "712ee030f775618d192314ee88cce528afa3a800:src/routes/settings/keys/$.tsx:curl-auth-header:178",
-  "d0b3736ed96f60503bb05a9de5bfb92f5afa0ca5:src/routes/settings/keys/$.lazy.tsx:generic-api-key:50",
-  "d0b3736ed96f60503bb05a9de5bfb92f5afa0ca5:src/routes/settings/keys/$.lazy.tsx:generic-api-key:59",
-  "d0b3736ed96f60503bb05a9de5bfb92f5afa0ca5:src/routes/settings/keys/$.lazy.tsx:generic-api-key:68",
-  "d0b3736ed96f60503bb05a9de5bfb92f5afa0ca5:src/routes/settings/keys/$.lazy.tsx:generic-api-key:77",
-  "d0b3736ed96f60503bb05a9de5bfb92f5afa0ca5:src/routes/settings/keys/$.lazy.tsx:generic-api-key:86",
-  "d0b3736ed96f60503bb05a9de5bfb92f5afa0ca5:src/routes/settings/keys/$.lazy.tsx:curl-auth-header:166",
-]);
+const approvedGitleaksConfig = "[extend]\nuseDefault = true\n";
+const approvedHistoricalFingerprintCount = 85;
+const approvedHistoricalFingerprintSha256 =
+  "638f4851cdf6ed8b5bd729721ff473000eba1f240ea6985a2a7ce4a0fa32dac8";
+const historicalFingerprint =
+  /^[0-9a-f]{40}:[^:\n]+:(?:curl-auth-header|curl-auth-user|generic-api-key|stripe-access-token):[1-9][0-9]*$/;
 
 export function validateGitleaksPolicy({
   configPath = resolve(repositoryRoot, ".gitleaks.toml"),
@@ -48,17 +30,18 @@ export function validateGitleaksPolicy({
   if (readFileSync(configPath, "utf8") !== approvedGitleaksConfig) {
     throw new Error("Gitleaks config differs from fail-closed approved policy");
   }
-  const findings = readFileSync(ignorePath, "utf8")
-    .split(/\r?\n/)
-    .filter(Boolean);
-  const actual = new Set(findings);
+  const baseline = readFileSync(ignorePath, "utf8");
+  const findings = baseline.split(/\r?\n/).filter(Boolean);
+  const digest = createHash("sha256").update(baseline).digest("hex");
   if (
-    actual.size !== findings.length ||
-    actual.size !== approvedHistoricalFindings.size ||
-    [...actual].some((finding) => !approvedHistoricalFindings.has(finding))
+    findings.length !== approvedHistoricalFingerprintCount ||
+    new Set(findings).size !== findings.length ||
+    JSON.stringify(findings) !== JSON.stringify([...findings].sort()) ||
+    findings.some((finding) => !historicalFingerprint.test(finding)) ||
+    digest !== approvedHistoricalFingerprintSha256
   ) {
     throw new Error(
-      "Gitleaks ignore must contain only exact audited historical fingerprints",
+      `Gitleaks ignore must contain ${approvedHistoricalFingerprintCount} exact audited historical fingerprints`,
     );
   }
 }
@@ -194,19 +177,93 @@ export function resolveScanPlan(
 }
 
 export function gitleaksCommands(plan) {
+  const hardening = [
+    "--ignore-gitleaks-allow",
+    "--max-decode-depth=5",
+    "--max-archive-depth=1",
+  ];
   return [
-    ["git", "--no-banner", "--redact", `--log-opts=${plan.history}`, "."],
-    ["git", "--no-banner", "--redact", `--log-opts=${plan.range}`, "."],
-    ["dir", "--no-banner", "--redact", "."],
+    [
+      "git",
+      "--no-banner",
+      "--redact",
+      ...hardening,
+      `--log-opts=${plan.history}`,
+      ".",
+    ],
+    [
+      "git",
+      "--no-banner",
+      "--redact",
+      ...hardening,
+      `--log-opts=${plan.range}`,
+      ".",
+    ],
+    ["dir", "--no-banner", "--redact", ...hardening, "."],
   ];
 }
 
+function gitCandidateFiles(cwd) {
+  const result = spawnSync(
+    "git",
+    ["ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+    { cwd, encoding: "buffer" },
+  );
+  if (result.status !== 0) {
+    throw new Error(result.stderr.toString() || "git ls-files failed");
+  }
+  return result.stdout.toString().split("\0").filter(Boolean).sort();
+}
+
+export function createCurrentTreeSnapshot(cwd = repositoryRoot) {
+  const root = resolve(cwd);
+  const tempRoot = mkdtempSync(join(tmpdir(), "zevium-gitleaks-tree-"));
+  const snapshot = join(tempRoot, "candidate");
+  mkdirSync(snapshot);
+  for (const file of gitCandidateFiles(root)) {
+    const source = resolve(root, file);
+    if (
+      source === root ||
+      !source.startsWith(`${root}${sep}`) ||
+      !existsSync(source)
+    )
+      continue;
+    const destination = resolve(snapshot, file);
+    if (!destination.startsWith(`${snapshot}${sep}`)) {
+      throw new Error(`Unsafe candidate path: ${file}`);
+    }
+    const stat = lstatSync(source);
+    mkdirSync(dirname(destination), { recursive: true });
+    if (stat.isSymbolicLink()) {
+      symlinkSync(readlinkSync(source), destination);
+    } else if (stat.isFile()) {
+      copyFileSync(source, destination);
+    } else {
+      throw new Error(`Unsupported candidate entry: ${relative(root, source)}`);
+    }
+  }
+  return { snapshot, cleanup: () => rmSync(tempRoot, { recursive: true }) };
+}
+
 function runGitleaks(args, cwd) {
-  const result = spawnSync("mise", ["exec", "--", "gitleaks", ...args], {
-    cwd,
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "pipe"],
-  });
+  const result = spawnSync(
+    "mise",
+    [
+      "exec",
+      "--",
+      "gitleaks",
+      "--config",
+      resolve(repositoryRoot, ".gitleaks.toml"),
+      "--gitleaks-ignore-path",
+      resolve(repositoryRoot, ".gitleaksignore"),
+      ...args,
+    ],
+    {
+      cwd,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    },
+  );
   if (result.status !== 0) {
     throw new Error(
       result.stdout + result.stderr || `gitleaks ${args[0]} failed`,
@@ -216,11 +273,15 @@ function runGitleaks(args, cwd) {
 }
 
 if (process.argv[1] === import.meta.filename) {
+  let candidate;
   try {
     validateGitleaksPolicy();
     const plan = resolveScanPlan();
-    for (const command of gitleaksCommands(plan))
-      runGitleaks(command, repositoryRoot);
+    const [history, range, current] = gitleaksCommands(plan);
+    runGitleaks(history, repositoryRoot);
+    runGitleaks(range, repositoryRoot);
+    candidate = createCurrentTreeSnapshot(repositoryRoot);
+    runGitleaks([...current.slice(0, -1), candidate.snapshot], repositoryRoot);
     process.stdout.write(
       `Gitleaks passed full history, ${plan.eventKind} range ${plan.range}, and current tree\n`,
     );
@@ -229,5 +290,7 @@ if (process.argv[1] === import.meta.filename) {
       `${error instanceof Error ? error.message : String(error)}\n`,
     );
     process.exitCode = 1;
+  } finally {
+    candidate?.cleanup();
   }
 }

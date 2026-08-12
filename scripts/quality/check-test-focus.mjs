@@ -1,19 +1,15 @@
-import { readFileSync, readdirSync } from "node:fs";
-import { dirname, extname, join, relative, resolve } from "node:path";
+import { readFileSync } from "node:fs";
+import { basename, dirname, relative, resolve } from "node:path";
 import ts from "typescript";
+import {
+  assertNoExcludedSourceImports,
+  attestIgnorePolicies,
+  collectOwnedFiles,
+  parseScript,
+  scriptExtensions,
+} from "./source-inventory.mjs";
 
 const repositoryRoot = resolve(import.meta.dirname, "../..");
-const ignoredDirectories = new Set([
-  ".git",
-  ".nitro",
-  ".output",
-  ".tanstack",
-  ".turbo",
-  ".wrangler",
-  "dist",
-  "node_modules",
-]);
-const scriptExtensions = [".cjs", ".js", ".jsx", ".mjs", ".ts", ".tsx"];
 const testFunctions = new Set(["describe", "it", "suite", "test"]);
 const blockedModifiers = new Set(["only", "skip", "skipIf", "todo"]);
 const blockedAliases = new Set([
@@ -31,6 +27,19 @@ const testModules = new Set([
   "@playwright/test",
 ]);
 const unknown = Object.freeze({ kind: "unknown" });
+const dynamicProperty = Symbol("dynamic-property");
+const expectedVitestConfigs = [
+  "apps/gateway/vitest.config.ts",
+  "apps/web/vitest.config.ts",
+  "convex/vitest.config.ts",
+  "packages/shared/vitest.config.ts",
+];
+const requiredVitestCommands = [
+  ["package.json", "test:convex"],
+  ["apps/gateway/package.json", "test"],
+  ["apps/web/package.json", "test"],
+  ["packages/shared/package.json", "test"],
+];
 
 function runner(root, segments = [root]) {
   return { kind: "runner", root, segments };
@@ -42,32 +51,6 @@ function stringValue(value) {
 
 function recordValue(properties = {}) {
   return { kind: "record", properties };
-}
-
-function collectScripts(root, excludeFixtures) {
-  const files = [];
-  function visit(directory) {
-    for (const entry of readdirSync(directory, { withFileTypes: true })) {
-      const path = join(directory, entry.name);
-      if (entry.isDirectory()) {
-        if (ignoredDirectories.has(entry.name)) continue;
-        if (
-          excludeFixtures &&
-          relative(repositoryRoot, path).startsWith("scripts/quality/fixtures")
-        )
-          continue;
-        visit(path);
-      } else if (
-        scriptExtensions.includes(extname(entry.name)) &&
-        entry.name !== "routeTree.gen.ts" &&
-        !relative(repositoryRoot, path).startsWith("convex/_generated/")
-      ) {
-        files.push(resolve(path));
-      }
-    }
-  }
-  visit(root);
-  return files.sort();
 }
 
 class Environment {
@@ -106,12 +89,175 @@ function unwrap(expression) {
   return current;
 }
 
+function staticPropertyName(name) {
+  if (ts.isIdentifier(name) || ts.isStringLiteralLike(name)) return name.text;
+  return undefined;
+}
+
+function uniqueObjectProperty(object, expectedName, path) {
+  const matches = [];
+  for (const property of object.properties) {
+    if (ts.isSpreadAssignment(property)) {
+      throw new Error(
+        `${path}: spreads are forbidden where ${expectedName} is attested`,
+      );
+    }
+    if (
+      !ts.isPropertyAssignment(property) ||
+      staticPropertyName(property.name) === undefined
+    ) {
+      if (
+        ts.isMethodDeclaration(property) ||
+        ts.isGetAccessorDeclaration(property) ||
+        ts.isSetAccessorDeclaration(property)
+      ) {
+        const name = staticPropertyName(property.name);
+        if (name === expectedName) matches.push(property);
+      } else if (ts.isComputedPropertyName(property.name)) {
+        throw new Error(
+          `${path}: computed config properties are forbidden where ${expectedName} is attested`,
+        );
+      }
+      continue;
+    }
+    if (staticPropertyName(property.name) === expectedName)
+      matches.push(property);
+  }
+  if (matches.length !== 1 || !ts.isPropertyAssignment(matches[0])) {
+    throw new Error(
+      `${path}: requires exactly one data property ${expectedName}`,
+    );
+  }
+  return matches[0].initializer;
+}
+
+export function attestVitestConfig(path) {
+  const source = parseScript(path);
+  const defineConfigImports = new Set();
+  const defaultExports = [];
+  for (const statement of source.statements) {
+    if (
+      ts.isImportDeclaration(statement) &&
+      ts.isStringLiteral(statement.moduleSpecifier) &&
+      statement.moduleSpecifier.text === "vitest/config" &&
+      statement.importClause?.namedBindings &&
+      ts.isNamedImports(statement.importClause.namedBindings)
+    ) {
+      for (const element of statement.importClause.namedBindings.elements) {
+        if (
+          (element.propertyName?.text ?? element.name.text) === "defineConfig"
+        )
+          defineConfigImports.add(element.name.text);
+      }
+    }
+    if (ts.isExportAssignment(statement) && !statement.isExportEquals)
+      defaultExports.push(statement.expression);
+  }
+  if (defineConfigImports.size !== 1) {
+    throw new Error(
+      `${path}: must import exactly one defineConfig binding from vitest/config`,
+    );
+  }
+  if (defaultExports.length !== 1) {
+    throw new Error(`${path}: must contain exactly one default config export`);
+  }
+
+  const expression = unwrap(defaultExports[0]);
+  const [defineConfigName] = defineConfigImports;
+  if (
+    !ts.isCallExpression(expression) ||
+    !ts.isIdentifier(expression.expression) ||
+    expression.expression.text !== defineConfigName ||
+    expression.arguments.length !== 1
+  ) {
+    throw new Error(
+      `${path}: default export must call imported defineConfig exactly once`,
+    );
+  }
+  const config = unwrap(expression.arguments[0]);
+  if (!ts.isObjectLiteralExpression(config)) {
+    throw new Error(
+      `${path}: defineConfig argument must be an inline immutable object`,
+    );
+  }
+  const testConfig = unwrap(uniqueObjectProperty(config, "test", path));
+  if (!ts.isObjectLiteralExpression(testConfig)) {
+    throw new Error(`${path}: test config must be an inline immutable object`);
+  }
+  const allowOnly = unwrap(uniqueObjectProperty(testConfig, "allowOnly", path));
+  if (allowOnly.kind !== ts.SyntaxKind.FalseKeyword) {
+    throw new Error(`${path}: test.allowOnly must be literal false`);
+  }
+}
+
+function normalizeRepositoryPath(path) {
+  return relative(repositoryRoot, path).split("\\").join("/");
+}
+
+export function attestVitestConfigs(
+  roots = [repositoryRoot],
+  { excludeFixtures = true, requireRepositorySet = true } = {},
+) {
+  const configs = collectOwnedFiles({
+    roots,
+    repository: repositoryRoot,
+    extensions: scriptExtensions,
+    excludeFixtures,
+  }).filter((path) =>
+    /^vitest\.(?:config|workspace)\.[^.]+$/.test(basename(path)),
+  );
+  if (requireRepositorySet) {
+    const actual = configs.map(normalizeRepositoryPath);
+    if (JSON.stringify(actual) !== JSON.stringify(expectedVitestConfigs)) {
+      throw new Error(
+        `Vitest config set mismatch:\nexpected ${expectedVitestConfigs.join(", ")}\nactual ${actual.join(", ")}`,
+      );
+    }
+  }
+  for (const config of configs) attestVitestConfig(config);
+  return configs;
+}
+
+export function attestVitestCommands(root = repositoryRoot) {
+  for (const [packagePath, scriptName] of requiredVitestCommands) {
+    const path = resolve(root, packagePath);
+    const packageJson = JSON.parse(readFileSync(path, "utf8"));
+    const command = packageJson.scripts?.[scriptName];
+    if (
+      typeof command !== "string" ||
+      !/^vitest run(?:\s|$)/.test(command) ||
+      /[;&|<>`$(){}\n\r\\'"*?]/.test(command)
+    ) {
+      throw new Error(
+        `${packagePath}#${scriptName} must invoke vitest run directly`,
+      );
+    }
+    const flags = command
+      .trim()
+      .split(/\s+/)
+      .filter((word) => word.startsWith("--allowOnly"));
+    if (flags.length !== 1 || flags[0] !== "--allowOnly=false") {
+      throw new Error(
+        `${packagePath}#${scriptName} must force exactly --allowOnly=false`,
+      );
+    }
+  }
+  return requiredVitestCommands.length;
+}
+
 function evaluateString(expression, environment) {
   const current = unwrap(expression);
   if (ts.isStringLiteralLike(current)) return current.text;
-  if (ts.isTemplateExpression(current) && current.templateSpans.length === 0)
-    return current.head.text;
   if (ts.isNoSubstitutionTemplateLiteral(current)) return current.text;
+  if (ts.isTemplateExpression(current)) {
+    let value = current.head.text;
+    for (const span of current.templateSpans) {
+      const expression = evaluateString(span.expression, environment);
+      if (expression === undefined) return undefined;
+      value += expression + span.literal.text;
+    }
+    return value;
+  }
   if (ts.isIdentifier(current)) {
     const value = environment.get(current.text);
     return value.kind === "string" ? value.value : undefined;
@@ -134,13 +280,20 @@ function propertyName(expression, environment) {
     !expression.argumentExpression
   )
     return undefined;
-  return evaluateString(expression.argumentExpression, environment);
+  return (
+    evaluateString(expression.argumentExpression, environment) ??
+    dynamicProperty
+  );
 }
 
 function memberValue(value, property) {
-  if (!property) return unknown;
+  if (property === undefined) return unknown;
   if (value.kind === "runner")
-    return runner(value.root, [...value.segments, property]);
+    return runner(value.root, [
+      ...value.segments,
+      property === dynamicProperty ? "<computed>" : property,
+    ]);
+  if (property === dynamicProperty) return unknown;
   if (value.kind === "record") return value.properties[property] ?? unknown;
   return unknown;
 }
@@ -183,7 +336,7 @@ function evaluate(expression, environment) {
       const property = ts.isComputedPropertyName(element.name)
         ? evaluateString(element.name.expression, environment)
         : element.name.text;
-      if (property)
+      if (property !== undefined && property !== dynamicProperty)
         properties[property] = evaluate(element.initializer, environment);
     }
     return recordValue(properties);
@@ -276,7 +429,11 @@ function assignPattern(node, value, environment) {
   ) {
     const property = propertyName(current, environment);
     const base = environment.get(current.expression.text);
-    if (property && base.kind === "record") {
+    if (
+      property !== undefined &&
+      property !== dynamicProperty &&
+      base.kind === "record"
+    ) {
       environment.assign(
         current.expression.text,
         recordValue({ ...base.properties, [property]: value }),
@@ -317,8 +474,10 @@ function resolveLocalModule(path, specifier, sources) {
   const base = resolve(dirname(path), specifier);
   const candidates = [
     base,
-    ...scriptExtensions.map((extension) => `${base}${extension}`),
-    ...scriptExtensions.map((extension) => join(base, `index${extension}`)),
+    ...[...scriptExtensions].map((extension) => `${base}${extension}`),
+    ...[...scriptExtensions].map((extension) =>
+      resolve(base, `index${extension}`),
+    ),
   ];
   return candidates.find((candidate) => sources.has(candidate));
 }
@@ -475,12 +634,15 @@ function isBlockedCall(value) {
   return (
     runnerCall &&
     value.segments.some(
-      (segment) => blockedModifiers.has(segment) || blockedAliases.has(segment),
+      (segment) =>
+        segment === "<computed>" ||
+        blockedModifiers.has(segment) ||
+        blockedAliases.has(segment),
     )
   );
 }
 
-function scanSource(info, sources, exportMaps) {
+function scanSource(info, sources, exportMaps, displayRoot) {
   const violations = [];
   const root = new Environment();
   predeclareStatements(info.source.statements, root);
@@ -497,7 +659,7 @@ function scanSource(info, sources, exportMaps) {
       node.getStart(info.source),
     );
     violations.push(
-      `${relative(repositoryRoot, info.path)}:${position.line + 1}:${position.character + 1} ${value.segments.join(".")}`,
+      `${relative(displayRoot, info.path)}:${position.line + 1}:${position.character + 1} ${value.segments.join(".")}`,
     );
   }
 
@@ -555,34 +717,26 @@ function scanSource(info, sources, exportMaps) {
   return violations;
 }
 
-export function findBlockedTests(roots, { excludeFixtures = false } = {}) {
-  const paths = [
-    ...new Set(roots.flatMap((root) => collectScripts(root, excludeFixtures))),
-  ];
+export function findBlockedTests(
+  roots,
+  { excludeFixtures = false, repository = repositoryRoot } = {},
+) {
+  const paths = collectOwnedFiles({
+    roots,
+    repository,
+    extensions: scriptExtensions,
+    excludeFixtures,
+  });
+  assertNoExcludedSourceImports(paths, repository, { excludeFixtures });
   const sources = new Map(
     paths.map((path) => {
-      const source = ts.createSourceFile(
-        path,
-        readFileSync(path, "utf8"),
-        ts.ScriptTarget.Latest,
-        true,
-        path.endsWith("x") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
-      );
-      if (source.parseDiagnostics.length > 0) {
-        throw new Error(
-          `${path}: ${source.parseDiagnostics
-            .map((diagnostic) =>
-              ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n"),
-            )
-            .join("; ")}`,
-        );
-      }
+      const source = parseScript(path);
       return [path, { path, source }];
     }),
   );
   const exportMaps = buildExportMaps(sources);
   return [...sources.values()].flatMap((info) =>
-    scanSource(info, sources, exportMaps),
+    scanSource(info, sources, exportMaps, repository),
   );
 }
 
@@ -590,6 +744,14 @@ if (process.argv[1] === import.meta.filename) {
   const explicitRoots = process.argv.slice(2).map((path) => resolve(path));
   const roots = explicitRoots.length ? explicitRoots : [repositoryRoot];
   try {
+    const configs = attestVitestConfigs(roots, {
+      excludeFixtures: explicitRoots.length === 0,
+      requireRepositorySet: explicitRoots.length === 0,
+    });
+    const commands =
+      explicitRoots.length === 0 ? attestVitestCommands(repositoryRoot) : 0;
+    const ignoreProbes =
+      explicitRoots.length === 0 ? attestIgnorePolicies(repositoryRoot) : 0;
     const violations = findBlockedTests(roots, {
       excludeFixtures: explicitRoots.length === 0,
     });
@@ -598,7 +760,14 @@ if (process.argv[1] === import.meta.filename) {
         `Skipped/focused tests are forbidden:\n${violations.join("\n")}\n`,
       );
       process.exitCode = 1;
-    } else process.stdout.write("Skipped/focused tests: 0\n");
+    } else {
+      process.stdout.write("Skipped/focused tests: 0\n");
+      if (explicitRoots.length === 0) {
+        process.stdout.write(
+          `Vitest focus enforcement: ${configs.length} configs, ${commands} commands, ${ignoreProbes} ignore probes\n`,
+        );
+      }
+    }
   } catch (error) {
     process.stderr.write(
       `${error instanceof Error ? error.message : String(error)}\n`,

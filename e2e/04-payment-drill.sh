@@ -46,10 +46,10 @@ ab wait --text "Confirmed" >/dev/null
 step "refund Stripe sandbox payment"
 session_json="$E2E_ARTIFACTS/checkout-session.json"
 refund_json="$E2E_ARTIFACTS/refund.json"
-curl -fsS -u "$STRIPE_SECRET_KEY:" "https://api.stripe.com/v1/checkout/sessions/$checkout_id" >"$session_json"
+curl -fsS --oauth2-bearer "$STRIPE_SECRET_KEY" "https://api.stripe.com/v1/checkout/sessions/$checkout_id" >"$session_json"
 payment_intent="$(node -e 'const x=require(process.argv[1]); console.log(x.payment_intent || "")' "$session_json")"
 [[ "$payment_intent" == pi_* ]] || fail "checkout session lacks payment intent"
-curl -fsS -u "$STRIPE_SECRET_KEY:" -X POST https://api.stripe.com/v1/refunds \
+curl -fsS --oauth2-bearer "$STRIPE_SECRET_KEY" -X POST https://api.stripe.com/v1/refunds \
   --data-urlencode "payment_intent=$payment_intent" \
   --data-urlencode "metadata[zevium_drill]=true" >"$refund_json"
 refund_status="$(node -e 'const x=require(process.argv[1]); console.log(x.status || "")' "$refund_json")"

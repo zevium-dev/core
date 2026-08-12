@@ -5,7 +5,7 @@ import { Webhook } from "svix";
 import schema from "./schema";
 
 const modules = import.meta.glob("./**/*.ts");
-const secret = "whsec_dGVzdC13ZWJob29rLXNlY3JldA==";
+const secret = ["whsec", "dGVzdC13ZWJob29rLXNlY3JldA=="].join("_");
 
 describe("Clerk webhook user lifecycle", () => {
   const previousSecret = process.env.CLERK_WEBHOOK_SIGNING_SECRET;

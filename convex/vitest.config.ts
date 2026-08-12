@@ -11,6 +11,6 @@ export default defineConfig({
     environment: "edge-runtime",
     include: ["**/*.test.ts"],
     // Keep vitest out of apps/* — this config is convex-only.
-    exclude: ["**/node_modules/**", "**/_generated/**"],
+    exclude: ["node_modules/**", "_generated/**"],
   },
 });

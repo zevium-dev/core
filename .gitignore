@@ -1,42 +1,54 @@
-node_modules
-package-lock.json
-yarn.lock
+/node_modules/
+/apps/gateway/node_modules/
+/apps/web/node_modules/
+/convex/node_modules/
+/packages/shared/node_modules/
+/package-lock.json
+/yarn.lock
 
-.DS_Store
-.cache
-.env
-.vercel
-.output
-.nitro
+/.DS_Store
+/.cache/
+/.env
+/.vercel/
+/.output/
+/.nitro/
 /build/
 /api/
-/server/build
-/public/build# Sentry Config File
-.env.sentry-build-plugin
+/server/build/
+/public/build/
+# Sentry config file
+/.env.sentry-build-plugin
 /test-results/
 /playwright-report/
 /blob-report/
 /playwright/.cache/
-.tanstack
-.wrangler/
-/dist
+/apps/web/.tanstack/
+/apps/web/.wrangler/
+/apps/gateway/.wrangler/
+/apps/gateway/dist/
+/packages/shared/dist/
+/dist/
 
 # agent-browser debug artifacts (frames, recordings, screenshots)
-*.webm
-*-frames/
-frames/
-before-reload.png
-after-reload.png
-error.png
-reload-*.png
-reload-*.webm
+/*.webm
+/*-frames/
+/frames/
+/before-reload.png
+/after-reload.png
+/error.png
+/reload-*.png
+/reload-*.webm
 
-.env*.local
+/.env*.local
 
 # convex
-.turbo
+/.turbo/
+/apps/gateway/.turbo/
+/apps/web/.turbo/
+/packages/shared/.turbo/
 
 # browser e2e
-e2e/artifacts/
-.project/e2e-key.env
-.dev.vars
+/e2e/artifacts/
+/.project/e2e-key.env
+/.dev.vars
+/apps/gateway/.dev.vars

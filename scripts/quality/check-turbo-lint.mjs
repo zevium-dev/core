@@ -1,85 +1,31 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { extname, relative, resolve, sep } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  assertNoExcludedSourceImports,
+  collectOwnedFiles as collectInventoryFiles,
+  scriptExtensions,
+} from "./source-inventory.mjs";
 
 const repositoryRoot = resolve(import.meta.dirname, "../..");
-const sourceExtensions = new Set([
-  ".cjs",
-  ".cts",
-  ".js",
-  ".jsx",
-  ".mjs",
-  ".mts",
-  ".ts",
-  ".tsx",
-]);
-const ignoredDirectoryNames = new Set([
-  ".agents",
-  ".git",
-  ".nitro",
-  ".output",
-  ".tanstack",
-  ".turbo",
-  ".wrangler",
-  "coverage",
-  "dist",
-  "node_modules",
-]);
-const generatedOrFixturePaths = [
-  "apps/web/src/routeTree.gen.ts",
-  "convex/_generated/",
-  "scripts/quality/fixtures/",
-];
 const forbiddenSyntax = /[;&|<>`$(){}\n\r\\'"*?]/;
 
 function normalize(path) {
   return path.split(sep).join("/");
 }
 
-function isGeneratedOrFixture(path, workspace) {
-  const repositoryPath = normalize(relative(repositoryRoot, path));
-  if (
-    resolve(workspace) === repositoryRoot &&
-    !repositoryPath.startsWith("../")
-  ) {
-    return generatedOrFixturePaths.some(
-      (excluded) =>
-        repositoryPath === excluded.replace(/\/$/, "") ||
-        repositoryPath.startsWith(excluded),
-    );
-  }
-  const workspacePath = normalize(relative(workspace, path));
-  return workspacePath.startsWith("scripts/quality/fixtures/");
-}
-
 function collectOwnedFiles(directory, workspace, excludedRoots = []) {
-  const files = [];
-  const excluded = excludedRoots.map((path) => resolve(workspace, path));
-
-  function visit(current) {
-    for (const entry of readdirSync(current, { withFileTypes: true })) {
-      const path = resolve(current, entry.name);
-      if (entry.isDirectory()) {
-        if (ignoredDirectoryNames.has(entry.name)) continue;
-        if (
-          excluded.some(
-            (root) => path === root || path.startsWith(`${root}${sep}`),
-          )
-        )
-          continue;
-        visit(path);
-      } else if (
-        sourceExtensions.has(extname(entry.name)) &&
-        !isGeneratedOrFixture(path, workspace)
-      ) {
-        files.push(path);
-      }
-    }
-  }
-
-  visit(directory);
-  return files.sort();
+  const repository = resolve(workspace);
+  const files = collectInventoryFiles({
+    roots: [directory],
+    repository,
+    extensions: scriptExtensions,
+    excludeFixtures: true,
+    excludedRoots: excludedRoots.map((path) => resolve(workspace, path)),
+  });
+  assertNoExcludedSourceImports(files, repository);
+  return files;
 }
 
 function parseOxlintCommand(command, packageName, cwd, expectedConfig) {
@@ -108,6 +54,8 @@ function parseOxlintCommand(command, packageName, cwd, expectedConfig) {
   let configuredPath;
   let denyWarnings = 0;
   let unusedDirectives = 0;
+  let noIgnore = 0;
+  let disableNestedConfig = 0;
   for (let index = 0; index < words.length; index += 1) {
     const word = words[index];
     if (word === "--config" || word === "-c") {
@@ -126,7 +74,14 @@ function parseOxlintCommand(command, packageName, cwd, expectedConfig) {
       unusedDirectives += 1;
       continue;
     }
-    if (word === "--no-ignore") continue;
+    if (word === "--no-ignore") {
+      noIgnore += 1;
+      continue;
+    }
+    if (word === "--disable-nested-config") {
+      disableNestedConfig += 1;
+      continue;
+    }
     if (word.startsWith("-")) {
       throw new Error(
         `${packageName}: lint weakening or config override flag is forbidden: ${word}`,
@@ -135,9 +90,14 @@ function parseOxlintCommand(command, packageName, cwd, expectedConfig) {
     targets.push(word);
   }
 
-  if (denyWarnings !== 1 || unusedDirectives !== 1) {
+  if (
+    denyWarnings !== 1 ||
+    unusedDirectives !== 1 ||
+    noIgnore !== 1 ||
+    disableNestedConfig !== 1
+  ) {
     throw new Error(
-      `${packageName}: lint must deny warnings and report unused disable directives`,
+      `${packageName}: lint must deny warnings, report unused disable directives, disable hidden ignore files, and disable nested configs`,
     );
   }
   if (
@@ -213,6 +173,16 @@ export function attestLintTask({
   const expected = collectOwnedFiles(cwd, workspace, excludedRoots);
   if (expected.length === 0) {
     throw new Error(`${task.package}: owned lint scope is empty`);
+  }
+  const suppressions = expected.filter((path) =>
+    /(?:eslint|oxlint)-disable/.test(readFileSync(path, "utf8")),
+  );
+  if (suppressions.length > 0) {
+    throw new Error(
+      `${task.package}: lint suppression directives are forbidden:\n${suppressions
+        .map((path) => normalize(relative(repositoryRoot, path)))
+        .join("\n")}`,
+    );
   }
 
   const oxlint = resolve(repositoryRoot, "node_modules/.bin/oxlint");
