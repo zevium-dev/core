@@ -9,7 +9,7 @@ import {
   type HttpMethod,
   type ParsedOpenApiSpec,
 } from "@zevium/shared";
-import type { CatalogueSource } from "./catalogue-source";
+import { listAllPublic, type CatalogueSource } from "./catalogue-source";
 import type { SpecSource } from "./spec-source";
 
 const HTTP_METHODS: readonly HttpMethod[] = [
@@ -83,10 +83,10 @@ export function endpointsFromSpec(
 export async function buildDiscoveryIndex(
   deps: DiscoveryDeps,
 ): Promise<DiscoveryIndex> {
-  const page = await deps.catalogueSource.listPublic();
+  const items = await listAllPublic(deps.catalogueSource);
   const apis: DiscoveryApi[] = [];
 
-  for (const item of page.items) {
+  for (const item of items) {
     const published = await deps.specSource.getPublishedSpec(
       item.publisherHandle,
       item.slug,

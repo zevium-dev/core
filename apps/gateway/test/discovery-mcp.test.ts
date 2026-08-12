@@ -11,7 +11,10 @@ import worker, {
 } from "../src/index";
 import {
   FixtureCatalogueSource,
+  type CatalogueListArgs,
   type CatalogueListing,
+  type CataloguePage,
+  type CatalogueSource,
 } from "../src/catalogue-source";
 import { FixtureKeyVerifier } from "../src/key-verifier";
 import { FixtureSpecSource } from "../src/spec-source";
@@ -60,6 +63,20 @@ const LISTING: CatalogueListing = {
   publishedAt: 1_700_000_000_000,
 };
 
+class TwoPageCatalogueSource implements CatalogueSource {
+  constructor(
+    readonly first: CatalogueListing,
+    readonly second: CatalogueListing,
+  ) {}
+
+  async listPublic(args?: CatalogueListArgs): Promise<CataloguePage> {
+    if (args?.cursor === "page-2") {
+      return { items: [this.second], nextCursor: null };
+    }
+    return { items: [this.first], nextCursor: "page-2" };
+  }
+}
+
 function walletStub(clerkOrgId: string): WalletStub {
   const id = env.WALLET.idFromName(clerkOrgId);
   return env.WALLET.get(id);
@@ -83,6 +100,7 @@ async function installAgentFixtures(opts: {
   fetchImpl?: typeof fetch;
   credits?: number;
   listings?: CatalogueListing[];
+  catalogueSource?: CatalogueSource;
 }) {
   const usage = new CollectingUsageSink();
   const keys = new FixtureKeyVerifier({
@@ -100,7 +118,9 @@ async function installAgentFixtures(opts: {
     clerkOrgId: opts.clerkOrgId,
     visibility: "private",
   });
-  const catalogue = new FixtureCatalogueSource(opts.listings ?? [LISTING]);
+  const catalogue =
+    opts.catalogueSource ??
+    new FixtureCatalogueSource(opts.listings ?? [LISTING]);
 
   __setTestPipelineDeps({
     keyVerifier: keys,
@@ -251,6 +271,28 @@ describe("GET /discovery", () => {
       isRecord(body) && Array.isArray(body.apis) && body.apis.length === 0,
     ).toBe(true);
   });
+
+  it("returns APIs from every catalogue page", async () => {
+    const second = {
+      ...LISTING,
+      projectId: "proj_second",
+      name: "Second API",
+      slug: "second",
+    };
+    await installAgentFixtures({
+      clerkOrgId: "org_disc_pages",
+      catalogueSource: new TwoPageCatalogueSource(LISTING, second),
+    });
+
+    const res = await workerFetch("/discovery");
+    const body: unknown = await res.json();
+    expect(isRecord(body) && Array.isArray(body.apis)).toBe(true);
+    if (!isRecord(body) || !Array.isArray(body.apis)) return;
+    expect(body.apis.map((api) => isRecord(api) && api.slug)).toEqual([
+      PROJECT_SLUG,
+      "second",
+    ]);
+  });
 });
 
 describe("MCP /mcp", () => {
@@ -371,6 +413,31 @@ describe("MCP /mcp", () => {
     expect(first.slug).toBe(PROJECT_SLUG);
     expect(first.publisherHandle).toBe(ORG_SLUG);
     expect(Array.isArray(first.endpoints)).toBe(true);
+  });
+
+  it("search_apis returns matches from every catalogue page", async () => {
+    const second = {
+      ...LISTING,
+      projectId: "proj_second",
+      name: "Second API",
+      slug: "second",
+    };
+    await installAgentFixtures({
+      clerkOrgId: "org_mcp_search_pages",
+      catalogueSource: new TwoPageCatalogueSource(LISTING, second),
+    });
+
+    const rpc: unknown = await mcpCall("tools/call", {
+      name: "search_apis",
+      arguments: { query: "" },
+    });
+    const parsed: unknown = JSON.parse(toolText(rpc));
+    expect(isRecord(parsed) && Array.isArray(parsed.matches)).toBe(true);
+    if (!isRecord(parsed) || !Array.isArray(parsed.matches)) return;
+    expect(parsed.matches.map((api) => isRecord(api) && api.slug)).toEqual([
+      PROJECT_SLUG,
+      "second",
+    ]);
   });
 
   it("get_api_docs returns endpoints + usage notes", async () => {
