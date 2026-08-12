@@ -121,7 +121,9 @@ export async function appendWalletEntry(
   const sequence = args.wallet.sequence + 1;
   const balance = args.wallet.balance + args.amount;
   if (!Number.isSafeInteger(balance) || !Number.isSafeInteger(sequence)) {
-    throw new Error("Wallet ledger overflow: balance or sequence is not a safe integer");
+    throw new Error(
+      "Wallet ledger overflow: balance or sequence is not a safe integer",
+    );
   }
   await ctx.db.insert("walletEntries", {
     walletId: args.wallet._id,
