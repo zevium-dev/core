@@ -24,7 +24,39 @@ ab() {
     printf '[e2e] locked agent-browser binary missing: %s\n' "$AGENT_BROWSER_BIN" >&2
     return 127
   fi
-  "$AGENT_BROWSER_BIN" "$@"
+  env -u E2E_API_KEY -u RELEASE_PROBE_API_KEY "$AGENT_BROWSER_BIN" "$@"
+}
+
+# Feed secret-bearing browser commands through JSON stdin. Secret never enters
+# shell or native agent-browser argv where process listings can expose it.
+ab_fill_secret() {
+  local mode="$1" selector="$2"
+  E2E_API_KEY="$E2E_RELEASE_KEY" AB_FILL_MODE="$mode" AB_FILL_SELECTOR="$selector" node -e '
+    const key=process.env.E2E_API_KEY;
+    if (typeof key !== "string" || key.length < 32 || /[\r\n]/.test(key)) {
+      throw new Error("E2E API key is invalid");
+    }
+    const command=process.env.AB_FILL_MODE === "css"
+      ? ["fill", process.env.AB_FILL_SELECTOR, key]
+      : ["find", process.env.AB_FILL_MODE, process.env.AB_FILL_SELECTOR, "fill", key];
+    process.stdout.write(JSON.stringify([command]));
+  ' | env -u E2E_API_KEY -u RELEASE_PROBE_API_KEY \
+    "$AGENT_BROWSER_BIN" batch --bail >/dev/null
+}
+
+ab_paid_fetch() {
+  local url="$1"
+  # JavaScript template literals are intentionally protected from shell expansion.
+  # shellcheck disable=SC2016
+  E2E_API_KEY="$E2E_RELEASE_KEY" AB_PAID_URL="$url" node -e '
+    const key=process.env.E2E_API_KEY;
+    const url=process.env.AB_PAID_URL;
+    if (typeof key !== "string" || key.length < 32 || /[\r\n]/.test(key)) {
+      throw new Error("E2E API key is invalid");
+    }
+    process.stdout.write(`fetch(${JSON.stringify(url)}, { headers: { Authorization: ${JSON.stringify(`Bearer ${key}`)} } }).then((response) => response.status)`);
+  ' | env -u E2E_API_KEY -u RELEASE_PROBE_API_KEY \
+    "$AGENT_BROWSER_BIN" eval --stdin
 }
 
 log() {

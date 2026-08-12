@@ -9,7 +9,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   classifyLifecycleChange,
   lifecycleDigest,
@@ -22,6 +22,10 @@ const DIGEST_RE = /^[0-9a-f]{64}$/;
 const ATTESTATION_TYPE =
   "https://zevium.dev/attestations/production-release/v1";
 const DEFINITIONS = {
+  policy: {
+    workflowPath: ".github/workflows/release-policy.yml",
+    environment: "production-policy",
+  },
   lifecycle: {
     workflowPath: ".github/workflows/gateway-do-lifecycle.yml",
     environment: "production-lifecycle",
@@ -35,6 +39,16 @@ const LIFECYCLE_RECOVERY_DEFINITION = {
   workflowPath: ".github/workflows/recover-production.yml",
   environment: "production-recovery",
 };
+const POLICY_PATHS = [
+  ".github/release-policy.json",
+  ".github/scripts/",
+  ".github/workflows/",
+  "e2e/",
+  "package.json",
+  "pnpm-lock.yaml",
+];
+const EVALUATOR_PATH = ".github/scripts/release-attestation.mjs";
+const POLICY_CHECK = "Immutable Release Policy Review / evaluate";
 
 function definitionForAttestation(attestation) {
   if (
@@ -87,21 +101,158 @@ function gitObject(sha, path) {
   }
 }
 
-export function contractDigest(base, target) {
-  validateSha(base, "contract base");
-  validateSha(target, "contract target");
-  const paths = git([
+function isPolicyPath(path) {
+  return POLICY_PATHS.some((entry) =>
+    entry.endsWith("/") ? path.startsWith(entry) : path === entry,
+  );
+}
+
+function changedPaths(base, target, pathspec = []) {
+  return git([
     "diff",
     "--name-only",
     "--diff-filter=ACDMRTUXB",
     base,
     target,
-    "--",
-    "convex",
+    ...(pathspec.length === 0 ? [] : ["--", ...pathspec]),
   ])
     .split("\n")
     .filter(Boolean)
     .sort();
+}
+
+function assertLinearRange(base, target) {
+  try {
+    execFileSync("git", ["merge-base", "--is-ancestor", base, target], {
+      stdio: "ignore",
+    });
+  } catch {
+    throw new Error("Protected release base is not an ancestor of target");
+  }
+  let expectedParent = base;
+  for (const row of git([
+    "rev-list",
+    "--reverse",
+    "--parents",
+    `${base}..${target}`,
+  ])
+    .split("\n")
+    .filter(Boolean)) {
+    const [commit, ...parents] = row.split(" ");
+    if (parents.length !== 1 || parents[0] !== expectedParent) {
+      throw new Error(
+        "Protected release range must have linear single-parent history",
+      );
+    }
+    expectedParent = commit;
+  }
+}
+
+export function policyTreeDigest(sha) {
+  validateSha(sha, "policy tree SHA");
+  const paths = git(["ls-tree", "-r", "--name-only", sha])
+    .split("\n")
+    .filter((path) => path && isPolicyPath(path))
+    .sort();
+  if (!paths.includes(EVALUATOR_PATH)) {
+    throw new Error("Trusted release evaluator is missing");
+  }
+  return sha256(
+    JSON.stringify(
+      paths.map((path) => ({ path, object: gitObject(sha, path) })),
+    ),
+  );
+}
+
+export function policyChangeDigest(base, target) {
+  validateSha(base, "policy base");
+  validateSha(target, "policy target");
+  assertLinearRange(base, target);
+  const paths = changedPaths(base, target).filter(isPolicyPath);
+  if (paths.length === 0) {
+    throw new Error("Policy digest requires referee or workflow changes");
+  }
+  return sha256(
+    JSON.stringify(
+      paths.map((path) => ({
+        path,
+        before: gitObject(base, path),
+        after: gitObject(target, path),
+      })),
+    ),
+  );
+}
+
+export function verifyImmutableReferee({
+  refereeRef,
+  target,
+  evaluatorDigest,
+  treeDigest,
+  repository,
+  targetBranch,
+}) {
+  validateSha(refereeRef, "immutable referee ref");
+  validateSha(target, "release target");
+  if (!DIGEST_RE.test(evaluatorDigest ?? "")) {
+    throw new Error("immutable evaluator digest is invalid");
+  }
+  if (!DIGEST_RE.test(treeDigest ?? "")) {
+    throw new Error("immutable policy tree digest is invalid");
+  }
+  if (repository !== "zevium-dev/core" || targetBranch !== "develop") {
+    throw new Error("release repository or protected target branch is invalid");
+  }
+  assertLinearRange(refereeRef, target);
+  const source = git(["show", `${refereeRef}:${EVALUATOR_PATH}`]);
+  if (sha256(source) !== evaluatorDigest) {
+    throw new Error("immutable evaluator digest mismatch");
+  }
+  const runtimeSource = readFileSync(
+    fileURLToPath(import.meta.url),
+    "utf8",
+  ).trim();
+  if (sha256(runtimeSource) !== evaluatorDigest || runtimeSource !== source) {
+    throw new Error("runtime evaluator is not immutable referee blob");
+  }
+  if (policyTreeDigest(refereeRef) !== treeDigest) {
+    throw new Error("immutable policy tree digest mismatch");
+  }
+  const policy = JSON.parse(
+    git(["show", `${refereeRef}:.github/release-policy.json`]),
+  );
+  if (
+    policy?.schemaVersion !== 1 ||
+    policy.repository !== repository ||
+    policy.targetBranch !== targetBranch ||
+    policy.evaluator !== EVALUATOR_PATH ||
+    policy.requiredWorkflow !== DEFINITIONS.policy.workflowPath ||
+    policy.requiredCheck !== POLICY_CHECK ||
+    policy.requiredEnvironment !== DEFINITIONS.policy.environment ||
+    policy.refereeRefVariable !== "RELEASE_REFEREE_REF" ||
+    policy.evaluatorDigestVariable !== "RELEASE_REFEREE_SHA256" ||
+    policy.policyTreeDigestVariable !== "RELEASE_POLICY_TREE_SHA256" ||
+    policy.preventSelfReview !== true ||
+    policy.adminBypass !== false ||
+    policy.mergeTopology !== "linear-single-parent" ||
+    !equal(policy.refereePaths, POLICY_PATHS)
+  ) {
+    throw new Error("immutable release policy content is invalid");
+  }
+  return canonical({
+    evaluatorDigest,
+    refereeRef,
+    repository,
+    target,
+    targetBranch,
+    treeDigest,
+  });
+}
+
+export function contractDigest(base, target) {
+  validateSha(base, "contract base");
+  validateSha(target, "contract target");
+  assertLinearRange(base, target);
+  const paths = changedPaths(base, target, ["convex"]);
   if (paths.length === 0)
     throw new Error("Contract digest requires convex changes");
   return sha256(
@@ -128,6 +279,7 @@ function configAt(sha) {
 export function findProtectedRequirements(base, target, environment) {
   validateSha(base, "active base");
   validateSha(target, "release target");
+  assertLinearRange(base, target);
   const commits = git(["rev-list", "--reverse", `${base}..${target}`])
     .split("\n")
     .filter(Boolean);
@@ -139,6 +291,44 @@ export function findProtectedRequirements(base, target, environment) {
     if (parents.length === 0)
       throw new Error(`Protected commit ${commit} has no parent`);
     const parent = parents[0];
+    const policyPaths = changedPaths(parent, commit).filter(isPolicyPath);
+      if (policyPaths.length > 0) {
+        const evaluatorRef = validateSha(
+          process.env.RELEASE_REFEREE_REF,
+          "immutable referee ref",
+        );
+      const evaluatorDigest = process.env.RELEASE_REFEREE_SHA256;
+      const trustedTreeDigest = process.env.RELEASE_POLICY_TREE_SHA256;
+        if (
+          !DIGEST_RE.test(evaluatorDigest ?? "") ||
+          !DIGEST_RE.test(trustedTreeDigest ?? "")
+        ) {
+          throw new Error(
+            "immutable referee and protected policy-tree digests are required for policy changes",
+          );
+        }
+      assertLinearRange(evaluatorRef, parent);
+      if (
+        sha256(git(["show", `${evaluatorRef}:${EVALUATOR_PATH}`])) !==
+          evaluatorDigest ||
+        policyTreeDigest(evaluatorRef) !== trustedTreeDigest
+      ) {
+        throw new Error(
+          "immutable referee configuration does not match git objects",
+        );
+      }
+      requirements.push({
+        kind: "policy",
+        targetSha: commit,
+        activeBase: parent,
+        protectedBase: parent,
+        phase: "review",
+        digest: policyChangeDigest(parent, commit),
+        evaluatorRef,
+        evaluatorDigest,
+        policyTreeDigest: trustedTreeDigest,
+      });
+    }
     const convex = classifyConvexContract(parent, commit);
     if (convex.hasContraction) {
       requirements.push({
@@ -222,8 +412,29 @@ export function createProtectedAttestation(input) {
     throw new Error("workflow path is invalid");
   if (input.environment !== definition.environment)
     throw new Error("environment is invalid");
-  if (!["expand", "contract"].includes(input.phase))
+  if (!["expand", "contract", "review"].includes(input.phase))
     throw new Error("phase is invalid");
+  if (input.kind === "policy") {
+    validateSha(input.evaluatorRef, "evaluator ref");
+    if (
+      input.phase !== "review" ||
+      !DIGEST_RE.test(input.evaluatorDigest ?? "") ||
+      !DIGEST_RE.test(input.policyTreeDigest ?? "") ||
+      input.runHeadSha !== input.protectedBase ||
+      input.activeBase !== input.protectedBase ||
+      input.recoveryOf !== undefined ||
+      hasSourceRun
+    ) {
+      throw new Error("policy attestation trust boundary is invalid");
+    }
+  } else if (
+    input.phase === "review" ||
+    input.evaluatorRef !== undefined ||
+    input.evaluatorDigest !== undefined ||
+    input.policyTreeDigest !== undefined
+  ) {
+    throw new Error("non-policy attestation contains policy trust fields");
+  }
   if (input.recoveryOf !== undefined) {
     validateSha(input.recoveryOf, "recovery target");
     if (input.kind !== "contract" || input.targetSha !== input.recoveryOf) {
@@ -245,6 +456,14 @@ export function createProtectedAttestation(input) {
     runAttempt: input.runAttempt,
     environment: input.environment,
     event: "workflow_dispatch",
+    ...(input.kind === "policy"
+      ? {
+          evaluatorRef: input.evaluatorRef,
+          evaluatorDigest: input.evaluatorDigest,
+          policyTreeDigest: input.policyTreeDigest,
+          event: "pull_request_target",
+        }
+      : {}),
     ...(input.recoveryOf ? { recoveryOf: input.recoveryOf } : {}),
     ...(lifecycleRecovery
       ? {
@@ -266,6 +485,9 @@ export function verifyProtectedAttestation({
   targetIsAncestor = attestation?.targetSha === attestation?.runHeadSha,
   sourceTargetIsAncestor = attestation?.targetSha === sourceRun?.head_sha,
   targetParentSha,
+  baseIsAncestorOfTarget = false,
+  evaluatorIsAncestorOfBase = false,
+  linearPolicyRange = false,
 }) {
   const definition = definitionForAttestation(attestation);
   if (!definition) throw new Error("Unknown requirement kind");
@@ -289,6 +511,13 @@ export function verifyProtectedAttestation({
           sourceRunAttempt: attestation.sourceRunAttempt,
         }
       : {}),
+    ...(attestation?.kind === "policy"
+      ? {
+          evaluatorRef: attestation.evaluatorRef,
+          evaluatorDigest: attestation.evaluatorDigest,
+          policyTreeDigest: attestation.policyTreeDigest,
+        }
+      : {}),
   });
   if (!equal(normalized, attestation))
     throw new Error("attestation shape is not canonical");
@@ -301,6 +530,13 @@ export function verifyProtectedAttestation({
     digest: requirement.digest,
     workflowPath: definition.workflowPath,
     environment: definition.environment,
+    ...(requirement.kind === "policy"
+      ? {
+          evaluatorRef: requirement.evaluatorRef,
+          evaluatorDigest: requirement.evaluatorDigest,
+          policyTreeDigest: requirement.policyTreeDigest,
+        }
+      : {}),
   };
   for (const [field, value] of Object.entries(expected)) {
     if (attestation?.[field] !== value)
@@ -313,7 +549,7 @@ export function verifyProtectedAttestation({
     run?.workflow_id !== attestation.workflowId ||
     run?.path !== definition.workflowPath ||
     run?.head_sha !== attestation.runHeadSha ||
-    run?.event !== "workflow_dispatch" ||
+    run?.event !== attestation.event ||
     run?.head_branch !== "develop" ||
     run?.status !== "completed" ||
     run?.conclusion !== "success" ||
@@ -321,10 +557,21 @@ export function verifyProtectedAttestation({
   ) {
     throw new Error("workflow run provenance mismatch");
   }
-  if (!targetIsAncestor)
-    throw new Error("protected target is not ancestor of workflow run head");
-  if (targetParentSha !== requirement.protectedBase) {
-    throw new Error("protected target parent does not match canonical base");
+  if (requirement.kind === "policy") {
+    if (
+      run.head_sha !== requirement.protectedBase ||
+      !baseIsAncestorOfTarget ||
+      !evaluatorIsAncestorOfBase ||
+      !linearPolicyRange
+    ) {
+      throw new Error("policy attestation did not run from immutable base");
+    }
+  } else {
+    if (!targetIsAncestor)
+      throw new Error("protected target is not ancestor of workflow run head");
+    if (targetParentSha !== requirement.protectedBase) {
+      throw new Error("protected target parent does not match canonical base");
+    }
   }
   if (
     attestation.sourceRunId !== undefined &&
@@ -506,6 +753,37 @@ async function verifyRemoteRequirement(
         Array.isArray(targetCommit.parents) && targetCommit.parents.length === 1
           ? targetCommit.parents[0]?.sha
           : undefined;
+      const policyComparison =
+        requirement.kind === "policy"
+          ? await github(
+              `/repos/${repository}/compare/${requirement.protectedBase}...${requirement.targetSha}`,
+              token,
+              fetchImpl,
+            )
+          : undefined;
+      const evaluatorComparison =
+        requirement.kind === "policy" &&
+        requirement.evaluatorRef !== requirement.protectedBase
+          ? await github(
+              `/repos/${repository}/compare/${requirement.evaluatorRef}...${requirement.protectedBase}`,
+              token,
+              fetchImpl,
+            )
+          : undefined;
+      const policyCommits = policyComparison?.commits ?? [];
+      let policyParent = requirement.protectedBase;
+      const linearPolicyRange =
+        requirement.kind !== "policy" ||
+        (policyComparison?.status === "ahead" &&
+          policyCommits.length > 0 &&
+          policyCommits.every((commit) => {
+            const valid =
+              commit?.parents?.length === 1 &&
+              commit.parents[0]?.sha === policyParent;
+            policyParent = commit?.sha;
+            return valid;
+          }) &&
+          policyParent === requirement.targetSha);
       const targetIsAncestor =
         attestation.targetSha === run.head_sha ||
         (
@@ -536,6 +814,14 @@ async function verifyRemoteRequirement(
         targetIsAncestor,
         sourceTargetIsAncestor,
         targetParentSha,
+        baseIsAncestorOfTarget:
+          policyComparison?.status === "ahead" ||
+          policyComparison?.status === "identical",
+        evaluatorIsAncestorOfBase:
+          requirement.kind !== "policy" ||
+          requirement.evaluatorRef === requirement.protectedBase ||
+          evaluatorComparison?.status === "ahead",
+        linearPolicyRange,
       });
       valid.push(attestation);
     } catch {
@@ -584,6 +870,28 @@ export async function run(argv = process.argv.slice(2)) {
     process.stdout.write(`${digest}\n`);
     return digest;
   }
+  if (command === "policy-digest") {
+    const value = policyChangeDigest(args.base, args.target);
+    process.stdout.write(`${value}\n`);
+    return value;
+  }
+  if (command === "policy-tree-digest") {
+    const value = policyTreeDigest(args.sha);
+    process.stdout.write(`${value}\n`);
+    return value;
+  }
+  if (command === "verify-referee") {
+    const value = verifyImmutableReferee({
+      refereeRef: args.ref,
+      target: args.target,
+      evaluatorDigest: args["evaluator-digest"],
+      treeDigest: args["tree-digest"],
+      repository: args.repository,
+      targetBranch: args["target-branch"],
+    });
+    process.stdout.write(`${JSON.stringify(value)}\n`);
+    return value;
+  }
   if (command === "lifecycle-digest") {
     const digest = lifecycleDigest(
       parseJsonc(readFileSync(args.config, "utf8")),
@@ -613,6 +921,13 @@ export async function run(argv = process.argv.slice(2)) {
       ...(args["source-run-attempt"]
         ? { sourceRunAttempt: Number(args["source-run-attempt"]) }
         : {}),
+      ...(args["evaluator-ref"]
+        ? {
+            evaluatorRef: args["evaluator-ref"],
+            evaluatorDigest: args["evaluator-digest"],
+            policyTreeDigest: args["policy-tree-digest"],
+          }
+        : {}),
     });
     writeFileSync(args.output, `${JSON.stringify(attestation, null, 2)}\n`, {
       mode: 0o600,
@@ -625,11 +940,42 @@ export async function run(argv = process.argv.slice(2)) {
     return attestation;
   }
   if (command === "verify-remote") {
-    const requirements = findProtectedRequirements(
+    const allRequirements = findProtectedRequirements(
       args.base,
       args.target,
       args.environment || undefined,
     );
+    const excludeKind = args["exclude-kind"];
+    const excludeTarget = args["exclude-target"];
+    if ((excludeKind === undefined) !== (excludeTarget === undefined)) {
+      throw new Error("protected requirement exclusion is incomplete");
+    }
+    let requirements = allRequirements;
+    if (excludeKind !== undefined) {
+      if (!new Set(["contract", "lifecycle"]).has(excludeKind)) {
+        throw new Error("only current protected mutation may be excluded");
+      }
+      validateSha(excludeTarget, "excluded protected target");
+      const excluded = allRequirements.filter(
+        (row) => row.kind === excludeKind && row.targetSha === excludeTarget,
+      );
+      if (excluded.length !== 1 || excludeTarget !== args.target) {
+        throw new Error("excluded protected requirement is not exact target");
+      }
+      const order = new Map([
+        ["policy", -1],
+        ["contract", 0],
+        ["lifecycle", 1],
+      ]);
+      requirements = allRequirements.filter(
+        (row) =>
+          row !== excluded[0] &&
+          !(
+            row.targetSha === excludeTarget &&
+            order.get(row.kind) > order.get(excludeKind)
+          ),
+      );
+    }
     const token = process.env.GH_TOKEN;
     const repository = process.env.GITHUB_REPOSITORY;
     if (!token || !repository)
@@ -643,7 +989,7 @@ export async function run(argv = process.argv.slice(2)) {
     return requirements;
   }
   throw new Error(
-    "Usage: release-attestation.mjs requirements|contract-digest|lifecycle-digest|create|verify-remote",
+    "Usage: release-attestation.mjs requirements|contract-digest|policy-digest|policy-tree-digest|verify-referee|lifecycle-digest|create|verify-remote",
   );
 }
 

@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
+import { posix } from "node:path";
 import { pathToFileURL } from "node:url";
 import ts from "typescript";
 
@@ -14,6 +15,22 @@ const FUNCTION_KINDS = new Set([
 ]);
 const INDEX_METHODS = new Set(["index", "searchIndex", "vectorIndex"]);
 const NUMBER_VALIDATORS = new Set(["number", "float64"]);
+const SOURCE_EXTENSION_RE = /\.(?:[cm]?[jt]sx?)$/;
+const MUTATING_METHODS = new Set([
+  "add",
+  "clear",
+  "copyWithin",
+  "delete",
+  "fill",
+  "pop",
+  "push",
+  "reverse",
+  "set",
+  "shift",
+  "sort",
+  "splice",
+  "unshift",
+]);
 const KNOWN_VALIDATOR_IMPORTS = new Map([
   [
     "convex/server:paginationOptsValidator",
@@ -52,6 +69,17 @@ function git(args) {
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
   }).trim();
+}
+
+function isAncestor(base, target) {
+  try {
+    execFileSync("git", ["merge-base", "--is-ancestor", base, target], {
+      stdio: "ignore",
+    });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function canonical(value) {
@@ -434,12 +462,39 @@ function sourceFilesAt(sha) {
     .split("\n")
     .filter(
       (path) =>
-        path.endsWith(".ts") &&
-        !path.includes("/_generated/") &&
-        !path.endsWith(".test.ts") &&
-        !path.endsWith(".config.ts"),
+        SOURCE_EXTENSION_RE.test(path) &&
+        !path.endsWith(".d.ts") &&
+        !/^convex\/_generated\//.test(path) &&
+        !/\.(?:test|spec)\.(?:[cm]?[jt]sx?)$/.test(path) &&
+        !/\.config\.(?:[cm]?[jt]sx?)$/.test(path),
     )
     .sort();
+}
+
+function generatedRegistrarsAt(sha) {
+  const output = git(["ls-tree", "-r", "--name-only", sha, "--", "convex"]);
+  const registrars = Object.fromEntries(
+    output
+      .split("\n")
+      .filter((path) => /(^|\/)\_generated\/server\.(?:[cm]?[jt]s)$/.test(path))
+      .sort()
+      .map((path) => [path, digest(sourceAt(sha, path))]),
+  );
+  if (Object.keys(registrars).length === 0) {
+    throw new Error("Convex generated server registrar is missing");
+  }
+  return registrars;
+}
+
+function moduleIdentity(path) {
+  return path.slice("convex/".length).replace(SOURCE_EXTENSION_RE, "");
+}
+
+function scriptKind(path) {
+  if (/\.[cm]?jsx$/.test(path)) return ts.ScriptKind.JSX;
+  if (/\.[cm]?js$/.test(path)) return ts.ScriptKind.JS;
+  if (/\.tsx$/.test(path)) return ts.ScriptKind.TSX;
+  return ts.ScriptKind.TS;
 }
 
 function parseSource(path, text) {
@@ -448,7 +503,7 @@ function parseSource(path, text) {
     text,
     ts.ScriptTarget.Latest,
     true,
-    ts.ScriptKind.TS,
+    scriptKind(path),
   );
   if (source.parseDiagnostics.length > 0) {
     throw new Error(`Cannot parse Convex contract source ${path}`);
@@ -456,7 +511,312 @@ function parseSource(path, text) {
   return source;
 }
 
-function constantsIn(source) {
+function rootIdentifier(node) {
+  let current = unwrap(node);
+  while (
+    ts.isPropertyAccessExpression(current) ||
+    ts.isElementAccessExpression(current)
+  ) {
+    current = unwrap(current.expression);
+  }
+  return ts.isIdentifier(current) ? current.text : undefined;
+}
+
+function containsIdentifier(node, names) {
+  let found = false;
+  function visit(current) {
+    if (ts.isIdentifier(current) && names.has(current.text)) {
+      found = true;
+      return;
+    }
+    if (!found) ts.forEachChild(current, visit);
+  }
+  visit(node);
+  return found;
+}
+
+function containsEscapingValue(node, names) {
+  const current = unwrap(node);
+  if (
+    ts.isArrowFunction(current) ||
+    ts.isFunctionExpression(current) ||
+    ts.isFunctionDeclaration(current)
+  ) {
+    return false;
+  }
+  if (names.has(rootIdentifier(current))) return true;
+  if (ts.isArrayLiteralExpression(current)) {
+    return current.elements.some((entry) =>
+      containsEscapingValue(entry, names),
+    );
+  }
+  if (ts.isObjectLiteralExpression(current)) {
+    return current.properties.some((property) => {
+      if (ts.isPropertyAssignment(property)) {
+        return containsEscapingValue(property.initializer, names);
+      }
+      if (ts.isShorthandPropertyAssignment(property)) {
+        return names.has(property.name.text);
+      }
+      if (ts.isSpreadAssignment(property)) {
+        return containsEscapingValue(property.expression, names);
+      }
+      return false;
+    });
+  }
+  if (ts.isSpreadElement(current)) {
+    return containsEscapingValue(current.expression, names);
+  }
+  if (ts.isConditionalExpression(current)) {
+    return (
+      containsEscapingValue(current.whenTrue, names) ||
+      containsEscapingValue(current.whenFalse, names)
+    );
+  }
+  return false;
+}
+
+function isTopLevelExpression(node) {
+  return node.parent !== undefined &&
+    ts.isExpressionStatement(node.parent) &&
+    node.parent.parent !== undefined &&
+    ts.isSourceFile(node.parent.parent);
+}
+
+function isStaticRouterRegistration(node) {
+  if (!ts.isCallExpression(node)) return false;
+  const expression = unwrap(node.expression);
+  if (ts.isPropertyAccessExpression(expression)) {
+    return ["route", "routePrefix"].includes(expression.name.text);
+  }
+  if (!ts.isElementAccessExpression(expression)) return false;
+  const literal = expression.argumentExpression
+    ? literalAst(expression.argumentExpression)
+    : undefined;
+  return literal?.kind === "string" &&
+    ["route", "routePrefix"].includes(literal.value);
+}
+
+function assertStaticTopLevelContract(source, allowRouterRegistrations = false) {
+  const topLevel = new Set();
+  const declarations = new Map();
+  for (const statement of source.statements) {
+    if (!ts.isVariableStatement(statement)) continue;
+    const isConst =
+      (statement.declarationList.flags & ts.NodeFlags.Const) !== 0;
+    if (!isConst) {
+      throw new Error(
+        "Convex contract source contains mutable top-level declaration",
+      );
+    }
+    for (const declaration of statement.declarationList.declarations) {
+      if (ts.isIdentifier(declaration.name)) {
+        topLevel.add(declaration.name.text);
+        declarations.set(declaration.name.text, declaration.initializer);
+      }
+    }
+  }
+  const primitiveTopLevel = new Set();
+  let learned = true;
+  while (learned) {
+    learned = false;
+    for (const [name, initializer] of declarations) {
+      if (primitiveTopLevel.has(name) || initializer === undefined) continue;
+      const current = unwrap(initializer);
+      if (
+        literalAst(current) !== undefined ||
+        (ts.isIdentifier(current) && primitiveTopLevel.has(current.text))
+      ) {
+        primitiveTopLevel.add(name);
+        learned = true;
+      }
+    }
+  }
+  const mutableTopLevel = new Set(
+    [...topLevel].filter((name) => !primitiveTopLevel.has(name)),
+  );
+
+  function visit(node) {
+    if (
+      ts.isBinaryExpression(node) &&
+      node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment &&
+      node.operatorToken.kind <= ts.SyntaxKind.LastAssignment &&
+      (topLevel.has(rootIdentifier(node.left)) ||
+        containsIdentifier(node.left, topLevel) ||
+        ["exports", "module"].includes(rootIdentifier(node.left)))
+    ) {
+      throw new Error("Convex contract top-level constant is reassigned");
+    }
+    if (
+      (ts.isPrefixUnaryExpression(node) || ts.isPostfixUnaryExpression(node)) &&
+      [ts.SyntaxKind.PlusPlusToken, ts.SyntaxKind.MinusMinusToken].includes(
+        node.operator,
+      ) &&
+      topLevel.has(rootIdentifier(node.operand))
+    ) {
+      throw new Error("Convex contract top-level constant is updated");
+    }
+    if (
+      ts.isDeleteExpression(node) &&
+      topLevel.has(rootIdentifier(node.expression))
+    ) {
+      throw new Error("Convex contract top-level constant is deleted");
+    }
+    if (ts.isCallExpression(node)) {
+      const expression = unwrap(node.expression);
+      if (
+        ts.isPropertyAccessExpression(expression) &&
+        ts.isIdentifier(expression.expression) &&
+        expression.expression.text === "Object" &&
+        [
+          "assign",
+          "defineProperty",
+          "defineProperties",
+          "setPrototypeOf",
+        ].includes(expression.name.text)
+      ) {
+        throw new Error("Convex contract uses runtime object mutation");
+      }
+      if (
+        ts.isPropertyAccessExpression(expression) &&
+        ts.isIdentifier(expression.expression) &&
+        expression.expression.text === "Reflect" &&
+        ["set", "deleteProperty", "defineProperty", "setPrototypeOf"].includes(
+          expression.name.text,
+        )
+      ) {
+        throw new Error("Convex contract uses runtime reflection mutation");
+      }
+      if (
+        ts.isPropertyAccessExpression(expression) &&
+        MUTATING_METHODS.has(expression.name.text) &&
+        mutableTopLevel.has(rootIdentifier(expression.expression))
+      ) {
+        throw new Error("Convex contract top-level constant is mutated");
+      }
+      if (
+        ts.isPropertyAccessExpression(expression) &&
+        ["call", "apply"].includes(expression.name.text) &&
+        node.arguments.some((argument) =>
+          containsEscapingValue(argument, mutableTopLevel),
+        )
+      ) {
+        throw new Error(
+          "Convex contract top-level constant escapes through call",
+        );
+      }
+      if (
+        ts.isExpressionStatement(node.parent) &&
+        node.arguments.some((argument) =>
+          containsEscapingValue(argument, mutableTopLevel),
+        ) &&
+        !(
+          ts.isPropertyAccessExpression(expression) &&
+          ["route", "routePrefix"].includes(expression.name.text)
+        )
+      ) {
+        throw new Error(
+          `Convex contract top-level constant escapes to side effect at ${source.fileName}: ${node.getText(source)}`,
+        );
+      }
+      if (
+        isTopLevelExpression(node) &&
+        (!allowRouterRegistrations || !isStaticRouterRegistration(node))
+      ) {
+        throw new Error(
+          `Convex contract contains top-level side effect at ${source.fileName}: ${node.getText(source)}`,
+        );
+      }
+    } else if (isTopLevelExpression(node)) {
+      throw new Error(
+        `Convex contract contains top-level side effect at ${source.fileName}: ${node.getText(source)}`,
+      );
+    }
+    ts.forEachChild(node, visit);
+  }
+  visit(source);
+}
+
+function resolveRelativeModuleFromSources(path, specifier, sourcePaths) {
+  if (!specifier.startsWith(".")) return undefined;
+  const candidate = posix
+    .normalize(posix.join(posix.dirname(path), specifier))
+    .replace(SOURCE_EXTENSION_RE, "");
+  const matches = sourcePaths.filter(
+    (entry) =>
+      entry.replace(SOURCE_EXTENSION_RE, "") === candidate ||
+      entry.replace(SOURCE_EXTENSION_RE, "").replace(/\/index$/, "") === candidate,
+  );
+  if (matches.length > 1) {
+    throw new Error(`Ambiguous Convex dependency: ${path} -> ${specifier}`);
+  }
+  return matches[0];
+}
+
+function exportedValues(path, sources, cache, stack = new Set()) {
+  if (cache.has(path)) return cache.get(path);
+  if (stack.has(path)) throw new Error(`Recursive Convex dependency: ${path}`);
+  const source = sources.get(path);
+  if (source === undefined) throw new Error(`Missing Convex dependency source: ${path}`);
+  const values = new Map();
+  const locals = new Map();
+  for (const statement of source.statements) {
+    if (ts.isVariableStatement(statement)) {
+      for (const declaration of statement.declarationList.declarations) {
+        if (ts.isIdentifier(declaration.name) && declaration.initializer) {
+          locals.set(declaration.name.text, declaration.initializer);
+          if (exported(statement)) values.set(declaration.name.text, declaration.initializer);
+        }
+      }
+    }
+    if (ts.isExportAssignment(statement) && !statement.isExportEquals) {
+      values.set("default", statement.expression);
+    }
+    if (ts.isExportDeclaration(statement) &&
+        statement.moduleSpecifier === undefined &&
+        statement.exportClause && ts.isNamedExports(statement.exportClause)) {
+      for (const element of statement.exportClause.elements) {
+        const local = element.propertyName?.text ?? element.name.text;
+        const value = locals.get(local);
+        if (value === undefined) throw new Error(`Unresolved Convex export: ${path}:${local}`);
+        values.set(element.name.text, value);
+      }
+    }
+  }
+  for (const statement of source.statements) {
+    if (!ts.isExportDeclaration(statement) || !statement.moduleSpecifier ||
+        !ts.isStringLiteral(statement.moduleSpecifier)) continue;
+    const targetPath = resolveRelativeModuleFromSources(
+      path,
+      statement.moduleSpecifier.text,
+      [...sources.keys()],
+    );
+    if (targetPath === undefined) {
+      throw new Error(`Unresolved Convex dependency: ${path} -> ${statement.moduleSpecifier.text}`);
+    }
+    const target = exportedValues(targetPath, sources, cache, new Set([...stack, path]));
+    if (statement.exportClause === undefined) {
+      for (const [name, value] of target) {
+        if (name !== "default") values.set(name, value);
+      }
+    } else if (ts.isNamedExports(statement.exportClause)) {
+      for (const element of statement.exportClause.elements) {
+        const imported = element.propertyName?.text ?? element.name.text;
+        const value = target.get(imported);
+        if (value === undefined) {
+          throw new Error(`Unresolved Convex re-export: ${path}:${imported}`);
+        }
+        values.set(element.name.text, value);
+      }
+    } else {
+      throw new Error(`Unsupported Convex namespace re-export: ${path}`);
+    }
+  }
+  cache.set(path, values);
+  return values;
+}
+
+function constantsIn(source, path, sources, exportCache = new Map()) {
   const constants = new Map();
   for (const statement of source.statements) {
     if (
@@ -471,10 +831,53 @@ function constantsIn(source) {
         const knownValidator = KNOWN_VALIDATOR_IMPORTS.get(identity);
         if (knownValidator !== undefined) {
           constants.set(element.name.text, { knownValidator });
+        } else if (statement.moduleSpecifier.text.startsWith(".")) {
+          const generatedTarget = posix
+            .normalize(
+              posix.join(posix.dirname(path), statement.moduleSpecifier.text),
+            )
+            .replace(SOURCE_EXTENSION_RE, "");
+          if (generatedTarget.endsWith("/_generated/server")) continue;
+          const targetPath = resolveRelativeModuleFromSources(
+            path,
+            statement.moduleSpecifier.text,
+            [...sources.keys()],
+          );
+          if (targetPath === undefined) {
+            throw new Error(`Unresolved Convex dependency: ${path} -> ${statement.moduleSpecifier.text}`);
+          }
+          const value = exportedValues(targetPath, sources, exportCache).get(imported);
+          if (value === undefined) {
+            throw new Error(`Unresolved Convex import: ${path}:${imported}`);
+          }
+          constants.set(element.name.text, value);
         }
       }
     }
+    if (
+      ts.isImportDeclaration(statement) &&
+      ts.isStringLiteral(statement.moduleSpecifier) &&
+      statement.importClause?.name &&
+      statement.moduleSpecifier.text.startsWith(".")
+    ) {
+      const targetPath = resolveRelativeModuleFromSources(
+        path,
+        statement.moduleSpecifier.text,
+        [...sources.keys()],
+      );
+      if (targetPath === undefined) {
+        throw new Error(`Unresolved Convex dependency: ${path}`);
+      }
+      const value = exportedValues(targetPath, sources, exportCache).get("default");
+      if (value === undefined) {
+        throw new Error(`Unresolved Convex default import: ${path}`);
+      }
+      constants.set(statement.importClause.name.text, value);
+    }
     if (!ts.isVariableStatement(statement)) continue;
+    if ((statement.declarationList.flags & ts.NodeFlags.Const) === 0) {
+      continue;
+    }
     for (const declaration of statement.declarationList.declarations) {
       if (ts.isIdentifier(declaration.name) && declaration.initializer) {
         constants.set(declaration.name.text, declaration.initializer);
@@ -625,11 +1028,16 @@ function exported(statement) {
 
 function exportedBindings(source) {
   const bindings = new Map();
+  function add(localName, exportedName) {
+    const names = bindings.get(localName) ?? new Set();
+    names.add(exportedName);
+    bindings.set(localName, names);
+  }
   for (const statement of source.statements) {
     if (ts.isVariableStatement(statement) && exported(statement)) {
       for (const declaration of statement.declarationList.declarations) {
         if (ts.isIdentifier(declaration.name)) {
-          bindings.set(declaration.name.text, declaration.name.text);
+          add(declaration.name.text, declaration.name.text);
         }
       }
     }
@@ -640,47 +1048,118 @@ function exportedBindings(source) {
       ts.isNamedExports(statement.exportClause)
     ) {
       for (const element of statement.exportClause.elements) {
-        bindings.set(
-          element.propertyName?.text ?? element.name.text,
-          element.name.text,
-        );
+        add(element.propertyName?.text ?? element.name.text, element.name.text);
       }
     }
   }
   return bindings;
 }
 
-function registrationAliases(source) {
-  const aliases = new Map([...FUNCTION_KINDS].map((kind) => [kind, kind]));
+function registrationAliases(path, source) {
+  const aliases = new Map();
+  const namespaces = new Map();
   for (const statement of source.statements) {
     if (
       !ts.isImportDeclaration(statement) ||
-      !statement.importClause?.namedBindings ||
-      !ts.isNamedImports(statement.importClause.namedBindings)
+      !ts.isStringLiteral(statement.moduleSpecifier) ||
+      !statement.importClause?.namedBindings
     ) {
       continue;
     }
-    for (const element of statement.importClause.namedBindings.elements) {
-      const imported = element.propertyName?.text ?? element.name.text;
-      if (FUNCTION_KINDS.has(imported))
-        aliases.set(element.name.text, imported);
+    const specifier = statement.moduleSpecifier.text;
+    const resolved = specifier.startsWith(".")
+      ? posix
+          .normalize(posix.join(posix.dirname(path), specifier))
+          .replace(SOURCE_EXTENSION_RE, "")
+      : undefined;
+    if (resolved !== "convex/_generated/server") continue;
+    if (ts.isNamespaceImport(statement.importClause.namedBindings)) {
+      namespaces.set(
+        statement.importClause.namedBindings.name.text,
+        new Set(FUNCTION_KINDS),
+      );
+      continue;
+    }
+    if (ts.isNamedImports(statement.importClause.namedBindings)) {
+      for (const element of statement.importClause.namedBindings.elements) {
+        const imported = element.propertyName?.text ?? element.name.text;
+        if (FUNCTION_KINDS.has(imported)) {
+          aliases.set(element.name.text, imported);
+        }
+      }
     }
   }
-  return aliases;
+  return { aliases, namespaces };
 }
 
 function functionInventory(path, source, constants) {
   const functions = {};
   const exports = exportedBindings(source);
-  const aliases = registrationAliases(source);
+  const { aliases, namespaces } = registrationAliases(path, source);
+
+  function registrarKind(expression) {
+    if (ts.isIdentifier(expression)) return aliases.get(expression.text);
+    if (
+      ts.isPropertyAccessExpression(expression) &&
+      ts.isIdentifier(expression.expression)
+    ) {
+      return namespaces.get(expression.expression.text)?.has(expression.name.text)
+        ? expression.name.text
+        : undefined;
+    }
+    if (
+      ts.isElementAccessExpression(expression) &&
+      ts.isIdentifier(expression.expression)
+    ) {
+      const literal = expression.argumentExpression
+        ? literalAst(expression.argumentExpression)
+        : undefined;
+      if (literal?.kind !== "string") {
+        throw new Error("Computed Convex function registration is unsupported");
+      }
+      return namespaces.get(expression.expression.text)?.has(literal.value)
+        ? literal.value
+        : undefined;
+    }
+    return undefined;
+  }
+
+  function rejectUnsupportedRegistrations(node) {
+    if (ts.isCallExpression(node)) {
+      const expression = unwrap(node.expression);
+      if (
+        (ts.isElementAccessExpression(expression) ||
+          ts.isPropertyAccessExpression(expression)) &&
+        ts.isIdentifier(expression.expression) &&
+        namespaces.has(expression.expression.text)
+      ) {
+        if (registrarKind(expression) === undefined) {
+          throw new Error("Unsupported computed Convex function registration");
+        }
+      }
+    }
+    ts.forEachChild(node, rejectUnsupportedRegistrations);
+  }
+  rejectUnsupportedRegistrations(source);
 
   function addFunction(exportedName, initializer) {
     if (
       !ts.isCallExpression(initializer) ||
-      !ts.isIdentifier(initializer.expression) ||
-      !aliases.has(initializer.expression.text) ||
+      registrarKind(initializer.expression) === undefined ||
       initializer.arguments.length !== 1
     ) {
+      if (
+        ts.isCallExpression(initializer) &&
+        initializer.arguments.length === 1 &&
+        objectProperty(initializer.arguments[0], "args", constants) !==
+          undefined &&
+        objectProperty(initializer.arguments[0], "handler", constants) !==
+          undefined
+      ) {
+        throw new Error(
+          `Unsupported Convex function registrar at ${path}:${exportedName}`,
+        );
+      }
       return;
     }
     const definition = initializer.arguments[0];
@@ -695,12 +1174,16 @@ function functionInventory(path, source, constants) {
       );
     }
     const returns = objectProperty(definition, "returns", constants);
-    const identity = `${path.slice("convex/".length, -3)}:${exportedName}`;
+    const handler = objectProperty(definition, "handler", constants);
+    if (handler === undefined) {
+      throw new Error(`Convex function ${path}:${exportedName} has no handler`);
+    }
+    const identity = `${moduleIdentity(path)}:${exportedName}`;
     if (Object.hasOwn(functions, identity)) {
       throw new Error(`Duplicate Convex function: ${identity}`);
     }
     functions[identity] = {
-      kind: aliases.get(initializer.expression.text),
+      kind: registrarKind(initializer.expression),
       args: argsValidator,
       returns: returns === undefined ? null : validator(returns, constants),
     };
@@ -717,7 +1200,9 @@ function functionInventory(path, source, constants) {
         constants,
         new Set(),
       );
-      if (exportedName !== undefined) addFunction(exportedName, initializer);
+      if (exportedName !== undefined) {
+        for (const name of exportedName) addFunction(name, initializer);
+      }
     }
   }
   for (const statement of source.statements) {
@@ -729,6 +1214,94 @@ function functionInventory(path, source, constants) {
     }
   }
   return functions;
+}
+
+function resolveRelativeModule(path, specifier, sourcePaths) {
+  if (!specifier.startsWith(".")) return undefined;
+  const candidate = posix
+    .normalize(posix.join(posix.dirname(path), specifier))
+    .replace(SOURCE_EXTENSION_RE, "");
+  const matches = sourcePaths.filter(
+    (entry) =>
+      entry.replace(SOURCE_EXTENSION_RE, "") === candidate ||
+      entry.replace(SOURCE_EXTENSION_RE, "").replace(/\/index$/, "") ===
+        candidate,
+  );
+  if (matches.length > 1) {
+    throw new Error(
+      `Ambiguous Convex re-export module: ${path} -> ${specifier}`,
+    );
+  }
+  return matches[0];
+}
+
+function addReexportedFunctions(inventory, sources) {
+  const paths = [...sources.keys()];
+  const direct = new Map();
+  for (const path of paths) {
+    const prefix = `${moduleIdentity(path)}:`;
+    direct.set(
+      path,
+      new Map(
+        Object.entries(inventory)
+          .filter(([identity]) => identity.startsWith(prefix))
+          .map(([identity, value]) => [identity.slice(prefix.length), value]),
+      ),
+    );
+  }
+  const resolved = new Map();
+  function add(result, name, value, path) {
+    if (result.has(name)) {
+      throw new Error(`Duplicate Convex function export: ${path}:${name}`);
+    }
+    result.set(name, value);
+  }
+  function exportsFor(path, stack = new Set()) {
+    if (resolved.has(path)) return resolved.get(path);
+    if (stack.has(path)) throw new Error(`Recursive Convex re-export: ${path}`);
+    const result = new Map(direct.get(path));
+    const source = sources.get(path);
+    for (const statement of source.statements) {
+      if (
+        !ts.isExportDeclaration(statement) ||
+        !statement.moduleSpecifier ||
+        !ts.isStringLiteral(statement.moduleSpecifier)
+      ) {
+        continue;
+      }
+      const targetPath = resolveRelativeModule(
+        path,
+        statement.moduleSpecifier.text,
+        paths,
+      );
+      if (targetPath === undefined) continue;
+      const target = exportsFor(targetPath, new Set([...stack, path]));
+      if (statement.exportClause === undefined) {
+        for (const [name, value] of target) {
+          if (name !== "default") add(result, name, value, path);
+        }
+        continue;
+      }
+      if (!ts.isNamedExports(statement.exportClause)) {
+        if (target.size > 0) {
+          throw new Error("Unsupported namespace Convex function re-export");
+        }
+        continue;
+      }
+      for (const element of statement.exportClause.elements) {
+        const importedName = element.propertyName?.text ?? element.name.text;
+        const value = target.get(importedName);
+        if (value !== undefined) add(result, element.name.text, value, path);
+      }
+    }
+    resolved.set(path, result);
+    return result;
+  }
+  for (const path of paths) {
+    for (const [name, value] of exportsFor(path)) {
+      inventory[`${moduleIdentity(path)}:${name}`] = value;
+    }
+  }
 }
 
 function enclosingFunction(node) {
@@ -746,9 +1319,58 @@ function enclosingFunction(node) {
   return undefined;
 }
 
-function httpInventory(source, constants) {
+function httpInventory(path, source, constants) {
   const routes = {};
   const routers = new Set();
+  const routerFactories = new Set();
+  const importBindings = new Map();
+  const functionBindings = new Map();
+  for (const statement of source.statements) {
+    if (
+      ts.isImportDeclaration(statement) &&
+      ts.isStringLiteral(statement.moduleSpecifier) &&
+      statement.importClause
+    ) {
+      const specifier = statement.moduleSpecifier.text;
+      if (statement.importClause.name) {
+        importBindings.set(statement.importClause.name.text, {
+          imported: "default",
+          module: specifier,
+        });
+      }
+      const bindings = statement.importClause.namedBindings;
+      if (bindings && ts.isNamedImports(bindings)) {
+        for (const element of bindings.elements) {
+          const imported = element.propertyName?.text ?? element.name.text;
+          importBindings.set(element.name.text, {
+            imported,
+            module: specifier,
+          });
+          if (specifier === "convex/server" && imported === "httpRouter") {
+            routerFactories.add(element.name.text);
+          }
+        }
+      } else if (bindings && ts.isNamespaceImport(bindings)) {
+        importBindings.set(bindings.name.text, {
+          imported: "*",
+          module: specifier,
+        });
+      }
+    }
+    if (ts.isFunctionDeclaration(statement) && statement.name) {
+      functionBindings.set(statement.name.text, statement.getText(source));
+    }
+  }
+
+  function resolvesTo(name, accepted, seen = new Set()) {
+    if (accepted.has(name)) return name;
+    if (seen.has(name)) return undefined;
+    const value = constants.get(name);
+    const current =
+      value && value.knownValidator === undefined ? unwrap(value) : undefined;
+    if (!current || !ts.isIdentifier(current)) return undefined;
+    return resolvesTo(current.text, accepted, new Set([...seen, name]));
+  }
   for (const statement of source.statements) {
     if (!ts.isVariableStatement(statement)) continue;
     for (const declaration of statement.declarationList.declarations) {
@@ -759,7 +1381,9 @@ function httpInventory(source, constants) {
         initializer &&
         ts.isCallExpression(initializer) &&
         ts.isIdentifier(initializer.expression) &&
-        initializer.expression.text === "httpRouter"
+        resolvesTo(initializer.expression.text, routerFactories) !==
+          undefined &&
+        initializer.arguments.length === 0
       ) {
         routers.add(declaration.name.text);
       }
@@ -772,14 +1396,14 @@ function httpInventory(source, constants) {
   if (
     !exportedRouter ||
     !ts.isIdentifier(exportedRouter) ||
-    !routers.has(exportedRouter.text)
+    resolvesTo(exportedRouter.text, routers) === undefined
   ) {
     throw new Error("Convex HTTP default export is not an inventoried router");
   }
 
-  function addRoute(registration, method, path) {
-    const identity = `${method}:${path}`;
-    const value = { registration, method, path };
+  function addRoute(registration, method, routePath, handlerDigest) {
+    const identity = `${method}:${routePath}`;
+    const value = { registration, method, path: routePath, handlerDigest };
     if (Object.hasOwn(routes, identity) && !equal(routes[identity], value)) {
       throw new Error(`Duplicate Convex HTTP route: ${identity}`);
     }
@@ -787,48 +1411,112 @@ function httpInventory(source, constants) {
   }
 
   const factories = new Map();
-  function visit(node) {
-    if (
-      ts.isCallExpression(node) &&
-      ts.isPropertyAccessExpression(node.expression) &&
-      ts.isIdentifier(node.expression.expression) &&
-      routers.has(node.expression.expression.text) &&
-      ["route", "routePrefix"].includes(node.expression.name.text) &&
-      node.arguments.length === 1
-    ) {
-      const registration = node.expression.name.text;
-      const pathKey = registration === "route" ? "path" : "pathPrefix";
-      const pathNode = objectProperty(node.arguments[0], pathKey, constants);
-      const methodNode = objectProperty(node.arguments[0], "method", constants);
-      if (pathNode === undefined || methodNode === undefined) {
-        throw new Error(`Convex HTTP ${registration} identity is incomplete`);
+  function handlerBinding(node, seen = new Set()) {
+    const current = unwrap(node);
+    if (ts.isIdentifier(current)) {
+      if (seen.has(current.text)) {
+        throw new Error("Recursive Convex HTTP handler binding");
       }
-      const method = literalString(methodNode, constants, "Convex HTTP method");
-      const owner = enclosingFunction(node);
-      if (owner === undefined) {
-        addRoute(
-          registration,
-          method,
-          literalString(pathNode, constants, `Convex HTTP ${pathKey}`),
-        );
-      } else if (ts.isFunctionDeclaration(owner) && owner.name) {
-        const path = unwrap(pathNode);
-        if (!ts.isIdentifier(path)) {
-          throw new Error("Convex HTTP route factory path must be a parameter");
+      const value = constants.get(current.text);
+      if (value && value.knownValidator === undefined) {
+        return handlerBinding(value, new Set([...seen, current.text]));
+      }
+      if (importBindings.has(current.text)) {
+        return { import: importBindings.get(current.text) };
+      }
+      if (functionBindings.has(current.text)) {
+        return { declaration: functionBindings.get(current.text) };
+      }
+      return { identifier: current.text };
+    }
+    return { syntax: current.getText(source) };
+  }
+  function visit(node) {
+    if (ts.isCallExpression(node)) {
+      const expression = unwrap(node.expression);
+      const routerRoot =
+        (ts.isPropertyAccessExpression(expression) ||
+          ts.isElementAccessExpression(expression)) &&
+        ts.isIdentifier(expression.expression) &&
+        resolvesTo(expression.expression.text, routers) !== undefined;
+      const registration = ts.isPropertyAccessExpression(expression)
+        ? expression.name.text
+        : ts.isElementAccessExpression(expression) && expression.argumentExpression
+          ? literalAst(expression.argumentExpression)?.value
+          : undefined;
+      const routeLike =
+        ts.isPropertyAccessExpression(expression) ||
+        ts.isElementAccessExpression(expression);
+      if (routeLike && !routerRoot) {
+        if (["route", "routePrefix"].includes(registration)) {
+          throw new Error("Convex HTTP registration uses untracked router");
         }
-        const parameterIndex = owner.parameters.findIndex(
-          (parameter) =>
-            ts.isIdentifier(parameter.name) &&
-            parameter.name.text === path.text,
+      }
+      if (routerRoot && !["route", "routePrefix"].includes(registration)) {
+        throw new Error(
+          "Computed Convex HTTP router registration is unsupported",
         );
-        if (parameterIndex < 0) {
-          throw new Error("Convex HTTP route factory path is not a parameter");
+      }
+      if (routerRoot) {
+        if (node.arguments.length !== 1) {
+          throw new Error("Convex HTTP registration arity is invalid");
         }
-        const entries = factories.get(owner.name.text) ?? [];
-        entries.push({ registration, method, parameterIndex });
-        factories.set(owner.name.text, entries);
-      } else {
-        throw new Error("Unsupported Convex HTTP route factory");
+        const pathKey = registration === "route" ? "path" : "pathPrefix";
+        const pathNode = objectProperty(node.arguments[0], pathKey, constants);
+        const methodNode = objectProperty(
+          node.arguments[0],
+          "method",
+          constants,
+        );
+        const handlerNode = objectProperty(
+          node.arguments[0],
+          "handler",
+          constants,
+        );
+        if (
+          pathNode === undefined ||
+          methodNode === undefined ||
+          handlerNode === undefined
+        ) {
+          throw new Error(`Convex HTTP ${registration} identity is incomplete`);
+        }
+        const method = literalString(
+          methodNode,
+          constants,
+          "Convex HTTP method",
+        );
+        const handlerDigest = digest(handlerBinding(handlerNode));
+        const owner = enclosingFunction(node);
+        if (owner === undefined) {
+          addRoute(
+            registration,
+            method,
+            literalString(pathNode, constants, `Convex HTTP ${pathKey}`),
+            handlerDigest,
+          );
+        } else if (ts.isFunctionDeclaration(owner) && owner.name) {
+          const path = unwrap(pathNode);
+          if (!ts.isIdentifier(path)) {
+            throw new Error(
+              "Convex HTTP route factory path must be a parameter",
+            );
+          }
+          const parameterIndex = owner.parameters.findIndex(
+            (parameter) =>
+              ts.isIdentifier(parameter.name) &&
+              parameter.name.text === path.text,
+          );
+          if (parameterIndex < 0) {
+            throw new Error(
+              "Convex HTTP route factory path is not a parameter",
+            );
+          }
+          const entries = factories.get(owner.name.text) ?? [];
+          entries.push({ registration, method, parameterIndex, handlerDigest });
+          factories.set(owner.name.text, entries);
+        } else {
+          throw new Error("Unsupported Convex HTTP route factory");
+        }
       }
     }
     ts.forEachChild(node, visit);
@@ -838,7 +1526,11 @@ function httpInventory(source, constants) {
   function visitFactoryCalls(node) {
     const expression = ts.isCallExpression(node) && unwrap(node.expression);
     if (expression && ts.isIdentifier(expression)) {
-      const descriptors = factories.get(expression.text);
+      const factoryName = resolvesTo(
+        expression.text,
+        new Set(factories.keys()),
+      );
+      const descriptors = factoryName && factories.get(factoryName);
       if (descriptors !== undefined) {
         for (const descriptor of descriptors) {
           const argument = node.arguments[descriptor.parameterIndex];
@@ -851,6 +1543,7 @@ function httpInventory(source, constants) {
             descriptor.registration,
             descriptor.method,
             literalString(argument, constants, "Convex HTTP factory path"),
+            descriptor.handlerDigest,
           );
         }
       }
@@ -864,21 +1557,44 @@ function httpInventory(source, constants) {
 export function convexContractAt(sha) {
   if (!SHA_RE.test(sha ?? ""))
     throw new Error("Convex contract SHA is invalid");
-  const inventory = { tables: {}, functions: {}, routes: {} };
-  for (const path of sourceFilesAt(sha)) {
-    const source = parseSource(path, sourceAt(sha, path));
-    const constants = constantsIn(source);
-    if (path === "convex/schema.ts") {
+  const paths = sourceFilesAt(sha);
+  const sources = new Map(
+    paths.map((path) => [path, parseSource(path, sourceAt(sha, path))]),
+  );
+  const schemaPaths = paths.filter((path) =>
+    /^convex\/schema\.(?:[cm]?[jt]s)$/.test(path),
+  );
+  const httpPaths = paths.filter((path) =>
+    /^convex\/http\.(?:[cm]?[jt]s)$/.test(path),
+  );
+  if (schemaPaths.length !== 1) {
+    throw new Error("Convex schema entrypoint must be unique");
+  }
+  if (httpPaths.length > 1) {
+    throw new Error("Convex HTTP entrypoint must be unique");
+  }
+  const inventory = {
+    registrars: generatedRegistrarsAt(sha),
+    tables: {},
+    functions: {},
+    routes: {},
+  };
+  const exportCache = new Map();
+  for (const [path, source] of sources) {
+    assertStaticTopLevelContract(source, path === httpPaths[0]);
+    const constants = constantsIn(source, path, sources, exportCache);
+    if (path === schemaPaths[0]) {
       inventory.tables = schemaInventory(source, constants);
     }
     Object.assign(
       inventory.functions,
       functionInventory(path, source, constants),
     );
-    if (path === "convex/http.ts") {
-      Object.assign(inventory.routes, httpInventory(source, constants));
+    if (path === httpPaths[0]) {
+      Object.assign(inventory.routes, httpInventory(path, source, constants));
     }
   }
+  addReexportedFunctions(inventory.functions, sources);
   if (Object.keys(inventory.tables).length === 0) {
     throw new Error("Convex contract has no schema tables");
   }
@@ -889,9 +1605,33 @@ export function classifyConvexContract(baseSha, candidateSha) {
   if (!SHA_RE.test(baseSha ?? "") || !SHA_RE.test(candidateSha ?? "")) {
     throw new Error("Exact Convex contract base and target SHAs are required");
   }
+  if (!isAncestor(baseSha, candidateSha)) {
+    throw new Error("Convex contract base is not an ancestor of target");
+  }
+  const rows = git([
+    "rev-list",
+    "--reverse",
+    "--parents",
+    `${baseSha}..${candidateSha}`,
+  ])
+    .split("\n")
+    .filter(Boolean);
+  let expectedParent = baseSha;
+  for (const row of rows) {
+    const [commit, ...parents] = row.split(" ");
+    if (parents.length !== 1 || parents[0] !== expectedParent) {
+      throw new Error(
+        "Convex contract range must have linear single-parent history",
+      );
+    }
+    expectedParent = commit;
+  }
   const base = convexContractAt(baseSha);
   const candidate = convexContractAt(candidateSha);
   const reasons = [];
+  if (!equal(base.registrars, candidate.registrars)) {
+    reasons.push("generated server registrar changed");
+  }
   for (const [name, table] of Object.entries(base.tables)) {
     const next = candidate.tables[name];
     if (next === undefined) {

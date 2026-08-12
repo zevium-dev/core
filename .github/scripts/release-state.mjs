@@ -25,7 +25,7 @@ function readJson(path) {
 
 function writeState(path, state) {
   const temporary = `${path}.tmp-${process.pid}`;
-  writeFileSync(temporary, `${JSON.stringify(state, null, 2)}\n`, {
+  writeFileSync(temporary, serialize(state), {
     mode: 0o600,
   });
   renameSync(temporary, path);
@@ -61,6 +61,14 @@ function sha256(value) {
   return createHash("sha256")
     .update(JSON.stringify(canonical(value)))
     .digest("hex");
+}
+
+function serialize(value) {
+  return `${JSON.stringify(canonical(value), null, 2)}\n`;
+}
+
+function byteDigest(value) {
+  return createHash("sha256").update(value).digest("hex");
 }
 
 function runIdentity(value, context, allowRecovery = true) {
@@ -117,6 +125,14 @@ function finalizedAttemptDigest(attempt) {
   });
 }
 
+function finalizedHandoffDigest(attempt) {
+  return sha256({
+    kind: "recovery-candidate-handoff",
+    token: attempt.token,
+    reusedCandidateDigest: attempt.reusedCandidateDigest,
+  });
+}
+
 function validateBaseManifest(manifest) {
   if (
     manifest?.schemaVersion !== 3 ||
@@ -167,6 +183,8 @@ function validateLineage(manifest) {
   let head = expectedSeed;
   let latestFinal = null;
   const identities = new Set();
+  const gatewayVersions = new Set([manifest.gateway.previousVersion]);
+  const webVersions = new Set([manifest.web.previousVersion]);
   for (const [index, rawAttempt] of lineage.attempts.entries()) {
     const attemptSource = runIdentity(
       rawAttempt?.source,
@@ -189,7 +207,22 @@ function validateLineage(manifest) {
     head = rawAttempt.token;
     const hasGateway = rawAttempt.gatewayVersion !== undefined;
     const hasWeb = rawAttempt.webVersion !== undefined;
+    const hasHandoff = rawAttempt.reusedCandidateDigest !== undefined;
     const hasDigest = rawAttempt.digest !== undefined;
+    if (hasHandoff) {
+      if (
+        hasGateway ||
+        hasWeb ||
+        !hasDigest ||
+        latestFinal === null ||
+        rawAttempt.reusedCandidateDigest !== latestFinal.digest ||
+        rawAttempt.digest !== finalizedHandoffDigest(rawAttempt)
+      ) {
+        throw new Error("Recovery candidate handoff is invalid");
+      }
+      head = rawAttempt.digest;
+      continue;
+    }
     if (hasGateway !== hasWeb || hasGateway !== hasDigest) {
       throw new Error("Recovery candidate lineage attempt is partial");
     }
@@ -201,6 +234,16 @@ function validateLineage(manifest) {
       ) {
         throw new Error("Recovery candidate lineage finalization is invalid");
       }
+      if (
+        gatewayVersions.has(rawAttempt.gatewayVersion) ||
+        webVersions.has(rawAttempt.webVersion)
+      ) {
+        throw new Error(
+          "Recovery candidate lineage repeats a provider version",
+        );
+      }
+      gatewayVersions.add(rawAttempt.gatewayVersion);
+      webVersions.add(rawAttempt.webVersion);
       head = rawAttempt.digest;
       latestFinal = rawAttempt;
     }
@@ -299,14 +342,67 @@ export function finalizeRecoveryAttempt(
   return manifest;
 }
 
-function finalizedVersions(manifest, component) {
-  const { latestFinal } = validateLineage(manifest);
+export function finalizeRecoveryHandoff(
+  manifestInput,
+  state = "recursive_recovery_handoff_bound",
+) {
+  const { latestFinal } = validateLineage(manifestInput);
   if (latestFinal === null) {
-    throw new Error("Recovery candidate lineage has no finalized versions");
+    throw new Error("Recovery handoff has no finalized candidates");
   }
+  const manifest = structuredClone(manifestInput);
+  const attempt = manifest.lineage.attempts.at(-1);
+  if (
+    attempt?.digest !== undefined ||
+    manifest.lineage.head !== attempt?.token ||
+    !equal(attempt?.source, manifest.source)
+  ) {
+    throw new Error("Latest recovery attempt cannot bind candidate handoff");
+  }
+  attempt.reusedCandidateDigest = latestFinal.digest;
+  attempt.digest = finalizedHandoffDigest(attempt);
+  manifest.lineage.head = attempt.digest;
+  manifest.state = state;
+  manifest.updatedAt = new Date().toISOString();
+  validateManifest(manifest);
+  return manifest;
+}
+
+function finalizedVersions(manifest, component) {
+  validateLineage(manifest);
   return manifest.lineage.attempts
-    .filter((attempt) => attempt.digest !== undefined)
+    .filter((attempt) => attempt.gatewayVersion !== undefined)
     .map((attempt) => attempt[`${component}Version`]);
+}
+
+function assertObservedLineageOrder(manifest, observed, verifiedPending = {}) {
+  const positions = { gateway: new Map(), web: new Map() };
+  for (const component of ["gateway", "web"]) {
+    positions[component].set(manifest[component].previousVersion, -1);
+  }
+  for (const [index, attempt] of manifest.lineage.attempts.entries()) {
+    if (attempt.digest !== undefined) {
+      positions.gateway.set(attempt.gatewayVersion, index);
+      positions.web.set(attempt.webVersion, index);
+    }
+  }
+  const pendingPosition = manifest.lineage.attempts.length - 1;
+  for (const component of ["gateway", "web"]) {
+    if (verifiedPending[component] !== undefined) {
+      positions[component].set(verifiedPending[component], pendingPosition);
+    }
+  }
+  const gatewayPosition = positions.gateway.get(observed.gateway);
+  const webPosition = positions.web.get(observed.web);
+  if (gatewayPosition === undefined || webPosition === undefined) {
+    throw new Error("Observed provider state is outside recovery lineage");
+  }
+  if (webPosition > gatewayPosition) {
+    throw new Error(
+      "Observed provider state violates recovery deployment order",
+    );
+  }
+  return { gatewayPosition, webPosition };
 }
 
 export function verifyRecoveryVersionLineage(manifestInput, remotePayload) {
@@ -379,8 +475,9 @@ export function validateRecoveryArtifact(input) {
   return "intent";
 }
 
-export function recoveryPlan(manifestInput, observed, strategy) {
-  const manifest = validateManifest(manifestInput);
+export function recoveryPlan(manifestInput, observed, strategy, admission) {
+  const artifactKind = validateRecoveryArtifact(manifestInput);
+  const manifest = manifestInput;
   if (!["auto", "roll-forward", "rollback"].includes(strategy)) {
     throw new Error("Recovery strategy is invalid");
   }
@@ -396,15 +493,53 @@ export function recoveryPlan(manifestInput, observed, strategy) {
       );
     }
   }
-  // Persisted pre-mutation manifest cannot prove how far a cancelled job got.
-  // Only separately recovered final state evidence may authorize rollback.
-  const state = manifest.lastVerifiedState;
+  assertObservedLineageOrder(manifest, observed);
+  const { selected, controlPlaneMayHaveChanged } = selectRecoveryAction(
+    manifest,
+    strategy,
+    observed,
+  );
+  if (artifactKind === "intent" && selected === "roll-forward") {
+    throw new Error("Roll-forward recovery candidates are not finalized");
+  }
+  if (admission !== undefined) {
+    verifyRecoveryAdmission(admission, manifest);
+    if (admission.action !== selected) {
+      throw new Error("Late recovery plan differs from pre-mutation admission");
+    }
+  }
+  const key = selected === "rollback" ? "previousVersion" : "candidateVersion";
+  return {
+    action: selected,
+    release: manifest.release,
+    gatewayVersion: manifest.gateway[key],
+    webVersion: manifest.web[key],
+    requiresConvexRollForward:
+      selected === "roll-forward" && controlPlaneMayHaveChanged,
+  };
+}
+
+const SAFE_CONTROL_PLANE_STATES = new Set([
+  "rollback_pointers_captured_no_traffic_mutation",
+  "artifacts_uploaded_no_traffic_mutation",
+  "recovery_attempt_bound_before_mutation",
+  "aborted_without_traffic_change",
+]);
+
+function selectRecoveryAction(manifest, strategy, observed) {
+  if (!["auto", "roll-forward", "rollback"].includes(strategy)) {
+    throw new Error("Recovery strategy is invalid");
+  }
+  const state = manifest.lastVerifiedState ?? manifest.state;
   const controlPlaneMayHaveChanged =
-    typeof state !== "string" ||
-    state !== "rollback_pointers_captured_no_traffic_mutation";
+    typeof state !== "string" || !SAFE_CONTROL_PLANE_STATES.has(state);
+  const trafficMayHaveChanged = ["gateway", "web"].some(
+    (component) =>
+      observed?.[component] !== manifest[component].previousVersion,
+  );
   const selected =
     strategy === "auto"
-      ? controlPlaneMayHaveChanged
+      ? controlPlaneMayHaveChanged || trafficMayHaveChanged
         ? "roll-forward"
         : manifest.lifecycle.rollbackAllowed
           ? "rollback"
@@ -416,15 +551,209 @@ export function recoveryPlan(manifestInput, observed, strategy) {
   if (selected === "rollback" && controlPlaneMayHaveChanged) {
     throw new Error("Rollback cannot undo an ambiguous Convex mutation");
   }
-  const key = selected === "rollback" ? "previousVersion" : "candidateVersion";
-  return {
+  if (selected === "rollback" && trafficMayHaveChanged) {
+    throw new Error("Rollback requires verified unchanged provider traffic");
+  }
+  return { selected, controlPlaneMayHaveChanged, trafficMayHaveChanged };
+}
+
+export function recoveryArtifactDigest(manifestInput) {
+  validateRecoveryArtifact(manifestInput);
+  return byteDigest(serialize(manifestInput));
+}
+
+export function recoveryAdmission(
+  manifestInput,
+  observed,
+  strategy,
+  recoverySourceInput,
+  verifiedPending = {},
+) {
+  const artifactKind = validateRecoveryArtifact(manifestInput);
+  const recoverySource = runIdentity(
+    recoverySourceInput,
+    "recovery admission source",
+  );
+  const currentIdentity = `${recoverySource.workflowPath}:${recoverySource.runId}:${recoverySource.runAttempt}`;
+  if (
+    manifestInput.lineage.attempts.some((attempt) => {
+      const source = attempt.source;
+      return (
+        `${source.workflowPath}:${source.runId}:${source.runAttempt}` ===
+        currentIdentity
+      );
+    })
+  ) {
+    throw new Error("Recovery admission replays an existing workflow attempt");
+  }
+  for (const component of ["gateway", "web"]) {
+    const allowed = new Set([
+      manifestInput[component].previousVersion,
+      ...finalizedVersions(manifestInput, component),
+      ...(verifiedPending[component] === observed?.[component]
+        ? [verifiedPending[component]]
+        : []),
+    ]);
+    if (!allowed.has(observed?.[component])) {
+      throw new Error(
+        `${component} pre-mutation state is outside cryptographic recovery lineage`,
+      );
+    }
+  }
+  assertObservedLineageOrder(manifestInput, observed, verifiedPending);
+  const { selected, controlPlaneMayHaveChanged } = selectRecoveryAction(
+    manifestInput,
+    strategy,
+    observed,
+  );
+  const body = canonical({
+    schemaVersion: 1,
     action: selected,
-    release: manifest.release,
-    gatewayVersion: manifest.gateway[key],
-    webVersion: manifest.web[key],
+    artifactDigest: recoveryArtifactDigest(manifestInput),
+    artifactKind,
+    controlPlaneMayHaveChanged,
+    lineageHead: manifestInput.lineage.head,
+    lineageSeed: manifestInput.lineage.seed,
+    observed: {
+      gateway: observed.gateway,
+      web: observed.web,
+    },
+    verifiedPending: canonical(verifiedPending),
+    recoverySource,
+    root: manifestInput.root,
+    source: manifestInput.source,
+    requiresCandidateGeneration:
+      selected === "roll-forward" && artifactKind === "intent",
     requiresConvexRollForward:
       selected === "roll-forward" && controlPlaneMayHaveChanged,
-  };
+  });
+  return canonical({ ...body, digest: sha256(body) });
+}
+
+export function verifyRecoveryAdmission(admission, manifestInput) {
+  validateRecoveryArtifact(manifestInput);
+  const { digest: suppliedDigest, ...body } = admission ?? {};
+  if (
+    admission?.schemaVersion !== 1 ||
+    !DIGEST_RE.test(suppliedDigest ?? "") ||
+    suppliedDigest !== sha256(body) ||
+    admission.lineageSeed !== manifestInput.lineage.seed ||
+    !equal(admission.root, manifestInput.root)
+  ) {
+    throw new Error("Recovery admission identity or digest is invalid");
+  }
+  const currentAttempt = manifestInput.lineage.attempts.at(-1);
+  const beforeAttempt =
+    manifestInput.source.runId === admission.recoverySource?.runId &&
+    manifestInput.source.runAttempt === admission.recoverySource?.runAttempt &&
+    manifestInput.source.workflowPath ===
+      admission.recoverySource?.workflowPath;
+  const expectedHead = beforeAttempt
+    ? currentAttempt?.parentDigest
+    : manifestInput.lineage.head;
+  if (expectedHead !== admission.lineageHead) {
+    throw new Error("Recovery admission is stale for candidate lineage");
+  }
+  if (!beforeAttempt) {
+    if (
+      recoveryArtifactDigest(manifestInput) !== admission.artifactDigest ||
+      !equal(manifestInput.source, admission.source)
+    ) {
+      throw new Error("Recovery artifact changed after admission");
+    }
+  }
+  return true;
+}
+
+export function createRecoveryLineagePredicate(manifestInput) {
+  validateRecoveryArtifact(manifestInput);
+  const manifest = canonical(manifestInput);
+  const token = manifest.lineage.attempts.at(-1)?.token;
+  if (!DIGEST_RE.test(token ?? "")) {
+    throw new Error("Recovery lineage subject token is invalid");
+  }
+  const subject = canonical({
+    schemaVersion: 1,
+    token,
+    manifestDigest: recoveryArtifactDigest(manifest),
+  });
+  return canonical({
+    schemaVersion: 1,
+    subjectDigest: byteDigest(serialize(subject)),
+    subject,
+    lineageSeed: manifest.lineage.seed,
+    lineageHead: manifest.lineage.head,
+    root: manifest.root,
+    source: manifest.source,
+    manifest,
+  });
+}
+
+export function extractRecoveryLineageAttestation(payload) {
+  const statements = [];
+  for (const row of Array.isArray(payload) ? payload : [payload]) {
+    const verified =
+      row?.verificationResult?.statement ?? row?.verification_result?.statement;
+    if (verified) statements.push(verified);
+  }
+  for (const row of Array.isArray(payload?.attestations)
+    ? payload.attestations
+    : []) {
+    try {
+      const encoded = row?.bundle?.dsseEnvelope?.payload;
+      if (typeof encoded !== "string") continue;
+      statements.push(
+        JSON.parse(Buffer.from(encoded, "base64").toString("utf8")),
+      );
+    } catch {
+      // Ignore malformed untrusted transparency-log rows.
+    }
+  }
+  const predicates = new Map();
+  const subjectDigests = new Set();
+  for (const statement of statements) {
+    try {
+      if (
+        statement?._type !== "https://in-toto.io/Statement/v1" ||
+        statement?.predicateType !==
+          "https://zevium.dev/attestations/recovery-lineage/v1"
+      ) {
+        continue;
+      }
+      const predicate = createRecoveryLineagePredicate(
+        statement?.predicate?.manifest,
+      );
+      if (!equal(predicate, statement.predicate)) continue;
+      const subject = statement.subject;
+      if (
+        !Array.isArray(subject) ||
+        subject.length !== 1 ||
+        subject[0]?.digest?.sha256 !== predicate.subjectDigest
+      ) {
+        continue;
+      }
+      subjectDigests.add(predicate.subjectDigest);
+      predicates.set(recoveryArtifactDigest(predicate.manifest), predicate);
+    } catch {
+      // Untrusted transparency-log rows fail closed and cannot mask valid rows.
+    }
+  }
+  if (subjectDigests.size !== 1 || predicates.size === 0) {
+    throw new Error(
+      "Durable recovery lineage attestation is absent or ambiguous",
+    );
+  }
+  const candidates = [...predicates.values()];
+  const finalized = candidates.filter(
+    (predicate) => validateRecoveryArtifact(predicate.manifest) === "manifest",
+  );
+  const selected = finalized.length > 0 ? finalized : candidates;
+  if (selected.length !== 1) {
+    throw new Error(
+      "Durable recovery lineage attestation is absent or ambiguous",
+    );
+  }
+  return selected[0].manifest;
 }
 
 export function activeVersion(path) {
@@ -623,6 +952,30 @@ export function run(argv = process.argv.slice(2)) {
     );
     return;
   }
+  if (command === "lineage-predicate") {
+    const [predicatePath, subjectPath] = args;
+    if (!predicatePath || !subjectPath) {
+      throw new Error(
+        "Recovery lineage predicate and subject paths are required",
+      );
+    }
+    const manifest = readJson(`${directory}/recovery-manifest.json`);
+    const predicate = createRecoveryLineagePredicate(manifest);
+    writeState(predicatePath, predicate);
+    writeState(subjectPath, predicate.subject);
+    process.stdout.write(predicate.subjectDigest);
+    return predicate;
+  }
+  if (command === "extract-lineage-attestation") {
+    const outputPath = args[0];
+    if (!outputPath) {
+      throw new Error("Recovery lineage output path is required");
+    }
+    const manifest = extractRecoveryLineageAttestation(readJson(directory));
+    writeState(outputPath, manifest);
+    process.stdout.write(recoveryArtifactDigest(manifest));
+    return manifest;
+  }
   if (command === "get-lineage-token") {
     const manifest = readJson(`${directory}/recovery-manifest.json`);
     validateRecoveryArtifact(manifest);
@@ -648,16 +1001,66 @@ export function run(argv = process.argv.slice(2)) {
   }
   const statePath = `${directory}/state.json`;
 
-  if (command === "begin-attempt") {
-    const [runId, workflowPath, runAttempt] = args;
-    const manifest = beginRecoveryAttempt(
-      readJson(`${directory}/recovery-manifest.json`),
+  if (command === "admit-recovery") {
+    const [strategy, runId, workflowPath, runAttempt] = args;
+    const manifest = readJson(`${directory}/recovery-manifest.json`);
+    const kind = validateRecoveryArtifact(manifest);
+    const observed = {};
+    const verifiedPending = {};
+    for (const component of ["gateway", "web"]) {
+      const path = `${directory}/${component}-current.json`;
+      observed[component] =
+        kind === "manifest"
+          ? boundedDeploymentLineageVersion(path, manifest, component)
+          : activeVersion(path);
+      if (
+        kind === "intent" &&
+        observed[component] !== manifest[component].previousVersion
+      ) {
+        const versionPath = `${directory}/${component}-current-version.json`;
+        const proof = verifyRecoveryVersionLineage(
+          manifest,
+          readJson(versionPath),
+        );
+        if (proof.id !== observed[component]) {
+          throw new Error(
+            `${component} pending lineage proof does not match active version`,
+          );
+        }
+        verifiedPending[component] = proof.id;
+      }
+    }
+    const admission = recoveryAdmission(
+      manifest,
+      observed,
+      strategy,
       {
         runId: Number(runId),
         workflowPath,
         runAttempt: Number(runAttempt),
       },
+      verifiedPending,
     );
+    writeState(`${directory}/recovery-admission.json`, admission);
+    process.stdout.write(`${JSON.stringify(admission)}\n`);
+    return admission;
+  }
+
+  if (command === "begin-attempt") {
+    const [runId, workflowPath, runAttempt] = args;
+    const source = {
+      runId: Number(runId),
+      workflowPath,
+      runAttempt: Number(runAttempt),
+    };
+    const original = readJson(`${directory}/recovery-manifest.json`);
+    const admission = readJson(`${directory}/recovery-admission.json`);
+    verifyRecoveryAdmission(admission, original);
+    if (!equal(admission.recoverySource, source)) {
+      throw new Error("Recovery attempt differs from pre-mutation admission");
+    }
+    const manifest = beginRecoveryAttempt(original, source);
+    verifyRecoveryAdmission(admission, manifest);
     writeState(`${directory}/recovery-manifest.json`, manifest);
     return manifest;
   }
@@ -668,6 +1071,16 @@ export function run(argv = process.argv.slice(2)) {
       readJson(`${directory}/recovery-manifest.json`),
       gatewayVersion,
       webVersion,
+      state,
+    );
+    writeState(`${directory}/recovery-manifest.json`, manifest);
+    return manifest;
+  }
+
+  if (command === "finalize-handoff") {
+    const [state] = args;
+    const manifest = finalizeRecoveryHandoff(
+      readJson(`${directory}/recovery-manifest.json`),
       state,
     );
     writeState(`${directory}/recovery-manifest.json`, manifest);
@@ -838,7 +1251,35 @@ export function run(argv = process.argv.slice(2)) {
     state.state = next;
     state.updatedAt = new Date().toISOString();
     writeState(statePath, state);
+    const manifestPath = `${directory}/recovery-manifest.json`;
+    if (existsSync(manifestPath)) {
+      const manifest = readJson(manifestPath);
+      validateRecoveryArtifact(manifest);
+      manifest.state = next;
+      manifest.updatedAt = state.updatedAt;
+      validateRecoveryArtifact(manifest);
+      writeState(manifestPath, manifest);
+    }
     return;
+  }
+
+  if (command === "checkpoint-irreversible") {
+    const state = readJson(statePath);
+    if (!SAFE_CONTROL_PLANE_STATES.has(state.state)) {
+      throw new Error(`Cannot checkpoint irreversible mutation from ${state.state}`);
+    }
+    const manifestPath = `${directory}/recovery-manifest.json`;
+    const manifest = readJson(manifestPath);
+    validateRecoveryArtifact(manifest);
+    const updatedAt = new Date().toISOString();
+    state.state = "convex_mutation_started";
+    state.updatedAt = updatedAt;
+    manifest.state = state.state;
+    manifest.updatedAt = updatedAt;
+    validateRecoveryArtifact(manifest);
+    writeState(statePath, state);
+    writeState(manifestPath, manifest);
+    return manifest;
   }
 
   if (command === "ambiguous") {
@@ -849,7 +1290,9 @@ export function run(argv = process.argv.slice(2)) {
       : { schemaVersion: 2, state: "failed_before_state_capture" };
     const lastVerifiedState = state.lastVerifiedState ?? state.state;
     state.lastVerifiedState = lastVerifiedState;
-    state.state = "ambiguous_recovery_required";
+    state.state = SAFE_CONTROL_PLANE_STATES.has(lastVerifiedState)
+      ? "aborted_without_traffic_change"
+      : "ambiguous_recovery_required";
     state.ambiguity = {
       recordedAt: new Date().toISOString(),
       signal,
@@ -861,7 +1304,7 @@ export function run(argv = process.argv.slice(2)) {
         ? validateManifest(rawManifest)
         : validateIntent(rawManifest);
       manifest.lastVerifiedState = lastVerifiedState;
-      manifest.state = "ambiguous_recovery_required";
+      manifest.state = state.state;
       manifest.ambiguity = state.ambiguity;
       writeState(`${directory}/recovery-manifest.json`, manifest);
     }
@@ -870,9 +1313,9 @@ export function run(argv = process.argv.slice(2)) {
 
   if (command === "plan-recovery") {
     const strategy = args[0];
-    const manifest = validateManifest(
-      readJson(`${directory}/recovery-manifest.json`),
-    );
+    const manifest = readJson(`${directory}/recovery-manifest.json`);
+    validateRecoveryArtifact(manifest);
+    const admission = readJson(`${directory}/recovery-admission.json`);
     const gatewayActive =
       typeof manifest.observed?.gateway === "string"
         ? manifest.observed.gateway
@@ -885,6 +1328,7 @@ export function run(argv = process.argv.slice(2)) {
       manifest,
       { gateway: gatewayActive, web: webActive },
       strategy,
+      admission,
     );
     writeState(`${directory}/recovery-plan.json`, plan);
     process.stdout.write(`${JSON.stringify(plan)}\n`);
@@ -893,10 +1337,14 @@ export function run(argv = process.argv.slice(2)) {
 
   if (command === "recovery-final") {
     const [gatewayReady, webReady, accountingReady] = args;
-    const manifest = validateManifest(
-      readJson(`${directory}/recovery-manifest.json`),
-    );
+    const manifest = readJson(`${directory}/recovery-manifest.json`);
+    const artifactKind = validateRecoveryArtifact(manifest);
     const plan = readJson(`${directory}/recovery-plan.json`);
+    if (plan.action === "roll-forward" && artifactKind !== "manifest") {
+      throw new Error(
+        "Roll-forward recovery completed without finalized candidates",
+      );
+    }
     const gatewayActive = readRollbackVersion(directory, "gateway");
     const webActive = readRollbackVersion(directory, "web");
     const verified =
@@ -939,7 +1387,7 @@ export function run(argv = process.argv.slice(2)) {
       state.lastVerifiedState = lastVerifiedState;
       if (
         lastVerifiedState === "failed_before_artifact_upload" ||
-        lastVerifiedState === "rollback_pointers_captured_no_traffic_mutation"
+        SAFE_CONTROL_PLANE_STATES.has(lastVerifiedState)
       ) {
         state.state = "aborted_without_traffic_change";
       } else state.state = "ambiguous_recovery_required";
@@ -949,7 +1397,7 @@ export function run(argv = process.argv.slice(2)) {
   }
 
   throw new Error(
-    "Usage: release-state.mjs get-active-version|get-uploaded-version|get-bounded-version|get-bounded-lineage-version|verify-zero-traffic|validate-recovery|get-lineage-token|verify-lineage-version|begin-attempt|finalize-attempt|capture|intent|uploaded|manifest|get|mark|ambiguous|plan-recovery|recovery-final|final <path>",
+    "Usage: release-state.mjs get-active-version|get-uploaded-version|get-bounded-version|get-bounded-lineage-version|verify-zero-traffic|validate-recovery|lineage-predicate|extract-lineage-attestation|get-lineage-token|verify-lineage-version|admit-recovery|begin-attempt|finalize-attempt|finalize-handoff|capture|intent|uploaded|manifest|get|mark|checkpoint-irreversible|ambiguous|plan-recovery|recovery-final|final <path>",
   );
 }
 

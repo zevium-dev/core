@@ -26,6 +26,9 @@ permissions:
   deployments: read
 
 env:
+  RELEASE_REFEREE_REF: ${{ vars.RELEASE_REFEREE_REF }}
+  RELEASE_REFEREE_SHA256: ${{ vars.RELEASE_REFEREE_SHA256 }}
+  RELEASE_POLICY_TREE_SHA256: ${{ vars.RELEASE_POLICY_TREE_SHA256 }}
   CLOUDFLARE_ACCOUNT_ID: 1ea9299555b026a6a7484c8323c5a953
   PRODUCTION_CONVEX_URL: https://polite-ermine-809.convex.cloud
   PRODUCTION_CONVEX_SITE_URL: https://polite-ermine-809.convex.site
@@ -97,8 +100,6 @@ jobs:
         with:
           path: ~/.local/share/pnpm/store
           key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pnpm-store-
       - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903
         with:
           node-version: 24.15.0
@@ -106,13 +107,31 @@ jobs:
         run: |
           corepack enable
           corepack prepare pnpm@11.8.0 --activate
-          pnpm install --frozen-lockfile
+          pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Materialize immutable protected release referee
+        env:
+          RELEASE_TARGET: ${{ steps.guard.outputs.release }}
+        run: |
+          [[ "$RELEASE_REFEREE_REF" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$RELEASE_REFEREE_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$RELEASE_POLICY_TREE_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          referee_root="$(mktemp -d "$RUNNER_TEMP/zevium-release-referee.XXXXXX")"
+          git archive "$RELEASE_REFEREE_REF" | tar -x -C "$referee_root"
+          pnpm --dir "$referee_root" install --frozen-lockfile --ignore-scripts
+          referee_dir="$referee_root/.github/scripts"
+          node "$referee_dir/release-attestation.mjs" verify-referee \
+            --ref="$RELEASE_REFEREE_REF" --target="$RELEASE_TARGET" \
+            --evaluator-digest="$RELEASE_REFEREE_SHA256" \
+            --tree-digest="$RELEASE_POLICY_TREE_SHA256" \
+            --repository="$GITHUB_REPOSITORY" --target-branch=develop
+          echo "RELEASE_REFEREE_DIR=$referee_dir" >> "$GITHUB_ENV"
 
       - name: Resolve exact active production identity
         id: active
         run: |
           test "$(git rev-parse HEAD)" = "${{ steps.guard.outputs.release }}"
-          active_release="$(node .github/scripts/release-contract.mjs \
+          active_release="$(node "$RELEASE_REFEREE_DIR/release-contract.mjs" \
             --current-release=true --web="$PRODUCTION_WEB_URL" \
             --gateway="$PRODUCTION_GATEWAY_URL")"
           [[ "$active_release" =~ ^[0-9a-f]{40}$ ]] || {
@@ -131,7 +150,7 @@ jobs:
         run: |
           active_config="$RUNNER_TEMP/active-wrangler.jsonc"
           git show "$ACTIVE_RELEASE:apps/gateway/wrangler.jsonc" > "$active_config"
-          classification="$(node .github/scripts/release-lifecycle.mjs classify \
+          classification="$(node "$RELEASE_REFEREE_DIR/release-lifecycle.mjs" classify \
             --base="$active_config" --candidate=apps/gateway/wrangler.jsonc)"
           invalid="$(CLASSIFICATION="$classification" node -e '
             const row=JSON.parse(process.env.CLASSIFICATION);
@@ -153,7 +172,10 @@ jobs:
             echo "eligible=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          node .github/scripts/release-attestation.mjs verify-remote \
+          node "$RELEASE_REFEREE_DIR/release-convex-contract.mjs" classify \
+            --base="$ACTIVE_RELEASE" --target="$RELEASE_SHA" \
+            > "$RUNNER_TEMP/preflight-convex-classification.json"
+          node "$RELEASE_REFEREE_DIR/release-attestation.mjs" verify-remote \
             --base="$ACTIVE_RELEASE" --target="$RELEASE_SHA"
           echo "eligible=true" >> "$GITHUB_OUTPUT"
 
@@ -205,8 +227,6 @@ jobs:
         with:
           path: ~/.local/share/pnpm/store
           key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pnpm-store-
       - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903
         with:
           node-version: 24.15.0
@@ -214,7 +234,27 @@ jobs:
         run: |
           corepack enable
           corepack prepare pnpm@11.8.0 --activate
-          pnpm install --frozen-lockfile
+          pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Materialize immutable referee and admit complete semantic range
+        run: |
+          [[ "$RELEASE_REFEREE_REF" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$RELEASE_REFEREE_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$RELEASE_POLICY_TREE_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          referee_root="$(mktemp -d "$RUNNER_TEMP/zevium-release-referee.XXXXXX")"
+          git archive "$RELEASE_REFEREE_REF" | tar -x -C "$referee_root"
+          pnpm --dir "$referee_root" install --frozen-lockfile --ignore-scripts
+          referee_dir="$referee_root/.github/scripts"
+          node "$referee_dir/release-attestation.mjs" verify-referee \
+            --ref="$RELEASE_REFEREE_REF" --target="$RELEASE_SHA" \
+            --evaluator-digest="$RELEASE_REFEREE_SHA256" \
+            --tree-digest="$RELEASE_POLICY_TREE_SHA256" \
+            --repository="$GITHUB_REPOSITORY" --target-branch=develop
+          node "$referee_dir/release-convex-contract.mjs" classify \
+            --base="$ACTIVE_RELEASE" --target="$RELEASE_SHA" > "$RUNNER_TEMP/staging-convex-classification.json"
+          node "$referee_dir/release-attestation.mjs" verify-remote \
+            --base="$ACTIVE_RELEASE" --target="$RELEASE_SHA"
+          echo "RELEASE_REFEREE_DIR=$referee_dir" >> "$GITHUB_ENV"
 
       - name: Build immutable staging web candidate
         env:
@@ -234,7 +274,7 @@ jobs:
           convex_dry_run="$(pnpm exec convex deploy --dry-run --yes \
             --codegen disable --typecheck disable 2>&1)"
           printf '%s' "$convex_dry_run" \
-            | node .github/scripts/release-contract.mjs --validate-convex-dry-run=true
+          | node "$RELEASE_REFEREE_DIR/release-contract.mjs" --validate-convex-dry-run=true
           pnpm exec convex deploy --yes --message "staging release $RELEASE_SHA"
 
       - name: Guard active metadata and deploy staging gateway
@@ -244,14 +284,14 @@ jobs:
         run: |
           test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
           test "$(gh api "repos/$GITHUB_REPOSITORY/commits/develop" --jq .sha)" = "$RELEASE_SHA"
-          staging_active="$(node .github/scripts/release-contract.mjs \
+          staging_active="$(node "$RELEASE_REFEREE_DIR/release-contract.mjs" \
             --current-release=true --web="$STAGING_WEB_URL" --gateway="$STAGING_GATEWAY_URL")"
           [[ "$staging_active" =~ ^[0-9a-f]{40}$ ]]
           git show "$staging_active:apps/gateway/wrangler.jsonc" > "$RUNNER_TEMP/staging-active.jsonc"
           pnpm --filter gateway exec wrangler deployments list --json > "$RUNNER_TEMP/staging-gateway-deployments.json"
-          active_id="$(node .github/scripts/release-state.mjs get-active-version "$RUNNER_TEMP/staging-gateway-deployments.json")"
+          active_id="$(node "$RELEASE_REFEREE_DIR/release-state.mjs" get-active-version "$RUNNER_TEMP/staging-gateway-deployments.json")"
           pnpm --filter gateway exec wrangler versions view "$active_id" --json > "$RUNNER_TEMP/staging-gateway-active.json"
-          node .github/scripts/release-lifecycle.mjs check-generic \
+          node "$RELEASE_REFEREE_DIR/release-lifecycle.mjs" check-generic \
             --base="$RUNNER_TEMP/staging-active.jsonc" \
             --candidate=apps/gateway/wrangler.jsonc \
             --active-version="$RUNNER_TEMP/staging-gateway-active.json" \
@@ -270,7 +310,7 @@ jobs:
           test "$(gh api "repos/$GITHUB_REPOSITORY/commits/develop" --jq .sha)" = "$RELEASE_SHA"
           pnpm --filter web exec wrangler deployments list \
             --config dist/server/wrangler.json --json > "$RUNNER_TEMP/staging-web-deployments.json"
-          active_id="$(node .github/scripts/release-state.mjs get-active-version "$RUNNER_TEMP/staging-web-deployments.json")"
+          active_id="$(node "$RELEASE_REFEREE_DIR/release-state.mjs" get-active-version "$RUNNER_TEMP/staging-web-deployments.json")"
           pnpm --filter web exec wrangler versions view "$active_id" \
             --config dist/server/wrangler.json --json > "$RUNNER_TEMP/staging-web-active.json"
           ACTIVE_ID="$active_id" VERSION_JSON="$RUNNER_TEMP/staging-web-active.json" node -e '
@@ -286,12 +326,12 @@ jobs:
           RELEASE_PROBE_REQUEST_BODY: ${{ secrets.STAGING_RELEASE_PROBE_REQUEST_BODY }}
           RELEASE_PROBE_SECRET: ${{ secrets.STAGING_RELEASE_PROBE_SECRET }}
         run: |
-          node .github/scripts/with-clerk-release-key.mjs \
+          node "$RELEASE_REFEREE_DIR/with-clerk-release-key.mjs" \
             --clerk-secret-env=CLERK_STAGING_SECRET_KEY \
             --org-slug="$RELEASE_PROBE_CONSUMER_ORG_SLUG" \
             --member-user-id="$RELEASE_PROBE_CONSUMER_MEMBER_USER_ID" \
             --key-id="$RELEASE_PROBE_API_KEY_ID" -- \
-            node .github/scripts/release-contract.mjs \
+             node "$RELEASE_REFEREE_DIR/release-contract.mjs" \
               --release="$RELEASE_SHA" --web="$STAGING_WEB_URL" \
               --gateway="$STAGING_GATEWAY_URL" \
               --mock-path="$RELEASE_PROBE_MOCK_PATH" \
@@ -302,12 +342,19 @@ jobs:
               --accounting="$STAGING_CONVEX_SITE_URL/release-probe-accounting" \
               --output=release-evidence/staging-contract.json
 
-      - name: Install workspace-locked browser runtime
+      - name: Verify immutable runner browser runtime
+        env:
+          CHROME_EXECUTABLE: ${{ vars.RELEASE_CHROME_EXECUTABLE }}
         run: |
-          locked_browser="$GITHUB_WORKSPACE/node_modules/.bin/agent-browser"
-          test -x "$locked_browser"
-          "$locked_browser" install --with-deps
-          echo "AGENT_BROWSER_BIN=$locked_browser" >> "$GITHUB_ENV"
+          browser_lock="$(node "$RELEASE_REFEREE_DIR/verify-agent-browser.mjs" \
+            --workspace="$GITHUB_WORKSPACE" --chrome="$CHROME_EXECUTABLE")"
+          # JavaScript template literals are intentionally protected from shell expansion.
+          # shellcheck disable=SC2016
+          BROWSER_LOCK="$browser_lock" node -e '
+            const row=JSON.parse(process.env.BROWSER_LOCK);
+            require("node:fs").appendFileSync(process.env.GITHUB_ENV,
+              `AGENT_BROWSER_BIN=${row.cli}\nAGENT_BROWSER_EXECUTABLE_PATH=${row.browserExecutable}\n`);
+          '
 
       - name: Run exact-request staging E2E with runtime Clerk key
         env:
@@ -319,7 +366,7 @@ jobs:
           E2E_OTP: ${{ secrets.STAGING_E2E_OTP }}
           E2E_ORG_SLUG: ${{ vars.STAGING_E2E_ORG_SLUG }}
         run: |
-          node .github/scripts/with-clerk-release-key.mjs \
+          node "$RELEASE_REFEREE_DIR/with-clerk-release-key.mjs" \
             --clerk-secret-env=CLERK_STAGING_SECRET_KEY \
             --org-slug="$RELEASE_PROBE_CONSUMER_ORG_SLUG" \
             --member-user-id="$RELEASE_PROBE_CONSUMER_MEMBER_USER_ID" \
@@ -342,6 +389,12 @@ jobs:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 45
     environment: production
+    permissions:
+      actions: read
+      attestations: write
+      contents: read
+      deployments: read
+      id-token: write
     env:
       RELEASE_SHA: ${{ needs.preflight.outputs.release }}
       ACTIVE_RELEASE: ${{ needs.preflight.outputs.active_release }}
@@ -375,8 +428,6 @@ jobs:
         with:
           path: ~/.local/share/pnpm/store
           key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pnpm-store-
       - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903
         with:
           node-version: 24.15.0
@@ -384,7 +435,27 @@ jobs:
         run: |
           corepack enable
           corepack prepare pnpm@11.8.0 --activate
-          pnpm install --frozen-lockfile
+          pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Materialize immutable referee and freeze production admission
+        run: |
+          [[ "$RELEASE_REFEREE_REF" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$RELEASE_REFEREE_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$RELEASE_POLICY_TREE_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          referee_root="$(mktemp -d "$RUNNER_TEMP/zevium-release-referee.XXXXXX")"
+          git archive "$RELEASE_REFEREE_REF" | tar -x -C "$referee_root"
+          pnpm --dir "$referee_root" install --frozen-lockfile --ignore-scripts
+          referee_dir="$referee_root/.github/scripts"
+          node "$referee_dir/release-attestation.mjs" verify-referee \
+            --ref="$RELEASE_REFEREE_REF" --target="$RELEASE_SHA" \
+            --evaluator-digest="$RELEASE_REFEREE_SHA256" \
+            --tree-digest="$RELEASE_POLICY_TREE_SHA256" \
+            --repository="$GITHUB_REPOSITORY" --target-branch=develop
+          node "$referee_dir/release-convex-contract.mjs" classify \
+            --base="$ACTIVE_RELEASE" --target="$RELEASE_SHA" > "$RUNNER_TEMP/production-convex-classification.json"
+          node "$referee_dir/release-attestation.mjs" verify-remote \
+            --base="$ACTIVE_RELEASE" --target="$RELEASE_SHA"
+          echo "RELEASE_REFEREE_DIR=$referee_dir" >> "$GITHUB_ENV"
 
       - name: Verify protected provenance again after approval
         env:
@@ -392,9 +463,9 @@ jobs:
         run: |
           test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
           test "$(gh api "repos/$GITHUB_REPOSITORY/commits/develop" --jq .sha)" = "$RELEASE_SHA"
-          test "$(node .github/scripts/release-contract.mjs --current-release=true \
+          test "$(node "$RELEASE_REFEREE_DIR/release-contract.mjs" --current-release=true \
             --web="$PRODUCTION_WEB_URL" --gateway="$PRODUCTION_GATEWAY_URL")" = "$ACTIVE_RELEASE"
-          node .github/scripts/release-attestation.mjs verify-remote \
+          node "$RELEASE_REFEREE_DIR/release-attestation.mjs" verify-remote \
             --base="$ACTIVE_RELEASE" --target="$RELEASE_SHA"
 
       - name: Build immutable production web artifact
@@ -412,31 +483,46 @@ jobs:
           mkdir -p release-evidence
           test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
           test "$(gh api "repos/$GITHUB_REPOSITORY/commits/develop" --jq .sha)" = "$RELEASE_SHA"
-          test "$(node .github/scripts/release-contract.mjs --current-release=true \
+          test "$(node "$RELEASE_REFEREE_DIR/release-contract.mjs" --current-release=true \
             --web="$PRODUCTION_WEB_URL" --gateway="$PRODUCTION_GATEWAY_URL")" = "$ACTIVE_RELEASE"
           pnpm --filter gateway exec wrangler deployments list --json > release-evidence/gateway-before.json
           pnpm --filter web exec wrangler deployments list \
             --config dist/server/wrangler.json --json > release-evidence/web-before.json
-          node .github/scripts/release-state.mjs capture release-evidence
-          gateway_previous="$(node .github/scripts/release-state.mjs get release-evidence gateway)"
+          node "$RELEASE_REFEREE_DIR/release-state.mjs" capture release-evidence
+          gateway_previous="$(node "$RELEASE_REFEREE_DIR/release-state.mjs" get release-evidence gateway)"
           pnpm --filter gateway exec wrangler versions view "$gateway_previous" --json \
             > "$RUNNER_TEMP/production-gateway-active.json"
           git show "$ACTIVE_RELEASE:apps/gateway/wrangler.jsonc" > "$RUNNER_TEMP/production-active.jsonc"
-          node .github/scripts/release-lifecycle.mjs check-generic \
+          node "$RELEASE_REFEREE_DIR/release-lifecycle.mjs" check-generic \
             --base="$RUNNER_TEMP/production-active.jsonc" \
             --candidate=apps/gateway/wrangler.jsonc \
             --active-version="$RUNNER_TEMP/production-gateway-active.json" \
             --expected-version="$gateway_previous"
-          node .github/scripts/release-state.mjs intent release-evidence \
+          node "$RELEASE_REFEREE_DIR/release-state.mjs" intent release-evidence \
             "$RELEASE_SHA" "$ACTIVE_RELEASE" "$LIFECYCLE_DIGEST" none true \
             "$GITHUB_RUN_ID" .github/workflows/deploy-production.yml "$GITHUB_RUN_ATTEMPT"
-          lineage_token="$(node .github/scripts/release-state.mjs get-lineage-token release-evidence)"
+          lineage_token="$(node "$RELEASE_REFEREE_DIR/release-state.mjs" get-lineage-token release-evidence)"
           echo "RECOVERY_LINEAGE_TOKEN=$lineage_token" >> "$GITHUB_ENV"
+
+      - name: Build content-addressed initial recovery lineage subject
+        id: initial_lineage
+        run: |
+          digest="$(node "$RELEASE_REFEREE_DIR/release-state.mjs" lineage-predicate \
+            release-evidence release-evidence/recovery-lineage-predicate.json \
+            release-evidence/recovery-lineage-subject.json)"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+
+      - name: Persist initial recovery lineage in immutable attestation store
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6
+        with:
+          subject-path: release-evidence/recovery-lineage-subject.json
+          predicate-type: https://zevium.dev/attestations/recovery-lineage/v1
+          predicate-path: release-evidence/recovery-lineage-predicate.json
 
       - name: Persist recovery manifest before first provider mutation
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: recovery-manifest-initial-${{ github.run_id }}-${{ github.run_attempt }}
+          name: recovery-manifest-initial-${{ github.run_id }}-${{ github.run_attempt }}-${{ steps.initial_lineage.outputs.digest }}
           path: |
             release-evidence/recovery-manifest.json
             release-evidence/state.json
@@ -450,13 +536,13 @@ jobs:
         run: |
           test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
           test "$(gh api "repos/$GITHUB_REPOSITORY/commits/develop" --jq .sha)" = "$RELEASE_SHA"
-          test "$(node .github/scripts/release-contract.mjs --current-release=true \
+          test "$(node "$RELEASE_REFEREE_DIR/release-contract.mjs" --current-release=true \
             --web="$PRODUCTION_WEB_URL" --gateway="$PRODUCTION_GATEWAY_URL")" = "$ACTIVE_RELEASE"
           pnpm --filter gateway exec wrangler deployments list --json > "$RUNNER_TEMP/gateway-recaptured.json"
-          current_id="$(node .github/scripts/release-state.mjs get-active-version "$RUNNER_TEMP/gateway-recaptured.json")"
-          test "$current_id" = "$(node .github/scripts/release-state.mjs get release-evidence gateway)"
+          current_id="$(node "$RELEASE_REFEREE_DIR/release-state.mjs" get-active-version "$RUNNER_TEMP/gateway-recaptured.json")"
+          test "$current_id" = "$(node "$RELEASE_REFEREE_DIR/release-state.mjs" get release-evidence gateway)"
           pnpm --filter gateway exec wrangler versions view "$current_id" --json > "$RUNNER_TEMP/gateway-recaptured-version.json"
-          node .github/scripts/release-lifecycle.mjs verify-remote \
+          node "$RELEASE_REFEREE_DIR/release-lifecycle.mjs" verify-remote \
             --candidate="$RUNNER_TEMP/production-active.jsonc" \
             --active-version="$RUNNER_TEMP/gateway-recaptured-version.json" \
             --expected-version="$current_id"
@@ -473,12 +559,12 @@ jobs:
         run: |
           test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
           test "$(gh api "repos/$GITHUB_REPOSITORY/commits/develop" --jq .sha)" = "$RELEASE_SHA"
-          test "$(node .github/scripts/release-contract.mjs --current-release=true \
+          test "$(node "$RELEASE_REFEREE_DIR/release-contract.mjs" --current-release=true \
             --web="$PRODUCTION_WEB_URL" --gateway="$PRODUCTION_GATEWAY_URL")" = "$ACTIVE_RELEASE"
           pnpm --filter web exec wrangler deployments list \
             --config dist/server/wrangler.json --json > "$RUNNER_TEMP/web-recaptured.json"
-          current_id="$(node .github/scripts/release-state.mjs get-active-version "$RUNNER_TEMP/web-recaptured.json")"
-          test "$current_id" = "$(node .github/scripts/release-state.mjs get release-evidence web)"
+          current_id="$(node "$RELEASE_REFEREE_DIR/release-state.mjs" get-active-version "$RUNNER_TEMP/web-recaptured.json")"
+          test "$current_id" = "$(node "$RELEASE_REFEREE_DIR/release-state.mjs" get release-evidence web)"
           pnpm --filter web exec wrangler versions view "$current_id" \
             --config dist/server/wrangler.json --json > "$RUNNER_TEMP/web-recaptured-version.json"
           ACTIVE_ID="$current_id" VERSION_JSON="$RUNNER_TEMP/web-recaptured-version.json" node -e '
@@ -491,15 +577,58 @@ jobs:
 
       - name: Finalize bounded recovery manifest
         run: |
-          node .github/scripts/release-state.mjs uploaded release-evidence
-          node .github/scripts/release-state.mjs manifest release-evidence \
+          node "$RELEASE_REFEREE_DIR/release-state.mjs" uploaded release-evidence
+          node "$RELEASE_REFEREE_DIR/release-state.mjs" manifest release-evidence \
             "$RELEASE_SHA" "$ACTIVE_RELEASE" "$LIFECYCLE_DIGEST" none true \
             "$GITHUB_RUN_ID" .github/workflows/deploy-production.yml "$GITHUB_RUN_ATTEMPT"
+
+      - name: Build content-addressed final recovery lineage subject
+        id: final_lineage
+        run: |
+          digest="$(node "$RELEASE_REFEREE_DIR/release-state.mjs" lineage-predicate \
+            release-evidence release-evidence/recovery-lineage-predicate.json \
+            release-evidence/recovery-lineage-subject.json)"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+
+      - name: Persist final recovery lineage in immutable attestation store
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6
+        with:
+          subject-path: release-evidence/recovery-lineage-subject.json
+          predicate-type: https://zevium.dev/attestations/recovery-lineage/v1
+          predicate-path: release-evidence/recovery-lineage-predicate.json
 
       - name: Persist enriched recovery manifest before control-plane or traffic mutation
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: recovery-manifest-final-${{ github.run_id }}-${{ github.run_attempt }}
+          name: recovery-manifest-final-${{ github.run_id }}-${{ github.run_attempt }}-${{ steps.final_lineage.outputs.digest }}
+          path: |
+            release-evidence/recovery-manifest.json
+            release-evidence/state.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Commit roll-forward-only state before irreversible mutation
+        run: node "$RELEASE_REFEREE_DIR/release-state.mjs" mark release-evidence convex_mutation_started
+
+      - name: Build content-addressed irreversible-mutation checkpoint
+        id: mutation_lineage
+        run: |
+          digest="$(node "$RELEASE_REFEREE_DIR/release-state.mjs" lineage-predicate \
+            release-evidence release-evidence/recovery-lineage-predicate.json \
+            release-evidence/recovery-lineage-subject.json)"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+
+      - name: Persist irreversible-mutation checkpoint in immutable attestation store
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6
+        with:
+          subject-path: release-evidence/recovery-lineage-subject.json
+          predicate-type: https://zevium.dev/attestations/recovery-lineage/v1
+          predicate-path: release-evidence/recovery-lineage-predicate.json
+
+      - name: Persist irreversible-mutation checkpoint before provider mutation
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: recovery-manifest-mutation-${{ github.run_id }}-${{ github.run_attempt }}-${{ steps.mutation_lineage.outputs.digest }}
           path: |
             release-evidence/recovery-manifest.json
             release-evidence/state.json
@@ -512,39 +641,38 @@ jobs:
           CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_PRODUCTION_DEPLOY_KEY }}
           EXPECTED_CONVEX_URL: ${{ env.PRODUCTION_CONVEX_URL }}
         run: |
-          record_signal() { node .github/scripts/release-state.mjs ambiguous release-evidence "$1" || true; exit 143; }
+          record_signal() { node "$RELEASE_REFEREE_DIR/release-state.mjs" ambiguous release-evidence "$1" || true; exit 143; }
           trap 'record_signal SIGINT' INT
           trap 'record_signal SIGTERM' TERM
           test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
           test "$(gh api "repos/$GITHUB_REPOSITORY/commits/develop" --jq .sha)" = "$RELEASE_SHA"
-          test "$(node .github/scripts/release-contract.mjs --current-release=true \
+          test "$(node "$RELEASE_REFEREE_DIR/release-contract.mjs" --current-release=true \
             --web="$PRODUCTION_WEB_URL" --gateway="$PRODUCTION_GATEWAY_URL")" = "$ACTIVE_RELEASE"
           convex_dry_run="$(pnpm exec convex deploy --dry-run --yes \
             --codegen disable --typecheck disable 2>&1)"
           printf '%s' "$convex_dry_run" \
-            | node .github/scripts/release-contract.mjs --validate-convex-dry-run=true
-          node .github/scripts/release-state.mjs mark release-evidence convex_mutation_started
+             | node "$RELEASE_REFEREE_DIR/release-contract.mjs" --validate-convex-dry-run=true
           pnpm exec convex deploy --yes --message "production expansion $RELEASE_SHA"
-          node .github/scripts/release-state.mjs mark release-evidence convex_expanded
+          node "$RELEASE_REFEREE_DIR/release-state.mjs" mark release-evidence convex_expanded
 
       - name: Guard versions immediately before zero-traffic gateway deployment
         env:
           GH_TOKEN: ${{ github.token }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
-          record_signal() { node .github/scripts/release-state.mjs ambiguous release-evidence "$1" || true; exit 143; }
+          record_signal() { node "$RELEASE_REFEREE_DIR/release-state.mjs" ambiguous release-evidence "$1" || true; exit 143; }
           trap 'record_signal SIGINT' INT
           trap 'record_signal SIGTERM' TERM
-          gateway_previous="$(node .github/scripts/release-state.mjs get release-evidence gateway previous)"
-          gateway_candidate="$(node .github/scripts/release-state.mjs get release-evidence gateway candidate)"
+          gateway_previous="$(node "$RELEASE_REFEREE_DIR/release-state.mjs" get release-evidence gateway previous)"
+          gateway_candidate="$(node "$RELEASE_REFEREE_DIR/release-state.mjs" get release-evidence gateway candidate)"
           test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
           test "$(gh api "repos/$GITHUB_REPOSITORY/commits/develop" --jq .sha)" = "$RELEASE_SHA"
-          test "$(node .github/scripts/release-contract.mjs --current-release=true \
+          test "$(node "$RELEASE_REFEREE_DIR/release-contract.mjs" --current-release=true \
             --web="$PRODUCTION_WEB_URL" --gateway="$PRODUCTION_GATEWAY_URL")" = "$ACTIVE_RELEASE"
           pnpm --filter gateway exec wrangler deployments list --json > "$RUNNER_TEMP/gateway-before-zero.json"
-          test "$(node .github/scripts/release-state.mjs get-active-version "$RUNNER_TEMP/gateway-before-zero.json")" = "$gateway_previous"
+          test "$(node "$RELEASE_REFEREE_DIR/release-state.mjs" get-active-version "$RUNNER_TEMP/gateway-before-zero.json")" = "$gateway_previous"
           pnpm --filter gateway exec wrangler versions view "$gateway_candidate" --json > "$RUNNER_TEMP/gateway-candidate.json"
-          node .github/scripts/release-lifecycle.mjs verify-remote \
+          node "$RELEASE_REFEREE_DIR/release-lifecycle.mjs" verify-remote \
             --candidate=apps/gateway/wrangler.jsonc \
             --active-version="$RUNNER_TEMP/gateway-candidate.json" \
             --expected-version="$gateway_candidate"
@@ -557,13 +685,13 @@ jobs:
           RELEASE_PROBE_REQUEST_BODY: ${{ secrets.PRODUCTION_RELEASE_PROBE_REQUEST_BODY }}
           RELEASE_PROBE_SECRET: ${{ secrets.PRODUCTION_RELEASE_PROBE_SECRET }}
         run: |
-          gateway_candidate="$(node .github/scripts/release-state.mjs get release-evidence gateway candidate)"
-          node .github/scripts/with-clerk-release-key.mjs \
+          gateway_candidate="$(node "$RELEASE_REFEREE_DIR/release-state.mjs" get release-evidence gateway candidate)"
+          node "$RELEASE_REFEREE_DIR/with-clerk-release-key.mjs" \
             --clerk-secret-env=CLERK_PRODUCTION_SECRET_KEY \
             --org-slug="$RELEASE_PROBE_CONSUMER_ORG_SLUG" \
             --member-user-id="$RELEASE_PROBE_CONSUMER_MEMBER_USER_ID" \
             --key-id="$RELEASE_PROBE_API_KEY_ID" -- \
-            node .github/scripts/release-contract.mjs \
+             node "$RELEASE_REFEREE_DIR/release-contract.mjs" \
               --gateway-only=true --release="$RELEASE_SHA" \
               --gateway="$PRODUCTION_GATEWAY_URL" \
               --gateway-override-name=zevium-gateway \
@@ -581,41 +709,41 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
-          record_signal() { node .github/scripts/release-state.mjs ambiguous release-evidence "$1" || true; exit 143; }
+          record_signal() { node "$RELEASE_REFEREE_DIR/release-state.mjs" ambiguous release-evidence "$1" || true; exit 143; }
           trap 'record_signal SIGINT' INT
           trap 'record_signal SIGTERM' TERM
-          gateway_previous="$(node .github/scripts/release-state.mjs get release-evidence gateway previous)"
-          gateway_candidate="$(node .github/scripts/release-state.mjs get release-evidence gateway candidate)"
+          gateway_previous="$(node "$RELEASE_REFEREE_DIR/release-state.mjs" get release-evidence gateway previous)"
+          gateway_candidate="$(node "$RELEASE_REFEREE_DIR/release-state.mjs" get release-evidence gateway candidate)"
           test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
           test "$(gh api "repos/$GITHUB_REPOSITORY/commits/develop" --jq .sha)" = "$RELEASE_SHA"
           pnpm --filter gateway exec wrangler deployments list --json > "$RUNNER_TEMP/gateway-zero.json"
           EXPECTED_PREVIOUS="$gateway_previous" EXPECTED_CANDIDATE="$gateway_candidate" \
-            DEPLOYMENTS="$RUNNER_TEMP/gateway-zero.json" node .github/scripts/release-state.mjs verify-zero-traffic
+            DEPLOYMENTS="$RUNNER_TEMP/gateway-zero.json" node "$RELEASE_REFEREE_DIR/release-state.mjs" verify-zero-traffic
           pnpm --filter gateway exec wrangler versions view "$gateway_candidate" --json > "$RUNNER_TEMP/gateway-before-full.json"
-          node .github/scripts/release-lifecycle.mjs verify-remote \
+          node "$RELEASE_REFEREE_DIR/release-lifecycle.mjs" verify-remote \
             --candidate=apps/gateway/wrangler.jsonc \
             --active-version="$RUNNER_TEMP/gateway-before-full.json" \
             --expected-version="$gateway_candidate"
           pnpm --filter gateway exec wrangler versions deploy "$gateway_candidate" --yes
           pnpm --filter gateway exec wrangler deployments list --json > "$RUNNER_TEMP/gateway-after-full.json"
-          test "$(node .github/scripts/release-state.mjs get-active-version "$RUNNER_TEMP/gateway-after-full.json")" = "$gateway_candidate"
-          node .github/scripts/release-state.mjs mark release-evidence gateway_active
+          test "$(node "$RELEASE_REFEREE_DIR/release-state.mjs" get-active-version "$RUNNER_TEMP/gateway-after-full.json")" = "$gateway_candidate"
+          node "$RELEASE_REFEREE_DIR/release-state.mjs" mark release-evidence gateway_active
 
       - name: Guard versions immediately before web traffic mutations
         env:
           GH_TOKEN: ${{ github.token }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
-          record_signal() { node .github/scripts/release-state.mjs ambiguous release-evidence "$1" || true; exit 143; }
+          record_signal() { node "$RELEASE_REFEREE_DIR/release-state.mjs" ambiguous release-evidence "$1" || true; exit 143; }
           trap 'record_signal SIGINT' INT
           trap 'record_signal SIGTERM' TERM
-          web_previous="$(node .github/scripts/release-state.mjs get release-evidence web previous)"
-          web_candidate="$(node .github/scripts/release-state.mjs get release-evidence web candidate)"
+          web_previous="$(node "$RELEASE_REFEREE_DIR/release-state.mjs" get release-evidence web previous)"
+          web_candidate="$(node "$RELEASE_REFEREE_DIR/release-state.mjs" get release-evidence web candidate)"
           test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
           test "$(gh api "repos/$GITHUB_REPOSITORY/commits/develop" --jq .sha)" = "$RELEASE_SHA"
           pnpm --filter web exec wrangler deployments list \
             --config dist/server/wrangler.json --json > "$RUNNER_TEMP/web-before-zero.json"
-          test "$(node .github/scripts/release-state.mjs get-active-version "$RUNNER_TEMP/web-before-zero.json")" = "$web_previous"
+          test "$(node "$RELEASE_REFEREE_DIR/release-state.mjs" get-active-version "$RUNNER_TEMP/web-before-zero.json")" = "$web_previous"
           pnpm --filter web exec wrangler versions view "$web_candidate" \
             --config dist/server/wrangler.json --json > "$RUNNER_TEMP/web-candidate.json"
           ACTIVE_ID="$web_candidate" VERSION_JSON="$RUNNER_TEMP/web-candidate.json" node -e '
@@ -628,7 +756,7 @@ jobs:
           pnpm --filter web exec wrangler deployments list \
             --config dist/server/wrangler.json --json > "$RUNNER_TEMP/web-zero.json"
           EXPECTED_PREVIOUS="$web_previous" EXPECTED_CANDIDATE="$web_candidate" \
-            DEPLOYMENTS="$RUNNER_TEMP/web-zero.json" node .github/scripts/release-state.mjs verify-zero-traffic
+            DEPLOYMENTS="$RUNNER_TEMP/web-zero.json" node "$RELEASE_REFEREE_DIR/release-state.mjs" verify-zero-traffic
           pnpm --filter web exec wrangler versions view "$web_candidate" \
             --config dist/server/wrangler.json --json > "$RUNNER_TEMP/web-before-full.json"
           ACTIVE_ID="$web_candidate" VERSION_JSON="$RUNNER_TEMP/web-before-full.json" node -e '
@@ -640,8 +768,8 @@ jobs:
             --config dist/server/wrangler.json "$web_candidate" --yes
           pnpm --filter web exec wrangler deployments list \
             --config dist/server/wrangler.json --json > "$RUNNER_TEMP/web-after-full.json"
-          test "$(node .github/scripts/release-state.mjs get-active-version "$RUNNER_TEMP/web-after-full.json")" = "$web_candidate"
-          node .github/scripts/release-state.mjs mark release-evidence web_active
+          test "$(node "$RELEASE_REFEREE_DIR/release-state.mjs" get-active-version "$RUNNER_TEMP/web-after-full.json")" = "$web_candidate"
+          node "$RELEASE_REFEREE_DIR/release-state.mjs" mark release-evidence web_active
 
       - name: Prove final production paid accounting with runtime Clerk key
         env:
@@ -649,12 +777,12 @@ jobs:
           RELEASE_PROBE_REQUEST_BODY: ${{ secrets.PRODUCTION_RELEASE_PROBE_REQUEST_BODY }}
           RELEASE_PROBE_SECRET: ${{ secrets.PRODUCTION_RELEASE_PROBE_SECRET }}
         run: |
-          node .github/scripts/with-clerk-release-key.mjs \
+          node "$RELEASE_REFEREE_DIR/with-clerk-release-key.mjs" \
             --clerk-secret-env=CLERK_PRODUCTION_SECRET_KEY \
             --org-slug="$RELEASE_PROBE_CONSUMER_ORG_SLUG" \
             --member-user-id="$RELEASE_PROBE_CONSUMER_MEMBER_USER_ID" \
             --key-id="$RELEASE_PROBE_API_KEY_ID" -- \
-            node .github/scripts/release-contract.mjs \
+             node "$RELEASE_REFEREE_DIR/release-contract.mjs" \
               --release="$RELEASE_SHA" --web="$PRODUCTION_WEB_URL" \
               --gateway="$PRODUCTION_GATEWAY_URL" \
               --mock-path="$RELEASE_PROBE_MOCK_PATH" \
@@ -667,14 +795,14 @@ jobs:
 
       - name: Record ambiguous state for failed or cancelled release
         if: failure() || cancelled()
-        run: node .github/scripts/release-state.mjs ambiguous release-evidence "${{ job.status }}"
+        run: node "$RELEASE_REFEREE_DIR/release-state.mjs" ambiguous release-evidence "${{ job.status }}"
 
       - name: Record verified final state
         if: success()
         env:
           RELEASE_JOB_STATUS: success
         run: |
-          node .github/scripts/release-state.mjs final release-evidence \
+          node "$RELEASE_REFEREE_DIR/release-state.mjs" final release-evidence \
             "$RELEASE_SHA" "$PRODUCTION_WEB_URL" "$PRODUCTION_GATEWAY_URL"
 
       - name: Upload production evidence

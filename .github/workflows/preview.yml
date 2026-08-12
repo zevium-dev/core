@@ -390,13 +390,20 @@ jobs:
         run: |
           corepack enable
           corepack prepare pnpm@11.8.0 --activate
-          pnpm install --frozen-lockfile
-      - name: Install workspace-locked browser runtime
+          pnpm install --frozen-lockfile --ignore-scripts
+      - name: Verify immutable runner browser runtime
+        env:
+          CHROME_EXECUTABLE: ${{ vars.RELEASE_CHROME_EXECUTABLE }}
         run: |
-          locked_browser="$GITHUB_WORKSPACE/node_modules/.bin/agent-browser"
-          test -x "$locked_browser"
-          "$locked_browser" install --with-deps
-          echo "AGENT_BROWSER_BIN=$locked_browser" >> "$GITHUB_ENV"
+          browser_lock="$(node .github/scripts/verify-agent-browser.mjs \
+            --workspace="$GITHUB_WORKSPACE" --chrome="$CHROME_EXECUTABLE")"
+          # JavaScript template literals are intentionally protected from shell expansion.
+          # shellcheck disable=SC2016
+          BROWSER_LOCK="$browser_lock" node -e '
+            const row=JSON.parse(process.env.BROWSER_LOCK);
+            require("node:fs").appendFileSync(process.env.GITHUB_ENV,
+              `AGENT_BROWSER_BIN=${row.cli}\nAGENT_BROWSER_EXECUTABLE_PATH=${row.browserExecutable}\n`);
+          '
       - name: Run authenticated publish and catalogue journey
         env:
           GATEWAY_URL: ""

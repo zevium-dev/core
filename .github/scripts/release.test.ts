@@ -1,4 +1,5 @@
 import { EventEmitter } from "node:events";
+import { createHash } from "node:crypto";
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -18,11 +19,16 @@ import {
   beginRecoveryAttempt,
   boundedDeploymentLineageVersion,
   boundedDeploymentVersion,
+  createRecoveryLineagePredicate,
   createRecoveryIntent,
+  extractRecoveryLineageAttestation,
   finalizeRecoveryAttempt,
+  finalizeRecoveryHandoff,
+  recoveryAdmission,
   recoveryPlan,
   uploadedVersion,
   validateRecoveryArtifact,
+  verifyRecoveryAdmission,
   verifyRecoveryVersionLineage,
   verifyZeroTraffic,
 } from "./release-state.mjs";
@@ -36,6 +42,7 @@ import {
 import {
   createProtectedAttestation,
   findProtectedRequirements,
+  policyTreeDigest,
   verifyProtectedAttestation,
 } from "./release-attestation.mjs";
 import {
@@ -678,7 +685,7 @@ describe("Clerk runtime release-key resolver", () => {
     revoked: false,
     revocationReason: null,
     expired: false,
-    expiration: null,
+    expiration: NOW + 10 * 60_000,
     description: "Dedicated release probe",
     lastUsedAt: null,
     createdAt: NOW - 60_000,
@@ -736,12 +743,14 @@ describe("Clerk runtime release-key resolver", () => {
         client,
         orgSlug: "consumer",
         memberUserId: "user_member",
+        keyId: "ak_exact",
         now: NOW,
       }),
     ).resolves.toEqual({
       id: "ak_exact",
       secret: API_KEY,
       organizationId: "org_exact",
+      expiration: NOW + 10 * 60_000,
     });
     expect(client.organizations.getOrganizationList).toHaveBeenCalledTimes(2);
     expect(
@@ -752,7 +761,7 @@ describe("Clerk runtime release-key resolver", () => {
     );
   });
 
-  it("fails ambiguity and supports one exact key-id override", async () => {
+  it("requires one exact short-lived key id", async () => {
     const second = { ...matchingKey, id: "ak_second" };
     const ambiguous = paginatedClient([matchingKey, second]);
     await expect(
@@ -762,7 +771,7 @@ describe("Clerk runtime release-key resolver", () => {
         memberUserId: "user_member",
         now: NOW,
       }),
-    ).rejects.toThrow(/unambiguous.*found 2/);
+    ).rejects.toThrow(/release probe API key id is required/);
     expect(ambiguous.apiKeys.getSecret).not.toHaveBeenCalled();
     await expect(
       resolveClerkReleaseKey({
@@ -788,6 +797,7 @@ describe("Clerk runtime release-key resolver", () => {
           client: paginatedClient([key]),
           orgSlug: "consumer",
           memberUserId: "user_member",
+          keyId: "ak_exact",
           now: NOW,
         }),
       ).rejects.toThrow(/active Clerk API key, found 0/);
@@ -805,6 +815,7 @@ describe("Clerk runtime release-key resolver", () => {
         client: malformed,
         orgSlug: "consumer",
         memberUserId: "user_member",
+        keyId: "ak_exact",
         now: NOW,
       }),
     ).rejects.toThrow(/invalid schema/);
@@ -826,6 +837,7 @@ describe("Clerk runtime release-key resolver", () => {
         client: crossOrg,
         orgSlug: "consumer",
         memberUserId: "user_member",
+        keyId: "ak_exact",
         now: NOW,
       }),
     ).rejects.toThrow(/membership, found 0/);
@@ -840,6 +852,10 @@ describe("Clerk runtime release-key resolver", () => {
       "CONVEX_DEPLOY_KEY",
       "GH_TOKEN",
       "GITHUB_TOKEN",
+      "GITHUB_ENV",
+      "GITHUB_OUTPUT",
+      "ACTIONS_ID_TOKEN_REQUEST_TOKEN",
+      "ACTIONS_ID_TOKEN_REQUEST_URL",
     ];
     const previous = Object.fromEntries(
       sensitiveNames.map((name) => [name, process.env[name]]),
@@ -849,6 +865,7 @@ describe("Clerk runtime release-key resolver", () => {
       process.env[name] = `secret-${name}`;
     const events: string[] = [];
     let childEnv: NodeJS.ProcessEnv | undefined;
+    const client = paginatedClient();
     const spawnImpl = vi.fn((_command, _args, options) => {
       events.push("spawn");
       childEnv = options.env;
@@ -868,7 +885,7 @@ describe("Clerk runtime release-key resolver", () => {
           "probe.mjs",
         ],
         {
-          client: paginatedClient(),
+          client,
           now: () => NOW,
           mask: (secret: string) => {
             expect(secret).toBe(API_KEY);
@@ -883,11 +900,49 @@ describe("Clerk runtime release-key resolver", () => {
       for (const name of sensitiveNames)
         expect(childEnv?.[name]).toBeUndefined();
       expect(spawnImpl.mock.calls[0]?.[1]).not.toContain(API_KEY);
+      expect(client.apiKeys.verify).toHaveBeenCalledTimes(2);
     } finally {
       for (const [name, value] of Object.entries(previous)) {
         if (value === undefined) delete process.env[name];
         else process.env[name] = value;
       }
+    }
+  });
+
+  it("rechecks key rotation and revocation after a failed child", async () => {
+    const previous = process.env.CLERK_PRODUCTION_SECRET_KEY;
+    process.env.CLERK_PRODUCTION_SECRET_KEY = "sk_live_" + "s".repeat(40);
+    const client = paginatedClient();
+    const spawnImpl = vi.fn(() => {
+      const child = new EventEmitter();
+      queueMicrotask(() => child.emit("exit", 9, null));
+      return child;
+    });
+    try {
+      await expect(
+        runWithClerkKey(
+          [
+            "--clerk-secret-env=CLERK_PRODUCTION_SECRET_KEY",
+            "--org-slug=consumer",
+            "--member-user-id=user_member",
+            "--key-id=ak_exact",
+            "--",
+            "node",
+            "probe.mjs",
+          ],
+          {
+            client,
+            now: () => NOW,
+            mask: vi.fn(),
+            spawnImpl,
+          },
+        ),
+      ).rejects.toThrow(/exited 9/);
+      expect(client.apiKeys.verify).toHaveBeenCalledTimes(2);
+    } finally {
+      if (previous === undefined)
+        delete process.env.CLERK_PRODUCTION_SECRET_KEY;
+      else process.env.CLERK_PRODUCTION_SECRET_KEY = previous;
     }
   });
 });
@@ -1022,10 +1077,10 @@ describe("provider recovery and cancellation fixtures", () => {
       }),
     ).toThrow(/partial candidate/);
     expect(
-      recoveryPlan(manifest, { gateway: previous, web: candidate }, "auto"),
+      recoveryPlan(manifest, { gateway: candidate, web: previous }, "auto"),
     ).toMatchObject({
       action: "roll-forward",
-      requiresConvexRollForward: true,
+      requiresConvexRollForward: false,
     });
     const safe = {
       ...manifest,
@@ -1044,8 +1099,8 @@ describe("provider recovery and cancellation fixtures", () => {
         "auto",
       ),
     ).toMatchObject({
-      action: "roll-forward",
-      requiresConvexRollForward: true,
+      action: "rollback",
+      requiresConvexRollForward: false,
     });
     const lifecycleSource = {
       runId: 43,
@@ -1171,7 +1226,7 @@ describe("provider recovery and cancellation fixtures", () => {
     let recursive = manifest;
     const gatewayVersions = [candidate];
     const webVersions = [candidate];
-    for (let attempt = 2; attempt <= 6; attempt += 1) {
+    for (let attempt = 3; attempt <= 7; attempt += 1) {
       const source = {
         runId: 100 + attempt,
         runAttempt: attempt,
@@ -1200,6 +1255,78 @@ describe("provider recovery and cancellation fixtures", () => {
     }
   });
 
+  it("hash-binds recursive handoffs without duplicating provider version IDs", () => {
+    const source = {
+      runId: 287,
+      runAttempt: 2,
+      workflowPath: ".github/workflows/recover-production.yml",
+    };
+    const pending = beginRecoveryAttempt(manifest, source);
+    const handoff = finalizeRecoveryHandoff(pending);
+    expect(validateRecoveryArtifact(handoff)).toBe("manifest");
+    expect(handoff.gateway.candidateVersion).toBe(candidate);
+    expect(handoff.web.candidateVersion).toBe(candidate);
+    expect(handoff.lineage.attempts.at(-1)).toMatchObject({
+      reusedCandidateDigest: manifest.lineage.attempts.at(-1)?.digest,
+      source,
+    });
+    expect(
+      recoveryPlan(
+        handoff,
+        { gateway: candidate, web: candidate },
+        "roll-forward",
+      ),
+    ).toMatchObject({ gatewayVersion: candidate, webVersion: candidate });
+
+    const tampered = structuredClone(handoff);
+    tampered.lineage.attempts.at(-1)!.reusedCandidateDigest = "f".repeat(64);
+    expect(() => validateRecoveryArtifact(tampered)).toThrow(/handoff/);
+    expect(() =>
+      finalizeRecoveryAttempt(pending, candidate, candidate),
+    ).toThrow(/repeats a provider version/);
+  });
+
+  it("treats lifecycle irreversible checkpoint as mandatory Convex roll-forward", () => {
+    const lifecycleSource = {
+      runId: 991,
+      runAttempt: 1,
+      workflowPath: ".github/workflows/gateway-do-lifecycle.yml",
+    };
+    const lifecycle = createRecoveryIntent({
+      schemaVersion: 3,
+      release: SHA,
+      activeBase: OLD_SHA,
+      protectedTarget: SHA,
+      protectedBase: OLD_SHA,
+      lifecycle: {
+        digest: "e".repeat(64),
+        phase: "expand",
+        rollbackAllowed: false,
+      },
+      root: lifecycleSource,
+      source: lifecycleSource,
+      gateway: { previousVersion: previous },
+      web: { previousVersion: previous },
+      state: "convex_mutation_started",
+    });
+    expect(
+      recoveryAdmission(
+        lifecycle,
+        { gateway: previous, web: previous },
+        "auto",
+        {
+          runId: 992,
+          runAttempt: 1,
+          workflowPath: ".github/workflows/recover-production.yml",
+        },
+      ),
+    ).toMatchObject({
+      action: "roll-forward",
+      controlPlaneMayHaveChanged: true,
+      requiresConvexRollForward: true,
+    });
+  });
+
   it("hash-chains every cancelled pending attempt before another recovery starts", () => {
     let cancelled = manifest;
     for (let attempt = 2; attempt <= 8; attempt += 1) {
@@ -1224,6 +1351,136 @@ describe("provider recovery and cancellation fixtures", () => {
     tampered.lineage.attempts.splice(2, 1);
     expect(() => validateRecoveryArtifact(tampered)).toThrow(/hash chain/);
   });
+
+  it("binds durable lineage predicates and rejects stale or ambiguous attempts", () => {
+    const initialPredicate = createRecoveryLineagePredicate(intent);
+    const finalPredicate = createRecoveryLineagePredicate(manifest);
+    expect(initialPredicate.subjectDigest).not.toBe(
+      finalPredicate.subjectDigest,
+    );
+    expect(finalPredicate.subject.manifestDigest).toMatch(/^[0-9a-f]{64}$/);
+    const statement = {
+      _type: "https://in-toto.io/Statement/v1",
+      subject: [
+        {
+          name: "recovery-lineage-subject.json",
+          digest: { sha256: finalPredicate.subjectDigest },
+        },
+      ],
+      predicateType: "https://zevium.dev/attestations/recovery-lineage/v1",
+      predicate: finalPredicate,
+    };
+    const rawBundle = {
+      attestations: [
+        {
+          bundle: {
+            dsseEnvelope: {
+              payload: Buffer.from(JSON.stringify(statement)).toString(
+                "base64",
+              ),
+            },
+          },
+        },
+      ],
+    };
+    expect(extractRecoveryLineageAttestation(rawBundle)).toEqual(manifest);
+    expect(
+      extractRecoveryLineageAttestation([
+        { verificationResult: { statement } },
+      ]),
+    ).toEqual(manifest);
+    const forged = structuredClone(rawBundle);
+    const forgedStatement = structuredClone(statement);
+    forgedStatement.subject[0]!.digest.sha256 = "f".repeat(64);
+    forged.attestations[0]!.bundle.dsseEnvelope.payload = Buffer.from(
+      JSON.stringify(forgedStatement),
+    ).toString("base64");
+    expect(() => extractRecoveryLineageAttestation(forged)).toThrow(
+      /absent or ambiguous/,
+    );
+
+    const recoverySource = {
+      runId: 901,
+      runAttempt: 1,
+      workflowPath: ".github/workflows/recover-production.yml",
+    };
+    const admission = recoveryAdmission(
+      manifest,
+      { gateway: previous, web: previous },
+      "rollback",
+      recoverySource,
+    );
+    const pending = beginRecoveryAttempt(manifest, recoverySource);
+    expect(verifyRecoveryAdmission(admission, pending)).toBe(true);
+    expect(
+      recoveryPlan(
+        pending,
+        { gateway: previous, web: previous },
+        "rollback",
+        admission,
+      ),
+    ).toMatchObject({ action: "rollback" });
+    expect(() =>
+      recoveryAdmission(
+        pending,
+        { gateway: previous, web: previous },
+        "rollback",
+        recoverySource,
+      ),
+    ).toThrow(/replays/);
+    const stale = structuredClone(pending);
+    stale.lineage.head = "f".repeat(64);
+    expect(() => verifyRecoveryAdmission(admission, stale)).toThrow();
+  });
+
+  it("property-checks ordered provider cuts across recursive recovery", () => {
+    let recursive = manifest;
+    const pairs = [{ gateway: previous, web: previous }];
+    for (let attempt = 2; attempt <= 32; attempt += 1) {
+      const pending = beginRecoveryAttempt(recursive, {
+        runId: 1_000 + attempt,
+        runAttempt: attempt,
+        workflowPath: ".github/workflows/recover-production.yml",
+      });
+      const gateway = attempt.toString(16).padStart(32, "0");
+      const web = (attempt + 100).toString(16).padStart(32, "0");
+      recursive = finalizeRecoveryAttempt(pending, gateway, web);
+      pairs.push({ gateway, web });
+    }
+    for (let gatewayIndex = 0; gatewayIndex < pairs.length; gatewayIndex += 1) {
+      for (let webIndex = 0; webIndex < pairs.length; webIndex += 1) {
+        const observed = {
+          gateway: pairs[gatewayIndex]!.gateway,
+          web: pairs[webIndex]!.web,
+        };
+        if (webIndex <= gatewayIndex) {
+          expect(
+            recoveryPlan(recursive, observed, "roll-forward"),
+          ).toMatchObject({
+            action: "roll-forward",
+            gatewayVersion: pairs.at(-1)!.gateway,
+            webVersion: pairs.at(-1)!.web,
+          });
+        } else {
+          expect(() =>
+            recoveryPlan(recursive, observed, "roll-forward"),
+          ).toThrow(/deployment order/);
+        }
+      }
+    }
+    const duplicate = beginRecoveryAttempt(recursive, {
+      runId: 2_000,
+      runAttempt: 1,
+      workflowPath: ".github/workflows/recover-production.yml",
+    });
+    expect(() =>
+      finalizeRecoveryAttempt(
+        duplicate,
+        pairs.at(-1)!.gateway,
+        "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      ),
+    ).toThrow(/repeats a provider version/);
+  });
 });
 
 describe("exact Convex semantic contract inventory", () => {
@@ -1236,6 +1493,11 @@ describe("exact Convex semantic contract inventory", () => {
       execFileSync("git", ["config", "user.email", "test@example.com"]);
       execFileSync("git", ["config", "user.name", "Release Test"]);
       mkdirSync("convex", { recursive: true });
+      mkdirSync("convex/_generated", { recursive: true });
+      writeFileSync(
+        "convex/_generated/server.ts",
+        "export const query = {}; export const mutation = {}; export const action = {}; export const internalQuery = {}; export const internalMutation = {}; export const internalAction = {}; export const httpAction = {};\n",
+      );
       writeFileSync(
         "convex/schema.ts",
         `import { defineSchema, defineTable } from "convex/server";
@@ -1441,6 +1703,183 @@ export const bypass = query({ ...hidden, handler: async () => null });
         encoding: "utf8",
       }).trim();
       expect(() => convexContractAt(bypass)).toThrow(/unsupported member/);
+    } finally {
+      process.chdir(originalCwd);
+    }
+  });
+
+  it("fails closed on mutable graphs while inventorying aliases, reexports, JavaScript, handlers, and generated registrars", () => {
+    const originalCwd = process.cwd();
+    const repo = mkdtempSync(join(tmpdir(), "zevium-convex-hostile-"));
+    const commit = (subject: string) => {
+      execFileSync("git", ["add", "."]);
+      execFileSync("git", ["commit", "-qm", subject]);
+      return execFileSync("git", ["rev-parse", "HEAD"], {
+        encoding: "utf8",
+      }).trim();
+    };
+    const schema = `import { defineSchema, defineTable } from "convex/server";
+import { v } from "convex/values";
+export default defineSchema({ items: defineTable({ value: v.optional(v.string()) }).index("by_value", ["value"]) });
+`;
+    const validHttp = `import { httpRouter } from "convex/server";
+import { httpAction } from "./_generated/server.js";
+const router = httpRouter();
+const app = router;
+const boundHandler = httpAction(async () => new Response("first"));
+app.route({ path: "/hook", method: "POST", handler: boundHandler });
+export default app;
+`;
+    try {
+      process.chdir(repo);
+      execFileSync("git", ["init", "-q"]);
+      execFileSync("git", ["config", "user.email", "test@example.com"]);
+      execFileSync("git", ["config", "user.name", "Release Test"]);
+      mkdirSync("convex/_generated", { recursive: true });
+      writeFileSync(
+        "convex/_generated/server.js",
+        "export const query = () => {}; export const httpAction = (value) => value;\n",
+      );
+      writeFileSync("convex/schema.js", schema);
+      writeFileSync(
+        "convex/impl.js",
+        `import { query } from "./_generated/server.js";
+import { v } from "convex/values";
+const impl = query({ args: { value: v.optional(v.string()) }, handler: async () => null });
+export { impl as removedAlias, impl as survivingAlias };
+`,
+      );
+      writeFileSync(
+        "convex/barrel.js",
+        'export { removedAlias as publicAlias } from "./impl.js";\n',
+      );
+      writeFileSync("convex/http.js", validHttp);
+      const base = commit("feat: hostile baseline");
+      const baseInventory = convexContractAt(base);
+      expect(Object.keys(baseInventory.functions)).toEqual(
+        expect.arrayContaining([
+          "impl:removedAlias",
+          "impl:survivingAlias",
+          "barrel:publicAlias",
+        ]),
+      );
+      expect(baseInventory.routes["POST:/hook"]?.handlerDigest).toMatch(
+        /^[0-9a-f]{64}$/,
+      );
+
+      writeFileSync(
+        "convex/impl.js",
+        `import { query } from "./_generated/server.js";
+import { v } from "convex/values";
+const impl = query({ args: { value: v.optional(v.string()) }, handler: async () => null });
+export { impl as survivingAlias };
+`,
+      );
+      writeFileSync(
+        "convex/barrel.js",
+        'export { survivingAlias as publicAlias } from "./impl.js";\n',
+      );
+      const aliasRemoval = commit("chore: arbitrary alias removal subject");
+      expect(classifyConvexContract(base, aliasRemoval)).toMatchObject({
+        hasContraction: true,
+        reasons: expect.arrayContaining([
+          "function removed: impl:removedAlias",
+        ]),
+      });
+
+      writeFileSync(
+        "convex/http.js",
+        validHttp.replace('new Response("first")', 'new Response("second")'),
+      );
+      const handlerSwap = commit("feat: swap bound handler");
+      expect(classifyConvexContract(aliasRemoval, handlerSwap)).toMatchObject({
+        hasContraction: true,
+        reasons: expect.arrayContaining(["HTTP route changed: POST:/hook"]),
+      });
+
+      writeFileSync(
+        "convex/mutable.ts",
+        `import { query } from "./_generated/server.js";
+import { v } from "convex/values";
+const args = { value: v.optional(v.string()) };
+Object.assign(args, { required: v.string() });
+export const bypass = query({ args, handler: async () => null });
+`,
+      );
+      const objectMutation = commit("feat: mutable args bypass");
+      expect(() => convexContractAt(objectMutation)).toThrow(
+        /runtime object mutation/,
+      );
+
+      writeFileSync(
+        "convex/mutable.ts",
+        `import { query } from "./_generated/server.js";
+export const safe = query({ args: {}, handler: async () => null });
+`,
+      );
+      writeFileSync(
+        "convex/schema.js",
+        `import { defineSchema, defineTable } from "convex/server";
+import { v } from "convex/values";
+const fields = ["value"];
+fields.reverse();
+export default defineSchema({ items: defineTable({ value: v.optional(v.string()) }).index("by_value", fields) });
+`,
+      );
+      const indexMutation = commit("feat: mutable index bypass");
+      expect(() => convexContractAt(indexMutation)).toThrow(
+        /top-level constant is mutated/,
+      );
+
+      writeFileSync("convex/schema.js", schema);
+      writeFileSync(
+        "convex/mutable.ts",
+        `import * as server from "./_generated/server.js";
+import { v } from "convex/values";
+export const bypass = server["query"]({ args: { value: v.string() }, handler: async () => null });
+`,
+      );
+      const computedRegistrar = commit("feat: computed registrar bypass");
+      expect(() => convexContractAt(computedRegistrar)).toThrow(
+        /computed Convex function registration/,
+      );
+
+      writeFileSync(
+        "convex/mutable.ts",
+        `import { query } from "./_generated/server.js";
+export const safe = query({ args: {}, handler: async () => null });
+`,
+      );
+      writeFileSync(
+        "convex/http.js",
+        validHttp.replace("app.route(", 'app["route"]('),
+      );
+      const computedHttp = commit("feat: computed HTTP bypass");
+      expect(() => convexContractAt(computedHttp)).toThrow(
+        /side effect|Computed Convex HTTP router registration/,
+      );
+
+      writeFileSync("convex/http.js", validHttp);
+      const clean = commit("fix: restore static graph");
+      writeFileSync(
+        "convex/_generated/server.js",
+        "export const query = () => {}; export const httpAction = (value) => value; // tampered\n",
+      );
+      const generatedTamper = commit("feat: tamper generated registrar");
+      expect(classifyConvexContract(clean, generatedTamper)).toMatchObject({
+        hasContraction: true,
+        reasons: expect.arrayContaining(["generated server registrar changed"]),
+      });
+
+      mkdirSync("convex/nested/_generated", { recursive: true });
+      writeFileSync(
+        "convex/nested/_generated/server.js",
+        "export const query = () => {};\n",
+      );
+      const nestedGenerated = commit("feat: nested generated bypass");
+      expect(() => convexContractAt(nestedGenerated)).toThrow(
+        /Nested Convex _generated directory/,
+      );
     } finally {
       process.chdir(originalCwd);
     }
@@ -1686,6 +2125,11 @@ describe("protected workflow provenance", () => {
       execFileSync("git", ["config", "user.name", "Release Test"]);
       mkdirSync("apps/gateway", { recursive: true });
       mkdirSync("convex", { recursive: true });
+      mkdirSync("convex/_generated", { recursive: true });
+      writeFileSync(
+        "convex/_generated/server.ts",
+        "export const query = {}; export const mutation = {}; export const action = {}; export const internalQuery = {}; export const internalMutation = {}; export const internalAction = {}; export const httpAction = {};\n",
+      );
       writeFileSync("apps/gateway/wrangler.jsonc", JSON.stringify(legacyBase));
       writeFileSync(
         "convex/schema.ts",
@@ -1774,6 +2218,202 @@ describe("protected workflow provenance", () => {
   });
 });
 
+describe("candidate-independent immutable release referee", () => {
+  it("forces same-commit policy/workflow tamper through org-pinned evaluation", () => {
+    const originalCwd = process.cwd();
+    const previousEnvironment = {
+      ref: process.env.RELEASE_REFEREE_REF,
+      evaluator: process.env.RELEASE_REFEREE_SHA256,
+      tree: process.env.RELEASE_POLICY_TREE_SHA256,
+    };
+    const repo = mkdtempSync(join(tmpdir(), "zevium-policy-hostile-"));
+    const commit = (subject: string) => {
+      execFileSync("git", ["add", "."]);
+      execFileSync("git", ["commit", "-qm", subject]);
+      return execFileSync("git", ["rev-parse", "HEAD"], {
+        encoding: "utf8",
+      }).trim();
+    };
+    try {
+      process.chdir(repo);
+      execFileSync("git", ["init", "-q"]);
+      execFileSync("git", ["config", "user.email", "test@example.com"]);
+      execFileSync("git", ["config", "user.name", "Release Test"]);
+      mkdirSync(".github/scripts", { recursive: true });
+      mkdirSync(".github/workflows", { recursive: true });
+      mkdirSync("convex/_generated", { recursive: true });
+      writeFileSync(
+        ".github/scripts/release-attestation.mjs",
+        "export const immutableEvaluator = true;\n",
+      );
+      writeFileSync(
+        ".github/release-policy.json",
+        `${JSON.stringify({ schemaVersion: 1 })}\n`,
+      );
+      writeFileSync(
+        ".github/workflows/deploy-production.yml",
+        "name: trusted deploy\n",
+      );
+      writeFileSync(
+        "convex/_generated/server.js",
+        "export const query = () => {};\n",
+      );
+      writeFileSync(
+        "convex/schema.ts",
+        `import { defineSchema, defineTable } from "convex/server";
+import { v } from "convex/values";
+export default defineSchema({ items: defineTable({ value: v.optional(v.string()) }) });
+`,
+      );
+      const base = commit("feat: immutable referee base");
+      const evaluatorSource = execFileSync(
+        "git",
+        ["show", `${base}:.github/scripts/release-attestation.mjs`],
+        { encoding: "utf8" },
+      ).trim();
+      process.env.RELEASE_REFEREE_REF = base;
+      process.env.RELEASE_REFEREE_SHA256 = createHash("sha256")
+        .update(evaluatorSource)
+        .digest("hex");
+      process.env.RELEASE_POLICY_TREE_SHA256 = policyTreeDigest(base);
+
+      writeFileSync(
+        ".github/scripts/release-attestation.mjs",
+        "export const candidateSaysNoAttestationNeeded = true;\n",
+      );
+      writeFileSync(
+        ".github/workflows/deploy-production.yml",
+        "name: candidate-owned bypass\n",
+      );
+      const tamper = commit("feat: weaken referee and workflow together");
+      const requirements = findProtectedRequirements(base, tamper);
+      expect(requirements).toEqual([
+        expect.objectContaining({
+          kind: "policy",
+          targetSha: tamper,
+          activeBase: base,
+          protectedBase: base,
+          evaluatorRef: base,
+          evaluatorDigest: process.env.RELEASE_REFEREE_SHA256,
+          policyTreeDigest: process.env.RELEASE_POLICY_TREE_SHA256,
+        }),
+      ]);
+      const requirement = requirements[0]!;
+      const attestation = createProtectedAttestation({
+        ...requirement,
+        runHeadSha: base,
+        workflowPath: ".github/workflows/release-policy.yml",
+        workflowId: 501,
+        runId: 502,
+        runAttempt: 1,
+        environment: "production-policy",
+      });
+      const run = {
+        id: 502,
+        workflow_id: 501,
+        path: ".github/workflows/release-policy.yml",
+        head_sha: base,
+        head_branch: "develop",
+        event: "pull_request_target",
+        status: "completed",
+        conclusion: "success",
+        run_attempt: 1,
+      };
+      expect(
+        verifyProtectedAttestation({
+          attestation,
+          requirement,
+          workflow: {
+            id: 501,
+            path: ".github/workflows/release-policy.yml",
+          },
+          run,
+          deployments: [
+            {
+              id: 503,
+              sha: base,
+              environment: "production-policy",
+              creator: { login: "github-actions[bot]" },
+            },
+          ],
+          statusesByDeployment: {
+            503: [
+              {
+                id: 504,
+                state: "success",
+                environment: "production-policy",
+                log_url:
+                  "https://github.com/zevium-dev/core/actions/runs/502/job/1",
+              },
+            ],
+          },
+          baseIsAncestorOfTarget: true,
+          evaluatorIsAncestorOfBase: true,
+          linearPolicyRange: true,
+        }),
+      ).toBe(true);
+      expect(() =>
+        verifyProtectedAttestation({
+          attestation: { ...attestation, evaluatorRef: tamper },
+          requirement,
+          workflow: {
+            id: 501,
+            path: ".github/workflows/release-policy.yml",
+          },
+          run,
+          deployments: [],
+          statusesByDeployment: {},
+          baseIsAncestorOfTarget: true,
+          evaluatorIsAncestorOfBase: true,
+          linearPolicyRange: true,
+        }),
+      ).toThrow();
+
+      writeFileSync(
+        ".github/workflows/recover-production.yml",
+        "name: second stacked policy change\n",
+      );
+      const stacked = commit("feat: stacked workflow change");
+      const stackedRequirements = findProtectedRequirements(base, stacked);
+      expect(stackedRequirements).toHaveLength(2);
+      expect(stackedRequirements.map((row) => row.targetSha)).toEqual([
+        tamper,
+        stacked,
+      ]);
+      expect(
+        stackedRequirements.every((row) => row.evaluatorRef === base),
+      ).toBe(true);
+
+      execFileSync("git", ["checkout", "-qb", "side", tamper]);
+      writeFileSync("side.txt", "side\n");
+      const side = commit("feat: side");
+      execFileSync("git", ["checkout", "-qb", "mainline", tamper]);
+      writeFileSync("mainline.txt", "mainline\n");
+      const mainline = commit("feat: mainline");
+      expect(() => findProtectedRequirements(side, mainline)).toThrow(
+        /not an ancestor/,
+      );
+      execFileSync("git", ["merge", "--no-ff", "side", "-qm", "merge"]);
+      const merge = execFileSync("git", ["rev-parse", "HEAD"], {
+        encoding: "utf8",
+      }).trim();
+      expect(() => findProtectedRequirements(tamper, merge)).toThrow(
+        /linear single-parent/,
+      );
+    } finally {
+      process.chdir(originalCwd);
+      for (const [name, value] of [
+        ["RELEASE_REFEREE_REF", previousEnvironment.ref],
+        ["RELEASE_REFEREE_SHA256", previousEnvironment.evaluator],
+        ["RELEASE_POLICY_TREE_SHA256", previousEnvironment.tree],
+      ] as const) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
+    }
+  });
+});
+
 type Workflow = {
   on?: unknown;
   concurrency?: { group?: string; "cancel-in-progress"?: boolean };
@@ -1805,6 +2445,7 @@ const workflowFiles = [
   ".github/workflows/payment-drill.yml",
   ".github/workflows/preview.yml",
   ".github/workflows/recover-production.yml",
+  ".github/workflows/release-policy.yml",
 ];
 
 function workflow(path: string): Workflow {
@@ -1845,11 +2486,18 @@ describe("semantic workflow security contracts", () => {
       ".github/workflows/preview.yml",
     ]) {
       const source = readFileSync(path, "utf8");
-      expect(source).toContain(
-        "$GITHUB_WORKSPACE/node_modules/.bin/agent-browser",
-      );
-      expect(source).toContain('"$locked_browser" install --with-deps');
+      expect(source).toContain("verify-agent-browser.mjs");
+      expect(source).toContain("AGENT_BROWSER_EXECUTABLE_PATH");
+      expect(source).not.toContain("agent-browser install");
     }
+    const runAll = readFileSync("e2e/run-all.sh", "utf8");
+    const consumer = readFileSync("e2e/03-consumer.sh", "utf8");
+    const helpers = readFileSync("e2e/lib.sh", "utf8");
+    expect(runAll).toContain("unset E2E_API_KEY");
+    expect(consumer).toContain("unset E2E_API_KEY");
+    expect(consumer).not.toContain('"$E2E_API_KEY"');
+    expect(helpers).toContain("env -u E2E_API_KEY");
+    expect(helpers).toContain('E2E_API_KEY="$E2E_RELEASE_KEY"');
   });
 
   it("derives contract protection from exact semantic diff, never commit subject", () => {
@@ -1857,11 +2505,12 @@ describe("semantic workflow security contracts", () => {
       ".github/workflows/contract-production.yml",
       "utf8",
     );
-    expect(source).toContain("release-convex-contract.mjs classify");
+    expect(source).toMatch(/release-convex-contract\.mjs" classify/);
     expect(source).toContain("classification.hasContraction");
-    expect(source).toContain("requirements.at(-1) !== exact[0]");
+    expect(source).toContain("exact.length !== 1");
+    expect(source).toContain('--base="$ACTIVE_RELEASE" --target="$target"');
     expect(source).toContain(
-      '--base="$ACTIVE_RELEASE" --target="$protected_base"',
+      '--exclude-kind=contract --exclude-target="$target"',
     );
     expect(source).toContain("ref: ${{ needs.resolve.outputs.deploy_sha }}");
     expect(source).toContain("pnpm --dir .release-contract-candidate install");
@@ -1916,7 +2565,7 @@ describe("semantic workflow security contracts", () => {
       ".github/workflows/deploy-production.yml",
       "utf8",
     );
-    expect(generic).toContain("release-attestation.mjs verify-remote");
+    expect(generic).toMatch(/release-attestation\.mjs" verify-remote/);
     for (const path of [
       ".github/workflows/deploy-production.yml",
       ".github/workflows/contract-production.yml",
@@ -1941,6 +2590,91 @@ describe("semantic workflow security contracts", () => {
         ),
       ).toBe(true);
     }
+  });
+
+  it("forces immutable referee and semantic admission before every provider mutation", () => {
+    for (const path of [
+      ".github/workflows/deploy-production.yml",
+      ".github/workflows/contract-production.yml",
+      ".github/workflows/gateway-do-lifecycle.yml",
+      ".github/workflows/recover-production.yml",
+    ]) {
+      const source = readFileSync(path, "utf8");
+      expect(source, path).toContain("RELEASE_REFEREE_REF");
+      expect(source, path).toContain("RELEASE_REFEREE_SHA256");
+      expect(source, path).toContain("RELEASE_POLICY_TREE_SHA256");
+      expect(source, path).toContain("verify-referee");
+      expect(source, path).toContain('git archive "$RELEASE_REFEREE_REF"');
+      expect(source, path).toContain(
+        'pnpm --dir "$referee_root" install --frozen-lockfile --ignore-scripts',
+      );
+      for (const install of source.matchAll(
+        /pnpm(?: --dir \S+)? install[^\n]*/g,
+      )) {
+        expect(install[0], `${path}: ${install[0]}`).toContain(
+          "--ignore-scripts",
+        );
+      }
+      expect(source, path).toMatch(/release-convex-contract\.mjs" classify/);
+      expect(source, path).not.toContain("--exclude-kind=policy");
+      const parsed = workflow(path);
+      for (const [jobName, job] of Object.entries(parsed.jobs ?? {})) {
+        const steps = job.steps ?? [];
+        const firstMutation = steps.findIndex((step) =>
+          /(?:convex deploy --yes\b|wrangler (?:deploy\b|versions upload\b|versions deploy\b))/.test(
+            step.run ?? "",
+          ),
+        );
+        if (firstMutation < 0) continue;
+        const prefix = steps
+          .slice(0, firstMutation)
+          .map((step) => step.run ?? "")
+          .join("\n");
+        expect(prefix, `${path}:${jobName}`).toContain("verify-referee");
+        expect(prefix, `${path}:${jobName}`).toMatch(
+          /release-convex-contract\.mjs" classify/,
+        );
+        const mutationStep = steps[firstMutation]?.run ?? "";
+        const localFirstMutation = mutationStep.search(
+          /(?:convex deploy --yes\b|wrangler (?:deploy\b|versions upload\b|versions deploy\b))/,
+        );
+        const localPrefix = mutationStep.slice(0, localFirstMutation);
+        if (path.endsWith("recover-production.yml")) {
+          expect(localPrefix, `${path}:${jobName}`).toContain(
+            "failed run drift",
+          );
+          expect(localPrefix, `${path}:${jobName}`).toMatch(
+            /(?:verify-remote|check-dedicated|verify-lineage-version)/,
+          );
+        }
+      }
+    }
+    const recovery = workflow(".github/workflows/recover-production.yml");
+    const recoverySteps = recovery.jobs?.recover?.steps ?? [];
+    const admission = recoverySteps.findIndex((step) =>
+      step.run?.includes("admit-recovery"),
+    );
+    const firstMutation = recoverySteps.findIndex((step) =>
+      /(?:convex deploy --yes\b|wrangler (?:deploy\b|versions upload\b|versions deploy\b))/.test(
+        step.run ?? "",
+      ),
+    );
+    expect(admission).toBeGreaterThan(-1);
+    expect(firstMutation).toBeGreaterThan(admission);
+
+    const policy = workflow(".github/workflows/release-policy.yml");
+    expect(policy.on).toHaveProperty("pull_request_target");
+    expect(policy.jobs?.evaluate?.environment).toBe("production-policy");
+    const policySource = readFileSync(
+      ".github/workflows/release-policy.yml",
+      "utf8",
+    );
+    expect(policySource).toContain("ref: ${{ vars.RELEASE_REFEREE_REF }}");
+    expect(policySource).toContain('--evaluator-ref="$RELEASE_REFEREE_REF"');
+    expect(policySource).not.toContain('--evaluator-ref="$BASE_SHA"');
+    expect(policySource).toContain(
+      "policy change must be one isolated linear commit under immutable referee",
+    );
   });
 
   it("keeps identity/provider guards in each mutation run block", () => {
@@ -2100,6 +2834,6 @@ describe("semantic workflow security contracts", () => {
       "Superseded release coalesced into newer develop tip",
     );
     expect(source).toContain("git merge-base --is-ancestor");
-    expect(source).toContain("release-attestation.mjs verify-remote");
+    expect(source).toMatch(/release-attestation\.mjs" verify-remote/);
   });
 });

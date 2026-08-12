@@ -6,6 +6,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export E2E_SESSION="${E2E_SESSION:-zevium-e2e-consumer}"
 # shellcheck source=e2e/lib.sh
 source "$SCRIPT_DIR/lib.sh"
+E2E_RELEASE_KEY="${E2E_API_KEY:-}"
+unset E2E_API_KEY
 
 cleanup() {
   close_browser
@@ -124,13 +126,13 @@ log "try-it panel signal present"
 # Optional paid gateway call — only when GATEWAY_URL + E2E_API_KEY provided.
 if [[ -n "${GATEWAY_URL:-}" ]]; then
   step "paid try-it call via GATEWAY_URL"
-  if [[ -z "${E2E_API_KEY:-}" ]]; then
+  if [[ -z "$E2E_RELEASE_KEY" ]]; then
     fail "GATEWAY_URL set but E2E_API_KEY missing"
   fi
   # UI path: paste key if panel accepts it.
-  if ab find placeholder "API key" fill "$E2E_API_KEY" >/dev/null 2>&1 \
-    || ab find label "API key" fill "$E2E_API_KEY" >/dev/null 2>&1 \
-    || ab fill 'input[name="apiKey"]' "$E2E_API_KEY" >/dev/null 2>&1; then
+  if ab_fill_secret placeholder "API key" 2>/dev/null \
+    || ab_fill_secret label "API key" 2>/dev/null \
+    || ab_fill_secret css 'input[name="apiKey"]' 2>/dev/null; then
     if click_button "Run" \
       || click_button "Send" \
       || ab find text "Run request" click >/dev/null 2>&1; then
@@ -163,11 +165,12 @@ if [[ -n "${GATEWAY_URL:-}" ]]; then
   headers_file="$E2E_ARTIFACTS/gateway-headers-${STAMP:-$(e2e_stamp)}.txt"
   body_file="$E2E_ARTIFACTS/gateway-body-${STAMP:-$(e2e_stamp)}.txt"
   http_code="$(
-    curl -sS --connect-timeout 2 --max-time 15 \
+    {
+      printf 'header = "Authorization: Bearer %s"\n' "$E2E_RELEASE_KEY"
+      printf 'header = "X-Api-Key: %s"\n' "$E2E_RELEASE_KEY"
+      printf 'header = "X-Zevium-Release-Challenge: %s"\n' "$release_challenge"
+    } | curl -sS --connect-timeout 2 --max-time 15 --config - \
       -D "$headers_file" -o "$body_file" -w '%{http_code}' \
-      -H "Authorization: Bearer ${E2E_API_KEY}" \
-      -H "X-Api-Key: ${E2E_API_KEY}" \
-      -H "X-Zevium-Release-Challenge: ${release_challenge}" \
       "$call_url" || true
   )"
   assert_eq "$http_code" "200" "gateway /get expected 200"
@@ -193,11 +196,9 @@ if [[ -n "${GATEWAY_URL:-}" ]]; then
   assert_eq "$mock_status" "200" "anonymous browser mock call expected 200 (url=$mock_url)"
   log "anonymous browser mock call ok status=$mock_status"
 
-  if [[ -n "${E2E_API_KEY:-}" ]]; then
+  if [[ -n "$E2E_RELEASE_KEY" ]]; then
     step "browser paid call with Authorization header"
-    call_url_js="$(printf '%s' "$call_url" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')"
-    api_key_js="$(printf '%s' "$E2E_API_KEY" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')"
-    paid_status="$(ab eval "fetch(${call_url_js}, { headers: { Authorization: 'Bearer ' + ${api_key_js} } }).then((r) => r.status)" 2>/dev/null || true)"
+    paid_status="$(ab_paid_fetch "$call_url" 2>/dev/null || true)"
     paid_status="$(printf '%s' "$paid_status" | tr -d '"[:space:]')"
     assert_eq "$paid_status" "200" "browser paid call expected 200 (url=$call_url)"
     log "browser paid call ok status=$paid_status"

@@ -25,6 +25,11 @@ cancellation disabled:
   `production-recovery`. It consumes one failed run's persisted manifest,
   re-resolves current provider state, and performs only bounded roll-forward or
   rollback allowed by that manifest.
+- **Immutable Release Policy Review** evaluates every release-policy, evaluator,
+  workflow, E2E, package-manifest, or lockfile change from an organization-pinned
+  referee commit. It runs on `pull_request_target`, uses no candidate code, and
+  requires `production-policy` approval before signing exact candidate policy
+  digest.
 
 GitHub retains one running and newest pending member of a concurrency group.
 Coalescing is intentional: only current `develop` may run, and a superseded
@@ -68,8 +73,38 @@ of `.github/workflows/ci.yml`. Remote actions use full commit SHAs. Node is fixe
 at `24.15.0`, pnpm at `11.8.0`, and install is frozen. Candidate-controlled Mise
 or global package installation is forbidden. Browser E2E executes exact
 workspace `agent-browser` binary whose package tarball integrity is frozen in
-`pnpm-lock.yaml`; no ad-hoc npm install runs before protected credentials enter
-a step.
+`pnpm-lock.yaml`. Fail-closed verifier checks package version, wrapper and native
+executable realpaths and SHA-256 digests, and exact Chrome for Testing
+`151.0.7922.77` at configured non-symlink path with SHA-256
+`3ecd43f567afe5204b7673b2dd2ccf05603f41b2f62ad3bca9e691d0b3d54128`.
+Dependency install uses `--ignore-scripts`; no browser downloader, global
+symlink fallback, or ad-hoc npm install runs before protected credentials enter
+a step. Organization-managed runner label must resolve only to reviewed Ubuntu
+24.04 image generation containing that Chrome file and its OS libraries.
+
+Candidate code never decides whether its own policy needs review. Every release
+lane archives evaluator's complete dependency tree from exact full commit in
+organization variable `RELEASE_REFEREE_REF`, installs that tree with lifecycle
+scripts disabled, executes evaluator and companion state/classification scripts
+only from it, verifies
+evaluator blob against `RELEASE_REFEREE_SHA256`, verifies complete protected
+policy tree against `RELEASE_POLICY_TREE_SHA256`, and proves ref is on linear
+ancestry of target `develop`. Candidate checkout is input data only. Each
+changed policy commit creates an unwaivable `policy` requirement before contract
+or lifecycle requirements. It can be satisfied only by
+`.github/workflows/release-policy.yml` running from protected base through
+`pull_request_target`, with successful `production-policy` deployment and
+GitHub-signed predicate bound to immutable ref/digests, exact base, exact target,
+workflow/run/attempt, event, and environment. Generic, contract, lifecycle, and
+recovery verification cannot exclude policy requirements.
+
+Organization ruleset must require `Immutable Release Policy Review / evaluate`
+for `develop`, require linear history, block force pushes, and prevent check
+bypass. `production-policy` requires independent reviewers, prevents
+self-review, restricts deployment to `develop`, and disables admin bypass.
+Policy changes are one isolated single-parent commit; stacked policy changes
+merge and rotate sequentially. Changing candidate workflow/evaluator files in
+same commit never changes referee executing that review.
 
 Raw commit status is never trusted. Contract and lifecycle production jobs emit
 GitHub-signed custom attestations whose predicate binds:
@@ -126,33 +161,40 @@ every paid staging, production, contract, lifecycle, or recovery probe,
 3. paginate all API keys, including invalid rows;
 4. select exactly one active `api_key` whose subject, creator, and `org_id`
    claim match member and organization;
-5. optionally require exact configured `ak_` key ID;
-6. fetch key material; immediately mask the retrieved value before any other
-   output, verify it, and pass it
-   only through child-process environment.
+5. require exact configured `ak_` key ID and active expiry no more than 15
+   minutes away;
+6. fetch key material, immediately mask it before any other output, verify it,
+   and pass it only through an allowlisted child-process environment;
+7. after probe exits, re-fetch and verify same ID, expiry, subject, creator,
+   organization claims, active state, and unexpired deadline.
 
 Zero or multiple matches fail. Resolver rejects malformed Clerk payloads,
 revoked/expired keys, cross-org claims, wrong creators, and wrong subjects. It
-never writes secret to output, artifact, argv, or file; child loses Clerk,
-Cloudflare, Convex, and GitHub credentials.
+never writes secret to output, artifact, argv, or file. Browser commands,
+JavaScript evaluation, and curl headers receive secret through environment or
+stdin. Child loses Clerk, Cloudflare, Convex, GitHub, and Actions/OIDC
+credentials.
 
 ## Normal release sequence
 
-1. Secret-free preflight resolves current active public release, classifies
-   complete DO lifecycle projection, verifies all protected attestations, and
-   runs uncached release CI.
+1. Secret-free preflight runs immutable-referee semantic Convex classification,
+   resolves current active public release, classifies complete DO lifecycle
+   projection, verifies every policy/contract/lifecycle attestation, and runs
+   uncached release CI.
 2. Staging approval re-runs GitHub guard before checkout. Convex dry-run target,
    active gateway lifecycle metadata, and active web version are checked in same
    blocks as staging deploys.
 3. Staging paid contract and browser E2E prove exact accounting.
 4. Production approval re-verifies current tip, active public identity, and all
    protected provenance.
-5. Exact gateway/web rollback pointers and intent manifest are captured and
-   uploaded before first mutation.
-6. Both immutable Worker candidates upload. Candidate IDs enrich and re-upload
-   manifest before Convex or traffic mutation.
-7. Convex expansion deploys; old Workers are probed against expanded control
-   plane.
+5. Exact gateway/web rollback pointers and intent manifest are captured,
+   content-addressed, signed, and uploaded before first provider mutation.
+6. Both immutable Worker candidates upload. Candidate IDs finalize lineage;
+   finalized manifest is content-addressed and signed before control-plane or
+   traffic mutation.
+7. Roll-forward-only mutation checkpoint is atomically written,
+   content-addressed, signed, and uploaded before Convex expansion deploys. Old
+   Workers are then probed against expanded control plane.
 8. Gateway enters 0% deployment, is paid-probed through exact version override,
    then moves to 100% after weights/config recheck.
 9. Web enters 0%, stamped HTML and referenced hashed assets are checked through
@@ -208,22 +250,38 @@ lifecycle.
 Signal traps do one fast local action: atomically record
 `ambiguous_recovery_required`, then exit. They do not call providers, probe, or
 claim rollback. Every production lane also handles `failure() || cancelled()`
-and uploads available evidence.
+and uploads available evidence. Failure before irreversible-mutation checkpoint
+records `aborted_without_traffic_change` only when last verified state proves
+Convex and traffic untouched. Once checkpoint exists, every crash or
+cancellation remains roll-forward-only even if Convex command returned no
+result.
 
 Dispatch **Recover Production** with failed run ID and reviewed action. Failed,
 cancelled, or timed-out deploy, lifecycle, and recovery runs are valid sources.
-Resolution binds exact run attempt and downloads its exact attempt-named
-manifest artifact. Stable release/root identity survives recursive recovery.
+Resolution binds exact run attempt and reconstructs its manifest from a
+content-addressed GitHub attestation. Stable release/root identity survives
+recursive recovery. Run artifacts are short-lived transport/cache only; they
+are never lineage authority. Record each printed 64-character lineage subject
+digest in durable incident/release records. If GitHub has removed run artifact
+metadata, dispatch recovery with exact `lineage_digest`; signature, signer
+workflow, source digest/ref, predicate type, subject digest, root/source
+identity, and ancestry are still reverified.
 
-Every source manifest contains a SHA-256 candidate lineage. Each recovery run
-persists a new attempt token before provider mutation, stamps that token into
-uploaded Worker metadata, finalizes exact gateway/web version IDs into the hash
-chain, and uploads the finalized attempt manifest before traffic convergence.
-An active version is accepted only when its ID is finalized in that chain or
-when exact provider metadata proves a still-pending lineage token; arbitrary
-lookalike versions fail closed. This also covers cancellation after a recovery
-candidate becomes active. Missing, partial, tampered, mixed, or expired lineage
-fails.
+Every source manifest contains a SHA-256 candidate lineage. Before mutation,
+recovery independently proves immutable referee, target/environment provenance,
+semantic Convex classification, all required attestations, lifecycle/rollback
+admissibility, exact manifest/root/source digests, current provider versions and
+metadata, ordered lineage, requested strategy, and whether Convex roll-forward
+is mandatory. Admission binds those facts to current recovery run and attempt;
+late planning must reproduce same action. Each recovery run then persists and
+signs a new attempt token before provider mutation, stamps token into uploaded
+Worker metadata, finalizes exact gateway/web version IDs into hash chain, and
+signs finalized attempt before traffic convergence. Recursive attempts repeat
+same admission and evidence sequence. Active version is accepted only when its
+ID is finalized in chain or exact provider metadata proves still-pending token;
+arbitrary lookalike versions fail closed. This covers cancellation after any
+generated candidate becomes active. Missing, partial, stale, replayed,
+tampered, cross-lineage, or mixed evidence fails closed.
 
 Convex ambiguous/contract state forces roll-forward. Normal gateway/web may
 roll forward to lineage-bound candidates or roll back to captured previous
@@ -239,8 +297,9 @@ Use required reviewers, prevent self-review, restrict deployment branches to
 
 | Environment            | Variables                                                                                                                                                                                                                                                                                                                             | Secrets                                                                                                                                        |
 | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| `staging`              | `STAGING_WEB_URL`, `STAGING_GATEWAY_URL`, `STAGING_CONVEX_URL`, `STAGING_CONVEX_SITE_URL`; probe paths/methods/content type; `RELEASE_PROBE_CONSUMER_ORG_SLUG`, `RELEASE_PROBE_CONSUMER_MEMBER_USER_ID`, optional `RELEASE_PROBE_API_KEY_ID`; `STAGING_E2E_ORG_SLUG`, `STAGING_E2E_MEMBER_USER_ID`, optional `STAGING_E2E_API_KEY_ID` | Cloudflare token; staging Clerk publishable/secret keys; staging Convex deploy key; staging probe secret/body; E2E email/password/optional OTP |
-| `production`           | Probe paths/methods/content type; exact consumer org/member/optional key ID                                                                                                                                                                                                                                                           | Cloudflare token; production Clerk publishable/secret keys; production Convex deploy key; production probe secret/body                         |
+| `production-policy`    | Organization-scoped exact `RELEASE_REFEREE_REF`, `RELEASE_REFEREE_SHA256`, and `RELEASE_POLICY_TREE_SHA256`                                                                                                                                                                                                                           | None                                                                                                                                           |
+| `staging`              | `STAGING_WEB_URL`, `STAGING_GATEWAY_URL`, `STAGING_CONVEX_URL`, `STAGING_CONVEX_SITE_URL`; probe paths/methods/content type; exact `RELEASE_PROBE_CONSUMER_ORG_SLUG`, `RELEASE_PROBE_CONSUMER_MEMBER_USER_ID`, `RELEASE_PROBE_API_KEY_ID`; exact `STAGING_E2E_ORG_SLUG`, `STAGING_E2E_MEMBER_USER_ID`, `STAGING_E2E_API_KEY_ID` | Cloudflare token; staging Clerk publishable/secret keys; staging Convex deploy key; staging probe secret/body; E2E email/password/optional OTP |
+| `production`           | Probe paths/methods/content type; exact consumer org, member, and key ID                                                                                                                                                                                                                                                              | Cloudflare token; production Clerk publishable/secret keys; production Convex deploy key; production probe secret/body                         |
 | `production-contract`  | Same production probe variables                                                                                                                                                                                                                                                                                                       | Production Clerk secret key; Convex deploy key; probe secret/body                                                                              |
 | `production-lifecycle` | Same production probe variables                                                                                                                                                                                                                                                                                                       | Cloudflare token; production Clerk publishable/secret keys; Convex deploy key; probe secret/body                                               |
 | `production-recovery`  | Same production probe variables                                                                                                                                                                                                                                                                                                       | Same production provider, Clerk, Convex, and probe secrets needed by bounded recovery                                                          |
@@ -253,14 +312,19 @@ org. Keep credits for staging, baseline, candidate, convergence, and recovery.
 There is deliberately no `PRODUCTION_RELEASE_PROBE_API_KEY`, staging equivalent,
 or E2E API-key secret.
 
+`RELEASE_CHROME_EXECUTABLE` is organization-managed exact path available to
+browser jobs. Referee variables are organization-owned and available to every
+production lane; candidate repository content cannot update them.
+
 ## Evidence and external bootstrap
 
 Artifacts contain SHAs, run IDs and attempts, candidate-lineage digests,
 timestamps, state, provider version pointers, minimal accounting totals, and
-failure screenshots. They exclude keys, challenge,
-headers, cookies, request/response bodies, environment dumps, and consumer
-identity. Staging retention is 14 days; production/recovery 30 days; protected
-attestation subject 90 days.
+failure screenshots. They exclude keys, challenge, headers, cookies,
+request/response bodies, environment dumps, and consumer identity. Staging
+retention is 14 days; production/recovery caches 30 days; protected attestation
+subjects 90 days. Recovery authority is signed content-addressed attestation,
+not artifact retention.
 
 Repository cannot enforce or verify these external controls:
 
@@ -270,8 +334,23 @@ Repository cannot enforce or verify these external controls:
 - Convex deploy-key scope, production environment variables, deployed bootstrap
   schema, and secret rotation;
 - Clerk dedicated member/key fixture and funded consumer wallet;
+- Clerk short-expiry issuance plus live revocation/rotation race behavior;
+- immutable runner-image label ownership and Chrome/OS-library provisioning;
 - first deployment of `/release-probe-accounting` expansion. Until endpoint and
   `RELEASE_PROBE_SECRET` exist in production, HTTP 404/401/503 blocks release.
 
-Bootstrap these under reviewed provider procedures. Never bypass failed checks,
-paste API-key secret into commands, or manually forge provenance.
+This follow-up is trust-root bootstrap and cannot attest itself: its parent does
+not contain this immutable evaluator/policy tree, while pinning candidate as
+referee would violate required referee-before-base ancestry. Merge it only
+through external organization-owned review. Then set three referee variables to
+exact merged commit and computed blob/tree digests, require exact policy check
+through organization ruleset, and lock `production-policy` controls before any
+later release. Ref rotation uses old referee to approve one policy commit; only
+after merge may independent organization owner rotate variables to new reviewed
+commit/digests.
+
+Bootstrap and real staging cancellation/recovery injection, Clerk
+expiry/revocation/rotation, runner image, Cloudflare/Convex state, environment,
+and required-check drills remain external work. This repository change claims
+none passed. Never bypass failed checks, paste API-key secret into commands, or
+manually forge provenance.

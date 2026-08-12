@@ -29,6 +29,9 @@ permissions:
   contents: read
 
 env:
+  RELEASE_REFEREE_REF: ${{ vars.RELEASE_REFEREE_REF }}
+  RELEASE_REFEREE_SHA256: ${{ vars.RELEASE_REFEREE_SHA256 }}
+  RELEASE_POLICY_TREE_SHA256: ${{ vars.RELEASE_POLICY_TREE_SHA256 }}
   PRODUCTION_CONVEX_URL: https://polite-ermine-809.convex.cloud
   PRODUCTION_CONVEX_SITE_URL: https://polite-ermine-809.convex.site
   PRODUCTION_WEB_URL: https://www.zevium.dev
@@ -70,8 +73,6 @@ jobs:
         with:
           path: ~/.local/share/pnpm/store
           key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pnpm-store-
       - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903
         with:
           node-version: 24.15.0
@@ -79,7 +80,25 @@ jobs:
         run: |
           corepack enable
           corepack prepare pnpm@11.8.0 --activate
-          pnpm install --frozen-lockfile
+          pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Materialize immutable protected release referee
+        env:
+          RELEASE_TARGET: ${{ steps.guard.outputs.release }}
+        run: |
+          [[ "$RELEASE_REFEREE_REF" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$RELEASE_REFEREE_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$RELEASE_POLICY_TREE_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          referee_root="$(mktemp -d "$RUNNER_TEMP/zevium-release-referee.XXXXXX")"
+          git archive "$RELEASE_REFEREE_REF" | tar -x -C "$referee_root"
+          pnpm --dir "$referee_root" install --frozen-lockfile --ignore-scripts
+          referee_dir="$referee_root/.github/scripts"
+          node "$referee_dir/release-attestation.mjs" verify-referee \
+            --ref="$RELEASE_REFEREE_REF" --target="$RELEASE_TARGET" \
+            --evaluator-digest="$RELEASE_REFEREE_SHA256" \
+            --tree-digest="$RELEASE_POLICY_TREE_SHA256" \
+            --repository="$GITHUB_REPOSITORY" --target-branch=develop
+          echo "RELEASE_REFEREE_DIR=$referee_dir" >> "$GITHUB_ENV"
 
       - name: Resolve exact contract commit and canonical digest
         id: contract
@@ -113,13 +132,13 @@ jobs:
             invalid_fix_paths="$(git diff --name-only "$target" "$RUN_HEAD" | awk '$0 !~ /^convex\// { print }')"
             test -z "$invalid_fix_paths"
           fi
-          classification="$(node .github/scripts/release-convex-contract.mjs classify \
+          classification="$(node "$RELEASE_REFEREE_DIR/release-convex-contract.mjs" classify \
             --base="$protected_base" --target="$target")"
-          digest="$(node .github/scripts/release-attestation.mjs contract-digest \
+          digest="$(node "$RELEASE_REFEREE_DIR/release-attestation.mjs" contract-digest \
             --base="$protected_base" --target="$target")"
-          requirements="$(node .github/scripts/release-attestation.mjs requirements \
+          requirements="$(node "$RELEASE_REFEREE_DIR/release-attestation.mjs" requirements \
             --base="$ACTIVE_RELEASE" --target="$target")"
-          after_requirements="$(node .github/scripts/release-attestation.mjs requirements \
+          after_requirements="$(node "$RELEASE_REFEREE_DIR/release-attestation.mjs" requirements \
             --base="$target" --target="$RUN_HEAD")"
           CLASSIFICATION="$classification" REQUIREMENTS="$requirements" \
             AFTER="$after_requirements" TARGET="$target" PROTECTED_BASE="$protected_base" \
@@ -134,13 +153,14 @@ jobs:
               if (classification.baseSha !== process.env.PROTECTED_BASE ||
                   classification.candidateSha !== process.env.TARGET ||
                   !classification.hasChange || !classification.hasContraction ||
-                  exact.length !== 1 || requirements.at(-1) !== exact[0] ||
+                  exact.length !== 1 ||
                   (process.env.RECOVERY_OF !== "" && after.length !== 0)) {
                 throw new Error("exact semantic contraction is not final protected requirement through target");
               }
             '
-          node .github/scripts/release-attestation.mjs verify-remote \
-            --base="$ACTIVE_RELEASE" --target="$protected_base"
+          node "$RELEASE_REFEREE_DIR/release-attestation.mjs" verify-remote \
+            --base="$ACTIVE_RELEASE" --target="$target" \
+            --exclude-kind=contract --exclude-target="$target"
           deploy_sha="$target"
           if [[ -n "$RECOVERY_OF" ]]; then
             deploy_sha="$RUN_HEAD"
@@ -205,8 +225,6 @@ jobs:
         with:
           path: ~/.local/share/pnpm/store
           key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pnpm-store-
       - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903
         with:
           node-version: 24.15.0
@@ -214,8 +232,29 @@ jobs:
         run: |
           corepack enable
           corepack prepare pnpm@11.8.0 --activate
-          pnpm install --frozen-lockfile
-          pnpm --dir .release-contract-candidate install --frozen-lockfile
+          pnpm install --frozen-lockfile --ignore-scripts
+          pnpm --dir .release-contract-candidate install --frozen-lockfile --ignore-scripts
+
+      - name: Materialize immutable referee and freeze staging contract admission
+        run: |
+          [[ "$RELEASE_REFEREE_REF" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$RELEASE_REFEREE_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$RELEASE_POLICY_TREE_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          referee_root="$(mktemp -d "$RUNNER_TEMP/zevium-release-referee.XXXXXX")"
+          git archive "$RELEASE_REFEREE_REF" | tar -x -C "$referee_root"
+          pnpm --dir "$referee_root" install --frozen-lockfile --ignore-scripts
+          referee_dir="$referee_root/.github/scripts"
+          node "$referee_dir/release-attestation.mjs" verify-referee \
+            --ref="$RELEASE_REFEREE_REF" --target="$RUN_HEAD" \
+            --evaluator-digest="$RELEASE_REFEREE_SHA256" \
+            --tree-digest="$RELEASE_POLICY_TREE_SHA256" \
+            --repository="$GITHUB_REPOSITORY" --target-branch=develop
+          node "$referee_dir/release-convex-contract.mjs" classify \
+            --base="$PROTECTED_BASE" --target="$TARGET_SHA" > "$RUNNER_TEMP/staging-contract-classification.json"
+          node "$referee_dir/release-attestation.mjs" verify-remote \
+            --base="$ACTIVE_RELEASE" --target="$TARGET_SHA" \
+            --exclude-kind=contract --exclude-target="$TARGET_SHA"
+          echo "RELEASE_REFEREE_DIR=$referee_dir" >> "$GITHUB_ENV"
 
       - name: Prove paid staging baseline with runtime Clerk key
         env:
@@ -223,17 +262,17 @@ jobs:
           RELEASE_PROBE_REQUEST_BODY: ${{ secrets.STAGING_RELEASE_PROBE_REQUEST_BODY }}
           RELEASE_PROBE_SECRET: ${{ secrets.STAGING_RELEASE_PROBE_SECRET }}
         run: |
-          staging_active="$(node .github/scripts/release-contract.mjs --current-release=true \
+          staging_active="$(node "$RELEASE_REFEREE_DIR/release-contract.mjs" --current-release=true \
             --web="$STAGING_WEB_URL" --gateway="$STAGING_GATEWAY_URL")"
           [[ "$staging_active" =~ ^[0-9a-f]{40}$ ]]
           git merge-base --is-ancestor "$ACTIVE_RELEASE" "$staging_active"
           git merge-base --is-ancestor "$staging_active" "$RUN_HEAD"
-          node .github/scripts/with-clerk-release-key.mjs \
+          node "$RELEASE_REFEREE_DIR/with-clerk-release-key.mjs" \
             --clerk-secret-env=CLERK_STAGING_SECRET_KEY \
             --org-slug="$RELEASE_PROBE_CONSUMER_ORG_SLUG" \
             --member-user-id="$RELEASE_PROBE_CONSUMER_MEMBER_USER_ID" \
             --key-id="$RELEASE_PROBE_API_KEY_ID" -- \
-            node .github/scripts/release-contract.mjs \
+            node "$RELEASE_REFEREE_DIR/release-contract.mjs" \
               --release="$staging_active" --web="$STAGING_WEB_URL" \
               --gateway="$STAGING_GATEWAY_URL" \
               --mock-path="$RELEASE_PROBE_MOCK_PATH" --mock-method="$RELEASE_PROBE_MOCK_METHOD" \
@@ -251,19 +290,19 @@ jobs:
           test "$(git rev-parse HEAD)" = "$RUN_HEAD"
           test "$(git -C .release-contract-candidate rev-parse HEAD)" = "$DEPLOY_SHA"
           test "$(gh api "repos/$GITHUB_REPOSITORY/commits/develop" --jq .sha)" = "$RUN_HEAD"
-          classification="$(node .github/scripts/release-convex-contract.mjs classify \
+          classification="$(node "$RELEASE_REFEREE_DIR/release-convex-contract.mjs" classify \
             --base="$PROTECTED_BASE" --target="$TARGET_SHA")"
           CLASSIFICATION="$classification" node -e '
             const row=JSON.parse(process.env.CLASSIFICATION);
             if (row.baseSha !== process.env.PROTECTED_BASE || row.candidateSha !== process.env.TARGET_SHA ||
                 !row.hasContraction) throw new Error("exact staging contraction classification drifted");
           '
-          test "$(node .github/scripts/release-attestation.mjs contract-digest \
+          test "$(node "$RELEASE_REFEREE_DIR/release-attestation.mjs" contract-digest \
             --base="$PROTECTED_BASE" --target="$TARGET_SHA")" = "$CONTRACT_DIGEST"
           convex_dry_run="$(cd .release-contract-candidate && pnpm exec convex deploy --dry-run --yes \
             --codegen disable --typecheck disable 2>&1)"
           printf '%s' "$convex_dry_run" \
-            | node .github/scripts/release-contract.mjs --validate-convex-dry-run=true
+             | node "$RELEASE_REFEREE_DIR/release-contract.mjs" --validate-convex-dry-run=true
           (cd .release-contract-candidate && \
             pnpm exec convex deploy --yes --message "staging contract $DEPLOY_SHA")
 
@@ -273,17 +312,17 @@ jobs:
           RELEASE_PROBE_REQUEST_BODY: ${{ secrets.STAGING_RELEASE_PROBE_REQUEST_BODY }}
           RELEASE_PROBE_SECRET: ${{ secrets.STAGING_RELEASE_PROBE_SECRET }}
         run: |
-          staging_active="$(node .github/scripts/release-contract.mjs --current-release=true \
+          staging_active="$(node "$RELEASE_REFEREE_DIR/release-contract.mjs" --current-release=true \
             --web="$STAGING_WEB_URL" --gateway="$STAGING_GATEWAY_URL")"
           [[ "$staging_active" =~ ^[0-9a-f]{40}$ ]]
           git merge-base --is-ancestor "$ACTIVE_RELEASE" "$staging_active"
           git merge-base --is-ancestor "$staging_active" "$RUN_HEAD"
-          node .github/scripts/with-clerk-release-key.mjs \
+          node "$RELEASE_REFEREE_DIR/with-clerk-release-key.mjs" \
             --clerk-secret-env=CLERK_STAGING_SECRET_KEY \
             --org-slug="$RELEASE_PROBE_CONSUMER_ORG_SLUG" \
             --member-user-id="$RELEASE_PROBE_CONSUMER_MEMBER_USER_ID" \
             --key-id="$RELEASE_PROBE_API_KEY_ID" -- \
-            node .github/scripts/release-contract.mjs \
+             node "$RELEASE_REFEREE_DIR/release-contract.mjs" \
               --release="$staging_active" --web="$STAGING_WEB_URL" \
               --gateway="$STAGING_GATEWAY_URL" \
               --mock-path="$RELEASE_PROBE_MOCK_PATH" --mock-method="$RELEASE_PROBE_MOCK_METHOD" \
@@ -352,8 +391,6 @@ jobs:
         with:
           path: ~/.local/share/pnpm/store
           key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pnpm-store-
       - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903
         with:
           node-version: 24.15.0
@@ -361,8 +398,29 @@ jobs:
         run: |
           corepack enable
           corepack prepare pnpm@11.8.0 --activate
-          pnpm install --frozen-lockfile
-          pnpm --dir .release-contract-candidate install --frozen-lockfile
+          pnpm install --frozen-lockfile --ignore-scripts
+          pnpm --dir .release-contract-candidate install --frozen-lockfile --ignore-scripts
+
+      - name: Materialize immutable referee and freeze production contract admission
+        run: |
+          [[ "$RELEASE_REFEREE_REF" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$RELEASE_REFEREE_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$RELEASE_POLICY_TREE_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          referee_root="$(mktemp -d "$RUNNER_TEMP/zevium-release-referee.XXXXXX")"
+          git archive "$RELEASE_REFEREE_REF" | tar -x -C "$referee_root"
+          pnpm --dir "$referee_root" install --frozen-lockfile --ignore-scripts
+          referee_dir="$referee_root/.github/scripts"
+          node "$referee_dir/release-attestation.mjs" verify-referee \
+            --ref="$RELEASE_REFEREE_REF" --target="$RUN_HEAD" \
+            --evaluator-digest="$RELEASE_REFEREE_SHA256" \
+            --tree-digest="$RELEASE_POLICY_TREE_SHA256" \
+            --repository="$GITHUB_REPOSITORY" --target-branch=develop
+          node "$referee_dir/release-convex-contract.mjs" classify \
+            --base="$PROTECTED_BASE" --target="$TARGET_SHA" > "$RUNNER_TEMP/production-contract-classification.json"
+          node "$referee_dir/release-attestation.mjs" verify-remote \
+            --base="$ACTIVE_RELEASE" --target="$TARGET_SHA" \
+            --exclude-kind=contract --exclude-target="$TARGET_SHA"
+          echo "RELEASE_REFEREE_DIR=$referee_dir" >> "$GITHUB_ENV"
 
       - name: Prove production baseline with runtime Clerk key
         env:
@@ -370,12 +428,12 @@ jobs:
           RELEASE_PROBE_REQUEST_BODY: ${{ secrets.PRODUCTION_RELEASE_PROBE_REQUEST_BODY }}
           RELEASE_PROBE_SECRET: ${{ secrets.PRODUCTION_RELEASE_PROBE_SECRET }}
         run: |
-          node .github/scripts/with-clerk-release-key.mjs \
+          node "$RELEASE_REFEREE_DIR/with-clerk-release-key.mjs" \
             --clerk-secret-env=CLERK_PRODUCTION_SECRET_KEY \
             --org-slug="$RELEASE_PROBE_CONSUMER_ORG_SLUG" \
             --member-user-id="$RELEASE_PROBE_CONSUMER_MEMBER_USER_ID" \
             --key-id="$RELEASE_PROBE_API_KEY_ID" -- \
-            node .github/scripts/release-contract.mjs \
+             node "$RELEASE_REFEREE_DIR/release-contract.mjs" \
               --release="$ACTIVE_RELEASE" --web="$PRODUCTION_WEB_URL" \
               --gateway="$PRODUCTION_GATEWAY_URL" \
               --mock-path="$RELEASE_PROBE_MOCK_PATH" --mock-method="$RELEASE_PROBE_MOCK_METHOD" \
@@ -425,21 +483,21 @@ jobs:
           test "$(git rev-parse HEAD)" = "$RUN_HEAD"
           test "$(git -C .release-contract-candidate rev-parse HEAD)" = "$DEPLOY_SHA"
           test "$(gh api "repos/$GITHUB_REPOSITORY/commits/develop" --jq .sha)" = "$RUN_HEAD"
-          test "$(node .github/scripts/release-contract.mjs --current-release=true \
+          test "$(node "$RELEASE_REFEREE_DIR/release-contract.mjs" --current-release=true \
             --web="$PRODUCTION_WEB_URL" --gateway="$PRODUCTION_GATEWAY_URL")" = "$ACTIVE_RELEASE"
-          classification="$(node .github/scripts/release-convex-contract.mjs classify \
+          classification="$(node "$RELEASE_REFEREE_DIR/release-convex-contract.mjs" classify \
             --base="$PROTECTED_BASE" --target="$TARGET_SHA")"
           CLASSIFICATION="$classification" node -e '
             const row=JSON.parse(process.env.CLASSIFICATION);
             if (row.baseSha !== process.env.PROTECTED_BASE || row.candidateSha !== process.env.TARGET_SHA ||
                 !row.hasContraction) throw new Error("exact production contraction classification drifted");
           '
-          test "$(node .github/scripts/release-attestation.mjs contract-digest \
+          test "$(node "$RELEASE_REFEREE_DIR/release-attestation.mjs" contract-digest \
             --base="$PROTECTED_BASE" --target="$TARGET_SHA")" = "$CONTRACT_DIGEST"
           convex_dry_run="$(cd .release-contract-candidate && pnpm exec convex deploy --dry-run --yes \
             --codegen disable --typecheck disable 2>&1)"
           printf '%s' "$convex_dry_run" \
-            | node .github/scripts/release-contract.mjs --validate-convex-dry-run=true
+             | node "$RELEASE_REFEREE_DIR/release-contract.mjs" --validate-convex-dry-run=true
           (cd .release-contract-candidate && \
             pnpm exec convex deploy --yes --message "production contract $DEPLOY_SHA")
 
@@ -449,12 +507,12 @@ jobs:
           RELEASE_PROBE_REQUEST_BODY: ${{ secrets.PRODUCTION_RELEASE_PROBE_REQUEST_BODY }}
           RELEASE_PROBE_SECRET: ${{ secrets.PRODUCTION_RELEASE_PROBE_SECRET }}
         run: |
-          node .github/scripts/with-clerk-release-key.mjs \
+          node "$RELEASE_REFEREE_DIR/with-clerk-release-key.mjs" \
             --clerk-secret-env=CLERK_PRODUCTION_SECRET_KEY \
             --org-slug="$RELEASE_PROBE_CONSUMER_ORG_SLUG" \
             --member-user-id="$RELEASE_PROBE_CONSUMER_MEMBER_USER_ID" \
             --key-id="$RELEASE_PROBE_API_KEY_ID" -- \
-            node .github/scripts/release-contract.mjs \
+             node "$RELEASE_REFEREE_DIR/release-contract.mjs" \
               --release="$ACTIVE_RELEASE" --web="$PRODUCTION_WEB_URL" \
               --gateway="$PRODUCTION_GATEWAY_URL" \
               --mock-path="$RELEASE_PROBE_MOCK_PATH" --mock-method="$RELEASE_PROBE_MOCK_METHOD" \
@@ -469,7 +527,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           workflow_id="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/contract-production.yml" --jq .id)"
-          node .github/scripts/release-attestation.mjs create \
+          node "$RELEASE_REFEREE_DIR/release-attestation.mjs" create \
             --kind=contract --target="$TARGET_SHA" --run-head="$RUN_HEAD" \
             --active-base="$ACTIVE_RELEASE" --protected-base="$PROTECTED_BASE" \
             --phase=contract \

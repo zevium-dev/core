@@ -10,6 +10,8 @@ mkdir -p "$E2E_ARTIFACTS"
 # Auth and publisher share one session. Consumer gets a clean session so its
 # public-catalogue assertions cannot pass on leaked auth state.
 SUITE_SESSION="${E2E_SESSION:-zevium-e2e}"
+E2E_RELEASE_KEY="${E2E_API_KEY:-}"
+unset E2E_API_KEY
 
 SCRIPTS=(
   "01-auth.sh"
@@ -36,7 +38,7 @@ for script in "${SCRIPTS[@]}"; do
   set +e
   # Project identity propagates through artifact files. Browser auth must not.
   if [[ "$script" == "03-consumer.sh" ]]; then
-    E2E_SESSION="${SUITE_SESSION}-consumer" bash "$path"
+    E2E_API_KEY="$E2E_RELEASE_KEY" E2E_SESSION="${SUITE_SESSION}-consumer" bash "$path"
   else
     E2E_SESSION="$SUITE_SESSION" bash "$path"
   fi

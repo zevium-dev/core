@@ -24,8 +24,6 @@ jobs:
         with:
           path: ~/.local/share/pnpm/store
           key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pnpm-store-
       - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903
         with:
           node-version: 24.15.0
@@ -35,7 +33,9 @@ jobs:
           corepack prepare pnpm@11.8.0 --activate
           pnpm install --frozen-lockfile
       - run: pnpm exec prettier --check .
+      - run: pnpm lint
       - run: pnpm typecheck
+      - run: pnpm build
 
   tests:
     runs-on: blacksmith-2vcpu-ubuntu-2404
@@ -46,8 +46,6 @@ jobs:
         with:
           path: ~/.local/share/pnpm/store
           key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pnpm-store-
       - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903
         with:
           node-version: 24.15.0

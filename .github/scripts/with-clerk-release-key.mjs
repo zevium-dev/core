@@ -8,6 +8,45 @@ const MEMBERSHIP_ID_RE = /^orgmem_[A-Za-z0-9]+$/;
 const USER_ID_RE = /^user_[A-Za-z0-9]+$/;
 const KEY_ID_RE = /^ak_[A-Za-z0-9]+$/;
 const PAGE_SIZE = 500;
+const MAX_RELEASE_KEY_TTL_MS = 15 * 60 * 1000;
+const CHILD_ENV_NAMES = new Set([
+  "AGENT_BROWSER_BIN",
+  "AGENT_BROWSER_EXECUTABLE_PATH",
+  "AGENT_BROWSER_SESSION",
+  "CI",
+  "E2E_API_KEY",
+  "E2E_ARTIFACTS",
+  "E2E_BASE_URL",
+  "E2E_EMAIL",
+  "E2E_OTP",
+  "E2E_ORG_SLUG",
+  "E2E_PASSWORD",
+  "E2E_SESSION",
+  "GATEWAY_URL",
+  "GITHUB_WORKSPACE",
+  "HOME",
+  "LANG",
+  "LC_ALL",
+  "LOGNAME",
+  "PATH",
+  "PNPM_HOME",
+  "PWD",
+  "RUNNER_ARCH",
+  "RUNNER_OS",
+  "RUNNER_TEMP",
+  "SHELL",
+  "TERM",
+  "TMPDIR",
+  "TZ",
+  "USER",
+  "RELEASE_PROBE_CONTENT_TYPE",
+  "RELEASE_PROBE_METERED_METHOD",
+  "RELEASE_PROBE_METERED_PATH",
+  "RELEASE_PROBE_MOCK_METHOD",
+  "RELEASE_PROBE_MOCK_PATH",
+  "RELEASE_PROBE_REQUEST_BODY",
+  "RELEASE_PROBE_SECRET",
+]);
 
 function requiredString(value, name) {
   if (typeof value !== "string" || value.trim() === "") {
@@ -122,8 +161,9 @@ function isActiveKey(key, now) {
   return (
     key.revoked === false &&
     key.expired === false &&
-    (key.expiration === null ||
-      (Number.isSafeInteger(key.expiration) && key.expiration > now))
+    Number.isSafeInteger(key.expiration) &&
+    key.expiration > now &&
+    key.expiration - now <= MAX_RELEASE_KEY_TTL_MS
   );
 }
 
@@ -154,7 +194,7 @@ export async function resolveClerkReleaseKey({
   ) {
     throw new Error("consumer member user id is invalid");
   }
-  if (keyId !== undefined && keyId !== "" && !KEY_ID_RE.test(keyId)) {
+  if (!KEY_ID_RE.test(requiredString(keyId, "release probe API key id"))) {
     throw new Error("release probe API key id is invalid");
   }
   if (!Number.isSafeInteger(now) || now <= 0) {
@@ -217,14 +257,13 @@ export async function resolveClerkReleaseKey({
     keyMatches(key, {
       memberUserId,
       organizationId: organization.id,
-      keyId: keyId || undefined,
+      keyId,
       now,
     }),
   );
   if (matches.length !== 1) {
-    const qualifier = keyId ? "matching override" : "unambiguous";
     throw new Error(
-      `expected one ${qualifier} active Clerk API key, found ${matches.length}`,
+      `expected one exact short-lived active Clerk API key, found ${matches.length}`,
     );
   }
 
@@ -240,7 +279,31 @@ export async function resolveClerkReleaseKey({
   ) {
     throw new Error("Clerk returned invalid API key secret");
   }
-  return { id: selected.id, secret, organizationId: organization.id };
+  return {
+    id: selected.id,
+    secret,
+    organizationId: organization.id,
+    expiration: selected.expiration,
+  };
+}
+
+function sanitizedChildEnvironment(secretName, secret) {
+  const environment = {};
+  for (const [name, value] of Object.entries(process.env)) {
+    if (
+      value !== undefined &&
+        CHILD_ENV_NAMES.has(name) &&
+      !name.startsWith("GITHUB_") &&
+      !name.startsWith("ACTIONS_")
+    ) {
+      environment[name] = value;
+    }
+  }
+  if (process.env.GITHUB_WORKSPACE !== undefined) {
+    environment.GITHUB_WORKSPACE = process.env.GITHUB_WORKSPACE;
+  }
+  environment[secretName] = secret;
+  return environment;
 }
 
 function parseArgs(argv) {
@@ -318,7 +381,7 @@ export async function main(argv = process.argv.slice(2), dependencies = {}) {
     client,
     orgSlug: options["org-slug"],
     memberUserId: options["member-user-id"],
-    keyId: options["key-id"] || undefined,
+    keyId: options["key-id"],
     now,
   });
 
@@ -336,6 +399,7 @@ export async function main(argv = process.argv.slice(2), dependencies = {}) {
   }
   if (
     verified.id !== resolved.id ||
+    verified.expiration !== resolved.expiration ||
     !keyMatches(verified, {
       memberUserId: options["member-user-id"],
       organizationId: resolved.organizationId,
@@ -345,16 +409,35 @@ export async function main(argv = process.argv.slice(2), dependencies = {}) {
   ) {
     throw new Error("Clerk API key verification no longer matches constraints");
   }
-  const childEnv = { ...process.env, [childEnvName]: resolved.secret };
-  delete childEnv.CLERK_PRODUCTION_SECRET_KEY;
-  delete childEnv.CLERK_STAGING_SECRET_KEY;
-  delete childEnv.CLERK_SECRET_KEY;
-  delete childEnv.CLOUDFLARE_API_TOKEN;
-  delete childEnv.CONVEX_DEPLOY_KEY;
-  delete childEnv.GH_TOKEN;
-  delete childEnv.GITHUB_TOKEN;
-  const code = await runChild(command, childEnv, dependencies.spawnImpl);
-  if (code !== 0) throw new Error(`release probe command exited ${code}`);
+  const childEnv = sanitizedChildEnvironment(childEnvName, resolved.secret);
+  let childFailure;
+  try {
+    const code = await runChild(command, childEnv, dependencies.spawnImpl);
+    if (code !== 0)
+      childFailure = new Error(`release probe command exited ${code}`);
+  } catch (error) {
+    childFailure = error;
+  }
+  const finishedAt = dependencies.now?.() ?? Date.now();
+  let after;
+  try {
+    after = apiKeyRow(await client.apiKeys.verify(resolved.secret));
+  } catch {
+    throw new Error("Clerk API key post-probe revocation check failed");
+  }
+  if (
+    after.id !== resolved.id ||
+    after.expiration !== resolved.expiration ||
+    !keyMatches(after, {
+      memberUserId: options["member-user-id"],
+      organizationId: resolved.organizationId,
+      keyId: resolved.id,
+      now: finishedAt,
+    })
+  ) {
+    throw new Error("Clerk API key rotated, revoked, or expired during probe");
+  }
+  if (childFailure !== undefined) throw childFailure;
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
@@ -365,3 +448,5 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
     process.exitCode = 1;
   });
 }
+
+export { MAX_RELEASE_KEY_TTL_MS };

@@ -8,17 +8,15 @@ jobs:
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 10
     permissions:
-      contents: write
+      contents: read
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30af803
+         with:
+           persist-credentials: false
       - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25
         with:
           path: ~/.local/share/pnpm/store
           key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pnpm-store-
       - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903
         with:
           node-version: 24.15.0
@@ -27,12 +25,5 @@ jobs:
           corepack enable
           corepack prepare pnpm@11.8.0 --activate
           pnpm install --frozen-lockfile
-      - name: Run format script
-        run: pnpm run format
-      - name: Commit and push changes
-        run: |
-          git config --global user.name 'github-actions[bot]'
-          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
-          git add .
-          git diff --staged --quiet || git commit -m "chore: apply eslint --fix and prettier --write"
-          git push
+       - name: Verify formatting
+         run: pnpm exec prettier --check .
