@@ -1219,7 +1219,9 @@ function strictKeyBytes(raw: string): Uint8Array<ArrayBuffer> {
     return Uint8Array.from(raw.match(/.{2}/g)!, (pair) =>
       Number.parseInt(pair, 16),
     );
-  const decoded = base64UrlToBytes(raw.replace(/=+$/g, ""));
+  let unpadded = raw;
+  while (unpadded.endsWith("=")) unpadded = unpadded.slice(0, -1);
+  const decoded = base64UrlToBytes(unpadded);
   if (decoded.byteLength !== 32)
     throw new Error("Registry transport key must contain exactly 32 bytes");
   return decoded;
