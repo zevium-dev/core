@@ -5,7 +5,11 @@
 
 import { joinUpstreamUrl, matchOperation, parseSpec } from "@zevium/shared";
 import type { SettlementUsage, WalletDO } from "./wallet";
-import { extractApiKey, type KeyVerifier } from "./key-verifier";
+import {
+  extractApiKey,
+  type KeyVerifier,
+  type VerifyOutcome,
+} from "./key-verifier";
 import type { SpecSource } from "./spec-source";
 import { filterRequestHeaders, filterResponseHeaders } from "./headers";
 import type { UsageSink } from "./usage";
@@ -92,12 +96,28 @@ export async function handleGatewayRequest(
     });
   }
 
-  const verified = await deps.keyVerifier.verify(secret);
-  if (!verified) {
+  const verifier = deps.keyVerifier;
+  const outcome: VerifyOutcome = verifier.verifyWithStatus
+    ? await verifier.verifyWithStatus(secret)
+    : await verifier
+        .verify(secret)
+        .then((key): VerifyOutcome =>
+          key ? { status: "ok", key } : { status: "invalid" },
+        );
+  if (outcome.status === "unavailable") {
+    return jsonError(
+      503,
+      "verification_unavailable",
+      "API key verification is temporarily unavailable",
+      requestId,
+    );
+  }
+  if (outcome.status !== "ok") {
     return paymentRequiredResponse(requestId, "Invalid API key", {
       reason: "invalid_api_key",
     });
   }
+  const verified = outcome.key;
 
   let published;
   try {

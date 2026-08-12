@@ -70,6 +70,15 @@ export type PendingSettlement = {
 /** Terminal outcome of a reservation once it leaves inFlight. */
 export type TerminalStatus = "settled" | "refunded" | "free";
 
+/** Terminal record with completion time so retention pruning is possible. */
+export type TerminalRecord = { status: TerminalStatus; at: number };
+
+/** Permanently rejected settlement, parked out of the retry queue. */
+export type DeadLetterSettlement = PendingSettlement & {
+  reason: string;
+  deadAt: number;
+};
+
 export type WalletState = {
   balance: number;
   /** Last accepted Convex wallet checkpoint sequence, or -1 before sync. */
@@ -137,6 +146,8 @@ export type FlushResult = {
 export type AckFlushResult = {
   removed: number;
   remaining: number;
+  /** Permanently rejected settlements parked into the dead-letter queue. */
+  deadLettered: number;
 };
 
 export type FlushToConvexResult = {
@@ -182,9 +193,23 @@ const K_KEY_SETTINGS = "keySettings";
 const K_KEY_SETTINGS_AT = "keySettingsSyncedAt";
 const K_SETTLED_PREFIX = "settled:";
 const K_SYNC_GRANTS_AT = "syncGrantsAt";
+const K_DEAD_LETTERS = "deadLetterSettlements";
+const K_LAST_COMPACTION_AT = "lastCompactionAt";
 const SYNC_GRANTS_WINDOW_MS = 60_000;
 
 const FLUSH_ALARM_MS = 5_000;
+/** Reservation lease: execution paths settle/refund in seconds; 10m is generous. */
+export const RESERVATION_TTL_MS = 10 * 60_000;
+/** Terminal idempotency window; older records are pruned on write. */
+export const TERMINAL_RETENTION_MS = 24 * 60 * 60_000;
+/** Applied-grant dedupe set cap; Convex ledger dedupes beyond this window. */
+export const MAX_APPLIED_GRANTS = 2048;
+/** Dead-letter queue cap; oldest dropped past this bound. */
+export const MAX_DEAD_LETTERS = 100;
+/** Maintenance alarm cadence while reservations are outstanding. */
+const MAINTENANCE_ALARM_MS = 60_000;
+/** Counter compaction runs at most once per hour. */
+const COMPACTION_INTERVAL_MS = 60 * 60_000;
 
 function settlementIdFor(reservationId: string): string {
   return `settle:${reservationId}`;
@@ -284,7 +309,9 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
   #inFlight: Record<string, InFlightEntry> = {};
   #appliedGrantIds: Set<string> = new Set();
   #pendingSettlements: PendingSettlement[] = [];
-  #terminal: Record<string, TerminalStatus> = {};
+  #terminal: Record<string, TerminalRecord> = {};
+  #deadLetters: DeadLetterSettlement[] = [];
+  #lastCompactionAt = 0;
   #keySettings: Map<string, KeySetting> = new Map();
   #keySettingsSyncedAt = 0;
   #syncInFlight: Promise<SyncGrantsResult> | null = null;
@@ -305,8 +332,9 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
       | Record<string, InFlightEntry>
       | string[]
       | PendingSettlement[]
-      | Record<string, TerminalStatus>
+      | Record<string, TerminalStatus | TerminalRecord>
       | Record<string, KeySetting>
+      | DeadLetterSettlement[]
     >([
       K_BALANCE,
       K_SEQUENCE,
@@ -317,6 +345,8 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
       K_FLUSH_SEQ,
       K_KEY_SETTINGS,
       K_KEY_SETTINGS_AT,
+      K_DEAD_LETTERS,
+      K_LAST_COMPACTION_AT,
     ]);
 
     this.#balance = (stored.get(K_BALANCE) as number | undefined) ?? 0;
@@ -328,9 +358,16 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
     this.#appliedGrantIds = new Set(grants);
     this.#pendingSettlements =
       (stored.get(K_PENDING) as PendingSettlement[] | undefined) ?? [];
-    this.#terminal =
-      (stored.get(K_TERMINAL) as Record<string, TerminalStatus> | undefined) ??
-      {};
+    const rawTerminal =
+      (stored.get(K_TERMINAL) as
+        Record<string, TerminalStatus | TerminalRecord> | undefined) ?? {};
+    // Legacy rows stored a bare status string; normalize to timed records.
+    this.#terminal = Object.fromEntries(
+      Object.entries(rawTerminal).map(([id, value]) => [
+        id,
+        typeof value === "string" ? { status: value, at: 0 } : value,
+      ]),
+    );
     this.#flushSeq = (stored.get(K_FLUSH_SEQ) as number | undefined) ?? 0;
     const settingsMap =
       (stored.get(K_KEY_SETTINGS) as Record<string, KeySetting> | undefined) ??
@@ -338,11 +375,41 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
     this.#keySettings = new Map(Object.entries(settingsMap));
     this.#keySettingsSyncedAt =
       (stored.get(K_KEY_SETTINGS_AT) as number | undefined) ?? 0;
+    this.#deadLetters =
+      (stored.get(K_DEAD_LETTERS) as DeadLetterSettlement[] | undefined) ?? [];
+    this.#lastCompactionAt =
+      (stored.get(K_LAST_COMPACTION_AT) as number | undefined) ?? 0;
     this.#loaded = true;
   }
 
   #available(): number {
     return Math.max(0, this.#balance - sumInFlight(this.#inFlight));
+  }
+
+  /**
+   * Lease expiry: reservations whose execution died before settle/refund are
+   * refunded after RESERVATION_TTL_MS so credits cannot be held forever. The
+   * terminal record keeps late settle/refund calls idempotent.
+   */
+  #expireStaleReservations(now: number): boolean {
+    let changed = false;
+    for (const [id, entry] of Object.entries(this.#inFlight)) {
+      if (now - entry.createdAt >= RESERVATION_TTL_MS) {
+        delete this.#inFlight[id];
+        this.#terminal[id] = { status: "refunded", at: now };
+        changed = true;
+      }
+    }
+    return changed;
+  }
+
+  /** Bound terminal map: drop records past the idempotency retention window. */
+  #pruneTerminal(now: number): void {
+    for (const [id, record] of Object.entries(this.#terminal)) {
+      if (record.at !== 0 && now - record.at >= TERMINAL_RETENTION_MS) {
+        delete this.#terminal[id];
+      }
+    }
   }
 
   #snapshot(): WalletState {
@@ -389,8 +456,10 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
       inFlight: Record<string, InFlightEntry>;
       appliedGrantIds: string[];
       pendingSettlements: PendingSettlement[];
-      terminal: Record<string, TerminalStatus>;
+      terminal: Record<string, TerminalRecord>;
       flushSeq: number;
+      deadLetters: DeadLetterSettlement[];
+      lastCompactionAt: number;
       keySettings: Record<string, KeySetting>;
       keySettingsSyncedAt: number;
       settledCounter: { storageKey: string; amount: number };
@@ -413,6 +482,10 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
       if (keys.terminal !== undefined) await txn.put(K_TERMINAL, keys.terminal);
       if (keys.flushSeq !== undefined)
         await txn.put(K_FLUSH_SEQ, keys.flushSeq);
+      if (keys.deadLetters !== undefined)
+        await txn.put(K_DEAD_LETTERS, keys.deadLetters);
+      if (keys.lastCompactionAt !== undefined)
+        await txn.put(K_LAST_COMPACTION_AT, keys.lastCompactionAt);
       if (keys.keySettings !== undefined)
         await txn.put(K_KEY_SETTINGS, keys.keySettings);
       if (keys.keySettingsSyncedAt !== undefined)
@@ -436,6 +509,57 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
     await this.ctx.storage.setAlarm(Date.now() + FLUSH_ALARM_MS);
   }
 
+  /**
+   * Outstanding reservations need a maintenance pass even when no settlement
+   * is pending, otherwise a crashed executor pins credits until next traffic.
+   */
+  async #scheduleMaintenanceAlarm(): Promise<void> {
+    if (Object.keys(this.#inFlight).length === 0) return;
+    const existing = await this.ctx.storage.getAlarm();
+    if (existing !== null && existing !== undefined) return;
+    await this.ctx.storage.setAlarm(Date.now() + MAINTENANCE_ALARM_MS);
+  }
+
+  /**
+   * Hourly-bounded compaction: free-tier counters older than yesterday and
+   * settled-month counters older than the previous UTC month are deleted so
+   * DO storage does not grow with lifetime traffic. Cap enforcement only
+   * reads the current month; free-tier reads only the current day.
+   */
+  async #compactCounters(now: number): Promise<boolean> {
+    if (now - this.#lastCompactionAt < COMPACTION_INTERVAL_MS) return false;
+    this.#lastCompactionAt = now;
+
+    const day = new Date(now);
+    const yesterday = utcDayKey(now - 24 * 60 * 60_000);
+    const priorMonth = utcMonthKey(
+      Date.UTC(day.getUTCFullYear(), day.getUTCMonth() - 1, 1),
+    );
+    const keysToDelete: string[] = [];
+
+    const freeEntries = await this.ctx.storage.list({
+      prefix: K_FREE_PREFIX,
+    });
+    for (const key of freeEntries.keys()) {
+      const daySuffix = key.slice(key.lastIndexOf(":") + 1);
+      if (daySuffix < yesterday) keysToDelete.push(key);
+    }
+
+    const settledEntries = await this.ctx.storage.list({
+      prefix: K_SETTLED_PREFIX,
+    });
+    for (const key of settledEntries.keys()) {
+      const month = key.slice(key.lastIndexOf(":") + 1);
+      if (month < priorMonth) keysToDelete.push(key);
+    }
+
+    if (keysToDelete.length > 0) {
+      await this.ctx.storage.delete(keysToDelete);
+    }
+    await this.#persist({ lastCompactionAt: this.#lastCompactionAt });
+    return true;
+  }
+
   // -------------------------------------------------------------------------
   // RPC operations
   // -------------------------------------------------------------------------
@@ -453,6 +577,11 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
         return { status: "duplicate", balance: this.#balance };
       }
 
+      if (this.#appliedGrantIds.size >= MAX_APPLIED_GRANTS) {
+        // Set iterates in insertion order; evict oldest first.
+        const oldest = this.#appliedGrantIds.values().next().value;
+        if (oldest !== undefined) this.#appliedGrantIds.delete(oldest);
+      }
       this.#appliedGrantIds.add(grantId);
       const nextBalance = this.#balance + amount;
       if (!Number.isSafeInteger(nextBalance)) {
@@ -487,6 +616,13 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
       : null;
 
     return this.#mutate(async () => {
+      if (this.#expireStaleReservations(now)) {
+        this.#pruneTerminal(now);
+        await this.#persist({
+          inFlight: { ...this.#inFlight },
+          terminal: { ...this.#terminal },
+        });
+      }
       const existing = this.#inFlight[reservationId];
       if (existing) {
         if (existing.cost === cost) {
@@ -502,7 +638,7 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
       if (terminal) {
         return {
           status: "conflict",
-          reason: `reservation ${reservationId} already ${terminal}`,
+          reason: `reservation ${reservationId} already ${terminal.status}`,
         };
       }
 
@@ -538,10 +674,11 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
 
       this.#inFlight[reservationId] = {
         cost,
-        createdAt: Date.now(),
+        createdAt: now,
         ...(opts.keyId ? { keyId: opts.keyId } : {}),
       };
       await this.#persist({ inFlight: { ...this.#inFlight } });
+      await this.#scheduleMaintenanceAlarm();
 
       return { status: "reserved", available: this.#available() };
     });
@@ -555,16 +692,16 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
 
     return this.#mutate(async () => {
       const terminal = this.#terminal[reservationId];
-      if (terminal === "settled") {
+      if (terminal?.status === "settled") {
         return {
           status: "already_settled",
           settlementId: settlementIdFor(reservationId),
         };
       }
-      if (terminal === "refunded") {
+      if (terminal?.status === "refunded") {
         return { status: "already_refunded" };
       }
-      if (terminal === "free") {
+      if (terminal?.status === "free") {
         return { status: "already_free" };
       }
 
@@ -583,7 +720,7 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
         throw new Error("Wallet balance overflow");
       }
       this.#balance = nextBalance;
-      this.#terminal[reservationId] = "settled";
+      this.#terminal[reservationId] = { status: "settled", at: settledAt };
       const pending: PendingSettlement = {
         settlementId,
         reservationId,
@@ -593,6 +730,7 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
       if (usage) pending.usage = usage;
       this.#pendingSettlements.push(pending);
 
+      this.#pruneTerminal(settledAt);
       await this.#persist({
         balance: this.#balance,
         inFlight: { ...this.#inFlight },
@@ -621,16 +759,16 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
 
     return this.#mutate(async () => {
       const terminal = this.#terminal[reservationId];
-      if (terminal === "refunded") {
+      if (terminal?.status === "refunded") {
         return { status: "already_refunded" };
       }
-      if (terminal === "settled") {
+      if (terminal?.status === "settled") {
         return {
           status: "already_settled",
           settlementId: settlementIdFor(reservationId),
         };
       }
-      if (terminal === "free") {
+      if (terminal?.status === "free") {
         return { status: "already_free" };
       }
 
@@ -639,8 +777,10 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
         return { status: "unknown" };
       }
 
+      const refundedAt = Date.now();
       delete this.#inFlight[reservationId];
-      this.#terminal[reservationId] = "refunded";
+      this.#terminal[reservationId] = { status: "refunded", at: refundedAt };
+      this.#pruneTerminal(refundedAt);
 
       await this.#persist({
         inFlight: { ...this.#inFlight },
@@ -770,10 +910,10 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
     return this.#mutate(async () => {
       const settlementId = settlementIdFor(reservationId);
       const terminal = this.#terminal[reservationId];
-      if (terminal === "free" || terminal === "settled") {
+      if (terminal?.status === "free" || terminal?.status === "settled") {
         return { status: "duplicate", settlementId };
       }
-      if (terminal === "refunded") {
+      if (terminal?.status === "refunded") {
         return { status: "rejected", reason: "already refunded" };
       }
       if (this.#inFlight[reservationId]) {
@@ -781,7 +921,8 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
       }
 
       const settledAt = Date.now();
-      this.#terminal[reservationId] = "free";
+      this.#terminal[reservationId] = { status: "free", at: settledAt };
+      this.#pruneTerminal(settledAt);
       this.#pendingSettlements.push({
         settlementId,
         reservationId,
@@ -813,9 +954,13 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
   }
 
   /**
-   * Persist ledger acknowledgements. Rejected outcomes intentionally remain
-   * pending so the alarm retries them; a lost acknowledgement is retried
-   * with the same settle:{reservationId} reference.
+   * Persist ledger acknowledgements. Applied outcomes leave the retry queue.
+   * Rejected outcomes from the ledger are permanent validation verdicts
+   * (payload conflict, wrong wallet, unknown project, insufficient
+   * authoritative balance) — retrying them every five seconds would alarm
+   * forever, so they move to a bounded dead-letter queue for reconciliation.
+   * Transient Convex failures never reach this path: recordUsage throws and
+   * the whole batch stays pending.
    */
   async applySettlementResults(
     results: SettlementOutcome[],
@@ -831,27 +976,59 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
           )
           .map((result) => result.refId),
       );
+      const rejected = new Map(
+        results
+          .filter((result) => result.status === "rejected")
+          .map((result) => [result.refId, result.reason ?? "rejected"]),
+      );
+      const now = Date.now();
       const before = this.#pendingSettlements.length;
-      if (removable.size > 0) {
-        this.#pendingSettlements = this.#pendingSettlements.filter(
-          (settlement) => !removable.has(settlement.settlementId),
+      const deadLettered: DeadLetterSettlement[] = [];
+      if (removable.size > 0 || rejected.size > 0) {
+        const kept: PendingSettlement[] = [];
+        for (const settlement of this.#pendingSettlements) {
+          if (removable.has(settlement.settlementId)) continue;
+          const reason = rejected.get(settlement.settlementId);
+          if (reason !== undefined) {
+            deadLettered.push({ ...settlement, reason, deadAt: now });
+            continue;
+          }
+          kept.push(settlement);
+        }
+        this.#pendingSettlements = kept;
+      }
+      const removed =
+        before - this.#pendingSettlements.length - deadLettered.length;
+
+      if (deadLettered.length > 0) {
+        this.#deadLetters = [...this.#deadLetters, ...deadLettered].slice(
+          -MAX_DEAD_LETTERS,
         );
       }
-      const removed = before - this.#pendingSettlements.length;
 
       const checkpointAccepted = this.#acceptCheckpoint(checkpoint);
-      if (removed > 0 || checkpointAccepted) {
+      if (removed > 0 || deadLettered.length > 0 || checkpointAccepted) {
         await this.#persist({
           balance: this.#balance,
           sequence: this.#sequence,
           pendingSettlements: this.#pendingSettlements.map((settlement) => ({
             ...settlement,
           })),
+          deadLetters: [...this.#deadLetters],
         });
       }
 
-      return { removed, remaining: this.#pendingSettlements.length };
+      return {
+        removed,
+        remaining: this.#pendingSettlements.length,
+        deadLettered: deadLettered.length,
+      };
     });
+  }
+
+  /** Dead-letter queue snapshot for reconciliation tooling and tests. */
+  async getDeadLetters(): Promise<DeadLetterSettlement[]> {
+    return this.#deadLetters.map((settlement) => ({ ...settlement }));
   }
 
   /**
@@ -1047,9 +1224,11 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
   }
 
   /**
-   * Resolve key settings. Cached settings are refreshed at the bounded
-   * freshness interval even for known keys, so disable/rotation changes
-   * cannot remain indefinitely stale. Concurrent refreshes share one fetch.
+   * Resolve key settings off the request hot path. Stale-but-present cache
+   * entries serve immediately while a single-flight refresh runs in the
+   * background (stale-while-revalidate, bounded by SYNC_GRANTS_WINDOW_MS).
+   * Only first contact (never synced) blocks, so a cold DO cannot enforce
+   * caps against settings it has never seen.
    */
   async #resolveKeySetting(
     keyId: string,
@@ -1057,8 +1236,18 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
     nowMs: number,
   ): Promise<KeySetting | null> {
     if (!clerkOrgId) return null;
-    if (nowMs - this.#keySettingsSyncedAt >= SYNC_GRANTS_WINDOW_MS) {
-      await this.#syncGrantsSingleFlight(clerkOrgId, nowMs);
+    const stale = nowMs - this.#keySettingsSyncedAt >= SYNC_GRANTS_WINDOW_MS;
+    if (stale) {
+      if (this.#keySettingsSyncedAt === 0) {
+        await this.#syncGrantsSingleFlight(clerkOrgId, nowMs);
+      } else {
+        this.ctx.waitUntil(
+          this.#syncGrantsSingleFlight(clerkOrgId, nowMs).then(
+            () => undefined,
+            () => undefined,
+          ),
+        );
+      }
     }
     return this.#keySettings.get(keyId) ?? null;
   }
@@ -1168,21 +1357,37 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
   }
 
   /**
-   * Alarm: batch-flush pending usage to Convex when configured.
-   * Re-arms while pending remains.
+   * Alarm: expire stale reservations and compact counters on the maintenance
+   * cadence, then batch-flush pending usage to Convex when configured.
+   * Re-arms fast while pending remains, slow while reservations are open.
    */
   async alarm(): Promise<void> {
-    if (this.#pendingSettlements.length === 0) return;
+    const now = Date.now();
+    await this.#mutate(async () => {
+      const expired = this.#expireStaleReservations(now);
+      this.#pruneTerminal(now);
+      const compacted = await this.#compactCounters(now);
+      if (expired || compacted) {
+        await this.#persist({
+          inFlight: { ...this.#inFlight },
+          terminal: { ...this.#terminal },
+        });
+      }
+    });
 
-    const hasUsage = this.#pendingSettlements.some(
-      (s) => s.usage !== undefined,
-    );
-    if (hasUsage) {
-      await this.flushToConvex();
+    if (this.#pendingSettlements.length > 0) {
+      const hasUsage = this.#pendingSettlements.some(
+        (s) => s.usage !== undefined,
+      );
+      if (hasUsage) {
+        await this.flushToConvex();
+      }
     }
 
     if (this.#pendingSettlements.length > 0) {
       await this.ctx.storage.setAlarm(Date.now() + FLUSH_ALARM_MS);
+    } else if (Object.keys(this.#inFlight).length > 0) {
+      await this.ctx.storage.setAlarm(Date.now() + MAINTENANCE_ALARM_MS);
     }
   }
 }

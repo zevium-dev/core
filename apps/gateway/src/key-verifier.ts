@@ -9,8 +9,20 @@ export type VerifiedKey = {
   scopes: string[];
 };
 
+/**
+ * Tri-state verification outcome. `invalid` is a definitive Clerk answer and
+ * is cacheable; `unavailable` covers network failure, 5xx, and malformed
+ * responses — never cached, surfaced as 503 so a Clerk outage does not
+ * masquerade as a bad key.
+ */
+export type VerifyOutcome =
+  | { status: "ok"; key: VerifiedKey }
+  | { status: "invalid" }
+  | { status: "unavailable" };
+
 export interface KeyVerifier {
   verify(secret: string): Promise<VerifiedKey | null>;
+  verifyWithStatus?(secret: string): Promise<VerifyOutcome>;
 }
 
 export type ClerkVerifyEnv = {
@@ -73,31 +85,44 @@ export class ClerkKeyVerifier implements KeyVerifier {
   }
 
   async verify(secret: string): Promise<VerifiedKey | null> {
-    if (!secret || !isApiKeySecret(secret)) return null;
+    const outcome = await this.verifyWithStatus(secret);
+    return outcome.status === "ok" ? outcome.key : null;
+  }
+
+  async verifyWithStatus(secret: string): Promise<VerifyOutcome> {
+    if (!secret || !isApiKeySecret(secret)) return { status: "invalid" };
 
     const cacheKey = await sha256Hex(secret);
     const now = this.#now();
 
     const mem = this.#memory.get(cacheKey);
     if (mem && mem.expiresAt > now) {
-      return mem.value;
+      return mem.value === null
+        ? { status: "invalid" }
+        : { status: "ok", key: mem.value };
     }
 
     if (this.#useCacheApi && this.#caches) {
       const cached = await this.#readCacheApi(cacheKey);
       if (cached !== undefined) {
         this.#writeMemory(cacheKey, cached, now);
-        return cached;
+        return cached === null
+          ? { status: "invalid" }
+          : { status: "ok", key: cached };
       }
     }
 
-    const verified = await this.#verifyRemote(secret);
-    this.#writeMemory(cacheKey, verified, now);
-    if (this.#useCacheApi && this.#caches) {
-      // Fire-and-forget cache fill; failures must not break verify.
-      void this.#writeCacheApi(cacheKey, verified);
+    const outcome = await this.#verifyRemote(secret);
+    // Only definitive answers are cached. Outages must not poison the cache.
+    if (outcome.status !== "unavailable") {
+      const cacheable = outcome.status === "ok" ? outcome.key : null;
+      this.#writeMemory(cacheKey, cacheable, now);
+      if (this.#useCacheApi && this.#caches) {
+        // Fire-and-forget cache fill; failures must not break verify.
+        void this.#writeCacheApi(cacheKey, cacheable);
+      }
     }
-    return verified;
+    return outcome;
   }
 
   #writeMemory(cacheKey: string, value: VerifiedKey | null, now: number): void {
@@ -146,7 +171,7 @@ export class ClerkKeyVerifier implements KeyVerifier {
     }
   }
 
-  async #verifyRemote(secret: string): Promise<VerifiedKey | null> {
+  async #verifyRemote(secret: string): Promise<VerifyOutcome> {
     let res: Response;
     try {
       res = await this.#fetch(this.#verifyUrl, {
@@ -158,19 +183,22 @@ export class ClerkKeyVerifier implements KeyVerifier {
         body: JSON.stringify({ secret }),
       });
     } catch {
-      return null;
+      return { status: "unavailable" };
     }
 
-    if (!res.ok) return null;
+    // 5xx and unexpected statuses are Clerk-side outages, not key verdicts.
+    if (res.status >= 500) return { status: "unavailable" };
+    if (!res.ok) return { status: "invalid" };
 
     let json: unknown;
     try {
       json = await res.json();
     } catch {
-      return null;
+      return { status: "unavailable" };
     }
 
-    return parseClerkVerifyResponse(json);
+    const key = parseClerkVerifyResponse(json);
+    return key === null ? { status: "invalid" } : { status: "ok", key };
   }
 }
 
@@ -292,5 +320,10 @@ export class FixtureKeyVerifier implements KeyVerifier {
 
   async verify(secret: string): Promise<VerifiedKey | null> {
     return this.#keys.get(secret) ?? null;
+  }
+
+  async verifyWithStatus(secret: string): Promise<VerifyOutcome> {
+    const key = this.#keys.get(secret);
+    return key ? { status: "ok", key } : { status: "invalid" };
   }
 }

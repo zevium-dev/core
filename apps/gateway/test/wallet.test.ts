@@ -4,6 +4,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   __setTestGrantsFetcher,
   __setTestUsageMutation,
+  MAX_APPLIED_GRANTS,
+  RESERVATION_TTL_MS,
   type WalletDO,
 } from "../src/wallet";
 import { SimulatedLedger } from "./ledger";
@@ -279,7 +281,7 @@ describe("WalletDO unit", () => {
     expect(settleAgain.status).toBe("already_settled");
   });
 
-  it("keeps rejected Convex outcomes pending while applying successful outcomes", async () => {
+  it("dead-letters permanently rejected Convex outcomes while applying successful outcomes", async () => {
     const stub = walletStub("unit-partial-convex-outcomes");
     await stub.grant("g1", 100);
     await stub.reserve("r-applied", 10);
@@ -304,7 +306,7 @@ describe("WalletDO unit", () => {
           : {
               refId: event.settleRefId,
               status: "rejected" as const,
-              reason: "temporary ledger rejection",
+              reason: "settlement reference payload conflict",
             },
       ),
       wallet: {
@@ -317,14 +319,97 @@ describe("WalletDO unit", () => {
     const flushed = await stub.flushToConvex();
     __setTestUsageMutation(null);
 
-    expect(flushed).toMatchObject({ flushed: 2, acked: 1, remaining: 1 });
+    expect(flushed).toMatchObject({ flushed: 2, acked: 1, remaining: 0 });
     const state = await stub.getState();
     expect(state.sequence).toBe(7);
-    expect(state.pendingSettlements).toEqual([
-      expect.objectContaining({ settlementId: "settle:r-rejected", cost: 20 }),
+    expect(state.pendingSettlements).toEqual([]);
+    // Permanent rejections park in the bounded dead-letter queue.
+    const deadLetters = await stub.getDeadLetters();
+    expect(deadLetters).toEqual([
+      expect.objectContaining({
+        settlementId: "settle:r-rejected",
+        cost: 20,
+        reason: "settlement reference payload conflict",
+      }),
     ]);
-    // Checkpoint 90 retains the rejected 20 as a conservative local debit.
-    expect(state.balance).toBe(70);
+    // Ledger refused the rejected charge: checkpoint 90 applies clean since
+    // the dead-lettered 20 leaves the pending deduction window.
+    expect(state.balance).toBe(90);
+  });
+
+  it("expires abandoned reservations past the lease and keeps late settle idempotent", async () => {
+    const stub = walletStub("unit-lease-expiry");
+    const t0 = 1_700_000_000_000;
+    await stub.grant("g1", 100);
+    await stub.reserve("r-orphan", 40, { nowMs: t0 });
+    expect((await stub.getState()).available).toBe(60);
+
+    // Next reserve past the lease sweeps the orphaned hold.
+    await stub.reserve("r-next", 10, { nowMs: t0 + RESERVATION_TTL_MS + 1 });
+    const state = await stub.getState();
+    expect(state.inFlight["r-orphan"]).toBeUndefined();
+    expect(state.available).toBe(90);
+
+    // Late settle/refund on the expired reservation stay idempotent.
+    await expect(stub.settle("r-orphan")).resolves.toMatchObject({
+      status: "already_refunded",
+    });
+    await expect(stub.refund("r-orphan")).resolves.toMatchObject({
+      status: "already_refunded",
+    });
+  });
+
+  it("bounds the applied-grant dedupe set", async () => {
+    const stub = walletStub("unit-grant-cap");
+    for (let index = 0; index < MAX_APPLIED_GRANTS + 5; index += 1) {
+      await stub.grant(`g${index}`, 1);
+    }
+    const state = await stub.getState();
+    expect(state.appliedGrantIds.length).toBe(MAX_APPLIED_GRANTS);
+    expect(state.balance).toBe(MAX_APPLIED_GRANTS + 5);
+    // Oldest evicted: replaying g0 is applied again by the DO; the Convex
+    // ledger remains the authoritative dedupe beyond the DO window.
+    const replay = await stub.grant("g0", 1);
+    expect(replay.status).toBe("applied");
+  });
+
+  it("serves stale key settings while refreshing in the background", async () => {
+    const clerkOrgId = "org_stale_settings";
+    const stub = walletStub(clerkOrgId);
+    await stub.grant("g1", 100);
+    let fetches = 0;
+    __setTestGrantsFetcher(async () => {
+      fetches += 1;
+      return {
+        wallet: { clerkOrgId, balance: 100, sequence: 1 },
+        keySettings: [{ keyId: "key_a", disabled: false }],
+      };
+    });
+
+    const t0 = 1_700_000_000_000;
+    // First contact blocks and syncs.
+    await stub.reserve("r1", 5, { keyId: "key_a", clerkOrgId, nowMs: t0 });
+    expect(fetches).toBe(1);
+
+    // Stale window crossed: refresh runs in the background and a failing
+    // control plane does not reject or hang the reserve path.
+    __setTestGrantsFetcher(async () => {
+      fetches += 1;
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      throw new Error("convex down");
+    });
+    const res = await stub.reserve("r2", 5, {
+      keyId: "key_a",
+      clerkOrgId,
+      nowMs: t0 + 61_000,
+    });
+    expect(res.status).toBe("reserved");
+    // Background refresh was scheduled (test harness settles waitUntil).
+    expect(fetches).toBe(2);
+    // Failed refresh leaves the last-known settings and wallet intact.
+    const state = await stub.getState();
+    expect(state.balance).toBe(100);
+    expect(state.available).toBe(90);
   });
 
   it("reconciles a newer checkpoint without discarding holds or pending settlement", async () => {
