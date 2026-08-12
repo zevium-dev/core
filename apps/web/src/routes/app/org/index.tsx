@@ -43,6 +43,7 @@ import { Label } from "#/components/ui/label";
 import { api } from "#/lib/convex-api";
 import { clerkShadcnTheme } from "#/lib/clerk-theme";
 import { humanError } from "#/lib/human-error";
+import { isPrivilegedOrgRole } from "#/lib/org-capabilities";
 import { connectedAccountDisplay } from "#/lib/stripe-ui";
 
 export const Route = createFileRoute("/app/org/")({
@@ -75,7 +76,7 @@ function OrgHomePage() {
       <div className="min-w-0 space-y-3">
         <div className="min-w-0 space-y-1">
           <h1
-            className="break-words text-2xl font-semibold tracking-tight"
+            className="min-w-0 text-2xl font-semibold tracking-tight [overflow-wrap:anywhere]"
             style={
               slug ? { viewTransitionName: `org-name-${slug}` } : undefined
             }
@@ -136,20 +137,21 @@ function PublicHandleCard() {
   }, [current]);
 
   const normalized = handle.trim().toLowerCase();
+  const valid = /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(normalized);
+  const changed = normalized !== current;
   const lookup = useQuery({
     ...convexQuery(api.organizations.checkPublicHandleAvailability, {
       handle: normalized,
     }),
-    enabled: normalized.length > 0 && !handleLocked && !mine.isPending,
+    enabled: valid && changed && !handleLocked && !mine.isPending,
   });
   const unavailable = lookup.data?.available === false;
   const availabilityConfirmed = lookup.data?.available === true;
-  const valid = /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(normalized);
-  const isAdmin = membership?.role === "org:admin";
+  const checking = lookup.isPending && valid && changed;
+  const isAdmin = isPrivilegedOrgRole(membership?.role);
   const { mutate: save, isPending } = useMutation({
     mutationFn: () => setPublicHandle({ handle: normalized }),
     onSuccess: () => {
-      toast.success("Public publisher handle updated");
       setConfirming(false);
       void mine.refetch();
     },
@@ -190,7 +192,8 @@ function PublicHandleCard() {
             autoComplete="off"
             spellCheck={false}
             aria-describedby="public-handle-help"
-            aria-invalid={normalized !== "" && !valid}
+            aria-invalid={normalized !== "" && (!valid || unavailable)}
+            aria-busy={checking}
             readOnly={!isAdmin || handleLocked || mine.isPending}
           />
           <Button
@@ -201,9 +204,8 @@ function PublicHandleCard() {
               mine.isPending ||
               handleLocked ||
               isPending ||
-              normalized === current ||
+              !changed ||
               !valid ||
-              lookup.isPending ||
               lookup.isError ||
               !availabilityConfirmed
             }
@@ -248,15 +250,17 @@ function PublicHandleCard() {
             ? "Choose lowercase letters, numbers, and single hyphens."
             : !valid
               ? "Use lowercase letters, numbers, and single hyphens."
-              : lookup.isPending
-                ? "Checking availability…"
-                : lookup.isError
-                  ? "Availability check failed. Try again."
-                  : unavailable
-                    ? "This handle is already taken."
-                    : availabilityConfirmed
-                      ? "This handle is available."
-                      : "Enter a new handle to check availability."}
+              : !changed
+                ? "This is the current public handle."
+                : checking
+                  ? "Checking availability…"
+                  : lookup.isError
+                    ? "Could not check availability. Edit the handle to retry."
+                    : unavailable
+                      ? "This handle is already taken."
+                      : availabilityConfirmed
+                        ? "This handle is available."
+                        : "Enter a new handle to check availability."}
         </p>
       </CardContent>
       <Dialog open={confirming} onOpenChange={setConfirming}>
@@ -290,6 +294,8 @@ function PublicHandleCard() {
 }
 
 function PublisherPaymentsCard() {
+  const { membership } = useOrganization();
+  const isAdmin = isPrivilegedOrgRole(membership?.role);
   const [publisherCountry, setPublisherCountry] = useState("");
   const payoutState = useQuery(convexQuery(api.payouts.getPayoutState, {}));
   const startOnboarding = useAction(api.payouts.startOnboarding);
@@ -309,15 +315,37 @@ function PublisherPaymentsCard() {
     },
   });
 
-  if (payoutState.isPending || !payoutState.data) {
+  if (payoutState.isPending) {
     return (
       <Card>
         <CardHeader>
           <Skeleton className="h-5 w-36" />
-          <Skeleton className="h-4 w-80" />
+          <Skeleton className="h-4 w-80 max-w-full" />
         </CardHeader>
         <CardContent>
           <Skeleton className="h-9 w-44" />
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (payoutState.isError || !payoutState.data) {
+    return (
+      <Card role="alert">
+        <CardHeader>
+          <CardTitle>Publisher payout status did not load</CardTitle>
+          <CardDescription>
+            Check your connection, then retry. No payout settings were changed.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => void payoutState.refetch()}
+          >
+            Retry payout status
+          </Button>
         </CardContent>
       </Card>
     );
@@ -353,7 +381,11 @@ function PublisherPaymentsCard() {
             ))}
           </ul>
         ) : null}
-        {display.action && display.actionLabel ? (
+        {!isAdmin ? (
+          <p className="text-sm text-muted-foreground">
+            An organization admin manages Stripe onboarding and payout details.
+          </p>
+        ) : display.action && display.actionLabel ? (
           <div className="space-y-3">
             {profile.status === "not_started" ? (
               <div className="max-w-xs space-y-2">

@@ -214,7 +214,7 @@ describe("upstream credentials", () => {
         name: "x-api-key",
         secret: "stolen",
       }),
-    ).rejects.toThrow(/Org admin role required/);
+    ).rejects.toThrow(/Org admin or owner role required/);
   });
 
   it("rejects unsafe headers and values", async () => {

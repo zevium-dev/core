@@ -7,7 +7,10 @@ export function BrandMark({ className }: BrandMarkProps) {
     <svg
       aria-hidden="true"
       className={className}
-      viewBox="78 128 356 256"
+      // Keep optical padding around path bounds. A tight viewBox clipped the
+      // antialiased edges at small header sizes and made the mark read as a
+      // broken glyph on high-DPI displays.
+      viewBox="70 120 372 272"
       fill="currentColor"
     >
       <g transform="translate(0 32)">

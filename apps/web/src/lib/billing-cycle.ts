@@ -41,18 +41,8 @@ export function formatCycleMonthLabel(cycleStart: number): string {
 export type CycleBreakdownLike = {
   totalCalls: number;
   totalCredits: number;
-  byProject: readonly {
-    projectId: string;
-    name: string;
-    slug: string;
-    calls: number;
-    credits: number;
-  }[];
-  byKey: readonly {
-    keyId: string;
-    calls: number;
-    credits: number;
-  }[];
+  byProject?: readonly unknown[];
+  byKey?: readonly unknown[];
 };
 
 /** Empty-state check for cycle usage card. */

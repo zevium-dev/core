@@ -11,7 +11,13 @@ import {
   Trash2,
   Webhook,
 } from "lucide-react";
-import { useEffect, useState, type FormEvent } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
 import { toast } from "sonner";
 
 import { Badge } from "#/components/ui/badge";
@@ -42,6 +48,7 @@ import {
   FieldError,
   FieldLabel,
 } from "#/components/ui/field";
+import { Skeleton } from "#/components/ui/skeleton";
 import { Textarea } from "#/components/ui/textarea";
 import { api } from "#/lib/convex-api";
 import type { Doc, Id } from "#/lib/convex-data-model";
@@ -57,9 +64,11 @@ const RETIREMENT_MESSAGE_MAX = 1_000;
 export function ProjectSettingsPanel({
   project,
   orgSlug,
+  canAdminister,
 }: {
   project: Doc<"projects">;
   orgSlug: string;
+  canAdminister: boolean;
 }) {
   const { membership } = useOrganization();
   const isAdmin = membership?.role === "org:admin";
@@ -83,6 +92,10 @@ export function ProjectSettingsPanel({
   const [deleteConfirm, setDeleteConfirm] = useState("");
   const [sunsetDate, setSunsetDate] = useState("");
   const [retirementMessage, setRetirementMessage] = useState("");
+  const [detailsSubmitted, setDetailsSubmitted] = useState(false);
+  const [detailsError, setDetailsError] = useState<string | null>(null);
+  const nameInputRef = useRef<HTMLInputElement>(null);
+  const tagsInputRef = useRef<HTMLInputElement>(null);
 
   // Keep local form in sync when realtime project doc changes (e.g. header visibility).
   useEffect(() => {
@@ -133,14 +146,15 @@ export function ProjectSettingsPanel({
       return { previous, queryKey: queryOpts.queryKey };
     },
     onSuccess: async () => {
-      toast.success("Project updated");
+      setDetailsSubmitted(false);
+      setDetailsError(null);
       await invalidateProjectQueries();
     },
     onError: (err: unknown, _patch, context) => {
       if (context?.previous !== undefined) {
         queryClient.setQueryData(context.queryKey, context.previous);
       }
-      toast.error(humanError(err, "Could not update project"));
+      setDetailsError(humanError(err, "Could not update project"));
     },
   });
 
@@ -150,12 +164,7 @@ export function ProjectSettingsPanel({
         projectId: project._id,
         patch: { visibility },
       }),
-    onSuccess: async (updated) => {
-      toast.success(
-        updated.visibility === "public"
-          ? "Project is now public"
-          : "Project is now private",
-      );
+    onSuccess: async () => {
       setVisibilityOpen(false);
       await invalidateProjectQueries();
     },
@@ -209,41 +218,26 @@ export function ProjectSettingsPanel({
   const nextVisibility = project.visibility === "public" ? "private" : "public";
   const tagsPreview = parseTagsInput(tagsText);
   const canDelete = deleteConfirm.trim() === project.slug;
-  const isPublishedPublic =
-    project.status === "published" && project.visibility === "public";
-  const retirementScheduled = project.deprecationStartedAt !== undefined;
-  const parsedSunset = Date.parse(`${sunsetDate}T23:59:59.999Z`);
-  const minimumSunset = Date.now() + MIN_RETIREMENT_NOTICE_MS;
-  const retirementMessageLength = retirementMessage.trim().length;
-  const sunsetError =
-    sunsetDate !== "" &&
-    (!Number.isFinite(parsedSunset) || parsedSunset < minimumSunset)
-      ? "Choose a sunset at least 7 full days from now."
-      : null;
-  const retirementMessageError =
-    retirementMessage.length > RETIREMENT_MESSAGE_MAX
-      ? `Keep the migration notice under ${RETIREMENT_MESSAGE_MAX.toLocaleString()} characters.`
-      : null;
-  const canScheduleRetirement =
-    Number.isFinite(parsedSunset) &&
-    parsedSunset >= minimumSunset &&
-    retirementMessageLength > 0 &&
-    retirementMessageLength <= RETIREMENT_MESSAGE_MAX;
   const canRemoveProject =
     project.status !== "published" ||
     (project.sunsetAt !== undefined && Date.now() >= project.sunsetAt);
+  const nameError = name.trim() === "" ? "Enter a project name." : null;
+  const tagsError =
+    tagsPreview.length > 32 ? "Use at most 32 unique tags." : null;
 
   function onSaveDetails(e: FormEvent) {
     e.preventDefault();
     if (savePending) return;
+    setDetailsSubmitted(true);
+    setDetailsError(null);
 
     const trimmedName = name.trim();
     if (trimmedName.length === 0) {
-      toast.error("Name is required");
+      nameInputRef.current?.focus();
       return;
     }
     if (tagsPreview.length > 32) {
-      toast.error("At most 32 tags");
+      tagsInputRef.current?.focus();
       return;
     }
 
@@ -255,10 +249,24 @@ export function ProjectSettingsPanel({
     });
   }
 
+  if (!canAdminister) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>Admin access required</CardTitle>
+          <CardDescription>
+            Organization admins manage project metadata, visibility, upstream
+            credentials, webhooks, and deletion. Your access remains read-only.
+          </CardDescription>
+        </CardHeader>
+      </Card>
+    );
+  }
+
   return (
     <div className="flex flex-col gap-4">
       <Card>
-        <form onSubmit={onSaveDetails}>
+        <form onSubmit={onSaveDetails} noValidate>
           <CardHeader>
             <CardTitle>Project details</CardTitle>
             <CardDescription>
@@ -266,22 +274,46 @@ export function ProjectSettingsPanel({
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
+            {detailsError ? (
+              <p
+                role="alert"
+                className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+              >
+                {detailsError}
+              </p>
+            ) : null}
             <div className="space-y-2">
               <Label htmlFor="settings-name">Name</Label>
               <Input
+                ref={nameInputRef}
                 id="settings-name"
+                name="project-name"
                 value={name}
-                onChange={(e) => setName(e.target.value)}
+                onChange={(e) => {
+                  setName(e.target.value);
+                  setDetailsError(null);
+                }}
                 maxLength={120}
                 disabled={savePending}
-                required
+                autoComplete="off"
+                aria-invalid={detailsSubmitted && nameError !== null}
+                aria-describedby="settings-name-help"
               />
+              <p
+                id="settings-name-help"
+                className={`min-h-5 text-xs ${detailsSubmitted && nameError ? "text-destructive" : "text-muted-foreground"}`}
+              >
+                {detailsSubmitted && nameError
+                  ? nameError
+                  : "Shown in the dashboard and public catalogue."}
+              </p>
             </div>
 
             <div className="space-y-2">
               <Label htmlFor="settings-slug">Slug</Label>
               <Input
                 id="settings-slug"
+                name="project-slug"
                 value={project.slug}
                 disabled
                 readOnly
@@ -294,28 +326,49 @@ export function ProjectSettingsPanel({
 
             <div className="space-y-2">
               <Label htmlFor="settings-description">Description</Label>
-              <textarea
+              <Textarea
                 id="settings-description"
+                name="project-description"
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
                 maxLength={2000}
                 disabled={savePending}
                 rows={4}
-                className="flex min-h-24 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs transition-[color,box-shadow] outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50"
+                className="min-h-24"
+                aria-describedby="settings-description-help"
               />
+              <p
+                id="settings-description-help"
+                className="min-h-5 text-xs text-muted-foreground"
+              >
+                Explain inputs, outputs, and ideal use cases.
+              </p>
             </div>
 
             <div className="space-y-2">
               <Label htmlFor="settings-tags">Tags</Label>
               <Input
+                ref={tagsInputRef}
                 id="settings-tags"
+                name="project-tags"
                 value={tagsText}
-                onChange={(e) => setTagsText(e.target.value)}
+                onChange={(e) => {
+                  setTagsText(e.target.value);
+                  setDetailsError(null);
+                }}
                 placeholder="ai, llm, tools"
                 disabled={savePending}
+                autoComplete="off"
+                aria-invalid={detailsSubmitted && tagsError !== null}
+                aria-describedby="settings-tags-help"
               />
-              <p className="text-xs text-muted-foreground">
-                Comma-separated. Lowercased and de-duplicated on save (max 32).
+              <p
+                id="settings-tags-help"
+                className={`min-h-5 text-xs ${detailsSubmitted && tagsError ? "text-destructive" : "text-muted-foreground"}`}
+              >
+                {detailsSubmitted && tagsError
+                  ? tagsError
+                  : "Comma-separated. Lowercased and de-duplicated on save (max 32)."}
               </p>
               {tagsPreview.length > 0 ? (
                 <div className="flex flex-wrap gap-1.5 pt-1">
@@ -519,9 +572,9 @@ export function ProjectSettingsPanel({
         </CardContent>
       </Card>
 
-      <UpstreamCredentialsCard project={project} />
+      <UpstreamCredentialsCard key={String(project._id)} project={project} />
 
-      <WebhooksCard project={project} />
+      <WebhooksCard key={String(project._id)} project={project} />
 
       <Card className="border-destructive/40">
         <CardHeader>
@@ -633,38 +686,60 @@ function UpstreamCredentialsCard({ project }: { project: Doc<"projects"> }) {
     id: Id<"upstreamCredentials">;
     name: string;
   } | null>(null);
+  const activeProjectRef = useRef<Id<"projects"> | null>(project._id);
+
+  useLayoutEffect(() => {
+    activeProjectRef.current = project._id;
+    setName("x-api-key");
+    setSecret("");
+    setRevealSecret(false);
+    setCredentialError(null);
+    setCredentialToRemove(null);
+    return () => {
+      activeProjectRef.current = null;
+    };
+  }, [project._id]);
 
   const queryKey = convexQuery(api.upstreamCredentials.listForProject, {
     projectId: project._id,
   }).queryKey;
 
   const { mutate: saveCredential, isPending: saving } = useMutation({
-    mutationFn: (input: { name: string; secret: string }) =>
-      upsertCredential({
+    mutationFn: async (input: { name: string; secret: string }) => ({
+      projectId: project._id,
+      result: await upsertCredential({
         projectId: project._id,
         name: input.name,
         secret: input.secret,
       }),
-    onSuccess: async () => {
+    }),
+    onSuccess: async ({ projectId }) => {
+      if (activeProjectRef.current !== projectId) return;
       setSecret("");
       setRevealSecret(false);
-      toast.success("Upstream credential saved");
       await queryClient.invalidateQueries({ queryKey });
     },
-    onError: (err: unknown) =>
-      toast.error(humanError(err, "Could not save upstream credential")),
+    onError: (err: unknown) => {
+      if (activeProjectRef.current !== project._id) return;
+      setCredentialError(humanError(err, "Could not save upstream credential"));
+      document.getElementById("upstream-header-secret")?.focus();
+    },
   });
 
   const { mutate: deleteCredential, isPending: deleting } = useMutation({
-    mutationFn: (credentialId: Id<"upstreamCredentials">) =>
-      removeCredential({ credentialId }),
-    onSuccess: async () => {
-      toast.success("Upstream credential removed");
+    mutationFn: async (credentialId: Id<"upstreamCredentials">) => ({
+      projectId: project._id,
+      result: await removeCredential({ credentialId }),
+    }),
+    onSuccess: async ({ projectId }) => {
+      if (activeProjectRef.current !== projectId) return;
       setCredentialToRemove(null);
       await queryClient.invalidateQueries({ queryKey });
     },
-    onError: (err: unknown) =>
-      toast.error(humanError(err, "Could not remove upstream credential")),
+    onError: (err: unknown) => {
+      if (activeProjectRef.current !== project._id) return;
+      toast.error(humanError(err, "Could not remove upstream credential"));
+    },
   });
 
   function onSave(e: FormEvent) {
@@ -687,6 +762,28 @@ function UpstreamCredentialsCard({ project }: { project: Doc<"projects"> }) {
 
   const credentials = credentialsQuery.data ?? [];
 
+  if (credentialsQuery.isPending) {
+    return (
+      <SettingsCardSkeleton
+        title="Upstream credentials"
+        description="Loading encrypted header configuration."
+      />
+    );
+  }
+
+  if (credentialsQuery.isError) {
+    return (
+      <SettingsQueryErrorCard
+        title="Upstream credentials unavailable"
+        message={humanError(
+          credentialsQuery.error,
+          "Could not load upstream credentials.",
+        )}
+        onRetry={() => void credentialsQuery.refetch()}
+      />
+    );
+  }
+
   return (
     <Card>
       <CardHeader>
@@ -703,19 +800,27 @@ function UpstreamCredentialsCard({ project }: { project: Doc<"projects"> }) {
         <form
           className="grid gap-3 sm:grid-cols-[1fr_1fr_auto]"
           onSubmit={onSave}
+          noValidate
         >
           <div className="space-y-2">
             <Label htmlFor="upstream-header-name">Header name</Label>
             <Input
               id="upstream-header-name"
+              name="upstream-header-name"
               value={name}
-              onChange={(e) => setName(e.target.value)}
+              onChange={(e) => {
+                setName(e.target.value);
+                setCredentialError(null);
+              }}
               placeholder="x-api-key"
               autoComplete="off"
               spellCheck={false}
               disabled={saving}
               required
               aria-invalid={credentialError !== null && name.trim() === ""}
+              aria-describedby={
+                credentialError ? "upstream-credential-error" : undefined
+              }
             />
           </div>
           <div className="space-y-2">
@@ -723,15 +828,22 @@ function UpstreamCredentialsCard({ project }: { project: Doc<"projects"> }) {
             <div className="relative">
               <Input
                 id="upstream-header-secret"
+                name="upstream-header-secret"
                 type={revealSecret ? "text" : "password"}
                 value={secret}
                 aria-invalid={credentialError !== null && secret.trim() === ""}
-                onChange={(e) => setSecret(e.target.value)}
+                onChange={(e) => {
+                  setSecret(e.target.value);
+                  setCredentialError(null);
+                }}
                 placeholder="Enter new value"
                 autoComplete="new-password"
                 disabled={saving}
                 required
                 className="pr-10"
+                aria-describedby={
+                  credentialError ? "upstream-credential-error" : undefined
+                }
               />
               <Button
                 type="button"
@@ -748,13 +860,17 @@ function UpstreamCredentialsCard({ project }: { project: Doc<"projects"> }) {
               </Button>
             </div>
           </div>
-          <Button
-            type="submit"
-            className="self-end"
-            disabled={saving || name.trim() === "" || secret === ""}
-          >
+          <Button type="submit" className="self-end" disabled={saving}>
             {saving ? "Saving…" : "Save credential"}
           </Button>
+          <p
+            id="upstream-credential-error"
+            role={credentialError ? "alert" : undefined}
+            className={`min-h-5 text-xs sm:col-span-3 ${credentialError ? "text-destructive" : "text-muted-foreground"}`}
+          >
+            {credentialError ??
+              "Header names are case-insensitive. Secret values are write-only."}
+          </p>
         </form>
 
         {credentials.length === 0 ? (
@@ -861,27 +977,52 @@ function WebhooksCard({ project }: { project: Doc<"projects"> }) {
   const [active, setActive] = useState(true);
   const [revealSecret, setRevealSecret] = useState(false);
   const [copiedSecret, setCopiedSecret] = useState(false);
+  const [webhookError, setWebhookError] = useState<string | null>(null);
+  const activeProjectRef = useRef<Id<"projects"> | null>(project._id);
+
+  useLayoutEffect(() => {
+    activeProjectRef.current = project._id;
+    setUrl("");
+    setActive(true);
+    setRevealSecret(false);
+    setCopiedSecret(false);
+    setWebhookError(null);
+    return () => {
+      activeProjectRef.current = null;
+    };
+  }, [project._id]);
 
   // Sync local form from the realtime endpoint doc once it loads.
   useEffect(() => {
+    if (activeProjectRef.current !== project._id) return;
     if (endpoint !== null) {
       setUrl(endpoint.url);
       setActive(endpoint.active);
+      setRevealSecret(false);
+      setCopiedSecret(false);
     }
-  }, [endpoint]);
+  }, [endpoint?._id, endpoint?.url, endpoint?.active, project._id]);
 
   const upsertMut = useConvexMutation(api.webhooks.upsertEndpoint);
 
   const { mutate: saveEndpoint, isPending: saving } = useMutation({
-    mutationFn: (input: { url: string; active: boolean }) =>
-      upsertMut({
+    mutationFn: async (input: { url: string; active: boolean }) => ({
+      projectId: project._id,
+      result: await upsertMut({
         projectId: project._id,
         url: input.url,
         active: input.active,
       }),
-    onSuccess: () => toast.success("Webhook endpoint saved"),
-    onError: (err: unknown) =>
-      toast.error(humanError(err, "Could not save webhook endpoint")),
+    }),
+    onSuccess: ({ projectId }) => {
+      if (activeProjectRef.current !== projectId) return;
+      setWebhookError(null);
+    },
+    onError: (err: unknown) => {
+      if (activeProjectRef.current !== project._id) return;
+      setWebhookError(humanError(err, "Could not save webhook endpoint"));
+      document.getElementById("webhook-url")?.focus();
+    },
   });
 
   const trimmedUrl = url.trim();
@@ -893,19 +1034,56 @@ function WebhooksCard({ project }: { project: Doc<"projects"> }) {
 
   function onSave(e: FormEvent) {
     e.preventDefault();
-    if (saving || !urlValid) return;
+    if (saving) return;
+    if (!urlValid) {
+      setWebhookError(
+        trimmedUrl === ""
+          ? "Enter a webhook endpoint URL."
+          : "URL must use HTTPS. HTTP is allowed only for localhost development.",
+      );
+      document.getElementById("webhook-url")?.focus();
+      return;
+    }
+    setWebhookError(null);
     saveEndpoint({ url: trimmedUrl, active });
   }
 
   async function copySecret() {
     if (!endpoint?.secret) return;
+    const projectId = project._id;
     try {
       await navigator.clipboard.writeText(endpoint.secret);
+      if (activeProjectRef.current !== projectId) return;
       setCopiedSecret(true);
-      setTimeout(() => setCopiedSecret(false), 1500);
+      setTimeout(() => {
+        if (activeProjectRef.current === projectId) setCopiedSecret(false);
+      }, 1500);
     } catch {
+      if (activeProjectRef.current !== projectId) return;
       toast.error("Could not copy secret");
     }
+  }
+
+  if (endpointQuery.isPending) {
+    return (
+      <SettingsCardSkeleton
+        title="Webhooks"
+        description="Loading endpoint and signing-secret state."
+      />
+    );
+  }
+
+  if (endpointQuery.isError) {
+    return (
+      <SettingsQueryErrorCard
+        title="Webhooks unavailable"
+        message={humanError(
+          endpointQuery.error,
+          "Could not load webhook configuration.",
+        )}
+        onRetry={() => void endpointQuery.refetch()}
+      />
+    );
   }
 
   return (
@@ -921,24 +1099,33 @@ function WebhooksCard({ project }: { project: Doc<"projects"> }) {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-5">
-        <form onSubmit={onSave} className="space-y-4">
+        <form onSubmit={onSave} className="space-y-4" noValidate>
           <div className="space-y-2">
             <Label htmlFor="webhook-url">Endpoint URL</Label>
             <Input
               id="webhook-url"
+              name="webhook-url"
               value={url}
-              onChange={(e) => setUrl(e.target.value)}
+              onChange={(e) => {
+                setUrl(e.target.value);
+                setWebhookError(null);
+              }}
               placeholder="https://example.com/hooks/zevium"
               className="font-mono text-sm"
               disabled={saving}
               spellCheck={false}
               autoComplete="url"
+              aria-invalid={webhookError !== null}
+              aria-describedby="webhook-url-help"
             />
-            {trimmedUrl.length > 0 && !urlValid ? (
-              <p className="text-xs text-destructive">
-                URL must be https (http://localhost allowed for dev).
-              </p>
-            ) : null}
+            <p
+              id="webhook-url-help"
+              role={webhookError ? "alert" : undefined}
+              className={`min-h-5 text-xs ${webhookError ? "text-destructive" : "text-muted-foreground"}`}
+            >
+              {webhookError ??
+                "HTTPS required. HTTP is accepted only for localhost development."}
+            </p>
           </div>
 
           <div className="space-y-2">
@@ -1006,7 +1193,7 @@ function WebhooksCard({ project }: { project: Doc<"projects"> }) {
           </div>
 
           <div className="flex justify-end">
-            <Button type="submit" disabled={saving || !urlValid || !dirty}>
+            <Button type="submit" disabled={saving || !dirty}>
               {saving
                 ? "Saving…"
                 : endpoint === null
@@ -1019,11 +1206,35 @@ function WebhooksCard({ project }: { project: Doc<"projects"> }) {
         <div className="space-y-2 border-t pt-4">
           <div className="flex items-center justify-between">
             <h4 className="text-sm font-medium">Recent deliveries</h4>
-            {endpoint === null ? null : (
+            {endpoint === null ||
+            deliveriesQuery.isPending ||
+            deliveriesQuery.isError ? null : (
               <Badge variant="outline">{deliveries.length}</Badge>
             )}
           </div>
-          {endpoint === null ? (
+          {deliveriesQuery.isPending ? (
+            <div className="space-y-2" aria-label="Loading deliveries">
+              <Skeleton className="h-14 w-full" />
+              <Skeleton className="h-14 w-full" />
+            </div>
+          ) : deliveriesQuery.isError ? (
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-dashed p-3">
+              <p className="text-xs text-muted-foreground">
+                {humanError(
+                  deliveriesQuery.error,
+                  "Could not load recent deliveries.",
+                )}
+              </p>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => void deliveriesQuery.refetch()}
+              >
+                Retry
+              </Button>
+            </div>
+          ) : endpoint === null ? (
             <p className="text-xs text-muted-foreground">
               Create an endpoint to start receiving deliveries.
             </p>
@@ -1071,6 +1282,51 @@ function WebhooksCard({ project }: { project: Doc<"projects"> }) {
             </ul>
           )}
         </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function SettingsCardSkeleton({
+  title,
+  description,
+}: {
+  title: string;
+  description: string;
+}) {
+  return (
+    <Card aria-label={`${title} loading`}>
+      <CardHeader>
+        <CardTitle>{title}</CardTitle>
+        <CardDescription>{description}</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <Skeleton className="h-9 w-full" />
+        <Skeleton className="h-16 w-full" />
+      </CardContent>
+    </Card>
+  );
+}
+
+function SettingsQueryErrorCard({
+  title,
+  message,
+  onRetry,
+}: {
+  title: string;
+  message: string;
+  onRetry: () => void;
+}) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>{title}</CardTitle>
+        <CardDescription>{message}</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <Button type="button" variant="outline" onClick={onRetry}>
+          Retry
+        </Button>
       </CardContent>
     </Card>
   );

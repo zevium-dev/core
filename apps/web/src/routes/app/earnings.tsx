@@ -28,6 +28,7 @@ import { Input } from "#/components/ui/input";
 import { Label } from "#/components/ui/label";
 import { api } from "#/lib/convex-api";
 import { humanError } from "#/lib/human-error";
+import { isPrivilegedOrgRole } from "#/lib/org-capabilities";
 import { formatCreditsAsUsd } from "#/lib/project-helpers";
 import {
   connectedAccountDisplay,
@@ -51,6 +52,13 @@ type ConnectedPayout = {
 type EarningsSearch = {
   onboarding?: "refresh" | "return";
 };
+
+const EARNINGS_DATE_FORMATTER = new Intl.DateTimeFormat("en-US", {
+  year: "numeric",
+  month: "short",
+  day: "numeric",
+  timeZone: "UTC",
+});
 
 export const Route = createFileRoute("/app/earnings")({
   validateSearch: (search: Record<string, unknown>): EarningsSearch => {
@@ -93,6 +101,8 @@ function EarningsPage() {
 }
 
 function EarningsContent() {
+  const { membership } = useOrganization();
+  const canManagePayouts = isPrivilegedOrgRole(membership?.role);
   const { onboarding } = Route.useSearch();
   const refreshStarted = useRef(false);
   const [publisherCountry, setPublisherCountry] = useState("");
@@ -117,10 +127,11 @@ function EarningsContent() {
   });
   const { profile, earnings, payouts, transfers } = payoutState;
   useEffect(() => {
-    if (onboarding !== "refresh" || refreshStarted.current) return;
+    if (!canManagePayouts || onboarding !== "refresh" || refreshStarted.current)
+      return;
     refreshStarted.current = true;
     openOnboarding();
-  }, [onboarding, openOnboarding]);
+  }, [canManagePayouts, onboarding, openOnboarding]);
   const initiatePublisherTransfer = useAction(
     api.payouts.initiatePublisherTransfer,
   );
@@ -177,7 +188,12 @@ function EarningsContent() {
               ))}
             </ul>
           ) : null}
-          {connect.action && connect.actionLabel ? (
+          {!canManagePayouts ? (
+            <p className="text-sm text-muted-foreground">
+              An organization admin manages Stripe onboarding and payout
+              transfers.
+            </p>
+          ) : connect.action && connect.actionLabel ? (
             <div className="space-y-3">
               {profile.status === "not_started" ? (
                 <div className="max-w-xs space-y-2">
@@ -224,7 +240,7 @@ function EarningsContent() {
               Your share after Zevium&apos;s 5% fee.
             </p>
           </div>
-          {profile.status === "enabled" ? (
+          {profile.status === "enabled" && canManagePayouts ? (
             <Button
               disabled={transferPending || !canTransfer}
               onClick={() => initiateTransfer()}
@@ -277,14 +293,14 @@ function EarningsContent() {
         ) : null}
         {earnings.failed > 0 ? (
           <p className="text-sm text-destructive">
-            {earnings.failed.toLocaleString()} credits need transfer review. See
-            transfer history for the safe failure reason.
+            {earnings.failed.toLocaleString("en-US")} credits need transfer
+            review. See transfer history for the safe failure reason.
           </p>
         ) : null}
         {earnings.reversed > 0 ? (
           <p className="text-sm text-destructive">
-            {earnings.reversed.toLocaleString()} credits were reversed. Review
-            ledger for affected earnings.
+            {earnings.reversed.toLocaleString("en-US")} credits were reversed.
+            Review ledger for affected earnings.
           </p>
         ) : null}
       </section>
@@ -404,25 +420,25 @@ function EarningsLedgerCard({
                       </Badge>
                     </td>
                     <td className="px-2 py-2.5 text-right tabular-nums">
-                      {earning.grossCredits.toLocaleString()}
+                      {earning.grossCredits.toLocaleString("en-US")}
                     </td>
                     <td className="hidden px-2 py-2.5 text-right tabular-nums text-muted-foreground sm:table-cell">
-                      {earning.platformFeeCredits.toLocaleString(undefined, {
+                      {earning.platformFeeCredits.toLocaleString("en-US", {
                         maximumFractionDigits: 2,
                       })}
                     </td>
                     <td className="px-2 py-2.5 text-right tabular-nums">
-                      {earning.netCredits.toLocaleString(undefined, {
+                      {earning.netCredits.toLocaleString("en-US", {
                         maximumFractionDigits: 2,
                       })}
                     </td>
                     <td className="hidden px-2 py-2.5 text-right tabular-nums text-muted-foreground md:table-cell">
-                      {earning.clawedBackCredits.toLocaleString(undefined, {
+                      {earning.clawedBackCredits.toLocaleString("en-US", {
                         maximumFractionDigits: 2,
                       })}
                     </td>
                     <td className="hidden px-2 py-2.5 whitespace-nowrap text-muted-foreground md:table-cell">
-                      {new Date(earning.availableAt).toLocaleDateString()}
+                      {EARNINGS_DATE_FORMATTER.format(earning.availableAt)}
                     </td>
                   </tr>
                 ))}
@@ -507,7 +523,7 @@ function TransferHistoryCard({
                         {formatMoney(transfer.amount, transfer.currency)}
                       </td>
                       <td className="px-2 py-2.5 whitespace-nowrap text-muted-foreground">
-                        {new Date(transfer.createdAt).toLocaleDateString()}
+                        {EARNINGS_DATE_FORMATTER.format(transfer.createdAt)}
                       </td>
                       <td className="hidden max-w-56 truncate px-2 py-2.5 text-muted-foreground md:table-cell">
                         {failure ?? transfer.stripeTransferId ?? "—"}
@@ -584,7 +600,7 @@ function PayoutHistoryCard({ payouts }: { payouts: ConnectedPayout[] }) {
                       </td>
                       <td className="px-2 py-2.5 whitespace-nowrap text-muted-foreground">
                         {payout.arrivalDate
-                          ? new Date(payout.arrivalDate).toLocaleDateString()
+                          ? EARNINGS_DATE_FORMATTER.format(payout.arrivalDate)
                           : "—"}
                       </td>
                       <td className="hidden max-w-56 truncate px-2 py-2.5 text-muted-foreground sm:table-cell">
@@ -620,7 +636,7 @@ function HistoryEmpty({
 }
 
 function formatMoney(amount: number, currency: string): string {
-  return new Intl.NumberFormat(undefined, {
+  return new Intl.NumberFormat("en-US", {
     style: "currency",
     currency: currency.toUpperCase(),
   }).format(amount / 100);

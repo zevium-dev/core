@@ -1,8 +1,12 @@
 import { clerkMiddleware } from "@clerk/tanstack-react-start/server";
-import { createStart } from "@tanstack/react-start";
+import { createCsrfMiddleware, createStart } from "@tanstack/react-start";
+
+const csrfMiddleware = createCsrfMiddleware({
+  filter: ({ handlerType }) => handlerType === "serverFn",
+});
 
 export const startInstance = createStart(() => {
   return {
-    requestMiddleware: [clerkMiddleware()],
+    requestMiddleware: [csrfMiddleware, clerkMiddleware()],
   };
 });

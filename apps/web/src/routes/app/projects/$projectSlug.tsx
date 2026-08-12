@@ -51,21 +51,43 @@ import {
 } from "#/components/ui/empty";
 import { Skeleton } from "#/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger } from "#/components/ui/tabs";
+import { ToggleGroup, ToggleGroupItem } from "#/components/ui/toggle-group";
+import {
+  ANALYTICS_RANGES,
+  buildDailyCallSeries,
+  callBarScale,
+  parseAnalyticsRange,
+  type AnalyticsRange,
+} from "#/lib/analytics-view";
 import { api } from "#/lib/convex-api";
 import type { Doc } from "#/lib/convex-data-model";
 import { humanError } from "#/lib/human-error";
+import { isPrivilegedOrgRole } from "#/lib/org-capabilities";
 import type { RouterContext } from "#/router";
 
 type ProjectPanel = "overview" | "analytics" | "earnings" | "settings";
-type ProjectSearch = { tab?: Exclude<ProjectPanel, "overview"> };
+type ProjectSearch = {
+  tab?: Exclude<ProjectPanel, "overview">;
+  range?: Exclude<AnalyticsRange, 7>;
+};
 
 export const Route = createFileRoute("/app/projects/$projectSlug")({
-  validateSearch: (search: Record<string, unknown>): ProjectSearch =>
-    search.tab === "analytics" ||
-    search.tab === "earnings" ||
-    search.tab === "settings"
-      ? { tab: search.tab }
-      : {},
+  validateSearch: (search: Record<string, unknown>): ProjectSearch => {
+    const tab =
+      search.tab === "analytics" ||
+      search.tab === "earnings" ||
+      search.tab === "settings"
+        ? search.tab
+        : null;
+    if (tab === null) return {};
+    const range = parseAnalyticsRange(search.range);
+    return {
+      tab,
+      ...(tab === "analytics" && range !== null && range !== 7
+        ? { range }
+        : {}),
+    };
+  },
   loader: async ({ context, params }) => {
     const { queryClient, orgSlug } = context as RouterContext;
     if (!orgSlug) return;
@@ -138,10 +160,12 @@ function ProjectShell({
   orgSlug: string;
   projectSlug: string;
 }) {
+  const { membership } = useOrganization();
+  const canAdminister = isPrivilegedOrgRole(membership?.role);
   const { data: project } = useSuspenseQuery(
     convexQuery(api.projects.get, { orgSlug, projectSlug }),
   );
-  const { tab: searchTab } = Route.useSearch();
+  const { tab: searchTab, range: searchRange } = Route.useSearch();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -157,12 +181,7 @@ function ProjectShell({
         patch: { visibility },
       });
     },
-    onSuccess: async (updated) => {
-      toast.success(
-        updated.visibility === "public"
-          ? "Project is now public"
-          : "Project is now private",
-      );
+    onSuccess: async () => {
       setVisibilityOpen(false);
       await queryClient.invalidateQueries({
         queryKey: convexQuery(api.projects.get, { orgSlug, projectSlug })
@@ -220,7 +239,7 @@ function ProjectShell({
             <Badge variant="outline">{project.visibility}</Badge>
           </div>
           <h1
-            className="text-2xl font-semibold tracking-tight"
+            className="min-w-0 text-2xl font-semibold tracking-tight [overflow-wrap:anywhere]"
             style={{
               viewTransitionName: `project-title-${project.slug}`,
             }}
@@ -247,7 +266,7 @@ function ProjectShell({
               Manage retirement
             </Link>
           </Button>
-        ) : (
+        ) : canAdminister ? (
           <Dialog open={visibilityOpen} onOpenChange={setVisibilityOpen}>
             <DialogTrigger asChild>
               <Button variant="outline">
@@ -280,6 +299,10 @@ function ProjectShell({
               </DialogFooter>
             </DialogContent>
           </Dialog>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            Admins manage project visibility.
+          </p>
         )}
       </div>
 
@@ -304,12 +327,20 @@ function ProjectShell({
             void navigate({
               to: "/app/projects/$projectSlug",
               params: { projectSlug: project.slug },
-              search: value === "overview" ? {} : { tab: value },
+              search:
+                value === "overview"
+                  ? {}
+                  : {
+                      tab: value,
+                      ...(value === "analytics" && searchRange
+                        ? { range: searchRange }
+                        : {}),
+                    },
             });
           }
         }}
       >
-        <TabsList>
+        <TabsList className="max-w-full justify-start overflow-x-auto">
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="spec">Spec</TabsTrigger>
           <TabsTrigger value="analytics">Analytics</TabsTrigger>
@@ -322,14 +353,33 @@ function ProjectShell({
         <Outlet />
       ) : panel === "analytics" ? (
         <Suspense fallback={<AnalyticsSkeleton />}>
-          <ProjectAnalyticsPanel orgSlug={orgSlug} projectSlug={project.slug} />
+          <ProjectAnalyticsPanel
+            orgSlug={orgSlug}
+            projectSlug={project.slug}
+            rangeDays={searchRange ?? 7}
+            onRangeChange={(rangeDays) =>
+              void navigate({
+                to: "/app/projects/$projectSlug",
+                params: { projectSlug: project.slug },
+                search: {
+                  tab: "analytics",
+                  ...(rangeDays === 7 ? {} : { range: rangeDays }),
+                },
+              })
+            }
+          />
         </Suspense>
       ) : panel === "earnings" ? (
         <Suspense fallback={<EarningsSkeleton />}>
           <ProjectEarningsPanel orgSlug={orgSlug} projectSlug={project.slug} />
         </Suspense>
       ) : panel === "settings" ? (
-        <ProjectSettingsPanel project={project} orgSlug={orgSlug} />
+        <ProjectSettingsPanel
+          key={String(project._id)}
+          project={project}
+          orgSlug={orgSlug}
+          canAdminister={canAdminister}
+        />
       ) : (
         <ProjectOverview
           project={project}
@@ -442,15 +492,19 @@ function formatPct(rate: number): string {
 function ProjectAnalyticsPanel({
   orgSlug,
   projectSlug,
+  rangeDays,
+  onRangeChange,
 }: {
   orgSlug: string;
   projectSlug: string;
+  rangeDays: AnalyticsRange;
+  onRangeChange: (rangeDays: AnalyticsRange) => void;
 }) {
   const { data: analytics } = useSuspenseQuery(
     convexQuery(api.analytics.projectAnalytics, {
       orgSlug,
       projectSlug,
-      rangeDays: 7,
+      rangeDays,
     }),
   );
 
@@ -470,6 +524,10 @@ function ProjectAnalyticsPanel({
 
   const maxDay = Math.max(1, ...analytics.callsByDay);
   const hasTraffic = analytics.calls > 0;
+  const dailyCalls = buildDailyCallSeries(
+    analytics.rangeStart,
+    analytics.callsByDay,
+  );
 
   return (
     <div className="flex flex-col gap-4">
@@ -519,11 +577,34 @@ function ProjectAnalyticsPanel({
       </div>
 
       <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Calls over time</CardTitle>
-          <CardDescription>
-            Daily metered calls over last {analytics.rangeDays} UTC days
-          </CardDescription>
+        <CardHeader className="gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div className="space-y-1.5">
+            <CardTitle className="text-base">Calls over time</CardTitle>
+            <CardDescription>
+              Daily metered calls over last {analytics.rangeDays} UTC days
+            </CardDescription>
+          </div>
+          <ToggleGroup
+            type="single"
+            variant="outline"
+            size="sm"
+            value={String(rangeDays)}
+            aria-label="Analytics time range"
+            onValueChange={(value) => {
+              const nextRange = parseAnalyticsRange(value);
+              if (nextRange !== null) onRangeChange(nextRange);
+            }}
+          >
+            {ANALYTICS_RANGES.map((range) => (
+              <ToggleGroupItem
+                key={range}
+                value={String(range)}
+                aria-label={`Last ${range} days`}
+              >
+                {range}d
+              </ToggleGroupItem>
+            ))}
+          </ToggleGroup>
         </CardHeader>
         <CardContent>
           {analytics.calls === 0 ? (
@@ -539,29 +620,78 @@ function ProjectAnalyticsPanel({
               </EmptyHeader>
             </Empty>
           ) : (
-            <div className="flex h-24 items-end gap-1">
-              {analytics.callsByDay.map((count, i) => {
-                const heightPct = Math.max(4, (count / maxDay) * 100);
-                return (
+            <div
+              role="img"
+              aria-label={`Bar chart of daily calls from ${dailyCalls[0]?.label ?? "range start"} to ${dailyCalls.at(-1)?.label ?? "range end"}. ${analytics.calls.toLocaleString("en-US")} calls total.`}
+            >
+              <div
+                className="flex h-28 items-end gap-px border-b sm:gap-1"
+                aria-hidden="true"
+              >
+                {dailyCalls.map((day) => (
                   <div
-                    key={i}
-                    className="flex flex-1 flex-col items-center gap-1"
-                    title={`${count} calls`}
+                    key={day.at}
+                    className="flex h-full min-w-0 flex-1 items-end"
                   >
                     <div
-                      className="w-full rounded-sm bg-primary/80 transition-[height] duration-[var(--dur-fast)] ease-[var(--ease)]"
-                      style={{ height: `${heightPct}%` }}
+                      className="h-full w-full origin-bottom rounded-t-sm bg-primary/80 transition-transform duration-[var(--dur-fast)] ease-[var(--ease)] motion-reduce:transition-none"
+                      style={{
+                        transform: `scaleY(${callBarScale(day.calls, maxDay)})`,
+                      }}
                     />
                   </div>
-                );
-              })}
+                ))}
+              </div>
+              <div
+                className="mt-2 flex justify-between text-xs text-muted-foreground"
+                aria-hidden="true"
+              >
+                <span>{dailyCalls[0]?.label}</span>
+                <span>{dailyCalls.at(-1)?.label}</span>
+              </div>
             </div>
           )}
           {analytics.truncated ? (
             <p className="mt-3 text-xs text-muted-foreground">
-              Scan capped at {analytics.scanCap.toLocaleString()} events — stats
-              may undercount.
+              Scan capped at {analytics.scanCap.toLocaleString("en-US")} events
+              — stats may undercount.
             </p>
+          ) : null}
+          {hasTraffic && dailyCalls.length > 0 ? (
+            <details className="mt-4 rounded-lg border px-3 py-2 text-sm">
+              <summary className="cursor-pointer font-medium outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50">
+                View daily data
+              </summary>
+              <div className="mt-3 max-h-72 overflow-auto">
+                <table className="w-full text-left text-sm">
+                  <thead className="sticky top-0 border-b bg-background text-xs text-muted-foreground">
+                    <tr>
+                      <th scope="col" className="px-2 py-2 font-medium">
+                        Day (UTC)
+                      </th>
+                      <th
+                        scope="col"
+                        className="px-2 py-2 text-right font-medium"
+                      >
+                        Calls
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {dailyCalls.map((day) => (
+                      <tr key={day.at} className="border-b last:border-0">
+                        <th scope="row" className="px-2 py-2 font-normal">
+                          {day.label}
+                        </th>
+                        <td className="px-2 py-2 text-right tabular-nums">
+                          {day.calls.toLocaleString("en-US")}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </details>
           ) : null}
         </CardContent>
       </Card>
@@ -632,10 +762,10 @@ function ProjectAnalyticsPanel({
                         {row.endpoint}
                       </td>
                       <td className="px-2 py-2.5 text-right tabular-nums">
-                        {row.calls.toLocaleString()}
+                        {row.calls.toLocaleString("en-US")}
                       </td>
                       <td className="px-2 py-2.5 text-right tabular-nums">
-                        {row.credits.toLocaleString()}
+                        {row.credits.toLocaleString("en-US")}
                       </td>
                       <td className="px-2 py-2.5 text-right tabular-nums text-muted-foreground">
                         {row.errors4xx}

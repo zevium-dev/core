@@ -39,7 +39,8 @@ export type NotificationsPage = {
 
 /**
  * Paginated notifications for the caller's org, newest first.
- * Includes unreadCount across all notifications (not just this page).
+ * Includes an exact unread count up to the UI's 99+ display threshold.
+ * The indexed `take` keeps this realtime query bounded for noisy orgs.
  */
 export const listForOrg = query({
   args: {

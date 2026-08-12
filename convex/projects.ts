@@ -322,7 +322,8 @@ export const create = mutation({
     description: v.optional(v.string()),
   },
   handler: async (ctx, args): Promise<Doc<"projects">> => {
-    const { org } = await requireOrgMemberBySlug(ctx, args.orgSlug);
+    const { claims, org } = await requireOrgMemberBySlug(ctx, args.orgSlug);
+    requireOrgAdmin(claims);
 
     const name = args.name.trim();
     if (name.length === 0) {
@@ -524,6 +525,7 @@ export const remove = mutation({
       project.deletionState !== undefined
     ) {
       throw new Error("Retired project cannot be deleted");
+
     }
 
     if (project.status === "published") {

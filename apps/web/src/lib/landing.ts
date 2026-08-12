@@ -50,7 +50,6 @@ export type LandingTeaser = {
   publisherHandle: string;
   orgName: string;
   description: string;
-  live: boolean;
 };
 
 export type CatalogueListItem = {
@@ -63,18 +62,13 @@ export type CatalogueListItem = {
 
 export function pickLandingTeasers(
   liveItems: CatalogueListItem[],
-  fallbacks: ReadonlyArray<Omit<LandingTeaser, "live">>,
   limit = 3,
 ): LandingTeaser[] {
-  if (liveItems.length > 0) {
-    return liveItems.slice(0, limit).map((item) => ({
-      name: item.name,
-      slug: item.slug,
-      publisherHandle: item.publisherHandle,
-      orgName: item.orgName,
-      description: item.description ?? "Published OpenAPI API.",
-      live: true,
-    }));
-  }
-  return fallbacks.slice(0, limit).map((item) => ({ ...item, live: false }));
+  return liveItems.slice(0, Math.max(0, limit)).map((item) => ({
+    name: item.name,
+    slug: item.slug,
+    publisherHandle: item.publisherHandle,
+    orgName: item.orgName,
+    description: item.description ?? "No description provided.",
+  }));
 }

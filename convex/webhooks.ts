@@ -137,7 +137,7 @@ export const upsertEndpoint = mutation({
   },
 });
 
-/** Fetch the webhook endpoint for a project (null if none). */
+/** Fetch admin-only endpoint configuration, including its signing secret. */
 export const getEndpoint = query({
   args: { projectId: v.id("projects") },
   handler: async (ctx, args): Promise<Doc<"webhookEndpoints"> | null> => {

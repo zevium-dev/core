@@ -1,7 +1,11 @@
 import { convexQuery, useConvexMutation } from "@convex-dev/react-query";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useBlocker } from "@tanstack/react-router";
-import { collectOpenApiSpecIssues, type SpecIssue } from "@zevium/shared";
+import {
+  collectOpenApiSpecIssues,
+  isValidSemver,
+  type SpecIssue,
+} from "@zevium/shared";
 import { useAction } from "convex/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -53,6 +57,8 @@ export type SpecWorkspaceProps = {
   visibility: "public" | "private";
   /** Nudges the publish flow to remind publishers to fill this in. */
   description: string | undefined;
+  /** Admin-only lifecycle controls; members may still edit and save drafts. */
+  canAdminister: boolean;
   savedDraft: string;
   savedDraftHash: string | null;
   lastSavedAt: number | null;
@@ -109,6 +115,7 @@ export function SpecWorkspace({
   projectSlug,
   visibility,
   description,
+  canAdminister,
   savedDraft,
   savedDraftHash,
   lastSavedAt: initialLastSavedAt,
@@ -125,6 +132,10 @@ export function SpecWorkspace({
   const [confirmedDraftHash, setConfirmedDraftHash] = useState(savedDraftHash);
   const [serverIssues, setServerIssues] = useState<SpecIssue[]>([]);
   const [publishOpen, setPublishOpen] = useState(false);
+  const [versionTouched, setVersionTouched] = useState(false);
+  const [pendingReplacement, setPendingReplacement] = useState<string | null>(
+    null,
+  );
   const [makePublicOpen, setMakePublicOpen] = useState(false);
   const [connectionResult, setConnectionResult] = useState<{
     status:
@@ -146,6 +157,7 @@ export function SpecWorkspace({
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(
     initialLastSavedAt,
   );
+  const versionInputRef = useRef<HTMLInputElement>(null);
   const [now, setNow] = useState(() => Date.now());
   const [goodEndpoints, setGoodEndpoints] = useState(
     () => listSpecEndpoints(initialText) ?? [],
@@ -233,6 +245,7 @@ export function SpecWorkspace({
 
   const dirty = text !== confirmedDraft;
   const hasClientErrors = clientErrors.length > 0;
+  const shouldBlockNavigation = useCallback(() => dirty, [dirty]);
 
   const saveDraftFn = useConvexMutation(api.specs.saveDraft);
   const publishFn = useConvexMutation(api.specs.publish);
@@ -243,7 +256,11 @@ export function SpecWorkspace({
   );
   const readinessCurrent = persistedReadiness.data?.current === true;
 
-  const { mutate: saveDraft, isPending: savePending } = useMutation({
+  const {
+    mutate: saveDraft,
+    mutateAsync: saveDraftAsync,
+    isPending: savePending,
+  } = useMutation({
     mutationFn: (spec: string) => saveDraftFn({ projectId, spec }),
     onSuccess: async (result, spec) => {
       setServerIssues(result.issues);
@@ -266,7 +283,6 @@ export function SpecWorkspace({
       setConfirmedDraft(spec);
       setConfirmedDraftHash(result.draftHash ?? null);
       setLastSavedAt(result.lastSavedAt);
-      toast.success("Draft saved");
       await queryClient.invalidateQueries({
         queryKey: convexQuery(api.specs.getDraft, { projectId }).queryKey,
       });
@@ -299,7 +315,6 @@ export function SpecWorkspace({
         toast.error(first?.message ?? "Publish failed — check issues");
         return;
       }
-      toast.success(`Published v${result.version?.version ?? version}`);
       setPublishOpen(false);
       await Promise.all([
         queryClient.invalidateQueries({
@@ -326,7 +341,7 @@ export function SpecWorkspace({
         patch: { visibility: "public" },
       }),
     onSuccess: async () => {
-      toast.success("Project is now public");
+      setMakePublicOpen(false);
       await queryClient.invalidateQueries({
         queryKey: convexQuery(api.projects.get, { orgSlug, projectSlug })
           .queryKey,
@@ -391,14 +406,19 @@ export function SpecWorkspace({
     saveDraft,
   ]);
 
-  // Guard against data loss on navigate-away / tab close while the user has
-  // unsaved edits. `shouldBlockFn` covers in-app route changes (e.g. the
-  // embedded "Add one in Settings" link); `enableBeforeUnload` covers tab
-  // close and refresh. Suppressed while a save is in flight.
-  useBlocker({
-    shouldBlockFn: () => dirty && !savePending,
-    enableBeforeUnload: () => dirty && !savePending,
+  // Keep the guard active during a save too: transport failure must never turn
+  // an in-flight draft into permission to discard edits.
+  const blocker = useBlocker({
+    shouldBlockFn: shouldBlockNavigation,
+    enableBeforeUnload: dirty,
+    withResolver: true,
   });
+
+  useEffect(() => {
+    if (!dirty && blocker.status === "blocked") {
+      blocker.proceed();
+    }
+  }, [dirty, blocker]);
 
   const status = deriveSaveStatus({
     dirty,
@@ -408,19 +428,18 @@ export function SpecWorkspace({
     now,
   });
 
-  function applyEditorText(next: string) {
+  function commitEditorReplacement(replacement: string) {
     resetAutosaveCircuit();
-    const converted = convertSpecInputToJson(next);
-    if (!converted.ok) {
-      setText(next);
+    setText(replacement);
+    setPendingReplacement(null);
+  }
+
+  function requestEditorReplacement(replacement: string) {
+    if (dirty) {
+      setPendingReplacement(replacement);
       return;
     }
-    if (converted.convertedFromYaml) {
-      setText(converted.json);
-      toast.success("Converted YAML to JSON");
-      return;
-    }
-    setText(converted.json === next ? next : converted.json);
+    commitEditorReplacement(replacement);
   }
 
   function onEditorChange(next: string) {
@@ -443,6 +462,15 @@ export function SpecWorkspace({
   }
 
   const hasDescription = description !== undefined && description.trim() !== "";
+  const normalizedVersion = version.trim();
+  const versionError =
+    normalizedVersion === ""
+      ? "Enter a version."
+      : !isValidSemver(normalizedVersion)
+        ? "Use semantic versioning, for example 1.2.0 or 1.2.0-beta.1."
+        : versions.some((item) => item.version === normalizedVersion)
+          ? `Version ${normalizedVersion} is already published.`
+          : null;
   const checklist = [
     {
       label: "Valid saved spec",
@@ -459,7 +487,7 @@ export function SpecWorkspace({
       detail:
         connectionResult?.message ??
         (readinessCurrent
-          ? "Saved passing connection test is current."
+          ? "Saved credential-free reachability test is current."
           : persistedReadiness.data?.reason === "expired"
             ? "Saved passing test expired. Run it again."
             : persistedReadiness.data?.reason === "draft_changed"
@@ -504,7 +532,18 @@ export function SpecWorkspace({
     },
   ];
 
-  const publishSlot = (
+  async function saveThenLeave() {
+    if (blocker.status !== "blocked") return;
+    const proceed = blocker.proceed;
+    try {
+      const result = await saveDraftAsync(textRef.current);
+      if (result.ok) proceed();
+    } catch {
+      // Mutation-level onError owns the human-readable message.
+    }
+  }
+
+  const publishSlot = canAdminister ? (
     <div className="space-y-3">
       <SpecRailVisibilityNudge
         visibility={visibility}
@@ -560,7 +599,7 @@ export function SpecWorkspace({
               hasClientErrors
             }
           >
-            {connectionPending ? "Testing…" : "Test connection"}
+            {connectionPending ? "Testing…" : "Test reachability"}
           </Button>
         </div>
         <ul className="mt-3 flex flex-col gap-2">
@@ -595,7 +634,13 @@ export function SpecWorkspace({
           .
         </p>
       ) : null}
-      <Dialog open={publishOpen} onOpenChange={setPublishOpen}>
+      <Dialog
+        open={publishOpen}
+        onOpenChange={(open) => {
+          setPublishOpen(open);
+          if (!open) setVersionTouched(false);
+        }}
+      >
         <DialogTrigger asChild>
           <Button
             className="w-full"
@@ -603,7 +648,7 @@ export function SpecWorkspace({
               dirty || savePending || hasClientErrors || !readinessCurrent
             }
           >
-            {readinessCurrent ? "Publish" : "Test connection to publish"}
+            {readinessCurrent ? "Publish" : "Test reachability to publish"}
           </Button>
         </DialogTrigger>
         <DialogContent>
@@ -617,13 +662,26 @@ export function SpecWorkspace({
           <div className="space-y-2 py-2">
             <Label htmlFor="semver">Version</Label>
             <Input
+              ref={versionInputRef}
               id="semver"
               value={version}
               onChange={(e) => setVersion(e.target.value)}
+              onBlur={() => setVersionTouched(true)}
               placeholder="0.1.0"
               className="font-mono"
               disabled={publishPending}
+              autoComplete="off"
+              spellCheck={false}
+              aria-invalid={versionTouched && versionError !== null}
+              aria-describedby={
+                versionTouched && versionError ? "semver-error" : undefined
+              }
             />
+            {versionTouched && versionError ? (
+              <p id="semver-error" className="text-sm text-destructive">
+                {versionError}
+              </p>
+            ) : null}
           </div>
           <DialogFooter>
             <Button
@@ -634,8 +692,15 @@ export function SpecWorkspace({
               Cancel
             </Button>
             <Button
-              onClick={() => publish()}
-              disabled={publishPending || version.trim() === ""}
+              onClick={() => {
+                setVersionTouched(true);
+                if (versionError) {
+                  versionInputRef.current?.focus();
+                  return;
+                }
+                publish();
+              }}
+              disabled={publishPending}
             >
               {publishPending ? "Publishing…" : "Publish"}
             </Button>
@@ -647,6 +712,14 @@ export function SpecWorkspace({
           Save draft before publishing.
         </p>
       ) : null}
+    </div>
+  ) : (
+    <div className="rounded-md border bg-muted/30 p-3 text-sm">
+      <p className="font-medium">Admin access required to publish</p>
+      <p className="mt-1 text-muted-foreground">
+        You can edit and save this draft. An organization admin must test the
+        upstream, publish versions, and change listing visibility.
+      </p>
     </div>
   );
 
@@ -675,7 +748,7 @@ export function SpecWorkspace({
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex flex-wrap items-center gap-2">
               <EditorToolbar
-                onApplyText={applyEditorText}
+                onApplyText={requestEditorReplacement}
                 disabled={savePending}
               />
               {pricing ? (
@@ -726,6 +799,7 @@ export function SpecWorkspace({
             onSelectVersion={(id) =>
               setVersionDialogId(id as Id<"specVersions">)
             }
+            canAdminister={canAdminister}
           />
         </div>
       </div>
@@ -741,6 +815,100 @@ export function SpecWorkspace({
           if (!open) setVersionDialogId(null);
         }}
       />
+      <Dialog
+        open={pendingReplacement !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingReplacement(null);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Replace unsaved editor changes?</DialogTitle>
+            <DialogDescription>
+              Imported content replaces the editor. Your saved draft stays
+              unchanged until the replacement is saved.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => setPendingReplacement(null)}
+            >
+              Keep editing
+            </Button>
+            <Button
+              type="button"
+              onClick={() => {
+                if (pendingReplacement) {
+                  commitEditorReplacement(pendingReplacement);
+                }
+              }}
+            >
+              Replace editor
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog
+        open={blocker.status === "blocked"}
+        onOpenChange={(open) => {
+          if (!open && blocker.status === "blocked") blocker.reset();
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Leave with unsaved changes?</DialogTitle>
+            <DialogDescription>
+              {blocker.status === "blocked" ? (
+                <>
+                  Draft differs from saved version. Navigation to{" "}
+                  <span className="font-mono">{blocker.next.pathname}</span> is
+                  paused.
+                </>
+              ) : (
+                "Draft differs from the saved version."
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          {hasClientErrors && text.trim() !== "" ? (
+            <p className="text-sm text-destructive">
+              Draft has validation errors and cannot be saved yet.
+            </p>
+          ) : null}
+          <DialogFooter className="sm:justify-between">
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => {
+                if (blocker.status === "blocked") blocker.reset();
+              }}
+            >
+              Keep editing
+            </Button>
+            <div className="flex flex-col-reverse gap-2 sm:flex-row">
+              <Button
+                type="button"
+                variant="destructive"
+                onClick={() => {
+                  if (blocker.status === "blocked") blocker.proceed();
+                }}
+              >
+                Discard and leave
+              </Button>
+              <Button
+                type="button"
+                onClick={() => void saveThenLeave()}
+                disabled={
+                  savePending || (hasClientErrors && text.trim() !== "")
+                }
+              >
+                {savePending ? "Saving…" : "Save and leave"}
+              </Button>
+            </div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

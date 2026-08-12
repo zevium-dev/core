@@ -1,5 +1,4 @@
 import type { SpecIssue } from "@zevium/shared";
-import { useOrganization } from "@clerk/tanstack-react-start";
 import {
   useCallback,
   useEffect,
@@ -69,6 +68,12 @@ export type SpecRailEndpointsProps = {
 type EndpointInputValue = { cost: string; freeTier: string };
 
 const PRICING_DEBOUNCE_MS = 300;
+const VERSION_DATE_FORMATTER = new Intl.DateTimeFormat("en-US", {
+  year: "numeric",
+  month: "short",
+  day: "numeric",
+  timeZone: "UTC",
+});
 
 function endpointKey(method: string, path: string): string {
   return `${method}:${path}`;
@@ -343,6 +348,7 @@ export type SpecRailVersionsProps = {
   publishSlot: ReactNode;
   projectId: Id<"projects">;
   onSelectVersion?: (versionId: SpecVersionRow["_id"]) => void;
+  canAdminister: boolean;
 };
 
 export function SpecRailVersions({
@@ -350,9 +356,8 @@ export function SpecRailVersions({
   publishSlot,
   projectId,
   onSelectVersion,
+  canAdminister,
 }: SpecRailVersionsProps) {
-  const { membership } = useOrganization();
-  const canManageLifecycle = membership?.role === "org:admin";
   const queryClient = useQueryClient();
   const [deprecateTarget, setDeprecateTarget] = useState<SpecVersionRow | null>(
     null,
@@ -376,7 +381,6 @@ export function SpecRailVersions({
       message: string;
     }) => deprecateMut(input),
     onSuccess: async () => {
-      toast.success("Version deprecated");
       setDeprecateTarget(null);
       await invalidateVersions();
     },
@@ -388,7 +392,6 @@ export function SpecRailVersions({
     mutationFn: (versionId: Id<"specVersions">) =>
       undeprecateMut({ versionId }),
     onSuccess: async () => {
-      toast.success("Version restored");
       setUndeprecateTarget(null);
       await invalidateVersions();
     },
@@ -419,7 +422,7 @@ export function SpecRailVersions({
                 onSelect={onSelectVersion}
                 onDeprecate={setDeprecateTarget}
                 onUndeprecate={setUndeprecateTarget}
-                canManageLifecycle={canManageLifecycle}
+                canAdminister={canAdminister}
                 busy={
                   (deprecating && deprecateTarget?._id === v._id) ||
                   (undeprecating && undeprecateTarget?._id === v._id)
@@ -459,15 +462,15 @@ function VersionRow({
   onSelect,
   onDeprecate,
   onUndeprecate,
-  canManageLifecycle,
   busy,
+  canAdminister,
 }: {
   version: SpecVersionRow;
   onSelect?: (versionId: SpecVersionRow["_id"]) => void;
   onDeprecate: (row: SpecVersionRow) => void;
   onUndeprecate: (row: SpecVersionRow) => void;
-  canManageLifecycle: boolean;
   busy: boolean;
+  canAdminister: boolean;
 }) {
   const deprecated = version.deprecatedAt !== undefined;
   const sunsetReached =
@@ -495,15 +498,15 @@ function VersionRow({
           ) : null}
         </button>
         <span className="shrink-0 text-xs text-muted-foreground">
-          {new Date(version.publishedAt).toLocaleDateString()}
+          {VERSION_DATE_FORMATTER.format(version.publishedAt)}
         </span>
-        {canManageLifecycle ? (
+        {canAdminister ? (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button
                 variant="ghost"
                 size="icon"
-                className="size-7 shrink-0 opacity-0 transition-opacity duration-[var(--dur-instant)] ease-[var(--ease)] group-hover:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100"
+                className="size-7 shrink-0 transition-opacity duration-[var(--dur-instant)] ease-[var(--ease)] [@media(hover:hover)_and_(pointer:fine)]:opacity-0 [@media(hover:hover)_and_(pointer:fine)]:group-hover:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100"
                 disabled={busy}
                 aria-label={`Actions for version ${version.version}`}
               >
@@ -633,6 +636,7 @@ function DeprecateDialog({
               rows={3}
               disabled={pending}
               placeholder="e.g. Move to v2 before cutoff…"
+              className="min-h-20"
               aria-describedby="deprecate-message-help"
               aria-invalid={message.length > 0 && !messageValid}
             />

@@ -10,6 +10,7 @@ import { internal } from "./_generated/api";
 import {
   getOrgByClerkId,
   getOrgByPublicHandle,
+  requireActiveOrg,
   requireIdentity,
   requireOrgAdmin,
 } from "./lib/auth";
@@ -126,6 +127,15 @@ export const listMine = query({
         publicHandleLocked: publishedProject !== null,
       },
     ];
+  },
+});
+
+/** Auth-sensitive role projection consumed by role-shaped app routes. */
+export const activeCapabilities = query({
+  args: {},
+  handler: async (ctx) => {
+    const { access } = await requireActiveOrg(ctx);
+    return access;
   },
 });
 

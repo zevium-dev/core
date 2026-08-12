@@ -215,7 +215,7 @@ export const createKey = createServerFn({ method: "POST" })
     });
     if (active) {
       throw new Error(
-        "Only one API key per organization. Revoke the existing key first.",
+        "Only one active API key per organization. Revoke or rotate the existing key first.",
       );
     }
 
@@ -490,6 +490,10 @@ export const rotateKey = createServerFn({ method: "POST" })
           projectionSecret,
           projection,
         ),
+      });
+      await convex.mutation(api.keySettings.registerOwnedKey, {
+        keyId: created.id,
+        keyName: created.name,
       });
       return {
         id: created.id,

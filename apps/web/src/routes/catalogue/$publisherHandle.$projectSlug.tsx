@@ -1,13 +1,6 @@
-import { Show } from "@clerk/tanstack-react-start";
 import { convexQuery } from "@convex-dev/react-query";
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { Link, createFileRoute } from "@tanstack/react-router";
-import {
-  extractPricing,
-  parseSpec,
-  type HttpMethod,
-  type OpenApiOperation,
-} from "@zevium/shared";
+import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
 import { Check, Copy, PackageX, Terminal, TriangleAlert } from "lucide-react";
 import {
   Suspense,
@@ -17,7 +10,6 @@ import {
   useState,
   type FormEvent,
 } from "react";
-import { toast } from "sonner";
 
 import { PublicHeader } from "#/components/public-header";
 import { QualityBadges } from "#/components/quality-badges";
@@ -40,27 +32,52 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "#/components/ui/empty";
+import {
+  Field,
+  FieldDescription,
+  FieldError,
+  FieldGroup,
+  FieldLabel,
+} from "#/components/ui/field";
 import { Input } from "#/components/ui/input";
-import { Label } from "#/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "#/components/ui/select";
 import { Skeleton } from "#/components/ui/skeleton";
-import { Switch } from "#/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "#/components/ui/tabs";
+import { Textarea } from "#/components/ui/textarea";
+import { ToggleGroup, ToggleGroupItem } from "#/components/ui/toggle-group";
 import { api } from "#/lib/convex-api";
 import { creditsLabel } from "#/lib/credits-label";
-import { humanError } from "#/lib/human-error";
 import {
   buildMcpConfigSnippet,
   mcpEndpointUrl,
   resolveGatewayOrigin,
   tryItBaseUrl,
 } from "#/lib/landing";
-import { tryItBodyDefaults } from "#/lib/try-it";
+import {
+  appendQueryParameters,
+  buildRequestPath,
+  parsePublishedEndpoints,
+  readableSuccessResponse,
+  sanitizedGatewayErrorResponse,
+  type ApiEndpoint,
+  type ApiParameter,
+} from "#/lib/openapi-reference";
 
 const API_KEY_STORAGE = "zevium:playground-api-key";
 const DEFAULT_GATEWAY = "http://localhost:8787/gateway";
-
-const TEXTAREA_CLASS =
-  "flex min-h-24 w-full rounded-md border border-input bg-transparent px-3 py-2 font-mono text-xs shadow-xs transition-[color,box-shadow] outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50";
+const DATE_FORMATTER = new Intl.DateTimeFormat("en-US", {
+  year: "numeric",
+  month: "short",
+  day: "numeric",
+  timeZone: "UTC",
+});
 
 function responseLanguage(body: string): "json" | "plain" {
   try {
@@ -71,9 +88,24 @@ function responseLanguage(body: string): "json" | "plain" {
   }
 }
 
+type EndpointRow = ApiEndpoint;
+type ApiDetailTab = "try" | "docs" | "agent";
+type PlaygroundMode = "mock" | "live";
+type ApiDetailSearch = {
+  tab: ApiDetailTab;
+  mode: PlaygroundMode;
+  operation?: string;
+};
+
 export const Route = createFileRoute(
   "/catalogue/$publisherHandle/$projectSlug",
 )({
+  validateSearch: (search: Record<string, unknown>): ApiDetailSearch => ({
+    tab: search.tab === "docs" || search.tab === "agent" ? search.tab : "try",
+    mode: search.mode === "live" ? "live" : "mock",
+    operation:
+      typeof search.operation === "string" ? search.operation : undefined,
+  }),
   loader: async ({ context, params }) => {
     const { queryClient } = context;
     const queryOpts = convexQuery(api.catalogue.getPublicDetail, {
@@ -106,24 +138,13 @@ export const Route = createFileRoute(
   pendingComponent: ApiDetailSkeleton,
 });
 
-type EndpointRow = {
-  id: string;
-  method: HttpMethod;
-  path: string;
-  summary: string | undefined;
-  cost: number;
-  freeTier: number | undefined;
-  pathParams: string[];
-  requestContentType: string;
-  requestBodyExample: string;
-};
-
 type PlayResult = {
   status: number;
   statusText: string;
   ms: number;
   body: string;
   mock: boolean;
+  contentType: string | null;
   requestId?: string;
 };
 
@@ -133,49 +154,6 @@ function gatewayBaseUrl(): string {
     return env.replace(/\/+$/, "");
   }
   return DEFAULT_GATEWAY;
-}
-
-function listEndpoints(specJson: string): EndpointRow[] {
-  const spec = parseSpec(specJson);
-  const rows: EndpointRow[] = [];
-  for (const [path, pathItem] of Object.entries(spec.paths)) {
-    for (const [method, op] of Object.entries(pathItem)) {
-      if (op === undefined) continue;
-      const operation = op as OpenApiOperation;
-      const pricing = extractPricing(operation);
-      const bodyDefaults = tryItBodyDefaults(operation);
-      const pathParams = Array.from(path.matchAll(/\{([^}/]+)\}/g)).map(
-        (m) => m[1]!,
-      );
-      rows.push({
-        id: `${method}:${path}`,
-        method: method as HttpMethod,
-        path,
-        summary:
-          typeof operation.summary === "string" ? operation.summary : undefined,
-        cost: pricing.cost,
-        freeTier: pricing.freeTier,
-        pathParams,
-        requestContentType: bodyDefaults.contentType,
-        requestBodyExample: bodyDefaults.body,
-      });
-    }
-  }
-  rows.sort((a, b) => {
-    if (a.path !== b.path) return a.path.localeCompare(b.path);
-    return a.method.localeCompare(b.method);
-  });
-  return rows;
-}
-
-function buildRequestPath(
-  template: string,
-  params: Record<string, string>,
-): string {
-  return template.replace(/\{([^}/]+)\}/g, (_, name: string) => {
-    const value = params[name] ?? "";
-    return encodeURIComponent(value);
-  });
 }
 
 function parseExtraHeaders(raw: string): Record<string, string> {
@@ -221,13 +199,25 @@ function buildCurl(opts: {
   return parts.join(" \\\n");
 }
 
-async function copyText(text: string, okMsg: string) {
+async function copyText(text: string): Promise<boolean> {
   try {
     await navigator.clipboard.writeText(text);
-    toast.success(okMsg);
+    return true;
   } catch {
-    toast.error("Could not copy to clipboard");
+    return false;
   }
+}
+
+function parameterInputId(endpointId: string, parameter: ApiParameter): string {
+  return `try-${endpointId}-${parameter.key}`.replace(/[^a-zA-Z0-9_-]/g, "-");
+}
+
+function liveCostLabel(endpoint: EndpointRow | null): string {
+  if (endpoint === null) return "cost unavailable";
+  if (endpoint.freeTier !== undefined) {
+    return `up to ${creditsLabel(endpoint.cost)}`;
+  }
+  return creditsLabel(endpoint.cost);
 }
 
 function ApiDetailPage() {
@@ -237,7 +227,11 @@ function ApiDetailPage() {
     <div className="min-h-screen bg-background">
       <PublicHeader active="catalogue" />
 
-      <main className="mx-auto max-w-6xl px-4 py-8 content-enter">
+      <main
+        id="main-content"
+        tabIndex={-1}
+        className="mx-auto max-w-6xl px-4 py-8 outline-none content-enter"
+      >
         <Suspense fallback={<ApiDetailBodySkeleton />}>
           <ApiDetailBody
             publisherHandle={publisherHandle}
@@ -256,6 +250,8 @@ function ApiDetailBody({
   publisherHandle: string;
   projectSlug: string;
 }) {
+  const routeSearch = Route.useSearch();
+  const navigate = useNavigate({ from: Route.fullPath });
   const { data } = useSuspenseQuery(
     convexQuery(api.catalogue.getPublicDetail, {
       publisherHandle,
@@ -267,7 +263,7 @@ function ApiDetailBody({
     if (data === null || data.latestVersion === null)
       return [] as EndpointRow[];
     try {
-      return listEndpoints(data.latestVersion.spec);
+      return parsePublishedEndpoints(data.latestVersion.spec);
     } catch {
       return [] as EndpointRow[];
     }
@@ -283,6 +279,32 @@ function ApiDetailBody({
     }
     return min === max ? creditsLabel(min) : `${min}–${max} credits`;
   }, [endpoints]);
+
+  const selectedEndpointId =
+    endpoints.find((endpoint) => endpoint.id === routeSearch.operation)?.id ??
+    endpoints[0]?.id ??
+    "";
+
+  const setTab = (tab: ApiDetailTab) => {
+    void navigate({
+      search: { ...routeSearch, tab },
+      replace: true,
+    });
+  };
+
+  const setOperation = (operation: string) => {
+    void navigate({
+      search: { ...routeSearch, operation },
+      replace: true,
+    });
+  };
+
+  const setMode = (mode: PlaygroundMode) => {
+    void navigate({
+      search: { ...routeSearch, mode },
+      replace: true,
+    });
+  };
 
   if (data === null) {
     return <ApiNotFound />;
@@ -303,9 +325,9 @@ function ApiDetailBody({
               </span>
             </p>
             <h1
-              className="text-3xl font-semibold tracking-tight"
+              className="min-w-0 text-3xl font-semibold tracking-tight [overflow-wrap:anywhere]"
               style={{
-                viewTransitionName: `api-title-${data.project.slug}`,
+                viewTransitionName: `api-title-${data.org.publisherHandle}-${data.project.slug}`,
               }}
             >
               {data.project.name}
@@ -322,7 +344,12 @@ function ApiDetailBody({
                 <>
                   {" "}
                   ·{" "}
-                  <span className="tabular-nums text-foreground">
+                  <span
+                    className="tabular-nums text-foreground"
+                    style={{
+                      viewTransitionName: `api-price-${data.org.publisherHandle}-${data.project.slug}`,
+                    }}
+                  >
                     {priceRange}
                   </span>
                 </>
@@ -351,6 +378,10 @@ function ApiDetailBody({
             ))}
           </div>
         ) : null}
+        <p className="text-xs text-muted-foreground">
+          Runtime reliability and publisher verification are not reported yet.
+          Start with the keyless mock before choosing a live call.
+        </p>
       </div>
 
       {data.latestVersion?.deprecatedAt !== undefined ? (
@@ -360,7 +391,7 @@ function ApiDetailBody({
             <p className="font-medium text-warning-foreground">
               Deprecated
               {data.latestVersion.sunsetAt !== undefined
-                ? ` — sunset ${new Date(data.latestVersion.sunsetAt).toLocaleDateString()}`
+                ? ` — sunset ${DATE_FORMATTER.format(data.latestVersion.sunsetAt)}`
                 : ""}
             </p>
             {data.latestVersion.deprecationMessage ? (
@@ -372,26 +403,52 @@ function ApiDetailBody({
         </div>
       ) : null}
 
-      <PricingTable endpoints={endpoints} />
-
       <QualityBadges quality={data.quality} />
 
-      <Tabs defaultValue="docs" className="gap-4">
-        <TabsList variant="line">
-          <TabsTrigger value="docs">Docs</TabsTrigger>
-          <TabsTrigger value="try-it">Try it</TabsTrigger>
+      <Tabs
+        value={routeSearch.tab}
+        onValueChange={(value) => {
+          if (value === "try" || value === "docs" || value === "agent") {
+            setTab(value);
+          }
+        }}
+        className="gap-4"
+      >
+        <TabsList
+          variant="line"
+          aria-label="API tools"
+          className="max-w-full justify-start overflow-x-auto"
+        >
+          <TabsTrigger value="try">Try it</TabsTrigger>
+          <TabsTrigger value="docs">Reference</TabsTrigger>
           <TabsTrigger value="agent">Connect your agent</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="docs" className="mt-2">
-          <EndpointDocs endpoints={endpoints} />
-        </TabsContent>
-
-        <TabsContent value="try-it" className="mt-2">
+        <TabsContent value="try" className="mt-2">
           <TryItPanel
             publisherHandle={data.org.publisherHandle}
             projectSlug={data.project.slug}
             endpoints={endpoints}
+            endpointId={selectedEndpointId}
+            mode={routeSearch.mode}
+            onEndpointChange={setOperation}
+            onModeChange={setMode}
+          />
+        </TabsContent>
+
+        <TabsContent value="docs" className="mt-2">
+          <EndpointDocs
+            endpoints={endpoints}
+            onTry={(operation) => {
+              void navigate({
+                search: {
+                  ...routeSearch,
+                  tab: "try",
+                  mode: "mock",
+                  operation,
+                },
+              });
+            }}
           />
         </TabsContent>
 
@@ -408,75 +465,13 @@ function ApiDetailBody({
   );
 }
 
-function PricingTable({ endpoints }: { endpoints: EndpointRow[] }) {
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-base">Pricing</CardTitle>
-        <CardDescription>
-          Per-endpoint credits from the published OpenAPI spec (
-          <span className="font-mono text-xs">x-zevium-cost</span>
-          ).
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        {endpoints.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            No priced endpoints in the published spec yet.
-          </p>
-        ) : (
-          <div className="overflow-x-auto rounded-md border">
-            <table className="w-full min-w-[28rem] text-left text-sm">
-              <thead className="border-b bg-muted/40 text-xs text-muted-foreground">
-                <tr>
-                  <th scope="col" className="px-3 py-2 font-medium">
-                    Method
-                  </th>
-                  <th scope="col" className="px-3 py-2 font-medium">
-                    Path
-                  </th>
-                  <th scope="col" className="px-3 py-2 font-medium">
-                    Summary
-                  </th>
-                  <th
-                    scope="col"
-                    className="px-3 py-2 font-medium tabular-nums"
-                  >
-                    Credits
-                  </th>
-                  <th scope="col" className="px-3 py-2 font-medium">
-                    Free tier
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {endpoints.map((ep) => (
-                  <tr key={ep.id} className="border-b last:border-0">
-                    <td className="px-3 py-2">
-                      <MethodBadge method={ep.method} />
-                    </td>
-                    <td className="px-3 py-2 font-mono text-xs">{ep.path}</td>
-                    <td className="px-3 py-2 text-muted-foreground">
-                      {ep.summary ?? "—"}
-                    </td>
-                    <td className="px-3 py-2 tabular-nums">{ep.cost}</td>
-                    <td className="px-3 py-2 text-muted-foreground">
-                      {ep.freeTier !== undefined && ep.freeTier > 0
-                        ? `${ep.freeTier}/day`
-                        : "—"}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </CardContent>
-    </Card>
-  );
-}
-
-function EndpointDocs({ endpoints }: { endpoints: EndpointRow[] }) {
+function EndpointDocs({
+  endpoints,
+  onTry,
+}: {
+  endpoints: EndpointRow[];
+  onTry: (endpointId: string) => void;
+}) {
   if (endpoints.length === 0) {
     return (
       <Card className="border-dashed">
@@ -491,33 +486,225 @@ function EndpointDocs({ endpoints }: { endpoints: EndpointRow[] }) {
   }
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-base">Endpoints</CardTitle>
-        <CardDescription>
-          Operation list with method badges, summaries, and per-call credits.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-2">
+    <div className="space-y-4">
+      <div>
+        <h2 className="text-lg font-semibold tracking-tight">API reference</h2>
+        <p className="text-sm text-muted-foreground">
+          Parameters, examples, responses, and exact live cost come from this
+          immutable published OpenAPI version.
+        </p>
+      </div>
+      <div className="space-y-4">
         {endpoints.map((ep) => (
-          <div
-            key={ep.id}
-            className="flex flex-wrap items-start gap-3 rounded-lg border px-3 py-3"
-          >
-            <MethodBadge method={ep.method} />
-            <div className="min-w-0 flex-1 space-y-1">
-              <p className="font-mono text-sm">{ep.path}</p>
-              {ep.summary ? (
-                <p className="text-sm text-muted-foreground">{ep.summary}</p>
+          <Card key={ep.id} id={`operation-${encodeURIComponent(ep.id)}`}>
+            <CardHeader>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div className="min-w-0 space-y-2">
+                  <div className="flex min-w-0 flex-wrap items-center gap-2">
+                    <MethodBadge method={ep.method} />
+                    <code className="min-w-0 break-all text-sm">{ep.path}</code>
+                  </div>
+                  <CardTitle className="text-base">
+                    {ep.summary ?? ep.operationId ?? "Untitled operation"}
+                  </CardTitle>
+                  {ep.description ? (
+                    <CardDescription className="max-w-3xl whitespace-pre-wrap">
+                      {ep.description}
+                    </CardDescription>
+                  ) : null}
+                </div>
+                <div className="flex shrink-0 flex-wrap items-center gap-2">
+                  <Badge variant="secondary" className="tabular-nums">
+                    Live · {creditsLabel(ep.cost)}
+                  </Badge>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => onTry(ep.id)}
+                  >
+                    Try mock
+                  </Button>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-5">
+              <div className="flex flex-wrap gap-2">
+                <Badge variant="outline">Mock · 0 credits</Badge>
+                {ep.freeTier !== undefined ? (
+                  <Badge variant="outline">
+                    {ep.freeTier} free live calls/day
+                  </Badge>
+                ) : null}
+                {ep.operationId ? (
+                  <Badge variant="outline">
+                    <code>{ep.operationId}</code>
+                  </Badge>
+                ) : null}
+                {ep.tags.map((tag) => (
+                  <Badge key={tag} variant="outline">
+                    {tag}
+                  </Badge>
+                ))}
+              </div>
+
+              <ReferenceParameters parameters={ep.parameters} />
+
+              {ep.requestBodyDeclared ? (
+                <div className="space-y-2">
+                  <h3 className="text-sm font-medium">
+                    Request body{ep.requestBodyRequired ? " · required" : ""}
+                  </h3>
+                  <p className="font-mono text-xs text-muted-foreground">
+                    {ep.requestContentType}
+                  </p>
+                  <pre className="max-h-72 overflow-auto rounded-md border bg-muted/40 p-3 font-mono text-xs whitespace-pre-wrap">
+                    <SyntaxCode
+                      code={ep.requestBodyExample}
+                      lang={
+                        ep.requestContentType.includes("json")
+                          ? "json"
+                          : "plain"
+                      }
+                    />
+                  </pre>
+                </div>
               ) : null}
-            </div>
-            <Badge variant="secondary" className="tabular-nums">
-              {creditsLabel(ep.cost)}
-            </Badge>
-          </div>
+
+              <ReferenceResponses responses={ep.responses} />
+            </CardContent>
+          </Card>
         ))}
-      </CardContent>
-    </Card>
+      </div>
+    </div>
+  );
+}
+
+function ReferenceParameters({ parameters }: { parameters: ApiParameter[] }) {
+  if (parameters.length === 0) {
+    return (
+      <div className="space-y-1">
+        <h3 className="text-sm font-medium">Parameters</h3>
+        <p className="text-sm text-muted-foreground">No parameters declared.</p>
+      </div>
+    );
+  }
+  return (
+    <div className="space-y-2">
+      <h3 className="text-sm font-medium">Parameters</h3>
+      <div className="overflow-x-auto rounded-md border">
+        <table className="w-full min-w-[34rem] text-left text-sm">
+          <thead className="border-b bg-muted/40 text-xs text-muted-foreground">
+            <tr>
+              <th scope="col" className="px-3 py-2 font-medium">
+                Name
+              </th>
+              <th scope="col" className="px-3 py-2 font-medium">
+                In
+              </th>
+              <th scope="col" className="px-3 py-2 font-medium">
+                Type
+              </th>
+              <th scope="col" className="px-3 py-2 font-medium">
+                Description
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {parameters.map((parameter) => (
+              <tr key={parameter.key} className="border-b last:border-0">
+                <th
+                  scope="row"
+                  className="px-3 py-2 font-mono text-xs font-medium"
+                >
+                  {parameter.name}
+                  {parameter.required ? (
+                    <span
+                      className="ml-1 text-destructive"
+                      aria-label="required"
+                    >
+                      *
+                    </span>
+                  ) : null}
+                </th>
+                <td className="px-3 py-2 text-muted-foreground">
+                  {parameter.location}
+                </td>
+                <td className="px-3 py-2 font-mono text-xs">
+                  {parameter.type}
+                </td>
+                <td className="px-3 py-2 text-muted-foreground">
+                  {parameter.description ?? "—"}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function ReferenceResponses({
+  responses,
+}: {
+  responses: ApiEndpoint["responses"];
+}) {
+  if (responses.length === 0) {
+    return (
+      <div className="space-y-1">
+        <h3 className="text-sm font-medium">Responses</h3>
+        <p className="text-sm text-muted-foreground">No responses declared.</p>
+      </div>
+    );
+  }
+  return (
+    <div className="space-y-2">
+      <h3 className="text-sm font-medium">Responses</h3>
+      <div className="divide-y rounded-md border">
+        {responses.map((response) => (
+          <details key={response.status} className="group px-3 py-2.5">
+            <summary className="flex cursor-pointer list-none items-center gap-3 rounded-sm text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50">
+              <Badge variant="outline" className="tabular-nums">
+                {response.status}
+              </Badge>
+              <span className="min-w-0 flex-1 truncate">
+                {response.description ?? "No description"}
+              </span>
+              <span className="text-xs text-muted-foreground group-open:hidden">
+                View
+              </span>
+              <span className="hidden text-xs text-muted-foreground group-open:inline">
+                Hide
+              </span>
+            </summary>
+            <div className="space-y-2 pt-3">
+              <p className="font-mono text-xs text-muted-foreground">
+                {response.contentTypes.join(", ") || "No response media type"}
+              </p>
+              {response.example ? (
+                <pre className="max-h-64 overflow-auto rounded-md bg-muted/40 p-3 font-mono text-xs whitespace-pre-wrap">
+                  <SyntaxCode
+                    code={response.example}
+                    lang={
+                      response.contentTypes.some((type) =>
+                        type.includes("json"),
+                      )
+                        ? "json"
+                        : "plain"
+                    }
+                  />
+                </pre>
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  No response example declared.
+                </p>
+              )}
+            </div>
+          </details>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -533,31 +720,43 @@ function TryItPanel({
   publisherHandle,
   projectSlug,
   endpoints,
+  endpointId,
+  mode,
+  onEndpointChange,
+  onModeChange,
 }: {
   publisherHandle: string;
   projectSlug: string;
   endpoints: EndpointRow[];
+  endpointId: string;
+  mode: PlaygroundMode;
+  onEndpointChange: (endpointId: string) => void;
+  onModeChange: (mode: PlaygroundMode) => void;
 }) {
-  const [endpointId, setEndpointId] = useState(endpoints[0]?.id ?? "");
+  const { userId } = Route.useRouteContext();
   const endpoint =
     endpoints.find((e) => e.id === endpointId) ?? endpoints[0] ?? null;
 
-  const [pathParams, setPathParams] = useState<Record<string, string>>({});
+  const [parameterValues, setParameterValues] = useState<
+    Record<string, string>
+  >({});
   const [headersText, setHeadersText] = useState("");
   const [bodyText, setBodyText] = useState(
     endpoint?.requestBodyExample ?? "{\n  \n}",
   );
   const [apiKey, setApiKey] = useState("");
-  const [mock, setMock] = useState(false);
   const [sending, setSending] = useState(false);
   const [result, setResult] = useState<PlayResult | null>(null);
-  const [headersError, setHeadersError] = useState<string | null>(null);
-  const [copiedCurl, setCopiedCurl] = useState(false);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "error">(
+    "idle",
+  );
+  const mock = mode === "mock";
 
   useEffect(() => {
     try {
       const stored = sessionStorage.getItem(API_KEY_STORAGE);
-      if (stored) setApiKey(stored);
+      if (stored && stored.length <= 4096) setApiKey(stored);
     } catch {
       // sessionStorage may be blocked
     }
@@ -565,14 +764,16 @@ function TryItPanel({
 
   useEffect(() => {
     if (!endpoint) return;
-    setPathParams((prev) => {
+    setParameterValues((previous) => {
       const next: Record<string, string> = {};
-      for (const name of endpoint.pathParams) {
-        next[name] = prev[name] ?? "";
+      for (const parameter of endpoint.parameters) {
+        next[parameter.key] = previous[parameter.key] ?? parameter.initialValue;
       }
       return next;
     });
     setBodyText(endpoint.requestBodyExample);
+    setErrors({});
+    setResult(null);
   }, [endpoint]);
 
   const onApiKeyChange = useCallback((value: string) => {
@@ -590,14 +791,28 @@ function TryItPanel({
 
   const requestUrl = useMemo(() => {
     if (!endpoint) return "";
-    const path = buildRequestPath(endpoint.path, pathParams);
+    const path = buildRequestPath(endpoint.path, parameterValues);
     const base = tryItBaseUrl(gatewayBaseUrl(), mock);
     const suffix = path.startsWith("/") ? path : `/${path}`;
-    return `${base}/${publisherHandle}/${projectSlug}${suffix}`;
-  }, [endpoint, pathParams, publisherHandle, projectSlug, mock]);
+    return appendQueryParameters(
+      `${base}/${publisherHandle}/${projectSlug}${suffix}`,
+      endpoint.parameters,
+      parameterValues,
+    );
+  }, [endpoint, parameterValues, publisherHandle, projectSlug, mock]);
+
+  const returnPath = useMemo(() => {
+    const search = new URLSearchParams({
+      tab: "try",
+      mode,
+      ...(endpoint ? { operation: endpoint.id } : {}),
+    });
+    return `/catalogue/${encodeURIComponent(publisherHandle)}/${encodeURIComponent(projectSlug)}?${search.toString()}`;
+  }, [endpoint, mode, projectSlug, publisherHandle]);
 
   const needsBody =
     endpoint !== null &&
+    endpoint.requestBodyDeclared &&
     (endpoint.method === "post" ||
       endpoint.method === "put" ||
       endpoint.method === "patch");
@@ -605,16 +820,59 @@ function TryItPanel({
   async function onSend(e: FormEvent) {
     e.preventDefault();
     if (!endpoint || sending) return;
+    const nextErrors: Record<string, string> = {};
+    for (const parameter of endpoint.parameters) {
+      if (
+        parameter.required &&
+        (parameterValues[parameter.key]?.trim() ?? "") === ""
+      ) {
+        nextErrors[parameter.key] = `${parameter.name} is required.`;
+      }
+    }
     if (invalidHeaderLine(headersText)) {
-      setHeadersError("Each header must use the format Name: value.");
-      document.getElementById("try-headers")?.focus();
+      nextErrors.headers = "Each header must use the format Name: value.";
+    }
+    if (!mock && apiKey.trim() === "") {
+      nextErrors.apiKey = "API key is required for a live call.";
+    }
+    if (needsBody && endpoint.requestBodyRequired && bodyText.trim() === "") {
+      nextErrors.body = "Request body is required.";
+    } else if (
+      needsBody &&
+      bodyText.trim() !== "" &&
+      endpoint.requestContentType.toLowerCase().includes("json")
+    ) {
+      try {
+        JSON.parse(bodyText);
+      } catch {
+        nextErrors.body = "Body must be valid JSON.";
+      }
+    }
+    setErrors(nextErrors);
+    const firstError = Object.keys(nextErrors)[0];
+    if (firstError !== undefined) {
+      const parameter = endpoint.parameters.find(
+        (candidate) => candidate.key === firstError,
+      );
+      const targetId = parameter
+        ? parameterInputId(endpoint.id, parameter)
+        : firstError === "apiKey"
+          ? "api-key"
+          : firstError === "body"
+            ? "try-body"
+            : "try-headers";
+      document.getElementById(targetId)?.focus();
       return;
     }
-    setHeadersError(null);
 
     const headers = parseExtraHeaders(headersText);
+    for (const parameter of endpoint.parameters) {
+      if (parameter.location !== "header") continue;
+      const value = parameterValues[parameter.key]?.trim() ?? "";
+      if (value !== "") headers[parameter.name] = value;
+    }
     const key = apiKey.trim();
-    if (key.length > 0) {
+    if (!mock) {
       headers.Authorization = `Bearer ${key}`;
     }
 
@@ -647,31 +905,33 @@ function TryItPanel({
         ms,
         body: text,
         mock,
+        contentType: res.headers.get("content-type"),
         requestId: res.headers.get("x-zevium-request-id") ?? undefined,
       });
-    } catch (err) {
+    } catch {
       const ms = Math.round(performance.now() - t0);
       setResult({
         status: 0,
         statusText: "Network error",
         ms,
-        body: humanError(err, "Request failed. Check gateway URL and CORS."),
+        body: "The browser could not reach the gateway.",
         mock,
+        contentType: null,
       });
     } finally {
       setSending(false);
     }
   }
 
-  function onCopyCurl(includeKey = false) {
+  function onCopyCurl() {
     if (!endpoint) return;
     const headers = parseExtraHeaders(headersText);
-    const key = apiKey.trim();
-    if (key.length > 0) {
-      headers.Authorization = includeKey
-        ? `Bearer ${key}`
-        : "Bearer YOUR_API_KEY";
+    for (const parameter of endpoint.parameters) {
+      if (parameter.location !== "header") continue;
+      const value = parameterValues[parameter.key]?.trim() ?? "";
+      if (value !== "") headers[parameter.name] = value;
     }
+    if (!mock) headers.Authorization = "Bearer YOUR_API_KEY";
     let body: string | undefined;
     if (needsBody && bodyText.trim().length > 0) {
       body = bodyText;
@@ -688,9 +948,9 @@ function TryItPanel({
       headers,
       body,
     });
-    void copyText(curl, "curl copied").then(() => {
-      setCopiedCurl(true);
-      window.setTimeout(() => setCopiedCurl(false), 1500);
+    void copyText(curl).then((copied) => {
+      setCopyState(copied ? "copied" : "error");
+      if (copied) window.setTimeout(() => setCopyState("idle"), 1500);
     });
   }
 
@@ -707,30 +967,48 @@ function TryItPanel({
     );
   }
 
+  const readableResultBody = result
+    ? result.status >= 400
+      ? sanitizedGatewayErrorResponse(
+          result.body,
+          result.contentType,
+          result.requestId,
+        )
+      : readableSuccessResponse(result.body, result.contentType)
+    : null;
+
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-base">Try it</CardTitle>
+        <CardTitle className="text-base">Request playground</CardTitle>
         <CardDescription>
-          Live playground. Calls hit the metered gateway and charge credits.
+          Mock is default: schema-generated response, no key, no upstream, zero
+          credits. Switch to live only when ready to spend.
         </CardDescription>
       </CardHeader>
       <CardContent>
         <form className="space-y-5" onSubmit={onSend}>
-          <div className="flex items-center justify-between gap-3 rounded-md border px-3 py-2.5">
-            <div className="space-y-0.5">
-              <Label htmlFor="try-mock-toggle">Mock</Label>
-              <p className="text-xs text-muted-foreground">
-                Serve a generated example from the spec — no upstream call, no
-                credits.
-              </p>
-            </div>
-            <Switch
-              id="try-mock-toggle"
-              checked={mock}
-              onCheckedChange={setMock}
-            />
-          </div>
+          <FieldGroup className="gap-3">
+            <Field>
+              <FieldLabel id="playground-mode-label">Environment</FieldLabel>
+              <ToggleGroup
+                type="single"
+                variant="outline"
+                value={mode}
+                onValueChange={(value) => {
+                  if (value === "mock" || value === "live") {
+                    onModeChange(value);
+                  }
+                }}
+                aria-labelledby="playground-mode-label"
+              >
+                <ToggleGroupItem value="mock">Mock · 0 credits</ToggleGroupItem>
+                <ToggleGroupItem value="live">
+                  Live · {liveCostLabel(endpoint)}
+                </ToggleGroupItem>
+              </ToggleGroup>
+            </Field>
+          </FieldGroup>
 
           {mock ? (
             <div
@@ -748,127 +1026,222 @@ function TryItPanel({
               role="status"
               className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
             >
-              Real call — charged against your org wallet. Key stays in session
-              storage only.
+              Live call · published price {creditsLabel(endpoint?.cost ?? 0)}.
+              {endpoint?.freeTier !== undefined
+                ? ` First ${endpoint.freeTier} eligible calls per day cost 0; remaining allowance is unavailable in this view.`
+                : ""}{" "}
+              Zero balance blocks paid execution. Key stays in this browser tab.
             </div>
           )}
 
           <div className="grid gap-4 sm:grid-cols-2">
-            <div className="space-y-2 sm:col-span-2">
-              <Label htmlFor="try-endpoint">Endpoint</Label>
-              <select
-                id="try-endpoint"
+            <Field className="sm:col-span-2">
+              <FieldLabel htmlFor="try-endpoint">Operation</FieldLabel>
+              <Select
                 value={endpoint?.id ?? ""}
-                onChange={(e) => setEndpointId(e.target.value)}
-                className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 font-mono text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                onValueChange={onEndpointChange}
               >
-                {endpoints.map((ep) => (
-                  <option key={ep.id} value={ep.id}>
-                    {ep.method.toUpperCase()} {ep.path} ·{" "}
-                    {creditsLabel(ep.cost)}
-                  </option>
-                ))}
-              </select>
-            </div>
+                <SelectTrigger id="try-endpoint" className="w-full font-mono">
+                  <SelectValue placeholder="Select operation" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    {endpoints.map((ep) => (
+                      <SelectItem key={ep.id} value={ep.id}>
+                        {ep.method.toUpperCase()} {ep.path} ·{" "}
+                        {creditsLabel(ep.cost)}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+              <FieldDescription>
+                Selection is stored in URL so this exact operation is shareable.
+              </FieldDescription>
+            </Field>
 
-            {endpoint?.pathParams.map((name) => (
-              <div key={name} className="space-y-2">
-                <Label htmlFor={`param-${name}`}>{name}</Label>
+            {endpoint?.parameters.map((parameter) => {
+              const inputId = parameterInputId(endpoint.id, parameter);
+              const error = errors[parameter.key];
+              const descriptionId = `${inputId}-description`;
+              const errorId = `${inputId}-error`;
+              return (
+                <Field key={parameter.key} data-invalid={Boolean(error)}>
+                  <FieldLabel htmlFor={inputId}>
+                    {parameter.name}
+                    <span className="font-normal text-muted-foreground">
+                      {parameter.location}
+                      {parameter.required ? " · required" : ""}
+                    </span>
+                  </FieldLabel>
+                  <Input
+                    id={inputId}
+                    name={parameter.key}
+                    value={parameterValues[parameter.key] ?? ""}
+                    onChange={(event) => {
+                      setParameterValues((previous) => ({
+                        ...previous,
+                        [parameter.key]: event.target.value,
+                      }));
+                      if (error) {
+                        setErrors((previous) => {
+                          const next = { ...previous };
+                          delete next[parameter.key];
+                          return next;
+                        });
+                      }
+                    }}
+                    placeholder={`${parameter.type} value`}
+                    className="font-mono text-sm"
+                    aria-invalid={Boolean(error)}
+                    aria-describedby={
+                      [
+                        parameter.description ? descriptionId : null,
+                        error ? errorId : null,
+                      ]
+                        .filter(Boolean)
+                        .join(" ") || undefined
+                    }
+                  />
+                  {parameter.description ? (
+                    <FieldDescription id={descriptionId}>
+                      {parameter.description}
+                    </FieldDescription>
+                  ) : null}
+                  <FieldError id={errorId}>{error}</FieldError>
+                </Field>
+              );
+            })}
+
+            {!mock ? (
+              <Field
+                className="sm:col-span-2"
+                data-invalid={Boolean(errors.apiKey)}
+              >
+                <FieldLabel htmlFor="api-key">API key</FieldLabel>
                 <Input
-                  id={`param-${name}`}
-                  name={name}
-                  value={pathParams[name] ?? ""}
-                  onChange={(e) =>
-                    setPathParams((prev) => ({
-                      ...prev,
-                      [name]: e.target.value,
-                    }))
-                  }
-                  placeholder={`Example ${name}`}
+                  id="api-key"
+                  name="apiKey"
+                  type="password"
+                  autoComplete="off"
+                  data-1p-ignore
+                  data-lpignore="true"
+                  spellCheck={false}
+                  placeholder="zv_…"
+                  value={apiKey}
+                  onChange={(e) => {
+                    onApiKeyChange(e.target.value);
+                    if (errors.apiKey) {
+                      setErrors((previous) => {
+                        const next = { ...previous };
+                        delete next.apiKey;
+                        return next;
+                      });
+                    }
+                  }}
                   className="font-mono text-sm"
+                  aria-invalid={Boolean(errors.apiKey)}
+                  aria-describedby="api-key-help"
                 />
-              </div>
-            ))}
+                <FieldDescription id="api-key-help">
+                  Stored in this browser session only. Never sent to Convex. Use
+                  the canonical <code>Authorization: Bearer</code> header.
+                </FieldDescription>
+                <FieldError>{errors.apiKey}</FieldError>
+                <p className="text-xs text-muted-foreground">
+                  {userId ? (
+                    <Link
+                      to="/app/settings/keys"
+                      search={{ returnTo: returnPath }}
+                      className="underline underline-offset-2 hover:text-foreground"
+                    >
+                      Manage keys →
+                    </Link>
+                  ) : (
+                    <Link
+                      to="/sign-up/$"
+                      search={{ redirect: returnPath }}
+                      className="underline underline-offset-2 hover:text-foreground"
+                    >
+                      Create account, then a key →
+                    </Link>
+                  )}
+                </p>
+              </Field>
+            ) : null}
 
-            <div className="space-y-2 sm:col-span-2">
-              <Label htmlFor="api-key">API key</Label>
-              <Input
-                id="api-key"
-                name="apiKey"
-                type="password"
-                autoComplete="current-password"
-                placeholder="API key"
-                value={apiKey}
-                onChange={(e) => onApiKeyChange(e.target.value)}
-                className="font-mono text-sm"
-              />
-              <p className="text-xs text-muted-foreground">
-                Stored in this browser session only. Never sent to Convex. Use
-                the canonical <code>Authorization: Bearer</code> header.
-              </p>
-              <p className="text-xs text-muted-foreground">
-                <Show when="signed-in">
-                  <Link
-                    to="/app/settings/keys"
-                    className="underline underline-offset-2 hover:text-foreground"
-                  >
-                    Manage keys →
-                  </Link>
-                </Show>
-                <Show when="signed-out">
-                  <Link
-                    to="/sign-up/$"
-                    className="underline underline-offset-2 hover:text-foreground"
-                  >
-                    Create a free key →
-                  </Link>
-                </Show>
-              </p>
-            </div>
-
-            <div className="space-y-2 sm:col-span-2">
-              <Label htmlFor="try-headers">Headers</Label>
-              <textarea
+            <Field
+              className="sm:col-span-2"
+              data-invalid={Boolean(errors.headers)}
+            >
+              <FieldLabel htmlFor="try-headers">Additional headers</FieldLabel>
+              <Textarea
                 id="try-headers"
                 name="headers"
                 autoComplete="off"
                 spellCheck={false}
-                aria-invalid={headersError !== null}
-                aria-describedby={
-                  headersError ? "try-headers-error" : undefined
-                }
+                aria-invalid={Boolean(errors.headers)}
+                aria-describedby="try-headers-help"
                 value={headersText}
-                onChange={(e) => setHeadersText(e.target.value)}
+                onChange={(e) => {
+                  setHeadersText(e.target.value);
+                  if (errors.headers) {
+                    setErrors((previous) => {
+                      const next = { ...previous };
+                      delete next.headers;
+                      return next;
+                    });
+                  }
+                }}
                 placeholder={"Accept: application/json"}
                 rows={3}
-                className={TEXTAREA_CLASS}
+                className="min-h-24 font-mono text-xs"
               />
-              {headersError ? (
-                <p
-                  id="try-headers-error"
-                  role="alert"
-                  aria-live="assertive"
-                  className="text-sm text-destructive"
-                >
-                  {headersError}
-                </p>
-              ) : null}
-            </div>
+              <FieldDescription id="try-headers-help">
+                One <code>Name: value</code> pair per line. Declared header
+                parameters have dedicated fields above.
+              </FieldDescription>
+              <FieldError>{errors.headers}</FieldError>
+            </Field>
 
             {needsBody ? (
-              <div className="space-y-2 sm:col-span-2">
-                <Label htmlFor="try-body">Body</Label>
-                <textarea
+              <Field
+                className="sm:col-span-2"
+                data-invalid={Boolean(errors.body)}
+              >
+                <FieldLabel htmlFor="try-body">
+                  Request body
+                  <span className="font-normal text-muted-foreground">
+                    {endpoint?.requestContentType}
+                    {endpoint?.requestBodyRequired ? " · required" : ""}
+                  </span>
+                </FieldLabel>
+                <Textarea
                   id="try-body"
                   name="request-body"
                   autoComplete="off"
                   value={bodyText}
-                  onChange={(e) => setBodyText(e.target.value)}
+                  onChange={(e) => {
+                    setBodyText(e.target.value);
+                    if (errors.body) {
+                      setErrors((previous) => {
+                        const next = { ...previous };
+                        delete next.body;
+                        return next;
+                      });
+                    }
+                  }}
                   rows={6}
                   spellCheck={false}
-                  className={TEXTAREA_CLASS}
+                  className="min-h-24 font-mono text-xs"
+                  aria-invalid={Boolean(errors.body)}
+                  aria-describedby="try-body-help"
                 />
-              </div>
+                <FieldDescription id="try-body-help">
+                  Seeded from examples or schema defaults in the published spec.
+                </FieldDescription>
+                <FieldError>{errors.body}</FieldError>
+              </Field>
             ) : null}
           </div>
 
@@ -879,7 +1252,11 @@ function TryItPanel({
 
           <div className="flex flex-wrap items-center gap-2">
             <Button type="submit" disabled={sending || !endpoint}>
-              {sending ? "Sending…" : "Send"}
+              {sending
+                ? "Sending…"
+                : mock
+                  ? "Send mock · 0 credits"
+                  : `Send live · ${liveCostLabel(endpoint)}`}
             </Button>
             <Button
               type="button"
@@ -887,84 +1264,129 @@ function TryItPanel({
               onClick={() => onCopyCurl()}
               disabled={!endpoint}
             >
-              {copiedCurl ? (
+              {copyState === "copied" ? (
                 <Check className="size-4" />
               ) : (
                 <Copy className="size-4" />
               )}
-              Copy as curl
+              {copyState === "copied" ? "Copied curl" : "Copy curl"}
             </Button>
-            {apiKey.trim() !== "" ? (
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => onCopyCurl(true)}
-                disabled={!endpoint}
-              >
-                Copy curl with key
-              </Button>
-            ) : null}
-            <span className="text-xs text-muted-foreground">
-              Copy with key puts a secret in your clipboard and shell history.
+            <span className="text-xs text-muted-foreground" aria-live="polite">
+              {copyState === "error"
+                ? "Copy failed. Select request values and copy manually."
+                : mock
+                  ? "Generated curl uses the keyless mock endpoint."
+                  : "Generated curl uses a placeholder and never copies your secret."}
             </span>
           </div>
 
-          {result ? (
-            <div className="space-y-2" role="status" aria-live="polite">
-              <div className="flex flex-wrap items-center gap-2 text-sm">
-                <Badge
-                  variant={
-                    result.status >= 200 && result.status < 300
-                      ? "secondary"
-                      : "destructive"
-                  }
-                  className="tabular-nums"
-                >
-                  {result.status || "ERR"} {result.statusText}
-                </Badge>
-                {result.mock ? (
-                  <Badge variant="outline">mock response · 0 credits</Badge>
-                ) : null}
-                <span className="text-muted-foreground tabular-nums">
-                  {result.ms} ms
-                </span>
-                {result.requestId ? (
-                  <span className="font-mono text-xs text-muted-foreground">
-                    Request {result.requestId}
+          <div className="min-h-[24rem]" role="status" aria-live="polite">
+            {sending ? (
+              <div className="space-y-3 rounded-md border p-4">
+                <Skeleton className="h-5 w-48" />
+                <Skeleton className="h-72 w-full" />
+              </div>
+            ) : result ? (
+              <div className="space-y-2">
+                <div className="flex flex-wrap items-center gap-2 text-sm">
+                  <Badge
+                    variant={
+                      result.status >= 200 && result.status < 300
+                        ? "secondary"
+                        : "destructive"
+                    }
+                    className="tabular-nums"
+                  >
+                    {result.status || "ERR"} {result.statusText}
+                  </Badge>
+                  {result.mock ? (
+                    <Badge variant="outline">mock response · 0 credits</Badge>
+                  ) : null}
+                  <span className="text-muted-foreground tabular-nums">
+                    {result.ms} ms
                   </span>
+                  {result.requestId ? (
+                    <span className="font-mono text-xs text-muted-foreground">
+                      Request {result.requestId}
+                    </span>
+                  ) : null}
+                </div>
+                {result.status === 0 ? (
+                  <div className="space-y-1 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm">
+                    <p className="font-medium text-destructive">
+                      Gateway could not be reached
+                    </p>
+                    <p className="text-muted-foreground">
+                      Check your connection and gateway URL. If this persists,
+                      allow this site in gateway CORS settings, then retry.
+                    </p>
+                  </div>
+                ) : result.status >= 400 ? (
+                  <p className="text-sm text-muted-foreground">
+                    {result.status === 401
+                      ? "Your API key was not accepted. Create or rotate a key, then try again."
+                      : result.status === 402
+                        ? "Your organization needs credits before this call can run."
+                        : result.status === 429
+                          ? "This key reached a limit. Wait or adjust its cap."
+                          : result.status >= 500
+                            ? "The upstream service failed. Retry later."
+                            : "Check the request fields and try again."}
+                  </p>
+                ) : null}
+                {result.status > 0 && readableResultBody !== null ? (
+                  <pre className="max-h-80 overflow-auto rounded-md border bg-muted/40 p-3 font-mono text-xs whitespace-pre-wrap break-all">
+                    <SyntaxCode
+                      code={readableResultBody}
+                      lang={responseLanguage(readableResultBody)}
+                    />
+                  </pre>
+                ) : result.status >= 400 ? (
+                  <p className="text-xs text-muted-foreground">
+                    Response body is hidden because it is not a verified Zevium
+                    error envelope. Use request ID above when contacting
+                    support.
+                  </p>
+                ) : result.status > 0 ? (
+                  <p className="text-xs text-muted-foreground">
+                    Binary response body is not displayed in the browser.
+                  </p>
                 ) : null}
               </div>
-              {result.status >= 400 ? (
-                <p className="text-sm text-muted-foreground">
-                  {result.status === 401
-                    ? "Your API key was not accepted. Create or rotate a key, then try again."
-                    : result.status === 402
-                      ? "Your organization needs credits before this call can run."
-                      : result.status === 429
-                        ? "This key reached a limit. Wait or adjust its cap."
-                        : result.status >= 500
-                          ? "The upstream service failed. Retry later."
-                          : "Check the request fields and try again."}
-                </p>
-              ) : null}
-              {result.status > 0 && result.status < 400 ? (
-                <pre className="max-h-80 overflow-auto rounded-md border bg-muted/40 p-3 font-mono text-xs whitespace-pre-wrap break-all">
-                  <SyntaxCode
-                    code={result.body || "(empty body)"}
-                    lang={responseLanguage(result.body)}
-                  />
-                </pre>
-              ) : (
-                <p className="text-xs text-muted-foreground">
-                  Error response details are hidden to protect provider and
-                  credential information.
-                </p>
-              )}
-            </div>
-          ) : null}
+            ) : (
+              <div className="flex h-80 items-center justify-center rounded-md border border-dashed text-sm text-muted-foreground">
+                Response appears here after you send the request.
+              </div>
+            )}
+          </div>
         </form>
       </CardContent>
     </Card>
+  );
+}
+
+function CopyAction({ text, label }: { text: string; label: string }) {
+  const [state, setState] = useState<"idle" | "copied" | "error">("idle");
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        onClick={() => {
+          void copyText(text).then((copied) => {
+            setState(copied ? "copied" : "error");
+            if (copied) window.setTimeout(() => setState("idle"), 1500);
+          });
+        }}
+      >
+        {state === "copied" ? <Check /> : <Copy />}
+        {state === "copied" ? "Copied" : label}
+      </Button>
+      <span className="text-xs text-muted-foreground" aria-live="polite">
+        {state === "error" ? "Copy failed. Select and copy manually." : ""}
+      </span>
+    </div>
   );
 }
 
@@ -988,8 +1410,8 @@ function ConnectAgentPanel({
 // Gateway base: ${gatewayBaseUrl()}/${publisherHandle}/${projectSlug}`;
 
   return (
-    <div className="grid gap-4 lg:grid-cols-2">
-      <Card>
+    <div className="grid min-w-0 gap-4 lg:grid-cols-2">
+      <Card className="min-w-0">
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
             <Terminal className="size-4" />
@@ -1000,42 +1422,26 @@ function ConnectAgentPanel({
             key.
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-3">
-          <pre className="max-h-72 overflow-auto rounded-md border bg-muted/40 p-3 font-mono text-xs whitespace-pre">
+        <CardContent className="min-w-0 space-y-3">
+          <pre className="max-h-72 w-full max-w-full overflow-auto rounded-md border bg-muted/40 p-3 font-mono text-xs whitespace-pre">
             <SyntaxCode code={snippet} lang="json" />
           </pre>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => void copyText(snippet, "MCP config copied")}
-          >
-            <Copy className="size-4" />
-            Copy config
-          </Button>
+          <CopyAction text={snippet} label="Copy config" />
         </CardContent>
       </Card>
 
-      <Card>
+      <Card className="min-w-0">
         <CardHeader>
           <CardTitle className="text-base">Usage notes</CardTitle>
           <CardDescription>
             Agent-readable connection path for this API.
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-3">
-          <pre className="max-h-72 overflow-auto rounded-md border bg-muted/40 p-3 font-mono text-xs whitespace-pre-wrap">
+        <CardContent className="min-w-0 space-y-3">
+          <pre className="max-h-72 w-full max-w-full overflow-auto rounded-md border bg-muted/40 p-3 font-mono text-xs whitespace-pre-wrap">
             <SyntaxCode code={notes} lang="js" />
           </pre>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => void copyText(notes, "Usage notes copied")}
-          >
-            <Copy className="size-4" />
-            Copy notes
-          </Button>
+          <CopyAction text={notes} label="Copy notes" />
         </CardContent>
       </Card>
     </div>
@@ -1070,7 +1476,7 @@ function ApiDetailBodySkeleton() {
       <div className="space-y-3">
         <Skeleton className="h-4 w-40" />
         <Skeleton className="h-9 w-64" />
-        <Skeleton className="h-4 w-80" />
+        <Skeleton className="h-4 w-80 max-w-full" />
         <div className="flex gap-2 pt-1">
           <Skeleton className="h-5 w-16 rounded-full" />
           <Skeleton className="h-5 w-20 rounded-full" />
@@ -1104,13 +1510,12 @@ function ApiDetailBodySkeleton() {
 function ApiDetailSkeleton() {
   return (
     <div className="min-h-screen bg-background">
-      <header className="border-b">
-        <div className="mx-auto flex h-14 max-w-6xl items-center justify-between gap-4 px-4">
-          <Skeleton className="h-4 w-20" />
-          <Skeleton className="h-8 w-20" />
-        </div>
-      </header>
-      <main className="mx-auto max-w-6xl px-4 py-8">
+      <PublicHeader active="catalogue" />
+      <main
+        id="main-content"
+        tabIndex={-1}
+        className="mx-auto max-w-6xl px-4 py-8 outline-none"
+      >
         <ApiDetailBodySkeleton />
       </main>
     </div>

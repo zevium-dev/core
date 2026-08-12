@@ -1,5 +1,5 @@
 import { ConvexQueryClient } from "@convex-dev/react-query";
-import { QueryClient } from "@tanstack/react-query";
+import { QueryClient, type QueryKey } from "@tanstack/react-query";
 import {
   createRouter as createTanStackRouter,
   type AnyRouter,
@@ -7,6 +7,8 @@ import {
 import { setupRouterSsrQueryIntegration } from "@tanstack/react-router-ssr-query";
 import { LazyMotion, domAnimation } from "motion/react";
 
+import { RouteError } from "#/components/route-error";
+import { routeViewTransitionTypes } from "#/lib/view-transition";
 import { markViewTransitionActive } from "#/lib/vt";
 import { routeTree } from "./routeTree.gen";
 
@@ -21,6 +23,13 @@ export interface RouterContext {
   orgSlug: string | null;
   /** Active Clerk org id; null when none selected. */
   orgId: string | null;
+  principalCache: PrincipalCache;
+}
+
+export interface PrincipalCache {
+  readonly currentKey: string;
+  keyFor(userId: string | null, orgId: string | null): string;
+  transition(userId: string | null, orgId: string | null): Promise<void>;
 }
 
 const convexUrl = import.meta.env.VITE_CONVEX_URL;
@@ -38,10 +47,30 @@ export function getRouter(): AnyRouter {
     // Inconsistent is correct here.
     dangerouslyUseInconsistentQueriesDuringSSR: true,
   });
-  const queryClient = new QueryClient({
+  const convexHash = convexQueryClient.hashFn();
+  let currentPrincipalKey = "anonymous:-";
+  let queryClient: QueryClient;
+  const principalCache: PrincipalCache = {
+    get currentKey() {
+      return currentPrincipalKey;
+    },
+    keyFor(userId, orgId) {
+      return `${userId ?? "anonymous"}:${orgId ?? "-"}`;
+    },
+    async transition(userId, orgId) {
+      const next = this.keyFor(userId, orgId);
+      if (next === currentPrincipalKey) return;
+      await queryClient.cancelQueries();
+      queryClient.removeQueries();
+      queryClient.getMutationCache().clear();
+      currentPrincipalKey = next;
+    },
+  };
+  queryClient = new QueryClient({
     defaultOptions: {
       queries: {
-        queryKeyHashFn: convexQueryClient.hashFn(),
+        queryKeyHashFn: (queryKey: QueryKey) =>
+          `${currentPrincipalKey}:${convexHash(queryKey)}`,
         queryFn: convexQueryClient.queryFn(),
       },
     },
@@ -57,6 +86,7 @@ export function getRouter(): AnyRouter {
     // Show pending skeletons quickly instead of freezing the old screen.
     defaultPendingMs: 100,
     defaultPendingMinMs: 300,
+    defaultErrorComponent: RouteError,
     context: {
       convexQueryClient,
       queryClient,
@@ -64,26 +94,20 @@ export function getRouter(): AnyRouter {
       token: null,
       orgSlug: null,
       orgId: null,
+      principalCache,
     } satisfies RouterContext,
     defaultViewTransition: {
       types: ({ fromLocation, toLocation }) => {
-        markViewTransitionActive();
         const from = fromLocation?.state.__TSR_index ?? 0;
         const to = toLocation.state.__TSR_index ?? 0;
-        const direction = to >= from ? "navigate-forward" : "navigate-back";
-        // DESIGN.md morphs are for list→detail. Sidebar-level hops get a
-        // fast swap (styles.css scopes duration via nav-swap type).
-        const isDetail = (path: string | undefined): boolean =>
-          path !== undefined &&
-          (/^\/app\/projects\/[^/]+/.test(path) ||
-            /^\/catalogue\/[^/]+\/[^/]+/.test(path));
-        if (
-          !isDetail(fromLocation?.pathname) &&
-          !isDetail(toLocation.pathname)
-        ) {
-          return [direction, "nav-swap"];
-        }
-        return [direction];
+        const types = routeViewTransitionTypes({
+          fromIndex: from,
+          toIndex: to,
+          fromPath: fromLocation?.pathname,
+          toPath: toLocation.pathname,
+        });
+        if (types !== false) markViewTransitionActive();
+        return types;
       },
     },
     Wrap: ({ children }) => (

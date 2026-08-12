@@ -43,11 +43,6 @@ export function EditorToolbar({ onApplyText, disabled }: EditorToolbarProps) {
       return;
     }
     onApplyText(converted.json);
-    if (converted.convertedFromYaml) {
-      toast.success("Converted YAML to JSON");
-    } else {
-      toast.success("Spec imported");
-    }
   }
 
   async function onFileChange(fileList: FileList | null) {
@@ -117,7 +112,6 @@ export function EditorToolbar({ onApplyText, disabled }: EditorToolbarProps) {
           <DropdownMenuItem
             onSelect={() => {
               onApplyText(OPENAPI_TEMPLATE);
-              toast.success("Template loaded");
             }}
             disabled={disabled}
           >

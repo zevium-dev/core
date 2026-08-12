@@ -4,7 +4,8 @@
  * media type — no upstream call, no credits.
  */
 
-import type { ParsedOpenApiSpec } from "./openapi.js";
+import type { HttpMethod, ParsedOpenApiSpec } from "./openapi.js";
+import { resolveLocalJsonRefChain } from "./json-pointer.js";
 
 export type GeneratedMockResponse = {
   status: number;
@@ -16,21 +17,6 @@ const MAX_DEPTH = 5;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-/** `components.schemas.<Name>` — one hop only, no chained/recursive $ref walk. */
-function resolveRef(
-  schema: Record<string, unknown>,
-  components: Record<string, unknown> | undefined,
-): Record<string, unknown> {
-  const ref = schema.$ref;
-  if (typeof ref !== "string") return schema;
-  const match = /^#\/components\/schemas\/([^/]+)$/.exec(ref);
-  if (!match) return schema;
-  const name = match[1]!;
-  const schemas = isRecord(components) ? components.schemas : undefined;
-  const target = isRecord(schemas) ? schemas[name] : undefined;
-  return isRecord(target) ? target : schema;
 }
 
 function stringExample(schema: Record<string, unknown>): string {
@@ -103,8 +89,10 @@ function synthesize(
 
   const schema =
     typeof rawSchema.$ref === "string"
-      ? resolveRef(rawSchema, components)
+      ? resolveLocalJsonRefChain(rawSchema, { components })
       : rawSchema;
+
+  if (!isRecord(schema)) return null;
 
   const explicit = explicitExample(schema);
   if (explicit.found) return explicit.value;
@@ -191,7 +179,7 @@ export function generateMockResponse(
   pathTemplate: string,
   method: string,
 ): GeneratedMockResponse | null {
-  const op = spec.paths[pathTemplate]?.[method.toLowerCase()];
+  const op = spec.paths[pathTemplate]?.[method.toLowerCase() as HttpMethod];
   if (!op) return null;
 
   const content = extractResponseContent(op);

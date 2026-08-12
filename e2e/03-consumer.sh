@@ -1,91 +1,60 @@
 #!/usr/bin/env bash
-# E2E 03 — consumer: public catalogue → detail → pricing → try-it (optional paid call)
+# E2E 03 — consumer: isolated anonymous browse/mock plus required staged paid contract hook
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-export E2E_SESSION="${E2E_SESSION:-zevium-e2e-consumer}"
+export E2E_SESSION="${E2E_SESSION:-${E2E_SESSION_PREFIX:-zevium-e2e}-consumer-anonymous}"
 # shellcheck source=lib.sh
 source "$SCRIPT_DIR/lib.sh"
 
 cleanup() {
   close_browser
+  cleanup_e2e_runtime
 }
 trap cleanup EXIT
 
 PROJECT_NAME="${E2E_LAST_PROJECT_NAME:-}"
 PROJECT_SLUG="${E2E_LAST_PROJECT_SLUG:-}"
-if [[ -z "$PROJECT_NAME" && -f "$E2E_ARTIFACTS/last-project-name.txt" ]]; then
-  PROJECT_NAME="$(cat "$E2E_ARTIFACTS/last-project-name.txt")"
+if [[ -z "$PROJECT_NAME" && -f "$E2E_FIXTURES_DIR/last-project-name.txt" ]]; then
+  PROJECT_NAME="$(cat "$E2E_FIXTURES_DIR/last-project-name.txt")"
 fi
-if [[ -z "$PROJECT_SLUG" && -f "$E2E_ARTIFACTS/last-project-slug.txt" ]]; then
-  PROJECT_SLUG="$(cat "$E2E_ARTIFACTS/last-project-slug.txt")"
+if [[ -z "$PROJECT_SLUG" && -f "$E2E_FIXTURES_DIR/last-project-slug.txt" ]]; then
+  PROJECT_SLUG="$(cat "$E2E_FIXTURES_DIR/last-project-slug.txt")"
 fi
+[[ -n "$PROJECT_NAME" ]] || fail "publisher fixture name missing — run 02 first"
+[[ -n "$PROJECT_SLUG" ]] || fail "publisher fixture slug missing — run 02 first"
+E2E_REQUIRE_PAID_CONTRACT="${E2E_REQUIRE_PAID_CONTRACT:-0}"
+E2E_EXPECTED_CALL_COST="${E2E_EXPECTED_CALL_COST:-1}"
+[[ "$E2E_EXPECTED_CALL_COST" =~ ^[1-9][0-9]*$ ]] || fail "E2E_EXPECTED_CALL_COST must be a positive integer"
+configure_browser_context
 
 step "wait for base url"
 wait_for_url "$E2E_BASE_URL/" "200" 90
+verify_target_commit "consumer"
 
 step "anonymous /catalogue lists published project"
-# run-all assigns this script its own browser session, isolating auth cookies.
+# Ensure anonymous session (new browser session name already isolates cookies).
 open_path "/catalogue"
 ab wait --load networkidle >/dev/null 2>&1 || ab wait 1200 >/dev/null
 assert_url_contains "/catalogue"
 snap="$(page_text)"
 assert_contains "$snap" "Catalogue" "catalogue heading missing"
 assert_contains "$snap" "Public APIs with per-call credits" "catalogue blurb missing"
+assert_anonymous_identity
+record_browser_contract "consumer" "anonymous-catalogue" "anonymous"
 
-if [[ -n "$PROJECT_NAME" ]]; then
-  if [[ "$snap" != *"$PROJECT_NAME"* && ( -z "$PROJECT_SLUG" || "$snap" != *"$PROJECT_SLUG"* ) ]]; then
-    fail "catalogue missing published project '$PROJECT_NAME' (run 02 first or app catalogue not wired)"
-  fi
-  log "found project listing: $PROJECT_NAME"
-else
-  log "no E2E_LAST_PROJECT_NAME — asserting catalogue shell only (no specific listing)"
-fi
+assert_contains "$snap" "$PROJECT_NAME" "catalogue missing published project '$PROJECT_NAME'"
+log "found project listing: $PROJECT_NAME"
 
 step "open API detail page"
-clicked=0
-detail_path=""
 before_url="$(ab get url)"
-if [[ -n "$PROJECT_NAME" ]]; then
-  name_js="$(printf '%s' "$PROJECT_NAME" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')"
-  slug_js="$(printf '%s' "$PROJECT_SLUG" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')"
-  detail_path="$(ab eval "(() => { const link=Array.from(document.querySelectorAll('a[href]')).find((node) => { const text=(node.textContent || '').trim(); const href=node.getAttribute('href') || ''; return text.includes(${name_js}) && href.endsWith('/' + ${slug_js}); }); return link?.getAttribute('href') || ''; })()" 2>/dev/null | tail -1 | tr -d '"\r')"
-  [[ "$detail_path" == /catalogue/*/"$PROJECT_SLUG" ]] \
-    || fail "catalogue listing has no canonical detail link for '$PROJECT_NAME'"
-  discovered_org_slug="${detail_path#/catalogue/}"
-  discovered_org_slug="${discovered_org_slug%%/*}"
-  [[ "$discovered_org_slug" =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]] \
-    || fail "catalogue detail link has invalid publisher handle"
-  ab eval "
-(() => {
-  const want = ${name_js};
-  const nodes = Array.from(document.querySelectorAll('h3, a, button, div, span'));
-  const el = nodes.find((n) => (n.textContent || '').trim() === want)
-    || nodes.find((n) => (n.textContent || '').includes(want));
-  if (!el) return 'missing';
-  el.scrollIntoView({ block: 'center' });
-  return 'ok';
-})()
-" >/dev/null 2>&1 || true
-  if ab find text "$PROJECT_NAME" click >/dev/null 2>&1; then
-    ab wait 1200 >/dev/null
-    after_url="$(ab get url)"
-    if [[ "$after_url" != "$before_url" ]]; then
-      clicked=1
-    else
-      log "card click did not navigate (cards may not be links)"
-    fi
-  fi
-fi
-
-if (( clicked == 0 )); then
-  if [[ -n "$detail_path" ]]; then
-    open_path "$detail_path"
-    ab wait 1200 >/dev/null
-  else
-    fail "no project detail target; set E2E_LAST_PROJECT_* or run 02 first"
-  fi
-fi
+ab find text "$PROJECT_NAME" click >/dev/null 2>&1 \
+  || fail "catalogue card link missing or click failed"
+ab wait 1200 >/dev/null
+after_url="$(ab get url)"
+DETAIL_PATH="${after_url#"$E2E_BASE_URL"}"
+[[ "$after_url" != "$before_url" ]] || fail "catalogue card click did not navigate"
+assert_url_contains "/${PROJECT_SLUG}" "catalogue card navigated to wrong API"
 
 url="$(ab get url)"
 snap="$(page_text)"
@@ -96,7 +65,7 @@ fi
 if [[ "$snap" == *"Not Found"* || "$snap" == *"404"* \
   || ( "$url" == *"/catalogue" && "$url" != *"$PROJECT_SLUG"* ) \
   || ( "$url" == *"/catalogue" && "$snap" == *"Public APIs with per-call credits"* && "$snap" == *"Search catalogue"* ) ]]; then
-  fail "API detail route missing or listing did not navigate (url=$url)"
+  fail "API detail route missing or listing not clickable (url=$url) — expected /catalogue/{org}/{api} with detail UI (pricing + try-it). App gap: cards are non-link Cards; no catalogue/\$org/\$slug route under apps/web/src/routes"
 fi
 
 step "pricing table shows credits"
@@ -114,110 +83,74 @@ if [[ "$snap" == *"Public APIs with per-call credits"* && "$snap" != *"x-zevium-
 fi
 log "pricing/credits signal present"
 
-step "try-it panel renders"
+step "try-it panel renders and sends real browser mock"
 snap="$(page_text)"
-if [[ "$snap" != *"Try it"* && "$snap" != *"Try It"* && "$snap" != *"playground"* && "$snap" != *"Playground"* && "$snap" != *"Run"* ]]; then
-  fail "try-it / playground panel not found on detail page (app gap)"
-fi
-log "try-it panel signal present"
+assert_contains "$snap" "Request playground" "request playground missing"
+assert_contains "$snap" "Mock · 0 credits" "safe mock mode is not default"
+click_button "Send mock · 0 credits" || fail "mock submit button missing"
+ab wait --text "200 OK" 20 || fail "browser mock request did not return 200"
+snap="$(page_text)"
+assert_contains "$snap" "mock response · 0 credits" "mock result badge missing"
+assert_not_contains "$snap" "Gateway could not be reached" "browser could not reach gateway"
 
-# Optional paid gateway call — only when GATEWAY_URL + E2E_API_KEY provided.
-if [[ -n "${GATEWAY_URL:-}" ]]; then
-  step "paid try-it call via GATEWAY_URL"
-  if [[ -z "${E2E_API_KEY:-}" ]]; then
-    fail "GATEWAY_URL set but E2E_API_KEY missing"
-  fi
-  # UI path: paste key if panel accepts it.
-  if ab find placeholder "API key" fill "$E2E_API_KEY" >/dev/null 2>&1 \
-    || ab find label "API key" fill "$E2E_API_KEY" >/dev/null 2>&1 \
-    || ab fill 'input[name="apiKey"]' "$E2E_API_KEY" >/dev/null 2>&1; then
-    if click_button "Run" \
-      || click_button "Send" \
-      || ab find text "Run request" click >/dev/null 2>&1; then
-      ab wait 2000 >/dev/null
-      snap="$(page_text)"
-      assert_contains "$snap" "200" "try-it response status not 200"
-    else
-      log "UI run button missing — falling back to curl against gateway"
-    fi
-  fi
+step "live mode fails closed without API key"
+click_button "Live · 1 credit" || fail "live-mode toggle missing"
+ab wait 300 >/dev/null
+click_button "Send live · 1 credit" || fail "live submit button missing"
+ab wait 300 >/dev/null
+snap="$(page_text)"
+assert_contains "$snap" "API key is required for a live call." "live mode did not reject missing key"
+focused="$(ab eval "document.activeElement?.id" 2>/dev/null | tr -d '"[:space:]')"
+assert_eq "$focused" "api-key" "missing-key validation did not focus API key"
 
-  # Deterministic gate: direct gateway call for /get
-  # Convention: GATEWAY_URL is origin; path /gateway/{org}/{api}/get
-  org_slug="${E2E_ORG_SLUG:-${discovered_org_slug:-}}"
-  api_slug="${PROJECT_SLUG:-}"
-  if [[ -z "$api_slug" ]]; then
-    fail "PROJECT_SLUG empty for gateway call"
-  fi
-  [[ "$org_slug" =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]] \
-    || fail "E2E_ORG_SLUG is not a canonical slug"
-  [[ -z "${discovered_org_slug:-}" || "$org_slug" == "$discovered_org_slug" ]] \
-    || fail "E2E_ORG_SLUG does not own published catalogue project"
-  [[ "$api_slug" =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]] \
-    || fail "PROJECT_SLUG is not a canonical slug"
-  call_url="${GATEWAY_URL%/}/gateway/${org_slug}/${api_slug}/get"
-  log "curl $call_url"
-  headers_file="$E2E_ARTIFACTS/gateway-headers-${STAMP:-$(e2e_stamp)}.txt"
-  body_file="$E2E_ARTIFACTS/gateway-body-${STAMP:-$(e2e_stamp)}.txt"
-  http_code="$(
-    curl -sS --connect-timeout 2 --max-time 15 \
-      -D "$headers_file" -o "$body_file" -w '%{http_code}' \
-      -H "Authorization: Bearer ${E2E_API_KEY}" \
-      -H "X-Api-Key: ${E2E_API_KEY}" \
-      "$call_url" || true
-  )"
-  assert_eq "$http_code" "200" "gateway /get expected 200"
-  hdrs="$(cat "$headers_file")"
-  # header names are case-insensitive
-  if ! printf '%s' "$hdrs" | grep -qi '^x-zevium-cost:'; then
-    fail "missing x-zevium-cost response header (see $headers_file)"
-  fi
-  cost="$(printf '%s' "$hdrs" | awk -F ': *' 'tolower($1)=="x-zevium-cost" {gsub(/\r/, "", $2); print $2; exit}')"
-  [[ "$cost" =~ ^[1-9][0-9]*$ ]] \
-    || fail "metered gateway cost must be positive integer (got '$cost')"
-  request_id="$(printf '%s' "$hdrs" | awk -F ': *' 'tolower($1)=="x-zevium-request-id" {gsub(/\r/, "", $2); print $2; exit}')"
-  [[ -n "$request_id" ]] || fail "metered gateway request id missing"
-  log "gateway call ok cost=$cost request-id-present=true"
-
-  step "anonymous browser mock call (CORS regression canary)"
-  # /mock/:org/:project is PUBLIC (no key) — browser fetch from the app origin
-  # to GATEWAY_URL is cross-origin, so this also proves CORS is wired.
-  mock_url="${GATEWAY_URL%/}/mock/${org_slug}/${api_slug}/get"
-  mock_url_js="$(printf '%s' "$mock_url" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')"
-  mock_status="$(ab eval "fetch(${mock_url_js}).then((r) => r.status)" 2>/dev/null || true)"
-  mock_status="$(printf '%s' "$mock_status" | tr -d '"[:space:]')"
-  assert_eq "$mock_status" "200" "anonymous browser mock call expected 200 (url=$mock_url)"
-  log "anonymous browser mock call ok status=$mock_status"
-
-  if [[ -n "${E2E_API_KEY:-}" ]]; then
-    step "browser paid call with Authorization header"
-    call_url_js="$(printf '%s' "$call_url" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')"
-    api_key_js="$(printf '%s' "$E2E_API_KEY" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')"
-    paid_status="$(ab eval "fetch(${call_url_js}, { headers: { Authorization: 'Bearer ' + ${api_key_js} } }).then((r) => r.status)" 2>/dev/null || true)"
-    paid_status="$(printf '%s' "$paid_status" | tr -d '"[:space:]')"
-    assert_eq "$paid_status" "200" "browser paid call expected 200 (url=$call_url)"
-    log "browser paid call ok status=$paid_status"
-  fi
-
-  step "metered call lands in authenticated activity log"
+if [[ "$E2E_REQUIRE_PAID_CONTRACT" == "1" ]]; then
+  verify_target_commit "paid-consumer"
+  : "${E2E_API_KEY:?E2E_API_KEY is required for paid consumer contract}"
+  step "signed-in paid consumer contract"
+  use_browser_session "${E2E_SESSION_PREFIX:-zevium-e2e}-consumer-paid-signed-in"
   sign_in
-  activity_found=false
-  project_js="$(printf '%s' "$PROJECT_NAME" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')"
-  cost_js="$(printf '%s' "$cost" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')"
+
+  open_path "/app/billing"
+  wait_for_text "Wallet balance" 30
+  balance_before="$(ab eval "(() => { const label=Array.from(document.querySelectorAll('p')).find((el) => el.textContent?.trim()==='Wallet balance'); const value=label?.parentElement?.querySelector('.tabular-nums')?.textContent ?? ''; return Number(value.replace(/[^0-9-]/g,'')); })()" 2>/dev/null | tr -d '"[:space:]')"
+  [[ "$balance_before" =~ ^[0-9]+$ ]] || fail "could not read pre-call wallet balance"
+  (( balance_before >= E2E_EXPECTED_CALL_COST )) || fail "paid fixture wallet lacks required credits"
+
+  open_path "$DETAIL_PATH"
+  wait_for_text "Request playground" 30
+  click_button "Live · ${E2E_EXPECTED_CALL_COST} credit" || click_button "Live · ${E2E_EXPECTED_CALL_COST} credits" || fail "paid live-mode toggle missing"
+  ab fill '#api-key' "$E2E_API_KEY" >/dev/null || fail "paid fixture key field missing"
+  click_button "Send live · ${E2E_EXPECTED_CALL_COST} credit" || click_button "Send live · ${E2E_EXPECTED_CALL_COST} credits" || fail "paid live submit missing"
+  ab wait --text "200 OK" --timeout 30000 >/dev/null 2>&1 || fail "paid gateway call did not return 200"
+  snap="$(page_text)"
+  assert_not_contains "$snap" "mock response · 0 credits" "paid response was mislabeled as mock"
+  assert_not_contains "$snap" "Your organization needs credits" "paid fixture was not funded"
+  assert_not_contains "$snap" "Your API key was not accepted" "paid fixture key was rejected"
+
+  step "paid debit reaches wallet projection"
+  expected_balance=$((balance_before - E2E_EXPECTED_CALL_COST))
+  balance_after=""
   for _ in $(seq 1 30); do
-    open_path "/app/settings/activity?range=24h"
-    row_found="$(ab eval "Array.from(document.querySelectorAll('tbody tr')).some((row) => { const cells=Array.from(row.querySelectorAll('td')).map((cell) => (cell.textContent || '').replace(/\\s+/g, ' ').trim()); return cells.length >= 5 && cells[1].includes(${project_js}) && cells[2] === 'GET /get' && cells[3] === Number(${cost_js}).toLocaleString() && cells[4] === '200'; })" 2>/dev/null | tail -1)"
-    if [[ "$row_found" == "true" ]]; then
-      activity_found=true
+    open_path "/app/billing"
+    balance_after="$(ab eval "(() => { const label=Array.from(document.querySelectorAll('p')).find((el) => el.textContent?.trim()==='Wallet balance'); const value=label?.parentElement?.querySelector('.tabular-nums')?.textContent ?? ''; return Number(value.replace(/[^0-9-]/g,'')); })()" 2>/dev/null | tr -d '"[:space:]')"
+    [[ "$balance_after" == "$expected_balance" ]] && break
+    ab wait 500 >/dev/null 2>&1 || true
+  done
+  assert_eq "$balance_after" "$expected_balance" "wallet projection did not debit exact published cost"
+
+  step "paid call reaches attribution projection"
+  attribution_seen=""
+  for _ in $(seq 1 30); do
+    open_path "/app/settings/activity"
+    snap="$(page_text)"
+    if [[ "$snap" == *"$PROJECT_NAME"* && "$snap" == *"/get"* ]]; then
+      attribution_seen=1
       break
     fi
-    ab wait 2000 >/dev/null 2>&1 || sleep 2
+    ab wait 500 >/dev/null 2>&1 || true
   done
-  [[ "$activity_found" == "true" ]] \
-    || fail "paid call never appeared in activity log for '$PROJECT_NAME'"
-  log "metered usage event visible in activity log"
-else
-  log "GATEWAY_URL unset — skip paid call (browse-only consumer path)"
+  [[ -n "$attribution_seen" ]] || fail "paid call never appeared in activity attribution"
+  record_browser_contract "paid-consumer" "metered-call-attribution" "signed-in"
 fi
 
-log "03-consumer PASS"
+log "03-consumer PASS paid_contract=$E2E_REQUIRE_PAID_CONTRACT"

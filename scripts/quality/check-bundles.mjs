@@ -446,6 +446,7 @@ function buildWorktree(path, revision) {
         CLERK_SECRET_KEY: ["sk", "test", "ZmFrZS5jbGVyay5hY2NvdW50JA"].join(
           "_",
         ),
+        VITE_BUILD_SHA: "0".repeat(40),
         VITE_CONVEX_URL: "https://ci.invalid",
         VITE_GATEWAY_URL: "https://ci.invalid",
       },

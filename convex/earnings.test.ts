@@ -62,7 +62,7 @@ describe("earnings.forOrg", () => {
       .withIdentity({
         subject: "publisher",
         org_id: "org_publisher",
-        org_role: "org:admin",
+        org_role: "org:member",
       } as {
         subject: string;
         org_id: string;

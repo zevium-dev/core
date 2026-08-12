@@ -41,7 +41,8 @@ export function ProjectEarningsPanel({
           <CardTitle>Earnings</CardTitle>
           <CardDescription>
             You keep 95% of gross credits charged to consumers. Platform takes
-            5%. Conversion: {CREDITS_PER_DOLLAR.toLocaleString()} credits = $1.
+            5%. Conversion: {CREDITS_PER_DOLLAR.toLocaleString("en-US")} credits
+            = $1.
           </CardDescription>
         </CardHeader>
       </Card>
@@ -67,8 +68,8 @@ export function ProjectEarningsPanel({
           netCredits={data.month.netCredits}
         />
         <p className="text-xs text-muted-foreground">
-          Month figures are org-wide (all projects). Project-level month lands
-          when the control plane exposes it.
+          Month figures cover the whole organization. Use this project's total
+          above to understand its contribution.
         </p>
       </section>
 

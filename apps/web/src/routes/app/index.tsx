@@ -1,4 +1,4 @@
-import { useOrganization } from "@clerk/tanstack-react-start";
+import { useAuth, useOrganization } from "@clerk/tanstack-react-start";
 import { convexQuery } from "@convex-dev/react-query";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { Link, createFileRoute } from "@tanstack/react-router";
@@ -8,6 +8,7 @@ import {
   Circle,
   KeyRound,
   PhoneCall,
+  TestTube2,
   Wallet,
 } from "lucide-react";
 import { Suspense } from "react";
@@ -34,7 +35,11 @@ import { Separator } from "#/components/ui/separator";
 import { Skeleton } from "#/components/ui/skeleton";
 import { listKeys } from "#/lib/api-keys";
 import { api } from "#/lib/convex-api";
-import { deriveOnboardingFlags, shouldShowOnboarding } from "#/lib/onboarding";
+import {
+  deriveOnboardingFlags,
+  nextOnboardingStep,
+  shouldShowOnboarding,
+} from "#/lib/onboarding";
 
 const NUMBER_FORMATTER = new Intl.NumberFormat("en-US");
 const DATE_TIME_FORMATTER = new Intl.DateTimeFormat("en-US", {
@@ -48,6 +53,17 @@ const DATE_TIME_FORMATTER = new Intl.DateTimeFormat("en-US", {
 });
 
 export const Route = createFileRoute("/app/")({
+  loader: async ({ context }) => {
+    if (!context.orgSlug) return;
+    await Promise.all([
+      context.queryClient.prefetchQuery(
+        convexQuery(api.analytics.orgOverview, { orgSlug: context.orgSlug }),
+      ),
+      context.queryClient.prefetchQuery(
+        convexQuery(api.wallets.getMyWallet, { orgSlug: context.orgSlug }),
+      ),
+    ]);
+  },
   component: DashboardPage,
   head: () => ({
     meta: [{ title: "Dashboard · Zevium" }],
@@ -57,13 +73,14 @@ export const Route = createFileRoute("/app/")({
 
 function DashboardPage() {
   const { organization, isLoaded } = useOrganization();
+  const { userId, orgId } = useAuth();
   const { isLoading: convexAuthLoading, isAuthenticated } = useConvexAuth();
   const orgSlug =
     organization && typeof organization.slug === "string"
       ? organization.slug
       : null;
 
-  if (!isLoaded || convexAuthLoading) {
+  if (!isLoaded || convexAuthLoading || !userId || !orgId) {
     return <DashboardSkeleton />;
   }
 
@@ -84,12 +101,20 @@ function DashboardPage() {
 
   return (
     <Suspense fallback={<DashboardSkeleton />}>
-      <DashboardContent orgSlug={orgSlug} />
+      <DashboardContent orgSlug={orgSlug} userId={userId} orgId={orgId} />
     </Suspense>
   );
 }
 
-function DashboardContent({ orgSlug }: { orgSlug: string }) {
+function DashboardContent({
+  orgSlug,
+  userId,
+  orgId,
+}: {
+  orgSlug: string;
+  userId: string;
+  orgId: string;
+}) {
   const { data: overview } = useSuspenseQuery(
     convexQuery(api.analytics.orgOverview, { orgSlug }),
   );
@@ -99,13 +124,15 @@ function DashboardContent({ orgSlug }: { orgSlug: string }) {
   );
 
   const keysQuery = useQuery({
-    queryKey: ["settings", "api-keys", "count"] as const,
+    queryKey: ["settings", "api-keys", "count", userId, orgId] as const,
     queryFn: () => listKeys(),
     staleTime: 30_000,
   });
 
-  const keyCount = keysQuery.data?.filter((key) => key.current).length ?? 0;
-  const keysLoaded = !keysQuery.isPending;
+  const keyCount = keysQuery.isSuccess
+    ? keysQuery.data.filter((key) => key.current).length
+    : 0;
+  const keysLoaded = keysQuery.isSuccess;
   const flags = deriveOnboardingFlags({
     keyCount,
     callsCycle: overview.callsCycle,
@@ -195,6 +222,24 @@ function DashboardContent({ orgSlug }: { orgSlug: string }) {
 
       {keysQuery.isPending ? (
         <OnboardingSkeleton />
+      ) : keysQuery.isError ? (
+        <Card role="alert">
+          <CardHeader>
+            <CardTitle>API key status did not load</CardTitle>
+            <CardDescription>
+              Onboarding progress is paused until key status is available.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => void keysQuery.refetch()}
+            >
+              Retry key status
+            </Button>
+          </CardContent>
+        </Card>
       ) : showOnboarding ? (
         <OnboardingChecklist
           hasKey={flags.hasKey}
@@ -332,8 +377,10 @@ function OnboardingChecklist({
   hasCall: boolean;
   hasTopUp: boolean;
 }) {
+  const nextStep = nextOnboardingStep({ hasKey, hasCall, hasTopUp });
   const steps = [
     {
+      id: "key" as const,
       done: hasKey,
       title: "Get an API key",
       body: "One key per user. Copy it once — you won't see it again.",
@@ -342,20 +389,22 @@ function OnboardingChecklist({
       icon: KeyRound,
     },
     {
-      done: hasCall,
-      title: "Make your first call",
-      body: "Browse the catalogue and hit a free-tier or paid endpoint.",
-      href: "/catalogue" as const,
-      cta: "Browse APIs",
-      icon: PhoneCall,
-    },
-    {
+      id: "topup" as const,
       done: hasTopUp,
       title: "Top up credits",
       body: "Prepaid org wallet. Zero balance blocks every call.",
       href: "/app/billing" as const,
       cta: "Top up",
       icon: Wallet,
+    },
+    {
+      id: "call" as const,
+      done: hasCall,
+      title: "Send your first live call",
+      body: "Return to your chosen operation and confirm its exact published cost.",
+      href: "/catalogue" as const,
+      cta: "Choose API",
+      icon: PhoneCall,
     },
   ];
 
@@ -366,15 +415,34 @@ function OnboardingChecklist({
           <h2>Get started</h2>
         </CardTitle>
         <CardDescription>
-          Key → first call → top up. Time-to-first-call under a minute.
+          Validate requests free, then create key → add credits → send live.
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
+        <div className="flex flex-col gap-3 rounded-lg border bg-muted/30 p-4 sm:flex-row sm:items-start sm:justify-between">
+          <div className="flex min-w-0 items-start gap-3">
+            <TestTube2 className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+            <div className="space-y-1">
+              <p className="text-sm font-medium">Try an API without a key</p>
+              <p className="text-sm text-muted-foreground">
+                Mock mode generates a response from the published schema. Zero
+                credits and no upstream execution.
+              </p>
+            </div>
+          </div>
+          <Button asChild size="sm" className="w-full shrink-0 sm:w-auto">
+            <Link to="/catalogue">Browse free mocks</Link>
+          </Button>
+        </div>
+        <Separator />
         {steps.map((step, index) => {
           const Icon = step.icon;
           return (
             <div key={step.title}>
-              <div className="flex flex-col gap-3 py-3 sm:flex-row sm:items-start">
+              <div
+                className="flex flex-col gap-3 py-3 sm:flex-row sm:items-start"
+                aria-current={step.id === nextStep ? "step" : undefined}
+              >
                 <div className="flex min-w-0 flex-1 items-start gap-3">
                   {step.done ? (
                     <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-primary" />
@@ -389,18 +457,17 @@ function OnboardingChecklist({
                     <p className="text-sm text-muted-foreground">{step.body}</p>
                   </div>
                 </div>
-                {!step.done ? (
-                  <Button
-                    asChild
-                    size="sm"
-                    variant="outline"
-                    className="w-full sm:w-auto"
-                  >
+                {!step.done && step.id === nextStep ? (
+                  <Button asChild size="sm" className="w-full sm:w-auto">
                     <Link to={step.href}>{step.cta}</Link>
                   </Button>
-                ) : (
+                ) : step.done ? (
                   <Badge variant="secondary" className="self-start">
                     Done
+                  </Badge>
+                ) : (
+                  <Badge variant="outline" className="self-start">
+                    Later
                   </Badge>
                 )}
               </div>

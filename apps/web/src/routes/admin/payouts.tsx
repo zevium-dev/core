@@ -25,6 +25,7 @@ import {
 } from "#/components/ui/dialog";
 import {
   Empty,
+  EmptyContent,
   EmptyDescription,
   EmptyHeader,
   EmptyMedia,
@@ -151,7 +152,10 @@ function AdminPayoutsPage() {
   const firstPagePending = transfersQuery.isPending && cursor === null;
   const loadMorePending = transfersQuery.isPending && cursor !== null;
   const canLoadMore =
-    !isDone && continueCursor !== null && !transfersQuery.isPending;
+    !isDone &&
+    continueCursor !== null &&
+    !transfersQuery.isPending &&
+    !transfersQuery.isError;
 
   function selectFilter(nextFilter: TransferFilter) {
     if (nextFilter === filter) return;
@@ -203,6 +207,27 @@ function AdminPayoutsPage() {
         <CardContent>
           {firstPagePending ? (
             <TransferTableSkeleton />
+          ) : transfersQuery.isError && rows.length === 0 ? (
+            <Empty className="border border-dashed py-8">
+              <EmptyHeader>
+                <EmptyTitle>Could not load transfers</EmptyTitle>
+                <EmptyDescription>
+                  {humanError(
+                    transfersQuery.error,
+                    "Publisher transfers are temporarily unavailable.",
+                  )}
+                </EmptyDescription>
+              </EmptyHeader>
+              <EmptyContent>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => void transfersQuery.refetch()}
+                >
+                  Retry
+                </Button>
+              </EmptyContent>
+            </Empty>
           ) : rows.length === 0 ? (
             <Empty className="py-8">
               <EmptyHeader>
@@ -234,6 +259,25 @@ function AdminPayoutsPage() {
                 }}
               >
                 {loadMorePending ? "Loading…" : "Load more"}
+              </Button>
+            </div>
+          ) : null}
+          {transfersQuery.isError && rows.length > 0 ? (
+            <div
+              className="mt-4 flex flex-wrap items-center justify-center gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-3"
+              role="alert"
+            >
+              <p className="text-sm text-destructive">
+                More transfers could not be loaded. Existing rows are still
+                available.
+              </p>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => void transfersQuery.refetch()}
+              >
+                Retry page
               </Button>
             </div>
           ) : null}
@@ -377,8 +421,8 @@ function RetryTransferDialog({
             ) : null}
           </DialogDescription>
         </DialogHeader>
-        <div className="flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-muted-foreground">
-          <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-600 dark:text-amber-400" />
+        <div className="flex items-start gap-2 rounded-md border border-warning/40 bg-warning/10 p-3 text-sm text-muted-foreground">
+          <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warning-foreground" />
           Retry does not mark the transfer paid. Stripe events determine the
           final transfer state.
         </div>
@@ -415,7 +459,7 @@ function PayoutsSkeleton() {
     <div className="flex flex-col gap-6">
       <div className="space-y-2">
         <Skeleton className="h-8 w-48" />
-        <Skeleton className="h-4 w-80" />
+        <Skeleton className="h-4 w-80 max-w-full" />
       </div>
       <Card>
         <CardHeader>
@@ -431,7 +475,7 @@ function PayoutsSkeleton() {
 }
 
 function formatMoney(amount: number, currency: string): string {
-  return new Intl.NumberFormat(undefined, {
+  return new Intl.NumberFormat("en-US", {
     style: "currency",
     currency: currency.toUpperCase(),
   }).format(amount / 100);

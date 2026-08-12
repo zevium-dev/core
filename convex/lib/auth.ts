@@ -1,3 +1,10 @@
+import {
+  isPrivilegedOrgRole,
+  projectOrgCapabilities,
+  type OrgCapability,
+  type OrgCapabilityProjection,
+} from "@zevium/shared";
+
 import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "../_generated/server";
 import { isOrganizationActive, isProjectRetired } from "./publicRoutes";
@@ -10,6 +17,7 @@ export type OrgIdentityClaims = {
 };
 
 type DbCtx = QueryCtx | MutationCtx;
+type AuthCtx = Pick<QueryCtx, "auth">;
 
 async function hasOrganizationTombstone(
   ctx: DbCtx,
@@ -23,7 +31,9 @@ async function hasOrganizationTombstone(
   );
 }
 
-export async function requireIdentity(ctx: DbCtx): Promise<OrgIdentityClaims> {
+export async function requireIdentity(
+  ctx: AuthCtx,
+): Promise<OrgIdentityClaims> {
   const identity = await ctx.auth.getUserIdentity();
   if (identity === null) {
     throw new Error("Not authenticated");
@@ -132,7 +142,11 @@ export async function getOrgByPublicHandle(
 export async function requireOrgMemberBySlug(
   ctx: DbCtx,
   _orgSlug: string,
-): Promise<{ claims: OrgIdentityClaims; org: Doc<"organizations"> }> {
+): Promise<{
+  claims: OrgIdentityClaims;
+  org: Doc<"organizations">;
+  access: OrgCapabilityProjection;
+}> {
   const claims = await requireIdentity(ctx);
   if (claims.orgId === undefined) {
     throw new Error("No active organization on identity");
@@ -147,7 +161,29 @@ export async function requireOrgMemberBySlug(
   if (org.archivedAt !== undefined) {
     throw new Error("Organization is archived");
   }
-  return { claims, org };
+  const access = projectOrgCapabilities(claims.orgRole);
+  if (access === null) throw new Error("Organization role is not supported");
+  return { claims, org, access };
+}
+
+/** Resolve the active Clerk org mirror and its server-owned role projection. */
+export async function requireActiveOrg(ctx: DbCtx): Promise<{
+  claims: OrgIdentityClaims;
+  org: Doc<"organizations">;
+  access: OrgCapabilityProjection;
+}> {
+  const claims = await requireIdentity(ctx);
+  if (claims.orgId === undefined) {
+    throw new Error("No active organization on identity");
+  }
+  const org = await ctx.db
+    .query("organizations")
+    .withIndex("by_clerk_org", (q) => q.eq("clerkOrgId", claims.orgId!))
+    .unique();
+  if (org === null) throw new Error("Active organization is not provisioned");
+  const access = projectOrgCapabilities(claims.orgRole);
+  if (access === null) throw new Error("Organization role is not supported");
+  return { claims, org, access };
 }
 
 /**
@@ -249,7 +285,7 @@ export async function requireSpecVersionAdmin(
 }
 
 /**
- * Enforce org admin/owner role from the Clerk JWT claim.
+ * Enforce privileged org role from the Clerk JWT claim (owner or admin).
  * `claims.orgRole` is parsed by `requireIdentity` but, without this gate, any
  * org member can perform admin actions. Callers resolve claims first via
  * `requireIdentity` / `requireOrgMemberBySlug` / `requireProjectMember`, then
@@ -259,13 +295,26 @@ export async function requireSpecVersionAdmin(
  *
  * Publication, public visibility, retirement, credential/webhook policy, and
  * organization-wide key policy call this gate. Draft editing and own-key reads
- * intentionally remain member-scoped.
+ * intentionally remain member-scoped. UI role checks only explain
+ * availability; this server gate remains authoritative.
  */
 export function requireOrgAdmin(claims: OrgIdentityClaims): OrgIdentityClaims {
-  if (claims.orgRole !== "org:admin" && claims.orgRole !== "org:owner") {
-    throw new Error("Org admin role required");
+  if (!isPrivilegedOrgRole(claims.orgRole)) {
+    throw new Error("Org admin or owner role required");
+
   }
   return claims;
+}
+
+export function requireOrgCapability(
+  claims: OrgIdentityClaims,
+  capability: OrgCapability,
+): OrgCapabilityProjection {
+  const access = projectOrgCapabilities(claims.orgRole);
+  if (access === null || !access.capabilities[capability]) {
+    throw new Error("Organization capability required");
+  }
+  return access;
 }
 
 /**

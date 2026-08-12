@@ -3,6 +3,7 @@ import { internalQuery, mutation, query } from "./_generated/server";
 import type { Doc } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
 import {
+  getOrgByPublicHandle,
   requireOrgAdmin,
   requireProjectMember,
   requireSpecVersionAdmin,
@@ -325,10 +326,14 @@ export const getVersion = query({
   handler: async (
     ctx,
     args,
-  ): Promise<{ version: string; spec: string; publishedAt: number }> => {
+  ): Promise<{
+    version: string;
+    spec: string;
+    publishedAt: number;
+  } | null> => {
     const row = await ctx.db.get(args.versionId);
     if (row === null) {
-      throw new Error("Spec version not found");
+      return null;
     }
     await requireProjectMember(ctx, row.projectId);
     return {
@@ -566,7 +571,6 @@ export const undeprecateVersion = mutation({
     if (version.sunsetAt !== undefined && version.sunsetAt <= Date.now()) {
       throw new Error("A version cannot be restored after its sunset");
     }
-
     // Replace to unset optional fields — patch cannot delete them.
     await ctx.db.replace(args.versionId, {
       projectId: version.projectId,

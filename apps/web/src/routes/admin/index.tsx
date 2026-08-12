@@ -5,6 +5,7 @@ import { Building2, FileStack, PhoneCall } from "lucide-react";
 
 import { NumberTicker } from "#/components/motion/number-ticker";
 import { Badge } from "#/components/ui/badge";
+import { Button } from "#/components/ui/button";
 import {
   Card,
   CardContent,
@@ -21,10 +22,21 @@ import {
 } from "#/components/ui/empty";
 import { Skeleton } from "#/components/ui/skeleton";
 import { api } from "#/lib/convex-api";
+import { humanError } from "#/lib/human-error";
 import type {
   PlatformStats,
   AdminUsageView,
 } from "../../../../../convex/admin";
+
+const ADMIN_DATE_FORMATTER = new Intl.DateTimeFormat("en-US", {
+  year: "numeric",
+  month: "short",
+  day: "numeric",
+  hour: "numeric",
+  minute: "2-digit",
+  timeZone: "UTC",
+  timeZoneName: "short",
+});
 
 export const Route = createFileRoute("/admin/")({
   component: AdminOverviewPage,
@@ -45,12 +57,26 @@ function AdminOverviewPage() {
   // Queries are admin-gated by the layout; a stale-session error surfaces as
   // a human-readable message rather than raw internals.
   if (statsQuery.data === undefined || usageQuery.data === undefined) {
+    const error = statsQuery.error ?? usageQuery.error;
     return (
-      <div className="flex flex-col gap-2">
+      <div className="flex flex-col gap-4">
         <h1 className="text-2xl font-semibold tracking-tight">Overview</h1>
         <p className="text-sm text-muted-foreground">
-          Couldn’t load platform data. You may need to sign in again.
+          {humanError(
+            error,
+            "Could not load platform data. You may need to sign in again.",
+          )}
         </p>
+        <Button
+          type="button"
+          variant="outline"
+          className="self-start"
+          onClick={() => {
+            void Promise.all([statsQuery.refetch(), usageQuery.refetch()]);
+          }}
+        >
+          Retry
+        </Button>
       </div>
     );
   }
@@ -117,7 +143,7 @@ function OverviewContent({
           </CardHeader>
           <CardContent className="text-xs text-muted-foreground">
             {stats.usageCapped
-              ? `Capped at ${stats.usageCap.toLocaleString()} (scan limit)`
+              ? `Capped at ${stats.usageCap.toLocaleString("en-US")} (scan limit)`
               : "Indexed by event time"}
           </CardContent>
         </Card>
@@ -193,7 +219,7 @@ function OverviewContent({
                   {usage.map((event) => (
                     <tr key={event._id} className="border-b last:border-0">
                       <td className="whitespace-nowrap px-2 py-2.5 text-muted-foreground">
-                        {new Date(event.at).toLocaleString()}
+                        {ADMIN_DATE_FORMATTER.format(event.at)}
                       </td>
                       <td className="px-2 py-2.5 font-mono text-xs text-muted-foreground">
                         {event.projectId}
@@ -208,7 +234,7 @@ function OverviewContent({
                         <StatusBadge status={event.status} />
                       </td>
                       <td className="px-2 py-2.5 text-right tabular-nums">
-                        {event.credits.toLocaleString()}
+                        {event.credits.toLocaleString("en-US")}
                       </td>
                       <td className="px-2 py-2.5 text-right tabular-nums text-muted-foreground">
                         {event.latencyMs}ms

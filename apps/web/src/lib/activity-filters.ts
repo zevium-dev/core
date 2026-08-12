@@ -46,17 +46,51 @@ export function parseActivityTimeRange(raw: unknown): ActivityTimeRange {
   return "all";
 }
 
-export type UsageRowId = { _id: string };
+export type UsageRowIdentity = {
+  eventId: string | null;
+  at: number;
+  keyId: string;
+  endpoint: string;
+  method: string;
+};
+
+export type ActivityAttributionSearch = {
+  key?: string;
+  member?: string;
+  endpoint?: string;
+  method?: string;
+};
+
+/** Never project an admin-only member filter into ordinary-member UI/query state. */
+export function authorizedAttributionSearch(
+  search: ActivityAttributionSearch,
+  canViewOrgUsage: boolean,
+): ActivityAttributionSearch {
+  return {
+    ...(search.key ? { key: search.key } : {}),
+    ...(canViewOrgUsage && search.member ? { member: search.member } : {}),
+    ...(search.endpoint ? { endpoint: search.endpoint } : {}),
+    ...(search.method ? { method: search.method } : {}),
+  };
+}
+
+function usageRowIdentity(row: UsageRowIdentity): string {
+  return (
+    row.eventId ??
+    `${row.at}:${row.keyId}:${row.method.toUpperCase()}:${row.endpoint}`
+  );
+}
 
 /**
  * Merge a fetched page into the accumulated list.
  * `replace` clears previous pages (filter reset / first page).
  * Dedupe by `_id` so StrictMode double-effects don't double-append.
  */
-export function mergeUsagePages<T extends UsageRowId>(
+function mergePages<T>(
   existing: readonly T[],
   incoming: readonly T[],
   replace: boolean,
+  identityFor: (row: T) => string,
 ): T[] {
   if (replace) {
     return [...incoming];
@@ -64,15 +98,32 @@ export function mergeUsagePages<T extends UsageRowId>(
   if (incoming.length === 0) {
     return [...existing];
   }
-  const seen = new Set(existing.map((row) => row._id));
+  const seen = new Set(existing.map(identityFor));
   const next = [...existing];
   for (const row of incoming) {
-    if (!seen.has(row._id)) {
-      seen.add(row._id);
+    const identity = identityFor(row);
+    if (!seen.has(identity)) {
+      seen.add(identity);
       next.push(row);
     }
   }
   return next;
+}
+
+export function mergeUsagePages<T extends { _id: string }>(
+  existing: readonly T[],
+  incoming: readonly T[],
+  replace: boolean,
+): T[] {
+  return mergePages(existing, incoming, replace, (row) => row._id);
+}
+
+export function mergePublicUsagePages<T extends UsageRowIdentity>(
+  existing: readonly T[],
+  incoming: readonly T[],
+  replace: boolean,
+): T[] {
+  return mergePages(existing, incoming, replace, usageRowIdentity);
 }
 
 export function mergeHandlePages<T extends { handle: string }>(

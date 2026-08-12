@@ -80,48 +80,36 @@ describe("buildMcpConfigSnippet", () => {
 });
 
 describe("pickLandingTeasers", () => {
-  const fallbacks = [
-    {
-      name: "Weather",
-      slug: "weather",
-      publisherHandle: "demo",
-      orgName: "Demo",
-      description: "Forecasts.",
-    },
-    {
-      name: "FX",
-      slug: "fx",
-      publisherHandle: "demo",
-      orgName: "Demo",
-      description: "Rates.",
-    },
-  ] as const;
-
-  it("prefers live items and marks live", () => {
-    const teasers = pickLandingTeasers(
-      [
-        {
-          name: "Real",
-          slug: "real",
-          publisherHandle: "acme",
-          orgName: "Acme",
-          description: null,
-        },
-      ],
-      fallbacks,
-    );
+  it("returns only real catalogue items", () => {
+    const teasers = pickLandingTeasers([
+      {
+        name: "Real",
+        slug: "real",
+        publisherHandle: "acme",
+        orgName: "Acme",
+        description: null,
+      },
+    ]);
     expect(teasers).toHaveLength(1);
     expect(teasers[0]).toMatchObject({
       name: "Real",
-      live: true,
-      description: "Published OpenAPI API.",
+      description: "No description provided.",
     });
   });
 
-  it("uses fallbacks as not-live when catalogue empty", () => {
-    const teasers = pickLandingTeasers([], fallbacks);
-    expect(teasers).toHaveLength(2);
-    expect(teasers.every((t) => t.live === false)).toBe(true);
-    expect(teasers[0]?.slug).toBe("weather");
+  it("does not manufacture listings when catalogue is empty", () => {
+    expect(pickLandingTeasers([])).toEqual([]);
+  });
+
+  it("honors a non-negative display limit", () => {
+    const item = {
+      name: "Real",
+      slug: "real",
+      publisherHandle: "acme",
+      orgName: "Acme",
+      description: "Real API",
+    };
+    expect(pickLandingTeasers([item, item], 1)).toHaveLength(1);
+    expect(pickLandingTeasers([item], -1)).toEqual([]);
   });
 });
