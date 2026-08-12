@@ -5,6 +5,7 @@ import {
 } from "./pricing.js";
 
 const SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const MAX_OPENAPI_SPEC_BYTES = 393_216;
 
 /**
  * Semver 2.0 core + optional pre-release / build metadata.
@@ -53,6 +54,15 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  */
 export function collectOpenApiSpecIssues(specText: string): SpecIssue[] {
   const issues: SpecIssue[] = [];
+
+  if (new TextEncoder().encode(specText).byteLength > MAX_OPENAPI_SPEC_BYTES) {
+    issues.push({
+      level: "error",
+      path: "$",
+      message: "Spec exceeds 393216 UTF-8 bytes",
+    });
+    return issues;
+  }
 
   let raw: unknown;
   try {

@@ -60,6 +60,13 @@ async function seedWorld(t: ReturnType<typeof convexTest>): Promise<Seeded> {
       spec: SPEC_BODY,
       publishedAt: Date.now(),
     });
+    await ctx.db.insert("publicRouteTombstones", {
+      organizationId: orgId,
+      projectId,
+      publisherHandle: "pub-co",
+      projectSlug: "dep-api",
+      reservedAt: Date.now(),
+    });
     return { orgId, projectId, versionId };
   });
 }
@@ -124,7 +131,7 @@ describe("specs.deprecateVersion — auth", () => {
         versionId: seed.versionId,
         message: "Use v2",
       }),
-    ).rejects.toThrow(/Not a member/);
+    ).rejects.toThrow(/Version not found/);
   });
 
   it("rejects unauthenticated", async () => {
@@ -285,7 +292,7 @@ describe("specs.undeprecateVersion", () => {
       asStranger(t).mutation(api.specs.undeprecateVersion, {
         versionId: seed.versionId,
       }),
-    ).rejects.toThrow(/Not a member/);
+    ).rejects.toThrow(/Version not found/);
   });
 });
 
@@ -628,7 +635,6 @@ describe("project retirement lifecycle", () => {
       await ctx.db.insert("upstreamCredentials", {
         projectId: seed.projectId,
         name: "authorization",
-        secret: "legacy-secret",
         updatedAt: 1,
       });
       await ctx.db.insert("webhookEndpoints", {

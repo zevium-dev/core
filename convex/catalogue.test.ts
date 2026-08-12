@@ -141,6 +141,21 @@ async function seedCatalogue(
       }),
     });
 
+    for (const [projectId, projectSlug] of [
+      [cheapId, "cheap"],
+      [freeId, "free-tier"],
+      [expensiveId, "expensive"],
+      [privateId, "secret"],
+    ] as const) {
+      await ctx.db.insert("publicRouteTombstones", {
+        organizationId: orgId,
+        projectId,
+        publisherHandle: "pub-co",
+        projectSlug,
+        reservedAt: t0,
+      });
+    }
+
     // Public draft — must never list.
     const draftId = await ctx.db.insert("projects", {
       organizationId: orgId,

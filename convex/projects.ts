@@ -20,6 +20,12 @@ import {
 import { fireWebhookEvent } from "./webhooks";
 import { isValidSlug } from "./lib/validate";
 import { syncCatalogueListing } from "./catalogue";
+import { isProjectRetired, retirePublicRoute } from "./lib/publicRoutes";
+import {
+  enqueueCatalogueSnapshot,
+  enqueuePublishedProjectProjection,
+  enqueueRouteArchive,
+} from "./registrySync";
 
 export const MIN_DEPRECATION_NOTICE_MS = 7 * 24 * 60 * 60 * 1000;
 const RETIREMENT_BATCH_SIZE = 100;
@@ -99,7 +105,11 @@ export const list = query({
       .query("projects")
       .withIndex("by_org", (q) => q.eq("organizationId", org._id))
       .collect();
-    return projects.filter((project) => project.retiredAt === undefined);
+    const active: Doc<"projects">[] = [];
+    for (const project of projects) {
+      if (!(await isProjectRetired(ctx, project))) active.push(project);
+    }
+    return active;
   },
 });
 
@@ -116,7 +126,9 @@ export const get = query({
         q.eq("organizationId", org._id).eq("slug", args.projectSlug),
       )
       .unique();
-    return project?.retiredAt === undefined ? project : null;
+    return project !== null && !(await isProjectRetired(ctx, project))
+      ? project
+      : null;
   },
 });
 
@@ -159,6 +171,15 @@ export const create = mutation({
       .unique();
     if (existing !== null) {
       throw new Error("Project slug already exists in this organization");
+    }
+    const tombstone = await ctx.db
+      .query("publicRouteTombstones")
+      .withIndex("by_org_slug", (q) =>
+        q.eq("organizationId", org._id).eq("projectSlug", slug),
+      )
+      .unique();
+    if (tombstone !== null) {
+      throw new Error("Project slug is permanently reserved");
     }
 
     const projectId = await ctx.db.insert("projects", {
@@ -206,10 +227,7 @@ export const update = mutation({
     if (current.retiredAt !== undefined) {
       throw new Error("Project is retired");
     }
-    if (
-      args.patch.visibility !== undefined &&
-      args.patch.visibility !== current.visibility
-    ) {
+    if (args.patch.visibility !== undefined) {
       requireOrgAdmin(claims);
     }
 
@@ -306,13 +324,17 @@ export const update = mutation({
       throw new Error("Failed to load updated project");
     }
     await syncCatalogueListing(ctx, updated._id);
+    await enqueuePublishedProjectProjection(ctx, args.projectId);
     return updated;
   },
 });
 
 export const remove = mutation({
   args: { projectId: v.id("projects") },
-  handler: async (ctx, args): Promise<{ deleted: Id<"projects"> }> => {
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{ archived: Id<"projects">; retiredAt: number }> => {
     const { claims, project } = await requireProjectMember(ctx, args.projectId);
     requireOrgAdmin(claims);
 
@@ -327,6 +349,7 @@ export const remove = mutation({
       }
     }
 
+    const retiredAt = Date.now();
     await cleanupProjectRuntime(ctx, args.projectId);
 
     if (project.status === "draft") {
@@ -335,13 +358,27 @@ export const remove = mutation({
       await ctx.db.patch(args.projectId, {
         visibility: "private",
         retirementState: "retired",
+        retirementRevision: (project.retirementRevision ?? 0) + 1,
         retirementCutoffAt: project.retirementCutoffAt ?? project.sunsetAt,
         sunsetAt: undefined,
-        retiredAt: Date.now(),
+        retiredAt,
       });
     }
     await syncCatalogueListing(ctx, args.projectId);
-    return { deleted: args.projectId };
+    if (project.status === "published") {
+      const organization = await getActiveOrgById(ctx, project.organizationId);
+      if (organization !== null) {
+        await retirePublicRoute(ctx, project, organization, retiredAt);
+        const route = await enqueueRouteArchive(
+          ctx,
+          project,
+          organization,
+          retiredAt,
+        );
+        await enqueueCatalogueSnapshot(ctx, args.projectId, route);
+      }
+    }
+    return { archived: args.projectId, retiredAt };
   },
 });
 
@@ -663,6 +700,17 @@ export const retireSunsetProjects = internalMutation({
         sunsetAt: undefined,
         retiredAt: now,
       });
+      const organization = await getActiveOrgById(ctx, project.organizationId);
+      if (organization !== null) {
+        await retirePublicRoute(ctx, project, organization, now);
+        const route = await enqueueRouteArchive(
+          ctx,
+          project,
+          organization,
+          now,
+        );
+        await enqueueCatalogueSnapshot(ctx, project._id, route);
+      }
       await syncCatalogueListing(ctx, project._id);
       retired += 1;
     }

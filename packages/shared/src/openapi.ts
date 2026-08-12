@@ -9,6 +9,8 @@ import {
   type EndpointPricing,
 } from "./pricing.js";
 
+export const MAX_OPENAPI_SPEC_BYTES = 393_216;
+
 export type HttpMethod =
   "get" | "post" | "put" | "patch" | "delete" | "options" | "head" | "trace";
 
@@ -73,6 +75,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * Throws on invalid JSON or non-object root.
  */
 export function parseSpec(json: string): ParsedOpenApiSpec {
+  if (new TextEncoder().encode(json).byteLength > MAX_OPENAPI_SPEC_BYTES) {
+    throw new Error("OpenAPI spec exceeds 393216 UTF-8 bytes");
+  }
   let raw: unknown;
   try {
     raw = JSON.parse(json) as unknown;

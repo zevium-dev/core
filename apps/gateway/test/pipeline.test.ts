@@ -748,6 +748,35 @@ describe("gateway pipeline", () => {
     expect((await walletStub(clerkOrgId).getState()).balance).toBe(1);
   });
 
+  it("blocks archived organizations before every admission path", async () => {
+    const clerkOrgId = "org_pipe_archived";
+    const { fetchImpl, calls } = makeFetchMock(
+      () => new Response("should not run"),
+    );
+    __setTestGrantsFetcher(async () => ({
+      wallet: { clerkOrgId, balance: 100, sequence: 1 },
+      keySettings: [{ keyId: KEY_ID, disabled: false }],
+      archived: true,
+    }));
+    await installFixtures({ clerkOrgId, fetchImpl });
+
+    for (const [path, method] of [
+      ["zero", "GET"],
+      ["free", "GET"],
+      ["echo", "POST"],
+    ] as const) {
+      const response = await gatewayFetch(
+        `/gateway/${ORG_SLUG}/${PROJECT_SLUG}/${path}`,
+        { method },
+      );
+      expect(response.status).toBe(403);
+      await expect(response.json()).resolves.toMatchObject({
+        error: "organization_archived",
+      });
+    }
+    expect(calls).toHaveLength(0);
+  });
+
   it("disabled and expired-grace keys cannot use the free tier upstream", async () => {
     for (const [label, setting] of [
       ["disabled", { keyId: KEY_ID, disabled: true }],

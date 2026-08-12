@@ -13,6 +13,7 @@ import { requireOrgMemberBySlug } from "./lib/auth";
 import { toGatewayRow, type GatewayKeySettingRow } from "./keySettings";
 import { PUBLISHER_RISK_HOLD_MS, publisherEarningSplit } from "./accounting";
 import { MAX_ENDPOINT_COST_CREDITS } from "@zevium/shared";
+import { getOrganizationTombstone } from "./lib/publicRoutes";
 
 export type SettlementStatus = "applied" | "already_applied" | "rejected";
 
@@ -244,6 +245,8 @@ export const applyAdminAdjustment = internalMutation({
 export type GatewayWalletView = {
   wallet: WalletCheckpoint;
   keySettings: GatewayKeySettingRow[];
+  /** Terminal kill bit; edge must deny every new admission when true. */
+  archived: boolean;
 };
 
 /**
@@ -254,6 +257,9 @@ export const getGatewayWallet = internalQuery({
   args: { clerkOrgId: v.string() },
   handler: async (ctx, args): Promise<GatewayWalletView> => {
     const organization = await getOrganizationByClerkId(ctx, args.clerkOrgId);
+    const archived =
+      organization?.archivedAt !== undefined ||
+      (await getOrganizationTombstone(ctx, args.clerkOrgId)) !== null;
     const wallet =
       organization === null
         ? null
@@ -267,11 +273,15 @@ export const getGatewayWallet = internalQuery({
       wallet:
         wallet === null
           ? { clerkOrgId: args.clerkOrgId, balance: 0, sequence: 0 }
-          : checkpoint(args.clerkOrgId, wallet),
+          : {
+              ...checkpoint(args.clerkOrgId, wallet),
+              balance: archived ? 0 : wallet.balance,
+            },
       keySettings: settings.map((setting) => ({
         ...toGatewayRow(setting),
-        disabled: organization === null ? true : setting.disabled,
+        disabled: archived || setting.disabled,
       })),
+      archived,
     };
   },
 });

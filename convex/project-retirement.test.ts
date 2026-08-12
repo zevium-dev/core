@@ -372,7 +372,6 @@ describe("retirement queue draining", () => {
         await ctx.db.insert("upstreamCredentials", {
           projectId: ids[204]!,
           name: `x-secret-${index}`,
-          secret: `legacy-${index}`,
           updatedAt: index,
         });
       }

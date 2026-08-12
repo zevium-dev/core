@@ -24,6 +24,11 @@ import type { Doc } from "./_generated/dataModel";
 import { summarizePublishedPricing, type PublicListing } from "./catalogue";
 import { getActiveOrgById } from "./lib/auth";
 import { toQualitySnapshotContract } from "./quality";
+import {
+  getActivePublicRouteBinding,
+  isOrganizationActive,
+  isProjectRetired,
+} from "./lib/publicRoutes";
 
 /** Max results returned by a semantic search (VectorSearchQuery.limit caps at 256). */
 const SEARCH_LIMIT_MAX = 20;
@@ -154,7 +159,14 @@ export const getProjectForEmbed = internalQuery({
     specJson: string | null;
   } | null> => {
     const project = await ctx.db.get(args.projectId);
-    if (project === null) return null;
+    if (project === null || (await isProjectRetired(ctx, project))) return null;
+    const organization = await ctx.db.get(project.organizationId);
+    if (
+      organization === null ||
+      !(await isOrganizationActive(ctx, organization))
+    ) {
+      return null;
+    }
 
     const latest = await ctx.db
       .query("specVersions")
@@ -317,6 +329,9 @@ export const fetchSearchListings = internalQuery({
 
       const org = await getActiveOrgById(ctx, project.organizationId);
       if (org === null) continue;
+      if ((await getActivePublicRouteBinding(ctx, org, project)) === null) {
+        continue;
+      }
       if (org.publicHandle === undefined || org.publicHandle === "") continue;
 
       const latest = await ctx.db

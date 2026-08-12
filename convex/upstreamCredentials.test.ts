@@ -40,6 +40,13 @@ async function seedProject(
       spec: '{"openapi":"3.1.0"}',
       publishedAt: 1,
     });
+    await ctx.db.insert("publicRouteTombstones", {
+      organizationId,
+      projectId,
+      publisherHandle: "publisher",
+      projectSlug: "md-to-html",
+      reservedAt: 1,
+    });
     return { projectId };
   });
 }

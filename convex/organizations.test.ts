@@ -122,6 +122,7 @@ describe("organization archive ordering and scale", () => {
       });
       // Hostile state: mutable mirror looks active beside terminal tombstone.
       await ctx.db.insert("organizationTombstones", {
+        sourceRevision: 1,
         clerkOrgId: "org_tombstoned",
         archivedAt: 2,
       });

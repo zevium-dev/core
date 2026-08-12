@@ -129,7 +129,7 @@ export type KeyAuthorizationResult =
   | { status: "allowed" }
   | {
       status: "rejected";
-      reason: "key_disabled" | "insufficient_credits";
+      reason: "key_disabled" | "insufficient_credits" | "organization_archived";
       available?: number;
     };
 
@@ -170,6 +170,7 @@ export type KeySetting = {
   rotatedFromKeyId?: string;
   /** Old rotated key works until this ms epoch; past = treated as disabled. */
   graceUntil?: number;
+  rotationRequiredAt?: number;
 };
 
 /** Optional key-context for a reservation (key enforcement). */
@@ -191,6 +192,7 @@ const K_FLUSH_SEQ = "flushSeq";
 const K_FREE_PREFIX = "free:";
 const K_KEY_SETTINGS = "keySettings";
 const K_KEY_SETTINGS_AT = "keySettingsSyncedAt";
+const K_ORG_ARCHIVED = "organizationArchived";
 const K_SETTLED_PREFIX = "settled:";
 const K_SYNC_GRANTS_AT = "syncGrantsAt";
 const K_DEAD_LETTERS = "deadLetterSettlements";
@@ -294,6 +296,9 @@ function parseKeySettings(raw: unknown): KeySetting[] {
     if (typeof r.graceUntil === "number") {
       setting.graceUntil = r.graceUntil;
     }
+    if (typeof r.rotationRequiredAt === "number") {
+      setting.rotationRequiredAt = r.rotationRequiredAt;
+    }
     out.push(setting);
   }
   return out;
@@ -314,6 +319,7 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
   #lastCompactionAt = 0;
   #keySettings: Map<string, KeySetting> = new Map();
   #keySettingsSyncedAt = 0;
+  #orgArchived = false;
   #syncInFlight: Promise<SyncGrantsResult> | null = null;
   #flushSeq = 0;
   #loaded = false;
@@ -335,6 +341,7 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
       | Record<string, TerminalStatus | TerminalRecord>
       | Record<string, KeySetting>
       | DeadLetterSettlement[]
+      | boolean
     >([
       K_BALANCE,
       K_SEQUENCE,
@@ -347,6 +354,7 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
       K_KEY_SETTINGS_AT,
       K_DEAD_LETTERS,
       K_LAST_COMPACTION_AT,
+      K_ORG_ARCHIVED,
     ]);
 
     this.#balance = (stored.get(K_BALANCE) as number | undefined) ?? 0;
@@ -379,6 +387,8 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
       (stored.get(K_DEAD_LETTERS) as DeadLetterSettlement[] | undefined) ?? [];
     this.#lastCompactionAt =
       (stored.get(K_LAST_COMPACTION_AT) as number | undefined) ?? 0;
+    this.#orgArchived =
+      (stored.get(K_ORG_ARCHIVED) as boolean | undefined) ?? false;
     this.#loaded = true;
   }
 
@@ -462,6 +472,7 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
       lastCompactionAt: number;
       keySettings: Record<string, KeySetting>;
       keySettingsSyncedAt: number;
+      organizationArchived: boolean;
       settledCounter: { storageKey: string; amount: number };
     }>,
   ): Promise<void> {
@@ -490,6 +501,8 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
         await txn.put(K_KEY_SETTINGS, keys.keySettings);
       if (keys.keySettingsSyncedAt !== undefined)
         await txn.put(K_KEY_SETTINGS_AT, keys.keySettingsSyncedAt);
+      if (keys.organizationArchived !== undefined)
+        await txn.put(K_ORG_ARCHIVED, keys.organizationArchived);
       if (keys.settledCounter !== undefined) {
         const current =
           (await txn.get<number>(keys.settledCounter.storageKey)) ?? 0;
@@ -622,6 +635,9 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
           inFlight: { ...this.#inFlight },
           terminal: { ...this.#terminal },
         });
+      }
+      if (this.#orgArchived) {
+        return { status: "rejected", reason: "organization_archived" };
       }
       const existing = this.#inFlight[reservationId];
       if (existing) {
@@ -818,6 +834,9 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
     );
 
     return this.#mutate(async () => {
+      if (this.#orgArchived) {
+        return { status: "rejected", reason: "organization_archived" };
+      }
       const currentSetting = this.#keySettings.get(opts.keyId) ?? setting;
       if (currentSetting && this.#isKeyDisabled(currentSetting, nowMs)) {
         return { status: "rejected", reason: "key_disabled" };
@@ -859,6 +878,9 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
   ): Promise<KeyAuthorizationResult> {
     const setting = await this.#resolveKeySetting(keyId, clerkOrgId, nowMs);
     return this.#mutate(async () => {
+      if (this.#orgArchived) {
+        return { status: "rejected", reason: "organization_archived" };
+      }
       const currentSetting = this.#keySettings.get(keyId) ?? setting;
       if (currentSetting && this.#isKeyDisabled(currentSetting, nowMs)) {
         return { status: "rejected", reason: "key_disabled" };
@@ -1206,6 +1228,8 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
         synced.keySettings.map((setting) => [setting.keyId, setting]),
       );
       this.#keySettingsSyncedAt = nowMs;
+      // Archive is terminal. Never reopen from an older/non-terminal response.
+      this.#orgArchived ||= synced.archived;
       this.#acceptCheckpoint(synced.wallet);
 
       await this.#persist({
@@ -1213,6 +1237,7 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
         sequence: this.#sequence,
         keySettings: Object.fromEntries(this.#keySettings),
         keySettingsSyncedAt: this.#keySettingsSyncedAt,
+        organizationArchived: this.#orgArchived,
       });
 
       return {
@@ -1255,6 +1280,7 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
   #isKeyDisabled(setting: KeySetting, nowMs: number): boolean {
     return (
       setting.disabled ||
+      setting.rotationRequiredAt !== undefined ||
       (setting.graceUntil !== undefined && nowMs >= setting.graceUntil)
     );
   }
@@ -1303,12 +1329,17 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
   async #fetchGrantsFromConvex(clerkOrgId: string): Promise<{
     wallet: WalletCheckpoint;
     keySettings: KeySetting[];
+    archived: boolean;
   } | null> {
     const testFn = getTestGrantsFetcher();
     if (testFn) {
       const r = await testFn(clerkOrgId);
       if (r === null) return null;
-      return { ...r, keySettings: r.keySettings ?? [] };
+      return {
+        ...r,
+        keySettings: r.keySettings ?? [],
+        archived: r.archived ?? false,
+      };
     }
 
     const env = this.env as Cloudflare.Env;
@@ -1329,6 +1360,7 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
       const json = (await res.json()) as {
         wallet?: unknown;
         keySettings?: unknown;
+        archived?: unknown;
       };
       if (!json.wallet || typeof json.wallet !== "object") return null;
       const rawWallet = json.wallet as Record<string, unknown>;
@@ -1350,6 +1382,7 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
           sequence: rawWallet.sequence,
         },
         keySettings,
+        archived: json.archived === true,
       };
     } catch {
       return null;
@@ -1417,6 +1450,7 @@ function getTestUsageMutation(): TestUsageMutation | null {
 type TestGrantsFetcher = (clerkOrgId: string) => Promise<{
   wallet: WalletCheckpoint;
   keySettings?: KeySetting[];
+  archived?: boolean;
 } | null>;
 
 let testGrantsFetcher: TestGrantsFetcher | null = null;

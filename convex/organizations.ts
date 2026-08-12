@@ -14,6 +14,30 @@ import {
   requireOrgAdmin,
 } from "./lib/auth";
 import { isValidSlug } from "./lib/validate";
+import { enqueueOrgArchive, enqueueOrgPut } from "./registrySync";
+import { availablePublicHandle } from "./lib/publicRoutes";
+
+function trustedOrganizationSlug(raw: string | undefined): string {
+  const slug = raw?.trim().toLowerCase();
+  if (slug === undefined || !isValidSlug(slug)) {
+    throw new Error("Authenticated organization slug is invalid");
+  }
+  return slug;
+}
+
+async function requireAvailableOrganizationSlug(
+  ctx: MutationCtx,
+  slug: string,
+  organizationId?: Id<"organizations">,
+): Promise<void> {
+  const rows = await ctx.db
+    .query("organizations")
+    .withIndex("by_slug", (q) => q.eq("slug", slug))
+    .take(2);
+  if (rows.some((row) => row._id !== organizationId)) {
+    throw new Error("Organization slug is already in use");
+  }
+}
 
 async function ensureWallet(
   ctx: MutationCtx,
@@ -113,27 +137,38 @@ export const upsertFromClerk = internalMutation({
     imageUrl: v.optional(v.string()),
   },
   handler: async (ctx, args): Promise<Id<"organizations"> | null> => {
-    const tombstone = await ctx.db
-      .query("organizationTombstones")
-      .withIndex("by_clerk_org", (q) => q.eq("clerkOrgId", args.clerkOrgId))
-      .unique();
+    const slug = trustedOrganizationSlug(args.slug);
     const existing = await ctx.db
       .query("organizations")
       .withIndex("by_clerk_org", (q) => q.eq("clerkOrgId", args.clerkOrgId))
       .unique();
-
+    const tombstone = await ctx.db
+      .query("organizationTombstones")
+      .withIndex("by_clerk_org", (q) => q.eq("clerkOrgId", args.clerkOrgId))
+      .unique();
     if (tombstone !== null) {
       // Clerk events are not ordered. A delete tombstone permanently wins over
       // late create/update delivery and prevents tenant resurrection.
+      if (existing !== null && existing.archivedAt !== tombstone.archivedAt) {
+        await ctx.db.patch(existing._id, {
+          archivedAt: tombstone.archivedAt,
+        });
+      }
       return existing?._id ?? null;
     }
 
     if (existing === null) {
+      await requireAvailableOrganizationSlug(ctx, slug);
+      const publicHandle = await availablePublicHandle(
+        ctx,
+        slug,
+        args.clerkOrgId,
+      );
       const organizationId = await ctx.db.insert("organizations", {
         clerkOrgId: args.clerkOrgId,
         name: args.name,
-        slug: args.slug,
-        publicHandle: args.slug,
+        slug,
+        publicHandle,
         imageUrl: args.imageUrl,
       });
       await ensureWallet(ctx, organizationId);
@@ -142,6 +177,9 @@ export const upsertFromClerk = internalMutation({
         internal.catalogue.syncOrganizationCataloguePage,
         { organizationId, cursor: null },
       );
+      const created = await ctx.db.get(organizationId);
+      if (created === null) throw new Error("Failed to load organization");
+      await enqueueOrgPut(ctx, created);
       return organizationId;
     }
 
@@ -150,12 +188,14 @@ export const upsertFromClerk = internalMutation({
       return existing._id;
     }
 
+    await requireAvailableOrganizationSlug(ctx, slug, existing._id);
+    const publicHandle =
+      existing.publicHandle ??
+      (await availablePublicHandle(ctx, slug, args.clerkOrgId, existing._id));
     await ctx.db.patch(existing._id, {
       name: args.name,
-      slug: args.slug,
-      ...(existing.publicHandle === undefined
-        ? { publicHandle: args.slug }
-        : {}),
+      slug,
+      ...(existing.publicHandle === undefined ? { publicHandle } : {}),
       imageUrl: args.imageUrl,
     });
     await ensureWallet(ctx, existing._id);
@@ -164,6 +204,9 @@ export const upsertFromClerk = internalMutation({
       internal.catalogue.syncOrganizationCataloguePage,
       { organizationId: existing._id, cursor: null },
     );
+    const updated = await ctx.db.get(existing._id);
+    if (updated === null) throw new Error("Failed to load organization");
+    await enqueueOrgPut(ctx, updated);
     return existing._id;
   },
 });
@@ -223,6 +266,7 @@ export const applyOrganizationWebhook = internalMutation({
         .unique();
       if (tombstone === null) {
         await ctx.db.insert("organizationTombstones", {
+          sourceRevision: 1,
           clerkOrgId: args.clerkOrgId,
           archivedAt: now,
         });
@@ -247,6 +291,12 @@ export const applyOrganizationWebhook = internalMutation({
         0,
         internal.organizations.disableArchivedOrgKeysPage,
         { clerkOrgId: args.clerkOrgId, cursor: null },
+      );
+      await enqueueOrgArchive(
+        ctx,
+        args.clerkOrgId,
+        existing === null ? null : String(existing._id),
+        existing?.archivedAt ?? now,
       );
       await ctx.db.patch(receiptId, {
         status: "processed",
@@ -291,6 +341,9 @@ export const applyOrganizationWebhook = internalMutation({
         internal.catalogue.syncOrganizationCataloguePage,
         { organizationId, cursor: null },
       );
+      const created = await ctx.db.get(organizationId);
+      if (created === null) throw new Error("Failed to load organization");
+      await enqueueOrgPut(ctx, created);
     } else {
       await ctx.db.patch(existing._id, {
         name: args.name,
@@ -307,6 +360,9 @@ export const applyOrganizationWebhook = internalMutation({
         internal.catalogue.syncOrganizationCataloguePage,
         { organizationId: existing._id, cursor: null },
       );
+      const updated = await ctx.db.get(existing._id);
+      if (updated === null) throw new Error("Failed to load organization");
+      await enqueueOrgPut(ctx, updated);
     }
     await ctx.db.patch(receiptId, {
       status: "processed",
@@ -326,6 +382,7 @@ export const archiveFromClerk = internalMutation({
       .unique();
     if (tombstone === null) {
       await ctx.db.insert("organizationTombstones", {
+        sourceRevision: 1,
         clerkOrgId: args.clerkOrgId,
         archivedAt: now,
       });
@@ -351,6 +408,30 @@ export const archiveFromClerk = internalMutation({
       0,
       internal.catalogue.syncOrganizationCataloguePage,
       { organizationId: existing._id, cursor: null },
+    );
+  },
+});
+
+/** Registry v2 alias: terminal org archive, delegates to archiveFromClerk. */
+export const deleteFromClerk = internalMutation({
+  args: { clerkOrgId: v.string() },
+  handler: async (ctx, args): Promise<void> => {
+    await ctx.runMutation(internal.organizations.archiveFromClerk, {
+      clerkOrgId: args.clerkOrgId,
+    });
+    const existing = await ctx.db
+      .query("organizations")
+      .withIndex("by_clerk_org", (q) => q.eq("clerkOrgId", args.clerkOrgId))
+      .unique();
+    const tombstone = await ctx.db
+      .query("organizationTombstones")
+      .withIndex("by_clerk_org", (q) => q.eq("clerkOrgId", args.clerkOrgId))
+      .unique();
+    await enqueueOrgArchive(
+      ctx,
+      args.clerkOrgId,
+      existing === null ? null : String(existing._id),
+      tombstone?.archivedAt ?? Date.now(),
     );
   },
 });
@@ -399,6 +480,7 @@ export const ensureOrganization = mutation({
     if (claims.orgId === undefined || claims.orgId !== args.clerkOrgId) {
       throw new Error("Organization does not match authenticated identity");
     }
+    trustedOrganizationSlug(claims.orgSlug);
 
     const tombstone = await ctx.db
       .query("organizationTombstones")
@@ -431,6 +513,7 @@ export const ensureOrganization = mutation({
       if (created === null) {
         throw new Error("Failed to load created organization");
       }
+      await enqueueOrgPut(ctx, created);
       return created;
     }
     if (existing.archivedAt !== undefined) {
@@ -471,6 +554,7 @@ export const setPublicHandle = mutation({
     if (existing && existing._id !== organization._id) {
       throw new Error("That public handle is already in use");
     }
+    if (organization.publicHandle === handle) return organization;
     await ctx.db.patch(organization._id, {
       publicHandle: handle,
     });
@@ -481,6 +565,7 @@ export const setPublicHandle = mutation({
     );
     const updated = await ctx.db.get(organization._id);
     if (!updated) throw new Error("Organization not found");
+    await enqueueOrgPut(ctx, updated);
     return updated;
   },
 });

@@ -8,6 +8,7 @@ export default defineConfig({
   root: convexDir,
   test: {
     environment: "edge-runtime",
+    setupFiles: ["./vitest.setup.ts"],
     include: ["**/*.test.ts"],
     // Keep vitest out of apps/* — this config is convex-only.
     exclude: ["**/node_modules/**", "**/_generated/**"],
