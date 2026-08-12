@@ -27,6 +27,25 @@ export {
 
 export { generateMockResponse, type GeneratedMockResponse } from "./mock.js";
 
+export { isPublicIp } from "./public-ip.js";
+
+export {
+  REGISTRY_SYNC_SCHEMA_VERSION,
+  canonicalJson,
+  registryPayloadDigest,
+  registrySyncPath,
+  sha256Hex,
+  signRegistrySyncRequest,
+  type RegistryKeyLifecycle,
+  type RegistryKeySetting,
+  type RegistryRouteSnapshot,
+  type RegistrySyncAck,
+  type RegistrySyncEnvelope,
+  type RegistrySyncOperation,
+  type RegistrySyncPathOverrides,
+  type RegistrySyncPayloadMap,
+} from "./registry-sync.js";
+
 export {
   isValidSlug,
   isValidSemver,

@@ -53,16 +53,19 @@ export function ProjectSettingsPanel({
 }) {
   if (!canAdminister) {
     return (
-      <Card>
-        <CardHeader>
-          <CardTitle>Admin-managed settings</CardTitle>
-          <CardDescription>
-            Organization admins manage project metadata, visibility, upstream
-            credentials, webhook secrets, and deletion. You can keep editing
-            this project&apos;s OpenAPI draft from the Spec tab.
-          </CardDescription>
-        </CardHeader>
-      </Card>
+      <div className="flex flex-col gap-4">
+        <Card>
+          <CardHeader>
+            <CardTitle>Admin-managed settings</CardTitle>
+            <CardDescription>
+              Organization admins manage project metadata, visibility, upstream
+              credentials, webhook secrets, and deletion. You can keep editing
+              this project&apos;s OpenAPI draft from the Spec tab.
+            </CardDescription>
+          </CardHeader>
+        </Card>
+        <WebhookDeliveryHistoryCard project={project} />
+      </div>
     );
   }
 
@@ -651,15 +654,8 @@ function WebhooksCard({ project }: { project: Doc<"projects"> }) {
   const endpointQuery = useQuery(
     convexQuery(api.webhooks.getEndpoint, { projectId: project._id }),
   );
-  const deliveriesQuery = useQuery(
-    convexQuery(api.webhooks.listDeliveries, {
-      projectId: project._id,
-      paginationOpts: { numItems: 10, cursor: null },
-    }),
-  );
 
   const endpoint = endpointQuery.data ?? null;
-  const deliveries = deliveriesQuery.data?.page ?? [];
 
   const [url, setUrl] = useState("");
   const [active, setActive] = useState(true);
@@ -856,63 +852,107 @@ function WebhooksCard({ project }: { project: Doc<"projects"> }) {
           </div>
         </form>
 
-        <div className="space-y-2 border-t pt-4">
-          <div className="flex items-center justify-between">
-            <h4 className="text-sm font-medium">Recent deliveries</h4>
-            {endpoint === null ? null : (
-              <Badge variant="outline">{deliveries.length}</Badge>
-            )}
-          </div>
-          {endpoint === null ? (
-            <p className="text-xs text-muted-foreground">
-              Create an endpoint to start receiving deliveries.
-            </p>
-          ) : deliveries.length === 0 ? (
-            <p className="text-xs text-muted-foreground">
-              No deliveries yet. Events appear here after a publish or
-              deprecate.
-            </p>
-          ) : (
-            <ul className="space-y-1.5">
-              {deliveries.map((d) => {
-                const view = deliveryStatusView(d.status);
-                const err = truncateError(d.lastError);
-                return (
-                  <li
-                    key={d._id}
-                    className="flex items-start justify-between gap-2 rounded-md border border-border px-2.5 py-2 text-sm"
-                  >
-                    <div className="min-w-0 space-y-0.5">
-                      <div className="flex items-center gap-2">
-                        <span className="font-mono text-xs">{d.event}</span>
-                        <Badge
-                          variant={view.badgeVariant}
-                          className={view.className}
-                        >
-                          {view.dotClassName.length > 0 ? (
-                            <span
-                              className={`size-1.5 rounded-full ${view.dotClassName}`}
-                            />
-                          ) : null}
-                          {view.label}
-                        </Badge>
-                      </div>
-                      <p className="text-xs text-muted-foreground">
-                        {d.attempts} attempt{d.attempts === 1 ? "" : "s"}
-                        {err.length > 0 ? ` · ${err}` : ""}
-                      </p>
-                    </div>
-                    <span className="shrink-0 text-[11px] text-muted-foreground tabular-nums">
-                      {formatRelativeTime(d.createdAt)}
-                    </span>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </div>
+        <WebhookDeliveryHistory
+          project={project}
+          endpointExists={endpoint !== null}
+        />
       </CardContent>
     </Card>
+  );
+}
+
+function WebhookDeliveryHistoryCard({ project }: { project: Doc<"projects"> }) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Webhook className="size-4 text-muted-foreground" />
+          Webhook delivery history
+        </CardTitle>
+        <CardDescription>
+          Read-only publish and deprecation delivery results. Admins manage the
+          destination and signing secret.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <WebhookDeliveryHistory project={project} />
+      </CardContent>
+    </Card>
+  );
+}
+
+function WebhookDeliveryHistory({
+  project,
+  endpointExists,
+}: {
+  project: Doc<"projects">;
+  endpointExists?: boolean;
+}) {
+  const deliveriesQuery = useQuery(
+    convexQuery(api.webhooks.listDeliveries, {
+      projectId: project._id,
+      paginationOpts: { numItems: 10, cursor: null },
+    }),
+  );
+  const deliveries = deliveriesQuery.data?.page ?? [];
+  return (
+    <div className="space-y-2 border-t pt-4">
+      <div className="flex items-center justify-between">
+        <h4 className="text-sm font-medium">Recent deliveries</h4>
+        {deliveries.length > 0 ? (
+          <Badge variant="outline">{deliveries.length}</Badge>
+        ) : null}
+      </div>
+      {deliveriesQuery.isPending ? (
+        <p className="text-xs text-muted-foreground" aria-live="polite">
+          Loading delivery history…
+        </p>
+      ) : deliveries.length === 0 ? (
+        <p className="text-xs text-muted-foreground">
+          {endpointExists === false
+            ? "Create an endpoint to start receiving deliveries."
+            : "No deliveries yet. Events appear here after a publish or deprecate."}
+        </p>
+      ) : (
+        <ul className="space-y-1.5">
+          {deliveries.map((delivery) => {
+            const view = deliveryStatusView(delivery.status);
+            const error = truncateError(delivery.lastError);
+            return (
+              <li
+                key={delivery._id}
+                className="flex items-start justify-between gap-2 rounded-md border border-border px-2.5 py-2 text-sm"
+              >
+                <div className="min-w-0 space-y-0.5">
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono text-xs">{delivery.event}</span>
+                    <Badge
+                      variant={view.badgeVariant}
+                      className={view.className}
+                    >
+                      {view.dotClassName.length > 0 ? (
+                        <span
+                          className={`size-1.5 rounded-full ${view.dotClassName}`}
+                        />
+                      ) : null}
+                      {view.label}
+                    </Badge>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {delivery.attempts} attempt
+                    {delivery.attempts === 1 ? "" : "s"}
+                    {error.length > 0 ? ` · ${error}` : ""}
+                  </p>
+                </div>
+                <span className="shrink-0 text-[11px] text-muted-foreground tabular-nums">
+                  {formatRelativeTime(delivery.createdAt)}
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
   );
 }
 

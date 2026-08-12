@@ -4,7 +4,7 @@ import {
   useQueryClient,
   useSuspenseQuery,
 } from "@tanstack/react-query";
-import { convexQuery, useConvexMutation } from "@convex-dev/react-query";
+import { convexQuery } from "@convex-dev/react-query";
 import { useOrganization } from "@clerk/tanstack-react-start";
 import { createFileRoute } from "@tanstack/react-router";
 import { useConvexAuth } from "convex/react";
@@ -47,6 +47,8 @@ import {
   listKeys,
   revokeKey,
   rotateKey,
+  setKeyCap,
+  setKeyDisabled,
   type ApiKeyRow,
   type RotateApiKeyResult,
 } from "#/lib/api-keys";
@@ -114,12 +116,19 @@ function KeysContent() {
 
   const [revokeTarget, setRevokeTarget] = useState<ApiKeyRow | null>(null);
   const [rotateTarget, setRotateTarget] = useState<ApiKeyRow | null>(null);
+  const createOperationId = useRef<string | null>(null);
+  const revokeOperationIds = useRef(new Map<string, string>());
 
   const createMutation = useMutation({
-    mutationFn: (keyName: string) => createKey({ data: { name: keyName } }),
+    mutationFn: (keyName: string) => {
+      const operationId = createOperationId.current ?? crypto.randomUUID();
+      createOperationId.current = operationId;
+      return createKey({ data: { name: keyName, operationId } });
+    },
     onSuccess: (result) => {
       setRevealed(result);
       setName("");
+      createOperationId.current = null;
       toast.success("API key created — copy it now");
       void queryClient.invalidateQueries({ queryKey: KEYS_QUERY_KEY });
     },
@@ -129,10 +138,16 @@ function KeysContent() {
   });
 
   const revokeMutation = useMutation({
-    mutationFn: (id: string) => revokeKey({ data: { id } }),
+    mutationFn: (id: string) => {
+      const operationId =
+        revokeOperationIds.current.get(id) ?? crypto.randomUUID();
+      revokeOperationIds.current.set(id, operationId);
+      return revokeKey({ data: { id, operationId } });
+    },
     onSuccess: () => {
       toast.success("API key revoked");
       setRevokeTarget(null);
+      revokeOperationIds.current.clear();
       void queryClient.invalidateQueries({ queryKey: KEYS_QUERY_KEY });
     },
     onError: (err: unknown) => {
@@ -140,8 +155,8 @@ function KeysContent() {
     },
   });
 
-  const setDisabled = useConvexMutation(api.keySettings.setDisabled);
-  const setCap = useConvexMutation(api.keySettings.setCap);
+  const setDisabled: SetDisabledFn = (args) => setKeyDisabled({ data: args });
+  const setCap: SetCapFn = (args) => setKeyCap({ data: args });
   const rotationOperationIds = useRef(new Map<string, string>());
 
   const rotateMutation = useMutation({
@@ -171,6 +186,7 @@ function KeysContent() {
     if (createMutation.isPending || rotateMutation.isPending) return;
     setCreateOpen(false);
     setName("");
+    createOperationId.current = null;
     setRevealed(null);
     setCopied(false);
   }

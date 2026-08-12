@@ -4,7 +4,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api, internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import schema from "./schema";
-import { decryptSecret, encryptSecret } from "./lib/credentialCrypto";
+import {
+  decryptSecret,
+  encryptSecret,
+  webhookBinding,
+} from "./lib/credentialCrypto";
 import { computeSignature, postWebhook } from "./lib/webhookDelivery";
 import { validateWebhookUrl } from "./webhooks";
 
@@ -18,7 +22,9 @@ vi.mock("./lib/webhookTransport", () => ({
 const modules = import.meta.glob("./**/*.ts");
 const TEST_KEYRING = JSON.stringify({
   current: "webhook-test-v1",
-  keys: { "webhook-test-v1": "webhook-encryption-test-material" },
+  keys: {
+    "webhook-test-v1": "MTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTE=",
+  },
 });
 const previousEncryptionKeys = process.env.UPSTREAM_CREDENTIAL_ENCRYPTION_KEYS;
 
@@ -384,7 +390,7 @@ describe("webhooks.getEndpoint", () => {
     });
     expect(none).toBeNull();
 
-    await as.mutation(api.webhooks.upsertEndpoint, {
+    const created = await as.mutation(api.webhooks.upsertEndpoint, {
       projectId: seed.projectId,
       url: "https://example.com/hook",
     });
@@ -442,13 +448,9 @@ describe("webhooks.revealSecret", () => {
 
     const stored = await t.run(async (ctx) => ctx.db.get(created.id));
     expect(stored?.secret).toBeUndefined();
-    expect(
-      await decryptSecret({
-        ciphertext: stored!.ciphertext!,
-        iv: stored!.iv!,
-        keyVersion: stored!.keyVersion!,
-      }),
-    ).toBe(result?.secret);
+    expect(await decryptSecret(stored!, webhookBinding(seed.projectId))).toBe(
+      result?.secret,
+    );
   });
 
   it("rejects members and cross-org callers without changing the row", async () => {
@@ -531,8 +533,14 @@ describe("webhooks.migrateLegacyPlaintext", () => {
   it("encrypts legacy rows, scrubs hybrid plaintext, and reports idempotent counts", async () => {
     const t = convexTest(schema, modules);
     const seed = await seedWorld(t);
-    const alreadyEncrypted = await encryptSecret("already-encrypted");
-    const hybridEncrypted = await encryptSecret("hybrid-encrypted-value");
+    const alreadyEncrypted = await encryptSecret(
+      "already-encrypted",
+      webhookBinding(seed.projectId),
+    );
+    const hybridEncrypted = await encryptSecret(
+      "hybrid-encrypted-value",
+      webhookBinding(seed.projectId),
+    );
     const ids = await t.run(async (ctx) => ({
       legacy: await ctx.db.insert("webhookEndpoints", {
         projectId: seed.projectId,
@@ -566,7 +574,17 @@ describe("webhooks.migrateLegacyPlaintext", () => {
 
     expect(
       await t.mutation(internal.webhooks.migrateLegacyPlaintext, {}),
-    ).toEqual({ migrated: 2, remaining: 1 });
+    ).toMatchObject({
+      scanned: 4,
+      current: 3,
+      old: 2,
+      broken: 1,
+      corrupt: 1,
+      plaintext: 2,
+      recovered: 1,
+      scrubbed: 2,
+      isDone: true,
+    });
 
     const rows = await t.run(async (ctx) => ({
       legacy: await ctx.db.get(ids.legacy),
@@ -576,20 +594,27 @@ describe("webhooks.migrateLegacyPlaintext", () => {
     }));
     expect(rows.legacy?.secret).toBeUndefined();
     expect(
-      await decryptSecret({
-        ciphertext: rows.legacy!.ciphertext!,
-        iv: rows.legacy!.iv!,
-        keyVersion: rows.legacy!.keyVersion!,
-      }),
+      await decryptSecret(rows.legacy!, webhookBinding(seed.projectId)),
     ).toBe("legacy-plaintext");
     expect(rows.hybrid?.secret).toBeUndefined();
-    expect(rows.hybrid?.ciphertext).toBe(hybridEncrypted.ciphertext);
+    expect(rows.hybrid?.ciphertext).not.toBe(hybridEncrypted.ciphertext);
+    expect(
+      await decryptSecret(rows.hybrid!, webhookBinding(seed.projectId)),
+    ).toBe("stale-plaintext-copy");
     expect(rows.encrypted?.ciphertext).toBe(alreadyEncrypted.ciphertext);
     expect(rows.broken?.ciphertext).toBeUndefined();
 
     expect(
       await t.mutation(internal.webhooks.migrateLegacyPlaintext, {}),
-    ).toEqual({ migrated: 0, remaining: 1 });
+    ).toMatchObject({
+      scanned: 4,
+      current: 3,
+      old: 1,
+      broken: 1,
+      plaintext: 0,
+      scrubbed: 0,
+      isDone: true,
+    });
   });
 
   it("rolls back every row when encryption keys are missing", async () => {
@@ -634,10 +659,20 @@ describe("webhooks.deleteEndpoint", () => {
     const seed = await seedWorld(t);
     const as = asPublisher(t);
 
-    await as.mutation(api.webhooks.upsertEndpoint, {
+    const created = await as.mutation(api.webhooks.upsertEndpoint, {
       projectId: seed.projectId,
       url: "https://example.com/hook",
     });
+    const deliveryId = await t.run(async (ctx) =>
+      ctx.db.insert("webhookDeliveries", {
+        endpointId: created.id,
+        event: "spec.published",
+        status: "pending",
+        attempts: 0,
+        createdAt: 1,
+        payload: "{}",
+      }),
+    );
 
     const result = await as.mutation(api.webhooks.deleteEndpoint, {
       projectId: seed.projectId,
@@ -648,6 +683,7 @@ describe("webhooks.deleteEndpoint", () => {
       projectId: seed.projectId,
     });
     expect(ep).toBeNull();
+    expect(await t.run(async (ctx) => ctx.db.get(deliveryId))).toBeNull();
   });
 
   it("rejects same-org members without deleting endpoint", async () => {
@@ -728,7 +764,10 @@ describe("recordDeliveryAttempt — state machine", () => {
         visibility: "public",
         tags: [],
       });
-      const encryptedSecret = await encryptSecret("s3cr3t");
+      const encryptedSecret = await encryptSecret(
+        "s3cr3t",
+        webhookBinding(projectId),
+      );
       const endpointId = await ctx.db.insert("webhookEndpoints", {
         projectId,
         url: "https://example.com/hook",
@@ -787,7 +826,10 @@ describe("recordDeliveryAttempt — state machine", () => {
         visibility: "public",
         tags: [],
       });
-      const encryptedSecret = await encryptSecret("s3cr3t");
+      const encryptedSecret = await encryptSecret(
+        "s3cr3t",
+        webhookBinding(projectId),
+      );
       const endpointId = await ctx.db.insert("webhookEndpoints", {
         projectId,
         url: "https://example.com/hook",
@@ -852,7 +894,10 @@ describe("recordDeliveryAttempt — state machine", () => {
         visibility: "public",
         tags: [],
       });
-      const encryptedSecret = await encryptSecret("s3cr3t");
+      const encryptedSecret = await encryptSecret(
+        "s3cr3t",
+        webhookBinding(projectId),
+      );
       const endpointId = await ctx.db.insert("webhookEndpoints", {
         projectId,
         url: "https://example.com/hook",
@@ -920,6 +965,7 @@ describe("deliverWebhook — action integration", () => {
       });
       const encryptedSecret = await encryptSecret(
         "delivery-plaintext-never-returned",
+        webhookBinding(projectId),
       );
       const endpointId = await ctx.db.insert("webhookEndpoints", {
         projectId,

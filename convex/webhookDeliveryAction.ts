@@ -3,7 +3,11 @@
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import { internalAction } from "./_generated/server";
-import { decryptSecret, requireEncryptedSecret } from "./lib/credentialCrypto";
+import {
+  decryptSecret,
+  requireEncryptedSecret,
+  webhookBinding,
+} from "./lib/credentialCrypto";
 import { postWebhook } from "./lib/webhookDelivery";
 import { deliverPinnedHttps } from "./lib/webhookTransport";
 
@@ -34,6 +38,7 @@ export const deliverWebhook = internalAction({
     try {
       signingSecret = await decryptSecret(
         requireEncryptedSecret(info.encryptedSecret),
+        webhookBinding(info.projectId),
       );
     } catch {
       await ctx.runMutation(internal.webhooks.recordDeliveryAttempt, {

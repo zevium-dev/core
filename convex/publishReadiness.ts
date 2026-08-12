@@ -110,7 +110,11 @@ export const getTarget = internalQuery({
         await Promise.all(
           credentials.map(async (row) => [
             row.name,
-            await decryptCredential(requireEncryptedCredential(row)),
+            await decryptCredential(
+              requireEncryptedCredential(row),
+              row.projectId,
+              row.name,
+            ),
           ]),
         ),
       ),

@@ -13,7 +13,9 @@ import { requireProjectAdmin, requireProjectMember } from "./lib/auth";
 import {
   decryptSecret,
   encryptSecret,
+  migrateStoredSecret,
   requireEncryptedSecret,
+  webhookBinding,
   type EncryptedSecret,
 } from "./lib/credentialCrypto";
 import { createNotification } from "./lib/notifications";
@@ -129,7 +131,10 @@ export const upsertEndpoint = mutation({
     if (existing === null) {
       let encryptedSecret: EncryptedSecret;
       try {
-        encryptedSecret = await encryptSecret(generateSecret());
+        encryptedSecret = await encryptSecret(
+          generateSecret(),
+          webhookBinding(args.projectId),
+        );
       } catch {
         throw new Error("Signing secret could not be created");
       }
@@ -181,7 +186,10 @@ export const revealSecret = mutation({
 
     try {
       return {
-        secret: await decryptSecret(requireEncryptedSecret(endpoint)),
+        secret: await decryptSecret(
+          requireEncryptedSecret(endpoint),
+          webhookBinding(args.projectId),
+        ),
       };
     } catch {
       throw new Error("Signing secret is unavailable");
@@ -199,6 +207,13 @@ export const deleteEndpoint = mutation({
       .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
       .unique();
     if (existing === null) return { deleted: false };
+    const deliveries = await ctx.db
+      .query("webhookDeliveries")
+      .withIndex("by_endpoint", (q) => q.eq("endpointId", existing._id))
+      .collect();
+    // Delete endpoint in the same transaction as its queue. Scheduled actions
+    // then observe no endpoint and cannot deliver with a retired secret.
+    for (const delivery of deliveries) await ctx.db.delete(delivery._id);
     await ctx.db.delete(existing._id);
     return { deleted: true };
   },
@@ -247,7 +262,12 @@ export const getDeliveryForAction = internalQuery({
       ciphertext?: string;
       iv?: string;
       keyVersion?: string;
+      sealedCiphertext?: string;
+      sealedIv?: string;
+      sealedKeyVersion?: string;
+      sealedVersion?: string;
     };
+    projectId: Id<"projects">;
     active: boolean;
     event: string;
     payload: string;
@@ -264,7 +284,12 @@ export const getDeliveryForAction = internalQuery({
         ciphertext: endpoint.ciphertext,
         iv: endpoint.iv,
         keyVersion: endpoint.keyVersion,
+        sealedCiphertext: endpoint.sealedCiphertext,
+        sealedIv: endpoint.sealedIv,
+        sealedKeyVersion: endpoint.sealedKeyVersion,
+        sealedVersion: endpoint.sealedVersion,
       },
+      projectId: endpoint.projectId,
       active: endpoint.active,
       event: delivery.event,
       payload: delivery.payload,
@@ -274,36 +299,66 @@ export const getDeliveryForAction = internalQuery({
   },
 });
 
-/** One-shot rollout migration. Idempotent; plaintext is scrubbed on success. */
+export type WebhookSecretMigrationPage = {
+  scanned: number;
+  current: number;
+  old: number;
+  broken: number;
+  corrupt: number;
+  plaintext: number;
+  recovered: number;
+  rewrapped: number;
+  scrubbed: number;
+  continueCursor: string;
+  isDone: boolean;
+};
+
+/** Cursor-bounded dual-envelope migration. Repeat until isDone, then audit again. */
 export const migrateLegacyPlaintext = internalMutation({
-  args: {},
-  handler: async (ctx): Promise<{ migrated: number; remaining: number }> => {
-    const rows = await ctx.db.query("webhookEndpoints").collect();
-    let migrated = 0;
-    let remaining = 0;
+  args: {
+    cursor: v.optional(v.union(v.string(), v.null())),
+    numItems: v.optional(v.number()),
+  },
+  handler: async (ctx, args): Promise<WebhookSecretMigrationPage> => {
+    const requested = args.numItems ?? 50;
+    const numItems = Math.max(1, Math.min(100, Math.floor(requested)));
+    const result = await ctx.db.query("webhookEndpoints").paginate({
+      cursor: args.cursor ?? null,
+      numItems,
+    });
+    const counts = {
+      scanned: result.page.length,
+      current: 0,
+      old: 0,
+      broken: 0,
+      corrupt: 0,
+      plaintext: 0,
+      recovered: 0,
+      rewrapped: 0,
+      scrubbed: 0,
+    };
 
-    for (const row of rows) {
-      const fullyEncrypted = Boolean(
-        row.ciphertext && row.iv && row.keyVersion,
+    for (const row of result.page) {
+      const migration = await migrateStoredSecret(
+        row,
+        webhookBinding(row.projectId),
       );
-      if (fullyEncrypted) {
-        if (row.secret !== undefined) {
-          await ctx.db.patch(row._id, { secret: undefined });
-          migrated += 1;
-        }
-        continue;
-      }
-      if (row.secret === undefined) {
-        remaining += 1;
-        continue;
-      }
-
-      const encrypted = await encryptSecret(row.secret);
-      await ctx.db.patch(row._id, { ...encrypted, secret: undefined });
-      migrated += 1;
+      if (migration.plaintext) counts.plaintext += 1;
+      if (migration.old) counts.old += 1;
+      if (migration.corrupt) counts.corrupt += 1;
+      if (migration.broken) counts.broken += 1;
+      else counts.current += 1;
+      if (migration.recovered) counts.recovered += 1;
+      if (migration.rewrapped) counts.rewrapped += 1;
+      if (migration.scrubbed) counts.scrubbed += 1;
+      if (migration.patch) await ctx.db.patch(row._id, migration.patch);
     }
 
-    return { migrated, remaining };
+    return {
+      ...counts,
+      continueCursor: result.continueCursor,
+      isDone: result.isDone,
+    };
   },
 });
 

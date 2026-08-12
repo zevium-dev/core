@@ -15,6 +15,7 @@ import {
   requireEncryptedCredential,
 } from "./lib/credentialCrypto";
 import { draftFingerprint, readinessValidity } from "./publishReadiness";
+import { enqueueRouteUpsert } from "./registrySync";
 import {
   isValidSemver,
   type SpecIssue,
@@ -267,6 +268,7 @@ export const publish = mutation({
     await ctx.scheduler.runAfter(0, internal.search.embedProject, {
       projectId: args.projectId,
     });
+    await enqueueRouteUpsert(ctx, args.projectId);
 
     return {
       ok: true,
@@ -449,7 +451,11 @@ export const getPublishedForGatewayInternal = internalQuery({
         await Promise.all(
           upstreamHeaders.map(async (row) => [
             row.name,
-            await decryptCredential(requireEncryptedCredential(row)),
+            await decryptCredential(
+              requireEncryptedCredential(row),
+              row.projectId,
+              row.name,
+            ),
           ]),
         ),
       ),
@@ -499,6 +505,7 @@ export const deprecateVersion = mutation({
     if (updated === null) {
       throw new Error("Failed to load version");
     }
+    await enqueueRouteUpsert(ctx, version.projectId);
     return updated;
   },
 });
@@ -524,6 +531,7 @@ export const undeprecateVersion = mutation({
     if (updated === null) {
       throw new Error("Failed to load version");
     }
+    await enqueueRouteUpsert(ctx, version.projectId);
     return updated;
   },
 });

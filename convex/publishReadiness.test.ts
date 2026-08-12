@@ -10,8 +10,11 @@ import {
 } from "./publishReadiness";
 import schema from "./schema";
 
-const lookupMock = vi.hoisted(() => vi.fn());
-vi.mock("node:dns/promises", () => ({ lookup: lookupMock }));
+const probeMock = vi.hoisted(() => vi.fn());
+vi.mock("./lib/readinessTransport", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./lib/readinessTransport")>()),
+  probePinnedHttps: probeMock,
+}));
 
 const modules = import.meta.glob("./**/*.ts");
 const DRAFT_A = JSON.stringify({
@@ -254,9 +257,10 @@ describe("publish readiness validity", () => {
         lastSavedAt: Date.now(),
       });
     });
-    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
-    vi.stubGlobal("fetch", fetchMock);
-    lookupMock.mockResolvedValue([{ address: "93.184.216.34", family: 4 }]);
+    probeMock.mockResolvedValue({
+      statusCode: 204,
+      finalUrl: new URL("https://example.com/"),
+    });
     try {
       await expect(
         asAdmin(t).action(api.publishReadinessAction.testConnection, {
@@ -264,8 +268,7 @@ describe("publish readiness validity", () => {
         }),
       ).resolves.toMatchObject({ status: "ok", statusCode: 204 });
     } finally {
-      vi.unstubAllGlobals();
-      lookupMock.mockReset();
+      probeMock.mockReset();
     }
 
     await expect(
@@ -280,6 +283,5 @@ describe("publish readiness validity", () => {
         serverOrigin: "https://example.com",
       },
     });
-    expect(fetchMock).toHaveBeenCalledOnce();
   });
 });

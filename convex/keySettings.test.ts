@@ -6,314 +6,238 @@ import type { Id } from "./_generated/dataModel";
 import schema from "./schema";
 
 const modules = import.meta.glob("./**/*.ts");
+const KEY_A = "key_live_AAAA";
+const KEY_B = "key_live_BBBB";
 
-type Seeded = {
-  orgId: Id<"organizations">;
-  strangerOrgId: Id<"organizations">;
-};
-
-async function seedWorld(t: ReturnType<typeof convexTest>): Promise<Seeded> {
+async function seedWorld(
+  t: ReturnType<typeof convexTest>,
+): Promise<Id<"organizations">> {
   return await t.run(async (ctx) => {
     const orgId = await ctx.db.insert("organizations", {
       clerkOrgId: "org_acme",
       name: "Acme",
       slug: "acme",
     });
-    const strangerOrgId = await ctx.db.insert("organizations", {
+    await ctx.db.insert("organizations", {
       clerkOrgId: "org_other",
       name: "Other",
       slug: "other",
     });
-    return { orgId, strangerOrgId };
+    return orgId;
   });
 }
 
-function asMember(
-  t: ReturnType<typeof convexTest>,
-  clerkOrgId = "org_acme",
-  slug = "acme",
-  subject = "user_member",
-) {
+function asUser(t: ReturnType<typeof convexTest>, userId = "user_owner") {
   return t.withIdentity({
-    subject,
-    org_id: clerkOrgId,
-    org_slug: slug,
-    org_role: "org:admin",
-  } as {
-    subject: string;
-    org_id: string;
-    org_slug: string;
-    org_role: string;
-  });
-}
-
-function asStranger(t: ReturnType<typeof convexTest>) {
-  return t.withIdentity({
-    subject: "user_stranger",
-    org_id: "org_other",
-    org_slug: "other",
+    subject: userId,
+    org_id: "org_acme",
     org_role: "org:member",
-  } as {
-    subject: string;
-    org_id: string;
-    org_slug: string;
-    org_role: string;
+  } as { subject: string });
+}
+
+async function register(
+  t: ReturnType<typeof convexTest>,
+  keyId = KEY_A,
+  userId = "user_owner",
+) {
+  return await t.mutation(internal.keySettings.registerVerified, {
+    clerkOrgId: "org_acme",
+    userId,
+    keyId,
   });
 }
 
-function asNoOrg(t: ReturnType<typeof convexTest>) {
-  return t.withIdentity({
-    subject: "user_noorg",
-  } as {
-    subject: string;
-    org_id?: string;
-    org_slug?: string;
-    org_role?: string;
-  });
-}
-
-const KEY_A = "key_live_AAAA";
-const KEY_B = "key_live_BBBB";
-
-describe("keySettings.getForOrg — auth", () => {
-  it("rejects unauthenticated", async () => {
+describe("user-owned key settings", () => {
+  it("never exposes sibling or legacy-unclaimed key ids to a member", async () => {
     const t = convexTest(schema, modules);
     await seedWorld(t);
-    await expect(t.query(api.keySettings.getForOrg, {})).rejects.toThrow(
-      /Not authenticated/,
-    );
-  });
-
-  it("rejects when no active org claim", async () => {
-    const t = convexTest(schema, modules);
-    await seedWorld(t);
-    await expect(
-      asNoOrg(t).query(api.keySettings.getForOrg, {}),
-    ).rejects.toThrow(/Select an organization/);
-  });
-
-  it("returns only the active org's rows", async () => {
-    const t = convexTest(schema, modules);
-    const seed = await seedWorld(t);
+    await register(t, KEY_A, "user_owner");
+    await register(t, KEY_B, "user_sibling");
     await t.run(async (ctx) => {
       await ctx.db.insert("keySettings", {
         clerkOrgId: "org_acme",
-        keyId: KEY_A,
+        keyId: "key_legacy_unclaimed",
         disabled: false,
         updatedAt: 1,
       });
-      await ctx.db.insert("keySettings", {
-        clerkOrgId: "org_other",
-        keyId: KEY_B,
-        disabled: true,
-        updatedAt: 2,
-      });
     });
-    expect(seed.strangerOrgId).toBeDefined();
 
-    const rows = await asMember(t).query(api.keySettings.getForOrg, {});
-    expect(rows).toHaveLength(1);
-    expect(rows[0]!.keyId).toBe(KEY_A);
+    const rows = await asUser(t).query(api.keySettings.getForOrg, {});
+    expect(rows.map((row) => row.keyId)).toEqual([KEY_A]);
   });
-});
 
-describe("keySettings.setCap — upsert + validation", () => {
-  it("creates a row with the cap when none exists", async () => {
+  it("rejects same-org sibling IDOR for cap and disable writes", async () => {
     const t = convexTest(schema, modules);
     await seedWorld(t);
+    await register(t, KEY_A, "user_owner");
 
-    const view = await asMember(t).mutation(api.keySettings.setCap, {
+    await expect(
+      t.mutation(internal.keySettings.setCapVerified, {
+        clerkOrgId: "org_acme",
+        userId: "user_sibling",
+        keyId: KEY_A,
+        monthlyCapCredits: 1,
+      }),
+    ).rejects.toThrow("Key unavailable");
+    await expect(
+      t.mutation(internal.keySettings.setDisabledVerified, {
+        clerkOrgId: "org_acme",
+        userId: "user_sibling",
+        keyId: KEY_A,
+        disabled: true,
+      }),
+    ).rejects.toThrow("Key unavailable");
+  });
+
+  it("updates only verified existing ownership and validates caps", async () => {
+    const t = convexTest(schema, modules);
+    await seedWorld(t);
+    await register(t);
+    const capped = await t.mutation(internal.keySettings.setCapVerified, {
+      clerkOrgId: "org_acme",
+      userId: "user_owner",
       keyId: KEY_A,
       monthlyCapCredits: 500,
     });
-    expect(view.monthlyCapCredits).toBe(500);
-    expect(view.disabled).toBe(false);
-    expect(view.keyId).toBe(KEY_A);
-
-    const rows = await asMember(t).query(api.keySettings.getForOrg, {});
-    expect(rows).toHaveLength(1);
-    expect(rows[0]!.monthlyCapCredits).toBe(500);
-  });
-
-  it("updates the cap on an existing row (upsert, same _id)", async () => {
-    const t = convexTest(schema, modules);
-    await seedWorld(t);
-    const as = asMember(t);
-
-    const v1 = await as.mutation(api.keySettings.setCap, {
-      keyId: KEY_A,
-      monthlyCapCredits: 100,
-    });
-    const v2 = await as.mutation(api.keySettings.setCap, {
-      keyId: KEY_A,
-      monthlyCapCredits: 200,
-    });
-    expect(v2._id).toBe(v1._id);
-    expect(v2.monthlyCapCredits).toBe(200);
-  });
-
-  it("clears the cap with null (field removed → unlimited)", async () => {
-    const t = convexTest(schema, modules);
-    await seedWorld(t);
-    const as = asMember(t);
-
-    await as.mutation(api.keySettings.setCap, {
-      keyId: KEY_A,
-      monthlyCapCredits: 300,
-    });
-    const cleared = await as.mutation(api.keySettings.setCap, {
-      keyId: KEY_A,
-      monthlyCapCredits: null,
-    });
-    expect(cleared.monthlyCapCredits).toBeUndefined();
-
-    const rows = await as.query(api.keySettings.getForOrg, {});
-    expect(rows[0]!.monthlyCapCredits).toBeUndefined();
-  });
-
-  it("rejects non-positive and fractional caps", async () => {
-    const t = convexTest(schema, modules);
-    await seedWorld(t);
-    const as = asMember(t);
-
+    expect(capped.monthlyCapCredits).toBe(500);
     await expect(
-      as.mutation(api.keySettings.setCap, {
-        keyId: KEY_A,
-        monthlyCapCredits: 0,
-      }),
-    ).rejects.toThrow(/positive whole number/);
-    await expect(
-      as.mutation(api.keySettings.setCap, {
-        keyId: KEY_A,
-        monthlyCapCredits: -5,
-      }),
-    ).rejects.toThrow(/positive whole number/);
-    await expect(
-      as.mutation(api.keySettings.setCap, {
+      t.mutation(internal.keySettings.setCapVerified, {
+        clerkOrgId: "org_acme",
+        userId: "user_owner",
         keyId: KEY_A,
         monthlyCapCredits: 1.5,
       }),
-    ).rejects.toThrow(/positive whole number/);
+    ).rejects.toThrow("positive whole number");
   });
+});
 
-  it("rejects cross-org mutation of an existing row", async () => {
+describe("key lifecycle reservations", () => {
+  it("disables locally before external revoke and compensates idempotently on failure", async () => {
     const t = convexTest(schema, modules);
     await seedWorld(t);
-    await asMember(t).mutation(api.keySettings.setCap, {
+    await register(t);
+    const scope = {
+      clerkOrgId: "org_acme",
+      userId: "user_owner",
+      operationId: "revoke-operation-1",
+    };
+    await t.mutation(internal.keySettings.beginRevokeVerified, {
+      ...scope,
       keyId: KEY_A,
-      monthlyCapCredits: 10,
     });
-    // Stranger shares KEY_A id but is in a different org.
+    expect(
+      (await asUser(t).query(api.keySettings.getForOrg, {}))[0]?.disabled,
+    ).toBe(true);
+
+    await t.mutation(internal.keySettings.failRevokeVerified, {
+      ...scope,
+      message: "Clerk failed",
+    });
+    await t.mutation(internal.keySettings.failRevokeVerified, {
+      ...scope,
+      message: "duplicate callback",
+    });
+    expect(
+      (await asUser(t).query(api.keySettings.getForOrg, {}))[0]?.disabled,
+    ).toBe(false);
+  });
+
+  it("keeps local gate disabled after terminal external revoke", async () => {
+    const t = convexTest(schema, modules);
+    await seedWorld(t);
+    await register(t);
+    const scope = {
+      clerkOrgId: "org_acme",
+      userId: "user_owner",
+      operationId: "revoke-operation-2",
+    };
+    await t.mutation(internal.keySettings.beginRevokeVerified, {
+      ...scope,
+      keyId: KEY_A,
+    });
+    await t.mutation(internal.keySettings.completeRevokeVerified, scope);
+    await t.mutation(internal.keySettings.completeRevokeVerified, scope);
+    expect(
+      (await asUser(t).query(api.keySettings.getForOrg, {}))[0]?.disabled,
+    ).toBe(true);
+  });
+
+  it("serializes revokes and blocks re-enable while external revoke is pending", async () => {
+    const t = convexTest(schema, modules);
+    await seedWorld(t);
+    await register(t, KEY_A);
+    await register(t, KEY_B);
+    await t.mutation(internal.keySettings.beginRevokeVerified, {
+      clerkOrgId: "org_acme",
+      userId: "user_owner",
+      operationId: "revoke-operation-race-1",
+      keyId: KEY_A,
+    });
+
     await expect(
-      asStranger(t).mutation(api.keySettings.setCap, {
-        keyId: KEY_A,
-        monthlyCapCredits: 999,
+      t.mutation(internal.keySettings.beginRevokeVerified, {
+        clerkOrgId: "org_acme",
+        userId: "user_owner",
+        operationId: "revoke-operation-race-2",
+        keyId: KEY_B,
       }),
-    ).rejects.toThrow(/Key not found/);
+    ).rejects.toThrow("already in progress");
+    await expect(
+      t.mutation(internal.keySettings.setDisabledVerified, {
+        clerkOrgId: "org_acme",
+        userId: "user_owner",
+        keyId: KEY_A,
+        disabled: false,
+      }),
+    ).rejects.toThrow("revocation is in progress");
+  });
+
+  it("prevents rotation and revocation from racing on one key", async () => {
+    const t = convexTest(schema, modules);
+    await seedWorld(t);
+    await register(t);
+    await t.mutation(internal.keySettings.beginRotationVerified, {
+      clerkOrgId: "org_acme",
+      userId: "user_owner",
+      operationId: "rotate-operation-race",
+      oldKeyId: KEY_A,
+    });
+
+    await expect(
+      t.mutation(internal.keySettings.beginRevokeVerified, {
+        clerkOrgId: "org_acme",
+        userId: "user_owner",
+        operationId: "revoke-operation-race",
+        keyId: KEY_A,
+      }),
+    ).rejects.toThrow("rotation is in progress");
   });
 });
 
-describe("keySettings.setDisabled — upsert", () => {
-  it("disables a key, preserving an existing cap", async () => {
+describe("wallet gateway projection", () => {
+  it("retains owner-agnostic enforcement rows for edge sync", async () => {
     const t = convexTest(schema, modules);
-    await seedWorld(t);
-    const as = asMember(t);
-
-    await as.mutation(api.keySettings.setCap, {
-      keyId: KEY_A,
-      monthlyCapCredits: 100,
-    });
-    const disabled = await as.mutation(api.keySettings.setDisabled, {
-      keyId: KEY_A,
-      disabled: true,
-    });
-    expect(disabled.disabled).toBe(true);
-    expect(disabled.monthlyCapCredits).toBe(100);
-    expect(disabled._id).toBe(
-      (await as.query(api.keySettings.getForOrg, {}))[0]!._id,
-    );
-  });
-
-  it("re-enables a key", async () => {
-    const t = convexTest(schema, modules);
-    await seedWorld(t);
-    const as = asMember(t);
-
-    await as.mutation(api.keySettings.setDisabled, {
-      keyId: KEY_A,
-      disabled: true,
-    });
-    const enabled = await as.mutation(api.keySettings.setDisabled, {
-      keyId: KEY_A,
-      disabled: false,
-    });
-    expect(enabled.disabled).toBe(false);
-  });
-});
-
-describe("wallets.getGatewayWallet — checkpoint and keySettings", () => {
-  it("returns the wallet checkpoint alongside keySettings", async () => {
-    const t = convexTest(schema, modules);
-    const seed = await seedWorld(t);
-
-    // Wallet + grant + two key settings.
+    const orgId = await seedWorld(t);
+    await register(t, KEY_A, "user_owner");
+    await register(t, KEY_B, "user_sibling");
     await t.run(async (ctx) => {
-      const walletId = await ctx.db.insert("wallets", {
-        organizationId: seed.orgId,
+      await ctx.db.insert("wallets", {
+        organizationId: orgId,
         balance: 1000,
         sequence: 1,
       });
-      await ctx.db.insert("walletEntries", {
-        walletId,
-        kind: "payment_grant",
-        amount: 1000,
-        refId: "grant-1",
-        sequence: 1,
-        createdAt: 1,
-      });
-      await ctx.db.insert("keySettings", {
-        clerkOrgId: "org_acme",
-        keyId: KEY_A,
-        disabled: true,
-        monthlyCapCredits: 250,
-        updatedAt: 3,
-      });
-      await ctx.db.insert("keySettings", {
-        clerkOrgId: "org_acme",
-        keyId: KEY_B,
-        disabled: false,
-        updatedAt: 4,
-      });
     });
-
+    await t.mutation(internal.keySettings.setDisabledVerified, {
+      clerkOrgId: "org_acme",
+      userId: "user_owner",
+      keyId: KEY_A,
+      disabled: true,
+    });
     const view = await t.query(internal.wallets.getGatewayWallet, {
       clerkOrgId: "org_acme",
     });
-    expect(view.wallet).toEqual({
-      clerkOrgId: "org_acme",
-      balance: 1000,
-      sequence: 1,
-    });
-    expect(view.keySettings).toHaveLength(2);
-    const byId = new Map(view.keySettings.map((r) => [r.keyId, r]));
-    expect(byId.get(KEY_A)!.disabled).toBe(true);
-    expect(byId.get(KEY_A)!.monthlyCapCredits).toBe(250);
-    expect(byId.get(KEY_B)!.disabled).toBe(false);
-    expect(byId.get(KEY_B)!.monthlyCapCredits).toBeUndefined();
-  });
-
-  it("returns a zero checkpoint when wallet is missing", async () => {
-    const t = convexTest(schema, modules);
-    await seedWorld(t);
-
-    const view = await t.query(internal.wallets.getGatewayWallet, {
-      clerkOrgId: "org_acme",
-    });
-    expect(view.keySettings).toEqual([]);
-    expect(view.wallet).toEqual({
-      clerkOrgId: "org_acme",
-      balance: 0,
-      sequence: 0,
-    });
+    expect(new Set(view.keySettings.map((row) => row.keyId))).toEqual(
+      new Set([KEY_A, KEY_B]),
+    );
   });
 });

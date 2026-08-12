@@ -7,6 +7,9 @@ import { createNotification } from "./lib/notifications";
 import { fireWebhookEvent } from "./webhooks";
 import { stripeClient } from "./billing";
 import { internal } from "./_generated/api";
+import type { CredentialMigrationPage } from "./upstreamCredentials";
+import type { WebhookSecretMigrationPage } from "./webhooks";
+import { enqueueRouteUpsert } from "./registrySync";
 
 /** Cap for month-to-date usage count (by_at index range scan). */
 const USAGE_STATS_CAP = 50_000;
@@ -29,49 +32,40 @@ export const isAdminQuery = query({
 
 /** Bounded, idempotent rollout step; run repeatedly until remaining is zero. */
 export const migrateSecurityRollout = mutation({
-  args: {},
+  args: {
+    credentialsCursor: v.optional(v.union(v.string(), v.null())),
+    webhookCursor: v.optional(v.union(v.string(), v.null())),
+    numItems: v.optional(v.number()),
+  },
   handler: async (
     ctx,
+    args,
   ): Promise<{
-    credentials: { migrated: number; remaining: number };
-    webhookSecrets: { migrated: number; remaining: number };
+    credentials: CredentialMigrationPage;
+    webhookSecrets: WebhookSecretMigrationPage;
     handles: { updated: number; collisions: number };
-    remainingPlaintext: number;
-    remainingUnencrypted: number;
-    remainingWebhookPlaintext: number;
-    remainingWebhookUnencrypted: number;
-    remainingMissingHandles: number;
   }> => {
     await requireAdmin(ctx);
-    const credentials: { migrated: number; remaining: number } =
-      await ctx.runMutation(
-        internal.upstreamCredentials.migrateLegacyPlaintext,
-        {},
-      );
-    const webhookSecrets: { migrated: number; remaining: number } =
-      await ctx.runMutation(internal.webhooks.migrateLegacyPlaintext, {});
+    const credentials = await ctx.runMutation(
+      internal.upstreamCredentials.migrateLegacyPlaintext,
+      {
+        cursor: args.credentialsCursor ?? null,
+        ...(args.numItems === undefined ? {} : { numItems: args.numItems }),
+      },
+    );
+    const webhookSecrets = await ctx.runMutation(
+      internal.webhooks.migrateLegacyPlaintext,
+      {
+        cursor: args.webhookCursor ?? null,
+        ...(args.numItems === undefined ? {} : { numItems: args.numItems }),
+      },
+    );
     const handles: { updated: number; collisions: number } =
       await ctx.runMutation(internal.organizations.backfillPublicHandles, {});
-    const rows = await ctx.db.query("upstreamCredentials").collect();
-    const webhookEndpoints = await ctx.db.query("webhookEndpoints").collect();
-    const organizations = await ctx.db.query("organizations").collect();
     return {
       credentials,
       webhookSecrets,
       handles,
-      remainingPlaintext: rows.filter((row) => row.secret !== undefined).length,
-      remainingUnencrypted: rows.filter(
-        (row) => !row.ciphertext || !row.iv || !row.keyVersion,
-      ).length,
-      remainingWebhookPlaintext: webhookEndpoints.filter(
-        (row) => row.secret !== undefined,
-      ).length,
-      remainingWebhookUnencrypted: webhookEndpoints.filter(
-        (row) => !row.ciphertext || !row.iv || !row.keyVersion,
-      ).length,
-      remainingMissingHandles: organizations.filter(
-        (organization) => organization.publicHandle === undefined,
-      ).length,
     };
   },
 });
@@ -297,6 +291,7 @@ export const setProjectVisibility = mutation({
     if (updated === null) {
       throw new Error("Failed to load project");
     }
+    await enqueueRouteUpsert(ctx, args.projectId);
     return updated;
   },
 });

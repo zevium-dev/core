@@ -7,6 +7,7 @@ import {
   requireProjectAdmin,
 } from "./lib/auth";
 import { isValidSlug } from "./lib/validate";
+import { enqueueRouteArchive, enqueueRouteUpsert } from "./registrySync";
 
 export const list = query({
   args: { orgSlug: v.string() },
@@ -192,6 +193,7 @@ export const update = mutation({
     if (updated === null) {
       throw new Error("Failed to load updated project");
     }
+    await enqueueRouteUpsert(ctx, args.projectId);
     return updated;
   },
 });
@@ -199,7 +201,13 @@ export const update = mutation({
 export const remove = mutation({
   args: { projectId: v.id("projects") },
   handler: async (ctx, args): Promise<{ deleted: Id<"projects"> }> => {
-    await requireProjectAdmin(ctx, args.projectId);
+    const { project, org } = await requireProjectAdmin(ctx, args.projectId);
+
+    if (project.status === "published") {
+      // Archive is committed before source rows disappear. Gateway retries can
+      // never resurrect a deleted route because revision order is monotonic.
+      await enqueueRouteArchive(ctx, project, org);
+    }
 
     const draft = await ctx.db
       .query("specs")
@@ -225,7 +233,35 @@ export const remove = mutation({
       await ctx.db.delete(credential._id);
     }
 
-    // Usage events stay for analytics integrity; they still reference projectId.
+    const readiness = await ctx.db
+      .query("publishReadiness")
+      .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
+      .unique();
+    if (readiness !== null) await ctx.db.delete(readiness._id);
+
+    const embeddings = await ctx.db
+      .query("specEmbeddings")
+      .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
+      .collect();
+    for (const embedding of embeddings) await ctx.db.delete(embedding._id);
+
+    const endpoint = await ctx.db
+      .query("webhookEndpoints")
+      .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
+      .unique();
+    if (endpoint !== null) {
+      const deliveries = await ctx.db
+        .query("webhookDeliveries")
+        .withIndex("by_endpoint", (q) => q.eq("endpointId", endpoint._id))
+        .collect();
+      for (const delivery of deliveries) await ctx.db.delete(delivery._id);
+      // Endpoint deletion atomically disables the signing secret. Any already
+      // scheduled action sees a missing endpoint and exits without delivery.
+      await ctx.db.delete(endpoint._id);
+    }
+
+    // Usage events are the deliberate secret-free audit projection retained
+    // for ledger/analytics integrity; every mutable execution artifact is gone.
     await ctx.db.delete(args.projectId);
     return { deleted: args.projectId };
   },

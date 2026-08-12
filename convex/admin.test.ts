@@ -3,7 +3,7 @@ import { convexTest, type TestConvex } from "convex-test";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { api } from "./_generated/api";
 import schema from "./schema";
-import { decryptSecret } from "./lib/credentialCrypto";
+import { decryptSecret, webhookBinding } from "./lib/credentialCrypto";
 
 const modules = import.meta.glob("./**/*.ts");
 const ADMIN = "admin_user";
@@ -36,7 +36,9 @@ describe("admin publisher transfer operations", () => {
     process.env.ADMIN_USER_IDS = ADMIN;
     process.env.UPSTREAM_CREDENTIAL_ENCRYPTION_KEYS = JSON.stringify({
       current: "admin-test-v1",
-      keys: { "admin-test-v1": "admin-rollout-test-key-material" },
+      keys: {
+        "admin-test-v1": "MTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTE=",
+      },
     });
   });
   afterEach(() => {
@@ -76,24 +78,31 @@ describe("admin publisher transfer operations", () => {
     const admin = t.withIdentity({ subject: ADMIN } as { subject: string });
 
     const first = await admin.mutation(api.admin.migrateSecurityRollout, {});
-    expect(first.webhookSecrets).toEqual({ migrated: 1, remaining: 0 });
-    expect(first.remainingWebhookPlaintext).toBe(0);
-    expect(first.remainingWebhookUnencrypted).toBe(0);
+    expect(first.webhookSecrets).toMatchObject({
+      scanned: 1,
+      current: 1,
+      broken: 0,
+      plaintext: 1,
+      scrubbed: 1,
+      isDone: true,
+    });
 
     const stored = await t.run(async (ctx) => ctx.db.get(endpointId));
     expect(stored?.secret).toBeUndefined();
     expect(
-      await decryptSecret({
-        ciphertext: stored!.ciphertext!,
-        iv: stored!.iv!,
-        keyVersion: stored!.keyVersion!,
-      }),
+      await decryptSecret(stored!, webhookBinding(stored!.projectId)),
     ).toBe("legacy-webhook-plaintext");
 
     const second = await admin.mutation(api.admin.migrateSecurityRollout, {});
-    expect(second.webhookSecrets).toEqual({ migrated: 0, remaining: 0 });
-    expect(second.remainingWebhookPlaintext).toBe(0);
-    expect(second.remainingWebhookUnencrypted).toBe(0);
+    expect(second.webhookSecrets).toMatchObject({
+      scanned: 1,
+      current: 1,
+      old: 0,
+      broken: 0,
+      plaintext: 0,
+      scrubbed: 0,
+      isDone: true,
+    });
   });
 
   it("rejects non-admin rollout without touching legacy plaintext", async () => {

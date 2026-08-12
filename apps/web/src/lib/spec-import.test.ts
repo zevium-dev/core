@@ -6,6 +6,15 @@ import {
   type SpecImportRuntime,
 } from "./spec-import.server";
 
+const VALID_SPEC = {
+  openapi: "3.1.0",
+  info: { title: "Imported API", version: "1.0.0" },
+  servers: [{ url: "https://api.example.com" }],
+  paths: {},
+};
+
+const NORMALIZED_SPEC = `${JSON.stringify(VALID_SPEC, null, 2)}\n`;
+
 function runtimeFixture() {
   const authenticate = vi.fn<SpecImportRuntime["authenticate"]>(async () => ({
     isAuthenticated: true,
@@ -16,19 +25,26 @@ function runtimeFixture() {
     { address: "93.184.216.34", family: 4 },
   ]);
   const fetch = vi.fn(async (_url: URL, _init: RequestInit) =>
-    Response.json(
-      { openapi: "3.1.0" },
-      {
-        headers: { "content-type": "application/json" },
-      },
-    ),
+    Response.json(VALID_SPEC, {
+      headers: { "content-type": "application/json" },
+    }),
   );
+  const release = vi.fn(async () => undefined);
+  const acquirePermit = vi.fn(async () => release);
   const runtime: SpecImportRuntime = {
     authenticate,
     resolveHostname,
     fetch,
+    acquirePermit,
   };
-  return { runtime, authenticate, resolveHostname, fetch };
+  return {
+    runtime,
+    authenticate,
+    resolveHostname,
+    fetch,
+    acquirePermit,
+    release,
+  };
 }
 
 function cancellableResponse(
@@ -141,13 +157,16 @@ describe("fetchSpecFromUrlForRequest", () => {
     );
 
     expect(result).toEqual({
-      text: JSON.stringify({ openapi: "3.1.0" }),
+      text: NORMALIZED_SPEC,
       contentType: "application/json",
     });
     expect(fixture.authenticate).toHaveBeenCalledOnce();
     expect(fixture.resolveHostname).toHaveBeenCalledWith("example.com");
     expect(fixture.fetch).toHaveBeenCalledOnce();
     expect(fixture.authenticate.mock.invocationCallOrder[0]).toBeLessThan(
+      fixture.acquirePermit.mock.invocationCallOrder[0],
+    );
+    expect(fixture.acquirePermit.mock.invocationCallOrder[0]).toBeLessThan(
       fixture.resolveHostname.mock.invocationCallOrder[0],
     );
     expect(fixture.resolveHostname.mock.invocationCallOrder[0]).toBeLessThan(
@@ -156,6 +175,10 @@ describe("fetchSpecFromUrlForRequest", () => {
     const [, init] = fixture.fetch.mock.calls[0];
     expect(init.redirect).toBe("manual");
     expect(init.signal).toBeInstanceOf(AbortSignal);
+    expect(String(new Headers(init.headers).get("accept"))).not.toContain(
+      "*/*",
+    );
+    expect(fixture.release).toHaveBeenCalledOnce();
   });
 
   it("rejects any mixed DNS answer before fetch", async () => {
@@ -195,18 +218,26 @@ describe("fetchSpecFromUrlForRequest", () => {
       .mockResolvedValueOnce(
         cancellableResponse(
           "ignored",
-          { status: 302, headers: { location: "https://cdn.example/spec" } },
+          {
+            status: 302,
+            headers: { location: "https://cdn.example/spec" },
+          },
           cancel,
         ),
       )
-      .mockResolvedValueOnce(new Response("openapi: 3.1.0", { status: 200 }));
+      .mockResolvedValueOnce(
+        new Response(
+          `openapi: 3.1.0\ninfo:\n  title: Imported API\n  version: 1.0.0\nservers:\n  - url: https://api.example.com\npaths: {}`,
+          { status: 200, headers: { "content-type": "application/yaml" } },
+        ),
+      );
 
     const result = await fetchSpecFromUrlForRequest(
       { url: "https://example.com/openapi.json" },
       fixture.runtime,
     );
 
-    expect(result.text).toBe("openapi: 3.1.0");
+    expect(result.text).toBe(NORMALIZED_SPEC);
     expect(cancel).toHaveBeenCalledOnce();
     expect(fixture.resolveHostname).toHaveBeenNthCalledWith(1, "example.com");
     expect(fixture.resolveHostname).toHaveBeenNthCalledWith(2, "cdn.example");
@@ -243,6 +274,7 @@ describe("fetchSpecFromUrlForRequest", () => {
           status: 200,
           headers: {
             "content-length": String(MAX_SPEC_IMPORT_BYTES + 1),
+            "content-type": "application/json",
           },
         },
         cancel,
@@ -272,6 +304,7 @@ describe("fetchSpecFromUrlForRequest", () => {
             cancel();
           },
         }),
+        { headers: { "content-type": "application/json" } },
       ),
     );
 
@@ -311,5 +344,69 @@ describe("fetchSpecFromUrlForRequest", () => {
 
     await rejection;
     expect(observedAbort).toHaveBeenCalledOnce();
+    expect(fixture.release).toHaveBeenCalledOnce();
+  });
+
+  it("rejects unsupported MIME before reading body", async () => {
+    const fixture = runtimeFixture();
+    const cancel = vi.fn();
+    fixture.fetch.mockResolvedValue(
+      cancellableResponse(
+        JSON.stringify(VALID_SPEC),
+        {
+          status: 200,
+          headers: { "content-type": "text/html; charset=utf-8" },
+        },
+        cancel,
+      ),
+    );
+    await expect(
+      fetchSpecFromUrlForRequest(
+        { url: "https://example.com/openapi.json" },
+        fixture.runtime,
+      ),
+    ).rejects.toThrow("supported JSON or YAML");
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(fixture.release).toHaveBeenCalledOnce();
+  });
+
+  it("parses then rejects non-OpenAPI and OpenAPI 2 payloads", async () => {
+    for (const body of [
+      { hello: "world" },
+      {
+        swagger: "2.0",
+        info: { title: "Old", version: "1" },
+        paths: {},
+      },
+    ]) {
+      const fixture = runtimeFixture();
+      fixture.fetch.mockResolvedValue(Response.json(body));
+      await expect(
+        fetchSpecFromUrlForRequest(
+          { url: "https://example.com/openapi.json" },
+          fixture.runtime,
+        ),
+      ).rejects.toThrow("valid OpenAPI 3 document");
+      expect(fixture.release).toHaveBeenCalledOnce();
+    }
+  });
+
+  it.each([
+    "64:ff9b::7f00:1",
+    "64:ff9b:1::7f00:1",
+    "100::1",
+    "2001:2::1",
+    "3fff::1",
+    "5f00::1",
+  ])("rejects special-use IPv6 DNS answer %s", async (address) => {
+    const fixture = runtimeFixture();
+    fixture.resolveHostname.mockResolvedValue([{ address, family: 6 }]);
+    await expect(
+      fetchSpecFromUrlForRequest(
+        { url: "https://example.com/openapi.json" },
+        fixture.runtime,
+      ),
+    ).rejects.toThrow("Failed to fetch spec");
+    expect(fixture.fetch).not.toHaveBeenCalled();
   });
 });

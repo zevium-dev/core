@@ -95,7 +95,9 @@ describe("upstream credentials", () => {
     process.env.GATEWAY_INTERNAL_SECRET = INTERNAL_SECRET;
     process.env.UPSTREAM_CREDENTIAL_ENCRYPTION_KEYS = JSON.stringify({
       current: "test-v1",
-      keys: { "test-v1": "test-upstream-credential-encryption-key" },
+      keys: {
+        "test-v1": "MTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTE=",
+      },
     });
   });
 
@@ -252,7 +254,7 @@ describe("upstream credentials", () => {
     ).toEqual([]);
   });
 
-  it("migrates legacy plaintext and scrubs stale plaintext from encrypted rows", async () => {
+  it("repairs mismatched hybrid ciphertext before scrubbing recoverable plaintext", async () => {
     const t = convexTest(schema, modules);
     const { projectId } = await seedProject(t);
     const created = await asPublisher(t).mutation(
@@ -273,9 +275,20 @@ describe("upstream credentials", () => {
       });
     });
 
-    expect(
-      await t.mutation(internal.upstreamCredentials.migrateLegacyPlaintext, {}),
-    ).toEqual({ migrated: 2, remaining: 0 });
+    const migration = await t.mutation(
+      internal.upstreamCredentials.migrateLegacyPlaintext,
+      {},
+    );
+    expect(migration).toMatchObject({
+      scanned: 2,
+      current: 2,
+      broken: 0,
+      corrupt: 1,
+      recovered: 1,
+      plaintext: 2,
+      scrubbed: 2,
+      isDone: true,
+    });
 
     const rows = await t.run(async (ctx) => ({
       encrypted: await ctx.db.get(created.id),
@@ -283,15 +296,115 @@ describe("upstream credentials", () => {
     }));
     expect(rows.encrypted?.secret).toBeUndefined();
     expect(rows.legacy?.secret).toBeUndefined();
+    expect(await decryptCredential(rows.legacy!, projectId, "x-api-key")).toBe(
+      "legacy-value",
+    );
     expect(
-      await decryptCredential({
-        ciphertext: rows.legacy!.ciphertext!,
-        iv: rows.legacy!.iv!,
-        keyVersion: rows.legacy!.keyVersion!,
-      }),
-    ).toBe("legacy-value");
+      await decryptCredential(rows.encrypted!, projectId, "authorization"),
+    ).toBe("stale-plaintext-copy");
     expect(
       await t.mutation(internal.upstreamCredentials.migrateLegacyPlaintext, {}),
-    ).toEqual({ migrated: 0, remaining: 0 });
+    ).toMatchObject({
+      scanned: 2,
+      current: 2,
+      old: 0,
+      broken: 0,
+      plaintext: 0,
+      scrubbed: 0,
+      isDone: true,
+    });
+  });
+
+  it("returns one non-enumerating error for missing and cross-org credential ids", async () => {
+    const t = convexTest(schema, modules);
+    const { projectId } = await seedProject(t);
+    const owned = await asPublisher(t).mutation(
+      api.upstreamCredentials.upsert,
+      {
+        projectId,
+        name: "authorization",
+        secret: "secret",
+      },
+    );
+    const missing = await t.run(async (ctx) => {
+      const id = await ctx.db.insert("upstreamCredentials", {
+        projectId,
+        name: "x-deleted",
+        secret: "temporary",
+        updatedAt: 1,
+      });
+      await ctx.db.delete(id);
+      return id;
+    });
+    for (const credentialId of [owned.id, missing]) {
+      const caller = asStranger(t);
+      await expect(
+        caller.mutation(api.upstreamCredentials.remove, { credentialId }),
+      ).rejects.toThrow("Upstream credential unavailable");
+    }
+  });
+
+  it("rewraps in cursor-bounded pages before old key retirement", async () => {
+    const t = convexTest(schema, modules);
+    const { projectId } = await seedProject(t);
+    const publisher = asPublisher(t);
+    await publisher.mutation(api.upstreamCredentials.upsert, {
+      projectId,
+      name: "authorization",
+      secret: "Bearer one",
+    });
+    await publisher.mutation(api.upstreamCredentials.upsert, {
+      projectId,
+      name: "x-api-key",
+      secret: "two",
+    });
+    process.env.UPSTREAM_CREDENTIAL_ENCRYPTION_KEYS = JSON.stringify({
+      current: "test-v2",
+      keys: {
+        "test-v1": "MTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTE=",
+        "test-v2": "MjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjI=",
+      },
+    });
+
+    const first = await t.mutation(
+      internal.upstreamCredentials.migrateLegacyPlaintext,
+      { cursor: null, numItems: 1 },
+    );
+    expect(first).toMatchObject({
+      scanned: 1,
+      old: 1,
+      rewrapped: 1,
+      broken: 0,
+      isDone: false,
+    });
+    const second = await t.mutation(
+      internal.upstreamCredentials.migrateLegacyPlaintext,
+      { cursor: first.continueCursor, numItems: 1 },
+    );
+    expect(second).toMatchObject({
+      scanned: 1,
+      old: 1,
+      rewrapped: 1,
+      broken: 0,
+      isDone: true,
+    });
+
+    process.env.UPSTREAM_CREDENTIAL_ENCRYPTION_KEYS = JSON.stringify({
+      current: "test-v2",
+      keys: {
+        "test-v2": "MjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjI=",
+      },
+    });
+    const response = await t.fetch(
+      "/gateway-spec?publisherHandle=publisher&projectSlug=md-to-html",
+      { headers: { "x-internal-secret": INTERNAL_SECRET } },
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      upstreamHeaders: {
+        authorization: "Bearer one",
+        "x-api-key": "two",
+      },
+    });
   });
 });

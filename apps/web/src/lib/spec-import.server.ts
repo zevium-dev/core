@@ -1,173 +1,32 @@
 import { auth } from "@clerk/tanstack-react-start/server";
+import { isPublicIp, validateOpenApiSpec } from "@zevium/shared";
+import { ConvexHttpClient } from "convex/browser";
+import { isIP } from "node:net";
 import { resolve4, resolve6 } from "node:dns/promises";
+import { api } from "#/lib/convex-api";
+import { convertSpecInputToJson } from "./spec-yaml";
 import { MAX_SPEC_IMPORT_BYTES, type ImportSpecUrlInput } from "./spec-import";
 
-/**
- * Hard limit on the total wall-clock time for a spec fetch (DNS resolution,
- * request, redirects, and body streaming). Aborts via AbortController.
- */
 const FETCH_TIMEOUT_MS = 10_000;
-
-/** Maximum redirect hops followed (each re-validated against the SSRF guard). */
 const MAX_REDIRECTS = 5;
-
-/**
- * Generic message for every failure that could reveal upstream topology
- * (network errors, non-2xx/3xx responses, DNS resolution failures, private-IP
- * blocks, redirect exhaustion). Upstream status codes MUST NOT be surfaced.
- */
 const GENERIC_FETCH_ERROR = "Failed to fetch spec";
 const SIZE_ERROR = "Spec is larger than 2MB";
 const EMPTY_ERROR = "URL returned empty body";
+const MIME_ERROR = "URL did not return supported JSON or YAML";
+const INVALID_SPEC_ERROR = "URL did not return a valid OpenAPI 3 document";
 const SESSION_ERROR = "Could not verify your session. Refresh and try again.";
 const SIGN_IN_ERROR = "Sign in before importing a spec";
 const ACTIVE_ORG_ERROR = "Select an organization before importing a spec";
 
-// ---------------------------------------------------------------------------
-// SSRF guards
-// ---------------------------------------------------------------------------
-
-function parseIPv4(ip: string): number[] | null {
-  const parts = ip.split(".");
-  if (parts.length !== 4) return null;
-  const nums = parts.map((p) => Number(p));
-  return nums.some((n) => !Number.isInteger(n) || n < 0 || n > 255)
-    ? null
-    : nums;
-}
-
-function ipv4Number(ip: string): number | null {
-  const parts = parseIPv4(ip);
-  if (!parts) return null;
-  return (
-    (((parts[0] << 24) >>> 0) |
-      (parts[1] << 16) |
-      (parts[2] << 8) |
-      parts[3]) >>>
-    0
-  );
-}
-
-function isInIPv4Cidr(ip: number, base: string, prefix: number): boolean {
-  const baseNumber = ipv4Number(base);
-  if (baseNumber === null) return true;
-  const mask = prefix === 0 ? 0 : (0xffffffff << (32 - prefix)) >>> 0;
-  return (ip & mask) >>> 0 === (baseNumber & mask) >>> 0;
-}
-
-/**
- * Reject every special-use IPv4 range. Cloudflare's
- * `global_fetch_strictly_public` flag is the runtime backstop; this preflight
- * also fails before a request is created and covers Node-based tests/tools.
- */
-function isNonPublicIPv4(ip: string): boolean {
-  const value = ipv4Number(ip);
-  if (value === null) return true;
-  const nonPublicCidrs = [
-    ["0.0.0.0", 8],
-    ["10.0.0.0", 8],
-    ["100.64.0.0", 10],
-    ["127.0.0.0", 8],
-    ["169.254.0.0", 16],
-    ["172.16.0.0", 12],
-    ["192.0.0.0", 24],
-    ["192.0.2.0", 24],
-    ["192.168.0.0", 16],
-    ["198.18.0.0", 15],
-    ["198.51.100.0", 24],
-    ["203.0.113.0", 24],
-    ["224.0.0.0", 4],
-    ["240.0.0.0", 4],
-  ] as const;
-  return nonPublicCidrs.some(([base, prefix]) =>
-    isInIPv4Cidr(value, base, prefix),
-  );
-}
-
-function ipv4ToTwoGroups(ip: string): [number, number] | null {
-  const parts = parseIPv4(ip);
-  if (!parts) return null;
-  return [(parts[0] << 8) | parts[1], (parts[2] << 8) | parts[3]];
-}
-
-/**
- * Expand an IPv6 textual form (incl. `::` compression and IPv4-mapped suffixes
- * like `::ffff:1.2.3.4`) into 8 16-bit groups, or `null` if unparseable.
- */
-function expandIPv6(ip: string): number[] | null {
-  // Replace a trailing embedded IPv4 with two hex groups.
-  const colon = ip.lastIndexOf(":");
-  if (colon !== -1 && ip.slice(colon + 1).includes(".")) {
-    const v4 = ipv4ToTwoGroups(ip.slice(colon + 1));
-    if (!v4) return null;
-    ip = `${ip.slice(0, colon + 1)}${v4[0].toString(16)}:${v4[1].toString(16)}`;
-  }
-
-  const halves = ip.split("::");
-  if (halves.length > 2) return null;
-
-  let groups: string[];
-  if (halves.length === 2) {
-    const head = halves[0] ? halves[0].split(":") : [];
-    const tail = halves[1] ? halves[1].split(":") : [];
-    const fill = 8 - head.length - tail.length;
-    if (fill < 0) return null;
-    groups = [...head, ...Array.from({ length: fill }, () => "0"), ...tail];
-  } else {
-    groups = ip.split(":");
-  }
-  if (groups.length !== 8) return null;
-
-  const out: number[] = [];
-  for (const g of groups) {
-    const n = Number.parseInt(g, 16);
-    if (!Number.isFinite(n) || n < 0 || n > 0xffff) return null;
-    out.push(n);
-  }
-  return out;
-}
-
-/**
- * Private / internal IPv6 ranges that MUST NOT be reachable:
- *   ::1            loopback
- *   fc00::/7       unique-local (fc00::–fdff::)
- *   fe80::/10      link-local
- *   ::ffff:0:0/96  IPv4-mapped — defer to the IPv4 blocklist
- */
-function isNonPublicIPv6(ip: string): boolean {
-  const groups = expandIPv6(ip);
-  // Fail closed: if we cannot parse the address, treat it as blocked.
-  if (!groups) return true;
-  const g0 = groups[0];
-
-  if (groups.every((g) => g === 0)) return true; // :: unspecified
-  if (groups.every((g, i) => (i === 7 ? g === 1 : g === 0))) return true; // ::1
-  if ((g0 & 0xfe00) === 0xfc00) return true; // fc00::/7
-  if ((g0 & 0xffc0) === 0xfe80) return true; // fe80::/10
-  if ((g0 & 0xffc0) === 0xfec0) return true; // fec0::/10 deprecated site-local
-  if ((g0 & 0xff00) === 0xff00) return true; // ff00::/8 multicast
-  if (g0 === 0x2001 && groups[1] === 0x0db8) return true; // docs only
-
-  // IPv4-compatible and IPv4-mapped forms — apply the IPv4 blocklist.
-  if (
-    groups[0] === 0 &&
-    groups[1] === 0 &&
-    groups[2] === 0 &&
-    groups[3] === 0 &&
-    groups[4] === 0 &&
-    (groups[5] === 0 || groups[5] === 0xffff)
-  ) {
-    const ipv4 = `${groups[6] >> 8}.${groups[6] & 0xff}.${groups[7] >> 8}.${
-      groups[7] & 0xff
-    }`;
-    if (isNonPublicIPv4(ipv4)) return true;
-  }
-  return false;
-}
-
-function isIPv4Literal(s: string): boolean {
-  return parseIPv4(s) !== null;
-}
+const SUPPORTED_MEDIA_TYPES = new Set([
+  "application/json",
+  "application/yaml",
+  "application/x-yaml",
+  "application/vnd.oai.openapi+json",
+  "application/vnd.oai.openapi+yaml",
+  "text/yaml",
+  "text/x-yaml",
+]);
 
 type ResolvedAddress = { address: string; family: number };
 
@@ -175,26 +34,48 @@ type SpecImportSession = {
   isAuthenticated: boolean;
   userId: string | null | undefined;
   orgId: string | null | undefined;
+  convexToken?: string | null;
+  convexUrl?: string;
 };
 
 export type SpecImportRuntime = {
   authenticate: () => Promise<SpecImportSession>;
   resolveHostname: (hostname: string) => Promise<ResolvedAddress[]>;
   fetch: (url: URL, init: RequestInit) => Promise<Response>;
+  acquirePermit: (session: SpecImportSession) => Promise<() => Promise<void>>;
 };
+
+async function releaseWithRetry(
+  convex: ConvexHttpClient,
+  leaseId: string,
+): Promise<void> {
+  try {
+    await convex.mutation(api.specImportLimits.release, { leaseId });
+  } catch {
+    // One immediate retry handles a transient failed response. Lease expiry is
+    // final compensation if both attempts fail; release itself is idempotent.
+    await convex.mutation(api.specImportLimits.release, { leaseId });
+  }
+}
 
 const productionRuntime: SpecImportRuntime = {
   authenticate: async () => {
     const session = await auth();
+    const convexToken =
+      session.userId && session.orgId
+        ? await session.getToken({ template: "convex" })
+        : null;
     return {
       isAuthenticated: session.isAuthenticated,
       userId: session.userId,
       orgId: session.orgId,
+      convexToken,
+      convexUrl: import.meta.env.VITE_CONVEX_URL,
     };
   },
   resolveHostname: async (hostname) => {
-    // Cloudflare Workers implements DNS-over-HTTPS resolve4/resolve6. Node's
-    // lookup() exists as a compatibility stub but throws at runtime.
+    // Worker node:dns uses DoH. `global_fetch_strictly_public` remains enabled
+    // as connect-time backstop against DNS rebinding.
     const [ipv4, ipv6] = await Promise.allSettled([
       resolve4(hostname),
       resolve6(hostname),
@@ -209,6 +90,15 @@ const productionRuntime: SpecImportRuntime = {
     return addresses;
   },
   fetch: async (url, init) => await globalThis.fetch(url, init),
+  acquirePermit: async (session) => {
+    if (!session.convexUrl || !session.convexToken)
+      throw new Error(SESSION_ERROR);
+    const convex = new ConvexHttpClient(session.convexUrl);
+    convex.setAuth(session.convexToken);
+    const leaseId = crypto.randomUUID();
+    await convex.mutation(api.specImportLimits.acquire, { leaseId });
+    return async () => await releaseWithRetry(convex, leaseId);
+  },
 };
 
 async function waitForAbortable<T>(
@@ -216,7 +106,6 @@ async function waitForAbortable<T>(
   signal: AbortSignal,
 ): Promise<T> {
   if (signal.aborted) throw new Error(GENERIC_FETCH_ERROR);
-
   return await new Promise<T>((resolve, reject) => {
     const onAbort = () => {
       cleanup();
@@ -245,16 +134,10 @@ async function cancelResponseBody(
   try {
     await waitForAbortable(response.body.cancel(), signal);
   } catch {
-    // Best effort. The request signal still bounds underlying work.
+    // Request signal still bounds underlying work.
   }
 }
 
-/**
- * Validate every initial URL and redirect target before fetch. DNS rejection
- * catches mixed public/private answers. The Worker compatibility flag
- * `global_fetch_strictly_public` closes the DNS-to-connect rebinding window by
- * forcing global fetch through the public Internet path.
- */
 async function assertSafeUrl(
   url: URL,
   runtime: SpecImportRuntime,
@@ -268,15 +151,10 @@ async function assertSafeUrl(
   ) {
     throw new Error(GENERIC_FETCH_ERROR);
   }
-
-  const hostname = url.hostname.replace(/^\[|\]$/g, "");
-
-  if (isIPv4Literal(hostname)) {
-    if (isNonPublicIPv4(hostname)) throw new Error(GENERIC_FETCH_ERROR);
-    return;
-  }
-  if (hostname.includes(":")) {
-    if (isNonPublicIPv6(hostname)) throw new Error(GENERIC_FETCH_ERROR);
+  const hostname = url.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  const literalFamily = isIP(hostname);
+  if (literalFamily !== 0) {
+    if (!isPublicIp(hostname)) throw new Error(GENERIC_FETCH_ERROR);
     return;
   }
 
@@ -289,15 +167,16 @@ async function assertSafeUrl(
   } catch {
     throw new Error(GENERIC_FETCH_ERROR);
   }
-  if (resolved.length === 0) throw new Error(GENERIC_FETCH_ERROR);
-  for (const address of resolved) {
-    if (
-      (address.family === 4 && isNonPublicIPv4(address.address)) ||
-      (address.family === 6 && isNonPublicIPv6(address.address)) ||
-      (address.family !== 4 && address.family !== 6)
-    ) {
-      throw new Error(GENERIC_FETCH_ERROR);
-    }
+  if (
+    resolved.length === 0 ||
+    resolved.some(
+      ({ address, family }) =>
+        (family !== 4 && family !== 6) ||
+        isIP(address) !== family ||
+        !isPublicIp(address),
+    )
+  ) {
+    throw new Error(GENERIC_FETCH_ERROR);
   }
 }
 
@@ -308,15 +187,13 @@ async function streamBodyUpTo(
 ): Promise<string> {
   const reader = response.body?.getReader();
   if (!reader) throw new Error(EMPTY_ERROR);
-
   const cancel = async () => {
     try {
       await waitForAbortable(reader.cancel(), signal);
     } catch {
-      // Best effort. The request signal still bounds underlying work.
+      // Request signal still bounds underlying work.
     }
   };
-
   const chunks: Uint8Array[] = [];
   let total = 0;
   for (;;) {
@@ -335,27 +212,71 @@ async function streamBodyUpTo(
     }
     chunks.push(result.value);
   }
-
   const body = new Uint8Array(total);
   let offset = 0;
   for (const chunk of chunks) {
     body.set(chunk, offset);
     offset += chunk.byteLength;
   }
-  return new TextDecoder("utf-8").decode(body);
+  return new TextDecoder("utf-8", { fatal: true }).decode(body);
+}
+
+function mediaType(value: string | null): string | null {
+  if (value === null) return null;
+  return value.split(";", 1)[0]!.trim().toLowerCase();
+}
+
+function isSupportedMediaType(value: string | null): boolean {
+  const type = mediaType(value);
+  if (type === null) return false;
+  return SUPPORTED_MEDIA_TYPES.has(type) || type.endsWith("+json");
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+/** Parse JSON/YAML, enforce OpenAPI 3 required shape, return canonical JSON. */
+export function normalizeImportedOpenApi(text: string): string {
+  const converted = convertSpecInputToJson(text);
+  if (!converted.ok) throw new Error(INVALID_SPEC_ERROR);
+  let raw: unknown;
+  try {
+    raw = JSON.parse(converted.json) as unknown;
+  } catch {
+    throw new Error(INVALID_SPEC_ERROR);
+  }
+  if (!isRecord(raw) || typeof raw.openapi !== "string") {
+    throw new Error(INVALID_SPEC_ERROR);
+  }
+  if (!/^3\.(?:0|1)\.\d+(?:[-+].+)?$/.test(raw.openapi.trim())) {
+    throw new Error(INVALID_SPEC_ERROR);
+  }
+  if (
+    !isRecord(raw.info) ||
+    typeof raw.info.title !== "string" ||
+    raw.info.title.trim() === "" ||
+    typeof raw.info.version !== "string" ||
+    raw.info.version.trim() === ""
+  ) {
+    throw new Error(INVALID_SPEC_ERROR);
+  }
+  const normalized = `${JSON.stringify(raw, null, 2)}\n`;
+  if (validateOpenApiSpec(normalized).errors.length > 0) {
+    throw new Error(INVALID_SPEC_ERROR);
+  }
+  return normalized;
 }
 
 async function fetchAuthorizedSpec(
   data: ImportSpecUrlInput,
   runtime: SpecImportRuntime,
   signal: AbortSignal,
-): Promise<{ text: string; contentType: string | null }> {
+): Promise<{ text: string; contentType: string }> {
   let current = new URL(data.url);
   let response: Response | null = null;
-
-  for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+  for (let hop = 0; hop <= MAX_REDIRECTS; hop += 1) {
     await assertSafeUrl(current, runtime, signal);
-
     let candidate: Response;
     try {
       candidate = await waitForAbortable(
@@ -365,7 +286,7 @@ async function fetchAuthorizedSpec(
           signal,
           headers: {
             Accept:
-              "application/json, application/yaml, text/yaml, text/plain, */*",
+              "application/json, application/yaml, application/x-yaml, text/yaml, text/x-yaml",
           },
         }),
         signal,
@@ -373,7 +294,6 @@ async function fetchAuthorizedSpec(
     } catch {
       throw new Error(GENERIC_FETCH_ERROR);
     }
-
     if (candidate.status >= 300 && candidate.status < 400) {
       const location = candidate.headers.get("location");
       await cancelResponseBody(candidate, signal);
@@ -385,18 +305,19 @@ async function fetchAuthorizedSpec(
       }
       continue;
     }
-
     response = candidate;
     break;
   }
-
-  if (!response) throw new Error(GENERIC_FETCH_ERROR);
-  if (!response.ok) {
-    await cancelResponseBody(response, signal);
+  if (!response || !response.ok) {
+    if (response) await cancelResponseBody(response, signal);
     throw new Error(GENERIC_FETCH_ERROR);
   }
 
   const contentType = response.headers.get("content-type");
+  if (!isSupportedMediaType(contentType)) {
+    await cancelResponseBody(response, signal);
+    throw new Error(MIME_ERROR);
+  }
   const lengthHeader = response.headers.get("content-length");
   if (lengthHeader !== null) {
     const length = Number(lengthHeader);
@@ -405,21 +326,25 @@ async function fetchAuthorizedSpec(
       throw new Error(SIZE_ERROR);
     }
   }
-
-  const text = await streamBodyUpTo(response, MAX_SPEC_IMPORT_BYTES, signal);
+  let text: string;
+  try {
+    text = await streamBodyUpTo(response, MAX_SPEC_IMPORT_BYTES, signal);
+  } catch (error) {
+    if (error instanceof TypeError) throw new Error(INVALID_SPEC_ERROR);
+    throw error;
+  }
   if (text.trim() === "") throw new Error(EMPTY_ERROR);
-  return { text, contentType };
+  return {
+    text: normalizeImportedOpenApi(text),
+    contentType: "application/json",
+  };
 }
 
-/**
- * Authenticated request boundary and test seam. Authentication completes before
- * URL parsing, DNS resolution, or fetch, so rejected callers cause zero network
- * activity. One AbortController bounds DNS, redirects, fetch, and body reads.
- */
+/** Auth, global per-user/org lease, then bounded public fetch and validation. */
 export async function fetchSpecFromUrlForRequest(
   data: ImportSpecUrlInput,
   runtime: SpecImportRuntime = productionRuntime,
-): Promise<{ text: string; contentType: string | null }> {
+): Promise<{ text: string; contentType: string }> {
   let session: SpecImportSession;
   try {
     session = await runtime.authenticate();
@@ -431,6 +356,7 @@ export async function fetchSpecFromUrlForRequest(
   }
   if (!session.orgId) throw new Error(ACTIVE_ORG_ERROR);
 
+  const release = await runtime.acquirePermit(session);
   const controller = new AbortController();
   const timeout = setTimeout(
     () => controller.abort(new Error(GENERIC_FETCH_ERROR)),
@@ -441,5 +367,10 @@ export async function fetchSpecFromUrlForRequest(
   } finally {
     clearTimeout(timeout);
     if (!controller.signal.aborted) controller.abort();
+    try {
+      await release();
+    } catch {
+      // Expiring server-side lease is recovery; never mask fetch result/error.
+    }
   }
 }

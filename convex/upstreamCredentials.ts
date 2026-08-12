@@ -2,8 +2,17 @@ import { v } from "convex/values";
 
 import { internalMutation, mutation, query } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
-import { encryptCredential } from "./lib/credentialCrypto";
-import { requireOrgAdmin, requireProjectMember } from "./lib/auth";
+import {
+  credentialBinding,
+  encryptCredential,
+  migrateStoredSecret,
+} from "./lib/credentialCrypto";
+import {
+  requireIdentity,
+  requireOrgAdmin,
+  requireProjectMember,
+} from "./lib/auth";
+import { enqueueRouteUpsert } from "./registrySync";
 
 const HEADER_NAME = /^[!#$%&'*+\-.^_`|~0-9a-z]+$/;
 const BLOCKED_HEADERS = new Set([
@@ -77,7 +86,7 @@ export const upsert = mutation({
     requireOrgAdmin(claims);
     const name = normalizeName(args.name);
     const secret = validateSecret(args.secret);
-    const encrypted = await encryptCredential(secret);
+    const encrypted = await encryptCredential(secret, args.projectId, name);
     const updatedAt = Date.now();
     const existing = await ctx.db
       .query("upstreamCredentials")
@@ -98,6 +107,7 @@ export const upsert = mutation({
       id = existing._id;
       await ctx.db.patch(existing._id, { ...encrypted, updatedAt });
     }
+    await enqueueRouteUpsert(ctx, args.projectId);
     return { id, name, updatedAt };
   },
 });
@@ -108,38 +118,87 @@ export const remove = mutation({
     ctx,
     args,
   ): Promise<{ deleted: Id<"upstreamCredentials"> }> => {
-    const credential = await ctx.db.get(args.credentialId);
-    if (credential === null) throw new Error("Upstream credential not found");
-    const { claims } = await requireProjectMember(ctx, credential.projectId);
+    // Role and active-org checks happen before touching caller-controlled id.
+    // Missing and cross-org rows intentionally collapse to one error.
+    const claims = await requireIdentity(ctx);
     requireOrgAdmin(claims);
+    if (!claims.orgId) throw new Error("Upstream credential unavailable");
+    const credential = await ctx.db.get(args.credentialId);
+    if (credential === null) throw new Error("Upstream credential unavailable");
+    const project = await ctx.db.get(credential.projectId);
+    const org =
+      project === null ? null : await ctx.db.get(project.organizationId);
+    if (org === null || org.clerkOrgId !== claims.orgId) {
+      throw new Error("Upstream credential unavailable");
+    }
     await ctx.db.delete(credential._id);
+    await enqueueRouteUpsert(ctx, credential.projectId);
     return { deleted: credential._id };
   },
 });
 
-/** One-shot deployment migration for legacy plaintext rows. Remove after all rows report zero. */
+export type CredentialMigrationPage = {
+  scanned: number;
+  current: number;
+  old: number;
+  broken: number;
+  corrupt: number;
+  plaintext: number;
+  recovered: number;
+  rewrapped: number;
+  scrubbed: number;
+  continueCursor: string;
+  isDone: boolean;
+};
+
+/** Cursor-bounded dual-envelope migration. Repeat until isDone, then audit again. */
 export const migrateLegacyPlaintext = internalMutation({
-  args: {},
-  handler: async (ctx): Promise<{ migrated: number; remaining: number }> => {
-    const rows = await ctx.db.query("upstreamCredentials").collect();
-    let migrated = 0;
-    let remaining = 0;
-    for (const row of rows) {
-      if (row.ciphertext && row.iv && row.keyVersion) {
-        if (row.secret !== undefined) {
-          await ctx.db.patch(row._id, { secret: undefined });
-          migrated += 1;
-        }
-        continue;
+  args: {
+    cursor: v.optional(v.union(v.string(), v.null())),
+    numItems: v.optional(v.number()),
+  },
+  handler: async (ctx, args): Promise<CredentialMigrationPage> => {
+    const requested = args.numItems ?? 50;
+    const numItems = Math.max(1, Math.min(100, Math.floor(requested)));
+    const result = await ctx.db.query("upstreamCredentials").paginate({
+      cursor: args.cursor ?? null,
+      numItems,
+    });
+    const counts = {
+      scanned: result.page.length,
+      current: 0,
+      old: 0,
+      broken: 0,
+      corrupt: 0,
+      plaintext: 0,
+      recovered: 0,
+      rewrapped: 0,
+      scrubbed: 0,
+    };
+    for (const row of result.page) {
+      const migration = await migrateStoredSecret(
+        row,
+        credentialBinding(row.projectId, row.name),
+      );
+      if (migration.plaintext) counts.plaintext += 1;
+      if (migration.old) counts.old += 1;
+      if (migration.corrupt) counts.corrupt += 1;
+      if (migration.broken) counts.broken += 1;
+      else counts.current += 1;
+      if (migration.recovered) counts.recovered += 1;
+      if (migration.rewrapped) counts.rewrapped += 1;
+      if (migration.scrubbed) counts.scrubbed += 1;
+      if (migration.patch) {
+        await ctx.db.patch(row._id, {
+          ...migration.patch,
+          updatedAt: Date.now(),
+        });
       }
-      if (row.secret === undefined) {
-        remaining += 1;
-        continue;
-      }
-      const encrypted = await encryptCredential(row.secret);
-      await ctx.db.patch(row._id, { ...encrypted, secret: undefined });
-      migrated += 1;
     }
-    return { migrated, remaining };
+    return {
+      ...counts,
+      continueCursor: result.continueCursor,
+      isDone: result.isDone,
+    };
   },
 });

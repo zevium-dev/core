@@ -46,6 +46,12 @@ export default defineSchema({
     ciphertext: v.optional(v.string()),
     iv: v.optional(v.string()),
     keyVersion: v.optional(v.string()),
+    // v2 envelope is purpose/resource-bound with AES-GCM AAD. Legacy envelope
+    // remains during staged rollout so previous release can still roll back.
+    sealedCiphertext: v.optional(v.string()),
+    sealedIv: v.optional(v.string()),
+    sealedKeyVersion: v.optional(v.string()),
+    sealedVersion: v.optional(v.literal("v2")),
     secret: v.optional(v.string()),
     updatedAt: v.number(),
   })
@@ -169,6 +175,10 @@ export default defineSchema({
     ciphertext: v.optional(v.string()),
     iv: v.optional(v.string()),
     keyVersion: v.optional(v.string()),
+    sealedCiphertext: v.optional(v.string()),
+    sealedIv: v.optional(v.string()),
+    sealedKeyVersion: v.optional(v.string()),
+    sealedVersion: v.optional(v.literal("v2")),
     secret: v.optional(v.string()),
     active: v.boolean(),
     createdAt: v.number(),
@@ -189,6 +199,9 @@ export default defineSchema({
   // Gateway pulls these via the internal-secret ledger sync — never per-request.
   keySettings: defineTable({
     clerkOrgId: v.string(),
+    // Transitional optional only for pre-policy rows. Member queries and all
+    // writes ignore unclaimed rows until Clerk-backed broker verifies owner.
+    ownerUserId: v.optional(v.string()),
     keyId: v.string(),
     /** Monthly credit cap; undefined = unlimited. Enforced by the wallet DO. */
     monthlyCapCredits: v.optional(v.number()),
@@ -200,6 +213,7 @@ export default defineSchema({
     updatedAt: v.number(),
   })
     .index("by_org", ["clerkOrgId"])
+    .index("by_owner", ["clerkOrgId", "ownerUserId"])
     .index("by_key", ["keyId"]),
 
   keyRotationOperations: defineTable({
@@ -220,6 +234,94 @@ export default defineSchema({
   })
     .index("by_operation", ["clerkOrgId", "userId", "operationId"])
     .index("by_active_old_key", ["clerkOrgId", "oldKeyId", "status"]),
+
+  keyLifecycleOperations: defineTable({
+    clerkOrgId: v.string(),
+    userId: v.string(),
+    operationId: v.string(),
+    kind: v.union(v.literal("create"), v.literal("revoke")),
+    status: v.union(
+      v.literal("reserved"),
+      v.literal("completed"),
+      v.literal("failed"),
+    ),
+    keyId: v.optional(v.string()),
+    previousDisabled: v.optional(v.boolean()),
+    failure: v.optional(v.string()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_operation", ["clerkOrgId", "userId", "operationId"])
+    .index("by_active_kind", ["clerkOrgId", "userId", "kind", "status"]),
+
+  // Transactional control-plane → gateway registry stream heads. Streams are
+  // never deleted, so a route/key source revision can never move backwards.
+  registrySyncStreams: defineTable({
+    streamKey: v.string(),
+    sourceRevision: v.number(),
+    operation: v.union(
+      v.literal("route.upsert"),
+      v.literal("route.archive"),
+      v.literal("key.upsert"),
+      v.literal("key.state"),
+      v.literal("org.archive"),
+      v.literal("catalogue.replace"),
+    ),
+    payloadJson: v.string(),
+    payloadDigest: v.string(),
+    occurredAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_stream", ["streamKey"])
+    .index("by_updated", ["updatedAt"]),
+
+  // Durable at-least-once outbox. Receiver sourceRevision checks make retries
+  // and out-of-order delivery safe; failed rows remain queued indefinitely.
+  registrySyncOutbox: defineTable({
+    eventId: v.string(),
+    streamKey: v.string(),
+    sourceRevision: v.number(),
+    operation: v.union(
+      v.literal("route.upsert"),
+      v.literal("route.archive"),
+      v.literal("key.upsert"),
+      v.literal("key.state"),
+      v.literal("org.archive"),
+      v.literal("catalogue.replace"),
+    ),
+    payloadJson: v.string(),
+    payloadDigest: v.string(),
+    status: v.union(
+      v.literal("pending"),
+      v.literal("delivering"),
+      v.literal("delivered"),
+    ),
+    attempts: v.number(),
+    nextAttemptAt: v.number(),
+    leaseUntil: v.optional(v.number()),
+    lastError: v.optional(v.string()),
+    occurredAt: v.number(),
+    updatedAt: v.number(),
+    deliveredAt: v.optional(v.number()),
+  })
+    .index("by_event", ["eventId"])
+    .index("by_stream_revision", ["streamKey", "sourceRevision"])
+    .index("by_due", ["status", "nextAttemptAt"]),
+
+  // Cross-isolate lease + fixed-window limiter for authenticated spec imports.
+  specImportLimits: defineTable({
+    clerkOrgId: v.string(),
+    userId: v.string(),
+    windowStartedAt: v.number(),
+    requestsInWindow: v.number(),
+    leases: v.array(
+      v.object({
+        id: v.string(),
+        expiresAt: v.number(),
+      }),
+    ),
+    updatedAt: v.number(),
+  }).index("by_scope", ["clerkOrgId", "userId"]),
 
   // Catalogue semantic search (embedded on publish; Gemini text-embedding-004)
   specEmbeddings: defineTable({

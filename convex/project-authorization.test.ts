@@ -12,6 +12,10 @@ type Seeded = {
   specId: Id<"specs">;
   versionId: Id<"specVersions">;
   credentialId: Id<"upstreamCredentials">;
+  readinessId: Id<"publishReadiness">;
+  embeddingId: Id<"specEmbeddings">;
+  endpointId: Id<"webhookEndpoints">;
+  deliveryId: Id<"webhookDeliveries">;
 };
 
 async function seedWorld(t: ReturnType<typeof convexTest>): Promise<Seeded> {
@@ -56,7 +60,47 @@ async function seedWorld(t: ReturnType<typeof convexTest>): Promise<Seeded> {
       keyVersion: "v1",
       updatedAt: 1,
     });
-    return { projectId, specId, versionId, credentialId };
+    const readinessId = await ctx.db.insert("publishReadiness", {
+      projectId,
+      draftHash: "draft",
+      serverOrigin: "https://api.example.com",
+      credentialRevision: 1,
+      status: "ok",
+      testedAt: 1,
+    });
+    const embeddingId = await ctx.db.insert("specEmbeddings", {
+      projectId,
+      text: "search text",
+      embedding: Array.from({ length: 768 }, () => 0.1),
+      updatedAt: 1,
+    });
+    const endpointId = await ctx.db.insert("webhookEndpoints", {
+      projectId,
+      url: "https://hooks.example.com/zevium",
+      ciphertext: "encrypted-secret",
+      iv: "encrypted-iv",
+      keyVersion: "v1",
+      active: true,
+      createdAt: 1,
+    });
+    const deliveryId = await ctx.db.insert("webhookDeliveries", {
+      endpointId,
+      event: "spec.published",
+      status: "pending",
+      attempts: 0,
+      payload: "{}",
+      createdAt: 1,
+    });
+    return {
+      projectId,
+      specId,
+      versionId,
+      credentialId,
+      readinessId,
+      embeddingId,
+      endpointId,
+      deliveryId,
+    };
   });
 }
 
@@ -264,11 +308,19 @@ describe("project lifecycle authorization", () => {
       spec: await ctx.db.get(seed.specId),
       version: await ctx.db.get(seed.versionId),
       credential: await ctx.db.get(seed.credentialId),
+      readiness: await ctx.db.get(seed.readinessId),
+      embedding: await ctx.db.get(seed.embeddingId),
+      endpoint: await ctx.db.get(seed.endpointId),
+      delivery: await ctx.db.get(seed.deliveryId),
     }));
     expect(state.project).not.toBeNull();
     expect(state.spec).not.toBeNull();
     expect(state.version).not.toBeNull();
     expect(state.credential).not.toBeNull();
+    expect(state.readiness).not.toBeNull();
+    expect(state.embedding).not.toBeNull();
+    expect(state.endpoint).not.toBeNull();
+    expect(state.delivery).not.toBeNull();
   });
 
   it("lets admins delete project-owned mutable state", async () => {
@@ -286,12 +338,20 @@ describe("project lifecycle authorization", () => {
       spec: await ctx.db.get(seed.specId),
       version: await ctx.db.get(seed.versionId),
       credential: await ctx.db.get(seed.credentialId),
+      readiness: await ctx.db.get(seed.readinessId),
+      embedding: await ctx.db.get(seed.embeddingId),
+      endpoint: await ctx.db.get(seed.endpointId),
+      delivery: await ctx.db.get(seed.deliveryId),
     }));
     expect(state).toEqual({
       project: null,
       spec: null,
       version: null,
       credential: null,
+      readiness: null,
+      embedding: null,
+      endpoint: null,
+      delivery: null,
     });
   });
 });
