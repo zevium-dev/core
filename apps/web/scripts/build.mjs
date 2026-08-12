@@ -39,4 +39,9 @@ const result = spawnSync("pnpm", ["exec", "vite", "build"], {
 // Cloudflare's Vite adapter may materialize local secrets for preview. That
 // file is never a deploy input and must not enter CI artifacts.
 rmSync(new URL("../dist/server/.dev.vars", import.meta.url), { force: true });
+// Retired raster PWA assets remain in older checkouts but are not referenced by
+// current manifest. Never carry opaque, non-decodable files into deploy input.
+for (const name of ["favicon.ico", "logo192.png", "logo512.png"]) {
+  rmSync(new URL(`../dist/client/${name}`, import.meta.url), { force: true });
+}
 process.exit(result.status ?? 1);

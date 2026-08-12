@@ -12,11 +12,6 @@ through a metered edge gateway. Zero balance blocks the call. Publishers keep 95
 ![Stripe](https://img.shields.io/badge/Stripe-Checkout%20%2B%20Connect-635bff?style=for-the-badge&logo=stripe)
 ![WTFPL](https://img.shields.io/badge/license-WTFPL-696969?style=for-the-badge)
 
-![Zevium demo — landing, catalogue, and a keyless mock call](docs/assets/demo.gif)
-
-_Full walkthrough with the publisher console, billing, earnings, and admin:
-[docs/assets/demo.mp4](docs/assets/demo.mp4)_
-
 ## How it works
 
 1. **Publish** — upload an OpenAPI spec. Upstream URL, endpoints, and pricing
@@ -29,15 +24,6 @@ _Full walkthrough with the publisher console, billing, earnings, and admin:
 3. **Settle per call** — a per-org wallet (Durable Object at the edge) reserves
    credits before the proxy, settles on 2xx, refunds on failure. $1 = 10,000
    credits; the platform takes 5%, publishers accrue 95% toward payouts.
-
-## Screenshots
-
-|                                                                             |                                                                     |
-| --------------------------------------------------------------------------- | ------------------------------------------------------------------- |
-| ![Catalogue with pricing badges and tag filters](docs/assets/catalogue.png) | ![API detail with per-endpoint pricing](docs/assets/api-detail.png) |
-| _Catalogue — search, tags, price badges_                                    | _API detail — spec-driven pricing table_                            |
-| ![Spec editor with live pricing rail](docs/assets/spec-editor.png)          | ![Billing with cycle breakdown](docs/assets/billing.png)            |
-| _Spec editor — live validation + pricing rail_                              | _Billing — wallet, packs, cycle breakdown_                          |
 
 ## What's inside
 

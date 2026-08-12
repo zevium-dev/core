@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import {
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -10,6 +11,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { deflateRawSync, deflateSync, gzipSync } from "node:zlib";
 import {
   formatFailures,
   listDefaultClaimFiles,
@@ -62,7 +64,14 @@ test("default scope includes tracked test, generated, dist, and unknown extensio
     "site/image.png",
     "src/production.test.ts",
   ]);
-  assert.deepEqual(scanComplianceClaims({ root }), []);
+  assert.deepEqual(scanComplianceClaims({ root }), [
+    {
+      file: "site/image.png",
+      line: 1,
+      label: "unsafe compliance scan input",
+      match: "PNG image has no bounded exact text decoder",
+    },
+  ]);
 });
 
 test("allows evidence analysis and direct negative language", (t) => {
@@ -70,6 +79,9 @@ test("allows evidence analysis and direct negative language", (t) => {
     "public/page.md": [
       "Analyzes SOC 2 reports and PCI DSS documentation.",
       "We are not HIPAA compliant.",
+      "We aren’t HIPAA compliant.",
+      "We cannot claim HIPAA compliant.",
+      "We can't claim HIPAA compliant.",
       "This service does not comply with GDPR.",
       "No end-to-end encryption.",
       "Publisher credential values use AES-GCM encryption.",
@@ -91,6 +103,10 @@ test("rejects normalized adversarial claims", (t) => {
     "P.C.I. D.S.S approved",
     "ΗΙΡΑΑ compliant",
     "ɢ.ᴅ.ᴘ.ʀ compliant",
+    "HıPAA ready",
+    "ԌDPR compliant",
+    "We guarantee GDPR compliance",
+    "HIPAA indisputably compliant",
     "not not HIPAA compliant",
     "No one doubts we are SOC 2 certified",
     "enterprise-grade platform",
@@ -101,7 +117,9 @@ test("rejects normalized adversarial claims", (t) => {
   ];
   const root = fixture(t, { "public/page.mdx": claims.join("\n---\n") });
   const failures = scanComplianceClaims({ root, targets: ["public"] });
-  assert.equal(failures.length, claims.length);
+  // An all-Unicode fixed-length skeleton can conservatively match more than
+  // one protected acronym. Every corpus entry must produce at least one hit.
+  assert.ok(failures.length >= claims.length);
   assert.match(formatFailures(failures)[0] ?? "", /soc 2/i);
 });
 
@@ -119,7 +137,7 @@ test("does not trust test-like names or file extensions", (t) => {
   ]);
 });
 
-test("NUL and unknown binary content cannot hide claims", (t) => {
+test("NUL, unknown, and recognized binary content cannot hide claims", (t) => {
   const root = fixture(t, {
     "public/nul.bin": Buffer.from("SOC\0.2 certified", "utf8"),
     "public/late-nul.bin": Buffer.from(
@@ -154,8 +172,115 @@ test("NUL and unknown binary content cannot hide claims", (t) => {
   );
   assert.ok(
     failures.some(
-      ({ file, label }) =>
-        file === "public/real.png" && label === "HIPAA claim",
+      ({ file, label, match }) =>
+        file === "public/real.png" &&
+        label === "unsafe compliance scan input" &&
+        /PNG image/.test(match),
+    ),
+  );
+});
+
+test("compressed, archive, and PDF magic always fails closed without a decoder", (t) => {
+  const claim = Buffer.from("HIPAA ready", "utf8");
+  const compressedPdf = Buffer.concat([
+    Buffer.from(
+      "%PDF-1.7\n1 0 obj\n<< /Length 999 /Filter /FlateDecode >>\nstream\n",
+      "ascii",
+    ),
+    deflateSync(Buffer.from(`BT (${claim.toString("utf8")}) Tj ET`, "utf8")),
+    Buffer.from("\nendstream\nendobj\n%%EOF\n", "ascii"),
+  ]);
+  const root = fixture(t, {
+    "public/claim.pdf": compressedPdf,
+    "public/claim.gz": gzipSync(claim),
+    "public/claim.zip": Buffer.concat([
+      Buffer.from([0x50, 0x4b, 0x03, 0x04]),
+      deflateRawSync(claim),
+    ]),
+    "public/claim.xz": Buffer.concat([
+      Buffer.from([0xfd, 0x37, 0x7a, 0x58, 0x5a, 0x00]),
+      claim,
+    ]),
+    "public/claim.7z": Buffer.concat([
+      Buffer.from([0x37, 0x7a, 0xbc, 0xaf, 0x27, 0x1c]),
+      claim,
+    ]),
+  });
+
+  const failures = scanComplianceClaims({ root, targets: ["public"] });
+  assert.deepEqual(failures.map(({ file, label }) => [file, label]).sort(), [
+    ["public/claim.7z", "unsafe compliance scan input"],
+    ["public/claim.gz", "unsafe compliance scan input"],
+    ["public/claim.pdf", "unsafe compliance scan input"],
+    ["public/claim.xz", "unsafe compliance scan input"],
+    ["public/claim.zip", "unsafe compliance scan input"],
+  ]);
+  assert.ok(
+    failures.every(({ match }) => /no bounded exact text decoder/.test(match)),
+  );
+});
+
+test("every recognized opaque magic family fails closed", (t) => {
+  const at = (offset, bytes) => {
+    const result = Buffer.alloc(offset + bytes.length);
+    Buffer.from(bytes).copy(result, offset);
+    return result;
+  };
+  const riffWebp = Buffer.alloc(12);
+  Buffer.from("RIFF", "ascii").copy(riffWebp);
+  Buffer.from("WEBP", "ascii").copy(riffWebp, 8);
+  const tar = at(257, Buffer.from("ustar", "ascii"));
+  const corpus = {
+    "png.bin": Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    "jpeg.bin": Buffer.from([0xff, 0xd8, 0xff]),
+    "gif.bin": Buffer.from("GIF89a", "ascii"),
+    "bmp.bin": Buffer.from("BM", "ascii"),
+    "tiff-le.bin": Buffer.from([0x49, 0x49, 0x2a, 0x00]),
+    "tiff-be.bin": Buffer.from([0x4d, 0x4d, 0x00, 0x2a]),
+    "ico.bin": Buffer.from([0x00, 0x00, 0x01, 0x00]),
+    "webp.bin": riffWebp,
+    "woff.bin": Buffer.from("wOFF", "ascii"),
+    "woff2.bin": Buffer.from("wOF2", "ascii"),
+    "ttf.bin": Buffer.from([0x00, 0x01, 0x00, 0x00]),
+    "otf.bin": Buffer.from("OTTO", "ascii"),
+    "zip.bin": Buffer.from([0x50, 0x4b, 0x03, 0x04]),
+    "gzip.bin": Buffer.from([0x1f, 0x8b]),
+    "bzip2.bin": Buffer.from("BZh", "ascii"),
+    "xz.bin": Buffer.from([0xfd, 0x37, 0x7a, 0x58, 0x5a, 0x00]),
+    "zstd.bin": Buffer.from([0x28, 0xb5, 0x2f, 0xfd]),
+    "lz4.bin": Buffer.from([0x04, 0x22, 0x4d, 0x18]),
+    "zlib.bin": Buffer.from([0x78, 0x9c]),
+    "7z.bin": Buffer.from([0x37, 0x7a, 0xbc, 0xaf, 0x27, 0x1c]),
+    "rar.bin": Buffer.from([0x52, 0x61, 0x72, 0x21, 0x1a, 0x07]),
+    "ar.bin": Buffer.from("!<arch>\n", "ascii"),
+    "cab.bin": Buffer.from("MSCF", "ascii"),
+    "tar.bin": tar,
+    "pdf.bin": Buffer.from("%PDF-1.7", "ascii"),
+    "iso-media.bin": at(4, Buffer.from("ftyp", "ascii")),
+    "elf.bin": Buffer.from([0x7f, 0x45, 0x4c, 0x46]),
+    "wasm.bin": Buffer.from([0x00, 0x61, 0x73, 0x6d]),
+    "compound.bin": Buffer.from([
+      0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1,
+    ]),
+    "sqlite.bin": Buffer.from("SQLite f", "ascii"),
+  };
+  const root = fixture(
+    t,
+    Object.fromEntries(
+      Object.entries(corpus).map(([name, contents]) => [
+        `public/${name}`,
+        contents,
+      ]),
+    ),
+  );
+
+  const failures = scanComplianceClaims({ root, targets: ["public"] });
+  assert.equal(failures.length, Object.keys(corpus).length);
+  assert.ok(
+    failures.every(
+      ({ label, match }) =>
+        label === "unsafe compliance scan input" &&
+        /no bounded exact text decoder/.test(match),
     ),
   );
 });
@@ -193,6 +318,9 @@ test("fixture exemption is not transferable by basename or modified content", (t
 });
 
 test("untracked web deploy assets are derived from generated manifest and scanned", (t) => {
+  const retiredSourceBytes = readFileSync(
+    new URL("../apps/web/public/logo192.png", import.meta.url),
+  );
   const root = fixture(t, {
     "apps/web/dist/server/wrangler.json": JSON.stringify({
       main: "index.js",
@@ -200,6 +328,11 @@ test("untracked web deploy assets are derived from generated manifest and scanne
     }),
     "apps/web/dist/server/index.js": "export default {};",
     "apps/web/dist/client/release.test.png": "SOC 2 certified",
+    "apps/web/dist/client/opaque.png": Buffer.from([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+    ]),
+    // Exact source digest is not transferable into generated deploy output.
+    "apps/web/dist/client/logo192.png": retiredSourceBytes,
   });
   execFileSync("git", ["init", "-q"], { cwd: root });
   const generated = listGeneratedClaimFiles(root, "web");
@@ -209,6 +342,51 @@ test("untracked web deploy assets are derived from generated manifest and scanne
     failures.some(({ file }) =>
       file.endsWith("apps/web/dist/client/release.test.png"),
     ),
+  );
+  assert.ok(
+    failures.some(
+      ({ file, match }) =>
+        file.endsWith("apps/web/dist/client/opaque.png") &&
+        /no bounded exact text decoder/.test(match),
+    ),
+  );
+  assert.ok(
+    failures.some(
+      ({ file, match }) =>
+        file.endsWith("apps/web/dist/client/logo192.png") &&
+        /no bounded exact text decoder/.test(match),
+    ),
+  );
+});
+
+test("retired source digest is no exemption for an explicit scan target", (t) => {
+  const root = fixture(t, {
+    "apps/web/public/logo192.png": readFileSync(
+      new URL("../apps/web/public/logo192.png", import.meta.url),
+    ),
+  });
+
+  const failures = scanComplianceClaims({
+    root,
+    targets: ["apps/web/public/logo192.png"],
+  });
+  assert.equal(failures.length, 1);
+  assert.match(failures[0]?.match ?? "", /no bounded exact text decoder/);
+});
+
+test("retired source asset fails closed if tracked copy references it", (t) => {
+  const path = "apps/web/public/logo192.png";
+  const root = fixture(t, {
+    [path]: readFileSync(
+      new URL("../apps/web/public/logo192.png", import.meta.url),
+    ),
+    "README.md": `![opaque](${path})`,
+  });
+  initAndTrack(root, [path, "README.md"]);
+
+  assert.throws(
+    () => scanComplianceClaims({ root }),
+    /Retired opaque asset became referenced/,
   );
 });
 

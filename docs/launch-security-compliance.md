@@ -573,11 +573,20 @@ gateway inputs are derived from a Wrangler dry-run output plus its esbuild
 metafile allowlist. Production and preview workflows scan those exact inputs
 before upload. There is no global test, generated, dist or extension bypass.
 The scanner reads bounded bytes, follows symlinks only within the repository,
-recognizes binary formats by magic bytes rather than names, scans decoded binary
-content, treats NUL/control bytes as separators, and rejects unknown binary,
-broken/out-of-tree symlink and oversized inputs. Hostile test sources are exempt
-only by exact repository path plus whole-file SHA-256; changed content loses the
-exemption.
+recognizes opaque formats by magic bytes rather than names, and rejects every
+recognized binary, compressed stream, archive, PDF, font, database and media
+container because no exact decoder exists. A future decoder may allow a format
+only with strict compressed/input-byte, expanded-byte, entry-count, nesting-depth
+and normalized in-root member-path bounds followed by complete decoded-text
+scanning. UTF-8 text scanning treats NUL/control bytes as separators; unknown
+binary, broken/out-of-tree symlink and oversized inputs fail closed. Hostile test
+sources are exempt only by exact repository path plus whole-file SHA-256; changed
+content loses the exemption. Retired README/skill/PWA media are unreferenced and
+excluded only at exact source paths with exact whole-file digests; changed,
+renamed, explicitly targeted or generated copies fail closed, any new tracked
+reference is an error, and the web build deletes the old raster copies before
+deploy inventory. No image OCR is performed, so any opaque image that remains a
+scan/deploy input is rejected rather than treated as scanned text.
 
 Publisher-controlled organization name, Clerk slug, public handle, project
 name/slug/description/tags, version/deprecation copy, every OpenAPI object key,
@@ -593,17 +602,21 @@ public spec, gateway, anonymous mock, discovery and MCP boundaries re-check and
 omit legacy/bypassed unsafe rows. Private owner/admin reads remain available for
 remediation. Published spec bodies are never rewritten.
 
-Matching normalizes compatibility forms, common Greek/Cyrillic/small-cap
-homographs, zero-width characters, punctuation and line breaks. Policy blocks
-normalized framework names only when local syntax makes a positive assurance,
-plus enumerated absolute security/privacy phrases. Bare framework references,
-report/documentation analysis APIs and direct odd-count negative disclaimers are
-allowed. Negation applies only through adjacent soft separators; sentence
-punctuation, double negation or remote negation does not suppress a positive
-assertion. This is an explicit publisher boundary, not natural-language
-understanding, legal review, image OCR or third-party-page review. Ambiguous
-copy must be rephrased. A pass proves only that current lexical policy and
-boundaries found no denied copy.
+Matching applies NFKD compatibility/ASCII folding, removes format characters,
+and folds punctuation and line breaks. Any Unicode letter or number that still
+cannot fold to ASCII becomes one fail-closed wildcard only at the same position
+inside a fixed protected grammar term; this covers new Greek, Cyrillic, Turkish
+and other one-code-point homoglyphs without a finite confusable table or a claim
+of transliteration. Policy blocks framework names only when the explicit bounded
+grammar finds a positive status, assertion verb/assurance noun, achieved status,
+or syntactic `-ly` modifier relation, plus enumerated absolute security/privacy
+phrases. Bare framework references and report/documentation analysis APIs remain
+allowed. Direct odd-count negatives include `cannot`, ASCII/curly-apostrophe
+contractions, and auxiliary-negative-claim forms. Sentence punctuation, double
+negation and remote negation do not suppress a positive assertion. This is a
+publisher boundary grammar, not natural-language understanding, legal review,
+image OCR or third-party-page review. Ambiguous copy must be rephrased. A pass
+proves only that current lexical policy and boundaries found no denied copy.
 
 ## Prioritized remediation plan
 

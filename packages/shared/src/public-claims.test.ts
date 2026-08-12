@@ -28,6 +28,14 @@ const BLOCKED_COPY = [
   "P.C.I. D.S.S approved",
   "ΗΙΡΑΑ compliant",
   "ɢ.ᴅ.ᴘ.ʀ compliant",
+  "HıPAA ready",
+  "ԌDPR compliant",
+  "НІРАА compliant",
+  "GDРR compliant",
+  "We guarantee GDPR compliance",
+  "We guarantee compliance with GDPR",
+  "HIPAA indisputably compliant",
+  "GDPR compliance is indisputably valid",
   "not not HIPAA compliant",
   "We do not deny that we are SOC 2 certified",
   "No one doubts we are SOC 2 certified",
@@ -61,6 +69,17 @@ const ALLOWED_COPY = [
   "This service is not compliant with GDPR",
   "This service is not certified for HIPAA",
   "We do not claim HIPAA compliance",
+  "We cannot claim HIPAA compliant",
+  "We can't claim HIPAA compliant",
+  "We can’t claim HIPAA compliant",
+  "We aren't HIPAA compliant",
+  "We aren’t HIPAA compliant",
+  "HIPAA isn't compliant",
+  "HIPAA isn’t compliant",
+  "We cannot guarantee GDPR compliance",
+  "We don’t guarantee GDPR compliance",
+  "This service cannot comply with GDPR",
+  "This service can’t comply with GDPR",
   "PCI DSS certification is pending",
   "No end-to-end encryption",
   "We do not offer end-to-end encryption",
@@ -88,6 +107,59 @@ describe("public claim policy", () => {
     ).toBe(false);
     expect(isPublicCopyAllowed("No one doubts it is SOC 2 certified")).toBe(
       false,
+    );
+    expect(isPublicCopyAllowed("We cannot not claim HIPAA compliant")).toBe(
+      false,
+    );
+  });
+
+  it("fails closed for every one-code-point Unicode substitution in protected terms", () => {
+    const unicodeLetters = ["ı", "Ԍ", "Н", "І", "Р", "А", "Α", "Ρ"];
+    const protectedTerms = [
+      ["HIPAA", " ready"],
+      ["GDPR", " compliant"],
+      ["compliant", " with GDPR"],
+      ["certified", " for HIPAA"],
+    ] as const;
+
+    for (const [term, suffix] of protectedTerms) {
+      for (let index = 0; index < term.length; index += 1) {
+        for (const substitution of unicodeLetters) {
+          const copy = `${term.slice(0, index)}${substitution}${term.slice(index + 1)}${suffix}`;
+          expect(isPublicCopyAllowed(copy), copy).toBe(false);
+        }
+      }
+    }
+  });
+
+  it("folds compatibility text and punctuation at every protected-word seam", () => {
+    const separators = [".", "-", "_", "/", "\u200b", "\n"];
+    for (const separator of separators) {
+      expect(
+        isPublicCopyAllowed(
+          `H${separator}I${separator}P${separator}A${separator}A compliant`,
+        ),
+        separator,
+      ).toBe(false);
+      expect(
+        isPublicCopyAllowed(
+          `HIPAA c${separator}o${separator}m${separator}p${separator}l${separator}i${separator}a${separator}n${separator}t`,
+        ),
+        separator,
+      ).toBe(false);
+    }
+    expect(isPublicCopyAllowed("ＨＩＰＡＡ compliant")).toBe(false);
+    expect(isPublicCopyAllowed("HÍPAA compliant")).toBe(false);
+  });
+
+  it("uses bounded syntax for arbitrary adverbs without treating prose as NLP", () => {
+    expect(isPublicCopyAllowed("HIPAA demonstrably compliant")).toBe(false);
+    expect(isPublicCopyAllowed("HIPAA cryptographically compliant")).toBe(
+      false,
+    );
+    expect(isPublicCopyAllowed("HIPAA evidence API compliant")).toBe(true);
+    expect(isPublicCopyAllowed("HIPAA compliance evidence classifier")).toBe(
+      true,
     );
   });
 
@@ -193,4 +265,38 @@ describe("public claim policy", () => {
       ]),
     );
   });
+
+  it.each([
+    "We guarantee GDPR compliance",
+    "HIPAA indisputably compliant",
+    "HıPAA ready",
+    "ԌDPR compliant",
+  ])(
+    "rejects adversarial copy in OpenAPI values and object keys: %s",
+    (claim) => {
+      const pathKey = `/${claim}`;
+      const spec = JSON.stringify({
+        openapi: "3.1.0",
+        info: {
+          title: "Boundary probe",
+          version: "1.0.0",
+          description: claim,
+        },
+        paths: {
+          [pathKey]: {
+            get: {
+              responses: { 200: { description: "ok" } },
+            },
+          },
+        },
+      });
+
+      expect(findOpenApiPublicClaimViolations(spec)).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ path: "$.info.description" }),
+          expect.objectContaining({ path: `$.paths.${pathKey} (key)` }),
+        ]),
+      );
+    },
+  );
 });

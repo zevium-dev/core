@@ -24,6 +24,72 @@ const EXACT_NON_SURFACE_PATHS = new Set([
   "packages/shared/src/public-claims.ts",
 ]);
 
+// Retired legacy media below are inert: README/skill/manifest references are
+// removed, and web build deletes retired public copies. Path plus whole-file
+// digest is required. A rename, byte change, or generated/deploy copy receives
+// no exception and fails closed.
+const EXACT_INERT_NON_SURFACE_SHA256 = new Map([
+  [
+    ".agents/skills/shadcn/assets/shadcn-small.png",
+    "0ecc62d682727f68fc4937eed19960c706714fa084d44f63028d611ae02bf3d7",
+  ],
+  [
+    ".agents/skills/shadcn/assets/shadcn.png",
+    "7d60ad6fec4d89a0d44ba5a3c9283d2fea0047af5467f9227040e20d927d39b7",
+  ],
+  [
+    "apps/web/public/favicon.ico",
+    "b05c05916e4be302aab2d4c77089df5bb1ac41ab141441124597b63b959e5d9f",
+  ],
+  [
+    "apps/web/public/logo192.png",
+    "06926ae5ffe1a375a00ba3e7b0f8f9c49395dcae291c5880356d815a4c242654",
+  ],
+  [
+    "apps/web/public/logo512.png",
+    "5cb47d47d52faceb4d3a0cd49c6598982703b29083ca8bf68d68f1382d76ec45",
+  ],
+  [
+    "docs/assets/api-detail.png",
+    "24a9af68d4a5fc0497d1c5d04c250038cf413cfe466a6ee9d33226ce5d2f1930",
+  ],
+  [
+    "docs/assets/billing.png",
+    "4cece06effe7df1e38012ae28545edb8dfcd2d78e8e30b5fe7d1029b6e7df17d",
+  ],
+  [
+    "docs/assets/catalogue.png",
+    "252e22590ceaef6972be5650280ed2de2b24170297df70f07caedc81def37195",
+  ],
+  [
+    "docs/assets/demo.gif",
+    "6c7a261b74f0da617cb928092a6c7d7eb7e40273d96df20eafa9d45a356b3ae4",
+  ],
+  [
+    "docs/assets/demo.mp4",
+    "4e45df96497c27d5b38568c9c94673aa727c4206dbe30d94e448a4ce8d6348b4",
+  ],
+  [
+    "docs/assets/spec-editor.png",
+    "c4fe368c06cb12e62f86f3a2fa178b2e494bc32fba7e2b9f71a1ec28fda21914",
+  ],
+  [
+    "docs/polar-e2e-demo.mp4",
+    "fdc36f34d34d7addbae954f6cf3863d0b643c4214ac5a34a6ab82c710caa8927",
+  ],
+]);
+const INERT_REFERENCE_ALLOWLIST = new Map([
+  ["apps/web/public/favicon.ico", new Set(["apps/web/scripts/build.mjs"])],
+  [
+    "apps/web/public/logo192.png",
+    new Set([
+      "apps/web/scripts/build.mjs",
+      "scripts/check-compliance-claims.test.mjs",
+    ]),
+  ],
+  ["apps/web/public/logo512.png", new Set(["apps/web/scripts/build.mjs"])],
+]);
+
 // Hostile tests are exempt only while exact path and complete-content digest
 // match. Any edit invalidates exemption and fails into normal scanning.
 const TEST_FIXTURE_SHA256 = new Map([
@@ -57,11 +123,11 @@ const TEST_FIXTURE_SHA256 = new Map([
   ],
   [
     "packages/shared/src/public-claims.test.ts",
-    "a48976965d0e06b5fe4af32fd29822a131f9ddbdcc17cf168654bf55f963955e",
+    "9faaaa4f83497a4f5b7224ade11e048f0fda7d355b09dcd7cbb7f69c55a9c3df",
   ],
   [
     "scripts/check-compliance-claims.test.mjs",
-    "ea8aa393705674fcdb50e68af9f02c48256da08455edbb40f0296d6fb016b085",
+    "dca0a3f87b64a4a2bfaa9372228eed83f526200e682d0916d2c5f8cd61e3de1a",
   ],
 ]);
 
@@ -85,9 +151,11 @@ function sha256(contents) {
   return createHash("sha256").update(contents).digest("hex");
 }
 
-function isFingerprintExcluded(relativePath, contents) {
-  const expected = TEST_FIXTURE_SHA256.get(relativePath);
-  return expected !== undefined && sha256(contents) === expected;
+function isFingerprintExcluded(relativePath, contents, allowInert) {
+  const fixture = TEST_FIXTURE_SHA256.get(relativePath);
+  if (fixture !== undefined) return sha256(contents) === fixture;
+  const inert = EXACT_INERT_NON_SURFACE_SHA256.get(relativePath);
+  return allowInert && inert !== undefined && sha256(contents) === inert;
 }
 
 function filesUnder(root, path) {
@@ -298,21 +366,75 @@ function hasMagic(bytes, signature, offset = 0) {
   return signature.every((byte, index) => bytes[offset + index] === byte);
 }
 
-function isRecognizedBinary(bytes) {
-  return (
-    hasMagic(bytes, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]) ||
-    hasMagic(bytes, [0xff, 0xd8, 0xff]) ||
-    hasMagic(bytes, [0x00, 0x00, 0x01, 0x00]) ||
-    hasMagic(bytes, [0x47, 0x49, 0x46, 0x38]) ||
-    (hasMagic(bytes, [0x52, 0x49, 0x46, 0x46]) &&
-      hasMagic(bytes, [0x57, 0x45, 0x42, 0x50], 8)) ||
+function recognizedBinaryKind(bytes) {
+  if (hasMagic(bytes, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))
+    return "PNG image";
+  if (hasMagic(bytes, [0xff, 0xd8, 0xff])) return "JPEG image";
+  if (
+    hasMagic(bytes, [0x47, 0x49, 0x46, 0x38, 0x37, 0x61]) ||
+    hasMagic(bytes, [0x47, 0x49, 0x46, 0x38, 0x39, 0x61])
+  )
+    return "GIF image";
+  if (
+    hasMagic(bytes, [0x42, 0x4d]) ||
+    hasMagic(bytes, [0x49, 0x49, 0x2a, 0x00]) ||
+    hasMagic(bytes, [0x4d, 0x4d, 0x00, 0x2a]) ||
+    hasMagic(bytes, [0x00, 0x00, 0x01, 0x00])
+  )
+    return "raster image";
+  if (
+    hasMagic(bytes, [0x52, 0x49, 0x46, 0x46]) &&
+    hasMagic(bytes, [0x57, 0x45, 0x42, 0x50], 8)
+  )
+    return "WebP image";
+  if (
     hasMagic(bytes, [0x77, 0x4f, 0x46, 0x46]) ||
     hasMagic(bytes, [0x77, 0x4f, 0x46, 0x32]) ||
+    hasMagic(bytes, [0x00, 0x01, 0x00, 0x00]) ||
+    hasMagic(bytes, [0x4f, 0x54, 0x54, 0x4f])
+  )
+    return "binary font";
+  if (
     hasMagic(bytes, [0x50, 0x4b, 0x03, 0x04]) ||
-    hasMagic(bytes, [0x1f, 0x8b]) ||
-    hasMagic(bytes, [0x25, 0x50, 0x44, 0x46, 0x2d]) ||
-    hasMagic(bytes, [0x66, 0x74, 0x79, 0x70], 4)
-  );
+    hasMagic(bytes, [0x50, 0x4b, 0x05, 0x06]) ||
+    hasMagic(bytes, [0x50, 0x4b, 0x07, 0x08])
+  )
+    return "ZIP archive";
+  if (hasMagic(bytes, [0x1f, 0x8b])) return "gzip stream";
+  if (hasMagic(bytes, [0x42, 0x5a, 0x68])) return "bzip2 stream";
+  if (hasMagic(bytes, [0xfd, 0x37, 0x7a, 0x58, 0x5a, 0x00])) return "xz stream";
+  if (hasMagic(bytes, [0x28, 0xb5, 0x2f, 0xfd])) return "zstd stream";
+  if (hasMagic(bytes, [0x04, 0x22, 0x4d, 0x18])) return "LZ4 stream";
+  if (
+    bytes.length >= 2 &&
+    bytes[0] === 0x78 &&
+    [0x01, 0x5e, 0x9c, 0xda].includes(bytes[1])
+  )
+    return "zlib stream";
+  if (hasMagic(bytes, [0x37, 0x7a, 0xbc, 0xaf, 0x27, 0x1c]))
+    return "7z archive";
+  if (hasMagic(bytes, [0x52, 0x61, 0x72, 0x21, 0x1a, 0x07]))
+    return "RAR archive";
+  if (hasMagic(bytes, [0x21, 0x3c, 0x61, 0x72, 0x63, 0x68, 0x3e, 0x0a]))
+    return "ar archive";
+  if (hasMagic(bytes, [0x4d, 0x53, 0x43, 0x46])) return "CAB archive";
+  if (hasMagic(bytes, [0x75, 0x73, 0x74, 0x61, 0x72], 257))
+    return "tar archive";
+  if (
+    bytes
+      .subarray(0, Math.min(bytes.length, 1024))
+      .indexOf(Buffer.from("%PDF-", "ascii")) >= 0
+  )
+    return "PDF document";
+  if (hasMagic(bytes, [0x66, 0x74, 0x79, 0x70], 4))
+    return "ISO media container";
+  if (hasMagic(bytes, [0x7f, 0x45, 0x4c, 0x46])) return "ELF binary";
+  if (hasMagic(bytes, [0x00, 0x61, 0x73, 0x6d])) return "WebAssembly binary";
+  if (hasMagic(bytes, [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]))
+    return "compound binary document";
+  if (hasMagic(bytes, [0x53, 0x51, 0x4c, 0x69, 0x74, 0x65, 0x20, 0x66]))
+    return "SQLite database";
+  return null;
 }
 
 function hasUnknownBinaryBytes(sniff) {
@@ -325,7 +447,7 @@ function hasUnknownBinaryBytes(sniff) {
   }
   if (controls > Math.max(2, Math.floor(sniff.length * 0.01))) return true;
   try {
-    new TextDecoder("utf-8", { fatal: true }).decode(sniff, { stream: true });
+    new TextDecoder("utf-8", { fatal: true }).decode(sniff);
     return false;
   } catch {
     return true;
@@ -377,6 +499,38 @@ function readBoundedFile(root, file) {
   return { contents: readFileSync(actual), relativePath };
 }
 
+function assertInertAssetsRemainUnreferenced(root, files) {
+  const assets = [...EXACT_INERT_NON_SURFACE_SHA256.keys()].map(
+    (assetPath) => ({
+      assetPath,
+      basename: Buffer.from(
+        assetPath.slice(assetPath.lastIndexOf("/") + 1),
+        "utf8",
+      ),
+      allowedReferences: INERT_REFERENCE_ALLOWLIST.get(assetPath),
+    }),
+  );
+  for (const file of files) {
+    const relativePath = normalizeRelativePath(root, file);
+    const read = readBoundedFile(root, file);
+    if (read.contents === undefined) continue;
+    for (const asset of assets) {
+      if (
+        relativePath === asset.assetPath ||
+        relativePath === "scripts/check-compliance-claims.mjs" ||
+        asset.allowedReferences?.has(relativePath) === true
+      ) {
+        continue;
+      }
+      if (read.contents.includes(asset.basename)) {
+        throw new Error(
+          `Retired opaque asset became referenced: ${asset.assetPath} from ${relativePath}`,
+        );
+      }
+    }
+  }
+}
+
 export function scanComplianceClaims({
   root = process.cwd(),
   targets,
@@ -391,6 +545,8 @@ export function scanComplianceClaims({
         ]
       : targets.flatMap((target) => filesUnder(root, target));
   const files = [...new Set(candidates.map((file) => resolve(file)))];
+  const allowInert = targets === undefined;
+  if (allowInert) assertInertAssetsRemainUnreferenced(root, files);
 
   for (const file of files) {
     const relativePath = normalizeRelativePath(root, file);
@@ -401,14 +557,29 @@ export function scanComplianceClaims({
       continue;
     }
     const contents = read.contents;
-    if (isFingerprintExcluded(relativePath, contents)) continue;
+    if (isFingerprintExcluded(relativePath, contents, allowInert)) continue;
 
     const sniff = contents.subarray(0, SNIFF_BYTES);
-    const recognizedBinary = isRecognizedBinary(sniff);
-    const unknownBinary = !recognizedBinary && hasUnknownBinaryBytes(contents);
-    // Decode bounded bytes even for recognized binaries: textual metadata and
-    // fake extensions do not get an escape hatch. NUL/control bytes become
-    // separators so split claim tokens remain detectable.
+    const binaryKind = recognizedBinaryKind(sniff);
+    if (binaryKind !== null) {
+      // No format decoder is implemented. Raw UTF-8 conversion is not decoded
+      // extraction and cannot inspect compressed streams, archives, PDF text,
+      // or pixels. Reject every recognized opaque format. Any future decoder
+      // must first enforce compressed/input bytes, expanded bytes, entry count,
+      // nesting depth, and normalized in-root member paths, then scan every
+      // exact decoded text stream before this branch may allow that format.
+      failures.push(
+        unsafeFailure(
+          relativePath,
+          `${binaryKind} has no bounded exact text decoder`,
+        ),
+      );
+      continue;
+    }
+
+    const unknownBinary = hasUnknownBinaryBytes(contents);
+    // NUL/control bytes become separators so a claim in malformed text is
+    // still reported in addition to the fail-closed unknown-binary error.
     const source = contents
       .toString("utf8")
       .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/gu, " ");

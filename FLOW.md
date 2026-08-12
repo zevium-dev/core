@@ -123,7 +123,7 @@ Org-scoped — the org owns the wallet; admins manage it, members view their own
 ### 3.4 x402 machine payments (P1)
 
 - Future signed-payment retry, facilitator verification, and settlement flow; no x402 payment implementation exists in the current tree
-- Current `/gateway` and `/mock` failures use a generic `402` actions envelope (create key, top up, docs) for the prepaid-credit flow. That envelope contains no x402 payment requirements and cannot authorize or settle a payment
+- Current `/gateway` authentication and credit failures use a generic `402` actions envelope (create key, top up, docs) for the prepaid-credit flow. That envelope contains no x402 payment requirements and cannot authorize or settle a payment. Keyless `/mock` has no authentication or payment failure path; missing, unsafe, or unreadable projects/specs/routes return generic `404` responses
 
 ---
 
