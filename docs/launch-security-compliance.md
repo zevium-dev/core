@@ -13,6 +13,41 @@ customer data. Code is evidence for implementation controls only. It cannot
 prove operating effectiveness, vendor configuration, staff behavior, contracts,
 or legal conclusions.
 
+## Evidence and interpretation rules
+
+Research was refreshed on 2026-08-12 against current primary sources. These
+sources define questions and control expectations; they do not decide whether a
+law applies to Zevium or prove that Zevium satisfies it:
+
+- [EU GDPR official text](https://eur-lex.europa.eu/eli/reg/2016/679/oj),
+  especially Articles 5, 12–22, 28, 32–34 and 44–49, anchors minimization,
+  storage limitation, data-subject rights, processor contracts, security,
+  breach handling and international transfers.
+- [EDPB data-subject-rights guide](https://www.edpb.europa.eu/sme/be-compliant/respect-individuals-rights_en)
+  anchors an operational intake, identity verification, one-month response
+  workflow, recipient follow-up and decision records where GDPR applies.
+- [California Privacy Protection Agency laws and regulations](https://cppa.ca.gov/regulations/)
+  is the current rulemaking index. Applicability, thresholds, effective rules
+  and consumer-request duties require counsel review; an older FAQ is not a
+  substitute for the current regulations.
+- [HHS business-associate guidance](https://www.hhs.gov/hipaa/for-professionals/privacy/guidance/business-associates/index.html)
+  and [HHS Security Rule summary](https://www.hhs.gov/hipaa/for-professionals/security/laws-regulations/index.html)
+  anchor the PHI/BAA analysis and administrative, physical and technical
+  safeguards if Zevium ever becomes a regulated entity.
+- [NIST SP 800-61 Rev. 3](https://csrc.nist.gov/pubs/sp/800/61/r3/final),
+  published April 2025, anchors incident preparation, detection, response and
+  recovery within broader cybersecurity risk management.
+- [AICPA SOC services](https://www.aicpa-cima.com/resources/landing/system-and-organization-controls-soc-suite-of-services)
+  establishes that SOC reports are assurance services performed by CPAs; this
+  repository cannot create an examination or report.
+
+Vendor public terms and marketing are due-diligence inputs only. For every
+vendor, preserve the terms/DPA version that binds the actual account, plan and
+entity; configuration exports; region and retention settings; current
+subprocessor list; reviewer; review date; and renewal/change-monitoring record.
+A live web page or repository link is not contract acceptance or operating
+evidence.
+
 ## Accountability
 
 The accountable role is **Security & Privacy Owner**. That role is currently
@@ -28,8 +63,11 @@ flow controls. Operations Lead owns on-call and recovery exercises.
 
 Production source currently declares these services:
 
-- Cloudflare Workers hosts web and gateway code. Gateway request and response
-  bodies stream through Cloudflare to publisher-controlled upstream APIs.
+- Cloudflare Workers hosts web and gateway code. Direct `/gateway` request and
+  response bodies stream through Cloudflare to publisher-controlled upstream
+  APIs. MCP `call_api` reuses that metered path but buffers its JSON-RPC request
+  and upstream response in Worker memory with explicit 1 MiB limits because the
+  tool result embeds the response body.
 - Cloudflare Durable Objects holds each consumer organization's working wallet,
   reservations, pending usage, key-control cache, free-tier counters, and
   reconciliation state.
@@ -40,8 +78,19 @@ Production source currently declares these services:
 - Stripe Checkout and Connect process credit purchases, identity/KYC, connected
   accounts, transfers, disputes, refunds, and bank payouts. Zevium stores Stripe
   identifiers and event projections, not card or bank-account numbers.
+- Conditional x402 pilot code is disabled unless the exact testnet flag and
+  configuration are present. Its hardened release gate permits only `GET` and
+  `HEAD`, uses a dedicated rotating HMAC challenge keyring, and sends the
+  x402.org facilitator a signed payment payload plus payment requirements whose
+  resource URL omits raw query values. Query, forwarded-header and body digests
+  still bind the request. A payment-scoped Cloudflare Durable Object retains
+  replay/settlement/outbox state; Convex stores a separate Base Sepolia
+  settlement projection; payer/payee/amount/transaction facts become visible on
+  a public test network. This paragraph applies only if the x402 branch is
+  integrated and must not be read as permission to enable it.
 - Google Gemini receives text assembled from project name, description, tags,
-  and published OpenAPI endpoint paths/summaries for catalogue embeddings.
+  and published OpenAPI endpoint paths/summaries for catalogue embeddings. It
+  also receives each free-text semantic catalogue search query.
 - Publisher upstream APIs receive consumer-selected gateway paths, query
   strings, filtered headers, and request bodies. Publisher response bodies and
   filtered headers stream back through the gateway.
@@ -49,36 +98,68 @@ Production source currently declares these services:
 - GitHub and Blacksmith run source CI/deployment workflows. They should not
   receive production customer records, but repository and workflow metadata are
   in scope for access review.
+- User browsers store theme preference in `localStorage`, sidebar state in a
+  seven-day cookie, and a pasted playground API key in `sessionStorage`. Clerk's
+  browser SDK separately manages authentication/session state under its service
+  contract.
 
-Cloudflare, Convex, Clerk, Stripe, Google, GitHub, and Blacksmith locations,
-retention settings, DPAs, regional configuration, support-access settings, and
-current subprocessor lists are deployment/account evidence, not facts proved by
-this repository.
+Cloudflare, Convex, Clerk, Stripe, Google, GitHub, Blacksmith, the x402 test
+facilitator, and Base infrastructure locations, retention settings, DPAs/terms,
+regional configuration, support-access settings, and current subprocessor lists
+are deployment/account evidence, not facts proved by this repository.
 
 ## Data inventory
 
-Data labels used below: **Public**, **Customer confidential**, **Personal**,
-**Financial**, and **Secret**. A field can have more than one label.
+Inventory labels are **Public**, **Customer confidential**, **Personal**,
+**Financial**, and **Secret**. A field can have more than one label; “possible”
+means free-form content can raise the classification above its intended schema.
 
-| Data class                     | Exact data                                                                                                                                                             | Purpose and flow                                              | Store / recipient                                                                                                            | Current repository lifecycle                                                                                                                                                          |
-| ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| User identity                  | Clerk user ID, display name, email; Clerk also owns login identifiers, credentials, OAuth links, verification and MFA/session data                                     | Authenticate users and render profiles                        | Clerk; ID/name/email mirror in Convex `users`                                                                                | Convex mirror is deleted on `user.deleted`; Clerk lifecycle and backups are vendor-configured; no DSR export workflow exists                                                          |
-| Organization identity          | Clerk org ID, name, slug, image URL, public handle; Clerk membership, role and invitation data                                                                         | Tenant routing, authorization, catalogue identity             | Clerk; selected mirror in Convex `organizations`                                                                             | Org webhook currently deletes only wallet entries, wallet, and org row; related app/payment/usage records are not comprehensively erased                                              |
-| Project/listing                | Project name, slug, description, tags, visibility/status, upstream origin, readiness result, draft and immutable published OpenAPI documents, deprecation reason/times | Publish and route APIs                                        | Convex; public listings/spec-derived material goes to browsers and gateway caches                                            | Project delete removes direct project/spec/credential data in code; no global retention schedule or backup-erasure proof                                                              |
-| Embedding input/output         | Project name, description, tags, endpoint methods, paths and summaries; 768-dimension vector                                                                           | Semantic catalogue search                                     | Google Gemini receives input; Convex `specEmbeddings` stores input text/vector                                               | Rebuilt on publish; no time-based expiry; project cleanup exists, vendor request retention unknown                                                                                    |
-| Publisher upstream credentials | Header name, encrypted value, IV, encryption-key version, update time; transitional schema can still represent legacy plaintext                                        | Inject publisher auth after consumer auth is stripped         | Convex `upstreamCredentials`; decrypted value delivered to Cloudflare gateway and publisher upstream                         | New writes use AES-GCM. Production must prove migration counts are zero, make ciphertext fields required, remove plaintext field, and document key rotation before claim is relied on |
-| Consumer API keys              | API-key secret, key ID, subject/org, scopes, expiry/revocation; cap, disabled state, rotation linkage and grace period                                                 | Authenticate/gate calls and attribute usage                   | Clerk stores key authority/secret; Convex stores key metadata only; Cloudflare caches verification and controls              | Secret is copy-once through Clerk flow; cache staleness is bounded in code, but vendor retention and a user-level key deletion procedure are not documented                           |
-| Gateway request                | Request ID; publisher/project route; path and query; method; filtered request headers; streaming body                                                                  | Proxy consumer call to publisher                              | Transits Cloudflare and publisher upstream; Cloudflare platform metadata may include IP, user agent, timing and network data | App code does not persist body or arbitrary headers. Bodies stream. Observability is enabled and its account retention/redaction settings are unverified                              |
-| Gateway response               | Status, filtered headers, streaming response body, latency, request ID                                                                                                 | Return publisher result and meter outcome                     | Transits publisher upstream and Cloudflare to consumer                                                                       | App code does not persist body. `set-cookie`, auth and hop-by-hop headers are stripped; observability/account logs remain unverified                                                  |
-| Usage and key attribution      | Consumer org ID, publisher org/project ID, key ID, method, normalized endpoint template, status, latency, credits, timestamp, settlement/request reference and outcome | Credit ledger, billing, consumer/publisher analytics, support | Cloudflare logs and Durable Object pending state; Convex `usageEvents`, wallet and earnings tables                           | Stored without fixed expiry. Console usage logs duplicate these fields when production Convex is configured. No IP/body is intentionally included by app logger                       |
-| Wallet/ledger                  | Balance, sequence, entry kind/amount/reference, payment/usage links, reservations, grants, free-tier counters, settlement state                                        | Enforce prepaid spend and reconcile accounting                | Convex `wallets`/`walletEntries`; Cloudflare Durable Objects                                                                 | Convex ledger and DO state have no approved expiry. Deletion must preserve legally required financial evidence while severing user identifiers where allowed                          |
-| Checkout/payment               | Pack, amount, currency, credits, Checkout Session/PaymentIntent/Charge/Customer IDs, event/object/account IDs, status, failures, refunds and disputes                  | Sell credits and reconcile payments                           | Stripe; projections in Convex checkout/payment/event tables                                                                  | Hosted Checkout keeps raw card data out of app schema. Records have no repository-enforced retention or pseudonymization schedule                                                     |
-| Publisher KYC/payout           | Connected Account ID, requirements, capability/status flags, transfer/payout IDs, amounts, currency, arrival/failure data                                              | Publisher onboarding and payout                               | Stripe holds identity, tax, bank and KYC evidence; Convex stores IDs/status projections                                      | Stripe retention/legal duties apply; repository has no approved schedule or closed-account runbook                                                                                    |
-| Earnings                       | Publisher org/project, usage settlement reference, gross/platform/net credits, availability/state, transfer link and timestamps                                        | 95/5 marketplace accounting                                   | Convex                                                                                                                       | No fixed expiry; likely financial-record retention, subject to counsel decision                                                                                                       |
-| Notifications                  | Org ID, type, title, body, reference, read/create times                                                                                                                | In-app operational notices                                    | Convex                                                                                                                       | No fixed expiry or per-user preference model                                                                                                                                          |
-| Publisher webhooks             | Endpoint URL, signing secret, active state; event payload, attempts, error and timestamps                                                                              | Notify publisher systems                                      | Convex; payload delivered to publisher-chosen endpoint                                                                       | Secret is stored as plaintext in Convex. Delivery logs/payloads have no expiry; delete endpoint does not delete prior delivery rows                                                   |
-| Administrative access          | Admin Clerk user IDs in environment allowlist; admin reads/actions over orgs, projects, usage and payouts                                                              | Platform operations                                           | Convex environment and functions; vendor/provider audit logs if enabled                                                      | Server-side gate exists. No repo-owned admin action audit table, access-review cadence, JIT process, or production allowlist evidence                                                 |
-| Vulnerability reports          | Reporter contact and reproduction details, potentially test identifiers                                                                                                | Triage and remediate security reports                         | GitHub private vulnerability reporting                                                                                       | GitHub retention/access settings govern it; reporters are told not to include credentials or personal data                                                                            |
+| Data class                     | Exact data                                                                                                                                                                                                   | Purpose and flow                                              | Store / recipient                                                                                                              | Current repository lifecycle                                                                                                                                                                                                                                                                                                                        |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| User identity                  | Clerk user ID, display name, email; Clerk also owns login identifiers, credentials, OAuth links, verification and MFA/session data                                                                           | Authenticate users and render profiles                        | Clerk; ID/name/email mirror in Convex `users`                                                                                  | Convex mirror is deleted on `user.deleted`; Clerk lifecycle and backups are vendor-configured; no DSR export workflow exists                                                                                                                                                                                                                        |
+| Organization identity          | Clerk org ID, name, slug, image URL, public handle; Clerk membership, role and invitation data                                                                                                               | Tenant routing, authorization, catalogue identity             | Clerk; selected mirror in Convex `organizations`                                                                               | Org webhook currently deletes only wallet entries, wallet, and org row; related app/payment/usage records are not comprehensively erased                                                                                                                                                                                                            |
+| Project/listing                | Project name, slug, description, tags, visibility/status, upstream origin, readiness result, draft and immutable published OpenAPI documents, deprecation reason/times                                       | Publish and route APIs                                        | Convex; public listings/spec-derived material goes to browsers and gateway caches                                              | Project delete removes project, draft, versions and upstream credentials, but currently leaves readiness, embedding, webhook, usage and earnings records; no global schedule or backup-erasure proof                                                                                                                                                |
+| Embedding input/output         | Public project name, description, tags, endpoint methods, paths and summaries; free-text catalogue search queries; 768-dimension vectors                                                                     | Semantic catalogue search                                     | Google Gemini receives source/query text; Convex `specEmbeddings` stores source text/vector, not search queries                | Rebuilt on publish; no time-based expiry; search queries are not intentionally stored in app tables; Gemini service tier, request logging/retention, location and deletion remain unverified                                                                                                                                                        |
+| Publisher upstream credentials | Header name, encrypted value, IV, encryption-key version, update time; transitional schema can still represent legacy plaintext                                                                              | Inject publisher auth after consumer auth is stripped         | Convex `upstreamCredentials`; decrypted value delivered to Cloudflare gateway and publisher upstream                           | New writes use AES-GCM. Production must prove migration counts are zero, make ciphertext fields required, remove plaintext field, and document key rotation before claim is relied on                                                                                                                                                               |
+| Consumer API keys              | API-key secret, key ID, subject/org, scopes, expiry/revocation; cap, disabled state, rotation linkage and grace period                                                                                       | Authenticate/gate calls and attribute usage                   | Clerk stores key authority/secret; Convex stores key metadata/rotation operations; Cloudflare caches verification and controls | Secret is copy-once through Clerk flow; playground can retain a pasted key in browser `sessionStorage`; vendor retention, coordinated cache purge and user-level deletion procedure are not documented                                                                                                                                              |
+| Browser-local state            | Theme value; sidebar expanded boolean; pasted playground API key; Clerk-managed auth/session state                                                                                                           | Remember presentation, playground credential and login        | User browser `localStorage`, cookie and `sessionStorage`; Clerk browser SDK                                                    | Theme remains until cleared; sidebar cookie requests seven days; playground key follows browser session-storage lifecycle or explicit field clear. No remote app-table purge can erase device-local copies; user-facing clear instructions are absent                                                                                               |
+| Operational control state      | Upstream readiness origin/hash/revision/time; key-rotation user/key IDs, operation state, failure and grace times                                                                                            | Gate publishing and make key rotation idempotent              | Convex `publishReadiness` and `keyRotationOperations`                                                                          | No fixed expiry; project deletion does not remove readiness and user/org deletion does not comprehensively remove key-rotation rows                                                                                                                                                                                                                 |
+| Gateway request                | Request ID; publisher/project route; path and query; method; filtered request headers; body                                                                                                                  | Proxy consumer call to publisher                              | Transits Cloudflare and publisher upstream; Cloudflare platform metadata may include IP, user agent, timing and network data   | App code does not persist body or arbitrary headers. Direct `/gateway` bodies stream; MCP JSON-RPC request/body is buffered in memory up to 1 MiB. Observability retention/redaction remains unverified                                                                                                                                             |
+| Gateway response               | Status, filtered headers, response body, latency, request ID                                                                                                                                                 | Return publisher result and meter outcome                     | Transits publisher upstream and Cloudflare to consumer                                                                         | App code does not persist body. Direct `/gateway` response streams; MCP `call_api` buffers up to 1 MiB in memory. `set-cookie`, auth and hop-by-hop headers are stripped; observability/account logs remain unverified                                                                                                                              |
+| Usage and key attribution      | Consumer org ID, publisher org/project ID, key ID, method, normalized endpoint template, status, latency, credits, timestamp, settlement/request reference and outcome                                       | Credit ledger, billing, consumer/publisher analytics, support | Cloudflare logs and Durable Object pending state; Convex `usageEvents`, wallet and earnings tables                             | Stored without fixed expiry. Console usage logs duplicate these fields when production Convex is configured. No IP/body is intentionally included by app logger                                                                                                                                                                                     |
+| Wallet/ledger                  | Balance, sequence, entry kind/amount/reference, payment/usage links, reservations, grants, free-tier counters, settlement state                                                                              | Enforce prepaid spend and reconcile accounting                | Convex `wallets`/`walletEntries`; Cloudflare Durable Objects                                                                   | Convex ledger and DO state have no approved expiry. Deletion must preserve legally required financial evidence while severing user identifiers where allowed                                                                                                                                                                                        |
+| Checkout/payment               | Pack, amount, currency, credits, Checkout Session/PaymentIntent/Charge/Customer IDs, event/object/account IDs, status, failures, refunds and disputes                                                        | Sell credits and reconcile payments                           | Stripe; projections in Convex checkout/payment/event tables                                                                    | Hosted Checkout keeps raw card data out of app schema. Records have no repository-enforced retention or pseudonymization schedule                                                                                                                                                                                                                   |
+| Conditional x402 authorization | Payer/payee addresses, asset/network, amount, validity window, nonce, signature, HMAC-authenticated challenge, sanitized resource origin/path, request fingerprint and digests                               | Verify and settle a keyless Base Sepolia test-USDC call       | x402.org test facilitator; Cloudflare Worker and payment Durable Object; public Base Sepolia network                           | Pilot is disabled by default and unfunded journey is unproven. Signed payload can be durably held while settlement recovery is pending; settled/uncertain replay state has no expiry. Raw query values are not sent to facilitator in hardened design, but resource path and payment facts are. Onchain facts are public and not erasable by Zevium |
+| Conditional x402 settlement    | Settlement/transaction IDs, payer/payee, network/asset, gross and 95/5 atomic amounts, credits, publisher org/project, endpoint template, safe method, status, latency, settled time and request fingerprint | Testnet accounting, replay prevention and reconciliation      | Cloudflare payment Durable Object/outbox; Convex `x402TestnetSettlements`; public Base Sepolia transaction                     | Separate from production earnings and disabled by default. DO and Convex rows have no repository-enforced expiry or de-identification. Public-chain transaction history is outside Zevium deletion control                                                                                                                                          |
+| Publisher KYC/payout           | Connected Account ID, requirements, capability/status flags, transfer/payout IDs, amounts, currency, arrival/failure data                                                                                    | Publisher onboarding and payout                               | Stripe holds identity, tax, bank and KYC evidence; Convex stores IDs/status projections                                        | Stripe retention/legal duties apply; repository has no approved schedule or closed-account runbook                                                                                                                                                                                                                                                  |
+| Earnings                       | Publisher org/project, usage settlement reference, gross/platform/net credits, availability/state, transfer link and timestamps                                                                              | 95/5 marketplace accounting                                   | Convex                                                                                                                         | No fixed expiry; likely financial-record retention, subject to counsel decision                                                                                                                                                                                                                                                                     |
+| Notifications                  | Org ID, type, title, body, reference, read/create times                                                                                                                                                      | In-app operational notices                                    | Convex                                                                                                                         | No fixed expiry or per-user preference model                                                                                                                                                                                                                                                                                                        |
+| Publisher webhooks             | Endpoint URL, signing secret, active state; event payload, attempts, error and timestamps                                                                                                                    | Notify publisher systems                                      | Convex; payload delivered to publisher-chosen endpoint                                                                         | Secret is stored as plaintext in Convex. Delivery logs/payloads have no expiry; delete endpoint does not delete prior delivery rows                                                                                                                                                                                                                 |
+| Administrative access          | Admin Clerk user IDs in environment allowlist; admin reads/actions over orgs, projects, usage and payouts                                                                                                    | Platform operations                                           | Convex environment and functions; vendor/provider audit logs if enabled                                                        | Server-side gate exists. No repo-owned admin action audit table, access-review cadence, JIT process, or production allowlist evidence                                                                                                                                                                                                               |
+| Vulnerability reports          | Reporter contact and reproduction details, potentially test identifiers                                                                                                                                      | Triage and remediate security reports                         | GitHub private vulnerability reporting                                                                                         | GitHub retention/access settings govern it; reporters are told not to include credentials or personal data                                                                                                                                                                                                                                          |
+
+| Data class                     | Inventory labels                                                                        |
+| ------------------------------ | --------------------------------------------------------------------------------------- |
+| User identity                  | Personal; Customer confidential; Secret for credentials/session factors                 |
+| Organization identity          | Public for published identity; Personal and Customer confidential otherwise             |
+| Project/listing                | Public when published; Customer confidential while private; Personal possible           |
+| Embedding input/output         | Public source text; Personal or Customer confidential search query possible             |
+| Publisher upstream credentials | Secret; Customer confidential                                                           |
+| Consumer API keys              | Secret; Personal attribution; Customer confidential                                     |
+| Browser-local state            | Secret for pasted key/auth; Personal; preference values                                 |
+| Operational control state      | Customer confidential; Personal for user attribution                                    |
+| Gateway request/response       | Customer confidential; Personal, Financial or Secret content possible                   |
+| Usage and key attribution      | Customer confidential; Personal; Financial                                              |
+| Wallet/ledger                  | Financial; Customer confidential; Personal attribution possible                         |
+| Checkout/payment               | Financial; Personal; Customer confidential                                              |
+| Conditional x402 authorization | Secret for signature/challenge key; Financial; Personal possible; Public onchain fields |
+| Conditional x402 settlement    | Financial; Customer confidential; Personal possible; Public onchain fields              |
+| Publisher KYC/payout           | Personal; Financial; Secret                                                             |
+| Earnings                       | Financial; Customer confidential                                                        |
+| Notifications                  | Customer confidential; Personal or Financial content possible                           |
+| Publisher webhooks             | Secret for signing key; Customer confidential; Personal/Financial possible              |
+| Administrative access          | Secret for allowlist/config; Personal; Customer confidential access capability          |
+| Vulnerability reports          | Customer confidential; Personal; Secret content possible                                |
 
 ### Data deliberately not stored by application tables
 
@@ -86,26 +167,37 @@ Data labels used below: **Public**, **Customer confidential**, **Personal**,
 - Gateway request bodies, response bodies, arbitrary request headers, consumer
   cookies, or publisher `set-cookie` response headers.
 - Consumer API-key secret values in Convex tables.
+- Conditional hardened x402 facilitator requests do not include raw gateway
+  query values, request bodies, or forwarded-header values. They do include a
+  sanitized origin/path, signed payment authorization, payment requirements and
+  authenticated binding extension; digests bind omitted request components.
 
 These are narrow architecture statements, not PCI, privacy, or security
 certifications. Vendor telemetry can still process network/request metadata and
 must be checked separately.
 
+Free-form project fields, OpenAPI documents, catalogue searches, gateway
+payloads, webhook payloads and failure strings must be treated as potentially
+personal, confidential or sensitive even when their intended schema is not.
+Data labels describe intended use; they are not content inspection or DLP.
+
 ## Subprocessors and external recipients
 
 No vendor may be represented as approved from this list alone.
 
-| Party                         | Role / data                                                                                            | Pre-launch evidence required                                                                                                         | Owner                    | Status                                                                                                                                                                                          |
-| ----------------------------- | ------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------ | ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Cloudflare                    | Web/gateway host, edge network metadata, streamed content, Durable Object state, logs                  | DPA, region/options, log retention/redaction, staff access, incident terms, deletion/export path, current subprocessor list          | Security & Privacy Owner | Blocked—account evidence absent                                                                                                                                                                 |
-| Convex                        | Primary application database/functions/vector store and function logs                                  | DPA, selected region, backups/retention, restore/deletion, support access, audit logs, incident terms, subprocessors                 | Engineering Lead         | Blocked—account evidence absent                                                                                                                                                                 |
-| Clerk                         | Auth, users/orgs/memberships, sessions, MFA, API keys                                                  | DPA, auth settings, MFA/admin controls, retention/deletion/export, breach terms, subprocessors                                       | Security & Privacy Owner | Blocked—account evidence absent                                                                                                                                                                 |
-| Stripe                        | Checkout, payments, disputes, Connect KYC/transfers/payouts                                            | Signed services terms/DPA, Connect platform obligations, retention, restricted-key/RBAC review, webhook config, country availability | Finance/Payments Owner   | Blocked—account and legal evidence absent                                                                                                                                                       |
-| Google Gemini                 | Catalogue embedding input                                                                              | DPA/terms, no-training and retention setting evidence, region, data minimization decision                                            | Engineering Lead         | Blocked—account/contract evidence absent                                                                                                                                                        |
-| GitHub                        | Source, vulnerability reports, CI metadata and secrets handoff                                         | Org MFA, least privilege, review policy, audit-log retention, secret-scanning settings, DPA/terms                                    | Engineering Lead         | Partial—default branch requires a PR and blocks deletion/non-fast-forward updates; zero approvals, CODEOWNER review, thread resolution and last-push approval are required; org evidence absent |
-| Blacksmith                    | Hosted CI runners and build metadata                                                                   | DPA/terms, runner isolation, log/artifact retention, network/secrets handling, subprocessors                                         | Engineering Lead         | Blocked—contract/account evidence absent                                                                                                                                                        |
-| Each publisher upstream       | Independent recipient of consumer-selected request data; role depends on contract and processing facts | Publisher terms/DPA allocation, listing disclosures, prohibited-data rules, abuse contact and takedown path                          | Legal/Privacy Counsel    | Blocked—contract model absent                                                                                                                                                                   |
-| Publisher webhook destination | Publisher-selected recipient of event payloads                                                         | Payload inventory, tenant warning, deletion/retry behavior, SSRF review                                                              | Engineering Lead         | Partial—URL validation/signing exist; governance absent                                                                                                                                         |
+| Party                                                        | Role / data                                                                                                                                                                                | Pre-launch evidence required                                                                                                                                                                                            | Owner                                             | Status                                                                                                                                                                                                                                                                                                                                |
+| ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Cloudflare                                                   | Web/gateway host, edge network metadata, streamed content, Durable Object state, logs                                                                                                      | DPA, region/options, log retention/redaction, staff access, incident terms, deletion/export path, current subprocessor list                                                                                             | Security & Privacy Owner                          | Blocked—account evidence absent                                                                                                                                                                                                                                                                                                       |
+| Convex                                                       | Primary application database/functions/vector store and function logs                                                                                                                      | DPA, selected region, backups/retention, restore/deletion, support access, audit logs, incident terms, subprocessors                                                                                                    | Engineering Lead                                  | Blocked—account evidence absent                                                                                                                                                                                                                                                                                                       |
+| Clerk                                                        | Auth, users/orgs/memberships, sessions, MFA, API keys                                                                                                                                      | Applicable DPA/version; processor versus independent-controller role allocation; auth/MFA/admin settings; retention/deletion/export; breach terms; subprocessors                                                        | Security & Privacy Owner                          | Blocked—public DPA describes both roles and post-termination deletion, but actual account, settings and contract evidence are absent                                                                                                                                                                                                  |
+| Stripe                                                       | Checkout, payments, disputes, Connect KYC/transfers/payouts                                                                                                                                | Signed services terms/DPA; Stripe processor/controller role allocation and notices; Connect platform obligations; retention; restricted-key/RBAC review; webhook config; country availability                           | Finance/Payments Owner                            | Blocked—public DPA describes both processor and controller activities; account, entity, product and legal evidence are absent                                                                                                                                                                                                         |
+| Google Gemini                                                | Published catalogue embedding input and free-text semantic search queries                                                                                                                  | Active billed Cloud Project/paid-service proof; applicable DPA; request-log duration/location; no-product-improvement terms; region; data minimization and prohibited-use review                                        | Engineering Lead                                  | Blocked—current Gemini terms say unpaid submissions may be used for product improvement and human review, EEA/Swiss/UK API clients must use paid services, and paid prompts/responses are logged for a limited period and may be transiently stored/cached wherever Google or its agents maintain facilities; account evidence absent |
+| GitHub                                                       | Source, vulnerability reports, CI metadata and secrets handoff                                                                                                                             | Org MFA, least privilege, review policy, audit-log retention, secret-scanning settings, DPA/terms                                                                                                                       | Engineering Lead                                  | Partial—default branch requires a PR and blocks deletion/non-fast-forward updates, but requires zero approving reviews and no status checks, CODEOWNER review, thread resolution or last-push approval; org evidence absent                                                                                                           |
+| Blacksmith                                                   | Hosted CI runners and build metadata                                                                                                                                                       | DPA/terms, runner isolation, log/artifact retention, network/secrets handling, subprocessors                                                                                                                            | Engineering Lead                                  | Blocked—contract/account evidence absent                                                                                                                                                                                                                                                                                              |
+| x402.org public test facilitator (conditional)               | Signed EIP-3009 payment payload, payer/payee, network/asset/amount, sanitized resource origin/path, requirements and binding extension; no raw query/body/header values in hardened design | Identify operator and contracting entity; applicable terms/privacy/DPA; countries, logs/retention, abuse/fraud screening, incident/deletion duties, subprocessors; prove request redaction in captured integration test | Security & Privacy Owner + Finance/Payments Owner | Blocked—pilot is disabled by default; public endpoint capability is documented, but operator/account/contract and data-handling evidence are not approved and no funded end-to-end journey exists                                                                                                                                     |
+| Base Sepolia public network and infrastructure (conditional) | Public payer/payee addresses, token amount, transaction hash, timing and smart-contract transaction data                                                                                   | Base terms/privacy review; wallet ownership and sanctions/financial-regulatory analysis; public-record notice; RPC/sequencer/explorer recipients; testnet-only control                                                  | Legal/Privacy Counsel + Finance/Payments Owner    | Blocked—Base Sepolia is a public test network, not private storage; public transaction facts cannot be erased by Zevium; pilot is disabled by default and no receiving wallet is approved                                                                                                                                             |
+| Each publisher upstream                                      | Independent recipient of consumer-selected request data; role depends on contract and processing facts                                                                                     | Publisher terms/DPA allocation, listing disclosures, prohibited-data rules, abuse contact and takedown path                                                                                                             | Legal/Privacy Counsel                             | Blocked—contract model absent                                                                                                                                                                                                                                                                                                         |
+| Publisher webhook destination                                | Publisher-selected recipient of event payloads                                                                                                                                             | Payload inventory, tenant warning, deletion/retry behavior, SSRF review                                                                                                                                                 | Engineering Lead                                  | Partial—URL validation/signing exist; governance absent                                                                                                                                                                                                                                                                               |
 
 Before adding a party: record purpose, data, countries, legal mechanism, DPA,
 security review, deletion/return terms, incident notice, owner, approval date, and
@@ -113,22 +205,41 @@ public-notice impact. Security & Privacy Owner reviews the register at least
 quarterly and before material data-flow changes. This cadence is a required
 future control, not evidence that reviews have occurred.
 
+Public vendor materials reviewed on 2026-08-12: [Cloudflare DPA](https://www.cloudflare.com/cloudflare-customer-dpa/),
+[Convex DPA](https://www.convex.dev/legal/dpa),
+[Clerk DPA](https://clerk.com/legal/dpa),
+[Stripe DPA](https://stripe.com/legal/dpa), and
+[Gemini API terms](https://ai.google.dev/gemini-api/terms). Conditional x402
+materials reviewed were the
+[CDP-hosted facilitator description](https://docs.cdp.coinbase.com/x402/seller/facilitator),
+[Coinbase x402 FAQ that separately documents the keyless x402.org testnet endpoint](https://docs.cdp.coinbase.com/x402/support/faq),
+[Coinbase global privacy policy](https://www.coinbase.com/legal/privacy),
+[Base network documentation](https://docs.base.org/base-chain/quickstart/connecting-to-base),
+and [Base service terms](https://docs.base.org/terms-of-service). Each remains
+`UNVERIFIED FOR ACCOUNT` until the assigned owner records the applicable entity,
+accepted version, plan/service scope and configuration evidence.
+
 ## Retention schedule: proposed, not yet enforced
 
 Legal/Privacy Counsel and Finance/Payments Owner must approve exact periods per
 supported jurisdiction. Until then, production data collection must not start.
 
-| Record                                | Proposed rule                                                                                                     | Current enforcement gap                                                                            |
-| ------------------------------------- | ----------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| User profile mirror                   | Active account; erase within 30 days of verified deletion unless hold applies                                     | Clerk webhook deletes Convex user mirror, but vendor/backups and case evidence are not coordinated |
-| Org/project/draft/credentials         | Active service plus 30-day recovery window, then erase; public immutable versions require contract/legal decision | No soft-delete/recovery lifecycle; org cascade is incomplete; backups unverified                   |
-| Gateway payloads                      | No intentional application persistence                                                                            | Must verify Cloudflare log/body capture settings and publisher responsibilities                    |
-| Usage/security logs                   | 30 days searchable, up to 90 days restricted archive if justified                                                 | Cloudflare/Convex log retention not configured in repo; usage tables never expire                  |
-| Detailed usage attribution            | 13 months, then aggregate or delete key/user identifiers                                                          | No cron or aggregation/de-identification job                                                       |
-| Wallet/payment/earnings/payout ledger | Jurisdiction-specific financial/statutory period, then delete or irreversibly de-identify                         | No approved period, legal-hold flag, pseudonymization, or purge job                                |
-| Webhook delivery payload/error        | 30 days                                                                                                           | No purge job; orphaned deliveries can remain after endpoint deletion                               |
-| API-key metadata/cache                | Active key plus 30 days for security investigation; secret per Clerk policy                                       | No coordinated purge; Durable Object key/free-tier state lacks deletion workflow                   |
-| DSR and incident case record          | Minimum necessary proof for approved legal period                                                                 | No case system or schedule                                                                         |
+| Record                                | Proposed rule                                                                                                                                                           | Current enforcement gap                                                                                            |
+| ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| User profile mirror                   | Active account; erase within 30 days of verified deletion unless hold applies                                                                                           | Clerk webhook deletes Convex user mirror, but vendor/backups and case evidence are not coordinated                 |
+| Org/project/draft/credentials         | Active service plus 30-day recovery window, then erase; public immutable versions require contract/legal decision                                                       | No soft-delete/recovery lifecycle; org cascade is incomplete; backups unverified                                   |
+| Gateway payloads                      | No intentional application persistence                                                                                                                                  | Must verify Cloudflare log/body capture settings and publisher responsibilities                                    |
+| Usage/security logs                   | 30 days searchable, up to 90 days restricted archive if justified                                                                                                       | Cloudflare/Convex log retention not configured in repo; usage tables never expire                                  |
+| Detailed usage attribution            | 13 months, then aggregate or delete key/user identifiers                                                                                                                | No cron or aggregation/de-identification job                                                                       |
+| Wallet/payment/earnings/payout ledger | Jurisdiction-specific financial/statutory period, then delete or irreversibly de-identify                                                                               | No approved period, legal-hold flag, pseudonymization, or purge job                                                |
+| Conditional x402 DO state             | Keep signed settlement command only while bounded recovery is possible; keep minimum replay/outbox facts for approved fraud/accounting window, then delete the DO state | No TTL, deletion API or approved recovery/replay window; settled and uncertain objects can persist indefinitely    |
+| Conditional x402 Convex settlement    | Test-only evidence for approved pilot window, then delete or irreversibly sever org/project/request links unless an approved hold applies                               | `x402TestnetSettlements` has no expiry, purge job, legal-hold marker or de-identification path                     |
+| Conditional Base Sepolia transaction  | Public network record persists according to network operation; never promise erasure                                                                                    | Zevium cannot delete public-chain address, amount or transaction facts; notice and minimization are not approved   |
+| Webhook delivery payload/error        | 30 days                                                                                                                                                                 | No purge job; orphaned deliveries can remain after endpoint deletion                                               |
+| API-key metadata/cache                | Active key plus 30 days for security investigation; secret per Clerk policy                                                                                             | No coordinated purge; Durable Object key/free-tier state lacks deletion workflow                                   |
+| Browser-local state                   | Theme until user clears it; sidebar seven days; pasted playground key for browser session only                                                                          | No explicit clear-all control or user instructions; browser restore/extension/device behavior is outside app proof |
+| Semantic search query                 | No intentional app-table persistence; vendor minimum needed to provide/secure service                                                                                   | Gemini paid-service status, logging period/location and deletion evidence unverified; no sensitive-query warning   |
+| DSR and incident case record          | Minimum necessary proof for approved legal period                                                                                                                       | No case system or schedule                                                                                         |
 
 Do not claim these periods publicly until jobs, vendor settings, tests, and
 operating evidence match them.
@@ -150,21 +261,32 @@ owners, vendor permissions, and legal schedule exist.
 4. **Scope identities.** Resolve Clerk user/org IDs, Convex IDs, Stripe customer
    and connected-account IDs, API-key IDs, project IDs, wallet, usage/payment/
    earning references, Cloudflare Durable Object namespace, vulnerability cases,
-   and publisher/webhook recipients. Search by canonical IDs, never email alone.
+   and publisher/webhook recipients. If x402 was ever enabled, include payer/payee
+   addresses, transaction/settlement IDs, payment-DO identity and Convex testnet
+   settlement rows; treat an address as potentially personal when linked to a
+   person. Include key-rotation rows and device-local storage instructions.
+   Search by canonical IDs, never email alone.
 5. **Preserve only approved holds.** Legal/Privacy Counsel documents statutory
    financial retention, dispute, fraud, security or litigation holds. Separate
    held records and restrict access; do not use a hold as blanket refusal.
 6. **Access/export.** Export responsive records from Clerk, Convex, Stripe,
-   Cloudflare logs/DO state, and support/security systems. Exclude other tenants,
-   secrets, internal abuse signals, and privileged material after counsel review.
-   Deliver through authenticated, expiring channel.
+   Cloudflare logs/DO state, and support/security systems. If x402 was enabled,
+   include linked facilitator records where obtainable and the public Base
+   transaction, clearly separating Zevium-held data from immutable public-network
+   facts. Exclude other tenants, secrets, payment signatures, wallet-signing
+   material, internal abuse signals, and privileged material after counsel review. Deliver through an
+   authenticated, expiring channel.
 7. **Correct.** Correct Clerk source fields first, allow verified webhook sync,
    then correct eligible app metadata. Append accounting corrections; do not
    rewrite append-only ledger history.
 8. **Delete/de-identify.** Revoke sessions/API keys; remove Clerk user/org data
    when authorized; delete Convex personal mirror and tenant data; purge gateway
-   cache/DO state; request Stripe/vendor deletion where allowed; delete webhook
-   destinations/payloads; notify publisher recipients when contract/law requires.
+   cache/DO state, including eligible x402 replay/outbox state; request Stripe,
+   facilitator and other vendor deletion where allowed; delete webhook
+   destinations/payloads; provide instructions to clear browser-local keys and
+   preferences; notify publisher recipients when contract/law requires. Zevium
+   cannot erase public Base Sepolia transactions: explain that limitation,
+   remove internal linkages when legally permitted, and never claim chain erasure.
    Retained finance/security rows must replace direct user/key identifiers with
    irreversible case-scoped tokens where feasible.
 9. **Verify.** Re-query every system and record vendor confirmations. Current
@@ -210,11 +332,17 @@ These are objectives, not measured historical performance or customer SLAs.
 
 1. Open restricted incident record; assign commander, severity, scribe and clock.
 2. Preserve relevant Cloudflare, Convex, Clerk, Stripe, GitHub and CI evidence;
-   record timestamps and access. Do not copy secrets or customer payloads into
-   chat/tickets.
+   if x402 was enabled, also preserve scoped facilitator responses, payment-DO
+   state, Convex settlement rows and public-chain transaction evidence. Record
+   timestamps and access. Do not copy secrets, signatures, private keys, full
+   payment payloads, or customer payloads into chat/tickets.
 3. Contain with smallest reversible action: revoke key/session/token, disable
    integration, delist project, stop deployment, rotate scoped secret, or block
-   affected route. Protect ledger evidence before financial correction.
+   affected route. For x402, set the feature flag off first, protect receiving
+   wallet access, rotate the dedicated challenge-key ID/key while retaining old
+   verification keys through the challenge TTL, and contact the facilitator/network
+   providers where useful. Never replay an authorization with ambiguous execution
+   or settlement. Protect ledger evidence before financial correction.
 4. Determine affected data, tenants, time window, actors, geography, vendors,
    funds and safety impact. Treat request/response content as potentially
    sensitive even though app tables do not store it.
@@ -228,6 +356,11 @@ These are objectives, not measured historical performance or customer SLAs.
 8. Within five business days of stabilization, complete blameless review with
    timeline, control failures, owners/dates and evidence links. Track actions to
    closure and update this posture.
+
+This runbook maps to NIST SP 800-61 Rev. 3's preparation, detection, response
+and recovery model only at design level. Pager evidence, detection sources,
+decision authority, communications channels, recovery exercises and retained
+records are still missing.
 
 Public vulnerability intake and acknowledgement objective remain in
 [`SECURITY.md`](../SECURITY.md). Vulnerability intake is not a substitute for an
@@ -247,6 +380,9 @@ Repository-supported controls:
 - Stripe/Clerk webhooks verify signatures; publisher webhooks are HMAC-signed.
 - Gateway internal endpoints use shared-secret comparison; credentials encrypt
   with versioned AES-GCM keys.
+- Conditional hardened x402 configuration uses a dedicated HMAC challenge
+  keyring, admits safe `GET`/`HEAD` methods only, strips raw query values from
+  facilitator resources, and isolates replay/outbox state per payment identity.
 
 Launch gaps:
 
@@ -254,11 +390,15 @@ Launch gaps:
   reviews, offboarding SLA, or least-privilege roles in vendor accounts.
 - `ADMIN_USER_IDS` is coarse and environment-managed; no app admin action audit
   trail or approval workflow exists.
-- GitHub ruleset evidence requires pull requests and blocks deletion and
-  non-fast-forward updates on `develop`, but requires zero approvals, no
-  CODEOWNER review, no thread resolution, and no last-push approval. No evidence
-  of signed-commit enforcement, secret-scanning configuration, or production
-  environment reviewers was collected.
+- GitHub ruleset `7681356`, re-read through `gh api` on 2026-08-12, requires pull
+  requests and blocks deletion and non-fast-forward updates on `develop`, but
+  requires zero approvals, no required status checks, no CODEOWNER review, no
+  thread resolution, and no last-push approval. No bypass actors are configured,
+  but no evidence of signed-commit enforcement, secret-scanning configuration,
+  or production environment reviewers was collected.
+- Manual `format-fix` workflow grants `contents: write` and pushes formatted
+  changes. Scope, branch restrictions, actor review and audit evidence need
+  explicit approval even though protected `develop` currently requires a PR.
 - Cloudflare observability logs detailed usage identifiers; retention, access,
   redaction, alerting and export are not repository-controlled.
 - Convex function/vendor audit-log availability and retention are unverified.
@@ -267,6 +407,9 @@ Launch gaps:
   tightening complete.
 - Shared production secrets have no documented rotation cadence, dual-control,
   inventory, ownership, expiry or tested emergency rotation.
+- Conditional x402 has no approved challenge-key custodian/rotation record,
+  receiving-wallet access model, facilitator access/incident evidence, payment-DO
+  retention/deletion control, alerting, or funded replay/reconciliation exercise.
 - No formal asset inventory, endpoint inventory, data-classification enforcement,
   vulnerability scanning/SAST/DAST, penetration test, SIEM, anomaly alerting,
   backup restore test, RTO/RPO, or disaster-recovery exercise evidence.
@@ -276,6 +419,11 @@ Launch gaps:
 Current decision: **no launch jurisdiction is approved by this repository**.
 Marketing availability, Stripe technical availability, company formation, and
 lawful service availability are separate decisions.
+
+Customer residence, publisher residence, Zevium contracting entity, Stripe
+platform/connected-account countries, publisher upstream location, vendor data
+location and where staff access data are separate inputs. A country appearing in
+a vendor availability list does not approve any of them.
 
 Legal/Privacy Counsel must create one signed row per launch country/region and
 score each item Pass / Restricted / Fail / Unknown:
@@ -291,6 +439,9 @@ score each item Pass / Restricted / Fail / Unknown:
    rules, automated-decision rules, and direct-marketing rules are handled.
 5. Convex region and all onward transfers have approved mechanisms; vendor DPAs,
    transfer assessments and subprocessors are accepted.
+   Gemini is either disabled or proven to use a paid service through an active
+   billed Cloud Project; current terms require paid services for API clients
+   available in the EEA, Switzerland or the UK.
 6. Retention, deletion, legal hold, breach-notification and regulator-contact
    rules are executable in systems and runbooks.
 7. Data categories permitted through marketplace APIs are defined; health,
@@ -300,6 +451,11 @@ score each item Pass / Restricted / Fail / Unknown:
    cancellation/refund obligations can be met.
 9. Insurance and contractual liability requirements are accepted by accountable
    executives.
+10. If x402 is enabled, counsel and Finance approve testnet wallet ownership,
+    sanctions screening, tax/accounting treatment, custody/money-transmission and
+    digital-asset questions, public-chain notice, facilitator/Base terms, and the
+    strict testnet-only/no-payout boundary. Technical availability is not legal
+    availability.
 
 Any Fail or Unknown means unsupported. Restricted needs exact product/contract
 guardrail and owner. Security & Privacy Owner records decision; Legal/Privacy
@@ -311,7 +467,15 @@ residual risk.
 Zevium is **not approved for Protected Health Information (PHI)** and must not be
 marketed or used as HIPAA compliant, HIPAA ready, or suitable for PHI. Do not
 enter PHI into accounts, organization/project metadata, OpenAPI specs, gateway
-requests, webhook payloads, support, logs, or payment descriptions.
+requests, URL paths/query values, webhook payloads, support, logs, payment
+descriptions, x402 resource paths, wallet labels, or transaction metadata.
+
+This is a product prohibition broader than a legal conclusion. It does not mean
+every health-related datum is PHI or that HIPAA applies to every party. Qualified
+counsel must determine covered-entity/business-associate roles and applicable
+rules. Independently, current Gemini API terms prohibit use in clinical practice,
+medical advice, or regulated medical-device use, so vendor-contract review is
+required even where HIPAA does not apply.
 
 Removing this prohibition requires, at minimum: counsel-approved role analysis;
 signed BAAs with every required vendor and customer/counterparty; verified vendor
@@ -326,86 +490,110 @@ must approve monitoring/enforcement. Those documents do not yet exist here.
 
 ## SOC 2 Trust Services Criteria gap matrix
 
-Zevium has **not been audited or certified for SOC 2**. SOC 2 is an attestation,
-not a repository badge. Matrix is planning inventory only; criteria mapping and
-scope must be validated by qualified auditors.
+Zevium has no SOC 2 examination or issued report. SOC 2 is a CPA assurance
+service, not a certification or repository badge. Matrix is planning inventory
+only; exact criteria, system scope, period, control design and evidence must be
+validated with a qualified CPA firm.
 
-| Area                          | Repository evidence                                                       | Missing operating/control evidence                                                                              | Status              |
-| ----------------------------- | ------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- | ------------------- |
-| CC1 Control environment       | Role gates and this ownership model                                       | Named control owners, governance charter, ethics/personnel policies, training, oversight minutes                | Major gap           |
-| CC2 Information/communication | Source docs, security reporting policy, typed architecture                | Approved policy set, employee/customer control communication, evidence repository and review cadence            | Major gap           |
-| CC3 Risk assessment           | Threat-sensitive code/tests around auth, SSRF, ledger, webhooks           | Formal scoped risk assessment, fraud risk, annual cadence, change/vendor risk process                           | Major gap           |
-| CC4 Monitoring                | CI tests and production smoke checks                                      | Control monitoring plan, exception handling, internal audit, metrics, evidence retention                        | Major gap           |
-| CC5 Control activities        | Validation, authorization helpers, signature checks, idempotency          | Complete control catalog, owners/frequency/evidence, manual control design and testing                          | Partial design only |
-| CC6 Logical/physical access   | Clerk auth, org gates, admin allowlist, scoped workflow permissions       | Vendor RBAC/MFA evidence, joiner/mover/leaver, quarterly reviews, break-glass, physical responsibility mapping  | Major gap           |
-| CC7 System operations         | Dependabot, private vulnerability intake, error handling                  | Asset/vulnerability program, alerting/SIEM, incident staffing/drills, patch SLA evidence, penetration test      | Major gap           |
-| CC8 Change management         | CI before deploy, pinned payment API version, source history              | Protected-branch/reviewer evidence, segregation of duties, emergency change/rollback records, release approvals | Partial design only |
-| CC9 Risk mitigation/vendors   | Vendor architecture identified                                            | Vendor due diligence, contracts/DPAs, subprocessor monitoring, business continuity, insurance/risk acceptance   | Major gap           |
-| A1 Availability               | Edge architecture, health endpoint, smoke test, transactional DO patterns | Approved SLA, capacity plan, monitored SLOs, backup/restore, RTO/RPO and DR test                                | Major gap           |
-| C1 Confidentiality            | Secret filtering, hosted payment, credential encryption design            | Classification policy, DLP, log redaction proof, key rotation, disposal verification                            | Major gap           |
-| PI1 Processing integrity      | Ledger reconciliation/idempotency tests, webhook dedupe, validation       | Production reconciliations, exception review, completeness/accuracy evidence and retained approvals             | Partial design only |
-| P1 Privacy                    | User-delete mirror hook and this inventory/procedure                      | Approved notice/bases/consent, DSR tooling, retention enforcement, privacy training, jurisdiction decisions     | Major gap           |
+| Area                          | Repository evidence                                                                                                                        | Missing operating/control evidence                                                                                                    | Status              |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------- | ------------------- |
+| CC1 Control environment       | Role gates and this ownership model                                                                                                        | Named control owners, governance charter, ethics/personnel policies, training, oversight minutes                                      | Major gap           |
+| CC2 Information/communication | Source docs, security reporting policy, typed architecture                                                                                 | Approved policy set, employee/customer control communication, evidence repository and review cadence                                  | Major gap           |
+| CC3 Risk assessment           | Threat-sensitive code/tests around auth, SSRF, ledger, webhooks                                                                            | Formal scoped risk assessment, fraud risk, annual cadence, change/vendor risk process                                                 | Major gap           |
+| CC4 Monitoring                | CI tests and production smoke checks                                                                                                       | Control monitoring plan, exception handling, internal audit, metrics, evidence retention                                              | Major gap           |
+| CC5 Control activities        | Validation, authorization helpers, signature checks, idempotency                                                                           | Complete control catalog, owners/frequency/evidence, manual control design and testing                                                | Partial design only |
+| CC6 Logical/physical access   | Clerk auth, org gates, admin allowlist, scoped workflow permissions                                                                        | Vendor RBAC/MFA evidence, joiner/mover/leaver, quarterly reviews, break-glass, physical responsibility mapping                        | Major gap           |
+| CC7 System operations         | Dependabot, private vulnerability intake, error handling                                                                                   | Asset/vulnerability program, alerting/SIEM, incident staffing/drills, patch SLA evidence, penetration test                            | Major gap           |
+| CC8 Change management         | CI before deploy, pinned payment API version, source history                                                                               | Protected-branch/reviewer evidence, segregation of duties, emergency change/rollback records, release approvals                       | Partial design only |
+| CC9 Risk mitigation/vendors   | Vendor architecture identified                                                                                                             | Vendor due diligence, contracts/DPAs, subprocessor monitoring, business continuity, insurance/risk acceptance                         | Major gap           |
+| A1 Availability               | Edge architecture, health endpoint, smoke test, transactional DO patterns                                                                  | Approved SLA, capacity plan, monitored SLOs, backup/restore, RTO/RPO and DR test                                                      | Major gap           |
+| C1 Confidentiality            | Secret filtering, hosted payment, credential encryption design                                                                             | Classification policy, DLP, log redaction proof, key rotation, disposal verification                                                  | Major gap           |
+| PI1 Processing integrity      | Ledger reconciliation/idempotency tests, webhook dedupe, validation; conditional x402 design isolates replay/outbox and testnet projection | Production reconciliations, exception review, completeness/accuracy evidence, funded x402 replay/failure proof and retained approvals | Partial design only |
+| Privacy (P1–P8)               | User-delete mirror hook and this inventory/procedure                                                                                       | Approved notice/bases/consent, DSR tooling, retention enforcement, privacy training, jurisdiction decisions                           | Major gap           |
 
 No “SOC 2 compliant,” “SOC 2 ready,” “Type I,” or “Type II” claim is permitted
 without scoped auditor advice and, for report claims, issued report language.
 
 ## Public claim to control matrix
 
-| Allowed narrow claim                                                     | Repository evidence                                                                | Qualification / release gate                                                                                      |
-| ------------------------------------------------------------------------ | ---------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| Zero wallet balance blocks paid calls                                    | Wallet DO reserve checks and gateway tests                                         | Applies to real gateway calls; keyless `/mock` never reaches upstream and costs zero                              |
-| Published spec versions are immutable                                    | Convex mutations create versions and only update deprecation metadata              | Database/vendor admin access is outside app-level immutability; operating access must be reviewed                 |
-| Gateway streams request/response bodies and app tables do not store them | `pipeline.ts` passes request/response streams; schema stores normalized usage only | Cloudflare/publisher processing and telemetry still apply; never say “we never process payloads”                  |
-| Consumer auth and cookies are not forwarded to publisher upstreams       | Header filter and regression tests                                                 | Publisher credentials are injected separately; other consumer headers/body are forwarded                          |
-| Raw card and bank details are handled by Stripe, not Zevium tables       | Hosted Checkout/Connect architecture and Convex schema                             | Zevium remains responsible for its Stripe integration and stored identifiers; no PCI claim                        |
-| Publisher webhook events are signed                                      | HMAC-SHA256 delivery implementation/tests                                          | Signing secret storage and recipient verification remain responsibilities; do not call delivery end-to-end secure |
-| Publisher upstream credentials are encrypted on new writes               | AES-GCM implementation and versioned ciphertext fields                             | No broad at-rest claim until legacy migration is proven zero and schema is tightened                              |
-| Security reports can be submitted privately                              | GitHub private vulnerability link in `SECURITY.md`                                 | Acknowledgement is an objective, not guaranteed SLA                                                               |
-| Zevium is metered and credit-gated                                       | Gateway pipeline, wallet DO and tests                                              | Avoid “secure,” “compliant,” “certified,” or absolute safety claims                                               |
+| Allowed narrow claim                                                                                                                                  | Repository evidence                                                                                             | Qualification / release gate                                                                                                                                                                                                                          |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Zero wallet balance blocks paid calls                                                                                                                 | Wallet DO reserve checks and gateway tests                                                                      | Applies to real gateway calls; keyless `/mock` never reaches upstream and costs zero                                                                                                                                                                  |
+| Published spec versions are immutable                                                                                                                 | Convex mutations create versions and only update deprecation metadata                                           | Database/vendor admin access is outside app-level immutability; operating access must be reviewed                                                                                                                                                     |
+| Direct `/gateway` proxies stream request/response bodies; app tables do not store them                                                                | `pipeline.ts` passes streams; schema stores normalized usage only                                               | MCP `call_api` buffers bounded 1 MiB bodies in Worker memory; Cloudflare/publisher processing and telemetry apply; never say “we never process payloads”                                                                                              |
+| Consumer auth and cookies are not forwarded to publisher upstreams                                                                                    | Header filter and regression tests                                                                              | Publisher credentials are injected separately; other consumer headers/body are forwarded                                                                                                                                                              |
+| Raw card and bank details are handled by Stripe, not Zevium tables                                                                                    | Hosted Checkout/Connect architecture and Convex schema                                                          | Zevium remains responsible for its Stripe integration and stored identifiers; no PCI claim                                                                                                                                                            |
+| Publisher webhook events are signed                                                                                                                   | HMAC-SHA256 delivery implementation/tests                                                                       | Signing secret storage and recipient verification remain responsibilities; do not call delivery end-to-end secure                                                                                                                                     |
+| Publisher upstream credentials are encrypted on new writes                                                                                            | AES-GCM implementation and versioned ciphertext fields                                                          | No broad at-rest claim until legacy migration is proven zero and schema is tightened                                                                                                                                                                  |
+| Security reports can be submitted privately                                                                                                           | GitHub private vulnerability link in `SECURITY.md`                                                              | Acknowledgement is an objective, not guaranteed SLA                                                                                                                                                                                                   |
+| Upstream execution is metered and credit-gated                                                                                                        | Gateway pipeline, wallet DO and tests                                                                           | Keyless `/mock` only synthesizes schema responses and never executes upstream; avoid assurance or absolute-safety wording                                                                                                                             |
+| Conditional x402 testnet rail is disabled by default; when configured, only `GET`/`HEAD` are eligible and facilitator resources omit raw query values | x402 config parser, eligible-method constant, sanitized resource builder and regression tests after integration | Do not publish before exact release code, deployed config and funded journey are verified. Facilitator still receives resource origin/path, signed payment payload and requirements; query still reaches publisher; Base transaction facts are public |
 
 Prohibited without new evidence and approval: compliance/certification badges;
 “SOC 2 compliant/ready”; “HIPAA compliant/ready”; “GDPR/CCPA compliant”;
 “PCI compliant”; “ISO 27001 certified”; “enterprise-grade,” “bank-grade,”
 “military-grade,” “fully secure,” “zero risk,” and absolute breach/privacy claims.
 
+`pnpm check:compliance-claims` runs eight adversarial scanner tests, then scans
+root product/trust docs, `docs/` except this candid posture, web source and
+text-bearing public assets, gateway source, Convex source and shared
+response-building source while excluding generated/dependency directories. It
+catches common spelling, hyphenation and multiline variants plus broad
+security/privacy absolutes. This is a heuristic tripwire, not legal review:
+generated runtime content, images, third-party pages and novel wording still
+require human claim review. A passing check proves only that its current patterns
+found no prohibited token.
+
 ## Prioritized remediation plan
 
 Timelines are relative to production launch (`T`). They are commitments required
 for approval, not claims that work is staffed.
 
-| Priority | Remediation                                                                                                                                                    | Owner                                                      | Due                         | Exit evidence                                                        |
-| -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- | --------------------------- | -------------------------------------------------------------------- |
-| P0       | Assign named Security & Privacy Owner, Legal/Privacy Counsel, Engineering, Operations, Finance and incident roles                                              | Accountable executive                                      | T-8 weeks                   | Signed role register and call tree                                   |
-| P0       | Approve entity/funds-flow and jurisdiction row(s); publish counsel-approved terms, privacy notice, acceptable use and publisher agreement with PHI prohibition | Legal/Privacy Counsel + Finance/Payments Owner             | T-6 weeks                   | Signed decisions and versioned public documents                      |
-| P0       | Execute vendor/recipient reviews and DPAs; verify regions, retention, logs, access, incident terms and subprocessors                                           | Security & Privacy Owner                                   | T-6 weeks                   | Evidence links and approved subprocessor register                    |
-| P0       | Finish upstream-credential migration, remove plaintext field, rotate keys, encrypt publisher webhook secrets                                                   | Engineering Lead                                           | T-4 weeks                   | Zero-count migration output, tightened schema/tests, rotation record |
-| P0       | Implement safe tenant erasure/export and Durable Object purge with dry run, holds, cascade tests and vendor coordination                                       | Engineering Lead + Legal/Privacy Counsel                   | T-4 weeks                   | DSR test case with before/after inventory and approvals              |
-| P0       | Configure/admin-review MFA/RBAC, branch/environment protection, secrets, audit logs and offboarding across vendors                                             | Engineering Lead + Security & Privacy Owner                | T-4 weeks                   | Screenshots/exports, access matrix and reviewer sign-off             |
-| P0       | Set log/data retention and purge jobs; remove or minimize duplicate console usage logs                                                                         | Engineering Lead                                           | T-3 weeks                   | Config exports, automated tests and purge execution evidence         |
-| P0       | Build on-call/incident channels and run cross-org/data/payment tabletop plus credential-rotation drill                                                         | Operations Lead                                            | T-2 weeks                   | Exercise record, gaps closed or accepted                             |
-| P0       | Backup/restore and wallet/payment reconciliation recovery test; approve RTO/RPO                                                                                | Operations Lead + Finance/Payments Owner                   | T-2 weeks                   | Timed restore/reconciliation evidence                                |
-| P0       | Final claim review and launch sign-off gate                                                                                                                    | Security & Privacy Owner + counsel + accountable executive | T-2 business days           | All gate rows signed; no unresolved P0                               |
-| P1       | Formal risk assessment, control catalog/evidence cadence, vulnerability management and independent penetration test                                            | Security & Privacy Owner                                   | Within 30 days after launch | Approved risk register and remediation tickets                       |
-| P1       | Admin action audit log, JIT/scoped roles, access-review automation and security alerting                                                                       | Engineering Lead                                           | Within 60 days after launch | Queryable audit trail, alert drill, review export                    |
-| P1       | Aggregate/de-identify old usage; validate DSR and incident exercises quarterly                                                                                 | Security & Privacy Owner                                   | Within 90 days after launch | Job results and exercise records                                     |
+| Priority | Remediation                                                                                                                                                                                                                                   | Owner                                                                          | Due                         | Exit evidence                                                                                                                  |
+| -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| P0       | Assign named Security & Privacy Owner, Legal/Privacy Counsel, Engineering, Operations, Finance and incident roles                                                                                                                             | Accountable executive                                                          | T-8 weeks                   | Signed role register and call tree                                                                                             |
+| P0       | Approve entity/funds-flow and jurisdiction row(s); publish counsel-approved terms, privacy notice, acceptable use and publisher agreement with PHI prohibition                                                                                | Legal/Privacy Counsel + Finance/Payments Owner                                 | T-6 weeks                   | Signed decisions and versioned public documents                                                                                |
+| P0       | Execute vendor/recipient reviews and DPAs; verify regions, retention, logs, access, incident terms and subprocessors                                                                                                                          | Security & Privacy Owner                                                       | T-6 weeks                   | Evidence links and approved subprocessor register                                                                              |
+| P0       | Prove Gemini uses applicable paid-service/DPA terms and approved locations/logging, prohibit sensitive search text, or disable semantic embeddings                                                                                            | Engineering Lead + Legal/Privacy Counsel                                       | T-6 weeks                   | Billing/config export, signed terms review and query-flow test                                                                 |
+| P0       | Keep x402 disabled unless facilitator/Base terms, public-chain notice, test-wallet/funds-flow, HMAC key custody/rotation, DO/Convex retention, safe-method/query-redaction tests and funded settle/replay/reconciliation journey are approved | Security & Privacy Owner + Finance/Payments Owner + Engineering Lead + counsel | Before setting feature flag | Signed conditional approval, config export, captured redaction test, transaction/explorer evidence and one matching Convex row |
+| P0       | Finish upstream-credential migration, remove plaintext field, rotate keys, encrypt publisher webhook secrets                                                                                                                                  | Engineering Lead                                                               | T-4 weeks                   | Zero-count migration output, tightened schema/tests, rotation record                                                           |
+| P0       | Implement safe tenant erasure/export and Durable Object purge with dry run, holds, cascade tests and vendor coordination                                                                                                                      | Engineering Lead + Legal/Privacy Counsel                                       | T-4 weeks                   | DSR test case with before/after inventory and approvals                                                                        |
+| P0       | Configure/admin-review MFA/RBAC, branch/environment protection, secrets, audit logs and offboarding across vendors                                                                                                                            | Engineering Lead + Security & Privacy Owner                                    | T-4 weeks                   | Screenshots/exports, access matrix and reviewer sign-off                                                                       |
+| P0       | Set log/data retention and purge jobs; remove or minimize duplicate console usage logs                                                                                                                                                        | Engineering Lead                                                               | T-3 weeks                   | Config exports, automated tests and purge execution evidence                                                                   |
+| P0       | Build on-call/incident channels and run cross-org/data/payment tabletop plus credential-rotation drill                                                                                                                                        | Operations Lead                                                                | T-2 weeks                   | Exercise record, gaps closed or accepted                                                                                       |
+| P0       | Backup/restore and wallet/payment reconciliation recovery test; approve RTO/RPO                                                                                                                                                               | Operations Lead + Finance/Payments Owner                                       | T-2 weeks                   | Timed restore/reconciliation evidence                                                                                          |
+| P0       | Final claim review and launch sign-off gate                                                                                                                                                                                                   | Security & Privacy Owner + counsel + accountable executive                     | T-2 business days           | All gate rows signed; no unresolved P0                                                                                         |
+| P1       | Formal risk assessment, control catalog/evidence cadence, vulnerability management and independent penetration test                                                                                                                           | Security & Privacy Owner                                                       | Within 30 days after launch | Approved risk register and remediation tickets                                                                                 |
+| P1       | Admin action audit log, JIT/scoped roles, access-review automation and security alerting                                                                                                                                                      | Engineering Lead                                                               | Within 60 days after launch | Queryable audit trail, alert drill, review export                                                                              |
+| P1       | Aggregate/de-identify old usage; validate DSR and incident exercises quarterly                                                                                                                                                                | Security & Privacy Owner                                                       | Within 90 days after launch | Job results and exercise records                                                                                               |
 
 ## Human sign-off gate
 
 Merging code/docs, passing CI, vendor marketing pages, or an AI-generated review
 cannot approve launch.
 
-| Required signer                      | Named human    | Required decision                                                                                         | Approval evidence          | State   |
-| ------------------------------------ | -------------- | --------------------------------------------------------------------------------------------------------- | -------------------------- | ------- |
-| Security & Privacy Owner             | **UNASSIGNED** | Security risks, vendor evidence, retention/DSR/incident readiness accepted                                | Dated signed decision      | BLOCKED |
-| Legal/Privacy Counsel                | **UNASSIGNED** | Jurisdictions, roles/bases, notices/contracts, PHI prohibition, retention and notification rules approved | Dated legal approval       | BLOCKED |
-| Finance/Payments Owner               | **UNASSIGNED** | Stripe/Connect funds flow, country support, tax/refund/dispute and financial retention approved           | Dated signed decision      | BLOCKED |
-| Engineering Lead                     | **UNASSIGNED** | P0 technical controls deployed and evidence matches production                                            | Release/control checklist  | BLOCKED |
-| Operations Lead / Incident Commander | **UNASSIGNED** | On-call, recovery, escalation and exercises operational                                                   | Drill and call-tree record | BLOCKED |
-| Accountable executive                | **UNASSIGNED** | Residual risk accepted after all specialist approvals                                                     | Dated launch authorization | BLOCKED |
+Approval record ID: `ISSUE-103-LAUNCH-POSTURE`. For each row, evidence must record
+the signer's legal name and accountable role, exact released posture commit SHA,
+decision and restrictions, UTC timestamp, and immutable evidence reference. Git
+authorship, issue assignment, review comments, CI success or placeholder text do
+not count as signature. `UNASSIGNED`, `NONE` or a missing timestamp always means
+`BLOCKED`.
+
+| Required signer                      | Named human    | Required decision                                                                                                                           | Evidence reference | Approved UTC | State   |
+| ------------------------------------ | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | ------------------ | ------------ | ------- |
+| Security & Privacy Owner             | **UNASSIGNED** | Security risks, vendor evidence, retention/DSR/incident readiness accepted                                                                  | **NONE**           | **NONE**     | BLOCKED |
+| Legal/Privacy Counsel                | **UNASSIGNED** | Jurisdictions, roles/bases, notices/contracts, PHI prohibition, retention and notification rules approved                                   | **NONE**           | **NONE**     | BLOCKED |
+| Finance/Payments Owner               | **UNASSIGNED** | Stripe/Connect funds flow, country support, tax/refund/dispute and financial retention; conditional x402 testnet wallet/funds flow approved | **NONE**           | **NONE**     | BLOCKED |
+| Engineering Lead                     | **UNASSIGNED** | P0 technical controls deployed and evidence matches production                                                                              | **NONE**           | **NONE**     | BLOCKED |
+| Operations Lead / Incident Commander | **UNASSIGNED** | On-call, recovery, escalation and exercises operational                                                                                     | **NONE**           | **NONE**     | BLOCKED |
+| Accountable executive                | **UNASSIGNED** | Residual risk accepted after all specialist approvals                                                                                       | **NONE**           | **NONE**     | BLOCKED |
 
 Exact external blocker: qualified Legal/Privacy Counsel must approve at least one
 supported launch jurisdiction, controller/processor allocation, marketplace and
 Stripe Connect funds flow, privacy/terms/DPA/publisher documents, retention and
-deletion rules, breach-notification duties, and HIPAA/PHI prohibition. Vendor
+deletion rules, breach-notification duties, and HIPAA/PHI prohibition. If x402 is
+enabled, this also requires facilitator/Base terms and data-flow approval,
+public-chain notice, wallet/funds-flow and regulatory decisions, approved
+retention/deletion exceptions, and an authorized funded end-to-end test. Vendor
 DPAs/account configuration evidence and named human operational signers must also
 exist. None can be supplied or approved by repository work.

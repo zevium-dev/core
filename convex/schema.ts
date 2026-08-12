@@ -216,7 +216,7 @@ export default defineSchema({
     .index("by_operation", ["clerkOrgId", "userId", "operationId"])
     .index("by_active_old_key", ["clerkOrgId", "oldKeyId", "status"]),
 
-  // Catalogue semantic search (embedded on publish; Gemini text-embedding-004)
+  // Catalogue semantic search (embedded on publish; Gemini gemini-embedding-001)
   specEmbeddings: defineTable({
     projectId: v.id("projects"),
     /** Text that was embedded (name + description + tags + endpoint summaries). */

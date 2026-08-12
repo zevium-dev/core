@@ -128,6 +128,11 @@ Decisions made during the build that extend or sharpen the stack decision above:
 - **Admin gate**: platform-admin access is an env allowlist, `ADMIN_USER_IDS` (Clerk subject ids), checked server-side in Convex — no separate roles table
 - **Payouts**: Stripe Connect onboarding replaces free-form payout destinations. Earnings move through pending-risk, available, allocated, transferred, and reversed/failed states; `/admin/payouts` operates failed transfer retries while Stripe payout events project bank-delivery state.
 - **x402**: a stub, not the full rail. Every unauthenticated/invalid-key/insufficient-credit response on the keyless-capable surfaces (`/gateway`, `/mock`) returns a `402` with a machine-readable `actions` envelope (create-key, top-up, docs links) so an agent can self-serve next steps. No payment-header verification via a facilitator yet — that part of the x402 rail is still deferred (see below)
+- **Body handling**: direct `/gateway` requests and responses stream without
+  application buffering. MCP `call_api` reuses the same authenticated, metered
+  pipeline, then buffers its JSON-RPC request and upstream response in Worker
+  memory with explicit 1 MiB limits because MCP tool results embed response text.
+  Neither path persists payload bodies in application tables.
 
 ## What dies from the current repo
 
