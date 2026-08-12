@@ -344,6 +344,7 @@ export const getPublishedForGateway = query({
   ): Promise<{
     spec: string;
     version: string;
+    specVersionId: string;
     projectId: string;
     organizationId: string;
     clerkOrgId: string;
@@ -375,6 +376,7 @@ export const getPublishedForGateway = query({
     return {
       spec: latest.spec,
       version: latest.version,
+      specVersionId: latest._id,
       projectId: project._id,
       organizationId: org._id,
       clerkOrgId: org.clerkOrgId,
@@ -401,6 +403,7 @@ export const getPublishedForGatewayInternal = internalQuery({
   ): Promise<{
     spec: string;
     version: string;
+    specVersionId: string;
     projectId: string;
     organizationId: string;
     clerkOrgId: string;
@@ -436,6 +439,7 @@ export const getPublishedForGatewayInternal = internalQuery({
     return {
       spec: latest.spec,
       version: latest.version,
+      specVersionId: latest._id,
       projectId: project._id,
       organizationId: org._id,
       clerkOrgId: org.clerkOrgId,

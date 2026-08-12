@@ -1,6 +1,12 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 
+const fundingProvenanceSlice = v.object({
+  sourceRef: v.string(),
+  paymentId: v.optional(v.id("payments")),
+  grossCredits: v.number(),
+});
+
 export default defineSchema({
   // Mirror of Clerk orgs (Clerk is auth truth; app data keys off clerkOrgId)
   organizations: defineTable({
@@ -172,6 +178,8 @@ export default defineSchema({
     reversedCredits: v.number(),
     /** Available inventory moved into a derived compacted lot. */
     compactedCredits: v.optional(v.number()),
+    /** Exact roots backing currently available inventory. Optional for rollout. */
+    availableProvenance: v.optional(v.array(fundingProvenanceSlice)),
     state: v.union(
       v.literal("available"),
       v.literal("depleted"),
@@ -230,6 +238,8 @@ export default defineSchema({
     ),
     grossCredits: v.number(),
     clawedBackGrossCredits: v.number(),
+    /** Exact root slices consumed by this immutable debit. */
+    provenance: v.optional(v.array(fundingProvenanceSlice)),
     createdAt: v.number(),
   })
     .index("by_wallet_entry", ["walletEntryId"])
@@ -246,6 +256,8 @@ export default defineSchema({
     walletEntryId: v.id("walletEntries"),
     paymentId: v.id("payments"),
     grossCredits: v.number(),
+    /** Exact payment-root slices removed by this immutable reversal. */
+    provenance: v.optional(v.array(fundingProvenanceSlice)),
     createdAt: v.number(),
   })
     .index("by_wallet_entry", ["walletEntryId"])
@@ -280,17 +292,41 @@ export default defineSchema({
   // Per-call metering events (gateway → Convex, async)
   usageEvents: defineTable({
     organizationId: v.id("organizations"),
+    /** Immutable publisher scope, separate from mutable project ownership. */
+    publisherOrganizationId: v.optional(v.id("organizations")),
     projectId: v.id("projects"),
+    /** Immutable published contract selected by gateway. */
+    specVersionId: v.optional(v.id("specVersions")),
+    specVersion: v.optional(v.string()),
+    operationId: v.optional(v.string()),
     /** Denormalized display identity; missing means legacy/unverified. */
     projectName: v.optional(v.string()),
     projectSlug: v.optional(v.string()),
     endpoint: v.string(),
     method: v.string(),
+    listedCostCredits: v.optional(v.number()),
+    freeTierLimit: v.optional(v.number()),
+    freeTierUsedBefore: v.optional(v.number()),
+    pricingDecision: v.optional(
+      v.union(
+        v.literal("listed_price"),
+        v.literal("free_tier"),
+        v.literal("zero_price"),
+      ),
+    ),
     credits: v.number(),
     status: v.number(),
     latencyMs: v.number(),
     keyId: v.string(),
+    keyFamilyId: v.optional(v.string()),
+    monthlyCapCredits: v.optional(v.number()),
+    budgetPeriod: v.optional(v.string()),
+    budgetUsedBefore: v.optional(v.number()),
+    budgetReservedBefore: v.optional(v.number()),
+    budgetReservationCredits: v.optional(v.number()),
     at: v.number(),
+    reservationId: v.optional(v.string()),
+    settlementIdentityVersion: v.optional(v.literal(2)),
     /**
      * Stable gateway settlement reference (`settle:{reservationId}`).
      * Optional solely for pre-ledger historical analytics rows; every new
@@ -355,6 +391,8 @@ export default defineSchema({
   keySettings: defineTable({
     clerkOrgId: v.string(),
     keyId: v.string(),
+    /** Stable across rotations; settlement identity never follows mutable keys. */
+    keyFamilyId: v.optional(v.string()),
     /** Monthly credit cap; undefined = unlimited. Enforced by the wallet DO. */
     monthlyCapCredits: v.optional(v.number()),
     disabled: v.boolean(),
@@ -457,6 +495,8 @@ export default defineSchema({
       v.literal("processed"),
       v.literal("failed"),
       v.literal("ignored"),
+      v.literal("provider_reconciliation_required"),
+      v.literal("dead_letter"),
     ),
     /** Processing attempts, not duplicate HTTP deliveries. */
     attempts: v.number(),
@@ -474,6 +514,40 @@ export default defineSchema({
     .index("by_object", ["objectId"])
     .index("by_status_next_attempt", ["status", "nextAttemptAt"])
     .index("by_status_lease", ["status", "leaseExpiresAt"]),
+
+  // Durable processing journal for every accepted Stripe event. Lease tokens
+  // reject stale completions; terminal states never strand accepted money.
+  stripeEventOutbox: defineTable({
+    paymentEventId: v.id("paymentEvents"),
+    stripeEventId: v.string(),
+    eventType: v.string(),
+    objectId: v.string(),
+    state: v.union(
+      v.literal("queued"),
+      v.literal("leased"),
+      v.literal("retry_wait"),
+      v.literal("applied"),
+      v.literal("ignored"),
+      v.literal("provider_reconciliation_required"),
+      v.literal("dead_letter"),
+    ),
+    attemptCycle: v.number(),
+    totalAttempts: v.number(),
+    leaseToken: v.optional(v.string()),
+    leaseExpiresAt: v.optional(v.number()),
+    nextAttemptAt: v.optional(v.number()),
+    lastError: v.optional(v.string()),
+    reconciliationReason: v.optional(v.string()),
+    resumedAt: v.optional(v.number()),
+    resumedBy: v.optional(v.string()),
+    appliedAt: v.optional(v.number()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_payment_event", ["paymentEventId"])
+    .index("by_stripe_event", ["stripeEventId"])
+    .index("by_state_next_attempt", ["state", "nextAttemptAt"])
+    .index("by_state_lease", ["state", "leaseExpiresAt"]),
 
   payments: defineTable({
     organizationId: v.id("organizations"),
@@ -496,10 +570,16 @@ export default defineSchema({
     reversalSequence: v.optional(v.number()),
     /** Missing means legacy/unverified. Money mutations require `verified`. */
     financeMigrationStatus: v.optional(
-      v.union(v.literal("building"), v.literal("verified")),
+      v.union(
+        v.literal("building"),
+        v.literal("verified"),
+        v.literal("provider_reconciliation_required"),
+      ),
     ),
     /** Present only while this payment is fenced by a migration job. */
     financeMigrationJobId: v.optional(v.id("financialMigrationJobs")),
+    financeReconciliationReason: v.optional(v.string()),
+    financeReconciledAt: v.optional(v.number()),
     status: v.union(
       v.literal("pending"),
       v.literal("paid"),
@@ -607,6 +687,7 @@ export default defineSchema({
     consumerOrganizationId: v.id("organizations"),
     /** Immutable published project that earned this settlement. */
     projectId: v.optional(v.id("projects")),
+    specVersionId: v.optional(v.id("specVersions")),
     /** Denormalized display identity; missing means legacy/unverified. */
     projectName: v.optional(v.string()),
     projectSlug: v.optional(v.string()),
@@ -747,8 +828,11 @@ export default defineSchema({
         v.literal("publisher_only"),
         v.literal("correlated_v0"),
         v.literal("correlated_v1"),
+        v.literal("correlated_v2"),
       ),
     ),
+    /** Canonical immutable create request, independent of provider retention. */
+    requestFingerprint: v.optional(v.string()),
     status: v.union(
       v.literal("created"),
       v.literal("pending"),
@@ -766,10 +850,43 @@ export default defineSchema({
     .index("by_idempotency_key", ["idempotencyKey"])
     .index("by_stripe_transfer", ["stripeTransferId"]),
 
+  // Persisted before first provider attempt. Unknown outcomes reconcile by
+  // signed request fingerprint; unsafe retries never issue another create.
+  publisherTransferDispatches: defineTable({
+    transferId: v.id("publisherTransfers"),
+    publisherOrganizationId: v.id("organizations"),
+    stripeConnectedAccountId: v.string(),
+    idempotencyKey: v.string(),
+    requestFingerprint: v.string(),
+    state: v.union(
+      v.literal("prepared"),
+      v.literal("leased"),
+      v.literal("ambiguous"),
+      v.literal("provider_verified"),
+      v.literal("provider_reconciliation_required"),
+    ),
+    attemptCount: v.number(),
+    firstAttemptAt: v.optional(v.number()),
+    lastAttemptAt: v.optional(v.number()),
+    safeRetryUntil: v.optional(v.number()),
+    leaseToken: v.optional(v.string()),
+    leaseExpiresAt: v.optional(v.number()),
+    stripeTransferId: v.optional(v.string()),
+    reconciliationReason: v.optional(v.string()),
+    reconciliationPasses: v.optional(v.number()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_transfer", ["transferId"])
+    .index("by_state_updated", ["state", "updatedAt"])
+    .index("by_request_fingerprint", ["requestFingerprint"]),
+
   // Resumable finance-v2 rollout. One versioned checkpoint owns cursors and
   // bounded accumulators; audits are append-only proof of each verified phase.
   financialMigrationJobs: defineTable({
     migrationKey: v.string(),
+    /** Globally visible software-fence generation captured at start. */
+    snapshotFenceToken: v.optional(v.string()),
     status: v.union(
       v.literal("pending"),
       v.literal("running"),
@@ -800,6 +917,9 @@ export default defineSchema({
     accumulatorF: v.optional(v.number()),
     /** Resumable independently recomputed conservation accumulator. */
     verificationState: v.optional(v.string()),
+    /** Hash over independently enumerated final facts, set with verified. */
+    finalWatermark: v.optional(v.string()),
+    finalWatermarkAt: v.optional(v.number()),
     rowsRead: v.number(),
     rowsWritten: v.number(),
     chunks: v.number(),

@@ -33,6 +33,7 @@ type FinancialSeed = {
   consumerOrganizationId: Id<"organizations">;
   publisherOrganizationId: Id<"organizations">;
   projectId: Id<"projects">;
+  specVersionId: Id<"specVersions">;
   paymentId: Id<"payments">;
   earningId: Id<"publisherEarnings">;
 };
@@ -97,7 +98,18 @@ async function seedFinancialPayment(
       visibility: "public",
       tags: [],
     });
-    return { consumerOrganizationId, publisherOrganizationId, projectId };
+    const specVersionId = await ctx.db.insert("specVersions", {
+      projectId,
+      version: "2026-01-01",
+      spec: "{}",
+      publishedAt: 1,
+    });
+    return {
+      consumerOrganizationId,
+      publisherOrganizationId,
+      projectId,
+      specVersionId,
+    };
   });
   const payment = await t.mutation(internal.billing.upsertPaidPayment, {
     stripeCheckoutSessionId: `cs_${suffix}`,
@@ -115,13 +127,24 @@ async function seedFinancialPayment(
       {
         organizationId: seeded.publisherOrganizationId,
         projectId: seeded.projectId,
+        specVersionId: seeded.specVersionId,
+        specVersion: "2026-01-01",
+        operationId: "POST /financial-test",
         endpoint: "/financial-test",
         method: "POST",
+        listedCostCredits: 100,
+        pricingDecision: "listed_price",
         credits: 100,
         status: 200,
         latencyMs: 1,
         keyId: "key_financial_test",
+        keyFamilyId: "key_family_financial_test",
+        budgetPeriod: "2026-08",
+        budgetUsedBefore: 0,
+        budgetReservedBefore: 0,
+        budgetReservationCredits: 100,
         at: 10,
+        reservationId: suffix,
         settleRefId: `settle:${suffix}`,
         consumerClerkOrgId: `org_consumer_${suffix}`,
       },
@@ -260,11 +283,14 @@ describe("Stripe Checkout control plane", () => {
     );
     expect(receipts).toHaveLength(2);
     expect(receipts[0]).toMatchObject({ attempts: 0, deliveries: 2 });
-    expect(
-      await t.mutation(internal.billing.claimStripeEvent, {
-        stripeEventId: "evt_one",
-      }),
-    ).toMatchObject({ eventType: "checkout.session.completed" });
+    const firstClaim = await t.mutation(internal.billing.claimStripeEvent, {
+      stripeEventId: "evt_one",
+    });
+    expect(firstClaim).toMatchObject({
+      eventType: "checkout.session.completed",
+      leaseToken: expect.any(String),
+    });
+    if (firstClaim === null) throw new Error("first event claim missing");
     expect(
       await t.mutation(internal.billing.claimStripeEvent, {
         stripeEventId: "evt_one",
@@ -272,6 +298,7 @@ describe("Stripe Checkout control plane", () => {
     ).toBeNull();
     await t.mutation(internal.billing.failStripeEvent, {
       stripeEventId: "evt_one",
+      leaseToken: firstClaim.leaseToken,
       error: "temporary Stripe outage",
     });
     expect(
@@ -294,14 +321,24 @@ describe("Stripe Checkout control plane", () => {
         .unique();
       if (event === null) throw new Error("event missing");
       await ctx.db.patch(event._id, { nextAttemptAt: 0 });
+      const outbox = await ctx.db
+        .query("stripeEventOutbox")
+        .withIndex("by_stripe_event", (q) => q.eq("stripeEventId", "evt_one"))
+        .unique();
+      if (outbox === null) throw new Error("outbox missing");
+      await ctx.db.patch(outbox._id, { nextAttemptAt: 0 });
     });
-    expect(
-      await t.mutation(internal.billing.claimStripeEvent, {
-        stripeEventId: "evt_one",
-      }),
-    ).toMatchObject({ objectId: "cs_one" });
+    const secondClaim = await t.mutation(internal.billing.claimStripeEvent, {
+      stripeEventId: "evt_one",
+    });
+    expect(secondClaim).toMatchObject({
+      objectId: "cs_one",
+      leaseToken: expect.any(String),
+    });
+    if (secondClaim === null) throw new Error("second event claim missing");
     await t.mutation(internal.billing.finishStripeEvent, {
       stripeEventId: "evt_one",
+      leaseToken: secondClaim.leaseToken,
       status: "processed",
     });
     expect(
@@ -381,10 +418,159 @@ describe("Stripe Checkout control plane", () => {
     );
     expect(replayed).toMatchObject({
       status: "received",
-      attempts: 0,
+      attempts: STRIPE_EVENT_MAX_ATTEMPTS,
       deliveries: 2,
       replayCount: 1,
       lastReplayedBy: "operator",
+    });
+  });
+
+  it("recovers crashed leases, rejects stale completion, and resumes terminal money events", async () => {
+    const t = convexTest(schema, modules);
+    await t.mutation(internal.billing.receiveStripeEvent, {
+      stripeEventId: "evt_lease_crash",
+      stripeAccount: "acct_platform",
+      eventType: "charge.refunded",
+      objectId: "ch_lease_crash",
+    });
+    const first = await t.mutation(internal.billing.claimStripeEvent, {
+      stripeEventId: "evt_lease_crash",
+    });
+    if (first === null) throw new Error("first lease missing");
+    await t.run(async (ctx) => {
+      const event = await ctx.db
+        .query("paymentEvents")
+        .withIndex("by_stripe_event", (q) =>
+          q.eq("stripeEventId", "evt_lease_crash"),
+        )
+        .unique();
+      const outbox = await ctx.db
+        .query("stripeEventOutbox")
+        .withIndex("by_stripe_event", (q) =>
+          q.eq("stripeEventId", "evt_lease_crash"),
+        )
+        .unique();
+      if (event === null || outbox === null) throw new Error("receipt missing");
+      await ctx.db.patch(event._id, { leaseExpiresAt: 0 });
+      await ctx.db.patch(outbox._id, { leaseExpiresAt: 0 });
+    });
+    expect(await t.mutation(internal.billing.recoverStripeEvents, {})).toEqual({
+      scheduled: 1,
+    });
+    let active = await t.mutation(internal.billing.claimStripeEvent, {
+      stripeEventId: "evt_lease_crash",
+    });
+    if (active === null) throw new Error("recovered lease missing");
+    expect(active.leaseToken).not.toBe(first.leaseToken);
+    await t.mutation(internal.billing.finishStripeEvent, {
+      stripeEventId: "evt_lease_crash",
+      leaseToken: first.leaseToken,
+      status: "processed",
+    });
+    expect(
+      await t.run(async (ctx) =>
+        ctx.db
+          .query("paymentEvents")
+          .withIndex("by_stripe_event", (q) =>
+            q.eq("stripeEventId", "evt_lease_crash"),
+          )
+          .unique(),
+      ),
+    ).toMatchObject({ status: "processing", attempts: 2 });
+
+    for (let attempt = 2; attempt <= STRIPE_EVENT_MAX_ATTEMPTS; attempt += 1) {
+      await t.mutation(internal.billing.failStripeEvent, {
+        stripeEventId: "evt_lease_crash",
+        leaseToken: active.leaseToken,
+        error: `crash-${attempt}`,
+      });
+      if (attempt === STRIPE_EVENT_MAX_ATTEMPTS) break;
+      await t.run(async (ctx) => {
+        const event = await ctx.db
+          .query("paymentEvents")
+          .withIndex("by_stripe_event", (q) =>
+            q.eq("stripeEventId", "evt_lease_crash"),
+          )
+          .unique();
+        const outbox = await ctx.db
+          .query("stripeEventOutbox")
+          .withIndex("by_stripe_event", (q) =>
+            q.eq("stripeEventId", "evt_lease_crash"),
+          )
+          .unique();
+        if (event === null || outbox === null)
+          throw new Error("retry receipt missing");
+        await ctx.db.patch(event._id, { nextAttemptAt: 0 });
+        await ctx.db.patch(outbox._id, { nextAttemptAt: 0 });
+      });
+      active = await t.mutation(internal.billing.claimStripeEvent, {
+        stripeEventId: "evt_lease_crash",
+      });
+      if (active === null) throw new Error("retry lease missing");
+    }
+
+    await t.mutation(internal.billing.receiveStripeEvent, {
+      stripeEventId: "evt_lease_crash",
+      stripeAccount: "acct_platform",
+      eventType: "charge.refunded",
+      objectId: "ch_lease_crash",
+    });
+    const prior = process.env.ADMIN_USER_IDS;
+    process.env.ADMIN_USER_IDS = "operator";
+    const operator = t.withIdentity({ subject: "operator" } as {
+      subject: string;
+    });
+    try {
+      expect(
+        await operator.query(api.billing.listStripeReconciliationQueue, {}),
+      ).toEqual([
+        expect.objectContaining({
+          stripeEventId: "evt_lease_crash",
+          state: "provider_reconciliation_required",
+          attemptCycle: STRIPE_EVENT_MAX_ATTEMPTS,
+          totalAttempts: STRIPE_EVENT_MAX_ATTEMPTS,
+        }),
+      ]);
+      await operator.mutation(api.billing.replayStripeEvent, {
+        stripeEventId: "evt_lease_crash",
+      });
+    } finally {
+      if (prior === undefined) delete process.env.ADMIN_USER_IDS;
+      else process.env.ADMIN_USER_IDS = prior;
+    }
+    const resumed = await t.mutation(internal.billing.claimStripeEvent, {
+      stripeEventId: "evt_lease_crash",
+    });
+    if (resumed === null) throw new Error("resumed lease missing");
+    await t.mutation(internal.billing.finishStripeEvent, {
+      stripeEventId: "evt_lease_crash",
+      leaseToken: resumed.leaseToken,
+      status: "processed",
+    });
+    const terminal = await t.run(async (ctx) => ({
+      event: await ctx.db
+        .query("paymentEvents")
+        .withIndex("by_stripe_event", (q) =>
+          q.eq("stripeEventId", "evt_lease_crash"),
+        )
+        .unique(),
+      outbox: await ctx.db
+        .query("stripeEventOutbox")
+        .withIndex("by_stripe_event", (q) =>
+          q.eq("stripeEventId", "evt_lease_crash"),
+        )
+        .unique(),
+    }));
+    expect(terminal.event).toMatchObject({
+      status: "processed",
+      attempts: STRIPE_EVENT_MAX_ATTEMPTS + 1,
+      deliveries: 2,
+      replayCount: 1,
+    });
+    expect(terminal.outbox).toMatchObject({
+      state: "applied",
+      attemptCycle: 1,
+      totalAttempts: STRIPE_EVENT_MAX_ATTEMPTS + 1,
     });
   });
 
@@ -1112,13 +1298,24 @@ describe("Stripe Checkout control plane", () => {
         {
           organizationId: seed.publisherOrganizationId,
           projectId: seed.projectId,
+          specVersionId: seed.specVersionId,
+          specVersion: "2026-01-01",
+          operationId: "POST /financial-test",
           endpoint: "/financial-test",
           method: "POST",
+          listedCostCredits: 109_900,
+          pricingDecision: "listed_price",
           credits: 109_900,
           status: 200,
           latencyMs: 1,
           keyId: "key_financial_test",
+          keyFamilyId: "key_family_financial_test",
+          budgetPeriod: "2026-08",
+          budgetUsedBefore: 0,
+          budgetReservedBefore: 0,
+          budgetReservationCredits: 109_900,
           at: 20,
+          reservationId: "paid-clawback-scale",
           settleRefId: "settle:paid-clawback-scale",
           consumerClerkOrgId: "org_consumer_paid_clawback",
         },
@@ -1160,7 +1357,8 @@ describe("Stripe Checkout control plane", () => {
         platformAccountId: transfer.platformAccountId,
         correlationNonce: transfer.correlationNonce,
         correlationHmac: transfer.correlationHmac,
-        metadataRepairVersion: 1,
+        metadataRepairVersion: 2,
+        requestFingerprint: transfer.requestFingerprint,
         failed: false,
       });
     } finally {
@@ -1198,13 +1396,24 @@ describe("Stripe Checkout control plane", () => {
         {
           organizationId: seed.publisherOrganizationId,
           projectId: seed.projectId,
+          specVersionId: seed.specVersionId,
+          specVersion: "2026-01-01",
+          operationId: "POST /financial-test",
           endpoint: "/financial-test",
           method: "POST",
+          listedCostCredits: 100,
+          pricingDecision: "listed_price",
           credits: 100,
           status: 200,
           latencyMs: 1,
           keyId: "key_financial_test",
+          keyFamilyId: "key_family_financial_test",
+          budgetPeriod: "2026-08",
+          budgetUsedBefore: 0,
+          budgetReservedBefore: 0,
+          budgetReservationCredits: 100,
           at: 30,
+          reservationId: "future-after-debt",
           settleRefId: "settle:future-after-debt",
           consumerClerkOrgId: "org_consumer_paid_clawback",
         },

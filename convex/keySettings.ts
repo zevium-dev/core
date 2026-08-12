@@ -27,6 +27,7 @@ import { requireIdentity, requireOrgAdmin } from "./lib/auth";
 export type KeySettingView = {
   _id: Id<"keySettings">;
   keyId: string;
+  keyFamilyId: string;
   /** Absent = unlimited. */
   monthlyCapCredits?: number;
   disabled: boolean;
@@ -38,6 +39,7 @@ export type KeySettingView = {
 
 export type GatewayKeySettingRow = {
   keyId: string;
+  keyFamilyId: string;
   monthlyCapCredits?: number;
   disabled: boolean;
   rotatedFromKeyId?: string;
@@ -48,6 +50,7 @@ function toView(doc: Doc<"keySettings">): KeySettingView {
   return {
     _id: doc._id,
     keyId: doc.keyId,
+    keyFamilyId: doc.keyFamilyId ?? doc.keyId,
     monthlyCapCredits: doc.monthlyCapCredits,
     disabled: doc.disabled,
     rotatedFromKeyId: doc.rotatedFromKeyId,
@@ -59,6 +62,7 @@ function toView(doc: Doc<"keySettings">): KeySettingView {
 export function toGatewayRow(doc: Doc<"keySettings">): GatewayKeySettingRow {
   return {
     keyId: doc.keyId,
+    keyFamilyId: doc.keyFamilyId ?? doc.keyId,
     monthlyCapCredits: doc.monthlyCapCredits,
     disabled: doc.disabled,
     rotatedFromKeyId: doc.rotatedFromKeyId,
@@ -123,6 +127,7 @@ async function insertSetting(
   const id = await ctx.db.insert("keySettings", {
     clerkOrgId,
     keyId,
+    keyFamilyId: patch.keyFamilyId ?? keyId,
     disabled: patch.disabled ?? false,
     updatedAt: now,
     ...(patch.monthlyCapCredits !== undefined
@@ -139,6 +144,7 @@ async function insertSetting(
 }
 
 type UpsertPatch = {
+  keyFamilyId?: string;
   monthlyCapCredits?: number;
   disabled?: boolean;
   rotatedFromKeyId?: string;
@@ -350,6 +356,7 @@ export const completeRotation = mutation({
     });
     await upsertSetting(ctx, claims.orgId, args.newKeyId, {
       rotatedFromKeyId: args.oldKeyId,
+      keyFamilyId: oldDoc.keyFamilyId ?? oldDoc.keyId,
     });
     await ctx.db.patch(op._id, {
       status: "completed",

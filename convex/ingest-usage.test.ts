@@ -13,6 +13,7 @@ type SeededWallet = {
   consumerOrganizationId: Id<"organizations">;
   publisherOrganizationId: Id<"organizations">;
   projectId: Id<"projects">;
+  specVersionId: Id<"specVersions">;
   paymentId: Id<"payments">;
 };
 
@@ -92,10 +93,25 @@ async function seedWallet(t: TestConvex<typeof schema>): Promise<SeededWallet> {
       )
       .unique();
     if (project === null) throw new Error("Failed to seed project");
+    const specVersionId = await ctx.db.insert("specVersions", {
+      projectId: project._id,
+      version: "1.0.0",
+      spec: JSON.stringify({
+        openapi: "3.1.0",
+        info: { title: "Publisher API", version: "1.0.0" },
+        paths: {
+          "/forecast": {
+            get: { operationId: "getForecast", "x-zevium-cost": 15 },
+          },
+        },
+      }),
+      publishedAt: 1,
+    });
     return {
       consumerOrganizationId,
       publisherOrganizationId,
       projectId: project._id,
+      specVersionId,
       paymentId,
     };
   });
@@ -105,13 +121,24 @@ function usageEvent(seed: SeededWallet, refId: string, credits = 15) {
   return {
     organizationId: seed.publisherOrganizationId,
     projectId: seed.projectId,
+    specVersionId: seed.specVersionId,
+    specVersion: "1.0.0",
+    operationId: "getForecast",
     endpoint: "/forecast",
     method: "GET",
+    listedCostCredits: credits,
+    pricingDecision: "listed_price" as const,
     credits,
     status: 200,
     latencyMs: 10,
     keyId: "key_test",
+    keyFamilyId: "key_family_test",
+    budgetPeriod: "2026-08",
+    budgetUsedBefore: 0,
+    budgetReservedBefore: 0,
+    budgetReservationCredits: credits,
     at: 10,
+    reservationId: refId.replace(/^settle:/, ""),
     settleRefId: refId,
     consumerClerkOrgId: "org_consumer",
   };

@@ -89,6 +89,41 @@ describe("WalletDO key controls — reserve enforcement", () => {
     expect(r3.status).toBe("reserved");
   });
 
+  it("charges settlement to immutable reservation month across month rollover", async () => {
+    const stub = walletStub("key-cap-reservation-month");
+    await seed(stub, {
+      grants: [{ refId: "g1", amount: 1_000 }],
+      keySettings: [{ keyId: "k1", disabled: false, monthlyCapCredits: 100 }],
+    });
+    const january = Date.UTC(2026, 0, 31, 23, 59, 59);
+    expect(
+      (
+        await stub.reserve("r-january", 100, {
+          keyId: "k1",
+          clerkOrgId: ORG,
+          nowMs: january,
+        })
+      ).status,
+    ).toBe("reserved");
+    await stub.settle("r-january", {
+      organizationId: "orgs/publisher",
+      projectId: "projects/api",
+      endpoint: "/v1/work",
+      method: "POST",
+      status: 200,
+      latencyMs: 1,
+      keyId: "untrusted-overwritten-key",
+    });
+
+    expect(
+      await stub.reserve("r-january-over-cap", 1, {
+        keyId: "k1",
+        clerkOrgId: ORG,
+        nowMs: january,
+      }),
+    ).toEqual({ status: "rejected", reason: "key_cap_exceeded" });
+  });
+
   it("counts active reservations plus requested cost at the cap boundary", async () => {
     const stub = walletStub("key-cap-concurrent");
     await seed(stub, {

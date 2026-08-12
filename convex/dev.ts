@@ -7,6 +7,7 @@ import { internalMutation } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
 import { validateOpenApiSpec } from "./lib/validate";
+import { assertFinanceMigrationAllowsRuntime } from "./lib/financeMigrationGate";
 
 // ---------------------------------------------------------------------------
 // cleanupTestProjects
@@ -38,6 +39,7 @@ export type CleanupCounts = {
 export const cleanupTestProjects = internalMutation({
   args: {},
   handler: async (ctx): Promise<CleanupCounts> => {
+    await assertFinanceMigrationAllowsRuntime(ctx);
     const allProjects = await ctx.db.query("projects").collect();
     const junk = allProjects.filter((p) => isJunkSlug(p.slug));
 
@@ -51,6 +53,13 @@ export const cleanupTestProjects = internalMutation({
     };
 
     for (const project of junk) {
+      const usage = await ctx.db
+        .query("usageEvents")
+        .withIndex("by_project", (q) => q.eq("projectId", project._id))
+        .first();
+      if (usage !== null) {
+        throw new Error("Junk project has immutable finance history");
+      }
       const specRow = await ctx.db
         .query("specs")
         .withIndex("by_project", (q) => q.eq("projectId", project._id))

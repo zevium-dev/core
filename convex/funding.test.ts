@@ -11,6 +11,7 @@ type Seed = {
   consumerId: Id<"organizations">;
   publisherId: Id<"organizations">;
   projectId: Id<"projects">;
+  specVersionId: Id<"specVersions">;
 };
 
 async function seed(
@@ -36,6 +37,12 @@ async function seed(
       visibility: "public",
       tags: [],
     });
+    const specVersionId = await ctx.db.insert("specVersions", {
+      projectId,
+      version: "2026-01-01",
+      spec: "{}",
+      publishedAt: 1,
+    });
     await ctx.db.insert("wallets", {
       organizationId: consumerId,
       balance: 0,
@@ -50,7 +57,7 @@ async function seed(
       requirements: [],
       updatedAt: Date.now(),
     });
-    return { consumerId, publisherId, projectId };
+    return { consumerId, publisherId, projectId, specVersionId };
   });
 }
 
@@ -92,16 +99,28 @@ async function grantPayment(
 }
 
 function usage(seed: Seed, refId: string, credits: number) {
+  const reservationId = refId.slice("settle:".length);
   return {
     organizationId: seed.publisherId,
     projectId: seed.projectId,
+    specVersionId: seed.specVersionId,
+    specVersion: "2026-01-01",
+    operationId: "POST /v1/work",
     endpoint: "/v1/work",
     method: "POST",
+    listedCostCredits: credits,
+    pricingDecision: credits === 0 ? ("zero_price" as const) : ("listed_price" as const),
     credits,
     status: 200,
     latencyMs: 12,
     keyId: "key_test",
+    keyFamilyId: "key_family_test",
+    budgetPeriod: "2026-08",
+    budgetUsedBefore: 0,
+    budgetReservedBefore: 0,
+    budgetReservationCredits: credits,
     at: Date.now(),
+    reservationId,
     settleRefId: refId,
     consumerClerkOrgId: `org_consumer_${refId.split(":")[1]}`,
   };
@@ -128,26 +147,22 @@ describe("universal wallet funding", () => {
     const result = await t.run(async (ctx) => {
       const allocations = await ctx.db
         .query("walletFundingAllocations")
-        .withIndex("by_payment_created", (q) =>
-          q.eq("paymentId", firstPaymentId),
-        )
-        .collect();
-      const second = await ctx.db
-        .query("walletFundingAllocations")
-        .withIndex("by_payment_created", (q) =>
-          q.eq("paymentId", secondPaymentId),
-        )
         .collect();
       const lots = await ctx.db.query("walletFundingLots").collect();
-      return { allocations, second, lots };
+      return { allocations, lots };
     });
-    expect(result.allocations.map((row) => row.grossCredits)).toEqual([100]);
-    expect(result.second.map((row) => row.grossCredits)).toEqual([50]);
+    expect(result.allocations).toHaveLength(1);
+    expect(result.allocations[0]).toMatchObject({
+      grossCredits: 150,
+      provenance: [
+        { paymentId: firstPaymentId, grossCredits: 100 },
+        { paymentId: secondPaymentId, grossCredits: 50 },
+      ],
+    });
+    expect(result.allocations[0]?.paymentId).toBeUndefined();
     expect(
-      result.lots
-        .filter((lot) => lot.paymentId === secondPaymentId)
-        .map((lot) => lot.availableCredits),
-    ).toEqual([50]);
+      result.lots.reduce((sum, lot) => sum + lot.availableCredits, 0),
+    ).toBe(50);
   });
 
   it("cannot use a new grant to repair a stale funding watermark", async () => {
@@ -371,7 +386,14 @@ describe("universal wallet funding", () => {
     };
     await t.mutation(internal.wallets.recordUsage, { events: [event] });
     const replay = await t.mutation(internal.wallets.recordUsage, {
-      events: [{ ...event, credits: 11 }],
+      events: [
+        {
+          ...event,
+          credits: 11,
+          listedCostCredits: 11,
+          budgetReservationCredits: 11,
+        },
+      ],
     });
     expect(replay.results).toEqual([
       {
@@ -387,6 +409,86 @@ describe("universal wallet funding", () => {
       ledger: (await ctx.db.query("walletEntries").collect()).length,
     }));
     expect(counts).toEqual({ usage: 1, earnings: 1, ledger: 2 });
+  });
+
+  it("fingerprints immutable spec, operation, pricing, and key-budget facts", async () => {
+    const t = convexTest(schema, modules);
+    const s = await seed(t, "fingerprint");
+    await grantPayment(t, s, "fingerprint_payment", 100);
+    const alternateSpecVersionId = await t.run(
+      async (ctx) =>
+        await ctx.db.insert("specVersions", {
+          projectId: s.projectId,
+          version: "2026-02-01",
+          spec: "{}",
+          publishedAt: 2,
+        }),
+    );
+    const event = {
+      ...usage(s, "settle:fingerprint", 10),
+      consumerClerkOrgId: "org_consumer_fingerprint",
+      monthlyCapCredits: 1_000,
+      publisherIdempotencyKey: "publisher-call-1",
+    };
+    expect(
+      await t.mutation(internal.wallets.recordUsage, { events: [event] }),
+    ).toMatchObject({ results: [{ status: "applied" }] });
+
+    const variants = [
+      { ...event, operationId: "POST /v1/other" },
+      { ...event, endpoint: "/v1/other" },
+      { ...event, method: "PUT" },
+      {
+        ...event,
+        specVersionId: alternateSpecVersionId,
+        specVersion: "2026-02-01",
+      },
+      {
+        ...event,
+        listedCostCredits: 11,
+        credits: 11,
+        budgetReservationCredits: 11,
+      },
+      {
+        ...event,
+        freeTierLimit: 5,
+        freeTierUsedBefore: 0,
+        pricingDecision: "free_tier" as const,
+        credits: 0,
+        budgetReservationCredits: 0,
+      },
+      { ...event, keyId: "key_rotated" },
+      { ...event, keyFamilyId: "key_family_other" },
+      { ...event, monthlyCapCredits: 2_000 },
+      { ...event, budgetPeriod: "2026-09" },
+      { ...event, budgetUsedBefore: 10 },
+      { ...event, budgetReservedBefore: 10 },
+      { ...event, status: 201 },
+      { ...event, latencyMs: 13 },
+      { ...event, at: event.at + 1 },
+      { ...event, publisherIdempotencyKey: "publisher-call-2" },
+    ];
+    for (const variant of variants) {
+      const replay = await t.mutation(internal.wallets.recordUsage, {
+        events: [variant],
+      });
+      expect(replay.results).toEqual([
+        {
+          refId: event.settleRefId,
+          status: "rejected",
+          reason: "settlement replay changed immutable payload or linkage",
+          retryable: false,
+        },
+      ]);
+    }
+    const counts = await t.run(async (ctx) => ({
+      usage: (await ctx.db.query("usageEvents").collect()).length,
+      earnings: (await ctx.db.query("publisherEarnings").collect()).length,
+      settlements: (await ctx.db.query("walletEntries").collect()).filter(
+        (entry) => entry.kind === "usage_settlement",
+      ).length,
+    }));
+    expect(counts).toEqual({ usage: 1, earnings: 1, settlements: 1 });
   });
 
   it("validates publisher and project ownership before duplicate acceptance", async () => {
@@ -412,11 +514,21 @@ describe("universal wallet funding", () => {
         visibility: "public",
         tags: [],
       });
-      return { organizationId, projectId };
+      const specVersionId = await ctx.db.insert("specVersions", {
+        projectId,
+        version: "2026-01-01",
+        spec: "{}",
+        publishedAt: 1,
+      });
+      return { organizationId, projectId, specVersionId };
     });
     for (const replay of [
       { ...event, organizationId: other.organizationId },
-      { ...event, projectId: other.projectId },
+      {
+        ...event,
+        projectId: other.projectId,
+        specVersionId: other.specVersionId,
+      },
     ]) {
       expect(
         (await t.mutation(internal.wallets.recordUsage, { events: [replay] }))
@@ -644,6 +756,138 @@ describe("universal wallet funding", () => {
       counts.allocations.reduce((sum, row) => sum + row.grossCredits, 0),
     ).toBe(17);
   });
+
+  it("compacts 25 distinct refundable roots without starving debit or refund", async () => {
+    const t = convexTest(schema, modules);
+    const s = await seed(t, "twenty-five");
+    const paymentIds: Id<"payments">[] = [];
+    for (let index = 0; index < 25; index += 1) {
+      paymentIds.push(
+        await grantPayment(t, s, `twenty_five_${index}`, 1),
+      );
+    }
+    const settlement = await t.mutation(internal.wallets.recordUsage, {
+      events: [
+        {
+          ...usage(s, "settle:twenty-five", 24),
+          consumerClerkOrgId: "org_consumer_twenty-five",
+        },
+      ],
+    });
+    expect(settlement.results).toEqual([
+      { refId: "settle:twenty-five", status: "applied" },
+    ]);
+
+    await t.mutation(internal.billing.applyRefundProjection, {
+      stripeRefundId: "re_twenty_five_unspent",
+      stripeChargeId: "ch_twenty_five_24",
+      refundAmount: 1_000,
+      totalRefundedAmount: 1_000,
+      status: "succeeded",
+    });
+    await t.mutation(internal.billing.applyRefundProjection, {
+      stripeRefundId: "re_twenty_five_consumed",
+      stripeChargeId: "ch_twenty_five_0",
+      refundAmount: 1_000,
+      totalRefundedAmount: 1_000,
+      status: "succeeded",
+    });
+    for (let chunk = 0; chunk < 10; chunk += 1) {
+      const result = await t.mutation(
+        internal.billing.processPublisherReconciliation,
+        { paymentId: paymentIds[0]! },
+      );
+      if (result.complete) break;
+    }
+
+    const state = await t.run(async (ctx) => ({
+      wallet: await ctx.db
+        .query("wallets")
+        .withIndex("by_organization", (q) =>
+          q.eq("organizationId", s.consumerId),
+        )
+        .unique(),
+      funding: await ctx.db.query("walletFundingStates").unique(),
+      lots: await ctx.db.query("walletFundingLots").collect(),
+      allocations: await ctx.db.query("walletFundingAllocations").collect(),
+      reversals: await ctx.db.query("walletFundingReversals").collect(),
+      clawbacks: await ctx.db.query("publisherClawbacks").collect(),
+    }));
+    expect(state.wallet).toMatchObject({ balance: 0, sequence: 27 });
+    expect(state.funding).toMatchObject({
+      nonrefundableAvailableCredits: 0,
+      refundableAvailableCredits: 0,
+      allocatedCredits: 24,
+      reversedCredits: 1,
+    });
+    expect(state.lots.filter((lot) => lot.state === "available")).toEqual([]);
+    expect(state.allocations).toHaveLength(1);
+    expect(state.allocations[0]?.provenance).toHaveLength(24);
+    expect(state.reversals).toEqual([
+      expect.objectContaining({
+        paymentId: paymentIds[24],
+        grossCredits: 1,
+      }),
+    ]);
+    expect(state.clawbacks).toEqual([
+      expect.objectContaining({
+        paymentId: paymentIds[0],
+        grossCredits: 1,
+        state: "active",
+      }),
+    ]);
+  });
+
+  it(
+    "preserves 1001 source slices while active lot and debit fan-out stay bounded",
+    { timeout: 60_000 },
+    async () => {
+      const t = convexTest(schema, modules);
+      const s = await seed(t, "thousand-roots");
+      for (let index = 0; index < 1_001; index += 1) {
+        await t.mutation(internal.wallets.applyAdminAdjustment, {
+          organizationId: s.consumerId,
+          amount: 1,
+          refId: `promo:thousand-roots:${index}`,
+          promotion: true,
+        });
+      }
+      await t.mutation(internal.wallets.applyAdminAdjustment, {
+        organizationId: s.consumerId,
+        amount: -1_001,
+        refId: "admin:thousand-roots:debit",
+      });
+      const state = await t.run(async (ctx) => ({
+        wallet: await ctx.db
+          .query("wallets")
+          .withIndex("by_organization", (q) =>
+            q.eq("organizationId", s.consumerId),
+          )
+          .unique(),
+        lots: await ctx.db.query("walletFundingLots").collect(),
+        components: await ctx.db
+          .query("walletFundingLotComponents")
+          .collect(),
+        allocations: await ctx.db
+          .query("walletFundingAllocations")
+          .collect(),
+      }));
+      expect(state.wallet).toMatchObject({ balance: 0, sequence: 1_002 });
+      expect(state.lots.filter((lot) => lot.state === "available")).toEqual(
+        [],
+      );
+      expect(state.components).toHaveLength(2_000);
+      expect(state.allocations).toHaveLength(1);
+      expect(state.allocations[0]).toMatchObject({ grossCredits: 1_001 });
+      expect(state.allocations[0]?.provenance).toHaveLength(1_001);
+      expect(
+        state.allocations[0]?.provenance?.reduce(
+          (sum, slice) => sum + slice.grossCredits,
+          0,
+        ),
+      ).toBe(1_001);
+    },
+  );
 
   it("reconciles a million-credit source through fixed eight-row journal chunks", async () => {
     const t = convexTest(schema, modules);

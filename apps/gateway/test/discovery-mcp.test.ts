@@ -95,6 +95,8 @@ async function installAgentFixtures(opts: {
   const specs = new FixtureSpecSource();
   specs.set(ORG_SLUG, PROJECT_SLUG, {
     spec: SPEC,
+    specVersionId: "spec_version_demo_v1",
+    version: "1.0.0",
     projectId: "proj_demo",
     organizationId: CONVEX_ORG,
     clerkOrgId: opts.clerkOrgId,

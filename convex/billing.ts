@@ -314,6 +314,7 @@ export const setStripeCustomer = internalMutation({
     stripeCustomerId: v.string(),
   },
   handler: async (ctx, args): Promise<string> => {
+    await assertFinanceMigrationAllowsRuntime(ctx);
     const intent = await ctx.db.get(args.checkoutIntentId);
     if (intent === null) throw new Error("Checkout intent not found");
     const profile = await ctx.db
@@ -343,6 +344,7 @@ export const attachCheckoutSession = internalMutation({
     stripeCheckoutSessionId: v.string(),
   },
   handler: async (ctx, args): Promise<void> => {
+    await assertFinanceMigrationAllowsRuntime(ctx);
     const intent = await ctx.db.get(args.checkoutIntentId);
     if (intent === null) throw new Error("Checkout intent not found");
     if (
@@ -365,6 +367,7 @@ export const markCheckoutIntentTerminal = internalMutation({
     status: v.union(v.literal("failed"), v.literal("expired")),
   },
   handler: async (ctx, args): Promise<void> => {
+    await assertFinanceMigrationAllowsRuntime(ctx);
     const intent = await ctx.db
       .query("checkoutIntents")
       .withIndex("by_checkout_session", (q) =>
@@ -462,6 +465,100 @@ function stripeRetryDelay(attempts: number): number {
   ];
 }
 
+export function stripeEventRequiresProviderReconciliation(
+  eventType: string,
+): boolean {
+  return (
+    eventType.startsWith("checkout.session.") ||
+    eventType.startsWith("payment_intent.") ||
+    eventType === "charge.refunded" ||
+    eventType.startsWith("refund.") ||
+    eventType.startsWith("charge.dispute.") ||
+    eventType.startsWith("transfer.") ||
+    eventType.startsWith("payout.")
+  );
+}
+
+async function getStripeOutbox(
+  ctx: MutationCtx,
+  stripeEventId: string,
+): Promise<Doc<"stripeEventOutbox"> | null> {
+  return await ctx.db
+    .query("stripeEventOutbox")
+    .withIndex("by_stripe_event", (q) => q.eq("stripeEventId", stripeEventId))
+    .unique();
+}
+
+async function ensureStripeOutbox(
+  ctx: MutationCtx,
+  event: Doc<"paymentEvents">,
+): Promise<Doc<"stripeEventOutbox">> {
+  const existing = await getStripeOutbox(ctx, event.stripeEventId);
+  if (existing !== null) {
+    if (
+      existing.paymentEventId !== event._id ||
+      existing.eventType !== event.eventType ||
+      existing.objectId !== event.objectId
+    ) {
+      throw new Error("Stripe outbox immutable receipt facts changed");
+    }
+    return existing;
+  }
+  const terminalState =
+    event.status === "processed"
+      ? ("applied" as const)
+      : event.status === "ignored"
+        ? ("ignored" as const)
+        : event.status === "provider_reconciliation_required"
+          ? ("provider_reconciliation_required" as const)
+          : event.status === "dead_letter"
+            ? ("dead_letter" as const)
+            : event.status === "failed" &&
+                event.attempts >= STRIPE_EVENT_MAX_ATTEMPTS
+              ? stripeEventRequiresProviderReconciliation(event.eventType)
+                ? ("provider_reconciliation_required" as const)
+                : ("dead_letter" as const)
+              : event.status === "failed"
+                ? ("retry_wait" as const)
+            : ("queued" as const);
+  const now = Date.now();
+  const id = await ctx.db.insert("stripeEventOutbox", {
+    paymentEventId: event._id,
+    stripeEventId: event.stripeEventId,
+    eventType: event.eventType,
+    objectId: event.objectId,
+    state: terminalState,
+    attemptCycle:
+      event.status === "received" ? 0 : Math.min(event.attempts, STRIPE_EVENT_MAX_ATTEMPTS),
+    totalAttempts: event.attempts,
+    lastError: event.lastError,
+    reconciliationReason:
+      terminalState === "provider_reconciliation_required" ||
+      terminalState === "dead_letter"
+        ? event.lastError
+        : undefined,
+    nextAttemptAt:
+      terminalState === "retry_wait" ? (event.nextAttemptAt ?? now) : undefined,
+    appliedAt: event.processedAt,
+    createdAt: event.receivedAt,
+    updatedAt: now,
+  });
+  const created = await ctx.db.get(id);
+  if (created === null) throw new Error("Stripe outbox creation failed");
+  if (
+    event.status === "failed" &&
+    (terminalState === "provider_reconciliation_required" ||
+      terminalState === "dead_letter")
+  ) {
+    await ctx.db.patch(event._id, {
+      status: terminalState,
+      nextAttemptAt: undefined,
+      leaseExpiresAt: undefined,
+    });
+  }
+  return created;
+}
+
 export const receiveStripeEvent = internalMutation({
   args: {
     stripeEventId: v.string(),
@@ -473,6 +570,10 @@ export const receiveStripeEvent = internalMutation({
     ctx,
     args,
   ): Promise<{ isNew: boolean; scheduled: boolean }> => {
+    // Migration must either see an accepted receipt or reject its transaction
+    // so Stripe retries it later. Never admit a post-fence row that cannot be
+    // included in the stable global watermark.
+    await assertFinanceMigrationAllowsRuntime(ctx);
     if (
       args.stripeEventId.trim() === "" ||
       args.stripeAccount.trim() === "" ||
@@ -498,12 +599,13 @@ export const receiveStripeEvent = internalMutation({
       await ctx.db.patch(existing._id, {
         deliveries: existing.deliveries + 1,
       });
+      await ensureStripeOutbox(ctx, existing);
       // HTTP redelivery is evidence, not operator intent. It must never reset
       // attempts, skip backoff, or revive poison receipts. Cron owns recovery.
       return { isNew: false, scheduled: false };
     }
     const now = Date.now();
-    await ctx.db.insert("paymentEvents", {
+    const paymentEventId = await ctx.db.insert("paymentEvents", {
       stripeEventId: args.stripeEventId,
       stripeAccount: args.stripeAccount,
       eventType: args.eventType,
@@ -512,6 +614,17 @@ export const receiveStripeEvent = internalMutation({
       attempts: 0,
       deliveries: 1,
       receivedAt: now,
+    });
+    await ctx.db.insert("stripeEventOutbox", {
+      paymentEventId,
+      stripeEventId: args.stripeEventId,
+      eventType: args.eventType,
+      objectId: args.objectId,
+      state: "queued",
+      attemptCycle: 0,
+      totalAttempts: 0,
+      createdAt: now,
+      updatedAt: now,
     });
     // Scheduler write commits atomically with receipt. Returning 200 now means
     // event is durably queued, not merely stored and forgotten.
@@ -522,7 +635,7 @@ export const receiveStripeEvent = internalMutation({
   },
 });
 
-/** Explicit platform-operator recovery for an exhausted poison receipt. */
+/** Explicit operator resume. Cumulative attempts remain immutable evidence. */
 export const replayStripeEvent = mutation({
   args: { stripeEventId: v.string() },
   handler: async (ctx, args): Promise<{ scheduled: true }> => {
@@ -534,13 +647,36 @@ export const replayStripeEvent = mutation({
       )
       .unique();
     if (event === null) throw new Error("Stripe event not found");
-    if (event.status !== "failed") {
-      throw new Error("Only failed Stripe events can be replayed");
+    if (
+      event.status !== "failed" &&
+      event.status !== "provider_reconciliation_required" &&
+      event.status !== "dead_letter"
+    ) {
+      throw new Error("Only blocked Stripe events can be resumed");
     }
     const now = Date.now();
+    const outbox = await ensureStripeOutbox(ctx, event);
+    if (
+      outbox.state !== "retry_wait" &&
+      outbox.state !== "provider_reconciliation_required" &&
+      outbox.state !== "dead_letter"
+    ) {
+      throw new Error("Stripe event outbox is not resumable");
+    }
+    await ctx.db.patch(outbox._id, {
+      state: "queued",
+      attemptCycle: 0,
+      leaseToken: undefined,
+      leaseExpiresAt: undefined,
+      nextAttemptAt: undefined,
+      lastError: undefined,
+      reconciliationReason: undefined,
+      resumedAt: now,
+      resumedBy: claims.subject,
+      updatedAt: now,
+    });
     await ctx.db.patch(event._id, {
       status: "received",
-      attempts: 0,
       nextAttemptAt: undefined,
       leaseExpiresAt: undefined,
       lastError: undefined,
@@ -566,30 +702,71 @@ export const claimStripeEvent = internalMutation({
       .unique();
     if (event === null) return null;
     const now = Date.now();
-    if (event.status === "processed" || event.status === "ignored") return null;
-    if (event.attempts >= STRIPE_EVENT_MAX_ATTEMPTS) return null;
-    if (event.status === "processing" && (event.leaseExpiresAt ?? 0) > now) {
-      return null;
-    }
+    const outbox = await ensureStripeOutbox(ctx, event);
     if (
-      event.status === "failed" &&
-      (event.attempts >= STRIPE_EVENT_MAX_ATTEMPTS ||
-        (event.nextAttemptAt ?? 0) > now)
+      outbox.state === "applied" ||
+      outbox.state === "ignored" ||
+      outbox.state === "provider_reconciliation_required" ||
+      outbox.state === "dead_letter"
     ) {
       return null;
     }
+    if (outbox.state === "leased" && (outbox.leaseExpiresAt ?? 0) > now) {
+      return null;
+    }
+    if (
+      outbox.state === "retry_wait" &&
+      (outbox.nextAttemptAt ?? 0) > now
+    ) {
+      return null;
+    }
+    if (outbox.attemptCycle >= STRIPE_EVENT_MAX_ATTEMPTS) {
+      const money = stripeEventRequiresProviderReconciliation(event.eventType);
+      const status = money
+        ? ("provider_reconciliation_required" as const)
+        : ("dead_letter" as const);
+      const reason =
+        outbox.lastError ?? "Stripe event exhausted its processing lease";
+      await ctx.db.patch(outbox._id, {
+        state: status,
+        leaseToken: undefined,
+        leaseExpiresAt: undefined,
+        nextAttemptAt: undefined,
+        reconciliationReason: reason,
+        updatedAt: now,
+      });
+      await ctx.db.patch(event._id, {
+        status,
+        lastError: reason,
+        nextAttemptAt: undefined,
+        leaseExpiresAt: undefined,
+      });
+      return null;
+    }
+    const leaseToken = crypto.randomUUID();
     await ctx.db.patch(event._id, {
       status: "processing",
-      attempts: event.attempts + 1,
+      attempts: outbox.totalAttempts + 1,
       nextAttemptAt: undefined,
       leaseExpiresAt: now + STRIPE_EVENT_LEASE_MS,
       lastError: undefined,
+    });
+    await ctx.db.patch(outbox._id, {
+      state: "leased",
+      attemptCycle: outbox.attemptCycle + 1,
+      totalAttempts: outbox.totalAttempts + 1,
+      leaseToken,
+      leaseExpiresAt: now + STRIPE_EVENT_LEASE_MS,
+      nextAttemptAt: undefined,
+      lastError: undefined,
+      updatedAt: now,
     });
     return {
       stripeEventId: event.stripeEventId,
       stripeAccount: event.stripeAccount,
       eventType: event.eventType,
       objectId: event.objectId,
+      leaseToken,
     };
   },
 });
@@ -597,6 +774,7 @@ export const claimStripeEvent = internalMutation({
 export const finishStripeEvent = internalMutation({
   args: {
     stripeEventId: v.string(),
+    leaseToken: v.string(),
     status: v.union(v.literal("processed"), v.literal("ignored")),
   },
   handler: async (ctx, args): Promise<void> => {
@@ -607,7 +785,14 @@ export const finishStripeEvent = internalMutation({
       )
       .unique();
     if (event === null) return;
-    if (event.status === "processed" || event.status === "ignored") return;
+    const outbox = await getStripeOutbox(ctx, event.stripeEventId);
+    if (
+      outbox === null ||
+      outbox.state !== "leased" ||
+      outbox.leaseToken !== args.leaseToken
+    ) {
+      return;
+    }
     await ctx.db.patch(event._id, {
       status: args.status,
       lastError: undefined,
@@ -615,11 +800,24 @@ export const finishStripeEvent = internalMutation({
       leaseExpiresAt: undefined,
       processedAt: Date.now(),
     });
+    await ctx.db.patch(outbox._id, {
+      state: args.status === "processed" ? "applied" : "ignored",
+      leaseToken: undefined,
+      leaseExpiresAt: undefined,
+      nextAttemptAt: undefined,
+      lastError: undefined,
+      appliedAt: Date.now(),
+      updatedAt: Date.now(),
+    });
   },
 });
 
 export const failStripeEvent = internalMutation({
-  args: { stripeEventId: v.string(), error: v.string() },
+  args: {
+    stripeEventId: v.string(),
+    leaseToken: v.string(),
+    error: v.string(),
+  },
   handler: async (ctx, args): Promise<void> => {
     const event = await ctx.db
       .query("paymentEvents")
@@ -627,21 +825,40 @@ export const failStripeEvent = internalMutation({
         q.eq("stripeEventId", args.stripeEventId),
       )
       .unique();
+    if (event === null) {
+      return;
+    }
+    const outbox = await getStripeOutbox(ctx, event.stripeEventId);
     if (
-      event === null ||
-      event.status === "processed" ||
-      event.status === "ignored"
+      outbox === null ||
+      outbox.state !== "leased" ||
+      outbox.leaseToken !== args.leaseToken
     ) {
       return;
     }
-    const retry = event.attempts < STRIPE_EVENT_MAX_ATTEMPTS;
-    const delay = stripeRetryDelay(event.attempts);
-    const nextAttemptAt = retry ? Date.now() + delay : undefined;
+    const retry = outbox.attemptCycle < STRIPE_EVENT_MAX_ATTEMPTS;
+    const delay = stripeRetryDelay(outbox.attemptCycle);
+    const now = Date.now();
+    const nextAttemptAt = retry ? now + delay : undefined;
+    const terminal = stripeEventRequiresProviderReconciliation(
+      event.eventType,
+    )
+      ? ("provider_reconciliation_required" as const)
+      : ("dead_letter" as const);
     await ctx.db.patch(event._id, {
-      status: "failed",
+      status: retry ? "failed" : terminal,
       lastError: args.error.slice(0, 240),
       nextAttemptAt,
       leaseExpiresAt: undefined,
+    });
+    await ctx.db.patch(outbox._id, {
+      state: retry ? "retry_wait" : terminal,
+      leaseToken: undefined,
+      leaseExpiresAt: undefined,
+      nextAttemptAt,
+      lastError: args.error.slice(0, 240),
+      reconciliationReason: retry ? undefined : args.error.slice(0, 240),
+      updatedAt: now,
     });
     if (retry) {
       await ctx.scheduler.runAfter(delay, internal.billing.processStripeEvent, {
@@ -656,34 +873,52 @@ export const recoverStripeEvents = internalMutation({
   args: {},
   handler: async (ctx): Promise<{ scheduled: number }> => {
     const now = Date.now();
-    const failed = await ctx.db
-      .query("paymentEvents")
-      .withIndex("by_status_next_attempt", (q) => q.eq("status", "failed"))
+    const queued = await ctx.db
+      .query("stripeEventOutbox")
+      .withIndex("by_state_next_attempt", (q) => q.eq("state", "queued"))
+      .take(100);
+    const retrying = await ctx.db
+      .query("stripeEventOutbox")
+      .withIndex("by_state_next_attempt", (q) => q.eq("state", "retry_wait"))
       .filter((q) => q.lte(q.field("nextAttemptAt"), now))
       .take(100);
     const expired = await ctx.db
-      .query("paymentEvents")
-      .withIndex("by_status_lease", (q) => q.eq("status", "processing"))
+      .query("stripeEventOutbox")
+      .withIndex("by_state_lease", (q) => q.eq("state", "leased"))
       .filter((q) => q.lte(q.field("leaseExpiresAt"), now))
       .take(100);
     let scheduled = 0;
-    for (const event of [...failed, ...expired]) {
-      if (event.attempts >= STRIPE_EVENT_MAX_ATTEMPTS) {
-        if (event.status === "processing") {
-          await ctx.db.patch(event._id, {
-            status: "failed",
-            lastError: "Stripe event processing lease expired at retry limit",
-            leaseExpiresAt: undefined,
-          });
-        }
-        continue;
-      }
+    const ids = new Set<string>();
+    for (const outbox of [...queued, ...retrying, ...expired]) {
+      if (ids.has(outbox.stripeEventId)) continue;
+      ids.add(outbox.stripeEventId);
       await ctx.scheduler.runAfter(0, internal.billing.processStripeEvent, {
-        stripeEventId: event.stripeEventId,
+        stripeEventId: outbox.stripeEventId,
       });
       scheduled += 1;
     }
     return { scheduled };
+  },
+});
+
+/** Public operator visibility for every accepted but unresolved receipt. */
+export const listStripeReconciliationQueue = query({
+  args: {},
+  handler: async (ctx) => {
+    await requireAdmin(ctx);
+    const reconciliation = await ctx.db
+      .query("stripeEventOutbox")
+      .withIndex("by_state_next_attempt", (q) =>
+        q.eq("state", "provider_reconciliation_required"),
+      )
+      .take(100);
+    const deadLetters = await ctx.db
+      .query("stripeEventOutbox")
+      .withIndex("by_state_next_attempt", (q) => q.eq("state", "dead_letter"))
+      .take(100);
+    return [...reconciliation, ...deadLetters].sort(
+      (left, right) => left.updatedAt - right.updatedAt,
+    );
   },
 });
 
@@ -1073,7 +1308,7 @@ async function applyEffectivePaymentReversal(
         refId: `${args.sourceRef}:wallet:reverse:${verified.reversalSequence + 1}:${targetWalletReversedCredits}`,
         paymentId: args.payment._id,
       });
-      await commitPaymentReversal(ctx, {
+      const provenance = await commitPaymentReversal(ctx, {
         plan: reversalPlan,
         walletSequence: reversal.wallet.sequence,
         now,
@@ -1084,6 +1319,7 @@ async function applyEffectivePaymentReversal(
         walletEntryId: reversal.entryId,
         paymentId: args.payment._id,
         grossCredits: walletDelta,
+        provenance,
         createdAt: now,
       });
     }
@@ -1610,6 +1846,7 @@ export const processStripeEvent = internalAction({
               transfer.metadata.metadataRepairVersion === undefined
                 ? undefined
                 : Number(transfer.metadata.metadataRepairVersion),
+            requestFingerprint: transfer.metadata.requestFingerprint,
             failed: args.eventType === "transfer.failed",
             failureReason: undefined,
           });
@@ -1650,12 +1887,14 @@ export const processStripeEvent = internalAction({
         default:
           await ctx.runMutation(internal.billing.finishStripeEvent, {
             stripeEventId: args.stripeEventId,
+            leaseToken: args.leaseToken,
             status: "ignored",
           });
           return;
       }
       await ctx.runMutation(internal.billing.finishStripeEvent, {
         stripeEventId: args.stripeEventId,
+        leaseToken: args.leaseToken,
         status: "processed",
       });
     } catch (error) {
@@ -1665,6 +1904,7 @@ export const processStripeEvent = internalAction({
           : "Stripe event processing failed";
       await ctx.runMutation(internal.billing.failStripeEvent, {
         stripeEventId: args.stripeEventId,
+        leaseToken: args.leaseToken,
         error: message,
       });
     }

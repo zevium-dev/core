@@ -33,6 +33,7 @@ const SPEC = JSON.stringify({
   paths: {
     "/echo": {
       post: {
+        operationId: "echoPost",
         "x-zevium-cost": 3,
       },
     },
@@ -121,6 +122,8 @@ async function installFixtures(opts: {
   const specs = new FixtureSpecSource();
   specs.set(ORG_SLUG, PROJECT_SLUG, {
     spec: opts.spec ?? SPEC,
+    specVersionId: "spec_version_demo_v1",
+    version: "1.0.0",
     projectId: "proj_demo",
     organizationId,
     clerkOrgId: opts.clerkOrgId,
@@ -243,7 +246,28 @@ describe("gateway pipeline", () => {
     expect(state.balance).toBe(97);
     expect(state.inFlightTotal).toBe(0);
     expect(state.pendingSettlements).toHaveLength(1);
-    expect(state.pendingSettlements[0]!.usage).toBeTruthy();
+    expect(state.pendingSettlements[0]!.cost).toBe(3);
+    expect(state.pendingSettlements[0]!.usage).toMatchObject({
+      consumerClerkOrgId: clerkOrgId,
+      organizationId: clerkOrgId,
+      projectId: "proj_demo",
+      specVersionId: "spec_version_demo_v1",
+      specVersion: "1.0.0",
+      operationId: "echoPost",
+      endpoint: "/echo",
+      method: "post",
+      listedCostCredits: 3,
+      pricingDecision: "listed_price",
+      keyId: KEY_ID,
+      keyFamilyId: KEY_ID,
+      budgetUsedBefore: 0,
+      budgetReservedBefore: 0,
+      budgetReservationCredits: 3,
+    });
+    expect(state.pendingSettlements[0]!.reservationId).toBeTruthy();
+    expect(state.pendingSettlements[0]!.usage?.budgetPeriod).toMatch(
+      /^\d{4}-\d{2}$/,
+    );
 
     expect(usage.events).toHaveLength(1);
     expect(usage.events[0]!.outcome).toBe("settled");

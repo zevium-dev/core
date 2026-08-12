@@ -4,7 +4,7 @@ import { convexTest, type TestConvex } from "convex-test";
 import type Stripe from "stripe";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { api, internal } from "./_generated/api";
-import type { Id } from "./_generated/dataModel";
+import type { Doc, Id } from "./_generated/dataModel";
 import {
   ACCOUNTING_ATOMS_PER_CREDIT,
   publisherEarningSplit,
@@ -13,7 +13,10 @@ import {
   connectAccountProjection,
   createAndRetrieveStripeTransfer,
   createOnboardingLink,
+  reconcileStripeTransferProvider,
   repairAndRetrieveStripeTransferMetadata,
+  STRIPE_TRANSFER_SAFE_RETRY_MS,
+  transferRequestFingerprint,
 } from "./payouts";
 import { FINANCE_MIGRATION_KEY } from "./lib/financeMigrationGate";
 import schema from "./schema";
@@ -374,6 +377,67 @@ describe("Stripe Connect publisher accounting", () => {
     expect(retry.transferId).toBe(first.transferId);
     expect(retry.idempotencyKey).toBe(first.idempotencyKey);
     expect(first.amount).toBe(1_045);
+    const prepared = await t.run(async (ctx) => ({
+      transfer: await ctx.db.get(first.transferId),
+      dispatch: await ctx.db
+        .query("publisherTransferDispatches")
+        .withIndex("by_transfer", (q) => q.eq("transferId", first.transferId))
+        .unique(),
+      ledger: await ctx.db
+        .query("publisherSettlementEntries")
+        .withIndex("by_transfer_sequence", (q) =>
+          q.eq("transferId", first.transferId),
+        )
+        .collect(),
+    }));
+    expect(prepared.transfer).toMatchObject({
+      correlationState: "local_prepared",
+      metadataRepairVersion: 2,
+      requestFingerprint: expect.stringMatching(/^[0-9a-f]{64}$/),
+    });
+    expect(prepared.dispatch).toMatchObject({
+      state: "prepared",
+      attemptCount: 0,
+      requestFingerprint: prepared.transfer?.requestFingerprint,
+    });
+    expect(prepared.ledger.map((entry) => entry.kind)).toEqual([
+      "transfer_allocation",
+    ]);
+    const claims = await Promise.all([
+      t.mutation(internal.payouts.claimPublisherTransferDispatch, {
+        transferId: first.transferId,
+      }),
+      t.mutation(internal.payouts.claimPublisherTransferDispatch, {
+        transferId: first.transferId,
+      }),
+    ]);
+    expect(claims.map((claim) => claim.mode).sort()).toEqual([
+      "busy",
+      "create",
+    ]);
+    const createClaim = claims.find((claim) => claim.mode === "create");
+    if (createClaim?.mode !== "create") throw new Error("create claim missing");
+    await t.run(async (ctx) => {
+      const dispatch = await ctx.db
+        .query("publisherTransferDispatches")
+        .withIndex("by_transfer", (q) => q.eq("transferId", first.transferId))
+        .unique();
+      if (dispatch === null) throw new Error("dispatch missing");
+      await ctx.db.patch(dispatch._id, { leaseExpiresAt: 0 });
+    });
+    expect(
+      await t.mutation(internal.payouts.recoverPublisherTransferDispatches, {}),
+    ).toEqual({ scheduled: 1 });
+    const recovered = await t.mutation(
+      internal.payouts.claimPublisherTransferDispatch,
+      { transferId: first.transferId },
+    );
+    expect(recovered).toMatchObject({
+      mode: "reconcile",
+      allowCreateAfterNoMatch: true,
+      firstAttemptAt: createClaim.firstAttemptAt,
+      requestFingerprint: first.requestFingerprint,
+    });
   });
 
   it("carries sub-cent earnings into the next transfer", async () => {
@@ -431,7 +495,8 @@ describe("Stripe Connect publisher accounting", () => {
       platformAccountId: first.platformAccountId,
       correlationNonce: first.correlationNonce,
       correlationHmac: first.correlationHmac,
-      metadataRepairVersion: 1,
+      metadataRepairVersion: 2,
+      requestFingerprint: first.requestFingerprint,
       failed: false,
     });
     await expect(
@@ -519,7 +584,8 @@ describe("Stripe Connect publisher accounting", () => {
       platformAccountId: transfer.platformAccountId,
       correlationNonce: transfer.correlationNonce,
       correlationHmac: transfer.correlationHmac,
-      metadataRepairVersion: 1,
+      metadataRepairVersion: 2,
+      requestFingerprint: transfer.requestFingerprint,
       failed: false,
     });
     await t.mutation(internal.payouts.projectStripeTransfer, {
@@ -531,7 +597,8 @@ describe("Stripe Connect publisher accounting", () => {
       platformAccountId: transfer.platformAccountId,
       correlationNonce: transfer.correlationNonce,
       correlationHmac: transfer.correlationHmac,
-      metadataRepairVersion: 1,
+      metadataRepairVersion: 2,
+      requestFingerprint: transfer.requestFingerprint,
       failed: true,
       failureReason: "stale failure",
     });
@@ -544,7 +611,8 @@ describe("Stripe Connect publisher accounting", () => {
       platformAccountId: transfer.platformAccountId,
       correlationNonce: transfer.correlationNonce,
       correlationHmac: transfer.correlationHmac,
-      metadataRepairVersion: 1,
+      metadataRepairVersion: 2,
+      requestFingerprint: transfer.requestFingerprint,
       failed: false,
       failureReason: undefined,
     });
@@ -592,6 +660,19 @@ describe("Stripe Connect publisher accounting", () => {
       "transfer_reversal",
     ]);
     expect(state.payouts).toHaveLength(1);
+    const publicState = await t
+      .withIdentity({ subject: "publisher", org_id: "org_publisher" } as {
+        subject: string;
+        org_id: string;
+      })
+      .query(api.payouts.getPayoutState, {});
+    expect(publicState.transfers).toEqual([
+      expect.objectContaining({
+        id: transfer.transferId,
+        status: "reversed",
+        stripeTransferId: "tr_projection",
+      }),
+    ]);
   });
 
   it("correlates reversal metadata across local-write crash and keeps retry projection reversed", async () => {
@@ -619,6 +700,7 @@ describe("Stripe Connect publisher accounting", () => {
       ...TRANSFER_CORRELATION,
     });
     const calls: string[] = [];
+    const firstAttemptAt = Date.now();
     const snapshot = await createAndRetrieveStripeTransfer(
       {
         create: (async () => {
@@ -634,7 +716,8 @@ describe("Stripe Connect publisher accounting", () => {
               correlationNonce: local.correlationNonce,
               correlationHmac: local.correlationHmac,
               platformAccountId: local.platformAccountId,
-              metadataRepairVersion: "1",
+              metadataRepairVersion: "2",
+              requestFingerprint: local.requestFingerprint,
             },
           } as Stripe.Transfer;
         }) as Stripe["transfers"]["create"],
@@ -652,13 +735,15 @@ describe("Stripe Connect publisher accounting", () => {
               correlationNonce: local.correlationNonce,
               correlationHmac: local.correlationHmac,
               platformAccountId: local.platformAccountId,
-              metadataRepairVersion: "1",
+              metadataRepairVersion: "2",
+              requestFingerprint: local.requestFingerprint,
             },
           } as Stripe.Transfer;
         }) as Stripe["transfers"]["retrieve"],
       },
       {
         _id: local.transferId,
+        publisherOrganizationId: seed.organizationId,
         stripeConnectedAccountId: local.connectedAccountId,
         amount: local.amount,
         currency: local.currency,
@@ -669,6 +754,14 @@ describe("Stripe Connect publisher accounting", () => {
         correlationState: local.correlationState,
         metadataRepairVersion: local.metadataRepairVersion,
         providerCreateMetadataShape: local.providerCreateMetadataShape,
+        requestFingerprint: local.requestFingerprint,
+      },
+      {
+        leaseToken: "lease-crash",
+        firstAttemptAt,
+        safeRetryUntil: firstAttemptAt + STRIPE_TRANSFER_SAFE_RETRY_MS,
+        requestFingerprint: local.requestFingerprint,
+        nowMs: firstAttemptAt,
       },
     );
     expect(calls).toEqual(["create", "retrieve"]);
@@ -688,6 +781,7 @@ describe("Stripe Connect publisher accounting", () => {
       correlationNonce: snapshot.metadata.correlationNonce,
       correlationHmac: snapshot.metadata.correlationHmac,
       metadataRepairVersion: Number(snapshot.metadata.metadataRepairVersion),
+      requestFingerprint: snapshot.metadata.requestFingerprint,
       failed: false,
       failureReason: undefined,
     } as const;
@@ -812,8 +906,8 @@ describe("Stripe Connect publisher accounting", () => {
     let metadata: Record<string, string> = {
       publisherTransferId: local._id,
     };
-    let createParams: Stripe.TransferCreateParams | undefined;
-    let createOptions: Stripe.RequestOptions | undefined;
+    let creates = 0;
+    let listCalls = 0;
     let updateOptions: Stripe.RequestOptions | undefined;
     const providerSnapshot = (): Stripe.Transfer =>
       ({
@@ -826,11 +920,14 @@ describe("Stripe Connect publisher accounting", () => {
       }) as Stripe.Transfer;
     const snapshot = await repairAndRetrieveStripeTransferMetadata(
       {
-        create: (async (params, options) => {
-          createParams = params;
-          createOptions = options;
-          return providerSnapshot();
+        create: (async () => {
+          creates += 1;
+          throw new Error("legacy repair must not create");
         }) as Stripe["transfers"]["create"],
+        list: (async () => {
+          listCalls += 1;
+          return { data: [providerSnapshot()], has_more: false };
+        }) as Stripe["transfers"]["list"],
         retrieve: (async () =>
           providerSnapshot()) as Stripe["transfers"]["retrieve"],
         update: (async (_id, params, options) => {
@@ -844,15 +941,10 @@ describe("Stripe Connect publisher accounting", () => {
       },
       local,
     );
-    expect(createParams).toEqual({
-      amount: 500,
-      currency: "usd",
-      destination: "acct_legacy_destination",
-      metadata: { publisherTransferId: local._id },
-    });
-    expect(createOptions?.idempotencyKey).toBe(local.idempotencyKey);
+    expect(creates).toBe(0);
+    expect(listCalls).toBe(2);
     expect(updateOptions?.idempotencyKey).toBe(
-      "publisher-transfer-metadata-repair:v1:tr_legacy_repair",
+      "publisher-transfer-metadata-repair:v2:tr_legacy_repair",
     );
 
     await t.mutation(
@@ -871,6 +963,7 @@ describe("Stripe Connect publisher accounting", () => {
         correlationNonce: snapshot.metadata.correlationNonce!,
         correlationHmac: snapshot.metadata.correlationHmac!,
         metadataRepairVersion: Number(snapshot.metadata.metadataRepairVersion),
+        requestFingerprint: snapshot.metadata.requestFingerprint!,
       },
     );
     const repaired = await t.run(async (ctx) => ({
@@ -967,7 +1060,8 @@ describe("Stripe Connect publisher accounting", () => {
       platformAccountId: local.platformAccountId!,
     };
     let providerMetadata: Record<string, string> = { ...originalMetadata };
-    let replayParams: Stripe.TransferCreateParams | undefined;
+    let creates = 0;
+    let listCalls = 0;
     const snapshot = (): Stripe.Transfer =>
       ({
         id: "tr_correlated_v0",
@@ -979,10 +1073,14 @@ describe("Stripe Connect publisher accounting", () => {
       }) as Stripe.Transfer;
     await repairAndRetrieveStripeTransferMetadata(
       {
-        create: (async (params) => {
-          replayParams = params;
-          return snapshot();
+        create: (async () => {
+          creates += 1;
+          throw new Error("legacy repair must not create");
         }) as Stripe["transfers"]["create"],
+        list: (async () => {
+          listCalls += 1;
+          return { data: [snapshot()], has_more: false };
+        }) as Stripe["transfers"]["list"],
         retrieve: (async () => snapshot()) as Stripe["transfers"]["retrieve"],
         update: (async (_id, params) => {
           providerMetadata = {
@@ -994,16 +1092,246 @@ describe("Stripe Connect publisher accounting", () => {
       },
       local,
     );
-    expect(replayParams).toEqual({
-      amount: 700,
-      currency: "usd",
-      destination: "acct_correlated_v0",
-      metadata: originalMetadata,
-    });
+    expect(creates).toBe(0);
+    expect(listCalls).toBe(2);
     expect(providerMetadata).toEqual({
       ...originalMetadata,
-      metadataRepairVersion: "1",
+      metadataRepairVersion: "2",
+      requestFingerprint: expect.stringMatching(/^[0-9a-f]{64}$/),
     });
+  });
+
+  it("reconciles response loss across 1001 paginated rows and blocks pruned blind retries", async () => {
+    const transferId = "transfer_provider_property" as Id<"publisherTransfers">;
+    const publisherOrganizationId =
+      "publisher_provider_property" as Id<"organizations">;
+    const correlationNonce = "e".repeat(64);
+    const correlationHmac = await signTransferCorrelation(TRANSFER_SECRET, {
+      publisherTransferId: transferId,
+      nonce: correlationNonce,
+      platformAccountId: "acct_platform_test",
+      destination: "acct_provider_property",
+      currency: "usd",
+      amount: 1_234,
+    });
+    const immutable = {
+      publisherTransferId: transferId,
+      publisherOrganizationId,
+      destination: "acct_provider_property",
+      amount: 1_234,
+      currency: "usd",
+      idempotencyKey: "publisher-transfer:provider-property",
+      correlationNonce,
+      correlationHmac,
+      platformAccountId: "acct_platform_test",
+    };
+    const requestFingerprint = await transferRequestFingerprint(immutable);
+    const local = {
+      _id: transferId,
+      _creationTime: 1,
+      publisherOrganizationId,
+      stripeConnectedAccountId: immutable.destination,
+      amount: immutable.amount,
+      amountAtoms: 1_234_000_000,
+      remainderAtoms: 0,
+      currency: immutable.currency,
+      idempotencyKey: immutable.idempotencyKey,
+      reversedAmount: 0,
+      correlationNonce,
+      correlationHmac,
+      platformAccountId: immutable.platformAccountId,
+      correlationState: "local_prepared",
+      metadataRepairVersion: 2,
+      providerCreateMetadataShape: "correlated_v2",
+      requestFingerprint,
+      status: "pending",
+      attemptedAt: 1_700_000_000_000,
+      createdAt: 1_700_000_000_000,
+      updatedAt: 1_700_000_000_000,
+    } as Doc<"publisherTransfers">;
+    const exactMetadata = {
+      publisherTransferId: transferId,
+      correlationNonce,
+      correlationHmac,
+      platformAccountId: immutable.platformAccountId,
+      metadataRepairVersion: "2",
+      requestFingerprint,
+    };
+    const transferSnapshot = (
+      id: string,
+      metadata: Record<string, string> = {},
+      amount = local.amount,
+    ) =>
+      ({
+        id,
+        amount,
+        amount_reversed: 0,
+        currency: local.currency,
+        destination: local.stripeConnectedAccountId,
+        metadata,
+      }) as Stripe.Transfer;
+    const distractors = Array.from({ length: 1_000 }, (_, index) =>
+      transferSnapshot(`tr_noise_${String(index).padStart(4, "0")}`, {
+        publisherTransferId: `other_${index}`,
+      }),
+    );
+    const exact = transferSnapshot("tr_exact_1001", exactMetadata);
+
+    let visible = [...distractors, exact];
+    let listCalls = 0;
+    const provider = {
+      list: (async (params: Stripe.TransferListParams) => {
+        listCalls += 1;
+        const start =
+          params.starting_after === undefined
+            ? 0
+            : visible.findIndex((row) => row.id === params.starting_after) + 1;
+        const limit = params.limit ?? 10;
+        const data = visible.slice(start, start + limit);
+        return { data, has_more: start + data.length < visible.length };
+      }) as Stripe["transfers"]["list"],
+      retrieve: (async (id: string) => {
+        const row = visible.find((candidate) => candidate.id === id);
+        if (row === undefined) throw new Error("provider row missing");
+        return row;
+      }) as Stripe["transfers"]["retrieve"],
+    };
+    const reconciled = await reconcileStripeTransferProvider(provider, local, {
+      firstAttemptAt: local.attemptedAt!,
+      observedThrough: local.attemptedAt! + 1_000,
+    });
+    expect(reconciled).toMatchObject({
+      kind: "exact",
+      snapshot: { id: "tr_exact_1001" },
+      pages: 22,
+    });
+    expect(listCalls).toBe(22);
+
+    visible = [...visible, transferSnapshot("tr_exact_duplicate", exactMetadata)];
+    expect(
+      await reconcileStripeTransferProvider(provider, local, {
+        firstAttemptAt: local.attemptedAt!,
+        observedThrough: local.attemptedAt! + 1_000,
+      }),
+    ).toMatchObject({
+      kind: "multiple",
+      exactIds: ["tr_exact_1001", "tr_exact_duplicate"],
+    });
+    visible = [
+      ...distractors,
+      transferSnapshot("tr_conflict", exactMetadata, local.amount + 1),
+    ];
+    expect(
+      await reconcileStripeTransferProvider(provider, local, {
+        firstAttemptAt: local.attemptedAt!,
+        observedThrough: local.attemptedAt! + 1_000,
+      }),
+    ).toMatchObject({ kind: "conflict", conflictIds: ["tr_conflict"] });
+
+    let consistencyPass = 0;
+    const inconsistent = await reconcileStripeTransferProvider(
+      {
+        list: (async (params: Stripe.TransferListParams) => {
+          if (params.starting_after === undefined) consistencyPass += 1;
+          return {
+            data: consistencyPass === 1 ? [exact] : [],
+            has_more: false,
+          };
+        }) as Stripe["transfers"]["list"],
+        retrieve: provider.retrieve,
+      },
+      local,
+      {
+        firstAttemptAt: local.attemptedAt!,
+        observedThrough: local.attemptedAt! + 1_000,
+      },
+    );
+    expect(inconsistent).toMatchObject({ kind: "inconsistent" });
+
+    let truncatedPage = 0;
+    expect(
+      await reconcileStripeTransferProvider(
+        {
+          list: (async () => {
+            const page = truncatedPage++;
+            return {
+              data: Array.from({ length: 100 }, (_, index) =>
+                transferSnapshot(`tr_truncated_${page}_${index}`),
+              ),
+              has_more: true,
+            };
+          }) as Stripe["transfers"]["list"],
+          retrieve: provider.retrieve,
+        },
+        local,
+        {
+          firstAttemptAt: local.attemptedAt!,
+          observedThrough: local.attemptedAt! + 1_000,
+        },
+      ),
+    ).toMatchObject({ kind: "truncated", pages: 40 });
+
+    visible = distractors;
+    expect(
+      await reconcileStripeTransferProvider(provider, local, {
+        firstAttemptAt: local.attemptedAt!,
+        observedThrough: local.attemptedAt! + 1_000,
+      }),
+    ).toMatchObject({ kind: "none" });
+    let creates = 0;
+    await expect(
+      createAndRetrieveStripeTransfer(
+        {
+          create: (async () => {
+            creates += 1;
+            return exact;
+          }) as Stripe["transfers"]["create"],
+          retrieve: provider.retrieve,
+        },
+        local,
+        {
+          leaseToken: "expired-provider-lease",
+          firstAttemptAt: local.attemptedAt!,
+          safeRetryUntil:
+            local.attemptedAt! + STRIPE_TRANSFER_SAFE_RETRY_MS,
+          requestFingerprint,
+          nowMs: local.attemptedAt! + STRIPE_TRANSFER_SAFE_RETRY_MS,
+        },
+      ),
+    ).rejects.toThrow("Active safe-window transfer dispatch lease required");
+    expect(creates).toBe(0);
+
+    const firstAttemptAt = Date.now();
+    await expect(
+      createAndRetrieveStripeTransfer(
+        {
+          create: (async () => {
+            creates += 1;
+            visible = [...distractors, exact];
+            return exact;
+          }) as Stripe["transfers"]["create"],
+          retrieve: (async () => {
+            throw new Error("response lost after provider accepted transfer");
+          }) as Stripe["transfers"]["retrieve"],
+        },
+        local,
+        {
+          leaseToken: "response-loss-lease",
+          firstAttemptAt,
+          safeRetryUntil: firstAttemptAt + STRIPE_TRANSFER_SAFE_RETRY_MS,
+          requestFingerprint,
+          nowMs: firstAttemptAt,
+        },
+      ),
+    ).rejects.toThrow("response lost");
+    expect(creates).toBe(1);
+    expect(
+      await reconcileStripeTransferProvider(provider, local, {
+        firstAttemptAt,
+        observedThrough: firstAttemptAt + 1_000,
+      }),
+    ).toMatchObject({ kind: "exact", snapshot: { id: "tr_exact_1001" } });
+    expect(creates).toBe(1);
   });
 
   it("fails closed instead of zero-lying for a staged legacy balance", async () => {

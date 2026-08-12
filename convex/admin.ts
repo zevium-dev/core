@@ -6,6 +6,7 @@ import { isAdmin, requireAdmin } from "./lib/auth";
 import { createNotification } from "./lib/notifications";
 import { fireWebhookEvent } from "./webhooks";
 import {
+  reconcileStripeTransferProvider,
   repairAndRetrieveStripeTransferMetadata,
   transferToStripe,
 } from "./payouts";
@@ -304,6 +305,9 @@ export type AdminPublisherTransferView = {
   failureReason?: string;
   stripeTransferId?: string;
   idempotencyKey: string;
+  dispatchState?: Doc<"publisherTransferDispatches">["state"];
+  dispatchAttemptCount?: number;
+  reconciliationReason?: string;
   createdAt: number;
   updatedAt: number;
 };
@@ -336,6 +340,10 @@ export const listPublisherTransfers = query({
     const page: AdminPublisherTransferView[] = await Promise.all(
       result.page.map(async (transfer) => {
         const organization = await ctx.db.get(transfer.publisherOrganizationId);
+        const dispatch = await ctx.db
+          .query("publisherTransferDispatches")
+          .withIndex("by_transfer", (q) => q.eq("transferId", transfer._id))
+          .unique();
         return {
           id: transfer._id,
           publisherOrganizationId: transfer.publisherOrganizationId,
@@ -349,6 +357,9 @@ export const listPublisherTransfers = query({
           failureReason: transfer.failureReason,
           stripeTransferId: transfer.stripeTransferId,
           idempotencyKey: transfer.idempotencyKey,
+          dispatchState: dispatch?.state,
+          dispatchAttemptCount: dispatch?.attemptCount,
+          reconciliationReason: dispatch?.reconciliationReason,
           createdAt: transfer.createdAt,
           updatedAt: transfer.updatedAt,
         };
@@ -395,6 +406,85 @@ export const retryPublisherTransfer = action({
   },
 });
 
+/** List-only v2 recovery. Non-exact provider state never authorizes create. */
+type AdminTransferReconciliationResult =
+  | {
+      transferId: Id<"publisherTransfers">;
+      kind: "exact";
+      stripeTransferId: string;
+      pages: number;
+    }
+  | {
+      transferId: Id<"publisherTransfers">;
+      kind: "none" | "multiple" | "conflict" | "inconsistent" | "truncated";
+      exactIds: string[];
+      conflictIds: string[];
+      pages: number;
+    };
+
+export const reconcilePublisherTransfer = action({
+  args: { transferId: v.id("publisherTransfers") },
+  handler: async (
+    ctx,
+    args,
+  ): Promise<AdminTransferReconciliationResult> => {
+    await requireAdminInAction(ctx);
+    const prepared: {
+      transfer: Doc<"publisherTransfers">;
+      dispatch: Doc<"publisherTransferDispatches">;
+    } = await ctx.runMutation(
+      internal.payouts.getPublisherTransferReconciliation,
+      { transferId: args.transferId },
+    );
+    const { transfer, dispatch } = prepared;
+    const result = await reconcileStripeTransferProvider(
+      stripeClient().transfers,
+      transfer,
+      {
+        firstAttemptAt: dispatch.firstAttemptAt!,
+        observedThrough: Date.now(),
+      },
+    );
+    if (result.kind !== "exact") {
+      return {
+        transferId: transfer._id,
+        kind: result.kind,
+        exactIds: result.exactIds,
+        conflictIds: result.conflictIds,
+        pages: result.pages,
+      };
+    }
+    const snapshot = result.snapshot;
+    await ctx.runMutation(internal.payouts.projectStripeTransfer, {
+      stripeTransferId: snapshot.id,
+      publisherTransferId:
+        snapshot.metadata.publisherTransferId ?? transfer._id,
+      amount: snapshot.amount,
+      amountReversed: snapshot.amount_reversed,
+      currency: snapshot.currency,
+      destination:
+        typeof snapshot.destination === "string"
+          ? snapshot.destination
+          : (snapshot.destination?.id ?? ""),
+      platformAccountId: snapshot.metadata.platformAccountId,
+      correlationNonce: snapshot.metadata.correlationNonce,
+      correlationHmac: snapshot.metadata.correlationHmac,
+      metadataRepairVersion: Number(
+        snapshot.metadata.metadataRepairVersion,
+      ),
+      requestFingerprint: snapshot.metadata.requestFingerprint,
+      failed: false,
+      failureReason: undefined,
+    });
+    return {
+      transferId: transfer._id,
+      kind: "exact" as const,
+      stripeTransferId: snapshot.id,
+      pages: result.pages,
+    };
+  },
+});
+
 /** Explicit provider reconciliation for pre-correlation Stripe transfers. */
 export const repairLegacyPublisherTransfer = action({
   args: { transferId: v.id("publisherTransfers") },
@@ -430,6 +520,7 @@ export const repairLegacyPublisherTransfer = action({
         correlationNonce: snapshot.metadata.correlationNonce,
         correlationHmac: snapshot.metadata.correlationHmac,
         metadataRepairVersion: Number(snapshot.metadata.metadataRepairVersion),
+        requestFingerprint: snapshot.metadata.requestFingerprint ?? "",
       },
     );
     return { transferId: transfer._id, stripeTransferId: snapshot.id };

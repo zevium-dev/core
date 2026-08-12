@@ -29,6 +29,7 @@ import {
   type FundingPlan,
 } from "./lib/funding";
 import { assertFinanceMigrationAllowsRuntime } from "./lib/financeMigrationGate";
+import { settlementIdentityFingerprint } from "./lib/settlementIdentity";
 
 export type SettlementStatus = "applied" | "already_applied" | "rejected";
 
@@ -503,13 +504,31 @@ export const ensureWallet = mutation({
 const usageEventArg = v.object({
   organizationId: v.string(),
   projectId: v.string(),
+  specVersionId: v.string(),
+  specVersion: v.string(),
+  operationId: v.string(),
   endpoint: v.string(),
   method: v.string(),
+  listedCostCredits: v.number(),
+  freeTierLimit: v.optional(v.number()),
+  freeTierUsedBefore: v.optional(v.number()),
+  pricingDecision: v.union(
+    v.literal("listed_price"),
+    v.literal("free_tier"),
+    v.literal("zero_price"),
+  ),
   credits: v.number(),
   status: v.number(),
   latencyMs: v.number(),
   keyId: v.string(),
+  keyFamilyId: v.string(),
+  monthlyCapCredits: v.optional(v.number()),
+  budgetPeriod: v.string(),
+  budgetUsedBefore: v.number(),
+  budgetReservedBefore: v.number(),
+  budgetReservationCredits: v.number(),
   at: v.number(),
+  reservationId: v.string(),
   settleRefId: v.string(),
   ambiguous: v.optional(v.boolean()),
   publisherIdempotencyKey: v.optional(v.string()),
@@ -520,13 +539,27 @@ const usageEventArg = v.object({
 type UsageEventArg = {
   organizationId: string;
   projectId: string;
+  specVersionId: string;
+  specVersion: string;
+  operationId: string;
   endpoint: string;
   method: string;
+  listedCostCredits: number;
+  freeTierLimit?: number;
+  freeTierUsedBefore?: number;
+  pricingDecision: "listed_price" | "free_tier" | "zero_price";
   credits: number;
   status: number;
   latencyMs: number;
   keyId: string;
+  keyFamilyId: string;
+  monthlyCapCredits?: number;
+  budgetPeriod: string;
+  budgetUsedBefore: number;
+  budgetReservedBefore: number;
+  budgetReservationCredits: number;
   at: number;
+  reservationId: string;
   settleRefId: string;
   ambiguous?: boolean;
   publisherIdempotencyKey?: string;
@@ -537,47 +570,92 @@ type SettlementBinding = {
   consumerOrganizationId: Id<"organizations">;
   publisherOrganizationId: Id<"organizations">;
   projectId: Id<"projects">;
+  specVersionId: Id<"specVersions">;
   event: UsageEventArg;
 };
 
-function settlementFingerprint(binding: SettlementBinding): string {
+async function settlementFingerprint(
+  binding: SettlementBinding,
+): Promise<string> {
   const { event } = binding;
-  return JSON.stringify([
-    event.consumerClerkOrgId,
-    binding.consumerOrganizationId,
-    binding.publisherOrganizationId,
-    binding.projectId,
-    event.endpoint,
-    event.method,
-    event.credits,
-    event.status,
-    event.latencyMs,
-    event.keyId,
-    event.at,
-    event.settleRefId,
-    event.ambiguous ?? false,
-    event.publisherIdempotencyKey ?? null,
-  ]);
+  return await settlementIdentityFingerprint({
+    ...event,
+    consumerOrganizationId: binding.consumerOrganizationId,
+    publisherOrganizationId: binding.publisherOrganizationId,
+    projectId: binding.projectId,
+    specVersionId: binding.specVersionId,
+  });
 }
 
 function validSettlementBoundary(event: UsageEventArg): boolean {
   return (
     event.settleRefId.trim().length > 0 &&
     event.settleRefId.length <= 200 &&
+    event.reservationId.trim().length > 0 &&
+    event.reservationId.length <= 180 &&
+    event.settleRefId === `settle:${event.reservationId}` &&
     event.consumerClerkOrgId.trim().length > 0 &&
     event.consumerClerkOrgId.length <= 256 &&
     event.endpoint.trim().length > 0 &&
     event.endpoint.length <= 2_048 &&
+    event.operationId.trim().length > 0 &&
+    event.operationId.length <= 512 &&
+    event.specVersion.trim().length > 0 &&
+    event.specVersion.length <= 128 &&
     event.method.trim().length > 0 &&
     event.method.length <= 16 &&
     event.keyId.trim().length > 0 &&
     event.keyId.length <= 256 &&
+    event.keyFamilyId.trim().length > 0 &&
+    event.keyFamilyId.length <= 256 &&
+    /^\d{4}-\d{2}$/.test(event.budgetPeriod) &&
     (event.publisherIdempotencyKey === undefined ||
       (event.publisherIdempotencyKey.trim().length > 0 &&
         event.publisherIdempotencyKey.length <= 256)) &&
     Number.isSafeInteger(event.credits) &&
     event.credits >= 0 &&
     event.credits <= MAX_ENDPOINT_COST_CREDITS &&
+    Number.isSafeInteger(event.listedCostCredits) &&
+    event.listedCostCredits >= 0 &&
+    event.listedCostCredits <= MAX_ENDPOINT_COST_CREDITS &&
+    (event.freeTierLimit === undefined ||
+      (Number.isSafeInteger(event.freeTierLimit) &&
+        event.freeTierLimit > 0)) &&
+    (event.freeTierUsedBefore === undefined ||
+      (Number.isSafeInteger(event.freeTierUsedBefore) &&
+        event.freeTierUsedBefore >= 0)) &&
+    (event.monthlyCapCredits === undefined ||
+      (Number.isSafeInteger(event.monthlyCapCredits) &&
+        event.monthlyCapCredits > 0)) &&
+    Number.isSafeInteger(event.budgetUsedBefore) &&
+    event.budgetUsedBefore >= 0 &&
+    Number.isSafeInteger(event.budgetReservedBefore) &&
+    event.budgetReservedBefore >= 0 &&
+    Number.isSafeInteger(event.budgetReservationCredits) &&
+    event.budgetReservationCredits >= 0 &&
+    (event.monthlyCapCredits === undefined ||
+      event.budgetUsedBefore +
+        event.budgetReservedBefore +
+        event.budgetReservationCredits <=
+        event.monthlyCapCredits) &&
+    ((event.pricingDecision === "listed_price" &&
+      event.listedCostCredits > 0 &&
+      event.credits === event.listedCostCredits &&
+      event.budgetReservationCredits === event.credits &&
+      (event.freeTierLimit === undefined ||
+        (event.freeTierUsedBefore !== undefined &&
+          event.freeTierUsedBefore >= event.freeTierLimit))) ||
+      (event.pricingDecision === "free_tier" &&
+        event.listedCostCredits > 0 &&
+        event.credits === 0 &&
+        event.budgetReservationCredits === 0 &&
+        event.freeTierLimit !== undefined &&
+        event.freeTierUsedBefore !== undefined &&
+        event.freeTierUsedBefore < event.freeTierLimit) ||
+      (event.pricingDecision === "zero_price" &&
+        event.listedCostCredits === 0 &&
+        event.credits === 0 &&
+        event.budgetReservationCredits === 0)) &&
     Number.isSafeInteger(event.at) &&
     event.at > 0 &&
     Number.isSafeInteger(event.status) &&
@@ -595,7 +673,7 @@ async function duplicateSettlementMatches(
   walletId: Id<"wallets">,
   binding: SettlementBinding,
 ): Promise<boolean> {
-  const fingerprint = settlementFingerprint(binding);
+  const fingerprint = await settlementFingerprint(binding);
   if (
     entry.walletId !== walletId ||
     entry.kind !== "usage_settlement" ||
@@ -607,31 +685,8 @@ async function duplicateSettlementMatches(
   if (entry.settlementFingerprint !== undefined) {
     return entry.settlementFingerprint === fingerprint;
   }
-  // Legacy fallback derives publisher ownership from immutable project row.
-  // It never guesses optional facts: supplied new-contract fields fail closed.
-  if (
-    binding.event.ambiguous !== undefined ||
-    binding.event.publisherIdempotencyKey !== undefined
-  ) {
-    return false;
-  }
-  const usage = await ctx.db.get(entry.usageEventId);
-  if (usage === null) return false;
-  const project = await ctx.db.get(usage.projectId);
-  if (project === null) return false;
-  return (
-    usage.organizationId === binding.consumerOrganizationId &&
-    project.organizationId === binding.publisherOrganizationId &&
-    usage.projectId === binding.projectId &&
-    usage.credits === binding.event.credits &&
-    usage.endpoint === binding.event.endpoint &&
-    usage.method === binding.event.method &&
-    usage.status === binding.event.status &&
-    usage.latencyMs === binding.event.latencyMs &&
-    usage.keyId === binding.event.keyId &&
-    usage.at === binding.event.at &&
-    usage.settleRefId === binding.event.settleRefId
-  );
+  // V2 callers always supply facts legacy rows cannot prove. No downgrade.
+  return false;
 }
 
 /**
@@ -710,12 +765,25 @@ export const recordUsage = internalMutation({
         event.organizationId,
       );
       const projectId = ctx.db.normalizeId("projects", event.projectId);
+      const specVersionId = ctx.db.normalizeId(
+        "specVersions",
+        event.specVersionId,
+      );
       const project = projectId === null ? null : await ctx.db.get(projectId);
-      if (projectId === null || project === null) {
+      const specVersion =
+        specVersionId === null ? null : await ctx.db.get(specVersionId);
+      if (
+        projectId === null ||
+        project === null ||
+        specVersionId === null ||
+        specVersion === null ||
+        specVersion.projectId !== projectId ||
+        specVersion.version !== event.specVersion
+      ) {
         results.push({
           refId: event.settleRefId,
           status: "rejected",
-          reason: "project not found",
+          reason: "immutable project spec version not found",
           retryable: false,
         });
         continue;
@@ -736,9 +804,10 @@ export const recordUsage = internalMutation({
         consumerOrganizationId: consumerOrg._id,
         publisherOrganizationId,
         projectId,
+        specVersionId,
         event,
       };
-      const fingerprint = settlementFingerprint(binding);
+      const fingerprint = await settlementFingerprint(binding);
 
       const existing = await ctx.db
         .query("walletEntries")
@@ -804,16 +873,32 @@ export const recordUsage = internalMutation({
       const now = Date.now();
       const usageEventId = await ctx.db.insert("usageEvents", {
         organizationId: consumerOrg._id,
+        publisherOrganizationId,
         projectId,
+        specVersionId,
+        specVersion: event.specVersion,
+        operationId: event.operationId,
         projectName: project.name,
         projectSlug: project.slug,
         endpoint: event.endpoint,
         method: event.method,
+        listedCostCredits: event.listedCostCredits,
+        freeTierLimit: event.freeTierLimit,
+        freeTierUsedBefore: event.freeTierUsedBefore,
+        pricingDecision: event.pricingDecision,
         credits: event.credits,
         status: event.status,
         latencyMs: event.latencyMs,
         keyId: event.keyId,
+        keyFamilyId: event.keyFamilyId,
+        monthlyCapCredits: event.monthlyCapCredits,
+        budgetPeriod: event.budgetPeriod,
+        budgetUsedBefore: event.budgetUsedBefore,
+        budgetReservedBefore: event.budgetReservedBefore,
+        budgetReservationCredits: event.budgetReservationCredits,
         at: event.at,
+        reservationId: event.reservationId,
+        settlementIdentityVersion: 2,
         settleRefId: event.settleRefId,
         ambiguous: event.ambiguous,
         publisherIdempotencyKey: event.publisherIdempotencyKey,
@@ -833,6 +918,7 @@ export const recordUsage = internalMutation({
         publisherOrganizationId: project.organizationId,
         consumerOrganizationId: consumerOrg._id,
         projectId: project._id,
+        specVersionId,
         projectName: project.name,
         projectSlug: project.slug,
         usageSettlementRefId: event.settleRefId,

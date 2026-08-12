@@ -18,6 +18,8 @@ describe("internal gateway spec source", () => {
       return Promise.resolve(
         Response.json({
           spec: '{"openapi":"3.1.0"}',
+          specVersionId: "spec-version",
+          version: "1.0.0",
           projectId: "project",
           organizationId: "organization",
           clerkOrgId: "org_publisher",
@@ -51,6 +53,8 @@ describe("internal gateway spec source", () => {
         expect(url.searchParams.get("projectSlug")).toBe("md-to-html");
         return Response.json({
           spec: '{"openapi":"3.1.0"}',
+          specVersionId: "spec-version",
+          version: "1.0.0",
           projectId: "project",
           organizationId: "organization",
           clerkOrgId: "org_publisher",
@@ -71,6 +75,8 @@ describe("internal gateway spec source", () => {
     expect(
       parsePublishedSpecPayload({
         spec: "{}",
+        specVersionId: "spec-version",
+        version: "1.0.0",
         projectId: "project",
         organizationId: "organization",
         clerkOrgId: "org_publisher",

@@ -246,13 +246,27 @@ http.route({
 type IngestUsageEvent = {
   organizationId: string;
   projectId: string;
+  specVersionId: string;
+  specVersion: string;
+  operationId: string;
   endpoint: string;
   method: string;
+  listedCostCredits: number;
+  freeTierLimit?: number;
+  freeTierUsedBefore?: number;
+  pricingDecision: "listed_price" | "free_tier" | "zero_price";
   credits: number;
   status: number;
   latencyMs: number;
   keyId: string;
+  keyFamilyId: string;
+  monthlyCapCredits?: number;
+  budgetPeriod: string;
+  budgetUsedBefore: number;
+  budgetReservedBefore: number;
+  budgetReservationCredits: number;
   at: number;
+  reservationId: string;
   settleRefId: string;
   consumerClerkOrgId: string;
   ambiguous?: boolean;
@@ -287,9 +301,15 @@ export function parseIngestUsageBody(
     const requiredStrings = [
       event.organizationId,
       event.projectId,
+      event.specVersionId,
+      event.specVersion,
+      event.operationId,
       event.endpoint,
       event.method,
       event.keyId,
+      event.keyFamilyId,
+      event.budgetPeriod,
+      event.reservationId,
       event.settleRefId,
       event.consumerClerkOrgId,
     ];
@@ -300,6 +320,10 @@ export function parseIngestUsageBody(
       (event.endpoint as string).length > 2_048 ||
       (event.method as string).length > 16 ||
       (event.keyId as string).length > 256 ||
+      (event.keyFamilyId as string).length > 256 ||
+      (event.operationId as string).length > 512 ||
+      (event.specVersion as string).length > 128 ||
+      !/^\d{4}-\d{2}$/.test(event.budgetPeriod as string) ||
       (event.settleRefId as string).length > 200 ||
       (event.consumerClerkOrgId as string).length > 256 ||
       (typeof event.publisherIdempotencyKey === "string" &&
@@ -312,6 +336,34 @@ export function parseIngestUsageBody(
       !Number.isSafeInteger(event.credits) ||
       event.credits < 0 ||
       event.credits > MAX_ENDPOINT_COST_CREDITS ||
+      typeof event.listedCostCredits !== "number" ||
+      !Number.isSafeInteger(event.listedCostCredits) ||
+      event.listedCostCredits < 0 ||
+      event.listedCostCredits > MAX_ENDPOINT_COST_CREDITS ||
+      (event.freeTierLimit !== undefined &&
+        (typeof event.freeTierLimit !== "number" ||
+          !Number.isSafeInteger(event.freeTierLimit) ||
+          event.freeTierLimit <= 0)) ||
+      (event.freeTierUsedBefore !== undefined &&
+        (typeof event.freeTierUsedBefore !== "number" ||
+          !Number.isSafeInteger(event.freeTierUsedBefore) ||
+          event.freeTierUsedBefore < 0)) ||
+      (event.pricingDecision !== "listed_price" &&
+        event.pricingDecision !== "free_tier" &&
+        event.pricingDecision !== "zero_price") ||
+      (event.monthlyCapCredits !== undefined &&
+        (typeof event.monthlyCapCredits !== "number" ||
+          !Number.isSafeInteger(event.monthlyCapCredits) ||
+          event.monthlyCapCredits <= 0)) ||
+      typeof event.budgetUsedBefore !== "number" ||
+      !Number.isSafeInteger(event.budgetUsedBefore) ||
+      event.budgetUsedBefore < 0 ||
+      typeof event.budgetReservedBefore !== "number" ||
+      !Number.isSafeInteger(event.budgetReservedBefore) ||
+      event.budgetReservedBefore < 0 ||
+      typeof event.budgetReservationCredits !== "number" ||
+      !Number.isSafeInteger(event.budgetReservationCredits) ||
+      event.budgetReservationCredits < 0 ||
       typeof event.status !== "number" ||
       !Number.isSafeInteger(event.status) ||
       event.status < 100 ||
@@ -339,13 +391,33 @@ export function parseIngestUsageBody(
     events.push({
       organizationId: event.organizationId as string,
       projectId: event.projectId as string,
+      specVersionId: event.specVersionId as string,
+      specVersion: event.specVersion as string,
+      operationId: event.operationId as string,
       endpoint: event.endpoint as string,
       method: event.method as string,
+      listedCostCredits: event.listedCostCredits,
+      ...(event.freeTierLimit === undefined
+        ? {}
+        : { freeTierLimit: event.freeTierLimit }),
+      ...(event.freeTierUsedBefore === undefined
+        ? {}
+        : { freeTierUsedBefore: event.freeTierUsedBefore }),
+      pricingDecision: event.pricingDecision,
       credits: event.credits,
       status: event.status,
       latencyMs: event.latencyMs,
       keyId: event.keyId as string,
+      keyFamilyId: event.keyFamilyId as string,
+      ...(event.monthlyCapCredits === undefined
+        ? {}
+        : { monthlyCapCredits: event.monthlyCapCredits }),
+      budgetPeriod: event.budgetPeriod as string,
+      budgetUsedBefore: event.budgetUsedBefore,
+      budgetReservedBefore: event.budgetReservedBefore,
+      budgetReservationCredits: event.budgetReservationCredits,
       at: event.at,
+      reservationId: event.reservationId as string,
       settleRefId: event.settleRefId as string,
       consumerClerkOrgId: consumer,
       ...(event.ambiguous === undefined

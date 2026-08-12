@@ -479,11 +479,16 @@ async function allocateExposureChunk(
   consumerOrganizationId: Id<"organizations">,
 ): Promise<number> {
   let remaining = exposure.publisherCredits - exposure.appliedPublisherCredits;
+  const wallet = await ctx.db
+    .query("wallets")
+    .withIndex("by_organization", (q) =>
+      q.eq("organizationId", consumerOrganizationId),
+    )
+    .unique();
+  if (wallet === null) throw new Error("Consumer wallet is missing");
   const page = await ctx.db
     .query("walletFundingAllocations")
-    .withIndex("by_payment_created", (q) =>
-      q.eq("paymentId", exposure.paymentId),
-    )
+    .withIndex("by_wallet_created", (q) => q.eq("walletId", wallet._id))
     .order("asc")
     .paginate({
       cursor: exposure.allocationCursor ?? null,
@@ -496,8 +501,32 @@ async function allocateExposureChunk(
     if (allocation.earningId === undefined || allocation.kind !== "usage") {
       continue;
     }
-    const capacity =
-      allocation.grossCredits - allocation.clawedBackGrossCredits;
+    const paymentGrossCredits =
+      allocation.provenance === undefined
+        ? allocation.paymentId === exposure.paymentId
+          ? allocation.grossCredits
+          : 0
+        : allocation.provenance
+            .filter((slice) => slice.paymentId === exposure.paymentId)
+            .reduce((sum, slice) => sum + slice.grossCredits, 0);
+    if (paymentGrossCredits === 0) continue;
+    const priorRows = await ctx.db
+      .query("publisherClawbacks")
+      .withIndex("by_allocation", (q) => q.eq("allocationId", allocation._id))
+      .take(MAX_PAYMENT_EXPOSURES + 1);
+    if (priorRows.length > MAX_PAYMENT_EXPOSURES) {
+      throw new Error("Funding allocation exceeds bounded exposure sources");
+    }
+    const paymentClawedBackCredits = priorRows
+      .filter((row) => row.paymentId === exposure.paymentId)
+      .reduce(
+        (sum, row) => sum + row.grossCredits - (row.restoredGrossCredits ?? 0),
+        0,
+      );
+    const capacity = paymentGrossCredits - paymentClawedBackCredits;
+    if (capacity < 0) {
+      throw new Error("Payment provenance clawback exceeds allocation");
+    }
     if (capacity <= 0) continue;
     const earning = await ctx.db.get(allocation.earningId);
     if (earning === null) throw new Error("Funded earning is missing");

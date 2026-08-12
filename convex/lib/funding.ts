@@ -5,7 +5,7 @@ import { assertFinanceMigrationAllowsRuntime } from "./financeMigrationGate";
 /** One debit stays bounded; batches additionally budget total projected writes. */
 export const MAX_FUNDING_LOTS_PER_DEBIT = 24;
 export const MAX_FUNDING_WRITE_UNITS_PER_BATCH = 96;
-/** Pairwise compaction leaves at most one active lot per immutable payment. */
+/** Pairwise compaction leaves at most one active lot per funding priority. */
 export const FUNDING_COMPACTION_INPUTS = 2;
 
 export class FundingInvariantError extends Error {
@@ -19,6 +19,100 @@ export class FundingInvariantError extends Error {
 }
 
 type FundingSourceKind = Doc<"walletFundingLots">["sourceKind"];
+
+export type FundingProvenanceSlice = {
+  sourceRef: string;
+  paymentId?: Id<"payments">;
+  grossCredits: number;
+};
+
+function provenanceTotal(slices: readonly FundingProvenanceSlice[]): number {
+  const total = slices.reduce((sum, slice) => sum + slice.grossCredits, 0);
+  if (!Number.isSafeInteger(total) || total < 0) {
+    throw new FundingInvariantError("Funding provenance overflow", false);
+  }
+  return total;
+}
+
+function availableProvenance(
+  lot: Doc<"walletFundingLots">,
+): FundingProvenanceSlice[] {
+  const slices = lot.availableProvenance;
+  if (slices === undefined) {
+    if (lot.sourceKind === "compaction") {
+      throw new FundingInvariantError(
+        "Compacted funding lot is missing provenance",
+        false,
+      );
+    }
+    return lot.availableCredits === 0
+      ? []
+      : [
+          {
+            sourceRef: lot.sourceRef,
+            paymentId: lot.paymentId,
+            grossCredits: lot.availableCredits,
+          },
+        ];
+  }
+  for (const slice of slices) {
+    if (
+      slice.sourceRef.trim() === "" ||
+      !Number.isSafeInteger(slice.grossCredits) ||
+      slice.grossCredits <= 0 ||
+      (!lot.refundable && slice.paymentId !== undefined)
+    ) {
+      throw new FundingInvariantError("Funding provenance is invalid", false);
+    }
+  }
+  if (provenanceTotal(slices) !== lot.availableCredits) {
+    throw new FundingInvariantError(
+      "Funding provenance does not match available inventory",
+      false,
+    );
+  }
+  return [...slices];
+}
+
+function splitProvenance(
+  slices: readonly FundingProvenanceSlice[],
+  credits: number,
+  paymentId?: Id<"payments">,
+): {
+  consumed: FundingProvenanceSlice[];
+  remaining: FundingProvenanceSlice[];
+} {
+  let needed = credits;
+  const consumed: FundingProvenanceSlice[] = [];
+  const remaining: FundingProvenanceSlice[] = [];
+  for (const slice of slices) {
+    const eligible = paymentId === undefined || slice.paymentId === paymentId;
+    const take = eligible ? Math.min(needed, slice.grossCredits) : 0;
+    if (take > 0) {
+      consumed.push({ ...slice, grossCredits: take });
+      needed -= take;
+    }
+    if (take < slice.grossCredits) {
+      remaining.push({ ...slice, grossCredits: slice.grossCredits - take });
+    }
+  }
+  if (needed !== 0) {
+    throw new FundingInvariantError(
+      "Funding provenance cannot cover requested credits",
+      false,
+    );
+  }
+  return { consumed, remaining };
+}
+
+function provenancePaymentId(
+  slices: readonly FundingProvenanceSlice[],
+): Id<"payments"> | undefined {
+  const first = slices[0]?.paymentId;
+  return first !== undefined && slices.every((slice) => slice.paymentId === first)
+    ? first
+    : undefined;
+}
 
 export async function getFundingState(
   ctx: MutationCtx | QueryCtx,
@@ -114,8 +208,7 @@ function compactableTogether(
   ) {
     return false;
   }
-  // Refundable inventory may compact only inside one immutable payment.
-  return !left.refundable || left.paymentId === right.paymentId;
+  return true;
 }
 
 async function compactLots(
@@ -143,18 +236,28 @@ async function compactLots(
   if (!Number.isSafeInteger(grantedCredits) || grantedCredits <= 0) {
     throw new FundingInvariantError("Funding compaction overflow", false);
   }
+  const provenance = lots.flatMap((lot) => availableProvenance(lot));
+  if (provenanceTotal(provenance) !== grantedCredits) {
+    throw new FundingInvariantError(
+      "Funding compaction provenance did not balance",
+      false,
+    );
+  }
   const compactedLotId = await ctx.db.insert("walletFundingLots", {
     walletId: first.walletId,
     organizationId: first.organizationId,
     sourceKind: "compaction",
     sourceRef: `funding:compact:${first.walletId}:${state.sequence + 1}`,
-    paymentId: first.refundable ? first.paymentId : undefined,
+    paymentId: first.refundable
+      ? provenancePaymentId(provenance)
+      : undefined,
     refundable: first.refundable,
     grantedCredits,
     availableCredits: grantedCredits,
     allocatedCredits: 0,
     reversedCredits: 0,
     compactedCredits: 0,
+    availableProvenance: provenance,
     state: "available",
     createdAt: Math.min(...lots.map((lot) => lot.createdAt)),
     updatedAt: now,
@@ -164,6 +267,7 @@ async function compactLots(
     await ctx.db.patch(lot._id, {
       availableCredits: 0,
       compactedCredits: (lot.compactedCredits ?? 0) + grossCredits,
+      availableProvenance: [],
       state: "compacted",
       updatedAt: now,
     });
@@ -201,22 +305,12 @@ export async function compactFundingInventory(
     args.wallet,
     args.migrationJobId,
   );
-  const lots = args.refundable
-    ? args.paymentId === undefined
-      ? []
-      : await ctx.db
-          .query("walletFundingLots")
-          .withIndex("by_payment_state_created", (q) =>
-            q.eq("paymentId", args.paymentId).eq("state", "available"),
-          )
-          .order("asc")
-          .take(FUNDING_COMPACTION_INPUTS)
-    : await ctx.db
+  const lots = await ctx.db
         .query("walletFundingLots")
         .withIndex("by_org_priority_state_created", (q) =>
           q
             .eq("organizationId", args.wallet.organizationId)
-            .eq("refundable", false)
+            .eq("refundable", args.refundable)
             .eq("state", "available"),
         )
         .order("asc")
@@ -270,6 +364,20 @@ export async function recordPositiveFundingSource(
         "Funding source reference was replayed with different facts",
         false,
       );
+    }
+    if (existing.availableProvenance === undefined) {
+      await ctx.db.patch(existing._id, {
+        availableProvenance:
+          existing.availableCredits === 0
+            ? []
+            : [
+                {
+                  sourceRef: existing.sourceRef,
+                  paymentId: existing.paymentId,
+                  grossCredits: existing.availableCredits,
+                },
+              ],
+      });
     }
     await requireFundingState(ctx, args.wallet, args.migrationJobId);
     return existing;
@@ -329,6 +437,13 @@ export async function recordPositiveFundingSource(
     allocatedCredits: 0,
     reversedCredits: 0,
     compactedCredits: 0,
+    availableProvenance: [
+      {
+        sourceRef: args.sourceRef,
+        paymentId: args.paymentId,
+        grossCredits: args.amount,
+      },
+    ],
     state: "available",
     createdAt: args.createdAt,
     updatedAt: args.createdAt,
@@ -370,6 +485,7 @@ export async function recordPositiveFundingSource(
 export type FundingPlanItem = {
   lot: Doc<"walletFundingLots">;
   grossCredits: number;
+  provenance: FundingProvenanceSlice[];
 };
 
 export type FundingPlan = {
@@ -405,8 +521,11 @@ export async function preflightPaymentReversal(
   );
   const lots = await ctx.db
     .query("walletFundingLots")
-    .withIndex("by_payment_state_created", (q) =>
-      q.eq("paymentId", args.paymentId).eq("state", "available"),
+    .withIndex("by_org_priority_state_created", (q) =>
+      q
+        .eq("organizationId", args.wallet.organizationId)
+        .eq("refundable", true)
+        .eq("state", "available"),
     )
     .order("asc")
     .take(MAX_FUNDING_LOTS_PER_DEBIT + 1);
@@ -414,9 +533,18 @@ export async function preflightPaymentReversal(
   let remaining = args.requestedCredits;
   for (const lot of lots) {
     if (remaining === 0 || items.length === MAX_FUNDING_LOTS_PER_DEBIT) break;
-    const grossCredits = Math.min(lot.availableCredits, remaining);
+    const provenance = availableProvenance(lot);
+    const paymentCredits = provenance
+      .filter((slice) => slice.paymentId === args.paymentId)
+      .reduce((sum, slice) => sum + slice.grossCredits, 0);
+    const grossCredits = Math.min(paymentCredits, remaining);
     if (grossCredits <= 0) continue;
-    items.push({ lot, grossCredits });
+    items.push({
+      lot,
+      grossCredits,
+      provenance: splitProvenance(provenance, grossCredits, args.paymentId)
+        .consumed,
+    });
     remaining -= grossCredits;
   }
   if (remaining > 0 && lots.length > MAX_FUNDING_LOTS_PER_DEBIT) {
@@ -448,10 +576,24 @@ export async function commitPaymentReversal(
     now: number;
     migrationJobId?: Id<"financialMigrationJobs">;
   },
-): Promise<void> {
+): Promise<FundingProvenanceSlice[]> {
   assertFundingStateReady(args.plan.state, args.migrationJobId);
   let refundableDelta = 0;
+  const reversedProvenance: FundingProvenanceSlice[] = [];
   for (const item of args.plan.items) {
+    const split = splitProvenance(
+      availableProvenance(item.lot),
+      item.grossCredits,
+      item.provenance[0]?.paymentId,
+    );
+    if (
+      JSON.stringify(split.consumed) !== JSON.stringify(item.provenance)
+    ) {
+      throw new FundingInvariantError(
+        "Payment reversal provenance changed after preflight",
+        true,
+      );
+    }
     const availableCredits = item.lot.availableCredits - item.grossCredits;
     if (availableCredits < 0) {
       throw new FundingInvariantError("Payment reversal lot underflow", false);
@@ -459,10 +601,12 @@ export async function commitPaymentReversal(
     await ctx.db.patch(item.lot._id, {
       availableCredits,
       reversedCredits: item.lot.reversedCredits + item.grossCredits,
+      availableProvenance: split.remaining,
       state: availableCredits === 0 ? "depleted" : "available",
       updatedAt: args.now,
     });
     refundableDelta += item.grossCredits;
+    reversedProvenance.push(...split.consumed);
   }
   if (refundableDelta !== args.plan.walletCredits) {
     throw new FundingInvariantError(
@@ -481,6 +625,7 @@ export async function commitPaymentReversal(
         : args.plan.state.migrationWatermarkSequence,
     updatedAt: args.now,
   });
+  return reversedProvenance;
 }
 
 async function takeAvailableLots(
@@ -556,7 +701,14 @@ export async function preflightFundingAllocation(
     if (remaining === 0 || items.length === MAX_FUNDING_LOTS_PER_DEBIT) break;
     const grossCredits = Math.min(lot.availableCredits, remaining);
     if (grossCredits <= 0) continue;
-    items.push({ lot, grossCredits });
+    items.push({
+      lot,
+      grossCredits,
+      provenance: splitProvenance(
+        availableProvenance(lot),
+        grossCredits,
+      ).consumed,
+    });
     nonrefundableCredits += grossCredits;
     remaining -= grossCredits;
   }
@@ -572,7 +724,14 @@ export async function preflightFundingAllocation(
       if (remaining === 0 || items.length === MAX_FUNDING_LOTS_PER_DEBIT) break;
       const grossCredits = Math.min(lot.availableCredits, remaining);
       if (grossCredits <= 0) continue;
-      items.push({ lot, grossCredits });
+      items.push({
+        lot,
+        grossCredits,
+        provenance: splitProvenance(
+          availableProvenance(lot),
+          grossCredits,
+        ).consumed,
+      });
       refundableCredits += grossCredits;
       remaining -= grossCredits;
     }
@@ -638,6 +797,16 @@ export async function commitFundingAllocation(
   }
   let committed = 0;
   for (const item of args.plan.items) {
+    const split = splitProvenance(
+      availableProvenance(item.lot),
+      item.grossCredits,
+    );
+    if (JSON.stringify(split.consumed) !== JSON.stringify(item.provenance)) {
+      throw new FundingInvariantError(
+        "Funding provenance changed after preflight",
+        true,
+      );
+    }
     const availableCredits = item.lot.availableCredits - item.grossCredits;
     if (availableCredits < 0) {
       throw new FundingInvariantError("Funding lot underflow", false);
@@ -645,6 +814,7 @@ export async function commitFundingAllocation(
     await ctx.db.patch(item.lot._id, {
       availableCredits,
       allocatedCredits: item.lot.allocatedCredits + item.grossCredits,
+      availableProvenance: split.remaining,
       state: availableCredits === 0 ? "depleted" : "available",
       updatedAt: args.createdAt,
     });
@@ -652,13 +822,14 @@ export async function commitFundingAllocation(
       walletId: args.walletId,
       organizationId: args.organizationId,
       fundingLotId: item.lot._id,
-      paymentId: item.lot.paymentId,
+      paymentId: provenancePaymentId(item.provenance),
       walletEntryId: args.walletEntryId,
       usageEventId: args.usageEventId,
       earningId: args.earningId,
       kind: args.kind,
       grossCredits: item.grossCredits,
       clawedBackGrossCredits: 0,
+      provenance: item.provenance,
       createdAt: args.createdAt,
     });
     if (args.earningId !== undefined) {
@@ -679,14 +850,17 @@ export async function commitFundingAllocation(
       if (rollup === null) {
         await ctx.db.insert("fundingAllocationRollups", {
           fundingLotId: item.lot._id,
-          paymentId: item.lot.paymentId,
+          paymentId: provenancePaymentId(item.provenance),
           publisherOrganizationId: args.publisherOrganizationId,
           allocatedGrossCredits: item.grossCredits,
           clawedBackGrossCredits: 0,
           updatedAt: args.createdAt,
         });
       } else {
+        const paymentId = provenancePaymentId(item.provenance);
         await ctx.db.patch(rollup._id, {
+          paymentId:
+            rollup.paymentId === paymentId ? rollup.paymentId : undefined,
           allocatedGrossCredits:
             rollup.allocatedGrossCredits + item.grossCredits,
           updatedAt: args.createdAt,

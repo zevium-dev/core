@@ -8,6 +8,7 @@ import {
 import type { Doc, Id } from "./_generated/dataModel";
 import { requireIdentity, requireOrgAdmin } from "./lib/auth";
 import { isValidSlug } from "./lib/validate";
+import { assertFinanceMigrationAllowsRuntime } from "./lib/financeMigrationGate";
 
 async function ensureWallet(
   ctx: MutationCtx,
@@ -104,6 +105,7 @@ export const upsertFromClerk = internalMutation({
     imageUrl: v.optional(v.string()),
   },
   handler: async (ctx, args): Promise<Id<"organizations">> => {
+    await assertFinanceMigrationAllowsRuntime(ctx);
     const existing = await ctx.db
       .query("organizations")
       .withIndex("by_clerk_org", (q) => q.eq("clerkOrgId", args.clerkOrgId))
@@ -137,6 +139,7 @@ export const upsertFromClerk = internalMutation({
 export const deleteFromClerk = internalMutation({
   args: { clerkOrgId: v.string() },
   handler: async (ctx, args): Promise<void> => {
+    await assertFinanceMigrationAllowsRuntime(ctx);
     const existing = await ctx.db
       .query("organizations")
       .withIndex("by_clerk_org", (q) => q.eq("clerkOrgId", args.clerkOrgId))
@@ -150,15 +153,110 @@ export const deleteFromClerk = internalMutation({
       .withIndex("by_organization", (q) => q.eq("organizationId", existing._id))
       .unique();
     if (wallet !== null) {
-      const entries = await ctx.db
+      const entry = await ctx.db
         .query("walletEntries")
         .withIndex("by_wallet", (q) => q.eq("walletId", wallet._id))
-        .collect();
-      for (const entry of entries) {
-        await ctx.db.delete(entry._id);
+        .first();
+      const lot = await ctx.db
+        .query("walletFundingLots")
+        .withIndex("by_wallet_created", (q) => q.eq("walletId", wallet._id))
+        .first();
+      const allocation = await ctx.db
+        .query("walletFundingAllocations")
+        .withIndex("by_wallet_created", (q) => q.eq("walletId", wallet._id))
+        .first();
+      const reversal = await ctx.db
+        .query("walletFundingReversals")
+        .withIndex("by_wallet_created", (q) => q.eq("walletId", wallet._id))
+        .first();
+      if (
+        wallet.balance !== 0 ||
+        wallet.sequence !== 0 ||
+        entry !== null ||
+        lot !== null ||
+        allocation !== null ||
+        reversal !== null
+      ) {
+        throw new Error("Organization with finance history cannot be deleted");
       }
+      const funding = await ctx.db
+        .query("walletFundingStates")
+        .withIndex("by_wallet", (q) => q.eq("walletId", wallet._id))
+        .unique();
+      if (funding !== null) await ctx.db.delete(funding._id);
       await ctx.db.delete(wallet._id);
     }
+
+    const project = await ctx.db
+      .query("projects")
+      .withIndex("by_org", (q) => q.eq("organizationId", existing._id))
+      .first();
+    const payment = await ctx.db
+      .query("payments")
+      .withIndex("by_organization", (q) => q.eq("organizationId", existing._id))
+      .first();
+    const checkoutIntent = await ctx.db
+      .query("checkoutIntents")
+      .withIndex("by_organization", (q) => q.eq("organizationId", existing._id))
+      .first();
+    const usage = await ctx.db
+      .query("usageEvents")
+      .withIndex("by_org", (q) => q.eq("organizationId", existing._id))
+      .first();
+    const earning = await ctx.db
+      .query("publisherEarnings")
+      .withIndex("by_publisher", (q) =>
+        q.eq("publisherOrganizationId", existing._id),
+      )
+      .first();
+    const consumedEarning = await ctx.db
+      .query("publisherEarnings")
+      .withIndex("by_consumer", (q) =>
+        q.eq("consumerOrganizationId", existing._id),
+      )
+      .first();
+    const publisherBalance = await ctx.db
+      .query("publisherBalances")
+      .withIndex("by_publisher", (q) =>
+        q.eq("publisherOrganizationId", existing._id),
+      )
+      .unique();
+    const transfer = await ctx.db
+      .query("publisherTransfers")
+      .withIndex("by_publisher", (q) =>
+        q.eq("publisherOrganizationId", existing._id),
+      )
+      .first();
+    const profile = await ctx.db
+      .query("organizationPayments")
+      .withIndex("by_organization", (q) => q.eq("organizationId", existing._id))
+      .unique();
+    const connectedPayout =
+      profile?.stripeConnectedAccountId === undefined
+        ? null
+        : await ctx.db
+            .query("connectedPayouts")
+            .withIndex("by_connected_account", (q) =>
+              q.eq(
+                "stripeConnectedAccountId",
+                profile.stripeConnectedAccountId!,
+              ),
+            )
+            .first();
+    if (
+      project !== null ||
+      payment !== null ||
+      checkoutIntent !== null ||
+      usage !== null ||
+      earning !== null ||
+      consumedEarning !== null ||
+      publisherBalance !== null ||
+      transfer !== null ||
+      connectedPayout !== null
+    ) {
+      throw new Error("Organization with referenced history cannot be deleted");
+    }
+    if (profile !== null) await ctx.db.delete(profile._id);
 
     await ctx.db.delete(existing._id);
   },
@@ -177,6 +275,7 @@ export const ensureOrganization = mutation({
     imageUrl: v.optional(v.string()),
   },
   handler: async (ctx, args): Promise<Doc<"organizations">> => {
+    await assertFinanceMigrationAllowsRuntime(ctx);
     const claims = await requireIdentity(ctx);
     if (claims.orgId === undefined || claims.orgId !== args.clerkOrgId) {
       throw new Error("Organization does not match authenticated identity");

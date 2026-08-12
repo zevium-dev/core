@@ -92,6 +92,8 @@ async function installFixtures(opts: { clerkOrgId: string; credits?: number }) {
   const specs = new FixtureSpecSource();
   specs.set(ORG_SLUG, PROJECT_SLUG, {
     spec: SPEC,
+    specVersionId: "spec_version_demo_v1",
+    version: "1.0.0",
     projectId: "proj_demo",
     organizationId: opts.clerkOrgId,
     clerkOrgId: opts.clerkOrgId,

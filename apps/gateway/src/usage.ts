@@ -14,11 +14,24 @@ export type UsageEvent = {
   /** Consumer's Clerk org id — the org whose wallet actually pays. */
   consumerClerkOrgId: string;
   projectId: string;
+  specVersionId?: string;
+  specVersion?: string;
+  operationId?: string;
   keyId: string;
+  keyFamilyId?: string;
   orgSlug: string;
   projectSlug: string;
   method: string;
   pathTemplate: string;
+  listedCostCredits?: number;
+  freeTierLimit?: number;
+  freeTierUsedBefore?: number;
+  pricingDecision?: "listed_price" | "free_tier" | "zero_price";
+  monthlyCapCredits?: number;
+  budgetPeriod?: string;
+  budgetUsedBefore?: number;
+  budgetReservedBefore?: number;
+  budgetReservationCredits?: number;
   cost: number;
   status: number;
   /** settled | ambiguous | refunded | blocked | free */
@@ -36,13 +49,27 @@ export type ConvexUsageRecord = {
   /** Consumer's Clerk org id — recordUsage resolves this to the wallet debited. */
   consumerClerkOrgId: string;
   projectId: string;
+  specVersionId: string;
+  specVersion: string;
+  operationId: string;
   endpoint: string;
   method: string;
+  listedCostCredits: number;
+  freeTierLimit?: number;
+  freeTierUsedBefore?: number;
+  pricingDecision: "listed_price" | "free_tier" | "zero_price";
   credits: number;
   status: number;
   latencyMs: number;
   keyId: string;
+  keyFamilyId: string;
+  monthlyCapCredits?: number;
+  budgetPeriod: string;
+  budgetUsedBefore: number;
+  budgetReservedBefore: number;
+  budgetReservationCredits: number;
   at: number;
+  reservationId: string;
   settleRefId: string;
   ambiguous?: boolean;
   publisherIdempotencyKey?: string;
@@ -351,17 +378,45 @@ export class ConvexUsageSink implements UsageSink {
 }
 
 export function usageEventToRecord(event: UsageEvent): ConvexUsageRecord {
+  if (
+    event.specVersionId === undefined ||
+    event.specVersion === undefined ||
+    event.operationId === undefined ||
+    event.keyFamilyId === undefined ||
+    event.listedCostCredits === undefined ||
+    event.pricingDecision === undefined ||
+    event.budgetPeriod === undefined ||
+    event.budgetUsedBefore === undefined ||
+    event.budgetReservedBefore === undefined ||
+    event.budgetReservationCredits === undefined
+  ) {
+    throw new Error("settled usage lacks immutable pricing identity");
+  }
   return {
     organizationId: event.organizationId,
     consumerClerkOrgId: event.consumerClerkOrgId,
     projectId: event.projectId,
+    specVersionId: event.specVersionId,
+    specVersion: event.specVersion,
+    operationId: event.operationId,
     endpoint: event.pathTemplate,
     method: event.method,
+    listedCostCredits: event.listedCostCredits,
+    freeTierLimit: event.freeTierLimit,
+    freeTierUsedBefore: event.freeTierUsedBefore,
+    pricingDecision: event.pricingDecision,
     credits: event.cost,
     status: event.status,
     latencyMs: event.latencyMs,
     keyId: event.keyId,
+    keyFamilyId: event.keyFamilyId,
+    monthlyCapCredits: event.monthlyCapCredits,
+    budgetPeriod: event.budgetPeriod,
+    budgetUsedBefore: event.budgetUsedBefore,
+    budgetReservedBefore: event.budgetReservedBefore,
+    budgetReservationCredits: event.budgetReservationCredits,
     at: Date.now(),
+    reservationId: event.reservationId,
     settleRefId: `settle:${event.reservationId}`,
     ...(event.ambiguous === undefined ? {} : { ambiguous: event.ambiguous }),
     ...(event.publisherIdempotencyKey === undefined
@@ -372,16 +427,30 @@ export function usageEventToRecord(event: UsageEvent): ConvexUsageRecord {
 
 export function pendingToUsageRecord(input: {
   settlementId: string;
+  reservationId: string;
   cost: number;
   settledAt: number;
   organizationId: string;
   consumerClerkOrgId: string;
   projectId: string;
+  specVersionId: string;
+  specVersion: string;
+  operationId: string;
   endpoint: string;
   method: string;
+  listedCostCredits: number;
+  freeTierLimit?: number;
+  freeTierUsedBefore?: number;
+  pricingDecision: "listed_price" | "free_tier" | "zero_price";
   status: number;
   latencyMs: number;
   keyId: string;
+  keyFamilyId: string;
+  monthlyCapCredits?: number;
+  budgetPeriod: string;
+  budgetUsedBefore: number;
+  budgetReservedBefore: number;
+  budgetReservationCredits: number;
   ambiguous?: boolean;
   publisherIdempotencyKey?: string;
 }): ConvexUsageRecord {
@@ -389,13 +458,27 @@ export function pendingToUsageRecord(input: {
     organizationId: input.organizationId,
     consumerClerkOrgId: input.consumerClerkOrgId,
     projectId: input.projectId,
+    specVersionId: input.specVersionId,
+    specVersion: input.specVersion,
+    operationId: input.operationId,
     endpoint: input.endpoint,
     method: input.method,
+    listedCostCredits: input.listedCostCredits,
+    freeTierLimit: input.freeTierLimit,
+    freeTierUsedBefore: input.freeTierUsedBefore,
+    pricingDecision: input.pricingDecision,
     credits: input.cost,
     status: input.status,
     latencyMs: input.latencyMs,
     keyId: input.keyId,
+    keyFamilyId: input.keyFamilyId,
+    monthlyCapCredits: input.monthlyCapCredits,
+    budgetPeriod: input.budgetPeriod,
+    budgetUsedBefore: input.budgetUsedBefore,
+    budgetReservedBefore: input.budgetReservedBefore,
+    budgetReservationCredits: input.budgetReservationCredits,
     at: input.settledAt,
+    reservationId: input.reservationId,
     settleRefId: input.settlementId,
     ...(input.ambiguous === undefined ? {} : { ambiguous: input.ambiguous }),
     ...(input.publisherIdempotencyKey === undefined

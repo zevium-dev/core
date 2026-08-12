@@ -12,6 +12,9 @@ export type PublishedSpec = {
   /** Raw OpenAPI JSON string. */
   spec: string;
   projectId: string;
+  /** Exact immutable version selected by control plane. */
+  specVersionId: string;
+  version: string;
   /** Convex organizations table id (ledger / usage). */
   organizationId: string;
   /** Clerk org id — wallet DO idFromName key. */
@@ -55,6 +58,8 @@ const getPublishedForGatewayRef = makeFunctionReference<
   { publisherHandle: string; projectSlug: string },
   {
     spec: string;
+    specVersionId: string;
+    version: string;
     projectId: string;
     organizationId: string;
     clerkOrgId: string;
@@ -224,6 +229,16 @@ export function parsePublishedSpecPayload(json: unknown): PublishedSpec | null {
     return null;
   }
   if (
+    !("specVersionId" in candidate) ||
+    typeof candidate.specVersionId !== "string" ||
+    candidate.specVersionId.length === 0 ||
+    !("version" in candidate) ||
+    typeof candidate.version !== "string" ||
+    candidate.version.length === 0
+  ) {
+    return null;
+  }
+  if (
     !("organizationId" in candidate) ||
     typeof candidate.organizationId !== "string"
   ) {
@@ -250,6 +265,8 @@ export function parsePublishedSpecPayload(json: unknown): PublishedSpec | null {
   const published: PublishedSpec = {
     spec: candidate.spec,
     projectId: candidate.projectId,
+    specVersionId: candidate.specVersionId,
+    version: candidate.version,
     organizationId: candidate.organizationId,
     clerkOrgId,
     visibility,

@@ -3,6 +3,7 @@ import { mutation, query } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { requireOrgMemberBySlug, requireProjectMember } from "./lib/auth";
 import { isValidSlug } from "./lib/validate";
+import { assertFinanceMigrationAllowsRuntime } from "./lib/financeMigrationGate";
 
 export const list = query({
   args: { orgSlug: v.string() },
@@ -39,6 +40,7 @@ export const create = mutation({
     description: v.optional(v.string()),
   },
   handler: async (ctx, args): Promise<Doc<"projects">> => {
+    await assertFinanceMigrationAllowsRuntime(ctx);
     const { org } = await requireOrgMemberBySlug(ctx, args.orgSlug);
 
     const name = args.name.trim();
@@ -200,7 +202,16 @@ export const update = mutation({
 export const remove = mutation({
   args: { projectId: v.id("projects") },
   handler: async (ctx, args): Promise<{ deleted: Id<"projects"> }> => {
+    await assertFinanceMigrationAllowsRuntime(ctx);
     await requireProjectMember(ctx, args.projectId);
+
+    const usage = await ctx.db
+      .query("usageEvents")
+      .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
+      .first();
+    if (usage !== null) {
+      throw new Error("Project with immutable usage history cannot be deleted");
+    }
 
     const draft = await ctx.db
       .query("specs")

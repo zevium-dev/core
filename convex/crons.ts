@@ -35,4 +35,10 @@ crons.interval(
   { minutes: 1 },
   internal.billing.recoverPublisherReconciliations,
 );
+
+crons.interval(
+  "publisher-transfer-dispatch-recovery",
+  { minutes: 1 },
+  internal.payouts.recoverPublisherTransferDispatches,
+);
 export default crons;
