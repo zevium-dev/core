@@ -109,7 +109,29 @@ describe("internal gateway spec source", () => {
         ...base,
         spec: JSON.stringify({
           openapi: "3.1.0",
-          info: { title: "Demo", version: "HIPAA ready" },
+          info: { title: "Demo", version: "PCI compliant" },
+          paths: {},
+        }),
+      }),
+    ).toBeNull();
+    expect(
+      parsePublishedSpecPayload({
+        ...base,
+        version: "HIPAA",
+        deprecationMessage: "compliant",
+        spec: "{}",
+      }),
+    ).toBeNull();
+    expect(
+      parsePublishedSpecPayload({
+        ...base,
+        spec: JSON.stringify({
+          openapi: "3.1.0",
+          info: {
+            title: "HIPAA",
+            description: "compliant",
+            version: "1.0.0",
+          },
           paths: {},
         }),
       }),

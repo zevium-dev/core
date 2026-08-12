@@ -8,6 +8,60 @@ import schema from "./schema";
 
 const modules = import.meta.glob("./**/*.ts");
 
+const REPRODUCED_UNSUPPORTED_ASSURANCE_COPY = [
+  "We obtained SOC 2 certification",
+  "We hold SOC 2 certification",
+  "We have SOC 2 compliance",
+  "SOC 2 certification passed",
+  "HIPAA compliance verified",
+  "GDPR compliance validated",
+  "All GDPR requirements are satisfied",
+  "ISO 27001 accredited",
+  "SOC 2 audited",
+  "SOC 2 attestation complete",
+  "Our SOC 2 examination passed",
+  "HIPAA assured",
+  "HIPAA safeguards guaranteed",
+  "GDPR lawful",
+  "GDPR requirements implemented",
+  "We meet every requirement of GDPR",
+  "GDPR audit passed",
+  "Certified by an independent auditor under SOC 2",
+  "Independent auditors verified our SOC 2 controls",
+  "CCPA obligations satisfied",
+  "We completed SOC 2 certification",
+  "Certification under SOC 2 was obtained",
+  "The HIPAA audit succeeded",
+  "GDPR requirements were fulfilled",
+  "Certification under SOC 2 is not pending",
+] as const;
+
+const HOSTILE_REPORT_BLOCKED_COPY = [
+  "PCI compliant",
+  "This API is certified",
+  "Compliance guaranteed",
+  "Indisputably compliant",
+  "\u202eAAPIH\u202c compliant",
+  "H1PAA compliant",
+  "🅷IPAA compliant",
+  "HʹIPAA compliant",
+  "HIPAA may be compliant",
+  "HIPAA indisputable compliance",
+  "GDPR compliance guarantee",
+  "HIPAA evidence API compliant",
+  "risk-free",
+  "no security risk",
+  "riskless",
+  "zero risks",
+  "0 risk",
+  "zero security risk",
+] as const;
+
+const PUBLIC_BOUNDARY_BLOCKED_COPY = [
+  ...REPRODUCED_UNSUPPORTED_ASSURANCE_COPY,
+  ...HOSTILE_REPORT_BLOCKED_COPY,
+] as const;
+
 function specWithCopy(copy: Record<string, unknown>): string {
   return JSON.stringify({
     openapi: "3.1.0",
@@ -23,6 +77,7 @@ function specWithCopy(copy: Record<string, unknown>): string {
 
 async function seed(t: ReturnType<typeof convexTest>): Promise<{
   projectId: Id<"projects">;
+  organizationId: Id<"organizations">;
 }> {
   return await t.run(async (ctx) => {
     const organizationId = await ctx.db.insert("organizations", {
@@ -44,7 +99,7 @@ async function seed(t: ReturnType<typeof convexTest>): Promise<{
       draft: specWithCopy({}),
       lastSavedAt: Date.now(),
     });
-    return { projectId };
+    return { projectId, organizationId };
   });
 }
 
@@ -58,6 +113,281 @@ function asAdmin(t: ReturnType<typeof convexTest>) {
 }
 
 describe("publisher public-claim boundaries", () => {
+  it("rejects every reproduced assurance phrase at organization and project writes", async () => {
+    const t = convexTest(schema, modules);
+    await seed(t);
+    const admin = asAdmin(t);
+
+    for (const [index, claim] of PUBLIC_BOUNDARY_BLOCKED_COPY.entries()) {
+      await expect(
+        t.mutation(internal.organizations.upsertFromClerk, {
+          clerkOrgId: `org_reproduced_${index}`,
+          name: claim,
+          slug: `reproduced-org-${index}`,
+        }),
+        claim,
+      ).rejects.toThrow(/unsupported compliance or absolute security claim/i);
+      await expect(
+        admin.mutation(api.projects.create, {
+          orgSlug: "claims-test",
+          name: claim,
+          slug: `reproduced-project-${index}`,
+        }),
+        claim,
+      ).rejects.toThrow(/unsupported compliance or absolute security claim/i);
+    }
+  });
+
+  it("rejects cross-field claim composition without sharing negation", async () => {
+    const t = convexTest(schema, modules);
+    const { projectId } = await seed(t);
+    const admin = asAdmin(t);
+
+    await expect(
+      t.mutation(internal.organizations.upsertFromClerk, {
+        clerkOrgId: "org_cross_field_claim",
+        name: "HIPAA",
+        slug: "compliant",
+      }),
+    ).rejects.toThrow(/unsupported compliance or absolute security claim/i);
+    await expect(
+      admin.mutation(api.projects.create, {
+        orgSlug: "claims-test",
+        name: "HIPAA",
+        slug: "cross-field-project",
+        description: "compliant",
+      }),
+    ).rejects.toThrow(/unsupported compliance or absolute security claim/i);
+    await expect(
+      admin.mutation(api.projects.create, {
+        orgSlug: "claims-test",
+        name: "Demo API",
+        slug: "cross-field-negation",
+        description: "HIPAA compliant",
+      }),
+    ).rejects.toThrow(/unsupported compliance or absolute security claim/i);
+    await expect(
+      admin.mutation(api.projects.update, {
+        projectId,
+        patch: { tags: ["not", "HIPAA compliant"] },
+      }),
+    ).rejects.toThrow(/unsupported compliance or absolute security claim/i);
+
+    const save = await admin.mutation(api.specs.saveDraft, {
+      projectId,
+      spec: specWithCopy({ title: "HIPAA", description: "compliant" }),
+    });
+    expect(save.ok).toBe(false);
+    expect(
+      save.issues.some(
+        (issue) =>
+          issue.path === "$ (cross-field raw JSON strings)" &&
+          issue.level === "error",
+      ),
+    ).toBe(true);
+  });
+
+  it.each(PUBLIC_BOUNDARY_BLOCKED_COPY)(
+    "rejects reproduced assurance phrase at OpenAPI save and publish: %s",
+    async (claim) => {
+      const t = convexTest(schema, modules);
+      const { projectId } = await seed(t);
+      const admin = asAdmin(t);
+      const spec = specWithCopy({ description: claim });
+      const save = await admin.mutation(api.specs.saveDraft, {
+        projectId,
+        spec,
+      });
+      expect(save.ok, claim).toBe(false);
+      expect(
+        save.issues.some(
+          (issue) =>
+            issue.path === "$.info.description" && issue.level === "error",
+        ),
+        claim,
+      ).toBe(true);
+
+      await t.run(async (ctx) => {
+        const draft = await ctx.db
+          .query("specs")
+          .withIndex("by_project", (q) => q.eq("projectId", projectId))
+          .unique();
+        if (draft === null) throw new Error("missing draft");
+        await ctx.db.patch(draft._id, { draft: spec, lastSavedAt: Date.now() });
+        const readiness = await ctx.db
+          .query("publishReadiness")
+          .withIndex("by_project", (q) => q.eq("projectId", projectId))
+          .unique();
+        const ready = {
+          draftHash: await draftFingerprint(spec),
+          serverOrigin: "https://api.example.com",
+          credentialRevision: 0,
+          status: "ok" as const,
+          testedAt: Date.now(),
+        };
+        if (readiness === null) {
+          await ctx.db.insert("publishReadiness", { projectId, ...ready });
+        } else {
+          await ctx.db.patch(readiness._id, ready);
+        }
+      });
+
+      const publish = await admin.mutation(api.specs.publish, {
+        projectId,
+        version: "1.0.0",
+      });
+      expect(publish.ok, claim).toBe(false);
+      expect(
+        publish.issues.some((issue) => issue.path === "$.info.description"),
+        claim,
+      ).toBe(true);
+    },
+  );
+
+  it.each(PUBLIC_BOUNDARY_BLOCKED_COPY)(
+    "fails closed for reproduced assurance phrase on public reads: %s",
+    async (claim) => {
+      const t = convexTest(schema, modules);
+      const { organizationId, projectId } = await seed(t);
+      const versionId = await t.run(async (ctx) => {
+        await ctx.db.patch(projectId, {
+          status: "published",
+          visibility: "public",
+        });
+        return await ctx.db.insert("specVersions", {
+          projectId,
+          version: "1.0.0",
+          spec: specWithCopy({}),
+          publishedAt: Date.now(),
+        });
+      });
+      const route = {
+        publisherHandle: "claims-test",
+        projectSlug: "claims-api",
+      };
+
+      await t.run(async (ctx) => {
+        await ctx.db.patch(projectId, { name: claim });
+        await ctx.db.patch(versionId, { spec: specWithCopy({}) });
+      });
+      expect(
+        (await t.query(api.catalogue.listPublic, {})).items,
+        claim,
+      ).toEqual([]);
+      await expect(
+        t.query(api.catalogue.getPublicDetail, route),
+        claim,
+      ).resolves.toBeNull();
+      await expect(
+        t.query(api.specs.getPublishedForGateway, route),
+        claim,
+      ).resolves.toBeNull();
+
+      await t.run(async (ctx) => {
+        await ctx.db.patch(projectId, { name: "Claims Test API" });
+        await ctx.db.patch(versionId, {
+          spec: specWithCopy({ description: claim }),
+        });
+      });
+      expect(
+        (await t.query(api.catalogue.listPublic, {})).items,
+        claim,
+      ).toEqual([]);
+      await expect(
+        t.query(api.catalogue.getPublicDetail, route),
+        claim,
+      ).resolves.toBeNull();
+      await expect(
+        t.query(api.specs.getPublishedForGateway, route),
+        claim,
+      ).resolves.toBeNull();
+
+      await t.run(async (ctx) => {
+        await ctx.db.patch(versionId, { spec: specWithCopy({}) });
+        await ctx.db.patch(organizationId, { name: claim });
+      });
+      await expect(
+        t.query(api.organizations.getByPublicHandle, {
+          handle: "claims-test",
+        }),
+        claim,
+      ).resolves.toBeNull();
+      expect(
+        (await t.query(api.catalogue.listPublic, {})).items,
+        claim,
+      ).toEqual([]);
+      await expect(
+        t.query(api.specs.getPublishedForGateway, route),
+        claim,
+      ).resolves.toBeNull();
+      await t.run(async (ctx) => {
+        await ctx.db.patch(organizationId, { name: "Claims Test Org" });
+      });
+    },
+  );
+
+  it("fails closed when legacy public rows compose a claim across fields", async () => {
+    const t = convexTest(schema, modules);
+    const { organizationId, projectId } = await seed(t);
+    const versionId = await t.run(async (ctx) => {
+      await ctx.db.patch(projectId, {
+        status: "published",
+        visibility: "public",
+      });
+      return await ctx.db.insert("specVersions", {
+        projectId,
+        version: "1.0.0",
+        spec: specWithCopy({}),
+        publishedAt: Date.now(),
+      });
+    });
+    const route = {
+      publisherHandle: "claims-test",
+      projectSlug: "claims-api",
+    };
+
+    await t.run(async (ctx) => {
+      await ctx.db.patch(projectId, {
+        name: "HIPAA",
+        description: "compliant",
+      });
+    });
+    expect((await t.query(api.catalogue.listPublic, {})).items).toEqual([]);
+    await expect(
+      t.query(api.catalogue.getPublicDetail, route),
+    ).resolves.toBeNull();
+    await expect(
+      t.query(api.specs.getPublishedForGateway, route),
+    ).resolves.toBeNull();
+
+    await t.run(async (ctx) => {
+      await ctx.db.patch(projectId, {
+        name: "compliant",
+        description: undefined,
+      });
+      await ctx.db.patch(organizationId, { name: "HIPAA" });
+    });
+    expect((await t.query(api.catalogue.listPublic, {})).items).toEqual([]);
+    await expect(
+      t.query(api.specs.getPublishedForGateway, route),
+    ).resolves.toBeNull();
+
+    await t.run(async (ctx) => {
+      await ctx.db.patch(organizationId, { name: "Claims Test Org" });
+      await ctx.db.patch(projectId, { name: "Claims Test API" });
+      await ctx.db.patch(versionId, {
+        spec: specWithCopy({ title: "HIPAA", description: "compliant" }),
+      });
+    });
+    expect((await t.query(api.catalogue.listPublic, {})).items).toEqual([]);
+    await expect(
+      t.query(api.catalogue.getPublicDetail, route),
+    ).resolves.toBeNull();
+    await expect(
+      t.query(api.specs.getPublishedForGateway, route),
+    ).resolves.toBeNull();
+  });
+
   it("rejects Clerk sync, explicit handle, and unsafe backfill writes", async () => {
     const t = convexTest(schema, modules);
     await seed(t);

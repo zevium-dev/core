@@ -1,6 +1,6 @@
 import {
   isOpenApiPublicCopyAllowed,
-  isPublicCopyAllowed,
+  isPublicCopySetAllowed,
 } from "@zevium/shared";
 import type { Doc } from "../_generated/dataModel";
 
@@ -22,16 +22,27 @@ type PublishedCopy = Pick<
   "version" | "spec" | "deprecationMessage"
 >;
 
+function organizationCopyFields(organization: OrganizationCopy): string[] {
+  return [
+    organization.name,
+    organization.slug,
+    organization.publicHandle ?? "",
+  ];
+}
+
+function projectCopyFields(project: ProjectCopy): string[] {
+  return [
+    project.name,
+    project.slug,
+    project.description ?? "",
+    ...project.tags,
+  ];
+}
+
 export function isOrganizationCopyAllowed(
   organization: OrganizationCopy,
 ): boolean {
-  return isPublicCopyAllowed(
-    [
-      organization.name,
-      organization.slug,
-      organization.publicHandle ?? "",
-    ].join("\n"),
-  );
+  return isPublicCopySetAllowed(organizationCopyFields(organization));
 }
 
 export function isOrganizationPublicSurfaceAllowed(
@@ -45,14 +56,7 @@ export function isOrganizationPublicSurfaceAllowed(
 }
 
 export function isProjectCopyAllowed(project: ProjectCopy): boolean {
-  return isPublicCopyAllowed(
-    [
-      project.name,
-      project.slug,
-      project.description ?? "",
-      ...project.tags,
-    ].join("\n"),
-  );
+  return isPublicCopySetAllowed(projectCopyFields(project));
 }
 
 export function isProjectPublicSurfaceAllowed(
@@ -61,7 +65,11 @@ export function isProjectPublicSurfaceAllowed(
 ): boolean {
   return (
     isOrganizationPublicSurfaceAllowed(organization) &&
-    isProjectCopyAllowed(project)
+    isProjectCopyAllowed(project) &&
+    isPublicCopySetAllowed([
+      ...organizationCopyFields(organization),
+      ...projectCopyFields(project),
+    ])
   );
 }
 
@@ -73,9 +81,12 @@ export function isPublishedSurfaceAllowed(
   return (
     version !== null &&
     isProjectPublicSurfaceAllowed(project, organization) &&
-    isPublicCopyAllowed(
-      [version.version, version.deprecationMessage ?? ""].join("\n"),
-    ) &&
+    isPublicCopySetAllowed([
+      ...organizationCopyFields(organization),
+      ...projectCopyFields(project),
+      version.version,
+      version.deprecationMessage ?? "",
+    ]) &&
     isOpenApiPublicCopyAllowed(version.spec)
   );
 }

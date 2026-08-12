@@ -31,6 +31,7 @@ export {
   findPublicClaimViolations,
   findOpenApiPublicClaimViolations,
   isPublicCopyAllowed,
+  isPublicCopySetAllowed,
   isOpenApiPublicCopyAllowed,
   type PublicClaimViolation,
   type OpenApiPublicClaimViolation,

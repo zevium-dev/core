@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import {
   mkdirSync,
   mkdtempSync,
@@ -11,7 +12,12 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { deflateRawSync, deflateSync, gzipSync } from "node:zlib";
+import {
+  brotliCompressSync,
+  deflateRawSync,
+  deflateSync,
+  gzipSync,
+} from "node:zlib";
 import {
   formatFailures,
   listDefaultClaimFiles,
@@ -220,6 +226,39 @@ test("compressed, archive, and PDF magic always fails closed without a decoder",
   );
 });
 
+test("Brotli streams fail closed despite having no format magic", (t) => {
+  const stream = brotliCompressSync(Buffer.from("HIPAA ready", "utf8"));
+  const largeStream = brotliCompressSync(randomBytes(16 * 1024));
+  assert.ok(largeStream.byteLength > 8 * 1024);
+  const root = fixture(t, {
+    "public/claim.br": stream,
+    "public/renamed.odd": stream,
+    "public/renamed-large.odd": largeStream,
+  });
+
+  const failures = scanComplianceClaims({ root, targets: ["public"] });
+  assert.deepEqual(
+    failures.map(({ file, label, match }) => [file, label, match]).sort(),
+    [
+      [
+        "public/claim.br",
+        "unsafe compliance scan input",
+        "Brotli stream has no bounded exact text decoder",
+      ],
+      [
+        "public/renamed-large.odd",
+        "unsafe compliance scan input",
+        "Brotli stream has no bounded exact text decoder",
+      ],
+      [
+        "public/renamed.odd",
+        "unsafe compliance scan input",
+        "Brotli stream has no bounded exact text decoder",
+      ],
+    ],
+  );
+});
+
 test("every recognized opaque magic family fails closed", (t) => {
   const at = (offset, bytes) => {
     const result = Buffer.alloc(offset + bytes.length);
@@ -317,6 +356,80 @@ test("fixture exemption is not transferable by basename or modified content", (t
   assert.equal(failures.length, 2);
 });
 
+test("internal reference exemption requires exact path, bytes, and source provenance", (t) => {
+  const reference = readFileSync(
+    new URL(
+      "../.agents/skills/stripe-best-practices/references/payments.md",
+      import.meta.url,
+    ),
+  );
+  const path = ".agents/skills/stripe-best-practices/references/payments.md";
+  const root = fixture(t, {
+    [path]: reference,
+    "copied/payments.md": reference,
+  });
+  initAndTrack(root, [path, "copied/payments.md"]);
+
+  const failures = scanComplianceClaims({ root });
+  assert.ok(failures.length > 0);
+  assert.ok(failures.every(({ file }) => file === "copied/payments.md"));
+  assert.ok(
+    scanComplianceClaims({ root, targets: [path] }).some(
+      ({ label }) => label === "PCI claim",
+    ),
+  );
+});
+
+test("POSIX backslashes cannot alias an exempt source path", (t) => {
+  if (process.platform === "win32") return;
+  const path = "docs\\launch-security-compliance.md";
+  const root = fixture(t, { [path]: "SOC 2 certified" });
+  initAndTrack(root, [path]);
+
+  const failures = scanComplianceClaims({ root });
+  assert.ok(
+    failures.some(
+      ({ file, label }) => file === path && label === "SOC 2 claim",
+    ),
+  );
+});
+
+test("generated provenance disables exact source path and digest exemptions", (t) => {
+  const root = fixture(t, {
+    "apps/web/dist/server/wrangler.json": JSON.stringify({
+      main: "../../../../docs/launch-security-compliance.md",
+      assets: { directory: "../../../.." },
+    }),
+    "docs/launch-security-compliance.md": readFileSync(
+      new URL("../docs/launch-security-compliance.md", import.meta.url),
+    ),
+    "apps/web/public/logo192.png": readFileSync(
+      new URL("../apps/web/public/logo192.png", import.meta.url),
+    ),
+    "packages/shared/src/public-claims.test.ts": readFileSync(
+      new URL("../packages/shared/src/public-claims.test.ts", import.meta.url),
+    ),
+  });
+  execFileSync("git", ["init", "-q"], { cwd: root });
+
+  const failures = scanComplianceClaims({ root, requireGenerated: "web" });
+  assert.ok(
+    failures.some(({ file }) => file === "docs/launch-security-compliance.md"),
+  );
+  assert.ok(
+    failures.some(
+      ({ file, match }) =>
+        file === "apps/web/public/logo192.png" &&
+        /no bounded exact text decoder/.test(match),
+    ),
+  );
+  assert.ok(
+    failures.some(
+      ({ file }) => file === "packages/shared/src/public-claims.test.ts",
+    ),
+  );
+});
+
 test("untracked web deploy assets are derived from generated manifest and scanned", (t) => {
   const retiredSourceBytes = readFileSync(
     new URL("../apps/web/public/logo192.png", import.meta.url),
@@ -355,6 +468,30 @@ test("untracked web deploy assets are derived from generated manifest and scanne
       ({ file, match }) =>
         file.endsWith("apps/web/dist/client/logo192.png") &&
         /no bounded exact text decoder/.test(match),
+    ),
+  );
+});
+
+test("generated CodeMirror regex metadata is inert but ordinary bidi copy fails", (t) => {
+  const metadata =
+    'const specials = RegExp(`[\\0-\\b\\n-\u001f\u061c\u200e\u200f\\u2028\\u2029\u202d\u202e\u2066\u2067\u2069\ufeff\ufff9-\ufffc]`, "gu");';
+  const minifiedMetadata = metadata.replace("\\n", "\n");
+  const root = fixture(t, {
+    "apps/web/dist/server/wrangler.json": JSON.stringify({
+      main: "index.js",
+      assets: { directory: "../client" },
+    }),
+    "apps/web/dist/server/index.js": metadata,
+    "apps/web/dist/client/safe.js": minifiedMetadata,
+    "apps/web/dist/client/attack.js": 'const copy = "safe\u202eclaim";',
+  });
+  execFileSync("git", ["init", "-q"], { cwd: root });
+
+  const failures = scanComplianceClaims({ root, requireGenerated: "web" });
+  assert.ok(failures.some(({ file }) => file.endsWith("attack.js")));
+  assert.ok(
+    failures.every(
+      ({ file }) => !file.endsWith("index.js") && !file.endsWith("safe.js"),
     ),
   );
 });
@@ -475,6 +612,8 @@ test("generated source directories receive no global bypass", (t) => {
     "convex/_generated/api.test.ts": "export const badge = 'SOC 2 certified';",
   });
   const failures = scanComplianceClaims({ root, targets: ["convex"] });
-  assert.equal(failures.length, 1);
-  assert.equal(failures[0]?.file, "convex/_generated/api.test.ts");
+  assert.ok(failures.length >= 1);
+  assert.ok(
+    failures.every(({ file }) => file === "convex/_generated/api.test.ts"),
+  );
 });

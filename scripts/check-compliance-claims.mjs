@@ -8,8 +8,9 @@ import {
   realpathSync,
   statSync,
 } from "node:fs";
-import { dirname, join, relative, resolve } from "node:path";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
+import { brotliDecompressSync } from "node:zlib";
 import { findPublicClaimViolations } from "../packages/shared/src/public-claims.ts";
 
 const MAX_FILE_BYTES = 8 * 1024 * 1024;
@@ -78,6 +79,15 @@ const EXACT_INERT_NON_SURFACE_SHA256 = new Map([
     "fdc36f34d34d7addbae954f6cf3863d0b643c4214ac5a34a6ab82c710caa8927",
   ],
 ]);
+// Internal reference material can discuss third-party assurance requirements
+// without becoming Zevium publisher copy. Exemption requires exact source path
+// and bytes and never transfers to explicit or generated/deploy inventory.
+const EXACT_INTERNAL_REFERENCE_SHA256 = new Map([
+  [
+    ".agents/skills/stripe-best-practices/references/payments.md",
+    "4c94d2762e371bf0e0257084f3efcf3358a35b3c54a34f2bb65b530ebb586e79",
+  ],
+]);
 const INERT_REFERENCE_ALLOWLIST = new Map([
   ["apps/web/public/favicon.ico", new Set(["apps/web/scripts/build.mjs"])],
   [
@@ -95,23 +105,23 @@ const INERT_REFERENCE_ALLOWLIST = new Map([
 const TEST_FIXTURE_SHA256 = new Map([
   [
     "apps/gateway/test/discovery-mcp.test.ts",
-    "db938c6634a2483564f44a9a83e28266d222c24caa9d4ae11cc6ac504d352dee",
+    "49ef95a3a19fc4150c4daa7c4097e0ea326468045d0ddebfe2f59736a7ff1893",
   ],
   [
     "apps/gateway/test/mock.test.ts",
-    "8205b8bd2ddcc65811fa46bc5f3ea0e62faf46ecb669e0055b1535203075121b",
+    "8e6930b88f321d6fae8e9de28742476c02740a6fff67712506742fc7906af79b",
   ],
   [
     "apps/gateway/test/pipeline.test.ts",
-    "17ec63ff744c7586c7cd3f732faafe15c11f6739cec91399762ee22d0d2204f6",
+    "b8c4a5b61537ea4981a91499b7a8ffb5a9de662fd2a53d108b169736a6703806",
   ],
   [
     "apps/gateway/test/spec-source.test.ts",
-    "25540dc6ce28311737f7dc8f40baf248cfd94543600658faa1c17c4ff33c4586",
+    "162a963e8353cbf1f44d354c6a337c375325b3d85a9ee2dd65da44efded9c992",
   ],
   [
     "convex/publicClaims.test.ts",
-    "6b18b40e71448b7482deb683eb9c2c4e8a034b1002044005d40d749942af58f9",
+    "92d3ba63a3bcd60379896e987b18e74d3a893817fabf93e424a05ccf6bd7a687",
   ],
   [
     "convex/dev.test.ts",
@@ -123,11 +133,11 @@ const TEST_FIXTURE_SHA256 = new Map([
   ],
   [
     "packages/shared/src/public-claims.test.ts",
-    "9faaaa4f83497a4f5b7224ade11e048f0fda7d355b09dcd7cbb7f69c55a9c3df",
+    "3beb5feb62f9cb19e3ff7401478412487ff41b92d19500dd427680b5e6b5cf31",
   ],
   [
     "scripts/check-compliance-claims.test.mjs",
-    "dca0a3f87b64a4a2bfaa9372228eed83f526200e682d0916d2c5f8cd61e3de1a",
+    "82a727e72ce01915163d80a7c5b28cdc8357d1591f8440a09056feaa86e529e7",
   ],
 ]);
 
@@ -139,11 +149,13 @@ const GATEWAY_METAFILE = `${GATEWAY_OUTPUT_DIR}/bundle-meta.json`;
 const GATEWAY_WORKER = `${GATEWAY_OUTPUT_DIR}/index.js`;
 
 function normalizeRelativePath(root, file) {
-  return relative(root, file).replaceAll("\\", "/");
+  // Convert platform separators only. On POSIX, backslash is a valid filename
+  // byte and must never alias an exempt repository path.
+  return relative(root, file).split(sep).join("/");
 }
 
 function isInside(root, target) {
-  const rel = relative(root, target).replaceAll("\\", "/");
+  const rel = relative(root, target).split(sep).join("/");
   return rel === "" || (rel !== ".." && !rel.startsWith("../"));
 }
 
@@ -151,11 +163,16 @@ function sha256(contents) {
   return createHash("sha256").update(contents).digest("hex");
 }
 
-function isFingerprintExcluded(relativePath, contents, allowInert) {
+function isFingerprintExcluded(relativePath, contents, allowSourceExemption) {
+  if (!allowSourceExemption) return false;
   const fixture = TEST_FIXTURE_SHA256.get(relativePath);
   if (fixture !== undefined) return sha256(contents) === fixture;
+  const internalReference = EXACT_INTERNAL_REFERENCE_SHA256.get(relativePath);
+  if (internalReference !== undefined) {
+    return sha256(contents) === internalReference;
+  }
   const inert = EXACT_INERT_NON_SURFACE_SHA256.get(relativePath);
-  return allowInert && inert !== undefined && sha256(contents) === inert;
+  return inert !== undefined && sha256(contents) === inert;
 }
 
 function filesUnder(root, path) {
@@ -366,7 +383,32 @@ function hasMagic(bytes, signature, offset = 0) {
   return signature.every((byte, index) => bytes[offset + index] === byte);
 }
 
-function recognizedBinaryKind(bytes) {
+function isBrotliCandidate(bytes, relativePath) {
+  // Brotli deliberately has no magic number. Reject its conventional suffix,
+  // then use a bounded decoder probe so renamed non-empty streams and output
+  // bombs cannot masquerade as UTF-8 source. We do not use decoded content as
+  // scan evidence: any detected stream remains an opaque rejected input.
+  if (relativePath.toLowerCase().endsWith(".br")) return true;
+  try {
+    return (
+      brotliDecompressSync(bytes, { maxOutputLength: MAX_FILE_BYTES + 1 })
+        .byteLength > 0
+    );
+  } catch (error) {
+    return (
+      error !== null &&
+      typeof error === "object" &&
+      "code" in error &&
+      error.code === "ERR_BUFFER_TOO_LARGE"
+    );
+  }
+}
+
+function recognizedBinaryKind(contents, relativePath) {
+  // Brotli needs complete bytes because it has no magic number; probing only
+  // the sniff prefix would miss renamed streams larger than SNIFF_BYTES.
+  if (isBrotliCandidate(contents, relativePath)) return "Brotli stream";
+  const bytes = contents.subarray(0, SNIFF_BYTES);
   if (hasMagic(bytes, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))
     return "PNG image";
   if (hasMagic(bytes, [0xff, 0xd8, 0xff])) return "JPEG image";
@@ -463,6 +505,30 @@ function unsafeFailure(file, reason) {
   };
 }
 
+function isCodeMirrorSpecialCharacterMetadata(source, index) {
+  // CodeMirror ships raw bidi controls inside an inert regular-expression
+  // character class used to visualize special characters. Match its exact
+  // structural anchors; ordinary string literals and publisher copy retain no
+  // exception. This applies only to generated inventory below.
+  const constructorStart = source.lastIndexOf("RegExp(", index);
+  if (constructorStart < 0 || index - constructorStart > 512) return false;
+  const constructorEnd = source.indexOf(")", index);
+  if (constructorEnd < 0 || constructorEnd - index > 512) return false;
+  const constructor = source.slice(constructorStart, constructorEnd + 1);
+  const escapedLineFeedPrefix = "\\0-\\b\\n-" + String.fromCodePoint(0x1f);
+  const literalLineFeedPrefix = "\\0-\\b\n-" + String.fromCodePoint(0x1f);
+  const hasExpectedPrefix = [escapedLineFeedPrefix, literalLineFeedPrefix].some(
+    (prefix) =>
+      constructor.startsWith(`RegExp("[${prefix}`) ||
+      constructor.startsWith(`RegExp(\`[${prefix}`),
+  );
+  return (
+    hasExpectedPrefix &&
+    constructor.includes("\\u2028\\u2029") &&
+    constructor.includes("\ufff9-\ufffc]")
+  );
+}
+
 function readBoundedFile(root, file) {
   const relativePath = normalizeRelativePath(root, file);
   let actual = file;
@@ -537,30 +603,39 @@ export function scanComplianceClaims({
   requireGenerated = "none",
 } = {}) {
   const failures = [];
+  const defaultFiles = targets === undefined ? listDefaultClaimFiles(root) : [];
+  const generatedFiles =
+    targets === undefined
+      ? listGeneratedClaimFiles(root, requireGenerated)
+      : [];
   const candidates =
     targets === undefined
-      ? [
-          ...listDefaultClaimFiles(root),
-          ...listGeneratedClaimFiles(root, requireGenerated),
-        ]
+      ? [...defaultFiles, ...generatedFiles]
       : targets.flatMap((target) => filesUnder(root, target));
   const files = [...new Set(candidates.map((file) => resolve(file)))];
-  const allowInert = targets === undefined;
-  if (allowInert) assertInertAssetsRemainUnreferenced(root, files);
+  const generated = new Set(generatedFiles.map((file) => resolve(file)));
+  const defaultScope = targets === undefined;
+  if (defaultScope) assertInertAssetsRemainUnreferenced(root, files);
 
   for (const file of files) {
     const relativePath = normalizeRelativePath(root, file);
-    if (EXACT_NON_SURFACE_PATHS.has(relativePath)) continue;
+    // Source-only exceptions never transfer to an explicit scan or to a path
+    // named by generated deploy inventory, even when path and bytes are exact.
+    const allowSourceExemption = defaultScope && !generated.has(resolve(file));
+    if (allowSourceExemption && EXACT_NON_SURFACE_PATHS.has(relativePath)) {
+      continue;
+    }
     const read = readBoundedFile(root, file);
     if (read.failure) {
       failures.push(read.failure);
       continue;
     }
     const contents = read.contents;
-    if (isFingerprintExcluded(relativePath, contents, allowInert)) continue;
+    if (isFingerprintExcluded(relativePath, contents, allowSourceExemption)) {
+      continue;
+    }
 
-    const sniff = contents.subarray(0, SNIFF_BYTES);
-    const binaryKind = recognizedBinaryKind(sniff);
+    const binaryKind = recognizedBinaryKind(contents, relativePath);
     if (binaryKind !== null) {
       // No format decoder is implemented. Raw UTF-8 conversion is not decoded
       // extraction and cannot inspect compressed streams, archives, PDF text,
@@ -580,10 +655,19 @@ export function scanComplianceClaims({
     const unknownBinary = hasUnknownBinaryBytes(contents);
     // NUL/control bytes become separators so a claim in malformed text is
     // still reported in addition to the fail-closed unknown-binary error.
-    const source = contents
-      .toString("utf8")
-      .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/gu, " ");
+    const rawSource = contents.toString("utf8");
+    const source = rawSource.replace(
+      /[\u0000-\u0008\u000b\u000c\u000e-\u001f]/gu,
+      " ",
+    );
     for (const violation of findPublicClaimViolations(source)) {
+      if (
+        violation.label === "bidirectional control" &&
+        generated.has(resolve(file)) &&
+        isCodeMirrorSpecialCharacterMetadata(rawSource, violation.index)
+      ) {
+        continue;
+      }
       failures.push({
         file: relativePath,
         line: lineAt(source, violation.index),

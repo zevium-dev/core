@@ -202,18 +202,27 @@ Data labels describe intended use; they are not content inspection or DLP.
 
 No vendor may be represented as approved from this list alone.
 
-| Party                          | Role / data                                                                                                                   | Pre-launch evidence required                                                                                                                                                                  | Owner                                    | Status                                                                                                                                                                                                                                                                                                                                |
-| ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Cloudflare                     | Web/gateway host, edge network metadata, streamed content, Durable Object state, logs                                         | DPA, region/options, log retention/redaction, staff access, incident terms, deletion/export path, current subprocessor list                                                                   | Security & Privacy Owner                 | Blocked—account evidence absent                                                                                                                                                                                                                                                                                                       |
-| Convex                         | Primary application database/functions/vector store and function logs                                                         | DPA, selected region, backups/retention, restore/deletion, support access, audit logs, incident terms, subprocessors                                                                          | Engineering Lead                         | Blocked—account evidence absent                                                                                                                                                                                                                                                                                                       |
-| Clerk                          | Auth, users/orgs/memberships, sessions, MFA, API keys                                                                         | Applicable DPA/version; processor versus independent-controller role allocation; auth/MFA/admin settings; retention/deletion/export; breach terms; subprocessors                              | Security & Privacy Owner                 | Blocked—public DPA describes both roles and post-termination deletion, but actual account, settings and contract evidence are absent                                                                                                                                                                                                  |
-| Stripe                         | Checkout, payments, disputes, Connect KYC/transfers/payouts                                                                   | Signed services terms/DPA; Stripe processor/controller role allocation and notices; Connect platform obligations; retention; restricted-key/RBAC review; webhook config; country availability | Finance/Payments Owner                   | Blocked—public DPA describes both processor and controller activities; account, entity, product and legal evidence are absent                                                                                                                                                                                                         |
-| Google Gemini                  | Published catalogue embedding input and free-text semantic search queries                                                     | Active billed Cloud Project/paid-service proof; applicable DPA; request-log duration/location; no-product-improvement terms; region; data minimization and prohibited-use review              | Engineering Lead                         | Blocked—current Gemini terms say unpaid submissions may be used for product improvement and human review, EEA/Swiss/UK API clients must use paid services, and paid prompts/responses are logged for a limited period and may be transiently stored/cached wherever Google or its agents maintain facilities; account evidence absent |
-| GitHub                         | Source, vulnerability reports, CI metadata and secrets handoff                                                                | Org MFA, least privilege, review policy, audit-log retention, secret-scanning settings, DPA/terms                                                                                             | Engineering Lead                         | Partial—default branch requires a PR and blocks deletion/non-fast-forward updates, but requires zero approving reviews and no status checks, CODEOWNER review, thread resolution or last-push approval; org evidence absent                                                                                                           |
-| Blacksmith                     | Hosted CI runners and build metadata                                                                                          | DPA/terms, runner isolation, log/artifact retention, network/secrets handling, subprocessors                                                                                                  | Engineering Lead                         | Blocked—contract/account evidence absent                                                                                                                                                                                                                                                                                              |
-| Each publisher upstream        | Independent recipient of consumer-selected request data; role depends on contract and processing facts                        | Publisher terms/DPA allocation, listing disclosures, prohibited-data rules, abuse contact and takedown path                                                                                   | Legal/Privacy Counsel                    | Blocked—contract model absent                                                                                                                                                                                                                                                                                                         |
-| Publisher webhook destination  | Publisher-selected recipient of event payloads                                                                                | Payload inventory, tenant warning, deletion/retry behavior, SSRF review                                                                                                                       | Engineering Lead                         | Partial—URL validation/signing exist; governance absent                                                                                                                                                                                                                                                                               |
-| User-selected spec-import host | Import URL path/query, source network/request metadata, redirect requests, and transient returned OpenAPI content up to 2 MiB | User warning and purpose limitation; destination terms/privacy responsibility; egress/log review; SSRF/auth/origin/rate/MIME tests; content-handling and deletion evidence                    | Engineering Lead + Legal/Privacy Counsel | Partial—member auth, strict Origin, durable rate lease, HTTPS, dual-family DNS/non-public-address, redirect, approved MIME, total timeout and size controls exist; arbitrary destination governance, platform logging, lease cleanup and user notice are absent                                                                       |
+| Party                          | Role / data                                                                                                                   | Pre-launch evidence required                                                                                                                                                                  | Owner                                    | Status                                                                                                                                                                                                                                                          |
+| ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Cloudflare                     | Web/gateway host, edge network metadata, streamed content, Durable Object state, logs                                         | DPA, region/options, log retention/redaction, staff access, incident terms, deletion/export path, current subprocessor list                                                                   | Security & Privacy Owner                 | Blocked—account evidence absent                                                                                                                                                                                                                                 |
+| Convex                         | Primary application database/functions/vector store and function logs                                                         | DPA, selected region, backups/retention, restore/deletion, support access, audit logs, incident terms, subprocessors                                                                          | Engineering Lead                         | Blocked—account evidence absent                                                                                                                                                                                                                                 |
+| Clerk                          | Auth, users/orgs/memberships, sessions, MFA, API keys                                                                         | Applicable DPA/version; processor versus independent-controller role allocation; auth/MFA/admin settings; retention/deletion/export; breach terms; subprocessors                              | Security & Privacy Owner                 | Blocked—public DPA describes both roles and post-termination deletion, but actual account, settings and contract evidence are absent                                                                                                                            |
+| Stripe                         | Checkout, payments, disputes, Connect KYC/transfers/payouts                                                                   | Signed services terms/DPA; Stripe processor/controller role allocation and notices; Connect platform obligations; retention; restricted-key/RBAC review; webhook config; country availability | Finance/Payments Owner                   | Blocked—public DPA describes both processor and controller activities; account, entity, product and legal evidence are absent                                                                                                                                   |
+| Google Gemini                  | Published catalogue embedding input and free-text semantic search queries                                                     | Active billed Cloud Project/paid-service proof; applicable DPA; request-log duration/location; no-product-improvement terms; region; data minimization and prohibited-use review              | Engineering Lead                         | Blocked—account evidence absent; current terms treatment summarized below                                                                                                                                                                                       |
+| GitHub                         | Source, vulnerability reports, CI metadata and secrets handoff                                                                | Org MFA, least privilege, review policy, audit-log retention, secret-scanning settings, DPA/terms                                                                                             | Engineering Lead                         | Partial—default branch requires a PR and blocks deletion/non-fast-forward updates, but requires zero approving reviews and no status checks, CODEOWNER review, thread resolution or last-push approval; org evidence absent                                     |
+| Blacksmith                     | Hosted CI runners and build metadata                                                                                          | DPA/terms, runner isolation, log/artifact retention, network/secrets handling, subprocessors                                                                                                  | Engineering Lead                         | Blocked—contract/account evidence absent                                                                                                                                                                                                                        |
+| Each publisher upstream        | Independent recipient of consumer-selected request data; role depends on contract and processing facts                        | Publisher terms/DPA allocation, listing disclosures, prohibited-data rules, abuse contact and takedown path                                                                                   | Legal/Privacy Counsel                    | Blocked—contract model absent                                                                                                                                                                                                                                   |
+| Publisher webhook destination  | Publisher-selected recipient of event payloads                                                                                | Payload inventory, tenant warning, deletion/retry behavior, SSRF review                                                                                                                       | Engineering Lead                         | Partial—URL validation/signing exist; governance absent                                                                                                                                                                                                         |
+| User-selected spec-import host | Import URL path/query, source network/request metadata, redirect requests, and transient returned OpenAPI content up to 2 MiB | User warning and purpose limitation; destination terms/privacy responsibility; egress/log review; SSRF/auth/origin/rate/MIME tests; content-handling and deletion evidence                    | Engineering Lead + Legal/Privacy Counsel | Partial—member auth, strict Origin, durable rate lease, HTTPS, dual-family DNS/non-public-address, redirect, approved MIME, total timeout and size controls exist; arbitrary destination governance, platform logging, lease cleanup and user notice are absent |
+
+Gemini terms retrieved 2026-08-12 say unpaid submissions outside the
+EEA/Switzerland/UK may be used for product improvement and human review; in
+those three regions the Paid Services data-use terms apply even to unpaid quota.
+The current billing FAQ says both free and paid tiers are available there.
+Paid-Service prompts/responses are not used to improve products but are logged
+for a limited period and may be transiently stored/cached wherever Google or its
+agents maintain facilities. Zevium still requires active-billing/DPA evidence as
+a conservative global launch control.
 
 ### Future x402 recipients—not current subprocessors or recipients
 
@@ -239,7 +248,9 @@ Public vendor materials reviewed on 2026-08-12: [Cloudflare DPA](https://www.clo
 [Convex DPA](https://www.convex.dev/legal/dpa),
 [Clerk DPA](https://clerk.com/legal/dpa),
 [Stripe DPA](https://stripe.com/legal/dpa), and
-[Gemini API terms](https://ai.google.dev/gemini-api/terms). Future x402 planning
+[Gemini API terms](https://ai.google.dev/gemini-api/terms) and
+[Gemini API billing FAQ](https://ai.google.dev/gemini-api/docs/billing#frequently-asked-questions).
+Future x402 planning
 used the [current Coinbase x402 FAQ](https://docs.cdp.coinbase.com/x402/support/faq),
 which describes signed-payment retry, facilitator settlement, CDP facilitator
 credentials, and Base Sepolia testing. It is protocol/vendor research only: no
@@ -469,10 +480,12 @@ score each item Pass / Restricted / Fail / Unknown:
 4. Lawful bases, consent/cookie requirements, DSR rights/deadlines, age/minor
    rules, automated-decision rules, and direct-marketing rules are handled.
 5. Convex region and all onward transfers have approved mechanisms; vendor DPAs,
-   transfer assessments and subprocessors are accepted.
-   Gemini is either disabled or proven to use a paid service through an active
-   billed Cloud Project; current terms require paid services for API clients
-   available in the EEA, Switzerland or the UK.
+   transfer assessments and subprocessors are accepted. Gemini is either
+   disabled or proven to use a paid service through an active billed Cloud
+   Project. This is Zevium's conservative global launch gate, not a claim that
+   current Gemini terms forbid unpaid quota in the EEA, Switzerland or the UK;
+   terms retrieved 2026-08-12 apply Paid Services data-use treatment there even
+   to unpaid quota, and the current billing FAQ says both tiers are available.
 6. Retention, deletion, legal hold, breach-notification and regulator-contact
    rules are executable in systems and runbooks.
 7. Data categories permitted through marketplace APIs are defined; health,
@@ -573,9 +586,12 @@ gateway inputs are derived from a Wrangler dry-run output plus its esbuild
 metafile allowlist. Production and preview workflows scan those exact inputs
 before upload. There is no global test, generated, dist or extension bypass.
 The scanner reads bounded bytes, follows symlinks only within the repository,
-recognizes opaque formats by magic bytes rather than names, and rejects every
-recognized binary, compressed stream, archive, PDF, font, database and media
-container because no exact decoder exists. A future decoder may allow a format
+recognizes opaque formats by magic bytes rather than trusting extensions, and
+rejects every recognized binary, compressed stream, archive, PDF, font,
+database and media container because no exact decoder exists. Brotli has no
+magic number: conventional `.br` paths plus renamed non-empty streams detected
+by a bounded decompression probe fail closed, as does oversized probe output. A
+future decoder may allow a format
 only with strict compressed/input-byte, expanded-byte, entry-count, nesting-depth
 and normalized in-root member-path bounds followed by complete decoded-text
 scanning. UTF-8 text scanning treats NUL/control bytes as separators; unknown
@@ -585,16 +601,22 @@ content loses the exemption. Retired README/skill/PWA media are unreferenced and
 excluded only at exact source paths with exact whole-file digests; changed,
 renamed, explicitly targeted or generated copies fail closed, any new tracked
 reference is an error, and the web build deletes the old raster copies before
-deploy inventory. No image OCR is performed, so any opaque image that remains a
-scan/deploy input is rejected rather than treated as scanned text.
+deploy inventory. Generated provenance survives candidate deduplication, so even
+an exact source path/digest cannot inherit its exception after a deploy manifest
+names it. Path normalization converts only the host separator; a POSIX filename
+containing backslashes cannot alias an exempt path. No image OCR is performed,
+so any opaque image that remains a scan/deploy input is rejected rather than
+treated as scanned text.
 
 Publisher-controlled organization name, Clerk slug, public handle, project
 name/slug/description/tags, version/deprecation copy, every OpenAPI object key,
-and every OpenAPI string value are checked at sync, explicit write, backfill,
+and every OpenAPI string value are checked independently at sync, explicit write, backfill,
 seed, save, publish and make-public/admin boundaries. Whole-document scanning is
 required because raw specs are public; parsed keys/values plus every raw JSON
 string token are scanned so duplicate-key shadowing and escaped text cannot
-hide copy. Coverage includes `info.version`, path keys, tags, summaries,
+hide copy. Document-level and public-surface composition checks reject a
+framework and assurance term split across fields; a negative in one field never
+suppresses another. Coverage includes `info.version`, path keys, tags, summaries,
 descriptions, operation IDs, parameters, schema title,
 example/default/enum/const/pattern values, mock bodies and raw documentation.
 Malformed JSON is a violation. Catalogue list/detail, semantic search, direct
@@ -602,16 +624,16 @@ public spec, gateway, anonymous mock, discovery and MCP boundaries re-check and
 omit legacy/bypassed unsafe rows. Private owner/admin reads remain available for
 remediation. Published spec bodies are never rewritten.
 
-Matching applies NFKD compatibility/ASCII folding, removes format characters,
-and folds punctuation and line breaks. Any Unicode letter or number that still
-cannot fold to ASCII becomes one fail-closed wildcard only at the same position
-inside a fixed protected grammar term; this covers new Greek, Cyrillic, Turkish
-and other one-code-point homoglyphs without a finite confusable table or a claim
-of transliteration. Policy blocks framework names only when the explicit bounded
-grammar finds a positive status, assertion verb/assurance noun, achieved status,
-or syntactic `-ly` modifier relation, plus enumerated absolute security/privacy
-phrases. Bare framework references and report/documentation analysis APIs remain
-allowed. Direct odd-count negatives include `cannot`, ASCII/curly-apostrophe
+Matching applies NFKD compatibility/ASCII folding, rejects every bidirectional
+control, and scans ambiguous Unicode under both wildcard and separator
+interpretations. Protected framework names cover common ASCII confusables and
+one substitution/deletion/insertion, including symbol and modifier-letter
+splits. Policy rejects bounded-nearby framework/assurance co-occurrence unless
+exact bounded negative, pending, or evidence-analysis grammar proves it safe;
+generic compliance/certification badges, plural/numeric/qualified zero-risk
+variants, and enumerated absolute security/privacy phrases are also denied. Bare
+framework references and narrowly phrased report/documentation evidence-analysis
+APIs remain allowed. Direct odd-count negatives include `cannot be`, ASCII/curly-apostrophe
 contractions, and auxiliary-negative-claim forms. Sentence punctuation, double
 negation and remote negation do not suppress a positive assertion. This is a
 publisher boundary grammar, not natural-language understanding, legal review,

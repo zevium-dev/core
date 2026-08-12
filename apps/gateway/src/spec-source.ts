@@ -8,7 +8,7 @@ import { ConvexHttpClient } from "convex/browser";
 import { makeFunctionReference } from "convex/server";
 import {
   isOpenApiPublicCopyAllowed,
-  isPublicCopyAllowed,
+  isPublicCopySetAllowed,
   trimTrailingSlashes,
 } from "@zevium/shared";
 
@@ -53,14 +53,12 @@ export function isPublishedSpecCopyAllowed(
   projectSlug: string,
 ): boolean {
   return (
-    isPublicCopyAllowed(
-      [
-        publisherHandle,
-        projectSlug,
-        published.version,
-        published.deprecationMessage ?? "",
-      ].join("\n"),
-    ) && isOpenApiPublicCopyAllowed(published.spec)
+    isPublicCopySetAllowed([
+      publisherHandle,
+      projectSlug,
+      published.version,
+      published.deprecationMessage ?? "",
+    ]) && isOpenApiPublicCopyAllowed(published.spec)
   );
 }
 
@@ -327,9 +325,10 @@ export function parsePublishedSpecPayload(json: unknown): PublishedSpec | null {
   ) {
     published.deprecationMessage = candidate.deprecationMessage;
   }
-  return isPublicCopyAllowed(
-    [published.version, published.deprecationMessage ?? ""].join("\n"),
-  ) && isOpenApiPublicCopyAllowed(published.spec)
+  return isPublicCopySetAllowed([
+    published.version,
+    published.deprecationMessage ?? "",
+  ]) && isOpenApiPublicCopyAllowed(published.spec)
     ? published
     : null;
 }

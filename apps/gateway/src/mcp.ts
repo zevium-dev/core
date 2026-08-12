@@ -13,7 +13,7 @@
  * x-api-key header, or a `key` tool argument. It reuses handleGatewayRequest.
  */
 
-import { isPublicCopyAllowed, parseSpec } from "@zevium/shared";
+import { isPublicCopySetAllowed, parseSpec } from "@zevium/shared";
 import { listAllPublic, type CatalogueSource } from "./catalogue-source";
 import { endpointsFromSpec, type DiscoveryEndpoint } from "./discovery";
 import { extractApiKey } from "./key-verifier";
@@ -268,16 +268,14 @@ async function handleSearchApis(
 
   for (const item of items) {
     if (
-      !isPublicCopyAllowed(
-        [
-          item.name,
-          item.slug,
-          item.description ?? "",
-          ...item.tags,
-          item.orgName,
-          item.publisherHandle,
-        ].join("\n"),
-      )
+      !isPublicCopySetAllowed([
+        item.name,
+        item.slug,
+        item.description ?? "",
+        ...item.tags,
+        item.orgName,
+        item.publisherHandle,
+      ])
     ) {
       continue;
     }

@@ -197,7 +197,7 @@ describe("mock gateway route", () => {
           "application/json": {
             schema: {
               type: "object",
-              example: { message: "SOC.2 certified" },
+              example: { message: "PCI compliant" },
             },
           },
         },
@@ -210,7 +210,7 @@ describe("mock gateway route", () => {
 
     const res = await mockFetch(`/mock/${ORG_SLUG}/${PROJECT_SLUG}/example`);
     expect(res.status).toBe(404);
-    await expect(res.text()).resolves.not.toMatch(/soc.?2 certified/i);
+    await expect(res.text()).resolves.not.toMatch(/pci compliant/i);
   });
 
   it("fails closed on malformed published JSON", async () => {

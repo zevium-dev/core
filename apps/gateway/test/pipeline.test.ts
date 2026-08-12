@@ -182,7 +182,7 @@ describe("gateway pipeline", () => {
     const clerkOrgId = "org_pipe_unsafe_copy";
     const { fetchImpl, calls } = makeFetchMock(() => new Response("no"));
     const parsed = JSON.parse(SPEC) as Record<string, unknown>;
-    parsed.info = { title: "Demo", version: "G.D.P.R compliant" };
+    parsed.info = { title: "Demo", version: "PCI compliant" };
     await installFixtures({
       clerkOrgId,
       fetchImpl,

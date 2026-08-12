@@ -5,7 +5,7 @@
 
 import {
   extractPricing,
-  isPublicCopyAllowed,
+  isPublicCopySetAllowed,
   parseSpec,
   type HttpMethod,
   type ParsedOpenApiSpec,
@@ -92,16 +92,14 @@ export async function buildDiscoveryIndex(
 
   for (const item of items) {
     if (
-      !isPublicCopyAllowed(
-        [
-          item.name,
-          item.slug,
-          item.description ?? "",
-          ...item.tags,
-          item.orgName,
-          item.publisherHandle,
-        ].join("\n"),
-      )
+      !isPublicCopySetAllowed([
+        item.name,
+        item.slug,
+        item.description ?? "",
+        ...item.tags,
+        item.orgName,
+        item.publisherHandle,
+      ])
     ) {
       continue;
     }

@@ -4,9 +4,65 @@ import {
   findPublicClaimViolations,
   isOpenApiPublicCopyAllowed,
   isPublicCopyAllowed,
+  isPublicCopySetAllowed,
 } from "./public-claims.js";
 
+const REPRODUCED_UNSUPPORTED_ASSURANCE_COPY = [
+  "We obtained SOC 2 certification",
+  "We hold SOC 2 certification",
+  "We have SOC 2 compliance",
+  "SOC 2 certification passed",
+  "HIPAA compliance verified",
+  "GDPR compliance validated",
+  "All GDPR requirements are satisfied",
+  "ISO 27001 accredited",
+  "SOC 2 audited",
+  "SOC 2 attestation complete",
+  "Our SOC 2 examination passed",
+  "HIPAA assured",
+  "HIPAA safeguards guaranteed",
+  "GDPR lawful",
+  "GDPR requirements implemented",
+  "We meet every requirement of GDPR",
+  "GDPR audit passed",
+  "Certified by an independent auditor under SOC 2",
+  "Independent auditors verified our SOC 2 controls",
+  "CCPA obligations satisfied",
+  "We completed SOC 2 certification",
+  "Certification under SOC 2 was obtained",
+  "The HIPAA audit succeeded",
+  "GDPR requirements were fulfilled",
+  "Certification under SOC 2 is not pending",
+] as const;
+
+const HOSTILE_REPORT_BLOCKED_COPY = [
+  "PCI compliant",
+  "This API is certified",
+  "Certified API",
+  "Compliant service",
+  "API certification",
+  "Certification API",
+  "Compliance guaranteed",
+  "Indisputably compliant",
+  "\u202eAAPIH\u202c compliant",
+  "H1PAA compliant",
+  "🅷IPAA compliant",
+  "HʹIPAA compliant",
+  "HIPAA may be compliant",
+  "HIPAA indisputable compliance",
+  "GDPR compliance guarantee",
+  "HIPAA evidence API compliant",
+  "risk-free",
+  "no security risk",
+  "riskless",
+  "zero risks",
+  "0 risk",
+  "zero security risk",
+] as const;
+
 const BLOCKED_COPY = [
+  ...REPRODUCED_UNSUPPORTED_ASSURANCE_COPY,
+  ...HOSTILE_REPORT_BLOCKED_COPY,
   "SOC.2 certified",
   "S.O.C. 2 certified",
   "SOC_2 Type II certified",
@@ -63,7 +119,6 @@ const ALLOWED_COPY = [
   "ISO 27001 documentation search",
   "We are not HIPAA compliant",
   "Not GDPR compliant",
-  "Not G.D.P.R compliant",
   "This service is not ISO 27001 certified",
   "This service does not comply with CCPA",
   "This service is not compliant with GDPR",
@@ -81,11 +136,20 @@ const ALLOWED_COPY = [
   "This service cannot comply with GDPR",
   "This service can’t comply with GDPR",
   "PCI DSS certification is pending",
+  "This service cannot be HIPAA compliant",
+  "This API is not certified",
+  "This product can't be zero risk",
+  "This product can’t be zero risk",
+  "We have not yet obtained SOC 2 certification",
+  "Certification evidence analysis API",
   "No end-to-end encryption",
   "We do not offer end-to-end encryption",
   "This product is not fully secure",
   "AES-GCM encrypts publisher credential values before new writes",
   "Gateway strips consumer authorization before upstream forwarding",
+  "const api = getClient(); const verified = result.ok;",
+  "Provider receives options passed by caller",
+  "Run check:compliance-claims in CI",
 ] as const;
 
 describe("public claim policy", () => {
@@ -132,6 +196,63 @@ describe("public claim policy", () => {
     }
   });
 
+  it("rejects one ASCII edit and modifier insertion across protected framework names", () => {
+    const frameworks = ["hipaa", "gdpr", "ccpa", "cpra", "soc2", "iso27001"];
+
+    for (const framework of frameworks) {
+      for (let index = 0; index < framework.length; index += 1) {
+        const replacement = framework[index] === "x" ? "q" : "x";
+        const substituted = `${framework.slice(0, index)}${replacement}${framework.slice(index + 1)}`;
+        const deleted = `${framework.slice(0, index)}${framework.slice(index + 1)}`;
+        expect(
+          isPublicCopyAllowed(`${substituted} compliant`),
+          substituted,
+        ).toBe(false);
+        expect(isPublicCopyAllowed(`${deleted} compliant`), deleted).toBe(
+          false,
+        );
+      }
+      for (let index = 0; index <= framework.length; index += 1) {
+        const inserted = `${framework.slice(0, index)}x${framework.slice(index)}`;
+        const modifierSplit = `${framework.slice(0, index)}ʹ${framework.slice(index)}`;
+        expect(isPublicCopyAllowed(`${inserted} compliant`), inserted).toBe(
+          false,
+        );
+        expect(
+          isPublicCopyAllowed(`${modifierSplit} compliant`),
+          modifierSplit,
+        ).toBe(false);
+      }
+    }
+    expect(isPublicCopyAllowed("PCl compliant")).toBe(false);
+  });
+
+  it("rejects bidirectional controls independently of rendered claim order", () => {
+    const controls = [
+      "\u061c",
+      "\u200e",
+      "\u200f",
+      "\u202a",
+      "\u202e",
+      "\u2066",
+      "\u2069",
+    ];
+    for (const control of controls) {
+      expect(isPublicCopyAllowed(`safe${control}copy`), control).toBe(false);
+    }
+  });
+
+  it("rejects cross-field composition without sharing negation", () => {
+    expect(isPublicCopySetAllowed(["HIPAA", "compliant"])).toBe(false);
+    expect(isPublicCopySetAllowed(["not HIPAA", "ready"])).toBe(false);
+    expect(
+      isPublicCopySetAllowed(["SOC 2 report analysis API", "Demo API"]),
+    ).toBe(true);
+    expect(isPublicCopySetAllowed(["Demo API", "not", "HIPAA compliant"])).toBe(
+      false,
+    );
+  });
+
   it("folds compatibility text and punctuation at every protected-word seam", () => {
     const separators = [".", "-", "_", "/", "\u200b", "\n"];
     for (const separator of separators) {
@@ -157,10 +278,89 @@ describe("public claim policy", () => {
     expect(isPublicCopyAllowed("HIPAA cryptographically compliant")).toBe(
       false,
     );
-    expect(isPublicCopyAllowed("HIPAA evidence API compliant")).toBe(true);
+    expect(isPublicCopyAllowed("HIPAA evidence API compliant")).toBe(false);
     expect(isPublicCopyAllowed("HIPAA compliance evidence classifier")).toBe(
       true,
     );
+  });
+
+  it("rejects assurance possession, achievement, audit, and control-result variations", () => {
+    const frameworks = ["SOC 2", "HIPAA", "GDPR", "CCPA", "ISO 27001"];
+    const possessionVerbs = [
+      "achieved",
+      "earned",
+      "have",
+      "hold",
+      "obtained",
+      "received",
+    ];
+    const assuranceNouns = [
+      "audit",
+      "certification",
+      "compliance",
+      "controls",
+      "report",
+      "requirements",
+    ];
+    const achievedStatuses = [
+      "accredited",
+      "audited",
+      "implemented",
+      "passed",
+      "satisfied",
+      "validated",
+      "verified",
+    ];
+
+    for (const framework of frameworks) {
+      for (const verb of possessionVerbs) {
+        for (const noun of assuranceNouns) {
+          const copy = `We ${verb} ${framework} ${noun}`;
+          expect(isPublicCopyAllowed(copy), copy).toBe(false);
+        }
+      }
+      for (const noun of assuranceNouns) {
+        for (const status of achievedStatuses) {
+          const copy = `${framework} ${noun} is ${status}`;
+          expect(isPublicCopyAllowed(copy), copy).toBe(false);
+        }
+      }
+    }
+  });
+
+  it("preserves narrow direct negatives and evidence-analysis forms for assurance nouns", () => {
+    const allowed = [
+      "We did not obtain SOC 2 certification",
+      "We do not hold SOC 2 certification",
+      "We have no SOC 2 compliance",
+      "We hold no SOC 2 certification",
+      "We have no compliance with GDPR",
+      "SOC 2 audit did not pass",
+      "SOC 2 certification is not verified",
+      "Certification under SOC 2 was not obtained",
+      "Certification under SOC 2 is pending",
+      "PCI DSS audit is pending",
+      "SOC 2 audit evidence analysis API",
+      "HIPAA safeguards documentation classifier",
+      "GDPR requirements evidence search",
+    ];
+
+    for (const copy of allowed) {
+      expect(isPublicCopyAllowed(copy), copy).toBe(true);
+    }
+  });
+
+  it("normalizes punctuation and homoglyphs in new assurance grammar", () => {
+    const blocked = [
+      "We o.b.t.a.i.n.e.d SOC 2 c.e.r.t.i.f.i.c.a.t.i.o.n",
+      "HIPAA compliance v.e.r.i.f.i.e.d",
+      "GDPR r.e.q.u.i.r.e.m.e.n.t.s satisfied",
+      "ISO 27001 accredіted",
+    ];
+
+    for (const copy of blocked) {
+      expect(isPublicCopyAllowed(copy), copy).toBe(false);
+    }
   });
 
   it("fails closed when OpenAPI JSON is malformed", () => {
@@ -185,6 +385,25 @@ describe("public claim policy", () => {
         }),
       ]),
     );
+  });
+
+  it("rejects cross-field and escaped-bidi OpenAPI compositions", () => {
+    const split = JSON.stringify({
+      openapi: "3.1.0",
+      info: { title: "HIPAA", description: "compliant", version: "1.0.0" },
+      paths: {},
+    });
+    expect(findOpenApiPublicClaimViolations(split)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          label: "HIPAA claim",
+          path: "$ (cross-field raw JSON strings)",
+        }),
+      ]),
+    );
+
+    const bidi = String.raw`{"openapi":"3.1.0","info":{"title":"\u202eAAPIH\u202c compliant","version":"1.0.0"},"paths":{}}`;
+    expect(isOpenApiPublicCopyAllowed(bidi)).toBe(false);
   });
 
   it("scans every publisher string in raw public OpenAPI", () => {
@@ -267,6 +486,8 @@ describe("public claim policy", () => {
   });
 
   it.each([
+    ...REPRODUCED_UNSUPPORTED_ASSURANCE_COPY,
+    ...HOSTILE_REPORT_BLOCKED_COPY,
     "We guarantee GDPR compliance",
     "HIPAA indisputably compliant",
     "HıPAA ready",
