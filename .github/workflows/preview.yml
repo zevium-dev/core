@@ -58,7 +58,7 @@ jobs:
             --cmd-url-env-var-name CONVEX_URL
 
   gateway-preview:
-    needs: preview-convex
+    needs: [preview-convex, exact-compliance-surface]
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 10
     environment: preview
@@ -94,7 +94,7 @@ jobs:
           echo "gateway_url=https://${gateway_name}.zevium-dev.workers.dev" >> "$GITHUB_OUTPUT"
 
   web-build:
-    needs: preview-convex
+    needs: [preview-convex, exact-compliance-surface]
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 10
     environment: preview
@@ -125,6 +125,33 @@ jobs:
           name: preview-web-${{ env.PR_NUMBER }}
           path: apps/web/dist
           if-no-files-found: error
+
+  exact-compliance-surface:
+    needs: preview-convex
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 10
+    environment: preview
+    env:
+      VITE_CONVEX_URL: ${{ needs.preview-convex.outputs.convex_url }}
+      VITE_GATEWAY_URL: https://zevium-gateway-pr-${{ github.event.pull_request.number || inputs.pr_number }}.zevium-dev.workers.dev
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/cache@v5
+        with:
+          path: ~/.local/share/pnpm/store
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+      - uses: jdx/mise-action@v4
+      - name: Build and scan exact generated deploy surface
+        env:
+          CLERK_PUBLISHABLE_KEY: ${{ secrets.CLERK_PREVIEW_PUBLISHABLE_KEY }}
+          CLERK_SECRET_KEY: ${{ secrets.CLERK_PREVIEW_SECRET_KEY }}
+        run: |
+          pnpm build:compliance-inputs
+          pnpm check:compliance-claims:deploy
 
   web-preview:
     needs: web-build

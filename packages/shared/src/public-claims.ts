@@ -62,10 +62,16 @@ const ASCII_CONFUSABLES: Readonly<Record<string, string>> = {
 // multilingual words as entire Latin acronyms.
 const UNICODE_FRAMEWORK_CONFUSABLES: Readonly<Record<string, string>> = {
   ı: "i",
+  ӏ: "i",
   ɢ: "g",
   ʀ: "r",
   ᴅ: "d",
   ᴘ: "p",
+  ѕ: "s",
+  һ: "h",
+  о: "o",
+  е: "e",
+  х: "x",
   α: "a",
   η: "h",
   ι: "i",
@@ -488,6 +494,10 @@ const DIRECT_NEGATION_PREFIX = new RegExp(
   `^\\s*(?<direct>(?:(?:${alternatives(AUXILIARY_WORDS)})\\s*)?(?:(?:${NEGATION_PATTERN})\\s*)+(?:(?:${NEGATION_BRIDGE_PATTERN})\\s*)*(?:(?:${alternatives(NEGATABLE_PREDICATES)})\\s*)?)`,
   "u",
 );
+const USE_PROHIBITION_PREFIX = new RegExp(
+  `(?:^|\\s)(?:${alternatives(["must", "should"])})\\s*${alternatives(["not"])}\\s*(?:${alternatives(["be"])})?\\s*(?:${alternatives(["marketed", "used", "advertised", "sold", "represented", "described"])})\\s*(?:(?:${alternatives(["and", "or"])})\\s*(?:${alternatives(["be"])})?\\s*(?:${alternatives(["marketed", "used", "advertised", "sold", "represented", "described"])})\\s*)*(?:${alternatives(["as"])})?\\s*$`,
+  "u",
+);
 // Keep detector implementation from becoming its own positive scan hit when
 // bundled into gateway output. Runtime construction preserves exact grammar.
 const SINGLE_WORD_ABSOLUTE_RISK = String.fromCodePoint(
@@ -727,6 +737,15 @@ function frameworkLabelForCandidate(candidate: string): string | null {
   ).length;
   if (wildcardCount > 1) return null;
   for (const target of FRAMEWORK_TARGETS) {
+    if (
+      (candidate === "phi" && target.literal === "pci") ||
+      (candidate === "cpa" &&
+        (target.literal === "ccpa" || target.literal === "cpra")) ||
+      (candidate === "cc4" &&
+        (target.literal === "ccpa" || target.literal === "cpra"))
+    ) {
+      continue;
+    }
     // Three-letter PCI is already broad; do not allow edit distance to make
     // ordinary prose fragments such as "pliance" into synthetic PCI matches.
     if (target.literal === "pci" && candidate.length !== 3) continue;
@@ -735,6 +754,111 @@ function frameworkLabelForCandidate(candidate: string): string | null {
     }
   }
   return null;
+}
+
+const COMPACT_ASSURANCE_SUFFIXES = new Set([
+  ...ADJECTIVE_ASSURANCE_WORDS,
+  ...ASSURANCE_NOUNS,
+  "encrypted",
+  "encryption",
+  "free",
+  "proof",
+  "risk",
+  "risks",
+  "secure",
+  "security",
+]);
+
+function findCompactFrameworkMatches(text: string): FrameworkMatch[] {
+  const matches: FrameworkMatch[] = [];
+  const words = [...text.matchAll(/[a-z0-9?]+/gu)].map((match) => ({
+    text: match[0],
+    start: match.index ?? 0,
+    end: (match.index ?? 0) + match[0].length,
+  }));
+
+  for (const word of words) {
+    for (const target of FRAMEWORK_TARGETS) {
+      for (const split of [target.literal.length - 1, target.literal.length, target.literal.length + 1]) {
+        if (split < 3 || split >= word.text.length) continue;
+        const framework = word.text.slice(0, split);
+        const suffix = word.text.slice(split);
+        if (!COMPACT_ASSURANCE_SUFFIXES.has(suffix)) continue;
+        if (frameworkLabelForCandidate(framework) !== target.label) continue;
+        matches.push({ label: target.label, start: word.start, end: word.end });
+        break;
+      }
+    }
+  }
+  return matches;
+}
+
+const COMPACT_DIRECT_CLAIMS = new Map<string, string>([
+  [
+    String.fromCodePoint(102, 117, 108, 108, 121, 115, 101, 99, 117, 114, 101),
+    "absolute security claim",
+  ],
+  [
+    String.fromCodePoint(
+      99,
+      111,
+      109,
+      112,
+      108,
+      101,
+      116,
+      101,
+      108,
+      121,
+      115,
+      101,
+      99,
+      117,
+      114,
+      101,
+    ),
+    "absolute security claim",
+  ],
+  [String.fromCodePoint(122, 101, 114, 111, 114, 105, 115, 107), "absolute risk claim"],
+  [String.fromCodePoint(122, 101, 114, 111, 114, 105, 115, 107, 115), "absolute risk claim"],
+  [String.fromCodePoint(114, 105, 115, 107, 102, 114, 101, 101), "absolute risk claim"],
+  [String.fromCodePoint(114, 105, 115, 107, 108, 101, 115, 115), "absolute risk claim"],
+  [
+    String.fromCodePoint(101, 110, 100, 116, 111, 101, 110, 100, 101, 110, 99, 114, 121, 112, 116, 101, 100),
+    "broad encryption claim",
+  ],
+  [
+    String.fromCodePoint(101, 110, 100, 116, 111, 101, 110, 100, 101, 110, 99, 114, 121, 112, 116, 105, 111, 110),
+    "broad encryption claim",
+  ],
+  [
+    String.fromCodePoint(122, 101, 114, 111, 100, 97, 116, 97, 114, 101, 116, 101, 110, 116, 105, 111, 110),
+    "absolute privacy claim",
+  ],
+  [
+    String.fromCodePoint(122, 101, 114, 111, 115, 101, 99, 117, 114, 105, 116, 121, 114, 105, 115, 107),
+    "absolute risk claim",
+  ],
+  [
+    String.fromCodePoint(101, 110, 116, 101, 114, 112, 114, 105, 115, 101, 103, 114, 97, 100, 101, 112, 108, 97, 116, 102, 111, 114, 109),
+    "security-grade superlative",
+  ],
+  [
+    String.fromCodePoint(101, 110, 116, 101, 114, 112, 114, 105, 115, 101, 103, 114, 97, 100, 101, 115, 101, 99, 117, 114, 105, 116, 121),
+    "security-grade superlative",
+  ],
+]);
+
+function findCompactDirectClaims(text: string): PublicClaimViolation[] {
+  const violations: PublicClaimViolation[] = [];
+  for (const word of text.matchAll(/[a-z0-9?]+/gu)) {
+    const start = word.index ?? 0;
+    const label = COMPACT_DIRECT_CLAIMS.get(word[0]);
+    if (label !== undefined) {
+      violations.push({ label, match: word[0], index: start });
+    }
+  }
+  return violations;
 }
 
 function findFrameworkMatches(text: string): FrameworkMatch[] {
@@ -848,6 +972,7 @@ function directNegationCountBefore(
 ): number {
   const hardStart = lastHardBreakBefore(normalized, start);
   const before = normalized.text.slice(Math.max(hardStart, start - 160), start);
+  if (USE_PROHIBITION_PREFIX.test(before)) return 1;
   const direct = before.match(DIRECT_NEGATION_SUFFIX)?.groups?.direct;
   return direct === undefined ? 0 : countNegativeForms(direct);
 }
@@ -1051,6 +1176,7 @@ function findNormalizedPublicClaimViolations(
     GENERIC_BADGE_SUBJECTS,
   );
   const frameworkMatches = findFrameworkMatches(normalized.text);
+  const compactFrameworkMatches = findCompactFrameworkMatches(normalized.text);
 
   for (const framework of frameworkMatches) {
     const start = framework.start;
@@ -1290,6 +1416,19 @@ function findNormalizedPublicClaimViolations(
     }
   }
 
+  for (const framework of compactFrameworkMatches) {
+    if (directNegationCountBefore(normalized, framework.start) % 2 === 1) {
+      continue;
+    }
+    addViolation(
+      violations,
+      normalized,
+      framework.label,
+      framework.start,
+      framework.end,
+    );
+  }
+
   // Framework-free badges still imply unsupported third-party assurance when
   // used as predicates or achievement statements. Keep evidence tooling and
   // directly negated disclaimers available.
@@ -1369,6 +1508,13 @@ function findNormalizedPublicClaimViolations(
     }
   }
 
+  for (const violation of findCompactDirectClaims(normalized.text)) {
+    if (directNegationCountBefore(normalized, violation.index) % 2 === 1) {
+      continue;
+    }
+    violations.push(violation);
+  }
+
   return violations.sort((a, b) => a.index - b.index);
 }
 
@@ -1408,7 +1554,10 @@ function frameworkLabels(source: string): string[] {
   const labels = new Set<string>();
   for (const ambiguousMode of ["wildcard", "separator"] as const) {
     const normalized = normalizePublicClaimText(source, ambiguousMode);
-    for (const framework of findFrameworkMatches(normalized.text)) {
+    for (const framework of [
+      ...findFrameworkMatches(normalized.text),
+      ...findCompactFrameworkMatches(normalized.text),
+    ]) {
       labels.add(framework.label);
     }
   }

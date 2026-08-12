@@ -129,6 +129,57 @@ test("rejects normalized adversarial claims", (t) => {
   assert.match(formatFailures(failures)[0] ?? "", /soc 2/i);
 });
 
+test("rejects glued framework, hashtag, URL, and absolute claims", (t) => {
+  const root = fixture(t, {
+    "public/glued.txt": [
+      "HIPAACompliant",
+      "SOC2Certified",
+      "GDPRReady",
+      "#CCPACompliant",
+      "https://claims.invalid/ISO27001Certified",
+      "FullySecure",
+      "ZeroRisk",
+      "EndToEndEncryption",
+    ].join("\n"),
+  });
+  const failures = scanComplianceClaims({ root, targets: ["public"] });
+  assert.ok(failures.length >= 8);
+  assert.ok(failures.some(({ match }) => /hipaacompliant/i.test(match)));
+  assert.ok(failures.some(({ match }) => /fullysecure/i.test(match)));
+});
+
+test("decodes bounded runtime escapes and static string construction", (t) => {
+  const root = fixture(t, {
+    "public/runtime.js": [
+      String.raw`const unicode = "\u0048\u0049\u0050\u0041\u0041\u0020ready";`,
+      String.raw`const hex = "\x47\x44\x50\x52\x20\x72\x65\x61\x64\x79";`,
+      String.raw`const bidi = "\u202eAAPIH\u202c compliant";`,
+      String.raw`const concatenated = "HIPAA" + " compliant";`,
+      'const templated = `GDPR ${"ready"}`;',
+      String.raw`const joined = ["SOC2", "Certified"].join("");`,
+      String.raw`const first = "HIPAA"; const second = "Compliant"; const variable = first + second;`,
+      String.raw`const encoded = atob("SElQQUEgcmVhZHk=");`,
+      String.raw`const hexEncoded = Buffer.from("4849504141207265616479", "hex");`,
+    ].join("\n"),
+    "public/runtime.json": String.raw`{"description":"\u0048\u0049\u0050\u0041\u0041 ready"}`,
+    "public/runtime.css": String.raw`.badge::before { content: "\48\49\50\41\41 compliant"; }`,
+    "public/runtime.html": String.raw`<meta content="&#x48;&#x49;&#x50;&#x41;&#x41; compliant">`,
+    "public/runtime.map": String.raw`{"version":3,"sourcesContent":["\u0047\u0044\u0050\u0052 ready"]}`,
+  });
+  const failures = scanComplianceClaims({ root, targets: ["public"] });
+  for (const file of [
+    "public/runtime.js",
+    "public/runtime.json",
+    "public/runtime.css",
+    "public/runtime.html",
+    "public/runtime.map",
+  ]) {
+    assert.ok(failures.some(({ file: failureFile }) => failureFile === file), file);
+  }
+  assert.ok(failures.some(({ match }) => /hipaa compliant/i.test(match)));
+  assert.ok(failures.some(({ match }) => /gdpr ready/i.test(match)));
+});
+
 test("does not trust test-like names or file extensions", (t) => {
   const root = fixture(t, {
     "public/release.test.ts": "HIPAA ready",
@@ -484,6 +535,7 @@ test("generated CodeMirror regex metadata is inert but ordinary bidi copy fails"
     "apps/web/dist/server/index.js": metadata,
     "apps/web/dist/client/safe.js": minifiedMetadata,
     "apps/web/dist/client/attack.js": 'const copy = "safe\u202eclaim";',
+    "apps/web/dist/client/modified.js": metadata.replace("\\u2029", "x\\u2029"),
   });
   execFileSync("git", ["init", "-q"], { cwd: root });
 
@@ -494,6 +546,7 @@ test("generated CodeMirror regex metadata is inert but ordinary bidi copy fails"
       ({ file }) => !file.endsWith("index.js") && !file.endsWith("safe.js"),
     ),
   );
+  assert.ok(failures.some(({ file }) => file.endsWith("modified.js")));
 });
 
 test("retired source digest is no exemption for an explicit scan target", (t) => {

@@ -208,9 +208,10 @@ describe("public claim policy", () => {
           isPublicCopyAllowed(`${substituted} compliant`),
           substituted,
         ).toBe(false);
-        expect(isPublicCopyAllowed(`${deleted} compliant`), deleted).toBe(
-          false,
-        );
+        expect(
+          isPublicCopyAllowed(`${deleted} compliant`),
+          deleted,
+        ).toBe(deleted === "cpa");
       }
       for (let index = 0; index <= framework.length; index += 1) {
         const inserted = `${framework.slice(0, index)}x${framework.slice(index)}`;
@@ -227,6 +228,12 @@ describe("public claim policy", () => {
     expect(isPublicCopyAllowed("PCl compliant")).toBe(false);
   });
 
+  it("does not classify ordinary words as PCI, CCPA, or CPRA", () => {
+    for (const copy of ["phi compliant", "CPA compliant", "CC4 certified"]) {
+      expect(isPublicCopyAllowed(copy), copy).toBe(true);
+    }
+  });
+
   it("rejects bidirectional controls independently of rendered claim order", () => {
     const controls = [
       "\u061c",
@@ -240,6 +247,12 @@ describe("public claim policy", () => {
     for (const control of controls) {
       expect(isPublicCopyAllowed(`safe${control}copy`), control).toBe(false);
     }
+  });
+
+  it("rejects multiple mapped homoglyphs without broad multilingual matches", () => {
+    expect(isPublicCopyAllowed("ΗΙΡΑΑ compliant")).toBe(false);
+    expect(isPublicCopyAllowed("日本語の説明")).toBe(true);
+    expect(isPublicCopyAllowed("ЖЖЗЗЗ")).toBe(true);
   });
 
   it("rejects cross-field composition without sharing negation", () => {

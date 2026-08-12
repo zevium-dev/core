@@ -133,11 +133,11 @@ const TEST_FIXTURE_SHA256 = new Map([
   ],
   [
     "packages/shared/src/public-claims.test.ts",
-    "3beb5feb62f9cb19e3ff7401478412487ff41b92d19500dd427680b5e6b5cf31",
+    "c56728846853fa684cd8a60002eec60a13c864a48b51ca2547c6b80ab6ee28d9",
   ],
   [
     "scripts/check-compliance-claims.test.mjs",
-    "82a727e72ce01915163d80a7c5b28cdc8357d1591f8440a09056feaa86e529e7",
+    "416cbc59c39411e4fca68a748cfa29f188c457e02a2ff6e25c49196c1229bb1d",
   ],
 ]);
 
@@ -505,29 +505,380 @@ function unsafeFailure(file, reason) {
   };
 }
 
-function isCodeMirrorSpecialCharacterMetadata(source, index) {
-  // CodeMirror ships raw bidi controls inside an inert regular-expression
-  // character class used to visualize special characters. Match its exact
-  // structural anchors; ordinary string literals and publisher copy retain no
-  // exception. This applies only to generated inventory below.
-  const constructorStart = source.lastIndexOf("RegExp(", index);
-  if (constructorStart < 0 || index - constructorStart > 512) return false;
-  const constructorEnd = source.indexOf(")", index);
-  if (constructorEnd < 0 || constructorEnd - index > 512) return false;
-  const constructor = source.slice(constructorStart, constructorEnd + 1);
-  const escapedLineFeedPrefix = "\\0-\\b\\n-" + String.fromCodePoint(0x1f);
-  const literalLineFeedPrefix = "\\0-\\b\n-" + String.fromCodePoint(0x1f);
-  const hasExpectedPrefix = [escapedLineFeedPrefix, literalLineFeedPrefix].some(
-    (prefix) =>
-      constructor.startsWith(`RegExp("[${prefix}`) ||
-      constructor.startsWith(`RegExp(\`[${prefix}`),
-  );
-  return (
-    hasExpectedPrefix &&
-    constructor.includes("\\u2028\\u2029") &&
-    constructor.includes("\ufff9-\ufffc]")
+const CODEMIRROR_METADATA_CONSTRUCTORS = new Set([
+  String.raw`RegExp([\0-\b\n-        \u2028\u2029        \ufff9-\ufffc], "gu")`,
+]);
+
+for (const lineFeed of ["\\n", "\n"]) {
+  CODEMIRROR_METADATA_CONSTRUCTORS.add(
+    "RegExp(" +
+      String.fromCharCode(96) +
+      "[\\0-\\b" +
+      lineFeed +
+      "-" +
+      String.fromCodePoint(0x1f, 0x61c, 0x200e, 0x200f) +
+      "\\u2028\\u2029" +
+      String.fromCodePoint(
+        0x202d,
+        0x202e,
+        0x2066,
+        0x2067,
+        0x2069,
+        0xfeff,
+        0xfff9,
+      ) +
+      "-" +
+      String.fromCodePoint(0xfffc) +
+      "]" +
+      String.fromCharCode(96) +
+      ', "gu")',
   );
 }
+const CODEMIRROR_BUNDLE_METADATA =
+  "var Specials = /*@__PURE__*/ new RegExp(\"[" +
+  "\\0-\\b\\n-" +
+  String.fromCodePoint(31, 127) +
+  "-" +
+  String.fromCodePoint(159, 173, 0x61c, 0x200b, 0x200e, 0x200f) +
+  "\\u2028\\u2029" +
+  String.fromCodePoint(0x202d, 0x202e, 0x2066, 0x2067, 0x2069, 0xfeff, 0xfff9) +
+  "-" +
+  String.fromCodePoint(0xfffc) +
+  "]\", UnicodeRegexpSupport$1);";
+const CODEMIRROR_MINIFIED_METADATA =
+  "oS=/x/.unicode==null?" +
+  String.fromCharCode(96) +
+  "g" +
+  String.fromCharCode(96) +
+  ":" +
+  String.fromCharCode(96) +
+  "gu" +
+  String.fromCharCode(96) +
+  ",sS=RegExp(" +
+  String.fromCharCode(96) +
+  "[\\0-\\b\n-" +
+  String.fromCodePoint(31, 127) +
+  "-" +
+  String.fromCodePoint(159, 173, 0x61c, 0x200b, 0x200e, 0x200f) +
+  "\\u2028\\u2029" +
+  String.fromCodePoint(0x202d, 0x202e, 0x2066, 0x2067, 0x2069, 0xfeff, 0xfff9) +
+  "-" +
+  String.fromCodePoint(0xfffc) +
+  "]" +
+  String.fromCharCode(96) +
+  ",oS),";
+
+function isCodeMirrorSpecialCharacterMetadata(source, index) {
+  // Only the exact generated constructor bytes are exempt. Structural or
+  // nearby matches would let a publisher string hitchhike on CodeMirror.
+  const constructorStart = source.lastIndexOf("RegExp(", index);
+  const bundleStart = source.lastIndexOf("var Specials", index);
+  if (
+    bundleStart >= 0 &&
+    source.slice(bundleStart, bundleStart + CODEMIRROR_BUNDLE_METADATA.length) ===
+      CODEMIRROR_BUNDLE_METADATA
+  ) {
+    return true;
+  }
+  const minifiedStart = source.lastIndexOf("oS=/x/.unicode", index);
+  if (
+    minifiedStart >= 0 &&
+    source.slice(
+      minifiedStart,
+      minifiedStart + CODEMIRROR_MINIFIED_METADATA.length,
+    ) === CODEMIRROR_MINIFIED_METADATA
+  ) {
+    return true;
+  }
+  if (constructorStart < 0) return false;
+  const constructorEnd = source.indexOf(")", constructorStart);
+  if (constructorEnd < 0) return false;
+  return CODEMIRROR_METADATA_CONSTRUCTORS.has(
+    source.slice(constructorStart, constructorEnd + 1),
+  );
+}
+
+function decodeCodePoint(value) {
+  const point = Number.parseInt(value, 16);
+  return Number.isInteger(point) && point <= 0x10ffff
+    ? String.fromCodePoint(point)
+    : null;
+}
+
+function decodeJavaScriptStringBody(body, template = false) {
+  const interpolated = template
+    ? body.replace(/\$\{\s*(["'])(.*?)\1\s*\}/gs, (_match, _quote, value) =>
+        decodeJavaScriptStringBody(value),
+      )
+    : body;
+  let decoded = "";
+  for (let index = 0; index < interpolated.length; index += 1) {
+    const character = interpolated[index];
+    if (character !== "\\") {
+      decoded += character;
+      continue;
+    }
+    const next = interpolated[index + 1];
+    if (next === undefined) {
+      decoded += "\\";
+      continue;
+    }
+    if (next === "u") {
+      const bracedEnd = interpolated.indexOf("}", index + 3);
+      if (interpolated[index + 2] === "{" && bracedEnd > index) {
+        const codePoint = decodeCodePoint(
+          interpolated.slice(index + 3, bracedEnd),
+        );
+        if (codePoint !== null) {
+          decoded += codePoint;
+          index = bracedEnd;
+          continue;
+        }
+      }
+      const codePoint = decodeCodePoint(interpolated.slice(index + 2, index + 6));
+      if (codePoint !== null) {
+        decoded += codePoint;
+        index += 5;
+        continue;
+      }
+    }
+    if (next === "x") {
+      const codePoint = decodeCodePoint(interpolated.slice(index + 2, index + 4));
+      if (codePoint !== null) {
+        decoded += codePoint;
+        index += 3;
+        continue;
+      }
+    }
+    const escapes = { n: "\n", r: "\r", t: "\t", b: "\b", f: "\f", v: "\v", 0: "\0" };
+    if (Object.hasOwn(escapes, next)) {
+      decoded += escapes[next];
+    } else if (next === "\n" || next === "\r") {
+      if (next === "\r" && interpolated[index + 2] === "\n") index += 1;
+    } else {
+      decoded += next;
+    }
+    index += 1;
+  }
+  return decoded;
+}
+
+function quotedRuntimeStrings(source) {
+  const strings = [];
+  for (let start = 0; start < source.length; start += 1) {
+    if (source.startsWith("//", start)) {
+      const lineEnd = source.indexOf("\n", start + 2);
+      start = lineEnd < 0 ? source.length : lineEnd;
+      continue;
+    }
+    if (source.startsWith("/*", start)) {
+      const commentEnd = source.indexOf("*/", start + 2);
+      start = commentEnd < 0 ? source.length : commentEnd + 1;
+      continue;
+    }
+    const quote = source[start];
+    if (quote !== "\"" && quote !== "'" && quote !== "`") continue;
+    let end = start + 1;
+    for (; end < source.length; end += 1) {
+      if (source[end] === "\\") {
+        end += 1;
+        continue;
+      }
+      if (source[end] === quote) break;
+    }
+    if (end >= source.length) continue;
+    const body = source.slice(start + 1, end);
+    const value = decodeJavaScriptStringBody(body, quote === "`");
+    if (Buffer.byteLength(value, "utf8") <= MAX_FILE_BYTES) {
+      strings.push({ value, start, end: end + 1 });
+    }
+    start = end;
+  }
+  return strings;
+}
+
+function decodeMarkupAndCss(source) {
+  let decoded = source.replace(/\\([0-9a-f]{1,6})(?:\s)?/gi, (_match, value) => {
+    return decodeCodePoint(value) ?? " ";
+  });
+  decoded = decoded.replace(/&#x([0-9a-f]{1,8});?/gi, (_match, value) => {
+    return decodeCodePoint(value) ?? " ";
+  });
+  decoded = decoded.replace(/&#([0-9]{1,8});?/g, (_match, value) => {
+    const point = Number.parseInt(value, 10);
+    return Number.isInteger(point) && point <= 0x10ffff
+      ? String.fromCodePoint(point)
+      : " ";
+  });
+  return decoded.replace(/%([0-9a-f]{2})/gi, (_match, value) =>
+    String.fromCodePoint(Number.parseInt(value, 16)),
+  );
+}
+
+function decodedJsonStrings(source) {
+  try {
+    const value = JSON.parse(source);
+    const strings = [];
+    const visit = (current) => {
+      if (typeof current === "string") strings.push(current);
+      else if (Array.isArray(current)) current.forEach(visit);
+      else if (current !== null && typeof current === "object") {
+        Object.entries(current).forEach(([key, child]) => {
+          strings.push(key);
+          visit(child);
+        });
+      }
+    };
+    visit(value);
+    return strings.filter(
+      (value) => Buffer.byteLength(value, "utf8") <= MAX_FILE_BYTES,
+    );
+  } catch {
+    return [];
+  }
+}
+
+function decodedEncodedLiterals(source, literals) {
+  const variants = [];
+  const isBoundedText = (value) => {
+    if (value.length === 0 || Buffer.byteLength(value) > MAX_FILE_BYTES) {
+      return false;
+    }
+    try {
+      new TextDecoder("utf-8", { fatal: true }).decode(Buffer.from(value));
+      return !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\ufffd]/u.test(value);
+    } catch {
+      return false;
+    }
+  };
+  for (const literal of literals) {
+    const context = source.slice(
+      Math.max(0, literal.start - 96),
+      Math.min(source.length, literal.end + 96),
+    );
+    if (
+      /\b(?:atob|Buffer\.from)\s*\(\s*["']/iu.test(context) ||
+      /,\s*["']base64["']/iu.test(context)
+    ) {
+      if (!/^[A-Za-z0-9+/]+={0,2}$/u.test(literal.value)) continue;
+      try {
+        const decoded = Buffer.from(literal.value, "base64").toString("utf8");
+        if (isBoundedText(decoded)) {
+          variants.push(decoded);
+        }
+      } catch {
+        // Invalid encodings remain covered by raw source scanning.
+      }
+    }
+    if (
+      (/(?:fromhex|decodehex)\s*\(/iu.test(context) ||
+        /,\s*["']hex["']/iu.test(context)) &&
+      /^[0-9a-f]+$/i.test(literal.value) &&
+      literal.value.length % 2 === 0
+    ) {
+      try {
+        const decoded = Buffer.from(literal.value, "hex").toString("utf8");
+        if (isBoundedText(decoded)) {
+          variants.push(decoded);
+        }
+      } catch {
+        // Invalid encodings remain covered by raw source scanning.
+      }
+    }
+  }
+  return variants;
+}
+
+function reconstructedStringVariants(source, literals) {
+  const variants = [];
+  for (let start = 0; start < literals.length; start += 1) {
+    let value = literals[start].value;
+    let end = start;
+    while (end + 1 < literals.length) {
+      const gap = source.slice(literals[end].end, literals[end + 1].start);
+      if (!/^\s*\+\s*$/u.test(gap)) break;
+      value += literals[end + 1].value;
+      end += 1;
+      if (Buffer.byteLength(value) > MAX_FILE_BYTES) break;
+      if (end > start) variants.push(value);
+    }
+  }
+
+  const joinPattern = /\[([\s\S]{0,4096})\]\s*\.join\s*\(\s*([\s\S]{0,256}?)\s*\)/gu;
+  for (const match of source.matchAll(joinPattern)) {
+    const inner = match[1] ?? "";
+    const parts = quotedRuntimeStrings(inner);
+    if (parts.length === 0) continue;
+    const stripped = inner.replace(/["'`](?:\\.|[\s\S])*?["'`]/gu, "");
+    if (/[^\s,]/u.test(stripped)) continue;
+    const separatorParts = quotedRuntimeStrings(match[2] ?? "");
+    const separator = separatorParts[0]?.value ?? ",";
+    const value = parts.map(({ value: part }) => part).join(separator);
+    if (Buffer.byteLength(value) <= MAX_FILE_BYTES) variants.push(value);
+  }
+
+  const staticValues = new Map();
+  const assignmentPattern =
+    /\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*([^;\n]+)/gu;
+  const evaluate = (expression) => {
+    const terms = expression.split(/\s*\+\s*/u);
+    let value = "";
+    for (const term of terms) {
+      const trimmed = term.trim();
+      if (/^[A-Za-z_$][\w$]*$/u.test(trimmed)) {
+        const resolved = staticValues.get(trimmed);
+        if (resolved === undefined) return null;
+        value += resolved;
+        continue;
+      }
+      const termLiterals = quotedRuntimeStrings(trimmed);
+      if (termLiterals.length !== 1) return null;
+      value += termLiterals[0].value;
+    }
+    return Buffer.byteLength(value) <= MAX_FILE_BYTES ? value : null;
+  };
+  for (const assignment of source.matchAll(assignmentPattern)) {
+    const name = assignment[1];
+    const value = evaluate(assignment[2] ?? "");
+    if (name === undefined || value === null) continue;
+    staticValues.set(name, value);
+    variants.push(value);
+  }
+  return variants;
+}
+
+function runtimeSourceVariants(source, relativePath) {
+  const literals = quotedRuntimeStrings(source);
+  const runtimeLiterals = literals.filter(({ start }) => {
+    const before = source.slice(Math.max(0, start - 48), start);
+    return !/(?:new\s+)?RegExp\s*\(\s*["'`]$/u.test(before);
+  });
+  const markupOrCss = /\.(?:css|html?)$/iu.test(relativePath);
+  const variants = [
+    ...runtimeLiterals.map(({ value }) => value),
+    ...decodedEncodedLiterals(source, runtimeLiterals),
+    ...(markupOrCss ? [decodeMarkupAndCss(source)] : []),
+    ...(markupOrCss
+      ? runtimeLiterals.map(({ value }) => decodeMarkupAndCss(value))
+      : []),
+    ...decodedJsonStrings(source),
+    ...reconstructedStringVariants(source, runtimeLiterals),
+  ];
+  const represented = new Set();
+  return variants.filter((variant) => {
+    if (
+      variant.length === 0 ||
+      represented.has(variant) ||
+      source.includes(variant)
+    ) {
+      return false;
+    }
+    represented.add(variant);
+    return represented.size <= 512;
+  });
+}
+
+export { runtimeSourceVariants };
 
 function readBoundedFile(root, file) {
   const relativePath = normalizeRelativePath(root, file);
@@ -674,6 +1025,28 @@ export function scanComplianceClaims({
         label: violation.label,
         match: violation.match.replace(/\s+/g, " ").trim(),
       });
+    }
+    const exactCodeMirrorMetadata =
+      generated.has(resolve(file)) &&
+      [
+        ...CODEMIRROR_METADATA_CONSTRUCTORS,
+        CODEMIRROR_BUNDLE_METADATA,
+        CODEMIRROR_MINIFIED_METADATA,
+      ].some((metadata) => rawSource.includes(metadata));
+    for (const runtimeSource of runtimeSourceVariants(rawSource, relativePath)) {
+      const runtimeViolations = findPublicClaimViolations(runtimeSource);
+      const runtimeOnlyBidi = runtimeViolations.every(
+        ({ label }) => label === "bidirectional control",
+      );
+      for (const violation of runtimeViolations) {
+        if (exactCodeMirrorMetadata && runtimeOnlyBidi) continue;
+        failures.push({
+          file: relativePath,
+          line: 1,
+          label: violation.label,
+          match: violation.match.replace(/\s+/g, " ").trim(),
+        });
+      }
     }
     if (unknownBinary) {
       failures.push(

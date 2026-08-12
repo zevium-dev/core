@@ -27,6 +27,8 @@ jobs:
         run: pnpm install
       - name: Run format script
         run: pnpm run format
+      - name: Require compliance checks after formatting
+        run: pnpm check:compliance-claims
       - name: Commit and push changes
         run: |
           git config --global user.name 'github-actions[bot]'
