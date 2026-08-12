@@ -19,10 +19,14 @@ const githubTokenAlphabet =
   "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 
 function fakeGithubToken() {
-  const bytes = randomBytes(36);
+  const limit = 256 - (256 % githubTokenAlphabet.length);
   let suffix = "";
-  for (const byte of bytes) {
-    suffix += githubTokenAlphabet[byte % githubTokenAlphabet.length];
+  while (suffix.length < 36) {
+    for (const byte of randomBytes(36)) {
+      if (byte >= limit) continue;
+      suffix += githubTokenAlphabet[byte % githubTokenAlphabet.length];
+      if (suffix.length === 36) break;
+    }
   }
   return `ghp_${suffix}`;
 }
