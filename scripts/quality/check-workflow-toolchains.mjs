@@ -38,7 +38,13 @@ function runText(step) {
 }
 
 export function validateWorkflowToolchain(path) {
-  const document = parse(readFileSync(path, "utf8"));
+  const source = readFileSync(path, "utf8");
+  if (source.includes("restore-keys")) {
+    throw new Error(
+      `${path}: broad pnpm cache restore-keys are forbidden; exact key-only cache matches required`,
+    );
+  }
+  const document = parse(source);
   const failures = [];
   for (const [jobName, job] of Object.entries(document?.jobs ?? {})) {
     const steps = Array.isArray(job?.steps) ? job.steps : [];

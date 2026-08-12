@@ -1,3 +1,4 @@
+00ec09826fcf0ea39ae54fd1ac846d1af2f82090:apps/web/scripts/compare-bundle-budget.mjs:generic-api-key:43
 0893c6e4869c4e53c8b848301e064ba91caa4299:convex/auth.config.ts:generic-api-key:4
 0a031dc6117255327afd6060fc11a5ceea2cb278:.env.example:generic-api-key:20
 0e376322b355d4e7bfa2ecfb2d7a5a21847d4900:apps/web/src/lib/billing-cycle.test.ts:stripe-access-token:18
@@ -10,6 +11,7 @@
 190a0d0ad4437134e326ad7c3b5808117bb2ae42:apps/web/src/routes/docs/index.tsx:curl-auth-header:25
 190a0d0ad4437134e326ad7c3b5808117bb2ae42:e2e/04-payment-drill.sh:curl-auth-user:49
 190a0d0ad4437134e326ad7c3b5808117bb2ae42:e2e/04-payment-drill.sh:curl-auth-user:52
+21a406ab04816645698acecb909544c8b252eba8:apps/web/scripts/compare-bundle-budget.mjs:generic-api-key:43
 2312151e63eef4f8cefa9bf638bf72515242d261:apps/web/src/lib/billing-cycle.test.ts:stripe-access-token:18
 2312151e63eef4f8cefa9bf638bf72515242d261:apps/web/src/routes/docs/consuming.tsx:curl-auth-header:25
 2312151e63eef4f8cefa9bf638bf72515242d261:apps/web/src/routes/docs/index.tsx:curl-auth-header:25
@@ -82,4 +84,8 @@ e5e67d86037bed76e1b916a6970d7a87b4249fd4:scripts/quality/build-ci.mjs:generic-ap
 e5e67d86037bed76e1b916a6970d7a87b4249fd4:scripts/quality/build-ci.mjs:stripe-access-token:17
 e5e67d86037bed76e1b916a6970d7a87b4249fd4:scripts/quality/check-generated-routes.mjs:generic-api-key:43
 e5e67d86037bed76e1b916a6970d7a87b4249fd4:scripts/quality/check-generated-routes.mjs:stripe-access-token:44
+eefb8a70e1005976c83a51c4c9ac43790c7c9da0:apps/web/scripts/compare-bundle-budget.mjs:generic-api-key:44
+eefb8a70e1005976c83a51c4c9ac43790c7c9da0:apps/web/scripts/compare-bundle-budget.mjs:generic-api-key:46
+eefb8a70e1005976c83a51c4c9ac43790c7c9da0:apps/web/scripts/compare-bundle-budget.mjs:generic-api-key:52
+eefb8a70e1005976c83a51c4c9ac43790c7c9da0:apps/web/scripts/compare-bundle-budget.mjs:generic-api-key:55
 f638df59039a5c208402d1e6e87fa219c2e854b1:docs/production-deploy.md:generic-api-key:309

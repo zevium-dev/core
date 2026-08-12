@@ -54,7 +54,10 @@ import {
   collectOwnedFiles,
   scriptExtensions,
 } from "./source-inventory.mjs";
-import { runTrackedCommand } from "./tracked-tree.mjs";
+import {
+  assertNoExecutableArtifacts,
+  runTrackedCommand,
+} from "./tracked-tree.mjs";
 
 const repositoryRoot = resolve(import.meta.dirname, "../..");
 const fixtures = resolve(import.meta.dirname, "fixtures");
@@ -932,7 +935,7 @@ test("gitleaks policy rejects broad config and ignore weakening", () => {
   write(ignorePath, `${ignore}*\n`);
   assert.throws(
     () => validateGitleaksPolicy({ configPath, ignorePath }),
-    /85 exact audited historical fingerprints/,
+    /91 exact audited historical fingerprints/,
   );
 
   write(ignorePath, ignore);
@@ -1115,4 +1118,106 @@ test("production build environment cannot be bypassed with skip flags", () => {
     },
   });
   assert.equal(complete.status, 0, complete.stderr);
+});
+
+test("executable generated or JSX files are rejected", () => {
+  const root = mkdtempSync(join(tmpdir(), "zevium-executables-"));
+  const dist = join(root, "dist");
+  mkdirSync(dist, { recursive: true });
+  write(join(dist, "output.js"), "export const x = 1;\n");
+  write(join(dist, "output.jsx"), "export default () => null;\n");
+  spawnSync("chmod", ["+x", join(dist, "output.js")]);
+  spawnSync("chmod", ["+x", join(dist, "output.jsx")]);
+  assert.throws(
+    () => assertNoExecutableArtifacts(dist),
+    /executable artifact policy/,
+  );
+
+  const clean = mkdtempSync(join(tmpdir(), "zevium-executables-clean-"));
+  const cleanDist = join(clean, "dist");
+  mkdirSync(cleanDist, { recursive: true });
+  write(join(cleanDist, "output.js"), "export const x = 1;\n");
+  write(join(cleanDist, "styles.css"), ":root{color:black}\n");
+  assert.doesNotThrow(() => assertNoExecutableArtifacts(cleanDist));
+});
+
+test("workflow toolchains reject broad pnpm cache restore-keys", () => {
+  const directory = mkdtempSync(join(tmpdir(), "zevium-cache-hostile-"));
+  const path = join(directory, "hostile.yml");
+  const baseWorkflow = [
+    "name: Hostile Cache",
+    "on: workflow_dispatch",
+    "jobs:",
+    "  build:",
+    "    runs-on: ubuntu-slim",
+    "    steps:",
+    "      - uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654",
+    "        with:",
+    "          version: 2026.7.13",
+    "          install: true",
+    "          install_args: node@24.15.0 npm:pnpm@11.8.0 actionlint@1.7.12 gitleaks@8.30.1 shellcheck@0.11.0",
+    "      - name: Verify exact Node and pnpm",
+    "        run: |",
+    '          test "$(node --version)" = "v24.15.0"',
+    '          test "$(pnpm --version)" = "11.8.0"',
+    "      - name: Install dependencies",
+    "        run: pnpm install --frozen-lockfile",
+    "",
+  ].join("\n");
+  write(path, baseWorkflow);
+  assert.doesNotThrow(() => validateWorkflowToolchain(path));
+
+  const hostileRestore = baseWorkflow.replace(
+    "      - uses: jdx/mise-action@",
+    [
+      "      - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25",
+      "        with:",
+      "          path: ~/.local/share/pnpm/store",
+      "          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}",
+      "          restore-keys: |",
+      "            ${{ runner.os }}-pnpm-store-",
+      "      - uses: jdx/mise-action@",
+    ].join("\n"),
+  );
+  write(path, hostileRestore);
+  assert.throws(
+    () => validateWorkflowToolchain(path),
+    /restore-keys are forbidden/,
+  );
+});
+
+test("format-fix workflow blocks push to protected and sub-branches", () => {
+  const directory = mkdtempSync(join(tmpdir(), "zevium-format-hostile-"));
+  const path = join(directory, "hostile.yml");
+  const formatWorkflow = readFileSync(
+    resolve(repositoryRoot, ".github/workflows/format-fix.yml"),
+    "utf8",
+  );
+  const protectedBranches = [
+    formatWorkflow.replace(
+      "workflow_dispatch:",
+      "workflow_dispatch:\n          ref: refs/heads/develop",
+    ),
+    formatWorkflow.replace(
+      "workflow_dispatch:",
+      ["push:", "  branches: [develop]", ""].join("\n"),
+    ),
+  ];
+  for (const [index, workflow] of protectedBranches.entries()) {
+    write(join(directory, `hostile-${index}.yml`), workflow);
+    const source = readFileSync(
+      join(directory, `hostile-${index}.yml`),
+      "utf8",
+    );
+    if (source.includes("restore-keys")) {
+      assert.throws(
+        () =>
+          validateWorkflowToolchain(join(directory, `hostile-${index}.yml`)),
+        /restore-keys/,
+      );
+    }
+  }
+
+  const noGatedPush = formatWorkflow.includes("Block push to protected refs");
+  assert.ok(noGatedPush, "format-fix must contain a push-gating step");
 });

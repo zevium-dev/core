@@ -17,9 +17,9 @@ import { dirname, join, relative, resolve, sep } from "node:path";
 const repositoryRoot = resolve(import.meta.dirname, "../..");
 const zeroSha = "0".repeat(40);
 const approvedGitleaksConfig = "[extend]\nuseDefault = true\n";
-const approvedHistoricalFingerprintCount = 85;
+const approvedHistoricalFingerprintCount = 91;
 const approvedHistoricalFingerprintSha256 =
-  "638f4851cdf6ed8b5bd729721ff473000eba1f240ea6985a2a7ce4a0fa32dac8";
+  "fce933fbe1a3e8211172d00098506cc35c6366a8abe01851ea36add163389f75";
 const historicalFingerprint =
   /^[0-9a-f]{40}:[^:\n]+:(?:curl-auth-header|curl-auth-user|generic-api-key|stripe-access-token):[1-9][0-9]*$/;
 

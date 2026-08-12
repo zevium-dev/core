@@ -1,5 +1,9 @@
 import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
+import {
+  assertNoExecutableArtifacts,
+  runTrackedCommand,
+} from "./tracked-tree.mjs";
 
 const repositoryRoot = resolve(import.meta.dirname, "../..");
 
@@ -31,6 +35,13 @@ try {
     VITE_CONVEX_URL: "https://ci.invalid",
     VITE_GATEWAY_URL: "https://ci.invalid",
   });
+  assertNoExecutableArtifacts(resolve(repositoryRoot, "apps/web/dist"));
+  for (const generated of [
+    resolve(repositoryRoot, "convex/_generated"),
+    resolve(repositoryRoot, "apps/web/src/routeTree.gen.ts"),
+  ]) {
+    assertNoExecutableArtifacts(generated);
+  }
 } catch (error) {
   process.stderr.write(
     `${error instanceof Error ? error.message : String(error)}\n`,

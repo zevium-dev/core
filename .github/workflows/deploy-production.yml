@@ -21,22 +21,104 @@ env:
   VERSION_TAG: ci-${{ github.run_id }}-${{ github.run_attempt }}
 
 jobs:
-  deploy:
-    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'develop'
+  preflight:
     runs-on: blacksmith-2vcpu-ubuntu-2404
-    timeout-minutes: 15
-    environment: production
+    timeout-minutes: 5
+    outputs:
+      sealed_sha: ${{ steps.verify.outputs.sealed_sha }}
+      sealed_workflow_run_id: ${{ steps.verify.outputs.sealed_workflow_run_id }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Verify source CI run and seal deployment SHA
+        id: verify
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          conclusion="${{ github.event.workflow_run.conclusion }}"
+          head_branch="${{ github.event.workflow_run.head_branch }}"
+          head_sha="${{ github.event.workflow_run.head_sha }}"
+          source_run_id="${{ github.event.workflow_run.id }}"
+
+          if [ "$conclusion" != "success" ]; then
+            echo "Deploy source CI run concluded with ${conclusion}, not success" >&2
+            exit 1
+          fi
+          if [ "$head_branch" != "develop" ]; then
+            echo "Deploy source CI run was on ${head_branch}, not develop" >&2
+            exit 1
+          fi
+
+          protected_tip="$(git rev-parse --verify 'origin/develop^{commit}')"
+          if [ "$protected_tip" != "$head_sha" ]; then
+            echo "Deploy head SHA ${head_sha} does not match protected develop tip ${protected_tip}" >&2
+            exit 1
+          fi
+
+          fetch_count=0
+          while [ "$fetch_count" -lt 10 ]; do
+            run_json="$(gh api --hostname api.github.com "/repos/$GITHUB_REPOSITORY/actions/runs/${source_run_id}")"
+            run_status="$(echo "$run_json" | python3 -c 'import json,sys; print(json.load(sys.stdin)["status"])')"
+            run_conclusion="$(echo "$run_json" | python3 -c 'import json,sys; print(json.load(sys.stdin)["conclusion"])')"
+            run_head_sha="$(echo "$run_json" | python3 -c 'import json,sys; print(json.load(sys.stdin)["head_sha"])')"
+            run_head_branch="$(echo "$run_json" | python3 -c 'import json,sys; print(json.load(sys.stdin)["head_branch"])')"
+            run_event="$(echo "$run_json" | python3 -c 'import json,sys; print(json.load(sys.stdin)["event"])')"
+
+            if [ "$run_status" != "completed" ]; then
+              echo "Source run ${source_run_id} is still ${run_status}; waiting" >&2
+              sleep 10
+              fetch_count=$((fetch_count + 1))
+              continue
+            fi
+            break
+          done
+          if [ "$run_status" != "completed" ] || [ "$run_conclusion" != "success" ]; then
+            echo "Source CI run ${source_run_id} is not a successful completion" >&2
+            exit 1
+          fi
+          if [ "$run_head_sha" != "$head_sha" ]; then
+            echo "Source CI run SHA ${run_head_sha} does not match event SHA ${head_sha}" >&2
+            exit 1
+          fi
+          if [ "$run_head_branch" != "develop" ]; then
+            echo "Source CI ran on ${run_head_branch} not develop" >&2
+            exit 1
+          fi
+          if [ "$run_event" != "push" ]; then
+            echo "Source CI run event is ${run_event} not push" >&2
+            exit 1
+          fi
+
+          echo "sealed_sha=$head_sha" >> "$GITHUB_OUTPUT"
+          echo "sealed_workflow_run_id=$source_run_id" >> "$GITHUB_OUTPUT"
+
+      - name: Atomically halt if sealed SHA is not identical
+        if: >-
+          steps.verify.outputs.sealed_sha != github.event.workflow_run.head_sha ||
+          !steps.verify.outputs.sealed_sha
+        run: |
+          echo "Sealed SHA mismatch or missing; aborting deploy" >&2
+          exit 1
+
+  deploy:
+    needs: preflight
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 15
+    environment: production
+    env:
+      SEALED_SHA: ${{ needs.preflight.outputs.sealed_sha }}
+      SEALED_WORKFLOW_RUN_ID: ${{ needs.preflight.outputs.sealed_workflow_run_id }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ needs.preflight.outputs.sealed_sha }}
           persist-credentials: false
       - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: ~/.local/share/pnpm/store
           key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pnpm-store-
       - uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4
         with:
           version: 2026.7.13
@@ -48,6 +130,11 @@ jobs:
           test "$(pnpm --version)" = "11.8.0"
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Rerun quality gates against sealed SHA
+        env:
+          TURBO_FORCE: "true"
+        run: pnpm ci:pr
 
       - name: Deploy Convex control plane
         env:
@@ -81,3 +168,17 @@ jobs:
 
           web="$(curl --fail --silent --show-error https://www.zevium.dev/)"
           [[ "$web" == *'One key. Every API. Pay per call.'* ]] || { echo "Landing page did not render" >&2; exit 1; }
+
+      - name: Record deployment in broker ledger
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh api --method POST \
+            -H "Accept: application/vnd.github+json" \
+            "/repos/$GITHUB_REPOSITORY/deployments" \
+            -f ref="$SEALED_SHA" \
+            -f environment="production" \
+            -f description="Sealed release from CI run ${SEALED_WORKFLOW_RUN_ID}" \
+            -f required_contexts="[]" \
+            -f auto_merge=false

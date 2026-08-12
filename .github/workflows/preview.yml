@@ -24,12 +24,47 @@ env:
   CLOUDFLARE_ACCOUNT_ID: 1ea9299555b026a6a7484c8323c5a953
 
 jobs:
+  resolve-pr:
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 3
+    outputs:
+      bound_sha: ${{ steps.resolve.outputs.bound_sha }}
+    steps:
+      - name: Resolve PR metadata and enforce actor/state/repo policy
+        id: resolve
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            pr_json="$(gh api "/repos/$GITHUB_REPOSITORY/pulls/${{ inputs.pr_number }}")"
+            pr_state="$(echo "$pr_json" | python3 -c 'import json,sys; print(json.load(sys.stdin)["state"])')"
+            head_sha="$(echo "$pr_json" | python3 -c 'import json,sys; print(json.load(sys.stdin)["head"]["sha"])')"
+            head_repo="$(echo "$pr_json" | python3 -c 'import json,sys; print(json.load(sys.stdin)["head"]["repo"]["full_name"])')"
+            author_login="$(echo "$pr_json" | python3 -c 'import json,sys; print(json.load(sys.stdin)["user"]["login"])')"
+            if [ "$pr_state" != "open" ]; then
+              echo "Preview PR #${{ inputs.pr_number }} is ${pr_state}; only open PRs are allowed" >&2
+              exit 1
+            fi
+            if [ "$head_repo" != "$GITHUB_REPOSITORY" ]; then
+              echo "Preview PR #${{ inputs.pr_number }} head repo ${head_repo} is not ${GITHUB_REPOSITORY}" >&2
+              exit 1
+            fi
+            if [ "${{ github.actor }}" != "$author_login" ] && [ "${{ github.actor }}" != "tnfssc" ]; then
+              echo "Preview actor ${{ github.actor }} is not PR #${{ inputs.pr_number }} author ${author_login}" >&2
+              exit 1
+            fi
+            echo "bound_sha=$head_sha" >> "$GITHUB_OUTPUT"
+          else
+            echo "bound_sha=${{ github.event.pull_request.head.sha }}" >> "$GITHUB_OUTPUT"
+          fi
+
   preview-convex:
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (github.event.pull_request.head.repo.full_name == github.repository &&
       github.actor == 'tnfssc' &&
       (github.event.action != 'labeled' || github.event.label.name == 'full-e2e'))
+    needs: resolve-pr
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 10
     environment: preview
@@ -39,13 +74,11 @@ jobs:
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
-          persist-credentials: false
+          ref: ${{ needs.resolve-pr.outputs.bound_sha }}
       - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: ~/.local/share/pnpm/store
           key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pnpm-store-
       - uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4
         with:
           version: 2026.7.13
@@ -68,7 +101,7 @@ jobs:
             --cmd-url-env-var-name CONVEX_URL
 
   gateway-preview:
-    needs: preview-convex
+    needs: [resolve-pr, preview-convex]
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 10
     environment: preview
@@ -80,13 +113,12 @@ jobs:
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
+          ref: ${{ needs.resolve-pr.outputs.bound_sha }}
           persist-credentials: false
       - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: ~/.local/share/pnpm/store
           key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pnpm-store-
       - uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4
         with:
           version: 2026.7.13
@@ -112,7 +144,7 @@ jobs:
           echo "gateway_url=https://${gateway_name}.zevium-dev.workers.dev" >> "$GITHUB_OUTPUT"
 
   web-build:
-    needs: preview-convex
+    needs: [resolve-pr, preview-convex]
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 10
     environment: preview
@@ -122,13 +154,12 @@ jobs:
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
+          ref: ${{ needs.resolve-pr.outputs.bound_sha }}
           persist-credentials: false
       - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: ~/.local/share/pnpm/store
           key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pnpm-store-
       - uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4
         with:
           version: 2026.7.13
@@ -153,7 +184,7 @@ jobs:
           if-no-files-found: error
 
   web-preview:
-    needs: web-build
+    needs: [resolve-pr, web-build]
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 10
     environment: preview
@@ -162,6 +193,7 @@ jobs:
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
+          ref: ${{ needs.resolve-pr.outputs.bound_sha }}
           persist-credentials: false
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
@@ -171,8 +203,6 @@ jobs:
         with:
           path: ~/.local/share/pnpm/store
           key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pnpm-store-
       - uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4
         with:
           version: 2026.7.13
@@ -279,7 +309,7 @@ jobs:
             else await github.rest.issues.createComment({ ...context.repo, issue_number: context.issue.number, body })
 
   full-e2e:
-    needs: deploy-and-test
+    needs: [resolve-pr, deploy-and-test]
     if: >-
       needs.deploy-and-test.result == 'success' &&
       (github.event_name == 'workflow_dispatch' ||
@@ -293,13 +323,12 @@ jobs:
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
+          ref: ${{ needs.resolve-pr.outputs.bound_sha }}
           persist-credentials: false
       - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: ~/.local/share/pnpm/store
           key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pnpm-store-
       - uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4
         with:
           version: 2026.7.13

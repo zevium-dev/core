@@ -1,7 +1,55 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { lstatSync, readFileSync, readlinkSync } from "node:fs";
-import { resolve } from "node:path";
+import { lstatSync, readFileSync, readlinkSync, readdirSync } from "node:fs";
+import { extname, join, relative, resolve } from "node:path";
+
+const executableForbiddenExtensions = new Set([
+  ".cjs",
+  ".css",
+  ".cts",
+  ".html",
+  ".js",
+  ".json",
+  ".jsonc",
+  ".jsx",
+  ".mjs",
+  ".mts",
+  ".svg",
+  ".ts",
+  ".tsx",
+  ".yaml",
+  ".yml",
+]);
+
+export function assertNoExecutableArtifacts(
+  root,
+  label = "executable artifact policy",
+) {
+  const rootPath = resolve(root);
+  const failures = [];
+  function visit(directory) {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const path = join(directory, entry.name);
+      if (entry.isDirectory()) {
+        visit(path);
+      } else if (entry.isFile()) {
+        const extension = extname(entry.name);
+        if (
+          executableForbiddenExtensions.has(extension) &&
+          (lstatSync(path).mode & 0o111) !== 0
+        ) {
+          failures.push(relative(rootPath, path));
+        }
+      }
+    }
+  }
+  visit(rootPath);
+  if (failures.length > 0) {
+    throw new Error(
+      `${label}: generated/dist files must not be executable:\n${failures.join("\n")}`,
+    );
+  }
+}
 
 function git(args, cwd, encoding = "utf8") {
   const result = spawnSync("git", args, { cwd, encoding });
