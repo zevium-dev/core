@@ -1,5 +1,4 @@
 import { OrganizationSwitcher, UserButton } from "@clerk/tanstack-react-start";
-import { shadcn } from "@clerk/ui/themes";
 import { Link, useRouterState } from "@tanstack/react-router";
 import {
   Activity,
@@ -15,6 +14,7 @@ import {
 
 import { BrandMark } from "#/components/brand-mark";
 import { ThemeToggle } from "#/components/theme-toggle";
+import { clerkShadcnTheme } from "#/lib/clerk-theme";
 import {
   Sidebar,
   SidebarContent,
@@ -98,7 +98,7 @@ export function AppSidebar() {
             <OrganizationSwitcher
               key={compact ? "compact" : "expanded"}
               appearance={{
-                theme: shadcn,
+                theme: clerkShadcnTheme,
                 elements: {
                   rootBox: "flex! w-full! min-w-0",
                   organizationSwitcherTrigger: compact
@@ -165,7 +165,7 @@ export function AppSidebar() {
                 key={compact ? "compact" : "expanded"}
                 showName={!compact}
                 appearance={{
-                  theme: shadcn,
+                  theme: clerkShadcnTheme,
                   elements: {
                     rootBox: "flex! min-w-0 flex-1",
                     userButtonTrigger: "w-full! min-w-0",

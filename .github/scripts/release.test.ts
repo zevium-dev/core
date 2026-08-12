@@ -536,7 +536,9 @@ describe("production workflow invariants", () => {
     expect(previewWorkflow).toContain('pr["user"]["login"] != "tnfssc"');
     expect(
       previewWorkflow.indexOf("Validate trusted preview target with gh CLI"),
-    ).toBeLessThan(previewWorkflow.indexOf("actions/checkout@v6"));
+    ).toBeLessThan(
+      previewWorkflow.indexOf("ref: ${{ needs.preview-target.outputs.ref }}"),
+    );
   });
 });
 
