@@ -197,6 +197,132 @@ describe("wallet settlement ingest contract", () => {
       results: [{ refId: "settle:one", status: "already_applied" }],
       wallet: { clerkOrgId: "org_consumer", balance: 85, sequence: 2 },
     });
+
+    const alteredReplay = await t.fetch("/ingest-usage", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-internal-secret": SECRET,
+      },
+      body: JSON.stringify({
+        events: [{ ...usageEvent(seed, "settle:one"), credits: 16 }],
+      }),
+    });
+    expect(await alteredReplay.json()).toEqual({
+      results: [
+        {
+          refId: "settle:one",
+          status: "rejected",
+          reason: "settlement reference payload conflict",
+        },
+      ],
+      wallet: { clerkOrgId: "org_consumer", balance: 85, sequence: 2 },
+    });
+  });
+
+  it("rejects impossible telemetry and a publisher/project ownership mismatch", async () => {
+    const t = convexTest(schema, modules);
+    const seed = await seedWallet(t);
+    await t.mutation(internal.wallets.grantPaymentCredits, {
+      organizationId: seed.consumerOrganizationId,
+      paymentId: seed.paymentId,
+      amount: 100,
+      refId: "grant:boundaries",
+    });
+
+    const result = await t.mutation(internal.wallets.recordUsage, {
+      events: [
+        { ...usageEvent(seed, "settle:bad-status"), status: 700 },
+        {
+          ...usageEvent(seed, "settle:bad-latency"),
+          latencyMs: 86_400_001,
+        },
+        {
+          ...usageEvent(seed, "settle:wrong-publisher"),
+          organizationId: seed.consumerOrganizationId,
+        },
+      ],
+    });
+
+    expect(result.results).toEqual([
+      {
+        refId: "settle:bad-status",
+        status: "rejected",
+        reason: "invalid settlement",
+      },
+      {
+        refId: "settle:bad-latency",
+        status: "rejected",
+        reason: "invalid settlement",
+      },
+      {
+        refId: "settle:wrong-publisher",
+        status: "rejected",
+        reason: "settlement publisher does not own project",
+      },
+    ]);
+    expect(result.wallet).toMatchObject({ balance: 100, sequence: 1 });
+  });
+
+  it("freezes new consumers at deprecation while backfilling historical eligibility", async () => {
+    const t = convexTest(schema, modules);
+    const seed = await seedWallet(t);
+    await t.mutation(internal.wallets.grantPaymentCredits, {
+      organizationId: seed.consumerOrganizationId,
+      paymentId: seed.paymentId,
+      amount: 100,
+      refId: "grant:retirement-freeze",
+    });
+    await t.run(async (ctx) => {
+      await ctx.db.patch(seed.projectId, {
+        deprecationStartedAt: 20,
+        sunsetAt: 20 + 7 * 24 * 60 * 60 * 1000,
+        retirementState: "scheduled",
+      });
+    });
+
+    const blocked = await t.mutation(internal.wallets.recordUsage, {
+      events: [{ ...usageEvent(seed, "settle:new-after-freeze"), at: 20 }],
+    });
+    expect(blocked.results).toEqual([
+      {
+        refId: "settle:new-after-freeze",
+        status: "rejected",
+        reason: "consumer became eligible after retirement freeze",
+      },
+    ]);
+
+    await t.run(async (ctx) => {
+      await ctx.db.insert("usageEvents", {
+        organizationId: seed.consumerOrganizationId,
+        projectId: seed.projectId,
+        endpoint: "/forecast",
+        method: "GET",
+        credits: 1,
+        status: 200,
+        latencyMs: 1,
+        keyId: "legacy-key",
+        at: 19,
+      });
+    });
+    const grandfathered = await t.mutation(internal.wallets.recordUsage, {
+      events: [{ ...usageEvent(seed, "settle:historical-consumer"), at: 21 }],
+    });
+    expect(grandfathered.results).toEqual([
+      { refId: "settle:historical-consumer", status: "applied" },
+    ]);
+    expect(
+      await t.run(async (ctx) =>
+        ctx.db
+          .query("projectConsumerEntitlements")
+          .withIndex("by_project_consumer", (q) =>
+            q
+              .eq("projectId", seed.projectId)
+              .eq("consumerOrganizationId", seed.consumerOrganizationId),
+          )
+          .unique(),
+      ),
+    ).toMatchObject({ firstUsedAt: 19 });
   });
 
   it("keeps materialized balance and sequence equal to the append-only ledger", async () => {

@@ -1,12 +1,10 @@
 import { v } from "convex/values";
 import { query } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
-import { requireOrgMemberBySlug } from "./lib/auth";
+import { requireOrgAdmin, requireOrgMemberBySlug } from "./lib/auth";
 
 /**
- * Scan caps — usageEvents only has by_org / by_project (no time index).
- * Queries order by _creationTime desc, filter on `at`, and stop at these caps.
- * High-volume orgs will undercount past the cap; a by_org_at index is the fix.
+ * Time-indexed scan caps bound aggregation work on high-volume ranges.
  */
 const ORG_SCAN_CAP = 5_000;
 const PROJECT_SCAN_CAP = 10_000;
@@ -66,6 +64,8 @@ export type ProjectAnalytics = {
   rangeDays: number;
   rangeStart: number;
   calls: number;
+  /** Publisher net after the platform fee. */
+  netCredits: number;
   credits: number;
   successRate: number;
   p50: number | null;
@@ -132,7 +132,7 @@ function projectLinearSpend(
 export const orgOverview = query({
   args: { orgSlug: v.string() },
   handler: async (ctx, args): Promise<OrgOverview> => {
-    const { org } = await requireOrgMemberBySlug(ctx, args.orgSlug);
+    const { claims, org } = await requireOrgMemberBySlug(ctx, args.orgSlug);
     const now = Date.now();
     const dayStart = startOfUtcDay(now);
     const cycleStart = startOfUtcMonth(now);
@@ -142,12 +142,51 @@ export const orgOverview = query({
       .withIndex("by_organization", (q) => q.eq("organizationId", org._id))
       .unique();
 
-    // Newest first via _creationTime; filter on event `at` for cycle window.
-    const scanned = await ctx.db
-      .query("usageEvents")
-      .withIndex("by_org", (q) => q.eq("organizationId", org._id))
-      .order("desc")
-      .take(ORG_SCAN_CAP);
+    const scanned =
+      claims.orgRole === "org:admin"
+        ? await ctx.db
+            .query("usageEvents")
+            .withIndex("by_org_at", (q) =>
+              q
+                .eq("organizationId", org._id)
+                .gte("at", cycleStart)
+                .lt("at", now + 1),
+            )
+            .order("desc")
+            .take(ORG_SCAN_CAP)
+        : await ctx.db
+            .query("usageEvents")
+            .withIndex("by_org_owner_at", (q) =>
+              q
+                .eq("organizationId", org._id)
+                .eq("ownerUserId", claims.subject)
+                .gte("at", cycleStart)
+                .lt("at", now + 1),
+            )
+            .order("desc")
+            .take(ORG_SCAN_CAP);
+
+    // Recent activity is independent of the UTC-month aggregation window, so
+    // month boundaries never produce an empty or undersized activity list.
+    const recentEvents =
+      claims.orgRole === "org:admin"
+        ? await ctx.db
+            .query("usageEvents")
+            .withIndex("by_org_at", (q) =>
+              q.eq("organizationId", org._id).lt("at", now + 1),
+            )
+            .order("desc")
+            .take(RECENT_LIMIT)
+        : await ctx.db
+            .query("usageEvents")
+            .withIndex("by_org_owner_at", (q) =>
+              q
+                .eq("organizationId", org._id)
+                .eq("ownerUserId", claims.subject)
+                .lt("at", now + 1),
+            )
+            .order("desc")
+            .take(RECENT_LIMIT);
 
     const truncated = scanned.length >= ORG_SCAN_CAP;
 
@@ -174,8 +213,6 @@ export const orgOverview = query({
       return view;
     }
 
-    const recent: UsageEventView[] = [];
-
     for (const event of scanned) {
       if (event.at >= cycleStart) {
         callsCycle += 1;
@@ -185,10 +222,12 @@ export const orgOverview = query({
         callsToday += 1;
         creditsToday += event.credits;
       }
+    }
 
-      if (recent.length < RECENT_LIMIT) {
+    const recent = await Promise.all(
+      recentEvents.map(async (event): Promise<UsageEventView> => {
         const project = await resolveProject(event.projectId);
-        recent.push({
+        return {
           _id: event._id,
           projectId: event.projectId,
           projectSlug: project?.slug ?? null,
@@ -200,9 +239,9 @@ export const orgOverview = query({
           latencyMs: event.latencyMs,
           keyId: event.keyId,
           at: event.at,
-        });
-      }
-    }
+        };
+      }),
+    );
 
     return {
       balance: wallet?.balance ?? 0,
@@ -231,7 +270,8 @@ export const projectAnalytics = query({
     rangeDays: v.optional(v.number()),
   },
   handler: async (ctx, args): Promise<ProjectAnalytics | null> => {
-    const { org } = await requireOrgMemberBySlug(ctx, args.orgSlug);
+    const { claims, org } = await requireOrgMemberBySlug(ctx, args.orgSlug);
+    requireOrgAdmin(claims);
 
     const project = await ctx.db
       .query("projects")
@@ -254,12 +294,32 @@ export const projectAnalytics = query({
 
     const scanned = await ctx.db
       .query("usageEvents")
-      .withIndex("by_project", (q) => q.eq("projectId", project._id))
+      .withIndex("by_project_at", (q) =>
+        q
+          .eq("projectId", project._id)
+          .gte("at", rangeStart)
+          .lt("at", now + 1),
+      )
       .order("desc")
       .take(PROJECT_SCAN_CAP);
 
-    const truncated = scanned.length >= PROJECT_SCAN_CAP;
-    const inRange = scanned.filter((e) => e.at >= rangeStart);
+    const earnings = await ctx.db
+      .query("publisherEarnings")
+      .withIndex("by_project_created", (q) =>
+        q
+          .eq("projectId", project._id)
+          .gte("createdAt", rangeStart)
+          .lt("createdAt", now + 1),
+      )
+      .order("desc")
+      .take(PROJECT_SCAN_CAP);
+
+    const truncated =
+      scanned.length >= PROJECT_SCAN_CAP || earnings.length >= PROJECT_SCAN_CAP;
+    const netCredits = earnings.reduce(
+      (total, earning) => total + earning.netCredits,
+      0,
+    );
 
     type Acc = {
       method: string;
@@ -282,7 +342,7 @@ export const projectAnalytics = query({
     let errors4xx = 0;
     let errors5xx = 0;
 
-    for (const event of inRange) {
+    for (const event of scanned) {
       calls += 1;
       credits += event.credits;
       allLatencies.push(event.latencyMs);
@@ -346,6 +406,7 @@ export const projectAnalytics = query({
       rangeDays,
       rangeStart,
       calls,
+      netCredits,
       credits,
       successRate: calls === 0 ? 0 : success / calls,
       p50: percentile(allLatencies, 50),

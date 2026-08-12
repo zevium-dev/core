@@ -1,11 +1,14 @@
 import { WalletDO } from "./wallet";
 import { ClerkKeyVerifier, FixtureKeyVerifier } from "./key-verifier";
 import {
+  CachedPublicSpecSource,
   CachedSpecSource,
-  ConvexSpecSource,
+  ConvexPublicSpecSource,
+  FailClosedPublicSpecSource,
   FailClosedSpecSource,
   FixtureSpecSource,
   InternalHttpSpecSource,
+  type PublicSpecSource,
   type SpecSource,
 } from "./spec-source";
 import {
@@ -52,7 +55,7 @@ export interface Env {
 export type WorkerDeps = PipelineDeps & {
   catalogueSource: CatalogueSource;
   /** Credential-free source for discovery, docs, and keyless mocks. */
-  publicSpecSource: SpecSource;
+  publicSpecSource: PublicSpecSource;
 };
 
 // Test-mode singletons (module scope per isolate). Production never sets GATEWAY_TEST_MODE.
@@ -117,10 +120,10 @@ function buildDeps(env: Env): WorkerDeps {
           ? new FixtureSpecSource()
           : new FailClosedSpecSource();
   const innerPublicSpec = env.CONVEX_URL
-    ? new ConvexSpecSource({ convexUrl: env.CONVEX_URL })
+    ? new ConvexPublicSpecSource({ convexUrl: env.CONVEX_URL })
     : testMode
       ? new FixtureSpecSource()
-      : new FailClosedSpecSource();
+      : new FailClosedPublicSpecSource();
 
   const innerCatalogue = env.CONVEX_URL
     ? new ConvexCatalogueSource({ convexUrl: env.CONVEX_URL })
@@ -141,7 +144,7 @@ function buildDeps(env: Env): WorkerDeps {
   const deps: WorkerDeps = {
     keyVerifier,
     specSource: new CachedSpecSource({ inner: innerSpec }),
-    publicSpecSource: new CachedSpecSource({ inner: innerPublicSpec }),
+    publicSpecSource: new CachedPublicSpecSource({ inner: innerPublicSpec }),
     catalogueSource: new CachedCatalogueSource({
       inner: innerCatalogue,
       ttlMs: 60_000,
@@ -176,6 +179,7 @@ function mockDeps(deps: WorkerDeps): MockDeps {
     keyVerifier: deps.keyVerifier,
     specSource: deps.publicSpecSource,
     idGenerator: deps.idGenerator,
+    now: deps.now,
   };
 }
 

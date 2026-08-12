@@ -32,25 +32,20 @@ import {
 } from "#/components/ui/empty";
 import { Label } from "#/components/ui/label";
 import { Skeleton } from "#/components/ui/skeleton";
-import { mergeUsagePages } from "#/lib/activity-filters";
+import { mergeHandlePages } from "#/lib/activity-filters";
 import {
   ADMIN_STATUS_OPTIONS,
   ADMIN_VISIBILITY_OPTIONS,
-  buildOrgNameMap,
-  orgDisplayName,
   parseProjectStatus,
   parseProjectVisibility,
-  type OrgNameEntry,
   type ProjectStatusFilter,
   type ProjectVisibilityFilter,
 } from "#/lib/admin-filters";
 import { api } from "#/lib/convex-api";
-import type { Id } from "#/lib/convex-data-model";
 import { humanError } from "#/lib/human-error";
 import type { AdminProjectView } from "../../../../../convex/admin";
 
 const PROJECT_PAGE_SIZE = 25;
-const ORG_MAP_PAGE_SIZE = 100;
 
 const SELECT_CLASS =
   "flex h-9 min-w-[9rem] rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none transition-[color,box-shadow] duration-[var(--dur-instant)] ease-[var(--ease)] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50";
@@ -83,8 +78,6 @@ function AdminProjectsPage() {
   const [continueCursor, setContinueCursor] = useState<string | null>(null);
   const [killTarget, setKillTarget] = useState<KillSwitchTarget | null>(null);
 
-  const orgMap = useOrgNameMap();
-
   const listArgs = useMemo(() => {
     const args: {
       paginationOpts: { numItems: number; cursor: string | null };
@@ -109,7 +102,7 @@ function AdminProjectsPage() {
   useEffect(() => {
     if (!projectsQuery.data || projectsQuery.isPending) return;
     const page = projectsQuery.data.page;
-    setRows((prev) => mergeUsagePages(prev, page, cursor === null));
+    setRows((prev) => mergeHandlePages(prev, page, cursor === null));
     setIsDone(projectsQuery.data.isDone);
     setContinueCursor(projectsQuery.data.continueCursor);
   }, [projectsQuery.data, projectsQuery.isPending, cursor]);
@@ -117,7 +110,8 @@ function AdminProjectsPage() {
   const convexSetVisibility = useConvexMutation(api.admin.setProjectVisibility);
   const toggleMutation = useMutation({
     mutationFn: (vars: {
-      projectId: Id<"projects">;
+      organizationHandle: string;
+      projectSlug: string;
       visibility: ProjectVisibilityFilter;
     }) => convexSetVisibility(vars),
     onSuccess: (_data, vars) => {
@@ -228,12 +222,9 @@ function AdminProjectsPage() {
                   <tbody>
                     {rows.map((project) => (
                       <ProjectRow
-                        key={project._id}
+                        key={project.handle}
                         project={project}
-                        orgLabel={orgDisplayName(
-                          project.organizationId,
-                          orgMap,
-                        )}
+                        orgLabel={project.organizationName}
                         disabled={toggleMutation.isPending}
                         onToggle={(target) =>
                           setKillTarget({ project, target })
@@ -271,7 +262,8 @@ function AdminProjectsPage() {
         onConfirm={() => {
           if (killTarget === null) return;
           toggleMutation.mutate({
-            projectId: killTarget.project._id,
+            organizationHandle: killTarget.project.organizationHandle,
+            projectSlug: killTarget.project.slug,
             visibility: killTarget.target,
           });
         }}
@@ -394,45 +386,6 @@ function KillSwitchDialog({
       </DialogContent>
     </Dialog>
   );
-}
-
-/**
- * Background org-name lookup. `listProjects` returns only `organizationId`,
- * so page through every org once (admin tool, bounded scale) and build a
- * complete id → name map. Realtime: stays fresh via the Convex subscription.
- */
-function useOrgNameMap() {
-  const [orgs, setOrgs] = useState<OrgNameEntry[]>([]);
-  const [cursor, setCursor] = useState<string | null>(null);
-  const [isDone, setIsDone] = useState(false);
-  const [continueCursor, setContinueCursor] = useState<string | null>(null);
-
-  const args = useMemo(
-    () => ({ paginationOpts: { numItems: ORG_MAP_PAGE_SIZE, cursor } }),
-    [cursor],
-  );
-  const orgsQuery = useQuery(convexQuery(api.admin.listOrgs, args));
-
-  useEffect(() => {
-    if (!orgsQuery.data || orgsQuery.isPending) return;
-    setOrgs((prev) =>
-      mergeUsagePages<OrgNameEntry>(
-        prev,
-        orgsQuery.data!.page,
-        cursor === null,
-      ),
-    );
-    setIsDone(orgsQuery.data.isDone);
-    setContinueCursor(orgsQuery.data.continueCursor);
-  }, [orgsQuery.data, orgsQuery.isPending, cursor]);
-
-  // Auto-advance until every org page is loaded.
-  useEffect(() => {
-    if (isDone || orgsQuery.isPending) return;
-    if (continueCursor !== null) setCursor(continueCursor);
-  }, [isDone, continueCursor, orgsQuery.isPending]);
-
-  return useMemo(() => buildOrgNameMap(orgs), [orgs]);
 }
 
 function EmptyProjects() {

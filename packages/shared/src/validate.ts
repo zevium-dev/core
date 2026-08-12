@@ -1,4 +1,9 @@
 /** Kebab-case slug: lowercase alnum segments joined by single hyphens. */
+import {
+  MAX_DAILY_FREE_TIER_CALLS,
+  MAX_ENDPOINT_COST_CREDITS,
+} from "./pricing.js";
+
 const SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 /**
@@ -155,13 +160,43 @@ export function collectOpenApiSpecIssues(specText: string): SpecIssue[] {
         });
       } else if (
         typeof cost !== "number" ||
-        !Number.isFinite(cost) ||
+        !Number.isSafeInteger(cost) ||
         cost < 0
       ) {
         issues.push({
           level: "error",
           path: `$.paths["${pathKey}"].${lower}.x-zevium-cost`,
-          message: "x-zevium-cost must be a number ≥ 0",
+          message: "x-zevium-cost must be a finite safe non-negative integer",
+        });
+      } else if (cost > MAX_ENDPOINT_COST_CREDITS) {
+        issues.push({
+          level: "error",
+          path: `$.paths["${pathKey}"].${lower}.x-zevium-cost`,
+          message: `x-zevium-cost must be at most ${MAX_ENDPOINT_COST_CREDITS}`,
+        });
+      }
+
+      const freeTier = opVal["x-zevium-free-tier"];
+      if (
+        freeTier !== undefined &&
+        (typeof freeTier !== "number" ||
+          !Number.isSafeInteger(freeTier) ||
+          freeTier < 0)
+      ) {
+        issues.push({
+          level: "error",
+          path: `$.paths["${pathKey}"].${lower}.x-zevium-free-tier`,
+          message:
+            "x-zevium-free-tier must be a finite safe non-negative integer",
+        });
+      } else if (
+        typeof freeTier === "number" &&
+        freeTier > MAX_DAILY_FREE_TIER_CALLS
+      ) {
+        issues.push({
+          level: "error",
+          path: `$.paths["${pathKey}"].${lower}.x-zevium-free-tier`,
+          message: `x-zevium-free-tier must be at most ${MAX_DAILY_FREE_TIER_CALLS}`,
         });
       }
     }

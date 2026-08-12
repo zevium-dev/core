@@ -7,6 +7,10 @@ import {
   isValidSlug,
   validateOpenApiSpec,
 } from "./validate.js";
+import {
+  MAX_DAILY_FREE_TIER_CALLS,
+  MAX_ENDPOINT_COST_CREDITS,
+} from "./pricing.js";
 
 const validBase = {
   openapi: "3.1.0",
@@ -109,7 +113,83 @@ describe("validateOpenApiSpec", () => {
     );
     expect(result.errors).toHaveLength(1);
     expect(result.errors[0]?.path).toBe('$.paths["/x"].get.x-zevium-cost');
-    expect(result.errors[0]?.message).toMatch(/number/);
+    expect(result.errors[0]?.message).toMatch(/safe non-negative integer/);
+  });
+
+  it.each([
+    ["fractional", 1.5],
+    ["negative", -1],
+    ["unsafe", Number.MAX_SAFE_INTEGER + 1],
+    ["overflow", 1e309],
+    ["string", "1"],
+    ["null", null],
+  ])("rejects %s x-zevium-cost", (_label, value) => {
+    const text = JSON.stringify(validBase).replace(
+      '"x-zevium-cost":1',
+      `"x-zevium-cost":${value === Infinity ? "1e309" : JSON.stringify(value)}`,
+    );
+    const result = validateOpenApiSpec(text);
+    expect(result.errors).toEqual([
+      expect.objectContaining({
+        path: '$.paths["/health"].get.x-zevium-cost',
+      }),
+    ]);
+  });
+
+  it.each([
+    ["fractional", 1.5],
+    ["negative", -1],
+    ["unsafe", Number.MAX_SAFE_INTEGER + 1],
+    ["overflow", 1e309],
+    ["string", "1"],
+    ["null", null],
+  ])("rejects %s x-zevium-free-tier", (_label, value) => {
+    const spec = JSON.stringify(validBase).replace(
+      '"summary":"Health",',
+      `"summary":"Health","x-zevium-free-tier":${value === Infinity ? "1e309" : JSON.stringify(value)},`,
+    );
+    const result = validateOpenApiSpec(spec);
+    expect(result.errors).toEqual([
+      expect.objectContaining({
+        path: '$.paths["/health"].get.x-zevium-free-tier',
+      }),
+    ]);
+  });
+
+  it.each([0, 1, MAX_ENDPOINT_COST_CREDITS])(
+    "accepts configured pricing boundary %s",
+    (value) => {
+      const spec = JSON.stringify({
+        ...validBase,
+        paths: {
+          "/x": {
+            get: {
+              "x-zevium-cost": value,
+              "x-zevium-free-tier": value,
+            },
+          },
+        },
+      });
+      expect(validateOpenApiSpec(spec).errors).toEqual([]);
+    },
+  );
+
+  it("rejects pricing above configured economic ceilings", () => {
+    const spec = JSON.stringify({
+      ...validBase,
+      paths: {
+        "/x": {
+          get: {
+            "x-zevium-cost": MAX_ENDPOINT_COST_CREDITS + 1,
+            "x-zevium-free-tier": MAX_DAILY_FREE_TIER_CALLS + 1,
+          },
+        },
+      },
+    });
+    expect(validateOpenApiSpec(spec).errors).toEqual([
+      expect.objectContaining({ message: expect.stringMatching(/at most/) }),
+      expect.objectContaining({ message: expect.stringMatching(/at most/) }),
+    ]);
   });
 
   it("warns on missing cost", () => {

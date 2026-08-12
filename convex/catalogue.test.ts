@@ -1,12 +1,14 @@
 /// <reference types="vite/client" />
 import { convexTest } from "convex-test";
-import { describe, expect, it } from "vitest";
-import { api } from "./_generated/api";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { api, internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import schema from "./schema";
 import { summarizePublishedPricing } from "./catalogue";
 
 const modules = import.meta.glob("./**/*.ts");
+
+afterEach(() => vi.useRealTimers());
 
 type SeededCatalogue = {
   orgId: Id<"organizations">;
@@ -260,7 +262,8 @@ describe("catalogue.listPublic", () => {
       endpointCount: 2,
       hasFreeTier: false,
     });
-    expect(bySlug.cheap?.projectId).toBe(seed.cheapId);
+    expect(bySlug.cheap).not.toHaveProperty("projectId");
+    expect(bySlug.cheap).not.toHaveProperty("organizationId");
   });
 
   it("filters by hasFreeTier", async () => {
@@ -351,7 +354,66 @@ describe("catalogue.listPublic", () => {
       publisherHandle: "pub-co",
       projectSlug: "cheap",
     });
+    expect(publicDetail?.project).not.toHaveProperty("_id");
+    expect(publicDetail?.org).not.toHaveProperty("_id");
     expect(publicDetail?.project.slug).toBe("cheap");
     expect(publicDetail?.latestVersion?.version).toBe("1.0.0");
+  });
+
+  it("backfills and traverses a large projection with opaque gap-free cursors", async () => {
+    vi.useFakeTimers();
+    const t = convexTest(schema, modules);
+    await t.run(async (ctx) => {
+      const orgId = await ctx.db.insert("organizations", {
+        clerkOrgId: "org_scale",
+        name: "Scale Publisher",
+        slug: "scale-publisher",
+        publicHandle: "scale-publisher",
+      });
+      for (let index = 0; index < 61; index += 1) {
+        const suffix = String(index).padStart(3, "0");
+        const projectId = await ctx.db.insert("projects", {
+          organizationId: orgId,
+          name: `API ${suffix}`,
+          slug: `api-${suffix}`,
+          status: "published",
+          visibility: "public",
+          tags: ["scale"],
+        });
+        await ctx.db.insert("specVersions", {
+          projectId,
+          version: "1.0.0",
+          publishedAt: index + 1,
+          spec: openapiSpec({
+            "/call": { get: { "x-zevium-cost": index + 1 } },
+          }),
+        });
+      }
+    });
+
+    expect(
+      await t.mutation(internal.catalogue.backfillCatalogueListingsPage, {
+        cursor: null,
+      }),
+    ).toEqual({ processed: 25, done: false });
+    await t.finishAllScheduledFunctions(() => vi.runAllTimers());
+
+    const names: string[] = [];
+    let cursor: string | null = null;
+    let total = 0;
+    do {
+      const page = await t.query(api.catalogue.listPublic, {
+        sort: "name",
+        ...(cursor === null ? {} : { cursor }),
+      });
+      names.push(...page.items.map((item) => item.name));
+      total = page.total;
+      cursor = page.nextCursor;
+    } while (cursor !== null);
+
+    expect(names).toHaveLength(61);
+    expect(new Set(names).size).toBe(61);
+    expect(names).toEqual([...names].sort((a, b) => a.localeCompare(b)));
+    expect(total).toBe(61);
   });
 });

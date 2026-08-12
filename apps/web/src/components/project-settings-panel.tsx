@@ -1,4 +1,5 @@
 import { convexQuery, useConvexMutation } from "@convex-dev/react-query";
+import { useOrganization } from "@clerk/tanstack-react-start";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import {
@@ -35,6 +36,13 @@ import {
 import { Switch } from "#/components/ui/switch";
 import { Input } from "#/components/ui/input";
 import { Label } from "#/components/ui/label";
+import {
+  Field,
+  FieldDescription,
+  FieldError,
+  FieldLabel,
+} from "#/components/ui/field";
+import { Textarea } from "#/components/ui/textarea";
 import { api } from "#/lib/convex-api";
 import type { Doc, Id } from "#/lib/convex-data-model";
 import { humanError } from "#/lib/human-error";
@@ -43,6 +51,9 @@ import { deliveryStatusView, truncateError } from "#/lib/webhook-delivery";
 import { maskSecret } from "#/lib/webhook-secret";
 import { formatRelativeTime } from "#/lib/relative-time";
 
+const MIN_RETIREMENT_NOTICE_MS = 7 * 24 * 60 * 60 * 1000;
+const RETIREMENT_MESSAGE_MAX = 1_000;
+
 export function ProjectSettingsPanel({
   project,
   orgSlug,
@@ -50,17 +61,28 @@ export function ProjectSettingsPanel({
   project: Doc<"projects">;
   orgSlug: string;
 }) {
+  const { membership } = useOrganization();
+  const isAdmin = membership?.role === "org:admin";
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const updateProject = useConvexMutation(api.projects.update);
   const removeProject = useConvexMutation(api.projects.remove);
+  const scheduleProjectRetirement = useConvexMutation(
+    api.projects.scheduleRetirement,
+  );
+  const cancelProjectRetirement = useConvexMutation(
+    api.projects.cancelRetirement,
+  );
 
   const [name, setName] = useState(project.name);
   const [description, setDescription] = useState(project.description ?? "");
   const [tagsText, setTagsText] = useState(project.tags.join(", "));
   const [visibilityOpen, setVisibilityOpen] = useState(false);
+  const [cancelRetirementOpen, setCancelRetirementOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState("");
+  const [sunsetDate, setSunsetDate] = useState("");
+  const [retirementMessage, setRetirementMessage] = useState("");
 
   // Keep local form in sync when realtime project doc changes (e.g. header visibility).
   useEffect(() => {
@@ -157,9 +179,59 @@ export function ProjectSettingsPanel({
     },
   });
 
+  const { mutate: scheduleRetirement, isPending: retirementPending } =
+    useMutation({
+      mutationFn: (input: { sunsetAt: number; message: string }) =>
+        scheduleProjectRetirement({ projectId: project._id, ...input }),
+      onSuccess: async () => {
+        toast.success("Project retirement scheduled");
+        setVisibilityOpen(false);
+        setSunsetDate("");
+        setRetirementMessage("");
+        await invalidateProjectQueries();
+      },
+      onError: (err: unknown) =>
+        toast.error(humanError(err, "Could not schedule retirement")),
+    });
+
+  const { mutate: cancelRetirement, isPending: cancelRetirementPending } =
+    useMutation({
+      mutationFn: () => cancelProjectRetirement({ projectId: project._id }),
+      onSuccess: async () => {
+        toast.success("Project retirement canceled");
+        setCancelRetirementOpen(false);
+        await invalidateProjectQueries();
+      },
+      onError: (err: unknown) =>
+        toast.error(humanError(err, "Could not cancel retirement")),
+    });
+
   const nextVisibility = project.visibility === "public" ? "private" : "public";
   const tagsPreview = parseTagsInput(tagsText);
   const canDelete = deleteConfirm.trim() === project.slug;
+  const isPublishedPublic =
+    project.status === "published" && project.visibility === "public";
+  const retirementScheduled = project.deprecationStartedAt !== undefined;
+  const parsedSunset = Date.parse(`${sunsetDate}T23:59:59.999Z`);
+  const minimumSunset = Date.now() + MIN_RETIREMENT_NOTICE_MS;
+  const retirementMessageLength = retirementMessage.trim().length;
+  const sunsetError =
+    sunsetDate !== "" &&
+    (!Number.isFinite(parsedSunset) || parsedSunset < minimumSunset)
+      ? "Choose a sunset at least 7 full days from now."
+      : null;
+  const retirementMessageError =
+    retirementMessage.length > RETIREMENT_MESSAGE_MAX
+      ? `Keep the migration notice under ${RETIREMENT_MESSAGE_MAX.toLocaleString()} characters.`
+      : null;
+  const canScheduleRetirement =
+    Number.isFinite(parsedSunset) &&
+    parsedSunset >= minimumSunset &&
+    retirementMessageLength > 0 &&
+    retirementMessageLength <= RETIREMENT_MESSAGE_MAX;
+  const canRemoveProject =
+    project.status !== "published" ||
+    (project.sunsetAt !== undefined && Date.now() >= project.sunsetAt);
 
   function onSaveDetails(e: FormEvent) {
     e.preventDefault();
@@ -269,7 +341,8 @@ export function ProjectSettingsPanel({
           <CardTitle>Visibility</CardTitle>
           <CardDescription>
             Public projects appear in the catalogue when published. Private
-            projects stay hidden.
+            projects stay hidden. Published projects require at least 7 days
+            notice before retirement.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -284,39 +357,165 @@ export function ProjectSettingsPanel({
               Status:{" "}
               <span className="font-medium capitalize">{project.status}</span>
             </p>
+            {retirementScheduled && project.sunsetAt !== undefined ? (
+              <p className="text-muted-foreground">
+                Sunset: {new Date(project.sunsetAt).toLocaleDateString()}
+              </p>
+            ) : null}
           </div>
-          <Dialog open={visibilityOpen} onOpenChange={setVisibilityOpen}>
-            <DialogTrigger asChild>
-              <Button variant="outline">
-                Make {nextVisibility === "public" ? "Public" : "Private"}
-              </Button>
-            </DialogTrigger>
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>Make project {nextVisibility}?</DialogTitle>
-                <DialogDescription>
-                  {nextVisibility === "public"
-                    ? "Public projects appear in the catalogue when published. Only published specs are listed."
-                    : "Private projects stay hidden from the public catalogue."}
-                </DialogDescription>
-              </DialogHeader>
-              <DialogFooter>
+          {retirementScheduled ? (
+            isAdmin ? (
+              <Dialog
+                open={cancelRetirementOpen}
+                onOpenChange={(next) => {
+                  if (!cancelRetirementPending) setCancelRetirementOpen(next);
+                }}
+              >
+                <DialogTrigger asChild>
+                  <Button variant="outline">Cancel retirement</Button>
+                </DialogTrigger>
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle>Cancel scheduled retirement?</DialogTitle>
+                    <DialogDescription>
+                      Existing consumers keep access either way. Canceling will
+                      make this API discoverable to new consumers again.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <DialogFooter>
+                    <Button
+                      variant="ghost"
+                      onClick={() => setCancelRetirementOpen(false)}
+                      disabled={cancelRetirementPending}
+                    >
+                      Keep retirement
+                    </Button>
+                    <Button
+                      onClick={() => cancelRetirement()}
+                      disabled={cancelRetirementPending}
+                    >
+                      {cancelRetirementPending
+                        ? "Canceling…"
+                        : "Cancel retirement"}
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                Only an organization admin can cancel retirement.
+              </p>
+            )
+          ) : (
+            <Dialog open={visibilityOpen} onOpenChange={setVisibilityOpen}>
+              <DialogTrigger asChild>
                 <Button
-                  variant="ghost"
-                  onClick={() => setVisibilityOpen(false)}
-                  disabled={visibilityPending}
+                  variant="outline"
+                  disabled={isPublishedPublic && !isAdmin}
                 >
-                  Cancel
+                  {isPublishedPublic
+                    ? "Schedule retirement"
+                    : `Make ${nextVisibility === "public" ? "Public" : "Private"}`}
                 </Button>
-                <Button
-                  onClick={() => setVisibility(nextVisibility)}
-                  disabled={visibilityPending}
-                >
-                  {visibilityPending ? "Updating…" : `Make ${nextVisibility}`}
-                </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>
+                    {isPublishedPublic
+                      ? "Schedule project retirement?"
+                      : `Make project ${nextVisibility}?`}
+                  </DialogTitle>
+                  <DialogDescription>
+                    {isPublishedPublic
+                      ? "New discovery freezes immediately. Existing gateway traffic continues through sunset, then stops."
+                      : nextVisibility === "public"
+                        ? "Public projects appear in the catalogue when published. Only published specs are listed."
+                        : "Private projects stay hidden from the public catalogue."}
+                  </DialogDescription>
+                </DialogHeader>
+                {isPublishedPublic ? (
+                  <div className="space-y-5">
+                    <Field data-invalid={sunsetError !== null}>
+                      <FieldLabel htmlFor="project-sunset">
+                        Sunset date
+                      </FieldLabel>
+                      <Input
+                        id="project-sunset"
+                        type="date"
+                        value={sunsetDate}
+                        onChange={(event) => setSunsetDate(event.target.value)}
+                        min={new Date(Date.now() + 7 * 86_400_000)
+                          .toISOString()
+                          .slice(0, 10)}
+                        aria-invalid={sunsetError !== null}
+                        aria-describedby="project-sunset-help"
+                      />
+                      <FieldDescription id="project-sunset-help">
+                        Calls from existing consumers stop at 23:59 UTC on this
+                        date. Minimum notice: 7 full days.
+                      </FieldDescription>
+                      <FieldError>{sunsetError}</FieldError>
+                    </Field>
+                    <Field data-invalid={retirementMessageError !== null}>
+                      <FieldLabel htmlFor="retirement-message">
+                        Migration notice
+                      </FieldLabel>
+                      <Textarea
+                        id="retirement-message"
+                        value={retirementMessage}
+                        onChange={(event) =>
+                          setRetirementMessage(event.target.value)
+                        }
+                        placeholder="Where should consumers migrate?"
+                        maxLength={RETIREMENT_MESSAGE_MAX + 1}
+                        aria-invalid={retirementMessageError !== null}
+                        aria-describedby="retirement-message-help"
+                      />
+                      <FieldDescription id="retirement-message-help">
+                        Sent to existing consumers. {retirementMessage.length}/
+                        {RETIREMENT_MESSAGE_MAX.toLocaleString()}
+                      </FieldDescription>
+                      <FieldError>{retirementMessageError}</FieldError>
+                    </Field>
+                  </div>
+                ) : null}
+                <DialogFooter>
+                  <Button
+                    variant="ghost"
+                    onClick={() => setVisibilityOpen(false)}
+                    disabled={visibilityPending || retirementPending}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    onClick={() => {
+                      if (isPublishedPublic) {
+                        scheduleRetirement({
+                          sunsetAt: parsedSunset,
+                          message: retirementMessage.trim(),
+                        });
+                        return;
+                      }
+                      setVisibility(nextVisibility);
+                    }}
+                    disabled={
+                      visibilityPending ||
+                      retirementPending ||
+                      (isPublishedPublic && !canScheduleRetirement)
+                    }
+                  >
+                    {retirementPending
+                      ? "Scheduling…"
+                      : visibilityPending
+                        ? "Updating…"
+                        : isPublishedPublic
+                          ? "Schedule retirement"
+                          : `Make ${nextVisibility}`}
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+          )}
         </CardContent>
       </Card>
 
@@ -328,8 +527,9 @@ export function ProjectSettingsPanel({
         <CardHeader>
           <CardTitle className="text-destructive">Danger zone</CardTitle>
           <CardDescription>
-            Delete this project and its draft/spec versions permanently. Usage
-            history is retained for analytics integrity.
+            {project.status === "draft"
+              ? "Delete this draft and its unpublished spec permanently."
+              : "Retire this published project after its sunset. Immutable versions, usage, and financial records remain available for audit integrity."}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -342,11 +542,22 @@ export function ProjectSettingsPanel({
             }}
           >
             <DialogTrigger asChild>
-              <Button variant="destructive">Delete project</Button>
+              <Button
+                variant="destructive"
+                disabled={!isAdmin || !canRemoveProject}
+              >
+                {project.status === "draft"
+                  ? "Delete project"
+                  : "Retire project"}
+              </Button>
             </DialogTrigger>
             <DialogContent>
               <DialogHeader>
-                <DialogTitle>Delete project?</DialogTitle>
+                <DialogTitle>
+                  {project.status === "draft"
+                    ? "Delete project?"
+                    : "Retire project?"}
+                </DialogTitle>
                 <DialogDescription>
                   This cannot be undone. Type{" "}
                   <span className="font-mono text-foreground">
@@ -388,6 +599,16 @@ export function ProjectSettingsPanel({
               </DialogFooter>
             </DialogContent>
           </Dialog>
+          {!isAdmin ? (
+            <p className="mt-3 text-sm text-muted-foreground">
+              Only an organization admin can remove projects.
+            </p>
+          ) : !canRemoveProject ? (
+            <p className="mt-3 text-sm text-muted-foreground">
+              Published projects can be retired only after their scheduled
+              sunset.
+            </p>
+          ) : null}
         </CardContent>
       </Card>
     </div>

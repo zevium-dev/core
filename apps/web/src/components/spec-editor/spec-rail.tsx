@@ -1,5 +1,12 @@
 import type { SpecIssue } from "@zevium/shared";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useOrganization } from "@clerk/tanstack-react-start";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { convexQuery, useConvexMutation } from "@convex-dev/react-query";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Archive, MoreHorizontal, RotateCcw } from "lucide-react";
@@ -30,6 +37,7 @@ import {
   DropdownMenuTrigger,
 } from "#/components/ui/dropdown-menu";
 import { Label } from "#/components/ui/label";
+import { Textarea } from "#/components/ui/textarea";
 import { api } from "#/lib/convex-api";
 import type { Id } from "#/lib/convex-data-model";
 import { humanError } from "#/lib/human-error";
@@ -46,6 +54,8 @@ const METHOD_VARIANT: Record<
   patch: "outline",
   delete: "destructive",
 };
+
+const MIN_VERSION_SUNSET_NOTICE_MS = 7 * 24 * 60 * 60 * 1000;
 
 export type SpecRailEndpointsProps = {
   endpoints: SpecEndpointRow[];
@@ -96,6 +106,17 @@ export function SpecRailEndpoints({
   const flushTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
     undefined,
   );
+  const onPricingChangeRef = useRef(onPricingChange);
+  onPricingChangeRef.current = onPricingChange;
+
+  const flushPendingEdits = useCallback((): void => {
+    clearTimeout(flushTimer.current);
+    flushTimer.current = undefined;
+    const edits = [...pendingEdits.current.values()];
+    pendingEdits.current.clear();
+    pendingKeys.current.clear();
+    for (const edit of edits) onPricingChangeRef.current?.(edit);
+  }, []);
 
   // Resync inputs from the prop, but never overwrite an unflushed local edit.
   useEffect(() => {
@@ -114,9 +135,10 @@ export function SpecRailEndpoints({
 
   useEffect(() => {
     return () => {
-      clearTimeout(flushTimer.current);
+      // Preserve the user's last edit when they navigate before debounce fires.
+      flushPendingEdits();
     };
-  }, []);
+  }, [flushPendingEdits]);
 
   function handleField(
     ep: SpecEndpointRow,
@@ -154,11 +176,7 @@ export function SpecRailEndpoints({
 
     clearTimeout(flushTimer.current);
     flushTimer.current = setTimeout(() => {
-      flushTimer.current = undefined;
-      const edits = [...pendingEdits.current.values()];
-      pendingEdits.current.clear();
-      pendingKeys.current.clear();
-      for (const e of edits) onPricingChange?.(e);
+      flushPendingEdits();
     }, PRICING_DEBOUNCE_MS);
   }
 
@@ -333,6 +351,8 @@ export function SpecRailVersions({
   projectId,
   onSelectVersion,
 }: SpecRailVersionsProps) {
+  const { membership } = useOrganization();
+  const canManageLifecycle = membership?.role === "org:admin";
   const queryClient = useQueryClient();
   const [deprecateTarget, setDeprecateTarget] = useState<SpecVersionRow | null>(
     null,
@@ -353,7 +373,7 @@ export function SpecRailVersions({
     mutationFn: (input: {
       versionId: Id<"specVersions">;
       sunsetAt?: number;
-      message?: string;
+      message: string;
     }) => deprecateMut(input),
     onSuccess: async () => {
       toast.success("Version deprecated");
@@ -399,6 +419,7 @@ export function SpecRailVersions({
                 onSelect={onSelectVersion}
                 onDeprecate={setDeprecateTarget}
                 onUndeprecate={setUndeprecateTarget}
+                canManageLifecycle={canManageLifecycle}
                 busy={
                   (deprecating && deprecateTarget?._id === v._id) ||
                   (undeprecating && undeprecateTarget?._id === v._id)
@@ -438,15 +459,19 @@ function VersionRow({
   onSelect,
   onDeprecate,
   onUndeprecate,
+  canManageLifecycle,
   busy,
 }: {
   version: SpecVersionRow;
   onSelect?: (versionId: SpecVersionRow["_id"]) => void;
   onDeprecate: (row: SpecVersionRow) => void;
   onUndeprecate: (row: SpecVersionRow) => void;
+  canManageLifecycle: boolean;
   busy: boolean;
 }) {
   const deprecated = version.deprecatedAt !== undefined;
+  const sunsetReached =
+    version.sunsetAt !== undefined && version.sunsetAt <= Date.now();
 
   return (
     <li>
@@ -472,32 +497,37 @@ function VersionRow({
         <span className="shrink-0 text-xs text-muted-foreground">
           {new Date(version.publishedAt).toLocaleDateString()}
         </span>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="size-7 shrink-0 opacity-0 transition-opacity duration-[var(--dur-instant)] ease-[var(--ease)] group-hover:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100"
-              disabled={busy}
-              aria-label={`Actions for version ${version.version}`}
-            >
-              <MoreHorizontal className="size-4" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-40">
-            {deprecated ? (
-              <DropdownMenuItem onClick={() => onUndeprecate(version)}>
-                <RotateCcw className="size-4" />
-                Undeprecate
-              </DropdownMenuItem>
-            ) : (
-              <DropdownMenuItem onClick={() => onDeprecate(version)}>
-                <Archive className="size-4" />
-                Deprecate…
-              </DropdownMenuItem>
-            )}
-          </DropdownMenuContent>
-        </DropdownMenu>
+        {canManageLifecycle ? (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="size-7 shrink-0 opacity-0 transition-opacity duration-[var(--dur-instant)] ease-[var(--ease)] group-hover:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100"
+                disabled={busy}
+                aria-label={`Actions for version ${version.version}`}
+              >
+                <MoreHorizontal aria-hidden="true" className="size-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-40">
+              {deprecated ? (
+                <DropdownMenuItem
+                  disabled={sunsetReached}
+                  onClick={() => onUndeprecate(version)}
+                >
+                  <RotateCcw aria-hidden="true" className="size-4" />
+                  {sunsetReached ? "Sunset reached" : "Undeprecate"}
+                </DropdownMenuItem>
+              ) : (
+                <DropdownMenuItem onClick={() => onDeprecate(version)}>
+                  <Archive aria-hidden="true" className="size-4" />
+                  Deprecate…
+                </DropdownMenuItem>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : null}
       </div>
     </li>
   );
@@ -514,7 +544,7 @@ function DeprecateDialog({
   onConfirm: (input: {
     versionId: Id<"specVersions">;
     sunsetAt?: number;
-    message?: string;
+    message: string;
   }) => void;
   onOpenChange: (open: boolean) => void;
 }) {
@@ -535,7 +565,15 @@ function DeprecateDialog({
   const sunsetAt: number | undefined = Number.isNaN(parsedSunset)
     ? undefined
     : parsedSunset;
-  const sunsetValid = sunsetDate.length === 0 || !Number.isNaN(parsedSunset);
+  const minimumSunset = Date.now() + MIN_VERSION_SUNSET_NOTICE_MS;
+  const sunsetValid =
+    sunsetDate.length === 0 ||
+    (!Number.isNaN(parsedSunset) && parsedSunset >= minimumSunset);
+  const messageValue = message.trim();
+  const messageValid = messageValue.length > 0 && messageValue.length <= 1000;
+  const minSunsetDate = new Date(minimumSunset + 86_400_000)
+    .toISOString()
+    .slice(0, 10);
 
   return (
     <Dialog
@@ -558,27 +596,60 @@ function DeprecateDialog({
             <Label htmlFor="deprecate-sunset">Sunset date (optional)</Label>
             <Input
               id="deprecate-sunset"
+              name="sunset-date"
               type="date"
+              min={minSunsetDate}
+              autoComplete="off"
               value={sunsetDate}
               onChange={(e) => setSunsetDate(e.target.value)}
               disabled={pending}
+              aria-describedby="deprecate-sunset-help"
+              aria-invalid={sunsetDate.length > 0 && !sunsetValid}
             />
-            {!sunsetValid ? (
-              <p className="text-xs text-destructive">Invalid date.</p>
-            ) : null}
+            <p
+              id="deprecate-sunset-help"
+              role="status"
+              aria-live="polite"
+              className={
+                sunsetValid
+                  ? "text-xs text-muted-foreground"
+                  : "text-xs text-destructive"
+              }
+            >
+              {!sunsetValid
+                ? "Sunset must be at least 7 days away."
+                : "Optional. Earliest cutoff is 7 full days from now."}
+            </p>
           </div>
           <div className="space-y-2">
-            <Label htmlFor="deprecate-message">Message (optional)</Label>
-            <textarea
+            <Label htmlFor="deprecate-message">Migration message</Label>
+            <Textarea
               id="deprecate-message"
+              name="deprecation-message"
+              autoComplete="off"
               value={message}
               onChange={(e) => setMessage(e.target.value)}
-              maxLength={500}
+              maxLength={1000}
               rows={3}
               disabled={pending}
-              placeholder="Migration guidance or replacement version."
-              className="flex min-h-20 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs transition-[color,box-shadow] outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50"
+              placeholder="e.g. Move to v2 before cutoff…"
+              aria-describedby="deprecate-message-help"
+              aria-invalid={message.length > 0 && !messageValid}
             />
+            <p
+              id="deprecate-message-help"
+              role="status"
+              aria-live="polite"
+              className={
+                !messageValid && message.length > 0
+                  ? "text-xs text-destructive"
+                  : "text-xs text-muted-foreground"
+              }
+            >
+              {!messageValid && message.length > 0
+                ? "Enter migration guidance, not whitespace."
+                : "Required. Consumers see this message before cutoff."}
+            </p>
           </div>
         </div>
         <DialogFooter>
@@ -591,13 +662,13 @@ function DeprecateDialog({
           </Button>
           <Button
             variant="destructive"
-            disabled={pending || !sunsetValid}
+            disabled={pending || !sunsetValid || !messageValid}
             onClick={() => {
               if (target === null) return;
               onConfirm({
                 versionId: target._id as Id<"specVersions">,
                 sunsetAt,
-                message: message.trim().length > 0 ? message.trim() : undefined,
+                message: messageValue,
               });
             }}
           >

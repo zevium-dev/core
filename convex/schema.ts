@@ -11,10 +11,41 @@ export default defineSchema({
     /** Stable, publisher-controlled public URL segment. */
     publicHandle: v.optional(v.string()),
     imageUrl: v.optional(v.string()),
+    /** Clerk deletion tombstone. Financial, audit, and project rows remain intact. */
+    archivedAt: v.optional(v.number()),
+    /** Last accepted Clerk organization event timestamp (ms), for stale-event rejection. */
+    lastClerkEventAt: v.optional(v.number()),
+    /** Materialized unread total. Optional until the bounded backfill completes. */
+    unreadNotificationCount: v.optional(v.number()),
+    /** True when legacy backfill observed at least 100 unread rows. */
+    unreadNotificationCountCapped: v.optional(v.boolean()),
   })
     .index("by_clerk_org", ["clerkOrgId"])
     .index("by_slug", ["slug"])
     .index("by_public_handle", ["publicHandle"]),
+
+  /** Durable delete-before-create guard for out-of-order Clerk webhooks. */
+  organizationTombstones: defineTable({
+    clerkOrgId: v.string(),
+    archivedAt: v.number(),
+  }).index("by_clerk_org", ["clerkOrgId"]),
+
+  /** Durable Svix receipt prevents replay and stale organization mirror writes. */
+  clerkWebhookReceipts: defineTable({
+    svixId: v.string(),
+    eventType: v.string(),
+    eventTimestamp: v.number(),
+    status: v.union(
+      v.literal("received"),
+      v.literal("processing"),
+      v.literal("processed"),
+      v.literal("ignored_stale"),
+    ),
+    attempts: v.number(),
+    lastAttemptAt: v.number(),
+    receivedAt: v.number(),
+    processedAt: v.optional(v.number()),
+  }).index("by_svix_id", ["svixId"]),
 
   // Mirror of Clerk users
   users: defineTable({
@@ -31,10 +62,27 @@ export default defineSchema({
     status: v.union(v.literal("draft"), v.literal("published")),
     visibility: v.union(v.literal("private"), v.literal("public")),
     tags: v.array(v.string()),
+    deprecationStartedAt: v.optional(v.number()),
+    sunsetAt: v.optional(v.number()),
+    deprecationMessage: v.optional(v.string()),
+    /** Explicit state keeps completed retirements out of scheduled indexes. */
+    retirementState: v.optional(
+      v.union(v.literal("scheduled"), v.literal("retired")),
+    ),
+    /** Monotonic schedule generation; stale fanout jobs fail closed. */
+    retirementRevision: v.optional(v.number()),
+    /** Final cutoff retained after sunsetAt leaves the active-work index. */
+    retirementCutoffAt: v.optional(v.number()),
+    /** Audit tombstone after sunset cleanup; project row remains immutable history. */
+    retiredAt: v.optional(v.number()),
   })
     .index("by_org", ["organizationId"])
+    .index("by_status", ["status"])
+    .index("by_org_status", ["organizationId", "status"])
     .index("by_org_slug", ["organizationId", "slug"])
-    .index("by_visibility_status", ["visibility", "status"]),
+    .index("by_visibility_status", ["visibility", "status"])
+    .index("by_sunset", ["sunsetAt"])
+    .index("by_retirement_state_sunset", ["retirementState", "sunsetAt"]),
 
   // Publisher-owned headers injected by gateway after consumer auth headers are stripped.
   // Values never return through member-facing queries after write.
@@ -111,6 +159,8 @@ export default defineSchema({
     sequence: v.number(),
     paymentId: v.optional(v.id("payments")),
     usageEventId: v.optional(v.id("usageEvents")),
+    /** Canonical immutable settlement payload binding for replay conflict checks. */
+    settlementFingerprint: v.optional(v.string()),
     createdAt: v.number(),
   })
     .index("by_wallet", ["walletId"])
@@ -119,6 +169,8 @@ export default defineSchema({
   // Per-call metering events (gateway → Convex, async)
   usageEvents: defineTable({
     organizationId: v.id("organizations"),
+    /** Server-derived Clerk user that owned key at settlement time. */
+    ownerUserId: v.optional(v.string()),
     projectId: v.id("projects"),
     endpoint: v.string(),
     method: v.string(),
@@ -137,8 +189,46 @@ export default defineSchema({
     .index("by_org", ["organizationId"])
     .index("by_project", ["projectId"])
     .index("by_org_at", ["organizationId", "at"])
+    .index("by_org_owner_at", ["organizationId", "ownerUserId", "at"])
+    .index("by_org_project_at", ["organizationId", "projectId", "at"])
+    .index("by_org_owner_project_at", [
+      "organizationId",
+      "ownerUserId",
+      "projectId",
+      "at",
+    ])
+    .index("by_org_key_at", ["organizationId", "keyId", "at"])
+    .index("by_org_owner_key_at", [
+      "organizationId",
+      "ownerUserId",
+      "keyId",
+      "at",
+    ])
+    .index("by_org_project_key_at", [
+      "organizationId",
+      "projectId",
+      "keyId",
+      "at",
+    ])
+    .index("by_org_owner_project_key_at", [
+      "organizationId",
+      "ownerUserId",
+      "projectId",
+      "keyId",
+      "at",
+    ])
     .index("by_project_at", ["projectId", "at"])
     .index("by_at", ["at"]),
+
+  /** First successful use. Not a plan/subscription; only lifecycle eligibility. */
+  projectConsumerEntitlements: defineTable({
+    projectId: v.id("projects"),
+    consumerOrganizationId: v.id("organizations"),
+    firstUsedAt: v.number(),
+    createdAt: v.number(),
+  })
+    .index("by_project_consumer", ["projectId", "consumerOrganizationId"])
+    .index("by_consumer", ["consumerOrganizationId", "projectId"]),
 
   // In-app notifications (org-scoped, idempotent by refId)
   notifications: defineTable({
@@ -147,6 +237,7 @@ export default defineSchema({
       v.literal("low_balance"),
       v.literal("spec_published"),
       v.literal("version_deprecated"),
+      v.literal("project_retirement"),
       v.literal("webhook_failed"),
       v.literal("visibility_changed"),
       v.literal("transfer_failed"),
@@ -155,10 +246,14 @@ export default defineSchema({
     title: v.string(),
     body: v.string(),
     refId: v.string(),
+    /** Optional safe, typed destination for catalogue lifecycle notices. */
+    publisherHandle: v.optional(v.string()),
+    projectSlug: v.optional(v.string()),
     readAt: v.optional(v.number()),
     createdAt: v.number(),
   })
     .index("by_org", ["clerkOrgId", "createdAt"])
+    .index("by_org_read", ["clerkOrgId", "readAt", "createdAt"])
     .index("by_ref", ["refId"]),
 
   // Publisher webhook endpoints (one per project)
@@ -186,6 +281,8 @@ export default defineSchema({
   keySettings: defineTable({
     clerkOrgId: v.string(),
     keyId: v.string(),
+    /** Server-verified Clerk key owner. Legacy/unverified rows stay undefined. */
+    ownerUserId: v.optional(v.string()),
     /** Monthly credit cap; undefined = unlimited. Enforced by the wallet DO. */
     monthlyCapCredits: v.optional(v.number()),
     disabled: v.boolean(),
@@ -197,6 +294,62 @@ export default defineSchema({
   })
     .index("by_org", ["clerkOrgId"])
     .index("by_key", ["keyId"]),
+
+  /** Denormalized, bounded public catalogue/search projection. */
+  catalogueListings: defineTable({
+    projectId: v.id("projects"),
+    clerkOrgId: v.string(),
+    publisherHandle: v.string(),
+    orgName: v.string(),
+    name: v.string(),
+    sortName: v.string(),
+    slug: v.string(),
+    description: v.optional(v.string()),
+    tags: v.array(v.string()),
+    tagText: v.string(),
+    searchText: v.string(),
+    publishedAt: v.number(),
+    pricingValid: v.boolean(),
+    minCost: v.number(),
+    maxCost: v.number(),
+    endpointCount: v.number(),
+    hasFreeTier: v.boolean(),
+    discoverable: v.boolean(),
+    updatedAt: v.number(),
+  })
+    .index("by_project", ["projectId"])
+    .index("by_discoverable_newest", ["discoverable", "publishedAt"])
+    .index("by_discoverable_name", ["discoverable", "sortName"])
+    .index("by_discoverable_cost", ["discoverable", "minCost", "sortName"])
+    .searchIndex("search_public", {
+      searchField: "searchText",
+      filterFields: ["discoverable", "hasFreeTier"],
+    }),
+
+  /** One bounded row per public tag for filter-first catalogue pagination. */
+  catalogueTagListings: defineTable({
+    listingId: v.id("catalogueListings"),
+    tag: v.string(),
+    publishedAt: v.number(),
+    sortName: v.string(),
+    minCost: v.number(),
+    discoverable: v.boolean(),
+  })
+    .index("by_listing", ["listingId"])
+    .index("by_tag_newest", ["tag", "discoverable", "publishedAt"])
+    .index("by_tag_name", ["tag", "discoverable", "sortName"])
+    .index("by_tag_cost", ["tag", "discoverable", "minCost", "sortName"]),
+
+  /** Single-row exact count for catalogue UI; rebuilt by bounded projection job. */
+  catalogueStats: defineTable({
+    key: v.string(),
+    publicCount: v.number(),
+    tagCounts: v.optional(v.record(v.string(), v.number())),
+    freeTierCount: v.optional(v.number()),
+    projectionComplete: v.boolean(),
+    backfillCursor: v.optional(v.string()),
+    updatedAt: v.number(),
+  }).index("by_key", ["key"]),
 
   keyRotationOperations: defineTable({
     clerkOrgId: v.string(),
@@ -396,6 +549,7 @@ export default defineSchema({
   })
     .index("by_publisher", ["publisherOrganizationId", "createdAt"])
     .index("by_consumer", ["consumerOrganizationId", "createdAt"])
+    .index("by_project_created", ["projectId", "createdAt"])
     .index("by_settlement", ["usageSettlementRefId"])
     .index("by_status_available", ["status", "availableAt"]),
 

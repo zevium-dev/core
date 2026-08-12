@@ -85,17 +85,28 @@ function walletStub(clerkOrgId: string): WalletStub {
   return env.WALLET.get(id);
 }
 
-async function installFixtures(opts: { clerkOrgId: string; credits?: number }) {
+async function installFixtures(opts: {
+  clerkOrgId: string;
+  credits?: number;
+  spec?: string;
+  deprecatedAt?: number;
+  sunsetAt?: number;
+  retiredAt?: number;
+  now?: number;
+}) {
   const keys = new FixtureKeyVerifier({
     [KEY_SECRET]: { orgId: opts.clerkOrgId, keyId: KEY_ID, scopes: ["read"] },
   });
   const specs = new FixtureSpecSource();
   specs.set(ORG_SLUG, PROJECT_SLUG, {
-    spec: SPEC,
+    spec: opts.spec ?? SPEC,
     projectId: "proj_demo",
     organizationId: opts.clerkOrgId,
     clerkOrgId: opts.clerkOrgId,
     visibility: "private",
+    deprecatedAt: opts.deprecatedAt,
+    sunsetAt: opts.sunsetAt,
+    retiredAt: opts.retiredAt,
   });
 
   __setTestPipelineDeps({
@@ -105,6 +116,7 @@ async function installFixtures(opts: { clerkOrgId: string; credits?: number }) {
     catalogueSource: new FixtureCatalogueSource(),
     usageSink: new NoopUsageSink(),
     idGenerator: () => `req_${crypto.randomUUID()}`,
+    now: opts.now === undefined ? undefined : () => opts.now!,
   });
 
   if (opts.credits && opts.credits > 0) {
@@ -219,6 +231,18 @@ describe("mock gateway route", () => {
     expect(state.balance).toBe(10);
   });
 
+  it("maps legacy invalid pricing to a controlled error", async () => {
+    await installFixtures({
+      clerkOrgId: "org_mock_legacy_price",
+      credits: 10,
+      spec: SPEC.replace('"x-zevium-cost":5', '"x-zevium-cost":1000001'),
+    });
+
+    const res = await mockFetch(`/mock/${ORG_SLUG}/${PROJECT_SLUG}/users/1`);
+    expect(res.status).toBe(404);
+    await expect(res.json()).resolves.toMatchObject({ error: "invalid_spec" });
+  });
+
   it("404 on unknown operation", async () => {
     await installFixtures({ clerkOrgId: "org_mock_unknownop", credits: 10 });
 
@@ -242,5 +266,41 @@ describe("mock gateway route", () => {
     expect(
       body && typeof body === "object" && "error" in body && body.error,
     ).toBe("project_not_found");
+  });
+
+  it("410 after sunset and never exposes a keyless mock", async () => {
+    const sunsetAt = Date.UTC(2026, 0, 8);
+    await installFixtures({
+      clerkOrgId: "org_mock_sunset",
+      deprecatedAt: Date.UTC(2026, 0, 1),
+      sunsetAt,
+      now: sunsetAt,
+    });
+
+    const res = await mockFetch(`/mock/${ORG_SLUG}/${PROJECT_SLUG}/users/1`);
+
+    expect(res.status).toBe(410);
+    expect(res.headers.get("deprecation")).toBe(
+      `@${Math.floor(Date.UTC(2026, 0, 1) / 1000)}`,
+    );
+    expect(res.headers.get("sunset")).toBe(new Date(sunsetAt).toUTCString());
+    await expect(res.json()).resolves.toMatchObject({
+      error: "sunset_reached",
+    });
+  });
+
+  it("410 when cleanup marked the project retired", async () => {
+    await installFixtures({
+      clerkOrgId: "org_mock_retired",
+      retiredAt: Date.UTC(2026, 0, 8),
+      now: Date.UTC(2026, 0, 1),
+    });
+
+    const res = await mockFetch(`/mock/${ORG_SLUG}/${PROJECT_SLUG}/users/1`);
+
+    expect(res.status).toBe(410);
+    await expect(res.json()).resolves.toMatchObject({
+      error: "sunset_reached",
+    });
   });
 });

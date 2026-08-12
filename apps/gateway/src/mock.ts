@@ -12,14 +12,15 @@ import {
   parseSpec,
 } from "@zevium/shared";
 import type { KeyVerifier } from "./key-verifier";
-import type { SpecSource } from "./spec-source";
+import type { PublicSpecSource } from "./spec-source";
 import { jsonError } from "./errors";
 
 export type MockDeps = {
   /** Unused since mock went keyless; kept so test deps stay uniform. */
   keyVerifier?: KeyVerifier;
-  specSource: SpecSource;
+  specSource: PublicSpecSource;
   idGenerator?: () => string;
+  now?: () => number;
 };
 
 export type MockRoute = {
@@ -60,6 +61,36 @@ export async function handleMockRequest(
     return jsonError(404, "project_not_found", "Unknown project", requestId);
   }
 
+  const started = (deps.now ?? Date.now)();
+  if (
+    published.retiredAt !== undefined ||
+    (published.sunsetAt !== undefined && started >= published.sunsetAt)
+  ) {
+    const response = jsonError(
+      410,
+      "sunset_reached",
+      "This API has reached its published sunset",
+      requestId,
+    );
+    if (published.deprecatedAt !== undefined) {
+      response.headers.set(
+        "Deprecation",
+        `@${Math.floor(published.deprecatedAt / 1000)}`,
+      );
+      response.headers.append(
+        "Link",
+        `<https://zevium.dev/catalogue/${route.publisherHandle}/${route.projectSlug}>; rel="deprecation"`,
+      );
+    }
+    if (published.sunsetAt !== undefined) {
+      response.headers.set(
+        "Sunset",
+        new Date(published.sunsetAt).toUTCString(),
+      );
+    }
+    return response;
+  }
+
   let parsed;
   try {
     parsed = parseSpec(published.spec);
@@ -72,7 +103,17 @@ export async function handleMockRequest(
     );
   }
 
-  const matched = matchOperation(parsed, request.method, route.remainderPath);
+  let matched: ReturnType<typeof matchOperation>;
+  try {
+    matched = matchOperation(parsed, request.method, route.remainderPath);
+  } catch {
+    return jsonError(
+      404,
+      "invalid_spec",
+      "Published spec has invalid pricing",
+      requestId,
+    );
+  }
   if (!matched) {
     return jsonError(404, "route_not_found", "Unknown route", requestId);
   }

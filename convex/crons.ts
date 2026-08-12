@@ -3,11 +3,23 @@ import { internal } from "./_generated/api";
 
 const crons = cronJobs();
 
+crons.interval(
+  "resume-catalogue-projection-backfill",
+  { minutes: 5 },
+  internal.catalogue.resumeCatalogueProjectionBackfill,
+);
+
 /** Hourly low-balance check — one notification per org per UTC day. */
 crons.hourly(
   "low-balance-check",
   { minuteUTC: 0 },
   internal.cronTasks.checkLowBalances,
+);
+
+crons.hourly(
+  "retire-sunset-projects",
+  { minuteUTC: 30 },
+  internal.projects.retireSunsetProjects,
 );
 
 /**

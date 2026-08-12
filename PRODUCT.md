@@ -113,7 +113,7 @@ Consumers see: one gateway URL per API, one key, one wallet, itemized charges. P
 ## Publisher experience requirements
 
 - **Self-serve end to end**: sign up, publish spec, set pricing, go live — zero platform-team involvement. Publishing model: **auto-publish with automated gates** (spec valid, upstream reachable, uptime probe) + post-hoc staff review; violators get delisted. No pre-approval queue
-- **Lifecycle safety**: a publisher cannot silently kill an API with active consumers — unpublish triggers a mandatory notice window (deprecation notices to consumers, standard deprecation signaling on responses), new subscriptions freeze, existing calls honored through wind-down
+- **Lifecycle safety**: a publisher cannot silently kill an API with active consumers — unpublish triggers a mandatory 7-day notice window (deprecation notices to consumers, standard deprecation signaling on responses), new subscriptions freeze, existing calls honored through wind-down
 - **Analytics that beat the dead incumbent**: per-endpoint tail latency (p95/p99), error-type breakdown, per-consumer usage, revenue trends
 - **Spec versioning**: draft → validate → publish with semver; published versions immutable
 - **Payouts**: transparent 95/5 split, accumulated earnings visible in dashboard; publisher requests a payout once earnings clear a $10 minimum, queued for platform fulfillment (automated settlement schedule is a later refinement)

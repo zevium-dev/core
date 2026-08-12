@@ -1,4 +1,5 @@
 import Stripe from "stripe";
+import { MAX_ENDPOINT_COST_CREDITS } from "@zevium/shared";
 import { httpRouter } from "convex/server";
 import { Webhook } from "svix";
 import { internal } from "./_generated/api";
@@ -22,6 +23,8 @@ type ClerkOrgEventData = {
   name: string;
   slug: string;
   image_url?: string | null;
+  updated_at?: number;
+  deleted_at?: number | null;
 };
 type ClerkWebhookEvent = {
   type: string;
@@ -54,11 +57,19 @@ http.route({
     } catch {
       return new Response("Invalid signature", { status: 400 });
     }
+    const signedAtSeconds = Number(svixTimestamp);
+    if (!Number.isSafeInteger(signedAtSeconds) || signedAtSeconds <= 0) {
+      return new Response("Invalid svix timestamp", { status: 400 });
+    }
     switch (event.type) {
       case "organization.created":
       case "organization.updated": {
         const data = event.data as ClerkOrgEventData;
-        await ctx.runMutation(internal.organizations.upsertFromClerk, {
+        const sourceTimestamp = data.updated_at ?? signedAtSeconds * 1000;
+        await ctx.runMutation(internal.organizations.applyOrganizationWebhook, {
+          svixId,
+          eventTimestamp: sourceTimestamp,
+          eventType: event.type,
           clerkOrgId: data.id,
           name: data.name,
           slug: data.slug,
@@ -66,11 +77,17 @@ http.route({
         });
         break;
       }
-      case "organization.deleted":
-        await ctx.runMutation(internal.organizations.deleteFromClerk, {
-          clerkOrgId: (event.data as ClerkOrgEventData).id,
+      case "organization.deleted": {
+        const data = event.data as ClerkOrgEventData;
+        await ctx.runMutation(internal.organizations.applyOrganizationWebhook, {
+          svixId,
+          eventTimestamp:
+            data.deleted_at ?? data.updated_at ?? signedAtSeconds * 1000,
+          eventType: "organization.deleted",
+          clerkOrgId: data.id,
         });
         break;
+      }
       case "user.created":
       case "user.updated": {
         const data = event.data as ClerkUserEventData;
@@ -292,7 +309,12 @@ export function parseIngestUsageBody(
     if (
       requiredStrings.some(
         (value) => typeof value !== "string" || value.trim() === "",
-      )
+      ) ||
+      (event.endpoint as string).length > 2_048 ||
+      (event.method as string).length > 16 ||
+      (event.keyId as string).length > 256 ||
+      (event.settleRefId as string).length > 200 ||
+      (event.consumerClerkOrgId as string).length > 256
     ) {
       return { ok: false, status: 400, error: "invalid event" };
     }
@@ -300,12 +322,18 @@ export function parseIngestUsageBody(
       typeof event.credits !== "number" ||
       !Number.isSafeInteger(event.credits) ||
       event.credits < 0 ||
+      event.credits > MAX_ENDPOINT_COST_CREDITS ||
       typeof event.status !== "number" ||
-      !Number.isFinite(event.status) ||
+      !Number.isSafeInteger(event.status) ||
+      event.status < 100 ||
+      event.status > 599 ||
       typeof event.latencyMs !== "number" ||
-      !Number.isFinite(event.latencyMs) ||
+      !Number.isSafeInteger(event.latencyMs) ||
+      event.latencyMs < 0 ||
+      event.latencyMs > 86_400_000 ||
       typeof event.at !== "number" ||
-      !Number.isFinite(event.at)
+      !Number.isSafeInteger(event.at) ||
+      event.at <= 0
     ) {
       return { ok: false, status: 400, error: "invalid event" };
     }

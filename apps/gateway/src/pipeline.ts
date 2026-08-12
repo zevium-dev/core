@@ -54,6 +54,25 @@ function defaultId(): string {
   return crypto.randomUUID();
 }
 
+function applyDeprecationHeaders(
+  headers: Headers,
+  published: {
+    deprecatedAt?: number;
+    sunsetAt?: number;
+  },
+  route: GatewayRoute,
+): void {
+  if (published.deprecatedAt === undefined) return;
+  headers.set("Deprecation", `@${Math.floor(published.deprecatedAt / 1000)}`);
+  headers.append(
+    "Link",
+    `<https://zevium.dev/catalogue/${route.publisherHandle}/${route.projectSlug}>; rel="deprecation"`,
+  );
+  if (published.sunsetAt !== undefined) {
+    headers.set("Sunset", new Date(published.sunsetAt).toUTCString());
+  }
+}
+
 export async function handleGatewayRequest(
   request: Request,
   env: PipelineEnv,
@@ -101,6 +120,20 @@ export async function handleGatewayRequest(
     return jsonError(404, "project_not_found", "Unknown project", requestId);
   }
 
+  if (
+    published.retiredAt !== undefined ||
+    (published.sunsetAt !== undefined && started >= published.sunsetAt)
+  ) {
+    const response = jsonError(
+      410,
+      "sunset_reached",
+      "This API has reached its published sunset",
+      requestId,
+    );
+    applyDeprecationHeaders(response.headers, published, route);
+    return response;
+  }
+
   // Marketplace access: public projects accept any authenticated key.
   // Private projects only accept keys whose org owns the project — foreign
   // keys get 404 (never leak that a private project exists) not 401/403.
@@ -123,7 +156,17 @@ export async function handleGatewayRequest(
     );
   }
 
-  const matched = matchOperation(parsed, request.method, route.remainderPath);
+  let matched: ReturnType<typeof matchOperation>;
+  try {
+    matched = matchOperation(parsed, request.method, route.remainderPath);
+  } catch {
+    return jsonError(
+      404,
+      "invalid_spec",
+      "Published spec has invalid pricing",
+      requestId,
+    );
+  }
   if (!matched) {
     return jsonError(404, "route_not_found", "Unknown route", requestId);
   }
@@ -501,20 +544,7 @@ export async function handleGatewayRequest(
   }
 
   // RFC 8594 deprecation signalling — headers only, never blocks the proxied body.
-  if (published.deprecatedAt !== undefined) {
-    // Convex timestamps are epoch milliseconds; Deprecation wants @<seconds>.
-    outHeaders.set(
-      "Deprecation",
-      `@${Math.floor(published.deprecatedAt / 1000)}`,
-    );
-    outHeaders.append(
-      "Link",
-      `<https://zevium.dev/catalogue/${route.publisherHandle}/${route.projectSlug}>; rel="deprecation"`,
-    );
-    if (published.sunsetAt !== undefined) {
-      outHeaders.set("Sunset", new Date(published.sunsetAt).toUTCString());
-    }
-  }
+  applyDeprecationHeaders(outHeaders, published, route);
 
   return new Response(upstreamRes.body, {
     status: upstreamRes.status,

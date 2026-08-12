@@ -23,7 +23,7 @@ import {
   type PipelineDeps,
   type PipelineEnv,
 } from "./pipeline";
-import type { SpecSource } from "./spec-source";
+import type { PublicSpecSource } from "./spec-source";
 
 const PROTOCOL_VERSION = "2024-11-05";
 const SERVER_INFO = { name: "zevium-gateway", version: "0.1.0" } as const;
@@ -36,7 +36,7 @@ class BodyLimitError extends Error {}
 
 export type McpDeps = {
   catalogueSource: CatalogueSource;
-  specSource: SpecSource;
+  specSource: PublicSpecSource;
   pipeline: PipelineDeps;
   pipelineEnv: PipelineEnv;
   gatewayOrigin: string;

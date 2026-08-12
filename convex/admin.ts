@@ -2,7 +2,7 @@ import { paginationOptsValidator } from "convex/server";
 import { v } from "convex/values";
 import { action, mutation, query, type ActionCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
-import { isAdmin, requireAdmin } from "./lib/auth";
+import { getActiveOrgById, isAdmin, requireAdmin } from "./lib/auth";
 import { createNotification } from "./lib/notifications";
 import { fireWebhookEvent } from "./webhooks";
 import { stripeClient } from "./billing";
@@ -10,6 +10,7 @@ import { internal } from "./_generated/api";
 
 /** Cap for month-to-date usage count (by_at index range scan). */
 const USAGE_STATS_CAP = 50_000;
+const ADMIN_PAGE_SIZE_MAX = 50;
 
 function startOfUtcMonth(now: number): number {
   const d = new Date(now);
@@ -109,8 +110,7 @@ export const platformStats = query({
 });
 
 export type AdminOrgView = {
-  _id: Id<"organizations">;
-  clerkOrgId: string;
+  handle: string;
   name: string;
   slug: string;
   balance: number;
@@ -133,8 +133,7 @@ export const listOrgs = query({
         .withIndex("by_organization", (q) => q.eq("organizationId", org._id))
         .unique();
       page.push({
-        _id: org._id,
-        clerkOrgId: org.clerkOrgId,
+        handle: org.publicHandle ?? org.slug,
         name: org.name,
         slug: org.slug,
         balance: wallet?.balance ?? 0,
@@ -146,12 +145,13 @@ export const listOrgs = query({
 });
 
 export type AdminProjectView = {
-  _id: Id<"projects">;
+  handle: string;
+  organizationHandle: string;
+  organizationName: string;
   name: string;
   slug: string;
   status: Doc<"projects">["status"];
   visibility: Doc<"projects">["visibility"];
-  organizationId: Id<"organizations">;
 };
 
 export const listProjects = query({
@@ -165,41 +165,62 @@ export const listProjects = query({
 
     const status = args.status;
     const visibility = args.visibility;
+    const paginationOpts = {
+      ...args.paginationOpts,
+      numItems: Number.isSafeInteger(args.paginationOpts.numItems)
+        ? Math.min(
+            Math.max(args.paginationOpts.numItems, 1),
+            ADMIN_PAGE_SIZE_MAX,
+          )
+        : ADMIN_PAGE_SIZE_MAX,
+      maximumRowsRead: ADMIN_PAGE_SIZE_MAX + 1,
+      maximumBytesRead: 256 * 1024,
+    };
 
-    // When both filters present, use the composite index for precise results.
-    // Otherwise paginate all and filter in-memory (admin tool, bounded scale).
-    let result;
-    if (status !== undefined && visibility !== undefined) {
-      result = await ctx.db
-        .query("projects")
-        .withIndex("by_visibility_status", (q) =>
-          q.eq("visibility", visibility).eq("status", status),
-        )
-        .order("desc")
-        .paginate(args.paginationOpts);
-    } else {
-      result = await ctx.db
-        .query("projects")
-        .order("desc")
-        .paginate(args.paginationOpts);
-    }
+    const result =
+      visibility !== undefined && status !== undefined
+        ? await ctx.db
+            .query("projects")
+            .withIndex("by_visibility_status", (q) =>
+              q.eq("visibility", visibility).eq("status", status),
+            )
+            .order("desc")
+            .paginate(paginationOpts)
+        : visibility !== undefined
+          ? await ctx.db
+              .query("projects")
+              .withIndex("by_visibility_status", (q) =>
+                q.eq("visibility", visibility),
+              )
+              .order("desc")
+              .paginate(paginationOpts)
+          : status !== undefined
+            ? await ctx.db
+                .query("projects")
+                .withIndex("by_status", (q) => q.eq("status", status))
+                .order("desc")
+                .paginate(paginationOpts)
+            : await ctx.db
+                .query("projects")
+                .order("desc")
+                .paginate(paginationOpts);
 
-    const page: AdminProjectView[] = result.page
-      .filter((p) => {
-        if (status !== undefined && p.status !== status) return false;
-        if (visibility !== undefined && p.visibility !== visibility) {
-          return false;
-        }
-        return true;
-      })
-      .map((p) => ({
-        _id: p._id,
-        name: p.name,
-        slug: p.slug,
-        status: p.status,
-        visibility: p.visibility,
-        organizationId: p.organizationId,
-      }));
+    const page: AdminProjectView[] = await Promise.all(
+      result.page.map(async (p) => {
+        const organization = await ctx.db.get(p.organizationId);
+        const organizationHandle =
+          organization?.publicHandle ?? organization?.slug ?? "archived";
+        return {
+          handle: `${organizationHandle}/${p.slug}`,
+          organizationHandle,
+          organizationName: organization?.name ?? "Archived organization",
+          name: p.name,
+          slug: p.slug,
+          status: p.status,
+          visibility: p.visibility,
+        };
+      }),
+    );
 
     return { ...result, page };
   },
@@ -251,18 +272,38 @@ export const recentUsage = query({
  */
 export const setProjectVisibility = mutation({
   args: {
-    projectId: v.id("projects"),
+    organizationHandle: v.string(),
+    projectSlug: v.string(),
     visibility: v.union(v.literal("private"), v.literal("public")),
   },
   handler: async (ctx, args): Promise<Doc<"projects">> => {
     await requireAdmin(ctx);
 
-    const project = await ctx.db.get(args.projectId);
+    const organization = await ctx.db
+      .query("organizations")
+      .withIndex("by_public_handle", (q) =>
+        q.eq("publicHandle", args.organizationHandle),
+      )
+      .unique();
+    const project =
+      organization === null
+        ? null
+        : await ctx.db
+            .query("projects")
+            .withIndex("by_org_slug", (q) =>
+              q
+                .eq("organizationId", organization._id)
+                .eq("slug", args.projectSlug),
+            )
+            .unique();
     if (project === null) {
       throw new Error("Project not found");
     }
+    if ((await getActiveOrgById(ctx, project.organizationId)) === null) {
+      throw new Error("Project organization is archived");
+    }
 
-    await ctx.db.patch(args.projectId, { visibility: args.visibility });
+    await ctx.db.patch(project._id, { visibility: args.visibility });
 
     const org = await ctx.db.get(project.organizationId);
     if (org !== null) {
@@ -271,16 +312,16 @@ export const setProjectVisibility = mutation({
         kind: "visibility_changed",
         title: "Project visibility changed",
         body: `Your project "${project.name}" visibility was set to ${args.visibility} by platform admin.`,
-        refId: `visibility_changed:${args.projectId}:${Date.now()}`,
+        refId: `visibility_changed:${project._id}:${Date.now()}`,
       });
     }
 
-    await fireWebhookEvent(ctx, args.projectId, "project.visibility_changed", {
-      projectId: args.projectId,
+    await fireWebhookEvent(ctx, project._id, "project.visibility_changed", {
+      projectId: project._id,
       visibility: args.visibility,
     });
 
-    const updated = await ctx.db.get(args.projectId);
+    const updated = await ctx.db.get(project._id);
     if (updated === null) {
       throw new Error("Failed to load project");
     }

@@ -11,12 +11,17 @@ import {
 } from "./_generated/server";
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
-import { requireIdentity, requireOrgMemberBySlug } from "./lib/auth";
+import {
+  getOrgByClerkId,
+  requireIdentity,
+  requireOrgMemberBySlug,
+} from "./lib/auth";
 import { reconcilePaymentPublisherClawback } from "./lib/publisherLedger";
 import { appendWalletEntry, getOrCreateWallet } from "./wallets";
 
 /** Pinned alongside `stripe@22.3.1`; upgrade only as an explicit migration. */
 export const STRIPE_API_VERSION = "2026-06-24.dahlia" as const;
+const BILLING_CYCLE_SCAN_CAP = 10_000;
 
 export type CreditPackId = "pack_10" | "pack_50" | "pack_100";
 
@@ -229,10 +234,7 @@ export const prepareCheckoutIntent = internalMutation({
     stripePriceId: v.string(),
   },
   handler: async (ctx, args) => {
-    const organization = await ctx.db
-      .query("organizations")
-      .withIndex("by_clerk_org", (q) => q.eq("clerkOrgId", args.clerkOrgId))
-      .unique();
+    const organization = await getOrgByClerkId(ctx, args.clerkOrgId);
     if (organization === null)
       throw new Error("Active organization is not provisioned");
     const pack = creditPack(args.packId);
@@ -1224,10 +1226,7 @@ export const getBillingState = query({
     const claims = await requireIdentity(ctx);
     if (claims.orgId === undefined)
       throw new Error("Active organization required");
-    const organization = await ctx.db
-      .query("organizations")
-      .withIndex("by_clerk_org", (q) => q.eq("clerkOrgId", claims.orgId!))
-      .unique();
+    const organization = await getOrgByClerkId(ctx, claims.orgId);
     if (organization === null)
       throw new Error("Active organization is not provisioned");
     const wallet = await ctx.db
@@ -1291,18 +1290,32 @@ function endOfUtcMonth(now: number): number {
 export const cycleBreakdown = query({
   args: { orgSlug: v.string() },
   handler: async (ctx, args) => {
-    const { org } = await requireOrgMemberBySlug(ctx, args.orgSlug);
+    const { claims, org } = await requireOrgMemberBySlug(ctx, args.orgSlug);
     const cycleStart = startOfUtcMonth(Date.now());
     const cycleEnd = endOfUtcMonth(Date.now());
-    const events = await ctx.db
-      .query("usageEvents")
-      .withIndex("by_org_at", (q) =>
-        q
-          .eq("organizationId", org._id)
-          .gte("at", cycleStart)
-          .lt("at", cycleEnd),
-      )
-      .collect();
+    const scanned =
+      claims.orgRole === "org:admin"
+        ? await ctx.db
+            .query("usageEvents")
+            .withIndex("by_org_at", (q) =>
+              q
+                .eq("organizationId", org._id)
+                .gte("at", cycleStart)
+                .lt("at", cycleEnd),
+            )
+            .take(BILLING_CYCLE_SCAN_CAP + 1)
+        : await ctx.db
+            .query("usageEvents")
+            .withIndex("by_org_owner_at", (q) =>
+              q
+                .eq("organizationId", org._id)
+                .eq("ownerUserId", claims.subject)
+                .gte("at", cycleStart)
+                .lt("at", cycleEnd),
+            )
+            .take(BILLING_CYCLE_SCAN_CAP + 1);
+    const truncated = scanned.length > BILLING_CYCLE_SCAN_CAP;
+    const events = scanned.slice(0, BILLING_CYCLE_SCAN_CAP);
     const byKey = new Map<string, { calls: number; credits: number }>();
     const byProject = new Map<
       Id<"projects">,
@@ -1335,6 +1348,8 @@ export const cycleBreakdown = query({
     return {
       cycleStart,
       cycleEnd,
+      truncated,
+      scanCap: BILLING_CYCLE_SCAN_CAP,
       totalCalls: events.length,
       totalCredits: events.reduce((total, event) => total + event.credits, 0),
       byKey: [...byKey.entries()]

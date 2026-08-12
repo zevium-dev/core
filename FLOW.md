@@ -175,7 +175,7 @@ Org-scoped — the org owns the wallet; admins manage it, members view their own
 ### 4.9 Listing lifecycle
 
 - Publish: auto-publish with automated gates (spec valid, upstream reachable, uptime probe); post-hoc review may delist
-- Deprecate/unpublish (P1): cannot silently kill an API with active consumers — set sunset date → consumers notified (banner + email), gateway signals deprecation, new subscriptions freeze, wind-down, hard cutoff
+- Deprecate/unpublish (P1): cannot silently kill an API with active consumers — set sunset date at least 7 days ahead → consumers notified (banner + email), gateway signals deprecation, new subscriptions freeze, wind-down, hard cutoff
 - Quality surface (P2): uptime status on own listing, security-scan results, freshness nudges
 
 ### 4.10 Publisher webhooks (P1)

@@ -7,7 +7,11 @@ export const CREDITS_PER_DOLLAR = 10_000;
 /** Platform cut: 5%. Publishers keep 95%. */
 export const PLATFORM_CUT = 0.05;
 
-export type { EndpointPricing } from "./pricing.js";
+export {
+  MAX_DAILY_FREE_TIER_CALLS,
+  MAX_ENDPOINT_COST_CREDITS,
+  type EndpointPricing,
+} from "./pricing.js";
 
 export {
   parseSpec,

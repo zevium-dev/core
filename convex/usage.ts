@@ -4,6 +4,8 @@ import { query } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { requireOrgMemberBySlug } from "./lib/auth";
 
+const USAGE_PAGE_SIZE_MAX = 50;
+
 export type UsageListItem = {
   _id: Id<"usageEvents">;
   projectId: Id<"projects">;
@@ -20,7 +22,7 @@ export type UsageListItem = {
 
 /**
  * Paginated consumer call log for the org that paid (organizationId on events).
- * Index range: by_org_at. projectId/keyId filtered after the index scan.
+ * Every optional filter is part of the selected index before pagination.
  * Newest first.
  */
 export const listForOrg = query({
@@ -33,25 +35,184 @@ export const listForOrg = query({
     until: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
-    const { org } = await requireOrgMemberBySlug(ctx, args.orgSlug);
+    const { claims, org } = await requireOrgMemberBySlug(ctx, args.orgSlug);
+    if (
+      args.since !== undefined &&
+      (!Number.isSafeInteger(args.since) || args.since < 0)
+    ) {
+      throw new Error("Invalid start time");
+    }
+    if (
+      args.until !== undefined &&
+      (!Number.isSafeInteger(args.until) || args.until < 0)
+    ) {
+      throw new Error("Invalid end time");
+    }
+    if (
+      args.since !== undefined &&
+      args.until !== undefined &&
+      args.since >= args.until
+    ) {
+      throw new Error("Start time must be before end time");
+    }
+    if (args.keyId !== undefined && args.keyId.length > 256) {
+      throw new Error("Key filter is too long");
+    }
+    const paginationOpts = {
+      ...args.paginationOpts,
+      numItems: Number.isSafeInteger(args.paginationOpts.numItems)
+        ? Math.min(
+            Math.max(args.paginationOpts.numItems, 1),
+            USAGE_PAGE_SIZE_MAX,
+          )
+        : USAGE_PAGE_SIZE_MAX,
+      maximumRowsRead: USAGE_PAGE_SIZE_MAX + 1,
+      maximumBytesRead: 256 * 1024,
+    };
 
-    const result = await ctx.db
-      .query("usageEvents")
-      .withIndex("by_org_at", (q) => {
-        const base = q.eq("organizationId", org._id);
-        if (args.since !== undefined && args.until !== undefined) {
-          return base.gte("at", args.since).lt("at", args.until);
-        }
-        if (args.since !== undefined) {
-          return base.gte("at", args.since);
-        }
-        if (args.until !== undefined) {
-          return base.lt("at", args.until);
-        }
-        return base;
-      })
-      .order("desc")
-      .paginate(args.paginationOpts);
+    const result =
+      claims.orgRole !== "org:admin"
+        ? args.projectId !== undefined && args.keyId !== undefined
+          ? await ctx.db
+              .query("usageEvents")
+              .withIndex("by_org_owner_project_key_at", (q) => {
+                const base = q
+                  .eq("organizationId", org._id)
+                  .eq("ownerUserId", claims.subject)
+                  .eq("projectId", args.projectId!)
+                  .eq("keyId", args.keyId!);
+                if (args.since !== undefined && args.until !== undefined) {
+                  return base.gte("at", args.since).lt("at", args.until);
+                }
+                if (args.since !== undefined) return base.gte("at", args.since);
+                if (args.until !== undefined) return base.lt("at", args.until);
+                return base;
+              })
+              .order("desc")
+              .paginate(paginationOpts)
+          : args.projectId !== undefined
+            ? await ctx.db
+                .query("usageEvents")
+                .withIndex("by_org_owner_project_at", (q) => {
+                  const base = q
+                    .eq("organizationId", org._id)
+                    .eq("ownerUserId", claims.subject)
+                    .eq("projectId", args.projectId!);
+                  if (args.since !== undefined && args.until !== undefined) {
+                    return base.gte("at", args.since).lt("at", args.until);
+                  }
+                  if (args.since !== undefined)
+                    return base.gte("at", args.since);
+                  if (args.until !== undefined)
+                    return base.lt("at", args.until);
+                  return base;
+                })
+                .order("desc")
+                .paginate(paginationOpts)
+            : args.keyId !== undefined
+              ? await ctx.db
+                  .query("usageEvents")
+                  .withIndex("by_org_owner_key_at", (q) => {
+                    const base = q
+                      .eq("organizationId", org._id)
+                      .eq("ownerUserId", claims.subject)
+                      .eq("keyId", args.keyId!);
+                    if (args.since !== undefined && args.until !== undefined) {
+                      return base.gte("at", args.since).lt("at", args.until);
+                    }
+                    if (args.since !== undefined)
+                      return base.gte("at", args.since);
+                    if (args.until !== undefined)
+                      return base.lt("at", args.until);
+                    return base;
+                  })
+                  .order("desc")
+                  .paginate(paginationOpts)
+              : await ctx.db
+                  .query("usageEvents")
+                  .withIndex("by_org_owner_at", (q) => {
+                    const base = q
+                      .eq("organizationId", org._id)
+                      .eq("ownerUserId", claims.subject);
+                    if (args.since !== undefined && args.until !== undefined) {
+                      return base.gte("at", args.since).lt("at", args.until);
+                    }
+                    if (args.since !== undefined)
+                      return base.gte("at", args.since);
+                    if (args.until !== undefined)
+                      return base.lt("at", args.until);
+                    return base;
+                  })
+                  .order("desc")
+                  .paginate(paginationOpts)
+        : args.projectId !== undefined && args.keyId !== undefined
+          ? await ctx.db
+              .query("usageEvents")
+              .withIndex("by_org_project_key_at", (q) => {
+                const base = q
+                  .eq("organizationId", org._id)
+                  .eq("projectId", args.projectId!)
+                  .eq("keyId", args.keyId!);
+                if (args.since !== undefined && args.until !== undefined) {
+                  return base.gte("at", args.since).lt("at", args.until);
+                }
+                if (args.since !== undefined) return base.gte("at", args.since);
+                if (args.until !== undefined) return base.lt("at", args.until);
+                return base;
+              })
+              .order("desc")
+              .paginate(paginationOpts)
+          : args.projectId !== undefined
+            ? await ctx.db
+                .query("usageEvents")
+                .withIndex("by_org_project_at", (q) => {
+                  const base = q
+                    .eq("organizationId", org._id)
+                    .eq("projectId", args.projectId!);
+                  if (args.since !== undefined && args.until !== undefined) {
+                    return base.gte("at", args.since).lt("at", args.until);
+                  }
+                  if (args.since !== undefined)
+                    return base.gte("at", args.since);
+                  if (args.until !== undefined)
+                    return base.lt("at", args.until);
+                  return base;
+                })
+                .order("desc")
+                .paginate(paginationOpts)
+            : args.keyId !== undefined
+              ? await ctx.db
+                  .query("usageEvents")
+                  .withIndex("by_org_key_at", (q) => {
+                    const base = q
+                      .eq("organizationId", org._id)
+                      .eq("keyId", args.keyId!);
+                    if (args.since !== undefined && args.until !== undefined) {
+                      return base.gte("at", args.since).lt("at", args.until);
+                    }
+                    if (args.since !== undefined)
+                      return base.gte("at", args.since);
+                    if (args.until !== undefined)
+                      return base.lt("at", args.until);
+                    return base;
+                  })
+                  .order("desc")
+                  .paginate(paginationOpts)
+              : await ctx.db
+                  .query("usageEvents")
+                  .withIndex("by_org_at", (q) => {
+                    const base = q.eq("organizationId", org._id);
+                    if (args.since !== undefined && args.until !== undefined) {
+                      return base.gte("at", args.since).lt("at", args.until);
+                    }
+                    if (args.since !== undefined)
+                      return base.gte("at", args.since);
+                    if (args.until !== undefined)
+                      return base.lt("at", args.until);
+                    return base;
+                  })
+                  .order("desc")
+                  .paginate(paginationOpts);
 
     const projectCache = new Map<
       Id<"projects">,
@@ -73,12 +234,6 @@ export const listForOrg = query({
 
     const page: UsageListItem[] = [];
     for (const event of result.page) {
-      if (args.projectId !== undefined && event.projectId !== args.projectId) {
-        continue;
-      }
-      if (args.keyId !== undefined && event.keyId !== args.keyId) {
-        continue;
-      }
       const project = await resolveProject(event.projectId);
       page.push({
         _id: event._id,

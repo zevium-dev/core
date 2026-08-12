@@ -336,9 +336,14 @@ describe("Stripe Checkout control plane", () => {
       }),
     ).toMatchObject({ applied: false, balance: 100_000, sequence: 1 });
     const outsiderState = await t
-      .withIdentity({ subject: "outside", org_id: "org_outsider" } as {
+      .withIdentity({
+        subject: "outside",
+        org_id: "org_outsider",
+        org_role: "org:admin",
+      } as {
         subject: string;
         org_id: string;
+        org_role: string;
       })
       .query(api.billing.getBillingState, { checkoutSessionId: "cs_paid" });
     expect(outsiderState.checkout).toBeNull();

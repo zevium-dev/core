@@ -2,7 +2,11 @@ import { v } from "convex/values";
 import { internalQuery, mutation, query } from "./_generated/server";
 import type { Doc } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
-import { getOrgByPublicHandle, requireProjectMember } from "./lib/auth";
+import {
+  getOrgByPublicHandle,
+  requireOrgAdmin,
+  requireProjectMember,
+} from "./lib/auth";
 import { createNotification } from "./lib/notifications";
 import { fireWebhookEvent } from "./webhooks";
 import {
@@ -10,6 +14,7 @@ import {
   requireEncryptedCredential,
 } from "./lib/credentialCrypto";
 import { draftFingerprint, readinessValidity } from "./publishReadiness";
+import { syncCatalogueListing } from "./catalogue";
 import {
   isValidSemver,
   type SpecIssue,
@@ -129,7 +134,8 @@ export const publish = mutation({
     version?: Doc<"specVersions">;
     project?: Doc<"projects">;
   }> => {
-    const { org } = await requireProjectMember(ctx, args.projectId);
+    const { claims, org } = await requireProjectMember(ctx, args.projectId);
+    requireOrgAdmin(claims);
 
     const version = args.version.trim();
     if (!isValidSemver(version)) {
@@ -246,6 +252,7 @@ export const publish = mutation({
     if (versionDoc === null || project === null) {
       throw new Error("Failed to load published version");
     }
+    await syncCatalogueListing(ctx, project._id);
     // Notify publisher org + fire webhook event.
     await createNotification(ctx, {
       clerkOrgId: org.clerkOrgId,
@@ -330,8 +337,8 @@ export const getVersion = query({
 });
 
 /**
- * Public (no-auth) query for the gateway data plane.
- * Returns latest published immutable snapshot + org ids for wallet DO routing.
+ * Public immutable spec DTO for docs, discovery, and keyless mocks.
+ * Metering identifiers and Clerk identity stay behind gateway-spec httpAction.
  */
 export const getPublishedForGateway = query({
   args: {
@@ -344,13 +351,11 @@ export const getPublishedForGateway = query({
   ): Promise<{
     spec: string;
     version: string;
-    projectId: string;
-    organizationId: string;
-    clerkOrgId: string;
     visibility: Doc<"projects">["visibility"];
     deprecatedAt: number | undefined;
     sunsetAt: number | undefined;
     deprecationMessage: string | undefined;
+    retiredAt: number | undefined;
   } | null> => {
     const org = await getOrgByPublicHandle(ctx, args.publisherHandle);
     if (org === null) return null;
@@ -375,13 +380,14 @@ export const getPublishedForGateway = query({
     return {
       spec: latest.spec,
       version: latest.version,
-      projectId: project._id,
-      organizationId: org._id,
-      clerkOrgId: org.clerkOrgId,
       visibility: project.visibility,
-      deprecatedAt: latest.deprecatedAt,
-      sunsetAt: latest.sunsetAt,
-      deprecationMessage: latest.deprecationMessage,
+      deprecatedAt: project.deprecationStartedAt ?? latest.deprecatedAt,
+      // Version sunset is informational. Only project retirement may cut off
+      // execution, because that lifecycle owns consumer notice and wind-down.
+      sunsetAt: project.sunsetAt ?? project.retirementCutoffAt,
+      deprecationMessage:
+        project.deprecationMessage ?? latest.deprecationMessage,
+      retiredAt: project.retiredAt,
     };
   },
 });
@@ -409,6 +415,7 @@ export const getPublishedForGatewayInternal = internalQuery({
     deprecatedAt: number | undefined;
     sunsetAt: number | undefined;
     deprecationMessage: string | undefined;
+    retiredAt: number | undefined;
   } | null> => {
     const org = await getOrgByPublicHandle(ctx, args.publisherHandle);
     if (org === null) return null;
@@ -428,10 +435,15 @@ export const getPublishedForGatewayInternal = internalQuery({
       .first();
     if (latest === null) return null;
 
-    const upstreamHeaders = await ctx.db
-      .query("upstreamCredentials")
-      .withIndex("by_project", (q) => q.eq("projectId", project._id))
-      .collect();
+    const isPastSunset =
+      project.retiredAt !== undefined ||
+      (project.sunsetAt !== undefined && project.sunsetAt <= Date.now());
+    const upstreamHeaders = isPastSunset
+      ? []
+      : await ctx.db
+          .query("upstreamCredentials")
+          .withIndex("by_project", (q) => q.eq("projectId", project._id))
+          .collect();
 
     return {
       spec: latest.spec,
@@ -448,43 +460,61 @@ export const getPublishedForGatewayInternal = internalQuery({
           ]),
         ),
       ),
-      deprecatedAt: latest.deprecatedAt,
-      sunsetAt: latest.sunsetAt,
-      deprecationMessage: latest.deprecationMessage,
+      deprecatedAt: project.deprecationStartedAt ?? latest.deprecatedAt,
+      sunsetAt: project.sunsetAt ?? project.retirementCutoffAt,
+      deprecationMessage:
+        project.deprecationMessage ?? latest.deprecationMessage,
+      retiredAt: project.retiredAt,
     };
   },
 });
 
 /**
  * Deprecate a published version (metadata only — spec body immutable).
- * Auth: org member owning the project.
+ * Auth: org admin owning the project.
  * Fires version_deprecated notification + spec.deprecated webhook.
  */
 export const deprecateVersion = mutation({
   args: {
     versionId: v.id("specVersions"),
     sunsetAt: v.optional(v.number()),
-    message: v.optional(v.string()),
+    message: v.string(),
   },
   handler: async (ctx, args): Promise<Doc<"specVersions">> => {
     const version = await ctx.db.get(args.versionId);
     if (version === null) {
       throw new Error("Version not found");
     }
-    const { org } = await requireProjectMember(ctx, version.projectId);
+    const { claims, org } = await requireProjectMember(ctx, version.projectId);
+    requireOrgAdmin(claims);
 
     const now = Date.now();
+    if (version.sunsetAt !== undefined && version.sunsetAt <= now) {
+      throw new Error("A version cannot be changed after its sunset");
+    }
+    if (
+      args.sunsetAt !== undefined &&
+      (!Number.isSafeInteger(args.sunsetAt) ||
+        !Number.isFinite(new Date(args.sunsetAt).getTime()) ||
+        args.sunsetAt < now + 7 * 24 * 60 * 60 * 1000)
+    ) {
+      throw new Error("Sunset must be a safe timestamp at least 7 days away");
+    }
+    const message = args.message.trim();
+    if (message.length === 0 || message.length > 1000) {
+      throw new Error("Deprecation message must be 1 to 1000 characters");
+    }
     await ctx.db.patch(args.versionId, {
-      deprecatedAt: now,
+      deprecatedAt: version.deprecatedAt ?? now,
       sunsetAt: args.sunsetAt,
-      deprecationMessage: args.message,
+      deprecationMessage: message,
     });
 
     await createNotification(ctx, {
       clerkOrgId: org.clerkOrgId,
       kind: "version_deprecated",
       title: "Version deprecated",
-      body: `Version ${version.version} has been deprecated${args.message !== undefined ? `: ${args.message}` : ""}.`,
+      body: `Version ${version.version} has been deprecated: ${message}.`,
       refId: `version_deprecated:${args.versionId}`,
     });
 
@@ -504,7 +534,7 @@ export const deprecateVersion = mutation({
 
 /**
  * Clear deprecation metadata from a version.
- * Auth: org member owning the project.
+ * Auth: org admin owning the project.
  */
 export const undeprecateVersion = mutation({
   args: { versionId: v.id("specVersions") },
@@ -513,7 +543,11 @@ export const undeprecateVersion = mutation({
     if (version === null) {
       throw new Error("Version not found");
     }
-    await requireProjectMember(ctx, version.projectId);
+    const { claims } = await requireProjectMember(ctx, version.projectId);
+    requireOrgAdmin(claims);
+    if (version.sunsetAt !== undefined && version.sunsetAt <= Date.now()) {
+      throw new Error("A version cannot be restored after its sunset");
+    }
 
     // Replace to unset optional fields — patch cannot delete them.
     await ctx.db.replace(args.versionId, {

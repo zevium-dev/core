@@ -1,6 +1,6 @@
 /**
  * Published OpenAPI spec resolution for the gateway.
- * ConvexSpecSource calls public query specs:getPublishedForGateway.
+ * ConvexPublicSpecSource calls minimal public query specs:getPublishedForGateway.
  * CachedSpecSource wraps any source with a 30s TTL.
  */
 
@@ -29,6 +29,8 @@ export type PublishedSpec = {
   sunsetAt?: number;
   /** Human-readable deprecation reason surfaced to consumers (optional). */
   deprecationMessage?: string;
+  /** Epoch milliseconds when cleanup retired this project. */
+  retiredAt?: number;
 };
 
 export interface SpecSource {
@@ -36,6 +38,23 @@ export interface SpecSource {
     publisherHandle: string,
     projectSlug: string,
   ): Promise<PublishedSpec | null>;
+}
+
+export type PublicPublishedSpec = Pick<
+  PublishedSpec,
+  | "spec"
+  | "visibility"
+  | "deprecatedAt"
+  | "sunsetAt"
+  | "deprecationMessage"
+  | "retiredAt"
+> & { version?: string };
+
+export interface PublicSpecSource {
+  getPublishedSpec(
+    publisherHandle: string,
+    projectSlug: string,
+  ): Promise<PublicPublishedSpec | null>;
 }
 
 export class SpecSourceUnavailableError extends Error {}
@@ -47,26 +66,36 @@ export class FailClosedSpecSource implements SpecSource {
   }
 }
 
+export class FailClosedPublicSpecSource implements PublicSpecSource {
+  async getPublishedSpec(): Promise<PublicPublishedSpec | null> {
+    return null;
+  }
+}
+
 const DEFAULT_TTL_MS = 30_000;
 const MEMORY_MAX = 256;
 
-const getPublishedForGatewayRef = makeFunctionReference<
+const getPublishedPublicRef = makeFunctionReference<
   "query",
   { publisherHandle: string; projectSlug: string },
   {
     spec: string;
-    projectId: string;
-    organizationId: string;
-    clerkOrgId: string;
-    visibility?: "public" | "private";
+    version: string;
+    visibility: "public" | "private";
     deprecatedAt?: number;
     sunsetAt?: number;
     deprecationMessage?: string;
+    retiredAt?: number;
   } | null
 >("specs:getPublishedForGateway");
 
 type CacheEntry = {
   value: PublishedSpec | null;
+  expiresAt: number;
+};
+
+type PublicCacheEntry = {
+  value: PublicPublishedSpec | null;
   expiresAt: number;
 };
 
@@ -111,7 +140,44 @@ export class CachedSpecSource implements SpecSource {
   }
 }
 
-export type ConvexSpecSourceOptions = {
+export class CachedPublicSpecSource implements PublicSpecSource {
+  readonly #inner: PublicSpecSource;
+  readonly #ttlMs: number;
+  readonly #now: () => number;
+  readonly #cache = new Map<string, PublicCacheEntry>();
+
+  constructor(opts: {
+    inner: PublicSpecSource;
+    ttlMs?: number;
+    now?: () => number;
+  }) {
+    this.#inner = opts.inner;
+    this.#ttlMs = opts.ttlMs ?? DEFAULT_TTL_MS;
+    this.#now = opts.now ?? Date.now;
+  }
+
+  async getPublishedSpec(
+    publisherHandle: string,
+    projectSlug: string,
+  ): Promise<PublicPublishedSpec | null> {
+    const key = `${publisherHandle}/${projectSlug}`;
+    const now = this.#now();
+    const hit = this.#cache.get(key);
+    if (hit && hit.expiresAt > now) return hit.value;
+    const value = await this.#inner.getPublishedSpec(
+      publisherHandle,
+      projectSlug,
+    );
+    if (this.#cache.size >= MEMORY_MAX) {
+      const first = this.#cache.keys().next().value;
+      if (first !== undefined) this.#cache.delete(first);
+    }
+    this.#cache.set(key, { value, expiresAt: now + this.#ttlMs });
+    return value;
+  }
+}
+
+export type ConvexPublicSpecSourceOptions = {
   convexUrl: string;
   /** Injected for tests. */
   fetchImpl?: typeof fetch;
@@ -123,10 +189,10 @@ export type ConvexSpecSourceOptions = {
  * Control-plane published-spec lookup via Convex HTTP client.
  * Function: specs:getPublishedForGateway (public query).
  */
-export class ConvexSpecSource implements SpecSource {
+export class ConvexPublicSpecSource implements PublicSpecSource {
   readonly #client: ConvexHttpClient;
 
-  constructor(opts: ConvexSpecSourceOptions) {
+  constructor(opts: ConvexPublicSpecSourceOptions) {
     if (opts.client) {
       this.#client = opts.client;
     } else {
@@ -141,18 +207,68 @@ export class ConvexSpecSource implements SpecSource {
   async getPublishedSpec(
     publisherHandle: string,
     projectSlug: string,
-  ): Promise<PublishedSpec | null> {
+  ): Promise<PublicPublishedSpec | null> {
     try {
-      const value = await this.#client.query(getPublishedForGatewayRef, {
+      const value = await this.#client.query(getPublishedPublicRef, {
         publisherHandle,
         projectSlug,
       });
-      return parsePublishedSpecPayload(value);
+      return parsePublicPublishedSpecPayload(value);
     } catch (err) {
-      console.error("ConvexSpecSource.getPublishedSpec failed", err);
+      console.error("ConvexPublicSpecSource.getPublishedSpec failed", err);
       return null;
     }
   }
+}
+
+export function parsePublicPublishedSpecPayload(
+  json: unknown,
+): PublicPublishedSpec | null {
+  if (json === null || json === undefined || typeof json !== "object") {
+    return null;
+  }
+  let candidate: unknown = json;
+  if ("value" in json) candidate = json.value;
+  if (candidate === null || typeof candidate !== "object") return null;
+  if (!("spec" in candidate) || typeof candidate.spec !== "string") return null;
+  if (!("visibility" in candidate) || candidate.visibility !== "public") {
+    return null;
+  }
+  const published: PublicPublishedSpec = {
+    spec: candidate.spec,
+    visibility: "public",
+  };
+  if ("version" in candidate && typeof candidate.version === "string") {
+    published.version = candidate.version;
+  }
+  if (
+    "deprecatedAt" in candidate &&
+    typeof candidate.deprecatedAt === "number" &&
+    Number.isFinite(candidate.deprecatedAt)
+  ) {
+    published.deprecatedAt = candidate.deprecatedAt;
+  }
+  if (
+    "sunsetAt" in candidate &&
+    typeof candidate.sunsetAt === "number" &&
+    Number.isFinite(candidate.sunsetAt)
+  ) {
+    published.sunsetAt = candidate.sunsetAt;
+  }
+  if (
+    "deprecationMessage" in candidate &&
+    typeof candidate.deprecationMessage === "string"
+  ) {
+    published.deprecationMessage = candidate.deprecationMessage;
+  }
+  if (
+    "retiredAt" in candidate &&
+    typeof candidate.retiredAt === "number" &&
+    Number.isFinite(candidate.retiredAt)
+  ) {
+    published.retiredAt = candidate.retiredAt;
+  }
+  return published;
 }
 
 export type InternalHttpSpecSourceOptions = {
@@ -285,6 +401,13 @@ export function parsePublishedSpecPayload(json: unknown): PublishedSpec | null {
     typeof candidate.deprecationMessage === "string"
   ) {
     published.deprecationMessage = candidate.deprecationMessage;
+  }
+  if (
+    "retiredAt" in candidate &&
+    typeof candidate.retiredAt === "number" &&
+    Number.isFinite(candidate.retiredAt)
+  ) {
+    published.retiredAt = candidate.retiredAt;
   }
   return published;
 }
