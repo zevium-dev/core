@@ -2,6 +2,18 @@ import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 
 export default defineSchema({
+  // Append-only receipts created through the admin-authenticated Convex CLI
+  // after a successful code push. Runtime URLs and creation time originate in
+  // Convex; the native document ID binds the staging proof to this deployment.
+  deploymentReceipts: defineTable({
+    schema: v.literal("zevium.convex-deploy-receipt/v1"),
+    gitSha: v.string(),
+    sourceRunId: v.string(),
+    cloudUrl: v.string(),
+    siteUrl: v.string(),
+    activatedAt: v.string(),
+  }).index("by_source_run", ["sourceRunId", "gitSha"]),
+
   // Mirror of Clerk orgs (Clerk is auth truth; app data keys off clerkOrgId)
   organizations: defineTable({
     clerkOrgId: v.string(),

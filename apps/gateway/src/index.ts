@@ -39,11 +39,14 @@ export interface Env {
   CONVEX_DEPLOY_KEY?: string;
   /** Shared secret for POST /internal/grant + Convex /ingest-usage. */
   GATEWAY_INTERNAL_SECRET?: string;
-  /** Immutable build identity. All four values are part of one Worker version. */
-  ZEVIUM_GIT_SHA?: string;
-  ZEVIUM_GATEWAY_DEPLOYMENT_ID?: string;
-  ZEVIUM_DEPLOYED_AT?: string;
-  ZEVIUM_DEPLOYMENT_MODE?: string;
+  /** Broker-bound release SHA baked into this immutable Worker version. */
+  ZEVIUM_RELEASE?: string;
+  /** Cloudflare-owned immutable version metadata binding. */
+  CF_VERSION_METADATA?: {
+    id: string;
+    tag: string;
+    timestamp: string;
+  };
   /**
    * Test-only: when set, Worker uses fixture key/spec sources populated via
    * internal test helpers (see test/pipeline.test.ts). Not for production.
@@ -72,12 +75,12 @@ export function __getTestPipelineDeps(): WorkerDeps | null {
 
 function gatewayDeploymentProof(env: Env) {
   return {
-    schemaVersion: 1,
+    schema: "zevium.cloudflare-runtime/v1",
     service: "gateway",
-    mode: env.ZEVIUM_DEPLOYMENT_MODE ?? "",
-    gitSha: env.ZEVIUM_GIT_SHA ?? "",
-    deploymentId: env.ZEVIUM_GATEWAY_DEPLOYMENT_ID ?? "",
-    deployedAt: env.ZEVIUM_DEPLOYED_AT ?? "",
+    gitSha: env.ZEVIUM_RELEASE ?? "",
+    versionId: env.CF_VERSION_METADATA?.id ?? "",
+    versionTag: env.CF_VERSION_METADATA?.tag ?? "",
+    deployedAt: env.CF_VERSION_METADATA?.timestamp ?? "",
   } as const;
 }
 
@@ -86,9 +89,14 @@ function validGatewayDeploymentProof(
 ): boolean {
   const deployedAt = Date.parse(proof.deployedAt);
   return (
-    /^(preview|production|staging)$/.test(proof.mode) &&
     /^[0-9a-f]{40}$/.test(proof.gitSha) &&
-    /^[A-Za-z0-9][A-Za-z0-9._:-]{7,159}$/.test(proof.deploymentId) &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(
+      proof.versionId,
+    ) &&
+    /^(?:preview-[1-9][0-9]*-[1-9][0-9]*|(?:staging|production)-[0-9a-f]{40})$/.test(
+      proof.versionTag,
+    ) &&
+    proof.versionTag.endsWith(proof.gitSha) &&
     Number.isFinite(deployedAt) &&
     new Date(deployedAt).toISOString() === proof.deployedAt
   );
