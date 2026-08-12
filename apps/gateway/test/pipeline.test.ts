@@ -15,7 +15,7 @@ import { FixtureKeyVerifier } from "../src/key-verifier";
 import { FixtureCatalogueSource } from "../src/catalogue-source";
 import { FixtureSpecSource } from "../src/spec-source";
 import { CollectingUsageSink, FakeConvexUsageSink } from "../src/usage";
-import type { WalletDO } from "../src/wallet";
+import type { KeySetting, WalletDO } from "../src/wallet";
 
 type WalletStub = DurableObjectStub<WalletDO>;
 
@@ -110,6 +110,9 @@ async function installFixtures(opts: {
   deprecationMessage?: string;
   upstreamHeaders?: Record<string, string>;
   spec?: string;
+  keySettings?: KeySetting[];
+  checkpointBalance?: number;
+  archived?: boolean;
 }) {
   const usage = opts.usage ?? new CollectingUsageSink();
   const organizationId = opts.organizationId ?? opts.clerkOrgId;
@@ -152,6 +155,18 @@ async function installFixtures(opts: {
       opts.credits,
     );
   }
+
+  __setTestGrantsFetcher(async (clerkOrgId) => ({
+    wallet: {
+      clerkOrgId,
+      balance: opts.checkpointBalance ?? opts.credits ?? 0,
+      sequence: 0,
+    },
+    keySettings: opts.keySettings ?? [
+      { keyId: KEY_ID, familyId: KEY_ID, disabled: false },
+    ],
+    archived: opts.archived ?? false,
+  }));
 
   return { usage, keys, specs, organizationId };
 }
@@ -786,12 +801,12 @@ describe("gateway pipeline", () => {
     const { fetchImpl, calls } = makeFetchMock(
       () => new Response("should not run"),
     );
-    __setTestGrantsFetcher(async () => ({
-      wallet: { clerkOrgId, balance: 100, sequence: 1 },
-      keySettings: [{ keyId: KEY_ID, disabled: false }],
+    await installFixtures({
+      clerkOrgId,
+      fetchImpl,
+      credits: 100,
       archived: true,
-    }));
-    await installFixtures({ clerkOrgId, fetchImpl });
+    });
 
     for (const [path, method] of [
       ["zero", "GET"],
@@ -812,18 +827,22 @@ describe("gateway pipeline", () => {
 
   it("disabled and expired-grace keys cannot use the free tier upstream", async () => {
     for (const [label, setting] of [
-      ["disabled", { keyId: KEY_ID, disabled: true }],
-      ["grace-expired", { keyId: KEY_ID, disabled: false, graceUntil: 0 }],
+      ["disabled", { keyId: KEY_ID, familyId: KEY_ID, disabled: true }],
+      [
+        "grace-expired",
+        { keyId: KEY_ID, familyId: KEY_ID, disabled: false, graceUntil: 0 },
+      ],
     ] as const) {
       const clerkOrgId = `org_pipe_free_${label}`;
       const { fetchImpl, calls } = makeFetchMock(
         () => new Response("should not run"),
       );
-      __setTestGrantsFetcher(async () => ({
-        wallet: { clerkOrgId, balance: 0, sequence: 1 },
+      await installFixtures({
+        clerkOrgId,
+        fetchImpl,
+        credits: 0,
         keySettings: [setting],
-      }));
-      await installFixtures({ clerkOrgId, fetchImpl, credits: 0 });
+      });
 
       const res = await gatewayFetch(
         `/gateway/${ORG_SLUG}/${PROJECT_SLUG}/free`,
@@ -1157,11 +1176,12 @@ describe("gateway pipeline", () => {
     const { fetchImpl, calls } = makeFetchMock(
       () => new Response("should not run"),
     );
-    __setTestGrantsFetcher(async () => ({
-      wallet: { clerkOrgId, balance: -10, sequence: 1 },
-      keySettings: [],
-    }));
-    await installFixtures({ clerkOrgId, fetchImpl, credits: 0 });
+    await installFixtures({
+      clerkOrgId,
+      fetchImpl,
+      credits: 0,
+      checkpointBalance: -10,
+    });
 
     const res = await gatewayFetch(
       `/gateway/${ORG_SLUG}/${PROJECT_SLUG}/echo`,

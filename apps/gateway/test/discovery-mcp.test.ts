@@ -6,6 +6,7 @@ import {
 import { afterEach, describe, expect, it, vi } from "vitest";
 import worker, {
   __setTestPipelineDeps,
+  __setTestGrantsFetcher,
   __setTestUsageMutation,
   type Env,
 } from "../src/index";
@@ -139,6 +140,15 @@ async function installAgentFixtures(opts: {
     );
   }
 
+  __setTestGrantsFetcher(async (clerkOrgId) => ({
+    wallet: {
+      clerkOrgId,
+      balance: opts.credits ?? 0,
+      sequence: 0,
+    },
+    keySettings: [{ keyId: KEY_ID, familyId: KEY_ID, disabled: false }],
+  }));
+
   return { usage, keys, specs, catalogue };
 }
 
@@ -205,6 +215,7 @@ function toolText(rpc: unknown): string {
 
 afterEach(() => {
   __setTestPipelineDeps(null);
+  __setTestGrantsFetcher(null);
   __setTestUsageMutation(null);
 });
 

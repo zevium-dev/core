@@ -63,6 +63,14 @@ describe("WalletDO unit", () => {
     const clerkOrgId = "org_free_scope";
     const stub = walletStub(clerkOrgId);
     await stub.grant("free-tier-balance", 1);
+    __setTestGrantsFetcher(async () => ({
+      wallet: { clerkOrgId, balance: 1, sequence: 0 },
+      keySettings: [
+        { keyId: "key-one", familyId: "family-one", disabled: false },
+        { keyId: "key-two", familyId: "family-two", disabled: false },
+      ],
+    }));
+    await stub.syncGrants(clerkOrgId);
     const dayOne = Date.UTC(2026, 6, 19, 23, 59, 59);
     const base = {
       clerkOrgId,
@@ -128,6 +136,7 @@ describe("WalletDO unit", () => {
         })
       ).status,
     ).toBe("consumed");
+    __setTestGrantsFetcher(null);
   });
 
   it("grant idempotency — same grantId does not double-credit", async () => {
@@ -370,7 +379,7 @@ describe("WalletDO unit", () => {
     });
   });
 
-  it("serves stale key settings while refreshing in the background", async () => {
+  it("fails closed when stale key settings cannot be refreshed", async () => {
     const clerkOrgId = "org_stale_settings";
     const stub = walletStub(clerkOrgId);
     await stub.grant("g1", 100);
@@ -388,25 +397,24 @@ describe("WalletDO unit", () => {
     await stub.reserve("r1", 5, { keyId: "key_a", clerkOrgId, nowMs: t0 });
     expect(fetches).toBe(1);
 
-    // Stale window crossed: refresh runs in the background and a failing
-    // control plane does not reject or hang the reserve path.
+    // Stale window crossed: refresh is awaited; a failing control plane
+    // revokes spending authority instead of serving stale positive state.
     __setTestGrantsFetcher(async () => {
       fetches += 1;
       await new Promise((resolve) => setTimeout(resolve, 500));
-      throw new Error("convex down");
+      return null;
     });
     const res = await stub.reserve("r2", 5, {
       keyId: "key_a",
       clerkOrgId,
       nowMs: t0 + 61_000,
     });
-    expect(res.status).toBe("reserved");
-    // Background refresh was scheduled (test harness settles waitUntil).
+    expect(res).toEqual({ status: "rejected", reason: "key_untracked" });
     expect(fetches).toBe(2);
-    // Failed refresh leaves the last-known settings and wallet intact.
+    // Failed refresh leaves the last-known wallet intact.
     const state = await stub.getState();
     expect(state.balance).toBe(100);
-    expect(state.available).toBe(90);
+    expect(state.available).toBe(95);
   });
 
   it("bounds the applied-grant dedupe set", async () => {
@@ -919,7 +927,7 @@ describe("WalletDO unit", () => {
 // ---------------------------------------------------------------------------
 
 describe("WalletDO property/fuzz", () => {
-  it("200 random ops preserve non-negative balance and ledger invariant at quiescence", async () => {
+  it("1024 random crash/property ops preserve ledger invariant at quiescence", async () => {
     const seed = 0xc0ffee;
     const rng = mulberry32(seed);
     const stub = walletStub(`fuzz-${seed}`);
@@ -945,7 +953,7 @@ describe("WalletDO property/fuzz", () => {
       expect(state.available).toBe(state.balance - state.inFlightTotal);
     };
 
-    const OPS = 200;
+    const OPS = 1_024;
     for (let i = 0; i < OPS; i++) {
       const roll = rng();
 

@@ -54,15 +54,6 @@ export type WebhookTransportDependencies = {
   now: () => number;
 };
 
-const SENSITIVE_REDIRECT_HEADERS = new Set([
-  "authorization",
-  "cookie",
-  "proxy-authorization",
-  "x-api-key",
-  "x-zevium-delivery-id",
-  "x-zevium-signature",
-]);
-
 function fail(message: string, retryable: boolean): WebhookTransportError {
   return new WebhookTransportError(message, retryable);
 }
@@ -122,16 +113,6 @@ async function resolveAndValidate(
     throw fail("Webhook hostname resolved to forbidden address", false);
   }
   return addresses[0]!;
-}
-
-function stripSensitiveHeaders(
-  headers: Readonly<Record<string, string>>,
-): Record<string, string> {
-  return Object.fromEntries(
-    Object.entries(headers).filter(
-      ([name]) => !SENSITIVE_REDIRECT_HEADERS.has(name.toLowerCase()),
-    ),
-  );
 }
 
 function headerCount(headers: IncomingHttpHeaders): number {
@@ -285,7 +266,6 @@ export async function deliverPinnedHttps(
 ): Promise<{ status: number }> {
   const deadlineAt = dependencies.now() + WEBHOOK_DEADLINE_MS;
   let currentUrl = input.url;
-  let headers: Readonly<Record<string, string>> = input.headers;
 
   for (let redirects = 0; ; redirects += 1) {
     const pinned = await resolveAndValidate(
@@ -298,7 +278,7 @@ export async function deliverPinnedHttps(
       url: currentUrl,
       address: pinned.address,
       family: pinned.family,
-      headers,
+      headers: input.headers,
       body: input.body,
       deadlineAt,
     });
@@ -313,7 +293,7 @@ export async function deliverPinnedHttps(
     }
     const nextUrl = new URL(location, currentUrl);
     if (nextUrl.origin !== currentUrl.origin) {
-      headers = stripSensitiveHeaders(headers);
+      throw fail("Webhook redirects must stay on the registered origin", false);
     }
     currentUrl = nextUrl;
   }

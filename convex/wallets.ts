@@ -437,6 +437,7 @@ export const getGatewayWallet = internalQuery({
     const settings = await ctx.db
       .query("keySettings")
       .withIndex("by_org", (q) => q.eq("clerkOrgId", args.clerkOrgId))
+
       .take(1_001);
     if (settings.length > 1_000) {
       throw new Error("Gateway key settings exceed bounded sync capacity");
@@ -447,6 +448,7 @@ export const getGatewayWallet = internalQuery({
         wallet === null || archived
           ? { clerkOrgId: args.clerkOrgId, balance: 0, sequence: 0 }
           : checkpoint(args.clerkOrgId, wallet),
+
       keySettings: settings.map((setting) => ({
         ...toGatewayRow(setting),
         disabled: archived || setting.disabled,
@@ -457,10 +459,9 @@ export const getGatewayWallet = internalQuery({
 });
 
 export type WalletEntryView = {
-  _id: Id<"walletEntries">;
+  id: string;
   kind: Doc<"walletEntries">["kind"];
   amount: number;
-  refId: string;
   sequence: number;
   createdAt: number;
 };
@@ -468,7 +469,6 @@ export type WalletEntryView = {
 export type WalletView = {
   balance: number;
   sequence: number;
-  walletId: Id<"wallets"> | null;
   entries: WalletEntryView[];
 };
 
@@ -479,7 +479,7 @@ async function walletView(
   await assertFinanceMigrationAllowsRuntime(ctx);
   const wallet = await getWalletForOrg(ctx, organizationId);
   if (wallet === null) {
-    return { balance: 0, sequence: 0, walletId: null, entries: [] };
+    return { balance: 0, sequence: 0, entries: [] };
   }
   await requireVerifiedWalletFunding(ctx, wallet);
   const entries = await ctx.db
@@ -490,12 +490,10 @@ async function walletView(
   return {
     balance: wallet.balance,
     sequence: wallet.sequence,
-    walletId: wallet._id,
     entries: entries.map((entry) => ({
-      _id: entry._id,
+      id: `ledger-${entry.sequence}`,
       kind: entry.kind,
       amount: entry.amount,
-      refId: entry.refId,
       sequence: entry.sequence,
       createdAt: entry.createdAt,
     })),
@@ -940,6 +938,7 @@ export const recordUsage = internalMutation({
         results.push({
           refId: event.settleRefId,
           status: "rejected",
+
           reason: "reservation checkpoint is stale after ledger debit",
           retryable: false,
         });
@@ -988,6 +987,7 @@ export const recordUsage = internalMutation({
           : undefined;
 
       const usageEventId = await ctx.db.insert("usageEvents", {
+        publicId: crypto.randomUUID(),
         organizationId: consumerOrg._id,
         ownerUserId,
         publisherOrganizationId,
@@ -1007,6 +1007,7 @@ export const recordUsage = internalMutation({
         status: event.status,
         latencyMs: event.latencyMs,
         keyId: event.keyId,
+
         keyFamilyId: event.keyFamilyId,
         monthlyCapCredits: event.monthlyCapCredits,
         budgetPeriod: event.budgetPeriod,

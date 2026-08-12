@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { api, internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import schema from "./schema";
-import { draftFingerprint } from "./publishReadiness";
+import { credentialSetFingerprint, draftFingerprint } from "./publishReadiness";
 import { MIN_DEPRECATION_NOTICE_MS } from "./projects";
 
 const modules = import.meta.glob("./**/*.ts");
@@ -446,6 +446,8 @@ describe("specs.publish — fires spec_published notification", () => {
         projectId: seed.projectId,
         draftHash: await draftFingerprint(SPEC_BODY),
         serverOrigin: "https://api.example.com",
+        credentialRevision: 0,
+        credentialFingerprint: await credentialSetFingerprint([]),
         status: "ok",
         testedAt: Date.now(),
       });

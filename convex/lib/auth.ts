@@ -11,6 +11,7 @@ import { isOrganizationActive, isProjectRetired } from "./publicRoutes";
 
 export type OrgIdentityClaims = {
   subject: string;
+  email: string | undefined;
   orgId: string | undefined;
   orgSlug: string | undefined;
   orgRole: string | undefined;
@@ -60,9 +61,11 @@ export async function requireIdentity(
       : typeof raw.orgRole === "string"
         ? raw.orgRole
         : undefined;
+  const email = typeof identity.email === "string" ? identity.email : undefined;
 
   return {
     subject: identity.subject,
+    email,
     orgId,
     orgSlug,
     orgRole,
@@ -285,6 +288,21 @@ export async function requireSpecVersionAdmin(
 }
 
 /**
+ * Resolve an org-admin mutation by slug. Authorization comes from the JWT org
+ * claim (the slug is routing data only), so cross-org failures stay
+ * indistinguishable from missing resources while same-org members receive a
+ * useful role error.
+ */
+export async function requireOrgAdminBySlug(
+  ctx: DbCtx,
+  orgSlug: string,
+): Promise<{ claims: OrgIdentityClaims; org: Doc<"organizations"> }> {
+  const { claims, org } = await requireOrgMemberBySlug(ctx, orgSlug);
+  requireOrgAdmin(claims);
+  return { claims, org };
+}
+
+/**
  * Enforce privileged org role from the Clerk JWT claim (owner or admin).
  * `claims.orgRole` is parsed by `requireIdentity` but, without this gate, any
  * org member can perform admin actions. Callers resolve claims first via
@@ -297,6 +315,9 @@ export async function requireSpecVersionAdmin(
  * organization-wide key policy call this gate. Draft editing and own-key reads
  * intentionally remain member-scoped. UI role checks only explain
  * availability; this server gate remains authoritative.
+ * Read-only queries and member collaboration mutations intentionally stay at
+ * `requireOrgMemberBySlug` / `requireProjectMember`. Lifecycle, billing, payout,
+ * secret, and org-setting writes must use one of the admin-resolving helpers.
  */
 export function requireOrgAdmin(claims: OrgIdentityClaims): OrgIdentityClaims {
   if (!isPrivilegedOrgRole(claims.orgRole)) {
@@ -314,6 +335,34 @@ export function requireOrgCapability(
     throw new Error("Organization capability required");
   }
   return access;
+}
+
+export type ActiveOrgAdminClaims = OrgIdentityClaims & { orgId: string };
+
+export type OrgCapabilities = {
+  canViewOrgUsage: boolean;
+  canManageOrgKeyPolicy: boolean;
+};
+
+/** One privileged-role mapping shared by usage, billing, and key-policy surfaces. */
+export function orgCapabilities(claims: OrgIdentityClaims): OrgCapabilities {
+  const privileged = isPrivilegedOrgRole(claims.orgRole);
+  return {
+    canViewOrgUsage: privileged,
+    canManageOrgKeyPolicy: privileged,
+  };
+}
+
+/** Authenticate an action and require an active Clerk org-admin membership. */
+export async function requireActiveOrgAdmin(
+  ctx: AuthCtx,
+): Promise<ActiveOrgAdminClaims> {
+  const claims = await requireIdentity(ctx);
+  if (claims.orgId === undefined || claims.orgId.trim() === "") {
+    throw new Error("Active organization required");
+  }
+  requireOrgAdmin(claims);
+  return { ...claims, orgId: claims.orgId };
 }
 
 /**

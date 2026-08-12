@@ -3,10 +3,11 @@
   "name": "zevium-dev",
   "account_id": "1ea9299555b026a6a7484c8323c5a953",
   "compatibility_date": "2026-07-18",
-  "compatibility_flags": ["nodejs_compat"],
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
   "workers_dev": true,
   "preview_urls": true,
   "observability": { "enabled": true },
-  "main": "@tanstack/react-start/server-entry",
+  "main": "./src/server.ts",
+  "assets": { "binding": "ASSETS", "run_worker_first": true },
   "routes": [{ "pattern": "www.zevium.dev", "custom_domain": true }],
 }

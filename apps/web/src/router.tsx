@@ -24,6 +24,8 @@ export interface RouterContext {
   /** Active Clerk org id; null when none selected. */
   orgId: string | null;
   principalCache: PrincipalCache;
+  /** Request-scoped SSR nonce setter; inert in browser router. */
+  applySsrNonce: (nonce: string) => void;
 }
 
 export interface PrincipalCache {
@@ -38,6 +40,7 @@ if (typeof convexUrl !== "string" || convexUrl.length === 0) {
 }
 
 export function getRouter(): AnyRouter {
+  let routerRef: AnyRouter | null = null;
   // TanStack Start calls getRouter once per SSR request and once in the
   // browser. Keeping both clients here isolates SSR auth and query caches
   // without relying on worker AsyncLocalStorage support.
@@ -95,6 +98,11 @@ export function getRouter(): AnyRouter {
       orgSlug: null,
       orgId: null,
       principalCache,
+      applySsrNonce: (nonce: string) => {
+        if (routerRef !== null) {
+          routerRef.options.ssr = { ...routerRef.options.ssr, nonce };
+        }
+      },
     } satisfies RouterContext,
     defaultViewTransition: {
       types: ({ fromLocation, toLocation }) => {
@@ -118,6 +126,8 @@ export function getRouter(): AnyRouter {
   });
 
   setupRouterSsrQueryIntegration({ router, queryClient });
+  routerRef = router;
+  routerRef = router;
 
   return router;
 }

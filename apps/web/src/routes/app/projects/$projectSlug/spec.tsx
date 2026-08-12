@@ -17,6 +17,7 @@ import {
 import { Skeleton } from "#/components/ui/skeleton";
 import { api } from "#/lib/convex-api";
 import type { Id } from "#/lib/convex-data-model";
+
 import { isPrivilegedOrgRole } from "#/lib/org-capabilities";
 import type { RouterContext } from "#/router";
 
@@ -90,6 +91,7 @@ function SpecEditorPage() {
       <SpecEditor
         orgSlug={orgSlug}
         projectSlug={projectSlug}
+
         canAdminister={isPrivilegedOrgRole(membership?.role)}
       />
     </Suspense>

@@ -13,6 +13,7 @@ import {
 import type { SpecSource } from "./spec-source";
 import { filterRequestHeaders, filterResponseHeaders } from "./headers";
 import type { UsageSink } from "./usage";
+import { logDependencyFailure } from "./telemetry";
 import { jsonError } from "./errors";
 import { paymentRequiredResponse } from "./x402";
 import { assertSafeUpstreamTarget } from "./upstream-safety";
@@ -298,11 +299,20 @@ export async function handleGatewayRequest(
           cost: 0,
         });
       }
+
       if (authorization.reason === "organization_archived") {
         return jsonError(
           403,
           "organization_archived",
           "Organization is archived",
+          requestId,
+        );
+      }
+      if (authorization.reason === "key_untracked") {
+        return jsonError(
+          403,
+          "key_untracked",
+          "API key is not managed by Zevium",
           requestId,
         );
       }
@@ -353,6 +363,7 @@ export async function handleGatewayRequest(
     } else if (
       freeResult.status === "rejected" &&
       (freeResult.reason === "key_disabled" ||
+        freeResult.reason === "key_untracked" ||
         freeResult.reason === "organization_archived")
     ) {
       emitUsage(ctx, deps, {
@@ -377,9 +388,12 @@ export async function handleGatewayRequest(
       return jsonError(
         403,
         freeResult.reason,
+
         freeResult.reason === "organization_archived"
           ? "Organization is archived"
-          : "API key is disabled",
+          : freeResult.reason === "key_untracked"
+            ? "API key is not managed by Zevium"
+            : "API key is disabled",
         requestId,
       );
     }
@@ -421,6 +435,7 @@ export async function handleGatewayRequest(
     if (
       reserve.status === "rejected" &&
       (reserve.reason === "key_disabled" ||
+        reserve.reason === "key_untracked" ||
         reserve.reason === "key_cap_exceeded" ||
         reserve.reason === "organization_archived")
     ) {
@@ -446,11 +461,14 @@ export async function handleGatewayRequest(
       return jsonError(
         403,
         reserve.reason,
+
         reserve.reason === "key_disabled"
           ? "API key is disabled"
-          : reserve.reason === "organization_archived"
-            ? "Organization is archived"
-            : "Monthly credit cap reached for this key",
+          : reserve.reason === "key_untracked"
+            ? "API key is not managed by Zevium"
+            : reserve.reason === "organization_archived"
+              ? "Organization is archived"
+              : "Monthly credit cap reached for this key",
         requestId,
       );
     }
@@ -750,8 +768,8 @@ function emitUsage(
   event: Parameters<UsageSink["emit"]>[0],
 ): void {
   ctx.waitUntil(
-    Promise.resolve(deps.usageSink.emit(event)).catch((err) => {
-      console.error("usage emit failed", err);
+    Promise.resolve(deps.usageSink.emit(event)).catch(() => {
+      logDependencyFailure("usage_sink");
     }),
   );
 }

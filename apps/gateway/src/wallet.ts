@@ -51,8 +51,9 @@ import {
 export type InFlightEntry = {
   cost: number;
   createdAt: number;
-  /** Present for keyed reservations so their aggregate is cap-enforced. */
+  /** Physical key retained for audit/debug compatibility. */
   keyId?: string;
+
   /** Immutable cap/family facts captured before this reservation. */
   keyBudget?: KeyBudgetSnapshot;
 };
@@ -178,7 +179,12 @@ export type KeyAuthorizationResult =
   | { status: "allowed"; keyBudget: KeyBudgetSnapshot }
   | {
       status: "rejected";
-      reason: "key_disabled" | "insufficient_credits" | "organization_archived";
+
+      reason:
+        | "key_disabled"
+        | "key_untracked"
+        | "insufficient_credits"
+        | "organization_archived";
       available?: number;
     };
 
@@ -226,6 +232,7 @@ export type SyncGrantsResult =
 /** Per-key control metadata mirrored from the control-plane keySettings table. */
 export type KeySetting = {
   keyId: string;
+
   keyFamilyId?: string;
   /** Absent = unlimited. */
   monthlyCapCredits?: number;
@@ -255,6 +262,7 @@ const K_FLUSH_SEQ = "flushSeq";
 const K_FREE_PREFIX = "free:";
 const K_KEY_SETTINGS = "keySettings";
 const K_KEY_SETTINGS_AT = "keySettingsSyncedAt";
+
 const K_ORG_ARCHIVED = "organizationArchived";
 const K_SETTLED_PREFIX = "settled:";
 const K_DEAD_LETTER_PREFIX = "dead-letter:";
@@ -299,7 +307,8 @@ function sumInFlightForKey(
 ): number {
   let total = 0;
   for (const entry of Object.values(inFlight)) {
-    if (entry.keyId === keyId) total += entry.cost;
+    if ((entry.keyBudget?.keyFamilyId ?? entry.keyId) === keyId)
+      total += entry.cost;
     if (!Number.isSafeInteger(total)) {
       throw new Error("Key hold total exceeds safe integer range");
     }
@@ -338,8 +347,8 @@ export function utcMonthKey(ms: number = Date.now()): string {
   return new Date(ms).toISOString().slice(0, 7);
 }
 
-function settledStorageKey(keyId: string, month: string): string {
-  return `${K_SETTLED_PREFIX}${keyId}:${month}`;
+function settledStorageKey(familyId: string, month: string): string {
+  return `${K_SETTLED_PREFIX}${familyId}:${month}`;
 }
 
 /** Parse a keySettings array from the /wallet-grants JSON payload. */
@@ -351,6 +360,7 @@ function parseKeySettings(raw: unknown): KeySetting[] {
     const r = row as Record<string, unknown>;
     if (typeof r.keyId !== "string" || r.keyId.length === 0) continue;
     if (typeof r.disabled !== "boolean") continue;
+
     const setting: KeySetting = { keyId: r.keyId, disabled: r.disabled };
     if (typeof r.keyFamilyId === "string" && r.keyFamilyId.length > 0) {
       setting.keyFamilyId = r.keyFamilyId;
@@ -387,6 +397,7 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
   #lastCompactionAt = 0;
   #keySettings: Map<string, KeySetting> = new Map();
   #keySettingsSyncedAt = 0;
+
   #orgArchived = false;
   #syncInFlight: Promise<SyncGrantsResult> | null = null;
   #flushSeq = 0;
@@ -402,6 +413,7 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
   async #load(): Promise<void> {
     const stored = await this.ctx.storage.get<
       | number
+      | string
       | Record<string, InFlightEntry>
       | string[]
       | PendingSettlement[]
@@ -419,6 +431,7 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
       K_FLUSH_SEQ,
       K_KEY_SETTINGS,
       K_KEY_SETTINGS_AT,
+
       K_DEAD_LETTERS,
       K_LAST_COMPACTION_AT,
       K_ORG_ARCHIVED,
@@ -462,6 +475,7 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
     this.#keySettings = new Map(Object.entries(settingsMap));
     this.#keySettingsSyncedAt =
       (stored.get(K_KEY_SETTINGS_AT) as number | undefined) ?? 0;
+
     this.#deadLetters =
       (stored.get(K_DEAD_LETTERS) as DeadLetterSettlement[] | undefined) ?? [];
     this.#lastCompactionAt =
@@ -551,6 +565,7 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
       lastCompactionAt: number;
       keySettings: Record<string, KeySetting>;
       keySettingsSyncedAt: number;
+
       organizationArchived: boolean;
       settledCounter: { storageKey: string; amount: number };
       settlementDeadLetters: SettlementDeadLetter[];
@@ -583,6 +598,7 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
         await txn.put(K_KEY_SETTINGS, keys.keySettings);
       if (keys.keySettingsSyncedAt !== undefined)
         await txn.put(K_KEY_SETTINGS_AT, keys.keySettingsSyncedAt);
+
       if (keys.organizationArchived !== undefined)
         await txn.put(K_ORG_ARCHIVED, keys.organizationArchived);
       if (keys.settledCounter !== undefined) {
@@ -699,6 +715,12 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
     });
   }
 
+  /**
+   * Security-owned v2 registry consumer hook. Receiver authenticates/hash-chain
+   * verifies event, then invokes this on wallet selected by clerkOrgId.
+   * Terminal membership revocation bypasses 60s checkpoint throttling.
+   */
+
   async reserve(
     reservationId: string,
     cost: number,
@@ -758,8 +780,14 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
 
       // Per-key enforcement: disabled, expired grace, and all active holds.
       const currentSetting = opts.keyId
-        ? (this.#keySettings.get(opts.keyId) ?? setting)
+        ? setting === undefined
+          ? null
+          : (this.#keySettings.get(opts.keyId) ?? setting)
         : null;
+      if (opts.keyId && currentSetting === null) {
+        return { status: "rejected", reason: "key_untracked" };
+      }
+
       const keyId = opts.keyId ?? "unscoped";
       const period = utcMonthKey(now);
       const used =
@@ -772,13 +800,13 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
           return { status: "rejected", reason: "key_disabled" };
         }
         if (currentSetting.monthlyCapCredits !== undefined) {
-          const month = utcMonthKey(now);
-          const used =
+          const familyId = currentSetting.keyFamilyId ?? currentSetting.keyId;
+          const familyUsed =
             (await this.ctx.storage.get<number>(
-              settledStorageKey(opts.keyId, month),
+              settledStorageKey(familyId, period),
             )) ?? 0;
-          const reserved = sumInFlightForKey(this.#inFlight, opts.keyId);
-          const projected = used + reserved + cost;
+          const familyReserved = sumInFlightForKey(this.#inFlight, familyId);
+          const projected = familyUsed + familyReserved + cost;
           if (!Number.isSafeInteger(projected)) {
             return { status: "rejected", reason: "wallet arithmetic overflow" };
           }
@@ -807,6 +835,7 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
       };
       this.#inFlight[reservationId] = {
         cost,
+
         createdAt: reservedAt,
         ...(opts.keyId ? { keyId: opts.keyId } : {}),
         keyBudget,
@@ -887,12 +916,21 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
         inFlight: { ...this.#inFlight },
         pendingSettlements: this.#pendingSettlements.map((s) => ({ ...s })),
         terminal: { ...this.#terminal },
-        ...(authoritativeUsage?.keyId && cost > 0
+
+        ...((authoritativeUsage !== undefined
+          ? (authoritativeUsage.keyFamilyId ?? authoritativeUsage.keyId)
+          : (entry.keyBudget?.keyFamilyId ?? entry.keyId)) !== undefined &&
+        cost > 0
           ? {
               settledCounter: {
                 storageKey: settledStorageKey(
-                  authoritativeUsage.keyId,
-                  authoritativeUsage.budgetPeriod,
+                  authoritativeUsage !== undefined
+                    ? (authoritativeUsage.keyFamilyId ??
+                        authoritativeUsage.keyId)
+                    : (entry.keyBudget?.keyFamilyId ?? entry.keyId)!,
+                  authoritativeUsage?.budgetPeriod ??
+                    entry.keyBudget?.period ??
+                    utcMonthKey(settledAt),
                 ),
                 amount: cost,
               },
@@ -988,8 +1026,14 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
       if (this.#orgArchived) {
         return { status: "rejected", reason: "organization_archived" };
       }
-      const currentSetting = this.#keySettings.get(opts.keyId) ?? setting;
-      if (currentSetting && this.#isKeyDisabled(currentSetting, nowMs)) {
+      const currentSetting =
+        setting === undefined
+          ? null
+          : (this.#keySettings.get(opts.keyId) ?? setting);
+      if (currentSetting === null) {
+        return { status: "rejected", reason: "key_untracked" };
+      }
+      if (this.#isKeyDisabled(currentSetting, nowMs)) {
         return { status: "rejected", reason: "key_disabled" };
       }
       if (this.#balance <= 0) {
@@ -1044,8 +1088,14 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
       if (this.#orgArchived) {
         return { status: "rejected", reason: "organization_archived" };
       }
-      const currentSetting = this.#keySettings.get(keyId) ?? setting;
-      if (currentSetting && this.#isKeyDisabled(currentSetting, nowMs)) {
+      const currentSetting =
+        setting === undefined
+          ? null
+          : (this.#keySettings.get(keyId) ?? setting);
+      if (currentSetting === null) {
+        return { status: "rejected", reason: "key_untracked" };
+      }
+      if (this.#isKeyDisabled(currentSetting, nowMs)) {
         return { status: "rejected", reason: "key_disabled" };
       }
       if (this.#balance <= 0) {
@@ -1564,6 +1614,7 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
         sequence: this.#sequence,
         keySettings: Object.fromEntries(this.#keySettings),
         keySettingsSyncedAt: this.#keySettingsSyncedAt,
+
         organizationArchived: this.#orgArchived,
       });
 
@@ -1586,19 +1637,14 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
     keyId: string,
     clerkOrgId: string | undefined,
     nowMs: number,
-  ): Promise<KeySetting | null> {
-    if (!clerkOrgId) return null;
-    const stale = nowMs - this.#keySettingsSyncedAt >= SYNC_GRANTS_WINDOW_MS;
-    if (stale) {
-      if (this.#keySettingsSyncedAt === 0) {
-        await this.#syncGrantsSingleFlight(clerkOrgId, nowMs);
-      } else {
-        this.ctx.waitUntil(
-          this.#syncGrantsSingleFlight(clerkOrgId, nowMs).then(
-            () => undefined,
-            () => undefined,
-          ),
-        );
+  ): Promise<KeySetting | null | undefined> {
+    if (!clerkOrgId) return undefined;
+    if (nowMs - this.#keySettingsSyncedAt >= SYNC_GRANTS_WINDOW_MS) {
+      await this.#syncGrantsSingleFlight(clerkOrgId, nowMs);
+      // Once positive control state expires, a failed refresh cannot preserve
+      // spending authority indefinitely. Missing row then fails closed.
+      if (nowMs - this.#keySettingsSyncedAt >= SYNC_GRANTS_WINDOW_MS) {
+        return undefined;
       }
     }
     return this.#keySettings.get(keyId) ?? null;

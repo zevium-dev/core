@@ -5,7 +5,10 @@
 
 import { ConvexHttpClient } from "convex/browser";
 import { makeFunctionReference } from "convex/server";
+
 import { MAX_USAGE_INGEST_EVENTS } from "@zevium/shared";
+
+import { costBucket, latencyBucket } from "./telemetry";
 
 /** Hot-path event emitted by the pipeline (tests / optional logging). */
 export type UsageEvent = {
@@ -148,8 +151,12 @@ export class ConsoleUsageSink implements UsageSink {
   emit(event: UsageEvent): void {
     console.log(
       JSON.stringify({
+        schema: 1,
         type: "zevium.usage",
-        ...event,
+        outcome: event.outcome,
+        statusClass: `${Math.floor(event.status / 100)}xx`,
+        latencyBucket: latencyBucket(event.latencyMs),
+        costBucket: costBucket(event.cost),
       }),
     );
   }

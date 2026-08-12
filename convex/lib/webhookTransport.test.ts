@@ -129,10 +129,10 @@ describe("deliverPinnedHttps", () => {
     }
   });
 
-  it("re-resolves and re-pins each redirect, stripping sensitive cross-origin headers", async () => {
+  it("rejects cross-origin redirects before leaking signed payload", async () => {
     const resolved: string[] = [];
     const requests: PinnedRequest[] = [];
-    const result = await deliverPinnedHttps(INPUT, {
+    const delivery = deliverPinnedHttps(INPUT, {
       now: () => 1_000,
       resolveHostname: async (hostname) => {
         resolved.push(hostname);
@@ -154,15 +154,9 @@ describe("deliverPinnedHttps", () => {
       },
     });
 
-    expect(result.status).toBe(204);
-    expect(resolved).toEqual(["webhook.example", "other.example"]);
-    expect(requests.map(({ address }) => address)).toEqual([
-      "93.184.216.34",
-      "142.250.72.14",
-    ]);
-    expect(requests[1]!.headers["x-zevium-signature"]).toBeUndefined();
-    expect(requests[1]!.headers["X-Zevium-Delivery-Id"]).toBeUndefined();
-    expect(requests[1]!.headers["Content-Type"]).toBe("application/json");
+    await expect(delivery).rejects.toMatchObject({ retryable: false });
+    expect(resolved).toEqual(["webhook.example"]);
+    expect(requests).toHaveLength(1);
   });
 
   it("blocks private redirect before opening its connection", async () => {

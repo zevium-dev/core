@@ -41,6 +41,7 @@ export function formatCycleMonthLabel(cycleStart: number): string {
 export type CycleBreakdownLike = {
   totalCalls: number;
   totalCredits: number;
+
   byProject?: readonly unknown[];
   byKey?: readonly unknown[];
 };

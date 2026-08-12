@@ -30,6 +30,39 @@ export async function draftFingerprint(value: string): Promise<string> {
   ).join("");
 }
 
+/** Stable hash over complete credential membership, identity, and revision. */
+export async function credentialSetFingerprint(
+  rows: readonly {
+    _id: unknown;
+    name: string;
+    revision?: number;
+    updatedAt: number;
+  }[],
+): Promise<string> {
+  const canonical = rows
+    .map((row) => ({
+      id: String(row._id),
+      name: row.name,
+      revision: row.revision ?? row.updatedAt,
+      updatedAt: row.updatedAt,
+    }))
+    .sort((left, right) =>
+      left.id === right.id
+        ? left.name.localeCompare(right.name)
+        : left.id.localeCompare(right.id),
+    );
+  return await draftFingerprint(JSON.stringify(canonical));
+}
+
+function credentialRevision(
+  rows: readonly { revision?: number; updatedAt: number }[],
+): number {
+  return rows.reduce(
+    (latest, row) => Math.max(latest, row.revision ?? row.updatedAt),
+    0,
+  );
+}
+
 /**
  * A publish test is valid only for this exact saved draft.
  * Keep this pure so the UI query and authoritative publish gate cannot drift.
@@ -38,9 +71,13 @@ export async function readinessValidity(
   readiness: {
     status: string;
     draftHash: string;
+    credentialRevision?: number;
+    credentialFingerprint?: string;
     testedAt: number;
   } | null,
   draft: string | null,
+  credentialRevision: number,
+  credentialFingerprint: string,
   nowMs: number = Date.now(),
 ): Promise<ReadinessValidity> {
   if (readiness === null) return { current: false, reason: "missing" };
@@ -53,6 +90,12 @@ export async function readinessValidity(
   }
   if (readiness.draftHash !== (await draftFingerprint(draft))) {
     return { current: false, reason: "draft_changed" };
+  }
+  if (
+    readiness.credentialRevision !== credentialRevision ||
+    readiness.credentialFingerprint !== credentialFingerprint
+  ) {
+    return { current: false, reason: "credentials_changed" };
   }
   return { current: true, reason: null };
 }
@@ -105,6 +148,7 @@ export const recordPassingTest = internalMutation({
   args: {
     projectId: v.id("projects"),
     draftHash: v.string(),
+
     healthCheckUrl: v.string(),
     healthCheckMethod: v.union(v.literal("GET"), v.literal("HEAD")),
   },
@@ -113,6 +157,13 @@ export const recordPassingTest = internalMutation({
       .query("specs")
       .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
       .unique();
+    const credentials = await ctx.db
+      .query("upstreamCredentials")
+      .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
+      .collect();
+    const currentCredentialRevision = credentialRevision(credentials);
+    const currentCredentialFingerprint =
+      await credentialSetFingerprint(credentials);
     if (
       draft === null ||
       args.draftHash !== (await draftFingerprint(draft.draft))
@@ -127,6 +178,8 @@ export const recordPassingTest = internalMutation({
       draftHash: args.draftHash,
       healthCheckUrl: args.healthCheckUrl,
       healthCheckMethod: args.healthCheckMethod,
+      credentialRevision: currentCredentialRevision,
+      credentialFingerprint: currentCredentialFingerprint,
       status: "ok" as const,
       testedAt: Date.now(),
     };
@@ -181,7 +234,18 @@ export const getCurrent = query({
       .query("specs")
       .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
       .unique();
-    const validity = await readinessValidity(readiness, draft?.draft ?? null);
+    const credentials = await ctx.db
+      .query("upstreamCredentials")
+      .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
+      .collect();
+    const currentCredentialRevision = credentialRevision(credentials);
+    const credentialFingerprint = await credentialSetFingerprint(credentials);
+    const validity = await readinessValidity(
+      readiness,
+      draft?.draft ?? null,
+      currentCredentialRevision,
+      credentialFingerprint,
+    );
     return {
       readiness,
       ...validity,

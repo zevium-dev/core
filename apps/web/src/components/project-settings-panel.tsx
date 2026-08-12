@@ -55,7 +55,6 @@ import type { Doc, Id } from "#/lib/convex-data-model";
 import { humanError } from "#/lib/human-error";
 import { parseTagsInput } from "#/lib/project-helpers";
 import { deliveryStatusView, truncateError } from "#/lib/webhook-delivery";
-import { maskSecret } from "#/lib/webhook-secret";
 import { formatRelativeTime } from "#/lib/relative-time";
 
 const MIN_RETIREMENT_NOTICE_MS = 7 * 24 * 60 * 60 * 1000;
@@ -975,27 +974,26 @@ function UpstreamCredentialsCard({ project }: { project: Doc<"projects"> }) {
 
 // ---------------------------------------------------------------------------
 // Webhooks — endpoint config + recent deliveries.
-// The signing secret is generated server-side by webhooks.upsertEndpoint and
-// returned in the endpoint doc; we surface it here (masked by default) with a
-// copy + reveal toggle. Deliveries come from webhooks.listDeliveries.
+// Endpoint reads contain metadata only. Admins explicitly decrypt the signing
+// secret on demand; hiding it drops the plaintext from component state.
 // ---------------------------------------------------------------------------
 function WebhooksCard({ project }: { project: Doc<"projects"> }) {
   const endpointQuery = useQuery(
     convexQuery(api.webhooks.getEndpoint, { projectId: project._id }),
   );
+
+  const endpoint = endpointQuery.data ?? null;
   const deliveriesQuery = useQuery(
     convexQuery(api.webhooks.listDeliveries, {
       projectId: project._id,
       paginationOpts: { numItems: 10, cursor: null },
     }),
   );
-
-  const endpoint = endpointQuery.data ?? null;
   const deliveries = deliveriesQuery.data?.page ?? [];
 
   const [url, setUrl] = useState("");
   const [active, setActive] = useState(true);
-  const [revealSecret, setRevealSecret] = useState(false);
+  const [revealedSecret, setRevealedSecret] = useState<string | null>(null);
   const [copiedSecret, setCopiedSecret] = useState(false);
   const [webhookError, setWebhookError] = useState<string | null>(null);
   const activeProjectRef = useRef<Id<"projects"> | null>(project._id);
@@ -1004,7 +1002,7 @@ function WebhooksCard({ project }: { project: Doc<"projects"> }) {
     activeProjectRef.current = project._id;
     setUrl("");
     setActive(true);
-    setRevealSecret(false);
+    setRevealedSecret(null);
     setCopiedSecret(false);
     setWebhookError(null);
     return () => {
@@ -1018,12 +1016,41 @@ function WebhooksCard({ project }: { project: Doc<"projects"> }) {
     if (endpoint !== null) {
       setUrl(endpoint.url);
       setActive(endpoint.active);
-      setRevealSecret(false);
+
+      setRevealedSecret(null);
       setCopiedSecret(false);
     }
   }, [endpoint, project._id]);
 
   const upsertMut = useConvexMutation(api.webhooks.upsertEndpoint);
+  const revealMut = useConvexMutation(api.webhooks.revealSecret);
+  const rotateMut = useConvexMutation(api.webhooks.rotateSecret);
+
+  const revealMutation = useMutation({
+    mutationFn: () => revealMut({ projectId: project._id }),
+    onSuccess: (result) => {
+      if (result === null) {
+        toast.error("Secret was already revealed. Rotate it to get a new one.");
+        return;
+      }
+      setRevealedSecret(result.secret);
+    },
+    onError: (err: unknown) =>
+      toast.error(humanError(err, "Could not reveal signing secret")),
+  });
+
+  const rotateMutation = useMutation({
+    mutationFn: () =>
+      rotateMut({ projectId: project._id, graceSeconds: 60 * 60 }),
+    onSuccess: (result) => {
+      setRevealedSecret(result.secret);
+      setCopiedSecret(false);
+      revealMutation.reset();
+      toast.success("Signing secret rotated; prior version works for 1 hour");
+    },
+    onError: (err: unknown) =>
+      toast.error(humanError(err, "Could not rotate signing secret")),
+  });
 
   const { mutate: saveEndpoint, isPending: saving } = useMutation({
     mutationFn: async (input: { url: string; active: boolean }) => ({
@@ -1069,10 +1096,10 @@ function WebhooksCard({ project }: { project: Doc<"projects"> }) {
   }
 
   async function copySecret() {
-    if (!endpoint?.secret) return;
+    if (!revealedSecret) return;
     const projectId = project._id;
     try {
-      await navigator.clipboard.writeText(endpoint.secret);
+      await navigator.clipboard.writeText(revealedSecret);
       if (activeProjectRef.current !== projectId) return;
       setCopiedSecret(true);
       setTimeout(() => {
@@ -1138,6 +1165,7 @@ function WebhooksCard({ project }: { project: Doc<"projects"> }) {
               aria-invalid={webhookError !== null}
               aria-describedby="webhook-url-help"
             />
+
             <p
               id="webhook-url-help"
               role={webhookError ? "alert" : undefined}
@@ -1150,25 +1178,39 @@ function WebhooksCard({ project }: { project: Doc<"projects"> }) {
 
           <div className="space-y-2">
             <Label htmlFor="webhook-secret">Signing secret</Label>
-            {endpoint?.secret ? (
+            {endpoint !== null ? (
               <div className="flex items-center gap-2">
                 <Input
                   id="webhook-secret"
                   readOnly
                   value={
-                    revealSecret ? endpoint.secret : maskSecret(endpoint.secret)
+                    revealMutation.isPending
+                      ? "Decrypting…"
+                      : (revealedSecret ?? "••••••••••••••••••••••••••••••••")
                   }
                   className="font-mono text-sm"
                   aria-label="Webhook signing secret"
+                  aria-busy={revealMutation.isPending}
                 />
                 <Button
                   type="button"
                   variant="outline"
                   size="icon"
-                  onClick={() => setRevealSecret((v) => !v)}
-                  aria-label={revealSecret ? "Hide secret" : "Reveal secret"}
+                  onClick={() => {
+                    if (revealedSecret !== null) {
+                      setRevealedSecret(null);
+                      setCopiedSecret(false);
+                      revealMutation.reset();
+                      return;
+                    }
+                    revealMutation.mutate();
+                  }}
+                  disabled={revealMutation.isPending}
+                  aria-label={
+                    revealedSecret !== null ? "Hide secret" : "Reveal secret"
+                  }
                 >
-                  {revealSecret ? (
+                  {revealedSecret !== null ? (
                     <EyeOff className="size-4" />
                   ) : (
                     <Eye className="size-4" />
@@ -1179,6 +1221,7 @@ function WebhooksCard({ project }: { project: Doc<"projects"> }) {
                   variant="outline"
                   size="icon"
                   onClick={copySecret}
+                  disabled={revealedSecret === null}
                   aria-label="Copy secret"
                 >
                   {copiedSecret ? (
@@ -1186,6 +1229,14 @@ function WebhooksCard({ project }: { project: Doc<"projects"> }) {
                   ) : (
                     <Copy className="size-4" />
                   )}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => rotateMutation.mutate()}
+                  disabled={rotateMutation.isPending}
+                >
+                  {rotateMutation.isPending ? "Rotating…" : "Rotate"}
                 </Button>
               </div>
             ) : (
@@ -1270,7 +1321,7 @@ function WebhooksCard({ project }: { project: Doc<"projects"> }) {
                 const err = truncateError(d.lastError);
                 return (
                   <li
-                    key={d._id}
+                    key={d.id}
                     className="flex items-start justify-between gap-2 rounded-md border border-border px-2.5 py-2 text-sm"
                   >
                     <div className="min-w-0 space-y-0.5">
@@ -1360,9 +1411,14 @@ function isValidWebhookUrl(url: string): boolean {
   } catch {
     return false;
   }
-  if (parsed.protocol === "https:") return true;
-  if (parsed.protocol === "http:" && parsed.hostname === "localhost") {
-    return true;
-  }
-  return false;
+  const hostname = parsed.hostname.toLowerCase();
+  return (
+    parsed.protocol === "https:" &&
+    parsed.username.length === 0 &&
+    parsed.password.length === 0 &&
+    hostname !== "localhost" &&
+    !hostname.endsWith(".localhost") &&
+    !hostname.endsWith(".local") &&
+    !hostname.endsWith(".internal")
+  );
 }

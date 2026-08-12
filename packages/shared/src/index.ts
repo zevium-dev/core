@@ -51,6 +51,7 @@ export type {
   ReviewAggregateContract,
 } from "./quality.js";
 export { REGISTRY_V2_SHARED_VECTORS } from "./registry-v2-vectors.js";
+export { isPublicIp } from "./public-ip.js";
 
 export {
   ORG_CAPABILITIES,

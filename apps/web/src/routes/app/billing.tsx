@@ -126,6 +126,7 @@ function BillingPage() {
 
 function BillingContent({
   checkoutSessionId,
+
   checkoutIntentId,
   orgSlug,
 }: {

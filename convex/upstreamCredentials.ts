@@ -1,10 +1,22 @@
 import { v } from "convex/values";
 
-import { mutation, query } from "./_generated/server";
+import { mutation, internalMutation, query } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
-import { encryptCredential } from "./lib/credentialCrypto";
-import { requireOrgAdmin, requireProjectMember } from "./lib/auth";
+import {
+  credentialBinding,
+  encryptCredential,
+  migrateStoredSecret,
+} from "./lib/credentialCrypto";
+import {
+  requireIdentity,
+  requireOrgAdmin,
+  requireProjectMember,
+} from "./lib/auth";
 import { enqueuePublishedProjectProjection } from "./registrySync";
+import {
+  bumpSecurityRolloutGeneration,
+  requireCompletedSecurityAudit,
+} from "./securityRollout";
 
 const HEADER_NAME = /^[!#$%&'*+\-.^_`|~0-9a-z]+$/;
 const BLOCKED_HEADERS = new Set([
@@ -78,14 +90,15 @@ export const upsert = mutation({
     requireOrgAdmin(claims);
     const name = normalizeName(args.name);
     const secret = validateSecret(args.secret);
-    const encrypted = await encryptCredential(secret);
-    const updatedAt = Date.now();
+    const encrypted = await encryptCredential(secret, args.projectId, name);
     const existing = await ctx.db
       .query("upstreamCredentials")
       .withIndex("by_project_name", (q) =>
         q.eq("projectId", args.projectId).eq("name", name),
       )
       .unique();
+    const updatedAt = Date.now();
+    const revision = (existing?.revision ?? 0) + 1;
 
     let id: Id<"upstreamCredentials">;
     if (existing === null) {
@@ -93,12 +106,19 @@ export const upsert = mutation({
         projectId: args.projectId,
         name,
         ...encrypted,
+        revision,
         updatedAt,
       });
     } else {
       id = existing._id;
-      await ctx.db.patch(existing._id, { ...encrypted, updatedAt });
+      await ctx.db.patch(existing._id, {
+        ...encrypted,
+        secret: undefined,
+        revision,
+        updatedAt,
+      });
     }
+    await bumpSecurityRolloutGeneration(ctx);
     await enqueuePublishedProjectProjection(ctx, args.projectId);
     return { id, name, updatedAt };
   },
@@ -110,12 +130,94 @@ export const remove = mutation({
     ctx,
     args,
   ): Promise<{ deleted: Id<"upstreamCredentials"> }> => {
-    const credential = await ctx.db.get(args.credentialId);
-    if (credential === null) throw new Error("Upstream credential not found");
-    const { claims } = await requireProjectMember(ctx, credential.projectId);
+    // Role and active-org checks happen before touching caller-controlled id.
+    // Missing and cross-org rows intentionally collapse to one error.
+    const claims = await requireIdentity(ctx);
     requireOrgAdmin(claims);
+    if (!claims.orgId) throw new Error("Upstream credential unavailable");
+    const credential = await ctx.db.get(args.credentialId);
+    if (credential === null) throw new Error("Upstream credential unavailable");
+    const project = await ctx.db.get(credential.projectId);
+    const org =
+      project === null ? null : await ctx.db.get(project.organizationId);
+    if (org === null || org.clerkOrgId !== claims.orgId) {
+      throw new Error("Upstream credential unavailable");
+    }
     await ctx.db.delete(credential._id);
+    await bumpSecurityRolloutGeneration(ctx);
     await enqueuePublishedProjectProjection(ctx, credential.projectId);
     return { deleted: credential._id };
+  },
+});
+
+export type CredentialMigrationPage = {
+  scanned: number;
+  current: number;
+  old: number;
+  broken: number;
+  corrupt: number;
+  plaintext: number;
+  recovered: number;
+  rewrapped: number;
+  scrubbed: number;
+  continueCursor: string;
+  isDone: boolean;
+};
+
+/** Cursor-bounded dual-envelope migration. Repeat until isDone, then audit again. */
+export const migrateLegacyPlaintext = internalMutation({
+  args: {
+    auditId: v.string(),
+    cursor: v.optional(v.union(v.string(), v.null())),
+    numItems: v.optional(v.number()),
+  },
+  handler: async (ctx, args): Promise<CredentialMigrationPage> => {
+    const audit = await requireCompletedSecurityAudit(ctx, args.auditId);
+    const requested = args.numItems ?? 50;
+    const numItems = Math.max(1, Math.min(100, Math.floor(requested)));
+    const result = await ctx.db.query("upstreamCredentials").paginate({
+      cursor: args.cursor ?? null,
+      numItems,
+    });
+    const counts = {
+      scanned: result.page.length,
+      current: 0,
+      old: 0,
+      broken: 0,
+      corrupt: 0,
+      plaintext: 0,
+      recovered: 0,
+      rewrapped: 0,
+      scrubbed: 0,
+    };
+    for (const row of result.page) {
+      if (row._creationTime > audit.highWaterCreationTime) {
+        throw new Error("Credential row exceeds audited high-water fence");
+      }
+      const migration = await migrateStoredSecret(
+        row,
+        credentialBinding(row.projectId, row.name),
+      );
+      if (migration.plaintext) counts.plaintext += 1;
+      if (migration.old) counts.old += 1;
+      if (migration.corrupt) counts.corrupt += 1;
+      if (migration.broken) counts.broken += 1;
+      else counts.current += 1;
+      if (migration.recovered) counts.recovered += 1;
+      if (migration.rewrapped) counts.rewrapped += 1;
+      if (migration.scrubbed) counts.scrubbed += 1;
+      if (migration.patch) {
+        await ctx.db.patch(row._id, {
+          ...migration.patch,
+          revision: (row.revision ?? 0) + 1,
+          updatedAt: Date.now(),
+        });
+      }
+    }
+    return {
+      ...counts,
+      continueCursor: result.continueCursor,
+      isDone: result.isDone,
+    };
   },
 });

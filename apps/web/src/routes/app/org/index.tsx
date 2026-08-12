@@ -43,6 +43,7 @@ import { Label } from "#/components/ui/label";
 import { api } from "#/lib/convex-api";
 import { clerkShadcnTheme } from "#/lib/clerk-theme";
 import { humanError } from "#/lib/human-error";
+
 import { isPrivilegedOrgRole } from "#/lib/org-capabilities";
 import { connectedAccountDisplay } from "#/lib/stripe-ui";
 
@@ -146,6 +147,7 @@ function PublicHandleCard() {
     enabled: valid && changed && !handleLocked && !mine.isPending,
   });
   const unavailable = lookup.data?.available === false;
+
   const availabilityConfirmed = lookup.data?.available === true;
   const checking = lookup.isPending && valid && changed;
   const isAdmin = isPrivilegedOrgRole(membership?.role);
@@ -196,6 +198,7 @@ function PublicHandleCard() {
             aria-busy={checking}
             readOnly={!isAdmin || handleLocked || mine.isPending}
           />
+
           <Button
             type="button"
             onClick={() => setConfirming(true)}
@@ -295,6 +298,7 @@ function PublicHandleCard() {
 
 function PublisherPaymentsCard() {
   const { membership } = useOrganization();
+
   const isAdmin = isPrivilegedOrgRole(membership?.role);
   const [publisherCountry, setPublisherCountry] = useState("");
   const payoutState = useQuery(convexQuery(api.payouts.getPayoutState, {}));
@@ -374,6 +378,11 @@ function PublisherPaymentsCard() {
       </CardHeader>
       <CardContent className="space-y-3">
         <p className="text-sm text-muted-foreground">{display.description}</p>
+        {!isAdmin ? (
+          <p className="rounded-md border bg-muted/40 p-3 text-sm text-muted-foreground">
+            Organization admins manage Stripe onboarding and payout settings.
+          </p>
+        ) : null}
         {profile.requirements.length > 0 ? (
           <ul className="list-disc space-y-1 pl-4 text-sm text-muted-foreground">
             {profile.requirements.map((requirement) => (
@@ -381,6 +390,7 @@ function PublisherPaymentsCard() {
             ))}
           </ul>
         ) : null}
+
         {!isAdmin ? (
           <p className="text-sm text-muted-foreground">
             An organization admin manages Stripe onboarding and payout details.

@@ -17,6 +17,7 @@ export type UsageListItem = {
   credits: number;
   status: number;
   latencyMs: number;
+
   keyId: string;
   memberId?: string | null;
   memberName?: string | null;
@@ -278,6 +279,7 @@ export const listForOrg = query({
       if (args.keyId !== undefined && event.keyId !== args.keyId) continue;
       if (args.endpoint !== undefined && event.endpoint !== args.endpoint)
         continue;
+
       if (method !== undefined && event.method.toUpperCase() !== method)
         continue;
       page.push(await usageView(ctx, event, canViewOrgUsage));

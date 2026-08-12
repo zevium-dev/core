@@ -125,6 +125,7 @@ type UsageListItem = {
   credits: number;
   status: number;
   latencyMs: number;
+
   keyId: string;
   memberId?: string | null;
   memberName?: string | null;

@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { api, internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import {
+  credentialSetFingerprint,
   draftFingerprint,
   READINESS_TTL_MS,
   readinessValidity,
@@ -108,13 +109,18 @@ describe("publish readiness validity", () => {
   it("rejects missing, stale, changed, and non-passing readiness", async () => {
     const now = Date.UTC(2026, 6, 19, 12, 0, 0);
     const hash = await draftFingerprint(DRAFT_A);
+    const fingerprint = await credentialSetFingerprint([]);
     const passing = {
       status: "ok",
       draftHash: hash,
+      credentialRevision: 0,
+      credentialFingerprint: fingerprint,
       testedAt: now,
     };
 
-    await expect(readinessValidity(null, DRAFT_A, now)).resolves.toEqual({
+    await expect(
+      readinessValidity(null, DRAFT_A, 0, fingerprint, now),
+    ).resolves.toEqual({
       current: false,
       reason: "missing",
     });
@@ -122,17 +128,35 @@ describe("publish readiness validity", () => {
       readinessValidity(
         { ...passing, status: "reachable_unconfirmed" },
         DRAFT_A,
+        0,
+        fingerprint,
         now,
       ),
     ).resolves.toEqual({ current: false, reason: "status_not_ok" });
     await expect(
-      readinessValidity(passing, DRAFT_A, now + READINESS_TTL_MS + 1),
+      readinessValidity(
+        passing,
+        DRAFT_A,
+        0,
+        fingerprint,
+        now + READINESS_TTL_MS + 1,
+      ),
     ).resolves.toEqual({ current: false, reason: "expired" });
-    await expect(readinessValidity(passing, DRAFT_B, now)).resolves.toEqual({
+    await expect(
+      readinessValidity(passing, DRAFT_B, 0, fingerprint, now),
+    ).resolves.toEqual({
       current: false,
       reason: "draft_changed",
     });
-    await expect(readinessValidity(passing, DRAFT_A, now)).resolves.toEqual({
+    await expect(
+      readinessValidity(passing, DRAFT_A, 1, fingerprint, now),
+    ).resolves.toEqual({
+      current: false,
+      reason: "credentials_changed",
+    });
+    await expect(
+      readinessValidity(passing, DRAFT_A, 0, fingerprint, now),
+    ).resolves.toEqual({
       current: true,
       reason: null,
     });

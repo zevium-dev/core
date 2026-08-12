@@ -46,6 +46,7 @@ export const testConnection = action({
       projectId: args.projectId,
       clerkOrgId,
     });
+
     if (
       target.url === null ||
       target.method === null ||
