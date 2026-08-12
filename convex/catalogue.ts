@@ -1,10 +1,34 @@
-import { extractPricing, parseSpec } from "@zevium/shared";
+import {
+  extractPricing,
+  isOpenApiPublicCopyAllowed,
+  isPublicCopyAllowed,
+  parseSpec,
+} from "@zevium/shared";
 import { v } from "convex/values";
 import { query } from "./_generated/server";
 import type { Doc } from "./_generated/dataModel";
 import { getOrgByPublicHandle } from "./lib/auth";
 
 const PAGE_SIZE = 24;
+
+export function isListingPublicCopyAllowed(
+  project: Pick<Doc<"projects">, "name" | "slug" | "description" | "tags">,
+  org: Pick<Doc<"organizations">, "name" | "publicHandle">,
+  spec: string | null,
+): boolean {
+  const fields = [
+    project.name,
+    project.slug,
+    project.description ?? "",
+    ...project.tags,
+    org.name,
+    org.publicHandle ?? "",
+  ];
+  return (
+    isPublicCopyAllowed(fields.join("\n")) &&
+    (spec === null || isOpenApiPublicCopyAllowed(spec))
+  );
+}
 
 export type CatalogueSort = "newest" | "name" | "cheapest";
 
@@ -129,17 +153,9 @@ export const listPublic = query({
       )
       .collect();
 
-    // Total public+published count, decoupled from search/tag/price filtering
-    // below — the landing "APIs listed" stat wants the whole catalogue size,
-    // not a filtered subset. Bounded at 1000 docs (noted in the return type
-    // comment); catalogue growth past that undercounts the stat.
-    const totalDocs = await ctx.db
-      .query("projects")
-      .withIndex("by_visibility_status", (q) =>
-        q.eq("visibility", "public").eq("status", "published"),
-      )
-      .take(1000);
-    const total = totalDocs.length;
+    // Count only listings that pass current public-copy gates. Filtering by
+    // search/tag/price below does not alter this whole-catalogue total.
+    let total = 0;
 
     const filtered: Array<{
       project: Doc<"projects">;
@@ -149,14 +165,6 @@ export const listPublic = query({
     }> = [];
 
     for (const project of candidates) {
-      if (tag !== "" && !project.tags.includes(tag)) continue;
-
-      if (search !== "") {
-        const hay =
-          `${project.name} ${project.slug} ${project.description ?? ""} ${project.tags.join(" ")}`.toLowerCase();
-        if (!hay.includes(search)) continue;
-      }
-
       const org = await ctx.db.get(project.organizationId);
       if (org === null) continue;
       // Public URLs are only valid through the dedicated publisher handle.
@@ -171,6 +179,19 @@ export const listPublic = query({
         )
         .order("desc")
         .first();
+
+      if (!isListingPublicCopyAllowed(project, org, latest?.spec ?? null)) {
+        continue;
+      }
+      total += 1;
+
+      if (tag !== "" && !project.tags.includes(tag)) continue;
+
+      if (search !== "") {
+        const hay =
+          `${project.name} ${project.slug} ${project.description ?? ""} ${project.tags.join(" ")}`.toLowerCase();
+        if (!hay.includes(search)) continue;
+      }
 
       const pricing =
         latest === null ? null : summarizePublishedPricing(latest.spec);
@@ -295,6 +316,10 @@ export const getPublicDetail = query({
       .withIndex("by_project_published", (q) => q.eq("projectId", project._id))
       .order("desc")
       .first();
+
+    if (!isListingPublicCopyAllowed(project, org, latest?.spec ?? null)) {
+      return null;
+    }
 
     return {
       project: {

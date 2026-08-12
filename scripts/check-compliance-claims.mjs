@@ -1,23 +1,28 @@
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import {
+  existsSync,
+  lstatSync,
+  readFileSync,
+  readdirSync,
+  readlinkSync,
+  statSync,
+} from "node:fs";
 import { extname, join, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { findPublicClaimViolations } from "../packages/shared/src/public-claims.ts";
 
-export const DEFAULT_TARGETS = [
-  "README.md",
-  "SECURITY.md",
-  "PRODUCT.md",
-  "FLOW.md",
-  "DESIGN.md",
-  "TECH.md",
-  "docs",
-  "apps/web/src",
-  "apps/web/public",
-  "apps/gateway/src",
-  "convex",
-  "packages/shared/src",
-];
+// Candid control inventory and scanner fixtures necessarily name prohibited
+// phrases. They are not publication surfaces. Every other tracked text/code/
+// config file is discovered from Git, so new roots and extensions fail into
+// scope automatically.
+const EXCLUDED_PATHS = new Set([
+  "docs/launch-security-compliance.md",
+  "scripts/check-compliance-claims.mjs",
+  "scripts/check-compliance-claims.test.mjs",
+  "packages/shared/src/public-claims.ts",
+  "packages/shared/src/public-claims.test.ts",
+]);
 
-const EXCLUDED_PATHS = new Set(["docs/launch-security-compliance.md"]);
 const EXCLUDED_DIRECTORIES = new Set([
   ".git",
   ".turbo",
@@ -26,9 +31,28 @@ const EXCLUDED_DIRECTORIES = new Set([
   "dist",
   "node_modules",
 ]);
-const EXTENSIONS = new Set([
+
+const BINARY_EXTENSIONS = new Set([
+  ".avif",
+  ".gif",
+  ".gz",
+  ".ico",
+  ".jpeg",
+  ".jpg",
+  ".pdf",
+  ".png",
+  ".tar",
+  ".webp",
+  ".woff",
+  ".woff2",
+  ".zip",
+]);
+
+const TEXT_EXTENSIONS = new Set([
+  ".astro",
   ".cjs",
   ".css",
+  ".env",
   ".html",
   ".js",
   ".json",
@@ -41,58 +65,22 @@ const EXTENSIONS = new Set([
   ".ts",
   ".tsx",
   ".txt",
+  ".xml",
+  ".yaml",
+  ".yml",
 ]);
 
-const PROHIBITED = [
-  {
-    label: "SOC 2 claim",
-    pattern: /\bSOC\s*-?\s*2(?:\s+Type\s+(?:I{1,2}|[12]))?\b/giu,
-  },
-  {
-    label: "HIPAA claim",
-    pattern:
-      /\bHIPAA(?:\s*[- ]\s*(?:compliant|certified|eligible|ready))?\b/giu,
-  },
-  {
-    label: "privacy-law compliance claim",
-    pattern:
-      /\b(?:GDPR|CCPA|CPRA)\s*[- ]\s*(?:aligned|approved|certified|compliance|compliant|ready)|\b(?:meets?|satisf(?:y|ies))\s+(?:all\s+)?(?:GDPR|CCPA|CPRA)\s+(?:requirements?|standards?)/giu,
-  },
-  {
-    label: "PCI claim",
-    pattern:
-      /\bPCI(?:\s*-?\s*DSS)?\s*[- ]\s*(?:compliant|certified|ready)|\bPCI\s*-?\s*DSS\b/giu,
-  },
-  {
-    label: "ISO 27001 claim",
-    pattern:
-      /\bISO\s*-?\s*27001(?:\s*[- ]\s*(?:aligned|compliant|certified|ready))?\b/giu,
-  },
-  {
-    label: "security-grade superlative",
-    pattern:
-      /\b(?:enterprise|bank|military)\s*[- ]\s*grade\s+secur(?:e|ity)\b/giu,
-  },
-  {
-    label: "absolute security claim",
-    pattern: /\b(?:fully|100\s*%|completely)\s+secure\b/giu,
-  },
-  {
-    label: "absolute risk claim",
-    pattern:
-      /\b(?:zero\s+risk|breach\s*[- ]\s*proof|hack\s*[- ]\s*proof|unhackable|impossible\s+to\s+breach)\b/giu,
-  },
-  {
-    label: "absolute privacy claim",
-    pattern:
-      /\b(?:we\s+)?(?:never|do\s+not|don't)\s+(?:collect|retain|share|store)\s+(?:any\s+|your\s+)?(?:data|personal (?:data|information))\b|\bno\s+(?:personal\s+)?data\s+(?:is\s+)?(?:collected|retained|shared|stored)\b/giu,
-  },
-  {
-    label: "broad encryption claim",
-    pattern:
-      /\bend\s*[- ]\s*to\s*[- ]\s*end encrypted\b|\b(?:all|customer|your)\s+data\s+(?:is|are)\s+encrypted\s+at\s+rest\b/giu,
-  },
-];
+function normalizeRelativePath(root, file) {
+  return relative(root, file).replaceAll("\\", "/");
+}
+
+function isExcluded(relativePath) {
+  if (EXCLUDED_PATHS.has(relativePath)) return true;
+  if (/(?:^|\/)[^/]+\.test\.[^/]+$/u.test(relativePath)) return true;
+  return relativePath
+    .split("/")
+    .some((segment) => EXCLUDED_DIRECTORIES.has(segment));
+}
 
 function filesUnder(root, path) {
   const absolute = join(root, path);
@@ -107,6 +95,43 @@ function filesUnder(root, path) {
   });
 }
 
+function isTextFile(file, contents) {
+  const extension = extname(file).toLowerCase();
+  if (BINARY_EXTENSIONS.has(extension)) return false;
+  if (TEXT_EXTENSIONS.has(extension)) return true;
+  // NUL is a reliable binary signal for remaining unknown extensions. Unknown
+  // NUL-free files are scanned, which includes YAML, XML, Astro, env and
+  // extensionless config/docs without maintaining a bypass-prone allowlist.
+  return !contents.includes(0);
+}
+
+export function listDefaultClaimFiles(root = process.cwd()) {
+  let tracked;
+  try {
+    tracked = execFileSync("git", ["ls-files", "-z"], {
+      cwd: root,
+      encoding: "utf8",
+      maxBuffer: 16 * 1024 * 1024,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(`Unable to enumerate tracked claim surfaces: ${detail}`);
+  }
+
+  return tracked
+    .split("\0")
+    .filter((path) => path.length > 0)
+    .filter((path) => !isExcluded(path))
+    .map((path) => {
+      const absolute = join(root, path);
+      if (!existsSync(absolute)) {
+        throw new Error(`Tracked compliance claim surface is missing: ${path}`);
+      }
+      return absolute;
+    });
+}
+
 function lineAt(source, index) {
   let line = 1;
   for (let cursor = 0; cursor < index; cursor += 1) {
@@ -115,27 +140,31 @@ function lineAt(source, index) {
   return line;
 }
 
-export function scanComplianceClaims({
-  root = process.cwd(),
-  targets = DEFAULT_TARGETS,
-} = {}) {
+export function scanComplianceClaims({ root = process.cwd(), targets } = {}) {
   const failures = [];
-  for (const file of targets.flatMap((target) => filesUnder(root, target))) {
-    const relativePath = relative(root, file).replaceAll("\\", "/");
-    if (EXCLUDED_PATHS.has(relativePath)) continue;
-    if (!EXTENSIONS.has(extname(file).toLowerCase())) continue;
+  const files =
+    targets === undefined
+      ? listDefaultClaimFiles(root)
+      : targets.flatMap((target) => filesUnder(root, target));
 
-    const source = readFileSync(file, "utf8");
-    for (const rule of PROHIBITED) {
-      for (const match of source.matchAll(rule.pattern)) {
-        const index = match.index ?? 0;
-        failures.push({
-          file: relativePath,
-          line: lineAt(source, index),
-          label: rule.label,
-          match: match[0].replace(/\s+/g, " ").trim(),
-        });
-      }
+  for (const file of files) {
+    const relativePath = normalizeRelativePath(root, file);
+    if (isExcluded(relativePath)) continue;
+    // Scan tracked symlink text itself; never follow a link outside the tree or
+    // into a directory while enumerating repository claim surfaces.
+    const contents = lstatSync(file).isSymbolicLink()
+      ? Buffer.from(readlinkSync(file), "utf8")
+      : readFileSync(file);
+    if (!isTextFile(file, contents)) continue;
+
+    const source = contents.toString("utf8");
+    for (const violation of findPublicClaimViolations(source)) {
+      failures.push({
+        file: relativePath,
+        line: lineAt(source, violation.index),
+        label: violation.label,
+        match: violation.match.replace(/\s+/g, " ").trim(),
+      });
     }
   }
   return failures;

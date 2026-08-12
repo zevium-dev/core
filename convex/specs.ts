@@ -1,4 +1,8 @@
 import { v } from "convex/values";
+import {
+  findOpenApiPublicClaimViolations,
+  isPublicCopyAllowed,
+} from "@zevium/shared";
 import { internalQuery, mutation, query } from "./_generated/server";
 import type { Doc } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
@@ -15,6 +19,14 @@ import {
   type SpecIssue,
   validateOpenApiSpec,
 } from "./lib/validate";
+
+function publicClaimIssues(spec: string): SpecIssue[] {
+  return findOpenApiPublicClaimViolations(spec).map((violation) => ({
+    level: "error" as const,
+    path: violation.path,
+    message: `Unsupported public claim (${violation.label}). Use narrow, evidenced control wording.`,
+  }));
+}
 
 export const getDraft = query({
   args: { projectId: v.id("projects") },
@@ -57,7 +69,10 @@ export const saveDraft = mutation({
   }> => {
     await requireProjectMember(ctx, args.projectId);
 
-    const issues = validateOpenApiSpec(args.spec);
+    const issues = [
+      ...validateOpenApiSpec(args.spec),
+      ...publicClaimIssues(args.spec),
+    ];
     // Empty draft is allowed to clear editor; only non-empty drafts must parse.
     const effectiveIssues = args.spec.trim() === "" ? [] : issues;
 
@@ -226,7 +241,30 @@ export const publish = mutation({
       };
     }
 
-    const issues = validateOpenApiSpec(draftRow.draft);
+    const projectForClaims = await ctx.db.get(args.projectId);
+    if (projectForClaims === null) {
+      throw new Error("Project not found");
+    }
+    const projectCopy = [
+      projectForClaims.name,
+      projectForClaims.description ?? "",
+      ...projectForClaims.tags,
+      org.name,
+    ].join("\n");
+    const issues = [
+      ...validateOpenApiSpec(draftRow.draft),
+      ...publicClaimIssues(draftRow.draft),
+      ...(isPublicCopyAllowed(projectCopy)
+        ? []
+        : [
+            {
+              level: "error" as const,
+              path: "project",
+              message:
+                "Project or publisher copy contains an unsupported compliance or absolute security claim.",
+            },
+          ]),
+    ];
     if (issues.some((i) => i.level === "error")) {
       return { ok: false, issues };
     }
@@ -472,6 +510,11 @@ export const deprecateVersion = mutation({
       throw new Error("Version not found");
     }
     const { org } = await requireProjectMember(ctx, version.projectId);
+    if (args.message !== undefined && !isPublicCopyAllowed(args.message)) {
+      throw new Error(
+        "Public copy contains an unsupported compliance or absolute security claim",
+      );
+    }
 
     const now = Date.now();
     await ctx.db.patch(args.versionId, {

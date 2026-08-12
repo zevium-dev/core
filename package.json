@@ -8,7 +8,7 @@
     "ci:pr": "prettier --check . && pnpm check:compliance-claims && pnpm typecheck && pnpm test",
     "check:compliance-claims": "pnpm test:compliance-claims && node scripts/check-compliance-claims.mjs",
     "test": "turbo test && pnpm test:convex",
-    "test:compliance-claims": "node --test scripts/check-compliance-claims.test.mjs",
+    "test:compliance-claims": "node --test scripts/check-compliance-claims.test.mjs && pnpm --filter @zevium/shared exec vitest run src/public-claims.test.ts",
     "test:convex": "vitest run --config convex/vitest.config.ts",
     "typecheck": "turbo typecheck",
     "lint": "turbo lint",

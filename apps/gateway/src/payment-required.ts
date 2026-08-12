@@ -1,8 +1,9 @@
 /**
- * x402-style payment-required envelope for /gateway and /mock.
- * Every unauthenticated, invalid-key, or insufficient-credit request gets
- * the same machine-readable shape so agents can self-serve: create a key,
- * top up, or read the docs — never a bare 401/402 with no next step.
+ * Generic payment-required envelope for /gateway and /mock.
+ *
+ * This is not x402: no payment requirements, signed-payment retry,
+ * facilitator verification, or settlement exists in this tree. The envelope
+ * only gives key/prepaid-credit users machine-readable recovery actions.
  */
 
 const ACTIONS = {
@@ -28,8 +29,8 @@ export function paymentRequiredResponse(
     requestId,
   };
   if (extra) {
-    for (const [k, v] of Object.entries(extra)) {
-      body[k] = v;
+    for (const [key, value] of Object.entries(extra)) {
+      body[key] = value;
     }
   }
   return new Response(JSON.stringify(body), {

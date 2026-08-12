@@ -13,7 +13,11 @@
  * x-api-key header, or a `key` tool argument. It reuses handleGatewayRequest.
  */
 
-import { parseSpec } from "@zevium/shared";
+import {
+  isOpenApiPublicCopyAllowed,
+  isPublicCopyAllowed,
+  parseSpec,
+} from "@zevium/shared";
 import { listAllPublic, type CatalogueSource } from "./catalogue-source";
 import { endpointsFromSpec, type DiscoveryEndpoint } from "./discovery";
 import { extractApiKey } from "./key-verifier";
@@ -264,16 +268,26 @@ async function handleSearchApis(
   }> = [];
 
   for (const item of items) {
+    if (
+      !isPublicCopyAllowed(
+        [item.name, item.description ?? "", ...item.tags, item.orgName].join(
+          "\n",
+        ),
+      )
+    ) {
+      continue;
+    }
     const published = await deps.specSource.getPublishedSpec(
       item.publisherHandle,
       item.slug,
     );
     let endpoints: DiscoveryEndpoint[] = [];
     if (published) {
+      if (!isOpenApiPublicCopyAllowed(published.spec)) continue;
       try {
         endpoints = endpointsFromSpec(parseSpec(published.spec));
       } catch {
-        endpoints = [];
+        continue;
       }
     }
     const origin = deps.gatewayOrigin.replace(/\/+$/, "");
@@ -303,6 +317,9 @@ async function handleGetApiDocs(
   const published = await deps.specSource.getPublishedSpec(org, project);
   if (!published) {
     return toolError(`Unknown public API: ${org}/${project}`);
+  }
+  if (!isOpenApiPublicCopyAllowed(published.spec)) {
+    return toolError("Published API unavailable");
   }
 
   let endpoints: DiscoveryEndpoint[] = [];

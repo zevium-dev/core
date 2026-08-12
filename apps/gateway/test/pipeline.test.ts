@@ -476,7 +476,7 @@ describe("gateway pipeline", () => {
     expect(calls).toHaveLength(1);
   });
 
-  it("402 (x402 payment_required, not 401) on bad key", async () => {
+  it("402 payment_required (not 401) on bad key", async () => {
     const clerkOrgId = "org_pipe_badkey";
     const { fetchImpl, calls } = makeFetchMock(() => new Response("x"));
     await installFixtures({ clerkOrgId, fetchImpl, credits: 10 });
@@ -505,7 +505,7 @@ describe("gateway pipeline", () => {
     expect(calls).toHaveLength(0);
   });
 
-  it("402 (x402 payment_required, not 401) on missing key", async () => {
+  it("402 payment_required (not 401) on missing key", async () => {
     const clerkOrgId = "org_pipe_missingkey";
     const { fetchImpl, calls } = makeFetchMock(() => new Response("x"));
     await installFixtures({ clerkOrgId, fetchImpl, credits: 10 });

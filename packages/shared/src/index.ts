@@ -28,6 +28,15 @@ export {
 export { generateMockResponse, type GeneratedMockResponse } from "./mock.js";
 
 export {
+  findPublicClaimViolations,
+  findOpenApiPublicClaimViolations,
+  isPublicCopyAllowed,
+  isOpenApiPublicCopyAllowed,
+  type PublicClaimViolation,
+  type OpenApiPublicClaimViolation,
+} from "./public-claims.js";
+
+export {
   isValidSlug,
   isValidSemver,
   collectOpenApiSpecIssues,

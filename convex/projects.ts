@@ -1,8 +1,25 @@
 import { v } from "convex/values";
+import {
+  isOpenApiPublicCopyAllowed,
+  isPublicCopyAllowed,
+} from "@zevium/shared";
 import { mutation, query } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { requireOrgMemberBySlug, requireProjectMember } from "./lib/auth";
 import { isValidSlug } from "./lib/validate";
+
+const PUBLIC_COPY_ERROR =
+  "Public copy contains an unsupported compliance or absolute security claim";
+
+function assertProjectPublicCopy(
+  name: string,
+  description: string | undefined,
+  tags: string[],
+): void {
+  if (!isPublicCopyAllowed([name, description ?? "", ...tags].join("\n"))) {
+    throw new Error(PUBLIC_COPY_ERROR);
+  }
+}
 
 export const list = query({
   args: { orgSlug: v.string() },
@@ -61,6 +78,14 @@ export const create = mutation({
     if (description !== undefined && description.length > 2000) {
       throw new Error("Description must be at most 2000 characters");
     }
+    assertProjectPublicCopy(
+      name,
+      description === "" ? undefined : description,
+      [],
+    );
+    if (!isPublicCopyAllowed(org.name)) {
+      throw new Error(PUBLIC_COPY_ERROR);
+    }
 
     const existing = await ctx.db
       .query("projects")
@@ -110,7 +135,7 @@ export const update = mutation({
     }),
   },
   handler: async (ctx, args): Promise<Doc<"projects">> => {
-    await requireProjectMember(ctx, args.projectId);
+    const { org } = await requireProjectMember(ctx, args.projectId);
 
     const current = await ctx.db.get(args.projectId);
     if (current === null) {
@@ -167,6 +192,26 @@ export const update = mutation({
         throw new Error("At most 32 tags");
       }
       tags = unique;
+    }
+
+    assertProjectPublicCopy(name, description, tags);
+    if (!isPublicCopyAllowed(org.name)) {
+      throw new Error(PUBLIC_COPY_ERROR);
+    }
+    if (visibility === "public") {
+      if (!isPublicCopyAllowed(current.slug)) {
+        throw new Error(PUBLIC_COPY_ERROR);
+      }
+      const latest = await ctx.db
+        .query("specVersions")
+        .withIndex("by_project_published", (q) =>
+          q.eq("projectId", args.projectId),
+        )
+        .order("desc")
+        .first();
+      if (latest !== null && !isOpenApiPublicCopyAllowed(latest.spec)) {
+        throw new Error(PUBLIC_COPY_ERROR);
+      }
     }
 
     if (descriptionCleared) {

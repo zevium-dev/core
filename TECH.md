@@ -1,6 +1,6 @@
 # Zevium Technical Decisions
 
-> Last updated: 2026-07-12
+> Last updated: 2026-08-12
 > Companions: [PRODUCT.md](PRODUCT.md) (what), [FLOW.md](FLOW.md) (screens), [DESIGN.md](DESIGN.md) (feel). This doc: **how it's built and why**.
 > Greenfield rules apply: zero users, data disposable, rebuild beats migrate.
 
@@ -121,13 +121,13 @@ Decisions made during the build that extend or sharpen the stack decision above:
   - Rollout command: `pnpm exec convex run admin:migrateSecurityRollout --identity '{"subject":"<admin-user-id>","org_id":"<admin-org-id>","org_role":"org:admin"}'`. Re-run until `remainingPlaintext`, `remainingUnencrypted`, and `remainingMissingHandles` are all exactly zero; only then make encryption/public-handle validators required and remove transitional fields.
 - **Stripe payments**: `billing.createCheckout` creates server-priced hosted Checkout sessions. Platform and Connect webhook routes verify raw-body signatures, durably dedupe events, and fulfill grants/refunds/disputes or account/transfer/payout projections idempotently. Stripe API version is pinned in code.
 - **Connect settlement**: publisher usage creates explicit risk-held 95/5 earning rows. Enabled connected accounts receive idempotent transfer batches after the hold; transfer and bank payout remain separate lifecycle states.
-- **Semantic search**: embeddings come from `gemini-embedding-001` pinned to `outputDimensionality: 768` (matches the `specEmbeddings` `by_embedding` vectorIndex). Not `text-embedding-004` — that model was removed from the Gemini v1beta API (404) and `gemini-embedding-001` is its 768-dim replacement
+- **Semantic search**: embeddings currently use the still-available text model `gemini-embedding-001`, pinned to `outputDimensionality: 768` to match the `specEmbeddings` `by_embedding` vector index. [Google's current embeddings documentation](https://ai.google.dev/gemini-api/docs/embeddings) lists `gemini-embedding-2` as the newer stable model and says migration requires re-embedding because the two embedding spaces are incompatible
 - **Publisher webhooks**: HMAC-SHA256 signed (`x-zevium-signature` header, hex digest over the raw body), delivered with up to 3 attempts and backoff of 60s then 300s between retries before marking a delivery failed
 - **Preview verification**: every trusted PR deploys isolated Convex, gateway, and web previews and runs required curl-only checks for web `/`, web `/catalogue`, gateway `/health`, gateway CORS preflight, and a stable gateway 404. After Convex provisioning, gateway deploy and web build run in parallel; web deployment and gateway deployment converge at the smoke job through explicit job outputs/artifacts. The browser runtime and authenticated publisher/consumer journey are intentionally opt-in because they are long and stateful: add the `full-e2e` label to a PR, or run **Pull Request Preview** manually on the PR head with its PR number. Publisher and consumer remain sequential because consumer verification reads the publisher-created project artifact. Closed PRs invoke the separate preview cleanup workflow.
 - **Deprecation signaling**: RFC 8594 headers on gateway responses for deprecated spec versions — `Deprecation: @<epoch-seconds>`, `Sunset: <HTTP-date>`, `Link: <catalogue-url>; rel="deprecation"`
 - **Admin gate**: platform-admin access is an env allowlist, `ADMIN_USER_IDS` (Clerk subject ids), checked server-side in Convex — no separate roles table
 - **Payouts**: Stripe Connect onboarding replaces free-form payout destinations. Earnings move through pending-risk, available, allocated, transferred, and reversed/failed states; `/admin/payouts` operates failed transfer retries while Stripe payout events project bank-delivery state.
-- **x402**: a stub, not the full rail. Every unauthenticated/invalid-key/insufficient-credit response on the keyless-capable surfaces (`/gateway`, `/mock`) returns a `402` with a machine-readable `actions` envelope (create-key, top-up, docs links) so an agent can self-serve next steps. No payment-header verification via a facilitator yet — that part of the x402 rail is still deferred (see below)
+- **Payment-required errors**: every unauthenticated/invalid-key/insufficient-credit response on `/gateway` and `/mock` returns a generic `402` with machine-readable create-key, top-up, and docs actions. This is prepaid-credit recovery metadata, not x402: no payment requirements, signed-payment verification, facilitator, or settlement exists in this tree
 - **Body handling**: direct `/gateway` requests and responses stream without
   application buffering. MCP `call_api` reuses the same authenticated, metered
   pipeline, then buffers its JSON-RPC request and upstream response in Worker
@@ -150,5 +150,5 @@ Four spikes ran as real code (scratch projects, reports + artifacts in session s
 ## Later (explicitly deferred)
 
 - Go port of the proxy Worker if TypeScript ever becomes the bottleneck (isolated by design; measure first)
-- x402 rail, full: the 402 + actions-envelope stub is live (see Implementation notes above); actual payment-header verification via a facilitator is still deferred — P1 per PRODUCT.md, lands after the credit path is solid
+- x402 rail: entirely deferred to P1 per PRODUCT.md. Any future implementation needs signed-payment retry, facilitator verification, settlement/replay controls, tests, data inventory, and approved operating evidence; generic current `402` action envelopes are not an x402 stub
 - Multi-region Convex / read replicas: not our problem; control plane latency is not user-facing hot path

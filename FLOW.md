@@ -122,8 +122,8 @@ Org-scoped — the org owns the wallet; admins manage it, members view their own
 
 ### 3.4 x402 machine payments (P1)
 
-- Payment-required responses with payment instructions on gateway endpoints; agents pay per-call with zero signup
-- Implemented as a stub: every keyless/unauthenticated/insufficient-credit response on `/gateway` and `/mock` carries a `402` with a machine-readable actions envelope (create key, top up, docs). Facilitator-verified on-chain payment is still P1/deferred
+- Future signed-payment retry, facilitator verification, and settlement flow; no x402 payment implementation exists in the current tree
+- Current `/gateway` and `/mock` failures use a generic `402` actions envelope (create key, top up, docs) for the prepaid-credit flow. That envelope contains no x402 payment requirements and cannot authorize or settle a payment
 
 ---
 

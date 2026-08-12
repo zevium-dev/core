@@ -293,9 +293,73 @@ describe("GET /discovery", () => {
       "second",
     ]);
   });
+
+  it("fails closed on unsafe listing and OpenAPI-derived copy", async () => {
+    await installAgentFixtures({
+      clerkOrgId: "org_disc_unsafe_listing",
+      listings: [{ ...LISTING, description: "enterprise-grade platform" }],
+    });
+    const unsafeListing = await workerFetch("/discovery");
+    await expect(unsafeListing.json()).resolves.toEqual({ apis: [] });
+
+    const fixtures = await installAgentFixtures({
+      clerkOrgId: "org_disc_unsafe_spec",
+    });
+    fixtures.specs.set(ORG_SLUG, PROJECT_SLUG, {
+      spec: JSON.stringify({
+        ...JSON.parse(SPEC),
+        info: {
+          title: "Demo Weather",
+          version: "1.0.0",
+          description: "GDPR: compliant",
+        },
+      }),
+      projectId: "proj_demo",
+      organizationId: CONVEX_ORG,
+      clerkOrgId: "org_disc_unsafe_spec",
+      visibility: "public",
+    });
+    const unsafeSpec = await workerFetch("/discovery");
+    await expect(unsafeSpec.json()).resolves.toEqual({ apis: [] });
+  });
 });
 
 describe("MCP /mcp", () => {
+  it("does not publish unsafe generated search/docs copy", async () => {
+    const fixtures = await installAgentFixtures({
+      clerkOrgId: "org_mcp_unsafe_copy",
+    });
+    fixtures.specs.set(ORG_SLUG, PROJECT_SLUG, {
+      spec: JSON.stringify({
+        ...JSON.parse(SPEC),
+        paths: {
+          "/forecast": {
+            get: {
+              summary: "fully-secure",
+              "x-zevium-cost": 2,
+            },
+          },
+        },
+      }),
+      projectId: "proj_demo",
+      organizationId: CONVEX_ORG,
+      clerkOrgId: "org_mcp_unsafe_copy",
+      visibility: "public",
+    });
+
+    const search = await mcpCall("tools/call", {
+      name: "search_apis",
+      arguments: { query: "weather" },
+    });
+    expect(JSON.parse(toolText(search))).toEqual({ matches: [] });
+
+    const docs = await mcpCall("tools/call", {
+      name: "get_api_docs",
+      arguments: { org: ORG_SLUG, project: PROJECT_SLUG },
+    });
+    expect(toolText(docs)).toBe("Published API unavailable");
+  });
+
   it("rejects request bodies larger than 1 MiB", async () => {
     await installAgentFixtures({ clerkOrgId: "org_mcp_request_limit" });
     const res = await workerFetch("/mcp", {

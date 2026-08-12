@@ -1,4 +1,5 @@
 import { v } from "convex/values";
+import { isPublicCopyAllowed } from "@zevium/shared";
 import {
   internalMutation,
   mutation,
@@ -8,6 +9,14 @@ import {
 import type { Doc, Id } from "./_generated/dataModel";
 import { requireIdentity, requireOrgAdmin } from "./lib/auth";
 import { isValidSlug } from "./lib/validate";
+
+function assertOrganizationPublicCopy(name: string): void {
+  if (!isPublicCopyAllowed(name)) {
+    throw new Error(
+      "Public copy contains an unsupported compliance or absolute security claim",
+    );
+  }
+}
 
 async function ensureWallet(
   ctx: MutationCtx,
@@ -90,6 +99,7 @@ export const upsertFromClerk = internalMutation({
     imageUrl: v.optional(v.string()),
   },
   handler: async (ctx, args): Promise<Id<"organizations">> => {
+    assertOrganizationPublicCopy(args.name);
     const existing = await ctx.db
       .query("organizations")
       .withIndex("by_clerk_org", (q) => q.eq("clerkOrgId", args.clerkOrgId))
@@ -167,6 +177,7 @@ export const ensureOrganization = mutation({
     if (claims.orgId === undefined || claims.orgId !== args.clerkOrgId) {
       throw new Error("Organization does not match authenticated identity");
     }
+    assertOrganizationPublicCopy(args.name);
 
     const existing = await ctx.db
       .query("organizations")

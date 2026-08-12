@@ -44,7 +44,7 @@ _Full walkthrough with the publisher console, billing, earnings, and admin:
 - **Metered gateway** (Cloudflare Worker) — key verification with edge caching,
   per-org wallet DO (reserve → settle/refund), per-key monthly caps and
   rotation with grace, RFC 8594 deprecation headers, CORS for browser callers,
-  x402 payment-required envelopes, keyless `/mock` mode, `/mcp` + `/discovery`
+  generic payment-required action envelopes, keyless `/mock` mode, `/mcp` + `/discovery`
   for agents.
 - **Control plane** (Convex) — projects and immutable spec versions, credit
   ledger, usage analytics, publisher earnings, Stripe event reconciliation,

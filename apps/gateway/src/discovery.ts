@@ -5,6 +5,8 @@
 
 import {
   extractPricing,
+  isOpenApiPublicCopyAllowed,
+  isPublicCopyAllowed,
   parseSpec,
   type HttpMethod,
   type ParsedOpenApiSpec,
@@ -87,17 +89,27 @@ export async function buildDiscoveryIndex(
   const apis: DiscoveryApi[] = [];
 
   for (const item of items) {
+    if (
+      !isPublicCopyAllowed(
+        [item.name, item.description ?? "", ...item.tags, item.orgName].join(
+          "\n",
+        ),
+      )
+    ) {
+      continue;
+    }
     const published = await deps.specSource.getPublishedSpec(
       item.publisherHandle,
       item.slug,
     );
     let endpoints: DiscoveryEndpoint[] = [];
     if (published) {
+      if (!isOpenApiPublicCopyAllowed(published.spec)) continue;
       try {
         const parsed = parseSpec(published.spec);
         endpoints = endpointsFromSpec(parsed);
       } catch {
-        endpoints = [];
+        continue;
       }
     }
 
