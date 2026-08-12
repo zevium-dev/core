@@ -7,6 +7,9 @@ import { createNotification } from "./lib/notifications";
 import { fireWebhookEvent } from "./webhooks";
 import { stripeClient } from "./billing";
 import { internal } from "./_generated/api";
+import { enqueuePublishedProjectProjection } from "./registrySync";
+import { toRegistryRolloutManifest } from "./registryRollout";
+import type { RegistryRolloutManifest } from "@zevium/shared";
 
 /** Cap for month-to-date usage count (by_at index range scan). */
 const USAGE_STATS_CAP = 50_000;
@@ -28,39 +31,24 @@ export const isAdminQuery = query({
   },
 });
 
-/** Bounded, idempotent rollout step; run repeatedly until remaining is zero. */
+/** Start or resume singleton bounded producer rollout. Safe to call repeatedly. */
 export const migrateSecurityRollout = mutation({
   args: {},
-  handler: async (
-    ctx,
-  ): Promise<{
-    credentials: { migrated: number; remaining: number };
-    handles: { updated: number; collisions: number };
-    remainingPlaintext: number;
-    remainingUnencrypted: number;
-    remainingMissingHandles: number;
-  }> => {
+  handler: async (ctx): Promise<RegistryRolloutManifest> => {
     await requireAdmin(ctx);
-    const credentials: { migrated: number; remaining: number } =
-      await ctx.runMutation(
-        internal.upstreamCredentials.migrateLegacyPlaintext,
-        {},
-      );
-    const handles: { updated: number; collisions: number } =
-      await ctx.runMutation(internal.organizations.backfillPublicHandles, {});
-    const rows = await ctx.db.query("upstreamCredentials").collect();
-    const organizations = await ctx.db.query("organizations").collect();
-    return {
-      credentials,
-      handles,
-      remainingPlaintext: rows.filter((row) => Boolean(row.secret)).length,
-      remainingUnencrypted: rows.filter(
-        (row) => !row.ciphertext || !row.iv || !row.keyVersion,
-      ).length,
-      remainingMissingHandles: organizations.filter(
-        (organization) => organization.publicHandle === undefined,
-      ).length,
-    };
+    return await ctx.runMutation(internal.registryRollout.startOrResume, {});
+  },
+});
+
+export const getSecurityRollout = query({
+  args: {},
+  handler: async (ctx): Promise<RegistryRolloutManifest | null> => {
+    await requireAdmin(ctx);
+    const rollout = await ctx.db
+      .query("registryRollouts")
+      .withIndex("by_key", (q) => q.eq("key", "registry-v2-initial"))
+      .unique();
+    return rollout === null ? null : toRegistryRolloutManifest(rollout);
   },
 });
 
@@ -304,6 +292,7 @@ export const setProjectVisibility = mutation({
     }
 
     await ctx.db.patch(project._id, { visibility: args.visibility });
+    await enqueuePublishedProjectProjection(ctx, project._id);
 
     const org = await ctx.db.get(project.organizationId);
     if (org !== null) {

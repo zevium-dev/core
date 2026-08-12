@@ -27,8 +27,14 @@ export default defineSchema({
   /** Durable delete-before-create guard for out-of-order Clerk webhooks. */
   organizationTombstones: defineTable({
     clerkOrgId: v.string(),
+    organizationId: v.optional(v.id("organizations")),
+    publisherHandle: v.optional(v.string()),
+    operationId: v.optional(v.string()),
+    sourceRevision: v.number(),
     archivedAt: v.number(),
-  }).index("by_clerk_org", ["clerkOrgId"]),
+  })
+    .index("by_clerk_org", ["clerkOrgId"])
+    .index("by_handle", ["publisherHandle"]),
 
   /** Durable Svix receipt prevents replay and stale organization mirror writes. */
   clerkWebhookReceipts: defineTable({
@@ -74,6 +80,10 @@ export default defineSchema({
     /** Final cutoff retained after sunsetAt leaves the active-work index. */
     retirementCutoffAt: v.optional(v.number()),
     /** Audit tombstone after sunset cleanup; project row remains immutable history. */
+    publicationGeneration: v.optional(v.number()),
+    desiredVisibility: v.optional(
+      v.union(v.literal("private"), v.literal("public")),
+    ),
     retiredAt: v.optional(v.number()),
   })
     .index("by_org", ["organizationId"])
@@ -83,6 +93,27 @@ export default defineSchema({
     .index("by_visibility_status", ["visibility", "status"])
     .index("by_sunset", ["sunsetAt"])
     .index("by_retirement_state_sunset", ["retirementState", "sunsetAt"]),
+
+  /**
+   * Permanent public URL reservations. Rows start on first publish and gain
+   * retiredAt on archive. Handle ownership and each org-scoped slug stay bound.
+   */
+  publicRouteTombstones: defineTable({
+    routeKey: v.optional(v.string()),
+    organizationId: v.id("organizations"),
+    projectId: v.id("projects"),
+    publisherHandle: v.string(),
+    projectSlug: v.string(),
+    operationId: v.optional(v.string()),
+    publicationGeneration: v.optional(v.number()),
+    sourceRevision: v.optional(v.number()),
+    reservedAt: v.number(),
+    retiredAt: v.optional(v.number()),
+  })
+    .index("by_project", ["projectId"])
+    .index("by_org_slug", ["organizationId", "projectSlug"])
+    .index("by_public_url", ["publisherHandle", "projectSlug"])
+    .index("by_handle", ["publisherHandle"]),
 
   // Publisher-owned headers injected by gateway after consumer auth headers are stripped.
   // Values never return through member-facing queries after write.
@@ -94,7 +125,6 @@ export default defineSchema({
     ciphertext: v.optional(v.string()),
     iv: v.optional(v.string()),
     keyVersion: v.optional(v.string()),
-    secret: v.optional(v.string()),
     updatedAt: v.number(),
   })
     .index("by_project", ["projectId"])
@@ -477,8 +507,22 @@ export default defineSchema({
   keySettings: defineTable({
     clerkOrgId: v.string(),
     keyId: v.string(),
-    /** Server-verified Clerk key owner. Legacy/unverified rows stay undefined. */
+    /** Verified Clerk subject. Optional only during legacy backfill. */
     ownerUserId: v.optional(v.string()),
+    subjectUserId: v.optional(v.string()),
+    budgetId: v.optional(v.string()),
+    budgetRevision: v.optional(v.number()),
+    secretSha256: v.optional(v.string()),
+    lifecycle: v.optional(
+      v.union(
+        v.literal("active"),
+        v.literal("grace"),
+        v.literal("disabled"),
+        v.literal("revoked"),
+      ),
+    ),
+    expiresAt: v.optional(v.number()),
+    revokedAt: v.optional(v.number()),
     /** Monthly credit cap; undefined = unlimited. Enforced by the wallet DO. */
     monthlyCapCredits: v.optional(v.number()),
     disabled: v.boolean(),
@@ -486,9 +530,12 @@ export default defineSchema({
     rotatedFromKeyId: v.optional(v.string()),
     /** Old key keeps working until this ms epoch (rotation grace). */
     graceUntil: v.optional(v.number()),
+    /** Transitional deny state when legacy raw material cannot be re-hashed. */
+    rotationRequiredAt: v.optional(v.number()),
     updatedAt: v.number(),
   })
     .index("by_org", ["clerkOrgId"])
+    .index("by_owner", ["clerkOrgId", "ownerUserId"])
     .index("by_key", ["keyId"]),
 
   /** Denormalized, bounded public catalogue/search projection. */
@@ -546,6 +593,222 @@ export default defineSchema({
     backfillCursor: v.optional(v.string()),
     updatedAt: v.number(),
   }).index("by_key", ["key"]),
+
+  /** Immutable registry stream heads; every producer mutation advances one. */
+  registryStreams: defineTable({
+    streamKey: v.string(),
+    revision: v.number(),
+    lastEventId: v.string(),
+    lastOperation: v.union(
+      v.literal("org.put"),
+      v.literal("org.archive"),
+      v.literal("route.put"),
+      v.literal("route.archive"),
+      v.literal("key.put"),
+      v.literal("key.revoke"),
+      v.literal("catalogue.snapshot"),
+    ),
+    payloadSha256: v.string(),
+    entityKey: v.string(),
+    terminal: v.boolean(),
+    updatedAt: v.number(),
+  }).index("by_stream", ["streamKey"]),
+
+  /** Singleton initial producer rollout with bounded, resumable phase cursor. */
+  registryRollouts: defineTable({
+    key: v.string(),
+    rolloutId: v.string(),
+    /** Optional-first compatibility; runtime rejects pre-provenance rows. */
+    provenanceVersion: v.optional(v.literal(1)),
+    snapshotAt: v.number(),
+    status: v.union(v.literal("running"), v.literal("complete")),
+    phase: v.union(
+      v.literal("credentials"),
+      v.literal("organizations"),
+      v.literal("routes"),
+      v.literal("keys"),
+      v.literal("verify_sources"),
+      v.literal("verify_events"),
+      v.literal("complete"),
+    ),
+    cursor: v.optional(v.string()),
+    page: v.optional(v.number()),
+    counts: v.object({
+      credentials: v.number(),
+      organizations: v.number(),
+      archivedOrganizations: v.number(),
+      handlesBackfilled: v.number(),
+      handlesReassigned: v.number(),
+      publishedRoutes: v.number(),
+      retiredRoutes: v.number(),
+      keys: v.number(),
+      keysForcedToRotate: v.number(),
+      events: v.number(),
+    }),
+    digests: v.object({
+      sources: v.string(),
+      events: v.string(),
+    }),
+    verification: v.optional(
+      v.object({
+        counts: v.object({
+          credentials: v.number(),
+          organizations: v.number(),
+          archivedOrganizations: v.number(),
+          handlesBackfilled: v.number(),
+          handlesReassigned: v.number(),
+          publishedRoutes: v.number(),
+          retiredRoutes: v.number(),
+          keys: v.number(),
+          keysForcedToRotate: v.number(),
+          events: v.number(),
+        }),
+        digests: v.object({
+          sources: v.string(),
+          events: v.string(),
+        }),
+        lastPage: v.optional(v.number()),
+        lastOrdinal: v.optional(v.number()),
+      }),
+    ),
+    startedAt: v.number(),
+    updatedAt: v.number(),
+    completedAt: v.optional(v.number()),
+  }).index("by_key", ["key"]),
+
+  /** Immutable exact inputs to the rollout source digest chain. */
+  registryRolloutSourcePreimages: defineTable({
+    rolloutId: v.string(),
+    page: v.number(),
+    ordinal: v.number(),
+    phase: v.union(
+      v.literal("credentials"),
+      v.literal("organizations"),
+      v.literal("routes"),
+      v.literal("keys"),
+    ),
+    sourceId: v.string(),
+    preimageJson: v.string(),
+    countDelta: v.object({
+      credentials: v.number(),
+      organizations: v.number(),
+      archivedOrganizations: v.number(),
+      handlesBackfilled: v.number(),
+      handlesReassigned: v.number(),
+      publishedRoutes: v.number(),
+      retiredRoutes: v.number(),
+      keys: v.number(),
+      keysForcedToRotate: v.number(),
+      events: v.number(),
+    }),
+  })
+    .index("by_rollout_order", ["rolloutId", "page", "ordinal"])
+    .index("by_rollout_source", ["rolloutId", "phase", "sourceId"]),
+
+  /** Immutable exact inputs to the rollout event-receipt digest chain. */
+  registryRolloutEventReceipts: defineTable({
+    rolloutId: v.string(),
+    page: v.number(),
+    ordinal: v.number(),
+    sourceOrdinal: v.number(),
+    eventId: v.string(),
+    streamKey: v.string(),
+    revision: v.number(),
+    payloadSha256: v.string(),
+    operation: v.union(
+      v.literal("org.put"),
+      v.literal("org.archive"),
+      v.literal("route.put"),
+      v.literal("route.archive"),
+      v.literal("key.put"),
+      v.literal("key.revoke"),
+      v.literal("catalogue.snapshot"),
+    ),
+    receiptJson: v.string(),
+  })
+    .index("by_rollout_order", ["rolloutId", "page", "ordinal"])
+    .index("by_rollout_event", ["rolloutId", "eventId"]),
+
+  registryOutbox: defineTable({
+    schemaVersion: v.literal(2),
+    eventId: v.string(),
+    streamKey: v.string(),
+    revision: v.number(),
+    operation: v.union(
+      v.literal("org.put"),
+      v.literal("org.archive"),
+      v.literal("route.put"),
+      v.literal("route.archive"),
+      v.literal("key.put"),
+      v.literal("key.revoke"),
+      v.literal("catalogue.snapshot"),
+    ),
+    occurredAt: v.number(),
+    nonce: v.string(),
+    payloadSha256: v.string(),
+    entityKey: v.string(),
+    eventJson: v.string(),
+    bodySha256: v.string(),
+    status: v.union(
+      v.literal("pending"),
+      v.literal("delivering"),
+      v.literal("acked"),
+      v.literal("dead_letter"),
+    ),
+    attempts: v.number(),
+    nextAttemptAt: v.number(),
+    leaseToken: v.optional(v.string()),
+    leaseUntil: v.optional(v.number()),
+    dependsOnEventId: v.optional(v.string()),
+    ackJson: v.optional(v.string()),
+    lastErrorCode: v.optional(v.string()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_event", ["eventId"])
+    .index("by_stream_revision", ["streamKey", "revision"])
+    .index("by_status_next", ["status", "nextAttemptAt"])
+    .index("by_status_lease", ["status", "leaseUntil"]),
+
+  /** Pinned immutable reconciliation manifest headers. */
+  registryManifestSnapshots: defineTable({
+    snapshotId: v.string(),
+    kind: v.union(
+      v.literal("org"),
+      v.literal("route"),
+      v.literal("key"),
+      v.literal("catalogue"),
+    ),
+    shard: v.string(),
+    createdAt: v.number(),
+    totalCount: v.number(),
+    totalSha256: v.string(),
+    pageCount: v.number(),
+  })
+    .index("by_snapshot", ["snapshotId"])
+    .index("by_kind_shard", ["kind", "shard", "createdAt"]),
+
+  /** Immutable manifest rows, sorted and diffed by entityKey. */
+  registryManifestItems: defineTable({
+    snapshotId: v.string(),
+    entityKey: v.string(),
+    streamKey: v.string(),
+    revision: v.number(),
+    eventId: v.string(),
+    operation: v.union(
+      v.literal("org.put"),
+      v.literal("org.archive"),
+      v.literal("route.put"),
+      v.literal("route.archive"),
+      v.literal("key.put"),
+      v.literal("key.revoke"),
+      v.literal("catalogue.snapshot"),
+    ),
+    payloadSha256: v.string(),
+    tombstone: v.boolean(),
+  })
+    .index("by_snapshot_entity", ["snapshotId", "entityKey"])
+    .index("by_snapshot_stream", ["snapshotId", "streamKey"]),
 
   keyRotationOperations: defineTable({
     clerkOrgId: v.string(),

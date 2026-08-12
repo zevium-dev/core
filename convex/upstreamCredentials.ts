@@ -1,9 +1,10 @@
 import { v } from "convex/values";
 
-import { internalMutation, mutation, query } from "./_generated/server";
+import { mutation, query } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { encryptCredential } from "./lib/credentialCrypto";
 import { requireOrgAdmin, requireProjectMember } from "./lib/auth";
+import { enqueuePublishedProjectProjection } from "./registrySync";
 
 const HEADER_NAME = /^[!#$%&'*+\-.^_`|~0-9a-z]+$/;
 const BLOCKED_HEADERS = new Set([
@@ -98,6 +99,7 @@ export const upsert = mutation({
       id = existing._id;
       await ctx.db.patch(existing._id, { ...encrypted, updatedAt });
     }
+    await enqueuePublishedProjectProjection(ctx, args.projectId);
     return { id, name, updatedAt };
   },
 });
@@ -113,27 +115,7 @@ export const remove = mutation({
     const { claims } = await requireProjectMember(ctx, credential.projectId);
     requireOrgAdmin(claims);
     await ctx.db.delete(credential._id);
+    await enqueuePublishedProjectProjection(ctx, credential.projectId);
     return { deleted: credential._id };
-  },
-});
-
-/** One-shot deployment migration for legacy plaintext rows. Remove after all rows report zero. */
-export const migrateLegacyPlaintext = internalMutation({
-  args: {},
-  handler: async (ctx): Promise<{ migrated: number; remaining: number }> => {
-    const rows = await ctx.db.query("upstreamCredentials").collect();
-    let migrated = 0;
-    let remaining = 0;
-    for (const row of rows) {
-      if (row.ciphertext && row.iv && row.keyVersion) continue;
-      if (!row.secret) {
-        remaining += 1;
-        continue;
-      }
-      const encrypted = await encryptCredential(row.secret);
-      await ctx.db.patch(row._id, { ...encrypted, secret: undefined });
-      migrated += 1;
-    }
-    return { migrated, remaining };
   },
 });

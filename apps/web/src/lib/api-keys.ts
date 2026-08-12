@@ -1,6 +1,13 @@
 import { auth, clerkClient } from "@clerk/tanstack-react-start/server";
 import { createServerFn } from "@tanstack/react-start";
 import { ConvexHttpClient } from "convex/browser";
+import {
+  sealOneTimeExecutionKey,
+  signRegistryVerifiedKeyProjection,
+  signRegistryVerifiedKeyRotationProjection,
+  type RegistryVerifiedKeyProjection,
+  type RegistryVerifiedKeyRotationProjection,
+} from "@zevium/shared";
 
 import { getApiKeyLifecycle } from "#/lib/api-key-lifecycle";
 import { api } from "#/lib/convex-api";
@@ -40,6 +47,16 @@ function requireUserId(userId: string | null | undefined): string {
     throw new Error("Sign in to manage API keys");
   }
   return userId;
+}
+
+function requireProjectionSecret(): string {
+  const secret = process.env.REGISTRY_KEY_PROJECTION_HMAC_SECRET;
+  if (!secret) {
+    throw new Error(
+      "Secure key registration is temporarily unavailable. Try again later.",
+    );
+  }
+  return secret;
 }
 
 function maskKeyId(id: string): string {
@@ -159,16 +176,17 @@ export const createKey = createServerFn({ method: "POST" })
     if (typeof orgId !== "string" || orgId.length === 0) {
       throw new Error("Select an organization before creating an API key");
     }
-    const client = await clerkClient();
     const convexUrl = import.meta.env.VITE_CONVEX_URL;
     const token = (await session.getToken({ template: "convex" })) ?? null;
+    const projectionSecret = requireProjectionSecret();
     if (!convexUrl || !token) {
       throw new Error(
-        "Secure key creation is temporarily unavailable. Refresh and try again.",
+        "Secure key registration is temporarily unavailable. Refresh and try again.",
       );
     }
     const convex = new ConvexHttpClient(convexUrl);
     convex.setAuth(token);
+    const client = await clerkClient();
 
     const [existing, settings] = await Promise.all([
       client.apiKeys.list({
@@ -215,23 +233,41 @@ export const createKey = createServerFn({ method: "POST" })
     }
 
     try {
-      await convex.action(api.keyVerification.syncVerifiedKey, {
+      const sealed = await sealOneTimeExecutionKey({
         keyId: created.id,
+        secret,
+        clerkOrgId: orgId,
+        ownerUserId: userId,
+        subjectUserId: userId,
+        budgetId: `budget_${crypto.randomUUID().replaceAll("-", "")}`,
+        budgetRevision: 1,
+        scopes: ["gateway:execute"],
       });
+      const projection: RegistryVerifiedKeyProjection = {
+        schemaVersion: 1,
+        verifiedAt: Date.now(),
+        provision: sealed.provision,
+      };
+      await convex.mutation(api.keySettings.registerVerified, {
+        projection,
+        signature: await signRegistryVerifiedKeyProjection(
+          projectionSecret,
+          projection,
+        ),
+      });
+      return {
+        id: created.id,
+        name: created.name,
+        secret,
+        createdAt: created.createdAt,
+      };
     } catch (error) {
       await client.apiKeys.revoke({
         apiKeyId: created.id,
-        revocationReason: "Provider ownership recording failed",
+        revocationReason: "Zevium key projection failed",
       });
       throw error;
     }
-
-    return {
-      id: created.id,
-      name: created.name,
-      secret,
-      createdAt: created.createdAt,
-    };
   });
 
 /** Revoke a key owned by the current user. */
@@ -328,6 +364,7 @@ export const rotateKey = createServerFn({ method: "POST" })
     }
     const convex = new ConvexHttpClient(convexUrl);
     convex.setAuth(token);
+    const projectionSecret = requireProjectionSecret();
     // Verify the old key belongs to this user.
     const old = await client.apiKeys.get(data.id);
     if (old.subject !== userId || !keyBelongsToOrganization(old, orgId)) {
@@ -420,14 +457,39 @@ export const rotateKey = createServerFn({ method: "POST" })
 
     const graceUntil = Date.now() + ROTATION_GRACE_MS;
     try {
-      await convex.action(api.keyVerification.syncVerifiedKey, {
+      const oldBudget = settings.find(
+        (setting) => setting.keyId === old.id,
+      )?.budgetId;
+      if (!oldBudget)
+        throw new Error(
+          "Key budget is unavailable; rotate after security migration",
+        );
+      const sealed = await sealOneTimeExecutionKey({
         keyId: created.id,
+        secret,
+        clerkOrgId: orgId,
+        ownerUserId: userId,
+        subjectUserId: userId,
+        budgetId: oldBudget,
+        budgetRevision:
+          (settings.find((setting) => setting.keyId === old.id)
+            ?.budgetRevision ?? 0) + 1,
+        scopes: ["gateway:execute"],
       });
-      await convex.mutation(api.keySettings.completeRotation, {
+      const projection: RegistryVerifiedKeyRotationProjection = {
+        schemaVersion: 1,
+        verifiedAt: Date.now(),
         operationId: data.operationId,
         oldKeyId: old.id,
-        newKeyId: created.id,
+        newProvision: sealed.provision,
         graceUntil,
+      };
+      await convex.mutation(api.keySettings.completeRotation, {
+        projection,
+        signature: await signRegistryVerifiedKeyRotationProjection(
+          projectionSecret,
+          projection,
+        ),
       });
       return {
         id: created.id,

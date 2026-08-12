@@ -2,7 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { lookup } from "node:dns/promises";
 import { z } from "zod";
 
-export const MAX_SPEC_IMPORT_BYTES = 2 * 1024 * 1024;
+export const MAX_SPEC_IMPORT_BYTES = 393_216;
 
 /**
  * Hard limit on the total wall-clock time for a spec fetch (DNS resolution,
@@ -19,7 +19,7 @@ const MAX_REDIRECTS = 5;
  * blocks, redirect exhaustion). Upstream status codes MUST NOT be surfaced.
  */
 const GENERIC_FETCH_ERROR = "Failed to fetch spec";
-const SIZE_ERROR = "Spec is larger than 2MB";
+const SIZE_ERROR = "Spec is larger than 393216 UTF-8 bytes";
 const EMPTY_ERROR = "URL returned empty body";
 const SCHEME_ERROR = "URL must be https";
 

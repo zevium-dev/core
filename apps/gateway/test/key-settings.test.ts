@@ -22,6 +22,7 @@ async function seed(
     grants?: { refId: string; amount: number }[];
     keySettings?: KeySetting[];
     balance?: number;
+    archived?: boolean;
   },
 ): Promise<void> {
   __setTestGrantsFetcher(async () => ({
@@ -33,6 +34,7 @@ async function seed(
       sequence: 0,
     },
     keySettings: opts.keySettings ?? [],
+    archived: opts.archived ?? false,
   }));
   await stub.syncGrants(ORG);
   __setTestGrantsFetcher(null);
@@ -55,6 +57,64 @@ describe("WalletDO key controls — reserve enforcement", () => {
 
     const res = await stub.reserve("r1", 10, { keyId: "k1", clerkOrgId: ORG });
     expect(res).toEqual({ status: "rejected", reason: "key_disabled" });
+  });
+
+  it("denies rotation-required keys even if disabled bit is stale", async () => {
+    const stub = walletStub("key-rotation-required");
+    await seed(stub, {
+      balance: 1_000,
+      keySettings: [
+        { keyId: "k1", disabled: false, rotationRequiredAt: Date.now() },
+      ],
+    });
+
+    await expect(stub.authorizeKey("k1", ORG)).resolves.toEqual({
+      status: "rejected",
+      reason: "key_disabled",
+    });
+  });
+
+  it("terminally denies every admission after control-plane org archive", async () => {
+    const stub = walletStub("organization-archived");
+    await seed(stub, {
+      balance: 1_000,
+      keySettings: [{ keyId: "k1", disabled: false }],
+      archived: true,
+    });
+
+    await expect(stub.authorizeKey("k1", ORG)).resolves.toEqual({
+      status: "rejected",
+      reason: "organization_archived",
+    });
+    await expect(
+      stub.reserve("archived-r1", 1, { keyId: "k1", clerkOrgId: ORG }),
+    ).resolves.toEqual({
+      status: "rejected",
+      reason: "organization_archived",
+    });
+    await expect(
+      stub.consumeFreeTier(1, {
+        keyId: "k1",
+        clerkOrgId: ORG,
+        projectId: "project_1",
+        method: "GET",
+        pathTemplate: "/ping",
+      }),
+    ).resolves.toEqual({
+      status: "rejected",
+      reason: "organization_archived",
+    });
+
+    __setTestGrantsFetcher(async () => ({
+      wallet: { clerkOrgId: ORG, balance: 1_000, sequence: 1 },
+      keySettings: [{ keyId: "k1", disabled: false }],
+      archived: false,
+    }));
+    await stub.syncGrants(ORG, Date.now() + 61_000);
+    __setTestGrantsFetcher(null);
+    await expect(
+      stub.authorizeKey("k1", ORG, Date.now() + 61_001),
+    ).resolves.toMatchObject({ reason: "organization_archived" });
   });
 
   it("rejects when monthly settled credits reach the cap (boundary)", async () => {

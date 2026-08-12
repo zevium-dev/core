@@ -1,5 +1,6 @@
 import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "../_generated/server";
+import { isOrganizationActive, isProjectRetired } from "./publicRoutes";
 
 export type OrgIdentityClaims = {
   subject: string;
@@ -177,12 +178,78 @@ export async function requireProjectMember(
   if (org.clerkOrgId !== claims.orgId) {
     throw new Error("Not a member of this organization");
   }
+  if (
+    !(await isOrganizationActive(ctx, org)) ||
+    (await isProjectRetired(ctx, project))
+  ) {
+    throw new Error("Project not found");
+  }
 
   return { claims, org, project };
 }
 
+/** Admin/owner project lifecycle gate with cross-org non-enumeration. */
+export async function requireProjectAdmin(
+  ctx: DbCtx,
+  projectId: Id<"projects">,
+  options: { allowRetired?: boolean } = {},
+): Promise<{
+  claims: OrgIdentityClaims;
+  org: Doc<"organizations">;
+  project: Doc<"projects">;
+}> {
+  const claims = await requireIdentity(ctx);
+  if (claims.orgId === undefined) {
+    throw new Error("No active organization on identity");
+  }
+  const project = await ctx.db.get(projectId);
+  if (project === null) throw new Error("Project not found");
+  const org = await ctx.db.get(project.organizationId);
+  if (
+    org === null ||
+    org.clerkOrgId !== claims.orgId ||
+    !(await isOrganizationActive(ctx, org)) ||
+    (!options.allowRetired && (await isProjectRetired(ctx, project)))
+  ) {
+    throw new Error("Project not found");
+  }
+  requireOrgAdmin(claims);
+  return { claims, org, project };
+}
+
+/** Admin/owner version lifecycle gate with cross-org non-enumeration. */
+export async function requireSpecVersionAdmin(
+  ctx: DbCtx,
+  versionId: Id<"specVersions">,
+): Promise<{
+  claims: OrgIdentityClaims;
+  org: Doc<"organizations">;
+  project: Doc<"projects">;
+  version: Doc<"specVersions">;
+}> {
+  const claims = await requireIdentity(ctx);
+  if (claims.orgId === undefined) {
+    throw new Error("No active organization on identity");
+  }
+  const version = await ctx.db.get(versionId);
+  if (version === null) throw new Error("Version not found");
+  const project = await ctx.db.get(version.projectId);
+  if (project === null) throw new Error("Version not found");
+  const org = await ctx.db.get(project.organizationId);
+  if (
+    org === null ||
+    org.clerkOrgId !== claims.orgId ||
+    !(await isOrganizationActive(ctx, org)) ||
+    (await isProjectRetired(ctx, project))
+  ) {
+    throw new Error("Version not found");
+  }
+  requireOrgAdmin(claims);
+  return { claims, org, project, version };
+}
+
 /**
- * Enforce org-admin role from the Clerk JWT claim (`org_role === "org:admin"`).
+ * Enforce org admin/owner role from the Clerk JWT claim.
  * `claims.orgRole` is parsed by `requireIdentity` but, without this gate, any
  * org member can perform admin actions. Callers resolve claims first via
  * `requireIdentity` / `requireOrgMemberBySlug` / `requireProjectMember`, then
@@ -195,7 +262,7 @@ export async function requireProjectMember(
  * intentionally remain member-scoped.
  */
 export function requireOrgAdmin(claims: OrgIdentityClaims): OrgIdentityClaims {
-  if (claims.orgRole !== "org:admin") {
+  if (claims.orgRole !== "org:admin" && claims.orgRole !== "org:owner") {
     throw new Error("Org admin role required");
   }
   return claims;

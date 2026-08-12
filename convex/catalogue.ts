@@ -8,12 +8,9 @@ import { v } from "convex/values";
 import { internalMutation, query, type MutationCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
-import {
-  getActiveOrgById,
-  getOrgByClerkId,
-  getOrgByPublicHandle,
-} from "./lib/auth";
+import { getActiveOrgById, getOrgByClerkId } from "./lib/auth";
 import { toQualitySnapshotContract } from "./quality";
+import { resolveActivePublicRoute } from "./lib/publicRoutes";
 
 const PAGE_SIZE = 24;
 const PUBLIC_SCAN_CAP = 240;
@@ -806,16 +803,13 @@ export const getPublicDetail = query({
     } | null;
     quality: QualitySnapshotContract | null;
   } | null> => {
-    const org = await getOrgByPublicHandle(ctx, args.publisherHandle);
-    if (org === null || org.publicHandle === undefined) return null;
-
-    const project = await ctx.db
-      .query("projects")
-      .withIndex("by_org_slug", (q) =>
-        q.eq("organizationId", org._id).eq("slug", args.projectSlug),
-      )
-      .unique();
-    if (project === null) return null;
+    const route = await resolveActivePublicRoute(
+      ctx,
+      args.publisherHandle,
+      args.projectSlug,
+    );
+    if (route === null) return null;
+    const { organization: org, project } = route;
     if (project.visibility !== "public" || project.status !== "published") {
       return null;
     }
@@ -841,7 +835,7 @@ export const getPublicDetail = query({
       },
       org: {
         name: org.name,
-        publisherHandle: org.publicHandle,
+        publisherHandle: org.publicHandle!,
         imageUrl: org.imageUrl,
       },
       latestVersion:

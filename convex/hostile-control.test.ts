@@ -53,6 +53,7 @@ describe("hostile control-plane state", () => {
         lastSavedAt: 1,
       });
       await ctx.db.insert("organizationTombstones", {
+        sourceRevision: 1,
         clerkOrgId: "org_hostile",
         archivedAt: 2,
       });
@@ -124,7 +125,7 @@ describe("hostile control-plane state", () => {
         keyId: "key_other_member",
         disabled: true,
       }),
-    ).rejects.toThrow(/Key not found/);
+    ).rejects.toThrow(/Verified key not found/);
   });
 
   it("records provider ownership and keeps unattributed usage fail-closed", async () => {

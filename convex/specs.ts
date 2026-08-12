@@ -3,9 +3,9 @@ import { internalQuery, mutation, query } from "./_generated/server";
 import type { Doc } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
 import {
-  getOrgByPublicHandle,
   requireOrgAdmin,
   requireProjectMember,
+  requireSpecVersionAdmin,
 } from "./lib/auth";
 import { createNotification } from "./lib/notifications";
 import { fireWebhookEvent } from "./webhooks";
@@ -15,6 +15,8 @@ import {
 } from "./lib/credentialCrypto";
 import { draftFingerprint, readinessValidity } from "./publishReadiness";
 import { syncCatalogueListing } from "./catalogue";
+import { enqueuePublishedProjectProjection } from "./registrySync";
+import { resolveActivePublicRoute } from "./lib/publicRoutes";
 import {
   isValidSemver,
   type SpecIssue,
@@ -236,7 +238,12 @@ export const publish = mutation({
       publishedAt,
     });
 
-    await ctx.db.patch(args.projectId, { status: "published" });
+    const currentProject = await ctx.db.get(args.projectId);
+    if (currentProject === null) throw new Error("Project not found");
+    await ctx.db.patch(args.projectId, {
+      status: "published",
+      publicationGeneration: (currentProject.publicationGeneration ?? 0) + 1,
+    });
 
     const versionDoc = await ctx.db.get(versionId);
     const project = await ctx.db.get(args.projectId);
@@ -244,6 +251,7 @@ export const publish = mutation({
       throw new Error("Failed to load published version");
     }
     await syncCatalogueListing(ctx, project._id);
+    await enqueuePublishedProjectProjection(ctx, args.projectId);
     // Notify publisher org + fire webhook event.
     await createNotification(ctx, {
       clerkOrgId: org.clerkOrgId,
@@ -352,17 +360,14 @@ export const getPublishedForGateway = query({
     deprecationMessage: string | undefined;
     retiredAt: number | undefined;
   } | null> => {
-    const org = await getOrgByPublicHandle(ctx, args.publisherHandle);
-    if (org === null) return null;
-
-    const project = await ctx.db
-      .query("projects")
-      .withIndex("by_org_slug", (q) =>
-        q.eq("organizationId", org._id).eq("slug", args.projectSlug),
-      )
-      .filter((q) => q.eq(q.field("visibility"), "public"))
-      .unique();
-    if (project === null) return null;
+    const route = await resolveActivePublicRoute(
+      ctx,
+      args.publisherHandle,
+      args.projectSlug,
+    );
+    if (route === null) return null;
+    const { project } = route;
+    if (project.visibility !== "public") return null;
     if (project.status !== "published") return null;
 
     const latest = await ctx.db
@@ -412,16 +417,40 @@ export const getPublishedForGatewayInternal = internalQuery({
     deprecationMessage: string | undefined;
     retiredAt: number | undefined;
   } | null> => {
-    const org = await getOrgByPublicHandle(ctx, args.publisherHandle);
-    if (org === null) return null;
-
-    const project = await ctx.db
-      .query("projects")
-      .withIndex("by_org_slug", (q) =>
-        q.eq("organizationId", org._id).eq("slug", args.projectSlug),
-      )
-      .unique();
-    if (project === null || project.status !== "published") return null;
+    let route = await resolveActivePublicRoute(
+      ctx,
+      args.publisherHandle,
+      args.projectSlug,
+    );
+    if (route === null) {
+      // Retired routes lose their active binding but must still resolve so the
+      // gateway can answer 410 with immutable deprecation metadata.
+      const organization = await ctx.db
+        .query("organizations")
+        .withIndex("by_public_handle", (q) =>
+          q.eq("publicHandle", args.publisherHandle.trim().toLowerCase()),
+        )
+        .unique();
+      if (organization === null || organization.archivedAt !== undefined) {
+        return null;
+      }
+      const candidates = await ctx.db
+        .query("projects")
+        .withIndex("by_org_slug", (q) =>
+          q.eq("organizationId", organization._id).eq("slug", args.projectSlug),
+        )
+        .take(2);
+      const retired = candidates.length === 1 ? candidates[0]! : null;
+      if (retired === null || retired.retiredAt === undefined) return null;
+      const tombstone = await ctx.db
+        .query("publicRouteTombstones")
+        .withIndex("by_project", (q) => q.eq("projectId", retired._id))
+        .first();
+      if (tombstone === null) return null;
+      route = { organization, project: retired, binding: tombstone };
+    }
+    const { organization: org, project } = route;
+    if (project.status !== "published") return null;
 
     const latest = await ctx.db
       .query("specVersions")
@@ -473,15 +502,10 @@ export const deprecateVersion = mutation({
   args: {
     versionId: v.id("specVersions"),
     sunsetAt: v.optional(v.number()),
-    message: v.string(),
+    message: v.optional(v.string()),
   },
   handler: async (ctx, args): Promise<Doc<"specVersions">> => {
-    const version = await ctx.db.get(args.versionId);
-    if (version === null) {
-      throw new Error("Version not found");
-    }
-    const { claims, org } = await requireProjectMember(ctx, version.projectId);
-    requireOrgAdmin(claims);
+    const { org, version } = await requireSpecVersionAdmin(ctx, args.versionId);
 
     const now = Date.now();
     if (version.sunsetAt !== undefined && version.sunsetAt <= now) {
@@ -495,21 +519,25 @@ export const deprecateVersion = mutation({
     ) {
       throw new Error("Sunset must be a safe timestamp at least 7 days away");
     }
-    const message = args.message.trim();
-    if (message.length === 0 || message.length > 1000) {
+    const message = args.message?.trim();
+    if (
+      message !== undefined &&
+      (message.length === 0 || message.length > 1000)
+    ) {
       throw new Error("Deprecation message must be 1 to 1000 characters");
     }
     await ctx.db.patch(args.versionId, {
       deprecatedAt: version.deprecatedAt ?? now,
       sunsetAt: args.sunsetAt,
-      deprecationMessage: message,
+      deprecationMessage: message ?? version.deprecationMessage,
     });
+    await enqueuePublishedProjectProjection(ctx, version.projectId);
 
     await createNotification(ctx, {
       clerkOrgId: org.clerkOrgId,
       kind: "version_deprecated",
       title: "Version deprecated",
-      body: `Version ${version.version} has been deprecated: ${message}.`,
+      body: `Version ${version.version} has been deprecated${message !== undefined ? `: ${message}` : ""}.`,
       refId: `version_deprecated:${args.versionId}`,
     });
 
@@ -534,12 +562,7 @@ export const deprecateVersion = mutation({
 export const undeprecateVersion = mutation({
   args: { versionId: v.id("specVersions") },
   handler: async (ctx, args): Promise<Doc<"specVersions">> => {
-    const version = await ctx.db.get(args.versionId);
-    if (version === null) {
-      throw new Error("Version not found");
-    }
-    const { claims } = await requireProjectMember(ctx, version.projectId);
-    requireOrgAdmin(claims);
+    const { version } = await requireSpecVersionAdmin(ctx, args.versionId);
     if (version.sunsetAt !== undefined && version.sunsetAt <= Date.now()) {
       throw new Error("A version cannot be restored after its sunset");
     }
@@ -551,6 +574,7 @@ export const undeprecateVersion = mutation({
       spec: version.spec,
       publishedAt: version.publishedAt,
     });
+    await enqueuePublishedProjectProjection(ctx, version.projectId);
 
     const updated = await ctx.db.get(args.versionId);
     if (updated === null) {

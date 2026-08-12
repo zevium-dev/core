@@ -252,7 +252,7 @@ export async function handleGatewayRequest(
         method: matched.method,
         pathTemplate: matched.pathTemplate,
         cost: 0,
-        status: authorization.reason === "key_disabled" ? 403 : 402,
+        status: authorization.reason === "insufficient_credits" ? 402 : 403,
         outcome: "blocked",
         latencyMs: (deps.now ?? Date.now)() - started,
         reservationId,
@@ -263,6 +263,14 @@ export async function handleGatewayRequest(
           available: authorization.available ?? 0,
           cost: 0,
         });
+      }
+      if (authorization.reason === "organization_archived") {
+        return jsonError(
+          403,
+          "organization_archived",
+          "Organization is archived",
+          requestId,
+        );
       }
       return jsonError(403, "key_disabled", "API key is disabled", requestId);
     }
@@ -302,7 +310,8 @@ export async function handleGatewayRequest(
       });
     } else if (
       freeResult.status === "rejected" &&
-      freeResult.reason === "key_disabled"
+      (freeResult.reason === "key_disabled" ||
+        freeResult.reason === "organization_archived")
     ) {
       emitUsage(ctx, deps, {
         requestId,
@@ -320,7 +329,14 @@ export async function handleGatewayRequest(
         latencyMs: (deps.now ?? Date.now)() - started,
         reservationId,
       });
-      return jsonError(403, "key_disabled", "API key is disabled", requestId);
+      return jsonError(
+        403,
+        freeResult.reason,
+        freeResult.reason === "organization_archived"
+          ? "Organization is archived"
+          : "API key is disabled",
+        requestId,
+      );
     }
   }
 
@@ -357,7 +373,8 @@ export async function handleGatewayRequest(
     if (
       reserve.status === "rejected" &&
       (reserve.reason === "key_disabled" ||
-        reserve.reason === "key_cap_exceeded")
+        reserve.reason === "key_cap_exceeded" ||
+        reserve.reason === "organization_archived")
     ) {
       emitUsage(ctx, deps, {
         requestId,
@@ -380,7 +397,9 @@ export async function handleGatewayRequest(
         reserve.reason,
         reserve.reason === "key_disabled"
           ? "API key is disabled"
-          : "Monthly credit cap reached for this key",
+          : reserve.reason === "organization_archived"
+            ? "Organization is archived"
+            : "Monthly credit cap reached for this key",
         requestId,
       );
     }

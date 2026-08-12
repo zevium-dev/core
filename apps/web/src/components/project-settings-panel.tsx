@@ -167,7 +167,7 @@ export function ProjectSettingsPanel({
   const { mutate: deleteProject, isPending: deletePending } = useMutation({
     mutationFn: () => removeProject({ projectId: project._id }),
     onSuccess: async () => {
-      toast.success("Project deleted");
+      toast.success("Project archived");
       setDeleteOpen(false);
       await queryClient.invalidateQueries({
         queryKey: convexQuery(api.projects.list, { orgSlug }).queryKey,
@@ -175,7 +175,7 @@ export function ProjectSettingsPanel({
       void navigate({ to: "/app/projects" });
     },
     onError: (err: unknown) => {
-      toast.error(humanError(err, "Could not delete project"));
+      toast.error(humanError(err, "Could not archive project"));
     },
   });
 
@@ -594,7 +594,7 @@ export function ProjectSettingsPanel({
                   disabled={deletePending || !canDelete}
                   onClick={() => deleteProject()}
                 >
-                  {deletePending ? "Deleting…" : "Delete project"}
+                  {deletePending ? "Archiving…" : "Archive project"}
                 </Button>
               </DialogFooter>
             </DialogContent>

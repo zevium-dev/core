@@ -85,6 +85,19 @@ async function seedSearchWorld(
       }),
     });
 
+    for (const [projectId, projectSlug] of [
+      [publicId, "weather"],
+      [privateId, "secret-billing"],
+    ] as const) {
+      await ctx.db.insert("publicRouteTombstones", {
+        organizationId: orgId,
+        projectId,
+        publisherHandle: "search-co",
+        projectSlug,
+        reservedAt: 1_700_000_000_000,
+      });
+    }
+
     const draftId = await ctx.db.insert("projects", {
       organizationId: orgId,
       name: "Drafty API",
@@ -314,6 +327,13 @@ describe("search.fetchSearchListings", () => {
         version: "1.0.0",
         publishedAt: 1_700_000_001_000,
         spec: openapiSpec({ "/geo": { get: { "x-zevium-cost": 2 } } }),
+      });
+      await ctx.db.insert("publicRouteTombstones", {
+        organizationId: seed.orgId,
+        projectId: id,
+        publisherHandle: "search-co",
+        projectSlug: "geo",
+        reservedAt: 1_700_000_001_000,
       });
       return await ctx.db.insert("specEmbeddings", {
         projectId: id,
