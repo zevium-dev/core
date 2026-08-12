@@ -47,7 +47,7 @@ The listing's product page — shareable URL, the API's landing page. Spec metad
 - **Mock mode**: free spec-generated mock responses — exercise the API shape without spending credits. Implemented: keyless and anonymous by design (never executes upstream, 0 credits), ahead of its P1 tag
 - **Connect your agent** tab: copy-paste agent-tool config per client + agent-readable usage notes
 - Version picker: published versions, spec-diff changelog between versions (P2)
-- Reviews/ratings (P2)
+- Reviews/ratings (P2): aggregate plus paginated verified-consumer reviews. Empty state says no verified reviews yet. Reviewers may edit or withdraw their one organization-level review; public attribution stays anonymous. Publisher responses sit beneath criticism and cannot delete it. Hidden reviews disappear from public counts and lists; staff moderation is auditable.
 
 ### 1.4 Auth — `/auth/*`
 

@@ -23,6 +23,7 @@ import { internal } from "./_generated/api";
 import type { Doc } from "./_generated/dataModel";
 import { summarizePublishedPricing, type PublicListing } from "./catalogue";
 import { getActiveOrgById } from "./lib/auth";
+import { toQualitySnapshotContract } from "./quality";
 
 /** Max results returned by a semantic search (VectorSearchQuery.limit caps at 256). */
 const SEARCH_LIMIT_MAX = 20;
@@ -328,6 +329,10 @@ export const fetchSearchListings = internalQuery({
 
       const pricing =
         latest === null ? null : summarizePublishedPricing(latest.spec);
+      const snapshot = await ctx.db
+        .query("qualitySnapshots")
+        .withIndex("by_project", (q) => q.eq("projectId", project._id))
+        .unique();
 
       out.push({
         name: project.name,
@@ -338,6 +343,12 @@ export const fetchSearchListings = internalQuery({
         publisherHandle: org.publicHandle,
         publishedAt: latest?.publishedAt ?? null,
         pricing,
+        quality:
+          snapshot === null ||
+          latest === null ||
+          snapshot.specVersionId !== latest._id
+            ? null
+            : toQualitySnapshotContract(snapshot),
         score: args.scores[i] ?? 0,
       });
     }

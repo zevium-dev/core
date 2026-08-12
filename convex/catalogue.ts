@@ -2,6 +2,7 @@ import {
   extractPricing,
   MAX_ENDPOINT_COST_CREDITS,
   parseSpec,
+  type QualitySnapshotContract,
 } from "@zevium/shared";
 import { v } from "convex/values";
 import { internalMutation, query, type MutationCtx } from "./_generated/server";
@@ -12,6 +13,7 @@ import {
   getOrgByClerkId,
   getOrgByPublicHandle,
 } from "./lib/auth";
+import { toQualitySnapshotContract } from "./quality";
 
 const PAGE_SIZE = 24;
 const PUBLIC_SCAN_CAP = 240;
@@ -37,6 +39,7 @@ export type PublicListing = {
   publisherHandle: string;
   publishedAt: number | null;
   pricing: ListingPricingSummary | null;
+  quality: QualitySnapshotContract | null;
 };
 
 /**
@@ -110,6 +113,7 @@ function publicListing(listing: Doc<"catalogueListings">): PublicListing {
     publisherHandle: listing.publisherHandle,
     publishedAt: listing.publishedAt || null,
     pricing: listingPricing(listing),
+    quality: null,
   };
 }
 
@@ -501,6 +505,10 @@ export const listPublic = query({
         ) {
           continue;
         }
+        const qualitySnapshot = await ctx.db
+          .query("qualitySnapshots")
+          .withIndex("by_project", (q) => q.eq("projectId", project._id))
+          .unique();
         items.push({
           name: project.name,
           slug: project.slug,
@@ -510,6 +518,12 @@ export const listPublic = query({
           publisherHandle: organization.publicHandle,
           publishedAt: latest?.publishedAt ?? null,
           pricing,
+          quality:
+            latest === null ||
+            qualitySnapshot === null ||
+            qualitySnapshot.specVersionId !== latest._id
+              ? null
+              : toQualitySnapshotContract(qualitySnapshot),
         });
       }
       items.sort((a, b) => {
@@ -714,7 +728,32 @@ export const listPublic = query({
     const staleCount = active.filter((row) => row.stale).length;
     const items = active.filter((row) => !row.stale).map((row) => row.listing);
     return {
-      items: items.map(publicListing),
+      items: await Promise.all(
+        items.map(async (listing) => {
+          const base = publicListing(listing);
+          const latest = await ctx.db
+            .query("specVersions")
+            .withIndex("by_project_published", (q) =>
+              q.eq("projectId", listing.projectId),
+            )
+            .order("desc")
+            .first();
+          if (latest === null) return { ...base, quality: null };
+          const snapshot = await ctx.db
+            .query("qualitySnapshots")
+            .withIndex("by_project", (q) =>
+              q.eq("projectId", listing.projectId),
+            )
+            .unique();
+          return {
+            ...base,
+            quality:
+              snapshot === null || snapshot.specVersionId !== latest._id
+                ? null
+                : toQualitySnapshotContract(snapshot),
+          };
+        }),
+      ),
       nextCursor: page.isDone ? null : page.continueCursor,
       total: Math.max(
         0,
@@ -765,6 +804,7 @@ export const getPublicDetail = query({
       sunsetAt: number | undefined;
       deprecationMessage: string | undefined;
     } | null;
+    quality: QualitySnapshotContract | null;
   } | null> => {
     const org = await getOrgByPublicHandle(ctx, args.publisherHandle);
     if (org === null || org.publicHandle === undefined) return null;
@@ -785,6 +825,10 @@ export const getPublicDetail = query({
       .withIndex("by_project_published", (q) => q.eq("projectId", project._id))
       .order("desc")
       .first();
+    const snapshot = await ctx.db
+      .query("qualitySnapshots")
+      .withIndex("by_project", (q) => q.eq("projectId", project._id))
+      .unique();
 
     return {
       project: {
@@ -812,6 +856,12 @@ export const getPublicDetail = query({
               deprecationMessage:
                 project.deprecationMessage ?? latest.deprecationMessage,
             },
+      quality:
+        snapshot === null ||
+        latest === null ||
+        snapshot.specVersionId !== latest._id
+          ? null
+          : toQualitySnapshotContract(snapshot),
     };
   },
 });

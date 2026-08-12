@@ -109,6 +109,7 @@ Consumers see: one gateway URL per API, one key, one wallet, itemized charges. P
 - **Playground**: in-docs test console. A playground call is a normal metered call — free when it costs nothing (mock mode generated from the spec, or the publisher's free tier covers it), charged like any other call when it hits a paid upstream. No special playground billing
 - **Billing transparency**: usage dashboard with current-cycle consumption + projected cost, per-key and per-endpoint breakdown; spend alerts at 50/75/100% thresholds; budget webhooks
 - **Key management**: per-key spend limits with daily/weekly/monthly resets and auto-disable, programmatic key provisioning, zero-downtime rotation (roll-key with grace period)
+- **Verified reviews** (P2): only an organization with a settled call may review a listing. One active review per consumer organization; rating-only reviews are valid. Public attribution is "Verified consumer" by default, not the buyer organization's identity. Publisher organizations cannot review their own listings, publisher responses cannot remove criticism, and staff hide/restore actions require an auditable reason.
 
 ## Publisher experience requirements
 

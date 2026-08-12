@@ -216,6 +216,59 @@ describe("search.fetchSearchListings", () => {
     expect(result).toEqual([]);
   });
 
+  it("never attaches quality from a superseded spec version", async () => {
+    const t = convexTest(schema, modules);
+    const seed = await seedSearchWorld(t);
+    const version1 = await t.run(async (ctx) =>
+      ctx.db
+        .query("specVersions")
+        .withIndex("by_project", (q) => q.eq("projectId", seed.publicId))
+        .unique(),
+    );
+    if (version1 === null) throw new Error("version missing");
+    await t.run(async (ctx) => {
+      await ctx.db.insert("qualitySnapshots", {
+        projectId: seed.publicId,
+        specVersionId: version1._id,
+        sampleSize: 3,
+        responseCount: 3,
+        successCount: 2,
+        availabilityPercent: 100,
+        successRatePercent: 66.67,
+        latencyP50Ms: 25,
+        insufficientData: false,
+        lastOutcome: "success",
+        lastCheckedAt: 1_700_000_010_000,
+        publishedAt: version1.publishedAt,
+        updatedAt: 1_700_000_010_000,
+      });
+    });
+    const current = await t.query(internal.search.fetchSearchListings, {
+      ids: [seed.publicEmbedId],
+      scores: [0.9],
+    });
+    expect(current[0]?.quality).toMatchObject({
+      sampleSize: 3,
+      successRatePercent: 66.67,
+    });
+
+    await t.run(async (ctx) => {
+      await ctx.db.insert("specVersions", {
+        projectId: seed.publicId,
+        version: "2.0.0",
+        publishedAt: version1.publishedAt + 1,
+        spec: openapiSpec({
+          "/forecast": { get: { "x-zevium-cost": 2 } },
+        }),
+      });
+    });
+    const stale = await t.query(internal.search.fetchSearchListings, {
+      ids: [seed.publicEmbedId],
+      scores: [0.9],
+    });
+    expect(stale[0]?.quality).toBeNull();
+  });
+
   it("skips ids whose embedding row was deleted", async () => {
     const t = convexTest(schema, modules);
     const seed = await seedSearchWorld(t);
