@@ -214,6 +214,18 @@ export const createKey = createServerFn({ method: "POST" })
       throw new Error("Key created but secret missing. Contact support.");
     }
 
+    try {
+      await convex.action(api.keyVerification.syncVerifiedKey, {
+        keyId: created.id,
+      });
+    } catch (error) {
+      await client.apiKeys.revoke({
+        apiKeyId: created.id,
+        revocationReason: "Provider ownership recording failed",
+      });
+      throw error;
+    }
+
     return {
       id: created.id,
       name: created.name,
@@ -408,6 +420,9 @@ export const rotateKey = createServerFn({ method: "POST" })
 
     const graceUntil = Date.now() + ROTATION_GRACE_MS;
     try {
+      await convex.action(api.keyVerification.syncVerifiedKey, {
+        keyId: created.id,
+      });
       await convex.mutation(api.keySettings.completeRotation, {
         operationId: data.operationId,
         oldKeyId: old.id,

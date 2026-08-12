@@ -59,9 +59,14 @@ describe("earnings.forOrg", () => {
       t.query(api.earnings.forOrg, { orgSlug: "publisher" }),
     ).rejects.toThrow("Not authenticated");
     const result = await t
-      .withIdentity({ subject: "publisher", org_id: "org_publisher" } as {
+      .withIdentity({
+        subject: "publisher",
+        org_id: "org_publisher",
+        org_role: "org:admin",
+      } as {
         subject: string;
         org_id: string;
+        org_role: string;
       })
       .query(api.earnings.forOrg, { orgSlug: "publisher" });
     expect(result.allTime).toEqual({

@@ -32,6 +32,13 @@ jobs:
       - uses: jdx/mise-action@v4
       - run: pnpm exec prettier --check .
       - run: pnpm typecheck
+      - name: Build production artifacts
+        env:
+          VITE_CONVEX_URL: https://example.convex.cloud
+          VITE_GATEWAY_URL: https://gateway.example.com
+          CLERK_PUBLISHABLE_KEY: pk_test_placeholder
+          CLERK_SECRET_KEY: sk_test_placeholder
+        run: pnpm build
 
   tests:
     runs-on: blacksmith-2vcpu-ubuntu-2404

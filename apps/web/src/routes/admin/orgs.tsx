@@ -23,7 +23,7 @@ import {
 import { Skeleton } from "#/components/ui/skeleton";
 import { api } from "#/lib/convex-api";
 import { formatCredits } from "#/lib/billing-cycle";
-import { mergeUsagePages } from "#/lib/activity-filters";
+import { mergeHandlePages } from "#/lib/activity-filters";
 import type { AdminOrgView } from "../../../../../convex/admin";
 
 const ORG_PAGE_SIZE = 25;
@@ -53,7 +53,7 @@ function AdminOrgsPage() {
   useEffect(() => {
     if (!orgsQuery.data || orgsQuery.isPending) return;
     const page = orgsQuery.data.page as AdminOrgView[];
-    setRows((prev) => mergeUsagePages(prev, page, cursor === null));
+    setRows((prev) => mergeHandlePages(prev, page, cursor === null));
     setIsDone(orgsQuery.data.isDone);
     setContinueCursor(orgsQuery.data.continueCursor);
   }, [orgsQuery.data, orgsQuery.isPending, cursor]);
@@ -104,7 +104,7 @@ function AdminOrgsPage() {
                   </thead>
                   <tbody>
                     {rows.map((org) => (
-                      <tr key={org._id} className="border-b last:border-0">
+                      <tr key={org.handle} className="border-b last:border-0">
                         <td className="px-2 py-2.5 font-medium">{org.name}</td>
                         <td className="px-2 py-2.5 font-mono text-xs text-muted-foreground">
                           {org.slug}

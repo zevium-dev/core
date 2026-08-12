@@ -75,4 +75,21 @@ export function mergeUsagePages<T extends UsageRowId>(
   return next;
 }
 
+export function mergeHandlePages<T extends { handle: string }>(
+  existing: readonly T[],
+  incoming: readonly T[],
+  replace: boolean,
+): T[] {
+  if (replace) return [...incoming];
+  const seen = new Set(existing.map((row) => row.handle));
+  const next = [...existing];
+  for (const row of incoming) {
+    if (!seen.has(row.handle)) {
+      seen.add(row.handle);
+      next.push(row);
+    }
+  }
+  return next;
+}
+
 export const ACTIVITY_PAGE_SIZE = 25;

@@ -93,6 +93,16 @@ export async function getActiveOrgById(
   return org;
 }
 
+/** Resolve an active organization by Clerk id for internal finance/key gates. */
+export async function requireActiveOrgByClerkId(
+  ctx: DbCtx,
+  clerkOrgId: string,
+): Promise<Doc<"organizations">> {
+  const org = await getOrgByClerkId(ctx, clerkOrgId);
+  if (org === null) throw new Error("Active organization is not provisioned");
+  return org;
+}
+
 /** Public routing uses the product handle, never the Clerk slug. */
 export async function getOrgByPublicHandle(
   ctx: DbCtx,

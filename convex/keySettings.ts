@@ -18,7 +18,7 @@ import {
   type MutationCtx,
   type QueryCtx,
 } from "./_generated/server";
-import { requireIdentity, requireOrgAdmin } from "./lib/auth";
+import { getOrgByClerkId, requireIdentity } from "./lib/auth";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -78,23 +78,20 @@ type DbCtx = QueryCtx | MutationCtx;
  */
 async function requireOrgByClerkId(
   ctx: DbCtx,
-): Promise<{ clerkOrgId: string }> {
+): Promise<{ clerkOrgId: string; subject: string; isAdmin: boolean }> {
   const claims = await requireIdentity(ctx);
   const clerkOrgId = claims.orgId;
   if (typeof clerkOrgId !== "string" || clerkOrgId.length === 0) {
     throw new Error("Select an organization before managing API keys");
   }
-  const org = await ctx.db
-    .query("organizations")
-    .withIndex("by_clerk_org", (q) => q.eq("clerkOrgId", clerkOrgId))
-    .unique();
-  if (org === null) {
-    throw new Error("Organization not found");
+  if ((await getOrgByClerkId(ctx, clerkOrgId)) === null) {
+    throw new Error("Organization is archived or not provisioned");
   }
-  if (org.archivedAt !== undefined) {
-    throw new Error("Organization is archived");
-  }
-  return { clerkOrgId };
+  return {
+    clerkOrgId,
+    subject: claims.subject,
+    isAdmin: claims.orgRole === "org:admin",
+  };
 }
 
 /** Load a keySettings row by keyId, enforcing org ownership. */
@@ -173,12 +170,23 @@ async function upsertSetting(
   clerkOrgId: string,
   keyId: string,
   patch: UpsertPatch,
+  allowCreate = false,
 ): Promise<Doc<"keySettings">> {
   const existing = await getOwnedRow(ctx, clerkOrgId, keyId);
   if (existing !== null) {
     return await patchSetting(ctx, existing._id, patch);
   }
+  if (!allowCreate) throw new Error("Key not found");
   return await insertSetting(ctx, clerkOrgId, keyId, patch);
+}
+
+function canManageSetting(
+  setting: Doc<"keySettings"> | null,
+  subject: string,
+  isAdmin: boolean,
+): setting is Doc<"keySettings"> {
+  if (setting === null) return false;
+  return isAdmin || setting.ownerUserId === subject;
 }
 
 // ---------------------------------------------------------------------------
@@ -191,12 +199,14 @@ async function upsertSetting(
 export const getForOrg = query({
   args: {},
   handler: async (ctx): Promise<KeySettingView[]> => {
-    const { clerkOrgId } = await requireOrgByClerkId(ctx);
+    const { clerkOrgId, subject, isAdmin } = await requireOrgByClerkId(ctx);
     const rows = await ctx.db
       .query("keySettings")
       .withIndex("by_org", (q) => q.eq("clerkOrgId", clerkOrgId))
       .collect();
-    return rows.map(toView);
+    return rows
+      .filter((row) => isAdmin || row.ownerUserId === subject)
+      .map(toView);
   },
 });
 
@@ -212,7 +222,7 @@ export const setCap = mutation({
     monthlyCapCredits: v.union(v.number(), v.null()),
   },
   handler: async (ctx, args): Promise<KeySettingView> => {
-    const { clerkOrgId } = await requireOrgByClerkId(ctx);
+    const { clerkOrgId, subject, isAdmin } = await requireOrgByClerkId(ctx);
     if (args.keyId.trim().length === 0) {
       throw new Error("keyId is required");
     }
@@ -224,11 +234,24 @@ export const setCap = mutation({
     ) {
       throw new Error("Cap must be a positive whole number of credits");
     }
+    const existing = await getOwnedRow(ctx, clerkOrgId, args.keyId);
+    if (existing === null && !isAdmin) {
+      throw new Error("Key not found");
+    }
+    if (existing !== null && !canManageSetting(existing, subject, isAdmin)) {
+      throw new Error("Key not found");
+    }
     // null clears the field (undefined in patch deletes it); a number sets it.
-    const doc = await upsertSetting(ctx, clerkOrgId, args.keyId, {
-      monthlyCapCredits:
-        args.monthlyCapCredits === null ? undefined : args.monthlyCapCredits,
-    });
+    const doc = await upsertSetting(
+      ctx,
+      clerkOrgId,
+      args.keyId,
+      {
+        monthlyCapCredits:
+          args.monthlyCapCredits === null ? undefined : args.monthlyCapCredits,
+      },
+      isAdmin && existing === null,
+    );
     return toView(doc);
   },
 });
@@ -240,13 +263,26 @@ export const setDisabled = mutation({
     disabled: v.boolean(),
   },
   handler: async (ctx, args): Promise<KeySettingView> => {
-    const { clerkOrgId } = await requireOrgByClerkId(ctx);
+    const { clerkOrgId, subject, isAdmin } = await requireOrgByClerkId(ctx);
     if (args.keyId.trim().length === 0) {
       throw new Error("keyId is required");
     }
-    const doc = await upsertSetting(ctx, clerkOrgId, args.keyId, {
-      disabled: args.disabled,
-    });
+    const existing = await getOwnedRow(ctx, clerkOrgId, args.keyId);
+    if (existing === null && !isAdmin) {
+      throw new Error("Key not found");
+    }
+    if (existing !== null && !canManageSetting(existing, subject, isAdmin)) {
+      throw new Error("Key not found");
+    }
+    const doc = await upsertSetting(
+      ctx,
+      clerkOrgId,
+      args.keyId,
+      {
+        disabled: args.disabled,
+      },
+      isAdmin && existing === null,
+    );
     return toView(doc);
   },
 });
@@ -254,9 +290,11 @@ export const setDisabled = mutation({
 export const revokePrevious = mutation({
   args: { keyId: v.string() },
   handler: async (ctx, args): Promise<KeySettingView> => {
-    const claims = await requireIdentity(ctx);
-    requireOrgAdmin(claims);
-    const { clerkOrgId } = await requireOrgByClerkId(ctx);
+    const { clerkOrgId, subject, isAdmin } = await requireOrgByClerkId(ctx);
+    const existing = await getOwnedRow(ctx, clerkOrgId, args.keyId);
+    if (!canManageSetting(existing, subject, isAdmin)) {
+      throw new Error("Key not found");
+    }
     const doc = await upsertSetting(ctx, clerkOrgId, args.keyId, {
       disabled: true,
       graceUntil: undefined,
@@ -269,9 +307,25 @@ export const beginRotation = mutation({
   args: { operationId: v.string(), oldKeyId: v.string() },
   handler: async (ctx, args) => {
     const claims = await requireIdentity(ctx);
-    requireOrgAdmin(claims);
     if (!claims.orgId || !claims.subject)
       throw new Error("Select an organization before rotating");
+    if ((await getOrgByClerkId(ctx, claims.orgId)) === null) {
+      throw new Error("Organization is archived or not provisioned");
+    }
+    const org = claims.orgId ? await getOrgByClerkId(ctx, claims.orgId) : null;
+    if (org === null)
+      throw new Error("Organization is archived or not provisioned");
+    let oldSetting = await getOwnedRow(ctx, claims.orgId, args.oldKeyId);
+    if (oldSetting === null && claims.orgRole === "org:admin") {
+      oldSetting = await insertSetting(ctx, claims.orgId, args.oldKeyId, {});
+    }
+    if (
+      oldSetting === null ||
+      (claims.orgRole !== "org:admin" &&
+        oldSetting.ownerUserId !== claims.subject)
+    ) {
+      throw new Error("Key not found");
+    }
     const existing = await ctx.db
       .query("keyRotationOperations")
       .withIndex("by_operation", (q) =>
@@ -332,9 +386,11 @@ export const completeRotation = mutation({
   },
   handler: async (ctx, args) => {
     const claims = await requireIdentity(ctx);
-    requireOrgAdmin(claims);
     if (!claims.orgId || !claims.subject)
       throw new Error("Select an organization before rotating");
+    if ((await getOrgByClerkId(ctx, claims.orgId)) === null) {
+      throw new Error("Organization is archived or not provisioned");
+    }
     const op = await ctx.db
       .query("keyRotationOperations")
       .withIndex("by_operation", (q) =>
@@ -348,6 +404,14 @@ export const completeRotation = mutation({
       throw new Error("Rotation operation not found");
     if (op.status === "completed") return op;
     if (op.status !== "reserved") throw new Error("Rotation operation failed");
+    const oldSetting = await getOwnedRow(ctx, claims.orgId, args.oldKeyId);
+    if (
+      oldSetting === null ||
+      (claims.orgRole !== "org:admin" &&
+        oldSetting.ownerUserId !== claims.subject)
+    ) {
+      throw new Error("Key not found");
+    }
     const oldDoc = await upsertSetting(ctx, claims.orgId, args.oldKeyId, {
       graceUntil: args.graceUntil,
     });
@@ -357,9 +421,15 @@ export const completeRotation = mutation({
         graceUntil: undefined,
       });
     }
-    await upsertSetting(ctx, claims.orgId, args.newKeyId, {
-      rotatedFromKeyId: args.oldKeyId,
-    });
+    await upsertSetting(
+      ctx,
+      claims.orgId,
+      args.newKeyId,
+      {
+        rotatedFromKeyId: args.oldKeyId,
+      },
+      true,
+    );
     await ctx.db.patch(op._id, {
       status: "completed",
       newKeyId: args.newKeyId,
@@ -374,7 +444,6 @@ export const failRotation = mutation({
   args: { operationId: v.string(), message: v.string() },
   handler: async (ctx, args) => {
     const claims = await requireIdentity(ctx);
-    requireOrgAdmin(claims);
     if (!claims.orgId || !claims.subject)
       throw new Error("Select an organization before rotating");
     const op = await ctx.db
@@ -394,5 +463,45 @@ export const failRotation = mutation({
       updatedAt: Date.now(),
     });
     return await ctx.db.get(op._id);
+  },
+});
+
+/**
+ * Provider verification writer. The web server calls this only after Clerk
+ * returned the key and verified its subject/org claims. Ordinary policy
+ * mutations cannot create rows or populate ownerUserId.
+ */
+export const recordProviderVerifiedKey = internalMutation({
+  args: {
+    keyId: v.string(),
+    ownerUserId: v.string(),
+    clerkOrgId: v.string(),
+  },
+  handler: async (ctx, args): Promise<KeySettingView> => {
+    const claims = await requireIdentity(ctx);
+    if (
+      claims.orgId !== args.clerkOrgId ||
+      claims.subject !== args.ownerUserId ||
+      args.keyId.trim() === ""
+    ) {
+      throw new Error("Provider key ownership could not be verified");
+    }
+    if ((await getOrgByClerkId(ctx, args.clerkOrgId)) === null) {
+      throw new Error("Organization is archived or not provisioned");
+    }
+    const existing = await getOwnedRow(ctx, args.clerkOrgId, args.keyId);
+    const doc =
+      existing === null
+        ? await insertSetting(ctx, args.clerkOrgId, args.keyId, {})
+        : await patchSetting(ctx, existing._id, {});
+    if (doc.ownerUserId !== args.ownerUserId) {
+      await ctx.db.patch(doc._id, {
+        ownerUserId: args.ownerUserId,
+        updatedAt: Date.now(),
+      });
+    }
+    const updated = await ctx.db.get(doc._id);
+    if (updated === null) throw new Error("Key setting disappeared");
+    return toView(updated);
   },
 });

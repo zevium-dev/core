@@ -194,6 +194,9 @@ function sumInFlight(inFlight: Record<string, InFlightEntry>): number {
   let total = 0;
   for (const entry of Object.values(inFlight)) {
     total += entry.cost;
+    if (!Number.isSafeInteger(total)) {
+      throw new Error("Wallet hold total exceeds safe integer range");
+    }
   }
   return total;
 }
@@ -205,13 +208,21 @@ function sumInFlightForKey(
   let total = 0;
   for (const entry of Object.values(inFlight)) {
     if (entry.keyId === keyId) total += entry.cost;
+    if (!Number.isSafeInteger(total)) {
+      throw new Error("Key hold total exceeds safe integer range");
+    }
   }
   return total;
 }
 
 function sumPendingCosts(pendingSettlements: PendingSettlement[]): number {
   let total = 0;
-  for (const settlement of pendingSettlements) total += settlement.cost;
+  for (const settlement of pendingSettlements) {
+    total += settlement.cost;
+    if (!Number.isSafeInteger(total)) {
+      throw new Error("Pending settlement total exceeds safe integer range");
+    }
+  }
   return total;
 }
 
@@ -361,6 +372,11 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
     await previous;
     try {
       return await operation();
+    } catch (error) {
+      // Storage transactions can reject after local fields were changed. Reload
+      // every projection before releasing the mutation gate.
+      await this.#load();
+      throw error;
     } finally {
       release?.();
     }
@@ -380,6 +396,11 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
       settledCounter: { storageKey: string; amount: number };
     }>,
   ): Promise<void> {
+    for (const value of [keys.balance, keys.sequence, keys.flushSeq]) {
+      if (value !== undefined && !Number.isSafeInteger(value)) {
+        throw new Error("Wallet state exceeds safe integer range");
+      }
+    }
     await this.ctx.storage.transaction(async (txn) => {
       if (keys.balance !== undefined) await txn.put(K_BALANCE, keys.balance);
       if (keys.sequence !== undefined) await txn.put(K_SEQUENCE, keys.sequence);
@@ -399,10 +420,11 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
       if (keys.settledCounter !== undefined) {
         const current =
           (await txn.get<number>(keys.settledCounter.storageKey)) ?? 0;
-        await txn.put(
-          keys.settledCounter.storageKey,
-          current + keys.settledCounter.amount,
-        );
+        const next = current + keys.settledCounter.amount;
+        if (!Number.isSafeInteger(current) || !Number.isSafeInteger(next)) {
+          throw new Error("Settled usage counter exceeds safe integer range");
+        }
+        await txn.put(keys.settledCounter.storageKey, next);
       }
     });
   }
@@ -422,7 +444,7 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
     if (!grantId || typeof grantId !== "string") {
       return { status: "rejected", reason: "grantId required" };
     }
-    if (!(amount > 0) || !Number.isFinite(amount)) {
+    if (!(amount > 0) || !Number.isSafeInteger(amount)) {
       return { status: "rejected", reason: "amount must be > 0" };
     }
 
@@ -432,7 +454,11 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
       }
 
       this.#appliedGrantIds.add(grantId);
-      this.#balance += amount;
+      const nextBalance = this.#balance + amount;
+      if (!Number.isSafeInteger(nextBalance)) {
+        throw new Error("Wallet balance exceeds safe integer range");
+      }
+      this.#balance = nextBalance;
 
       await this.#persist({
         balance: this.#balance,
@@ -451,7 +477,7 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
     if (!reservationId || typeof reservationId !== "string") {
       return { status: "rejected", reason: "reservationId required" };
     }
-    if (!(cost > 0) || !Number.isFinite(cost)) {
+    if (!(cost > 0) || !Number.isSafeInteger(cost)) {
       return { status: "rejected", reason: "cost must be > 0" };
     }
 
@@ -495,7 +521,11 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
               settledStorageKey(opts.keyId, month),
             )) ?? 0;
           const reserved = sumInFlightForKey(this.#inFlight, opts.keyId);
-          if (used + reserved + cost > currentSetting.monthlyCapCredits) {
+          const projected = used + reserved + cost;
+          if (!Number.isSafeInteger(projected)) {
+            return { status: "rejected", reason: "wallet arithmetic overflow" };
+          }
+          if (projected > currentSetting.monthlyCapCredits) {
             return { status: "rejected", reason: "key_cap_exceeded" };
           }
         }
@@ -548,7 +578,11 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
       const { cost } = entry;
 
       delete this.#inFlight[reservationId];
-      this.#balance -= cost;
+      const nextBalance = this.#balance - cost;
+      if (!Number.isSafeInteger(nextBalance) || nextBalance < 0) {
+        throw new Error("Wallet balance overflow");
+      }
+      this.#balance = nextBalance;
       this.#terminal[reservationId] = "settled";
       const pending: PendingSettlement = {
         settlementId,
@@ -632,7 +666,7 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
       nowMs?: number;
     },
   ): Promise<FreeTierResult> {
-    if (!(limit > 0) || !Number.isFinite(limit)) {
+    if (!(limit > 0) || !Number.isSafeInteger(limit)) {
       return { status: "rejected", reason: "limit must be > 0" };
     }
 
@@ -669,6 +703,9 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
       }
 
       const next = used + 1;
+      if (!Number.isSafeInteger(next)) {
+        return { status: "rejected", reason: "free-tier counter overflow" };
+      }
       await this.ctx.storage.put(storageKey, next);
       return { status: "consumed", used: next, limit };
     });
@@ -1039,10 +1076,21 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
    * acknowledged; reservations remain represented in #inFlight.
    */
   #acceptCheckpoint(checkpoint: WalletCheckpoint): boolean {
+    if (
+      !Number.isSafeInteger(checkpoint.sequence) ||
+      checkpoint.sequence < 0 ||
+      !Number.isSafeInteger(checkpoint.balance)
+    ) {
+      throw new Error("Invalid wallet checkpoint");
+    }
     if (checkpoint.sequence <= this.#sequence) return false;
     this.#sequence = checkpoint.sequence;
-    this.#balance =
+    const balance =
       checkpoint.balance - sumPendingCosts(this.#pendingSettlements);
+    if (!Number.isSafeInteger(balance)) {
+      throw new Error("Wallet checkpoint underflow");
+    }
+    this.#balance = balance;
     return true;
   }
 

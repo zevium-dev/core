@@ -1,0 +1,7 @@
+[allowlist]
+description = "Repository fixtures and examples use explicit non-secret placeholders."
+regexes = [
+  '''REDACTED''',
+  '''pk_test_placeholder''',
+  '''sk_test_placeholder''',
+]

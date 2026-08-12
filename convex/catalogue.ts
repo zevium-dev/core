@@ -14,6 +14,7 @@ import {
 } from "./lib/auth";
 
 const PAGE_SIZE = 24;
+const PUBLIC_SCAN_CAP = 240;
 const PROJECTION_BACKFILL_PAGE_SIZE = 25;
 const CATALOGUE_STATS_KEY = "public";
 
@@ -137,6 +138,59 @@ async function adjustCatalogueCount(
   });
 }
 
+async function adjustCatalogueFacets(
+  ctx: MutationCtx,
+  previous: Pick<
+    Doc<"catalogueListings">,
+    "discoverable" | "tags" | "hasFreeTier"
+  > | null,
+  next: Pick<Doc<"catalogueListings">, "discoverable" | "tags" | "hasFreeTier">,
+): Promise<void> {
+  const stats = await ctx.db
+    .query("catalogueStats")
+    .withIndex("by_key", (q) => q.eq("key", CATALOGUE_STATS_KEY))
+    .unique();
+  if (stats === null) return;
+  const tags = { ...(stats.tagCounts ?? {}) };
+  let freeTierCount = stats.freeTierCount ?? 0;
+  if (previous?.discoverable) {
+    for (const tag of previous.tags)
+      tags[tag] = Math.max(0, (tags[tag] ?? 0) - 1);
+    if (previous.hasFreeTier) freeTierCount = Math.max(0, freeTierCount - 1);
+  }
+  if (next.discoverable) {
+    for (const tag of next.tags) tags[tag] = (tags[tag] ?? 0) + 1;
+    if (next.hasFreeTier) freeTierCount += 1;
+  }
+  await ctx.db.patch(stats._id, { tagCounts: tags, freeTierCount });
+}
+
+async function syncTagListings(
+  ctx: MutationCtx,
+  listingId: Id<"catalogueListings">,
+  listing: Pick<
+    Doc<"catalogueListings">,
+    "tags" | "publishedAt" | "sortName" | "minCost" | "discoverable"
+  > | null,
+): Promise<void> {
+  const previous = await ctx.db
+    .query("catalogueTagListings")
+    .withIndex("by_listing", (q) => q.eq("listingId", listingId))
+    .collect();
+  for (const row of previous) await ctx.db.delete(row._id);
+  if (listing === null) return;
+  for (const tag of listing.tags) {
+    await ctx.db.insert("catalogueTagListings", {
+      listingId,
+      tag,
+      publishedAt: listing.publishedAt,
+      sortName: listing.sortName,
+      minCost: listing.minCost,
+      discoverable: listing.discoverable,
+    });
+  }
+}
+
 /** Maintain one denormalized listing from authoritative project/org/spec rows. */
 export async function syncCatalogueListing(
   ctx: MutationCtx,
@@ -150,6 +204,7 @@ export async function syncCatalogueListing(
   if (project === null) {
     if (existing !== null) {
       await ctx.db.delete(existing._id);
+      await syncTagListings(ctx, existing._id, null);
       await adjustCatalogueCount(ctx, existing.discoverable ? -1 : 0);
     }
     return null;
@@ -163,6 +218,10 @@ export async function syncCatalogueListing(
         updatedAt: Date.now(),
       });
       await adjustCatalogueCount(ctx, -1);
+      await syncTagListings(ctx, existing._id, {
+        ...existing,
+        discoverable: false,
+      });
     }
     return null;
   }
@@ -237,6 +296,8 @@ export async function syncCatalogueListing(
     ctx,
     Number(discoverable) - Number(existing?.discoverable ?? false),
   );
+  await adjustCatalogueFacets(ctx, existing, next);
+  await syncTagListings(ctx, listingId, next);
   return await ctx.db.get(listingId);
 }
 
@@ -355,6 +416,10 @@ export const listPublic = query({
     nextCursor: string | null;
     /** Total public+published projects, uncapped by search/tag/price filters. */
     total: number;
+    facets: {
+      tags: Array<{ name: string; count: number }>;
+      freeTierCount: number;
+    };
   }> => {
     const search =
       args.search === undefined ? "" : args.search.trim().toLowerCase();
@@ -382,6 +447,8 @@ export const listPublic = query({
     // Deploy-safe compatibility path: bounded raw-page reads remain live while
     // the projection backfill advances. No table scan, offset, or unbounded N+1.
     if (stats?.projectionComplete !== true) {
+      const items: PublicListing[] = [];
+      let staleCount = 0;
       const rawPage = await ctx.db
         .query("projects")
         .withIndex("by_visibility_status", (q) =>
@@ -391,14 +458,14 @@ export const listPublic = query({
         .paginate({
           cursor,
           numItems: PAGE_SIZE,
-          maximumRowsRead: PAGE_SIZE + 1,
+          maximumRowsRead: PUBLIC_SCAN_CAP,
         });
-      const items: PublicListing[] = [];
       for (const project of rawPage.page) {
         if (
           project.deprecationStartedAt !== undefined ||
           project.retiredAt !== undefined
         ) {
+          staleCount += 1;
           continue;
         }
         const organization = await getActiveOrgById(
@@ -459,14 +526,103 @@ export const listPublic = query({
       return {
         items,
         nextCursor: rawPage.isDone ? null : rawPage.continueCursor,
-        total: Math.max(stats?.publicCount ?? 0, items.length),
+        total: Math.max(
+          0,
+          (tag !== "" && !freeOnly && maxCostCap === null
+            ? (stats?.tagCounts?.[tag] ?? 0)
+            : freeOnly && tag === "" && maxCostCap === null
+              ? (stats?.freeTierCount ?? 0)
+              : (stats?.publicCount ?? items.length)) - staleCount,
+        ),
+        facets: {
+          tags: Object.entries(stats?.tagCounts ?? {}).map(([name, count]) => ({
+            name,
+            count,
+          })),
+          freeTierCount: Math.max(0, (stats?.freeTierCount ?? 0) - 0),
+        },
+      };
+    }
+
+    if (tag !== "") {
+      const tagPage =
+        sort === "name"
+          ? await ctx.db
+              .query("catalogueTagListings")
+              .withIndex("by_tag_name", (q) =>
+                q.eq("tag", tag).eq("discoverable", true),
+              )
+              .order("asc")
+              .paginate({
+                cursor,
+                numItems: PAGE_SIZE,
+                maximumRowsRead: PUBLIC_SCAN_CAP,
+              })
+          : sort === "cheapest"
+            ? await ctx.db
+                .query("catalogueTagListings")
+                .withIndex("by_tag_cost", (q) =>
+                  q.eq("tag", tag).eq("discoverable", true),
+                )
+                .order("asc")
+                .paginate({
+                  cursor,
+                  numItems: PAGE_SIZE,
+                  maximumRowsRead: PUBLIC_SCAN_CAP,
+                })
+            : await ctx.db
+                .query("catalogueTagListings")
+                .withIndex("by_tag_newest", (q) =>
+                  q.eq("tag", tag).eq("discoverable", true),
+                )
+                .order("desc")
+                .paginate({
+                  cursor,
+                  numItems: PAGE_SIZE,
+                  maximumRowsRead: PUBLIC_SCAN_CAP,
+                });
+      const tagged = (
+        await Promise.all(
+          tagPage.page.map(async (row) => {
+            const listing = await ctx.db.get(row.listingId);
+            if (listing === null || !listing.discoverable) return null;
+            if (search !== "" && !listing.searchText.includes(search))
+              return null;
+            if (freeOnly && !listing.hasFreeTier) return null;
+            if (
+              maxCostCap !== null &&
+              (!listing.pricingValid ||
+                listing.endpointCount === 0 ||
+                listing.minCost > maxCostCap)
+            )
+              return null;
+            const organization = await getOrgByClerkId(ctx, listing.clerkOrgId);
+            return organization?.publicHandle === listing.publisherHandle
+              ? listing
+              : null;
+          }),
+        )
+      ).filter(
+        (listing): listing is Doc<"catalogueListings"> => listing !== null,
+      );
+      return {
+        items: tagged.map(publicListing),
+        nextCursor: tagPage.isDone ? null : tagPage.continueCursor,
+        total: stats.tagCounts?.[tag] ?? 0,
+        facets: {
+          tags: Object.entries(stats.tagCounts ?? {}).map(([name, count]) => ({
+            name,
+            count,
+          })),
+          freeTierCount: stats.freeTierCount ?? 0,
+        },
       };
     }
 
     const pagination = {
       cursor,
       numItems: PAGE_SIZE,
-      maximumRowsRead: PAGE_SIZE * 4,
+      maximumRowsRead: PUBLIC_SCAN_CAP,
     };
     const page =
       search !== ""
@@ -478,6 +634,16 @@ export const listPublic = query({
                 .eq("discoverable", true);
               return freeOnly ? searched.eq("hasFreeTier", true) : searched;
             })
+            .filter((q) => {
+              if (maxCostCap !== null) {
+                return q.and(
+                  q.eq(q.field("pricingValid"), true),
+                  q.gt(q.field("endpointCount"), 0),
+                  q.lte(q.field("minCost"), maxCostCap),
+                );
+              }
+              return true;
+            })
             .paginate(pagination)
         : sort === "name"
           ? await ctx.db
@@ -486,6 +652,16 @@ export const listPublic = query({
                 q.eq("discoverable", true),
               )
               .order("asc")
+              .filter((q) => {
+                if (maxCostCap !== null) {
+                  return q.and(
+                    q.eq(q.field("pricingValid"), true),
+                    q.gt(q.field("endpointCount"), 0),
+                    q.lte(q.field("minCost"), maxCostCap),
+                  );
+                }
+                return true;
+              })
               .paginate(pagination)
           : sort === "cheapest"
             ? await ctx.db
@@ -494,6 +670,16 @@ export const listPublic = query({
                   q.eq("discoverable", true),
                 )
                 .order("asc")
+                .filter((q) => {
+                  if (maxCostCap !== null) {
+                    return q.and(
+                      q.eq(q.field("pricingValid"), true),
+                      q.gt(q.field("endpointCount"), 0),
+                      q.lte(q.field("minCost"), maxCostCap),
+                    );
+                  }
+                  return true;
+                })
                 .paginate(pagination)
             : await ctx.db
                 .query("catalogueListings")
@@ -501,36 +687,50 @@ export const listPublic = query({
                   q.eq("discoverable", true),
                 )
                 .order("desc")
+                .filter((q) => {
+                  if (maxCostCap !== null) {
+                    return q.and(
+                      q.eq(q.field("pricingValid"), true),
+                      q.gt(q.field("endpointCount"), 0),
+                      q.lte(q.field("minCost"), maxCostCap),
+                    );
+                  }
+                  return true;
+                })
                 .paginate(pagination);
     const filtered = page.page.filter((listing) => {
       if (tag !== "" && !listing.tags.includes(tag)) return false;
       if (freeOnly && !listing.hasFreeTier) return false;
-      if (
-        maxCostCap !== null &&
-        (!listing.pricingValid ||
-          listing.endpointCount === 0 ||
-          listing.minCost > maxCostCap)
-      ) {
-        return false;
-      }
       return true;
     });
     const active = await Promise.all(
       filtered.map(async (listing) => {
         const organization = await getOrgByClerkId(ctx, listing.clerkOrgId);
         return organization?.publicHandle === listing.publisherHandle
-          ? listing
-          : null;
+          ? { listing, stale: false }
+          : { listing, stale: true };
       }),
     );
+    const staleCount = active.filter((row) => row.stale).length;
+    const items = active.filter((row) => !row.stale).map((row) => row.listing);
     return {
-      items: active
-        .filter((listing): listing is Doc<"catalogueListings"> =>
-          Boolean(listing),
-        )
-        .map(publicListing),
+      items: items.map(publicListing),
       nextCursor: page.isDone ? null : page.continueCursor,
-      total: stats.publicCount,
+      total: Math.max(
+        0,
+        (tag !== "" && !freeOnly && maxCostCap === null
+          ? (stats.tagCounts?.[tag] ?? 0)
+          : freeOnly && tag === "" && maxCostCap === null
+            ? (stats.freeTierCount ?? 0)
+            : stats.publicCount) - staleCount,
+      ),
+      facets: {
+        tags: Object.entries(stats.tagCounts ?? {}).map(([name, count]) => ({
+          name,
+          count,
+        })),
+        freeTierCount: stats.freeTierCount ?? 0,
+      },
     };
   },
 });

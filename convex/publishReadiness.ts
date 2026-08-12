@@ -5,7 +5,7 @@ import {
   decryptCredential,
   requireEncryptedCredential,
 } from "./lib/credentialCrypto";
-import { requireProjectMember } from "./lib/auth";
+import { getActiveOrgById, requireProjectMember } from "./lib/auth";
 
 export const READINESS_TTL_MS = 15 * 60 * 1000;
 
@@ -77,7 +77,7 @@ export const getTarget = internalQuery({
   }> => {
     const project = await ctx.db.get(args.projectId);
     if (project === null) throw new Error("Project not found");
-    const organization = await ctx.db.get(project.organizationId);
+    const organization = await getActiveOrgById(ctx, project.organizationId);
     if (organization === null || organization.clerkOrgId !== args.clerkOrgId)
       throw new Error("Not a member of this organization");
     const draft = await ctx.db
@@ -126,6 +126,13 @@ export const recordPassingTest = internalMutation({
     credentialRevision: v.number(),
   },
   handler: async (ctx, args) => {
+    const project = await ctx.db.get(args.projectId);
+    if (
+      project === null ||
+      (await getActiveOrgById(ctx, project.organizationId)) === null
+    ) {
+      throw new Error("Organization is archived or not provisioned");
+    }
     const draft = await ctx.db
       .query("specs")
       .withIndex("by_project", (q) => q.eq("projectId", args.projectId))

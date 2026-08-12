@@ -27,6 +27,7 @@
     "vitest": "^4.1.10"
   },
   "dependencies": {
+    "@clerk/backend": "^3.14.0",
     "@zevium/shared": "workspace:*",
     "convex": "^1.42.3",
     "stripe": "22.3.1",

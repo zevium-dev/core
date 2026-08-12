@@ -326,10 +326,26 @@ export default defineSchema({
       filterFields: ["discoverable", "hasFreeTier"],
     }),
 
+  /** One bounded row per public tag for filter-first catalogue pagination. */
+  catalogueTagListings: defineTable({
+    listingId: v.id("catalogueListings"),
+    tag: v.string(),
+    publishedAt: v.number(),
+    sortName: v.string(),
+    minCost: v.number(),
+    discoverable: v.boolean(),
+  })
+    .index("by_listing", ["listingId"])
+    .index("by_tag_newest", ["tag", "discoverable", "publishedAt"])
+    .index("by_tag_name", ["tag", "discoverable", "sortName"])
+    .index("by_tag_cost", ["tag", "discoverable", "minCost", "sortName"]),
+
   /** Single-row exact count for catalogue UI; rebuilt by bounded projection job. */
   catalogueStats: defineTable({
     key: v.string(),
     publicCount: v.number(),
+    tagCounts: v.optional(v.record(v.string(), v.number())),
+    freeTierCount: v.optional(v.number()),
     projectionComplete: v.boolean(),
     backfillCursor: v.optional(v.string()),
     updatedAt: v.number(),

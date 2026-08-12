@@ -1,7 +1,7 @@
 import { v } from "convex/values";
 import { query } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
-import { requireOrgMemberBySlug } from "./lib/auth";
+import { requireOrgAdmin, requireOrgMemberBySlug } from "./lib/auth";
 
 /**
  * Time-indexed scan caps bound aggregation work on high-volume ranges.
@@ -270,7 +270,8 @@ export const projectAnalytics = query({
     rangeDays: v.optional(v.number()),
   },
   handler: async (ctx, args): Promise<ProjectAnalytics | null> => {
-    const { org } = await requireOrgMemberBySlug(ctx, args.orgSlug);
+    const { claims, org } = await requireOrgMemberBySlug(ctx, args.orgSlug);
+    requireOrgAdmin(claims);
 
     const project = await ctx.db
       .query("projects")
