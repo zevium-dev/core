@@ -6,9 +6,10 @@ import {
   internalMutation,
   query,
   type ActionCtx,
+  type MutationCtx,
 } from "./_generated/server";
 import { internal } from "./_generated/api";
-import type { Id } from "./_generated/dataModel";
+import type { Doc, Id } from "./_generated/dataModel";
 import {
   ACCOUNTING_ATOMS_PER_USD_CENT,
   PUBLISHER_MINIMUM_PAYOUT_ATOMS,
@@ -18,6 +19,7 @@ import {
 import { requireIdentity } from "./lib/auth";
 import { createNotification } from "./lib/notifications";
 import {
+  adjustPublisherBalanceAggregates,
   appendPublisherSettlementEntry,
   getOrCreatePublisherBalance,
   releasePublisherEarning,
@@ -44,8 +46,22 @@ function activeClerkOrgId(identity: unknown): string {
   return orgId;
 }
 
-async function requireActiveClerkOrgInAction(ctx: ActionCtx): Promise<string> {
-  return activeClerkOrgId(await ctx.auth.getUserIdentity());
+async function requireActiveClerkOrgAdminInAction(
+  ctx: ActionCtx,
+): Promise<{ clerkOrgId: string; identity: Record<string, unknown> }> {
+  const identity = await ctx.auth.getUserIdentity();
+  const clerkOrgId = activeClerkOrgId(identity);
+  const raw = identity as Record<string, unknown>;
+  const role =
+    typeof raw.org_role === "string"
+      ? raw.org_role
+      : typeof raw.orgRole === "string"
+        ? raw.orgRole
+        : undefined;
+  if (role !== "org:admin" && role !== "org:owner") {
+    throw new Error("Org admin or owner role required");
+  }
+  return { clerkOrgId, identity: raw };
 }
 
 /** Test seam for deterministic account-link creation. */
@@ -257,12 +273,10 @@ export const startOnboarding = action({
   args: { country: v.optional(v.string()) },
   handler: async (ctx, args): Promise<{ url: string }> => {
     const country = args.country?.trim().toUpperCase() ?? null;
-    const identity = await ctx.auth.getUserIdentity();
-    const clerkOrgId = activeClerkOrgId(identity);
+    const { clerkOrgId, identity } =
+      await requireActiveClerkOrgAdminInAction(ctx);
     const contactEmail =
-      identity !== null && typeof identity.email === "string"
-        ? identity.email.trim()
-        : "";
+      typeof identity.email === "string" ? identity.email.trim() : "";
     if (contactEmail === "") {
       throw new Error("Signed-in user email is required for Stripe onboarding");
     }
@@ -400,6 +414,7 @@ export const preparePublisherTransfer = internalMutation({
       remainderAtoms,
       currency: "usd",
       idempotencyKey,
+      reversedAmount: 0,
       status: "created",
       createdAt: now,
       updatedAt: now,
@@ -441,33 +456,11 @@ export const markPublisherTransferSucceeded = internalMutation({
   handler: async (ctx, args): Promise<void> => {
     const transfer = await ctx.db.get(args.transferId);
     if (transfer === null) throw new Error("Publisher transfer not found");
-    if (transfer.status === "succeeded") {
-      if (transfer.stripeTransferId !== args.stripeTransferId) {
-        throw new Error("Publisher transfer Stripe id changed");
-      }
-      return;
-    }
-    if (transfer.status === "reversed") return;
-    const now = Date.now();
-    const balance = await getOrCreatePublisherBalance(
-      ctx,
-      transfer.publisherOrganizationId,
-    );
-    await appendPublisherSettlementEntry(ctx, {
-      balance,
-      kind: "transfer_succeeded",
-      availableDeltaAtoms: 0,
-      allocatedDeltaAtoms: -transfer.amountAtoms,
-      paidDeltaAtoms: transfer.amountAtoms,
-      refId: `publisher:transfer:${transfer._id}:succeeded`,
-      transferId: transfer._id,
-    });
-    await ctx.db.patch(transfer._id, {
+    await applyStripeTransferProjection(ctx, transfer, {
       stripeTransferId: args.stripeTransferId,
-      status: "succeeded",
-      failureReason: undefined,
-      attemptedAt: now,
-      updatedAt: now,
+      amount: transfer.amount,
+      amountReversed: transfer.reversedAmount,
+      failed: false,
     });
   },
 });
@@ -477,7 +470,18 @@ export const markPublisherTransferFailed = internalMutation({
   handler: async (ctx, args): Promise<void> => {
     const transfer = await ctx.db.get(args.transferId);
     if (transfer === null) throw new Error("Publisher transfer not found");
+    if (transfer.status === "succeeded" || transfer.status === "reversed")
+      return;
     const now = Date.now();
+    if (transfer.status !== "failed") {
+      const balance = await getOrCreatePublisherBalance(
+        ctx,
+        transfer.publisherOrganizationId,
+      );
+      await adjustPublisherBalanceAggregates(ctx, balance, {
+        failedAtoms: transfer.amountAtoms,
+      });
+    }
     await ctx.db.patch(transfer._id, {
       status: "failed",
       failureReason: args.reason.slice(0, 240),
@@ -497,64 +501,137 @@ export const markPublisherTransferFailed = internalMutation({
   },
 });
 
+async function applyStripeTransferProjection(
+  ctx: MutationCtx,
+  transfer: Doc<"publisherTransfers">,
+  args: {
+    stripeTransferId: string;
+    amount: number;
+    amountReversed: number;
+    failed: boolean;
+    failureReason?: string;
+  },
+): Promise<void> {
+  if (
+    !Number.isSafeInteger(args.amount) ||
+    !Number.isSafeInteger(args.amountReversed) ||
+    args.amount !== transfer.amount ||
+    args.amountReversed < 0 ||
+    args.amountReversed > args.amount
+  ) {
+    throw new Error("Stripe transfer snapshot does not match allocation");
+  }
+  if (
+    transfer.stripeTransferId !== undefined &&
+    transfer.stripeTransferId !== args.stripeTransferId
+  ) {
+    throw new Error("Publisher transfer Stripe id changed");
+  }
+  if (args.failed) {
+    if (transfer.status === "succeeded" || transfer.status === "reversed")
+      return;
+    if (transfer.status !== "failed") {
+      const balance = await getOrCreatePublisherBalance(
+        ctx,
+        transfer.publisherOrganizationId,
+      );
+      await adjustPublisherBalanceAggregates(ctx, balance, {
+        failedAtoms: transfer.amountAtoms,
+      });
+    }
+    await ctx.db.patch(transfer._id, {
+      stripeTransferId: args.stripeTransferId,
+      status: "failed",
+      failureReason: args.failureReason,
+      attemptedAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+    return;
+  }
+
+  let balance = await getOrCreatePublisherBalance(
+    ctx,
+    transfer.publisherOrganizationId,
+  );
+  if (
+    transfer.status === "created" ||
+    transfer.status === "pending" ||
+    transfer.status === "failed"
+  ) {
+    const succeeded = await appendPublisherSettlementEntry(ctx, {
+      balance,
+      kind: "transfer_succeeded",
+      availableDeltaAtoms: 0,
+      allocatedDeltaAtoms: -transfer.amountAtoms,
+      paidDeltaAtoms: transfer.amountAtoms,
+      refId: `publisher:transfer:${transfer._id}:succeeded`,
+      transferId: transfer._id,
+    });
+    balance = succeeded.balance;
+    if (transfer.status === "failed") {
+      balance = await adjustPublisherBalanceAggregates(ctx, balance, {
+        failedAtoms: -transfer.amountAtoms,
+      });
+    }
+  }
+
+  const targetReversedAmount = Math.max(
+    transfer.reversedAmount,
+    args.amountReversed,
+  );
+  const reversalDelta = targetReversedAmount - transfer.reversedAmount;
+  if (reversalDelta > 0) {
+    const reversalDeltaAtoms = reversalDelta * ACCOUNTING_ATOMS_PER_USD_CENT;
+    await appendPublisherSettlementEntry(ctx, {
+      balance,
+      kind: "transfer_reversal",
+      availableDeltaAtoms: reversalDeltaAtoms,
+      allocatedDeltaAtoms: 0,
+      paidDeltaAtoms: -reversalDeltaAtoms,
+      refId: `publisher:transfer:${transfer._id}:reversed:${targetReversedAmount}`,
+      transferId: transfer._id,
+    });
+  }
+  await ctx.db.patch(transfer._id, {
+    stripeTransferId: args.stripeTransferId,
+    reversedAmount: targetReversedAmount,
+    status: targetReversedAmount === transfer.amount ? "reversed" : "succeeded",
+    failureReason: undefined,
+    attemptedAt: Date.now(),
+    updatedAt: Date.now(),
+  });
+}
+
 export const projectStripeTransfer = internalMutation({
   args: {
     stripeTransferId: v.string(),
-    state: v.union(
-      v.literal("succeeded"),
-      v.literal("failed"),
-      v.literal("reversed"),
-    ),
+    publisherTransferId: v.optional(v.string()),
+    amount: v.number(),
+    amountReversed: v.number(),
+    failed: v.boolean(),
     failureReason: v.optional(v.string()),
   },
   handler: async (ctx, args): Promise<void> => {
-    const transfer = await ctx.db
+    let transfer = await ctx.db
       .query("publisherTransfers")
       .withIndex("by_stripe_transfer", (q) =>
         q.eq("stripeTransferId", args.stripeTransferId),
       )
       .unique();
+    if (transfer === null && args.publisherTransferId !== undefined) {
+      const localId = ctx.db.normalizeId(
+        "publisherTransfers",
+        args.publisherTransferId,
+      );
+      if (localId !== null) transfer = await ctx.db.get(localId);
+    }
     if (transfer === null) return;
-    if (transfer.status === args.state) return;
-    if (
-      (transfer.status === "succeeded" || transfer.status === "reversed") &&
-      args.state === "failed"
-    ) {
-      return;
-    }
-    if (transfer.status === "reversed" && args.state === "succeeded") return;
-    const now = Date.now();
-    const balance = await getOrCreatePublisherBalance(
-      ctx,
-      transfer.publisherOrganizationId,
-    );
-    if (args.state === "succeeded") {
-      await appendPublisherSettlementEntry(ctx, {
-        balance,
-        kind: "transfer_succeeded",
-        availableDeltaAtoms: 0,
-        allocatedDeltaAtoms: -transfer.amountAtoms,
-        paidDeltaAtoms: transfer.amountAtoms,
-        refId: `publisher:transfer:${transfer._id}:succeeded`,
-        transferId: transfer._id,
-      });
-    } else if (args.state === "reversed") {
-      await appendPublisherSettlementEntry(ctx, {
-        balance,
-        kind: "transfer_reversal",
-        availableDeltaAtoms: transfer.amountAtoms,
-        allocatedDeltaAtoms:
-          transfer.status === "succeeded" ? 0 : -transfer.amountAtoms,
-        paidDeltaAtoms:
-          transfer.status === "succeeded" ? -transfer.amountAtoms : 0,
-        refId: `publisher:transfer:${transfer._id}:reversed`,
-        transferId: transfer._id,
-      });
-    }
-    await ctx.db.patch(transfer._id, {
-      status: args.state,
+    await applyStripeTransferProjection(ctx, transfer, {
+      stripeTransferId: args.stripeTransferId,
+      amount: args.amount,
+      amountReversed: args.amountReversed,
+      failed: args.failed,
       failureReason: args.failureReason,
-      updatedAt: now,
     });
   },
 });
@@ -599,7 +676,34 @@ export const projectConnectedPayout = internalMutation({
   },
 });
 
-async function transferToStripe(
+export type StripeTransferClient = {
+  create: Stripe["transfers"]["create"];
+  retrieve: Stripe["transfers"]["retrieve"];
+};
+
+export async function createAndRetrieveStripeTransfer(
+  stripe: StripeTransferClient,
+  transfer: {
+    _id: Id<"publisherTransfers">;
+    stripeConnectedAccountId: string;
+    amount: number;
+    currency: string;
+    idempotencyKey: string;
+  },
+): Promise<Stripe.Transfer> {
+  const created = await stripe.create(
+    {
+      amount: transfer.amount,
+      currency: transfer.currency,
+      destination: transfer.stripeConnectedAccountId,
+      metadata: { publisherTransferId: transfer._id },
+    },
+    { idempotencyKey: transfer.idempotencyKey },
+  );
+  return await stripe.retrieve(created.id);
+}
+
+export async function transferToStripe(
   ctx: ActionCtx,
   transfer: {
     _id: Id<"publisherTransfers">;
@@ -610,18 +714,18 @@ async function transferToStripe(
   },
 ): Promise<void> {
   try {
-    const stripeTransfer = await stripeClient().transfers.create(
-      {
-        amount: transfer.amount,
-        currency: transfer.currency,
-        destination: transfer.stripeConnectedAccountId,
-        metadata: { publisherTransferId: transfer._id },
-      },
-      { idempotencyKey: transfer.idempotencyKey },
+    const stripeTransfer = await createAndRetrieveStripeTransfer(
+      stripeClient().transfers,
+      transfer,
     );
-    await ctx.runMutation(internal.payouts.markPublisherTransferSucceeded, {
-      transferId: transfer._id,
+    await ctx.runMutation(internal.payouts.projectStripeTransfer, {
       stripeTransferId: stripeTransfer.id,
+      publisherTransferId:
+        stripeTransfer.metadata.publisherTransferId ?? transfer._id,
+      amount: stripeTransfer.amount,
+      amountReversed: stripeTransfer.amount_reversed,
+      failed: false,
+      failureReason: undefined,
     });
   } catch (error) {
     const reason =
@@ -639,7 +743,7 @@ async function transferToStripe(
 export const initiatePublisherTransfer = action({
   args: {},
   handler: async (ctx): Promise<{ transferId: Id<"publisherTransfers"> }> => {
-    const clerkOrgId = await requireActiveClerkOrgInAction(ctx);
+    const { clerkOrgId } = await requireActiveClerkOrgAdminInAction(ctx);
     const profile = await ctx.runMutation(
       internal.payouts.getConnectProfileForActiveOrg,
       { clerkOrgId },
@@ -716,25 +820,13 @@ export const getPayoutState = query({
             .order("desc")
             .take(100);
     const totals = {
-      pendingRisk: 0,
+      pendingRisk: atomsToCredits(publisherBalance?.pendingRiskAtoms ?? 0),
       available: atomsToCredits(publisherBalance?.availableAtoms ?? 0),
       allocated: atomsToCredits(publisherBalance?.allocatedAtoms ?? 0),
       transferred: atomsToCredits(publisherBalance?.paidAtoms ?? 0),
-      reversed: 0,
-      failed: 0,
+      reversed: atomsToCredits(publisherBalance?.reversedAtoms ?? 0),
+      failed: atomsToCredits(publisherBalance?.failedAtoms ?? 0),
     };
-    for (const earning of earnings) {
-      if (earning.status === "pending_risk")
-        totals.pendingRisk += atomsToCredits(
-          earning.publisherNetAtoms - earning.clawedBackAtoms,
-        );
-      totals.reversed += atomsToCredits(earning.clawedBackAtoms);
-    }
-    totals.failed = atomsToCredits(
-      transfers
-        .filter((transfer) => transfer.status === "failed")
-        .reduce((sum, transfer) => sum + transfer.amountAtoms, 0),
-    );
     const profileStatus: ConnectProfileStatus =
       profile === null || profile.stripeConnectedAccountId === undefined
         ? "not_started"

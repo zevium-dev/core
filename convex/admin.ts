@@ -5,7 +5,7 @@ import type { Doc, Id } from "./_generated/dataModel";
 import { isAdmin, requireAdmin } from "./lib/auth";
 import { createNotification } from "./lib/notifications";
 import { fireWebhookEvent } from "./webhooks";
-import { stripeClient } from "./billing";
+import { transferToStripe } from "./payouts";
 import { internal } from "./_generated/api";
 
 /** Cap for month-to-date usage count (by_at index range scan). */
@@ -386,31 +386,7 @@ export const retryPublisherTransfer = action({
     if (transfer.status === "succeeded" || transfer.status === "reversed") {
       return { transferId: transfer._id };
     }
-    try {
-      const stripeTransfer = await stripeClient().transfers.create(
-        {
-          amount: transfer.amount,
-          currency: transfer.currency,
-          destination: transfer.stripeConnectedAccountId,
-          metadata: { publisherTransferId: transfer._id },
-        },
-        { idempotencyKey: transfer.idempotencyKey },
-      );
-      await ctx.runMutation(internal.payouts.markPublisherTransferSucceeded, {
-        transferId: transfer._id,
-        stripeTransferId: stripeTransfer.id,
-      });
-    } catch (error) {
-      const reason =
-        error instanceof Error
-          ? error.message.slice(0, 240)
-          : "Stripe transfer failed";
-      await ctx.runMutation(internal.payouts.markPublisherTransferFailed, {
-        transferId: transfer._id,
-        reason,
-      });
-      throw error;
-    }
+    await transferToStripe(ctx, transfer);
     return { transferId: transfer._id };
   },
 });

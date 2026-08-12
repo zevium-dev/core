@@ -11,6 +11,10 @@ import {
 import { requireOrgMemberBySlug } from "./lib/auth";
 import { toGatewayRow, type GatewayKeySettingRow } from "./keySettings";
 import { PUBLISHER_RISK_HOLD_MS, publisherEarningSplit } from "./accounting";
+import {
+  adjustPublisherBalanceAggregates,
+  getOrCreatePublisherBalance,
+} from "./lib/publisherLedger";
 
 export type SettlementStatus = "applied" | "already_applied" | "rejected";
 
@@ -155,6 +159,31 @@ export const grantPaymentCredits = internalMutation({
       refId: args.refId,
       paymentId: args.paymentId,
     });
+    const existingLot = await ctx.db
+      .query("paymentFundingLots")
+      .withIndex("by_payment", (q) => q.eq("paymentId", args.paymentId))
+      .unique();
+    if (existingLot === null) {
+      if (!result.applied) {
+        throw new Error("Payment grant is missing its funding lot");
+      }
+      const now = Date.now();
+      await ctx.db.insert("paymentFundingLots", {
+        paymentId: args.paymentId,
+        organizationId: organization._id,
+        grantedCredits: args.amount,
+        availableCredits: args.amount,
+        walletReversedCredits: 0,
+        state: "available",
+        createdAt: now,
+        updatedAt: now,
+      });
+    } else if (
+      existingLot.organizationId !== organization._id ||
+      existingLot.grantedCredits !== args.amount
+    ) {
+      throw new Error("Payment funding lot does not match immutable grant");
+    }
     return {
       ...checkpoint(organization.clerkOrgId, result.wallet),
       applied: result.applied,
@@ -444,7 +473,7 @@ export const recordUsage = internalMutation({
         .unique();
       if (existingEarning === null) {
         const now = Date.now();
-        await ctx.db.insert("publisherEarnings", {
+        const earningId = await ctx.db.insert("publisherEarnings", {
           publisherOrganizationId: project.organizationId,
           consumerOrganizationId: consumerOrg._id,
           projectId: project._id,
@@ -462,6 +491,43 @@ export const recordUsage = internalMutation({
           createdAt: now,
           updatedAt: now,
         });
+        const publisherBalance = await getOrCreatePublisherBalance(
+          ctx,
+          project.organizationId,
+        );
+        if (split.publisherNetAtoms > 0) {
+          await adjustPublisherBalanceAggregates(ctx, publisherBalance, {
+            pendingRiskAtoms: split.publisherNetAtoms,
+          });
+        }
+
+        let remaining = event.credits;
+        const fundingLots = await ctx.db
+          .query("paymentFundingLots")
+          .withIndex("by_org_state_created", (q) =>
+            q.eq("organizationId", consumerOrg._id).eq("state", "available"),
+          )
+          .collect();
+        for (const lot of fundingLots) {
+          if (remaining === 0) break;
+          const grossCredits = Math.min(lot.availableCredits, remaining);
+          if (grossCredits === 0) continue;
+          const availableCredits = lot.availableCredits - grossCredits;
+          await ctx.db.patch(lot._id, {
+            availableCredits,
+            state: availableCredits === 0 ? "depleted" : "available",
+            updatedAt: now,
+          });
+          await ctx.db.insert("paymentFundingAllocations", {
+            paymentId: lot.paymentId,
+            fundingLotId: lot._id,
+            earningId,
+            usageEventId,
+            grossCredits,
+            createdAt: now,
+          });
+          remaining -= grossCredits;
+        }
       }
       results.push({ refId: event.settleRefId, status: "applied" });
     }

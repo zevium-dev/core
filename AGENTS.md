@@ -59,7 +59,7 @@ TECH.md remains authoritative for architecture. When a doc and the code disagree
 - **Control plane**: Convex — DB, functions, realtime sync, vector search, cron. Credit ledger source of truth
 - **Data plane**: Cloudflare Worker — `/gateway` metered proxy + agent-tool endpoint. Durable Object per org wallet (edge credit gate). Isolated on purpose; nothing else imports from it
 - **Auth**: Clerk — sessions, orgs (prebuilt UI), machine API keys. Convex integration via JWT
-- **Payments**: Polar checkout + merchant-of-record for credit top-ups ONLY. No Polar meters/benefits. Webhook → Convex grant
+- **Payments**: Stripe Checkout for one-time credit top-ups + Stripe Connect for publisher onboarding/transfers. Webhooks project external payment/refund/dispute/transfer/payout facts into Convex; Convex owns credit and publisher ledgers
 - **Language**: TypeScript everywhere, strict
 
 Target layout (pnpm workspace + Turborepo):

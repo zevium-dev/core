@@ -126,7 +126,7 @@ export async function requireProjectMember(
 }
 
 /**
- * Enforce org-admin role from the Clerk JWT claim (`org_role === "org:admin"`).
+ * Enforce org admin/owner role from the Clerk JWT claim.
  * `claims.orgRole` is parsed by `requireIdentity` but, without this gate, any
  * org member can perform admin actions. Callers resolve claims first via
  * `requireIdentity` / `requireOrgMemberBySlug` / `requireProjectMember`, then
@@ -151,7 +151,7 @@ export async function requireProjectMember(
  * state) intentionally stay at `requireOrgMemberBySlug` / `requireProjectMember`.
  */
 export function requireOrgAdmin(claims: OrgIdentityClaims): OrgIdentityClaims {
-  if (claims.orgRole !== "org:admin") {
+  if (claims.orgRole !== "org:admin" && claims.orgRole !== "org:owner") {
     throw new Error("Org admin role required");
   }
   return claims;

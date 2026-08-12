@@ -116,6 +116,34 @@ export default defineSchema({
     .index("by_wallet", ["walletId"])
     .index("by_ref", ["refId"]),
 
+  // Payment grants are fungible at wallet level but retain FIFO funding-lot
+  // attribution so refunds consume unspent value before publisher liability.
+  paymentFundingLots: defineTable({
+    paymentId: v.id("payments"),
+    organizationId: v.id("organizations"),
+    grantedCredits: v.number(),
+    availableCredits: v.number(),
+    walletReversedCredits: v.number(),
+    state: v.union(v.literal("available"), v.literal("depleted")),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_payment", ["paymentId"])
+    .index("by_org_state_created", ["organizationId", "state", "createdAt"]),
+
+  // One usage settlement may draw from multiple payment lots. These immutable
+  // allocations cap which publisher earnings a refunded payment can claw back.
+  paymentFundingAllocations: defineTable({
+    paymentId: v.id("payments"),
+    fundingLotId: v.id("paymentFundingLots"),
+    earningId: v.id("publisherEarnings"),
+    usageEventId: v.optional(v.id("usageEvents")),
+    grossCredits: v.number(),
+    createdAt: v.number(),
+  })
+    .index("by_payment", ["paymentId", "createdAt"])
+    .index("by_earning", ["earningId"]),
+
   // Per-call metering events (gateway → Convex, async)
   usageEvents: defineTable({
     organizationId: v.id("organizations"),
@@ -297,6 +325,9 @@ export default defineSchema({
     nextAttemptAt: v.optional(v.number()),
     leaseExpiresAt: v.optional(v.number()),
     processedAt: v.optional(v.number()),
+    replayCount: v.optional(v.number()),
+    lastReplayedAt: v.optional(v.number()),
+    lastReplayedBy: v.optional(v.string()),
   })
     .index("by_stripe_event", ["stripeEventId"])
     .index("by_object", ["objectId"])
@@ -316,7 +347,9 @@ export default defineSchema({
     refundedCredits: v.number(),
     /** Effective wallet reversal, capped to the immutable grant. */
     reversedCredits: v.number(),
-    /** Reversal target projected into publisher earnings. */
+    /** Active reversal satisfied by removing unspent payment-funded credits. */
+    walletReversedCredits: v.number(),
+    /** Active reversal satisfied by clawing consumed publisher-funded credits. */
     publisherClawbackTargetCredits: v.number(),
     status: v.union(
       v.literal("pending"),
@@ -407,6 +440,10 @@ export default defineSchema({
     availableAtoms: v.number(),
     allocatedAtoms: v.number(),
     paidAtoms: v.number(),
+    /** Canonical all-row aggregates; list pagination never changes totals. */
+    pendingRiskAtoms: v.number(),
+    reversedAtoms: v.number(),
+    failedAtoms: v.number(),
     sequence: v.number(),
     updatedAt: v.number(),
   }).index("by_publisher", ["publisherOrganizationId"]),
@@ -465,6 +502,8 @@ export default defineSchema({
     currency: v.string(),
     idempotencyKey: v.string(),
     stripeTransferId: v.optional(v.string()),
+    /** Cumulative Stripe reversal snapshot in whole USD cents. */
+    reversedAmount: v.number(),
     status: v.union(
       v.literal("created"),
       v.literal("pending"),

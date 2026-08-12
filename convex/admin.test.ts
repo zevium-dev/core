@@ -22,6 +22,7 @@ async function seedTransfer(t: TestConvex<typeof schema>): Promise<void> {
       remainderAtoms: 0,
       currency: "usd",
       idempotencyKey: "publisher-transfer:test",
+      reversedAmount: 0,
       status: "failed",
       failureReason: "insufficient platform balance",
       createdAt: 1,

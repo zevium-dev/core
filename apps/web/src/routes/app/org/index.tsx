@@ -265,6 +265,10 @@ function PublicHandleCard() {
 }
 
 function PublisherPaymentsCard() {
+  const { membership } = useOrganization();
+  const canManagePayouts =
+    String(membership?.role) === "org:admin" ||
+    String(membership?.role) === "org:owner";
   const [publisherCountry, setPublisherCountry] = useState("");
   const payoutState = useQuery(convexQuery(api.payouts.getPayoutState, {}));
   const startOnboarding = useAction(api.payouts.startOnboarding);
@@ -328,7 +332,7 @@ function PublisherPaymentsCard() {
             ))}
           </ul>
         ) : null}
-        {display.action && display.actionLabel ? (
+        {canManagePayouts && display.action && display.actionLabel ? (
           <div className="space-y-3">
             {profile.status === "not_started" ? (
               <div className="max-w-xs space-y-2">

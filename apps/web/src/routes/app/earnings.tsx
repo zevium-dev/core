@@ -67,7 +67,7 @@ export const Route = createFileRoute("/app/earnings")({
 });
 
 function EarningsPage() {
-  const { organization, isLoaded } = useOrganization();
+  const { organization, membership, isLoaded } = useOrganization();
   const { isLoading: convexAuthLoading, isAuthenticated } = useConvexAuth();
 
   if (!isLoaded || convexAuthLoading || !isAuthenticated) {
@@ -87,12 +87,17 @@ function EarningsPage() {
 
   return (
     <Suspense fallback={<EarningsPageSkeleton />}>
-      <EarningsContent />
+      <EarningsContent
+        canManagePayouts={
+          String(membership?.role) === "org:admin" ||
+          String(membership?.role) === "org:owner"
+        }
+      />
     </Suspense>
   );
 }
 
-function EarningsContent() {
+function EarningsContent({ canManagePayouts }: { canManagePayouts: boolean }) {
   const { onboarding } = Route.useSearch();
   const refreshStarted = useRef(false);
   const [publisherCountry, setPublisherCountry] = useState("");
@@ -117,10 +122,11 @@ function EarningsContent() {
   });
   const { profile, earnings, payouts, transfers } = payoutState;
   useEffect(() => {
-    if (onboarding !== "refresh" || refreshStarted.current) return;
+    if (!canManagePayouts || onboarding !== "refresh" || refreshStarted.current)
+      return;
     refreshStarted.current = true;
     openOnboarding();
-  }, [onboarding, openOnboarding]);
+  }, [canManagePayouts, onboarding, openOnboarding]);
   const initiatePublisherTransfer = useAction(
     api.payouts.initiatePublisherTransfer,
   );
@@ -177,7 +183,7 @@ function EarningsContent() {
               ))}
             </ul>
           ) : null}
-          {connect.action && connect.actionLabel ? (
+          {canManagePayouts && connect.action && connect.actionLabel ? (
             <div className="space-y-3">
               {profile.status === "not_started" ? (
                 <div className="max-w-xs space-y-2">
@@ -224,7 +230,7 @@ function EarningsContent() {
               Your share after Zevium&apos;s 5% fee.
             </p>
           </div>
-          {profile.status === "enabled" ? (
+          {canManagePayouts && profile.status === "enabled" ? (
             <Button
               disabled={transferPending || !canTransfer}
               onClick={() => initiateTransfer()}

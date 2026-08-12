@@ -58,6 +58,7 @@ async function seedWallet(t: TestConvex<typeof schema>): Promise<SeededWallet> {
       refundedAmount: 0,
       refundedCredits: 0,
       reversedCredits: 0,
+      walletReversedCredits: 0,
       publisherClawbackTargetCredits: 0,
       status: "paid",
       createdAt: 1,

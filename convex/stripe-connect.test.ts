@@ -2,13 +2,17 @@
 import { convexTest, type TestConvex } from "convex-test";
 import type Stripe from "stripe";
 import { describe, expect, it } from "vitest";
-import { internal } from "./_generated/api";
+import { api, internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import {
   ACCOUNTING_ATOMS_PER_CREDIT,
   publisherEarningSplit,
 } from "./accounting";
-import { connectAccountProjection, createOnboardingLink } from "./payouts";
+import {
+  connectAccountProjection,
+  createAndRetrieveStripeTransfer,
+  createOnboardingLink,
+} from "./payouts";
 import schema from "./schema";
 
 const modules = import.meta.glob("./**/*.ts");
@@ -49,6 +53,17 @@ async function seedConnect(t: TestConvex<typeof schema>): Promise<ConnectSeed> {
       availableAt: 1,
       status: "pending_risk",
       createdAt: 1,
+      updatedAt: 1,
+    });
+    await ctx.db.insert("publisherBalances", {
+      publisherOrganizationId: organizationId,
+      availableAtoms: 0,
+      allocatedAtoms: 0,
+      paidAtoms: 0,
+      pendingRiskAtoms: split.publisherNetAtoms,
+      reversedAtoms: 0,
+      failedAtoms: 0,
+      sequence: 0,
       updatedAt: 1,
     });
     return { organizationId, earningId };
@@ -235,6 +250,49 @@ describe("Stripe Connect publisher accounting", () => {
     });
   });
 
+  it("blocks members from onboarding or transferring before any local side effect", async () => {
+    const t = convexTest(schema, modules);
+    const organizationId = await t.run(async (ctx) =>
+      ctx.db.insert("organizations", {
+        clerkOrgId: "org_member_blocked",
+        name: "Member blocked",
+        slug: "member-blocked",
+      }),
+    );
+    const member = t.withIdentity({
+      subject: "member_user",
+      org_id: "org_member_blocked",
+      org_role: "org:member",
+      email: "member@example.com",
+    } as {
+      subject: string;
+      org_id: string;
+      org_role: string;
+      email: string;
+    });
+    await expect(
+      member.action(api.payouts.startOnboarding, { country: "US" }),
+    ).rejects.toThrow("Org admin or owner role required");
+    await expect(
+      member.action(api.payouts.initiatePublisherTransfer, {}),
+    ).rejects.toThrow("Org admin or owner role required");
+    const state = await t.run(async (ctx) => ({
+      profiles: await ctx.db
+        .query("organizationPayments")
+        .withIndex("by_organization", (q) =>
+          q.eq("organizationId", organizationId),
+        )
+        .collect(),
+      transfers: await ctx.db
+        .query("publisherTransfers")
+        .withIndex("by_publisher", (q) =>
+          q.eq("publisherOrganizationId", organizationId),
+        )
+        .collect(),
+    }));
+    expect(state).toEqual({ profiles: [], transfers: [] });
+  });
+
   it("enforces capability gates and creates one idempotent transfer allocation", async () => {
     const t = convexTest(schema, modules);
     const seed = await seedConnect(t);
@@ -315,6 +373,16 @@ describe("Stripe Connect publisher accounting", () => {
         platformFeeCredits: split.platformFeeCredits,
         netCredits: split.publisherNetCredits,
       });
+      const balance = await ctx.db
+        .query("publisherBalances")
+        .withIndex("by_publisher", (q) =>
+          q.eq("publisherOrganizationId", seed.organizationId),
+        )
+        .unique();
+      if (balance === null) throw new Error("balance missing");
+      await ctx.db.patch(balance._id, {
+        pendingRiskAtoms: split.publisherNetAtoms,
+      });
     });
     await t.mutation(internal.payouts.releaseMatureEarnings, {
       publisherOrganizationId: seed.organizationId,
@@ -352,6 +420,16 @@ describe("Stripe Connect publisher accounting", () => {
         status: "pending_risk",
         createdAt: 2,
         updatedAt: 2,
+      });
+      const balance = await ctx.db
+        .query("publisherBalances")
+        .withIndex("by_publisher", (q) =>
+          q.eq("publisherOrganizationId", seed.organizationId),
+        )
+        .unique();
+      if (balance === null) throw new Error("balance missing");
+      await ctx.db.patch(balance._id, {
+        pendingRiskAtoms: balance.pendingRiskAtoms + split.publisherNetAtoms,
       });
     });
     await t.mutation(internal.payouts.releaseMatureEarnings, {
@@ -397,12 +475,16 @@ describe("Stripe Connect publisher accounting", () => {
     });
     await t.mutation(internal.payouts.projectStripeTransfer, {
       stripeTransferId: "tr_projection",
-      state: "failed",
+      amount: transfer.amount,
+      amountReversed: 0,
+      failed: true,
       failureReason: "stale failure",
     });
     await t.mutation(internal.payouts.projectStripeTransfer, {
       stripeTransferId: "tr_projection",
-      state: "reversed",
+      amount: transfer.amount,
+      amountReversed: transfer.amount,
+      failed: false,
       failureReason: undefined,
     });
     await t.mutation(internal.payouts.projectConnectedPayout, {
@@ -449,5 +531,167 @@ describe("Stripe Connect publisher accounting", () => {
       "transfer_reversal",
     ]);
     expect(state.payouts).toHaveLength(1);
+  });
+
+  it("correlates reversal metadata across local-write crash and keeps retry projection reversed", async () => {
+    const t = convexTest(schema, modules);
+    const seed = await seedConnect(t);
+    await t.mutation(internal.payouts.setConnectedAccount, {
+      organizationId: seed.organizationId,
+      stripeConnectedAccountId: "acct_crash",
+    });
+    await t.run(async (ctx) => {
+      const profile = await ctx.db
+        .query("organizationPayments")
+        .withIndex("by_organization", (q) =>
+          q.eq("organizationId", seed.organizationId),
+        )
+        .unique();
+      if (profile === null) throw new Error("profile missing");
+      await ctx.db.patch(profile._id, { payoutsEnabled: true });
+    });
+    await t.mutation(internal.payouts.releaseMatureEarnings, {
+      publisherOrganizationId: seed.organizationId,
+    });
+    const local = await t.mutation(internal.payouts.preparePublisherTransfer, {
+      publisherOrganizationId: seed.organizationId,
+    });
+    const calls: string[] = [];
+    const snapshot = await createAndRetrieveStripeTransfer(
+      {
+        create: (async () => {
+          calls.push("create");
+          return {
+            id: "tr_crash",
+            amount: local.amount,
+            amount_reversed: 0,
+            metadata: { publisherTransferId: local.transferId },
+          } as Stripe.Transfer;
+        }) as Stripe["transfers"]["create"],
+        retrieve: (async () => {
+          calls.push("retrieve");
+          return {
+            id: "tr_crash",
+            amount: local.amount,
+            amount_reversed: local.amount,
+            reversed: true,
+            metadata: { publisherTransferId: local.transferId },
+          } as Stripe.Transfer;
+        }) as Stripe["transfers"]["retrieve"],
+      },
+      {
+        _id: local.transferId,
+        stripeConnectedAccountId: local.connectedAccountId,
+        amount: local.amount,
+        currency: local.currency,
+        idempotencyKey: local.idempotencyKey,
+      },
+    );
+    expect(calls).toEqual(["create", "retrieve"]);
+    expect(snapshot.amount_reversed).toBe(local.amount);
+
+    const projection = {
+      stripeTransferId: snapshot.id,
+      publisherTransferId: snapshot.metadata.publisherTransferId,
+      amount: snapshot.amount,
+      amountReversed: snapshot.amount_reversed,
+      failed: false,
+      failureReason: undefined,
+    } as const;
+    await t.mutation(internal.payouts.projectStripeTransfer, projection);
+    await t.mutation(internal.payouts.projectStripeTransfer, projection);
+    const state = await t.run(async (ctx) => ({
+      transfer: await ctx.db.get(local.transferId),
+      balance: await ctx.db
+        .query("publisherBalances")
+        .withIndex("by_publisher", (q) =>
+          q.eq("publisherOrganizationId", seed.organizationId),
+        )
+        .unique(),
+      ledger: await ctx.db.query("publisherSettlementEntries").collect(),
+    }));
+    expect(state.transfer).toMatchObject({
+      stripeTransferId: "tr_crash",
+      reversedAmount: local.amount,
+      status: "reversed",
+    });
+    expect(state.balance).toMatchObject({
+      availableAtoms: 1_045_000_000,
+      allocatedAtoms: 0,
+      paidAtoms: 0,
+    });
+    expect(state.ledger.map((entry) => entry.kind)).toEqual([
+      "earning_release",
+      "transfer_allocation",
+      "transfer_succeeded",
+      "transfer_reversal",
+    ]);
+  });
+
+  it("uses materialized all-row payout totals while paginating display rows", async () => {
+    const t = convexTest(schema, modules);
+    const count = 120;
+    await t.run(async (ctx) => {
+      const organizationId = await ctx.db.insert("organizations", {
+        clerkOrgId: "org_totals",
+        name: "Totals",
+        slug: "totals",
+      });
+      await ctx.db.insert("publisherBalances", {
+        publisherOrganizationId: organizationId,
+        availableAtoms: 0,
+        allocatedAtoms: 0,
+        paidAtoms: 0,
+        pendingRiskAtoms: count * 9_500,
+        reversedAtoms: count * 9_500,
+        failedAtoms: count * 10_000,
+        sequence: 0,
+        updatedAt: 1,
+      });
+      for (let index = 0; index < count; index += 1) {
+        await ctx.db.insert("publisherEarnings", {
+          publisherOrganizationId: organizationId,
+          consumerOrganizationId: organizationId,
+          usageSettlementRefId: `settle:totals:${index}`,
+          grossCredits: 1,
+          platformFeeAtoms: 500,
+          publisherNetAtoms: 9_500,
+          platformFeeCredits: 0.05,
+          netCredits: 0.95,
+          clawedBackGrossCredits: 0,
+          clawedBackAtoms: 0,
+          releasedAtoms: 0,
+          availableAt: 2,
+          status: "pending_risk",
+          createdAt: index + 1,
+          updatedAt: index + 1,
+        });
+        await ctx.db.insert("publisherTransfers", {
+          publisherOrganizationId: organizationId,
+          stripeConnectedAccountId: "acct_totals",
+          amount: 1,
+          amountAtoms: 10_000,
+          remainderAtoms: 0,
+          currency: "usd",
+          idempotencyKey: `totals:${index}`,
+          reversedAmount: 0,
+          status: "failed",
+          createdAt: index + 1,
+          updatedAt: index + 1,
+        });
+      }
+    });
+    const state = await t
+      .withIdentity({
+        subject: "totals_user",
+        org_id: "org_totals",
+        org_role: "org:member",
+      } as { subject: string; org_id: string; org_role: string })
+      .query(api.payouts.getPayoutState, {});
+    expect(state.earnings.rows).toHaveLength(100);
+    expect(state.transfers).toHaveLength(100);
+    expect(state.earnings.pendingRisk).toBe(114);
+    expect(state.earnings.reversed).toBe(114);
+    expect(state.earnings.failed).toBe(120);
   });
 });

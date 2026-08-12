@@ -28,12 +28,52 @@ export async function getOrCreatePublisherBalance(
     availableAtoms: 0,
     allocatedAtoms: 0,
     paidAtoms: 0,
+    pendingRiskAtoms: 0,
+    reversedAtoms: 0,
+    failedAtoms: 0,
     sequence: 0,
     updatedAt: now,
   });
   const created = await ctx.db.get(id);
   if (created === null) throw new Error("Failed to create publisher balance");
   return created;
+}
+
+export async function adjustPublisherBalanceAggregates(
+  ctx: MutationCtx,
+  balance: Doc<"publisherBalances">,
+  deltas: {
+    pendingRiskAtoms?: number;
+    reversedAtoms?: number;
+    failedAtoms?: number;
+  },
+): Promise<Doc<"publisherBalances">> {
+  const pendingRiskAtoms =
+    balance.pendingRiskAtoms + (deltas.pendingRiskAtoms ?? 0);
+  const reversedAtoms = balance.reversedAtoms + (deltas.reversedAtoms ?? 0);
+  const failedAtoms = balance.failedAtoms + (deltas.failedAtoms ?? 0);
+  for (const [name, value] of [
+    ["Pending-risk aggregate", pendingRiskAtoms],
+    ["Reversed aggregate", reversedAtoms],
+    ["Failed aggregate", failedAtoms],
+  ] as const) {
+    safeAtomDelta(value, name);
+    if (value < 0) throw new Error(`${name} cannot become negative`);
+  }
+  const updatedAt = Date.now();
+  await ctx.db.patch(balance._id, {
+    pendingRiskAtoms,
+    reversedAtoms,
+    failedAtoms,
+    updatedAt,
+  });
+  return {
+    ...balance,
+    pendingRiskAtoms,
+    reversedAtoms,
+    failedAtoms,
+    updatedAt,
+  };
 }
 
 export async function appendPublisherSettlementEntry(
@@ -146,7 +186,7 @@ export async function releasePublisherEarning(
       ctx,
       earning.publisherOrganizationId,
     );
-    await appendPublisherSettlementEntry(ctx, {
+    const released = await appendPublisherSettlementEntry(ctx, {
       balance,
       kind: "earning_release",
       availableDeltaAtoms: releasableAtoms,
@@ -154,6 +194,17 @@ export async function releasePublisherEarning(
       paidDeltaAtoms: 0,
       refId: `publisher:earning:${earning._id}:release`,
       earningId: earning._id,
+    });
+    await adjustPublisherBalanceAggregates(ctx, released.balance, {
+      pendingRiskAtoms: -releasableAtoms,
+    });
+  } else {
+    const balance = await getOrCreatePublisherBalance(
+      ctx,
+      earning.publisherOrganizationId,
+    );
+    await adjustPublisherBalanceAggregates(ctx, balance, {
+      pendingRiskAtoms: -releasableAtoms,
     });
   }
   await ctx.db.patch(earning._id, {
@@ -197,16 +248,25 @@ export async function reconcilePaymentPublisherClawback(
 
   if (activeGrossCredits < args.targetGrossCredits) {
     let remaining = args.targetGrossCredits - activeGrossCredits;
-    const earnings = await ctx.db
-      .query("publisherEarnings")
-      .withIndex("by_consumer", (q) =>
-        q.eq("consumerOrganizationId", args.consumerOrganizationId),
-      )
-      .order("asc")
+    const allocations = await ctx.db
+      .query("paymentFundingAllocations")
+      .withIndex("by_payment", (q) => q.eq("paymentId", args.paymentId))
       .collect();
-    for (const earning of earnings) {
+    const activeByEarning = new Map<Id<"publisherEarnings">, number>();
+    for (const row of rows) {
+      activeByEarning.set(
+        row.earningId,
+        (activeByEarning.get(row.earningId) ?? 0) +
+          row.grossCredits -
+          row.restoredGrossCredits,
+      );
+    }
+    for (const allocation of allocations) {
       if (remaining === 0) break;
-      const capacity = earning.grossCredits - earning.clawedBackGrossCredits;
+      const earning = await ctx.db.get(allocation.earningId);
+      if (earning === null) throw new Error("Funded earning is missing");
+      const capacity =
+        allocation.grossCredits - (activeByEarning.get(earning._id) ?? 0);
       if (capacity <= 0) continue;
       const grossCredits = Math.min(capacity, remaining);
       const amountAtoms = publisherEarningSplit(grossCredits).publisherNetAtoms;
@@ -228,6 +288,10 @@ export async function reconcilePaymentPublisherClawback(
       await ctx.db.patch(earning._id, {
         clawedBackGrossCredits: earning.clawedBackGrossCredits + grossCredits,
         clawedBackAtoms: earning.clawedBackAtoms + amountAtoms,
+        releasedAtoms:
+          earning.status === "pending_risk"
+            ? earning.releasedAtoms
+            : earning.releasedAtoms - amountAtoms,
         status:
           earning.status === "pending_risk"
             ? "pending_risk"
@@ -242,7 +306,7 @@ export async function reconcilePaymentPublisherClawback(
           ctx,
           earning.publisherOrganizationId,
         );
-        await appendPublisherSettlementEntry(ctx, {
+        const clawed = await appendPublisherSettlementEntry(ctx, {
           balance,
           kind:
             args.sourceKind === "refund"
@@ -255,9 +319,28 @@ export async function reconcilePaymentPublisherClawback(
           earningId: earning._id,
           paymentId: args.paymentId,
         });
+        await adjustPublisherBalanceAggregates(ctx, clawed.balance, {
+          reversedAtoms: amountAtoms,
+        });
+      } else {
+        const balance = await getOrCreatePublisherBalance(
+          ctx,
+          earning.publisherOrganizationId,
+        );
+        await adjustPublisherBalanceAggregates(ctx, balance, {
+          pendingRiskAtoms: -amountAtoms,
+          reversedAtoms: amountAtoms,
+        });
       }
+      activeByEarning.set(
+        earning._id,
+        (activeByEarning.get(earning._id) ?? 0) + grossCredits,
+      );
       activeGrossCredits += grossCredits;
       remaining -= grossCredits;
+    }
+    if (remaining !== 0) {
+      throw new Error("Payment reversal exceeds consumed funding allocations");
     }
   } else if (activeGrossCredits > args.targetGrossCredits) {
     let remaining = activeGrossCredits - args.targetGrossCredits;
@@ -299,7 +382,7 @@ export async function reconcilePaymentPublisherClawback(
           ctx,
           earning.publisherOrganizationId,
         );
-        await appendPublisherSettlementEntry(ctx, {
+        const restored = await appendPublisherSettlementEntry(ctx, {
           balance,
           kind: "dispute_restoration",
           availableDeltaAtoms: amountAtoms,
@@ -308,6 +391,18 @@ export async function reconcilePaymentPublisherClawback(
           refId: `${args.sourceRef}:restore:${row._id}`,
           earningId: earning._id,
           paymentId: args.paymentId,
+        });
+        await adjustPublisherBalanceAggregates(ctx, restored.balance, {
+          reversedAtoms: -amountAtoms,
+        });
+      } else {
+        const balance = await getOrCreatePublisherBalance(
+          ctx,
+          earning.publisherOrganizationId,
+        );
+        await adjustPublisherBalanceAggregates(ctx, balance, {
+          pendingRiskAtoms: amountAtoms,
+          reversedAtoms: -amountAtoms,
         });
       }
       activeGrossCredits -= grossCredits;
