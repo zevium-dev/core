@@ -1,4 +1,4 @@
-name: Deploy Production
+name: Production Broker Preflight
 
 on:
   workflow_run:
@@ -15,7 +15,7 @@ permissions:
   id-token: write
 
 jobs:
-  deploy:
+  preflight:
     if: >-
       github.actor == 'tnfssc' &&
       github.event.workflow_run.conclusion == 'success' &&

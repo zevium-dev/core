@@ -9,6 +9,7 @@ import {
 import {
   buildManifest,
   canonicalJson,
+  manifestDigest,
   parseManifest,
 } from "../../src/manifest";
 import {
@@ -16,10 +17,15 @@ import {
   MERGE_SHA,
   PREVIEW_SECRET_DIGESTS,
   PRODUCTION_SHA,
+  TEST_MODULE_ARTIFACTS,
+  TEST_STATIC_ASSETS,
+  TEST_ASSET_SHA256,
+  TEST_WEB_SECRET_DIGESTS,
 } from "../fixtures";
 
 function previewGateway() {
   return buildManifest({
+    ...TEST_MODULE_ARTIFACTS,
     convexSiteUrl: "https://preview-123.convex.site",
     convexUrl: "https://preview-123.convex.cloud",
     eventName: "pull_request",
@@ -36,6 +42,7 @@ function previewGateway() {
 
 function productionGateway() {
   return buildManifest({
+    ...TEST_MODULE_ARTIFACTS,
     eventName: "workflow_run",
     headSha: HEAD_SHA,
     oidcSha: PRODUCTION_SHA,
@@ -48,12 +55,20 @@ function productionGateway() {
 }
 
 describe("signed deployment manifest", () => {
-  it("rebuilds canonical policy instead of trusting serialized targets", () => {
+  it("rebuilds policy while cryptographically binding serialized artifacts", async () => {
     const manifest = previewGateway();
     expect(parseManifest(structuredClone(manifest))).toEqual(manifest);
     const forged = structuredClone(manifest);
     forged.targets[0]?.operations.push("script:delete");
     expect(() => parseManifest(forged)).toThrow("canonical policy");
+    const executableSwap = structuredClone(manifest);
+    executableSwap.targets[0]!.modules[0]!.sha256 = "f".repeat(64);
+    expect(parseManifest(executableSwap).targets[0]!.modules[0]!.sha256).toBe(
+      "f".repeat(64),
+    );
+    expect(await manifestDigest(executableSwap)).not.toEqual(
+      await manifestDigest(manifest),
+    );
   });
 
   it("separates preview and production target names and lifecycle", () => {
@@ -70,6 +85,7 @@ describe("signed deployment manifest", () => {
   it("rejects cross-environment and malformed Convex origins", () => {
     expect(() =>
       buildManifest({
+        ...TEST_MODULE_ARTIFACTS,
         convexSiteUrl: "https://different.convex.site",
         convexUrl: "https://preview-123.convex.cloud",
         eventName: "pull_request",
@@ -85,6 +101,8 @@ describe("signed deployment manifest", () => {
     ).toThrow("deployments differ");
     expect(() =>
       buildManifest({
+        ...TEST_MODULE_ARTIFACTS,
+        ...TEST_STATIC_ASSETS,
         eventName: "pull_request",
         headSha: HEAD_SHA,
         oidcSha: MERGE_SHA,
@@ -93,12 +111,37 @@ describe("signed deployment manifest", () => {
         runAttempt: 1,
         runId: "9001",
         sourceRunId: "8999",
+        secretDigests: TEST_WEB_SECRET_DIGESTS,
       }),
     ).toThrow("production requires workflow_run");
   });
 
   it("canonicalizes object keys and preserves array order", () => {
     expect(canonicalJson({ b: 1, a: [2, 1] })).toBe('{"a":[2,1],"b":1}');
+  });
+
+  it("bounds serialized manifests before Durable Object persistence", () => {
+    const staticAssets = Array.from({ length: 120 }, (_, index) => ({
+      cloudflareHash: index.toString(16).padStart(32, "0"),
+      path: `/${index.toString().padStart(3, "0")}-${"x".repeat(900)}.js`,
+      sha256: "d".repeat(64),
+      size: 1,
+    }));
+    expect(() =>
+      buildManifest({
+        ...TEST_MODULE_ARTIFACTS,
+        eventName: "workflow_run",
+        headSha: HEAD_SHA,
+        oidcSha: PRODUCTION_SHA,
+        profile: "production-web",
+        ref: "refs/heads/develop",
+        runAttempt: 1,
+        runId: "9002",
+        secretDigests: TEST_WEB_SECRET_DIGESTS,
+        sourceRunId: "8999",
+        staticAssets,
+      }),
+    ).toThrow("serialized manifest is too large");
   });
 });
 
@@ -282,26 +325,89 @@ describe("mutation metadata", () => {
       ),
     ).toThrow("traffic");
     expect(() =>
-      validateAssetInitBody({
-        manifest: { "/../escape": { hash: "a".repeat(32), size: 1 } },
-      }),
+      validateAssetInitBody(
+        {
+          manifest: { "/../escape": { hash: "a".repeat(32), size: 1 } },
+        },
+        previewTarget,
+      ),
     ).toThrow("Asset manifest");
 
     expect(
-      validateAssetInitBody({
-        manifest: {
-          "/copy-a.js": { hash: "b".repeat(32), size: 42 },
-          "/copy-b.js": { hash: "b".repeat(32), size: 42 },
+      validateAssetInitBody(
+        {
+          manifest: {
+            "/copy.js": { hash: "b".repeat(32), size: 18 },
+          },
         },
-      }),
-    ).toEqual({ hashes: { ["b".repeat(32)]: 42 }, totalBytes: 42 });
+        { ...previewTarget, staticAssets: TEST_STATIC_ASSETS.staticAssets },
+      ),
+    ).toEqual({
+      hashes: { ["b".repeat(32)]: 18 },
+      sha256ByHash: { ["b".repeat(32)]: TEST_ASSET_SHA256 },
+      totalBytes: 18,
+    });
     expect(() =>
-      validateAssetInitBody({
-        manifest: {
-          "/copy-a.js": { hash: "b".repeat(32), size: 42 },
-          "/copy-b.js": { hash: "b".repeat(32), size: 43 },
+      validateAssetInitBody(
+        {
+          manifest: {
+            "/copy.js": { hash: "b".repeat(32), size: 43 },
+          },
         },
-      }),
-    ).toThrow("one size");
+        { ...previewTarget, staticAssets: TEST_STATIC_ASSETS.staticAssets },
+      ),
+    ).toThrow("Asset manifest");
+  });
+
+  it("retires undeclared web secrets instead of inheriting provider drift", () => {
+    const target = buildManifest({
+      ...TEST_MODULE_ARTIFACTS,
+      ...TEST_STATIC_ASSETS,
+      eventName: "workflow_run",
+      headSha: HEAD_SHA,
+      oidcSha: PRODUCTION_SHA,
+      profile: "production-web",
+      ref: "refs/heads/develop",
+      runAttempt: 1,
+      runId: "9002",
+      secretDigests: TEST_WEB_SECRET_DIGESTS,
+      sourceRunId: "8999",
+    }).targets[0]!;
+    const metadata = {
+      annotations: { "workers/tag": "ci-9002-1" },
+      assets: { config: {}, jwt: "a.b.c".repeat(10) },
+      bindings: [
+        { name: "CLERK_SECRET_KEY", text: "secret", type: "secret_text" },
+      ],
+      compatibility_date: "2026-07-18",
+      compatibility_flags: ["nodejs_compat"],
+      main_module: "index.js",
+    };
+    expect(validateWorkerMetadata(metadata, target, "version")).toMatchObject({
+      mainModule: "index.js",
+    });
+    expect(() =>
+      validateWorkerMetadata(
+        {
+          ...metadata,
+          keep_bindings: ["secret_text", "secret_key"],
+        },
+        target,
+        "version",
+      ),
+    ).toThrow("inheritance");
+    expect(() =>
+      validateWorkerMetadata(
+        {
+          ...metadata,
+          bindings: [
+            ...metadata.bindings,
+            { name: "LIBSQL_AUTH_TOKEN", text: "legacy", type: "secret_text" },
+          ],
+        },
+        target,
+        "version",
+      ),
+    ).toThrow("Secret binding");
   });
 });

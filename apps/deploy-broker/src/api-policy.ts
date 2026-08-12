@@ -36,6 +36,7 @@ export interface ApiRoute {
 
 export interface ValidatedAssetManifest {
   hashes: Record<string, number>;
+  sha256ByHash: Record<string, string>;
   totalBytes: number;
 }
 
@@ -407,7 +408,15 @@ function sameStringArray(
   );
 }
 
-function validateBindings(value: unknown, target: TargetManifest): void {
+interface ExplicitSecretBinding {
+  name: string;
+  text: string;
+}
+
+function validateBindings(
+  value: unknown,
+  target: TargetManifest,
+): ExplicitSecretBinding[] {
   invariant(
     Array.isArray(value),
     400,
@@ -415,6 +424,7 @@ function validateBindings(value: unknown, target: TargetManifest): void {
     "Worker bindings must be an array",
   );
   const normalized: string[] = [];
+  const explicitSecrets: ExplicitSecretBinding[] = [];
   for (const binding of value) {
     invariant(
       isRecord(binding),
@@ -448,6 +458,20 @@ function validateBindings(value: unknown, target: TargetManifest): void {
       );
       continue;
     }
+    if (binding.type === "secret_text") {
+      invariant(
+        exactKeys(binding, ["name", "text", "type"]) &&
+          typeof binding.name === "string" &&
+          typeof binding.text === "string" &&
+          target.allowedSecrets.some((secret) => secret.name === binding.name),
+        400,
+        "metadata_rejected",
+        "Secret binding is invalid",
+      );
+      normalized.push(`secret_text:${binding.name}`);
+      explicitSecrets.push({ name: binding.name, text: binding.text });
+      continue;
+    }
     throw new BrokerError(
       400,
       "binding_type_rejected",
@@ -462,6 +486,9 @@ function validateBindings(value: unknown, target: TargetManifest): void {
       (binding) =>
         `durable_object_namespace:${binding.name}:${binding.className}`,
     ),
+    ...(target.inheritedBindingTypes.length === 0
+      ? target.allowedSecrets.map((binding) => `secret_text:${binding.name}`)
+      : []),
   ];
   invariant(
     normalized.sort().join("\n") === expected.sort().join("\n"),
@@ -469,6 +496,7 @@ function validateBindings(value: unknown, target: TargetManifest): void {
     "bindings_rejected",
     "Worker bindings do not match manifest",
   );
+  return explicitSecrets;
 }
 
 function validateMigration(value: unknown, target: TargetManifest): void {
@@ -577,6 +605,7 @@ export function validateWorkerMetadata(
   assetsJwt?: string;
   mainModule: string;
   migrationMode: "initial" | "none";
+  secretBindings?: ExplicitSecretBinding[];
 } {
   invariant(
     isRecord(value),
@@ -604,6 +633,7 @@ export function validateWorkerMetadata(
   );
   invariant(
     typeof value.main_module === "string" &&
+      value.main_module === target.mainModule &&
       isSafeModuleName(value.main_module),
     400,
     "metadata_rejected",
@@ -616,16 +646,18 @@ export function validateWorkerMetadata(
     "compatibility_rejected",
     "Worker compatibility settings do not match manifest",
   );
-  validateBindings(value.bindings, target);
+  const secretBindings = validateBindings(value.bindings, target);
   validateMigration(value.migrations, target);
   const assetsJwt = validateAssets(value.assets, target);
   validatePackageDependencies(value.package_dependencies);
 
   invariant(
-    sameStringArray(value.keep_bindings, ["secret_text", "secret_key"]),
+    target.inheritedBindingTypes.length === 0
+      ? value.keep_bindings === undefined
+      : sameStringArray(value.keep_bindings, target.inheritedBindingTypes),
     400,
     "keep_bindings_rejected",
-    "Version upload must preserve only secret bindings",
+    "Version upload inheritance does not match signed manifest",
   );
   invariant(
     isRecord(value.annotations) &&
@@ -645,6 +677,7 @@ export function validateWorkerMetadata(
     mainModule: value.main_module,
     migrationMode: value.migrations === undefined ? "none" : "initial",
     ...(assetsJwt === undefined ? {} : { assetsJwt }),
+    ...(secretBindings.length === 0 ? {} : { secretBindings }),
   };
 }
 
@@ -751,7 +784,10 @@ export function validateDeploymentBody(
   return { versionId: version.version_id };
 }
 
-export function validateAssetInitBody(value: unknown): ValidatedAssetManifest {
+export function validateAssetInitBody(
+  value: unknown,
+  target: TargetManifest,
+): ValidatedAssetManifest {
   invariant(
     isRecord(value) &&
       exactKeys(value, ["manifest"]) &&
@@ -762,7 +798,7 @@ export function validateAssetInitBody(value: unknown): ValidatedAssetManifest {
   );
   const entries = Object.entries(value.manifest);
   invariant(
-    entries.length >= 1 && entries.length <= 1_500,
+    entries.length === target.staticAssets.length && entries.length <= 1_500,
     400,
     "asset_manifest_rejected",
     "Asset manifest count is invalid",
@@ -771,6 +807,13 @@ export function validateAssetInitBody(value: unknown): ValidatedAssetManifest {
     string,
     number
   >;
+  const sha256ByHash: Record<string, string> = Object.create(null) as Record<
+    string,
+    string
+  >;
+  const expectedByPath = new Map(
+    target.staticAssets.map((asset) => [asset.path, asset]),
+  );
   let totalBytes = 0;
   for (const [path, metadata] of entries) {
     invariant(
@@ -789,12 +832,23 @@ export function validateAssetInitBody(value: unknown): ValidatedAssetManifest {
         typeof metadata.size === "number" &&
         Number.isSafeInteger(metadata.size) &&
         metadata.size >= 0 &&
-        metadata.size <= 25 * 1024 * 1024,
+        metadata.size <= 25 * 1024 * 1024 &&
+        expectedByPath.get(path)?.cloudflareHash === metadata.hash &&
+        expectedByPath.get(path)?.size === metadata.size,
       400,
       "asset_manifest_rejected",
       "Asset manifest entry is invalid",
     );
     const existingSize = hashes[metadata.hash];
+    const expectedSha256 = expectedByPath.get(path)?.sha256;
+    invariant(
+      expectedSha256 !== undefined &&
+        (sha256ByHash[metadata.hash] === undefined ||
+          sha256ByHash[metadata.hash] === expectedSha256),
+      400,
+      "asset_manifest_rejected",
+      "Repeated asset hashes must bind one artifact digest",
+    );
     invariant(
       existingSize === undefined || existingSize === metadata.size,
       400,
@@ -803,6 +857,7 @@ export function validateAssetInitBody(value: unknown): ValidatedAssetManifest {
     );
     if (existingSize === undefined) {
       hashes[metadata.hash] = metadata.size;
+      sha256ByHash[metadata.hash] = expectedSha256;
       totalBytes += metadata.size;
     }
     invariant(
@@ -812,7 +867,7 @@ export function validateAssetInitBody(value: unknown): ValidatedAssetManifest {
       "Asset manifest is too large",
     );
   }
-  return { hashes, totalBytes };
+  return { hashes, sha256ByHash, totalBytes };
 }
 
 export function syntheticScriptsResponse(

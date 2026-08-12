@@ -1,4 +1,4 @@
-name: Cloudflare Production Deployment
+name: Cloudflare Production Broker Preflight
 
 on:
   workflow_call:
@@ -11,6 +11,7 @@ on:
         type: string
 
 permissions:
+  actions: read
   contents: read
   id-token: write
 
@@ -29,6 +30,27 @@ jobs:
     timeout-minutes: 15
     environment: production
     steps:
+      - name: Reject stale or mismatched source run before checkout
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SHA: ${{ inputs.head_sha }}
+          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+        run: |
+          [[ "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$SOURCE_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          test "$(gh api "repos/$GITHUB_REPOSITORY/commits/develop" --jq .sha)" = "$RELEASE_SHA"
+          source_json="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN_ID")"
+          SOURCE_JSON="$source_json" node -e '
+            const run=JSON.parse(process.env.SOURCE_JSON)
+            if (String(run.id)!==process.env.SOURCE_RUN_ID || run.status!=="completed" ||
+                run.conclusion!=="success" || run.event!=="push" ||
+                run.head_branch!=="develop" || run.head_sha!==process.env.RELEASE_SHA ||
+                run.path!==".github/workflows/ci.yml" ||
+                String(run.repository?.id)!=="1044451612") {
+              throw new Error("production source CI provenance rejected")
+            }
+          '
+
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           ref: ${{ inputs.head_sha }}
@@ -41,27 +63,23 @@ jobs:
             ${{ runner.os }}-pnpm-store-
       - uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4
 
-      - name: Deploy Convex control plane
-        env:
-          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_PRODUCTION_DEPLOY_KEY }}
-        run: pnpm exec convex deploy --yes
-
-      - name: Deploy gateway Worker through broker
+      # Production mutation belongs to release.yml. This reusable workflow is
+      # intentionally a source/artifact/provenance preflight only: caller input
+      # cannot impersonate protected release attestations or paid-call proof.
+      - name: Authorize exact gateway artifact without mutation
         env:
           DEPLOY_HEAD_SHA: ${{ inputs.head_sha }}
           SOURCE_RUN_ID: ${{ inputs.source_run_id }}
         run: |
-          broker_env="$(mktemp)"
-          trap 'rm -f "$broker_env"' EXIT
-          BROKER_ENV_FILE="$broker_env" node --experimental-strip-types \
-            apps/deploy-broker/scripts/register.ts --profile production-gateway
-          set -a
-          . "$broker_env"
-          set +a
-          pnpm --filter gateway exec wrangler versions upload --tag "$VERSION_TAG"
-          pnpm --filter gateway exec wrangler versions deploy \
-            --config ../deploy-broker/wrangler-client.jsonc \
-            --name zevium-gateway --version-tag "$VERSION_TAG" --yes
+          module_root="$(mktemp -d)"
+          trap 'rm -r -- "$module_root"' EXIT
+          pnpm --filter gateway exec wrangler versions upload --dry-run \
+            --outdir "$module_root" --tag "$VERSION_TAG"
+          export DEPLOY_MODULE_ROOT="$module_root"
+          export DEPLOY_MAIN_MODULE="index.js"
+          node --experimental-strip-types \
+            apps/deploy-broker/scripts/register.ts --remote-dry-run \
+            --profile production-gateway
 
       - name: Build web Worker
         env:
@@ -69,28 +87,15 @@ jobs:
           CLERK_SECRET_KEY: ${{ secrets.CLERK_PRODUCTION_SECRET_KEY }}
         run: pnpm --filter web build
 
-      - name: Deploy web Worker through broker
+      - name: Authorize exact web artifact and secret set without mutation
         env:
+          CLERK_SECRET_KEY: ${{ secrets.CLERK_PRODUCTION_SECRET_KEY }}
           DEPLOY_HEAD_SHA: ${{ inputs.head_sha }}
           SOURCE_RUN_ID: ${{ inputs.source_run_id }}
         run: |
-          broker_env="$(mktemp)"
-          trap 'rm -f "$broker_env"' EXIT
-          BROKER_ENV_FILE="$broker_env" node --experimental-strip-types \
-            apps/deploy-broker/scripts/register.ts --profile production-web
-          set -a
-          . "$broker_env"
-          set +a
-          pnpm --filter web exec wrangler versions upload \
-            --config dist/server/wrangler.json --tag "$VERSION_TAG"
-          pnpm --filter web exec wrangler versions deploy \
-            --config ../deploy-broker/wrangler-client.jsonc \
-            --name zevium-dev --version-tag "$VERSION_TAG" --yes
-
-      - name: Smoke test production
-        run: |
-          gateway="$(curl --fail --silent --show-error https://gateway.zevium.dev/health)"
-          [[ "$gateway" == *'"ok":true'* ]] || { echo "Gateway health response is invalid" >&2; exit 1; }
-
-          web="$(curl --fail --silent --show-error https://www.zevium.dev/)"
-          [[ "$web" == *'One key. Every API. Pay per call.'* ]] || { echo "Landing page did not render" >&2; exit 1; }
+          export DEPLOY_MODULE_ROOT="apps/web/dist/server"
+          export DEPLOY_ASSET_ROOT="apps/web/dist/client"
+          export DEPLOY_MAIN_MODULE="index.js"
+          node --experimental-strip-types \
+            apps/deploy-broker/scripts/register.ts --remote-dry-run \
+            --profile production-web

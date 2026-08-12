@@ -4,6 +4,7 @@ import {
   validateWorkerMetadata,
 } from "./api-policy";
 import { BrokerError, invariant } from "./errors";
+import { sha256Hex, timingSafeEqual } from "./crypto";
 import type { TargetManifest } from "./manifest";
 import { isRecord, parseStrictJson } from "./strict-json";
 
@@ -11,6 +12,7 @@ const HEADER_TERMINATOR = new Uint8Array([13, 10, 13, 10]);
 const CRLF = new Uint8Array([13, 10]);
 const MAX_HEADER_BYTES = 16 * 1024;
 const MAX_METADATA_BYTES = 256 * 1024;
+const MAX_SIGNED_ARTIFACT_BYTES = 128 * 1024 * 1024;
 const MAX_PARTS = 2_000;
 const WORKER_CONTENT_TYPES = new Set([
   "application/javascript",
@@ -29,6 +31,7 @@ interface PartHeaders {
 }
 
 interface MultipartInspectorOptions {
+  assetDigests?: Record<string, string>;
   assetSizes?: Record<string, number>;
   mode: "assets" | "worker-version";
   target: TargetManifest;
@@ -142,9 +145,14 @@ class StreamingMultipartInspector {
   private currentBase64Padding = 0;
   private metadataBytes = 0;
   private partCount = 0;
+  private readonly partHeaders: PartHeaders[] = [];
   private readonly delimiter: Uint8Array;
   private readonly initial: Uint8Array;
   private readonly seenNames = new Set<string>();
+  private readonly partChunks = new Map<string, Uint8Array[]>();
+  private readonly partSizes = new Map<string, number>();
+  private secretBindings: Array<{ name: string; text: string }> = [];
+  private collectedArtifactBytes = 0;
   private state: "body" | "boundary" | "finished" | "headers" | "start" =
     "start";
   mainModule: string | undefined;
@@ -187,7 +195,125 @@ class StreamingMultipartInspector {
         "multipart_rejected",
         "Worker main module part is missing",
       );
+      const expected = this.options.target.modules.map((module) => module.name);
+      const actual = [...this.seenNames].filter((name) => name !== "metadata");
+      invariant(
+        actual.length === expected.length &&
+          actual.every((name) => expected.includes(name)),
+        400,
+        "artifact_rejected",
+        "Worker module set does not match signed manifest",
+      );
     }
+  }
+
+  async verifyArtifacts(): Promise<void> {
+    for (const binding of this.secretBindings) {
+      const expected = this.options.target.allowedSecrets.find(
+        (secret) => secret.name === binding.name,
+      );
+      invariant(
+        expected !== undefined &&
+          timingSafeEqual(await sha256Hex(binding.text), expected.sha256),
+        400,
+        "secret_rejected",
+        `Secret ${binding.name} does not match signed manifest`,
+      );
+    }
+    if (this.options.mode === "worker-version") {
+      for (const expected of this.options.target.modules) {
+        const bytes = this.partBytes(expected.name);
+        invariant(
+          bytes.byteLength === expected.size &&
+            timingSafeEqual(await sha256Hex(bytes), expected.sha256),
+          400,
+          "artifact_rejected",
+          `Worker module ${expected.name} does not match signed manifest`,
+        );
+      }
+      return;
+    }
+    for (const [hash, expectedSha256] of Object.entries(
+      this.options.assetDigests ?? {},
+    )) {
+      if (!this.seenNames.has(hash)) continue;
+      const encoded = this.partBytes(hash);
+      const size = this.options.assetSizes?.[hash];
+      invariant(
+        size !== undefined,
+        500,
+        "artifact_state_invalid",
+        "Static asset size is missing from session",
+      );
+      const bytes = decodeBase64(encoded, size);
+      invariant(
+        timingSafeEqual(await sha256Hex(bytes), expectedSha256),
+        400,
+        "artifact_rejected",
+        `Static asset ${hash} does not match signed manifest`,
+      );
+    }
+  }
+
+  forwardedBody(boundary: string): {
+    body: ReadableStream<Uint8Array>;
+    contentLength: number;
+  } {
+    const encoder = new TextEncoder();
+    const chunks: Uint8Array[] = [];
+    for (const [index, headers] of this.partHeaders.entries()) {
+      const disposition =
+        `Content-Disposition: form-data; name="${headers.name}"` +
+        (headers.filename === undefined
+          ? ""
+          : `; filename="${headers.filename}"`);
+      const header = [
+        `${index === 0 ? "" : "\r\n"}--${boundary}`,
+        disposition,
+        ...(headers.contentType === undefined
+          ? []
+          : [`Content-Type: ${headers.contentType}`]),
+        "",
+        "",
+      ].join("\r\n");
+      chunks.push(encoder.encode(header));
+      chunks.push(
+        ...(headers.name === "metadata"
+          ? this.collectedMetadata
+          : (this.partChunks.get(headers.name) ?? [])),
+      );
+    }
+    chunks.push(encoder.encode(`\r\n--${boundary}--\r\n`));
+    const contentLength = chunks.reduce(
+      (total, chunk) => total + chunk.byteLength,
+      0,
+    );
+    let index = 0;
+    return {
+      body: new ReadableStream<Uint8Array>({
+        pull(controller) {
+          const chunk = chunks[index];
+          if (chunk === undefined) {
+            controller.close();
+            return;
+          }
+          index += 1;
+          controller.enqueue(chunk);
+        },
+      }),
+      contentLength,
+    };
+  }
+
+  private partBytes(name: string): Uint8Array {
+    const chunks = this.partChunks.get(name) ?? [];
+    const bytes = new Uint8Array(this.partSizes.get(name) ?? 0);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    return bytes;
   }
 
   private process(): void {
@@ -292,6 +418,7 @@ class StreamingMultipartInspector {
       "Multipart part is duplicate",
     );
     this.seenNames.add(headers.name);
+    this.partHeaders.push(headers);
     this.currentHeaders = headers;
     this.currentBodyBytes = 0;
     this.currentBase64Characters = 0;
@@ -330,6 +457,8 @@ class StreamingMultipartInspector {
         "Asset part is not declared in manifest",
       );
       this.ready = true;
+      this.partChunks.set(headers.name, []);
+      this.partSizes.set(headers.name, 0);
       return;
     }
     invariant(
@@ -341,6 +470,17 @@ class StreamingMultipartInspector {
       "multipart_rejected",
       "Worker module part is invalid",
     );
+    const expected = this.options.target.modules.find(
+      (module) => module.name === headers.name,
+    );
+    invariant(
+      expected !== undefined && expected.contentType === headers.contentType,
+      400,
+      "artifact_rejected",
+      "Worker module is not declared in signed manifest",
+    );
+    this.partChunks.set(headers.name, []);
+    this.partSizes.set(headers.name, 0);
   }
 
   private addBody(bytes: Uint8Array): void {
@@ -363,6 +503,18 @@ class StreamingMultipartInspector {
       this.collectedMetadata.push(bytes);
       return;
     }
+    this.partChunks.get(headers.name)?.push(bytes);
+    this.collectedArtifactBytes += bytes.byteLength;
+    invariant(
+      this.collectedArtifactBytes <= MAX_SIGNED_ARTIFACT_BYTES,
+      413,
+      "artifact_too_large",
+      "Signed artifact verification buffer is too large",
+    );
+    this.partSizes.set(
+      headers.name,
+      (this.partSizes.get(headers.name) ?? 0) + bytes.byteLength,
+    );
     if (this.options.mode === "assets") {
       for (const byte of bytes) {
         if (byte === 61) {
@@ -431,6 +583,7 @@ class StreamingMultipartInspector {
       this.mainModule = result.mainModule;
       this.migrationMode = result.migrationMode;
       this.assetsJwt = result.assetsJwt;
+      this.secretBindings = result.secretBindings ?? [];
       this.ready = true;
     } else if (this.options.mode === "assets") {
       const size = this.options.assetSizes?.[headers.name];
@@ -456,6 +609,39 @@ class StreamingMultipartInspector {
     this.currentBase64Characters = 0;
     this.currentBase64Padding = 0;
   }
+}
+
+function decodeBase64(source: Uint8Array, expectedBytes: number): Uint8Array {
+  const output = new Uint8Array(expectedBytes);
+  const value = (byte: number): number => {
+    if (byte >= 65 && byte <= 90) return byte - 65;
+    if (byte >= 97 && byte <= 122) return byte - 71;
+    if (byte >= 48 && byte <= 57) return byte + 4;
+    if (byte === 43) return 62;
+    if (byte === 47) return 63;
+    return 0;
+  };
+  let offset = 0;
+  for (let index = 0; index < source.byteLength; index += 4) {
+    const left = value(source[index] ?? 61);
+    const middleLeft = value(source[index + 1] ?? 61);
+    const middleRight = value(source[index + 2] ?? 61);
+    const right = value(source[index + 3] ?? 61);
+    if (offset < output.length)
+      output[offset++] = (left << 2) | (middleLeft >> 4);
+    if (offset < output.length) {
+      output[offset++] = ((middleLeft & 15) << 4) | (middleRight >> 2);
+    }
+    if (offset < output.length)
+      output[offset++] = ((middleRight & 3) << 6) | right;
+  }
+  invariant(
+    offset === expectedBytes,
+    400,
+    "artifact_rejected",
+    "Static asset decoded length does not match signed manifest",
+  );
+  return output;
 }
 
 function parseBoundary(contentType: string | null): string {
@@ -515,17 +701,10 @@ export async function inspectMultipart(
   const contentLength = parseContentLength(request, maximumBytes);
   const reader = request.body.getReader();
   const parser = new StreamingMultipartInspector(boundary, options);
-  const prefix: Uint8Array[] = [];
   let total = 0;
-
-  while (!parser.ready) {
+  for (;;) {
     const result = await reader.read();
-    invariant(
-      !result.done,
-      400,
-      "multipart_rejected",
-      "Multipart ended before policy metadata",
-    );
+    if (result.done) break;
     total += result.value.byteLength;
     invariant(
       total <= maximumBytes,
@@ -533,62 +712,21 @@ export async function inspectMultipart(
       "body_too_large",
       "Multipart body exceeds route limit",
     );
-    invariant(
-      total <= MAX_METADATA_BYTES + MAX_HEADER_BYTES * 2,
-      413,
-      "metadata_too_large",
-      "Multipart policy prefix is too large",
-    );
     parser.feed(result.value);
-    prefix.push(result.value);
   }
-
-  let prefixIndex = 0;
-  const body = new ReadableStream<Uint8Array>({
-    async pull(controller) {
-      try {
-        if (prefixIndex < prefix.length) {
-          const chunk = prefix[prefixIndex];
-          prefixIndex += 1;
-          if (chunk) controller.enqueue(chunk);
-          return;
-        }
-        const result = await reader.read();
-        if (result.done) {
-          parser.finish();
-          if (contentLength !== null) {
-            invariant(
-              total === contentLength,
-              400,
-              "invalid_content_length",
-              "Content-Length did not match body",
-            );
-          }
-          controller.close();
-          return;
-        }
-        total += result.value.byteLength;
-        invariant(
-          total <= maximumBytes,
-          413,
-          "body_too_large",
-          "Multipart body exceeds route limit",
-        );
-        parser.feed(result.value);
-        controller.enqueue(result.value);
-      } catch (error) {
-        await reader.cancel("multipart validation failed");
-        controller.error(error);
-      }
-    },
-    async cancel(reason) {
-      await reader.cancel(reason);
-    },
-  });
+  parser.finish();
+  invariant(
+    contentLength === null || total === contentLength,
+    400,
+    "invalid_content_length",
+    "Content-Length did not match body",
+  );
+  await parser.verifyArtifacts();
+  const forwarded = parser.forwardedBody(boundary);
   return {
     ...(parser.assetsJwt ? { assetsJwt: parser.assetsJwt } : {}),
-    body,
-    contentLength,
+    body: forwarded.body,
+    contentLength: forwarded.contentLength,
     ...(parser.mainModule ? { mainModule: parser.mainModule } : {}),
     ...(parser.migrationMode ? { migrationMode: parser.migrationMode } : {}),
   };

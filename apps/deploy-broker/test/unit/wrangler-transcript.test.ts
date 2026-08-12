@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import { authorizeApiRoute } from "../../src/api-policy";
 import { buildManifest } from "../../src/manifest";
-import { HEAD_SHA, PRODUCTION_SHA } from "../fixtures";
+import { HEAD_SHA, PRODUCTION_SHA, TEST_MODULE_ARTIFACTS } from "../fixtures";
 
 interface TranscriptEntry {
   method: string;
@@ -11,6 +11,7 @@ interface TranscriptEntry {
 
 function productionGateway() {
   return buildManifest({
+    ...TEST_MODULE_ARTIFACTS,
     eventName: "workflow_run",
     headSha: HEAD_SHA,
     oidcSha: PRODUCTION_SHA,

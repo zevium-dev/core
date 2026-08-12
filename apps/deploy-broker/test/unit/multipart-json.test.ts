@@ -2,10 +2,18 @@ import { describe, expect, it } from "vitest";
 import { buildManifest } from "../../src/manifest";
 import { inspectMultipart } from "../../src/multipart";
 import { parseStrictJson } from "../../src/strict-json";
-import { HEAD_SHA, MERGE_SHA, PREVIEW_SECRET_DIGESTS } from "../fixtures";
+import {
+  HEAD_SHA,
+  MERGE_SHA,
+  PREVIEW_SECRET_DIGESTS,
+  PRODUCTION_SHA,
+  TEST_MODULE_ARTIFACTS,
+  TEST_STATIC_ASSETS,
+} from "../fixtures";
 
 function gatewayTarget() {
   return buildManifest({
+    ...TEST_MODULE_ARTIFACTS,
     convexSiteUrl: "https://preview-123.convex.site",
     convexUrl: "https://preview-123.convex.cloud",
     eventName: "pull_request",
@@ -17,6 +25,28 @@ function gatewayTarget() {
     runAttempt: 1,
     runId: "9001",
     secretDigests: PREVIEW_SECRET_DIGESTS,
+  }).targets[0]!;
+}
+
+function webTarget() {
+  return buildManifest({
+    ...TEST_MODULE_ARTIFACTS,
+    ...TEST_STATIC_ASSETS,
+    eventName: "workflow_run",
+    headSha: HEAD_SHA,
+    oidcSha: PRODUCTION_SHA,
+    profile: "production-web",
+    ref: "refs/heads/develop",
+    runAttempt: 1,
+    runId: "9002",
+    secretDigests: [
+      {
+        name: "CLERK_SECRET_KEY",
+        sha256:
+          "673fdf3905ba00e820de905b7c831604ac535c756561234e6d90f974316226a6",
+      },
+    ],
+    sourceRunId: "8999",
   }).targets[0]!;
 }
 
@@ -94,6 +124,17 @@ function versionMetadata(): Record<string, unknown> {
   };
 }
 
+function webVersionMetadata(secret: string): Record<string, unknown> {
+  return {
+    annotations: { "workers/tag": "ci-9002-1" },
+    assets: { config: {}, jwt: "a.b.c".repeat(10) },
+    bindings: [{ name: "CLERK_SECRET_KEY", text: secret, type: "secret_text" }],
+    compatibility_date: "2026-07-18",
+    compatibility_flags: ["nodejs_compat"],
+    main_module: "index.js",
+  };
+}
+
 describe("strict JSON", () => {
   it.each([
     '{"a":1,"a":2}',
@@ -136,6 +177,33 @@ describe("streaming multipart validation", () => {
     expect(forwarded).toEqual(multipart.body);
   });
 
+  it("returns exact length for canonicalized validated multipart", async () => {
+    const multipart = workerMultipart(versionMetadata());
+    const nonCanonical = new TextEncoder().encode(
+      new TextDecoder()
+        .decode(multipart.body)
+        .replaceAll("Content-Disposition:", "content-disposition:    "),
+    );
+    const inspected = await inspectMultipart(
+      new Request("https://broker.invalid/upload", {
+        body: Uint8Array.from(nonCanonical).buffer,
+        headers: {
+          "content-length": String(nonCanonical.byteLength),
+          "content-type": `multipart/form-data; boundary=${multipart.boundary}`,
+        },
+        method: "POST",
+      }),
+      { mode: "worker-version", target: gatewayTarget() },
+      1024 * 1024,
+    );
+    const forwarded = new Uint8Array(
+      await new Response(inspected.body).arrayBuffer(),
+    );
+
+    expect(inspected.contentLength).toBe(forwarded.byteLength);
+    expect(inspected.contentLength).not.toBe(nonCanonical.byteLength);
+  });
+
   it("rejects metadata after executable module", async () => {
     const boundary = "----zevium-order";
     const source = [
@@ -165,6 +233,75 @@ describe("streaming multipart validation", () => {
         1024 * 1024,
       ),
     ).rejects.toMatchObject({ code: "multipart_rejected" });
+  });
+
+  it("rejects executable bytes and content type not bound by manifest", async () => {
+    const changed = workerMultipart(versionMetadata());
+    const tampered = new TextDecoder()
+      .decode(changed.body)
+      .replace("new Response('ok')", "new Response('pwned')");
+    const tamperedBytes = new TextEncoder().encode(tampered);
+    await expect(
+      inspectMultipart(
+        new Request("https://broker.invalid/upload", {
+          body: tamperedBytes,
+          headers: {
+            "content-type": `multipart/form-data; boundary=${changed.boundary}`,
+          },
+          method: "POST",
+        }),
+        { mode: "worker-version", target: gatewayTarget() },
+        1024 * 1024,
+      ),
+    ).rejects.toMatchObject({ code: "artifact_rejected" });
+
+    const wrongType = new TextDecoder()
+      .decode(changed.body)
+      .replace("application/javascript+module", "application/javascript");
+    await expect(
+      inspectMultipart(
+        new Request("https://broker.invalid/upload", {
+          body: new TextEncoder().encode(wrongType),
+          headers: {
+            "content-type": `multipart/form-data; boundary=${changed.boundary}`,
+          },
+          method: "POST",
+        }),
+        { mode: "worker-version", target: gatewayTarget() },
+        1024 * 1024,
+      ),
+    ).rejects.toMatchObject({ code: "artifact_rejected" });
+  });
+
+  it("binds explicit Worker secret values to signed digests", async () => {
+    const valid = workerMultipart(webVersionMetadata("correct-secret"));
+    const inspected = await inspectMultipart(
+      new Request("https://broker.invalid/upload", {
+        body: Uint8Array.from(valid.body).buffer,
+        headers: {
+          "content-type": `multipart/form-data; boundary=${valid.boundary}`,
+        },
+        method: "POST",
+      }),
+      { mode: "worker-version", target: webTarget() },
+      1024 * 1024,
+    );
+    await new Response(inspected.body).arrayBuffer();
+
+    const forged = workerMultipart(webVersionMetadata("wrong-secret"));
+    await expect(
+      inspectMultipart(
+        new Request("https://broker.invalid/upload", {
+          body: Uint8Array.from(forged.body).buffer,
+          headers: {
+            "content-type": `multipart/form-data; boundary=${forged.boundary}`,
+          },
+          method: "POST",
+        }),
+        { mode: "worker-version", target: webTarget() },
+        1024 * 1024,
+      ),
+    ).rejects.toMatchObject({ code: "secret_rejected" });
   });
 
   it("rejects duplicate, traversal, encoded, and undeclared module names", async () => {

@@ -100,7 +100,27 @@ jobs:
           esac
 
           broker_env="$(mktemp)"
-          trap 'rm -f "$broker_env"' EXIT
+          module_root=""
+          trap 'rm -f "$broker_env" "${secrets_file:-}"' EXIT
+          if [ "${{ inputs.component }}" = "gateway" ]; then
+            module_root="$(mktemp -d)"
+            pnpm --filter gateway exec wrangler versions upload --dry-run \
+              --outdir "$module_root" --name "$worker_name" \
+              --config wrangler.preview.jsonc --tag "$VERSION_TAG" \
+              --var "CONVEX_URL:$VITE_CONVEX_URL" \
+              --var "CONVEX_SITE_URL:$CONVEX_SITE_URL"
+            export DEPLOY_MODULE_ROOT="$module_root"
+          else
+            export DEPLOY_MODULE_ROOT="apps/web/dist/server"
+            export DEPLOY_ASSET_ROOT="apps/web/dist/client"
+            secrets_file="$(mktemp)"
+            chmod 600 "$secrets_file"
+            node -e '
+              const fs=require("node:fs")
+              fs.writeFileSync(process.argv[1],JSON.stringify({CLERK_SECRET_KEY:process.env.CLERK_PREVIEW_SECRET_KEY}))
+            ' "$secrets_file"
+          fi
+          export DEPLOY_MAIN_MODULE="index.js"
           BROKER_ENV_FILE="$broker_env" node --experimental-strip-types \
             apps/deploy-broker/scripts/register.ts --profile "$profile"
           set -a
@@ -108,7 +128,8 @@ jobs:
           set +a
 
           if [ "${{ inputs.component }}" = "gateway" ]; then
-            pnpm --filter gateway exec wrangler versions upload --name "$worker_name" \
+            pnpm --filter gateway exec wrangler versions upload \
+              "$module_root/index.js" --no-bundle --name "$worker_name" \
               --config wrangler.preview.jsonc \
               --tag "$VERSION_TAG" \
               --var "CONVEX_URL:$VITE_CONVEX_URL" \
@@ -124,13 +145,11 @@ jobs:
                 --name "$worker_name" --config wrangler.preview.jsonc
           else
             pnpm --filter web exec wrangler versions upload --name "$worker_name" \
-              --config dist/server/wrangler.preview.json --tag "$VERSION_TAG"
+              --config dist/server/wrangler.preview.json --tag "$VERSION_TAG" \
+              --secrets-file "$secrets_file"
             pnpm --filter web exec wrangler versions deploy --name "$worker_name" \
               --config ../deploy-broker/wrangler-client.jsonc \
               --version-tag "$VERSION_TAG" --yes
-            printf '%s' "$CLERK_PREVIEW_SECRET_KEY" | \
-              pnpm --filter web exec wrangler secret put CLERK_SECRET_KEY \
-                --name "$worker_name" --config dist/server/wrangler.preview.json
           fi
           curl --fail --silent --show-error --request POST \
             --header "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \

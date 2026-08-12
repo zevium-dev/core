@@ -11,12 +11,14 @@ import {
   HEAD_SHA,
   MERGE_SHA,
   PREVIEW_SECRET_DIGESTS,
+  TEST_MODULE_ARTIFACTS,
   previewClaims,
   signClaims,
 } from "../fixtures";
 
 function previewManifest(profile: "preview-cleanup" | "preview-gateway") {
   return buildManifest({
+    ...(profile === "preview-gateway" ? TEST_MODULE_ARTIFACTS : {}),
     ...(profile === "preview-gateway"
       ? {
           convexSiteUrl: "https://preview-123.convex.site",
@@ -226,6 +228,38 @@ describe("workerd deployment broker", () => {
       }),
     );
     expect(accepted.status).toBe(200);
+  });
+
+  it("forwards only fully validated canonical multipart with exact length", async () => {
+    const registration = await register("preview-gateway");
+    const version = gatewayVersionBody(false);
+    const body = new TextEncoder().encode(
+      new TextDecoder()
+        .decode(version.body)
+        .replaceAll("Content-Disposition:", "content-disposition:    "),
+    );
+    const response = await dispatch(
+      new Request(
+        `${registration.value.apiBaseUrl}/accounts/1ea9299555b026a6a7484c8323c5a953/workers/scripts/zevium-gateway-pr-123/versions?bindings_inherit=strict`,
+        {
+          body: Uint8Array.from(body).buffer,
+          headers: {
+            authorization: `Bearer ${registration.token}`,
+            "content-length": String(body.byteLength),
+            "content-type": version.contentType,
+          },
+          method: "POST",
+        },
+      ),
+    );
+    expect(response.status).toBe(200);
+    const value = (await response.json()) as {
+      result: { bodyLength: number; contentLength: null | string };
+    };
+    expect(value.result.bodyLength).toBe(body.byteLength - 8);
+    if (value.result.contentLength !== null) {
+      expect(Number(value.result.contentLength)).toBe(value.result.bodyLength);
+    }
   });
 
   it("rejects Cloudflare redirects without exposing Location", async () => {

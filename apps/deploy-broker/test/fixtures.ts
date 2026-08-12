@@ -24,6 +24,36 @@ export const TEST_PUBLIC_JWK: JsonWebKey & { kid: string } = {
 export const HEAD_SHA = "a".repeat(40);
 export const MERGE_SHA = "b".repeat(40);
 export const PRODUCTION_SHA = "c".repeat(40);
+export const TEST_MODULE_ARTIFACTS = {
+  mainModule: "index.js",
+  modules: [
+    {
+      contentType: "application/javascript+module",
+      name: "index.js",
+      sha256:
+        "beb20a4a89bf69cff85440d6746fcbfeebf92d181926072acf0b153cd1528f89",
+      size: 56,
+    },
+  ],
+};
+export const TEST_WEB_SECRET_DIGESTS = [
+  { name: "CLERK_SECRET_KEY", sha256: "e".repeat(64) },
+];
+const TEST_ASSET_BYTES = new TextEncoder().encode("bound static asset");
+const TEST_ASSET_BASE64 = btoa(String.fromCharCode(...TEST_ASSET_BYTES));
+export const TEST_ASSET_SHA256 =
+  "51c7388b9d9443c3d4d298797dbc948fb3d54b84adee194ae0e0ff9d7106c901";
+export const TEST_STATIC_ASSETS = {
+  staticAssets: [
+    {
+      cloudflareHash: "b".repeat(32),
+      path: "/copy.js",
+      sha256: TEST_ASSET_SHA256,
+      size: TEST_ASSET_BYTES.byteLength,
+    },
+  ],
+};
+export { TEST_ASSET_BASE64, TEST_ASSET_BYTES };
 export const PREVIEW_SECRET_DIGESTS = [
   {
     name: "CLERK_SECRET_KEY",

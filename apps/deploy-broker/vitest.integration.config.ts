@@ -49,6 +49,7 @@ export default defineConfig({
                 result: {
                   authorization: request.headers.get("authorization"),
                   bodyLength: body.length,
+                  contentLength: request.headers.get("content-length"),
                   default_environment: {
                     script: { migration_tag: "v1" },
                   },

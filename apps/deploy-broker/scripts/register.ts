@@ -1,10 +1,14 @@
-import { appendFile } from "node:fs/promises";
+import { appendFile, lstat, readFile, readdir } from "node:fs/promises";
 import { createHash } from "node:crypto";
+import { extname, relative, resolve, sep } from "node:path";
+import { hash as blake3 } from "blake3-wasm";
 import {
   AUDIENCE_PREFIX,
   buildManifest,
   manifestDigest,
   type DeploymentProfile,
+  type ModuleArtifactManifest,
+  type StaticAssetArtifactManifest,
 } from "../src/manifest.ts";
 
 const BROKER_ORIGIN = "https://deploy-broker.zevium.dev";
@@ -69,6 +73,124 @@ function optionalInteger(name: string): number | undefined {
   const result = Number(value);
   if (!Number.isSafeInteger(result)) fail(`${name} is invalid`);
   return result;
+}
+
+const MODULE_CONTENT_TYPES = new Map<string, string>([
+  [".bin", "application/octet-stream"],
+  [".js", "application/javascript+module"],
+  [".mjs", "application/javascript+module"],
+  [".py", "application/python"],
+  [".txt", "text/plain"],
+  [".wasm", "application/wasm"],
+]);
+
+function normalizedRelative(root: string, path: string): string {
+  const name = relative(root, path).split(sep).join("/");
+  if (
+    name === "" ||
+    name.startsWith("../") ||
+    name.includes("\\") ||
+    name.includes("%") ||
+    name.split("/").some((segment) => segment === "" || segment === ".")
+  ) {
+    fail("artifact path escaped inventory root");
+  }
+  return name;
+}
+
+async function inventoryFiles(rootInput: string): Promise<string[]> {
+  const root = resolve(rootInput);
+  const rootState = await lstat(root).catch(() => null);
+  if (!rootState?.isDirectory() || rootState.isSymbolicLink()) {
+    fail("artifact inventory root is not a real directory");
+  }
+  const files: string[] = [];
+  const visit = async (directory: string): Promise<void> => {
+    const entries = await readdir(directory, { withFileTypes: true });
+    entries.sort((left, right) => left.name.localeCompare(right.name));
+    for (const entry of entries) {
+      const path = resolve(directory, entry.name);
+      if (entry.isSymbolicLink()) fail("artifact inventory contains symlink");
+      if (entry.isDirectory()) await visit(path);
+      else if (entry.isFile()) files.push(path);
+      else fail("artifact inventory contains unsupported file");
+    }
+  };
+  await visit(root);
+  return files;
+}
+
+function sha256(bytes: Uint8Array): string {
+  return createHash("sha256").update(bytes).digest("hex");
+}
+
+async function moduleInventory(
+  rootInput: string,
+): Promise<ModuleArtifactManifest[]> {
+  const root = resolve(rootInput);
+  const modules: ModuleArtifactManifest[] = [];
+  for (const path of await inventoryFiles(root)) {
+    const contentType = MODULE_CONTENT_TYPES.get(extname(path).toLowerCase());
+    if (!contentType) continue;
+    const bytes = await readFile(path);
+    modules.push({
+      contentType,
+      name: normalizedRelative(root, path),
+      sha256: sha256(bytes),
+      size: bytes.byteLength,
+    });
+  }
+  if (modules.length === 0) fail("module inventory is empty");
+  return modules;
+}
+
+async function ignoredAssetPaths(root: string): Promise<Set<string>> {
+  const path = resolve(root, ".assetsignore");
+  const source = await readFile(path, "utf8").catch(
+    (error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT") return "";
+      throw error;
+    },
+  );
+  const ignored = new Set<string>([".assetsignore"]);
+  for (const raw of source.split(/\r?\n/)) {
+    const value = raw.trim();
+    if (value === "" || value.startsWith("#")) continue;
+    if (
+      value.startsWith("/") ||
+      value.includes("\\") ||
+      value.includes("..") ||
+      /[*?[\]{}!]/.test(value)
+    ) {
+      fail(".assetsignore must contain literal relative paths");
+    }
+    ignored.add(value);
+  }
+  return ignored;
+}
+
+async function staticAssetInventory(
+  rootInput: string,
+): Promise<StaticAssetArtifactManifest[]> {
+  const root = resolve(rootInput);
+  const ignored = await ignoredAssetPaths(root);
+  const assets: StaticAssetArtifactManifest[] = [];
+  for (const path of await inventoryFiles(root)) {
+    const name = normalizedRelative(root, path);
+    if (ignored.has(name)) continue;
+    const bytes = await readFile(path);
+    const extension = extname(path).slice(1);
+    const cloudflareHash = blake3(`${bytes.toString("base64")}${extension}`)
+      .toString("hex")
+      .slice(0, 32);
+    assets.push({
+      cloudflareHash,
+      path: `/${name}`,
+      sha256: sha256(bytes),
+      size: bytes.byteLength,
+    });
+  }
+  return assets;
 }
 
 async function readResponseBounded(
@@ -157,7 +279,7 @@ async function requestOidcToken(audience: string): Promise<string> {
   return value.value;
 }
 
-function buildFromEnvironment(profile: DeploymentProfile) {
+async function buildFromEnvironment(profile: DeploymentProfile) {
   const prNumber = optionalInteger("PR_NUMBER");
   const sourceRunId = process.env.SOURCE_RUN_ID;
   const secretSources =
@@ -172,10 +294,13 @@ function buildFromEnvironment(profile: DeploymentProfile) {
             name: "GATEWAY_INTERNAL_SECRET",
           },
         ]
-      : profile === "preview-web"
+      : profile.endsWith("-web")
         ? [
             {
-              environmentName: "CLERK_PREVIEW_SECRET_KEY",
+              environmentName:
+                profile === "preview-web"
+                  ? "CLERK_PREVIEW_SECRET_KEY"
+                  : "CLERK_SECRET_KEY",
               name: "CLERK_SECRET_KEY",
             },
           ]
@@ -186,6 +311,13 @@ function buildFromEnvironment(profile: DeploymentProfile) {
       .update(requiredEnvironment(environmentName), "utf8")
       .digest("hex"),
   }));
+  const cleanup = profile === "preview-cleanup";
+  const modules = cleanup
+    ? []
+    : await moduleInventory(requiredEnvironment("DEPLOY_MODULE_ROOT"));
+  const staticAssets = profile.endsWith("-web")
+    ? await staticAssetInventory(requiredEnvironment("DEPLOY_ASSET_ROOT"))
+    : [];
   return buildManifest({
     ...(process.env.CONVEX_SITE_URL
       ? { convexSiteUrl: process.env.CONVEX_SITE_URL }
@@ -196,6 +328,10 @@ function buildFromEnvironment(profile: DeploymentProfile) {
     eventName: requiredEnvironment("GITHUB_EVENT_NAME") as
       "pull_request" | "workflow_dispatch" | "workflow_run",
     headSha: requiredEnvironment("DEPLOY_HEAD_SHA"),
+    ...(cleanup
+      ? {}
+      : { mainModule: requiredEnvironment("DEPLOY_MAIN_MODULE") }),
+    ...(modules.length === 0 ? {} : { modules }),
     oidcSha: requiredEnvironment("GITHUB_SHA"),
     ...(prNumber === undefined ? {} : { prNumber }),
     profile,
@@ -204,12 +340,13 @@ function buildFromEnvironment(profile: DeploymentProfile) {
     runId: requiredEnvironment("GITHUB_RUN_ID"),
     ...(secretDigests.length === 0 ? {} : { secretDigests }),
     ...(sourceRunId ? { sourceRunId } : {}),
+    ...(staticAssets.length === 0 ? {} : { staticAssets }),
   });
 }
 
 async function main(): Promise<void> {
   const arguments_ = parseArguments(process.argv.slice(2));
-  const manifest = buildFromEnvironment(arguments_.profile);
+  const manifest = await buildFromEnvironment(arguments_.profile);
   const digest = await manifestDigest(manifest);
   const audience = `${AUDIENCE_PREFIX}${digest}`;
 

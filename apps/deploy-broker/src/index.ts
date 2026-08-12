@@ -73,12 +73,24 @@ function policySummary(manifest: DeploymentManifest): Record<string, unknown> {
       assets: target.assets,
       component: target.component,
       durableObjectBindings: target.durableObjectBindings,
+      inheritedBindingTypes: target.inheritedBindingTypes,
+      mainModule: target.mainModule,
       migration: target.migration,
+      moduleCount: target.modules.length,
+      moduleBytes: target.modules.reduce(
+        (total, module) => total + module.size,
+        0,
+      ),
       operations: target.operations,
       plainTextBindingNames: target.plainTextBindings.map(
         (binding) => binding.name,
       ),
       scriptName: target.scriptName,
+      staticAssetCount: target.staticAssets.length,
+      staticAssetBytes: target.staticAssets.reduce(
+        (total, asset) => total + asset.size,
+        0,
+      ),
       versionTag: target.versionTag,
       workersDev: target.workersDev,
     })),
@@ -92,7 +104,7 @@ async function registerManifest(
 ): Promise<Response> {
   validateEnvironment(env, { requireCloudflareToken: !dryRun });
   await consumeRegistrationRate(request, env);
-  const { value } = await readJsonBounded(request, 64 * 1024);
+  const { value } = await readJsonBounded(request, 128 * 1024);
   const manifest = parseManifest(value);
   const digest = await manifestDigest(manifest);
   const claims = await verifyGitHubOidc(

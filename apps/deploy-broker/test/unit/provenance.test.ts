@@ -6,15 +6,19 @@ import {
   MERGE_SHA,
   PREVIEW_SECRET_DIGESTS,
   PRODUCTION_SHA,
+  TEST_MODULE_ARTIFACTS,
+  TEST_STATIC_ASSETS,
+  TEST_WEB_SECRET_DIGESTS,
   previewClaims,
   productionClaims,
   pullRequestFixture,
 } from "../fixtures";
 
-const AUDIENCE = `urn:zevium:cloudflare-deploy:v1:${"d".repeat(64)}`;
+const AUDIENCE = `urn:zevium:cloudflare-deploy:v2:${"d".repeat(64)}`;
 
 function previewManifest() {
   return buildManifest({
+    ...TEST_MODULE_ARTIFACTS,
     convexSiteUrl: "https://preview-123.convex.site",
     convexUrl: "https://preview-123.convex.cloud",
     eventName: "pull_request",
@@ -98,6 +102,7 @@ describe("GitHub immutable provenance", () => {
 
   it("rejects manual dispatch carrying ambiguous PR branch claims", async () => {
     const manifest = buildManifest({
+      ...TEST_MODULE_ARTIFACTS,
       convexSiteUrl: "https://preview-123.convex.site",
       convexUrl: "https://preview-123.convex.cloud",
       eventName: "workflow_dispatch",
@@ -130,6 +135,8 @@ describe("GitHub immutable provenance", () => {
 
   it("binds production to successful develop CI source run", async () => {
     const manifest = buildManifest({
+      ...TEST_MODULE_ARTIFACTS,
+      ...TEST_STATIC_ASSETS,
       eventName: "workflow_run",
       headSha: HEAD_SHA,
       oidcSha: PRODUCTION_SHA,
@@ -138,6 +145,7 @@ describe("GitHub immutable provenance", () => {
       runAttempt: 1,
       runId: "9002",
       sourceRunId: "8999",
+      secretDigests: TEST_WEB_SECRET_DIGESTS,
     });
     const source = {
       conclusion: "success",

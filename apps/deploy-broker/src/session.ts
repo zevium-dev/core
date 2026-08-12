@@ -122,16 +122,21 @@ function sanitizeResponseHeaders(source: Headers): Headers {
   return output;
 }
 
-function upstreamHeaders(request: Request, authorization: string): Headers {
+function upstreamHeaders(
+  request: Request,
+  authorization: string,
+  contentLengthOverride?: number | null,
+): Headers {
   const output = new Headers({ authorization });
-  for (const name of [
-    "accept",
-    "content-length",
-    "content-type",
-    "user-agent",
-  ]) {
+  for (const name of ["accept", "content-type", "user-agent"]) {
     const value = request.headers.get(name);
     if (value !== null) output.set(name, value);
+  }
+  if (contentLengthOverride === undefined) {
+    const value = request.headers.get("content-length");
+    if (value !== null) output.set("content-length", value);
+  } else if (contentLengthOverride !== null) {
+    output.set("content-length", String(contentLengthOverride));
   }
   return output;
 }
@@ -163,46 +168,6 @@ function contentLength(request: Request, maximumBytes: number): number | null {
     "Request body exceeds route limit",
   );
   return value;
-}
-
-function exactLengthBody(
-  body: ReadableStream<Uint8Array> | null,
-  expectedBytes: number,
-): ReadableStream<Uint8Array> {
-  invariant(body, 400, "body_rejected", "Asset body is required");
-  const reader = body.getReader();
-  let total = 0;
-  return new ReadableStream<Uint8Array>({
-    async pull(controller) {
-      try {
-        const result = await reader.read();
-        if (result.done) {
-          invariant(
-            total === expectedBytes,
-            400,
-            "asset_rejected",
-            "Asset size does not match declared manifest",
-          );
-          controller.close();
-          return;
-        }
-        total += result.value.byteLength;
-        invariant(
-          total <= expectedBytes,
-          400,
-          "asset_rejected",
-          "Asset size exceeds declared manifest",
-        );
-        controller.enqueue(result.value);
-      } catch (error) {
-        await reader.cancel("asset validation failed");
-        controller.error(error);
-      }
-    },
-    async cancel(reason) {
-      await reader.cancel(reason);
-    },
-  });
 }
 
 async function boundedResponseBytes(
@@ -528,6 +493,7 @@ export class DeploySessionDO extends DurableObject<BrokerEnv> {
     invariant(
       value &&
         isRecord(value.hashes) &&
+        isRecord(value.sha256ByHash) &&
         isRecord(value.uploadSizes) &&
         Array.isArray(value.completionJwtHashes),
       409,
@@ -727,6 +693,7 @@ export class DeploySessionDO extends DurableObject<BrokerEnv> {
     const state: AssetState = {
       completionJwtHashes: [],
       hashes: manifest.hashes,
+      sha256ByHash: manifest.sha256ByHash,
       totalBytes: manifest.totalBytes,
       uploadSizes: Object.create(null) as Record<string, number>,
     };
@@ -862,6 +829,7 @@ export class DeploySessionDO extends DurableObject<BrokerEnv> {
     }
 
     let body: BodyInit | null = null;
+    let forwardedContentLength: number | null | undefined;
     let mutationKey = route.mutationKey;
     if (route.maximumBodyBytes === 0) {
       ensureNoBody(request);
@@ -896,7 +864,7 @@ export class DeploySessionDO extends DurableObject<BrokerEnv> {
       } else if (route.kind === "subdomain-write") {
         validateSubdomainBody(parsed.value, route.target);
       } else if (route.kind === "asset-init") {
-        const assetManifest = validateAssetInitBody(parsed.value);
+        const assetManifest = validateAssetInitBody(parsed.value, route.target);
         invariant(
           mutationKey,
           500,
@@ -938,6 +906,7 @@ export class DeploySessionDO extends DurableObject<BrokerEnv> {
       );
       await this.verifyCompletionJwt(route, inspected.assetsJwt);
       body = inspected.body;
+      forwardedContentLength = inspected.contentLength;
     } else if (route.kind === "asset-upload-bulk") {
       invariant(
         route.target && assetState,
@@ -949,12 +918,14 @@ export class DeploySessionDO extends DurableObject<BrokerEnv> {
         request,
         {
           assetSizes: assetState.uploadSizes,
+          assetDigests: assetState.sha256ByHash,
           mode: "assets",
           target: route.target,
         },
         route.maximumBodyBytes,
       );
       body = inspected.body;
+      forwardedContentLength = inspected.contentLength;
       mutationKey = undefined;
     } else if (route.kind === "asset-upload-single") {
       invariant(
@@ -972,7 +943,18 @@ export class DeploySessionDO extends DurableObject<BrokerEnv> {
       );
       const declaredLength = contentLength(request, route.maximumBodyBytes);
       validateSingleAssetLength(declaredLength, expected);
-      body = exactLengthBody(request.body, expected);
+      const bytes = await readBodyBounded(request, route.maximumBodyBytes);
+      invariant(
+        bytes.byteLength === expected &&
+          timingSafeEqual(
+            await sha256Hex(bytes),
+            assetState.sha256ByHash[route.assetHash] ?? "",
+          ),
+        400,
+        "artifact_rejected",
+        "Static asset does not match signed manifest",
+      );
+      body = Uint8Array.from(bytes).buffer;
       mutationKey = undefined;
     }
 
@@ -981,7 +963,7 @@ export class DeploySessionDO extends DurableObject<BrokerEnv> {
     const upstreamUrl = `${CLOUDFLARE_API_ORIGIN}/client/v4${api.pathname}${api.search}`;
     const response = await fetch(upstreamUrl, {
       body,
-      headers: upstreamHeaders(request, authorization),
+      headers: upstreamHeaders(request, authorization, forwardedContentLength),
       method: request.method,
       redirect: "manual",
     });

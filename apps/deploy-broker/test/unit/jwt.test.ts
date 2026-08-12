@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { resetJwksCacheForTest, verifyGitHubOidc } from "../../src/jwt";
 import { previewClaims, signClaims, TEST_PUBLIC_JWK } from "../fixtures";
 
-const AUDIENCE = `urn:zevium:cloudflare-deploy:v1:${"d".repeat(64)}`;
+const AUDIENCE = `urn:zevium:cloudflare-deploy:v2:${"d".repeat(64)}`;
 
 async function verify(token: string, nowSeconds?: number) {
   return verifyGitHubOidc(token, AUDIENCE, {
