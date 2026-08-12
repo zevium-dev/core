@@ -104,7 +104,7 @@ function DashboardContent({ orgSlug }: { orgSlug: string }) {
     staleTime: 30_000,
   });
 
-  const keyCount = keysQuery.data?.length ?? 0;
+  const keyCount = keysQuery.data?.filter((key) => key.current).length ?? 0;
   const keysLoaded = !keysQuery.isPending;
   const flags = deriveOnboardingFlags({
     keyCount,

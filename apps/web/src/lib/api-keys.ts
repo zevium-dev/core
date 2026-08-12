@@ -2,6 +2,7 @@ import { auth, clerkClient } from "@clerk/tanstack-react-start/server";
 import { createServerFn } from "@tanstack/react-start";
 import { ConvexHttpClient } from "convex/browser";
 
+import { getApiKeyLifecycle } from "#/lib/api-key-lifecycle";
 import { api } from "#/lib/convex-api";
 
 export type ApiKeyRow = {
@@ -12,6 +13,7 @@ export type ApiKeyRow = {
   createdAt: number;
   lastUsedAt: number | null;
   revoked: boolean;
+  current: boolean;
 };
 
 export type CreateApiKeyResult = {
@@ -45,13 +47,16 @@ function maskKeyId(id: string): string {
   return `••••${id.slice(-4)}`;
 }
 
-function toRow(key: {
-  id: string;
-  name: string;
-  createdAt: number;
-  lastUsedAt: number | null;
-  revoked: boolean;
-}): ApiKeyRow {
+function toRow(
+  key: {
+    id: string;
+    name: string;
+    createdAt: number;
+    lastUsedAt: number | null;
+    revoked: boolean;
+  },
+  current: boolean,
+): ApiKeyRow {
   return {
     id: key.id,
     name: key.name,
@@ -59,6 +64,7 @@ function toRow(key: {
     createdAt: key.createdAt,
     lastUsedAt: key.lastUsedAt,
     revoked: key.revoked,
+    current,
   };
 }
 
@@ -86,11 +92,27 @@ export const listKeys = createServerFn({ method: "GET" }).handler(
       throw new Error("Select an organization before managing API keys");
     }
     const client = await clerkClient();
-    const page = await client.apiKeys.list({
-      subject: userId,
-      includeInvalid: false,
-      limit: 100,
-    });
+    const convexUrl = import.meta.env.VITE_CONVEX_URL;
+    const token = (await session.getToken({ template: "convex" })) ?? null;
+    if (!convexUrl || !token) {
+      throw new Error(
+        "Secure key listing is temporarily unavailable. Refresh and try again.",
+      );
+    }
+    const convex = new ConvexHttpClient(convexUrl);
+    convex.setAuth(token);
+    const [page, settings] = await Promise.all([
+      client.apiKeys.list({
+        subject: userId,
+        includeInvalid: false,
+        limit: 100,
+      }),
+      convex.query(api.keySettings.getForOrg, {}),
+    ]);
+    const settingsByKey = new Map(
+      settings.map((setting) => [setting.keyId, setting]),
+    );
+    const now = Date.now();
     return page.data
       .filter((k) => !k.revoked && !k.expired)
       .filter((k) => {
@@ -102,7 +124,12 @@ export const listKeys = createServerFn({ method: "GET" }).handler(
           claims.org_id === orgId
         );
       })
-      .map((k) => toRow(k));
+      .map((k) =>
+        toRow(
+          k,
+          getApiKeyLifecycle(settingsByKey.get(k.id), now) === "current",
+        ),
+      );
   },
 );
 
@@ -133,20 +160,39 @@ export const createKey = createServerFn({ method: "POST" })
       throw new Error("Select an organization before creating an API key");
     }
     const client = await clerkClient();
+    const convexUrl = import.meta.env.VITE_CONVEX_URL;
+    const token = (await session.getToken({ template: "convex" })) ?? null;
+    if (!convexUrl || !token) {
+      throw new Error(
+        "Secure key creation is temporarily unavailable. Refresh and try again.",
+      );
+    }
+    const convex = new ConvexHttpClient(convexUrl);
+    convex.setAuth(token);
 
-    const existing = await client.apiKeys.list({
-      subject: userId,
-      includeInvalid: false,
-      limit: 100,
-    });
+    const [existing, settings] = await Promise.all([
+      client.apiKeys.list({
+        subject: userId,
+        includeInvalid: false,
+        limit: 100,
+      }),
+      convex.query(api.keySettings.getForOrg, {}),
+    ]);
+    const settingsByKey = new Map(
+      settings.map((setting) => [setting.keyId, setting]),
+    );
+    const now = Date.now();
     const active = existing.data.some((k) => {
       if (k.revoked || k.expired) return false;
       const claims = k.claims;
       if (!claims || typeof claims !== "object") return false;
-      return (
+      const belongsToOrg =
         "org_id" in claims &&
         typeof claims.org_id === "string" &&
-        claims.org_id === orgId
+        claims.org_id === orgId;
+      return (
+        belongsToOrg &&
+        getApiKeyLifecycle(settingsByKey.get(k.id), now) === "current"
       );
     });
     if (active) {
@@ -295,13 +341,40 @@ export const rotateKey = createServerFn({ method: "POST" })
     }
 
     const settings = await convex.query(api.keySettings.getForOrg, {});
+    const now = Date.now();
+    const currentSetting = settings.find(
+      (setting) => setting.keyId === data.id,
+    );
+    if (getApiKeyLifecycle(currentSetting, now) !== "current") {
+      throw new Error("Only the current key can be rotated");
+    }
+    const supersededKeyId = currentSetting?.rotatedFromKeyId;
     if (
       settings.some(
         (setting) =>
-          setting.graceUntil !== undefined && setting.graceUntil > Date.now(),
+          getApiKeyLifecycle(setting, now) === "grace" &&
+          setting.keyId !== supersededKeyId,
       )
     ) {
-      throw new Error("Revoke the previous grace key before rotating again");
+      throw new Error("Revoke the unrelated grace key before rotating again");
+    }
+    if (supersededKeyId !== undefined) {
+      const superseded = await client.apiKeys.get(supersededKeyId);
+      if (
+        superseded.subject !== userId ||
+        !keyBelongsToOrganization(superseded, orgId)
+      ) {
+        throw new Error("Previous key not found");
+      }
+      if (!superseded.revoked) {
+        await client.apiKeys.revoke({
+          apiKeyId: supersededKeyId,
+          revocationReason: "Superseded by chained rotation",
+        });
+      }
+      await convex.mutation(api.keySettings.revokePrevious, {
+        keyId: supersededKeyId,
+      });
     }
 
     let created;

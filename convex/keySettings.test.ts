@@ -74,6 +74,7 @@ function asNoOrg(t: ReturnType<typeof convexTest>) {
 
 const KEY_A = "key_live_AAAA";
 const KEY_B = "key_live_BBBB";
+const KEY_C = "key_live_CCCC";
 
 describe("keySettings.getForOrg — auth", () => {
   it("rejects unauthenticated", async () => {
@@ -248,6 +249,65 @@ describe("keySettings.setDisabled — upsert", () => {
       disabled: false,
     });
     expect(enabled.disabled).toBe(false);
+  });
+});
+
+describe("keySettings rotation lifecycle", () => {
+  it("keeps one current key, supersedes older grace, and supports manual revoke", async () => {
+    const t = convexTest(schema, modules);
+    await seedWorld(t);
+    const as = asMember(t);
+
+    await as.mutation(api.keySettings.beginRotation, {
+      operationId: "rotation-a-to-b",
+      oldKeyId: KEY_A,
+    });
+    await as.mutation(api.keySettings.completeRotation, {
+      operationId: "rotation-a-to-b",
+      oldKeyId: KEY_A,
+      newKeyId: KEY_B,
+      graceUntil: Date.now() + 24 * 60 * 60 * 1_000,
+    });
+
+    await as.mutation(api.keySettings.beginRotation, {
+      operationId: "rotation-b-to-c",
+      oldKeyId: KEY_B,
+    });
+    await as.mutation(api.keySettings.completeRotation, {
+      operationId: "rotation-b-to-c",
+      oldKeyId: KEY_B,
+      newKeyId: KEY_C,
+      graceUntil: 2_000,
+    });
+
+    let byId = new Map(
+      (await as.query(api.keySettings.getForOrg, {})).map((row) => [
+        row.keyId,
+        row,
+      ]),
+    );
+    expect(byId.get(KEY_A)?.disabled).toBe(true);
+    expect(byId.get(KEY_A)?.graceUntil).toBeUndefined();
+    expect(byId.get(KEY_B)).toMatchObject({
+      disabled: false,
+      graceUntil: 2_000,
+    });
+    expect(byId.get(KEY_C)).toMatchObject({
+      disabled: false,
+      rotatedFromKeyId: KEY_B,
+    });
+    expect(byId.get(KEY_C)?.graceUntil).toBeUndefined();
+
+    await as.mutation(api.keySettings.revokePrevious, { keyId: KEY_B });
+    byId = new Map(
+      (await as.query(api.keySettings.getForOrg, {})).map((row) => [
+        row.keyId,
+        row,
+      ]),
+    );
+    expect(byId.get(KEY_B)?.disabled).toBe(true);
+    expect(byId.get(KEY_B)?.graceUntil).toBeUndefined();
+    expect(byId.get(KEY_C)?.disabled).toBe(false);
   });
 });
 
