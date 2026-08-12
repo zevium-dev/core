@@ -35,4 +35,11 @@ crons.interval(
   { minutes: 1 },
   internal.billing.recoverPublisherReconciliations,
 );
+
+crons.interval(
+  "connect-operation-pii-cleanup",
+  { hours: 1 },
+  internal.payouts.cleanupConnectOperationPii,
+  {},
+);
 export default crons;

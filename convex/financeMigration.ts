@@ -1747,6 +1747,17 @@ async function runTransferChunk(
         throw new Error("Transfer success ledger is not exact");
       }
       succeededAtoms = transfer.amountAtoms;
+    } else if (entry.kind === "transfer_failed") {
+      if (
+        entry.availableDeltaAtoms !== transfer.amountAtoms ||
+        entry.allocatedDeltaAtoms !== -transfer.amountAtoms ||
+        entry.paidDeltaAtoms !== 0
+      ) {
+        throw new Error("Transfer failure ledger is not exact");
+      }
+      if (succeededAtoms !== 0) {
+        throw new Error("Failed transfer has a success ledger entry");
+      }
     } else if (entry.kind === "transfer_reversal") {
       if (
         entry.availableDeltaAtoms !== -entry.paidDeltaAtoms ||
@@ -1867,12 +1878,30 @@ async function runTransferChunk(
   }
   let result: AuditResult = "verified";
   let correlationState = transfer.correlationState;
+  let reconciliationCaseId = transfer.reconciliationCaseId;
   if (
     correlationState !== "provider_verified" ||
     transfer.providerMetadataVerifiedAt === undefined
   ) {
     correlationState = "provider_repair_required";
     result = "checkpoint";
+    if (reconciliationCaseId === undefined) {
+      reconciliationCaseId = await ctx.db.insert("financeReconciliationCases", {
+        kind: "transfer",
+        status: "open",
+        reason: "legacy_transfer_provider_repair_required",
+        organizationId: transfer.publisherOrganizationId,
+        transferId: transfer._id,
+        candidateIds: transfer.stripeTransferId === undefined
+          ? []
+          : [transfer.stripeTransferId],
+        candidateCount: transfer.stripeTransferId === undefined ? 0 : 1,
+        providerRequestIds: [],
+        attempts: 0,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      });
+    }
   } else if (
     correlationNonce === undefined ||
     correlationHmac === undefined ||
@@ -1900,6 +1929,7 @@ async function runTransferChunk(
     correlationState,
     metadataRepairVersion: 1,
     providerCreateMetadataShape,
+    reconciliationCaseId,
     status: reversedAmount === transfer.amount ? "reversed" : transfer.status,
     updatedAt: Date.now(),
   });
@@ -2192,6 +2222,9 @@ async function runConservationChunk(
       const reversals = entries.filter(
         (entry) => entry.kind === "transfer_reversal",
       );
+      const failures = entries.filter(
+        (entry) => entry.kind === "transfer_failed",
+      );
       const publisherBalance = await ctx.db
         .query("publisherBalances")
         .withIndex("by_publisher", (q) =>
@@ -2203,10 +2236,14 @@ async function runConservationChunk(
           safeAdd(sum, -entry.paidDeltaAtoms, "Transfer final reversals"),
         0,
       );
+      const definitiveFailure =
+        transfer.status === "failed" &&
+        transfer.providerOutcome === "definitive_no_side_effect";
       if (
-        transfer.correlationState !== "provider_verified" ||
-        transfer.providerMetadataVerifiedAt === undefined ||
-        transfer.stripeTransferId === undefined ||
+        (!definitiveFailure &&
+          (transfer.correlationState !== "provider_verified" ||
+            transfer.providerMetadataVerifiedAt === undefined ||
+            transfer.stripeTransferId === undefined)) ||
         transfer.correlationNonce === undefined ||
         transfer.correlationHmac === undefined ||
         transfer.platformAccountId === undefined ||
@@ -2214,6 +2251,11 @@ async function runConservationChunk(
         transfer.metadataRepairVersion !== 1 ||
         transfer.providerCreateMetadataShape === undefined ||
         transfer.reversedAmount === undefined ||
+        (definitiveFailure &&
+          (failures.length !== 1 ||
+            failures[0]!.availableDeltaAtoms !== transfer.amountAtoms ||
+            failures[0]!.allocatedDeltaAtoms !== -transfer.amountAtoms)) ||
+        (!definitiveFailure && failures.length !== 0) ||
         transfer.currency !== "usd" ||
         transfer.amountAtoms !==
           transfer.amount * ACCOUNTING_ATOMS_PER_USD_CENT ||

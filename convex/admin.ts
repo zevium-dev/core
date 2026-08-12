@@ -7,7 +7,10 @@ import { createNotification } from "./lib/notifications";
 import { fireWebhookEvent } from "./webhooks";
 import {
   repairAndRetrieveStripeTransferMetadata,
+  assertConnectedAccountIdentity,
+  stripeLivemodeFromSecretKey,
   transferToStripe,
+  verifyStripePlatformIdentity,
 } from "./payouts";
 import { stripeClient } from "./billing";
 import { internal } from "./_generated/api";
@@ -358,6 +361,33 @@ export const listPublisherTransfers = query({
   },
 });
 
+export const listFinanceReconciliationCases = query({
+  args: {
+    paginationOpts: paginationOptsValidator,
+    status: v.optional(
+      v.union(
+        v.literal("open"),
+        v.literal("adopted"),
+        v.literal("quarantined"),
+        v.literal("resolved"),
+      ),
+    ),
+  },
+  handler: async (ctx, args) => {
+    await requireAdmin(ctx);
+    const result = await ctx.db
+      .query("financeReconciliationCases")
+      .withIndex("by_status_updated", (q) =>
+        args.status === undefined
+          ? q
+          : q.eq("status", args.status),
+      )
+      .order("desc")
+      .paginate(args.paginationOpts);
+    return result;
+  },
+});
+
 async function requireAdminInAction(ctx: ActionCtx): Promise<void> {
   const identity = await ctx.auth.getUserIdentity();
   if (identity === null) throw new Error("Not authenticated");
@@ -390,6 +420,10 @@ export const retryPublisherTransfer = action({
     if (transfer.status === "succeeded" || transfer.status === "reversed") {
       return { transferId: transfer._id };
     }
+    const expectedLivemode = stripeLivemodeFromSecretKey(
+      process.env.STRIPE_SECRET_KEY,
+    );
+    await verifyStripePlatformIdentity(stripeClient(), expectedLivemode);
     await transferToStripe(ctx, transfer);
     return { transferId: transfer._id };
   },
@@ -410,8 +444,17 @@ export const repairLegacyPublisherTransfer = action({
       internal.payouts.getLegacyPublisherTransferForRepair,
       { transferId: args.transferId },
     );
+    const expectedLivemode = stripeLivemodeFromSecretKey(
+      process.env.STRIPE_SECRET_KEY,
+    );
+    const stripe = stripeClient();
+    await verifyStripePlatformIdentity(stripe, expectedLivemode);
     const snapshot = await repairAndRetrieveStripeTransferMetadata(
-      stripeClient().transfers,
+      {
+        ...stripe.transfers,
+        listCandidates: async (destination) =>
+          (await stripe.transfers.list({ destination, limit: 100 })).data,
+      },
       transfer,
     );
     await ctx.runMutation(
@@ -433,5 +476,198 @@ export const repairLegacyPublisherTransfer = action({
       },
     );
     return { transferId: transfer._id, stripeTransferId: snapshot.id };
+  },
+});
+
+export const resolvePublisherTransferReconciliation = action({
+  args: {
+    caseId: v.id("financeReconciliationCases"),
+    resolution: v.union(v.literal("adopt"), v.literal("quarantine")),
+  },
+  handler: async (ctx, args): Promise<{ status: string; transferId?: string }> => {
+    await requireAdminInAction(ctx);
+    const row = await ctx.runQuery(
+      internal.admin.getFinanceReconciliationCase,
+      { caseId: args.caseId },
+    );
+    if (row === null) throw new Error("Finance reconciliation case not found");
+    if (args.resolution === "quarantine") {
+      await ctx.runMutation(internal.payouts.resolveFinanceReconciliationCase, {
+        caseId: args.caseId,
+        status: "quarantined",
+        resolution: "operator_quarantined",
+      });
+      return { status: "quarantined" };
+    }
+    if (row.kind !== "transfer" || row.transferId === undefined) {
+      throw new Error("Only transfer reconciliation cases can be adopted");
+    }
+    const transfer = await ctx.runMutation(
+      internal.payouts.getPublisherTransfer,
+      { transferId: row.transferId },
+    );
+    const expectedLivemode = stripeLivemodeFromSecretKey(
+      process.env.STRIPE_SECRET_KEY,
+    );
+    const stripe = stripeClient();
+    await verifyStripePlatformIdentity(stripe, expectedLivemode);
+    let snapshot: Stripe.Transfer;
+    if (transfer.stripeTransferId !== undefined) {
+      snapshot = await stripe.transfers.retrieve(transfer.stripeTransferId);
+    } else {
+      const candidates = (
+        await stripe.transfers.list({
+          destination: transfer.stripeConnectedAccountId,
+          limit: 100,
+        })
+      ).data.filter(
+        (candidate) =>
+          candidate.metadata.publisherTransferId === String(transfer._id) &&
+          candidate.amount === transfer.amount &&
+          candidate.currency.toLowerCase() === transfer.currency.toLowerCase() &&
+          (typeof candidate.destination === "string"
+            ? candidate.destination
+            : candidate.destination?.id) === transfer.stripeConnectedAccountId,
+      );
+      if (candidates.length !== 1) {
+        await ctx.runMutation(internal.payouts.resolveFinanceReconciliationCase, {
+          caseId: args.caseId,
+          status: "open",
+          candidateIds: candidates.map((candidate) => candidate.id),
+          resolution: "operator_review_required",
+        });
+        return { status: "open", transferId: String(transfer._id) };
+      }
+      snapshot = await stripe.transfers.retrieve(candidates[0]!.id);
+    }
+    await ctx.runMutation(internal.payouts.projectStripeTransfer, {
+      stripeTransferId: snapshot.id,
+      publisherTransferId: snapshot.metadata.publisherTransferId,
+      amount: snapshot.amount,
+      amountReversed: snapshot.amount_reversed,
+      currency: snapshot.currency,
+      destination:
+        typeof snapshot.destination === "string"
+          ? snapshot.destination
+          : (snapshot.destination?.id ?? ""),
+      platformAccountId: snapshot.metadata.platformAccountId,
+      correlationNonce: snapshot.metadata.correlationNonce,
+      correlationHmac: snapshot.metadata.correlationHmac,
+      metadataRepairVersion:
+        snapshot.metadata.metadataRepairVersion === undefined
+          ? undefined
+          : Number(snapshot.metadata.metadataRepairVersion),
+      providerRequestId: snapshot.lastResponse?.requestId,
+      failed: false,
+      failureReason: undefined,
+    });
+    await ctx.runMutation(internal.payouts.resolveFinanceReconciliationCase, {
+      caseId: args.caseId,
+      status: "adopted",
+      candidateIds: [snapshot.id],
+      resolution: "operator_adopted_exact_provider_snapshot",
+    });
+    return { status: "adopted", transferId: String(transfer._id) };
+  },
+});
+
+export const getFinanceReconciliationCase = query({
+  args: { caseId: v.id("financeReconciliationCases") },
+  handler: async (ctx, args) => {
+    await requireAdmin(ctx);
+    return await ctx.db.get(args.caseId);
+  },
+});
+
+export const resolveConnectAccountReconciliation = action({
+  args: {
+    caseId: v.id("financeReconciliationCases"),
+    resolution: v.union(v.literal("adopt"), v.literal("quarantine")),
+  },
+  handler: async (ctx, args): Promise<{ status: string; accountId?: string }> => {
+    await requireAdminInAction(ctx);
+    const row = await ctx.runQuery(
+      internal.admin.getFinanceReconciliationCase,
+      { caseId: args.caseId },
+    );
+    if (row === null || row.kind !== "account_create" || row.operationId === undefined) {
+      throw new Error("Connect account reconciliation case not found");
+    }
+    if (args.resolution === "quarantine") {
+      await ctx.runMutation(internal.payouts.resolveFinanceReconciliationCase, {
+        caseId: args.caseId,
+        status: "quarantined",
+        resolution: "operator_quarantined",
+      });
+      return { status: "quarantined" };
+    }
+    const operation = await ctx.runQuery(
+      internal.payouts.getConnectOnboardingOperation,
+      { operationId: row.operationId },
+    );
+    if (
+      operation === null ||
+      operation.country === undefined ||
+      operation.providerRequestFingerprint === undefined
+    ) {
+      throw new Error("Connect account operation lacks immutable request facts");
+    }
+    const expectedLivemode = stripeLivemodeFromSecretKey(
+      process.env.STRIPE_SECRET_KEY,
+    );
+    const stripe = stripeClient();
+    await verifyStripePlatformIdentity(stripe, expectedLivemode);
+    const accounts = await stripe.v2.core.accounts
+      .list({ applied_configurations: ["recipient"], limit: 100 })
+      .autoPagingToArray({ limit: 100_000 });
+    const matches = accounts.filter((account) => {
+      try {
+        assertConnectedAccountIdentity(account, {
+          clerkOrgId: operation.clerkOrgId,
+          organizationId: operation.organizationId,
+          expectedLivemode,
+          operationId: operation.operationId,
+          country: operation.country,
+        });
+        return true;
+      } catch {
+        return false;
+      }
+    });
+    await ctx.runMutation(internal.payouts.resolveFinanceReconciliationCase, {
+      caseId: args.caseId,
+      status: matches.length === 1 ? "resolved" : "open",
+      candidateIds: matches.map((account) => account.id).slice(0, 1_000),
+      resolution:
+        matches.length === 1
+          ? "operator_verified_account_candidate"
+          : "operator_review_required",
+    });
+    if (matches.length !== 1) {
+      return { status: "open" };
+    }
+    const account = await stripe.v2.core.accounts.retrieve(matches[0]!.id, {
+      include: ["configuration.recipient", "defaults", "identity", "requirements"],
+    });
+    assertConnectedAccountIdentity(account, {
+      accountId: account.id,
+      clerkOrgId: operation.clerkOrgId,
+      organizationId: operation.organizationId,
+      expectedLivemode,
+      operationId: operation.operationId,
+      country: operation.country,
+    });
+    const committed = await ctx.runMutation(
+      internal.payouts.commitConnectAccountOperation,
+      {
+        organizationId: operation.organizationId,
+        operationId: operation.operationId,
+        stripeConnectedAccountId: account.id,
+        expectedLivemode,
+        platformAccountId: process.env.STRIPE_PLATFORM_ACCOUNT_ID,
+      },
+    );
+    if (!committed.accepted) return { status: "open" };
+    return { status: "resolved", accountId: account.id };
   },
 });

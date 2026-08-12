@@ -407,6 +407,7 @@ export default defineSchema({
     stripeCustomerId: v.optional(v.string()),
     stripeConnectedAccountId: v.optional(v.string()),
     stripeConnectedAccountLivemode: v.optional(v.boolean()),
+    stripePlatformAccountId: v.optional(v.string()),
     detailsSubmitted: v.boolean(),
     chargesEnabled: v.boolean(),
     payoutsEnabled: v.boolean(),
@@ -429,6 +430,7 @@ export default defineSchema({
       v.literal("account_persisted"),
       v.literal("link_created"),
       v.literal("expired"),
+      v.literal("failed"),
       v.literal("requires_reconciliation"),
     ),
     expectedLivemode: v.boolean(),
@@ -436,11 +438,18 @@ export default defineSchema({
     contactEmail: v.optional(v.string()),
     stripeConnectedAccountId: v.optional(v.string()),
     providerExpiresAt: v.optional(v.number()),
+    providerRequestFingerprint: v.optional(v.string()),
+    providerRequestId: v.optional(v.string()),
+    providerErrorCode: v.optional(v.string()),
+    piiExpiresAt: v.optional(v.number()),
+    replacementOfAccountId: v.optional(v.string()),
+    reconciliationCaseId: v.optional(v.id("financeReconciliationCases")),
     createdAt: v.number(),
     updatedAt: v.number(),
   })
     .index("by_operation", ["operationId"])
-    .index("by_organization_kind_status", ["organizationId", "kind", "status"]),
+    .index("by_organization_kind_status", ["organizationId", "kind", "status"])
+    .index("by_pii_expiry", ["piiExpiresAt"]),
 
   // Checkout state is server-owned: browser-supplied metadata never grants.
   checkoutIntents: defineTable({
@@ -571,7 +580,8 @@ export default defineSchema({
     updatedAt: v.number(),
   })
     .index("by_stripe_dispute", ["stripeDisputeId"])
-    .index("by_payment", ["paymentId", "createdAt"]),
+    .index("by_payment", ["paymentId", "createdAt"])
+    .index("by_organization_status", ["organizationId", "status"]),
 
   // Refund/dispute exposure stays source-specific. Effective targets are
   // deterministically capped to the immutable payment grant.
@@ -604,6 +614,7 @@ export default defineSchema({
     updatedAt: v.number(),
   })
     .index("by_source", ["sourceRef"])
+    .index("by_organization_active", ["organizationId", "active"])
     .index("by_payment_active_created", ["paymentId", "active", "createdAt"])
     .index("by_payment_created", ["paymentId", "createdAt"]),
 
@@ -625,6 +636,7 @@ export default defineSchema({
     updatedAt: v.number(),
   })
     .index("by_payment", ["paymentId"])
+    .index("by_consumer_status", ["consumerOrganizationId", "status"])
     .index("by_status_updated", ["status", "updatedAt"]),
 
   // Each successful settlement creates exactly one immutable publisher split.
@@ -704,6 +716,7 @@ export default defineSchema({
       v.literal("dispute_restoration"),
       v.literal("transfer_allocation"),
       v.literal("transfer_succeeded"),
+      v.literal("transfer_failed"),
       v.literal("transfer_reversal"),
     ),
     availableDeltaAtoms: v.number(),
@@ -763,9 +776,21 @@ export default defineSchema({
         v.literal("local_prepared"),
         v.literal("provider_verified"),
         v.literal("provider_repair_required"),
+        v.literal("requires_reconciliation"),
       ),
     ),
     providerMetadataVerifiedAt: v.optional(v.number()),
+    providerRequestFingerprint: v.optional(v.string()),
+    providerReplayExpiresAt: v.optional(v.number()),
+    providerRequestId: v.optional(v.string()),
+    providerOutcome: v.optional(
+      v.union(
+        v.literal("created"),
+        v.literal("definitive_no_side_effect"),
+        v.literal("ambiguous"),
+      ),
+    ),
+    reconciliationCaseId: v.optional(v.id("financeReconciliationCases")),
     metadataRepairVersion: v.optional(v.number()),
     /** Exact metadata parameter set used by original idempotent create. */
     providerCreateMetadataShape: v.optional(
@@ -834,6 +859,44 @@ export default defineSchema({
     updatedAt: v.number(),
   }).index("by_migration_key", ["migrationKey"]),
 
+  financeReconciliationCases: defineTable({
+    kind: v.union(
+      v.literal("transfer"),
+      v.literal("transfer_orphan"),
+      v.literal("account_create"),
+    ),
+    status: v.union(
+      v.literal("open"),
+      v.literal("adopted"),
+      v.literal("quarantined"),
+      v.literal("resolved"),
+    ),
+    reason: v.string(),
+    organizationId: v.optional(v.id("organizations")),
+    transferId: v.optional(v.id("publisherTransfers")),
+    operationId: v.optional(v.string()),
+    candidateIds: v.array(v.string()),
+    candidateCount: v.number(),
+    providerCursor: v.optional(v.string()),
+    providerRequestIds: v.array(v.string()),
+    attempts: v.number(),
+    resolution: v.optional(v.string()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_status_updated", ["status", "updatedAt"])
+    .index("by_transfer", ["transferId"])
+    .index("by_operation", ["operationId"]),
+
+  connectedAccountClaims: defineTable({
+    stripeConnectedAccountId: v.string(),
+    organizationId: v.id("organizations"),
+    livemode: v.boolean(),
+    claimedAt: v.number(),
+  })
+    .index("by_connected_account", ["stripeConnectedAccountId"])
+    .index("by_organization", ["organizationId"]),
+
   financialMigrationAudits: defineTable({
     migrationJobId: v.id("financialMigrationJobs"),
     phase: v.string(),
@@ -863,5 +926,6 @@ export default defineSchema({
     updatedAt: v.number(),
   })
     .index("by_connected_account", ["stripeConnectedAccountId", "updatedAt"])
+    .index("by_connected_account_status", ["stripeConnectedAccountId", "status"])
     .index("by_stripe_payout", ["stripePayoutId"]),
 });

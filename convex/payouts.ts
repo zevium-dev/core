@@ -8,6 +8,7 @@ import {
   action,
   internalAction,
   internalMutation,
+  internalQuery,
   query,
   type ActionCtx,
   type MutationCtx,
@@ -97,13 +98,65 @@ async function requireActiveClerkOrgAdminInAction(
   return { clerkOrgId, identity: raw };
 }
 
-const CONNECT_ACCOUNT_RECONCILIATION_LIMIT = 1_000;
 const STRIPE_V2_IDEMPOTENCY_WINDOW_MS = 30 * 24 * 60 * 60 * 1_000;
 const CONNECT_LINK_RETRY_WINDOW_MS = 4 * 60 * 1_000;
 const CONNECT_LINK_MIN_VALIDITY_MS = 30 * 1_000;
 const CONNECT_OPERATION_ID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const STRIPE_ACCOUNT_ID_PATTERN = /^acct_[A-Za-z0-9]+$/;
+const CONNECT_ONBOARDING_HOSTS = new Set([
+  "connect.stripe.com",
+  "connect.stripe.test",
+  "connect.stripe.sandbox",
+]);
+const SUPPORTED_CONNECT_COUNTRIES = new Set([
+  "AE",
+  "AT",
+  "AU",
+  "BE",
+  "BG",
+  "BR",
+  "CA",
+  "CH",
+  "CY",
+  "CZ",
+  "DE",
+  "DK",
+  "EE",
+  "ES",
+  "FI",
+  "FR",
+  "GB",
+  "GR",
+  "HK",
+  "HR",
+  "HU",
+  "ID",
+  "IE",
+  "IN",
+  "IT",
+  "JP",
+  "LI",
+  "LT",
+  "LU",
+  "LV",
+  "MT",
+  "MX",
+  "MY",
+  "NL",
+  "NO",
+  "NZ",
+  "PH",
+  "PL",
+  "PT",
+  "RO",
+  "SE",
+  "SG",
+  "SI",
+  "SK",
+  "TH",
+  "US",
+]);
 
 type ConnectedAccountExpectation = {
   accountId?: string;
@@ -143,6 +196,45 @@ export function stripeLivemodeFromSecretKey(secretKey: string | undefined) {
   throw new Error("STRIPE_SECRET_KEY must identify Stripe test or live mode");
 }
 
+function connectProviderErrorCode(error: unknown): string {
+  if (error !== null && typeof error === "object") {
+    const raw = error as Record<string, unknown>;
+    if (typeof raw.code === "string" && /^[a-z0-9_]{1,80}$/.test(raw.code)) {
+      return raw.code;
+    }
+    if (typeof raw.type === "string" && /^[a-z0-9_]{1,80}$/.test(raw.type)) {
+      return raw.type;
+    }
+  }
+  return "provider_create_failed";
+}
+
+function isDefinitiveConnectCreateFailure(error: unknown): boolean {
+  if (error === null || typeof error !== "object") return false;
+  const status = (error as Record<string, unknown>).status;
+  return typeof status === "number" && status >= 400 && status < 500 && status !== 409;
+}
+
+export async function verifyStripePlatformIdentity(
+  stripe: Stripe,
+  expectedLivemode: boolean,
+): Promise<void> {
+  const configured = stripePlatformAccountId();
+  const sandbox = process.env.STRIPE_SANDBOX;
+  if (sandbox !== undefined && sandbox !== String(!expectedLivemode)) {
+    throw new Error("Stripe sandbox configuration does not match secret key");
+  }
+  const account = await stripe.accounts.retrieve(configured);
+  const providerLivemode = (account as unknown as { livemode?: unknown }).livemode;
+  if (
+    account.id !== configured ||
+    providerLivemode !== expectedLivemode ||
+    !STRIPE_ACCOUNT_ID_PATTERN.test(account.id)
+  ) {
+    throw new Error("Stripe platform identity does not match configuration");
+  }
+}
+
 export function connectOnboardingUrls(rawOrigin: string | undefined): {
   refreshUrl: string;
   returnUrl: string;
@@ -180,11 +272,12 @@ function connectOperationIdempotencyKey(
 }
 
 function normalizedPublisherCountry(country: string | null): string {
-  if (country === null || !/^[A-Z]{2}$/.test(country)) {
-    throw new Error("Publisher country must be a two-letter ISO country code");
-  }
-  if (country === "ZZ") {
-    throw new Error("Country ZZ not supported for Connect recipients");
+  if (
+    country === null ||
+    !/^[A-Z]{2}$/.test(country) ||
+    !SUPPORTED_CONNECT_COUNTRIES.has(country)
+  ) {
+    throw new Error("Publisher country is not supported for Connect recipients");
   }
   return country;
 }
@@ -206,6 +299,33 @@ function boundedDisplayName(displayName: string): string {
   return [...value].slice(0, 100).join("");
 }
 
+export function connectAccountRequestFingerprint(args: {
+  organizationId: string;
+  clerkOrgId: string;
+  organizationName: string;
+  country: string;
+  contactEmail: string;
+  expectedLivemode: boolean;
+}): string {
+  return JSON.stringify({
+    clerkOrgId: args.clerkOrgId,
+    contactEmail: args.contactEmail,
+    country: args.country,
+    dashboard: "express",
+    defaults: {
+      responsibilities: {
+        fees_collector: "application",
+        losses_collector: "application",
+        requirements_collector: "stripe",
+      },
+    },
+    displayName: boundedDisplayName(args.organizationName),
+    expectedLivemode: args.expectedLivemode,
+    identity: { country: args.country.toLowerCase() },
+    organizationId: args.organizationId,
+  });
+}
+
 function assertHttpsUrl(value: string, field: string): URL {
   let url: URL;
   try {
@@ -215,6 +335,14 @@ function assertHttpsUrl(value: string, field: string): URL {
   }
   if (url.protocol !== "https:") {
     throw new Error(`${field} must use HTTPS`);
+  }
+  return url;
+}
+
+function assertStripeOnboardingUrl(value: string): URL {
+  const url = assertHttpsUrl(value, "Stripe onboarding URL");
+  if (!CONNECT_ONBOARDING_HOSTS.has(url.hostname)) {
+    throw new Error("Stripe returned an untrusted onboarding host");
   }
   return url;
 }
@@ -234,6 +362,40 @@ export function assertConnectedAccountIdentity(
   account: Stripe.V2.Core.Account,
   expected: ConnectedAccountExpectation,
 ): void {
+  const raw = account as unknown as Record<string, unknown>;
+  const appliedConfigurations = raw.applied_configurations;
+  const defaults = raw.defaults;
+  const responsibilities =
+    defaults !== null && typeof defaults === "object"
+      ? (defaults as Record<string, unknown>).responsibilities
+      : undefined;
+  const configuration = raw.configuration;
+  const recipient =
+    configuration !== null && typeof configuration === "object"
+      ? (configuration as Record<string, unknown>).recipient
+      : undefined;
+  const recipientRecord =
+    recipient !== null && typeof recipient === "object"
+      ? (recipient as Record<string, unknown>)
+      : undefined;
+  const capabilities = recipientRecord?.capabilities;
+  const stripeBalance =
+    capabilities !== null && typeof capabilities === "object"
+      ? (capabilities as Record<string, unknown>).stripe_balance
+      : undefined;
+  const stripeBalanceRecord =
+    stripeBalance !== null && typeof stripeBalance === "object"
+      ? (stripeBalance as Record<string, unknown>)
+      : undefined;
+  const transfers = stripeBalanceRecord?.stripe_transfers;
+  const transferRecord =
+    transfers !== null && typeof transfers === "object"
+      ? (transfers as Record<string, unknown>)
+      : undefined;
+  const responsibilityRecord =
+    responsibilities !== null && typeof responsibilities === "object"
+      ? (responsibilities as Record<string, unknown>)
+      : undefined;
   if (
     account.object !== "v2.core.account" ||
     !STRIPE_ACCOUNT_ID_PATTERN.test(account.id) ||
@@ -248,10 +410,15 @@ export function assertConnectedAccountIdentity(
   }
   if (
     account.closed === true ||
-    !account.applied_configurations.includes("recipient") ||
+    !Array.isArray(appliedConfigurations) ||
+    appliedConfigurations.length !== 1 ||
+    appliedConfigurations[0] !== "recipient" ||
     account.dashboard !== "express" ||
-    account.defaults?.responsibilities.fees_collector !== "application" ||
-    account.defaults.responsibilities.losses_collector !== "application"
+    responsibilityRecord?.fees_collector !== "application" ||
+    responsibilityRecord?.losses_collector !== "application" ||
+    responsibilityRecord?.requirements_collector !== "stripe" ||
+    recipientRecord?.applied !== true ||
+    transferRecord === undefined
   ) {
     throw new Error(
       "Stripe connected account recipient configuration is invalid",
@@ -304,6 +471,7 @@ export async function createConnectedAccountForOperation(
         responsibilities: {
           fees_collector: "application",
           losses_collector: "application",
+          requirements_collector: "stripe",
         },
       },
       configuration: {
@@ -375,9 +543,6 @@ export async function resolveConnectedAccountForOperation(
     );
     if (matching.length > 1) {
       throw new Error("Stripe connected account reconciliation is ambiguous");
-    }
-    if (listed.length >= CONNECT_ACCOUNT_RECONCILIATION_LIMIT) {
-      throw new Error("Stripe connected account reconciliation scan is full");
     }
     if (matching.length === 1) {
       const matchesCurrentOperation = accountMatchesOperationMetadata(
@@ -466,7 +631,17 @@ export async function createAccountLinkForOperation(
   ) {
     throw new Error("Stripe returned an unexpected onboarding link use case");
   }
-  assertHttpsUrl(link.url, "Stripe onboarding URL");
+  assertStripeOnboardingUrl(link.url);
+  const onboarding = link.use_case.account_onboarding;
+  if (
+    onboarding === undefined ||
+    onboarding.collection_options?.fields !== "eventually_due" ||
+    onboarding.collection_options.future_requirements !== "include" ||
+    onboarding.refresh_url !== args.refreshUrl ||
+    onboarding.return_url !== args.returnUrl
+  ) {
+    throw new Error("Stripe returned unexpected onboarding link options");
+  }
   const expiresAt = Date.parse(link.expires_at);
   if (!Number.isFinite(expiresAt)) {
     throw new Error("Stripe returned an invalid onboarding link expiry");
@@ -484,7 +659,7 @@ function connectOnboardingClient(stripe: Stripe): ConnectOnboardingClient {
       listRecipientAccounts: async (limit) =>
         await stripe.v2.core.accounts
           .list({ applied_configurations: ["recipient"], limit: 100 })
-          .autoPagingToArray({ limit }),
+          .autoPagingToArray({ limit: Math.max(limit, 100_000) }),
     },
     accountLinksV2: {
       create: async (params, options) =>
@@ -502,6 +677,9 @@ export const getConnectProfileForActiveOrg = internalMutation({
       .unique();
     if (organization === null)
       throw new Error("Active organization is not provisioned");
+    if (organization.archivedAt !== undefined) {
+      throw new Error("Organization is archived");
+    }
     let profile = await ctx.db
       .query("organizationPayments")
       .withIndex("by_organization", (q) =>
@@ -549,6 +727,8 @@ export const prepareConnectAccountOperation = internalMutation({
     country: v.optional(v.string()),
     contactEmail: v.optional(v.string()),
     requireExistingAccount: v.boolean(),
+    allowClosedReplacement: v.optional(v.boolean()),
+    requestFingerprint: v.optional(v.string()),
   },
   handler: async (ctx, args): Promise<PreparedConnectAccount> => {
     if (
@@ -563,6 +743,9 @@ export const prepareConnectAccountOperation = internalMutation({
       .unique();
     if (organization === null) {
       throw new Error("Active organization is not provisioned");
+    }
+    if (organization.archivedAt !== undefined) {
+      throw new Error("Organization is archived");
     }
     let profile = await ctx.db
       .query("organizationPayments")
@@ -584,23 +767,27 @@ export const prepareConnectAccountOperation = internalMutation({
     }
     if (profile.stripeConnectedAccountId !== undefined) {
       if (
-        profile.stripeConnectedAccountLivemode !== undefined &&
+        profile.stripeConnectedAccountLivemode === undefined ||
         profile.stripeConnectedAccountLivemode !== args.expectedLivemode
       ) {
         throw new Error(
           "Stored Stripe connected account mode does not match configuration",
         );
       }
-      return {
-        organizationId: organization._id,
-        organizationName: organization.name,
-        connectedAccountId: profile.stripeConnectedAccountId,
-        connectedAccountLivemode:
-          profile.stripeConnectedAccountLivemode ?? null,
-        operation: null,
-      };
+      if (
+        args.allowClosedReplacement !== true ||
+        profile.disabledReason !== "account_closed"
+      ) {
+        return {
+          organizationId: organization._id,
+          organizationName: organization.name,
+          connectedAccountId: profile.stripeConnectedAccountId,
+          connectedAccountLivemode: profile.stripeConnectedAccountLivemode,
+          operation: null,
+        };
+      }
     }
-    if (args.requireExistingAccount) {
+    if (args.requireExistingAccount && args.allowClosedReplacement !== true) {
       throw new Error(
         "Stripe onboarding must be started before it can refresh",
       );
@@ -616,10 +803,25 @@ export const prepareConnectAccountOperation = internalMutation({
       .order("desc")
       .first();
     if (pending !== null) {
+      const requestedFingerprint =
+        args.requestFingerprint ??
+        (args.country !== undefined && args.contactEmail !== undefined
+          ? connectAccountRequestFingerprint({
+              organizationId: organization._id,
+              clerkOrgId: args.clerkOrgId,
+              organizationName: organization.name,
+              country: normalizedPublisherCountry(args.country.toUpperCase()),
+              contactEmail: boundedContactEmail(args.contactEmail),
+              expectedLivemode: args.expectedLivemode,
+            })
+          : undefined);
       if (
         pending.expectedLivemode !== args.expectedLivemode ||
         pending.country === undefined ||
-        pending.contactEmail === undefined
+        pending.contactEmail === undefined ||
+        (requestedFingerprint !== undefined &&
+          pending.providerRequestFingerprint !== undefined &&
+          pending.providerRequestFingerprint !== requestedFingerprint)
       ) {
         throw new Error("Stripe account creation requires reconciliation");
       }
@@ -651,6 +853,19 @@ export const prepareConnectAccountOperation = internalMutation({
     }
     const country = normalizedPublisherCountry(args.country ?? null);
     const contactEmail = boundedContactEmail(args.contactEmail ?? null);
+    const requestFingerprint =
+      args.requestFingerprint ??
+      connectAccountRequestFingerprint({
+        organizationId: organization._id,
+        clerkOrgId: args.clerkOrgId,
+        organizationName: organization.name,
+        country,
+        contactEmail,
+        expectedLivemode: args.expectedLivemode,
+      });
+    if (requestFingerprint.length > 2_048) {
+      throw new Error("Stripe account request fingerprint is invalid");
+    }
     const now = Date.now();
     await ctx.db.insert("stripeConnectOnboardingOperations", {
       organizationId: organization._id,
@@ -660,6 +875,13 @@ export const prepareConnectAccountOperation = internalMutation({
       expectedLivemode: args.expectedLivemode,
       country,
       contactEmail,
+      providerRequestFingerprint: requestFingerprint,
+      piiExpiresAt: now + 24 * 60 * 60 * 1_000,
+      ...(profile.disabledReason === "account_closed" &&
+      args.allowClosedReplacement === true &&
+      profile.stripeConnectedAccountId !== undefined
+        ? { replacementOfAccountId: profile.stripeConnectedAccountId }
+        : {}),
       createdAt: now,
       updatedAt: now,
     });
@@ -685,6 +907,7 @@ export const commitConnectAccountOperation = internalMutation({
     operationId: v.string(),
     stripeConnectedAccountId: v.string(),
     expectedLivemode: v.boolean(),
+    platformAccountId: v.optional(v.string()),
   },
   handler: async (
     ctx,
@@ -714,11 +937,14 @@ export const commitConnectAccountOperation = internalMutation({
       )
       .unique();
     if (profile === null) throw new Error("Payment profile not found");
+    const isReplacement =
+      operation.replacementOfAccountId !== undefined &&
+      operation.replacementOfAccountId === profile.stripeConnectedAccountId;
     if (
       profile.stripeConnectedAccountId !== undefined &&
+      !isReplacement &&
       (profile.stripeConnectedAccountId !== args.stripeConnectedAccountId ||
-        (profile.stripeConnectedAccountLivemode !== undefined &&
-          profile.stripeConnectedAccountLivemode !== args.expectedLivemode))
+        profile.stripeConnectedAccountLivemode !== args.expectedLivemode)
     ) {
       await ctx.db.patch(operation._id, {
         status: "requires_reconciliation",
@@ -730,21 +956,95 @@ export const commitConnectAccountOperation = internalMutation({
         connectedAccountId: profile.stripeConnectedAccountId,
       };
     }
+    const claim = await ctx.db
+      .query("connectedAccountClaims")
+      .withIndex("by_connected_account", (q) =>
+        q.eq("stripeConnectedAccountId", args.stripeConnectedAccountId),
+      )
+      .unique();
+    if (
+      claim !== null &&
+      (claim.organizationId !== args.organizationId ||
+        claim.livemode !== args.expectedLivemode)
+    ) {
+      throw new Error("Stripe connected account is already claimed");
+    }
+    if (claim === null) {
+      await ctx.db.insert("connectedAccountClaims", {
+        stripeConnectedAccountId: args.stripeConnectedAccountId,
+        organizationId: args.organizationId,
+        livemode: args.expectedLivemode,
+        claimedAt: Date.now(),
+      });
+    }
     const now = Date.now();
     await ctx.db.patch(profile._id, {
       stripeConnectedAccountId: args.stripeConnectedAccountId,
       stripeConnectedAccountLivemode: args.expectedLivemode,
+      ...(args.platformAccountId === undefined
+        ? {}
+        : { stripePlatformAccountId: args.platformAccountId }),
       updatedAt: now,
     });
     await ctx.db.patch(operation._id, {
       status: "account_persisted",
       stripeConnectedAccountId: args.stripeConnectedAccountId,
+      country: undefined,
+      contactEmail: undefined,
+      piiExpiresAt: undefined,
       updatedAt: now,
     });
     return {
       accepted: true,
       connectedAccountId: args.stripeConnectedAccountId,
     };
+  },
+});
+
+export const markConnectAccountCreateOutcome = internalMutation({
+  args: {
+    operationId: v.string(),
+    code: v.string(),
+    definitiveNoSideEffect: v.boolean(),
+  },
+  handler: async (ctx, args): Promise<void> => {
+    const operation = await ctx.db
+      .query("stripeConnectOnboardingOperations")
+      .withIndex("by_operation", (q) => q.eq("operationId", args.operationId))
+      .unique();
+    if (operation === null || operation.kind !== "account_create") return;
+    if (operation.status !== "prepared") return;
+    const now = Date.now();
+    if (args.definitiveNoSideEffect) {
+      await ctx.db.patch(operation._id, {
+        status: "failed",
+        country: undefined,
+        contactEmail: undefined,
+        piiExpiresAt: undefined,
+        providerErrorCode: args.code,
+        updatedAt: now,
+      });
+      return;
+    }
+    const caseId = await ctx.db.insert("financeReconciliationCases", {
+      kind: "account_create",
+      status: "open",
+      reason: "ambiguous_account_create",
+      organizationId: operation.organizationId,
+      operationId: operation.operationId,
+      candidateIds: [],
+      candidateCount: 0,
+      providerRequestIds: [],
+      attempts: 0,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await ctx.db.patch(operation._id, {
+      status: "requires_reconciliation",
+      providerErrorCode: args.code,
+      reconciliationCaseId: caseId,
+      updatedAt: now,
+    });
   },
 });
 
@@ -768,18 +1068,12 @@ export const confirmConnectAccountIdentity = internalMutation({
       throw new Error("Stored Stripe connected account does not match");
     }
     if (
-      profile.stripeConnectedAccountLivemode !== undefined &&
+      profile.stripeConnectedAccountLivemode === undefined ||
       profile.stripeConnectedAccountLivemode !== args.expectedLivemode
     ) {
       throw new Error(
         "Stored Stripe connected account mode does not match configuration",
       );
-    }
-    if (profile.stripeConnectedAccountLivemode === undefined) {
-      await ctx.db.patch(profile._id, {
-        stripeConnectedAccountLivemode: args.expectedLivemode,
-        updatedAt: Date.now(),
-      });
     }
   },
 });
@@ -895,6 +1189,31 @@ export const expireConnectLinkOperation = internalMutation({
   },
 });
 
+export const cleanupConnectOperationPii = internalMutation({
+  args: {},
+  handler: async (ctx): Promise<{ cleared: number }> => {
+    const rows = await ctx.db
+      .query("stripeConnectOnboardingOperations")
+      .withIndex("by_pii_expiry", (q) => q.lte("piiExpiresAt", Date.now()))
+      .take(100);
+    for (const row of rows) {
+      await ctx.db.patch(row._id, {
+        country: undefined,
+        contactEmail: undefined,
+        piiExpiresAt: undefined,
+      });
+    }
+    if (rows.length === 100) {
+      await ctx.scheduler.runAfter(
+        0,
+        internal.payouts.cleanupConnectOperationPii,
+        {},
+      );
+    }
+    return { cleared: rows.length };
+  },
+});
+
 export const completeConnectLinkOperation = internalMutation({
   args: {
     organizationId: v.id("organizations"),
@@ -952,6 +1271,7 @@ export const setConnectedAccount = internalMutation({
   args: {
     organizationId: v.id("organizations"),
     stripeConnectedAccountId: v.string(),
+    expectedLivemode: v.boolean(),
   },
   handler: async (ctx, args): Promise<string> => {
     const existing = await ctx.db
@@ -962,13 +1282,41 @@ export const setConnectedAccount = internalMutation({
       .unique();
     if (existing === null) throw new Error("Payment profile not found");
     if (
+      existing.stripeConnectedAccountLivemode === undefined ||
+      existing.stripeConnectedAccountLivemode !== args.expectedLivemode
+    ) {
+      throw new Error("Stored Stripe connected account mode does not match configuration");
+    }
+    if (
       existing.stripeConnectedAccountId !== undefined &&
       existing.stripeConnectedAccountId !== args.stripeConnectedAccountId
     ) {
       return existing.stripeConnectedAccountId;
     }
+    const claim = await ctx.db
+      .query("connectedAccountClaims")
+      .withIndex("by_connected_account", (q) =>
+        q.eq("stripeConnectedAccountId", args.stripeConnectedAccountId),
+      )
+      .unique();
+    if (
+      claim !== null &&
+      (claim.organizationId !== args.organizationId ||
+        claim.livemode !== args.expectedLivemode)
+    ) {
+      throw new Error("Stripe connected account is already claimed");
+    }
+    if (claim === null) {
+      await ctx.db.insert("connectedAccountClaims", {
+        stripeConnectedAccountId: args.stripeConnectedAccountId,
+        organizationId: args.organizationId,
+        livemode: args.expectedLivemode,
+        claimedAt: Date.now(),
+      });
+    }
     await ctx.db.patch(existing._id, {
       stripeConnectedAccountId: args.stripeConnectedAccountId,
+      stripeConnectedAccountLivemode: args.expectedLivemode,
       updatedAt: Date.now(),
     });
     return args.stripeConnectedAccountId;
@@ -1044,14 +1392,78 @@ export function connectAccountProjection(account: Stripe.V2.Core.Account) {
 export const refreshConnectedAccount = internalAction({
   args: { stripeConnectedAccountId: v.string() },
   handler: async (ctx, args): Promise<void> => {
-    const account = await stripeClient().v2.core.accounts.retrieve(
-      args.stripeConnectedAccountId,
-      { include: ["configuration.recipient", "requirements"] },
+    const expectation = await ctx.runQuery(
+      internal.payouts.getConnectedAccountExpectation,
+      { stripeConnectedAccountId: args.stripeConnectedAccountId },
     );
+    if (expectation === null) return;
+    const expectedLivemode = stripeLivemodeFromSecretKey(
+      process.env.STRIPE_SECRET_KEY,
+    );
+    const stripe = stripeClient();
+    await verifyStripePlatformIdentity(stripe, expectedLivemode);
+    const account = await stripe.v2.core.accounts.retrieve(
+      args.stripeConnectedAccountId,
+      {
+        include: ["configuration.recipient", "defaults", "identity", "requirements"],
+      },
+    );
+    if (account.closed === true) {
+      assertConnectedAccountIdentity(
+        { ...account, closed: false },
+        {
+          accountId: args.stripeConnectedAccountId,
+          clerkOrgId: expectation.clerkOrgId,
+          organizationId: expectation.organizationId,
+          expectedLivemode,
+        },
+      );
+    } else {
+      assertConnectedAccountIdentity(account, {
+        accountId: args.stripeConnectedAccountId,
+        clerkOrgId: expectation.clerkOrgId,
+        organizationId: expectation.organizationId,
+        expectedLivemode,
+      });
+    }
     await ctx.runMutation(internal.payouts.projectConnectedAccount, {
       stripeConnectedAccountId: account.id,
       ...connectAccountProjection(account),
     });
+  },
+});
+
+export const getConnectedAccountExpectation = internalQuery({
+  args: { stripeConnectedAccountId: v.string() },
+  handler: async (ctx, args) => {
+    const profile = await ctx.db
+      .query("organizationPayments")
+      .withIndex("by_connected_account", (q) =>
+        q.eq("stripeConnectedAccountId", args.stripeConnectedAccountId),
+      )
+      .unique();
+    if (profile === null) return null;
+    const organization = await ctx.db.get(profile.organizationId);
+    if (organization === null) return null;
+    return {
+      organizationId: organization._id,
+      clerkOrgId: organization.clerkOrgId,
+    };
+  },
+});
+
+export const getConnectOnboardingOperation = internalQuery({
+  args: { operationId: v.string() },
+  handler: async (ctx, args) => {
+    const operation = await ctx.db
+      .query("stripeConnectOnboardingOperations")
+      .withIndex("by_operation", (q) => q.eq("operationId", args.operationId))
+      .unique();
+    const organization =
+      operation === null ? null : await ctx.db.get(operation.organizationId);
+    return operation === null
+      ? null
+      : { ...operation, clerkOrgId: organization?.clerkOrgId ?? "" };
   },
 });
 
@@ -1063,12 +1475,15 @@ export type ConnectOnboardingStore = {
     country?: string;
     contactEmail?: string;
     requireExistingAccount: boolean;
+    allowClosedReplacement?: boolean;
+    requestFingerprint?: string;
   }) => Promise<PreparedConnectAccount>;
   commitAccount: (args: {
     organizationId: Id<"organizations">;
     operationId: string;
     stripeConnectedAccountId: string;
     expectedLivemode: boolean;
+    platformAccountId?: string;
   }) => Promise<{ accepted: boolean; connectedAccountId: string }>;
   confirmAccount: (args: {
     organizationId: Id<"organizations">;
@@ -1097,8 +1512,14 @@ export type ConnectOnboardingWorkflowDependencies = {
   expectedLivemode: boolean;
   refreshUrl: string;
   returnUrl: string;
+  platformAccountId: string;
   newOperationId: () => string;
   now: () => number;
+  markAccountFailure?: (args: {
+    operationId: string;
+    code: string;
+    definitiveNoSideEffect: boolean;
+  }) => Promise<void>;
 };
 
 export async function runConnectOnboardingWorkflow(
@@ -1110,18 +1531,23 @@ export async function runConnectOnboardingWorkflow(
     country: string | null;
     forceFreshLink: boolean;
     requireExistingAccount: boolean;
+    allowClosedReplacement?: boolean;
   },
   dependencies: ConnectOnboardingWorkflowDependencies,
 ): Promise<{ url: string }> {
+  const candidateOperationId = dependencies.newOperationId();
   const prepared = await dependencies.store.prepareAccount({
     clerkOrgId: actor.clerkOrgId,
-    candidateOperationId: dependencies.newOperationId(),
+    candidateOperationId,
     expectedLivemode: dependencies.expectedLivemode,
     ...(input.country === null ? {} : { country: input.country }),
     ...(actor.contactEmail === null
       ? {}
       : { contactEmail: actor.contactEmail }),
     requireExistingAccount: input.requireExistingAccount,
+    ...(input.allowClosedReplacement === undefined
+      ? {}
+      : { allowClosedReplacement: input.allowClosedReplacement }),
   });
 
   let connectedAccountId = prepared.connectedAccountId;
@@ -1129,28 +1555,39 @@ export async function runConnectOnboardingWorkflow(
     if (prepared.operation === null) {
       throw new Error("Stripe account creation operation is missing");
     }
-    const account = await resolveConnectedAccountForOperation(
-      dependencies.stripe,
-      {
-        operationId: prepared.operation.operationId,
-        clerkOrgId: actor.clerkOrgId,
-        organizationId: prepared.organizationId,
-        organizationName: prepared.organizationName,
-        country: prepared.operation.country,
-        contactEmail: prepared.operation.contactEmail,
-        expectedLivemode: dependencies.expectedLivemode,
-        // First run also scans for a 5f8-era account created before the old
-        // v1 Account Link failure prevented its local persistence.
-        reconcileFirst: true,
-        operationStartedAt: prepared.operation.startedAt,
-        now: dependencies.now(),
-      },
-    );
+    let account: Stripe.V2.Core.Account;
+    try {
+      account = await resolveConnectedAccountForOperation(
+        dependencies.stripe,
+        {
+          operationId: prepared.operation.operationId,
+          clerkOrgId: actor.clerkOrgId,
+          organizationId: prepared.organizationId,
+          organizationName: prepared.organizationName,
+          country: prepared.operation.country,
+          contactEmail: prepared.operation.contactEmail,
+          expectedLivemode: dependencies.expectedLivemode,
+          reconcileFirst: prepared.operation.isRetry,
+          operationStartedAt: prepared.operation.startedAt,
+          now: dependencies.now(),
+        },
+      );
+    } catch (error) {
+      if (dependencies.markAccountFailure !== undefined) {
+        await dependencies.markAccountFailure({
+          operationId: prepared.operation.operationId,
+          code: connectProviderErrorCode(error),
+          definitiveNoSideEffect: isDefinitiveConnectCreateFailure(error),
+        });
+      }
+      throw error;
+    }
     const committed = await dependencies.store.commitAccount({
       organizationId: prepared.organizationId,
       operationId: prepared.operation.operationId,
       stripeConnectedAccountId: account.id,
       expectedLivemode: dependencies.expectedLivemode,
+      platformAccountId: dependencies.platformAccountId,
     });
     if (!committed.accepted || committed.connectedAccountId !== account.id) {
       throw new Error("Stripe connected account reconciliation is required");
@@ -1239,6 +1676,7 @@ async function runConnectOnboardingAction(
     country: string | null;
     forceFreshLink: boolean;
     requireExistingAccount: boolean;
+    allowClosedReplacement?: boolean;
   },
 ): Promise<{ url: string }> {
   const { clerkOrgId, identity } =
@@ -1257,18 +1695,50 @@ async function runConnectOnboardingAction(
   );
   const urls = connectOnboardingUrls(process.env.APP_ORIGIN);
   const stripe = stripeClient();
-  return await runConnectOnboardingWorkflow(
-    { clerkOrgId, contactEmail },
-    input,
-    {
-      stripe: connectOnboardingClient(stripe),
-      store: connectOnboardingStore(ctx),
-      expectedLivemode,
-      ...urls,
-      newOperationId: () => crypto.randomUUID(),
-      now: () => Date.now(),
-    },
-  );
+  await verifyStripePlatformIdentity(stripe, expectedLivemode);
+  try {
+    return await runConnectOnboardingWorkflow(
+      { clerkOrgId, contactEmail },
+      input,
+      {
+        stripe: connectOnboardingClient(stripe),
+        store: connectOnboardingStore(ctx),
+        expectedLivemode,
+        platformAccountId: stripePlatformAccountId(),
+        ...urls,
+        newOperationId: () => crypto.randomUUID(),
+        now: () => Date.now(),
+        markAccountFailure: async (failure) => {
+          await ctx.runMutation(
+            internal.payouts.markConnectAccountCreateOutcome,
+            failure,
+          );
+        },
+      },
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    if (message === "Stripe connected account reconciliation is required") {
+      throw new Error("CONNECT_ACCOUNT_RECONCILIATION_REQUIRED");
+    }
+    if (
+      message === "TRANSFER_REQUIRES_RECONCILIATION" ||
+      message === "TRANSFER_PROVIDER_REJECTED"
+    ) {
+      throw error;
+    }
+    if (
+      message.includes("Stripe") &&
+      !message.includes("country") &&
+      !message.includes("HTTPS")
+    ) {
+      throw new Error("CONNECT_PROVIDER_REJECTED");
+    }
+    if (/^[a-z0-9_]{3,80}$/.test(message)) {
+      throw new Error("CONNECT_PROVIDER_REJECTED");
+    }
+    throw error;
+  }
 }
 
 export const startOnboarding = action({
@@ -1278,6 +1748,17 @@ export const startOnboarding = action({
       country: args.country ?? null,
       forceFreshLink: false,
       requireExistingAccount: false,
+    }),
+});
+
+export const replaceClosedAccount = action({
+  args: { country: v.optional(v.string()) },
+  handler: async (ctx, args): Promise<{ url: string }> =>
+    await runConnectOnboardingAction(ctx, {
+      country: args.country ?? null,
+      forceFreshLink: false,
+      requireExistingAccount: false,
+      allowClosedReplacement: true,
     }),
 });
 
@@ -1348,6 +1829,7 @@ export const preparePublisherTransfer = internalMutation({
     publisherOrganizationId: v.id("organizations"),
     correlationNonce: v.string(),
     platformAccountId: v.string(),
+    expectedLivemode: v.boolean(),
   },
   handler: async (ctx, args) => {
     await assertFinanceMigrationAllowsRuntime(ctx);
@@ -1365,6 +1847,9 @@ export const preparePublisherTransfer = internalMutation({
     if (
       profile === null ||
       profile.stripeConnectedAccountId === undefined ||
+      profile.stripeConnectedAccountLivemode === undefined ||
+      profile.stripeConnectedAccountLivemode !== args.expectedLivemode ||
+      args.platformAccountId !== stripePlatformAccountId() ||
       !profile.payoutsEnabled ||
       profile.disabledReason !== undefined
     ) {
@@ -1413,6 +1898,9 @@ export const preparePublisherTransfer = internalMutation({
         metadataRepairVersion: retry.metadataRepairVersion,
         providerCreateMetadataShape: retry.providerCreateMetadataShape,
         stripeTransferId: retry.stripeTransferId,
+        providerRequestFingerprint: retry.providerRequestFingerprint,
+        providerReplayExpiresAt: retry.providerReplayExpiresAt,
+        providerOutcome: retry.providerOutcome,
       };
     }
     const balance = await getOrCreatePublisherBalance(
@@ -1460,6 +1948,9 @@ export const preparePublisherTransfer = internalMutation({
         metadataRepairVersion: existing.metadataRepairVersion,
         providerCreateMetadataShape: existing.providerCreateMetadataShape,
         stripeTransferId: existing.stripeTransferId,
+        providerRequestFingerprint: existing.providerRequestFingerprint,
+        providerReplayExpiresAt: existing.providerReplayExpiresAt,
+        providerOutcome: existing.providerOutcome,
       };
     }
     const now = Date.now();
@@ -1492,7 +1983,20 @@ export const preparePublisherTransfer = internalMutation({
         amount,
       },
     );
-    await ctx.db.patch(transferId, { correlationHmac });
+    const providerRequestFingerprint = transferRequestFingerprint({
+      amount,
+      currency: "usd",
+      destination: profile.stripeConnectedAccountId,
+      publisherTransferId: transferId,
+      correlationNonce: args.correlationNonce,
+      correlationHmac,
+      platformAccountId: args.platformAccountId,
+    });
+    await ctx.db.patch(transferId, {
+      correlationHmac,
+      providerRequestFingerprint,
+      providerReplayExpiresAt: now + STRIPE_V2_IDEMPOTENCY_WINDOW_MS,
+    });
     await appendPublisherSettlementEntry(ctx, {
       balance,
       kind: "transfer_allocation",
@@ -1516,6 +2020,9 @@ export const preparePublisherTransfer = internalMutation({
       metadataRepairVersion: 1,
       providerCreateMetadataShape: "correlated_v1" as const,
       stripeTransferId: undefined,
+      providerRequestFingerprint,
+      providerReplayExpiresAt: now + STRIPE_V2_IDEMPOTENCY_WINDOW_MS,
+      providerOutcome: undefined,
     };
   },
 });
@@ -1572,6 +2079,7 @@ async function applyStripeTransferProjection(
     correlationNonce?: string;
     correlationHmac?: string;
     metadataRepairVersion?: number;
+    providerRequestId?: string;
     failed: boolean;
     failureReason?: string;
   },
@@ -1593,6 +2101,15 @@ async function applyStripeTransferProjection(
         ctx,
         transfer.publisherOrganizationId,
       );
+      await appendPublisherSettlementEntry(ctx, {
+        balance,
+        kind: "transfer_failed",
+        availableDeltaAtoms: transfer.amountAtoms,
+        allocatedDeltaAtoms: -transfer.amountAtoms,
+        paidDeltaAtoms: 0,
+        refId: `publisher:transfer:${transfer._id}:failed`,
+        transferId: transfer._id,
+      });
       await adjustPublisherBalanceAggregates(ctx, balance, {
         failedAtoms: transfer.amountAtoms,
       });
@@ -1604,6 +2121,7 @@ async function applyStripeTransferProjection(
       correlationState: "provider_verified",
       providerMetadataVerifiedAt: Date.now(),
       attemptedAt: Date.now(),
+      providerRequestId: args.providerRequestId,
       updatedAt: Date.now(),
     });
     return;
@@ -1660,6 +2178,7 @@ async function applyStripeTransferProjection(
     correlationState: "provider_verified",
     providerMetadataVerifiedAt: Date.now(),
     attemptedAt: Date.now(),
+    providerRequestId: args.providerRequestId,
     updatedAt: Date.now(),
   });
 }
@@ -1719,6 +2238,21 @@ async function assertStripeTransferSnapshotMatches(
     throw new Error("Stripe transfer correlation proof is invalid");
   }
   if (
+    transfer.providerRequestFingerprint !== undefined &&
+    transfer.providerRequestFingerprint !==
+      transferRequestFingerprint({
+        amount: args.amount,
+        currency: args.currency,
+        destination: args.destination,
+        publisherTransferId: transfer._id,
+        correlationNonce: args.correlationNonce,
+        correlationHmac: args.correlationHmac,
+        platformAccountId: args.platformAccountId,
+      })
+  ) {
+    throw new Error("Stripe transfer request fingerprint changed");
+  }
+  if (
     transfer.stripeTransferId !== undefined &&
     transfer.stripeTransferId !== args.stripeTransferId
   ) {
@@ -1738,6 +2272,7 @@ export const projectStripeTransfer = internalMutation({
     correlationNonce: v.optional(v.string()),
     correlationHmac: v.optional(v.string()),
     metadataRepairVersion: v.optional(v.number()),
+    providerRequestId: v.optional(v.string()),
     failed: v.boolean(),
     failureReason: v.optional(v.string()),
   },
@@ -1773,7 +2308,27 @@ export const projectStripeTransfer = internalMutation({
         }
       }
     }
-    if (transfer === null) return;
+    if (transfer === null) {
+      const now = Date.now();
+      await ctx.db.insert("financeReconciliationCases", {
+        kind: "transfer_orphan",
+        status: "open",
+        reason: "provider_transfer_without_local_allocation",
+        candidateIds: [args.stripeTransferId],
+        candidateCount: 1,
+        providerRequestIds: [],
+        attempts: 0,
+        resolution: JSON.stringify({
+          amount: args.amount,
+          currency: args.currency,
+          destination: args.destination,
+          publisherTransferId: args.publisherTransferId ?? null,
+        }),
+        createdAt: now,
+        updatedAt: now,
+      });
+      return;
+    }
     await applyStripeTransferProjection(ctx, transfer, {
       stripeTransferId: args.stripeTransferId,
       amount: args.amount,
@@ -1784,8 +2339,107 @@ export const projectStripeTransfer = internalMutation({
       correlationNonce: args.correlationNonce,
       correlationHmac: args.correlationHmac,
       metadataRepairVersion: args.metadataRepairVersion,
+      providerRequestId: args.providerRequestId,
       failed: args.failed,
       failureReason: args.failureReason,
+    });
+  },
+});
+
+export const markPublisherTransferRequiresReconciliation = internalMutation({
+  args: { transferId: v.id("publisherTransfers"), reason: v.string() },
+  handler: async (ctx, args): Promise<void> => {
+    const transfer = await ctx.db.get(args.transferId);
+    if (transfer === null) return;
+    const now = Date.now();
+    let caseId = transfer.reconciliationCaseId;
+    if (caseId === undefined) {
+      caseId = await ctx.db.insert("financeReconciliationCases", {
+        kind: "transfer",
+        status: "open",
+        reason: args.reason.slice(0, 120),
+        organizationId: transfer.publisherOrganizationId,
+        transferId: transfer._id,
+        candidateIds: transfer.stripeTransferId === undefined
+          ? []
+          : [transfer.stripeTransferId],
+        candidateCount: transfer.stripeTransferId === undefined ? 0 : 1,
+        providerRequestIds: transfer.providerRequestId === undefined
+          ? []
+          : [transfer.providerRequestId],
+        attempts: 0,
+        createdAt: now,
+        updatedAt: now,
+      });
+    } else {
+      await ctx.db.patch(caseId, { attempts: 0, updatedAt: now });
+    }
+    await ctx.db.patch(transfer._id, {
+      correlationState: "requires_reconciliation",
+      providerOutcome: "ambiguous",
+      reconciliationCaseId: caseId,
+      updatedAt: now,
+    });
+  },
+});
+
+export const resolveFinanceReconciliationCase = internalMutation({
+  args: {
+    caseId: v.id("financeReconciliationCases"),
+    status: v.union(
+      v.literal("adopted"),
+      v.literal("quarantined"),
+      v.literal("resolved"),
+      v.literal("open"),
+    ),
+    candidateIds: v.optional(v.array(v.string())),
+    resolution: v.string(),
+  },
+  handler: async (ctx, args): Promise<void> => {
+    const row = await ctx.db.get(args.caseId);
+    if (row === null) throw new Error("Finance reconciliation case not found");
+    await ctx.db.patch(args.caseId, {
+      status: args.status,
+      candidateIds: args.candidateIds ?? row.candidateIds,
+      candidateCount: (args.candidateIds ?? row.candidateIds).length,
+      attempts: row.attempts + 1,
+      resolution: args.resolution.slice(0, 500),
+      updatedAt: Date.now(),
+    });
+  },
+});
+
+export const recordDefinitivePublisherTransferFailure = internalMutation({
+  args: { transferId: v.id("publisherTransfers"), code: v.string() },
+  handler: async (ctx, args): Promise<void> => {
+    const transfer = await ctx.db.get(args.transferId);
+    if (transfer === null || transfer.status === "failed") return;
+    if (transfer.stripeTransferId !== undefined) {
+      throw new Error("Definitive failure cannot replace provider transfer proof");
+    }
+    const balance = await getOrCreatePublisherBalance(
+      ctx,
+      transfer.publisherOrganizationId,
+    );
+    await appendPublisherSettlementEntry(ctx, {
+      balance,
+      kind: "transfer_failed",
+      availableDeltaAtoms: transfer.amountAtoms,
+      allocatedDeltaAtoms: -transfer.amountAtoms,
+      paidDeltaAtoms: 0,
+      refId: `publisher:transfer:${transfer._id}:failed`,
+      transferId: transfer._id,
+    });
+    await adjustPublisherBalanceAggregates(ctx, balance, {
+      failedAtoms: transfer.amountAtoms,
+    });
+    await ctx.db.patch(transfer._id, {
+      status: "failed",
+      failureReason: args.code.slice(0, 80),
+      providerOutcome: "definitive_no_side_effect",
+      correlationState: "provider_verified",
+      attemptedAt: Date.now(),
+      updatedAt: Date.now(),
     });
   },
 });
@@ -2023,12 +2677,36 @@ export type StripeTransferClient = {
 
 export type StripeTransferRepairClient = StripeTransferClient & {
   update: Stripe["transfers"]["update"];
+  listCandidates?: (destination: string) => Promise<Stripe.Transfer[]>;
 };
 
 function transferDestination(transfer: Stripe.Transfer): string {
   return typeof transfer.destination === "string"
     ? transfer.destination
     : (transfer.destination?.id ?? "");
+}
+
+export function transferRequestFingerprint(args: {
+  amount: number;
+  currency: string;
+  destination: string;
+  publisherTransferId: string;
+  correlationNonce: string;
+  correlationHmac: string;
+  platformAccountId: string;
+}): string {
+  return JSON.stringify({
+    amount: args.amount,
+    currency: args.currency.toLowerCase(),
+    destination: args.destination,
+    metadata: {
+      correlationHmac: args.correlationHmac,
+      correlationNonce: args.correlationNonce,
+      metadataRepairVersion: "1",
+      platformAccountId: args.platformAccountId,
+      publisherTransferId: args.publisherTransferId,
+    },
+  });
 }
 
 function assertLegacyTransferSnapshot(
@@ -2048,9 +2726,8 @@ function assertLegacyTransferSnapshot(
 }
 
 /**
- * Provider repair uses original legacy create parameters on idempotent replay,
- * then a distinct metadata-update request. Local HMAC is never called proof
- * until the final provider retrieval returns every expected metadata field.
+ * Provider repair never creates a transfer. Missing local IDs are reconciled
+ * from provider candidates, then metadata is updated under a distinct key.
  */
 export async function repairAndRetrieveStripeTransferMetadata(
   stripe: StripeTransferRepairClient,
@@ -2067,32 +2744,23 @@ export async function repairAndRetrieveStripeTransferMetadata(
   }
   let snapshot: Stripe.Transfer;
   if (transfer.stripeTransferId === undefined) {
-    let metadata: Stripe.MetadataParam;
-    if (transfer.providerCreateMetadataShape === "publisher_only") {
-      metadata = { publisherTransferId: String(transfer._id) };
-    } else {
-      metadata = {
-        publisherTransferId: String(transfer._id),
-        correlationNonce: transfer.correlationNonce,
-        correlationHmac: transfer.correlationHmac,
-        platformAccountId: transfer.platformAccountId,
-      };
-      if (transfer.providerCreateMetadataShape === "correlated_v1") {
-        metadata.metadataRepairVersion = "1";
-      }
+    if (stripe.listCandidates === undefined) {
+      throw new Error("TRANSFER_REQUIRES_RECONCILIATION");
     }
-    const replay = await stripe.create(
-      {
-        amount: transfer.amount,
-        currency: transfer.currency,
-        destination: transfer.stripeConnectedAccountId,
-        // Exact original request shape. Adding or dropping correlation here
-        // violates Stripe idempotency parameter matching after response loss.
-        metadata,
-      },
-      { idempotencyKey: transfer.idempotencyKey },
-    );
-    snapshot = await stripe.retrieve(replay.id);
+    const candidates = (await stripe.listCandidates(
+      transfer.stripeConnectedAccountId,
+    )).filter((candidate) => {
+      try {
+        assertLegacyTransferSnapshot(transfer, candidate);
+        return candidate.metadata.publisherTransferId === String(transfer._id);
+      } catch {
+        return false;
+      }
+    });
+    if (candidates.length !== 1) {
+      throw new Error("TRANSFER_REQUIRES_RECONCILIATION");
+    }
+    snapshot = await stripe.retrieve(candidates[0]!.id);
   } else {
     snapshot = await stripe.retrieve(transfer.stripeTransferId);
   }
@@ -2153,6 +2821,11 @@ export async function createAndRetrieveStripeTransfer(
     metadataRepairVersion?: number;
     providerCreateMetadataShape?: Doc<"publisherTransfers">["providerCreateMetadataShape"];
     stripeTransferId?: string;
+    providerRequestFingerprint?: string;
+    providerReplayExpiresAt?: number;
+    providerRequestFingerprint?: string;
+    providerReplayExpiresAt?: number;
+    now?: number;
   },
 ): Promise<Stripe.Transfer> {
   if (
@@ -2168,6 +2841,27 @@ export async function createAndRetrieveStripeTransfer(
   }
   if (transfer.stripeTransferId !== undefined) {
     return await stripe.retrieve(transfer.stripeTransferId);
+  }
+  if (
+    transfer.providerReplayExpiresAt === undefined ||
+    (transfer.now ?? Date.now()) > transfer.providerReplayExpiresAt
+  ) {
+    throw new Error("TRANSFER_REQUIRES_RECONCILIATION");
+  }
+  const expectedFingerprint = transferRequestFingerprint({
+    amount: transfer.amount,
+    currency: transfer.currency,
+    destination: transfer.stripeConnectedAccountId,
+    publisherTransferId: transfer._id,
+    correlationNonce: transfer.correlationNonce,
+    correlationHmac: transfer.correlationHmac,
+    platformAccountId: transfer.platformAccountId,
+  });
+  if (
+    transfer.providerRequestFingerprint === undefined ||
+    transfer.providerRequestFingerprint !== expectedFingerprint
+  ) {
+    throw new Error("TRANSFER_REQUIRES_RECONCILIATION");
   }
   const created = await stripe.create(
     {
@@ -2218,7 +2912,11 @@ export async function transferToStripe(
   try {
     const stripeTransfer = await createAndRetrieveStripeTransfer(
       stripeClient().transfers,
-      transfer,
+      {
+        ...transfer,
+        providerRequestFingerprint: transfer.providerRequestFingerprint,
+        providerReplayExpiresAt: transfer.providerReplayExpiresAt,
+      },
     );
     await ctx.runMutation(internal.payouts.projectStripeTransfer, {
       stripeTransferId: stripeTransfer.id,
@@ -2238,13 +2936,44 @@ export async function transferToStripe(
         stripeTransfer.metadata.metadataRepairVersion === undefined
           ? undefined
           : Number(stripeTransfer.metadata.metadataRepairVersion),
+      providerRequestId: stripeTransfer.lastResponse?.requestId,
       failed: false,
       failureReason: undefined,
     });
   } catch (error) {
-    // Network/client failure is ambiguous. Only a verified provider snapshot
-    // or transfer.failed webhook may classify external money as failed.
-    throw new Error("Provider transfer failed. Try again or contact support.");
+    const status =
+      error !== null && typeof error === "object" &&
+      typeof (error as Record<string, unknown>).status === "number"
+        ? ((error as Record<string, unknown>).status as number)
+        : undefined;
+    const definitive =
+      status !== undefined && status >= 400 && status < 500 && status !== 409;
+    const rawCode =
+      error !== null && typeof error === "object" &&
+      typeof (error as Record<string, unknown>).code === "string"
+        ? ((error as Record<string, unknown>).code as string)
+        : "provider_transfer_failed";
+    const code = /^[a-z0-9_]{1,80}$/.test(rawCode)
+      ? rawCode
+      : "provider_transfer_failed";
+    if (definitive && transfer.stripeTransferId === undefined) {
+      await ctx.runMutation(
+        internal.payouts.recordDefinitivePublisherTransferFailure,
+        { transferId: transfer._id, code },
+      );
+      throw new Error("TRANSFER_PROVIDER_REJECTED");
+    }
+    await ctx.runMutation(
+      internal.payouts.markPublisherTransferRequiresReconciliation,
+      {
+        transferId: transfer._id,
+        reason:
+          transfer.stripeTransferId === undefined
+            ? "ambiguous_provider_transfer"
+            : "provider_transfer_snapshot_unavailable",
+      },
+    );
+    throw new Error("TRANSFER_REQUIRES_RECONCILIATION");
   }
 }
 
@@ -2252,6 +2981,12 @@ export const initiatePublisherTransfer = action({
   args: {},
   handler: async (ctx): Promise<{ transferId: Id<"publisherTransfers"> }> => {
     const { clerkOrgId } = await requireActiveClerkOrgAdminInAction(ctx);
+    const expectedLivemode = stripeLivemodeFromSecretKey(
+      process.env.STRIPE_SECRET_KEY,
+    );
+    const stripe = stripeClient();
+    await verifyStripePlatformIdentity(stripe, expectedLivemode);
+    const platformAccountId = stripePlatformAccountId();
     const profile = await ctx.runMutation(
       internal.payouts.getConnectProfileForActiveOrg,
       { clerkOrgId },
@@ -2264,7 +2999,8 @@ export const initiatePublisherTransfer = action({
       {
         publisherOrganizationId: profile.organizationId,
         correlationNonce: randomCorrelationNonce(),
-        platformAccountId: stripePlatformAccountId(),
+        platformAccountId,
+        expectedLivemode,
       },
     );
     await transferToStripe(ctx, {
@@ -2280,6 +3016,8 @@ export const initiatePublisherTransfer = action({
       metadataRepairVersion: prepared.metadataRepairVersion,
       providerCreateMetadataShape: prepared.providerCreateMetadataShape,
       stripeTransferId: prepared.stripeTransferId,
+      providerRequestFingerprint: prepared.providerRequestFingerprint,
+      providerReplayExpiresAt: prepared.providerReplayExpiresAt,
     });
     return { transferId: prepared.transferId };
   },
@@ -2335,6 +3073,9 @@ export const getPayoutState = query({
       throw new Error("Publisher finance migration is not verified");
     }
     for (const transfer of transfers) {
+      const definitiveFailure =
+        transfer.status === "failed" &&
+        transfer.providerOutcome === "definitive_no_side_effect";
       if (
         transfer.reversedAmount === undefined ||
         transfer.correlationNonce === undefined ||
@@ -2344,7 +3085,8 @@ export const getPayoutState = query({
         transfer.correlationState === "provider_repair_required" ||
         transfer.metadataRepairVersion !== 1 ||
         transfer.providerCreateMetadataShape === undefined ||
-        (transfer.correlationState === "provider_verified" &&
+        (!definitiveFailure &&
+          transfer.correlationState === "provider_verified" &&
           transfer.providerMetadataVerifiedAt === undefined)
       ) {
         throw new Error("Transfer correlation migration is incomplete");

@@ -54,6 +54,10 @@ export async function getOrCreateWallet(
     .withIndex("by_organization", (q) => q.eq("organizationId", organizationId))
     .unique();
   if (existing !== null) return existing;
+  const organization = await ctx.db.get(organizationId);
+  if (organization?.archivedAt !== undefined) {
+    throw new Error("Archived organization cannot receive finance writes");
+  }
 
   const walletId = await ctx.db.insert("wallets", {
     organizationId,
