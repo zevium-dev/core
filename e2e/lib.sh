@@ -19,7 +19,7 @@ export AGENT_BROWSER_SESSION="$E2E_SESSION"
 mkdir -p "$E2E_ARTIFACTS"
 
 ab() {
-  agent-browser "$@"
+  pnpm exec agent-browser "$@"
 }
 
 log() {
@@ -37,10 +37,10 @@ fail() {
   ts="$(date +%Y%m%d-%H%M%S)"
   slug="$(printf '%s' "$E2E_STEP" | tr -cs '[:alnum:]._-' '_' | cut -c1-80)"
   shot="$E2E_ARTIFACTS/${ts}-${slug}.png"
-  timeout 10s agent-browser screenshot "$shot" >/dev/null 2>&1 || true
-  timeout 10s agent-browser get url \
+  timeout 10s pnpm exec agent-browser screenshot "$shot" >/dev/null 2>&1 || true
+  timeout 10s pnpm exec agent-browser get url \
     >"$E2E_ARTIFACTS/${ts}-${slug}.url.txt" 2>/dev/null || true
-  timeout 10s agent-browser snapshot \
+  timeout 10s pnpm exec agent-browser snapshot \
     >"$E2E_ARTIFACTS/${ts}-${slug}.snapshot.txt" 2>/dev/null || true
   printf '[e2e] FAIL: %s\n' "$msg" >&2
   printf '[e2e] screenshot: %s\n' "$shot" >&2
@@ -48,7 +48,8 @@ fail() {
 }
 
 assert_eq() {
-  local got="$1" want="$2" msg="${3:-expected '$want', got '$got'}"
+  local got="$1" want="$2"
+  local msg="${3:-expected \"$want\", got \"$got\"}"
   if [[ "$got" != "$want" ]]; then
     fail "$msg (got='$got' want='$want')"
   fi
@@ -56,7 +57,7 @@ assert_eq() {
 
 assert_contains() {
   local hay="$1" needle="$2"
-  local msg="${3:-missing '$needle'}"
+  local msg="${3:-missing \"$needle\"}"
   if [[ "$hay" != *"$needle"* ]]; then
     fail "$msg"
   fi
@@ -64,7 +65,7 @@ assert_contains() {
 
 assert_not_contains() {
   local hay="$1" needle="$2"
-  local msg="${3:-unexpected '$needle'}"
+  local msg="${3:-unexpected \"$needle\"}"
   if [[ "$hay" == *"$needle"* ]]; then
     fail "$msg"
   fi
@@ -72,7 +73,7 @@ assert_not_contains() {
 
 assert_url_contains() {
   local needle="$1"
-  local msg="${2:-url missing '$needle'}"
+  local msg="${2:-url missing \"$needle\"}"
   local url
   url="$(ab get url)"
   assert_contains "$url" "$needle" "$msg (url=$url)"
@@ -80,7 +81,7 @@ assert_url_contains() {
 
 assert_url_not_contains() {
   local needle="$1"
-  local msg="${2:-url still has '$needle'}"
+  local msg="${2:-url still has \"$needle\"}"
   local url
   url="$(ab get url)"
   assert_not_contains "$url" "$needle" "$msg (url=$url)"
@@ -144,7 +145,8 @@ wait_for_url_pattern() {
         # e.g. **/app/projects/** → */app/projects/*
         local bash_pat
         bash_pat="$(printf '%s' "$pattern" | sed 's/\*\*/\*/g')"
-        # shellcheck disable=SC2254
+        # Intentional glob match after converting agent-browser's ** syntax.
+        # shellcheck disable=SC2053
         if [[ "$url" == $bash_pat ]]; then
           return 0
         fi
@@ -440,7 +442,7 @@ sign_in() {
 }
 
 close_browser() {
-  timeout 10s agent-browser close >/dev/null 2>&1 || true
+  timeout 10s pnpm exec agent-browser close >/dev/null 2>&1 || true
 }
 
 # Unique-ish stamp for project names/slugs.

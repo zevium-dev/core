@@ -120,20 +120,45 @@ if [[ -n "${GATEWAY_URL:-}" ]]; then
   if [[ -z "${E2E_API_KEY:-}" ]]; then
     fail "GATEWAY_URL set but E2E_API_KEY missing"
   fi
-  # UI path: paste key if panel accepts it.
-  if ab find placeholder "API key" fill "$E2E_API_KEY" >/dev/null 2>&1 \
-    || ab find label "API key" fill "$E2E_API_KEY" >/dev/null 2>&1 \
-    || ab fill 'input[name="apiKey"]' "$E2E_API_KEY" >/dev/null 2>&1; then
-    if click_button "Run" \
-      || click_button "Send" \
-      || ab find text "Run request" click >/dev/null 2>&1; then
-      ab wait 2000 >/dev/null
-      snap="$(page_text)"
-      assert_contains "$snap" "200" "try-it response status not 200"
-    else
-      log "UI run button missing — falling back to curl against gateway"
-    fi
+  # Real UI gate: require exact GET /get selection, submit through React, and
+  # retain response request id so Convex proof can reject unrelated usage.
+  ui_endpoint_json="$(ab eval "document.querySelector('#try-endpoint')?.selectedOptions?.[0]?.textContent?.trim() ?? ''" 2>/dev/null || true)"
+  ui_endpoint="$(node -e 'try { console.log(JSON.parse(process.argv[1])) } catch {}' "$ui_endpoint_json" 2>/dev/null || true)"
+  [[ "$ui_endpoint" =~ ^GET[[:space:]]+/get([[:space:]]|$) ]] \
+    || fail "try-it did not select exact GET /get endpoint"
+  if ! ab find placeholder "API key" fill "$E2E_API_KEY" >/dev/null 2>&1 \
+    && ! ab find label "API key" fill "$E2E_API_KEY" >/dev/null 2>&1 \
+    && ! ab fill 'input[name="apiKey"]' "$E2E_API_KEY" >/dev/null 2>&1; then
+    fail "try-it API key input is not operable"
   fi
+  snap="$(page_text)"
+  assert_contains "$snap" "Real call" "try-it is not in paid-call mode"
+  click_button "Send" || fail "try-it Send button is not operable"
+
+  ui_status=""
+  ui_request_id=""
+  ui_deadline=$((SECONDS + 30))
+  while (( SECONDS < ui_deadline )); do
+    ui_proof="$(ab eval '
+(() => {
+  const regions = Array.from(document.querySelectorAll("[role=status]"));
+  const text = regions.map((node) => node.textContent || "").find((value) => /Request\s+[A-Za-z0-9_-]{8,}/.test(value));
+  const request = text?.match(/Request\s+([A-Za-z0-9_-]{8,})/);
+  const status = text?.match(/\b([1-5][0-9]{2})\b/);
+  return { status: status ? Number(status[1]) : null, requestId: request?.[1] ?? null };
+})()
+' 2>/dev/null || true)"
+    ui_status="$(node -e 'try { console.log(JSON.parse(process.argv[1]).status ?? "") } catch {}' "$ui_proof" 2>/dev/null || true)"
+    ui_request_id="$(node -e 'try { console.log(JSON.parse(process.argv[1]).requestId ?? "") } catch {}' "$ui_proof" 2>/dev/null || true)"
+    if [[ "$ui_status" == "200" && "$ui_request_id" =~ ^[A-Za-z0-9_-]{8,}$ ]]; then
+      break
+    fi
+    ab wait 500 >/dev/null 2>&1 || true
+  done
+  assert_eq "$ui_status" "200" "try-it response status not 200"
+  [[ "$ui_request_id" =~ ^[A-Za-z0-9_-]{8,}$ ]] \
+    || fail "try-it did not expose gateway request id"
+  log "try-it UI paid call ok request=$ui_request_id"
 
   # Deterministic gate: direct gateway call for /get
   # Convention: GATEWAY_URL is origin; path /gateway/{org}/{api}/get
@@ -158,7 +183,14 @@ if [[ -n "${GATEWAY_URL:-}" ]]; then
   if ! printf '%s' "$hdrs" | grep -qi '^x-zevium-cost:'; then
     fail "missing x-zevium-cost response header (see $headers_file)"
   fi
-  log "gateway call ok cost=$(printf '%s' "$hdrs" | grep -i '^x-zevium-cost:' | head -1)"
+  direct_cost="$(printf '%s' "$hdrs" | sed -nE 's/^[Xx]-[Zz]evium-[Cc]ost:[[:space:]]*([0-9]+).*/\1/p' | head -1)"
+  direct_request_id="$(printf '%s' "$hdrs" | sed -nE 's/^[Xx]-[Zz]evium-[Rr]equest-[Ii]d:[[:space:]]*([^[:space:]\r]+).*/\1/p' | head -1)"
+  [[ "$direct_cost" =~ ^[1-9][0-9]*$ ]] || fail "paid call returned invalid cost"
+  [[ "$direct_request_id" =~ ^[A-Za-z0-9_-]{8,}$ ]] \
+    || fail "paid call returned invalid request id"
+  [[ "$direct_request_id" != "$ui_request_id" ]] \
+    || fail "gateway reused UI request id for direct call"
+  log "gateway call ok cost=$direct_cost request=$direct_request_id"
 
   step "anonymous browser mock call (CORS regression canary)"
   # /mock/:org/:project is PUBLIC (no key) — browser fetch from the app origin
@@ -171,10 +203,35 @@ if [[ -n "${GATEWAY_URL:-}" ]]; then
 
   if [[ -n "${E2E_API_KEY:-}" ]]; then
     step "browser paid call with Authorization header"
-    paid_status="$(ab eval "fetch('${call_url}', { headers: { Authorization: 'Bearer ${E2E_API_KEY}' } }).then((r) => r.status)" 2>/dev/null || true)"
-    paid_status="$(printf '%s' "$paid_status" | tr -d '"[:space:]')"
-    assert_eq "$paid_status" "200" "browser paid call expected 200 (url=$call_url)"
-    log "browser paid call ok status=$paid_status"
+    browser_proof="$(ab eval "fetch('${call_url}', { headers: { Authorization: 'Bearer ${E2E_API_KEY}' } }).then((r) => ({ status: r.status, cost: r.headers.get('x-zevium-cost'), requestId: r.headers.get('x-zevium-request-id') }))" 2>/dev/null || true)"
+    browser_status="$(node -e 'const x=JSON.parse(process.argv[1]); console.log(x.status)' "$browser_proof" 2>/dev/null || true)"
+    browser_cost="$(node -e 'const x=JSON.parse(process.argv[1]); console.log(x.cost)' "$browser_proof" 2>/dev/null || true)"
+    browser_request_id="$(node -e 'const x=JSON.parse(process.argv[1]); console.log(x.requestId)' "$browser_proof" 2>/dev/null || true)"
+    assert_eq "$browser_status" "200" "browser paid call expected 200 (url=$call_url)"
+    assert_eq "$browser_cost" "$direct_cost" "browser paid call cost changed"
+    [[ "$browser_request_id" =~ ^[A-Za-z0-9_-]{8,}$ ]] \
+      || fail "browser paid call returned invalid request id"
+    [[ "$browser_request_id" != "$direct_request_id" ]] \
+      || fail "gateway reused request id across paid calls"
+    [[ "$browser_request_id" != "$ui_request_id" ]] \
+      || fail "gateway reused UI request id for browser call"
+    usage_proof_file="$E2E_ARTIFACTS/gateway-paid-call-proof.json"
+    # JavaScript program is intentionally single-quoted; all values are argv.
+    # shellcheck disable=SC2016
+    node -e '
+const { writeFileSync } = require("node:fs");
+const [path, projectSlug, uiId, directId, browserId, cost] = process.argv.slice(1);
+writeFileSync(path, `${JSON.stringify({
+  schemaVersion: 1,
+  projectSlug,
+  calls: [
+    { requestId: uiId, cost: Number(cost), status: 200, method: "GET", endpoint: "/get" },
+    { requestId: directId, cost: Number(cost), status: 200, method: "GET", endpoint: "/get" },
+    { requestId: browserId, cost: Number(cost), status: 200, method: "GET", endpoint: "/get" },
+  ],
+}, null, 2)}\n`, { mode: 0o600 });
+' "$usage_proof_file" "$api_slug" "$ui_request_id" "$direct_request_id" "$browser_request_id" "$direct_cost"
+    log "browser paid call ok status=$browser_status request=$browser_request_id"
   fi
 else
   log "GATEWAY_URL unset — skip paid call (browse-only consumer path)"

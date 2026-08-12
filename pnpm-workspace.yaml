@@ -5,6 +5,9 @@ packages:
 allowBuilds:
   "@parcel/watcher": true
   "@tailwindcss/oxide": true
+  # Package already ships native binaries. Block its postinstall because it
+  # rewrites global CLI symlinks even during local installs.
+  agent-browser: false
   bufferutil: true
   core-js: true
   esbuild: true

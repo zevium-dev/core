@@ -1,9 +1,9 @@
 
 [hooks]
-postinstall = "yes | npm i -g pnpm && pnpm install"
+postinstall = "npm install --global pnpm@11.8.0 && pnpm install --frozen-lockfile"
 
 [tasks]
 ci = "pnpm run ci:pr"
 
 [tools]
-node = "lts"
+node = "24.19.0"
