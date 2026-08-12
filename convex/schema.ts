@@ -108,11 +108,14 @@ export default defineSchema({
     refId: v.string(),
     /** Wallet sequence after this entry was atomically materialized. */
     sequence: v.number(),
+    /** Materialized wallet balance after this exact entry. */
+    balanceAfter: v.optional(v.number()),
     paymentId: v.optional(v.id("payments")),
     usageEventId: v.optional(v.id("usageEvents")),
     createdAt: v.number(),
   })
     .index("by_wallet", ["walletId"])
+    .index("by_wallet_sequence", ["walletId", "sequence"])
     .index("by_ref", ["refId"]),
 
   // Per-call metering events (gateway → Convex, async)
@@ -132,12 +135,34 @@ export default defineSchema({
      * Wallet DO ingest validates and persists it.
      */
     settleRefId: v.optional(v.string()),
+    /** One-time runner correlation. Only release probes set this. */
+    releaseChallenge: v.optional(v.string()),
+    /** Immutable gateway git SHA that handled this request. */
+    gatewayRelease: v.optional(v.string()),
   })
     .index("by_org", ["organizationId"])
     .index("by_project", ["projectId"])
     .index("by_org_at", ["organizationId", "at"])
     .index("by_project_at", ["projectId", "at"])
     .index("by_at", ["at"]),
+
+  // One-time accounting claims. A challenge can prove one settlement once.
+  releaseProbeClaims: defineTable({
+    challenge: v.string(),
+    requestId: v.string(),
+    settlementRefId: v.string(),
+    expectedGatewayRelease: v.string(),
+    claimedAt: v.number(),
+  })
+    .index("by_challenge", ["challenge"])
+    .index("by_request", ["requestId"]),
+
+  // Transactional global limiter for protected release-accounting lookups.
+  releaseProbeGates: defineTable({
+    key: v.string(),
+    windowStartedAt: v.number(),
+    count: v.number(),
+  }).index("by_key", ["key"]),
 
   // In-app notifications (org-scoped, idempotent by refId)
   notifications: defineTable({

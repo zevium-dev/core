@@ -16,6 +16,8 @@ export type UsageListItem = {
   latencyMs: number;
   keyId: string;
   at: number;
+  requestId: string | null;
+  releaseChallenge: string | null;
 };
 
 /**
@@ -92,6 +94,10 @@ export const listForOrg = query({
         latencyMs: event.latencyMs,
         keyId: event.keyId,
         at: event.at,
+        requestId: event.settleRefId?.startsWith("settle:")
+          ? event.settleRefId.slice("settle:".length)
+          : null,
+        releaseChallenge: event.releaseChallenge ?? null,
       });
     }
 

@@ -25,6 +25,10 @@ export type UsageEvent = {
   outcome: "settled" | "refunded" | "blocked" | "free";
   latencyMs: number;
   reservationId: string;
+  /** Runner-generated one-time release correlation, when this is a probe. */
+  releaseChallenge?: string;
+  /** Immutable gateway git SHA serving this request. */
+  gatewayRelease?: string;
 };
 
 /** Shape stored on pending settlements and sent to wallets:recordUsage. */
@@ -42,6 +46,8 @@ export type ConvexUsageRecord = {
   keyId: string;
   at: number;
   settleRefId: string;
+  releaseChallenge?: string;
+  gatewayRelease?: string;
 };
 
 export type SettlementOutcomeStatus =
@@ -358,6 +364,10 @@ export function usageEventToRecord(event: UsageEvent): ConvexUsageRecord {
     keyId: event.keyId,
     at: Date.now(),
     settleRefId: `settle:${event.reservationId}`,
+    ...(event.releaseChallenge
+      ? { releaseChallenge: event.releaseChallenge }
+      : {}),
+    ...(event.gatewayRelease ? { gatewayRelease: event.gatewayRelease } : {}),
   };
 }
 
@@ -373,6 +383,8 @@ export function pendingToUsageRecord(input: {
   status: number;
   latencyMs: number;
   keyId: string;
+  releaseChallenge?: string;
+  gatewayRelease?: string;
 }): ConvexUsageRecord {
   return {
     organizationId: input.organizationId,
@@ -386,6 +398,10 @@ export function pendingToUsageRecord(input: {
     keyId: input.keyId,
     at: input.settledAt,
     settleRefId: input.settlementId,
+    ...(input.releaseChallenge
+      ? { releaseChallenge: input.releaseChallenge }
+      : {}),
+    ...(input.gatewayRelease ? { gatewayRelease: input.gatewayRelease } : {}),
   };
 }
 

@@ -3,10 +3,12 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export E2E_SESSION="${E2E_SESSION:-zevium-payment-drill}"
-# shellcheck source=lib.sh
+# shellcheck source=e2e/lib.sh
 source "$SCRIPT_DIR/lib.sh"
 
 cleanup() {
+  # ShellCheck cannot infer that the EXIT trap invokes this callback.
+  # shellcheck disable=SC2317
   close_browser
 }
 trap cleanup EXIT
@@ -20,8 +22,10 @@ sign_in
 step "start Stripe Checkout"
 open_path "/app/billing"
 ab wait --text "Buy credits" >/dev/null
-if ! ab find text "Buy $10.00" click --exact >/dev/null 2>&1; then
-  ab find role button click --name "Buy $10.00" >/dev/null
+# Dollar sign is literal UI text, not parameter expansion.
+# shellcheck disable=SC2016
+if ! ab find text 'Buy $10.00' click --exact >/dev/null 2>&1; then
+  ab find role button click --name 'Buy $10.00' >/dev/null
 fi
 ab wait --url "https://checkout.stripe.com/**" >/dev/null
 

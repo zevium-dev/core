@@ -1,4 +1,5 @@
 import { mkdir, writeFile } from "node:fs/promises";
+import { randomBytes } from "node:crypto";
 import { dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -7,11 +8,14 @@ const INTEGER_RE = /^[1-9]\d*$/;
 const REQUEST_ID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const CHALLENGE_RE = /^[0-9a-f]{64}$/;
 const MEDIA_TYPE_RE =
   /^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*(?:\s*;\s*charset=[a-z0-9-]+)?$/i;
 const HTTP_METHODS = new Set(["DELETE", "GET", "HEAD", "PATCH", "POST", "PUT"]);
 const DEFAULT_ATTEMPTS = 23;
 const DEFAULT_INTERVAL_MS = 2_000;
+const MAX_PROBE_BODY_BYTES = 64 * 1024;
+const MAX_API_KEY_BYTES = 1024;
 
 export function validateRelease(release) {
   if (!SHA_RE.test(release)) {
@@ -123,7 +127,14 @@ function validateRequestBody(method, body, contentType) {
   if (typeof body !== "string" || body.length === 0) {
     throw new Error("RELEASE_PROBE_REQUEST_BODY is required for body methods");
   }
-  if (typeof contentType !== "string" || !MEDIA_TYPE_RE.test(contentType)) {
+  if (Buffer.byteLength(body, "utf8") > MAX_PROBE_BODY_BYTES) {
+    throw new Error("RELEASE_PROBE_REQUEST_BODY exceeds 64 KiB");
+  }
+  if (
+    typeof contentType !== "string" ||
+    contentType.length > 128 ||
+    !MEDIA_TYPE_RE.test(contentType)
+  ) {
     throw new Error(
       "RELEASE_PROBE_CONTENT_TYPE must be a valid media type for body methods",
     );
@@ -222,7 +233,8 @@ export function validateProbeOptions(options) {
   const meteredMethod = validateMethod(options.meteredMethod, "meteredMethod");
   if (
     typeof options.apiKey !== "string" ||
-    options.apiKey.trim().length === 0
+    options.apiKey.trim().length === 0 ||
+    Buffer.byteLength(options.apiKey, "utf8") > MAX_API_KEY_BYTES
   ) {
     throw new Error("RELEASE_PROBE_API_KEY is required");
   }
@@ -246,9 +258,10 @@ export function validateProbeOptions(options) {
   const accountingUrl = validateAccountingUrl(options.accountingUrl);
   if (
     typeof options.probeSecret !== "string" ||
-    options.probeSecret.trim().length === 0
+    options.probeSecret.length < 32 ||
+    options.probeSecret.length > 256
   ) {
-    throw new Error("RELEASE_PROBE_SECRET is required");
+    throw new Error("RELEASE_PROBE_SECRET must contain 32-256 characters");
   }
 
   return {
@@ -570,6 +583,11 @@ export async function probeRelease(options, fetchImpl = fetch) {
       return evidence;
     }
 
+    assert(
+      !legacyIdentity,
+      "paid release proof requires an immutable gateway release SHA",
+    );
+
     if (!gatewayOnly) {
       const catalogue = await runCheck("web-catalogue-ssr", async () => {
         const result = await request(
@@ -719,10 +737,23 @@ export async function probeRelease(options, fetchImpl = fetch) {
     });
     record("published-spec-mock", mock);
 
+    const challenge =
+      options.challengeFactory?.() ?? randomBytes(32).toString("hex");
+    assert(
+      typeof challenge === "string" && CHALLENGE_RE.test(challenge),
+      "release challenge generator returned invalid output",
+    );
+    const notBefore = (options.now ?? Date.now)();
+    assert(
+      Number.isSafeInteger(notBefore) && notBefore > 0,
+      "release probe clock returned invalid timestamp",
+    );
+
     const metered = await runCheck("metered-wallet-upstream", async () => {
       const init = bodyInit(meteredMethod, requestBody, requestContentType);
       const headers = new Headers(init.headers);
       headers.set("authorization", `Bearer ${apiKey}`);
+      headers.set("x-zevium-release-challenge", challenge);
       const result = await request(fetchImpl, `${gateway}${meteredPath}`, {
         ...gatewayInit({ ...init, headers }),
       });
@@ -772,9 +803,24 @@ export async function probeRelease(options, fetchImpl = fetch) {
             "content-type": "application/json",
             "x-release-probe-secret": probeSecret,
           },
-          body: JSON.stringify({ requestId: metered.requestId }),
+          body: JSON.stringify({
+            requestId: metered.requestId,
+            challenge,
+            notBefore,
+            expectedGatewayRelease: release,
+          }),
         },
         inspect: async (response) => {
+          const responseType =
+            response.headers.get("content-type")?.split(";", 1)[0]?.trim() ??
+            "";
+          if (responseType.toLowerCase() !== "application/json") {
+            return {
+              ready: false,
+              terminal: response.status !== 202,
+              reason: "accounting response content type was not JSON",
+            };
+          }
           let body;
           try {
             body = await response.json();
@@ -796,43 +842,25 @@ export async function probeRelease(options, fetchImpl = fetch) {
             };
           }
 
-          const actual = body.accounting;
           const expectedFee = Math.floor((metered.cost * 500) / 10_000);
           const expectedNet = metered.cost - expectedFee;
-          const validPublisherStatuses = new Set([
-            "pending_risk",
-            "available",
-            "allocated_to_transfer",
-            "transferred",
-          ]);
           const exact =
-            actual?.requestId === metered.requestId &&
-            actual?.settlementRefId === `settle:${metered.requestId}` &&
-            actual?.usage?.credits === metered.cost &&
-            actual?.usage?.status === metered.status &&
-            actual?.usage?.method === meteredMethod &&
-            actual?.usage?.endpoint === target.endpoint &&
-            actual?.ledger?.kind === "usage_settlement" &&
-            actual?.ledger?.amount === -metered.cost &&
-            Number.isSafeInteger(actual?.ledger?.sequence) &&
-            actual.ledger.sequence > 0 &&
-            actual?.publisher?.publicHandle === target.publisherHandle &&
-            actual?.publisher?.projectSlug === target.slug &&
-            actual?.publisher?.grossCredits === metered.cost &&
-            actual?.publisher?.platformFeeCredits === expectedFee &&
-            actual?.publisher?.netCredits === expectedNet &&
-            validPublisherStatuses.has(actual?.publisher?.status);
+            Object.keys(body).length === 6 &&
+            body.requestId === metered.requestId &&
+            body.challenge === challenge &&
+            body.credits === metered.cost &&
+            body.platformFeeCredits === expectedFee &&
+            body.publisherNetCredits === expectedNet;
           if (!exact) {
             return {
               ready: false,
               terminal: true,
-              reason: "usage, ledger, or publisher accounting mismatch",
+              reason: "request challenge or accounting mismatch",
             };
           }
           return {
             ready: true,
             requestId: metered.requestId,
-            settlementRefId: actual.settlementRefId,
             cost: metered.cost,
             platformFeeCredits: expectedFee,
             publisherNetCredits: expectedNet,
@@ -842,7 +870,6 @@ export async function probeRelease(options, fetchImpl = fetch) {
     );
     record("authoritative-usage-accounting", accounting, {
       requestId: accounting.requestId,
-      settlementRefId: accounting.settlementRefId,
       cost: accounting.cost,
       platformFeeCredits: accounting.platformFeeCredits,
       publisherNetCredits: accounting.publisherNetCredits,

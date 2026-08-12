@@ -4,7 +4,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export E2E_SESSION="${E2E_SESSION:-zevium-e2e-publisher}"
-# shellcheck source=lib.sh
+# shellcheck source=e2e/lib.sh
 source "$SCRIPT_DIR/lib.sh"
 
 cleanup() {

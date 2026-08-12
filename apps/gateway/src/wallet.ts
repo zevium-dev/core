@@ -56,6 +56,10 @@ export type SettlementUsage = {
   status: number;
   latencyMs: number;
   keyId: string;
+  /** Present only for authenticated release probes. */
+  releaseChallenge?: string;
+  /** Immutable git SHA stamped into gateway build. */
+  gatewayRelease?: string;
 };
 
 export type PendingSettlement = {
@@ -856,6 +860,8 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
           status: usage.status,
           latencyMs: usage.latencyMs,
           keyId: usage.keyId,
+          releaseChallenge: usage.releaseChallenge,
+          gatewayRelease: usage.gatewayRelease,
         }),
       );
     }

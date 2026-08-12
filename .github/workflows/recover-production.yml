@@ -1,0 +1,633 @@
+name: Recover Production Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      failed_run_id:
+        description: Failed or cancelled Deploy Production / Gateway DO Lifecycle run ID
+        required: true
+        type: string
+      strategy:
+        description: Bounded recovery direction
+        required: true
+        type: choice
+        options: [auto, roll-forward, rollback]
+
+concurrency:
+  group: production-release
+  cancel-in-progress: false
+
+permissions:
+  actions: read
+  contents: read
+
+env:
+  CLOUDFLARE_ACCOUNT_ID: 1ea9299555b026a6a7484c8323c5a953
+  PRODUCTION_CONVEX_URL: https://polite-ermine-809.convex.cloud
+  PRODUCTION_CONVEX_SITE_URL: https://polite-ermine-809.convex.site
+  PRODUCTION_WEB_URL: https://www.zevium.dev
+  PRODUCTION_GATEWAY_URL: https://gateway.zevium.dev
+
+jobs:
+  resolve:
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 5
+    outputs:
+      run_id: ${{ steps.run.outputs.run_id }}
+      release: ${{ steps.run.outputs.release }}
+      workflow_path: ${{ steps.run.outputs.workflow_path }}
+      artifact_name: ${{ steps.run.outputs.artifact_name }}
+      artifact_id: ${{ steps.run.outputs.artifact_id }}
+      run_attempt: ${{ steps.run.outputs.run_attempt }}
+      lifecycle: ${{ steps.run.outputs.lifecycle }}
+    steps:
+      - name: Resolve failed run and exact recovery artifact without checkout
+        id: run
+        env:
+          FAILED_RUN_ID: ${{ inputs.failed_run_id }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          test "$(gh api "repos/$GITHUB_REPOSITORY/commits/develop" --jq .sha)" = "$GITHUB_SHA"
+          [[ "$FAILED_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          run_json="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$FAILED_RUN_ID")"
+          artifacts_json="$(gh api --method GET \
+            "repos/$GITHUB_REPOSITORY/actions/runs/$FAILED_RUN_ID/artifacts" -f per_page=100)"
+          # JavaScript template literals are intentionally protected from shell expansion.
+          # shellcheck disable=SC2016
+          RUN_JSON="$run_json" ARTIFACTS_JSON="$artifacts_json" node -e '
+            const run=JSON.parse(process.env.RUN_JSON);
+            const artifacts=JSON.parse(process.env.ARTIFACTS_JSON).artifacts ?? [];
+            const allowed=new Set(["failure","cancelled","timed_out"]);
+            const paths=new Set([".github/workflows/deploy-production.yml",".github/workflows/gateway-do-lifecycle.yml"]);
+            const expectedEvents=run.path?.endsWith("gateway-do-lifecycle.yml")
+              ? new Set(["workflow_dispatch"])
+              : new Set(["workflow_dispatch","workflow_run"]);
+            if (!paths.has(run.path) || run.status !== "completed" || !allowed.has(run.conclusion) ||
+                run.head_branch !== "develop" || !expectedEvents.has(run.event) ||
+                !/^[0-9a-f]{40}$/.test(run.head_sha) || !Number.isSafeInteger(run.run_attempt) || run.run_attempt < 1) {
+              throw new Error("run is not recoverable production workflow");
+            }
+            const lifecycle=run.path.endsWith("gateway-do-lifecycle.yml");
+            const preferred=lifecycle
+              ? [`lifecycle-recovery-final-${run.id}-${run.run_attempt}`,`lifecycle-recovery-${run.id}-${run.run_attempt}`]
+              : [`recovery-manifest-final-${run.id}-${run.run_attempt}`,`recovery-manifest-initial-${run.id}-${run.run_attempt}`];
+            let selected;
+            for (const name of preferred) {
+              const matches=artifacts.filter((artifact)=>artifact.name===name && !artifact.expired);
+              if (matches.length > 1) throw new Error("recovery manifest artifact is ambiguous");
+              if (matches.length === 1) { selected=matches[0]; break; }
+            }
+            if (!selected || !Number.isSafeInteger(selected.id) || selected.id < 1) {
+              throw new Error("recovery manifest artifact unavailable");
+            }
+            const out=process.env.GITHUB_OUTPUT;
+            require("node:fs").appendFileSync(out,`run_id=${run.id}\nrun_attempt=${run.run_attempt}\nrelease=${run.head_sha}\nworkflow_path=${run.path}\nartifact_name=${selected.name}\nartifact_id=${selected.id}\nlifecycle=${lifecycle}\n`);
+          '
+          run_head="$(RUN_JSON="$run_json" node -e 'process.stdout.write(JSON.parse(process.env.RUN_JSON).head_sha)')"
+          gh api "repos/$GITHUB_REPOSITORY/compare/$run_head...$GITHUB_SHA" \
+            --jq '.status == "ahead" or .status == "identical"' | grep -qx true
+
+  recover:
+    needs: resolve
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 40
+    environment: production-recovery
+    permissions:
+      actions: read
+      attestations: write
+      contents: read
+      id-token: write
+    env:
+      FAILED_RUN_ID: ${{ needs.resolve.outputs.run_id }}
+      RELEASE_SHA: ${{ needs.resolve.outputs.release }}
+      SOURCE_WORKFLOW_PATH: ${{ needs.resolve.outputs.workflow_path }}
+      RECOVERY_ARTIFACT: ${{ needs.resolve.outputs.artifact_name }}
+      SOURCE_RUN_ATTEMPT: ${{ needs.resolve.outputs.run_attempt }}
+      IS_LIFECYCLE: ${{ needs.resolve.outputs.lifecycle }}
+      RECOVERY_STRATEGY: ${{ inputs.strategy }}
+      RELEASE_PROBE_MOCK_PATH: ${{ vars.RELEASE_PROBE_MOCK_PATH }}
+      RELEASE_PROBE_MOCK_METHOD: ${{ vars.RELEASE_PROBE_MOCK_METHOD }}
+      RELEASE_PROBE_METERED_PATH: ${{ vars.RELEASE_PROBE_METERED_PATH }}
+      RELEASE_PROBE_METERED_METHOD: ${{ vars.RELEASE_PROBE_METERED_METHOD }}
+      RELEASE_PROBE_CONTENT_TYPE: ${{ vars.RELEASE_PROBE_CONTENT_TYPE }}
+      RELEASE_PROBE_CONSUMER_ORG_SLUG: ${{ vars.RELEASE_PROBE_CONSUMER_ORG_SLUG }}
+      RELEASE_PROBE_CONSUMER_MEMBER_USER_ID: ${{ vars.RELEASE_PROBE_CONSUMER_MEMBER_USER_ID }}
+      RELEASE_PROBE_API_KEY_ID: ${{ vars.RELEASE_PROBE_API_KEY_ID }}
+    steps:
+      - name: Candidate-independent failed-run guard before checkout or setup
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          test "$(gh api "repos/$GITHUB_REPOSITORY/commits/develop" --jq .sha)" = "$GITHUB_SHA"
+          run_json="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$FAILED_RUN_ID")"
+          RUN_JSON="$run_json" node -e '
+            const run=JSON.parse(process.env.RUN_JSON);
+            const expectedEvents=run.path?.endsWith("gateway-do-lifecycle.yml")
+              ? new Set(["workflow_dispatch"])
+              : new Set(["workflow_dispatch","workflow_run"]);
+            if (run.head_sha !== process.env.RELEASE_SHA || run.path !== process.env.SOURCE_WORKFLOW_PATH ||
+                run.run_attempt !== Number(process.env.SOURCE_RUN_ATTEMPT) ||
+                run.head_branch !== "develop" || !expectedEvents.has(run.event) ||
+                run.status !== "completed" || !new Set(["failure","cancelled","timed_out"]).has(run.conclusion)) {
+              throw new Error("failed run identity changed");
+            }
+          '
+          gh api "repos/$GITHUB_REPOSITORY/compare/$RELEASE_SHA...$GITHUB_SHA" \
+            --jq '.status == "ahead" or .status == "identical"' | grep -qx true
+
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ needs.resolve.outputs.release }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25
+        with:
+          path: ~/.local/share/pnpm/store
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+      - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903
+        with:
+          node-version: 24.15.0
+      - name: Install pinned pnpm dependencies
+        run: |
+          corepack enable
+          corepack prepare pnpm@11.8.0 --activate
+          pnpm install --frozen-lockfile
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          artifact-ids: ${{ needs.resolve.outputs.artifact_id }}
+          path: recovery-evidence
+          repository: ${{ github.repository }}
+          run-id: ${{ needs.resolve.outputs.run_id }}
+          github-token: ${{ github.token }}
+          merge-multiple: true
+
+      - name: Normalize and validate immutable recovery manifest
+        id: manifest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p recovery-evidence
+          if [[ "$IS_LIFECYCLE" = true ]]; then
+            source_manifest="recovery-evidence/lifecycle-recovery-manifest.json"
+            test -f "$source_manifest"
+            # JavaScript template literals are intentionally protected from shell expansion.
+            # shellcheck disable=SC2016
+            SOURCE_MANIFEST="$source_manifest" node -e '
+              const fs=require("node:fs");
+              const source=JSON.parse(fs.readFileSync(process.env.SOURCE_MANIFEST,"utf8"));
+              if (source.release !== process.env.RELEASE_SHA || source.source?.runId !== Number(process.env.FAILED_RUN_ID) ||
+                  !/^[0-9a-f]{40}$/.test(source.protectedTarget ?? "") ||
+                  !/^[0-9a-f]{40}$/.test(source.protectedBase ?? "") ||
+                  source.lifecycle?.rollbackAllowed !== false) throw new Error("lifecycle recovery manifest mismatch");
+              const normalized={...source,state:source.state,
+                gateway:{...source.gateway},web:{...source.web}};
+              fs.writeFileSync("recovery-evidence/recovery-manifest.json",JSON.stringify(normalized,null,2)+"\n",{mode:0o600});
+              fs.appendFileSync(process.env.GITHUB_ENV,`LIFECYCLE_TARGET_SHA=${source.protectedTarget}\n`);
+              fs.appendFileSync(process.env.GITHUB_ENV,`LIFECYCLE_PROTECTED_BASE=${source.protectedBase}\n`);
+            '
+          else
+            test -f recovery-evidence/recovery-manifest.json
+            progress_dir="$RUNNER_TEMP/recovery-progress"
+            if gh run download "$FAILED_RUN_ID" --repo "$GITHUB_REPOSITORY" \
+              --name "production-release-$RELEASE_SHA-$FAILED_RUN_ID-$SOURCE_RUN_ATTEMPT" \
+              --dir "$progress_dir" >/dev/null 2>&1; then
+              state_path="$(find "$progress_dir" -name state.json -type f -print -quit)"
+              if [[ -n "$state_path" ]]; then
+                MANIFEST=recovery-evidence/recovery-manifest.json STATE_PATH="$state_path" node -e '
+                  const fs=require("node:fs");
+                  const manifest=JSON.parse(fs.readFileSync(process.env.MANIFEST,"utf8"));
+                  const state=JSON.parse(fs.readFileSync(process.env.STATE_PATH,"utf8"));
+                  const safe=new Set(["rollback_pointers_captured_no_traffic_mutation","artifacts_uploaded_no_traffic_mutation"]);
+                  const last=state.lastVerifiedState ?? state.state;
+                  if (state.state === "aborted_without_traffic_change" && safe.has(last)) {
+                    manifest.lastVerifiedState=last;
+                    fs.writeFileSync(process.env.MANIFEST,JSON.stringify(manifest,null,2)+"\n",{mode:0o600});
+                  }
+                '
+              fi
+            fi
+          fi
+          MANIFEST=recovery-evidence/recovery-manifest.json node -e '
+            const row=JSON.parse(require("node:fs").readFileSync(process.env.MANIFEST,"utf8"));
+            if (row.release !== process.env.RELEASE_SHA || row.source?.runId !== Number(process.env.FAILED_RUN_ID) ||
+                row.source?.workflowPath !== process.env.SOURCE_WORKFLOW_PATH ||
+                row.source?.runAttempt !== Number(process.env.SOURCE_RUN_ATTEMPT)) {
+              throw new Error("recovery manifest is not bound to failed run");
+            }
+          '
+          manifest_kind="$(node .github/scripts/release-state.mjs validate-recovery recovery-evidence)"
+          if [[ "$manifest_kind" = intent ]]; then
+            echo "bootstrap=true" >> "$GITHUB_OUTPUT"
+          elif [[ "$manifest_kind" = manifest ]]; then
+            echo "bootstrap=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "unknown recovery artifact kind" >&2
+            exit 1
+          fi
+
+      - name: Build exact web artifact for possible roll-forward bootstrap
+        if: steps.manifest.outputs.bootstrap == 'true'
+        env:
+          VITE_RELEASE_SHA: ${{ env.RELEASE_SHA }}
+          CLERK_PUBLISHABLE_KEY: ${{ secrets.CLERK_PRODUCTION_PUBLISHABLE_KEY }}
+          CLERK_SECRET_KEY: ${{ secrets.CLERK_PRODUCTION_SECRET_KEY }}
+        run: pnpm --filter web build
+
+      - name: Guard failed-run identity and roll Convex forward when state is ambiguous
+        if: steps.manifest.outputs.bootstrap == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_PRODUCTION_DEPLOY_KEY }}
+          EXPECTED_CONVEX_URL: ${{ env.PRODUCTION_CONVEX_URL }}
+        run: |
+          record_signal() { node .github/scripts/release-state.mjs ambiguous recovery-evidence "$1" || true; exit 143; }
+          trap 'record_signal SIGINT' INT
+          trap 'record_signal SIGTERM' TERM
+          test "$(gh api "repos/$GITHUB_REPOSITORY/commits/develop" --jq .sha)" = "$GITHUB_SHA"
+          run_json="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$FAILED_RUN_ID")"
+          RUN_JSON="$run_json" node -e '
+            const run=JSON.parse(process.env.RUN_JSON);
+            if (run.head_sha !== process.env.RELEASE_SHA || run.path !== process.env.SOURCE_WORKFLOW_PATH ||
+                run.run_attempt !== Number(process.env.SOURCE_RUN_ATTEMPT) || run.status !== "completed" ||
+                !new Set(["failure","cancelled","timed_out"]).has(run.conclusion)) throw new Error("failed run drift");
+          '
+          convex_dry_run="$(pnpm exec convex deploy --dry-run --yes --codegen disable --typecheck disable 2>&1)"
+          printf '%s' "$convex_dry_run" | node .github/scripts/release-contract.mjs --validate-convex-dry-run=true
+          pnpm exec convex deploy --yes --message "protected recovery roll-forward $RELEASE_SHA"
+
+      - name: Guard active metadata and upload normal replacement candidates
+        if: steps.manifest.outputs.bootstrap == 'true' && env.IS_LIFECYCLE != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          test "$(gh api "repos/$GITHUB_REPOSITORY/commits/develop" --jq .sha)" = "$GITHUB_SHA"
+          run_json="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$FAILED_RUN_ID")"
+          RUN_JSON="$run_json" node -e '
+            const run=JSON.parse(process.env.RUN_JSON);
+            if (run.head_sha !== process.env.RELEASE_SHA || run.path !== process.env.SOURCE_WORKFLOW_PATH ||
+                run.run_attempt !== Number(process.env.SOURCE_RUN_ATTEMPT) || run.status !== "completed" ||
+                !new Set(["failure","cancelled","timed_out"]).has(run.conclusion)) throw new Error("failed run drift");
+          '
+          pnpm --filter web exec wrangler deployments list --config dist/server/wrangler.json --json \
+            > "$RUNNER_TEMP/recovery-web-before.json"
+          web_active="$(node .github/scripts/release-state.mjs get-active-version "$RUNNER_TEMP/recovery-web-before.json")"
+          pnpm --filter web exec wrangler versions view "$web_active" --config dist/server/wrangler.json --json \
+            > "$RUNNER_TEMP/recovery-web-active.json"
+          ACTIVE_ID="$web_active" VERSION_JSON="$RUNNER_TEMP/recovery-web-active.json" node -e '
+            const row=require(process.env.VERSION_JSON).result ?? require(process.env.VERSION_JSON);
+            if ((row.id ?? row.version_id) !== process.env.ACTIVE_ID) throw new Error("web active metadata mismatch");
+          '
+          WRANGLER_OUTPUT_FILE=recovery-evidence/web-upload.ndjson \
+            pnpm --filter web exec wrangler versions upload --config dist/server/wrangler.json \
+              --strict --tag "recovery-$RELEASE_SHA-$GITHUB_RUN_ID"
+
+          test "$(gh api "repos/$GITHUB_REPOSITORY/commits/develop" --jq .sha)" = "$GITHUB_SHA"
+          run_json="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$FAILED_RUN_ID")"
+          RUN_JSON="$run_json" node -e '
+            const run=JSON.parse(process.env.RUN_JSON);
+            if (run.head_sha !== process.env.RELEASE_SHA || run.path !== process.env.SOURCE_WORKFLOW_PATH ||
+                run.run_attempt !== Number(process.env.SOURCE_RUN_ATTEMPT) || run.status !== "completed" ||
+                !new Set(["failure","cancelled","timed_out"]).has(run.conclusion)) throw new Error("failed run drift");
+          '
+          active_base="$(MANIFEST=recovery-evidence/recovery-manifest.json node -e 'process.stdout.write(JSON.parse(require("node:fs").readFileSync(process.env.MANIFEST,"utf8")).activeBase)')"
+          phase="$(MANIFEST=recovery-evidence/recovery-manifest.json node -e 'process.stdout.write(JSON.parse(require("node:fs").readFileSync(process.env.MANIFEST,"utf8")).lifecycle.phase)')"
+          git show "$active_base:apps/gateway/wrangler.jsonc" > "$RUNNER_TEMP/recovery-active.jsonc"
+          pnpm --filter gateway exec wrangler deployments list --json > "$RUNNER_TEMP/recovery-gateway-before.json"
+          gateway_active="$(node .github/scripts/release-state.mjs get-active-version "$RUNNER_TEMP/recovery-gateway-before.json")"
+          pnpm --filter gateway exec wrangler versions view "$gateway_active" --json > "$RUNNER_TEMP/recovery-gateway-active.json"
+          if ! node .github/scripts/release-lifecycle.mjs verify-remote \
+            --candidate=apps/gateway/wrangler.jsonc \
+            --active-version="$RUNNER_TEMP/recovery-gateway-active.json" \
+            --expected-version="$gateway_active"; then
+            node .github/scripts/release-lifecycle.mjs check-dedicated \
+              --base="$RUNNER_TEMP/recovery-active.jsonc" \
+              --candidate=apps/gateway/wrangler.jsonc \
+              --active-version="$RUNNER_TEMP/recovery-gateway-active.json" \
+              --expected-version="$gateway_active" \
+              --phase="$phase"
+          fi
+          WRANGLER_OUTPUT_FILE=recovery-evidence/gateway-upload.ndjson \
+            pnpm --filter gateway exec wrangler versions upload --strict \
+              --tag "recovery-$RELEASE_SHA-$GITHUB_RUN_ID" \
+              --var "ZEVIUM_RELEASE:$RELEASE_SHA" \
+              --var "CONVEX_URL:$PRODUCTION_CONVEX_URL" \
+              --var "CONVEX_SITE_URL:$PRODUCTION_CONVEX_SITE_URL"
+
+      - name: Re-resolve and apply lifecycle roll-forward, then upload web candidate
+        if: steps.manifest.outputs.bootstrap == 'true' && env.IS_LIFECYCLE == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          record_signal() { node .github/scripts/release-state.mjs ambiguous recovery-evidence "$1" || true; exit 143; }
+          trap 'record_signal SIGINT' INT
+          trap 'record_signal SIGTERM' TERM
+          test "$(gh api "repos/$GITHUB_REPOSITORY/commits/develop" --jq .sha)" = "$GITHUB_SHA"
+          run_json="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$FAILED_RUN_ID")"
+          RUN_JSON="$run_json" node -e '
+            const run=JSON.parse(process.env.RUN_JSON);
+            if (run.head_sha !== process.env.RELEASE_SHA || run.path !== process.env.SOURCE_WORKFLOW_PATH ||
+                run.run_attempt !== Number(process.env.SOURCE_RUN_ATTEMPT) || run.status !== "completed" ||
+                !new Set(["failure","cancelled","timed_out"]).has(run.conclusion)) throw new Error("failed run drift");
+          '
+          active_base="$(MANIFEST=recovery-evidence/recovery-manifest.json node -e 'process.stdout.write(JSON.parse(require("node:fs").readFileSync(process.env.MANIFEST,"utf8")).activeBase)')"
+          phase="$(MANIFEST=recovery-evidence/recovery-manifest.json node -e 'process.stdout.write(JSON.parse(require("node:fs").readFileSync(process.env.MANIFEST,"utf8")).lifecycle.phase)')"
+          gateway_previous="$(MANIFEST=recovery-evidence/recovery-manifest.json node -e 'process.stdout.write(JSON.parse(require("node:fs").readFileSync(process.env.MANIFEST,"utf8")).gateway.previousVersion)')"
+          git show "$active_base:apps/gateway/wrangler.jsonc" > "$RUNNER_TEMP/recovery-lifecycle-base.jsonc"
+          pnpm --filter gateway exec wrangler deployments list --json \
+            > "$RUNNER_TEMP/recovery-lifecycle-current.json"
+          gateway_current="$(node .github/scripts/release-state.mjs get-active-version \
+            "$RUNNER_TEMP/recovery-lifecycle-current.json")"
+          pnpm --filter gateway exec wrangler versions view "$gateway_current" --json \
+            > "$RUNNER_TEMP/recovery-lifecycle-current-version.json"
+          if node .github/scripts/release-lifecycle.mjs verify-remote \
+            --candidate=apps/gateway/wrangler.jsonc \
+            --active-version="$RUNNER_TEMP/recovery-lifecycle-current-version.json" \
+            --expected-version="$gateway_current"; then
+            gateway_candidate="$gateway_current"
+          else
+            test "$gateway_current" = "$gateway_previous"
+            node .github/scripts/release-lifecycle.mjs check-dedicated \
+              --base="$RUNNER_TEMP/recovery-lifecycle-base.jsonc" \
+              --candidate=apps/gateway/wrangler.jsonc \
+              --active-version="$RUNNER_TEMP/recovery-lifecycle-current-version.json" \
+              --expected-version="$gateway_current" \
+              --phase="$phase"
+            test "$(gh api "repos/$GITHUB_REPOSITORY/commits/develop" --jq .sha)" = "$GITHUB_SHA"
+            pnpm --filter gateway exec wrangler deploy --strict \
+              --tag "recovery-$RELEASE_SHA-$GITHUB_RUN_ID" \
+              --var "ZEVIUM_RELEASE:$RELEASE_SHA" \
+              --var "CONVEX_URL:$PRODUCTION_CONVEX_URL" \
+              --var "CONVEX_SITE_URL:$PRODUCTION_CONVEX_SITE_URL"
+            pnpm --filter gateway exec wrangler deployments list --json \
+              > "$RUNNER_TEMP/recovery-lifecycle-after.json"
+            gateway_candidate="$(node .github/scripts/release-state.mjs get-active-version \
+              "$RUNNER_TEMP/recovery-lifecycle-after.json")"
+            pnpm --filter gateway exec wrangler versions view "$gateway_candidate" --json \
+              > "$RUNNER_TEMP/recovery-lifecycle-after-version.json"
+            node .github/scripts/release-lifecycle.mjs verify-remote \
+              --candidate=apps/gateway/wrangler.jsonc \
+              --active-version="$RUNNER_TEMP/recovery-lifecycle-after-version.json" \
+              --expected-version="$gateway_candidate"
+          fi
+
+          web_previous="$(MANIFEST=recovery-evidence/recovery-manifest.json node -e 'process.stdout.write(JSON.parse(require("node:fs").readFileSync(process.env.MANIFEST,"utf8")).web.previousVersion)')"
+          pnpm --filter web exec wrangler deployments list --config dist/server/wrangler.json --json \
+            > "$RUNNER_TEMP/recovery-lifecycle-web-current.json"
+          web_current="$(node .github/scripts/release-state.mjs get-active-version \
+            "$RUNNER_TEMP/recovery-lifecycle-web-current.json")"
+          test "$web_current" = "$web_previous"
+          pnpm --filter web exec wrangler versions view "$web_current" \
+            --config dist/server/wrangler.json --json \
+            > "$RUNNER_TEMP/recovery-lifecycle-web-version.json"
+          ACTIVE_ID="$web_current" VERSION_JSON="$RUNNER_TEMP/recovery-lifecycle-web-version.json" node -e '
+            const row=require(process.env.VERSION_JSON).result ?? require(process.env.VERSION_JSON);
+            if ((row.id ?? row.version_id) !== process.env.ACTIVE_ID) throw new Error("web active metadata mismatch");
+          '
+          test "$(gh api "repos/$GITHUB_REPOSITORY/commits/develop" --jq .sha)" = "$GITHUB_SHA"
+          WRANGLER_OUTPUT_FILE=recovery-evidence/web-upload.ndjson \
+            pnpm --filter web exec wrangler versions upload --config dist/server/wrangler.json \
+              --strict --tag "recovery-$RELEASE_SHA-$GITHUB_RUN_ID"
+          web_candidate="$(node .github/scripts/release-state.mjs get-uploaded-version \
+            recovery-evidence/web-upload.ndjson)"
+          GATEWAY_CANDIDATE="$gateway_candidate" WEB_CANDIDATE="$web_candidate" node -e '
+            const fs=require("node:fs"); const path="recovery-evidence/recovery-manifest.json";
+            const row=JSON.parse(fs.readFileSync(path,"utf8"));
+            row.gateway.candidateVersion=process.env.GATEWAY_CANDIDATE;
+            row.web.candidateVersion=process.env.WEB_CANDIDATE;
+            row.state="lifecycle_recovery_candidates_resolved";
+            fs.writeFileSync(path,JSON.stringify(row,null,2)+"\n",{mode:0o600});
+          '
+
+      - name: Bind replacement candidate IDs into recovery manifest
+        if: steps.manifest.outputs.bootstrap == 'true' && env.IS_LIFECYCLE != 'true'
+        run: |
+          gateway_candidate="$(node .github/scripts/release-state.mjs get-uploaded-version recovery-evidence/gateway-upload.ndjson)"
+          web_candidate="$(node .github/scripts/release-state.mjs get-uploaded-version recovery-evidence/web-upload.ndjson)"
+          GATEWAY_CANDIDATE="$gateway_candidate" WEB_CANDIDATE="$web_candidate" node -e '
+            const fs=require("node:fs"); const path="recovery-evidence/recovery-manifest.json";
+            const row=JSON.parse(fs.readFileSync(path,"utf8"));
+            row.gateway.candidateVersion=process.env.GATEWAY_CANDIDATE;
+            row.web.candidateVersion=process.env.WEB_CANDIDATE;
+            row.state="recovery_candidates_uploaded";
+            fs.writeFileSync(path,JSON.stringify(row,null,2)+"\n",{mode:0o600});
+          '
+
+      - name: Re-resolve bounded provider state and choose recovery plan
+        id: plan
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          gateway_previous="$(MANIFEST=recovery-evidence/recovery-manifest.json node -e 'process.stdout.write(JSON.parse(require("node:fs").readFileSync(process.env.MANIFEST,"utf8")).gateway.previousVersion)')"
+          gateway_candidate="$(MANIFEST=recovery-evidence/recovery-manifest.json node -e 'process.stdout.write(JSON.parse(require("node:fs").readFileSync(process.env.MANIFEST,"utf8")).gateway.candidateVersion)')"
+          web_previous="$(MANIFEST=recovery-evidence/recovery-manifest.json node -e 'process.stdout.write(JSON.parse(require("node:fs").readFileSync(process.env.MANIFEST,"utf8")).web.previousVersion)')"
+          web_candidate="$(MANIFEST=recovery-evidence/recovery-manifest.json node -e 'process.stdout.write(JSON.parse(require("node:fs").readFileSync(process.env.MANIFEST,"utf8")).web.candidateVersion)')"
+          pnpm --filter gateway exec wrangler deployments list --json > recovery-evidence/gateway-current.json
+          pnpm --filter web exec wrangler deployments list --config dist/server/wrangler.json --json \
+            > recovery-evidence/web-current.json
+          gateway_observed="$(node .github/scripts/release-state.mjs get-bounded-version \
+            recovery-evidence/gateway-current.json "$gateway_previous" "$gateway_candidate")"
+          web_observed="$(node .github/scripts/release-state.mjs get-bounded-version \
+            recovery-evidence/web-current.json "$web_previous" "$web_candidate")"
+          GATEWAY_OBSERVED="$gateway_observed" WEB_OBSERVED="$web_observed" node -e '
+            const fs=require("node:fs"); const path="recovery-evidence/recovery-manifest.json";
+            const row=JSON.parse(fs.readFileSync(path,"utf8"));
+            row.observed={gateway:process.env.GATEWAY_OBSERVED,web:process.env.WEB_OBSERVED};
+            fs.writeFileSync(path,JSON.stringify(row,null,2)+"\n",{mode:0o600});
+          '
+          plan_json="$(node .github/scripts/release-state.mjs plan-recovery recovery-evidence "$RECOVERY_STRATEGY")"
+          # JavaScript template literals are intentionally protected from shell expansion.
+          # shellcheck disable=SC2016
+          PLAN_JSON="$plan_json" node -e '
+            const row=JSON.parse(process.env.PLAN_JSON); const fs=require("node:fs");
+            fs.appendFileSync(process.env.GITHUB_OUTPUT,`action=${row.action}\nrelease=${row.release}\ngateway=${row.gatewayVersion}\nweb=${row.webVersion}\nconvex=${row.requiresConvexRollForward}\n`);
+          '
+
+      - name: Guard failed-run identity and roll ambiguous Convex state forward
+        if: steps.plan.outputs.convex == 'true' && steps.manifest.outputs.bootstrap != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_PRODUCTION_DEPLOY_KEY }}
+          EXPECTED_CONVEX_URL: ${{ env.PRODUCTION_CONVEX_URL }}
+        run: |
+          record_signal() { node .github/scripts/release-state.mjs ambiguous recovery-evidence "$1" || true; exit 143; }
+          trap 'record_signal SIGINT' INT
+          trap 'record_signal SIGTERM' TERM
+          test "$(gh api "repos/$GITHUB_REPOSITORY/commits/develop" --jq .sha)" = "$GITHUB_SHA"
+          run_json="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$FAILED_RUN_ID")"
+          RUN_JSON="$run_json" node -e '
+            const run=JSON.parse(process.env.RUN_JSON);
+            if (run.head_sha !== process.env.RELEASE_SHA || run.path !== process.env.SOURCE_WORKFLOW_PATH ||
+                run.run_attempt !== Number(process.env.SOURCE_RUN_ATTEMPT) || run.status !== "completed" ||
+                !new Set(["failure","cancelled","timed_out"]).has(run.conclusion)) throw new Error("failed run drift");
+          '
+          convex_dry_run="$(pnpm exec convex deploy --dry-run --yes --codegen disable --typecheck disable 2>&1)"
+          printf '%s' "$convex_dry_run" | node .github/scripts/release-contract.mjs --validate-convex-dry-run=true
+          pnpm exec convex deploy --yes --message "protected recovery roll-forward $RELEASE_SHA"
+
+      - name: Guard bounded gateway metadata immediately before convergence
+        if: env.IS_LIFECYCLE != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          record_signal() { node .github/scripts/release-state.mjs ambiguous recovery-evidence "$1" || true; exit 143; }
+          trap 'record_signal SIGINT' INT
+          trap 'record_signal SIGTERM' TERM
+          test "$(gh api "repos/$GITHUB_REPOSITORY/commits/develop" --jq .sha)" = "$GITHUB_SHA"
+          run_json="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$FAILED_RUN_ID")"
+          RUN_JSON="$run_json" node -e '
+            const run=JSON.parse(process.env.RUN_JSON);
+            if (run.head_sha !== process.env.RELEASE_SHA || run.path !== process.env.SOURCE_WORKFLOW_PATH ||
+                run.run_attempt !== Number(process.env.SOURCE_RUN_ATTEMPT) || run.status !== "completed" ||
+                !new Set(["failure","cancelled","timed_out"]).has(run.conclusion)) throw new Error("failed run drift");
+          '
+          gateway_previous="$(MANIFEST=recovery-evidence/recovery-manifest.json node -e 'process.stdout.write(JSON.parse(require("node:fs").readFileSync(process.env.MANIFEST,"utf8")).gateway.previousVersion)')"
+          gateway_candidate="$(MANIFEST=recovery-evidence/recovery-manifest.json node -e 'process.stdout.write(JSON.parse(require("node:fs").readFileSync(process.env.MANIFEST,"utf8")).gateway.candidateVersion)')"
+          pnpm --filter gateway exec wrangler deployments list --json > "$RUNNER_TEMP/recovery-gateway-now.json"
+          node .github/scripts/release-state.mjs get-bounded-version \
+            "$RUNNER_TEMP/recovery-gateway-now.json" "$gateway_previous" "$gateway_candidate" > /dev/null
+          desired_config=apps/gateway/wrangler.jsonc
+          if [[ "${{ steps.plan.outputs.action }}" = rollback ]]; then
+            active_base="$(MANIFEST=recovery-evidence/recovery-manifest.json node -e 'process.stdout.write(JSON.parse(require("node:fs").readFileSync(process.env.MANIFEST,"utf8")).activeBase)')"
+            git show "$active_base:apps/gateway/wrangler.jsonc" > "$RUNNER_TEMP/recovery-desired.jsonc"
+            desired_config="$RUNNER_TEMP/recovery-desired.jsonc"
+          fi
+          pnpm --filter gateway exec wrangler versions view "${{ steps.plan.outputs.gateway }}" --json \
+            > "$RUNNER_TEMP/recovery-gateway-desired.json"
+          node .github/scripts/release-lifecycle.mjs verify-remote \
+            --candidate="$desired_config" --active-version="$RUNNER_TEMP/recovery-gateway-desired.json" \
+            --expected-version="${{ steps.plan.outputs.gateway }}"
+          pnpm --filter gateway exec wrangler versions deploy "${{ steps.plan.outputs.gateway }}" --yes
+
+      - name: Guard bounded web metadata immediately before convergence
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          record_signal() { node .github/scripts/release-state.mjs ambiguous recovery-evidence "$1" || true; exit 143; }
+          trap 'record_signal SIGINT' INT
+          trap 'record_signal SIGTERM' TERM
+          test "$(gh api "repos/$GITHUB_REPOSITORY/commits/develop" --jq .sha)" = "$GITHUB_SHA"
+          run_json="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$FAILED_RUN_ID")"
+          RUN_JSON="$run_json" node -e '
+            const run=JSON.parse(process.env.RUN_JSON);
+            if (run.head_sha !== process.env.RELEASE_SHA || run.path !== process.env.SOURCE_WORKFLOW_PATH ||
+                run.run_attempt !== Number(process.env.SOURCE_RUN_ATTEMPT) || run.status !== "completed" ||
+                !new Set(["failure","cancelled","timed_out"]).has(run.conclusion)) throw new Error("failed run drift");
+          '
+          web_previous="$(MANIFEST=recovery-evidence/recovery-manifest.json node -e 'process.stdout.write(JSON.parse(require("node:fs").readFileSync(process.env.MANIFEST,"utf8")).web.previousVersion)')"
+          web_candidate="$(MANIFEST=recovery-evidence/recovery-manifest.json node -e 'process.stdout.write(JSON.parse(require("node:fs").readFileSync(process.env.MANIFEST,"utf8")).web.candidateVersion)')"
+          pnpm --filter web exec wrangler deployments list --config dist/server/wrangler.json --json \
+            > "$RUNNER_TEMP/recovery-web-now.json"
+          node .github/scripts/release-state.mjs get-bounded-version \
+            "$RUNNER_TEMP/recovery-web-now.json" "$web_previous" "$web_candidate" > /dev/null
+          pnpm --filter web exec wrangler versions view "${{ steps.plan.outputs.web }}" \
+            --config dist/server/wrangler.json --json > "$RUNNER_TEMP/recovery-web-desired.json"
+          ACTIVE_ID="${{ steps.plan.outputs.web }}" VERSION_JSON="$RUNNER_TEMP/recovery-web-desired.json" node -e '
+            const row=require(process.env.VERSION_JSON).result ?? require(process.env.VERSION_JSON);
+            if ((row.id ?? row.version_id) !== process.env.ACTIVE_ID) throw new Error("web desired metadata mismatch");
+          '
+          pnpm --filter web exec wrangler versions deploy --config dist/server/wrangler.json \
+            "${{ steps.plan.outputs.web }}" --yes
+
+      - name: Prove recovered paid accounting with runtime Clerk key
+        env:
+          CLERK_PRODUCTION_SECRET_KEY: ${{ secrets.CLERK_PRODUCTION_SECRET_KEY }}
+          RELEASE_PROBE_REQUEST_BODY: ${{ secrets.PRODUCTION_RELEASE_PROBE_REQUEST_BODY }}
+          RELEASE_PROBE_SECRET: ${{ secrets.PRODUCTION_RELEASE_PROBE_SECRET }}
+        run: |
+          expected_release="${{ steps.plan.outputs.release }}"
+          if [[ "${{ steps.plan.outputs.action }}" = rollback ]]; then
+            expected_release="$(MANIFEST=recovery-evidence/recovery-manifest.json node -e 'process.stdout.write(JSON.parse(require("node:fs").readFileSync(process.env.MANIFEST,"utf8")).activeBase)')"
+          fi
+          node .github/scripts/with-clerk-release-key.mjs \
+            --clerk-secret-env=CLERK_PRODUCTION_SECRET_KEY \
+            --org-slug="$RELEASE_PROBE_CONSUMER_ORG_SLUG" \
+            --member-user-id="$RELEASE_PROBE_CONSUMER_MEMBER_USER_ID" \
+            --key-id="$RELEASE_PROBE_API_KEY_ID" -- \
+            node .github/scripts/release-contract.mjs \
+              --release="$expected_release" --web="$PRODUCTION_WEB_URL" --gateway="$PRODUCTION_GATEWAY_URL" \
+              --mock-path="$RELEASE_PROBE_MOCK_PATH" --mock-method="$RELEASE_PROBE_MOCK_METHOD" \
+              --metered-path="$RELEASE_PROBE_METERED_PATH" --metered-method="$RELEASE_PROBE_METERED_METHOD" \
+              --content-type="$RELEASE_PROBE_CONTENT_TYPE" \
+              --accounting="$PRODUCTION_CONVEX_SITE_URL/release-probe-accounting" \
+              --output=recovery-evidence/paid-accounting.json
+          touch recovery-evidence/accounting-passed
+
+      - name: Re-resolve provider state and record verified recovery
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          pnpm --filter gateway exec wrangler deployments list --json \
+            > recovery-evidence/gateway-after-rollback.json
+          pnpm --filter web exec wrangler deployments list --config dist/server/wrangler.json --json \
+            > recovery-evidence/web-after-rollback.json
+          if [[ "$IS_LIFECYCLE" = true ]]; then
+            gateway_active="$(node .github/scripts/release-state.mjs get-active-version \
+              recovery-evidence/gateway-after-rollback.json)"
+            pnpm --filter gateway exec wrangler versions view "$gateway_active" --json \
+              > "$RUNNER_TEMP/recovery-lifecycle-final.json"
+            node .github/scripts/release-lifecycle.mjs verify-remote \
+              --candidate=apps/gateway/wrangler.jsonc \
+              --active-version="$RUNNER_TEMP/recovery-lifecycle-final.json" \
+              --expected-version="$gateway_active"
+          fi
+          accounting=false
+          test -f recovery-evidence/accounting-passed && accounting=true
+          node .github/scripts/release-state.mjs recovery-final recovery-evidence \
+            true true "$accounting"
+
+      - name: Build exact protected lifecycle recovery attestation
+        if: env.IS_LIFECYCLE == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          workflow_id="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/recover-production.yml" --jq .id)"
+          active_base="$(MANIFEST=recovery-evidence/recovery-manifest.json node -e 'process.stdout.write(JSON.parse(require("node:fs").readFileSync(process.env.MANIFEST,"utf8")).activeBase)')"
+          phase="$(MANIFEST=recovery-evidence/recovery-manifest.json node -e 'process.stdout.write(JSON.parse(require("node:fs").readFileSync(process.env.MANIFEST,"utf8")).lifecycle.phase)')"
+          digest="$(MANIFEST=recovery-evidence/recovery-manifest.json node -e 'process.stdout.write(JSON.parse(require("node:fs").readFileSync(process.env.MANIFEST,"utf8")).lifecycle.digest)')"
+          node .github/scripts/release-attestation.mjs create \
+            --kind=lifecycle --target="$LIFECYCLE_TARGET_SHA" --run-head="$GITHUB_SHA" \
+            --active-base="$active_base" --protected-base="$LIFECYCLE_PROTECTED_BASE" \
+            --phase="$phase" --digest="$digest" \
+            --workflow-path=.github/workflows/recover-production.yml \
+            --workflow-id="$workflow_id" --run-id="$GITHUB_RUN_ID" \
+            --run-attempt="$GITHUB_RUN_ATTEMPT" --environment=production-recovery \
+            --source-run-id="$FAILED_RUN_ID" --source-run-attempt="$SOURCE_RUN_ATTEMPT" \
+            --output=recovery-evidence/release-attestation.json \
+            --predicate=recovery-evidence/release-attestation-predicate.json
+
+      - name: Sign protected lifecycle recovery attestation
+        if: env.IS_LIFECYCLE == 'true'
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6
+        with:
+          subject-path: recovery-evidence/release-attestation.json
+          predicate-type: https://zevium.dev/attestations/production-release/v1
+          predicate-path: recovery-evidence/release-attestation-predicate.json
+
+      - name: Upload immutable lifecycle recovery attestation subject
+        if: env.IS_LIFECYCLE == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: release-attestation-lifecycle-${{ env.LIFECYCLE_TARGET_SHA }}
+          path: recovery-evidence/release-attestation.json
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Record ambiguity after failure or cancellation
+        if: failure() || cancelled()
+        run: node .github/scripts/release-state.mjs ambiguous recovery-evidence "${{ job.status }}"
+
+      - name: Upload protected recovery evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: production-recovery-${{ needs.resolve.outputs.run_id }}-${{ github.run_id }}
+          path: recovery-evidence
+          if-no-files-found: error
+          retention-days: 30

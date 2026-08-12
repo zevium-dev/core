@@ -4,7 +4,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export E2E_SESSION="${E2E_SESSION:-zevium-e2e-consumer}"
-# shellcheck source=lib.sh
+# shellcheck source=e2e/lib.sh
 source "$SCRIPT_DIR/lib.sh"
 
 cleanup() {
@@ -156,6 +156,9 @@ if [[ -n "${GATEWAY_URL:-}" ]]; then
   [[ "$api_slug" =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]] \
     || fail "PROJECT_SLUG is not a canonical slug"
   call_url="${GATEWAY_URL%/}/gateway/${org_slug}/${api_slug}/get"
+  release_challenge="$(node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("hex"))')"
+  [[ "$release_challenge" =~ ^[0-9a-f]{64}$ ]] \
+    || fail "release challenge generation failed"
   log "curl $call_url"
   headers_file="$E2E_ARTIFACTS/gateway-headers-${STAMP:-$(e2e_stamp)}.txt"
   body_file="$E2E_ARTIFACTS/gateway-body-${STAMP:-$(e2e_stamp)}.txt"
@@ -164,6 +167,7 @@ if [[ -n "${GATEWAY_URL:-}" ]]; then
       -D "$headers_file" -o "$body_file" -w '%{http_code}' \
       -H "Authorization: Bearer ${E2E_API_KEY}" \
       -H "X-Api-Key: ${E2E_API_KEY}" \
+      -H "X-Zevium-Release-Challenge: ${release_challenge}" \
       "$call_url" || true
   )"
   assert_eq "$http_code" "200" "gateway /get expected 200"
@@ -204,9 +208,11 @@ if [[ -n "${GATEWAY_URL:-}" ]]; then
   activity_found=false
   project_js="$(printf '%s' "$PROJECT_NAME" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')"
   cost_js="$(printf '%s' "$cost" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')"
+  request_id_js="$(printf '%s' "$request_id" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')"
+  release_challenge_js="$(printf '%s' "$release_challenge" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')"
   for _ in $(seq 1 30); do
     open_path "/app/settings/activity?range=24h"
-    row_found="$(ab eval "Array.from(document.querySelectorAll('tbody tr')).some((row) => { const cells=Array.from(row.querySelectorAll('td')).map((cell) => (cell.textContent || '').replace(/\\s+/g, ' ').trim()); return cells.length >= 5 && cells[1].includes(${project_js}) && cells[2] === 'GET /get' && cells[3] === Number(${cost_js}).toLocaleString() && cells[4] === '200'; })" 2>/dev/null | tail -1)"
+    row_found="$(ab eval "Array.from(document.querySelectorAll('tbody tr')).some((row) => { const cells=Array.from(row.querySelectorAll('td')).map((cell) => (cell.textContent || '').replace(/\\s+/g, ' ').trim()); return row.dataset.requestId === ${request_id_js} && row.dataset.releaseChallenge === ${release_challenge_js} && cells.length >= 5 && cells[1].includes(${project_js}) && cells[2] === 'GET /get' && cells[3] === Number(${cost_js}).toLocaleString() && cells[4] === '200'; })" 2>/dev/null | tail -1)"
     if [[ "$row_found" == "true" ]]; then
       activity_found=true
       break
@@ -214,7 +220,7 @@ if [[ -n "${GATEWAY_URL:-}" ]]; then
     ab wait 2000 >/dev/null 2>&1 || sleep 2
   done
   [[ "$activity_found" == "true" ]] \
-    || fail "paid call never appeared in activity log for '$PROJECT_NAME'"
+    || fail "exact paid request/challenge never appeared in activity log for '$PROJECT_NAME'"
   log "metered usage event visible in activity log"
 else
   log "GATEWAY_URL unset — skip paid call (browse-only consumer path)"

@@ -15,9 +15,12 @@ import { assertSafeUpstreamTarget } from "./upstream-safety";
 import { SpecSourceUnavailableError } from "./spec-source";
 
 const UPSTREAM_HEADERS_TIMEOUT_MS = 15_000;
+const RELEASE_CHALLENGE_RE = /^[0-9a-f]{64}$/;
+const RELEASE_SHA_RE = /^[0-9a-f]{40}$/;
 
 export type PipelineEnv = {
   WALLET: DurableObjectNamespace<WalletDO>;
+  ZEVIUM_RELEASE?: string;
 };
 
 export type PipelineDeps = {
@@ -78,6 +81,32 @@ export async function handleGatewayRequest(
     return paymentRequiredResponse(requestId, "Invalid API key", {
       reason: "invalid_api_key",
     });
+  }
+
+  const releaseChallengeHeader = request.headers.get(
+    "x-zevium-release-challenge",
+  );
+  let releaseChallenge: string | undefined;
+  let gatewayRelease: string | undefined;
+  if (releaseChallengeHeader !== null) {
+    if (!RELEASE_CHALLENGE_RE.test(releaseChallengeHeader)) {
+      return jsonError(
+        400,
+        "invalid_release_challenge",
+        "Release challenge is invalid",
+        requestId,
+      );
+    }
+    if (!env.ZEVIUM_RELEASE || !RELEASE_SHA_RE.test(env.ZEVIUM_RELEASE)) {
+      return jsonError(
+        503,
+        "release_identity_unavailable",
+        "Gateway release identity is unavailable",
+        requestId,
+      );
+    }
+    releaseChallenge = releaseChallengeHeader;
+    gatewayRelease = env.ZEVIUM_RELEASE;
   }
 
   let published;
@@ -402,6 +431,8 @@ export async function handleGatewayRequest(
     status,
     latencyMs,
     keyId: verified.keyId,
+    ...(releaseChallenge ? { releaseChallenge } : {}),
+    ...(gatewayRelease ? { gatewayRelease } : {}),
   };
 
   if (usedFree || unmetered) {

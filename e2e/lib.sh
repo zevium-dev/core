@@ -46,7 +46,8 @@ fail() {
 }
 
 assert_eq() {
-  local got="$1" want="$2" msg="${3:-expected '$want', got '$got'}"
+  local got="$1" want="$2" msg="${3:-}"
+  [[ -n "$msg" ]] || msg="expected '$want', got '$got'"
   if [[ "$got" != "$want" ]]; then
     fail "$msg (got='$got' want='$want')"
   fi
@@ -54,7 +55,8 @@ assert_eq() {
 
 assert_contains() {
   local hay="$1" needle="$2"
-  local msg="${3:-missing '$needle'}"
+  local msg="${3:-}"
+  [[ -n "$msg" ]] || msg="missing '$needle'"
   if [[ "$hay" != *"$needle"* ]]; then
     fail "$msg"
   fi
@@ -62,7 +64,8 @@ assert_contains() {
 
 assert_not_contains() {
   local hay="$1" needle="$2"
-  local msg="${3:-unexpected '$needle'}"
+  local msg="${3:-}"
+  [[ -n "$msg" ]] || msg="unexpected '$needle'"
   if [[ "$hay" == *"$needle"* ]]; then
     fail "$msg"
   fi
@@ -70,7 +73,8 @@ assert_not_contains() {
 
 assert_url_contains() {
   local needle="$1"
-  local msg="${2:-url missing '$needle'}"
+  local msg="${2:-}"
+  [[ -n "$msg" ]] || msg="url missing '$needle'"
   local url
   url="$(ab get url)"
   assert_contains "$url" "$needle" "$msg (url=$url)"
@@ -78,7 +82,8 @@ assert_url_contains() {
 
 assert_url_not_contains() {
   local needle="$1"
-  local msg="${2:-url still has '$needle'}"
+  local msg="${2:-}"
+  [[ -n "$msg" ]] || msg="url still has '$needle'"
   local url
   url="$(ab get url)"
   assert_not_contains "$url" "$needle" "$msg (url=$url)"
@@ -142,7 +147,8 @@ wait_for_url_pattern() {
         # e.g. **/app/projects/** → */app/projects/*
         local bash_pat
         bash_pat="$(printf '%s' "$pattern" | sed 's/\*\*/\*/g')"
-        # shellcheck disable=SC2254
+        # Unquoted right side deliberately performs glob matching.
+        # shellcheck disable=SC2053
         if [[ "$url" == $bash_pat ]]; then
           return 0
         fi

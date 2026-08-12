@@ -82,6 +82,8 @@ type UsageListItem = {
   latencyMs: number;
   keyId: string;
   at: number;
+  requestId: string | null;
+  releaseChallenge: string | null;
 };
 
 function ActivityPage() {
@@ -309,7 +311,14 @@ function ActivityContent({ orgSlug }: { orgSlug: string }) {
                   </thead>
                   <tbody>
                     {rows.map((event) => (
-                      <tr key={event._id} className="border-b last:border-0">
+                      <tr
+                        key={event._id}
+                        className="border-b last:border-0"
+                        data-request-id={event.requestId ?? undefined}
+                        data-release-challenge={
+                          event.releaseChallenge ?? undefined
+                        }
+                      >
                         <td className="whitespace-nowrap px-2 py-2.5 text-muted-foreground">
                           {new Date(event.at).toLocaleString()}
                         </td>

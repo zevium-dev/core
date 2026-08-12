@@ -5,7 +5,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Fresh session for anonymous checks, then sign-in reuses same session.
 export E2E_SESSION="${E2E_SESSION:-zevium-e2e-auth}"
-# shellcheck source=lib.sh
+# shellcheck source=e2e/lib.sh
 source "$SCRIPT_DIR/lib.sh"
 
 cleanup() {

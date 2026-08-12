@@ -2,6 +2,9 @@
   "name": "zevium",
   "private": true,
   "packageManager": "pnpm@11.8.0",
+  "engines": {
+    "node": "24.15.0"
+  },
   "scripts": {
     "dev": "concurrently --kill-others-on-fail --names web,convex,gateway --prefix-colors blue,magenta,green \"pnpm --filter web dev\" \"pnpm exec convex dev\" \"pnpm --filter @zevium/gateway dev\"",
     "build": "turbo build",
@@ -16,7 +19,7 @@
     "e2e": "bash e2e/run-all.sh"
   },
   "devDependencies": {
-    "@clerk/backend": "^3.14.0",
+    "@clerk/backend": "3.14.0",
     "@edge-runtime/vm": "^5.0.0",
     "concurrently": "^10.0.4",
     "convex-test": "^0.0.54",
@@ -24,7 +27,8 @@
     "tsx": "^4.23.1",
     "turbo": "^2.6.0",
     "typescript": "^5.9.0",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.10",
+    "yaml": "2.9.0"
   },
   "dependencies": {
     "@zevium/shared": "workspace:*",

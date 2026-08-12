@@ -28,27 +28,16 @@ export type SettlementResult = {
 
 export type ReleaseProbeAccounting = {
   requestId: string;
-  settlementRefId: string;
-  usage: {
-    credits: number;
-    status: number;
-    method: string;
-    endpoint: string;
-  };
-  ledger: {
-    kind: "usage_settlement";
-    amount: number;
-    sequence: number;
-  };
-  publisher: {
-    publicHandle: string | null;
-    projectSlug: string;
-    grossCredits: number;
-    platformFeeCredits: number;
-    netCredits: number;
-    status: Doc<"publisherEarnings">["status"];
-  };
+  challenge: string;
+  credits: number;
+  platformFeeCredits: number;
+  publisherNetCredits: number;
 };
+
+const RELEASE_REQUEST_ID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const RELEASE_CHALLENGE_RE = /^[0-9a-f]{64}$/;
+const RELEASE_SHA_RE = /^[0-9a-f]{40}$/;
 
 async function getOrCreateWallet(
   ctx: MutationCtx,
@@ -136,6 +125,7 @@ async function appendWalletEntry(
     amount: args.amount,
     refId: args.refId,
     sequence,
+    balanceAfter: balance,
     paymentId: args.paymentId,
     usageEventId: args.usageEventId,
     createdAt: Date.now(),
@@ -278,14 +268,61 @@ export const getGatewayWallet = internalQuery({
 });
 
 /**
- * Least-privilege release correlation. HTTP auth lives in convex/http.ts; this
- * query returns no consumer identity, key id, wallet balance, or secret data.
- * One indexed settlement lookup proves usage, debit, and publisher accounting
- * committed atomically for exact gateway request id.
+ * One-time release correlation. HTTP auth and request bounds live in http.ts.
+ * This mutation atomically rate-limits and claims a challenge only after exact
+ * request, fresh usage, gateway release, consumer wallet, materialized ledger,
+ * and publisher split all agree.
  */
-export const getReleaseProbeAccounting = internalQuery({
-  args: { requestId: v.string() },
+export const claimReleaseProbeAccounting = internalMutation({
+  args: {
+    requestId: v.string(),
+    challenge: v.string(),
+    notBefore: v.number(),
+    expectedGatewayRelease: v.string(),
+    now: v.number(),
+  },
   handler: async (ctx, args): Promise<ReleaseProbeAccounting | null> => {
+    if (
+      !RELEASE_REQUEST_ID_RE.test(args.requestId) ||
+      !RELEASE_CHALLENGE_RE.test(args.challenge) ||
+      !RELEASE_SHA_RE.test(args.expectedGatewayRelease) ||
+      !Number.isSafeInteger(args.notBefore) ||
+      !Number.isSafeInteger(args.now) ||
+      args.notBefore <= 0 ||
+      args.now <= 0
+    ) {
+      throw new Error("Release probe claim is invalid");
+    }
+    const gateKey = "release-probe-accounting";
+    const windowMs = 60_000;
+    const maxRequests = 60;
+    const gate = await ctx.db
+      .query("releaseProbeGates")
+      .withIndex("by_key", (q) => q.eq("key", gateKey))
+      .unique();
+    if (gate === null) {
+      await ctx.db.insert("releaseProbeGates", {
+        key: gateKey,
+        windowStartedAt: args.now,
+        count: 1,
+      });
+    } else if (args.now - gate.windowStartedAt >= windowMs) {
+      await ctx.db.patch(gate._id, { windowStartedAt: args.now, count: 1 });
+    } else {
+      if (gate.count >= maxRequests) {
+        throw new Error("Release probe rate limit exceeded");
+      }
+      await ctx.db.patch(gate._id, { count: gate.count + 1 });
+    }
+
+    const priorClaim = await ctx.db
+      .query("releaseProbeClaims")
+      .withIndex("by_challenge", (q) => q.eq("challenge", args.challenge))
+      .unique();
+    if (priorClaim !== null) {
+      throw new Error("Release probe challenge was already claimed");
+    }
+
     const settlementRefId = `settle:${args.requestId}`;
     const ledger = await ctx.db
       .query("walletEntries")
@@ -300,15 +337,41 @@ export const getReleaseProbeAccounting = internalQuery({
     }
 
     const usage = await ctx.db.get(ledger.usageEventId);
-    if (usage === null || usage.settleRefId !== settlementRefId) {
+    if (
+      usage === null ||
+      usage.settleRefId !== settlementRefId ||
+      usage.releaseChallenge !== args.challenge ||
+      usage.gatewayRelease !== args.expectedGatewayRelease ||
+      usage.at < args.notBefore ||
+      usage.at > args.now + 30_000 ||
+      args.now - usage.at > 5 * 60_000 ||
+      usage.credits <= 0 ||
+      usage.status < 200 ||
+      usage.status >= 300 ||
+      ledger.amount !== -usage.credits
+    ) {
       throw new Error("Release probe usage linkage is invalid");
+    }
+    const wallet = await ctx.db.get(ledger.walletId);
+    if (wallet === null || wallet.organizationId !== usage.organizationId) {
+      throw new Error("Release probe consumer wallet linkage is invalid");
+    }
+    const latestLedger = await ctx.db
+      .query("walletEntries")
+      .withIndex("by_wallet_sequence", (q) => q.eq("walletId", wallet._id))
+      .order("desc")
+      .first();
+    if (
+      latestLedger === null ||
+      latestLedger.sequence !== wallet.sequence ||
+      latestLedger.balanceAfter === undefined ||
+      latestLedger.balanceAfter !== wallet.balance ||
+      ledger.sequence > wallet.sequence
+    ) {
+      throw new Error("Release probe wallet checkpoint is invalid");
     }
     const project = await ctx.db.get(usage.projectId);
     if (project === null) throw new Error("Release probe project is missing");
-    const publisherOrganization = await ctx.db.get(project.organizationId);
-    if (publisherOrganization === null) {
-      throw new Error("Release probe publisher is missing");
-    }
     const earning = await ctx.db
       .query("publisherEarnings")
       .withIndex("by_settlement", (q) =>
@@ -318,33 +381,34 @@ export const getReleaseProbeAccounting = internalQuery({
     if (
       earning === null ||
       earning.projectId !== project._id ||
-      earning.publisherOrganizationId !== project.organizationId
+      earning.publisherOrganizationId !== project.organizationId ||
+      earning.grossCredits !== usage.credits ||
+      earning.status !== "pending_risk"
     ) {
       throw new Error("Release probe publisher accounting is invalid");
     }
+    const split = publisherEarningSplit(usage.credits);
+    if (
+      earning.platformFeeCredits !== split.platformFeeCredits ||
+      earning.netCredits !== split.publisherNetCredits
+    ) {
+      throw new Error("Release probe publisher split is invalid");
+    }
+
+    await ctx.db.insert("releaseProbeClaims", {
+      challenge: args.challenge,
+      requestId: args.requestId,
+      settlementRefId,
+      expectedGatewayRelease: args.expectedGatewayRelease,
+      claimedAt: args.now,
+    });
 
     return {
       requestId: args.requestId,
-      settlementRefId,
-      usage: {
-        credits: usage.credits,
-        status: usage.status,
-        method: usage.method,
-        endpoint: usage.endpoint,
-      },
-      ledger: {
-        kind: ledger.kind,
-        amount: ledger.amount,
-        sequence: ledger.sequence,
-      },
-      publisher: {
-        publicHandle: publisherOrganization.publicHandle ?? null,
-        projectSlug: project.slug,
-        grossCredits: earning.grossCredits,
-        platformFeeCredits: earning.platformFeeCredits,
-        netCredits: earning.netCredits,
-        status: earning.status,
-      },
+      challenge: args.challenge,
+      credits: usage.credits,
+      platformFeeCredits: earning.platformFeeCredits,
+      publisherNetCredits: earning.netCredits,
     };
   },
 });
@@ -423,6 +487,8 @@ const usageEventArg = v.object({
   settleRefId: v.string(),
   /** The only consumer identity accepted for a Wallet DO settlement. */
   consumerClerkOrgId: v.string(),
+  releaseChallenge: v.optional(v.string()),
+  gatewayRelease: v.optional(v.string()),
 });
 
 /**
@@ -460,14 +526,29 @@ export const recordUsage = internalMutation({
         event.settleRefId.trim() === "" ||
         !Number.isSafeInteger(event.credits) ||
         event.credits < 0 ||
-        !Number.isFinite(event.at) ||
-        !Number.isFinite(event.status) ||
+        !Number.isSafeInteger(event.at) ||
+        !Number.isSafeInteger(event.status) ||
         !Number.isFinite(event.latencyMs)
       ) {
         results.push({
           refId: event.settleRefId,
           status: "rejected",
           reason: "invalid settlement",
+        });
+        continue;
+      }
+      if (
+        (event.releaseChallenge === undefined) !==
+          (event.gatewayRelease === undefined) ||
+        (event.releaseChallenge !== undefined &&
+          !RELEASE_CHALLENGE_RE.test(event.releaseChallenge)) ||
+        (event.gatewayRelease !== undefined &&
+          !RELEASE_SHA_RE.test(event.gatewayRelease))
+      ) {
+        results.push({
+          refId: event.settleRefId,
+          status: "rejected",
+          reason: "invalid release metadata",
         });
         continue;
       }
@@ -518,6 +599,8 @@ export const recordUsage = internalMutation({
         keyId: event.keyId,
         at: event.at,
         settleRefId: event.settleRefId,
+        releaseChallenge: event.releaseChallenge,
+        gatewayRelease: event.gatewayRelease,
       });
       const settled = await appendWalletEntry(ctx, {
         wallet,

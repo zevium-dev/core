@@ -1,314 +1,250 @@
 # Production deployment protocol
 
-Production deploys are recoverable state transitions across Convex and
-Cloudflare. They are not atomic transactions. Convex changes production code
-immediately and has no first-class release rollback; Cloudflare Workers support
-immutable versions and rollback. Workflow encodes those facts instead of
-claiming cross-vendor atomicity.
+Production release is a recoverable state transition across Convex and
+Cloudflare, not one atomic transaction. Convex code becomes live on deploy and
+has no generic rollback. Cloudflare Worker code is versioned, but Durable Object
+storage and lifecycle are not. Release automation preserves those boundaries.
+
+## Release lanes
+
+All production mutations share concurrency group `production-release` with
+cancellation disabled:
+
+- **Deploy Production** ships backward-compatible Convex expansion, gateway,
+  then web. It never carries a Durable Object lifecycle diff or unapplied
+  Convex contract.
+- **Contract Production Schema** applies one reviewed destructive Convex commit
+  after proving old consumers against staging and production.
+- **Gateway Durable Object Lifecycle** owns every staging and production DO
+  lifecycle mutation. Generic release classifies complete lifecycle state before
+  any staging environment or provider mutation and exits successfully with
+  `eligible=false` whenever lifecycle differs.
+- **Recover Production** is separately dispatchable and protected by
+  `production-recovery`. It consumes one failed run's persisted manifest,
+  re-resolves current provider state, and performs only bounded roll-forward or
+  rollback allowed by that manifest.
+
+GitHub retains one running and newest pending member of a concurrency group.
+Coalescing is intentional: only current `develop` may run, and a superseded
+normal SHA remains an ancestor of newest `develop`, so newest release includes
+it. Protected contract/lifecycle commits cannot disappear: generic preflight
+enumerates every such commit between active production and candidate and blocks
+until each exact commit has verified protected-workflow provenance. Dedicated
+workflows accept `contract_sha` or `lifecycle_sha` when protected commit is
+buried under later normal commits and reject any second protected commit around
+it. Thus replacement can coalesce normal releases, but cannot silently bypass a
+protected release.
 
 ## Compatibility rule
 
-Every normal release is **expand-only**:
+Normal release is expand-only:
 
-- Add optional fields, new functions, tolerant readers, and dual-read/write
-  paths first.
-- Keep old Convex functions, validators, fields, indexes, and response shapes
-  while any deployed gateway or web version can use them.
-- Backfill with idempotent mutations and prove completion separately. Never
-  hide migration work inside deploy command.
-- Remove old behavior only in a later contract-only commit after at least one
-  fully verified production release uses new shape.
+- Add optional fields, functions, indexes, tolerant readers, and dual paths.
+- Retain old Convex functions, validators, fields, indexes, and response shapes
+  while any deployed Worker can use them.
+- Run idempotent backfills separately and prove completion.
+- Remove old behavior only in later isolated `contract(convex):` commit.
 
-Pull requests containing destructive schema changes must be split. Normal
-`Deploy Production` workflow must never carry contract step.
+Split pull requests that mix expansion and contraction. Convex failure after a
+deploy starts is ambiguous and always recovers by compatible roll-forward.
 
-## Truthful state machine
+## Trust and provenance
 
-| State                                                  | Traffic                             | Safe action                                      |
-| ------------------------------------------------------ | ----------------------------------- | ------------------------------------------------ |
-| `validated`                                            | Old release                         | Fix candidate; no recovery needed.               |
-| `candidate_verified`                                   | Staging candidate; production old   | Approve production or abandon candidate.         |
-| `rollback_pointers_captured_no_traffic_mutation`       | Production old                      | Fix upload; no traffic recovery needed.          |
-| `artifacts_uploaded_no_traffic_mutation`               | Production old                      | Resume same SHA or abandon uploaded versions.    |
-| `convex_mutation_started`                              | Old Workers; Convex outcome unknown | Inspect deployment, then fix forward.            |
-| `convex_expanded`                                      | Old Workers + new compatible Convex | Roll forward. Do not revert schema blindly.      |
-| `gateway_active`                                       | New gateway + old web + new Convex  | Deploy web or roll gateway back.                 |
-| `web_active`                                           | New Workers + new Convex            | Run deep probe; rollback Workers if it fails.    |
-| `verified`                                             | New release                         | Observe, then schedule later contract if needed. |
-| `aborted_without_traffic_change`                       | Old Workers and Convex              | Fix configuration/artifact upload and rerun.     |
-| `workers_rolled_back_control_plane_change_possible`    | Old Workers; Convex outcome unknown | Inspect Convex, then fix forward.                |
-| `workers_rolled_back_control_plane_expansion_retained` | Old Workers + expanded Convex       | Verify evidence; fix forward.                    |
-| `manual_recovery_required`                             | Inspect evidence                    | Use recovery matrix below.                       |
+Every approved job performs candidate-independent GitHub API checks before
+checkout, cache restore, Node setup, or dependency install. It requires exact
+lowercase 40-character current `develop` SHA and exactly one successful push run
+of `.github/workflows/ci.yml`. Remote actions use full commit SHAs. Node is fixed
+at `24.15.0`, pnpm at `11.8.0`, and install is frozen. Candidate-controlled Mise
+or global package installation is forbidden.
 
-Workflow serializes both expand and contract operations with
-`production-release` concurrency. Stable candidate data and secrets live in the
-`staging` GitHub environment. `production` and `production-contract` require
-independent reviewers with self-review disabled. Stale CI SHAs are rejected
-before candidate creation. Production jobs repeat GitHub API resolution of
-current `develop` and resolve live web plus gateway release identities after
-environment approval, immediately before first paid write/provider mutation.
-Uploaded code never gets authority merely because an earlier preflight passed.
+Raw commit status is never trusted. Contract and lifecycle production jobs emit
+GitHub-signed custom attestations whose predicate binds:
 
-## Gates before production traffic
+- exact protected workflow ID and path;
+- successful run ID, attempt, run head, and protected target commit;
+- exact single-parent protected base and active production base;
+- reviewed GitHub environment and deployment success;
+- phase and canonical lifecycle/contract digest.
 
-1. Exact 40-character git SHA is checked out and matched to current `develop`.
-2. Formatting, type checks, unit/contract tests, and workflow invariants pass.
-3. Same SHA deploys to stable staging Convex and immutable staging Worker
-   versions.
-4. Cross-service contract waits through bounded provider propagation, then
-   validates SSR release metadata, gateway release/contract identity, live
-   Convex discovery price, CORS, zero-credit mock headers, and a positive-cost
-   metered wallet/upstream call with a canonical request id. Probe then polls a
-   dedicated Convex endpoint for exact usage event, consumer ledger debit, and
-   publisher gross/fee/net settlement linkage before gate can pass.
-5. Authenticated browser E2E creates, publishes, discovers, and calls a staging
-   API, then proves the exact call reached the activity ledger.
-6. Human production approval occurs only after candidate gates pass.
-7. After approval and before any production paid probe/provider write, current
-   `develop` must still equal exact release SHA and current web/gateway identity
-   must agree with approved active release. Full paid contract runs against that
-   identity. Invalid probe key, stale `RELEASE_PROBE_SECRET`, stale
-   `GATEWAY_INTERNAL_SECRET`, stuck async ingest, empty wallet, upstream outage,
-   or stale listing fails closed.
+Generic descendant release downloads exact target artifact, verifies GitHub's
+signature and signer workflow, queries run/workflow/deployment APIs, re-computes
+digest from git objects, and proves target ancestry under run head. Missing,
+ambiguous, stale, or unverifiable provenance blocks release.
 
-In production, both Worker versions upload before mutation and exact uploaded
-version IDs are recorded. Convex expansion deploys first, then old gateway and
-web catalogue are probed against new Convex. Each new Worker joins a deployment
-at 0% traffic and is addressed with Cloudflare's version-override header. Web
-verification fetches stamped HTML plus every referenced hashed asset through
-the same override, avoiding frontend version skew. Only verified versions move
-to 100%, gateway then web. Deep probes run after full convergence.
+Immediately before every upload, deploy, or traffic mutation, same shell block
+rechecks current GitHub identity and exact provider state. Cloudflare blocks
+re-list active deployments, inspect exact version metadata, and compare captured
+version IDs/config. Convex blocks run production `deploy --dry-run` and require
+reported target URL to equal reviewed deployment before live deploy.
 
-First rollout from the pre-protocol deployment accepts one explicit `legacy`
-identity only when both healthy public services lack release stamps and git
-history contains no contract commits. Any partial identity or disagreement
-fails closed. Successful rollout replaces legacy; later legacy reappearance can
-only come from explicit rollback and still cannot cross a contract commit.
+## Paid release proof
 
-## Required GitHub configuration
+Each probe creates fresh cryptographically random 32-byte challenge. Challenge
+travels only in authenticated gateway request, is stripped before upstream, and
+is atomically persisted with settled usage plus stamped gateway release.
+Accounting lookup binds exact request ID, challenge, not-before timestamp, and
+expected immutable release. It additionally proves:
 
-Configure environments, never repository-wide plaintext values. GitHub
-environment secrets may be backed by repository or organization secrets, but
-names below must resolve inside referenced environment.
+- positive-cost successful usage is fresh and unique;
+- settlement ledger row references wallet owned by consumer organization;
+- latest wallet ledger sequence/checkpoint and materialized balance agree;
+- publisher gross, platform fee, and net split match settlement exactly.
 
-| Environment           | Variables                                                                                                                                                                                                                                                                              | Secrets                                                                                                                                                                                                                                                                                                                                                                              |
-| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `staging`             | `STAGING_WEB_URL`, `STAGING_GATEWAY_URL`, `STAGING_CONVEX_URL`, `STAGING_CONVEX_SITE_URL`, `STAGING_E2E_ORG_SLUG`, `RELEASE_PROBE_MOCK_PATH`, `RELEASE_PROBE_MOCK_METHOD`, `RELEASE_PROBE_METERED_PATH`, `RELEASE_PROBE_METERED_METHOD`; `RELEASE_PROBE_CONTENT_TYPE` for non-GET/HEAD | `CLOUDFLARE_API_TOKEN`, `CLERK_STAGING_PUBLISHABLE_KEY`, `CLERK_STAGING_SECRET_KEY`, `GATEWAY_STAGING_INTERNAL_SECRET`, `CONVEX_STAGING_DEPLOY_KEY`, `STAGING_RELEASE_PROBE_API_KEY`, `STAGING_RELEASE_PROBE_SECRET`, `STAGING_E2E_EMAIL`, `STAGING_E2E_PASSWORD`, `STAGING_E2E_API_KEY`; `STAGING_RELEASE_PROBE_REQUEST_BODY` required for non-GET/HEAD; optional `STAGING_E2E_OTP` |
-| `production`          | `RELEASE_PROBE_MOCK_PATH`, `RELEASE_PROBE_MOCK_METHOD`, `RELEASE_PROBE_METERED_PATH`, `RELEASE_PROBE_METERED_METHOD`; `RELEASE_PROBE_CONTENT_TYPE` for non-GET/HEAD                                                                                                                    | `CLOUDFLARE_API_TOKEN`, `CLERK_PRODUCTION_PUBLISHABLE_KEY`, `CLERK_PRODUCTION_SECRET_KEY`, `CONVEX_PRODUCTION_DEPLOY_KEY`, `PRODUCTION_RELEASE_PROBE_API_KEY`, `PRODUCTION_RELEASE_PROBE_SECRET`; `PRODUCTION_RELEASE_PROBE_REQUEST_BODY` required for non-GET/HEAD probe                                                                                                            |
-| `production-contract` | Same five `RELEASE_PROBE_*` path/method/content variables as `production`                                                                                                                                                                                                              | `CONVEX_PRODUCTION_DEPLOY_KEY`, `PRODUCTION_RELEASE_PROBE_API_KEY`, `PRODUCTION_RELEASE_PROBE_SECRET`; `PRODUCTION_RELEASE_PROBE_REQUEST_BODY` required for non-GET/HEAD probe                                                                                                                                                                                                       |
-| `gateway-do-staging`  | Same stable staging origins and probe variables as `staging`                                                                                                                                                                                                                           | `CLOUDFLARE_API_TOKEN`, `STAGING_RELEASE_PROBE_API_KEY`, `STAGING_RELEASE_PROBE_SECRET`; `STAGING_RELEASE_PROBE_REQUEST_BODY` required for body methods                                                                                                                                                                                                                              |
-| `gateway-do-expand`   | Same probe variables as `production`                                                                                                                                                                                                                                                   | `CLOUDFLARE_API_TOKEN`, `PRODUCTION_RELEASE_PROBE_API_KEY`, `PRODUCTION_RELEASE_PROBE_SECRET`; `PRODUCTION_RELEASE_PROBE_REQUEST_BODY` required for body methods                                                                                                                                                                                                                     |
-| `gateway-do-contract` | Same probe variables as `production`                                                                                                                                                                                                                                                   | Same as `gateway-do-expand`; use separate required reviewers for destructive lifecycle approval                                                                                                                                                                                                                                                                                      |
+Challenge is one-time and globally rate-gated. Replay, stale row, duplicate
+request/settlement, cross-wallet linkage, checkpoint drift, wrong release, or
+pending async ingest fails closed. Endpoint accepts only bounded JSON POST,
+bounded secret/challenge fields, fixed-size digest comparison, and returns only
+minimal proof totals. It never exposes organization, key, wallet balance,
+sequence, lifecycle status, request headers, or response body.
 
-Staging origins must be HTTPS, credential-free, and distinct from production.
-Probe content type must match published operation request media type. Body is
-sent byte-for-byte; JSON syntax is additionally validated for JSON media types.
-`STAGING_WEB_URL` and `STAGING_GATEWAY_URL` point to stable
-`zevium-web-staging` and `zevium-gateway-staging` Workers. Tagged staging
-deploys create those Workers on first use and immutable versions thereafter.
-Workflow provisions their Clerk/internal secrets through temporary 0600 files,
-then deletes those files before artifact upload. Same
-`GATEWAY_STAGING_INTERNAL_SECRET` must be configured on staging Convex as
-`GATEWAY_INTERNAL_SECRET`; mismatch fails gateway readiness and metering.
-Configure independent high-entropy `RELEASE_PROBE_SECRET` values in staging and
-production Convex, then mirror them only into corresponding protected GitHub
-environment secrets. This credential can read one request-scoped accounting
-projection. It cannot ingest usage, deploy, query wallets, or reveal consumer
-identity/key/balance. Rotate it independently from `GATEWAY_INTERNAL_SECRET`.
+Browser E2E captures gateway request ID and challenge, then requires one
+activity row carrying both exact values. Project/route/cost/status alone cannot
+satisfy test.
 
-Activation is fail-closed: current production Convex must already expose
-`/release-probe-accounting` before normal production release can pass baseline.
-For first adoption, review and deploy only this backward-compatible Convex
-query/httpAction expansion under production approval, configure secret, then
-rerun exact unchanged release SHA. HTTP 404/401/503 or pending settlement blocks
-normal workflow; never weaken baseline to bootstrap it.
+## Clerk release-key resolution
 
-Provision stable staging state before enabling release workflow: Convex
-deployment, staging Clerk instance and E2E account/org, public positive-cost
-probe project with reliable test upstream, and funded org-scoped API key. At
-minimum, staging Convex needs `CLERK_JWT_ISSUER_DOMAIN`, `APP_ORIGIN`, and
-`GATEWAY_INTERNAL_SECRET`; values must match staging Clerk/web/gateway config.
-Configure other feature secrets required by staged journeys. Workflow deploys
-code and Worker versions; it deliberately does not manufacture identity,
-wallet, catalogue, or upstream fixtures during release.
+No production or staging API key secret is stored in GitHub. Immediately before
+every paid staging, production, contract, lifecycle, or recovery probe,
+`with-clerk-release-key.mjs` uses protected Clerk secret key to:
 
-Before every Convex mutation, workflow runs `convex deploy --dry-run`, parses
-CLI-selected deployment URLs, and requires every reported target to equal
-reviewed expected origin. A staging key aimed at production, or inverse, fails
-before code push. Parser fails closed when Convex omits or changes target output.
+1. paginate organizations and resolve exactly one configured slug;
+2. paginate memberships and resolve exact configured member user ID;
+3. paginate all API keys, including invalid rows;
+4. select exactly one active `api_key` whose subject, creator, and `org_id`
+   claim match member and organization;
+5. optionally require exact configured `ak_` key ID;
+6. fetch key material; immediately mask the retrieved value before any other
+   output, verify it, and pass it
+   only through child-process environment.
 
-Cloudflare token needs Worker Versions upload/deploy/rollback, deployment-list,
-version-view, and relevant Worker script permissions only. Probe API keys must
-be dedicated, org-scoped, capped, rotatable, outside free tier, and funded for
-at least four charged calls (baseline, expanded control plane, zero-traffic
-gateway candidate, convergence). Keep capacity for one rollback proof too.
-Workflow never prints or captures them.
+Zero or multiple matches fail. Resolver rejects malformed Clerk payloads,
+revoked/expired keys, cross-org claims, wrong creators, and wrong subjects. It
+never writes secret to output, artifact, argv, or file; child loses Clerk,
+Cloudflare, Convex, and GitHub credentials.
 
-Enable required reviewers and prevent self-review for production environments.
-Keep branch protection requiring `Continuous Integration` and preview contract
-checks.
+## Normal release sequence
 
-## Evidence safety
+1. Secret-free preflight resolves current active public release, classifies
+   complete DO lifecycle projection, verifies all protected attestations, and
+   runs uncached release CI.
+2. Staging approval re-runs GitHub guard before checkout. Convex dry-run target,
+   active gateway lifecycle metadata, and active web version are checked in same
+   blocks as staging deploys.
+3. Staging paid contract and browser E2E prove exact accounting.
+4. Production approval re-verifies current tip, active public identity, and all
+   protected provenance.
+5. Exact gateway/web rollback pointers and intent manifest are captured and
+   uploaded before first mutation.
+6. Both immutable Worker candidates upload. Candidate IDs enrich and re-upload
+   manifest before Convex or traffic mutation.
+7. Convex expansion deploys; old Workers are probed against expanded control
+   plane.
+8. Gateway enters 0% deployment, is paid-probed through exact version override,
+   then moves to 100% after weights/config recheck.
+9. Web enters 0%, stamped HTML and referenced hashed assets are checked through
+   override, then web moves to 100%.
+10. Final public paid accounting proves convergence and exact active release.
 
-Artifacts contain release SHA, timestamps, HTTP status/timing, Cloudflare
-version pointers, failure screenshots, and failing page URLs. Accessibility
-snapshots are deliberately excluded because form values can contain credentials.
-Contract probe never writes response bodies, request headers, API keys, cookies,
-deploy keys, or environment dumps. Accounting evidence contains request id,
-settlement reference, charged credits, and publisher split totals only; no
-consumer org, key id, wallet balance, or secret. Retention is 14 days for
-staging and 30 days for production.
+## Durable Object lifecycle
 
-Browser failure snapshots can contain user-visible staging data. Dedicated E2E
-accounts must contain no personal or production data.
+Canonical lifecycle digest contains selected Wrangler environment, effective
+Worker name, DO bindings (`name`, `class_name`, `script_name`, `environment`),
+legacy migration history, declarative live exports, and tombstones. Named-env
+bindings are non-inheritable; migrations and exports inherit. Local bindings
+must point to live declared classes. Provider proof compares exact DO bindings,
+named class handlers, migration tag, and readable live exports.
 
-## Recovery matrix
+Legacy mode is append-only. New KV/SQLite classes are expansion; rename/delete
+are contract; cross-Worker `transferred_classes` is expansion on receiving
+Worker but requires source inspection. Applied tags/steps cannot change or
+disappear.
 
-1. Open run artifact `state.json`; identify last completed state. Check provider
-   dashboards before rerunning anything.
-2. If failure occurred before `convex_mutation_started`, abandon candidate or
-   rerun exact SHA. If state is `convex_mutation_started`, inspect Convex: CLI
-   failure can occur after provider commit, so mutation outcome is unknown.
-3. If Convex expanded but no Worker moved, leave compatible expansion live and
-   fix forward. Convex has no safe generic rollback command.
-4. If gateway or web moved, workflow attempts explicit rollback to version IDs
-   captured before deploy only after lifecycle gate proved both versions share
-   same DO lifecycle. Rollback success requires full authenticated paid probe
-   plus exact Convex accounting, not `/health`. Never assume rollback succeeded
-   because job ended.
-5. If old Workers fail against expanded Convex, expansion violated protocol.
-   Restore compatibility with smallest roll-forward Convex patch from a new,
-   reviewed SHA. Do not deploy a stale schema snapshot over live data.
-6. If new Workers are healthy and only probe dependency is failing, keep last
-   known compatible combination, document incident, and rerun probe after
-   dependency recovery. Do not contract.
-7. If failure occurs after a Convex contract, roll forward missing compatibility
-   immediately. Cloudflare rollback may be unsafe because contracted schema may
-   no longer serve old Workers. Create exactly one `fix(convex):` child commit
-   touching only `convex/`, then rerun `Contract Production Schema` with
-   `recovery_of` set to failed contract SHA. Recovery still rehearses staging,
-   requires production-contract approval, applies final state, and deep-probes
-   before unblocking normal releases.
+Declarative `exports` and legacy `migrations` are mutually exclusive. Supported
+legacy-to-exports transition is one-way and must preserve every live class and
+known storage exactly. New declarative namespaces use SQLite; `legacy-kv` is
+accepted only when preserving existing namespace.
 
-Manual Cloudflare recovery uses captured `previousVersion` values:
+Declarative state machine:
 
-```bash
-pnpm --filter gateway exec wrangler rollback <gateway-version-id> --yes
-pnpm --filter web exec wrangler rollback <web-version-id> --config dist/server/wrangler.json --yes
-```
+- `created` is live and has immutable `storage`.
+- `deleted`, `renamed`, and `transferred` are tombstones. Delete removes code
+  and local binding. Rename requires live target. Transfer source requires
+  matching target `expecting-transfer` first.
+- `expecting-transfer` is target preparation. It names exact source and has no
+  local self-binding until source commits transfer. Final target changes to
+  `created` and adds binding.
+- Tombstone removal is allowed only after Cloudflare reconciliation lists exact
+  entry in `removable_entries`.
 
-Run `release-contract.mjs` with expected active SHA after recovery. Never paste
-probe keys into command line; provide `RELEASE_PROBE_API_KEY` and
-`RELEASE_PROBE_SECRET` through protected environment.
+Cloudflare version reads omit write-only tombstone destinations and cannot prove
+all reconciliation state. Current automation therefore marks delete/rename/
+transfer, pending-transfer cancellation/finalization, and tombstone cleanup as
+`manualInspectionRequired` and fails dedicated secret-free preflight before
+staging or provider mutation. Never weaken this to inferred state. Extend
+provider proof with authoritative reconciliation/source/target metadata first.
 
-## Durable Object lifecycle phase
+Lifecycle changes use `wrangler deploy`; `wrangler versions upload` cannot apply
+them. Lifecycle is non-rollbackable because Worker version rollback does not
+roll back DO storage. Dedicated recovery only re-resolves and rolls forward if
+current state still equals captured base or candidate; it never rolls across
+lifecycle.
 
-Generic `Deploy Production` rejects any gateway binding, class export, legacy
-migration history, migration tag, class add/rename/delete/transfer, or binding
-target change not already applied by reviewed lifecycle workflow. It compares
-candidate config with active release source and authoritative metadata from
-active Cloudflare version before `versions upload`. Therefore generic Worker
-rollback never crosses DO lifecycle/storage state and never claims it can.
+## Cancellation and recovery
 
-Create one isolated commit after active release touching only `apps/gateway/`.
-Keep migration history append-only. Run **Gateway Durable Object Lifecycle**
-with exact current `develop`, exact active release, and reviewed phase:
+Signal traps do one fast local action: atomically record
+`ambiguous_recovery_required`, then exit. They do not call providers, probe, or
+claim rollback. Every production lane also handles `failure() || cancelled()`
+and uploads available evidence.
 
-- `expand`: add class/binding and appended `new_classes` or
-  `new_sqlite_classes`. Keep old class/binding readable.
-- `contract`: rename/delete/transfer class, change/remove binding, or remove
-  export only after separate data migration and observation proved old state
-  unused. This is irreversible approval, not rollback.
+Dispatch **Recover Production** with failed run ID/attempt and reviewed action.
+Recovery downloads exact manifest artifact from that run, validates workflow and
+SHA lineage, re-resolves GitHub/current provider state, and permits only manifest
+version IDs. Missing or mixed state fails. Convex ambiguous/contract state forces
+roll-forward. Normal gateway/web may roll forward to captured candidates or
+rollback to captured previous versions when lifecycle digest allows. Lifecycle
+always rolls forward. Recovery ends only after exact provider state and paid
+accounting proof; protected lifecycle recovery emits signed recovery attestation
+bound to failed source run.
 
-Workflow rehearses identical phase against staging, validates active Cloudflare
-metadata equals reviewed base, then enters `gateway-do-expand` or
-`gateway-do-contract`. Production uses atomic `wrangler deploy` because
-Cloudflare Versions upload cannot carry DO lifecycle migrations. Worker release
-identity intentionally remains old while lifecycle-only code lands. Full paid
-accounting runs before and after. Success stamps
-`zevium/gateway-do-lifecycle`; later normal release may upload code only when
-source diff, remote lifecycle, and marker agree. Failure has no automatic
-rollback. Freeze releases, inspect migration/storage state, and roll forward
-with another isolated reviewed phase.
+## Required GitHub environments
 
-Class rename follows staged provider protocol: add new class/binding in expand,
-migrate/read both, then append rename/remove old binding in contract. Never mix
-expand and contract operations in one lifecycle commit. Applied migration steps
-may not be edited or removed.
+Use required reviewers, prevent self-review, restrict deployment branches to
+`develop`, and disable admin bypass where policy allows.
 
-## Contract phase
+| Environment            | Variables                                                                                                                                                                                                                                                                                                                             | Secrets                                                                                                                                        |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `staging`              | `STAGING_WEB_URL`, `STAGING_GATEWAY_URL`, `STAGING_CONVEX_URL`, `STAGING_CONVEX_SITE_URL`; probe paths/methods/content type; `RELEASE_PROBE_CONSUMER_ORG_SLUG`, `RELEASE_PROBE_CONSUMER_MEMBER_USER_ID`, optional `RELEASE_PROBE_API_KEY_ID`; `STAGING_E2E_ORG_SLUG`, `STAGING_E2E_MEMBER_USER_ID`, optional `STAGING_E2E_API_KEY_ID` | Cloudflare token; staging Clerk publishable/secret keys; staging Convex deploy key; staging probe secret/body; E2E email/password/optional OTP |
+| `production`           | Probe paths/methods/content type; exact consumer org/member/optional key ID                                                                                                                                                                                                                                                           | Cloudflare token; production Clerk publishable/secret keys; production Convex deploy key; production probe secret/body                         |
+| `production-contract`  | Same production probe variables                                                                                                                                                                                                                                                                                                       | Production Clerk secret key; Convex deploy key; probe secret/body                                                                              |
+| `production-lifecycle` | Same production probe variables                                                                                                                                                                                                                                                                                                       | Cloudflare token; production Clerk publishable/secret keys; Convex deploy key; probe secret/body                                               |
+| `production-recovery`  | Same production probe variables                                                                                                                                                                                                                                                                                                       | Same production provider, Clerk, Convex, and probe secrets needed by bounded recovery                                                          |
 
-Contract change must be exactly one commit after active release, touch only
-`convex/`, use `contract(convex):` subject, and remain current `develop` tip.
-Normal production workflow recognizes that subject and does not deploy it. Run
-`Contract Production Schema` manually with contract SHA and verified active
-release SHA. Workflow rehearses contract on staging and runs authenticated,
-metered E2E. Separate `production-contract` approval then re-proves active
-consumers, applies contract, and runs deep probes again.
+`RELEASE_PROBE_REQUEST_BODY` is required only for body methods. JSON body must
+match content type and operation schema. Probe fixture must be public,
+positive-cost, outside free tier, reliable, funded, and owned by exact consumer
+org. Keep credits for staging, baseline, candidate, convergence, and recovery.
 
-Immediately before production contraction, workflow records pending commit
-status context `zevium/convex-contract`; successful post-contract probes change
-it to success. Normal releases scan every contract commit since active Worker
-release and refuse deployment unless each latest marker is successful. This
-prevents a later normal commit from silently carrying an unapplied contraction.
-Interrupted or failed contractions remain blocking until reviewed recovery and
-a successful contract or recovery run.
+There is deliberately no `PRODUCTION_RELEASE_PROBE_API_KEY`, staging equivalent,
+or E2E API-key secret.
 
-Contract rollback is intentionally absent. Removed schema/functions may make
-old Workers incompatible and Convex cannot atomically restore code plus data.
-Failure response is a reviewed roll-forward compatibility patch. Recovery mode
-accepts only one `fix(convex):` commit immediately after one failed
-`contract(convex):` commit, requires both commits after active Worker release to
-touch only `convex/`, and refuses recovery when original marker already passed.
-Because broken contracted state may fail paid pre-probe, recovery first proves
-unchanged Worker identities, then requires full paid probe after repair. Success
-marks original contract context recovered with recovery SHA in description.
+## Evidence and external bootstrap
 
-## Provider limitations
+Artifacts contain SHAs, timestamps, state, provider version pointers, minimal
+accounting totals, and failure screenshots. They exclude keys, challenge,
+headers, cookies, request/response bodies, environment dumps, and consumer
+identity. Staging retention is 14 days; production/recovery 30 days; protected
+attestation subject 90 days.
 
-- Convex production deploy changes live functions/schema immediately. No
-  first-class immutable deployment selection, traffic split, or atomic data/code
-  rollback exists. Deployment history is not a substitute for compatible
-  roll-forward.
-- Cloudflare Worker code supports immutable versions, 0%-traffic version
-  overrides, weighted traffic, and rollback. Durable Object storage and class
-  migrations are shared state, not versioned with Worker code. DO migrations
-  must also be expand-only. A version override proves Worker code/bindings, not
-  unrelated zone configuration.
-- Worker secrets persist outside source artifacts. Staging candidate uploads
-  carry reviewed Clerk/internal secrets in temporary files; production uploads
-  preserve existing remote secrets. Production rotation remains separate
-  controlled work and every release probe proves resulting bindings function.
-- GitHub concurrency and environment approvals serialize this workflow, not
-  vendor consoles or emergency manual commands. Operators must check provider
-  activity before recovery.
-- Staging proves contracts against separate vendor tenants and test data. It
-  reduces risk but cannot prove production data shape or third-party uptime.
+Repository cannot enforce or verify these external controls:
 
-## Threat and failure model
+- GitHub environment reviewers, self-review/admin bypass, deployment branch
+  rules, and secret placement;
+- Cloudflare token least privilege and current active provider state;
+- Convex deploy-key scope, production environment variables, deployed bootstrap
+  schema, and secret rotation;
+- Clerk dedicated member/key fixture and funded consumer wallet;
+- first deployment of `/release-probe-accounting` expansion. Until endpoint and
+  `RELEASE_PROBE_SECRET` exist in production, HTTP 404/401/503 blocks release.
 
-- Fork/ref injection: manual release input enters secret-free resolver as an
-  environment value, must match lowercase full SHA regex and GitHub API current
-  `develop`, is emitted as job output, then exact output is checked out. Cache
-  restore and Mise execute only after trusted checkout. No input becomes shell
-  syntax, checkout ref, cache expression, or command fragment.
-- Approval delay: every production environment job re-resolves current
-  `develop` and active production identities after approval. Normal deploy also
-  repeats SHA check directly before first Cloudflare write. Stale approval dies
-  before paid baseline or provider mutation.
-- Concurrency: expand, contract, and DO lifecycle workflows share
-  `production-release` with cancellation disabled. GitHub ordering is not
-  assumed. Vendor-console/manual writes remain out of band and active metadata
-  checks catch them.
-- Cancellation: workflow cancellation or runner death can happen between any
-  vendor calls despite `cancel-in-progress: false`. State markers are written
-  before ambiguous Convex mutation; captured Cloudflare version IDs and paid
-  evidence drive recovery. DO lifecycle cancellation is roll-forward only.
-- Async failure: gateway returns before usage ingest. Every paid gate polls
-  boundedly for same request id and exact usage/ledger/publisher settlement.
-  Missing ingest, stale internal secret, duplicate/wrong linkage, or timeout
-  fails gate. No public health success substitutes for accounting.
-- Credential/log failure: release accounting secret is query-only and distinct
-  from ingest/deploy keys. Requests use headers; scripts persist no headers,
-  bodies, environment, or credentials. HTTP errors return generic messages and
-  server logs never include supplied secret.
+Bootstrap these under reviewed provider procedures. Never bypass failed checks,
+paste API-key secret into commands, or manually forge provenance.

@@ -9,10 +9,8 @@ concurrency:
   group: payment-drill
   cancel-in-progress: false
 
-env:
-  MISE_EXPERIMENTAL: true
-
 permissions:
+  actions: read
   contents: read
 
 jobs:
@@ -20,16 +18,23 @@ jobs:
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           persist-credentials: false
-      - uses: actions/cache@v5
+      - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25
         with:
           path: ~/.local/share/pnpm/store
           key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
           restore-keys: |
             ${{ runner.os }}-pnpm-store-
-      - uses: jdx/mise-action@v4
+      - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903
+        with:
+          node-version: 24.15.0
+      - name: Install pinned pnpm dependencies
+        run: |
+          corepack enable
+          corepack prepare pnpm@11.8.0 --activate
+          pnpm install --frozen-lockfile
       - name: Verify checkout, metering, refunds, and Connect settlement
         run: pnpm exec vitest run --config convex/vitest.config.ts convex/stripe-billing.test.ts convex/stripe-connect.test.ts convex/ingest-usage.test.ts
 
@@ -38,31 +43,64 @@ jobs:
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 20
     environment: staging
+    env:
+      TARGET_SHA: ${{ github.sha }}
+      E2E_CONSUMER_ORG_SLUG: ${{ vars.STAGING_E2E_ORG_SLUG }}
+      E2E_CONSUMER_MEMBER_USER_ID: ${{ vars.STAGING_E2E_MEMBER_USER_ID }}
+      E2E_API_KEY_ID: ${{ vars.STAGING_E2E_API_KEY_ID }}
     steps:
-      - uses: actions/checkout@v6
+      - name: Candidate-independent GitHub stale guard before checkout or setup
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          [[ "$TARGET_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$(gh api "repos/$GITHUB_REPOSITORY/commits/develop" --jq .sha)" = "$TARGET_SHA"
+          # jq reads runner values through $ENV; shell must not expand it.
+          # shellcheck disable=SC2016
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            --jq '[.id == ($ENV.GITHUB_RUN_ID | tonumber), .path == ".github/workflows/payment-drill.yml", .head_sha == $ENV.TARGET_SHA, .event == "workflow_dispatch", .status == "in_progress"] | all' \
+            | grep -qx true
+
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
+          ref: ${{ github.sha }}
           persist-credentials: false
-      - uses: actions/cache@v5
+      - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25
         with:
           path: ~/.local/share/pnpm/store
           key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
           restore-keys: |
             ${{ runner.os }}-pnpm-store-
-      - uses: jdx/mise-action@v4
+      - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903
+        with:
+          node-version: 24.15.0
+      - name: Install pinned pnpm dependencies
+        run: |
+          corepack enable
+          corepack prepare pnpm@11.8.0 --activate
+          pnpm install --frozen-lockfile
       - name: Install browser runtime
         run: |
-          npm install --global agent-browser@0.27.1
-          agent-browser install --with-deps
+          browser_prefix="$RUNNER_TEMP/agent-browser"
+          npm install --prefix "$browser_prefix" --ignore-scripts --no-audit --no-fund agent-browser@0.27.1
+          "$browser_prefix/node_modules/.bin/agent-browser" install --with-deps
+          echo "$browser_prefix/node_modules/.bin" >> "$GITHUB_PATH"
       - name: Run authenticated publish and metered-call journey
         env:
+          CLERK_STAGING_SECRET_KEY: ${{ secrets.CLERK_STAGING_SECRET_KEY }}
           E2E_BASE_URL: ${{ vars.STAGING_WEB_URL }}
           GATEWAY_URL: ${{ vars.STAGING_GATEWAY_URL }}
           E2E_EMAIL: ${{ secrets.STAGING_E2E_EMAIL }}
           E2E_PASSWORD: ${{ secrets.STAGING_E2E_PASSWORD }}
           E2E_OTP: ${{ secrets.STAGING_E2E_OTP }}
-          E2E_API_KEY: ${{ secrets.STAGING_E2E_API_KEY }}
           E2E_ORG_SLUG: ${{ vars.STAGING_E2E_ORG_SLUG }}
-        run: e2e/run-all.sh
+        run: |
+          node .github/scripts/with-clerk-release-key.mjs \
+            --clerk-secret-env=CLERK_STAGING_SECRET_KEY \
+            --org-slug="$E2E_CONSUMER_ORG_SLUG" \
+            --member-user-id="$E2E_CONSUMER_MEMBER_USER_ID" \
+            --key-id="$E2E_API_KEY_ID" --child-env=E2E_API_KEY -- \
+            bash e2e/run-all.sh
       - name: Run real Stripe Checkout and refund journey
         env:
           E2E_BASE_URL: ${{ vars.STAGING_WEB_URL }}
@@ -73,7 +111,7 @@ jobs:
         run: e2e/04-payment-drill.sh
       - name: Upload failure evidence
         if: failure()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: payment-drill-evidence
           path: e2e/artifacts
