@@ -39,6 +39,8 @@ export interface Env {
   CONVEX_DEPLOY_KEY?: string;
   /** Shared secret for POST /internal/grant + Convex /ingest-usage. */
   GATEWAY_INTERNAL_SECRET?: string;
+  /** Immutable git SHA stamped into every release candidate. */
+  ZEVIUM_RELEASE?: string;
   /**
    * Test-only: when set, Worker uses fixture key/spec sources populated via
    * internal test helpers (see test/pipeline.test.ts). Not for production.
@@ -232,7 +234,12 @@ export default {
         );
       return withCors(
         Response.json(
-          { ok: specConfigReady, service: "zevium-gateway" },
+          {
+            ok: specConfigReady,
+            service: "zevium-gateway",
+            release: env.ZEVIUM_RELEASE ?? "development",
+            contract: 1,
+          },
           { status: specConfigReady ? 200 : 503 },
         ),
       );

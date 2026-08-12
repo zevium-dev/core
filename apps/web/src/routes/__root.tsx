@@ -88,6 +88,12 @@ export const Route = createRootRouteWithContext<RouterContext>()({
         content: "width=device-width, initial-scale=1",
       },
       { title: "Zevium" },
+      {
+        name: "zevium-release",
+        content:
+          (import.meta.env.VITE_RELEASE_SHA as string | undefined) ??
+          "development",
+      },
     ],
     links: [
       { rel: "stylesheet", href: appCss },

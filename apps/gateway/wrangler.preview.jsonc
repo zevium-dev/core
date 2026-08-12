@@ -4,6 +4,7 @@
   "account_id": "1ea9299555b026a6a7484c8323c5a953",
   "main": "src/index.ts",
   "compatibility_date": "2025-04-01",
+  "compatibility_flags": ["global_fetch_strictly_public"],
   "workers_dev": true,
   "preview_urls": true,
   "observability": { "enabled": true },

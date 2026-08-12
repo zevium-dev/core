@@ -1,0 +1,373 @@
+name: Contract Production Schema
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_sha:
+        description: Full git SHA containing one reviewed contract-only Convex commit
+        required: true
+        type: string
+      expected_active_release:
+        description: Full git SHA currently verified on gateway and web
+        required: true
+        type: string
+      recovery_of:
+        description: Failed contract SHA to recover; empty for normal contraction
+        required: false
+        type: string
+
+concurrency:
+  group: production-release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  statuses: write
+
+env:
+  MISE_EXPERIMENTAL: true
+  PRODUCTION_CONVEX_URL: https://polite-ermine-809.convex.cloud
+  PRODUCTION_WEB_URL: https://www.zevium.dev
+  PRODUCTION_GATEWAY_URL: https://gateway.zevium.dev
+
+jobs:
+  contract-candidate:
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 35
+    environment: staging
+    env:
+      CONTRACT_SHA: ${{ inputs.release_sha }}
+      ACTIVE_RELEASE: ${{ inputs.expected_active_release }}
+      RECOVERY_OF: ${{ inputs.recovery_of }}
+      STAGING_WEB_URL: ${{ vars.STAGING_WEB_URL }}
+      STAGING_GATEWAY_URL: ${{ vars.STAGING_GATEWAY_URL }}
+      STAGING_CONVEX_URL: ${{ vars.STAGING_CONVEX_URL }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.release_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/cache@v5
+        with:
+          path: ~/.local/share/pnpm/store
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+      - uses: jdx/mise-action@v4
+
+      - name: Prove immutable identities and one contract-only commit
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          node -e '
+            for (const key of ["CONTRACT_SHA", "ACTIVE_RELEASE"]) {
+              if (!/^[0-9a-f]{40}$/.test(process.env[key] ?? "")) process.exit(1);
+            }
+            if (process.env.RECOVERY_OF && !/^[0-9a-f]{40}$/.test(process.env.RECOVERY_OF)) process.exit(1);
+          '
+          test "$(git rev-parse HEAD)" = "$CONTRACT_SHA"
+          develop_tip="$(gh api "repos/$GITHUB_REPOSITORY/commits/develop" --jq .sha)"
+          test "$develop_tip" = "$CONTRACT_SHA" || {
+            echo "Contract commit must remain current develop tip" >&2
+            exit 1
+          }
+          git merge-base --is-ancestor "$ACTIVE_RELEASE" "$CONTRACT_SHA"
+          if [[ -z "$RECOVERY_OF" ]]; then
+            test "$(git rev-list --count "$ACTIVE_RELEASE..$CONTRACT_SHA")" = "1" || {
+              echo "Contract phase accepts exactly one commit after active release" >&2
+              exit 1
+            }
+            [[ "$(git log -1 --format=%s)" == contract\(convex\):* ]] || {
+              echo "Contract commit subject must start with contract(convex):" >&2
+              exit 1
+            }
+          else
+            git merge-base --is-ancestor "$ACTIVE_RELEASE" "$RECOVERY_OF"
+            git merge-base --is-ancestor "$RECOVERY_OF" "$CONTRACT_SHA"
+            test "$(git rev-list --count "$ACTIVE_RELEASE..$RECOVERY_OF")" = "1"
+            test "$(git rev-list --count "$RECOVERY_OF..$CONTRACT_SHA")" = "1"
+            [[ "$(git log -1 --format=%s "$RECOVERY_OF")" == contract\(convex\):* ]] || {
+              echo "Recovery target is not contract(convex) commit" >&2
+              exit 1
+            }
+            [[ "$(git log -1 --format=%s "$CONTRACT_SHA")" == fix\(convex\):* ]] || {
+              echo "Recovery commit subject must start with fix(convex):" >&2
+              exit 1
+            }
+            marker="$(gh api \
+              "repos/$GITHUB_REPOSITORY/commits/$RECOVERY_OF/status" \
+              | node -e '
+                let s="";
+                process.stdin.on("data", d => s += d).on("end", () => {
+                  const payload = JSON.parse(s);
+                  const marker = payload.statuses?.find(
+                    (status) => status.context === "zevium/convex-contract",
+                  );
+                  process.stdout.write(marker?.state ?? "missing");
+                });
+              ')"
+            [[ "$marker" != "success" ]] || {
+              echo "Successful contract cannot enter recovery mode" >&2
+              exit 1
+            }
+          fi
+          invalid_paths="$(git diff --name-only "$ACTIVE_RELEASE" "$CONTRACT_SHA" \
+            | awk '$0 !~ /^convex\// { print }')"
+          [[ -z "$invalid_paths" ]] || {
+            echo "Contract commit changed files outside convex/:" >&2
+            printf '%s\n' "$invalid_paths" >&2
+            exit 1
+          }
+          test -n "$(git diff --name-only "$ACTIVE_RELEASE" "$CONTRACT_SHA" -- convex/)"
+          pnpm ci:pr
+
+      - name: Reject incomplete staging contract configuration
+        env:
+          CONVEX_STAGING_DEPLOY_KEY: ${{ secrets.CONVEX_STAGING_DEPLOY_KEY }}
+          STAGING_E2E_ORG_SLUG: ${{ vars.STAGING_E2E_ORG_SLUG }}
+          STAGING_E2E_EMAIL: ${{ secrets.STAGING_E2E_EMAIL }}
+          STAGING_E2E_PASSWORD: ${{ secrets.STAGING_E2E_PASSWORD }}
+          STAGING_E2E_API_KEY: ${{ secrets.STAGING_E2E_API_KEY }}
+        run: |
+          required=(
+            STAGING_WEB_URL STAGING_GATEWAY_URL STAGING_CONVEX_URL
+            CONVEX_STAGING_DEPLOY_KEY
+            STAGING_E2E_ORG_SLUG STAGING_E2E_EMAIL STAGING_E2E_PASSWORD
+            STAGING_E2E_API_KEY
+          )
+          missing=()
+          for name in "${required[@]}"; do
+            [[ -n "${!name:-}" ]] || missing+=("$name")
+          done
+          if (( ${#missing[@]} > 0 )); then
+            printf 'Missing staging contract configuration: %s\n' "${missing[*]}" >&2
+            exit 1
+          fi
+          # shellcheck disable=SC2016
+          node -e '
+            for (const key of ["STAGING_WEB_URL","STAGING_GATEWAY_URL","STAGING_CONVEX_URL"]) {
+              const url = new URL(process.env[key]);
+              if (url.protocol !== "https:" || url.pathname !== "/" || url.search ||
+                  url.hash || url.username || url.password ||
+                  url.origin === process.env.PRODUCTION_WEB_URL ||
+                  url.origin === process.env.PRODUCTION_GATEWAY_URL ||
+                  url.origin === process.env.PRODUCTION_CONVEX_URL) {
+                throw new Error(`${key} must be a distinct HTTPS staging origin`);
+              }
+            }
+            if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(process.env.STAGING_E2E_ORG_SLUG)) {
+              throw new Error("STAGING_E2E_ORG_SLUG must be a canonical slug");
+            }
+          '
+
+      - name: Prove staging Convex deploy key target without mutation
+        env:
+          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_STAGING_DEPLOY_KEY }}
+          EXPECTED_CONVEX_URL: ${{ vars.STAGING_CONVEX_URL }}
+        run: |
+          convex_dry_run="$(pnpm exec convex deploy --dry-run --yes \
+            --codegen disable --typecheck disable 2>&1)"
+          printf '%s' "$convex_dry_run" \
+            | node .github/scripts/release-contract.mjs --validate-convex-dry-run=true
+
+      - name: Verify staging runtime still serves active release
+        run: |
+          node .github/scripts/release-contract.mjs \
+            --identity-only=true --release="$ACTIVE_RELEASE" \
+            --web="$STAGING_WEB_URL" --gateway="$STAGING_GATEWAY_URL" \
+            --output=release-evidence/staging-pre-contract-identity.json
+
+      - name: Rehearse destructive contract on staging Convex
+        env:
+          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_STAGING_DEPLOY_KEY }}
+        run: pnpm exec convex deploy --yes --message "staging contract $CONTRACT_SHA"
+
+      - name: Install browser runtime
+        run: |
+          npm install --global agent-browser@0.27.1
+          agent-browser install --with-deps
+
+      - name: Run contracted-state authenticated and metered E2E
+        env:
+          E2E_BASE_URL: ${{ env.STAGING_WEB_URL }}
+          GATEWAY_URL: ${{ env.STAGING_GATEWAY_URL }}
+          E2E_EMAIL: ${{ secrets.STAGING_E2E_EMAIL }}
+          E2E_PASSWORD: ${{ secrets.STAGING_E2E_PASSWORD }}
+          E2E_OTP: ${{ secrets.STAGING_E2E_OTP }}
+          E2E_API_KEY: ${{ secrets.STAGING_E2E_API_KEY }}
+          E2E_ORG_SLUG: ${{ vars.STAGING_E2E_ORG_SLUG }}
+        run: e2e/run-all.sh
+
+      - name: Upload contracted-state evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: contract-candidate-${{ env.CONTRACT_SHA }}
+          path: |
+            release-evidence
+            e2e/artifacts/*.png
+            e2e/artifacts/*.url.txt
+          if-no-files-found: ignore
+          retention-days: 14
+
+  contract-production:
+    needs: contract-candidate
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 25
+    environment: production-contract
+    env:
+      CONTRACT_SHA: ${{ inputs.release_sha }}
+      ACTIVE_RELEASE: ${{ inputs.expected_active_release }}
+      RECOVERY_OF: ${{ inputs.recovery_of }}
+      STATUS_SHA: ${{ inputs.recovery_of || inputs.release_sha }}
+      RELEASE_PROBE_MOCK_PATH: ${{ vars.RELEASE_PROBE_MOCK_PATH }}
+      RELEASE_PROBE_MOCK_METHOD: ${{ vars.RELEASE_PROBE_MOCK_METHOD }}
+      RELEASE_PROBE_METERED_PATH: ${{ vars.RELEASE_PROBE_METERED_PATH }}
+      RELEASE_PROBE_METERED_METHOD: ${{ vars.RELEASE_PROBE_METERED_METHOD }}
+      RELEASE_PROBE_CONTENT_TYPE: ${{ vars.RELEASE_PROBE_CONTENT_TYPE }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.release_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/cache@v5
+        with:
+          path: ~/.local/share/pnpm/store
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+      - uses: jdx/mise-action@v4
+
+      - name: Recheck immutable commit and production configuration
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_PROBE_REQUEST_BODY: ${{ secrets.PRODUCTION_RELEASE_PROBE_REQUEST_BODY }}
+          CONVEX_PRODUCTION_DEPLOY_KEY: ${{ secrets.CONVEX_PRODUCTION_DEPLOY_KEY }}
+          RELEASE_PROBE_API_KEY: ${{ secrets.PRODUCTION_RELEASE_PROBE_API_KEY }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$CONTRACT_SHA"
+          develop_tip="$(gh api "repos/$GITHUB_REPOSITORY/commits/develop" --jq .sha)"
+          test "$develop_tip" = "$CONTRACT_SHA" || {
+            echo "Contract commit stopped being current develop tip" >&2
+            exit 1
+          }
+          required=(
+            RELEASE_PROBE_MOCK_PATH RELEASE_PROBE_MOCK_METHOD
+            RELEASE_PROBE_METERED_PATH RELEASE_PROBE_METERED_METHOD
+            CONVEX_PRODUCTION_DEPLOY_KEY RELEASE_PROBE_API_KEY
+          )
+          missing=()
+          for name in "${required[@]}"; do
+            [[ -n "${!name:-}" ]] || missing+=("$name")
+          done
+          if (( ${#missing[@]} > 0 )); then
+            printf 'Missing production contract configuration: %s\n' "${missing[*]}" >&2
+            exit 1
+          fi
+          node .github/scripts/release-contract.mjs --validate-only=true \
+            --release="$ACTIVE_RELEASE" --web="$PRODUCTION_WEB_URL" \
+            --gateway="$PRODUCTION_GATEWAY_URL" \
+            --mock-path="$RELEASE_PROBE_MOCK_PATH" \
+            --mock-method="$RELEASE_PROBE_MOCK_METHOD" \
+            --metered-path="$RELEASE_PROBE_METERED_PATH" \
+            --metered-method="$RELEASE_PROBE_METERED_METHOD" \
+            --content-type="$RELEASE_PROBE_CONTENT_TYPE"
+
+      - name: Prove production Convex deploy key target without mutation
+        env:
+          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_PRODUCTION_DEPLOY_KEY }}
+          EXPECTED_CONVEX_URL: ${{ env.PRODUCTION_CONVEX_URL }}
+        run: |
+          convex_dry_run="$(pnpm exec convex deploy --dry-run --yes \
+            --codegen disable --typecheck disable 2>&1)"
+          printf '%s' "$convex_dry_run" \
+            | node .github/scripts/release-contract.mjs --validate-convex-dry-run=true
+
+      - name: Verify all active consumers before destructive contract
+        env:
+          RELEASE_PROBE_API_KEY: ${{ secrets.PRODUCTION_RELEASE_PROBE_API_KEY }}
+          RELEASE_PROBE_REQUEST_BODY: ${{ secrets.PRODUCTION_RELEASE_PROBE_REQUEST_BODY }}
+        run: |
+          if [[ -n "$RECOVERY_OF" ]]; then
+            node .github/scripts/release-contract.mjs \
+              --identity-only=true --release="$ACTIVE_RELEASE" \
+              --web="$PRODUCTION_WEB_URL" --gateway="$PRODUCTION_GATEWAY_URL" \
+              --output=release-evidence/pre-recovery-identity.json
+          else
+            node .github/scripts/release-contract.mjs \
+              --release="$ACTIVE_RELEASE" --web="$PRODUCTION_WEB_URL" \
+              --gateway="$PRODUCTION_GATEWAY_URL" \
+              --mock-path="$RELEASE_PROBE_MOCK_PATH" \
+              --mock-method="$RELEASE_PROBE_MOCK_METHOD" \
+              --metered-path="$RELEASE_PROBE_METERED_PATH" \
+              --metered-method="$RELEASE_PROBE_METERED_METHOD" \
+              --content-type="$RELEASE_PROBE_CONTENT_TYPE" \
+              --output=release-evidence/pre-contract.json
+          fi
+
+      - name: Mark production contraction pending
+        id: contract_status
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh api --silent --method POST \
+            "repos/$GITHUB_REPOSITORY/statuses/$STATUS_SHA" \
+            -f state=pending -f context=zevium/convex-contract \
+            -f description='Production Convex contraction in progress' \
+            -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+
+      - name: Apply approved Convex contract
+        env:
+          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_PRODUCTION_DEPLOY_KEY }}
+        run: pnpm exec convex deploy --yes --message "production contract $CONTRACT_SHA"
+
+      - name: Deep probe contracted state
+        env:
+          RELEASE_PROBE_API_KEY: ${{ secrets.PRODUCTION_RELEASE_PROBE_API_KEY }}
+          RELEASE_PROBE_REQUEST_BODY: ${{ secrets.PRODUCTION_RELEASE_PROBE_REQUEST_BODY }}
+        run: |
+          node .github/scripts/release-contract.mjs \
+            --release="$ACTIVE_RELEASE" --web="$PRODUCTION_WEB_URL" \
+            --gateway="$PRODUCTION_GATEWAY_URL" \
+            --mock-path="$RELEASE_PROBE_MOCK_PATH" \
+            --mock-method="$RELEASE_PROBE_MOCK_METHOD" \
+            --metered-path="$RELEASE_PROBE_METERED_PATH" \
+            --metered-method="$RELEASE_PROBE_METERED_METHOD" \
+            --content-type="$RELEASE_PROBE_CONTENT_TYPE" \
+            --output=release-evidence/post-contract.json
+
+      - name: Mark production contraction applied
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          description='Production Convex contraction verified'
+          if [[ -n "$RECOVERY_OF" ]]; then
+            description="Production Convex contract recovered by ${CONTRACT_SHA:0:12}"
+          fi
+          gh api --silent --method POST \
+            "repos/$GITHUB_REPOSITORY/statuses/$STATUS_SHA" \
+            -f state=success -f context=zevium/convex-contract \
+            -f description="$description" \
+            -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+
+      - name: Mark interrupted production contraction
+        if: failure() && steps.contract_status.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh api --silent --method POST \
+            "repos/$GITHUB_REPOSITORY/statuses/$STATUS_SHA" \
+            -f state=failure -f context=zevium/convex-contract \
+            -f description='Production Convex contraction needs recovery' \
+            -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+
+      - name: Upload sanitized contract evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: production-contract-${{ env.CONTRACT_SHA }}
+          path: release-evidence
+          if-no-files-found: error
+          retention-days: 30
