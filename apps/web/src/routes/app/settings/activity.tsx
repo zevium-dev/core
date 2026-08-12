@@ -3,9 +3,11 @@ import { convexQuery } from "@convex-dev/react-query";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useConvexAuth } from "convex/react";
+import { makeFunctionReference } from "convex/server";
 import { Activity, Search } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
+import { OrgCapabilityNotice } from "#/components/org-capability-notice";
 import { Badge } from "#/components/ui/badge";
 import { Button } from "#/components/ui/button";
 import {
@@ -45,12 +47,19 @@ import {
   ACTIVITY_TIME_RANGE_LABELS,
   ACTIVITY_TIME_RANGES,
   activitySinceMs,
-  mergeUsagePages,
+  authorizedAttributionSearch,
+  mergePublicUsagePages,
   type ActivityTimeRange,
 } from "#/lib/activity-filters";
-import { api } from "#/lib/convex-api";
-import type { Id } from "#/lib/convex-data-model";
+import { truncateKeyId } from "#/lib/billing-cycle";
 import { humanError } from "#/lib/human-error";
+import {
+  activeOrgCapabilitiesRef,
+  capabilityProjectionsMatch,
+  hasServerCapability,
+  parseOrgCapabilityProjection,
+  type OrgCapabilityProjection,
+} from "#/lib/org-capabilities";
 
 type ActivitySearch = {
   range?: ActivityTimeRange;
@@ -62,41 +71,45 @@ type ActivitySearch = {
   event?: string;
 };
 
+export function validateActivitySearch(
+  search: Record<string, unknown>,
+): ActivitySearch {
+  const range = ACTIVITY_TIME_RANGES.find(
+    (candidate) => candidate === search.range,
+  );
+  const project =
+    typeof search.project === "string" &&
+    search.project.length > 0 &&
+    search.project.length <= 128
+      ? search.project
+      : undefined;
+  const event =
+    typeof search.event === "string" &&
+    search.event.length > 0 &&
+    search.event.length <= 128
+      ? search.event
+      : undefined;
+  const bounded = (value: unknown, max: number) =>
+    typeof value === "string" && value.length > 0 && value.length <= max
+      ? value
+      : undefined;
+  const key = bounded(search.key, 128);
+  const member = bounded(search.member, 128);
+  const endpoint = bounded(search.endpoint, 512);
+  const method = bounded(search.method, 16)?.toUpperCase();
+  return {
+    ...(range && range !== "7d" ? { range } : {}),
+    ...(project ? { project } : {}),
+    ...(key ? { key } : {}),
+    ...(member ? { member } : {}),
+    ...(endpoint ? { endpoint } : {}),
+    ...(method ? { method } : {}),
+    ...(event ? { event } : {}),
+  };
+}
+
 export const Route = createFileRoute("/app/settings/activity")({
-  validateSearch: (search: Record<string, unknown>): ActivitySearch => {
-    const range = ACTIVITY_TIME_RANGES.find(
-      (candidate) => candidate === search.range,
-    );
-    const project =
-      typeof search.project === "string" &&
-      search.project.length > 0 &&
-      search.project.length <= 128
-        ? search.project
-        : undefined;
-    const event =
-      typeof search.event === "string" &&
-      search.event.length > 0 &&
-      search.event.length <= 128
-        ? search.event
-        : undefined;
-    const bounded = (value: unknown, max: number) =>
-      typeof value === "string" && value.length > 0 && value.length <= max
-        ? value
-        : undefined;
-    const key = bounded(search.key, 128);
-    const member = bounded(search.member, 128);
-    const endpoint = bounded(search.endpoint, 512);
-    const method = bounded(search.method, 16)?.toUpperCase();
-    return {
-      ...(range && range !== "7d" ? { range } : {}),
-      ...(project ? { project } : {}),
-      ...(key ? { key } : {}),
-      ...(member ? { member } : {}),
-      ...(endpoint ? { endpoint } : {}),
-      ...(method ? { method } : {}),
-      ...(event ? { event } : {}),
-    };
-  },
+  validateSearch: validateActivitySearch,
   component: ActivityPage,
   head: () => ({
     meta: [{ title: "Activity · Zevium" }],
@@ -104,8 +117,8 @@ export const Route = createFileRoute("/app/settings/activity")({
 });
 
 type UsageListItem = {
-  _id: string;
-  projectId: string;
+  eventId: string | null;
+  projectRef: string | null;
   projectName: string | null;
   projectSlug: string | null;
   endpoint: string;
@@ -114,8 +127,119 @@ type UsageListItem = {
   status: number;
   latencyMs: number;
   keyId: string;
+  memberId?: string | null;
+  memberName?: string | null;
   at: number;
 };
+
+type UsagePageData = {
+  access: OrgCapabilityProjection;
+  page: UsageListItem[];
+  isDone: boolean;
+  continueCursor: string | null;
+};
+
+type ActivityCycleData = {
+  access: OrgCapabilityProjection;
+  byProject: Array<{
+    projectRef: string | null;
+    name: string;
+    slug: string;
+  }>;
+};
+
+type UsageListArgs = {
+  orgSlug: string;
+  paginationOpts: { numItems: number; cursor: string | null };
+  projectRef?: string;
+  keyId?: string;
+  memberId?: string;
+  endpoint?: string;
+  method?: string;
+  since?: number;
+};
+
+const activityCycleRef = makeFunctionReference<
+  "query",
+  { orgSlug: string },
+  ActivityCycleData
+>("billing:cycleBreakdown");
+
+const usageListRef = makeFunctionReference<
+  "query",
+  UsageListArgs,
+  UsagePageData
+>("usage:listForOrg");
+
+const usageEventRef = makeFunctionReference<
+  "query",
+  { orgSlug: string; eventId: string },
+  UsageListItem | null
+>("usage:getForOrgById");
+
+function isNullableString(value: unknown): value is string | null {
+  return value === null || typeof value === "string";
+}
+
+function isUsageListItem(value: unknown): value is UsageListItem {
+  if (typeof value !== "object" || value === null) return false;
+  const item = value as Record<string, unknown>;
+  return (
+    isNullableString(item.eventId) &&
+    isNullableString(item.projectRef) &&
+    isNullableString(item.projectName) &&
+    isNullableString(item.projectSlug) &&
+    typeof item.endpoint === "string" &&
+    typeof item.method === "string" &&
+    typeof item.credits === "number" &&
+    Number.isFinite(item.credits) &&
+    typeof item.status === "number" &&
+    Number.isFinite(item.status) &&
+    typeof item.latencyMs === "number" &&
+    Number.isFinite(item.latencyMs) &&
+    typeof item.keyId === "string" &&
+    (item.memberId === undefined || isNullableString(item.memberId)) &&
+    (item.memberName === undefined || isNullableString(item.memberName)) &&
+    typeof item.at === "number" &&
+    Number.isFinite(item.at)
+  );
+}
+
+function parseUsagePage(value: unknown): UsagePageData | null {
+  if (typeof value !== "object" || value === null) return null;
+  const page = value as Record<string, unknown>;
+  if (
+    parseOrgCapabilityProjection(page.access) === null ||
+    !Array.isArray(page.page) ||
+    !page.page.every(isUsageListItem) ||
+    typeof page.isDone !== "boolean" ||
+    !isNullableString(page.continueCursor)
+  ) {
+    return null;
+  }
+  return value as UsagePageData;
+}
+
+function parseActivityCycle(value: unknown): ActivityCycleData | null {
+  if (typeof value !== "object" || value === null) return null;
+  const cycle = value as Record<string, unknown>;
+  if (
+    parseOrgCapabilityProjection(cycle.access) === null ||
+    !Array.isArray(cycle.byProject) ||
+    !cycle.byProject.every((project) => {
+      if (typeof project !== "object" || project === null) return false;
+      const candidate = project as Record<string, unknown>;
+      return (
+        isNullableString(candidate.projectRef) &&
+        typeof candidate.name === "string" &&
+        typeof candidate.slug === "string"
+      );
+    })
+  ) {
+    return null;
+  }
+  return value as ActivityCycleData;
+}
 
 const ACTIVITY_DATE_FORMATTER = new Intl.DateTimeFormat("en-US", {
   year: "numeric",
@@ -177,16 +301,36 @@ function ActivityContent({ orgSlug }: { orgSlug: string }) {
   const navigate = useNavigate({ from: Route.fullPath });
   const search = Route.useSearch();
   const timeRange = search.range ?? "7d";
-  const projectId = search.project ?? "all";
+  const projectRef = search.project ?? "all";
   const [cursor, setCursor] = useState<string | null>(null);
   const [rows, setRows] = useState<UsageListItem[]>([]);
   const [isDone, setIsDone] = useState(false);
   const [continueCursor, setContinueCursor] = useState<string | null>(null);
+  const [projectionRejected, setProjectionRejected] = useState(false);
 
   // Freeze "now" per filter change so page fetches share the same window.
   const [windowNow, setWindowNow] = useState(() => Date.now());
 
-  const projectsQuery = useQuery(convexQuery(api.projects.list, { orgSlug }));
+  const accessQuery = useQuery(convexQuery(activeOrgCapabilitiesRef, {}));
+  const capabilities = useMemo(
+    () => parseOrgCapabilityProjection(accessQuery.data),
+    [accessQuery.data],
+  );
+  const canViewOrgUsage = hasServerCapability(capabilities, "viewOrgUsage");
+  const attributionSearch = useMemo(
+    () => authorizedAttributionSearch(search, canViewOrgUsage),
+    [
+      canViewOrgUsage,
+      search.endpoint,
+      search.key,
+      search.member,
+      search.method,
+    ],
+  );
+  const cycleQuery = useQuery({
+    ...convexQuery(activityCycleRef, { orgSlug }),
+    enabled: capabilities !== null,
+  });
 
   const since = useMemo(
     () => activitySinceMs(timeRange, windowNow),
@@ -194,38 +338,78 @@ function ActivityContent({ orgSlug }: { orgSlug: string }) {
   );
 
   const listArgs = useMemo(() => {
-    const args: {
-      orgSlug: string;
-      paginationOpts: { numItems: number; cursor: string | null };
-      projectId?: Id<"projects">;
-      keyId?: string;
-      memberId?: string;
-      endpoint?: string;
-      method?: string;
-      since?: number;
-    } = {
+    const args: UsageListArgs = {
       orgSlug,
       paginationOpts: {
         numItems: ACTIVITY_PAGE_SIZE,
         cursor,
       },
     };
-    if (projectId !== "all") {
-      args.projectId = projectId as Id<"projects">;
+    if (projectRef !== "all") {
+      args.projectRef = projectRef;
     }
-    if (search.key) args.keyId = search.key;
-    if (search.member) args.memberId = search.member;
-    if (search.endpoint) args.endpoint = search.endpoint;
-    if (search.method) args.method = search.method;
+    if (attributionSearch.key) args.keyId = attributionSearch.key;
+    if (attributionSearch.member) args.memberId = attributionSearch.member;
+    if (attributionSearch.endpoint) args.endpoint = attributionSearch.endpoint;
+    if (attributionSearch.method) args.method = attributionSearch.method;
     if (since !== undefined) {
       args.since = since;
     }
     return args;
-  }, [orgSlug, cursor, projectId, search, since]);
+  }, [orgSlug, cursor, projectRef, attributionSearch, since]);
 
   const usageQuery = useQuery({
-    ...convexQuery(api.usage.listForOrg, listArgs),
+    ...convexQuery(usageListRef, listArgs),
+    enabled: capabilities !== null,
   });
+
+  const usagePage = useMemo(
+    () => parseUsagePage(usageQuery.data),
+    [usageQuery.data],
+  );
+  const cycle = useMemo(
+    () => parseActivityCycle(cycleQuery.data),
+    [cycleQuery.data],
+  );
+  const usageProjectionMatches = capabilityProjectionsMatch(
+    capabilities,
+    parseOrgCapabilityProjection(usagePage?.access),
+  );
+  const cycleProjectionMatches = capabilityProjectionsMatch(
+    capabilities,
+    parseOrgCapabilityProjection(cycle?.access),
+  );
+
+  // Strip hostile admin-only attribution from member URLs after projection loads.
+  useEffect(() => {
+    if (capabilities === null || canViewOrgUsage || !search.member) return;
+    void navigate({
+      search: {
+        ...(search.range ? { range: search.range } : {}),
+        ...(search.project ? { project: search.project } : {}),
+        ...(attributionSearch.key ? { key: attributionSearch.key } : {}),
+        ...(attributionSearch.endpoint
+          ? { endpoint: attributionSearch.endpoint }
+          : {}),
+        ...(attributionSearch.method
+          ? { method: attributionSearch.method }
+          : {}),
+        ...(search.event ? { event: search.event } : {}),
+      },
+      replace: true,
+    });
+  }, [
+    attributionSearch.endpoint,
+    attributionSearch.key,
+    attributionSearch.method,
+    canViewOrgUsage,
+    capabilities,
+    navigate,
+    search.event,
+    search.member,
+    search.project,
+    search.range,
+  ]);
 
   // Reset accumulated pages when filters change.
   useEffect(() => {
@@ -233,57 +417,105 @@ function ActivityContent({ orgSlug }: { orgSlug: string }) {
     setRows([]);
     setIsDone(false);
     setContinueCursor(null);
+    setProjectionRejected(false);
     setWindowNow(Date.now());
   }, [
     timeRange,
-    projectId,
+    projectRef,
     orgSlug,
     search.key,
-    search.member,
+    attributionSearch.member,
     search.endpoint,
     search.method,
+    canViewOrgUsage,
+    capabilities?.role,
   ]);
 
   // Merge each successful page into the running list.
   useEffect(() => {
-    if (!usageQuery.data || usageQuery.isPending) {
+    if (usageQuery.data === undefined || usageQuery.isPending) {
       return;
     }
-    const page = usageQuery.data.page as UsageListItem[];
+    if (usagePage === null || !usageProjectionMatches) {
+      setRows([]);
+      setIsDone(true);
+      setContinueCursor(null);
+      setProjectionRejected(true);
+      return;
+    }
+    setProjectionRejected(false);
     const replace = cursor === null;
-    setRows((prev) => mergeUsagePages(prev, page, replace));
-    setIsDone(usageQuery.data.isDone);
-    setContinueCursor(usageQuery.data.continueCursor);
-  }, [usageQuery.data, usageQuery.isPending, cursor]);
+    setRows((prev) => mergePublicUsagePages(prev, usagePage.page, replace));
+    setIsDone(usagePage.isDone);
+    setContinueCursor(usagePage.continueCursor);
+  }, [
+    cursor,
+    usagePage,
+    usageProjectionMatches,
+    usageQuery.data,
+    usageQuery.isPending,
+  ]);
 
-  const projects = projectsQuery.data ?? [];
-  const firstPagePending = usageQuery.isPending && cursor === null;
+  const projects = cycleProjectionMatches
+    ? (cycle?.byProject ?? []).filter(
+        (project): project is typeof project & { projectRef: string } =>
+          project.projectRef !== null,
+      )
+    : [];
+  const firstPagePending =
+    (accessQuery.isPending ||
+      (capabilities !== null &&
+        (cycleQuery.isPending || usageQuery.isPending))) &&
+    cursor === null;
   const loadMorePending = usageQuery.isPending && cursor !== null;
   const canLoadMore =
     !isDone &&
     continueCursor !== null &&
     !usageQuery.isPending &&
-    !usageQuery.isError;
+    !usageQuery.isError &&
+    !projectionRejected;
   const selectedFromRows = search.event
-    ? (rows.find((event) => event._id === search.event) ?? null)
+    ? (rows.find((event) => event.eventId === search.event) ?? null)
     : null;
   const eventQuery = useQuery({
-    ...convexQuery(api.usage.getForOrgById, {
+    ...convexQuery(usageEventRef, {
       orgSlug,
       eventId: search.event ?? "invalid",
     }),
-    enabled: search.event !== undefined && selectedFromRows === null,
+    enabled:
+      capabilities !== null &&
+      search.event !== undefined &&
+      selectedFromRows === null,
   });
-  const selectedEvent = selectedFromRows ?? eventQuery.data ?? null;
+  const eventProjectionRejected =
+    eventQuery.data !== undefined &&
+    eventQuery.data !== null &&
+    !isUsageListItem(eventQuery.data);
+  const queriedEvent = isUsageListItem(eventQuery.data)
+    ? eventQuery.data
+    : null;
+  const selectedEvent = selectedFromRows ?? queriedEvent;
+  const serverProjectionRejected =
+    (!accessQuery.isPending && !accessQuery.isError && capabilities === null) ||
+    (cycleQuery.data !== undefined &&
+      (cycle === null || !cycleProjectionMatches)) ||
+    (capabilities !== null &&
+      !cycleQuery.isPending &&
+      !cycleQuery.isError &&
+      cycleQuery.data === undefined) ||
+    projectionRejected ||
+    eventProjectionRejected;
+  const activityFailed =
+    accessQuery.isError ||
+    cycleQuery.isError ||
+    usageQuery.isError ||
+    serverProjectionRejected;
   const hasAttributionFilter = Boolean(
-    search.key || search.member || search.endpoint || search.method,
+    attributionSearch.key ||
+    attributionSearch.member ||
+    attributionSearch.endpoint ||
+    attributionSearch.method,
   );
-  const attributionSearch = {
-    ...(search.key ? { key: search.key } : {}),
-    ...(search.member ? { member: search.member } : {}),
-    ...(search.endpoint ? { endpoint: search.endpoint } : {}),
-    ...(search.method ? { method: search.method } : {}),
-  };
 
   const inspectEvent = (eventId: string) => {
     void navigate({ search: { ...search, event: eventId } });
@@ -294,8 +526,10 @@ function ActivityContent({ orgSlug }: { orgSlug: string }) {
       search: {
         ...(search.range ? { range: search.range } : {}),
         ...(search.project ? { project: search.project } : {}),
-        ...(search.key ? { key: search.key } : {}),
-        ...(search.member ? { member: search.member } : {}),
+        ...(attributionSearch.key ? { key: attributionSearch.key } : {}),
+        ...(attributionSearch.member
+          ? { member: attributionSearch.member }
+          : {}),
         ...(search.endpoint ? { endpoint: search.endpoint } : {}),
         ...(search.method ? { method: search.method } : {}),
       },
@@ -306,6 +540,9 @@ function ActivityContent({ orgSlug }: { orgSlug: string }) {
   return (
     <div className="flex flex-col gap-6">
       <ActivityHeader />
+      {capabilities !== null && !canViewOrgUsage ? (
+        <OrgCapabilityNotice reason={capabilities.reasons.viewOrgUsage} />
+      ) : null}
 
       <Card>
         <CardHeader className="gap-4 sm:flex-row sm:items-end sm:justify-between">
@@ -321,7 +558,7 @@ function ActivityContent({ orgSlug }: { orgSlug: string }) {
                 Project
               </Label>
               <Select
-                value={projectId}
+                value={projectRef}
                 onValueChange={(value) =>
                   void navigate({
                     to: "/app/settings/activity",
@@ -332,7 +569,7 @@ function ActivityContent({ orgSlug }: { orgSlug: string }) {
                     },
                   })
                 }
-                disabled={projectsQuery.isPending}
+                disabled={cycleQuery.isPending || !cycleProjectionMatches}
               >
                 <SelectTrigger id="activity-project" className="min-w-[10rem]">
                   <SelectValue />
@@ -341,7 +578,10 @@ function ActivityContent({ orgSlug }: { orgSlug: string }) {
                   <SelectGroup>
                     <SelectItem value="all">All projects</SelectItem>
                     {projects.map((project) => (
-                      <SelectItem key={project._id} value={project._id}>
+                      <SelectItem
+                        key={project.projectRef}
+                        value={project.projectRef}
+                      >
                         {project.name}
                       </SelectItem>
                     ))}
@@ -363,7 +603,7 @@ function ActivityContent({ orgSlug }: { orgSlug: string }) {
                   void navigate({
                     search: {
                       ...(range === "7d" ? {} : { range }),
-                      ...(projectId === "all" ? {} : { project: projectId }),
+                      ...(projectRef === "all" ? {} : { project: projectRef }),
                       ...attributionSearch,
                     },
                   });
@@ -391,14 +631,14 @@ function ActivityContent({ orgSlug }: { orgSlug: string }) {
               <span className="text-xs font-medium text-muted-foreground">
                 Billing drill-down
               </span>
-              {search.member ? (
+              {attributionSearch.member ? (
                 <Badge variant="secondary" className="max-w-full break-all">
-                  Member · {search.member}
+                  Member · {attributionSearch.member}
                 </Badge>
               ) : null}
-              {search.key ? (
+              {attributionSearch.key ? (
                 <Badge variant="secondary" className="max-w-full break-all">
-                  Key · {search.key}
+                  Key · {truncateKeyId(attributionSearch.key)}
                 </Badge>
               ) : null}
               {search.endpoint ? (
@@ -418,7 +658,7 @@ function ActivityContent({ orgSlug }: { orgSlug: string }) {
                   void navigate({
                     search: {
                       ...(timeRange === "7d" ? {} : { range: timeRange }),
-                      ...(projectId === "all" ? {} : { project: projectId }),
+                      ...(projectRef === "all" ? {} : { project: projectRef }),
                     },
                   })
                 }
@@ -429,22 +669,30 @@ function ActivityContent({ orgSlug }: { orgSlug: string }) {
           ) : null}
           {firstPagePending ? (
             <ActivityTableSkeleton />
-          ) : usageQuery.isError && rows.length === 0 ? (
+          ) : activityFailed && rows.length === 0 ? (
             <Empty className="border border-dashed">
               <EmptyHeader>
                 <EmptyTitle>Could not load activity</EmptyTitle>
                 <EmptyDescription>
-                  {humanError(
-                    usageQuery.error,
-                    "Activity is temporarily unavailable.",
-                  )}
+                  {serverProjectionRejected
+                    ? "Server access projection could not be verified. No activity rows were displayed."
+                    : humanError(
+                        accessQuery.error ??
+                          cycleQuery.error ??
+                          usageQuery.error,
+                        "Activity is temporarily unavailable.",
+                      )}
                 </EmptyDescription>
               </EmptyHeader>
               <EmptyContent>
                 <Button
                   type="button"
                   variant="outline"
-                  onClick={() => void usageQuery.refetch()}
+                  onClick={() => {
+                    void accessQuery.refetch();
+                    void cycleQuery.refetch();
+                    void usageQuery.refetch();
+                  }}
                 >
                   Retry
                 </Button>
@@ -453,7 +701,7 @@ function ActivityContent({ orgSlug }: { orgSlug: string }) {
           ) : rows.length === 0 ? (
             <div className="space-y-4">
               <EmptyActivity
-                filtered={hasAttributionFilter || projectId !== "all"}
+                filtered={hasAttributionFilter || projectRef !== "all"}
               />
               {canLoadMore ? (
                 <div className="flex justify-center">
@@ -472,8 +720,11 @@ function ActivityContent({ orgSlug }: { orgSlug: string }) {
           ) : (
             <div className="flex flex-col gap-4">
               <div className="divide-y md:hidden">
-                {rows.map((event) => (
-                  <div key={event._id} className="space-y-3 py-4 first:pt-0">
+                {rows.map((event, index) => (
+                  <div
+                    key={event.eventId ?? `${event.at}:${index}`}
+                    className="space-y-3 py-4 first:pt-0"
+                  >
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <p className="font-medium">
@@ -502,13 +753,27 @@ function ActivityContent({ orgSlug }: { orgSlug: string }) {
                         <dt className="text-muted-foreground">Latency</dt>
                         <dd className="tabular-nums">{event.latencyMs} ms</dd>
                       </div>
+                      {canViewOrgUsage ? (
+                        <div>
+                          <dt className="text-muted-foreground">Member</dt>
+                          <dd>{event.memberName ?? "Unattributed member"}</dd>
+                        </div>
+                      ) : null}
                     </dl>
                     <Button
                       type="button"
                       variant="outline"
                       size="sm"
                       className="w-full"
-                      onClick={() => inspectEvent(event._id)}
+                      disabled={event.eventId === null}
+                      title={
+                        event.eventId === null
+                          ? "Legacy call has no public inspector ID."
+                          : undefined
+                      }
+                      onClick={() => {
+                        if (event.eventId !== null) inspectEvent(event.eventId);
+                      }}
                     >
                       <Search />
                       Inspect call
@@ -526,6 +791,11 @@ function ActivityContent({ orgSlug }: { orgSlug: string }) {
                       <th scope="col" className="px-2 py-2 font-medium">
                         Project
                       </th>
+                      {canViewOrgUsage ? (
+                        <th scope="col" className="px-2 py-2 font-medium">
+                          Member
+                        </th>
+                      ) : null}
                       <th scope="col" className="px-2 py-2 font-medium">
                         Endpoint
                       </th>
@@ -550,14 +820,22 @@ function ActivityContent({ orgSlug }: { orgSlug: string }) {
                     </tr>
                   </thead>
                   <tbody>
-                    {rows.map((event) => (
-                      <tr key={event._id} className="border-b last:border-0">
+                    {rows.map((event, index) => (
+                      <tr
+                        key={event.eventId ?? `${event.at}:${index}`}
+                        className="border-b last:border-0"
+                      >
                         <td className="whitespace-nowrap px-2 py-2.5 text-muted-foreground">
                           {formatActivityDate(event.at)}
                         </td>
                         <td className="px-2 py-2.5">
                           {event.projectName ?? event.projectSlug ?? "—"}
                         </td>
+                        {canViewOrgUsage ? (
+                          <td className="px-2 py-2.5">
+                            {event.memberName ?? "Unattributed member"}
+                          </td>
+                        ) : null}
                         <td className="px-2 py-2.5 font-mono text-xs">
                           <span className="text-muted-foreground">
                             {event.method.toUpperCase()}
@@ -578,7 +856,16 @@ function ActivityContent({ orgSlug }: { orgSlug: string }) {
                             type="button"
                             variant="ghost"
                             size="sm"
-                            onClick={() => inspectEvent(event._id)}
+                            disabled={event.eventId === null}
+                            title={
+                              event.eventId === null
+                                ? "Legacy call has no public inspector ID."
+                                : undefined
+                            }
+                            onClick={() => {
+                              if (event.eventId !== null)
+                                inspectEvent(event.eventId);
+                            }}
                             aria-label={`Inspect ${event.method.toUpperCase()} ${event.endpoint}`}
                           >
                             Inspect
@@ -618,7 +905,10 @@ function ActivityContent({ orgSlug }: { orgSlug: string }) {
                     type="button"
                     size="sm"
                     variant="outline"
-                    onClick={() => void usageQuery.refetch()}
+                    onClick={() => {
+                      void accessQuery.refetch();
+                      void usageQuery.refetch();
+                    }}
                   >
                     Retry page
                   </Button>
@@ -631,11 +921,22 @@ function ActivityContent({ orgSlug }: { orgSlug: string }) {
 
       <ActivityInspector
         open={search.event !== undefined}
-        event={selectedEvent}
-        requestedId={search.event}
-        pending={eventQuery.isPending && selectedFromRows === null}
-        failed={eventQuery.isError}
-        onRetry={() => void eventQuery.refetch()}
+        event={serverProjectionRejected ? null : selectedEvent}
+        showMember={canViewOrgUsage}
+        pending={
+          capabilities !== null &&
+          eventQuery.isPending &&
+          selectedFromRows === null
+        }
+        failed={
+          eventQuery.isError ||
+          serverProjectionRejected ||
+          (!accessQuery.isPending && capabilities === null)
+        }
+        onRetry={() => {
+          void accessQuery.refetch();
+          void eventQuery.refetch();
+        }}
         onOpenChange={(open) => {
           if (!open) closeInspector();
         }}
@@ -647,7 +948,7 @@ function ActivityContent({ orgSlug }: { orgSlug: string }) {
 function ActivityInspector({
   open,
   event,
-  requestedId,
+  showMember,
   pending,
   failed,
   onRetry,
@@ -655,7 +956,7 @@ function ActivityInspector({
 }: {
   open: boolean;
   event: UsageListItem | null;
-  requestedId?: string;
+  showMember: boolean;
   pending: boolean;
   failed: boolean;
   onRetry: () => void;
@@ -707,8 +1008,17 @@ function ActivityInspector({
                 label="Latency"
                 value={`${event.latencyMs.toLocaleString("en-US")} ms`}
               />
-              <InspectorRow label="Key" value={event.keyId} mono />
-              <InspectorRow label="Usage event" value={event._id} mono />
+              <InspectorRow
+                label="Key"
+                value={truncateKeyId(event.keyId)}
+                mono
+              />
+              {showMember && event.memberName !== undefined ? (
+                <InspectorRow
+                  label="Member"
+                  value={event.memberName ?? "Unattributed member"}
+                />
+              ) : null}
             </dl>
             <div className="rounded-lg border bg-muted/30 p-4">
               <p className="text-sm font-medium">Payload retention</p>
@@ -725,8 +1035,8 @@ function ActivityInspector({
               <EmptyHeader>
                 <EmptyTitle>Call not found</EmptyTitle>
                 <EmptyDescription>
-                  Event {requestedId ?? "requested"} does not exist or is not
-                  authorized for this organization.
+                  Requested call does not exist or is not authorized for this
+                  organization.
                 </EmptyDescription>
               </EmptyHeader>
             </Empty>

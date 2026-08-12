@@ -1,27 +1,32 @@
 #!/usr/bin/env bash
-# E2E 03 — consumer: public catalogue → detail → pricing → try-it (optional paid call)
+# E2E 03 — consumer: isolated anonymous browse/mock plus required staged paid contract hook
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-export E2E_SESSION="${E2E_SESSION:-zevium-e2e-consumer}"
+export E2E_SESSION="${E2E_SESSION:-${E2E_SESSION_PREFIX:-zevium-e2e}-consumer-anonymous}"
 # shellcheck source=lib.sh
 source "$SCRIPT_DIR/lib.sh"
 
 cleanup() {
   close_browser
+  cleanup_e2e_runtime
 }
 trap cleanup EXIT
 
 PROJECT_NAME="${E2E_LAST_PROJECT_NAME:-}"
 PROJECT_SLUG="${E2E_LAST_PROJECT_SLUG:-}"
-if [[ -z "$PROJECT_NAME" && -f "$E2E_ARTIFACTS/last-project-name.txt" ]]; then
-  PROJECT_NAME="$(cat "$E2E_ARTIFACTS/last-project-name.txt")"
+if [[ -z "$PROJECT_NAME" && -f "$E2E_FIXTURES_DIR/last-project-name.txt" ]]; then
+  PROJECT_NAME="$(cat "$E2E_FIXTURES_DIR/last-project-name.txt")"
 fi
-if [[ -z "$PROJECT_SLUG" && -f "$E2E_ARTIFACTS/last-project-slug.txt" ]]; then
-  PROJECT_SLUG="$(cat "$E2E_ARTIFACTS/last-project-slug.txt")"
+if [[ -z "$PROJECT_SLUG" && -f "$E2E_FIXTURES_DIR/last-project-slug.txt" ]]; then
+  PROJECT_SLUG="$(cat "$E2E_FIXTURES_DIR/last-project-slug.txt")"
 fi
 [[ -n "$PROJECT_NAME" ]] || fail "publisher fixture name missing — run 02 first"
 [[ -n "$PROJECT_SLUG" ]] || fail "publisher fixture slug missing — run 02 first"
+E2E_REQUIRE_PAID_CONTRACT="${E2E_REQUIRE_PAID_CONTRACT:-0}"
+E2E_EXPECTED_CALL_COST="${E2E_EXPECTED_CALL_COST:-1}"
+[[ "$E2E_EXPECTED_CALL_COST" =~ ^[1-9][0-9]*$ ]] || fail "E2E_EXPECTED_CALL_COST must be a positive integer"
+configure_browser_context
 
 step "wait for base url"
 wait_for_url "$E2E_BASE_URL/" "200" 90
@@ -34,6 +39,8 @@ assert_url_contains "/catalogue"
 snap="$(page_text)"
 assert_contains "$snap" "Catalogue" "catalogue heading missing"
 assert_contains "$snap" "Public APIs with per-call credits" "catalogue blurb missing"
+assert_anonymous_identity
+record_browser_contract "consumer" "anonymous-catalogue" "anonymous"
 
 assert_contains "$snap" "$PROJECT_NAME" "catalogue missing published project '$PROJECT_NAME'"
 log "found project listing: $PROJECT_NAME"
@@ -44,6 +51,7 @@ ab find text "$PROJECT_NAME" click >/dev/null 2>&1 \
   || fail "catalogue card link missing or click failed"
 ab wait 1200 >/dev/null
 after_url="$(ab get url)"
+DETAIL_PATH="${after_url#"$E2E_BASE_URL"}"
 [[ "$after_url" != "$before_url" ]] || fail "catalogue card click did not navigate"
 assert_url_contains "/${PROJECT_SLUG}" "catalogue card navigated to wrong API"
 
@@ -94,4 +102,53 @@ assert_contains "$snap" "API key is required for a live call." "live mode did no
 focused="$(ab eval "document.activeElement?.id" 2>/dev/null | tr -d '"[:space:]')"
 assert_eq "$focused" "api-key" "missing-key validation did not focus API key"
 
-log "03-consumer PASS"
+if [[ "$E2E_REQUIRE_PAID_CONTRACT" == "1" ]]; then
+  : "${E2E_API_KEY:?E2E_API_KEY is required for paid consumer contract}"
+  step "signed-in paid consumer contract"
+  use_browser_session "${E2E_SESSION_PREFIX:-zevium-e2e}-consumer-paid-signed-in"
+  sign_in
+
+  open_path "/app/billing"
+  wait_for_text "Wallet balance" 30
+  balance_before="$(ab eval "(() => { const label=Array.from(document.querySelectorAll('p')).find((el) => el.textContent?.trim()==='Wallet balance'); const value=label?.parentElement?.querySelector('.tabular-nums')?.textContent ?? ''; return Number(value.replace(/[^0-9-]/g,'')); })()" 2>/dev/null | tr -d '"[:space:]')"
+  [[ "$balance_before" =~ ^[0-9]+$ ]] || fail "could not read pre-call wallet balance"
+  (( balance_before >= E2E_EXPECTED_CALL_COST )) || fail "paid fixture wallet lacks required credits"
+
+  open_path "$DETAIL_PATH"
+  wait_for_text "Request playground" 30
+  click_button "Live · ${E2E_EXPECTED_CALL_COST} credit" || click_button "Live · ${E2E_EXPECTED_CALL_COST} credits" || fail "paid live-mode toggle missing"
+  ab fill '#api-key' "$E2E_API_KEY" >/dev/null || fail "paid fixture key field missing"
+  click_button "Send live · ${E2E_EXPECTED_CALL_COST} credit" || click_button "Send live · ${E2E_EXPECTED_CALL_COST} credits" || fail "paid live submit missing"
+  ab wait --text "200 OK" --timeout 30000 >/dev/null 2>&1 || fail "paid gateway call did not return 200"
+  snap="$(page_text)"
+  assert_not_contains "$snap" "mock response · 0 credits" "paid response was mislabeled as mock"
+  assert_not_contains "$snap" "Your organization needs credits" "paid fixture was not funded"
+  assert_not_contains "$snap" "Your API key was not accepted" "paid fixture key was rejected"
+
+  step "paid debit reaches wallet projection"
+  expected_balance=$((balance_before - E2E_EXPECTED_CALL_COST))
+  balance_after=""
+  for _ in $(seq 1 30); do
+    open_path "/app/billing"
+    balance_after="$(ab eval "(() => { const label=Array.from(document.querySelectorAll('p')).find((el) => el.textContent?.trim()==='Wallet balance'); const value=label?.parentElement?.querySelector('.tabular-nums')?.textContent ?? ''; return Number(value.replace(/[^0-9-]/g,'')); })()" 2>/dev/null | tr -d '"[:space:]')"
+    [[ "$balance_after" == "$expected_balance" ]] && break
+    ab wait 500 >/dev/null 2>&1 || true
+  done
+  assert_eq "$balance_after" "$expected_balance" "wallet projection did not debit exact published cost"
+
+  step "paid call reaches attribution projection"
+  attribution_seen=""
+  for _ in $(seq 1 30); do
+    open_path "/app/settings/activity"
+    snap="$(page_text)"
+    if [[ "$snap" == *"$PROJECT_NAME"* && "$snap" == *"/get"* ]]; then
+      attribution_seen=1
+      break
+    fi
+    ab wait 500 >/dev/null 2>&1 || true
+  done
+  [[ -n "$attribution_seen" ]] || fail "paid call never appeared in activity attribution"
+  record_browser_contract "paid-consumer" "metered-call-attribution" "signed-in"
+fi
+
+log "03-consumer PASS paid_contract=$E2E_REQUIRE_PAID_CONTRACT"

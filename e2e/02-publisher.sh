@@ -3,12 +3,13 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-export E2E_SESSION="${E2E_SESSION:-zevium-e2e-publisher}"
+export E2E_SESSION="${E2E_SESSION:-${E2E_SESSION_PREFIX:-zevium-e2e}-publisher-signed-in}"
 # shellcheck source=lib.sh
 source "$SCRIPT_DIR/lib.sh"
 
 cleanup() {
   close_browser
+  cleanup_e2e_runtime
 }
 trap cleanup EXIT
 
@@ -16,12 +17,14 @@ STAMP="$(e2e_stamp)"
 PROJECT_NAME="E2E Weather ${STAMP}"
 # slugify-compatible: lowercase, hyphens
 PROJECT_SLUG="e2e-weather-${STAMP}"
-SPEC_FILE="$E2E_ARTIFACTS/openapi-${STAMP}.json"
+SPEC_FILE="$E2E_FIXTURES_DIR/openapi-${STAMP}.json"
 # Persist name for 03-consumer if run in same shell/suite
 export E2E_LAST_PROJECT_NAME="$PROJECT_NAME"
 export E2E_LAST_PROJECT_SLUG="$PROJECT_SLUG"
-printf '%s\n' "$PROJECT_NAME" >"$E2E_ARTIFACTS/last-project-name.txt"
-printf '%s\n' "$PROJECT_SLUG" >"$E2E_ARTIFACTS/last-project-slug.txt"
+printf '%s\n' "$PROJECT_NAME" >"$E2E_FIXTURES_DIR/last-project-name.txt"
+printf '%s\n' "$PROJECT_SLUG" >"$E2E_FIXTURES_DIR/last-project-slug.txt"
+
+configure_browser_context
 
 step "wait for base url"
 wait_for_url "$E2E_BASE_URL/" "200" 90
@@ -168,5 +171,6 @@ assert_contains "$snap" "Catalogue" "catalogue heading missing"
 if [[ "$snap" != *"$PROJECT_NAME"* && "$snap" != *"$PROJECT_SLUG"* ]]; then
   fail "catalogue does not list published project '$PROJECT_NAME' (app may lack live catalogue data)"
 fi
+record_browser_contract "publisher" "published-catalogue" "signed-in"
 
 log "02-publisher PASS name=$PROJECT_NAME slug=$PROJECT_SLUG"

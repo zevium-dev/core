@@ -8,6 +8,7 @@ import { setupRouterSsrQueryIntegration } from "@tanstack/react-router-ssr-query
 import { LazyMotion, domAnimation } from "motion/react";
 
 import { RouteError } from "#/components/route-error";
+import { routeViewTransitionTypes } from "#/lib/view-transition";
 import { markViewTransitionActive } from "#/lib/vt";
 import { routeTree } from "./routeTree.gen";
 
@@ -69,23 +70,16 @@ export function getRouter(): AnyRouter {
     } satisfies RouterContext,
     defaultViewTransition: {
       types: ({ fromLocation, toLocation }) => {
-        markViewTransitionActive();
         const from = fromLocation?.state.__TSR_index ?? 0;
         const to = toLocation.state.__TSR_index ?? 0;
-        const direction = to >= from ? "navigate-forward" : "navigate-back";
-        // DESIGN.md morphs are for list→detail. Sidebar-level hops get a
-        // fast swap (styles.css scopes duration via nav-swap type).
-        const isDetail = (path: string | undefined): boolean =>
-          path !== undefined &&
-          (/^\/app\/projects\/[^/]+/.test(path) ||
-            /^\/catalogue\/[^/]+\/[^/]+/.test(path));
-        if (
-          !isDetail(fromLocation?.pathname) &&
-          !isDetail(toLocation.pathname)
-        ) {
-          return [direction, "nav-swap"];
-        }
-        return [direction];
+        const types = routeViewTransitionTypes({
+          fromIndex: from,
+          toIndex: to,
+          fromPath: fromLocation?.pathname,
+          toPath: toLocation.pathname,
+        });
+        if (types !== false) markViewTransitionActive();
+        return types;
       },
     },
     Wrap: ({ children }) => (

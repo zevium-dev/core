@@ -1,13 +1,15 @@
 import { useOrganization } from "@clerk/tanstack-react-start";
 import { convexQuery } from "@convex-dev/react-query";
-import { useMutation, useQueries } from "@tanstack/react-query";
+import { useMutation, useQueries, useQuery } from "@tanstack/react-query";
 import { Link, createFileRoute } from "@tanstack/react-router";
 import { useAction, useConvexAuth } from "convex/react";
+import { makeFunctionReference } from "convex/server";
 import { ChartNoAxesColumn, CreditCard, Wallet } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
 import { NumberTicker } from "#/components/motion/number-ticker";
+import { OrgCapabilityNotice } from "#/components/org-capability-notice";
 import { Badge } from "#/components/ui/badge";
 import { Button } from "#/components/ui/button";
 import {
@@ -34,6 +36,13 @@ import {
 } from "#/lib/billing-cycle";
 import { humanError } from "#/lib/human-error";
 import {
+  activeOrgCapabilitiesRef,
+  capabilityProjectionsMatch,
+  hasServerCapability,
+  parseOrgCapabilityProjection,
+  type OrgCapabilityProjection,
+} from "#/lib/org-capabilities";
+import {
   checkoutDisplay,
   checkoutPackButton,
   checkoutStartFailureMessage,
@@ -46,6 +55,27 @@ type BillingSearch = {
   checkout?: string;
 };
 type PackId = "pack_10" | "pack_50" | "pack_100";
+
+type BillingStateData = {
+  access: OrgCapabilityProjection;
+  wallet: { balance: number };
+  packs: Array<{ packId: PackId; credits: number; priceCents: number }>;
+  checkout: { status: string } | null;
+  payments: Array<{
+    status: string;
+    amount: number;
+    currency: string;
+    credits: number;
+    createdAt: number;
+    failureReason?: string;
+  }>;
+};
+
+const billingStateRef = makeFunctionReference<
+  "query",
+  { checkoutSessionId?: string },
+  BillingStateData
+>("billing:getBillingState");
 
 export const Route = createFileRoute("/app/billing")({
   validateSearch: (search: Record<string, unknown>): BillingSearch => {
@@ -96,12 +126,21 @@ function BillingContent({
   checkoutSessionId?: string;
   orgSlug: string;
 }) {
-  const { membership } = useOrganization();
-  const canManageBilling = membership?.role === "org:admin";
+  const capabilityQuery = useQuery(convexQuery(activeOrgCapabilitiesRef, {}));
+  const capabilities = parseOrgCapabilityProjection(capabilityQuery.data);
+  const canManageBilling = hasServerCapability(capabilities, "manageBilling");
   const [billingQuery, cycleQuery] = useQueries({
     queries: [
-      convexQuery(api.billing.getBillingState, { checkoutSessionId }),
-      convexQuery(api.billing.cycleBreakdown, { orgSlug }),
+      {
+        ...convexQuery(billingStateRef, {
+          checkoutSessionId: canManageBilling ? checkoutSessionId : undefined,
+        }),
+        enabled: capabilities !== null,
+      },
+      {
+        ...convexQuery(cycleBreakdownRef, { orgSlug }),
+        enabled: capabilities !== null,
+      },
     ],
   });
   const createCheckout = useAction(api.billing.createCheckout);
@@ -109,6 +148,9 @@ function BillingContent({
 
   const { mutate: buyPack, isPending: checkoutPending } = useMutation({
     mutationFn: async (packId: PackId) => {
+      if (!canManageBilling) {
+        throw new Error("Billing capability required");
+      }
       setCheckoutPackId(packId);
       return await createCheckout({ packId });
     },
@@ -125,11 +167,16 @@ function BillingContent({
     },
   });
 
-  if (billingQuery.isPending || cycleQuery.isPending) {
+  if (
+    capabilityQuery.isPending ||
+    (capabilities !== null && (billingQuery.isPending || cycleQuery.isPending))
+  ) {
     return <BillingSkeleton />;
   }
 
   if (
+    capabilityQuery.isError ||
+    capabilities === null ||
     billingQuery.isError ||
     cycleQuery.isError ||
     billingQuery.data === undefined ||
@@ -148,6 +195,7 @@ function BillingContent({
             type="button"
             variant="outline"
             onClick={() => {
+              void capabilityQuery.refetch();
               void billingQuery.refetch();
               void cycleQuery.refetch();
             }}
@@ -161,6 +209,24 @@ function BillingContent({
 
   const billing = billingQuery.data;
   const cycle = cycleQuery.data;
+  const billingAccess = parseOrgCapabilityProjection(billing.access);
+  const cycleAccess = parseOrgCapabilityProjection(cycle.access);
+  if (
+    !capabilityProjectionsMatch(capabilities, billingAccess) ||
+    !capabilityProjectionsMatch(capabilities, cycleAccess)
+  ) {
+    return (
+      <Card className="border-destructive/40" role="alert">
+        <CardHeader>
+          <CardTitle>Billing access changed</CardTitle>
+          <CardDescription>
+            Refresh organization access before viewing billing data.
+          </CardDescription>
+        </CardHeader>
+      </Card>
+    );
+  }
+  const billingReason = capabilities.reasons.manageBilling;
 
   const checkoutState = billing.checkout
     ? checkoutStateFromStatus(billing.checkout.status)
@@ -173,7 +239,9 @@ function BillingContent({
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Billing</h1>
           <p className="text-sm text-muted-foreground">
-            Buy prepaid credits and review payment history.
+            {canManageBilling
+              ? "Buy prepaid credits and review payment history."
+              : "Review wallet totals and your attributed usage."}
           </p>
         </div>
         <div className="flex w-full items-center gap-3 rounded-lg border bg-card px-4 py-3 sm:w-auto">
@@ -198,7 +266,7 @@ function BillingContent({
         </div>
       </div>
 
-      {checkoutNotice ? (
+      {canManageBilling && checkoutNotice ? (
         <Card
           aria-live="polite"
           className={
@@ -225,179 +293,200 @@ function BillingContent({
 
       <CycleUsage cycle={cycle} />
 
-      <section className="flex flex-col gap-3">
-        <div>
-          <h2 className="text-lg font-semibold tracking-tight">Buy credits</h2>
-          <p className="text-sm text-muted-foreground">
-            $1 = 10,000 credits. One-time packs at one fixed exchange rate.
-          </p>
-        </div>
-        {!canManageBilling ? (
-          <p className="rounded-md border bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
-            Organization admins buy credits. Every member can review wallet
-            usage and attribution below.
-          </p>
-        ) : null}
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {billing.packs.map((pack) => {
-            const price = formatMoney(pack.priceCents, "USD");
-            const button = checkoutPackButton(
-              pack.packId,
-              checkoutPackId,
-              checkoutPending,
-              price,
-            );
-            return (
-              <Card
-                key={pack.packId}
-                className="transition-[translate,box-shadow] duration-[var(--dur-instant)] ease-[var(--ease)] hover:-translate-y-0.5 hover:shadow-sm motion-reduce:transition-none motion-reduce:hover:translate-y-0"
-              >
-                <CardHeader>
-                  <CardTitle className="text-xl tabular-nums">
-                    {formatCredits(pack.credits)}
-                    <span className="ml-1 text-sm font-normal text-muted-foreground">
-                      credits
-                    </span>
-                  </CardTitle>
-                  <CardDescription>{price} one-time purchase</CardDescription>
-                </CardHeader>
-                <CardFooter>
-                  <Button
-                    className="w-full"
-                    disabled={!canManageBilling || button.disabled}
-                    onClick={() => buyPack(pack.packId)}
+      {canManageBilling ? (
+        <>
+          <section className="flex flex-col gap-3">
+            <div>
+              <h2 className="text-lg font-semibold tracking-tight">
+                Buy credits
+              </h2>
+              <p className="text-sm text-muted-foreground">
+                $1 = 10,000 credits. One-time packs at one fixed exchange rate.
+              </p>
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {billing.packs.map((pack) => {
+                const price = formatMoney(pack.priceCents, "USD");
+                const button = checkoutPackButton(
+                  pack.packId,
+                  checkoutPackId,
+                  checkoutPending,
+                  price,
+                );
+                return (
+                  <Card
+                    key={pack.packId}
+                    className="transition-[translate,box-shadow] duration-[var(--dur-instant)] ease-[var(--ease)] hover:-translate-y-0.5 hover:shadow-sm motion-reduce:transition-none motion-reduce:hover:translate-y-0"
                   >
-                    {canManageBilling ? button.label : "Admin only"}
-                  </Button>
-                </CardFooter>
-              </Card>
-            );
-          })}
-        </div>
-      </section>
+                    <CardHeader>
+                      <CardTitle className="text-xl tabular-nums">
+                        {formatCredits(pack.credits)}
+                        <span className="ml-1 text-sm font-normal text-muted-foreground">
+                          credits
+                        </span>
+                      </CardTitle>
+                      <CardDescription>
+                        {price} one-time purchase
+                      </CardDescription>
+                    </CardHeader>
+                    <CardFooter>
+                      <Button
+                        className="w-full"
+                        disabled={button.disabled}
+                        onClick={() => buyPack(pack.packId)}
+                      >
+                        {button.label}
+                      </Button>
+                    </CardFooter>
+                  </Card>
+                );
+              })}
+            </div>
+          </section>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-base">
-            <CreditCard className="size-4" aria-hidden="true" />
-            Payment history
-          </CardTitle>
-          <CardDescription>
-            Stripe payment status and credits added to this wallet.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {billing.payments.length === 0 ? (
-            <Empty className="py-8 md:py-10">
-              <EmptyHeader>
-                <EmptyTitle>No payments yet</EmptyTitle>
-                <EmptyDescription>
-                  Completed credit purchases and their Stripe status appear
-                  here.
-                </EmptyDescription>
-              </EmptyHeader>
-            </Empty>
-          ) : (
-            <>
-              <div className="divide-y sm:hidden">
-                {billing.payments.map((payment) => (
-                  <div key={payment.id} className="space-y-3 py-4 first:pt-0">
-                    <div className="flex items-center justify-between gap-3">
-                      <Badge variant={paymentStatusVariant(payment.status)}>
-                        {paymentStatusLabel(payment.status)}
-                      </Badge>
-                      <span className="font-medium tabular-nums">
-                        {formatMoney(payment.amount, payment.currency)}
-                      </span>
-                    </div>
-                    <div className="flex justify-between gap-3 text-sm">
-                      <span className="text-muted-foreground">
-                        Credits added
-                      </span>
-                      <span className="tabular-nums">
-                        {formatCredits(payment.credits)}
-                      </span>
-                    </div>
-                    <p className="text-xs text-muted-foreground">
-                      {formatDateTime(payment.createdAt)}
-                    </p>
-                    {payment.failureReason ? (
-                      <p className="text-sm text-destructive">
-                        {payment.failureReason}
-                      </p>
-                    ) : null}
-                  </div>
-                ))}
-              </div>
-              <div className="hidden overflow-x-auto sm:block">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b text-left text-muted-foreground">
-                      <th scope="col" className="px-2 py-2 font-medium">
-                        Status
-                      </th>
-                      <th
-                        scope="col"
-                        className="px-2 py-2 font-medium text-right"
-                      >
-                        Amount
-                      </th>
-                      <th
-                        scope="col"
-                        className="px-2 py-2 font-medium text-right"
-                      >
-                        Credits
-                      </th>
-                      <th scope="col" className="px-2 py-2 font-medium">
-                        Date
-                      </th>
-                      <th scope="col" className="px-2 py-2 font-medium">
-                        Details
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {billing.payments.map((payment) => (
-                      <tr key={payment.id} className="border-b last:border-0">
-                        <td className="px-2 py-2.5">
-                          <Badge variant={paymentStatusVariant(payment.status)}>
-                            {paymentStatusLabel(payment.status)}
-                          </Badge>
-                        </td>
-                        <td className="px-2 py-2.5 text-right tabular-nums">
-                          {formatMoney(payment.amount, payment.currency)}
-                        </td>
-                        <td className="px-2 py-2.5 text-right tabular-nums">
-                          {formatCredits(payment.credits)}
-                        </td>
-                        <td className="px-2 py-2.5 whitespace-nowrap text-muted-foreground">
-                          {formatDateTime(payment.createdAt)}
-                        </td>
-                        <td className="max-w-64 truncate px-2 py-2.5 text-muted-foreground">
-                          {payment.failureReason ?? "—"}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </>
-          )}
-        </CardContent>
-      </Card>
+          <PaymentHistory payments={billing.payments} />
+        </>
+      ) : (
+        <OrgCapabilityNotice reason={billingReason} />
+      )}
     </div>
   );
 }
 
+function PaymentHistory({
+  payments,
+}: {
+  payments: BillingStateData["payments"];
+}) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base">
+          <CreditCard className="size-4" aria-hidden="true" />
+          Payment history
+        </CardTitle>
+        <CardDescription>
+          Stripe payment status and credits added to this wallet.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        {payments.length === 0 ? (
+          <Empty className="py-8 md:py-10">
+            <EmptyHeader>
+              <EmptyTitle>No payments yet</EmptyTitle>
+              <EmptyDescription>
+                Completed credit purchases and their Stripe status appear here.
+              </EmptyDescription>
+            </EmptyHeader>
+          </Empty>
+        ) : (
+          <>
+            <div className="divide-y sm:hidden">
+              {payments.map((payment, index) => (
+                <div
+                  key={`${payment.createdAt}:${payment.status}:${index}`}
+                  className="space-y-3 py-4 first:pt-0"
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <Badge variant={paymentStatusVariant(payment.status)}>
+                      {paymentStatusLabel(payment.status)}
+                    </Badge>
+                    <span className="font-medium tabular-nums">
+                      {formatMoney(payment.amount, payment.currency)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between gap-3 text-sm">
+                    <span className="text-muted-foreground">Credits added</span>
+                    <span className="tabular-nums">
+                      {formatCredits(payment.credits)}
+                    </span>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {formatDateTime(payment.createdAt)}
+                  </p>
+                  {payment.failureReason ? (
+                    <p className="text-sm text-destructive">
+                      {payment.failureReason}
+                    </p>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+            <div className="hidden overflow-x-auto sm:block">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b text-left text-muted-foreground">
+                    <th scope="col" className="px-2 py-2 font-medium">
+                      Status
+                    </th>
+                    <th
+                      scope="col"
+                      className="px-2 py-2 font-medium text-right"
+                    >
+                      Amount
+                    </th>
+                    <th
+                      scope="col"
+                      className="px-2 py-2 font-medium text-right"
+                    >
+                      Credits
+                    </th>
+                    <th scope="col" className="px-2 py-2 font-medium">
+                      Date
+                    </th>
+                    <th scope="col" className="px-2 py-2 font-medium">
+                      Details
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {payments.map((payment, index) => (
+                    <tr
+                      key={`${payment.createdAt}:${payment.status}:${index}`}
+                      className="border-b last:border-0"
+                    >
+                      <td className="px-2 py-2.5">
+                        <Badge variant={paymentStatusVariant(payment.status)}>
+                          {paymentStatusLabel(payment.status)}
+                        </Badge>
+                      </td>
+                      <td className="px-2 py-2.5 text-right tabular-nums">
+                        {formatMoney(payment.amount, payment.currency)}
+                      </td>
+                      <td className="px-2 py-2.5 text-right tabular-nums">
+                        {formatCredits(payment.credits)}
+                      </td>
+                      <td className="px-2 py-2.5 whitespace-nowrap text-muted-foreground">
+                        {formatDateTime(payment.createdAt)}
+                      </td>
+                      <td className="max-w-64 truncate px-2 py-2.5 text-muted-foreground">
+                        {payment.failureReason ?? "—"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 type CycleUsageData = {
+  access: OrgCapabilityProjection;
+  scope: "organization" | "member";
   cycleStart: number;
   cycleEnd: number;
   asOf: number;
   totalCalls: number;
   totalCredits: number;
+  ownCalls: number | null;
+  ownCredits: number | null;
   projectedCredits: number;
   byProject: Array<{
-    projectId: string;
+    projectRef: string | null;
     name: string;
     slug: string;
     calls: number;
@@ -406,19 +495,18 @@ type CycleUsageData = {
   byKey: Array<{
     keyId: string;
     keyName: string;
-    ownerUserId: string | null;
+    memberId: string | null;
     calls: number;
     credits: number;
   }>;
   byMember: Array<{
-    userId: string | null;
+    memberId: string | null;
     name: string;
-    email: string | null;
     calls: number;
     credits: number;
   }>;
   byEndpoint: Array<{
-    projectId: string;
+    projectRef: string | null;
     projectName: string;
     projectSlug: string;
     method: string;
@@ -426,9 +514,25 @@ type CycleUsageData = {
     calls: number;
     credits: number;
   }>;
+  breakdownTruncated: {
+    members: boolean;
+    keys: boolean;
+    projects: boolean;
+    endpoints: boolean;
+  };
 };
 
-function CycleUsage({ cycle }: { cycle: CycleUsageData }) {
+const cycleBreakdownRef = makeFunctionReference<
+  "query",
+  { orgSlug: string },
+  CycleUsageData
+>("billing:cycleBreakdown");
+
+export function CycleUsage({ cycle }: { cycle: CycleUsageData }) {
+  const canViewOrgUsage = cycle.access.capabilities.viewOrgUsage;
+  const breakdownIsTruncated = Object.values(cycle.breakdownTruncated).some(
+    Boolean,
+  );
   return (
     <Card>
       <CardHeader className="gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -473,6 +577,32 @@ function CycleUsage({ cycle }: { cycle: CycleUsageData }) {
           </div>
         </div>
 
+        {!canViewOrgUsage ? (
+          <div className="rounded-lg border bg-muted/20 p-4">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div>
+                <p className="text-xs text-muted-foreground">
+                  Your attributed calls
+                </p>
+                <p className="mt-1 text-xl font-semibold tabular-nums">
+                  {formatCredits(cycle.ownCalls ?? 0)}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">
+                  Your attributed spend
+                </p>
+                <p className="mt-1 text-xl font-semibold tabular-nums">
+                  {formatCredits(cycle.ownCredits ?? 0)} credits
+                </p>
+              </div>
+            </div>
+            <p className="mt-3 text-xs text-muted-foreground">
+              {cycle.access.reasons.viewOrgUsage}
+            </p>
+          </div>
+        ) : null}
+
         {isCycleEmpty(cycle) ? (
           <Empty className="border border-dashed py-8">
             <EmptyHeader>
@@ -485,56 +615,67 @@ function CycleUsage({ cycle }: { cycle: CycleUsageData }) {
           </Empty>
         ) : (
           <div className="grid gap-5 lg:grid-cols-2">
+            {canViewOrgUsage ? (
+              <UsageBreakdownTable
+                title="By member"
+                rows={cycle.byMember.map((row) => ({
+                  id: row.memberId ?? "unattributed",
+                  label: row.name,
+                  detail: row.memberId ? "Organization member" : "Unattributed",
+                  calls: row.calls,
+                  credits: row.credits,
+                  search: row.memberId ? { member: row.memberId } : undefined,
+                }))}
+              />
+            ) : null}
             <UsageBreakdownTable
-              title="By member"
-              rows={cycle.byMember.map((row) => ({
-                id: row.userId ?? "unattributed",
-                label: row.name,
-                detail: row.email ?? "Legacy usage without member metadata",
-                calls: row.calls,
-                credits: row.credits,
-                search: row.userId ? { member: row.userId } : undefined,
-              }))}
-            />
-            <UsageBreakdownTable
-              title="By key"
+              title={canViewOrgUsage ? "By key" : "Your keys"}
               rows={cycle.byKey.map((row) => ({
                 id: row.keyId,
                 label: row.keyName,
                 detail: truncateKeyId(row.keyId),
                 calls: row.calls,
                 credits: row.credits,
-                search: { key: row.keyId },
+                search: canViewOrgUsage ? { key: row.keyId } : undefined,
               }))}
             />
             <UsageBreakdownTable
-              title="By API"
+              title={canViewOrgUsage ? "By API" : "Your API usage"}
               rows={cycle.byProject.map((row) => ({
-                id: row.projectId,
+                id: row.projectRef ?? `${row.slug}:${row.name}`,
                 label: row.name,
                 detail: row.slug,
                 calls: row.calls,
                 credits: row.credits,
-                search: { project: row.projectId },
+                search: row.projectRef
+                  ? { project: row.projectRef }
+                  : undefined,
               }))}
             />
             <UsageBreakdownTable
-              title="By endpoint"
+              title={canViewOrgUsage ? "By endpoint" : "Your endpoints"}
               rows={cycle.byEndpoint.map((row) => ({
-                id: `${row.projectId}:${row.method}:${row.endpoint}`,
+                id: `${row.projectRef ?? row.projectSlug}:${row.method}:${row.endpoint}`,
                 label: row.projectName,
                 detail: `${row.method.toUpperCase()} ${row.endpoint}`,
                 calls: row.calls,
                 credits: row.credits,
-                search: {
-                  project: row.projectId,
-                  endpoint: row.endpoint,
-                  method: row.method,
-                },
+                search: row.projectRef
+                  ? {
+                      project: row.projectRef,
+                      endpoint: row.endpoint,
+                      method: row.method,
+                    }
+                  : undefined,
               }))}
             />
           </div>
         )}
+        {breakdownIsTruncated ? (
+          <p className="text-xs text-muted-foreground">
+            Showing first 100 attribution groups per category.
+          </p>
+        ) : null}
       </CardContent>
     </Card>
   );

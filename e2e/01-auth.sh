@@ -3,15 +3,16 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# Fresh session for anonymous checks, then sign-in reuses same session.
-export E2E_SESSION="${E2E_SESSION:-zevium-e2e-auth}"
+export E2E_SESSION="${E2E_SESSION:-${E2E_SESSION_PREFIX:-zevium-e2e}-auth-anonymous}"
 # shellcheck source=lib.sh
 source "$SCRIPT_DIR/lib.sh"
 
 cleanup() {
   close_browser
+  cleanup_e2e_runtime
 }
 trap cleanup EXIT
+configure_browser_context
 
 step "wait for base url"
 wait_for_url "$E2E_BASE_URL/" "200" 90
@@ -30,8 +31,11 @@ open_path "/app"
 ab wait 1500 >/dev/null
 url="$(ab get url)"
 assert_contains "$url" "sign-in" "/app must bounce anonymous users to sign-in (url=$url)"
+assert_anonymous_identity
+record_browser_contract "auth" "protected-route-anonymous" "anonymous"
 
 step "sign_in with seed credentials"
+use_browser_session "${E2E_SESSION_PREFIX:-zevium-e2e}-auth-signed-in"
 sign_in
 
 step "signed-in /app/projects loads"
@@ -43,5 +47,6 @@ assert_not_contains "$snap" "Something went wrong" "projects page error banner"
 assert_not_contains "$snap" "No active organization" "seed organization must be active"
 assert_contains "$snap" "Projects" "projects heading missing"
 assert_contains "$snap" "New project" "admin project action missing"
+record_browser_contract "auth" "projects-signed-in" "signed-in"
 
 log "01-auth PASS"

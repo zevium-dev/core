@@ -2,16 +2,18 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-export E2E_SESSION="${E2E_SESSION:-zevium-payment-drill}"
+export E2E_SESSION="${E2E_SESSION:-${E2E_SESSION_PREFIX:-zevium-e2e}-payment-signed-in}"
 # shellcheck source=lib.sh
 source "$SCRIPT_DIR/lib.sh"
 
 cleanup() {
   close_browser
+  cleanup_e2e_runtime
 }
 trap cleanup EXIT
 
 : "${STRIPE_SECRET_KEY:?STRIPE_SECRET_KEY is required}"
+configure_browser_context
 
 step "sign in to stable staging"
 wait_for_url "$E2E_BASE_URL/" "200" 90
@@ -44,22 +46,33 @@ checkout_id="$(node -e 'console.log(new URL(process.argv[1]).searchParams.get("c
 ab wait --text "Confirmed" >/dev/null
 
 step "refund Stripe sandbox payment"
-session_json="$E2E_ARTIFACTS/checkout-session.json"
-refund_json="$E2E_ARTIFACTS/refund.json"
+proof_stamp="$(date +%Y%m%d-%H%M%S)-$(date +%N)"
+session_json="$E2E_RAW_DIR/$proof_stamp-checkout-session.raw.json"
+refund_json="$E2E_RAW_DIR/$proof_stamp-refund.raw.json"
 curl -fsS -u "$STRIPE_SECRET_KEY:" "https://api.stripe.com/v1/checkout/sessions/$checkout_id" >"$session_json"
 payment_intent="$(node -e 'const x=require(process.argv[1]); console.log(x.payment_intent || "")' "$session_json")"
 [[ "$payment_intent" == pi_* ]] || fail "checkout session lacks payment intent"
+sanitize_artifact "$session_json" "$E2E_ARTIFACTS/$proof_stamp-checkout-proof.json" "stripe-session"
 curl -fsS -u "$STRIPE_SECRET_KEY:" -X POST https://api.stripe.com/v1/refunds \
   --data-urlencode "payment_intent=$payment_intent" \
   --data-urlencode "metadata[zevium_drill]=true" >"$refund_json"
 refund_status="$(node -e 'const x=require(process.argv[1]); console.log(x.status || "")' "$refund_json")"
 assert_eq "$refund_status" "succeeded" "Stripe refund did not succeed"
+sanitize_artifact "$refund_json" "$E2E_ARTIFACTS/$proof_stamp-refund-proof.json" "stripe-refund"
 
 step "verify refund reached Zevium"
 for _ in $(seq 1 30); do
   open_path "/app/billing"
   snap="$(page_text)"
   if [[ "$snap" == *"Refunded"* ]]; then
+    record_browser_contract "payment" "checkout-refund-history" "signed-in"
+    if [[ "${E2E_RUNNER_ACTIVE:-0}" != "1" ]]; then
+      for excluded_lane in preview auth publisher consumer paid-consumer; do
+        record_manifest_result "$excluded_lane" "excluded" 0 "standalone payment drill did not request this lane"
+      done
+      record_manifest_result "payment" "passed" 0 "real checkout, fulfillment, refund, and webhook history asserted"
+      build_evidence_manifest "$E2E_ARTIFACTS/$proof_stamp-payment-evidence-manifest.json"
+    fi
     log "04-payment-drill PASS"
     exit 0
   fi

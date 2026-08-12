@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useAction } from "convex/react";
 import { ArrowLeft, PackageSearch, Sparkles } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 
 import { FadeIn } from "#/components/motion/fade-in";
 import {
@@ -46,11 +46,15 @@ import {
   formatCataloguePriceRange,
   formatEndpointCount,
 } from "#/lib/catalogue-card";
-import { formatRelevance } from "#/lib/catalogue-search";
+import {
+  catalogueLoaderDeps,
+  catalogueUrlSearch,
+  formatRelevance,
+  useDebouncedUrlDraft,
+  validateCatalogueSearch,
+} from "#/lib/catalogue-search";
 import { api } from "#/lib/convex-api";
 import type { SearchListing } from "../../../../../convex/search";
-
-const SEARCH_DEBOUNCE_MS = 250;
 
 /** Card shape shared by browse + semantic results; `score` only on ranked hits. */
 type CatalogueCardItem = Omit<SearchListing, "score"> & { score?: number };
@@ -79,29 +83,8 @@ function catalogueListArgs({
 }
 
 export const Route = createFileRoute("/catalogue/")({
-  validateSearch: (search: Record<string, unknown>) => ({
-    q:
-      typeof search.q === "string" && search.q.trim() !== ""
-        ? search.q
-        : undefined,
-    tag: typeof search.tag === "string" ? search.tag : undefined,
-    sort:
-      search.sort === "name" || search.sort === "cheapest"
-        ? search.sort
-        : undefined,
-    free:
-      search.free === true || search.free === "1" || search.free === 1
-        ? true
-        : undefined,
-    semantic:
-      search.semantic === true || search.semantic === "1" ? true : undefined,
-    max:
-      (typeof search.max === "string" || typeof search.max === "number") &&
-      /^\d+$/.test(String(search.max))
-        ? Number(search.max)
-        : undefined,
-  }),
-  loaderDeps: ({ search }) => search,
+  validateSearch: validateCatalogueSearch,
+  loaderDeps: ({ search }) => catalogueLoaderDeps(search),
   loader: async ({ context, deps }) => {
     const { queryClient } = context;
     const queryOpts = convexQuery(
@@ -136,18 +119,52 @@ export const Route = createFileRoute("/catalogue/")({
 function CataloguePage() {
   const routeSearch = Route.useSearch();
   const navigate = useNavigate({ from: Route.fullPath });
-  const [searchInput, setSearchInput] = useState(routeSearch.q ?? "");
-  const [debouncedSearch, setDebouncedSearch] = useState(routeSearch.q ?? "");
-  const [activeTag, setActiveTag] = useState<string | null>(
-    routeSearch.tag ?? null,
+  const activeTag = routeSearch.tag ?? null;
+  const sort: CatalogueSort = routeSearch.sort ?? "newest";
+  const freeOnly = routeSearch.free ?? false;
+
+  const navigateSearch = (
+    next: {
+      q: string;
+      tag: string | null;
+      sort: CatalogueSort;
+      freeOnly: boolean;
+      maxCostInput: string;
+      semantic: boolean;
+    },
+    replace = true,
+  ) => {
+    void navigate({
+      search: catalogueUrlSearch(next),
+      replace,
+      viewTransition: false,
+    });
+  };
+
+  const [searchInput, setSearchInput] = useDebouncedUrlDraft(
+    routeSearch.q ?? "",
+    (q) =>
+      navigateSearch({
+        q,
+        tag: activeTag,
+        sort,
+        freeOnly,
+        maxCostInput:
+          routeSearch.max === undefined ? "" : String(routeSearch.max),
+        semantic: false,
+      }),
   );
-  const [sort, setSort] = useState<CatalogueSort>(routeSearch.sort ?? "newest");
-  const [freeOnly, setFreeOnly] = useState(routeSearch.free ?? false);
-  const [maxCostInput, setMaxCostInput] = useState(
+  const [maxCostInput, setMaxCostInput] = useDebouncedUrlDraft(
     routeSearch.max === undefined ? "" : String(routeSearch.max),
-  );
-  const [debouncedMaxCost, setDebouncedMaxCost] = useState<number | null>(
-    routeSearch.max ?? null,
+    (nextMaxCostInput) =>
+      navigateSearch({
+        q: searchInput,
+        tag: activeTag,
+        sort,
+        freeOnly,
+        maxCostInput: nextMaxCostInput,
+        semantic: false,
+      }),
   );
 
   const runSemanticAction = useAction(api.search.searchCatalogue);
@@ -181,88 +198,11 @@ function CataloguePage() {
     (semanticPending ||
       (semanticQuery.data !== undefined && !semanticQuery.data.degraded));
 
-  useEffect(() => {
-    const handle = window.setTimeout(() => {
-      setDebouncedSearch(searchInput);
-    }, SEARCH_DEBOUNCE_MS);
-    return () => window.clearTimeout(handle);
-  }, [searchInput]);
-
-  useEffect(() => {
-    const handle = window.setTimeout(() => {
-      const trimmed = maxCostInput.trim();
-      if (trimmed === "") {
-        setDebouncedMaxCost(null);
-        return;
-      }
-      const n = Number(trimmed);
-      if (!Number.isFinite(n) || n < 0) {
-        setDebouncedMaxCost(null);
-        return;
-      }
-      setDebouncedMaxCost(n);
-    }, SEARCH_DEBOUNCE_MS);
-    return () => window.clearTimeout(handle);
-  }, [maxCostInput]);
-
-  useEffect(() => {
-    setSearchInput(routeSearch.q ?? "");
-    setDebouncedSearch(routeSearch.q ?? "");
-    setActiveTag(routeSearch.tag ?? null);
-    setSort(routeSearch.sort ?? "newest");
-    setFreeOnly(routeSearch.free ?? false);
-    setMaxCostInput(
-      routeSearch.max === undefined ? "" : String(routeSearch.max),
-    );
-  }, [
-    routeSearch.free,
-    routeSearch.max,
-    routeSearch.q,
-    routeSearch.sort,
-    routeSearch.tag,
-  ]);
-
-  const navigateSearch = (
-    next: {
-      q: string;
-      tag: string | null;
-      sort: CatalogueSort;
-      freeOnly: boolean;
-      maxCostInput: string;
-      semantic: boolean;
-    },
-    replace = true,
-  ) => {
-    const trimmedMax = next.maxCostInput.trim();
-    const max = /^\d+$/.test(trimmedMax) ? Number(trimmedMax) : undefined;
-    void navigate({
-      search: {
-        q: next.q || undefined,
-        tag: next.tag ?? undefined,
-        sort: next.sort === "newest" ? undefined : next.sort,
-        free: next.freeOnly || undefined,
-        max,
-        semantic: next.semantic || undefined,
-      },
-      replace,
-      viewTransition: false,
-    });
-  };
-
   const handleSearchInput = (value: string) => {
     setSearchInput(value);
-    navigateSearch({
-      q: value,
-      tag: activeTag,
-      sort,
-      freeOnly,
-      maxCostInput,
-      semantic: false,
-    });
   };
 
   const handleTagChange = (tag: string | null) => {
-    setActiveTag(tag);
     navigateSearch({
       q: searchInput,
       tag,
@@ -274,7 +214,6 @@ function CataloguePage() {
   };
 
   const handleSortChange = (nextSort: CatalogueSort) => {
-    setSort(nextSort);
     navigateSearch({
       q: searchInput,
       tag: activeTag,
@@ -286,7 +225,6 @@ function CataloguePage() {
   };
 
   const handleFreeOnlyChange = (nextFreeOnly: boolean) => {
-    setFreeOnly(nextFreeOnly);
     navigateSearch({
       q: searchInput,
       tag: activeTag,
@@ -299,14 +237,6 @@ function CataloguePage() {
 
   const handleMaxCostChange = (nextMaxCostInput: string) => {
     setMaxCostInput(nextMaxCostInput);
-    navigateSearch({
-      q: searchInput,
-      tag: activeTag,
-      sort,
-      freeOnly,
-      maxCostInput: nextMaxCostInput,
-      semantic: false,
-    });
   };
 
   const submitSemanticSearch = (e: React.SubmitEvent<HTMLFormElement>) => {
@@ -451,12 +381,12 @@ function CataloguePage() {
           />
         ) : (
           <BrowsePanel
-            debouncedSearch={debouncedSearch}
+            search={routeSearch.q ?? ""}
             activeTag={activeTag}
             onTagChange={handleTagChange}
             sort={sort}
             freeOnly={freeOnly}
-            debouncedMaxCost={debouncedMaxCost}
+            maxCost={routeSearch.max ?? null}
           />
         )}
       </main>
@@ -514,28 +444,28 @@ function BrowseFilters({
 }
 
 function BrowsePanel({
-  debouncedSearch,
+  search,
   activeTag,
   onTagChange,
   sort,
   freeOnly,
-  debouncedMaxCost,
+  maxCost,
 }: {
-  debouncedSearch: string;
+  search: string;
   activeTag: string | null;
   onTagChange: (tag: string | null) => void;
   sort: CatalogueSort;
   freeOnly: boolean;
-  debouncedMaxCost: number | null;
+  maxCost: number | null;
 }) {
   return (
     <CatalogueList
-      search={debouncedSearch}
+      search={search}
       activeTag={activeTag}
       onTagChange={onTagChange}
       sort={sort}
       freeOnly={freeOnly}
-      maxCost={debouncedMaxCost}
+      maxCost={maxCost}
     />
   );
 }

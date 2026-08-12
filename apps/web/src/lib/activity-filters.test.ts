@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   activitySinceMs,
+  authorizedAttributionSearch,
+  mergePublicUsagePages,
   mergeUsagePages,
   parseActivityTimeRange,
 } from "./activity-filters";
@@ -53,5 +55,39 @@ describe("mergeUsagePages", () => {
 
   it("keeps existing when incoming empty", () => {
     expect(mergeUsagePages([a], [], false)).toEqual([a]);
+  });
+});
+
+describe("member activity authorization", () => {
+  it("strips hostile colleague filters but preserves own-safe drill-downs", () => {
+    expect(
+      authorizedAttributionSearch(
+        {
+          member: "user_colleague",
+          key: "key_owned",
+          endpoint: "/v1/data",
+          method: "GET",
+        },
+        false,
+      ),
+    ).toEqual({ key: "key_owned", endpoint: "/v1/data", method: "GET" });
+    expect(
+      authorizedAttributionSearch({ member: "user_colleague" }, true),
+    ).toEqual({ member: "user_colleague" });
+  });
+
+  it("dedupes public usage rows without Convex ids", () => {
+    const row = {
+      eventId: "usage_public",
+      at: 1,
+      keyId: "key_owned",
+      endpoint: "/v1/data",
+      method: "GET",
+    };
+    const next = { ...row, eventId: "usage_next", at: 2 };
+    expect(mergePublicUsagePages([row], [row, next], false)).toEqual([
+      row,
+      next,
+    ]);
   });
 });

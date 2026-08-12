@@ -1,6 +1,65 @@
 import { describe, expect, it } from "vitest";
 
-import { formatRelevance, relevanceFraction } from "./catalogue-search";
+import {
+  catalogueLoaderDeps,
+  catalogueUrlSearch,
+  formatRelevance,
+  parseCatalogueMaxCost,
+  relevanceFraction,
+  validateCatalogueSearch,
+} from "./catalogue-search";
+
+describe("catalogue route state", () => {
+  it("keeps semantic state out of exact loader dependencies", () => {
+    const browse = validateCatalogueSearch({
+      q: "weather",
+      tag: "forecast",
+      sort: "cheapest",
+      free: "1",
+      semantic: "1",
+      max: "4",
+    });
+
+    expect(catalogueLoaderDeps(browse)).toEqual({
+      q: "weather",
+      tag: "forecast",
+      sort: "cheapest",
+      free: true,
+      max: 4,
+    });
+    expect(catalogueLoaderDeps({ ...browse, semantic: undefined })).toEqual(
+      catalogueLoaderDeps(browse),
+    );
+  });
+
+  it("rejects malformed and unsafe maximum-cost values", () => {
+    expect(parseCatalogueMaxCost("0")).toBe(0);
+    expect(parseCatalogueMaxCost("001")).toBe(1);
+    expect(parseCatalogueMaxCost("-1")).toBeUndefined();
+    expect(parseCatalogueMaxCost("1.5")).toBeUndefined();
+    expect(parseCatalogueMaxCost("9007199254740992")).toBeUndefined();
+  });
+
+  it("canonicalizes drafts without retaining false default parameters", () => {
+    expect(
+      catalogueUrlSearch({
+        q: "  ",
+        tag: null,
+        sort: "newest",
+        freeOnly: false,
+        maxCostInput: "not-a-number",
+        semantic: false,
+      }),
+    ).toEqual({
+      q: undefined,
+      tag: undefined,
+      sort: undefined,
+      free: undefined,
+      max: undefined,
+      semantic: undefined,
+    });
+  });
+});
 
 describe("relevanceFraction", () => {
   it("passes through values in [0,1]", () => {

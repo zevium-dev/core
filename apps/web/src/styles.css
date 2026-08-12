@@ -279,10 +279,24 @@ html:active-view-transition-type(nav-swap)::view-transition-new(main-content) {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-delay: 0s !important;
+    animation-duration: 0s !important;
+    animation-iteration-count: 1 !important;
+    transition-delay: 0s !important;
+    transition-duration: 0s !important;
+  }
+
   .content-enter,
   ::view-transition-old(root),
   ::view-transition-new(root),
-  ::view-transition-group(*) {
+  ::view-transition-group(*),
+  ::view-transition-image-pair(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
     animation: none !important;
   }
 
@@ -295,6 +309,39 @@ html:active-view-transition-type(nav-swap)::view-transition-new(main-content) {
 
   .animate-pulse {
     animation: none !important;
+  }
+}
+
+/* Keep desktop density. Coarse pointers get WCAG-sized controls and overlay exits. */
+@media (pointer: coarse) {
+  :where(
+    button:not([data-slot="checkbox"]):not([data-slot="switch"]),
+    input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"]),
+    select,
+    textarea,
+    [role="button"]:not([data-slot="checkbox"]):not([data-slot="switch"]),
+    [role="menuitem"],
+    [role="option"],
+    [role="tab"]
+  ) {
+    min-block-size: 2.75rem;
+  }
+
+  :where(
+    button:not([data-slot="checkbox"]):not([data-slot="switch"]),
+    [role="button"]:not([data-slot="checkbox"]):not([data-slot="switch"])
+  ) {
+    min-inline-size: 2.75rem;
+  }
+
+  :where([data-slot="checkbox"], [data-slot="switch"]) {
+    position: relative;
+  }
+
+  :where([data-slot="checkbox"], [data-slot="switch"])::after {
+    position: absolute;
+    inset: -0.75rem;
+    content: "";
   }
 }
 
