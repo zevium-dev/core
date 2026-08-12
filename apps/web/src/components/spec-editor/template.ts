@@ -13,7 +13,8 @@ export const OPENAPI_TEMPLATE = `{
     "/health": {
       "get": {
         "summary": "Health check",
-        "x-zevium-cost": 1
+        "x-zevium-cost": 0,
+        "x-zevium-health-check": true
       }
     }
   }

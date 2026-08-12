@@ -1,5 +1,5 @@
 export type QualityProbeOutcome =
-  | "success"
+  | "healthy"
   | "http_error"
   | "timeout"
   | "dns_error"
@@ -8,15 +8,21 @@ export type QualityProbeOutcome =
   | "blocked_target";
 
 export type QualitySnapshotContract = {
-  sampleSize: number;
-  availabilityPercent: number | null;
-  successRatePercent: number | null;
-  latencyP50Ms: number | null;
-  insufficientData: boolean;
-  lastOutcome: QualityProbeOutcome | null;
-  lastCheckedAt: number | null;
+  reachabilitySampleSize: number;
+  reachabilityMinimumSampleSize: number;
+  reachabilityPercent: number | null;
+  reachabilityLatencyP50Ms: number | null;
+  insufficientReachabilityData: boolean;
+  apiSampleSize: number;
+  apiMinimumSampleSize: number;
+  apiSuccessRatePercent: number | null;
+  apiLatencyP50Ms: number | null;
+  insufficientApiData: boolean;
+  lastProbeOutcome: QualityProbeOutcome | null;
+  lastProbedAt: number | null;
   freshness: {
     publishedAt: number;
+    measuredAt: number;
     ageMs: number;
     status: "fresh" | "stale";
   };
@@ -30,6 +36,9 @@ export type QualityIncidentContract = {
   status: "open" | "resolved" | "superseded";
   failureCount: number;
   lastOutcome: QualityProbeOutcome;
+  reason: string;
+  threshold: number;
+  windowSize: number;
 };
 
 export type PublicReviewContract = {

@@ -27,7 +27,6 @@ const ORG_SLUG = "acme";
 const PROJECT_SLUG = "demo";
 const KEY_SECRET = "zev_test_secret_mcp_1";
 const KEY_ID = "ak_mcp_1";
-const CLERK_ORG = "org_clerk_mcp";
 const CONVEX_ORG = "org_convex_mcp";
 
 const SPEC = JSON.stringify({
@@ -110,6 +109,7 @@ async function installAgentFixtures(opts: {
   });
   const specs = new FixtureSpecSource();
   specs.set(ORG_SLUG, PROJECT_SLUG, {
+    specVersionId: "version_demo",
     spec: SPEC,
     projectId: "proj_demo",
     organizationId: CONVEX_ORG,

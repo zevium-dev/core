@@ -105,7 +105,7 @@ Consumers see: one gateway URL per API, one key, one wallet, itemized charges. P
 
 ## Consumer experience requirements
 
-- **Catalogue with quality signals**: semantic search + tag filters derived from spec metadata, plus latency, success rate, and freshness badges per listing (recently-updated listings rank higher)
+- **Catalogue with quality signals**: semantic search + tag filters derived from spec metadata, plus real-call latency, real-call success rate, declared-health reachability, and freshness badges per listing. A badge says "insufficient data" until its evidence floor is met; absence never renders as 0%. Reachability never claims paid API operations succeed.
 - **Playground**: in-docs test console. A playground call is a normal metered call — free when it costs nothing (mock mode generated from the spec, or the publisher's free tier covers it), charged like any other call when it hits a paid upstream. No special playground billing
 - **Billing transparency**: usage dashboard with current-cycle consumption + projected cost, per-key and per-endpoint breakdown; spend alerts at 50/75/100% thresholds; budget webhooks
 - **Key management**: per-key spend limits with daily/weekly/monthly resets and auto-disable, programmatic key provisioning, zero-downtime rotation (roll-key with grace period)
@@ -113,7 +113,7 @@ Consumers see: one gateway URL per API, one key, one wallet, itemized charges. P
 
 ## Publisher experience requirements
 
-- **Self-serve end to end**: sign up, publish spec, set pricing, go live — zero platform-team involvement. Publishing model: **auto-publish with automated gates** (spec valid, upstream reachable, uptime probe) + post-hoc staff review; violators get delisted. No pre-approval queue
+- **Self-serve end to end**: sign up, publish spec, set pricing, go live — zero platform-team involvement. Publishing model: **auto-publish with automated gates** (spec valid plus an explicitly declared safe health endpoint that is reachable and ready) + post-hoc staff review. Repeated declared-health failures suspend listing and calls, tell publisher why, and restore access only after bounded recovery. No pre-approval queue
 - **Lifecycle safety**: a publisher cannot silently kill an API with active consumers — unpublish triggers a mandatory 7-day notice window (deprecation notices to consumers, standard deprecation signaling on responses), new subscriptions freeze, existing calls honored through wind-down
 - **Analytics that beat the dead incumbent**: per-endpoint tail latency (p95/p99), error-type breakdown, per-consumer usage, revenue trends
 - **Spec versioning**: draft → validate → publish with semver; published versions immutable

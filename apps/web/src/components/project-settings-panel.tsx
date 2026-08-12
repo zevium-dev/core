@@ -868,7 +868,7 @@ function WebhooksCard({ project }: { project: Doc<"projects"> }) {
       setUrl(endpoint.url);
       setActive(endpoint.active);
     }
-  }, [endpoint?._id, endpoint?.url, endpoint?.active]);
+  }, [endpoint]);
 
   const upsertMut = useConvexMutation(api.webhooks.upsertEndpoint);
 

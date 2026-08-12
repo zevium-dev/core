@@ -8,6 +8,7 @@ const NAV: { to: string; label: string }[] = [
   { to: "/admin", label: "Overview" },
   { to: "/admin/orgs", label: "Orgs" },
   { to: "/admin/projects", label: "Projects" },
+  { to: "/admin/reviews", label: "Reviews" },
   { to: "/admin/payouts", label: "Payouts" },
 ];
 
@@ -20,7 +21,7 @@ const navLinkClass =
  */
 export function AdminHeader() {
   return (
-    <header className="flex h-14 shrink-0 items-center gap-2 border-b px-4">
+    <header className="flex min-h-14 shrink-0 flex-wrap items-center gap-2 border-b px-4 py-2 sm:flex-nowrap sm:py-0">
       <Link
         to="/admin"
         aria-label="Zevium Admin"
@@ -29,7 +30,10 @@ export function AdminHeader() {
         <BrandMark className="h-3 w-4" />
         <span aria-hidden="true">evium Admin</span>
       </Link>
-      <nav className="ml-4 hidden items-center gap-0.5 sm:flex">
+      <nav
+        aria-label="Admin sections"
+        className="order-3 flex w-full items-center gap-0.5 overflow-x-auto sm:order-none sm:ml-4 sm:w-auto"
+      >
         {NAV.map((item) => (
           <Link
             key={item.to}

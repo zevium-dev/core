@@ -99,6 +99,7 @@ async function installFixtures(opts: {
   });
   const specs = new FixtureSpecSource();
   specs.set(ORG_SLUG, PROJECT_SLUG, {
+    specVersionId: "version_demo",
     spec: opts.spec ?? SPEC,
     projectId: "proj_demo",
     organizationId: opts.clerkOrgId,
@@ -239,7 +240,7 @@ describe("mock gateway route", () => {
     });
 
     const res = await mockFetch(`/mock/${ORG_SLUG}/${PROJECT_SLUG}/users/1`);
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(422);
     await expect(res.json()).resolves.toMatchObject({ error: "invalid_spec" });
   });
 

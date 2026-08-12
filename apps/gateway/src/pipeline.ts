@@ -20,6 +20,15 @@ import { SpecSourceUnavailableError } from "./spec-source";
 
 const UPSTREAM_HEADERS_TIMEOUT_MS = 15_000;
 
+function qualityOutcomeForStatus(
+  status: number,
+): SettlementUsage["qualityOutcome"] {
+  if (status >= 200 && status < 300) return "success";
+  if (status >= 400 && status < 500) return "client_error";
+  if (status >= 500 && status < 600) return "server_error";
+  return "network_error";
+}
+
 export type PipelineEnv = {
   WALLET: DurableObjectNamespace<WalletDO>;
 };
@@ -33,6 +42,11 @@ export type PipelineDeps = {
   /** Id generator for request/reservation ids. */
   idGenerator?: () => string;
   now?: () => number;
+  /** Durable edge-local control gate. False blocks cached route immediately. */
+  routeAllowed?: (
+    publisherHandle: string,
+    projectSlug: string,
+  ) => Promise<boolean>;
 };
 
 export type GatewayRoute = {
@@ -117,6 +131,12 @@ export async function handleGatewayRequest(
       reason: "invalid_api_key",
     });
   }
+  if (
+    deps.routeAllowed &&
+    !(await deps.routeAllowed(route.publisherHandle, route.projectSlug))
+  ) {
+    return jsonError(404, "project_not_found", "Unknown project", requestId);
+  }
   const verified = outcome.key;
 
   let published;
@@ -181,9 +201,9 @@ export async function handleGatewayRequest(
     matched = matchOperation(parsed, request.method, route.remainderPath);
   } catch {
     return jsonError(
-      404,
+      422,
       "invalid_spec",
-      "Published spec has invalid pricing",
+      "Published endpoint pricing is invalid",
       requestId,
     );
   }
@@ -246,6 +266,7 @@ export async function handleGatewayRequest(
         organizationId: published.organizationId,
         consumerClerkOrgId: verified.orgId,
         projectId: published.projectId,
+        specVersionId: published.specVersionId,
         keyId: verified.keyId,
         orgSlug: route.publisherHandle,
         projectSlug: route.projectSlug,
@@ -292,6 +313,7 @@ export async function handleGatewayRequest(
         organizationId: published.organizationId,
         consumerClerkOrgId: verified.orgId,
         projectId: published.projectId,
+        specVersionId: published.specVersionId,
         keyId: verified.keyId,
         orgSlug: route.publisherHandle,
         projectSlug: route.projectSlug,
@@ -318,6 +340,7 @@ export async function handleGatewayRequest(
         organizationId: published.organizationId,
         consumerClerkOrgId: verified.orgId,
         projectId: published.projectId,
+        specVersionId: published.specVersionId,
         keyId: verified.keyId,
         orgSlug: route.publisherHandle,
         projectSlug: route.projectSlug,
@@ -351,6 +374,7 @@ export async function handleGatewayRequest(
         organizationId: published.organizationId,
         consumerClerkOrgId: verified.orgId,
         projectId: published.projectId,
+        specVersionId: published.specVersionId,
         keyId: verified.keyId,
         orgSlug: route.publisherHandle,
         projectSlug: route.projectSlug,
@@ -381,6 +405,7 @@ export async function handleGatewayRequest(
         organizationId: published.organizationId,
         consumerClerkOrgId: verified.orgId,
         projectId: published.projectId,
+        specVersionId: published.specVersionId,
         keyId: verified.keyId,
         orgSlug: route.publisherHandle,
         projectSlug: route.projectSlug,
@@ -442,13 +467,53 @@ export async function handleGatewayRequest(
   let upstreamRes: Response;
   try {
     upstreamRes = await fetchImpl(upstreamUrl.toString(), init);
-  } catch (err) {
+  } catch {
+    const latencyMs = (deps.now ?? Date.now)() - started;
     if (!usedFree && !unmetered) {
-      await wallet.refund(reservationId);
+      await wallet.refund(reservationId, {
+        organizationId: published.organizationId,
+        consumerClerkOrgId: verified.orgId,
+        projectId: published.projectId,
+        specVersionId: published.specVersionId,
+        endpoint: matched.pathTemplate,
+        method: matched.method,
+        status: 502,
+        latencyMs,
+        keyId: verified.keyId,
+        billingOutcome: "refunded",
+        qualityOutcome: "network_error",
+      });
     } else if (usedFree) {
       await wallet.refundFreeTier({
         ...freeTierScope,
         nowMs: (deps.now ?? Date.now)(),
+      });
+      await wallet.enqueueFreeUsage(reservationId, {
+        organizationId: published.organizationId,
+        consumerClerkOrgId: verified.orgId,
+        projectId: published.projectId,
+        specVersionId: published.specVersionId,
+        endpoint: matched.pathTemplate,
+        method: matched.method,
+        status: 502,
+        latencyMs,
+        keyId: verified.keyId,
+        billingOutcome: "refunded",
+        qualityOutcome: "network_error",
+      });
+    } else {
+      await wallet.enqueueFreeUsage(reservationId, {
+        organizationId: published.organizationId,
+        consumerClerkOrgId: verified.orgId,
+        projectId: published.projectId,
+        specVersionId: published.specVersionId,
+        endpoint: matched.pathTemplate,
+        method: matched.method,
+        status: 502,
+        latencyMs,
+        keyId: verified.keyId,
+        billingOutcome: "refunded",
+        qualityOutcome: "network_error",
       });
     }
     emitUsage(ctx, deps, {
@@ -456,6 +521,7 @@ export async function handleGatewayRequest(
       organizationId: published.organizationId,
       consumerClerkOrgId: verified.orgId,
       projectId: published.projectId,
+      specVersionId: published.specVersionId,
       keyId: verified.keyId,
       orgSlug: route.publisherHandle,
       projectSlug: route.projectSlug,
@@ -464,7 +530,8 @@ export async function handleGatewayRequest(
       cost: usedFree ? 0 : cost,
       status: 502,
       outcome: "refunded",
-      latencyMs: (deps.now ?? Date.now)() - started,
+      qualityOutcome: "network_error",
+      latencyMs,
       reservationId,
     });
     return jsonError(
@@ -486,11 +553,14 @@ export async function handleGatewayRequest(
     organizationId: published.organizationId,
     consumerClerkOrgId: verified.orgId,
     projectId: published.projectId,
+    specVersionId: published.specVersionId,
     endpoint: matched.pathTemplate,
     method: matched.method,
     status,
     latencyMs,
     keyId: verified.keyId,
+    billingOutcome: usedFree || unmetered ? "free" : "settled",
+    qualityOutcome: qualityOutcomeForStatus(status),
   };
 
   if (usedFree || unmetered) {
@@ -502,6 +572,7 @@ export async function handleGatewayRequest(
         organizationId: published.organizationId,
         consumerClerkOrgId: verified.orgId,
         projectId: published.projectId,
+        specVersionId: published.specVersionId,
         keyId: verified.keyId,
         orgSlug: route.publisherHandle,
         projectSlug: route.projectSlug,
@@ -520,11 +591,16 @@ export async function handleGatewayRequest(
           nowMs: (deps.now ?? Date.now)(),
         });
       }
+      await wallet.enqueueFreeUsage(reservationId, {
+        ...usageMeta,
+        billingOutcome: "refunded",
+      });
       emitUsage(ctx, deps, {
         requestId,
         organizationId: published.organizationId,
         consumerClerkOrgId: verified.orgId,
         projectId: published.projectId,
+        specVersionId: published.specVersionId,
         keyId: verified.keyId,
         orgSlug: route.publisherHandle,
         projectSlug: route.projectSlug,
@@ -544,6 +620,7 @@ export async function handleGatewayRequest(
       organizationId: published.organizationId,
       consumerClerkOrgId: verified.orgId,
       projectId: published.projectId,
+      specVersionId: published.specVersionId,
       keyId: verified.keyId,
       orgSlug: route.publisherHandle,
       projectSlug: route.projectSlug,
@@ -556,12 +633,16 @@ export async function handleGatewayRequest(
       reservationId,
     });
   } else {
-    await wallet.refund(reservationId);
+    await wallet.refund(reservationId, {
+      ...usageMeta,
+      billingOutcome: "refunded",
+    });
     emitUsage(ctx, deps, {
       requestId,
       organizationId: published.organizationId,
       consumerClerkOrgId: verified.orgId,
       projectId: published.projectId,
+      specVersionId: published.specVersionId,
       keyId: verified.keyId,
       orgSlug: route.publisherHandle,
       projectSlug: route.projectSlug,

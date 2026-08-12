@@ -54,6 +54,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  */
 export function collectOpenApiSpecIssues(specText: string): SpecIssue[] {
   const issues: SpecIssue[] = [];
+  let healthCheckCount = 0;
 
   if (new TextEncoder().encode(specText).byteLength > MAX_OPENAPI_SPEC_BYTES) {
     issues.push({
@@ -209,7 +210,47 @@ export function collectOpenApiSpecIssues(specText: string): SpecIssue[] {
           message: `x-zevium-free-tier must be at most ${MAX_DAILY_FREE_TIER_CALLS}`,
         });
       }
+
+      if (opVal["x-zevium-health-check"] === true) {
+        healthCheckCount += 1;
+        if (lower !== "get" && lower !== "head") {
+          issues.push({
+            level: "error",
+            path: `$.paths["${pathKey}"].${lower}.x-zevium-health-check`,
+            message:
+              "Health check must be a side-effect-free GET or HEAD operation",
+          });
+        }
+        if (
+          !pathKey.startsWith("/") ||
+          pathKey.includes("{") ||
+          pathKey.includes("}") ||
+          pathKey.includes("?") ||
+          pathKey.includes("#")
+        ) {
+          issues.push({
+            level: "error",
+            path: `$.paths["${pathKey}"].${lower}.x-zevium-health-check`,
+            message: "Health check path must be absolute and parameter-free",
+          });
+        }
+      }
     }
+  }
+
+  if (healthCheckCount === 0) {
+    issues.push({
+      level: "warning",
+      path: "$.paths",
+      message:
+        "Publication requires one GET or HEAD operation with x-zevium-health-check: true",
+    });
+  } else if (healthCheckCount > 1) {
+    issues.push({
+      level: "error",
+      path: "$.paths",
+      message: "Exactly one x-zevium-health-check operation is allowed",
+    });
   }
 
   return issues;

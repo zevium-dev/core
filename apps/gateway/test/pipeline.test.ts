@@ -122,6 +122,7 @@ async function installFixtures(opts: {
   const specs = new FixtureSpecSource();
   specs.set(ORG_SLUG, PROJECT_SLUG, {
     spec: opts.spec ?? SPEC,
+    specVersionId: "version_demo",
     projectId: "proj_demo",
     organizationId,
     clerkOrgId: opts.clerkOrgId,
@@ -234,7 +235,7 @@ describe("gateway pipeline", () => {
     const res = await gatewayFetch(
       `/gateway/${ORG_SLUG}/${PROJECT_SLUG}/stream`,
     );
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(422);
     await expect(res.json()).resolves.toMatchObject({ error: "invalid_spec" });
     expect(calls).toHaveLength(0);
     expect(usage.events).toHaveLength(0);
@@ -515,7 +516,16 @@ describe("gateway pipeline", () => {
     const state = await walletStub(clerkOrgId).getState();
     expect(state.balance).toBe(50);
     expect(state.inFlightTotal).toBe(0);
-    expect(state.pendingSettlements).toHaveLength(0);
+    expect(state.pendingSettlements).toEqual([
+      expect.objectContaining({
+        cost: 0,
+        usage: expect.objectContaining({
+          specVersionId: "version_demo",
+          billingOutcome: "refunded",
+          qualityOutcome: "server_error",
+        }),
+      }),
+    ]);
   });
 
   it("streaming body passthrough integrity", async () => {
@@ -837,7 +847,20 @@ describe("gateway pipeline", () => {
     ]);
     expect(
       (await walletStub(clerkOrgId).getState()).pendingSettlements,
-    ).toHaveLength(0);
+    ).toEqual([
+      expect.objectContaining({
+        usage: expect.objectContaining({
+          billingOutcome: "refunded",
+          qualityOutcome: "client_error",
+        }),
+      }),
+      expect.objectContaining({
+        usage: expect.objectContaining({
+          billingOutcome: "refunded",
+          qualityOutcome: "server_error",
+        }),
+      }),
+    ]);
   });
 
   it("returns free-tier allowance when the upstream request throws", async () => {

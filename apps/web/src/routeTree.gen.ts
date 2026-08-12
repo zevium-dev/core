@@ -17,6 +17,7 @@ import { Route as AdminIndexRouteImport } from './routes/admin/index'
 import { Route as AdminOrgsRouteImport } from './routes/admin/orgs'
 import { Route as AdminPayoutsRouteImport } from './routes/admin/payouts'
 import { Route as AdminProjectsRouteImport } from './routes/admin/projects'
+import { Route as AdminReviewsRouteImport } from './routes/admin/reviews'
 import { Route as AppIndexRouteImport } from './routes/app/index'
 import { Route as AppBillingRouteImport } from './routes/app/billing'
 import { Route as AppEarningsRouteImport } from './routes/app/earnings'
@@ -79,6 +80,11 @@ const AdminPayoutsRoute = AdminPayoutsRouteImport.update({
 const AdminProjectsRoute = AdminProjectsRouteImport.update({
   id: '/projects',
   path: '/projects',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminReviewsRoute = AdminReviewsRouteImport.update({
+  id: '/reviews',
+  path: '/reviews',
   getParentRoute: () => AdminRoute,
 } as any)
 const AppIndexRoute = AppIndexRouteImport.update({
@@ -207,6 +213,7 @@ export interface FileRoutesByFullPath {
   '/admin/orgs': typeof AdminOrgsRoute
   '/admin/payouts': typeof AdminPayoutsRoute
   '/admin/projects': typeof AdminProjectsRoute
+  '/admin/reviews': typeof AdminReviewsRoute
   '/app/billing': typeof AppBillingRoute
   '/app/earnings': typeof AppEarningsRoute
   '/app/org': typeof AppOrgRouteWithChildren
@@ -237,6 +244,7 @@ export interface FileRoutesByTo {
   '/admin/orgs': typeof AdminOrgsRoute
   '/admin/payouts': typeof AdminPayoutsRoute
   '/admin/projects': typeof AdminProjectsRoute
+  '/admin/reviews': typeof AdminReviewsRoute
   '/app/billing': typeof AppBillingRoute
   '/app/earnings': typeof AppEarningsRoute
   '/docs/agents': typeof DocsAgentsRoute
@@ -268,6 +276,7 @@ export interface FileRoutesById {
   '/admin/orgs': typeof AdminOrgsRoute
   '/admin/payouts': typeof AdminPayoutsRoute
   '/admin/projects': typeof AdminProjectsRoute
+  '/admin/reviews': typeof AdminReviewsRoute
   '/app/billing': typeof AppBillingRoute
   '/app/earnings': typeof AppEarningsRoute
   '/app/org': typeof AppOrgRouteWithChildren
@@ -303,6 +312,7 @@ export interface FileRouteTypes {
     | '/admin/orgs'
     | '/admin/payouts'
     | '/admin/projects'
+    | '/admin/reviews'
     | '/app/billing'
     | '/app/earnings'
     | '/app/org'
@@ -333,6 +343,7 @@ export interface FileRouteTypes {
     | '/admin/orgs'
     | '/admin/payouts'
     | '/admin/projects'
+    | '/admin/reviews'
     | '/app/billing'
     | '/app/earnings'
     | '/docs/agents'
@@ -363,6 +374,7 @@ export interface FileRouteTypes {
     | '/admin/orgs'
     | '/admin/payouts'
     | '/admin/projects'
+    | '/admin/reviews'
     | '/app/billing'
     | '/app/earnings'
     | '/app/org'
@@ -458,6 +470,13 @@ declare module '@tanstack/react-router' {
       path: '/projects'
       fullPath: '/admin/projects'
       preLoaderRoute: typeof AdminProjectsRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/reviews': {
+      id: '/admin/reviews'
+      path: '/reviews'
+      fullPath: '/admin/reviews'
+      preLoaderRoute: typeof AdminReviewsRouteImport
       parentRoute: typeof AdminRoute
     }
     '/app/': {
@@ -628,6 +647,7 @@ interface AdminRouteChildren {
   AdminOrgsRoute: typeof AdminOrgsRoute
   AdminPayoutsRoute: typeof AdminPayoutsRoute
   AdminProjectsRoute: typeof AdminProjectsRoute
+  AdminReviewsRoute: typeof AdminReviewsRoute
   AdminIndexRoute: typeof AdminIndexRoute
 }
 
@@ -635,6 +655,7 @@ const AdminRouteChildren: AdminRouteChildren = {
   AdminOrgsRoute: AdminOrgsRoute,
   AdminPayoutsRoute: AdminPayoutsRoute,
   AdminProjectsRoute: AdminProjectsRoute,
+  AdminReviewsRoute: AdminReviewsRoute,
   AdminIndexRoute: AdminIndexRoute,
 }
 

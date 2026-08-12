@@ -6,8 +6,10 @@ import {
   __setTestUsageMutation,
   MAX_APPLIED_GRANTS,
   RESERVATION_TTL_MS,
+  USAGE_FLUSH_BATCH_SIZE,
   type WalletDO,
 } from "../src/wallet";
+import { UsageIngestError } from "../src/usage";
 import { SimulatedLedger } from "./ledger";
 
 type WalletStub = DurableObjectStub<WalletDO>;
@@ -281,7 +283,7 @@ describe("WalletDO unit", () => {
     expect(settleAgain.status).toBe("already_settled");
   });
 
-  it("dead-letters permanently rejected Convex outcomes while applying successful outcomes", async () => {
+  it("dead-letters permanent Convex rejections without poisoning later flushes", async () => {
     const stub = walletStub("unit-partial-convex-outcomes");
     await stub.grant("g1", 100);
     await stub.reserve("r-applied", 10);
@@ -290,11 +292,14 @@ describe("WalletDO unit", () => {
       organizationId: "org_publisher",
       consumerClerkOrgId: "org_consumer",
       projectId: "project",
+      specVersionId: "version",
       endpoint: "/endpoint",
       method: "GET",
       status: 200,
       latencyMs: 1,
       keyId: "key",
+      billingOutcome: "settled" as const,
+      qualityOutcome: "success" as const,
     };
     await stub.settle("r-applied", usage);
     await stub.settle("r-rejected", usage);
@@ -306,7 +311,8 @@ describe("WalletDO unit", () => {
           : {
               refId: event.settleRefId,
               status: "rejected" as const,
-              reason: "settlement reference payload conflict",
+              reason: "invalid settlement contract",
+              retryable: false,
             },
       ),
       wallet: {
@@ -319,22 +325,27 @@ describe("WalletDO unit", () => {
     const flushed = await stub.flushToConvex();
     __setTestUsageMutation(null);
 
-    expect(flushed).toMatchObject({ flushed: 2, acked: 1, remaining: 0 });
+    expect(flushed).toMatchObject({
+      flushed: 2,
+      acked: 1,
+      rejected: 1,
+      retryable: 0,
+      remaining: 0,
+    });
     const state = await stub.getState();
     expect(state.sequence).toBe(7);
     expect(state.pendingSettlements).toEqual([]);
-    // Permanent rejections park in the bounded dead-letter queue.
-    const deadLetters = await stub.getDeadLetters();
-    expect(deadLetters).toEqual([
-      expect.objectContaining({
-        settlementId: "settle:r-rejected",
-        cost: 20,
-        reason: "settlement reference payload conflict",
-      }),
-    ]);
-    // Ledger refused the rejected charge: checkpoint 90 applies clean since
-    // the dead-lettered 20 leaves the pending deduction window.
+    // Authoritative checkpoint did not debit rejected row, so spendable balance
+    // recovers while durable dead-letter evidence remains for operators.
     expect(state.balance).toBe(90);
+    await expect(
+      stub.getSettlementDeadLetter("settle:r-rejected"),
+    ).resolves.toMatchObject({
+      reason: "invalid settlement contract",
+      terminal: true,
+      source: "outcome",
+    });
+    await expect(stub.flushToConvex()).resolves.toMatchObject({ flushed: 0 });
   });
 
   it("expires abandoned reservations past the lease and keeps late settle idempotent", async () => {
@@ -357,20 +368,6 @@ describe("WalletDO unit", () => {
     await expect(stub.refund("r-orphan")).resolves.toMatchObject({
       status: "already_refunded",
     });
-  });
-
-  it("bounds the applied-grant dedupe set", async () => {
-    const stub = walletStub("unit-grant-cap");
-    for (let index = 0; index < MAX_APPLIED_GRANTS + 5; index += 1) {
-      await stub.grant(`g${index}`, 1);
-    }
-    const state = await stub.getState();
-    expect(state.appliedGrantIds.length).toBe(MAX_APPLIED_GRANTS);
-    expect(state.balance).toBe(MAX_APPLIED_GRANTS + 5);
-    // Oldest evicted: replaying g0 is applied again by the DO; the Convex
-    // ledger remains the authoritative dedupe beyond the DO window.
-    const replay = await stub.grant("g0", 1);
-    expect(replay.status).toBe("applied");
   });
 
   it("serves stale key settings while refreshing in the background", async () => {
@@ -411,6 +408,463 @@ describe("WalletDO unit", () => {
     expect(state.balance).toBe(100);
     expect(state.available).toBe(90);
   });
+
+  it("bounds the applied-grant dedupe set", async () => {
+    const stub = walletStub("unit-grant-cap");
+    for (let index = 0; index < MAX_APPLIED_GRANTS + 5; index += 1) {
+      await stub.grant(`g${index}`, 1);
+    }
+    const state = await stub.getState();
+    expect(state.appliedGrantIds.length).toBe(MAX_APPLIED_GRANTS);
+    expect(state.balance).toBe(MAX_APPLIED_GRANTS + 5);
+    // Oldest evicted: replaying g0 is applied again by the DO; the Convex
+    // ledger remains the authoritative dedupe beyond the DO window.
+    const replay = await stub.grant("g0", 1);
+    expect(replay.status).toBe("applied");
+  });
+
+  it("restores paid credit when a permanent rejection keeps the same checkpoint", async () => {
+    const stub = walletStub("unit-permanent-rejection-stale-checkpoint");
+    const usage = {
+      organizationId: "org_publisher",
+      consumerClerkOrgId: "org_consumer",
+      projectId: "project",
+      specVersionId: "version",
+      endpoint: "/endpoint",
+      method: "GET",
+      status: 200,
+      latencyMs: 1,
+      keyId: "key",
+      billingOutcome: "settled" as const,
+      qualityOutcome: "success" as const,
+    };
+    __setTestGrantsFetcher(async () => ({
+      wallet: { clerkOrgId: "org_consumer", balance: 100, sequence: 7 },
+      keySettings: [],
+    }));
+    await stub.syncGrants("org_consumer", 100_000);
+    __setTestGrantsFetcher(null);
+    await stub.reserve("permanent", 20);
+    await stub.settle("permanent", usage);
+    __setTestUsageMutation(async (_name, { events }) => ({
+      results: events.map((event) => ({
+        refId: event.settleRefId,
+        status: "rejected" as const,
+        reason: "permanent contract rejection",
+        retryable: false,
+      })),
+      wallet: { clerkOrgId: "org_consumer", balance: 100, sequence: 7 },
+    }));
+
+    await expect(stub.flushToConvex()).resolves.toMatchObject({
+      acked: 0,
+      rejected: 1,
+      remaining: 0,
+    });
+    await expect(stub.getState()).resolves.toMatchObject({
+      balance: 100,
+      sequence: 7,
+      pendingSettlements: [],
+    });
+  });
+
+  it("reconciles crash, checkpoint sync, and already-applied replay exactly", async () => {
+    const stub = walletStub("unit-crash-sync-already-applied");
+    const usage = {
+      organizationId: "org_publisher",
+      consumerClerkOrgId: "org_consumer",
+      projectId: "project",
+      specVersionId: "version",
+      endpoint: "/endpoint",
+      method: "GET",
+      status: 200,
+      latencyMs: 1,
+      keyId: "key",
+      billingOutcome: "settled" as const,
+      qualityOutcome: "success" as const,
+    };
+    await stub.grant("crash-grant", 100);
+    await stub.reserve("crash-paid", 10);
+    await stub.settle("crash-paid", usage);
+    __setTestUsageMutation(async () => {
+      throw new UsageIngestError("ack lost after commit", true);
+    });
+    await expect(stub.flushToConvex()).resolves.toMatchObject({
+      retryable: 1,
+      remaining: 1,
+    });
+
+    __setTestGrantsFetcher(async () => ({
+      wallet: { clerkOrgId: "org_consumer", balance: 90, sequence: 1 },
+      keySettings: [],
+    }));
+    await stub.syncGrants("org_consumer", 100_000);
+    __setTestGrantsFetcher(null);
+    await evictDurableObject(stub);
+    await expect(stub.getState()).resolves.toMatchObject({
+      balance: 80,
+      sequence: 1,
+      pendingSettlements: [
+        expect.objectContaining({ settlementId: "settle:crash-paid" }),
+      ],
+    });
+
+    __setTestUsageMutation(async (_name, { events }) => ({
+      results: events.map((event) => ({
+        refId: event.settleRefId,
+        status: "already_applied" as const,
+      })),
+      wallet: { clerkOrgId: "org_consumer", balance: 90, sequence: 1 },
+    }));
+    await expect(stub.flushToConvex()).resolves.toMatchObject({
+      acked: 1,
+      remaining: 0,
+    });
+    await expect(stub.getState()).resolves.toMatchObject({
+      balance: 90,
+      sequence: 1,
+      pendingSettlements: [],
+    });
+  });
+
+  it("drains more than one ingest limit in bounded recoverable batches", async () => {
+    const stub = walletStub("unit-bounded-convex-batches");
+    const usage = {
+      organizationId: "org_publisher",
+      consumerClerkOrgId: "org_consumer",
+      projectId: "project",
+      specVersionId: "version",
+      endpoint: "/endpoint",
+      method: "GET",
+      status: 200,
+      latencyMs: 1,
+      keyId: "key",
+      billingOutcome: "free" as const,
+      qualityOutcome: "success" as const,
+    };
+    for (let index = 0; index <= USAGE_FLUSH_BATCH_SIZE; index += 1) {
+      await stub.enqueueFreeUsage(`free-${index}`, usage);
+    }
+    const batches: number[] = [];
+    let sequence = 0;
+    __setTestUsageMutation(async (_name, { events }) => {
+      batches.push(events.length);
+      sequence += 1;
+      return {
+        results: events.map((event) => ({
+          refId: event.settleRefId,
+          status: "applied" as const,
+        })),
+        wallet: {
+          clerkOrgId: "org_consumer",
+          balance: 0,
+          sequence,
+        },
+      };
+    });
+
+    await expect(stub.flushToConvex()).resolves.toMatchObject({
+      flushed: USAGE_FLUSH_BATCH_SIZE,
+      acked: USAGE_FLUSH_BATCH_SIZE,
+      remaining: 1,
+    });
+    await expect(stub.flushToConvex()).resolves.toMatchObject({
+      flushed: 1,
+      acked: 1,
+      remaining: 0,
+    });
+    expect(batches).toEqual([USAGE_FLUSH_BATCH_SIZE, 1]);
+  });
+
+  it("rotates explicitly retryable rows while acknowledging later outcomes", async () => {
+    const stub = walletStub("unit-retryable-row-rotation");
+    const usage = {
+      organizationId: "org_publisher",
+      consumerClerkOrgId: "org_consumer",
+      projectId: "project",
+      specVersionId: "version",
+      endpoint: "/endpoint",
+      method: "GET",
+      status: 200,
+      latencyMs: 1,
+      keyId: "key",
+      billingOutcome: "free" as const,
+      qualityOutcome: "success" as const,
+    };
+    for (const id of ["retry", "later-one", "later-two"]) {
+      await stub.enqueueFreeUsage(id, usage);
+    }
+    const batches: string[][] = [];
+    let attempt = 0;
+    __setTestUsageMutation(async (_name, { events }) => {
+      attempt += 1;
+      batches.push(events.map((event) => event.settleRefId));
+      return {
+        results: events.map((event) =>
+          attempt === 1 && event.settleRefId === "settle:retry"
+            ? {
+                refId: event.settleRefId,
+                status: "rejected" as const,
+                reason: "grant projection lag",
+                retryable: true,
+              }
+            : { refId: event.settleRefId, status: "applied" as const },
+        ),
+        wallet: {
+          clerkOrgId: "org_consumer",
+          balance: 0,
+          sequence: attempt,
+        },
+      };
+    });
+
+    await expect(stub.flushToConvex()).resolves.toMatchObject({
+      flushed: 3,
+      acked: 2,
+      rejected: 0,
+      retryable: 1,
+      remaining: 1,
+    });
+    await expect(stub.getState()).resolves.toMatchObject({
+      pendingSettlements: [
+        expect.objectContaining({ settlementId: "settle:retry" }),
+      ],
+    });
+    await expect(
+      stub.getSettlementDeadLetter("settle:retry"),
+    ).resolves.toBeNull();
+
+    await expect(stub.flushToConvex()).resolves.toMatchObject({
+      flushed: 1,
+      acked: 1,
+      retryable: 0,
+      remaining: 0,
+    });
+    expect(batches).toEqual([
+      ["settle:retry", "settle:later-one", "settle:later-two"],
+      ["settle:retry"],
+    ]);
+  });
+
+  it("recursively bisects a permanent batch poison and dead-letters only its singleton", async () => {
+    const stub = walletStub("unit-recursive-poison-bisection");
+    await stub.grant("poison-test-grant", 90);
+    const usage = {
+      organizationId: "org_publisher",
+      consumerClerkOrgId: "org_consumer",
+      projectId: "project",
+      specVersionId: "version",
+      endpoint: "/endpoint",
+      method: "GET",
+      status: 200,
+      latencyMs: 1,
+      keyId: "key",
+      billingOutcome: "settled" as const,
+      qualityOutcome: "success" as const,
+    };
+    for (let index = 0; index < 9; index += 1) {
+      const reservationId = index === 8 ? "poison" : `good-${index}`;
+      await expect(stub.reserve(reservationId, 1)).resolves.toMatchObject({
+        status: "reserved",
+      });
+      await expect(stub.settle(reservationId, usage)).resolves.toMatchObject({
+        status: "settled",
+      });
+    }
+    const batchSizes: number[] = [];
+    let sequence = 0;
+    let authoritativeBalance = 90;
+    __setTestUsageMutation(async (_name, { events }) => {
+      batchSizes.push(events.length);
+      if (events.some((event) => event.settleRefId === "settle:poison")) {
+        throw new UsageIngestError("deterministic poison", false, {
+          bisectable: true,
+        });
+      }
+      sequence += events.length;
+      authoritativeBalance -= events.reduce(
+        (total, event) => total + event.credits,
+        0,
+      );
+      return {
+        results: events.map((event) => ({
+          refId: event.settleRefId,
+          status: "applied" as const,
+        })),
+        wallet: {
+          clerkOrgId: "org_consumer",
+          balance: authoritativeBalance,
+          sequence,
+        },
+      };
+    });
+
+    await expect(stub.flushToConvex()).resolves.toMatchObject({
+      flushed: 9,
+      acked: 8,
+      rejected: 1,
+      retryable: 0,
+      remaining: 0,
+    });
+    expect(batchSizes).toEqual([9, 4, 5, 2, 3, 1, 2, 1, 1]);
+    await expect(stub.getState()).resolves.toMatchObject({
+      balance: 82,
+      pendingSettlements: [],
+    });
+    await expect(
+      stub.getSettlementDeadLetter("settle:poison"),
+    ).resolves.toMatchObject({
+      reason: "deterministic poison",
+      terminal: true,
+      source: "batch",
+      settlement: { settlementId: "settle:poison" },
+    });
+    for (let index = 0; index < 8; index += 1) {
+      await expect(
+        stub.getSettlementDeadLetter(`settle:good-${index}`),
+      ).resolves.toBeNull();
+    }
+  });
+
+  it("keeps systemic permanent failures intact instead of mass dead-lettering", async () => {
+    const stub = walletStub("unit-systemic-protocol-failure");
+    const usage = {
+      organizationId: "org_publisher",
+      consumerClerkOrgId: "org_consumer",
+      projectId: "project",
+      specVersionId: "version",
+      endpoint: "/endpoint",
+      method: "GET",
+      status: 200,
+      latencyMs: 1,
+      keyId: "key",
+      billingOutcome: "free" as const,
+      qualityOutcome: "success" as const,
+    };
+    for (const id of ["one", "two", "three"]) {
+      await stub.enqueueFreeUsage(id, usage);
+    }
+    let calls = 0;
+    __setTestUsageMutation(async () => {
+      calls += 1;
+      throw new UsageIngestError("server contract mismatch", false);
+    });
+
+    await expect(stub.flushToConvex()).resolves.toMatchObject({
+      flushed: 0,
+      acked: 0,
+      rejected: 0,
+      retryable: 0,
+      blocked: 3,
+      remaining: 3,
+      error: "server contract mismatch",
+    });
+    expect(calls).toBe(1);
+    expect((await stub.getState()).pendingSettlements).toHaveLength(3);
+    for (const id of ["one", "two", "three"]) {
+      await expect(
+        stub.getSettlementDeadLetter(`settle:${id}`),
+      ).resolves.toBeNull();
+    }
+  });
+
+  it("persists over 1000 rows in bounded partitions across restart and ambiguous crash", async () => {
+    const stub = walletStub("unit-durable-partitions-over-1000");
+    const usage = {
+      organizationId: "org_publisher",
+      consumerClerkOrgId: "org_consumer",
+      projectId: "project",
+      specVersionId: "version",
+      endpoint: "/endpoint",
+      method: "GET",
+      status: 200,
+      latencyMs: 1,
+      keyId: "key",
+      billingOutcome: "free" as const,
+      qualityOutcome: "success" as const,
+    };
+    const rowCount = 1_037;
+    for (let index = 0; index < rowCount; index += 1) {
+      await stub.enqueueFreeUsage(`bulk-${index}`, usage);
+    }
+    const expectedSizes = [
+      ...Array.from(
+        { length: Math.floor(rowCount / USAGE_FLUSH_BATCH_SIZE) },
+        () => USAGE_FLUSH_BATCH_SIZE,
+      ),
+      rowCount % USAGE_FLUSH_BATCH_SIZE,
+    ];
+    await expect(stub.getSettlementQueueLayout()).resolves.toEqual({
+      size: rowCount,
+      partitionCount: expectedSizes.length,
+      partitionSizes: expectedSizes,
+    });
+
+    await evictDurableObject(stub);
+    await expect(stub.getState()).resolves.toMatchObject({
+      pendingSettlements: expect.any(Array),
+    });
+    expect((await stub.getState()).pendingSettlements).toHaveLength(rowCount);
+
+    const committed = new Set<string>();
+    const batchSizes: number[] = [];
+    let dropAfterCommit = true;
+    let sequence = 0;
+    __setTestUsageMutation(async (_name, { events }) => {
+      batchSizes.push(events.length);
+      if (dropAfterCommit) {
+        dropAfterCommit = false;
+        for (const event of events) committed.add(event.settleRefId);
+        sequence += events.length;
+        throw new UsageIngestError("connection lost after commit", true);
+      }
+      const results = events.map((event) => {
+        if (committed.has(event.settleRefId)) {
+          return {
+            refId: event.settleRefId,
+            status: "already_applied" as const,
+          };
+        }
+        committed.add(event.settleRefId);
+        sequence += 1;
+        return { refId: event.settleRefId, status: "applied" as const };
+      });
+      return {
+        results,
+        wallet: {
+          clerkOrgId: "org_consumer",
+          balance: 0,
+          sequence,
+        },
+      };
+    });
+
+    await expect(stub.flushToConvex()).resolves.toMatchObject({
+      flushed: 0,
+      acked: 0,
+      retryable: USAGE_FLUSH_BATCH_SIZE,
+      remaining: rowCount,
+      error: "connection lost after commit",
+    });
+    await evictDurableObject(stub);
+    expect((await stub.getState()).pendingSettlements).toHaveLength(rowCount);
+
+    while ((await stub.getState()).pendingSettlements.length > 0) {
+      await expect(stub.flushToConvex()).resolves.not.toHaveProperty("error");
+    }
+    expect(committed.size).toBe(rowCount);
+    expect(batchSizes.every((size) => size <= USAGE_FLUSH_BATCH_SIZE)).toBe(
+      true,
+    );
+    expect(batchSizes).toHaveLength(
+      1 + Math.ceil(rowCount / USAGE_FLUSH_BATCH_SIZE),
+    );
+    await expect(stub.getSettlementQueueLayout()).resolves.toEqual({
+      size: 0,
+      partitionCount: 0,
+      partitionSizes: [],
+    });
+  }, 120_000);
 
   it("reconciles a newer checkpoint without discarding holds or pending settlement", async () => {
     const stub = walletStub("unit-checkpoint-preserves-local-state");

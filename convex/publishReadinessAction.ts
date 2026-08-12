@@ -7,12 +7,12 @@ import { probePublicHttps } from "./qualityProbeAction";
 
 export type ConnectionResult = {
   status:
-    | "ok"
-    | "reachable_unconfirmed"
+    | "ready"
+    | "reachable_unhealthy"
     | "blocked_target"
     | "timeout"
     | "unreachable"
-    | "missing_server";
+    | "missing_health_check";
   statusCode?: number;
   latencyMs?: number;
   message: string;
@@ -40,7 +40,11 @@ export const testConnection = action({
       projectId: args.projectId,
       clerkOrgId,
     });
-    if (target.url === null || target.draftHash === null) {
+    if (
+      target.url === null ||
+      target.method === null ||
+      target.draftHash === null
+    ) {
       if (target.draftHash !== null) {
         await ctx.runMutation(internal.publishReadiness.clearPassingTest, {
           projectId: args.projectId,
@@ -48,21 +52,20 @@ export const testConnection = action({
         });
       }
       return {
-        status: "missing_server",
-        message: "Save a valid spec with servers[0].url before testing.",
+        status: "missing_health_check",
+        message:
+          "Mark one parameter-free GET or HEAD operation with x-zevium-health-check: true, then save the spec.",
       };
     }
-    const result = await probePublicHttps(target.url);
+    const result = await probePublicHttps(target.url, target.method);
     const reachable = result.statusCode !== undefined;
-    // Credential gates and unsupported HEAD requests commonly return 4xx and
-    // still prove reachability. 5xx is unhealthy and must invalidate a prior
-    // pass for same draft.
-    const gatePassed = reachable && result.statusCode! < 500;
+    const gatePassed = result.outcome === "healthy";
     if (gatePassed) {
       await ctx.runMutation(internal.publishReadiness.recordPassingTest, {
         projectId: args.projectId,
         draftHash: target.draftHash,
-        serverOrigin: result.finalOrigin ?? new URL(target.url).origin,
+        healthCheckUrl: target.url,
+        healthCheckMethod: target.method,
       });
     } else {
       await ctx.runMutation(internal.publishReadiness.clearPassingTest, {
@@ -72,9 +75,9 @@ export const testConnection = action({
     }
     return {
       status: reachable
-        ? result.outcome === "success"
-          ? "ok"
-          : "reachable_unconfirmed"
+        ? result.outcome === "healthy"
+          ? "ready"
+          : "reachable_unhealthy"
         : result.outcome === "blocked_target"
           ? "blocked_target"
           : result.outcome === "timeout"
@@ -83,7 +86,7 @@ export const testConnection = action({
       statusCode: result.statusCode,
       latencyMs: result.latencyMs,
       message: reachable
-        ? `${result.message} ${gatePassed ? "Reachability gate passed; scheduled quality checks will report HTTP success separately." : "Publication gate failed; restore upstream service and test again."}`
+        ? `${result.message} ${gatePassed ? "Reachability and declared-health readiness gate passed." : "Publication gate failed; make the declared health endpoint return 2xx/3xx and test again."}`
         : result.message,
     };
   },

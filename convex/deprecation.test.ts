@@ -505,7 +505,7 @@ describe("specs.publish — gateway-safe pricing invariant", () => {
       version: "9.9.9",
     });
     expect(result.ok).toBe(false);
-    expect(result.issues).toEqual([
+    expect(result.issues.filter((issue) => issue.level === "error")).toEqual([
       expect.objectContaining({ level: "error" }),
     ]);
     const persisted = await t.run(async (ctx) =>
@@ -664,6 +664,12 @@ describe("project retirement lifecycle", () => {
     ).rejects.toThrow(/after sunset/);
 
     await t.mutation(internal.projects.retireSunsetProjects, {});
+    for (let step = 0; step < 20; step += 1) {
+      const result = await t.mutation(internal.projects.runProjectCleanupPage, {
+        projectId: seed.projectId,
+      });
+      if (result.phase === "finished") break;
+    }
     const state = await t.run(async (ctx) => ({
       project: await ctx.db.get(seed.projectId),
       versions: await ctx.db
@@ -688,6 +694,6 @@ describe("project retirement lifecycle", () => {
     expect(state.versions).toHaveLength(1);
     expect(state.usage).toHaveLength(1);
     expect(state.credentials).toHaveLength(0);
-    expect(state.webhook?.active).toBe(false);
+    expect(state.webhook).toBeNull();
   });
 });

@@ -243,15 +243,18 @@ describe("search.fetchSearchListings", () => {
       await ctx.db.insert("qualitySnapshots", {
         projectId: seed.publicId,
         specVersionId: version1._id,
-        sampleSize: 3,
-        responseCount: 3,
-        successCount: 2,
-        availabilityPercent: 100,
-        successRatePercent: 66.67,
-        latencyP50Ms: 25,
-        insufficientData: false,
-        lastOutcome: "success",
-        lastCheckedAt: 1_700_000_010_000,
+        reachabilitySampleSize: 3,
+        reachabilityResponseCount: 3,
+        reachabilityPercent: 100,
+        reachabilityLatencyP50Ms: 25,
+        insufficientReachabilityData: false,
+        apiSampleSize: 20,
+        apiSuccessCount: 13,
+        apiSuccessRatePercent: 65,
+        apiLatencyP50Ms: 25,
+        insufficientApiData: false,
+        lastProbeOutcome: "healthy",
+        lastProbedAt: 1_700_000_010_000,
         publishedAt: version1.publishedAt,
         updatedAt: 1_700_000_010_000,
       });
@@ -261,8 +264,8 @@ describe("search.fetchSearchListings", () => {
       scores: [0.9],
     });
     expect(current[0]?.quality).toMatchObject({
-      sampleSize: 3,
-      successRatePercent: 66.67,
+      reachabilitySampleSize: 3,
+      apiSuccessRatePercent: 65,
     });
 
     await t.run(async (ctx) => {

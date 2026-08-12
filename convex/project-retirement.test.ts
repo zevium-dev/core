@@ -196,6 +196,12 @@ describe("retirement consumer fanout", () => {
         retirementState: "scheduled",
         retirementRevision: 1,
       });
+      const versionId = await ctx.db.insert("specVersions", {
+        projectId,
+        version: "1.0.0",
+        publishedAt: now,
+        spec: "{}",
+      });
       const historicalConsumerId = await ctx.db.insert("organizations", {
         clerkOrgId: "org_historical_consumer",
         name: "Historical consumer",
@@ -224,7 +230,7 @@ describe("retirement consumer fanout", () => {
         balance: 10,
         sequence: 0,
       });
-      return { projectId, publisherId, lateConsumerId };
+      return { projectId, publisherId, lateConsumerId, versionId };
     });
 
     expect(
@@ -252,6 +258,9 @@ describe("retirement consumer fanout", () => {
           at: now - 1,
           settleRefId: "settle:late-retirement-consumer",
           consumerClerkOrgId: "org_late_consumer",
+          specVersionId: seed.versionId,
+          billingOutcome: "settled",
+          qualityOutcome: "success",
         },
       ],
     });

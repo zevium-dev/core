@@ -21,6 +21,7 @@ export type Resolver = (
 export type PinnedHeadRequester = (
   url: URL,
   pinned: LookupAddress,
+  method: "GET" | "HEAD",
   signal: AbortSignal,
 ) => Promise<{ statusCode: number; location?: string }>;
 
@@ -196,18 +197,62 @@ export async function resolveSafeHttpsUrl(
   return { url, addresses };
 }
 
-function requestPinnedHead(
+function canonicalSocketAddress(address: string): string {
+  const lower = address.toLowerCase().split("%")[0]!;
+  return lower.startsWith("::ffff:") ? lower.slice(7) : lower;
+}
+
+export function remoteAddressMatchesPin(
+  remoteAddress: string | undefined,
+  pinnedAddress: string,
+): boolean {
+  return (
+    remoteAddress !== undefined &&
+    canonicalSocketAddress(remoteAddress) ===
+      canonicalSocketAddress(pinnedAddress)
+  );
+}
+
+type ProbeHeaderResponse = {
+  statusCode?: number;
+  headers: { location?: string };
+  destroy(): void;
+};
+
+/** Header-only evidence boundary. Always tears down body/socket synchronously. */
+export function consumeProbeHeaders(response: ProbeHeaderResponse): {
+  statusCode: number;
+  location?: string;
+} {
+  const statusCode = response.statusCode ?? 0;
+  const location = response.headers.location;
+  response.destroy();
+  return location === undefined ? { statusCode } : { statusCode, location };
+}
+
+export function requestPinnedHealth(
   url: URL,
   pinned: LookupAddress,
+  method: "GET" | "HEAD",
   signal: AbortSignal,
 ): Promise<{ statusCode: number; location?: string }> {
   return new Promise((resolve, reject) => {
+    let settled = false;
+    const fail = (error: Error) => {
+      if (settled) return;
+      settled = true;
+      reject(error);
+    };
     const req = request(
       url,
       {
-        method: "HEAD",
+        method,
+        // Node's global HTTPS agent reuses sockets. A probe pin is exact for
+        // one resolution, so every request owns a one-use agent/socket.
+        agent: false,
         headers: {
           accept: "*/*",
+          connection: "close",
           "user-agent": "Zevium-Quality-Probe/1.0",
         },
         signal,
@@ -225,15 +270,36 @@ function requestPinnedHead(
         },
       },
       (response) => {
-        const statusCode = response.statusCode ?? 0;
-        const location = response.headers.location;
-        response.resume();
-        resolve(
-          location === undefined ? { statusCode } : { statusCode, location },
-        );
+        if (
+          !remoteAddressMatchesPin(
+            response.socket.remoteAddress,
+            pinned.address,
+          )
+        ) {
+          response.destroy();
+          fail(new Error("Probe socket address did not match DNS pin"));
+          return;
+        }
+        // Probe evidence ends at headers. Destroy body/socket immediately so
+        // an endless GET body cannot outlive the overall deadline.
+        const result = consumeProbeHeaders(response);
+        if (settled) return;
+        settled = true;
+        resolve(result);
       },
     );
-    req.on("error", reject);
+    req.on("socket", (socket) => {
+      const verifyPin = () => {
+        if (!remoteAddressMatchesPin(socket.remoteAddress, pinned.address)) {
+          const error = new Error("Probe socket address did not match DNS pin");
+          socket.destroy(error);
+          fail(error);
+        }
+      };
+      if (socket.connecting) socket.once("connect", verifyPin);
+      else verifyPin();
+    });
+    req.on("error", (error) => fail(error));
     req.end();
   });
 }
@@ -265,6 +331,7 @@ function raceWithAbort<T>(
 
 export async function probePublicHttps(
   raw: string,
+  method: "GET" | "HEAD",
   dependencies: ProbeDependencies = {},
 ): Promise<SafeProbeResult> {
   const started = Date.now();
@@ -272,7 +339,7 @@ export async function probePublicHttps(
   const timeoutMs = dependencies.timeoutMs ?? PROBE_TIMEOUT_MS;
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   const resolver = dependencies.resolver ?? lookup;
-  const requestHead = dependencies.requestHead ?? requestPinnedHead;
+  const requestHead = dependencies.requestHead ?? requestPinnedHealth;
   let current = raw;
   try {
     for (let redirects = 0; redirects <= MAX_PROBE_REDIRECTS; redirects += 1) {
@@ -304,6 +371,7 @@ export async function probePublicHttps(
         const response = await requestHead(
           safe.url,
           safe.addresses[0]!,
+          method,
           controller.signal,
         );
         if (
@@ -334,15 +402,15 @@ export async function probePublicHttps(
           continue;
         }
         const latencyMs = Date.now() - started;
-        const success = response.statusCode >= 200 && response.statusCode < 400;
+        const healthy = response.statusCode >= 200 && response.statusCode < 400;
         return {
-          outcome: success ? "success" : "http_error",
+          outcome: healthy ? "healthy" : "http_error",
           statusCode: response.statusCode,
           latencyMs,
           finalOrigin: safe.url.origin,
-          message: success
-            ? "Upstream responded successfully without credentials."
-            : `Upstream is reachable without credentials but returned HTTP ${response.statusCode}.`,
+          message: healthy
+            ? "Declared health endpoint is reachable and ready."
+            : `Declared health endpoint is reachable but returned HTTP ${response.statusCode}.`,
         };
       } catch (error) {
         const code =
@@ -386,7 +454,7 @@ export const runScheduledProbe = internalAction({
   handler: async (ctx, args): Promise<void> => {
     const target = await ctx.runQuery(internal.quality.getLeasedTarget, args);
     if (target === null) return;
-    const result = await probePublicHttps(target.url);
+    const result = await probePublicHttps(target.url, target.method);
     await ctx.runMutation(internal.quality.recordProbeResult, {
       targetId: args.targetId,
       executionId: args.executionId,

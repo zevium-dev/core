@@ -217,6 +217,14 @@ export const getDeliveryForAction = internalQuery({
     if (delivery === null) return null;
     const endpoint = await ctx.db.get(delivery.endpointId);
     if (endpoint === null) return null;
+    const project = await ctx.db.get(endpoint.projectId);
+    if (
+      project === null ||
+      project.retiredAt !== undefined ||
+      project.deletionState !== undefined
+    ) {
+      return null;
+    }
     return {
       url: endpoint.url,
       secret: endpoint.secret,

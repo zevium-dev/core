@@ -5,6 +5,7 @@
 
 import { ConvexHttpClient } from "convex/browser";
 import { makeFunctionReference } from "convex/server";
+import { MAX_USAGE_INGEST_EVENTS } from "@zevium/shared";
 
 /** Hot-path event emitted by the pipeline (tests / optional logging). */
 export type UsageEvent = {
@@ -14,6 +15,7 @@ export type UsageEvent = {
   /** Consumer's Clerk org id — the org whose wallet actually pays. */
   consumerClerkOrgId: string;
   projectId: string;
+  specVersionId: string;
   keyId: string;
   orgSlug: string;
   projectSlug: string;
@@ -23,6 +25,8 @@ export type UsageEvent = {
   status: number;
   /** settled | refunded | blocked | free */
   outcome: "settled" | "refunded" | "blocked" | "free";
+  /** Transport truth when no upstream HTTP response existed. */
+  qualityOutcome?: "network_error";
   latencyMs: number;
   reservationId: string;
 };
@@ -34,6 +38,7 @@ export type ConvexUsageRecord = {
   /** Consumer's Clerk org id — recordUsage resolves this to the wallet debited. */
   consumerClerkOrgId: string;
   projectId: string;
+  specVersionId: string;
   endpoint: string;
   method: string;
   credits: number;
@@ -42,20 +47,57 @@ export type ConvexUsageRecord = {
   keyId: string;
   at: number;
   settleRefId: string;
+  billingOutcome: "settled" | "refunded" | "free";
+  qualityOutcome: "success" | "client_error" | "server_error" | "network_error";
 };
-
-export type SettlementOutcomeStatus =
-  "applied" | "already_applied" | "rejected";
 
 /**
  * Per-settlement result returned by the authoritative Convex ledger.
- * Only applied outcomes may be removed from the DO retry queue.
+ * Every rejection explicitly states whether retry can change its outcome.
  */
-export type SettlementOutcome = {
-  refId: string;
-  status: SettlementOutcomeStatus;
-  reason?: string;
-};
+export type SettlementOutcome =
+  | { refId: string; status: "applied" | "already_applied" }
+  | {
+      refId: string;
+      status: "rejected";
+      reason: string;
+      retryable: boolean;
+    };
+
+/** Transport/protocol failure with an exact retry classification. */
+export class UsageIngestError extends Error {
+  readonly retryable: boolean;
+  readonly bisectable: boolean;
+
+  constructor(
+    message: string,
+    retryable: boolean,
+    options: { cause?: unknown; bisectable?: boolean } = {},
+  ) {
+    super(
+      message,
+      options.cause === undefined ? undefined : { cause: options.cause },
+    );
+    this.name = "UsageIngestError";
+    this.retryable = retryable;
+    this.bisectable = options.bisectable === true;
+  }
+}
+
+export type UsageFailureDisposition = "retryable" | "bisectable" | "blocked";
+
+export function usageFailureDisposition(
+  error: unknown,
+): UsageFailureDisposition {
+  if (!(error instanceof UsageIngestError) || error.retryable) {
+    return "retryable";
+  }
+  return error.bisectable ? "bisectable" : "blocked";
+}
+
+function httpFailureIsRetryable(status: number): boolean {
+  return status === 408 || status === 425 || status === 429 || status >= 500;
+}
 
 /** Authoritative post-ingest checkpoint for the single consumer wallet batch. */
 export type WalletCheckpoint = {
@@ -94,7 +136,7 @@ export class CollectingUsageSink implements UsageSink {
 }
 
 export class NoopUsageSink implements UsageSink {
-  emit(_event: UsageEvent): void {}
+  emit(): void {}
 }
 
 const recordUsageRef = makeFunctionReference<
@@ -177,13 +219,50 @@ export class ConvexUsageClient {
 
   async recordUsage(events: ConvexUsageRecord[]): Promise<RecordUsageResult> {
     if (events.length === 0) {
-      throw new Error("recordUsage requires at least one settlement");
+      throw new UsageIngestError(
+        "recordUsage requires at least one settlement",
+        false,
+      );
+    }
+    if (events.length > MAX_USAGE_INGEST_EVENTS) {
+      throw new UsageIngestError(
+        `recordUsage accepts at most ${MAX_USAGE_INGEST_EVENTS} settlements`,
+        false,
+      );
+    }
+    const consumerClerkOrgId = events[0]!.consumerClerkOrgId;
+    if (
+      !events.every((event) => event.consumerClerkOrgId === consumerClerkOrgId)
+    ) {
+      throw new UsageIngestError(
+        "usage batch contains multiple consumer wallets",
+        false,
+      );
+    }
+    if (
+      new Set(events.map((event) => event.settleRefId)).size !== events.length
+    ) {
+      throw new UsageIngestError(
+        "usage batch contains duplicate settlement references",
+        false,
+      );
     }
     if (this.#mutationFn) {
-      return this.#validateResult(
-        await this.#mutationFn("wallets:recordUsage", { events }),
-        events,
-      );
+      try {
+        return this.#validateResult(
+          parseRecordUsageResult(
+            await this.#mutationFn("wallets:recordUsage", { events }),
+          ),
+          events,
+        );
+      } catch (error) {
+        if (error instanceof UsageIngestError) throw error;
+        throw new UsageIngestError(
+          error instanceof Error ? error.message : String(error),
+          true,
+          { cause: error },
+        );
+      }
     }
 
     // Prefer shared-secret httpAction over deploy-key mutation.
@@ -202,9 +281,16 @@ export class ConvexUsageClient {
     }
 
     if (!this.#client) {
-      throw new Error("ConvexUsageClient has no client");
+      throw new UsageIngestError("ConvexUsageClient has no client", false);
     }
-    const result = await this.#client.mutation(recordUsageRef, { events });
+    let result: RecordUsageResult;
+    try {
+      result = await this.#client.mutation(recordUsageRef, { events });
+    } catch (error) {
+      throw new UsageIngestError("convex mutation transport failed", true, {
+        cause: error,
+      });
+    }
     return this.#validateResult(parseRecordUsageResult(result), events);
   }
 
@@ -213,23 +299,37 @@ export class ConvexUsageClient {
   ): Promise<RecordUsageResult> {
     const url = (this.#ingestUrl ?? "").replace(/\/+$/, "");
     const secret = this.#internalSecret ?? "";
-    const res = await this.#fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-internal-secret": secret,
-      },
-      body: JSON.stringify({ events }),
-    });
+    let res: Response;
+    try {
+      res = await this.#fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-internal-secret": secret,
+        },
+        body: JSON.stringify({ events }),
+      });
+    } catch (error) {
+      throw new UsageIngestError("convex ingest transport failed", true, {
+        cause: error,
+      });
+    }
     if (!res.ok) {
       const text = await res.text().catch(() => "");
-      throw new Error(`convex ingest failed: ${res.status} ${text}`);
+      throw new UsageIngestError(
+        `convex ingest failed: ${res.status} ${text}`,
+        httpFailureIsRetryable(res.status),
+        {
+          bisectable:
+            res.status === 400 || res.status === 413 || res.status === 422,
+        },
+      );
     }
     let json: unknown;
     try {
       json = await res.json();
     } catch {
-      throw new Error("convex ingest returned non-json");
+      throw new UsageIngestError("convex ingest returned non-json", false);
     }
     return this.#validateResult(parseRecordUsageResult(json), events);
   }
@@ -240,37 +340,51 @@ export class ConvexUsageClient {
     adminKey: string,
   ): Promise<RecordUsageResult> {
     const base = (this.#convexUrl ?? "").replace(/\/+$/, "");
-    const res = await this.#fetch(`${base}/api/mutation`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Convex ${adminKey}`,
-      },
-      body: JSON.stringify({
-        path,
-        format: "json",
-        args: [args],
-      }),
-    });
+    let res: Response;
+    try {
+      res = await this.#fetch(`${base}/api/mutation`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Convex ${adminKey}`,
+        },
+        body: JSON.stringify({
+          path,
+          format: "json",
+          args: [args],
+        }),
+      });
+    } catch (error) {
+      throw new UsageIngestError("convex mutation transport failed", true, {
+        cause: error,
+      });
+    }
     if (!res.ok) {
       const text = await res.text().catch(() => "");
-      throw new Error(`convex mutation failed: ${res.status} ${text}`);
+      throw new UsageIngestError(
+        `convex mutation failed: ${res.status} ${text}`,
+        httpFailureIsRetryable(res.status),
+        {
+          bisectable:
+            res.status === 400 || res.status === 413 || res.status === 422,
+        },
+      );
     }
     let json: unknown;
     try {
       json = await res.json();
     } catch {
-      throw new Error("convex mutation returned non-json");
+      throw new UsageIngestError("convex mutation returned non-json", false);
     }
     if (!json || typeof json !== "object") {
-      throw new Error("convex mutation invalid response");
+      throw new UsageIngestError("convex mutation invalid response", false);
     }
     if ("status" in json && json.status === "error") {
       const msg =
         "errorMessage" in json && typeof json.errorMessage === "string"
           ? json.errorMessage
           : "convex mutation error";
-      throw new Error(msg);
+      throw new UsageIngestError(msg, false, { bisectable: true });
     }
     const value =
       "status" in json && json.status === "success" && "value" in json
@@ -284,13 +398,28 @@ export class ConvexUsageClient {
     events: ConvexUsageRecord[],
   ): RecordUsageResult {
     const consumerClerkOrgId = events[0]!.consumerClerkOrgId;
-    if (
-      !events.every((event) => event.consumerClerkOrgId === consumerClerkOrgId)
-    ) {
-      throw new Error("usage batch contains multiple consumer wallets");
-    }
     if (result.wallet.clerkOrgId !== consumerClerkOrgId) {
-      throw new Error("convex checkpoint wallet does not match usage batch");
+      throw new UsageIngestError(
+        "convex checkpoint wallet does not match usage batch",
+        false,
+      );
+    }
+    const expected = new Set(events.map((event) => event.settleRefId));
+    const received = new Set<string>();
+    for (const outcome of result.results) {
+      if (!expected.has(outcome.refId) || received.has(outcome.refId)) {
+        throw new UsageIngestError(
+          "convex ingest returned unexpected settlement outcomes",
+          false,
+        );
+      }
+      received.add(outcome.refId);
+    }
+    if (received.size !== expected.size) {
+      throw new UsageIngestError(
+        "convex ingest omitted settlement outcomes",
+        false,
+      );
     }
     return result;
   }
@@ -350,6 +479,7 @@ export function usageEventToRecord(event: UsageEvent): ConvexUsageRecord {
     organizationId: event.organizationId,
     consumerClerkOrgId: event.consumerClerkOrgId,
     projectId: event.projectId,
+    specVersionId: event.specVersionId,
     endpoint: event.pathTemplate,
     method: event.method,
     credits: event.cost,
@@ -358,6 +488,21 @@ export function usageEventToRecord(event: UsageEvent): ConvexUsageRecord {
     keyId: event.keyId,
     at: Date.now(),
     settleRefId: `settle:${event.reservationId}`,
+    billingOutcome:
+      event.outcome === "free"
+        ? "free"
+        : event.outcome === "settled"
+          ? "settled"
+          : "refunded",
+    qualityOutcome:
+      event.qualityOutcome ??
+      (event.status >= 200 && event.status < 300
+        ? "success"
+        : event.status >= 400 && event.status < 500
+          ? "client_error"
+          : event.status >= 500
+            ? "server_error"
+            : "network_error"),
   };
 }
 
@@ -368,16 +513,20 @@ export function pendingToUsageRecord(input: {
   organizationId: string;
   consumerClerkOrgId: string;
   projectId: string;
+  specVersionId: string;
   endpoint: string;
   method: string;
   status: number;
   latencyMs: number;
   keyId: string;
+  billingOutcome: ConvexUsageRecord["billingOutcome"];
+  qualityOutcome: ConvexUsageRecord["qualityOutcome"];
 }): ConvexUsageRecord {
   return {
     organizationId: input.organizationId,
     consumerClerkOrgId: input.consumerClerkOrgId,
     projectId: input.projectId,
+    specVersionId: input.specVersionId,
     endpoint: input.endpoint,
     method: input.method,
     credits: input.cost,
@@ -386,21 +535,29 @@ export function pendingToUsageRecord(input: {
     keyId: input.keyId,
     at: input.settledAt,
     settleRefId: input.settlementId,
+    billingOutcome: input.billingOutcome,
+    qualityOutcome: input.qualityOutcome,
   };
 }
 
 function parseRecordUsageResult(value: unknown): RecordUsageResult {
   if (!value || typeof value !== "object") {
-    throw new Error("convex ingest returned invalid result");
+    throw new UsageIngestError("convex ingest returned invalid result", false);
   }
   const result = value as Record<string, unknown>;
   if (!Array.isArray(result.results)) {
-    throw new Error("convex ingest result missing settlement outcomes");
+    throw new UsageIngestError(
+      "convex ingest result missing settlement outcomes",
+      false,
+    );
   }
   const results: SettlementOutcome[] = [];
   for (const raw of result.results) {
     if (!raw || typeof raw !== "object") {
-      throw new Error("convex ingest result has invalid settlement outcome");
+      throw new UsageIngestError(
+        "convex ingest result has invalid settlement outcome",
+        false,
+      );
     }
     const outcome = raw as Record<string, unknown>;
     const status = outcome.status;
@@ -410,20 +567,34 @@ function parseRecordUsageResult(value: unknown): RecordUsageResult {
       (status !== "applied" &&
         status !== "already_applied" &&
         status !== "rejected") ||
-      (outcome.reason !== undefined && typeof outcome.reason !== "string")
+      (status === "rejected"
+        ? typeof outcome.reason !== "string" ||
+          outcome.reason.length === 0 ||
+          typeof outcome.retryable !== "boolean"
+        : outcome.reason !== undefined || outcome.retryable !== undefined)
     ) {
-      throw new Error("convex ingest result has invalid settlement outcome");
+      throw new UsageIngestError(
+        "convex ingest result has invalid settlement outcome",
+        false,
+      );
     }
-    const parsed: SettlementOutcome = {
-      refId: outcome.refId,
-      status,
-    };
-    if (typeof outcome.reason === "string") parsed.reason = outcome.reason;
-    results.push(parsed);
+    results.push(
+      status === "rejected"
+        ? {
+            refId: outcome.refId,
+            status,
+            reason: outcome.reason as string,
+            retryable: outcome.retryable as boolean,
+          }
+        : { refId: outcome.refId, status },
+    );
   }
 
   if (!result.wallet || typeof result.wallet !== "object") {
-    throw new Error("convex ingest result missing wallet checkpoint");
+    throw new UsageIngestError(
+      "convex ingest result missing wallet checkpoint",
+      false,
+    );
   }
   const wallet = result.wallet as Record<string, unknown>;
   if (
@@ -435,7 +606,10 @@ function parseRecordUsageResult(value: unknown): RecordUsageResult {
     !Number.isSafeInteger(wallet.sequence) ||
     wallet.sequence < 0
   ) {
-    throw new Error("convex ingest result has invalid wallet checkpoint");
+    throw new UsageIngestError(
+      "convex ingest result has invalid wallet checkpoint",
+      false,
+    );
   }
   return {
     results,

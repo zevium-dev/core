@@ -28,6 +28,11 @@ info:
 servers:
   - url: https://api.acme.dev
 paths:
+  /health:
+    head:
+      summary: Credential-free readiness check
+      x-zevium-cost: 0
+      x-zevium-health-check: true
   /v1/summarize:
     post:
       summary: Summarize text
@@ -91,13 +96,15 @@ function DocsPublishingPage() {
           upstream APIs work without exposing keys to consumers.
         </li>
         <li>
-          <strong>Validate and publish.</strong> Fix errors, then publish a
-          semver version (e.g. <code>0.1.0</code>).
+          <strong>Declare and test health.</strong> Mark exactly one safe,
+          parameter-free <code>GET</code> or <code>HEAD</code> with{" "}
+          <code>x-zevium-health-check: true</code>. It must return 2xx/3xx
+          without publisher or consumer credentials.
         </li>
         <li>
-          <strong>Make public.</strong> Flip visibility to public; automated
-          gates (spec valid, upstream reachable) run, then the API lists in the
-          catalogue.
+          <strong>Validate and publish.</strong> Fix errors, pass
+          declared-health reachability/readiness test, then publish a semver
+          version (e.g. <code>0.1.0</code>) and make it public.
         </li>
       </ol>
 
@@ -117,6 +124,12 @@ function DocsPublishingPage() {
           <strong> publisher-funded</strong>, capped at{" "}
           {MAX_DAILY_FREE_TIER_CALLS.toLocaleString("en-US")}. The platform does
           not subsidize free-tier calls.
+        </li>
+        <li>
+          <code>x-zevium-health-check</code> — required on exactly one safe
+          credential-free <code>GET</code> or <code>HEAD</code>. Zevium labels
+          this evidence reachability/readiness, never success of other API
+          operations.
         </li>
       </ul>
       <p>

@@ -3,11 +3,7 @@
  * Spec is source of truth for upstream URL, routes, and x-zevium-* pricing.
  */
 
-import {
-  MAX_DAILY_FREE_TIER_CALLS,
-  MAX_ENDPOINT_COST_CREDITS,
-  type EndpointPricing,
-} from "./pricing.js";
+import { MAX_ENDPOINT_COST_CREDITS, type EndpointPricing } from "./pricing.js";
 
 export const MAX_OPENAPI_SPEC_BYTES = 393_216;
 
@@ -36,6 +32,8 @@ export type OpenApiOperation = {
   "x-zevium-cost"?: number;
   "x-zevium-free-tier"?: number;
   [key: string]: unknown;
+  /** Explicit opt-in for one credential-free, side-effect-free health probe. */
+  "x-zevium-health-check"?: boolean;
 };
 
 export type OpenApiPathItem = {
@@ -74,6 +72,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * Parse an OpenAPI 3.x document from a JSON string into a minimal typed shape.
  * Throws on invalid JSON or non-object root.
  */
+export type HealthCheckTarget = {
+  url: string;
+  method: "GET" | "HEAD";
+  path: string;
+};
+
 export function parseSpec(json: string): ParsedOpenApiSpec {
   if (new TextEncoder().encode(json).byteLength > MAX_OPENAPI_SPEC_BYTES) {
     throw new Error("OpenAPI spec exceeds 393216 UTF-8 bytes");
@@ -173,43 +177,38 @@ export function matchOperation(
   return null;
 }
 
+export function parseCreditExtension(
+  value: unknown,
+  field: "x-zevium-cost" | "x-zevium-free-tier",
+): number {
+  if (
+    typeof value !== "number" ||
+    !Number.isSafeInteger(value) ||
+    value < 0 ||
+    value > MAX_ENDPOINT_COST_CREDITS
+  ) {
+    throw new Error(
+      `${field} must be a non-negative safe integer at most ${MAX_ENDPOINT_COST_CREDITS}`,
+    );
+  }
+  return value;
+}
+
 export function extractPricing(op: OpenApiOperation): EndpointPricing {
-  const costRaw = op["x-zevium-cost"];
+  const costValue = op["x-zevium-cost"];
   let cost: number;
-  if (costRaw === undefined) {
+  if (costValue === undefined) {
     // Unspecified → default credit cost. 0 is NOT defaulted — it is a valid
     // free-tier cost (free endpoint, publisher-funded free tier aside).
     cost = 1;
-  } else if (!Number.isSafeInteger(costRaw)) {
-    throw new Error("x-zevium-cost must be a finite safe non-negative integer");
-  } else if (typeof costRaw !== "number" || costRaw < 0) {
-    throw new Error(`x-zevium-cost must be non-negative (got ${costRaw})`);
-  } else if (costRaw > MAX_ENDPOINT_COST_CREDITS) {
-    throw new Error(
-      `x-zevium-cost must be at most ${MAX_ENDPOINT_COST_CREDITS}`,
-    );
   } else {
-    cost = costRaw;
+    cost = parseCreditExtension(costValue, "x-zevium-cost");
   }
 
-  const freeRaw = op["x-zevium-free-tier"];
+  const freeValue = op["x-zevium-free-tier"];
   let freeTier: number | undefined;
-  if (freeRaw !== undefined) {
-    if (!Number.isSafeInteger(freeRaw)) {
-      throw new Error(
-        "x-zevium-free-tier must be a finite safe non-negative integer",
-      );
-    }
-    if (typeof freeRaw !== "number" || freeRaw < 0) {
-      throw new Error(
-        `x-zevium-free-tier must be non-negative (got ${freeRaw})`,
-      );
-    }
-    if (freeRaw > MAX_DAILY_FREE_TIER_CALLS) {
-      throw new Error(
-        `x-zevium-free-tier must be at most ${MAX_DAILY_FREE_TIER_CALLS}`,
-      );
-    }
+  if (freeValue !== undefined) {
+    const freeRaw = parseCreditExtension(freeValue, "x-zevium-free-tier");
     // 0 free calls == no free tier; normalize to undefined.
     freeTier = freeRaw > 0 ? freeRaw : undefined;
   }
@@ -289,4 +288,42 @@ export function joinUpstreamUrl(baseUrl: string, requestPath: string): string {
   } catch {
     return `${base}${path === "/" ? "" : path}`;
   }
+}
+
+export function extractHealthCheckTarget(
+  spec: ParsedOpenApiSpec,
+): HealthCheckTarget | null {
+  const base = spec.servers[0]?.url;
+  if (base === undefined) return null;
+
+  const matches: Array<{ path: string; method: "GET" | "HEAD" }> = [];
+  for (const [path, item] of Object.entries(spec.paths)) {
+    for (const method of ["get", "head"] as const) {
+      if (item[method]?.["x-zevium-health-check"] === true) {
+        matches.push({ path, method: method.toUpperCase() as "GET" | "HEAD" });
+      }
+    }
+  }
+  if (matches.length === 0) return null;
+  if (matches.length > 1) {
+    throw new Error("exactly one x-zevium-health-check operation is allowed");
+  }
+
+  const match = matches[0]!;
+  if (
+    !match.path.startsWith("/") ||
+    match.path.includes("{") ||
+    match.path.includes("}") ||
+    match.path.includes("?") ||
+    match.path.includes("#")
+  ) {
+    throw new Error(
+      "x-zevium-health-check must use a parameter-free absolute path",
+    );
+  }
+  return {
+    url: joinUpstreamUrl(base, match.path),
+    method: match.method,
+    path: match.path,
+  };
 }

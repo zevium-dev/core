@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "wrangler dev --port 8787",
     "test": "vitest run",
+    "lint": "eslint --max-warnings 0 src test",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit"
   },

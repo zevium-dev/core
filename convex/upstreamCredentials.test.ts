@@ -172,7 +172,7 @@ describe("upstream credentials", () => {
     });
   });
 
-  it("returns private published projects to the gateway", async () => {
+  it("returns healthy private published projects to their owner-gated gateway path", async () => {
     const t = convexTest(schema, modules);
     const { projectId } = await seedProject(t, "private");
 

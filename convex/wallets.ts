@@ -12,10 +12,11 @@ import {
 import { requireOrgMemberBySlug } from "./lib/auth";
 import { toGatewayRow, type GatewayKeySettingRow } from "./keySettings";
 import { PUBLISHER_RISK_HOLD_MS, publisherEarningSplit } from "./accounting";
-import { MAX_ENDPOINT_COST_CREDITS } from "@zevium/shared";
+import {
+  MAX_ENDPOINT_COST_CREDITS,
+  MAX_USAGE_INGEST_EVENTS,
+} from "@zevium/shared";
 import { getOrganizationTombstone } from "./lib/publicRoutes";
-
-export type SettlementStatus = "applied" | "already_applied" | "rejected";
 
 export type WalletCheckpoint = {
   clerkOrgId: string;
@@ -23,11 +24,14 @@ export type WalletCheckpoint = {
   sequence: number;
 };
 
-export type SettlementResult = {
-  refId: string;
-  status: SettlementStatus;
-  reason?: string;
-};
+export type SettlementResult =
+  | { refId: string; status: "applied" | "already_applied" }
+  | {
+      refId: string;
+      status: "rejected";
+      reason: string;
+      retryable: boolean;
+    };
 
 export async function getOrCreateWallet(
   ctx: MutationCtx,
@@ -360,6 +364,18 @@ const usageEventArg = v.object({
   settleRefId: v.string(),
   /** The only consumer identity accepted for a Wallet DO settlement. */
   consumerClerkOrgId: v.string(),
+  specVersionId: v.id("specVersions"),
+  billingOutcome: v.union(
+    v.literal("settled"),
+    v.literal("refunded"),
+    v.literal("free"),
+  ),
+  qualityOutcome: v.union(
+    v.literal("success"),
+    v.literal("client_error"),
+    v.literal("server_error"),
+    v.literal("network_error"),
+  ),
 });
 
 type SettlementFingerprintInput = {
@@ -373,6 +389,9 @@ type SettlementFingerprintInput = {
   keyId: string;
   at: number;
   consumerClerkOrgId: string;
+  specVersionId: Id<"specVersions">;
+  billingOutcome: "settled" | "refunded" | "free";
+  qualityOutcome: "success" | "client_error" | "server_error" | "network_error";
 };
 
 function settlementFingerprint(event: SettlementFingerprintInput): string {
@@ -388,6 +407,9 @@ function settlementFingerprint(event: SettlementFingerprintInput): string {
     event.latencyMs,
     event.keyId,
     event.at,
+    event.specVersionId,
+    event.billingOutcome,
+    event.qualityOutcome,
   ]);
 }
 
@@ -419,6 +441,34 @@ function validSettlementBoundary(
   );
 }
 
+function validSettlementOutcome(
+  event: SettlementFingerprintInput & { settleRefId: string },
+): boolean {
+  const statusOutcomeValid =
+    (event.qualityOutcome === "success" &&
+      event.status >= 200 &&
+      event.status < 300) ||
+    (event.qualityOutcome === "client_error" &&
+      event.status >= 400 &&
+      event.status < 500) ||
+    (event.qualityOutcome === "server_error" &&
+      event.status >= 500 &&
+      event.status < 600) ||
+    (event.qualityOutcome === "network_error" &&
+      ((event.status >= 300 && event.status < 400) || event.status === 502));
+  const billingOutcomeValid =
+    (event.billingOutcome === "settled" &&
+      event.credits > 0 &&
+      event.qualityOutcome === "success") ||
+    (event.billingOutcome === "free" &&
+      event.credits === 0 &&
+      event.qualityOutcome === "success") ||
+    (event.billingOutcome === "refunded" &&
+      event.credits === 0 &&
+      event.qualityOutcome !== "success");
+  return billingOutcomeValid && statusOutcomeValid;
+}
+
 /**
  * Gateway settlement ingest. A request belongs to precisely one consumer
  * Wallet DO, so mixed-organizations are rejected before any ledger mutation.
@@ -432,6 +482,15 @@ export const recordUsage = internalMutation({
   ): Promise<{ results: SettlementResult[]; wallet: WalletCheckpoint }> => {
     if (args.events.length === 0) {
       throw new Error("At least one settlement is required");
+    }
+    if (args.events.length > MAX_USAGE_INGEST_EVENTS) {
+      throw new Error("Too many settlements");
+    }
+    if (
+      new Set(args.events.map((event) => event.settleRefId)).size !==
+      args.events.length
+    ) {
+      throw new Error("Duplicate settlement reference in batch");
     }
     const clerkOrgId = args.events[0]!.consumerClerkOrgId;
     if (
@@ -451,11 +510,12 @@ export const recordUsage = internalMutation({
     const retirementNoticeProjectIds = new Set<Id<"projects">>();
 
     for (const event of args.events) {
-      if (!validSettlementBoundary(event)) {
+      if (!validSettlementBoundary(event) || !validSettlementOutcome(event)) {
         results.push({
           refId: event.settleRefId,
           status: "rejected",
           reason: "invalid settlement",
+          retryable: false,
         });
         continue;
       }
@@ -476,7 +536,12 @@ export const recordUsage = internalMutation({
             const usage = await ctx.db.get(existing.usageEventId);
             if (usage !== null) {
               const usageProject = await ctx.db.get(usage.projectId);
-              if (usageProject !== null) {
+              if (
+                usageProject !== null &&
+                usage.specVersionId !== undefined &&
+                usage.billingOutcome !== undefined &&
+                usage.qualityOutcome !== undefined
+              ) {
                 existingFingerprint = settlementFingerprint({
                   organizationId: usageProject.organizationId,
                   projectId: usage.projectId,
@@ -488,6 +553,9 @@ export const recordUsage = internalMutation({
                   keyId: usage.keyId,
                   at: usage.at,
                   consumerClerkOrgId: clerkOrgId,
+                  specVersionId: usage.specVersionId,
+                  billingOutcome: usage.billingOutcome,
+                  qualityOutcome: usage.qualityOutcome,
                 });
               }
             }
@@ -499,6 +567,7 @@ export const recordUsage = internalMutation({
                   refId: event.settleRefId,
                   status: "rejected",
                   reason: "settlement reference payload conflict",
+                  retryable: false,
                 },
           );
         } else {
@@ -506,17 +575,22 @@ export const recordUsage = internalMutation({
             refId: event.settleRefId,
             status: "rejected",
             reason: "settlement reference belongs to another wallet",
+            retryable: false,
           });
         }
         continue;
       }
 
-      const project = await ctx.db.get(event.projectId);
-      if (project === null) {
+      const [project, specVersion] = await Promise.all([
+        ctx.db.get(event.projectId),
+        ctx.db.get(event.specVersionId),
+      ]);
+      if (project === null || specVersion?.projectId !== event.projectId) {
         results.push({
           refId: event.settleRefId,
           status: "rejected",
-          reason: "project not found",
+          reason: "project version not found",
+          retryable: false,
         });
         continue;
       }
@@ -525,6 +599,7 @@ export const recordUsage = internalMutation({
           refId: event.settleRefId,
           status: "rejected",
           reason: "settlement publisher does not own project",
+          retryable: false,
         });
         continue;
       }
@@ -559,6 +634,7 @@ export const recordUsage = internalMutation({
             refId: event.settleRefId,
             status: "rejected",
             reason: "consumer became eligible after retirement freeze",
+            retryable: false,
           });
           continue;
         }
@@ -578,6 +654,7 @@ export const recordUsage = internalMutation({
           refId: event.settleRefId,
           status: "rejected",
           reason: "insufficient authoritative balance",
+          retryable: true,
         });
         continue;
       }
@@ -603,6 +680,9 @@ export const recordUsage = internalMutation({
         keyId: event.keyId,
         at: event.at,
         settleRefId: event.settleRefId,
+        specVersionId: event.specVersionId,
+        billingOutcome: event.billingOutcome,
+        qualityOutcome: event.qualityOutcome,
       });
       const settled = await appendWalletEntry(ctx, {
         wallet,
@@ -614,7 +694,28 @@ export const recordUsage = internalMutation({
       });
       wallet = settled.wallet;
 
-      if (project.organizationId !== consumerOrg._id && entitlement === null) {
+      await ctx.db.insert("gatewayQualitySamples", {
+        projectId: event.projectId,
+        specVersionId: event.specVersionId,
+        refId: event.settleRefId,
+        outcome: event.qualityOutcome,
+        latencyMs: event.latencyMs,
+        at: event.at,
+      });
+      await ctx.scheduler.runAfter(
+        0,
+        internal.quality.recomputeGatewayQuality,
+        {
+          projectId: event.projectId,
+          specVersionId: event.specVersionId,
+        },
+      );
+
+      if (
+        event.billingOutcome !== "refunded" &&
+        project.organizationId !== consumerOrg._id &&
+        entitlement === null
+      ) {
         await ctx.db.insert("projectConsumerEntitlements", {
           projectId: project._id,
           consumerOrganizationId: consumerOrg._id,
@@ -630,7 +731,7 @@ export const recordUsage = internalMutation({
           q.eq("usageSettlementRefId", event.settleRefId),
         )
         .unique();
-      if (existingEarning === null) {
+      if (event.billingOutcome === "settled" && existingEarning === null) {
         const now = Date.now();
         await ctx.db.insert("publisherEarnings", {
           publisherOrganizationId: project.organizationId,
@@ -652,6 +753,7 @@ export const recordUsage = internalMutation({
         });
       }
       if (
+        event.billingOutcome !== "refunded" &&
         project.organizationId !== consumerOrg._id &&
         project.retirementState === "scheduled" &&
         project.sunsetAt !== undefined &&

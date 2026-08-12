@@ -2,7 +2,6 @@
 import { convexTest } from "convex-test";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { api } from "./_generated/api";
-import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import schema from "./schema";
 import { createNotification, upsertNotification } from "./lib/notifications";

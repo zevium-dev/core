@@ -1,16 +1,23 @@
 /// <reference types="vite/client" />
 import { convexTest, type TestConvex } from "convex-test";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { api, internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
+import { PROBE_LEASE_MS } from "./quality";
 import schema from "./schema";
 
 const modules = import.meta.glob("./**/*.ts");
+
+afterEach(() => vi.useRealTimers());
 const SPEC = JSON.stringify({
   openapi: "3.1.0",
   info: { title: "Quality", version: "1.0.0" },
   servers: [{ url: "https://example.com" }],
-  paths: { "/health": { get: { "x-zevium-cost": 1 } } },
+  paths: {
+    "/health": {
+      get: { "x-zevium-cost": 1, "x-zevium-health-check": true },
+    },
+  },
 });
 
 async function seed(t: TestConvex<typeof schema>) {
@@ -78,11 +85,12 @@ describe("scheduled quality truth", () => {
         projectId: seeded.projectId,
       }),
     ).toMatchObject({
-      sampleSize: 0,
-      insufficientData: true,
-      availabilityPercent: null,
-      successRatePercent: null,
-      latencyP50Ms: null,
+      reachabilitySampleSize: 0,
+      insufficientReachabilityData: true,
+      reachabilityPercent: null,
+      apiSampleSize: 0,
+      insufficientApiData: true,
+      apiSuccessRatePercent: null,
     });
     await t.run(async (ctx) => {
       await ctx.db.patch(seeded.projectId, { visibility: "private" });
@@ -109,7 +117,7 @@ describe("scheduled quality truth", () => {
       await t.mutation(internal.quality.recordProbeResult, {
         targetId: target._id,
         executionId: "probe-1",
-        outcome: "success",
+        outcome: "healthy",
         statusCode: 200,
         latencyMs: 1,
       }),
@@ -127,22 +135,54 @@ describe("scheduled quality truth", () => {
     await t.mutation(internal.quality.recordProbeResult, {
       targetId: target._id,
       executionId: "probe-3",
-      outcome: "success",
+      outcome: "healthy",
       statusCode: 204,
       latencyMs: 20,
     });
+
+    await leaseWithId(t, target._id, "probe-4");
+    await t.mutation(internal.quality.recordProbeResult, {
+      targetId: target._id,
+      executionId: "probe-4",
+      outcome: "healthy",
+      statusCode: 204,
+      latencyMs: 25,
+    });
+    await leaseWithId(t, target._id, "probe-5");
+    await t.mutation(internal.quality.recordProbeResult, {
+      targetId: target._id,
+      executionId: "probe-5",
+      outcome: "timeout",
+      latencyMs: 8_000,
+    });
+    await expect(
+      t.run(async (ctx) => ctx.db.get(seeded.projectId)),
+    ).resolves.toMatchObject({
+      visibility: "private",
+      qualityStatus: "suspended",
+    });
+    for (let index = 6; index <= 8; index += 1) {
+      await leaseWithId(t, target._id, `probe-${index}`);
+      await t.mutation(internal.quality.recordProbeResult, {
+        targetId: target._id,
+        executionId: `probe-${index}`,
+        outcome: "healthy",
+        statusCode: 204,
+        latencyMs: 20 + index,
+      });
+    }
 
     expect(
       await t.query(api.quality.getPublicSnapshot, {
         projectId: seeded.projectId,
       }),
     ).toMatchObject({
-      sampleSize: 3,
-      insufficientData: false,
-      availabilityPercent: 66.67,
-      successRatePercent: 50,
-      latencyP50Ms: 20,
-      lastOutcome: "success",
+      reachabilitySampleSize: 8,
+      insufficientReachabilityData: false,
+      reachabilityPercent: 75,
+      apiSampleSize: 0,
+      insufficientApiData: true,
+      lastProbeOutcome: "healthy",
     });
     const incidents = await t.query(api.quality.listPublicIncidents, {
       projectId: seeded.projectId,
@@ -151,15 +191,22 @@ describe("scheduled quality truth", () => {
     expect(incidents.page).toHaveLength(1);
     expect(incidents.page[0]).toMatchObject({
       status: "resolved",
-      failureCount: 2,
+      failureCount: 3,
     });
 
     const sideEffects = await t.run(async (ctx) => ({
       usage: await ctx.db.query("usageEvents").collect(),
       earnings: await ctx.db.query("publisherEarnings").collect(),
       ledger: await ctx.db.query("walletEntries").collect(),
+      notifications: await ctx.db.query("notifications").collect(),
     }));
-    expect(sideEffects).toEqual({ usage: [], earnings: [], ledger: [] });
+    expect(sideEffects.usage).toEqual([]);
+    expect(sideEffects.earnings).toEqual([]);
+    expect(sideEffects.ledger).toEqual([]);
+    expect(sideEffects.notifications.map((row) => row.kind)).toEqual([
+      "quality_suspended",
+      "quality_restored",
+    ]);
   });
 
   it("leases a bounded batch and keeps one idempotent subscription per consumer org/listing", async () => {
@@ -180,6 +227,12 @@ describe("scheduled quality truth", () => {
       org_id: "org_consumer",
       org_role: "org:member",
     });
+    await expect(
+      consumer.mutation(api.quality.setSubscription, {
+        projectId: seeded.projectId,
+        active: false,
+      }),
+    ).resolves.toBeNull();
     const first = await consumer.mutation(api.quality.setSubscription, {
       projectId: seeded.projectId,
       active: true,
@@ -203,10 +256,19 @@ describe("scheduled quality truth", () => {
         projectId: seeded.projectId,
       }),
     ).toBe(1);
+    await t.run(async (ctx) => {
+      await ctx.db.patch(seeded.projectId, { visibility: "private" });
+    });
     await consumer.mutation(api.quality.setSubscription, {
       projectId: seeded.projectId,
       active: false,
     });
+    await expect(
+      consumer.mutation(api.quality.setSubscription, {
+        projectId: seeded.projectId,
+        active: true,
+      }),
+    ).rejects.toThrow("Published listing not found");
     const inactive = await consumer.query(api.quality.listSubscriptions, {
       paginationOpts: { numItems: 10, cursor: null },
     });
@@ -217,6 +279,155 @@ describe("scheduled quality truth", () => {
         projectId: seeded.projectId,
       }),
     ).toBe(0);
+  });
+
+  it("reclaims expired leases and fences stale fetches and result writes", async () => {
+    vi.useFakeTimers();
+    const t = convexTest(schema, modules);
+    const seeded = await seed(t);
+    await t.mutation(internal.quality.syncPublishedTarget, {
+      projectId: seeded.projectId,
+      specVersionId: seeded.specVersionId,
+    });
+    const firstLease = await t.mutation(internal.quality.leaseDueTargets, {});
+    const target = firstLease[0];
+    if (target === undefined) throw new Error("target was not leased");
+    const targetRow = await t.run(async (ctx) => ctx.db.get(target.targetId));
+    if (targetRow === null) throw new Error("target missing");
+    expect(targetRow.nextProbeAt).toBeGreaterThan(Date.now());
+    expect(
+      await t.query(internal.quality.getLeasedTarget, target),
+    ).not.toBeNull();
+
+    vi.advanceTimersByTime(PROBE_LEASE_MS + 1);
+    expect(await t.query(internal.quality.getLeasedTarget, target)).toBeNull();
+    expect(
+      await t.mutation(internal.quality.recordProbeResult, {
+        targetId: target.targetId,
+        executionId: target.executionId,
+        outcome: "healthy",
+        statusCode: 204,
+        latencyMs: 1,
+      }),
+    ).toEqual({ applied: false });
+
+    const reclaimed = await t.mutation(internal.quality.leaseDueTargets, {});
+    expect(reclaimed).toHaveLength(1);
+    expect(reclaimed[0]?.executionId).not.toBe(target.executionId);
+    expect(
+      await t.mutation(internal.quality.recordProbeResult, {
+        targetId: reclaimed[0]!.targetId,
+        executionId: reclaimed[0]!.executionId,
+        outcome: "healthy",
+        statusCode: 204,
+        latencyMs: 1,
+      }),
+    ).toEqual({ applied: true });
+  });
+
+  it("blocks activation throughout deprecation, retirement, and publisher archive while deactivation always works", async () => {
+    const t = convexTest(schema, modules);
+    const seeded = await seed(t);
+    const consumer = t.withIdentity({
+      subject: "consumer_user",
+      org_id: "org_consumer",
+      org_role: "org:member",
+    });
+
+    const activate = () =>
+      consumer.mutation(api.quality.setSubscription, {
+        projectId: seeded.projectId,
+        active: true,
+      });
+    const deactivate = () =>
+      consumer.mutation(api.quality.setSubscription, {
+        projectId: seeded.projectId,
+        active: false,
+      });
+    const resetLifecycle = async () => {
+      await t.run(async (ctx) => {
+        await ctx.db.patch(seeded.projectId, {
+          deprecationStartedAt: undefined,
+          sunsetAt: undefined,
+          retirementState: undefined,
+          retiredAt: undefined,
+          deletionState: undefined,
+        });
+        await ctx.db.patch(seeded.publisherId, { archivedAt: undefined });
+      });
+    };
+    const assertBlockedAfterDeactivation = async () => {
+      const project = await t.run(async (ctx) => ctx.db.get(seeded.projectId));
+      if (project?.deletionState !== undefined) {
+        await expect(deactivate()).rejects.toThrow("cleanup has started");
+        await expect(activate()).rejects.toThrow("cleanup has started");
+      } else {
+        await expect(deactivate()).resolves.toMatchObject({ active: false });
+        await expect(deactivate()).resolves.toMatchObject({ active: false });
+        await expect(activate()).rejects.toThrow("Published listing not found");
+      }
+    };
+
+    await activate();
+    await t.run(async (ctx) => {
+      await ctx.db.patch(seeded.projectId, {
+        deprecationStartedAt: Date.now(),
+      });
+    });
+    await assertBlockedAfterDeactivation();
+
+    for (const deletionState of ["tombstoned", "cleaned"] as const) {
+      await resetLifecycle();
+      await activate();
+      await t.run(async (ctx) => {
+        await ctx.db.patch(seeded.projectId, { deletionState });
+      });
+      await assertBlockedAfterDeactivation();
+    }
+
+    await resetLifecycle();
+    await activate();
+    await t.run(async (ctx) => {
+      await ctx.db.patch(seeded.projectId, { sunsetAt: Date.now() + 60_000 });
+    });
+    await assertBlockedAfterDeactivation();
+
+    await resetLifecycle();
+    await activate();
+    await t.run(async (ctx) => {
+      await ctx.db.patch(seeded.projectId, {
+        retirementState: "scheduled",
+      });
+    });
+    await assertBlockedAfterDeactivation();
+
+    await resetLifecycle();
+    await activate();
+    await t.run(async (ctx) => {
+      await ctx.db.patch(seeded.projectId, {
+        retirementState: "retired",
+        retiredAt: Date.now(),
+      });
+    });
+    await assertBlockedAfterDeactivation();
+
+    await resetLifecycle();
+    await activate();
+    await t.run(async (ctx) => {
+      await ctx.db.patch(seeded.publisherId, { archivedAt: Date.now() });
+    });
+    await assertBlockedAfterDeactivation();
+
+    const state = await t.run(async (ctx) => ({
+      subscriptions: await ctx.db.query("listingSubscriptions").collect(),
+      aggregate: await ctx.db
+        .query("listingSubscriptionAggregates")
+        .withIndex("by_project", (q) => q.eq("projectId", seeded.projectId))
+        .unique(),
+    }));
+    expect(state.subscriptions).toHaveLength(1);
+    expect(state.subscriptions[0]?.active).toBe(false);
+    expect(state.aggregate?.count).toBe(0);
   });
 
   it("isolates immutable versions, rejects stale executions, and supersedes old incidents", async () => {
@@ -241,6 +452,21 @@ describe("scheduled quality truth", () => {
       outcome: "timeout",
       latencyMs: 8_000,
     });
+    for (const [executionId, outcome] of [
+      ["v1-failure-2", "timeout"],
+      ["v1-healthy-1", "healthy"],
+      ["v1-healthy-2", "healthy"],
+      ["v1-failure-3", "timeout"],
+    ] as const) {
+      await leaseWithId(t, target._id, executionId);
+      await t.mutation(internal.quality.recordProbeResult, {
+        targetId: target._id,
+        executionId,
+        outcome,
+        ...(outcome === "healthy" ? { statusCode: 204 } : {}),
+        latencyMs: 10,
+      });
+    }
     await leaseWithId(t, target._id, "v1-in-flight");
 
     const version2 = await t.run(async (ctx) =>
@@ -265,7 +491,7 @@ describe("scheduled quality truth", () => {
       await t.mutation(internal.quality.recordProbeResult, {
         targetId: target._id,
         executionId: "v1-in-flight",
-        outcome: "success",
+        outcome: "healthy",
         statusCode: 200,
         latencyMs: 1,
       }),
@@ -279,20 +505,44 @@ describe("scheduled quality truth", () => {
     const currentTarget = await t.run(async (ctx) => ctx.db.get(target._id));
     expect(currentTarget?.specVersionId).toBe(version2);
 
-    await leaseWithId(t, target._id, "v2-success");
-    await t.mutation(internal.quality.recordProbeResult, {
-      targetId: target._id,
-      executionId: "v2-success",
-      outcome: "success",
-      statusCode: 204,
-      latencyMs: 15,
+    for (let index = 1; index <= 3; index += 1) {
+      await leaseWithId(t, target._id, `v2-healthy-${index}`);
+      await t.mutation(internal.quality.recordProbeResult, {
+        targetId: target._id,
+        executionId: `v2-healthy-${index}`,
+        outcome: "healthy",
+        statusCode: 204,
+        latencyMs: 15,
+      });
+    }
+    await t.run(async (ctx) => {
+      await ctx.db.insert("gatewayQualitySamples", {
+        projectId: seeded.projectId,
+        specVersionId: seeded.specVersionId,
+        refId: "settle:late-v1-call",
+        outcome: "network_error",
+        latencyMs: 8_000,
+        at: Date.now(),
+      });
     });
+    await t.mutation(internal.quality.recomputeGatewayQuality, {
+      projectId: seeded.projectId,
+      specVersionId: seeded.specVersionId,
+    });
+    await expect(
+      t.run(async (ctx) =>
+        ctx.db
+          .query("qualitySnapshots")
+          .withIndex("by_project", (q) => q.eq("projectId", seeded.projectId))
+          .unique(),
+      ),
+    ).resolves.toMatchObject({ specVersionId: version2 });
     await expect(
       t.query(api.quality.getPublicSnapshot, { projectId: seeded.projectId }),
     ).resolves.toMatchObject({
-      sampleSize: 1,
-      insufficientData: true,
-      lastOutcome: "success",
+      reachabilitySampleSize: 3,
+      insufficientReachabilityData: false,
+      lastProbeOutcome: "healthy",
     });
 
     // Duplicate scheduler delivery is non-destructive.
@@ -302,24 +552,32 @@ describe("scheduled quality truth", () => {
     });
     await expect(
       t.query(api.quality.getPublicSnapshot, { projectId: seeded.projectId }),
-    ).resolves.toMatchObject({ sampleSize: 1, lastOutcome: "success" });
+    ).resolves.toMatchObject({
+      reachabilitySampleSize: 3,
+      lastProbeOutcome: "healthy",
+    });
 
     const incidents = await t.query(api.quality.listPublicIncidents, {
       projectId: seeded.projectId,
       paginationOpts: { numItems: 10, cursor: null },
     });
-    expect(incidents.page).toEqual([
-      expect.objectContaining({
-        version: "1.0.0",
-        status: "superseded",
-        failureCount: 1,
-      }),
-    ]);
-    expect(incidents.page[0]).not.toHaveProperty("startedByExecutionId");
-    expect(incidents.page[0]).not.toHaveProperty("resolvedByExecutionId");
+    expect(incidents.page).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          version: "1.0.0",
+          status: "superseded",
+          failureCount: 3,
+        }),
+        expect.objectContaining({ version: "2.0.0", status: "resolved" }),
+      ]),
+    );
+    for (const incident of incidents.page) {
+      expect(incident).not.toHaveProperty("startedByExecutionId");
+      expect(incident).not.toHaveProperty("resolvedByExecutionId");
+    }
   });
 
-  it("validates probe truth and treats 4xx as available without opening outage incidents", async () => {
+  it("validates probe truth and keeps reachability separate from declared-health readiness", async () => {
     const t = convexTest(schema, modules);
     const seeded = await seed(t);
     await t.mutation(internal.quality.syncPublishedTarget, {
@@ -339,7 +597,7 @@ describe("scheduled quality truth", () => {
       t.mutation(internal.quality.recordProbeResult, {
         targetId: target._id,
         executionId: "invalid-success",
-        outcome: "success",
+        outcome: "healthy",
         statusCode: 503,
         latencyMs: 1,
       }),
@@ -363,16 +621,27 @@ describe("scheduled quality truth", () => {
       statusCode: 401,
       latencyMs: 6,
     });
+    for (let index = 0; index < 3; index += 1) {
+      await leaseWithId(t, target._id, `healthy-${index}`);
+      await t.mutation(internal.quality.recordProbeResult, {
+        targetId: target._id,
+        executionId: `healthy-${index}`,
+        outcome: "healthy",
+        statusCode: 204,
+        latencyMs: 5,
+      });
+    }
 
     const incidents = await t.query(api.quality.listPublicIncidents, {
       projectId: seeded.projectId,
       paginationOpts: { numItems: 10, cursor: null },
     });
-    expect(incidents.page).toHaveLength(1);
-    expect(incidents.page[0]).toMatchObject({
-      status: "resolved",
-      failureCount: 1,
-      lastOutcome: "network_error",
+    expect(incidents.page).toHaveLength(0);
+    await expect(
+      t.query(api.quality.getPublicSnapshot, { projectId: seeded.projectId }),
+    ).resolves.toMatchObject({
+      reachabilityPercent: 80,
+      lastProbeOutcome: "healthy",
     });
   });
 
@@ -399,6 +668,7 @@ describe("scheduled quality truth", () => {
           projectId: id,
           specVersionId,
           url: "https://example.com",
+          method: "HEAD",
           enabled: true,
           nextProbeAt: 0,
           updatedAt: 0,

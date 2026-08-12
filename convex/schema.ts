@@ -68,6 +68,16 @@ export default defineSchema({
     status: v.union(v.literal("draft"), v.literal("published")),
     visibility: v.union(v.literal("private"), v.literal("public")),
     tags: v.array(v.string()),
+    qualityStatus: v.optional(
+      v.union(
+        v.literal("active"),
+        v.literal("suspended"),
+        v.literal("recovering"),
+      ),
+    ),
+    qualitySuspendedAt: v.optional(v.number()),
+    qualitySuspensionReason: v.optional(v.string()),
+    qualityRecoveryPasses: v.optional(v.number()),
     deprecationStartedAt: v.optional(v.number()),
     sunsetAt: v.optional(v.number()),
     deprecationMessage: v.optional(v.string()),
@@ -85,6 +95,9 @@ export default defineSchema({
       v.union(v.literal("private"), v.literal("public")),
     ),
     retiredAt: v.optional(v.number()),
+    deletionState: v.optional(
+      v.union(v.literal("tombstoned"), v.literal("cleaned")),
+    ),
   })
     .index("by_org", ["organizationId"])
     .index("by_status", ["status"])
@@ -133,7 +146,11 @@ export default defineSchema({
   publishReadiness: defineTable({
     projectId: v.id("projects"),
     draftHash: v.string(),
-    serverOrigin: v.string(),
+    /** Optional-first migration: legacy rows retain these until backfill. */
+    serverOrigin: v.optional(v.string()),
+    credentialRevision: v.optional(v.number()),
+    healthCheckUrl: v.optional(v.string()),
+    healthCheckMethod: v.optional(v.union(v.literal("GET"), v.literal("HEAD"))),
     status: v.literal("ok"),
     testedAt: v.number(),
   }).index("by_project", ["projectId"]),
@@ -142,7 +159,10 @@ export default defineSchema({
   qualityProbeTargets: defineTable({
     projectId: v.id("projects"),
     specVersionId: v.id("specVersions"),
+    /** Optional-first generation fence for targets created before rollout. */
+    publicationGeneration: v.optional(v.number()),
     url: v.string(),
+    method: v.union(v.literal("GET"), v.literal("HEAD")),
     enabled: v.boolean(),
     nextProbeAt: v.number(),
     leaseId: v.optional(v.string()),
@@ -150,15 +170,19 @@ export default defineSchema({
     updatedAt: v.number(),
   })
     .index("by_project", ["projectId"])
-    .index("by_due", ["enabled", "nextProbeAt"]),
+    .index("by_due", ["enabled", "nextProbeAt"])
+    // Optional-first lease expiry index lets old workers be reclaimed without
+    // waiting for their deliberately future nextProbeAt.
+    .index("by_lease_expiry", ["enabled", "leaseExpiresAt"]),
 
   qualityProbeResults: defineTable({
     projectId: v.id("projects"),
     specVersionId: v.id("specVersions"),
+    publicationGeneration: v.optional(v.number()),
     executionId: v.string(),
     checkedAt: v.number(),
     outcome: v.union(
-      v.literal("success"),
+      v.literal("healthy"),
       v.literal("http_error"),
       v.literal("timeout"),
       v.literal("dns_error"),
@@ -181,16 +205,19 @@ export default defineSchema({
   qualitySnapshots: defineTable({
     projectId: v.id("projects"),
     specVersionId: v.id("specVersions"),
-    sampleSize: v.number(),
-    responseCount: v.number(),
-    successCount: v.number(),
-    availabilityPercent: v.optional(v.number()),
-    successRatePercent: v.optional(v.number()),
-    latencyP50Ms: v.optional(v.number()),
-    insufficientData: v.boolean(),
-    lastOutcome: v.optional(
+    reachabilitySampleSize: v.number(),
+    reachabilityResponseCount: v.number(),
+    reachabilityPercent: v.optional(v.number()),
+    reachabilityLatencyP50Ms: v.optional(v.number()),
+    insufficientReachabilityData: v.boolean(),
+    apiSampleSize: v.number(),
+    apiSuccessCount: v.number(),
+    apiSuccessRatePercent: v.optional(v.number()),
+    apiLatencyP50Ms: v.optional(v.number()),
+    insufficientApiData: v.boolean(),
+    lastProbeOutcome: v.optional(
       v.union(
-        v.literal("success"),
+        v.literal("healthy"),
         v.literal("http_error"),
         v.literal("timeout"),
         v.literal("dns_error"),
@@ -199,14 +226,35 @@ export default defineSchema({
         v.literal("blocked_target"),
       ),
     ),
-    lastCheckedAt: v.optional(v.number()),
+    lastProbedAt: v.optional(v.number()),
     publishedAt: v.number(),
     updatedAt: v.number(),
   }).index("by_project", ["projectId"]),
 
+  // Privacy-minimized real gateway outcomes. No consumer, key, endpoint,
+  // payload, raw status, or request metadata is retained.
+  gatewayQualitySamples: defineTable({
+    projectId: v.id("projects"),
+    specVersionId: v.id("specVersions"),
+    refId: v.string(),
+    outcome: v.union(
+      v.literal("success"),
+      v.literal("client_error"),
+      v.literal("server_error"),
+      v.literal("network_error"),
+    ),
+    latencyMs: v.number(),
+    at: v.number(),
+  })
+    .index("by_ref", ["refId"])
+    .index("by_project_at", ["projectId", "at"])
+    .index("by_project_version_at", ["projectId", "specVersionId", "at"]),
+
   qualityIncidents: defineTable({
     projectId: v.id("projects"),
     specVersionId: v.id("specVersions"),
+    /** Optional-first immutable version label for N+1-free public history. */
+    specVersion: v.optional(v.string()),
     openedAt: v.number(),
     closedAt: v.optional(v.number()),
     status: v.union(
@@ -218,7 +266,7 @@ export default defineSchema({
     resolvedByExecutionId: v.optional(v.string()),
     failureCount: v.number(),
     lastOutcome: v.union(
-      v.literal("success"),
+      v.literal("healthy"),
       v.literal("http_error"),
       v.literal("timeout"),
       v.literal("dns_error"),
@@ -226,6 +274,16 @@ export default defineSchema({
       v.literal("network_error"),
       v.literal("blocked_target"),
     ),
+    reason: v.string(),
+    /** Legacy capture. Recovery uses projects.desiredVisibility, never this field. */
+    restoreVisibility: v.optional(
+      v.union(v.literal("private"), v.literal("public")),
+    ),
+    threshold: v.number(),
+    windowSize: v.number(),
+    suspendedAt: v.optional(v.number()),
+    recoveryPasses: v.number(),
+    restoredAt: v.optional(v.number()),
     updatedAt: v.number(),
   })
     .index("by_project_opened", ["projectId", "openedAt"])
@@ -318,6 +376,8 @@ export default defineSchema({
     /** Server-derived Clerk user that owned key at settlement time. */
     ownerUserId: v.optional(v.string()),
     projectId: v.id("projects"),
+    /** Optional-first migration; all new gateway rows require this. */
+    specVersionId: v.optional(v.id("specVersions")),
     endpoint: v.string(),
     method: v.string(),
     credits: v.number(),
@@ -331,6 +391,17 @@ export default defineSchema({
      * Wallet DO ingest validates and persists it.
      */
     settleRefId: v.optional(v.string()),
+    billingOutcome: v.optional(
+      v.union(v.literal("settled"), v.literal("refunded"), v.literal("free")),
+    ),
+    qualityOutcome: v.optional(
+      v.union(
+        v.literal("success"),
+        v.literal("client_error"),
+        v.literal("server_error"),
+        v.literal("network_error"),
+      ),
+    ),
   })
     .index("by_org", ["organizationId"])
     .index("by_project", ["projectId"])
@@ -368,6 +439,12 @@ export default defineSchema({
       "projectId",
       "settleRefId",
     ])
+    .index("by_org_project_billing_settlement", [
+      "organizationId",
+      "projectId",
+      "billingOutcome",
+      "settleRefId",
+    ])
     .index("by_project_at", ["projectId", "at"])
     .index("by_at", ["at"]),
 
@@ -392,14 +469,34 @@ export default defineSchema({
     updatedBy: v.string(),
     createdAt: v.number(),
     updatedAt: v.number(),
+    /** Immutable timestamp + unique random id, used for stable keyset paging. */
+    sortKey: v.string(),
+    responseBody: v.optional(v.string()),
+    responseUpdatedAt: v.optional(v.number()),
+    projectName: v.optional(v.string()),
+    publisherName: v.optional(v.string()),
+    openReportCount: v.optional(v.number()),
+    latestReportReason: v.optional(v.string()),
+    latestReportAt: v.optional(v.number()),
+    latestModerationAction: v.optional(
+      v.union(v.literal("hidden"), v.literal("restored")),
+    ),
+    latestModerationReason: v.optional(v.string()),
+    latestModerationAt: v.optional(v.number()),
+    /**
+     * Monotonic fence between a moderation decision and reports created after
+     * that decision. Optional while legacy rows are treated as generation 0.
+     */
+    moderationGeneration: v.optional(v.number()),
+    /** Optional-first content/state fence for moderation queue intents. */
+    contentRevision: v.optional(v.number()),
   })
     .index("by_consumer_project", ["consumerOrganizationId", "projectId"])
-    .index("by_project_visible", [
-      "projectId",
-      "active",
-      "hidden",
-      "updatedAt",
-    ]),
+    .index("by_project_sort", ["projectId", "sortKey"])
+    .index("by_project_visible", ["projectId", "active", "hidden", "sortKey"])
+    .index("by_active_hidden_sort", ["active", "hidden", "sortKey"])
+    .index("by_hidden_sort", ["hidden", "sortKey"])
+    .index("by_report_count_sort", ["openReportCount", "sortKey"]),
 
   reviewEdits: defineTable({
     reviewId: v.id("reviews"),
@@ -416,6 +513,57 @@ export default defineSchema({
     body: v.optional(v.string()),
     at: v.number(),
   }).index("by_review", ["reviewId", "at"]),
+
+  reviewReports: defineTable({
+    reviewId: v.id("reviews"),
+    reporterUserId: v.string(),
+    reporterOrganizationId: v.optional(v.id("organizations")),
+    reason: v.string(),
+    status: v.union(v.literal("open"), v.literal("resolved")),
+    createdAt: v.number(),
+    sortKey: v.string(),
+    /** Generation copied from the review when this report was opened. */
+    moderationGeneration: v.optional(v.number()),
+    resolvedAt: v.optional(v.number()),
+    resolvedBy: v.optional(v.string()),
+  })
+    .index("by_review_status", ["reviewId", "status", "sortKey"])
+    .index("by_review_status_generation", [
+      "reviewId",
+      "status",
+      "moderationGeneration",
+      "sortKey",
+    ])
+    .index("by_reporter_review", ["reporterUserId", "reviewId"])
+    .index("by_reporter_org_review", ["reporterOrganizationId", "reviewId"])
+    .index("by_reporter_org_created", ["reporterOrganizationId", "createdAt"])
+    .index("by_status", ["status", "sortKey"]),
+
+  reviewReportThreads: defineTable({
+    reviewId: v.id("reviews"),
+    openCount: v.number(),
+    latestReason: v.string(),
+    latestReportedAt: v.number(),
+    latestSortKey: v.string(),
+    /** Immutable while thread remains open; stable moderation cursor. */
+    queueSortKey: v.string(),
+    rating: v.number(),
+    body: v.optional(v.string()),
+    active: v.boolean(),
+    hidden: v.boolean(),
+    reviewCreatedAt: v.number(),
+    projectName: v.string(),
+    publisherName: v.string(),
+    responseBody: v.optional(v.string()),
+    responseUpdatedAt: v.optional(v.number()),
+    /** Optional-first current review fences mirrored into the queue snapshot. */
+    moderationGeneration: v.optional(v.number()),
+    contentRevision: v.optional(v.number()),
+    status: v.union(v.literal("open"), v.literal("resolved")),
+    updatedAt: v.number(),
+  })
+    .index("by_review", ["reviewId"])
+    .index("by_status_sort", ["status", "queueSortKey"]),
 
   reviewAggregates: defineTable({
     projectId: v.id("projects"),
@@ -452,11 +600,26 @@ export default defineSchema({
     reason: v.string(),
     actorUserId: v.string(),
     at: v.number(),
+    sortKey: v.string(),
+    rating: v.optional(v.number()),
+    body: v.optional(v.string()),
+    projectName: v.optional(v.string()),
+    publisherName: v.optional(v.string()),
+    active: v.optional(v.boolean()),
+    hidden: v.optional(v.boolean()),
+    reviewCreatedAt: v.optional(v.number()),
+    responseBody: v.optional(v.string()),
+    responseUpdatedAt: v.optional(v.number()),
+    reportCount: v.optional(v.number()),
+    latestReportReason: v.optional(v.string()),
+    latestReportAt: v.optional(v.number()),
   })
     .index("by_review", ["reviewId", "at"])
-    .index("by_actor", ["actorUserId", "at"]),
+    .index("by_review_sort", ["reviewId", "sortKey"])
+    .index("by_actor", ["actorUserId", "at"])
+    .index("by_sort", ["sortKey"]),
 
-  // In-app notifications (org-scoped, idempotent by refId)
+  /** First successful use. Not a plan/subscription; only lifecycle eligibility. */
   notifications: defineTable({
     clerkOrgId: v.string(),
     kind: v.union(
@@ -468,6 +631,8 @@ export default defineSchema({
       v.literal("visibility_changed"),
       v.literal("transfer_failed"),
       v.literal("transfer_sent"),
+      v.literal("quality_suspended"),
+      v.literal("quality_restored"),
     ),
     title: v.string(),
     body: v.string(),
@@ -501,6 +666,25 @@ export default defineSchema({
     createdAt: v.number(),
     payload: v.string(),
   }).index("by_endpoint", ["endpointId", "createdAt"]),
+
+  /** Resumable bounded cleanup; project tombstone remains accounting parent. */
+  projectCleanupJobs: defineTable({
+    projectId: v.id("projects"),
+    phase: v.union(
+      v.literal("quality_results"),
+      v.literal("quality_samples"),
+      v.literal("incidents"),
+      v.literal("subscriptions"),
+      v.literal("reviews"),
+      v.literal("spec_versions"),
+      v.literal("credentials"),
+      v.literal("webhook_deliveries"),
+      v.literal("webhook_endpoint"),
+      v.literal("finished"),
+    ),
+    batchesCompleted: v.number(),
+    updatedAt: v.number(),
+  }).index("by_project", ["projectId"]),
 
   // Per-key controls (Clerk owns the key itself; this is Zevium metadata).
   // Gateway pulls these via the internal-secret ledger sync — never per-request.

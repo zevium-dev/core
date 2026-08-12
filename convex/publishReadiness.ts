@@ -1,7 +1,8 @@
-import { parseSpec } from "@zevium/shared";
+import { extractHealthCheckTarget, parseSpec } from "@zevium/shared";
 import { v } from "convex/values";
 import { internalMutation, internalQuery, query } from "./_generated/server";
-import { getActiveOrgById, requireProjectMember } from "./lib/auth";
+import { requireProjectMember } from "./lib/auth";
+import { isOrganizationActive } from "./lib/publicRoutes";
 
 export const READINESS_TTL_MS = 15 * 60 * 1000;
 
@@ -63,30 +64,38 @@ export const getTarget = internalQuery({
     args,
   ): Promise<{
     url: string | null;
+    method: "GET" | "HEAD" | null;
     draftHash: string | null;
   }> => {
     const project = await ctx.db.get(args.projectId);
     if (project === null) throw new Error("Project not found");
-    const organization = await getActiveOrgById(ctx, project.organizationId);
-    if (organization === null || organization.clerkOrgId !== args.clerkOrgId)
+    const organization = await ctx.db.get(project.organizationId);
+    if (
+      organization === null ||
+      organization.clerkOrgId !== args.clerkOrgId ||
+      !(await isOrganizationActive(ctx, organization))
+    )
       throw new Error("Not a member of this organization");
     const draft = await ctx.db
       .query("specs")
       .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
       .unique();
     let url: string | null = null;
+    let method: "GET" | "HEAD" | null = null;
     if (draft?.draft.trim()) {
       try {
-        const spec = parseSpec(draft.draft);
-        const candidate = spec.servers?.[0]?.url;
-        if (typeof candidate === "string" && candidate.trim())
-          url = candidate.trim();
+        const target = extractHealthCheckTarget(parseSpec(draft.draft));
+        if (target !== null) {
+          url = target.url;
+          method = target.method;
+        }
       } catch {
         // The editor separately reports spec parsing errors.
       }
     }
     return {
       url,
+      method,
       draftHash: draft ? await draftFingerprint(draft.draft) : null,
     };
   },
@@ -96,16 +105,10 @@ export const recordPassingTest = internalMutation({
   args: {
     projectId: v.id("projects"),
     draftHash: v.string(),
-    serverOrigin: v.string(),
+    healthCheckUrl: v.string(),
+    healthCheckMethod: v.union(v.literal("GET"), v.literal("HEAD")),
   },
   handler: async (ctx, args) => {
-    const project = await ctx.db.get(args.projectId);
-    if (
-      project === null ||
-      (await getActiveOrgById(ctx, project.organizationId)) === null
-    ) {
-      throw new Error("Organization is archived or not provisioned");
-    }
     const draft = await ctx.db
       .query("specs")
       .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
@@ -122,7 +125,8 @@ export const recordPassingTest = internalMutation({
       .unique();
     const value = {
       draftHash: args.draftHash,
-      serverOrigin: args.serverOrigin,
+      healthCheckUrl: args.healthCheckUrl,
+      healthCheckMethod: args.healthCheckMethod,
       status: "ok" as const,
       testedAt: Date.now(),
     };

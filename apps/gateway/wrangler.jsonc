@@ -22,12 +22,20 @@
         "name": "WALLET",
         "class_name": "WalletDO",
       },
+      {
+        "name": "CONTROL",
+        "class_name": "ControlDO",
+      },
     ],
   },
   "migrations": [
     {
       "tag": "v1",
       "new_sqlite_classes": ["WalletDO"],
+    },
+    {
+      "tag": "v2",
+      "new_sqlite_classes": ["ControlDO"],
     },
   ],
 }
