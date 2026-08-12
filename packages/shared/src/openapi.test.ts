@@ -122,6 +122,54 @@ describe("matchOperation", () => {
     expect(matchOperation(spec, "GET", "/nope")).toBeNull();
     expect(matchOperation(spec, "DELETE", "/users/1")).toBeNull();
   });
+
+  it("matches concrete paths before templates regardless of document order", () => {
+    const templatedFirst = parseSpec(
+      JSON.stringify({
+        paths: {
+          "/pets/{id}": { get: { "x-zevium-cost": 99 } },
+          "/pets/mine": { get: { "x-zevium-cost": 2 } },
+        },
+      }),
+    );
+    const concreteFirst = parseSpec(
+      JSON.stringify({
+        paths: {
+          "/pets/mine": { get: { "x-zevium-cost": 2 } },
+          "/pets/{id}": { get: { "x-zevium-cost": 99 } },
+        },
+      }),
+    );
+
+    for (const candidate of [templatedFirst, concreteFirst]) {
+      const hit = matchOperation(candidate, "GET", "/pets/mine");
+      expect(hit?.pathTemplate).toBe("/pets/mine");
+      expect(hit?.pricing).toEqual({ cost: 2 });
+    }
+  });
+
+  it("uses stable specificity ordering for ambiguous templates", () => {
+    const pathOrders = [
+      {
+        "/{scope}/pets/42": { get: { "x-zevium-cost": 50 } },
+        "/users/{kind}/42": { get: { "x-zevium-cost": 3 } },
+      },
+      {
+        "/users/{kind}/42": { get: { "x-zevium-cost": 3 } },
+        "/{scope}/pets/42": { get: { "x-zevium-cost": 50 } },
+      },
+    ];
+
+    for (const paths of pathOrders) {
+      const hit = matchOperation(
+        parseSpec(JSON.stringify({ paths })),
+        "GET",
+        "/users/pets/42",
+      );
+      expect(hit?.pathTemplate).toBe("/users/{kind}/42");
+      expect(hit?.pricing).toEqual({ cost: 3 });
+    }
+  });
 });
 
 describe("extractPricing", () => {

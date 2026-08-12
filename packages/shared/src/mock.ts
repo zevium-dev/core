@@ -13,24 +13,87 @@ export type GeneratedMockResponse = {
 };
 
 const MAX_DEPTH = 5;
+const MAX_REF_HOPS = 32;
+const MAX_REF_LENGTH = 2_048;
+const MAX_POINTER_SEGMENTS = 64;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-/** `components.schemas.<Name>` — one hop only, no chained/recursive $ref walk. */
+function decodePointerSegment(segment: string): string | null {
+  // RFC 6901 permits only ~0 and ~1 escapes. Reject malformed pointers instead
+  // of resolving a different property by accident.
+  if (/~(?:[^01]|$)/.test(segment)) return null;
+  return segment.replaceAll("~1", "/").replaceAll("~0", "~");
+}
+
+/** Resolve a bounded local JSON Pointer below the parsed components object. */
+function resolveLocalRef(
+  ref: string,
+  components: Record<string, unknown> | undefined,
+): unknown {
+  if (
+    !ref.startsWith("#/") ||
+    ref.length > MAX_REF_LENGTH ||
+    components === undefined
+  ) {
+    return undefined;
+  }
+
+  let pointer: string;
+  try {
+    pointer = decodeURIComponent(ref.slice(2));
+  } catch {
+    return undefined;
+  }
+
+  const encodedSegments = pointer.split("/");
+  if (
+    encodedSegments.length < 2 ||
+    encodedSegments.length > MAX_POINTER_SEGMENTS ||
+    encodedSegments[0] !== "components"
+  ) {
+    return undefined;
+  }
+
+  let current: unknown = components;
+  for (const encoded of encodedSegments.slice(1)) {
+    const segment = decodePointerSegment(encoded);
+    if (segment === null || !isRecord(current)) return undefined;
+    if (!Object.prototype.hasOwnProperty.call(current, segment)) {
+      return undefined;
+    }
+    current = current[segment];
+  }
+  return current;
+}
+
+/** Resolve chained local refs. Recursive schemas remain bounded by synthesize. */
 function resolveRef(
-  schema: Record<string, unknown>,
+  initial: Record<string, unknown>,
   components: Record<string, unknown> | undefined,
 ): Record<string, unknown> {
-  const ref = schema.$ref;
-  if (typeof ref !== "string") return schema;
-  const match = /^#\/components\/schemas\/([^/]+)$/.exec(ref);
-  if (!match) return schema;
-  const name = match[1]!;
-  const schemas = isRecord(components) ? components.schemas : undefined;
-  const target = isRecord(schemas) ? schemas[name] : undefined;
-  return isRecord(target) ? target : schema;
+  let schema = initial;
+  const seen = new Set<string>();
+
+  for (let hop = 0; hop < MAX_REF_HOPS; hop++) {
+    const ref = schema.$ref;
+    if (typeof ref !== "string") return schema;
+    if (seen.has(ref)) return {};
+    seen.add(ref);
+
+    const target = resolveLocalRef(ref, components);
+    if (!isRecord(target)) return schema;
+
+    const siblings = Object.fromEntries(
+      Object.entries(schema).filter(([key]) => key !== "$ref"),
+    );
+    schema =
+      Object.keys(siblings).length > 0 ? { ...target, ...siblings } : target;
+  }
+
+  return {};
 }
 
 function stringExample(schema: Record<string, unknown>): string {

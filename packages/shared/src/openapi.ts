@@ -142,8 +142,9 @@ export function parseSpec(json: string): ParsedOpenApiSpec {
 
 /**
  * Match a request method+path against OpenAPI path templates.
- * Templates use `{param}` segments (OpenAPI style). First matching template wins
- * (Object key order — insertion order from the parsed document).
+ * Templates use `{param}` segments (OpenAPI style). OpenAPI requires concrete
+ * paths to win over templated paths. Remaining ambiguous template matches use a
+ * stable specificity/lexical order so pricing never depends on JSON key order.
  */
 export function matchOperation(
   spec: ParsedOpenApiSpec,
@@ -157,6 +158,15 @@ export function matchOperation(
   const requestPath = normalizePath(path);
   const upstreamBaseUrl = spec.servers[0]?.url ?? "";
 
+  let selected:
+    | {
+        operation: OpenApiOperation;
+        template: string;
+        params: Record<string, string>;
+        parameterCount: number;
+      }
+    | undefined;
+
   for (const [template, pathItem] of Object.entries(spec.paths)) {
     if (!pathItem) continue;
     const op = pathItem[m];
@@ -165,17 +175,42 @@ export function matchOperation(
     const params = matchPathTemplate(template, requestPath);
     if (!params) continue;
 
-    return {
-      operation: op,
-      method: m,
-      pathTemplate: template,
-      params,
-      pricing: extractPricing(op),
-      upstreamBaseUrl,
-    };
+    const parameterCount = pathParameterCount(template);
+    if (
+      selected === undefined ||
+      parameterCount < selected.parameterCount ||
+      (parameterCount === selected.parameterCount &&
+        normalizePath(template) < normalizePath(selected.template))
+    ) {
+      selected = { operation: op, template, params, parameterCount };
+    }
   }
 
-  return null;
+  if (selected === undefined) return null;
+  return {
+    operation: selected.operation,
+    method: m,
+    pathTemplate: selected.template,
+    params: selected.params,
+    pricing: extractPricing(selected.operation),
+    upstreamBaseUrl,
+  };
+}
+
+function pathParameterCount(template: string): number {
+  const normalized = normalizePath(template);
+  if (normalized === "/") return 0;
+  let count = 0;
+  for (const segment of normalized.slice(1).split("/")) {
+    if (
+      segment.startsWith("{") &&
+      segment.endsWith("}") &&
+      segment.length > 2
+    ) {
+      count++;
+    }
+  }
+  return count;
 }
 
 export function extractPricing(op: OpenApiOperation): EndpointPricing {
