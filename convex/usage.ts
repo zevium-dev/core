@@ -192,11 +192,9 @@ export const listForOrg = query({
     }
     const method = args.method?.toUpperCase();
     const pagination = boundedPagination(args.paginationOpts);
-    type TimeRange = {
-      gte: (field: "at", value: number) => TimeRange;
-      lt: (field: "at", value: number) => TimeRange;
-    };
-    const applyTime = <T extends TimeRange>(base: T): T => {
+    // Convex index builders narrow per eq-chain; the shared time-window
+    // helper only needs the gte/lt surface, so it stays structural.
+    const applyTime = <T extends { gte: Function; lt: Function }>(base: T) => {
       if (args.since !== undefined && args.until !== undefined) {
         return base.gte("at", args.since).lt("at", args.until);
       }
@@ -259,9 +257,7 @@ export const listForOrg = query({
       result = await ctx.db
         .query("usageEvents")
         .withIndex("by_org_endpoint_at", (q) =>
-          applyTime(
-            q.eq("organizationId", org._id).eq("endpoint", endpoint),
-          ),
+          applyTime(q.eq("organizationId", org._id).eq("endpoint", endpoint)),
         )
         .order("desc")
         .paginate(pagination);

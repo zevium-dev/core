@@ -218,6 +218,26 @@ export function ProjectSettingsPanel({
   const nextVisibility = project.visibility === "public" ? "private" : "public";
   const tagsPreview = parseTagsInput(tagsText);
   const canDelete = deleteConfirm.trim() === project.slug;
+  const isPublishedPublic =
+    project.status === "published" && project.visibility === "public";
+  const retirementScheduled = project.deprecationStartedAt !== undefined;
+  const parsedSunset = Date.parse(`${sunsetDate}T23:59:59.999Z`);
+  const minimumSunset = Date.now() + MIN_RETIREMENT_NOTICE_MS;
+  const retirementMessageLength = retirementMessage.trim().length;
+  const sunsetError =
+    sunsetDate !== "" &&
+    (!Number.isFinite(parsedSunset) || parsedSunset < minimumSunset)
+      ? "Choose a sunset at least 7 full days from now."
+      : null;
+  const retirementMessageError =
+    retirementMessage.length > RETIREMENT_MESSAGE_MAX
+      ? `Keep the migration notice under ${RETIREMENT_MESSAGE_MAX.toLocaleString()} characters.`
+      : null;
+  const canScheduleRetirement =
+    Number.isFinite(parsedSunset) &&
+    parsedSunset >= minimumSunset &&
+    retirementMessageLength > 0 &&
+    retirementMessageLength <= RETIREMENT_MESSAGE_MAX;
   const canRemoveProject =
     project.status !== "published" ||
     (project.sunsetAt !== undefined && Date.now() >= project.sunsetAt);
@@ -1001,7 +1021,7 @@ function WebhooksCard({ project }: { project: Doc<"projects"> }) {
       setRevealSecret(false);
       setCopiedSecret(false);
     }
-  }, [endpoint?._id, endpoint?.url, endpoint?.active, project._id]);
+  }, [endpoint, project._id]);
 
   const upsertMut = useConvexMutation(api.webhooks.upsertEndpoint);
 

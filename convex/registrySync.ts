@@ -24,6 +24,7 @@ import {
   validateRegistryAck,
   verifyRegistryAck,
   type JsonValue,
+  type OpenApiOperation,
   type RegistryAck,
   type RegistryCatalogueListing,
   type RegistryEvent,
@@ -413,8 +414,8 @@ function pricing(specJson: string): RegistryCatalogueListing["pricing"] {
   for (const path of Object.values(spec.paths)) {
     if (path === undefined) continue;
     for (const operation of Object.values(path)) {
-      if (operation === undefined) continue;
-      const value = extractPricing(operation);
+      if (operation === undefined || Array.isArray(operation)) continue;
+      const value = extractPricing(operation as OpenApiOperation);
       endpointCount += 1;
       minCostCredits = Math.min(minCostCredits, value.cost);
       maxCostCredits = Math.max(maxCostCredits, value.cost);

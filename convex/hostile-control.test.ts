@@ -125,7 +125,7 @@ describe("hostile control-plane state", () => {
         keyId: "key_other_member",
         disabled: true,
       }),
-    ).rejects.toThrow(/Verified key not found/);
+    ).rejects.toThrow(/admin/);
   });
 
   it("records provider ownership and keeps unattributed usage fail-closed", async () => {

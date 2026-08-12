@@ -165,7 +165,9 @@ function BellWithOrg({ orgSlug }: { orgSlug: string }) {
       toast.error(humanError(err, "Could not mark all read")),
   });
 
-  const data = notificationsQuery.isSuccess ? notificationsQuery.data : undefined;
+  const data = notificationsQuery.isSuccess
+    ? notificationsQuery.data
+    : undefined;
   const pagePending = notificationsQuery.isPending;
   const page = [...olderPages, ...(data?.page ?? [])];
   const unreadLabel = unreadCountCapped || unread > 99 ? "99+" : String(unread);

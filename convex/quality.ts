@@ -13,6 +13,7 @@ import {
   mutation,
   query,
   type MutationCtx,
+  type QueryCtx,
 } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
@@ -89,7 +90,7 @@ function p50(values: number[]): number | undefined {
   return sorted[Math.floor((sorted.length - 1) / 2)];
 }
 
-async function activeOrg(ctx: Parameters<typeof requireIdentity>[0]) {
+async function activeOrg(ctx: QueryCtx | MutationCtx) {
   const claims = await requireIdentity(ctx);
   if (!claims.orgId) throw new Error("Choose an organization first");
   const org = await ctx.db

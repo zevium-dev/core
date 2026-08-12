@@ -116,7 +116,8 @@ describe("admin publisher transfer operations", () => {
       expect.objectContaining({
         name: "Beta API",
         organizationName: "Beta Labs",
-        organizationSlug: "beta-labs",
+        organizationHandle: "beta-labs",
+        handle: "beta-labs/beta-api",
       }),
     ]);
     expect(result.isDone).toBe(true);

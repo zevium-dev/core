@@ -1092,6 +1092,7 @@ test("production build environment cannot be bypassed with skip flags", () => {
         ![
           "CLERK_PUBLISHABLE_KEY",
           "CLERK_SECRET_KEY",
+          "VITE_BUILD_SHA",
           "VITE_CLERK_PUBLISHABLE_KEY",
           "VITE_CONVEX_URL",
           "VITE_GATEWAY_URL",
@@ -1113,6 +1114,7 @@ test("production build environment cannot be bypassed with skip flags", () => {
       ...strippedEnvironment,
       CLERK_PUBLISHABLE_KEY: "fixture-public",
       CLERK_SECRET_KEY: "fixture-secret",
+      VITE_BUILD_SHA: "1".repeat(40),
       VITE_CONVEX_URL: "https://fixture.invalid",
       VITE_GATEWAY_URL: "https://fixture.invalid",
     },

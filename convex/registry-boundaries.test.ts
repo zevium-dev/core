@@ -130,21 +130,21 @@ describe("registry producer public boundaries", () => {
         projectId: world.projectId,
         patch: { visibility: "public" },
       }),
-    ).rejects.toThrow("Org admin role required");
+    ).rejects.toThrow(/Org admin or owner role required/);
     await expect(
       member.mutation(api.specs.publish, {
         projectId: world.draftProjectId,
         version: "1.0.0",
       }),
-    ).rejects.toThrow("Org admin role required");
+    ).rejects.toThrow(/Org admin or owner role required/);
     await expect(
       member.mutation(api.specs.deprecateVersion, {
         versionId: world.versionId,
       }),
-    ).rejects.toThrow("Org admin role required");
+    ).rejects.toThrow(/Org admin or owner role required/);
     await expect(
       member.mutation(api.projects.remove, { projectId: world.projectId }),
-    ).rejects.toThrow("Org admin role required");
+    ).rejects.toThrow(/Org admin or owner role required/);
 
     const state = await t.run(async (ctx) => ({
       project: await ctx.db.get(world.projectId),

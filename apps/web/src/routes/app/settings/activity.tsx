@@ -303,13 +303,7 @@ function ActivityContent({ orgSlug }: { orgSlug: string }) {
   const canViewOrgUsage = hasServerCapability(capabilities, "viewOrgUsage");
   const attributionSearch = useMemo(
     () => authorizedAttributionSearch(search, canViewOrgUsage),
-    [
-      canViewOrgUsage,
-      search.endpoint,
-      search.key,
-      search.member,
-      search.method,
-    ],
+    [canViewOrgUsage, search],
   );
   const cycleQuery = useQuery({
     ...convexQuery(api.billing.cycleBreakdown, { orgSlug }),
