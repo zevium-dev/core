@@ -156,7 +156,17 @@ export async function handleGatewayRequest(
     );
   }
 
-  const matched = matchOperation(parsed, request.method, route.remainderPath);
+  let matched: ReturnType<typeof matchOperation>;
+  try {
+    matched = matchOperation(parsed, request.method, route.remainderPath);
+  } catch {
+    return jsonError(
+      404,
+      "invalid_spec",
+      "Published spec has invalid pricing",
+      requestId,
+    );
+  }
   if (!matched) {
     return jsonError(404, "route_not_found", "Unknown route", requestId);
   }

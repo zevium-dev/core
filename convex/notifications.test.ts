@@ -5,7 +5,7 @@ import { api } from "./_generated/api";
 import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import schema from "./schema";
-import { createNotification } from "./lib/notifications";
+import { createNotification, upsertNotification } from "./lib/notifications";
 
 const modules = import.meta.glob("./**/*.ts");
 
@@ -83,6 +83,60 @@ describe("createNotification — idempotency", () => {
   });
 });
 
+describe("upsertNotification — canonical lifecycle state", () => {
+  it("preserves reads on identical retry and revives changed content", async () => {
+    const t = convexTest(schema, modules);
+    const id = await t.run(async (ctx) => {
+      const created = await upsertNotification(ctx, {
+        clerkOrgId: "org_test",
+        kind: "project_retirement",
+        title: "Retirement scheduled",
+        body: "Old cutoff",
+        refId: "retirement:canonical",
+      });
+      if (created.id === null) throw new Error("notification missing");
+      await ctx.db.patch(created.id, { readAt: 123 });
+      return created.id;
+    });
+
+    await t.run(async (ctx) => {
+      await upsertNotification(ctx, {
+        clerkOrgId: "org_test",
+        kind: "project_retirement",
+        title: "Retirement scheduled",
+        body: "Old cutoff",
+        refId: "retirement:canonical",
+      });
+    });
+    expect(await t.run(async (ctx) => (await ctx.db.get(id))?.readAt)).toBe(
+      123,
+    );
+
+    await t.run(async (ctx) => {
+      await upsertNotification(ctx, {
+        clerkOrgId: "org_test",
+        kind: "project_retirement",
+        title: "Retirement canceled",
+        body: "API remains available",
+        refId: "retirement:canonical",
+        publisherHandle: "publisher",
+        projectSlug: "api",
+      });
+    });
+    const state = await t.run(async (ctx) => ({
+      row: await ctx.db.get(id),
+      all: await ctx.db.query("notifications").collect(),
+    }));
+    expect(state.all).toHaveLength(1);
+    expect(state.row).toMatchObject({
+      body: "API remains available",
+      publisherHandle: "publisher",
+      projectSlug: "api",
+    });
+    expect(state.row?.readAt).toBeUndefined();
+  });
+});
+
 describe("notifications.listForOrg — auth", () => {
   it("rejects unauthenticated", async () => {
     const t = convexTest(schema, modules);
@@ -94,13 +148,18 @@ describe("notifications.listForOrg — auth", () => {
     ).rejects.toThrow(/Not authenticated/);
   });
 
-  it("rejects non-member", async () => {
+  it("scopes by signed org id instead of a supplied slug", async () => {
     const t = convexTest(schema, modules);
     await t.run(async (ctx) => {
       await ctx.db.insert("organizations", {
         clerkOrgId: "org_test",
         name: "Test",
         slug: "test-co",
+      });
+      await ctx.db.insert("organizations", {
+        clerkOrgId: "org_other",
+        name: "Other",
+        slug: "other",
       });
     });
     const outsider = t.withIdentity({
@@ -114,12 +173,11 @@ describe("notifications.listForOrg — auth", () => {
       org_slug: string;
       org_role: string;
     });
-    await expect(
-      outsider.query(api.notifications.listForOrg, {
-        orgSlug: "test-co",
-        paginationOpts: { numItems: 10, cursor: null },
-      }),
-    ).rejects.toThrow(/Not a member/);
+    const result = await outsider.query(api.notifications.listForOrg, {
+      orgSlug: "test-co",
+      paginationOpts: { numItems: 10, cursor: null },
+    });
+    expect(result.page).toEqual([]);
   });
 });
 

@@ -40,6 +40,7 @@ const KIND_ICON: Record<string, LucideIcon> = {
   low_balance: Wallet,
   spec_published: Rocket,
   version_deprecated: Archive,
+  project_retirement: Archive,
   webhook_failed: Webhook,
   visibility_changed: Eye,
   transfer_failed: CircleAlert,
@@ -90,7 +91,7 @@ function DisabledBell({ ready }: { ready: boolean }) {
       disabled={!ready}
       aria-label="Select an organization to view notifications"
     >
-      <Bell className="size-4" />
+      <Bell aria-hidden="true" className="size-4" />
     </Button>
   );
 }
@@ -135,11 +136,27 @@ function BellWithOrg({ orgSlug }: { orgSlug: string }) {
   const page = data?.page ?? [];
   const unreadLabel = unread > 99 ? "99+" : String(unread);
 
-  function onRowClick(notificationId: Id<"notifications">, kind: string) {
+  function onRowClick(
+    notificationId: Id<"notifications">,
+    kind: string,
+    publisherHandle: string | undefined,
+    projectSlug: string | undefined,
+  ) {
     markRead(notificationId);
-    const destination = destinationForKind(kind);
-    if (destination !== undefined) {
-      void navigate({ to: destination });
+    if (
+      kind === "project_retirement" &&
+      publisherHandle !== undefined &&
+      projectSlug !== undefined
+    ) {
+      void navigate({
+        to: "/catalogue/$publisherHandle/$projectSlug",
+        params: { publisherHandle, projectSlug },
+      });
+    } else if (kind === "project_retirement") {
+      void navigate({ to: "/app/projects" });
+    } else {
+      const destination = destinationForKind(kind);
+      if (destination !== undefined) void navigate({ to: destination });
     }
     setOpen(false);
   }
@@ -153,7 +170,7 @@ function BellWithOrg({ orgSlug }: { orgSlug: string }) {
           className="relative"
           aria-label={`Notifications${unread > 0 ? `, ${unread} unread` : ""}`}
         >
-          <Bell className="size-4" />
+          <Bell aria-hidden="true" className="size-4" />
           {unread > 0 ? (
             <m.span
               key={unread}
@@ -182,7 +199,7 @@ function BellWithOrg({ orgSlug }: { orgSlug: string }) {
             disabled={markingAll || unread === 0}
             onClick={() => markAllRead()}
           >
-            <CheckCheck className="size-3.5" />
+            <CheckCheck aria-hidden="true" className="size-3.5" />
             Mark all read
           </Button>
         </div>
@@ -202,7 +219,9 @@ function BellWithOrg({ orgSlug }: { orgSlug: string }) {
                 now={now}
                 index={i}
                 reduce={Boolean(reduce)}
-                onClick={() => onRowClick(n._id, n.kind)}
+                onClick={() =>
+                  onRowClick(n._id, n.kind, n.publisherHandle, n.projectSlug)
+                }
               />
             ))}
           </ul>
@@ -235,6 +254,7 @@ function NotificationRow({
 }) {
   const Icon = (KIND_ICON[kind] ?? Bell) as ComponentType<{
     className?: string;
+    "aria-hidden"?: boolean | "true" | "false";
   }>;
   // Cap stagger so long lists don't string out past 400ms (DESIGN.md).
   const delay = Math.min(index, 7) * STAGGER;
@@ -252,7 +272,7 @@ function NotificationRow({
         data-read={read}
       >
         <span className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
-          <Icon className="size-4" />
+          <Icon aria-hidden="true" className="size-4" />
         </span>
         <span className="min-w-0 flex-1 space-y-0.5">
           <span className="flex items-baseline justify-between gap-2">
@@ -281,7 +301,7 @@ function EmptyState() {
         transition={{ duration: DUR.base, ease: EASE }}
         className="flex size-10 items-center justify-center rounded-full bg-muted text-muted-foreground"
       >
-        <BellOff className="size-5" />
+        <BellOff aria-hidden="true" className="size-5" />
       </m.span>
       <p className="text-sm font-medium">You&apos;re all caught up</p>
       <p className="text-xs text-muted-foreground">

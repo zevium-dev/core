@@ -46,15 +46,15 @@ export async function requireIdentity(ctx: DbCtx): Promise<OrgIdentityClaims> {
   };
 }
 
-export async function getOrgBySlug(
+/** Resolve tenant data from the immutable Clerk organization id in the JWT. */
+export async function getOrgByClerkId(
   ctx: DbCtx,
-  slug: string,
+  clerkOrgId: string,
 ): Promise<Doc<"organizations"> | null> {
-  const org = await ctx.db
+  return await ctx.db
     .query("organizations")
-    .withIndex("by_slug", (q) => q.eq("slug", slug))
+    .withIndex("by_clerk_org", (q) => q.eq("clerkOrgId", clerkOrgId))
     .unique();
-  return org?.archivedAt === undefined ? org : null;
 }
 
 /** Public routing uses the product handle, never the Clerk slug. */
@@ -72,29 +72,27 @@ export async function getOrgByPublicHandle(
 }
 
 /**
- * Resolve org by slug and require the JWT active org claim matches it.
- * Creator/editor must be a member of the org (Clerk org claim).
+ * Resolve active tenant exclusively from the JWT org id. `orgSlug` remains in
+ * public function contracts for routing compatibility but never scopes data.
  */
 export async function requireOrgMemberBySlug(
   ctx: DbCtx,
-  orgSlug: string,
+  _orgSlug: string,
 ): Promise<{ claims: OrgIdentityClaims; org: Doc<"organizations"> }> {
   const claims = await requireIdentity(ctx);
   if (claims.orgId === undefined) {
     throw new Error("No active organization on identity");
   }
 
-  const org = await getOrgBySlug(ctx, orgSlug);
+  // URL slugs are mutable display/routing data. Authorization and data scope
+  // come exclusively from the signed, immutable Clerk org id claim.
+  const org = await getOrgByClerkId(ctx, claims.orgId);
   if (org === null) {
     throw new Error("Organization not found");
   }
   if (org.archivedAt !== undefined) {
     throw new Error("Organization is archived");
   }
-  if (org.clerkOrgId !== claims.orgId) {
-    throw new Error("Not a member of this organization");
-  }
-
   return { claims, org };
 }
 

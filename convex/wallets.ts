@@ -1,4 +1,5 @@
 import { v } from "convex/values";
+import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import {
   internalMutation,
@@ -362,6 +363,7 @@ export const recordUsage = internalMutation({
       throw new Error("Consumer organization not found");
     let wallet = await getOrCreateWallet(ctx, consumerOrg._id);
     const results: SettlementResult[] = [];
+    const retirementNoticeProjectIds = new Set<Id<"projects">>();
 
     for (const event of args.events) {
       if (
@@ -464,7 +466,23 @@ export const recordUsage = internalMutation({
           updatedAt: now,
         });
       }
+      if (
+        project.organizationId !== consumerOrg._id &&
+        project.retirementState === "scheduled" &&
+        project.sunsetAt !== undefined &&
+        project.retiredAt === undefined
+      ) {
+        retirementNoticeProjectIds.add(project._id);
+      }
       results.push({ refId: event.settleRefId, status: "applied" });
+    }
+
+    for (const projectId of retirementNoticeProjectIds) {
+      await ctx.scheduler.runAfter(
+        0,
+        internal.projects.reconcileRetirementConsumerNotice,
+        { projectId, consumerOrganizationId: consumerOrg._id },
+      );
     }
 
     return { results, wallet: checkpoint(clerkOrgId, wallet) };

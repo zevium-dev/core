@@ -6,16 +6,24 @@ import {
   type MutationCtx,
 } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
+import { internal } from "./_generated/api";
 import {
   requireOrgAdmin,
   requireOrgMemberBySlug,
   requireProjectMember,
 } from "./lib/auth";
-import { createNotification } from "./lib/notifications";
+import {
+  upsertNotification,
+  upsertProjectRetirementConsumerNotice,
+} from "./lib/notifications";
 import { fireWebhookEvent } from "./webhooks";
 import { isValidSlug } from "./lib/validate";
 
 export const MIN_DEPRECATION_NOTICE_MS = 7 * 24 * 60 * 60 * 1000;
+const RETIREMENT_BATCH_SIZE = 100;
+const NOTICE_USAGE_PAGE_SIZE = 100;
+const INLINE_CREDENTIAL_CLEANUP_SIZE = 10;
+const CREDENTIAL_CLEANUP_PAGE_SIZE = 100;
 
 async function cleanupProjectRuntime(
   ctx: MutationCtx,
@@ -30,8 +38,15 @@ async function cleanupProjectRuntime(
   const credentials = await ctx.db
     .query("upstreamCredentials")
     .withIndex("by_project", (q) => q.eq("projectId", projectId))
-    .collect();
+    .take(INLINE_CREDENTIAL_CLEANUP_SIZE);
   for (const credential of credentials) await ctx.db.delete(credential._id);
+  if (credentials.length === INLINE_CREDENTIAL_CLEANUP_SIZE) {
+    await ctx.scheduler.runAfter(
+      0,
+      internal.projects.deleteProjectCredentialsPage,
+      { projectId },
+    );
+  }
 
   const readiness = await ctx.db
     .query("publishReadiness")
@@ -51,6 +66,27 @@ async function cleanupProjectRuntime(
     .unique();
   if (webhook !== null) await ctx.db.patch(webhook._id, { active: false });
 }
+
+/** Drain legacy/high-cardinality credential sets without an unbounded mutation. */
+export const deleteProjectCredentialsPage = internalMutation({
+  args: { projectId: v.id("projects") },
+  handler: async (ctx, args): Promise<{ deleted: number; done: boolean }> => {
+    const credentials = await ctx.db
+      .query("upstreamCredentials")
+      .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
+      .take(CREDENTIAL_CLEANUP_PAGE_SIZE);
+    for (const credential of credentials) await ctx.db.delete(credential._id);
+    const done = credentials.length < CREDENTIAL_CLEANUP_PAGE_SIZE;
+    if (!done) {
+      await ctx.scheduler.runAfter(
+        0,
+        internal.projects.deleteProjectCredentialsPage,
+        args,
+      );
+    }
+    return { deleted: credentials.length, done };
+  },
+});
 
 export const list = query({
   args: { orgSlug: v.string() },
@@ -244,6 +280,9 @@ export const update = mutation({
         deprecationStartedAt: current.deprecationStartedAt,
         sunsetAt: current.sunsetAt,
         deprecationMessage: current.deprecationMessage,
+        retirementState: current.retirementState,
+        retirementRevision: current.retirementRevision,
+        retirementCutoffAt: current.retirementCutoffAt,
         retiredAt: current.retiredAt,
       });
     } else {
@@ -287,6 +326,9 @@ export const remove = mutation({
     } else {
       await ctx.db.patch(args.projectId, {
         visibility: "private",
+        retirementState: "retired",
+        retirementCutoffAt: project.retirementCutoffAt ?? project.sunsetAt,
+        sunsetAt: undefined,
         retiredAt: Date.now(),
       });
     }
@@ -313,6 +355,7 @@ export const scheduleRetirement = mutation({
     const now = Date.now();
     if (
       !Number.isSafeInteger(args.sunsetAt) ||
+      !Number.isFinite(new Date(args.sunsetAt).getTime()) ||
       args.sunsetAt < now + MIN_DEPRECATION_NOTICE_MS
     ) {
       throw new Error("Sunset must provide at least 7 days notice");
@@ -321,19 +364,43 @@ export const scheduleRetirement = mutation({
     if (message.length === 0 || message.length > 1000) {
       throw new Error("Deprecation message must be 1-1000 characters");
     }
+    if (
+      project.retirementState === "scheduled" &&
+      project.sunsetAt === args.sunsetAt &&
+      project.deprecationMessage === message
+    ) {
+      return project;
+    }
     const deprecationStartedAt = project.deprecationStartedAt ?? now;
+    const retirementRevision = (project.retirementRevision ?? 0) + 1;
+    if (!Number.isSafeInteger(retirementRevision)) {
+      throw new Error("Project retirement revision exhausted");
+    }
     await ctx.db.patch(project._id, {
       deprecationStartedAt,
       sunsetAt: args.sunsetAt,
       deprecationMessage: message,
+      retirementState: "scheduled",
+      retirementRevision,
     });
-    await createNotification(ctx, {
+    await upsertNotification(ctx, {
       clerkOrgId: org.clerkOrgId,
-      kind: "version_deprecated",
+      kind: "project_retirement",
       title: "Project retirement scheduled",
-      body: `${project.name} will sunset ${new Date(args.sunsetAt).toISOString()}.`,
-      refId: `project_retirement:${project._id}:${deprecationStartedAt}`,
+      body: `${project.name} will sunset ${new Date(args.sunsetAt).toISOString()}. ${message}`,
+      refId: `project_retirement:${project._id}:publisher`,
     });
+    await ctx.scheduler.runAfter(
+      0,
+      internal.projects.notifyRetirementConsumersPage,
+      {
+        projectId: project._id,
+        retirementRevision,
+        sunsetAt: args.sunsetAt,
+        event: "scheduled",
+        cursor: null,
+      },
+    );
     await fireWebhookEvent(ctx, project._id, "project.deprecated", {
       projectId: project._id,
       sunsetAt: args.sunsetAt,
@@ -348,7 +415,10 @@ export const scheduleRetirement = mutation({
 export const cancelRetirement = mutation({
   args: { projectId: v.id("projects") },
   handler: async (ctx, args): Promise<Doc<"projects">> => {
-    const { claims, project } = await requireProjectMember(ctx, args.projectId);
+    const { claims, org, project } = await requireProjectMember(
+      ctx,
+      args.projectId,
+    );
     requireOrgAdmin(claims);
     if (project.retiredAt !== undefined) {
       throw new Error("Retired projects cannot be restored");
@@ -356,6 +426,17 @@ export const cancelRetirement = mutation({
     if (project.sunsetAt !== undefined && project.sunsetAt <= Date.now()) {
       throw new Error("Retirement cannot be canceled after sunset");
     }
+    if (
+      project.sunsetAt === undefined ||
+      project.deprecationStartedAt === undefined
+    ) {
+      throw new Error("Project has no scheduled retirement");
+    }
+    const retirementRevision = (project.retirementRevision ?? 0) + 1;
+    if (!Number.isSafeInteger(retirementRevision)) {
+      throw new Error("Project retirement revision exhausted");
+    }
+    const canceledSunsetAt = project.sunsetAt;
     await ctx.db.replace(project._id, {
       organizationId: project.organizationId,
       name: project.name,
@@ -364,6 +445,29 @@ export const cancelRetirement = mutation({
       status: project.status,
       visibility: project.visibility,
       tags: project.tags,
+      retirementRevision,
+    });
+    await upsertNotification(ctx, {
+      clerkOrgId: org.clerkOrgId,
+      kind: "project_retirement",
+      title: "Project retirement canceled",
+      body: `${project.name} will remain available.`,
+      refId: `project_retirement:${project._id}:publisher`,
+    });
+    await ctx.scheduler.runAfter(
+      0,
+      internal.projects.notifyRetirementConsumersPage,
+      {
+        projectId: project._id,
+        retirementRevision,
+        sunsetAt: canceledSunsetAt,
+        event: "canceled",
+        cursor: null,
+      },
+    );
+    await fireWebhookEvent(ctx, project._id, "project.deprecation_canceled", {
+      projectId: project._id,
+      canceledSunsetAt,
     });
     const updated = await ctx.db.get(project._id);
     if (updated === null) throw new Error("Project not found");
@@ -371,31 +475,211 @@ export const cancelRetirement = mutation({
   },
 });
 
+/**
+ * Notify every consumer org that has called this project. The indexed usage
+ * scan is paginated, each org/ref pair is idempotent, and stale reschedule jobs
+ * exit before producing side effects.
+ */
+export const notifyRetirementConsumersPage = internalMutation({
+  args: {
+    projectId: v.id("projects"),
+    retirementRevision: v.number(),
+    sunsetAt: v.number(),
+    event: v.union(v.literal("scheduled"), v.literal("canceled")),
+    cursor: v.union(v.string(), v.null()),
+  },
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{ scanned: number; notified: number; done: boolean }> => {
+    const project = await ctx.db.get(args.projectId);
+    const current =
+      project !== null &&
+      project.retirementRevision === args.retirementRevision &&
+      project.retiredAt === undefined &&
+      (args.event === "scheduled"
+        ? project.retirementState === "scheduled" &&
+          project.sunsetAt === args.sunsetAt
+        : project.retirementState === undefined &&
+          project.sunsetAt === undefined);
+    if (!current || project === null) {
+      return { scanned: 0, notified: 0, done: true };
+    }
+    const publisher = await ctx.db.get(project.organizationId);
+    if (publisher === null || publisher.archivedAt !== undefined) {
+      return { scanned: 0, notified: 0, done: true };
+    }
+
+    const page = await ctx.db
+      .query("usageEvents")
+      .withIndex("by_project_at", (q) => q.eq("projectId", project._id))
+      .order("asc")
+      .paginate({ cursor: args.cursor, numItems: NOTICE_USAGE_PAGE_SIZE });
+    const consumerIds = [
+      ...new Set(page.page.map((event) => event.organizationId)),
+    ];
+    let notified = 0;
+    for (const organizationId of consumerIds) {
+      if (organizationId === project.organizationId) continue;
+      const consumer = await ctx.db.get(organizationId);
+      if (consumer === null || consumer.archivedAt !== undefined) continue;
+      await upsertProjectRetirementConsumerNotice(ctx, {
+        consumerClerkOrgId: consumer.clerkOrgId,
+        projectId: project._id,
+        projectName: project.name,
+        projectSlug: project.slug,
+        publisherName: publisher.name,
+        publisherHandle: publisher.publicHandle,
+        sunsetAt: args.sunsetAt,
+        message: project.deprecationMessage,
+        event: args.event,
+      });
+      notified += 1;
+    }
+
+    if (!page.isDone) {
+      await ctx.scheduler.runAfter(
+        0,
+        internal.projects.notifyRetirementConsumersPage,
+        { ...args, cursor: page.continueCursor },
+      );
+    }
+    return { scanned: page.page.length, notified, done: page.isDone };
+  },
+});
+
+/**
+ * Close the async-settlement race with paginated fanout. A usage event that
+ * lands behind an existing cursor gets this independent canonical upsert.
+ */
+export const reconcileRetirementConsumerNotice = internalMutation({
+  args: {
+    projectId: v.id("projects"),
+    consumerOrganizationId: v.id("organizations"),
+  },
+  handler: async (ctx, args): Promise<{ notified: boolean }> => {
+    const [project, consumer] = await Promise.all([
+      ctx.db.get(args.projectId),
+      ctx.db.get(args.consumerOrganizationId),
+    ]);
+    if (
+      project === null ||
+      consumer === null ||
+      consumer.archivedAt !== undefined ||
+      project.organizationId === consumer._id ||
+      project.retirementState !== "scheduled" ||
+      project.sunsetAt === undefined ||
+      project.retiredAt !== undefined
+    ) {
+      return { notified: false };
+    }
+    const publisher = await ctx.db.get(project.organizationId);
+    if (publisher === null || publisher.archivedAt !== undefined) {
+      return { notified: false };
+    }
+    await upsertProjectRetirementConsumerNotice(ctx, {
+      consumerClerkOrgId: consumer.clerkOrgId,
+      projectId: project._id,
+      projectName: project.name,
+      projectSlug: project.slug,
+      publisherName: publisher.name,
+      publisherHandle: publisher.publicHandle,
+      sunsetAt: project.sunsetAt,
+      message: project.deprecationMessage,
+      event: "scheduled",
+    });
+    return { notified: true };
+  },
+});
+
 /** Hourly bounded sunset cleanup. Immutable versions and usage history remain. */
 export const retireSunsetProjects = internalMutation({
   args: {},
-  handler: async (ctx): Promise<{ retired: number }> => {
+  handler: async (ctx): Promise<{ retired: number; hasMore: boolean }> => {
     const now = Date.now();
     const candidates = await ctx.db
       .query("projects")
-      .withIndex("by_sunset", (q) => q.gt("sunsetAt", 0).lte("sunsetAt", now))
-      .take(100);
+      .withIndex("by_retirement_state_sunset", (q) =>
+        q.eq("retirementState", "scheduled").lte("sunsetAt", now),
+      )
+      .take(RETIREMENT_BATCH_SIZE);
     let retired = 0;
     for (const project of candidates) {
-      if (
-        project.sunsetAt === undefined ||
-        project.retiredAt !== undefined ||
-        project.deprecationStartedAt === undefined
-      ) {
+      if (project.sunsetAt === undefined) {
+        continue;
+      }
+      if (project.retiredAt !== undefined) {
+        await ctx.db.patch(project._id, {
+          retirementState: "retired",
+          retirementCutoffAt: project.retirementCutoffAt ?? project.sunsetAt,
+          sunsetAt: undefined,
+        });
+        continue;
+      }
+      if (project.deprecationStartedAt === undefined) {
+        await ctx.db.patch(project._id, {
+          retirementState: undefined,
+          retirementCutoffAt: project.retirementCutoffAt ?? project.sunsetAt,
+          sunsetAt: undefined,
+        });
         continue;
       }
       await cleanupProjectRuntime(ctx, project._id);
       await ctx.db.patch(project._id, {
         visibility: "private",
+        retirementState: "retired",
+        retirementCutoffAt: project.retirementCutoffAt ?? project.sunsetAt,
+        sunsetAt: undefined,
         retiredAt: now,
       });
       retired += 1;
     }
-    return { retired };
+    // Transitional drain for rows written before retirementState existed.
+    // Every visited legacy row leaves by_sunset, so even 100+ old tombstones
+    // cannot pin the head of the queue forever.
+    const remaining = RETIREMENT_BATCH_SIZE - candidates.length;
+    const legacyCandidates =
+      remaining > 0
+        ? await ctx.db
+            .query("projects")
+            .withIndex("by_sunset", (q) =>
+              q.gt("sunsetAt", 0).lte("sunsetAt", now),
+            )
+            .take(remaining)
+        : [];
+    for (const project of legacyCandidates) {
+      if (project.retirementState === "scheduled") continue;
+      if (
+        project.retiredAt === undefined &&
+        project.deprecationStartedAt !== undefined
+      ) {
+        await cleanupProjectRuntime(ctx, project._id);
+        await ctx.db.patch(project._id, {
+          visibility: "private",
+          retirementState: "retired",
+          retirementCutoffAt: project.retirementCutoffAt ?? project.sunsetAt,
+          sunsetAt: undefined,
+          retiredAt: now,
+        });
+        retired += 1;
+      } else {
+        await ctx.db.patch(project._id, {
+          retirementState:
+            project.retiredAt === undefined ? undefined : "retired",
+          retirementCutoffAt: project.retirementCutoffAt ?? project.sunsetAt,
+          sunsetAt: undefined,
+        });
+      }
+    }
+    const processed = candidates.length + legacyCandidates.length;
+    const hasMore = processed === RETIREMENT_BATCH_SIZE;
+    if (hasMore) {
+      await ctx.scheduler.runAfter(
+        0,
+        internal.projects.retireSunsetProjects,
+        {},
+      );
+    }
+    return { retired, hasMore };
   },
 });

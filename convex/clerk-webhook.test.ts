@@ -1,6 +1,6 @@
 /// <reference types="vite/client" />
 import { convexTest } from "convex-test";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Webhook } from "svix";
 import { api } from "./_generated/api";
 import schema from "./schema";
@@ -16,6 +16,7 @@ describe("Clerk webhook user lifecycle", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     if (previousSecret === undefined) {
       delete process.env.CLERK_WEBHOOK_SIGNING_SECRET;
     } else {
@@ -61,6 +62,7 @@ describe("Clerk webhook user lifecycle", () => {
   });
 
   it("archives a deleted organization and preserves financial, audit, and project history", async () => {
+    vi.useFakeTimers();
     const t = convexTest(schema, modules);
     const seeded = await t.run(async (ctx) => {
       const organizationId = await ctx.db.insert("organizations", {
@@ -127,6 +129,7 @@ describe("Clerk webhook user lifecycle", () => {
       body,
     });
     expect(response.status).toBe(200);
+    await t.finishAllScheduledFunctions(() => vi.runAllTimers());
 
     const state = await t.run(async (ctx) => ({
       org: await ctx.db.get(seeded.organizationId),

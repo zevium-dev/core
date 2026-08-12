@@ -151,6 +151,16 @@ export const orgOverview = query({
       .order("desc")
       .take(ORG_SCAN_CAP);
 
+    // Recent activity is independent of the UTC-month aggregation window, so
+    // month boundaries never produce an empty or undersized activity list.
+    const recentEvents = await ctx.db
+      .query("usageEvents")
+      .withIndex("by_org_at", (q) =>
+        q.eq("organizationId", org._id).lt("at", now + 1),
+      )
+      .order("desc")
+      .take(RECENT_LIMIT);
+
     const truncated = scanned.length >= ORG_SCAN_CAP;
 
     let callsToday = 0;
@@ -176,8 +186,6 @@ export const orgOverview = query({
       return view;
     }
 
-    const recent: UsageEventView[] = [];
-
     for (const event of scanned) {
       if (event.at >= cycleStart) {
         callsCycle += 1;
@@ -187,10 +195,12 @@ export const orgOverview = query({
         callsToday += 1;
         creditsToday += event.credits;
       }
+    }
 
-      if (recent.length < RECENT_LIMIT) {
+    const recent = await Promise.all(
+      recentEvents.map(async (event): Promise<UsageEventView> => {
         const project = await resolveProject(event.projectId);
-        recent.push({
+        return {
           _id: event._id,
           projectId: event.projectId,
           projectSlug: project?.slug ?? null,
@@ -202,9 +212,9 @@ export const orgOverview = query({
           latencyMs: event.latencyMs,
           keyId: event.keyId,
           at: event.at,
-        });
-      }
-    }
+        };
+      }),
+    );
 
     return {
       balance: wallet?.balance ?? 0,

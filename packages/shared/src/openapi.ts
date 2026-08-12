@@ -3,7 +3,11 @@
  * Spec is source of truth for upstream URL, routes, and x-zevium-* pricing.
  */
 
-import type { EndpointPricing } from "./pricing.js";
+import {
+  MAX_DAILY_FREE_TIER_CALLS,
+  MAX_ENDPOINT_COST_CREDITS,
+  type EndpointPricing,
+} from "./pricing.js";
 
 export type HttpMethod =
   "get" | "post" | "put" | "patch" | "delete" | "options" | "head" | "trace";
@@ -175,6 +179,10 @@ export function extractPricing(op: OpenApiOperation): EndpointPricing {
     throw new Error("x-zevium-cost must be a finite safe non-negative integer");
   } else if (typeof costRaw !== "number" || costRaw < 0) {
     throw new Error(`x-zevium-cost must be non-negative (got ${costRaw})`);
+  } else if (costRaw > MAX_ENDPOINT_COST_CREDITS) {
+    throw new Error(
+      `x-zevium-cost must be at most ${MAX_ENDPOINT_COST_CREDITS}`,
+    );
   } else {
     cost = costRaw;
   }
@@ -190,6 +198,11 @@ export function extractPricing(op: OpenApiOperation): EndpointPricing {
     if (typeof freeRaw !== "number" || freeRaw < 0) {
       throw new Error(
         `x-zevium-free-tier must be non-negative (got ${freeRaw})`,
+      );
+    }
+    if (freeRaw > MAX_DAILY_FREE_TIER_CALLS) {
+      throw new Error(
+        `x-zevium-free-tier must be at most ${MAX_DAILY_FREE_TIER_CALLS}`,
       );
     }
     // 0 free calls == no free tier; normalize to undefined.

@@ -8,6 +8,10 @@ import {
   trimTrailingSlashes,
   parseSpec,
 } from "./openapi.js";
+import {
+  MAX_DAILY_FREE_TIER_CALLS,
+  MAX_ENDPOINT_COST_CREDITS,
+} from "./pricing.js";
 
 const SAMPLE = JSON.stringify({
   openapi: "3.1.0",
@@ -138,8 +142,8 @@ describe("extractPricing", () => {
     ).toEqual({ cost: 3, freeTier: 2 });
   });
 
-  it.each([0, 1, Number.MAX_SAFE_INTEGER])(
-    "accepts safe integer boundary %s",
+  it.each([0, 1, MAX_ENDPOINT_COST_CREDITS])(
+    "accepts configured pricing boundary %s",
     (value) => {
       expect(
         extractPricing({
@@ -149,6 +153,18 @@ describe("extractPricing", () => {
       ).toEqual(value === 0 ? { cost: 0 } : { cost: value, freeTier: value });
     },
   );
+
+  it("rejects values above economic ceilings", () => {
+    expect(() =>
+      extractPricing({ "x-zevium-cost": MAX_ENDPOINT_COST_CREDITS + 1 }),
+    ).toThrow(/at most/);
+    expect(() =>
+      extractPricing({
+        "x-zevium-cost": 1,
+        "x-zevium-free-tier": MAX_DAILY_FREE_TIER_CALLS + 1,
+      }),
+    ).toThrow(/at most/);
+  });
 
   it("treats freeTier 0 as no free tier", () => {
     expect(

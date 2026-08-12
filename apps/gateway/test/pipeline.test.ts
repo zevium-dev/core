@@ -178,6 +178,30 @@ afterEach(() => {
 });
 
 describe("gateway pipeline", () => {
+  it("maps legacy published pricing above the ceiling to invalid_spec without charging", async () => {
+    const clerkOrgId = "org_pipe_legacy_price";
+    const { fetchImpl, calls } = makeFetchMock(() => new Response("no"));
+    const legacySpec = SPEC.replace(
+      '"x-zevium-cost":2',
+      '"x-zevium-cost":1000001',
+    );
+    const { usage } = await installFixtures({
+      clerkOrgId,
+      fetchImpl,
+      credits: 100,
+      spec: legacySpec,
+    });
+
+    const res = await gatewayFetch(
+      `/gateway/${ORG_SLUG}/${PROJECT_SLUG}/stream`,
+    );
+    expect(res.status).toBe(404);
+    await expect(res.json()).resolves.toMatchObject({ error: "invalid_spec" });
+    expect(calls).toHaveLength(0);
+    expect(usage.events).toHaveLength(0);
+    expect((await walletStub(clerkOrgId).getState()).balance).toBe(100);
+  });
+
   it("rejects an unsafe upstream before a credit reservation or fetch", async () => {
     const clerkOrgId = "org_pipe_unsafe";
     const { fetchImpl, calls } = makeFetchMock(() => new Response("no"));

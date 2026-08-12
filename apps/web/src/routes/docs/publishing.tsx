@@ -1,4 +1,8 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
+import {
+  MAX_DAILY_FREE_TIER_CALLS,
+  MAX_ENDPOINT_COST_CREDITS,
+} from "@zevium/shared";
 
 import { DocsCodeBlock } from "#/components/docs-code-block";
 import { DocsPage } from "#/components/docs-layout";
@@ -104,13 +108,15 @@ function DocsPublishingPage() {
       <DocsCodeBlock lang="yaml" code={SPEC_EXAMPLE} />
       <ul>
         <li>
-          <code>x-zevium-cost</code> — credits per call. Integer. Defaults to 1
+          <code>x-zevium-cost</code> — credits per call. Integer from 0 to{" "}
+          {MAX_ENDPOINT_COST_CREDITS.toLocaleString("en-US")}. Defaults to 1
           when absent.
         </li>
         <li>
           <code>x-zevium-free-tier</code> — optional free calls per day,
-          <strong> publisher-funded</strong>. The platform does not subsidize
-          free-tier calls.
+          <strong> publisher-funded</strong>, capped at{" "}
+          {MAX_DAILY_FREE_TIER_CALLS.toLocaleString("en-US")}. The platform does
+          not subsidize free-tier calls.
         </li>
       </ul>
       <p>

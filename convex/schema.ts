@@ -18,6 +18,12 @@ export default defineSchema({
     .index("by_slug", ["slug"])
     .index("by_public_handle", ["publicHandle"]),
 
+  /** Durable delete-before-create guard for out-of-order Clerk webhooks. */
+  organizationTombstones: defineTable({
+    clerkOrgId: v.string(),
+    archivedAt: v.number(),
+  }).index("by_clerk_org", ["clerkOrgId"]),
+
   // Mirror of Clerk users
   users: defineTable({
     clerkUserId: v.string(),
@@ -36,13 +42,23 @@ export default defineSchema({
     deprecationStartedAt: v.optional(v.number()),
     sunsetAt: v.optional(v.number()),
     deprecationMessage: v.optional(v.string()),
+    /** Explicit state keeps completed retirements out of scheduled indexes. */
+    retirementState: v.optional(
+      v.union(v.literal("scheduled"), v.literal("retired")),
+    ),
+    /** Monotonic schedule generation; stale fanout jobs fail closed. */
+    retirementRevision: v.optional(v.number()),
+    /** Final cutoff retained after sunsetAt leaves the active-work index. */
+    retirementCutoffAt: v.optional(v.number()),
     /** Audit tombstone after sunset cleanup; project row remains immutable history. */
     retiredAt: v.optional(v.number()),
   })
     .index("by_org", ["organizationId"])
+    .index("by_org_status", ["organizationId", "status"])
     .index("by_org_slug", ["organizationId", "slug"])
     .index("by_visibility_status", ["visibility", "status"])
-    .index("by_sunset", ["sunsetAt"]),
+    .index("by_sunset", ["sunsetAt"])
+    .index("by_retirement_state_sunset", ["retirementState", "sunsetAt"]),
 
   // Publisher-owned headers injected by gateway after consumer auth headers are stripped.
   // Values never return through member-facing queries after write.
@@ -163,6 +179,7 @@ export default defineSchema({
       v.literal("low_balance"),
       v.literal("spec_published"),
       v.literal("version_deprecated"),
+      v.literal("project_retirement"),
       v.literal("webhook_failed"),
       v.literal("visibility_changed"),
       v.literal("transfer_failed"),
@@ -171,6 +188,9 @@ export default defineSchema({
     title: v.string(),
     body: v.string(),
     refId: v.string(),
+    /** Optional safe, typed destination for catalogue lifecycle notices. */
+    publisherHandle: v.optional(v.string()),
+    projectSlug: v.optional(v.string()),
     readAt: v.optional(v.number()),
     createdAt: v.number(),
   })

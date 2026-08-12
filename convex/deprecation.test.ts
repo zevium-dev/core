@@ -78,6 +78,20 @@ function asPublisher(t: ReturnType<typeof convexTest>) {
   });
 }
 
+function asPublisherMember(t: ReturnType<typeof convexTest>) {
+  return t.withIdentity({
+    subject: "user_pub_member",
+    org_id: "org_pub",
+    org_slug: "pub-co",
+    org_role: "org:member",
+  } as {
+    subject: string;
+    org_id: string;
+    org_slug: string;
+    org_role: string;
+  });
+}
+
 function asStranger(t: ReturnType<typeof convexTest>) {
   return t.withIdentity({
     subject: "user_stranger",
@@ -120,8 +134,20 @@ describe("specs.deprecateVersion — auth", () => {
     await expect(
       t.mutation(api.specs.deprecateVersion, {
         versionId: seed.versionId,
+        message: "Use v2",
       }),
     ).rejects.toThrow(/Not authenticated/);
+  });
+
+  it("rejects an ordinary member of the owning organization", async () => {
+    const t = convexTest(schema, modules);
+    const seed = await seedWorld(t);
+    await expect(
+      asPublisherMember(t).mutation(api.specs.deprecateVersion, {
+        versionId: seed.versionId,
+        message: "Use v2",
+      }),
+    ).rejects.toThrow(/admin/);
   });
 });
 
@@ -129,7 +155,7 @@ describe("specs.deprecateVersion — metadata", () => {
   it("sets deprecatedAt, sunsetAt, deprecationMessage", async () => {
     const t = convexTest(schema, modules);
     const seed = await seedWorld(t);
-    const sunsetAt = Date.now() + 86_400_000;
+    const sunsetAt = Date.now() + MIN_DEPRECATION_NOTICE_MS + 60_000;
 
     const updated = await asPublisher(t).mutation(api.specs.deprecateVersion, {
       versionId: seed.versionId,
@@ -143,6 +169,46 @@ describe("specs.deprecateVersion — metadata", () => {
     // Spec body immutable
     expect(updated.spec).toBe(SPEC_BODY);
     expect(updated.version).toBe("1.0.0");
+  });
+
+  it("rejects unsafe, short-notice, and empty metadata without side effects", async () => {
+    const t = convexTest(schema, modules);
+    const seed = await seedWorld(t);
+    const actor = asPublisher(t);
+
+    await expect(
+      actor.mutation(api.specs.deprecateVersion, {
+        versionId: seed.versionId,
+        sunsetAt: Date.now() + MIN_DEPRECATION_NOTICE_MS - 1,
+        message: "Use v2",
+      }),
+    ).rejects.toThrow(/at least 7 days/);
+    await expect(
+      actor.mutation(api.specs.deprecateVersion, {
+        versionId: seed.versionId,
+        sunsetAt: 1.5,
+        message: "Use v2",
+      }),
+    ).rejects.toThrow(/safe timestamp/);
+    await expect(
+      actor.mutation(api.specs.deprecateVersion, {
+        versionId: seed.versionId,
+        sunsetAt: Number.MAX_SAFE_INTEGER,
+        message: "Use v2",
+      }),
+    ).rejects.toThrow(/safe timestamp/);
+    await expect(
+      actor.mutation(api.specs.deprecateVersion, {
+        versionId: seed.versionId,
+        message: "   ",
+      }),
+    ).rejects.toThrow(/1 to 1000/);
+
+    const unchanged = await t.run(async (ctx) => ctx.db.get(seed.versionId));
+    expect(unchanged?.deprecatedAt).toBeUndefined();
+    expect(
+      await t.run(async (ctx) => ctx.db.query("notifications").collect()),
+    ).toHaveLength(0);
   });
 
   it("fires version_deprecated notification", async () => {
@@ -172,7 +238,7 @@ describe("specs.undeprecateVersion", () => {
     await as.mutation(api.specs.deprecateVersion, {
       versionId: seed.versionId,
       message: "Temporarily deprecated",
-      sunsetAt: Date.now() + 1000,
+      sunsetAt: Date.now() + MIN_DEPRECATION_NOTICE_MS + 60_000,
     });
 
     const cleared = await as.mutation(api.specs.undeprecateVersion, {
@@ -185,6 +251,32 @@ describe("specs.undeprecateVersion", () => {
     // Spec body still intact
     expect(cleared.spec).toBe(SPEC_BODY);
     expect(cleared.version).toBe("1.0.0");
+  });
+
+  it("cannot restore a version after its cutoff", async () => {
+    const t = convexTest(schema, modules);
+    const seed = await seedWorld(t);
+    await t.run(async (ctx) => {
+      await ctx.db.patch(seed.versionId, {
+        deprecatedAt: Date.now() - MIN_DEPRECATION_NOTICE_MS,
+        sunsetAt: Date.now() - 1,
+        deprecationMessage: "Cut off",
+      });
+    });
+    await expect(
+      asPublisher(t).mutation(api.specs.undeprecateVersion, {
+        versionId: seed.versionId,
+      }),
+    ).rejects.toThrow(/cannot be restored/);
+    await expect(
+      asPublisher(t).mutation(api.specs.deprecateVersion, {
+        versionId: seed.versionId,
+        sunsetAt: Date.now() + MIN_DEPRECATION_NOTICE_MS + 60_000,
+        message: "Try to move cutoff",
+      }),
+    ).rejects.toThrow(/cannot be changed/);
+    const unchanged = await t.run(async (ctx) => ctx.db.get(seed.versionId));
+    expect(unchanged?.sunsetAt).toEqual(expect.any(Number));
   });
 
   it("rejects non-member", async () => {
@@ -221,7 +313,7 @@ describe("specs.getPublishedForGateway — deprecation metadata", () => {
   it("includes deprecation metadata after deprecate", async () => {
     const t = convexTest(schema, modules);
     const seed = await seedWorld(t);
-    const sunsetAt = Date.now() + 86_400_000;
+    const sunsetAt = Date.now() + MIN_DEPRECATION_NOTICE_MS + 60_000;
 
     await asPublisher(t).mutation(api.specs.deprecateVersion, {
       versionId: seed.versionId,
@@ -335,6 +427,7 @@ describe("specs.publish — gateway-safe pricing invariant", () => {
   it.each([
     ["fractional cost", '"x-zevium-cost":1.5'],
     ["unsafe cost", `"x-zevium-cost":${Number.MAX_SAFE_INTEGER + 1}`],
+    ["cost above ceiling", '"x-zevium-cost":1000001'],
     ["overflow cost", '"x-zevium-cost":1e309'],
     ["fractional free tier", '"x-zevium-cost":1,"x-zevium-free-tier":0.5'],
     ["negative free tier", '"x-zevium-cost":1,"x-zevium-free-tier":-1'],
@@ -415,6 +508,27 @@ describe("project retirement lifecycle", () => {
         message: "   ",
       }),
     ).rejects.toThrow(/message/);
+    await expect(
+      asPublisher(t).mutation(api.projects.scheduleRetirement, {
+        projectId: seed.projectId,
+        sunsetAt: Number.MAX_SAFE_INTEGER,
+        message: "Use replacement",
+      }),
+    ).rejects.toThrow(/at least 7 days/);
+    await expect(
+      asPublisher(t).mutation(api.projects.scheduleRetirement, {
+        projectId: seed.projectId,
+        sunsetAt: Date.now() + MIN_DEPRECATION_NOTICE_MS + 60_000,
+        message: "x".repeat(1001),
+      }),
+    ).rejects.toThrow(/message/);
+    const unchanged = await t.run(async (ctx) => ({
+      project: await ctx.db.get(seed.projectId),
+      notifications: await ctx.db.query("notifications").collect(),
+    }));
+    expect(unchanged.project?.sunsetAt).toBeUndefined();
+    expect(unchanged.project?.retirementState).toBeUndefined();
+    expect(unchanged.notifications).toHaveLength(0);
   });
 
   it("freezes discovery but keeps detail and gateway state available until sunset", async () => {

@@ -127,6 +127,7 @@ function PublicHandleCard() {
   const mine = useQuery(convexQuery(api.organizations.listMine, {}));
   const setPublicHandle = useConvexMutation(api.organizations.setPublicHandle);
   const current = mine.data?.[0]?.publisherHandle ?? "";
+  const handleLocked = mine.data?.[0]?.publicHandleLocked ?? false;
   const [handle, setHandle] = useState("");
   const [confirming, setConfirming] = useState(false);
 
@@ -139,7 +140,7 @@ function PublicHandleCard() {
     ...convexQuery(api.organizations.checkPublicHandleAvailability, {
       handle: normalized,
     }),
-    enabled: normalized.length > 0,
+    enabled: normalized.length > 0 && !handleLocked && !mine.isPending,
   });
   const unavailable = lookup.data?.available === false;
   const valid = /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(normalized);
@@ -178,13 +179,15 @@ function PublicHandleCard() {
             spellCheck={false}
             aria-describedby="public-handle-help"
             aria-invalid={normalized !== "" && !valid}
-            readOnly={!isAdmin}
+            readOnly={!isAdmin || handleLocked || mine.isPending}
           />
           <Button
             type="button"
             onClick={() => setConfirming(true)}
             disabled={
               !isAdmin ||
+              mine.isPending ||
+              handleLocked ||
               isPending ||
               normalized === current ||
               !valid ||
@@ -194,7 +197,11 @@ function PublicHandleCard() {
             Save handle
           </Button>
         </div>
-        {!isAdmin ? (
+        {handleLocked ? (
+          <p className="text-sm text-muted-foreground">
+            Permanent after first publication. Existing API URLs stay stable.
+          </p>
+        ) : !isAdmin ? (
           <p className="text-sm text-muted-foreground">
             An organization admin can change this public handle.
           </p>
@@ -218,7 +225,7 @@ function PublicHandleCard() {
               Copy public URL
             </Button>
             <span className="text-xs text-muted-foreground">
-              Gateway, mock, discovery, and MCP routes update within 60 seconds.
+              Shared by gateway, mock, discovery, and MCP routes.
             </span>
           </div>
         ) : null}
@@ -242,8 +249,8 @@ function PublicHandleCard() {
           <DialogHeader>
             <DialogTitle>Change public publisher handle?</DialogTitle>
             <DialogDescription>
-              Existing catalogue, gateway, mock, and MCP URLs using the old
-              handle stop working after the gateway propagation window.
+              Future catalogue, gateway, mock, and MCP URLs will use this
+              handle. It becomes permanent when you publish your first API.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -309,7 +316,7 @@ function PublisherPaymentsCard() {
     <Card>
       <CardHeader>
         <CardDescription className="flex items-center gap-2">
-          <Landmark className="size-3.5" />
+          <Landmark aria-hidden="true" className="size-3.5" />
           Publisher payouts
         </CardDescription>
         <div className="flex flex-wrap items-center justify-between gap-3">

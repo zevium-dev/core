@@ -6,6 +6,7 @@ import {
   type MutationCtx,
 } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
+import { internal } from "./_generated/api";
 import { requireIdentity, requireOrgAdmin } from "./lib/auth";
 import { isValidSlug } from "./lib/validate";
 
@@ -31,6 +32,10 @@ export type PublicOrganization = {
   name: string;
   publisherHandle: string;
   imageUrl: string | undefined;
+};
+
+export type MineOrganization = PublicOrganization & {
+  publicHandleLocked: boolean;
 };
 
 export const getByPublicHandle = query({
@@ -81,7 +86,7 @@ export const checkPublicHandleAvailability = query({
 
 export const listMine = query({
   args: {},
-  handler: async (ctx): Promise<PublicOrganization[]> => {
+  handler: async (ctx): Promise<MineOrganization[]> => {
     const claims = await requireIdentity(ctx);
     if (claims.orgId === undefined) {
       return [];
@@ -97,11 +102,18 @@ export const listMine = query({
     ) {
       return [];
     }
+    const publishedProject = await ctx.db
+      .query("projects")
+      .withIndex("by_org_status", (q) =>
+        q.eq("organizationId", org._id).eq("status", "published"),
+      )
+      .first();
     return [
       {
         name: org.name,
         publisherHandle: org.publicHandle,
         imageUrl: org.imageUrl,
+        publicHandleLocked: publishedProject !== null,
       },
     ];
   },
@@ -114,11 +126,21 @@ export const upsertFromClerk = internalMutation({
     slug: v.string(),
     imageUrl: v.optional(v.string()),
   },
-  handler: async (ctx, args): Promise<Id<"organizations">> => {
+  handler: async (ctx, args): Promise<Id<"organizations"> | null> => {
+    const tombstone = await ctx.db
+      .query("organizationTombstones")
+      .withIndex("by_clerk_org", (q) => q.eq("clerkOrgId", args.clerkOrgId))
+      .unique();
     const existing = await ctx.db
       .query("organizations")
       .withIndex("by_clerk_org", (q) => q.eq("clerkOrgId", args.clerkOrgId))
       .unique();
+
+    if (tombstone !== null) {
+      // Clerk events are not ordered. A delete tombstone permanently wins over
+      // late create/update delivery and prevents tenant resurrection.
+      return existing?._id ?? null;
+    }
 
     if (existing === null) {
       const organizationId = await ctx.db.insert("organizations", {
@@ -153,27 +175,64 @@ export const upsertFromClerk = internalMutation({
 export const archiveFromClerk = internalMutation({
   args: { clerkOrgId: v.string() },
   handler: async (ctx, args): Promise<void> => {
+    const now = Date.now();
+    const tombstone = await ctx.db
+      .query("organizationTombstones")
+      .withIndex("by_clerk_org", (q) => q.eq("clerkOrgId", args.clerkOrgId))
+      .unique();
+    if (tombstone === null) {
+      await ctx.db.insert("organizationTombstones", {
+        clerkOrgId: args.clerkOrgId,
+        archivedAt: now,
+      });
+    }
+
     const existing = await ctx.db
       .query("organizations")
       .withIndex("by_clerk_org", (q) => q.eq("clerkOrgId", args.clerkOrgId))
       .unique();
+    await ctx.scheduler.runAfter(
+      0,
+      internal.organizations.disableArchivedOrgKeysPage,
+      { clerkOrgId: args.clerkOrgId, cursor: null },
+    );
     if (existing === null) {
       return;
     }
 
     if (existing.archivedAt === undefined) {
-      await ctx.db.patch(existing._id, { archivedAt: Date.now() });
+      await ctx.db.patch(existing._id, { archivedAt: now });
     }
-    const settings = await ctx.db
+  },
+});
+
+/** Bounded continuation job; safe under retries and concurrent archive events. */
+export const disableArchivedOrgKeysPage = internalMutation({
+  args: {
+    clerkOrgId: v.string(),
+    cursor: v.union(v.string(), v.null()),
+  },
+  handler: async (ctx, args): Promise<{ disabled: number; done: boolean }> => {
+    const page = await ctx.db
       .query("keySettings")
       .withIndex("by_org", (q) => q.eq("clerkOrgId", args.clerkOrgId))
-      .collect();
-    for (const setting of settings) {
+      .paginate({ cursor: args.cursor, numItems: 100 });
+    const now = Date.now();
+    for (const setting of page.page) {
+      if (setting.disabled) continue;
       await ctx.db.patch(setting._id, {
         disabled: true,
-        updatedAt: Date.now(),
+        updatedAt: now,
       });
     }
+    if (!page.isDone) {
+      await ctx.scheduler.runAfter(
+        0,
+        internal.organizations.disableArchivedOrgKeysPage,
+        { clerkOrgId: args.clerkOrgId, cursor: page.continueCursor },
+      );
+    }
+    return { disabled: page.page.length, done: page.isDone };
   },
 });
 
@@ -198,6 +257,13 @@ export const ensureOrganization = mutation({
       .unique();
 
     if (existing === null) {
+      const tombstone = await ctx.db
+        .query("organizationTombstones")
+        .withIndex("by_clerk_org", (q) => q.eq("clerkOrgId", args.clerkOrgId))
+        .unique();
+      if (tombstone !== null) {
+        throw new Error("Organization is archived");
+      }
       const signedSlug = claims.orgSlug?.trim().toLowerCase();
       if (signedSlug === undefined || !isValidSlug(signedSlug)) {
         throw new Error(
@@ -243,6 +309,16 @@ export const setPublicHandle = mutation({
     if (!organization) throw new Error("Organization not found");
     if (organization.archivedAt !== undefined) {
       throw new Error("Organization is archived");
+    }
+    if (organization.publicHandle === handle) return organization;
+    const publishedProject = await ctx.db
+      .query("projects")
+      .withIndex("by_org_status", (q) =>
+        q.eq("organizationId", organization._id).eq("status", "published"),
+      )
+      .first();
+    if (publishedProject !== null) {
+      throw new Error("Public handle is permanent after first publication");
     }
     const existing = await ctx.db
       .query("organizations")

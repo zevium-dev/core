@@ -10,6 +10,8 @@ export type NotificationView = {
   title: string;
   body: string;
   refId: string;
+  publisherHandle: string | undefined;
+  projectSlug: string | undefined;
   readAt: number | undefined;
   createdAt: number;
 };
@@ -54,6 +56,8 @@ export const listForOrg = query({
         title: n.title,
         body: n.body,
         refId: n.refId,
+        publisherHandle: n.publisherHandle,
+        projectSlug: n.projectSlug,
         readAt: n.readAt,
         createdAt: n.createdAt,
       })),

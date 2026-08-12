@@ -7,6 +7,10 @@ import {
   isValidSlug,
   validateOpenApiSpec,
 } from "./validate.js";
+import {
+  MAX_DAILY_FREE_TIER_CALLS,
+  MAX_ENDPOINT_COST_CREDITS,
+} from "./pricing.js";
 
 const validBase = {
   openapi: "3.1.0",
@@ -152,8 +156,8 @@ describe("validateOpenApiSpec", () => {
     ]);
   });
 
-  it.each([0, 1, Number.MAX_SAFE_INTEGER])(
-    "accepts safe integer pricing boundary %s",
+  it.each([0, 1, MAX_ENDPOINT_COST_CREDITS])(
+    "accepts configured pricing boundary %s",
     (value) => {
       const spec = JSON.stringify({
         ...validBase,
@@ -169,6 +173,24 @@ describe("validateOpenApiSpec", () => {
       expect(validateOpenApiSpec(spec).errors).toEqual([]);
     },
   );
+
+  it("rejects pricing above configured economic ceilings", () => {
+    const spec = JSON.stringify({
+      ...validBase,
+      paths: {
+        "/x": {
+          get: {
+            "x-zevium-cost": MAX_ENDPOINT_COST_CREDITS + 1,
+            "x-zevium-free-tier": MAX_DAILY_FREE_TIER_CALLS + 1,
+          },
+        },
+      },
+    });
+    expect(validateOpenApiSpec(spec).errors).toEqual([
+      expect.objectContaining({ message: expect.stringMatching(/at most/) }),
+      expect.objectContaining({ message: expect.stringMatching(/at most/) }),
+    ]);
+  });
 
   it("warns on missing cost", () => {
     const result = validateOpenApiSpec(

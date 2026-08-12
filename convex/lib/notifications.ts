@@ -6,6 +6,7 @@ export type NotificationKind =
   | "low_balance"
   | "spec_published"
   | "version_deprecated"
+  | "project_retirement"
   | "webhook_failed"
   | "visibility_changed"
   | "transfer_failed"
@@ -17,6 +18,8 @@ export type CreateNotificationArgs = {
   title: string;
   body: string;
   refId: string;
+  publisherHandle?: string;
+  projectSlug?: string;
 };
 
 export type CreateNotificationResult = {
@@ -38,6 +41,9 @@ export async function createNotification(
     .withIndex("by_ref", (q) => q.eq("refId", args.refId))
     .unique();
   if (existing !== null) {
+    if (existing.clerkOrgId !== args.clerkOrgId) {
+      throw new Error("Notification reference belongs to another organization");
+    }
     return { created: false, id: existing._id };
   }
 
@@ -47,7 +53,80 @@ export async function createNotification(
     title: args.title,
     body: args.body,
     refId: args.refId,
+    publisherHandle: args.publisherHandle,
+    projectSlug: args.projectSlug,
     createdAt: Date.now(),
   });
   return { created: true, id };
+}
+
+/**
+ * Canonical lifecycle notice. Identical retries do nothing; changed schedule
+ * state replaces the existing row, marks it unread, and moves it to the top.
+ */
+export async function upsertNotification(
+  ctx: MutationCtx,
+  args: CreateNotificationArgs,
+): Promise<CreateNotificationResult> {
+  const existing = await ctx.db
+    .query("notifications")
+    .withIndex("by_ref", (q) => q.eq("refId", args.refId))
+    .unique();
+  if (existing === null) return await createNotification(ctx, args);
+  if (existing.clerkOrgId !== args.clerkOrgId) {
+    throw new Error("Notification reference belongs to another organization");
+  }
+  if (
+    existing.kind === args.kind &&
+    existing.title === args.title &&
+    existing.body === args.body &&
+    existing.publisherHandle === args.publisherHandle &&
+    existing.projectSlug === args.projectSlug
+  ) {
+    return { created: false, id: existing._id };
+  }
+  await ctx.db.patch(existing._id, {
+    kind: args.kind,
+    title: args.title,
+    body: args.body,
+    publisherHandle: args.publisherHandle,
+    projectSlug: args.projectSlug,
+    readAt: undefined,
+    createdAt: Date.now(),
+  });
+  return { created: false, id: existing._id };
+}
+
+export type ProjectRetirementConsumerNoticeArgs = {
+  consumerClerkOrgId: string;
+  projectId: Id<"projects">;
+  projectName: string;
+  projectSlug: string;
+  publisherName: string;
+  publisherHandle?: string;
+  sunsetAt: number;
+  message?: string;
+  event: "scheduled" | "canceled";
+};
+
+/** One canonical retirement notice per project and consumer organization. */
+export async function upsertProjectRetirementConsumerNotice(
+  ctx: MutationCtx,
+  args: ProjectRetirementConsumerNoticeArgs,
+): Promise<CreateNotificationResult> {
+  return await upsertNotification(ctx, {
+    clerkOrgId: args.consumerClerkOrgId,
+    kind: "project_retirement",
+    title:
+      args.event === "scheduled"
+        ? `${args.projectName} retirement scheduled`
+        : `${args.projectName} retirement canceled`,
+    body:
+      args.event === "scheduled"
+        ? `${args.publisherName}'s ${args.projectName} API will sunset ${new Date(args.sunsetAt).toISOString()}. ${args.message ?? "Migrate before the cutoff."}`
+        : `${args.publisherName}'s ${args.projectName} API retirement scheduled for ${new Date(args.sunsetAt).toISOString()} was canceled.`,
+    refId: `project_retirement:${args.projectId}:consumer:${args.consumerClerkOrgId}`,
+    publisherHandle: args.publisherHandle,
+    projectSlug: args.projectSlug,
+  });
 }

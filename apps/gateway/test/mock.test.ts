@@ -85,13 +85,17 @@ function walletStub(clerkOrgId: string): WalletStub {
   return env.WALLET.get(id);
 }
 
-async function installFixtures(opts: { clerkOrgId: string; credits?: number }) {
+async function installFixtures(opts: {
+  clerkOrgId: string;
+  credits?: number;
+  spec?: string;
+}) {
   const keys = new FixtureKeyVerifier({
     [KEY_SECRET]: { orgId: opts.clerkOrgId, keyId: KEY_ID, scopes: ["read"] },
   });
   const specs = new FixtureSpecSource();
   specs.set(ORG_SLUG, PROJECT_SLUG, {
-    spec: SPEC,
+    spec: opts.spec ?? SPEC,
     projectId: "proj_demo",
     organizationId: opts.clerkOrgId,
     clerkOrgId: opts.clerkOrgId,
@@ -217,6 +221,18 @@ describe("mock gateway route", () => {
 
     const state = await walletStub("org_mock_badkey").getState();
     expect(state.balance).toBe(10);
+  });
+
+  it("maps legacy invalid pricing to a controlled error", async () => {
+    await installFixtures({
+      clerkOrgId: "org_mock_legacy_price",
+      credits: 10,
+      spec: SPEC.replace('"x-zevium-cost":5', '"x-zevium-cost":1000001'),
+    });
+
+    const res = await mockFetch(`/mock/${ORG_SLUG}/${PROJECT_SLUG}/users/1`);
+    expect(res.status).toBe(404);
+    await expect(res.json()).resolves.toMatchObject({ error: "invalid_spec" });
   });
 
   it("404 on unknown operation", async () => {

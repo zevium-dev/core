@@ -140,9 +140,16 @@ function asMember(t: ReturnType<typeof convexTest>, clerkOrgId: string) {
 }
 
 describe("usage.listForOrg", () => {
-  it("rejects non-member", async () => {
+  it("scopes by signed org id even when another org slug is supplied", async () => {
     const t = convexTest(schema, modules);
     await seedWorld(t);
+    await t.run(async (ctx) => {
+      await ctx.db.insert("organizations", {
+        clerkOrgId: "org_other",
+        name: "Other",
+        slug: "other",
+      });
+    });
     const outsider = t.withIdentity({
       subject: "user_outsider",
       org_id: "org_other",
@@ -155,12 +162,11 @@ describe("usage.listForOrg", () => {
       org_role: string;
     });
 
-    await expect(
-      outsider.query(api.usage.listForOrg, {
-        orgSlug: "consumer-co",
-        paginationOpts: { numItems: 10, cursor: null },
-      }),
-    ).rejects.toThrow(/Not a member/);
+    const result = await outsider.query(api.usage.listForOrg, {
+      orgSlug: "consumer-co",
+      paginationOpts: { numItems: 10, cursor: null },
+    });
+    expect(result.page).toEqual([]);
   });
 
   it("rejects unauthenticated", async () => {
@@ -270,10 +276,42 @@ describe("usage.listForOrg", () => {
   });
 });
 
-describe("billing.cycleBreakdown", () => {
-  it("rejects non-member", async () => {
+describe("analytics.orgOverview", () => {
+  it("keeps recent calls across month boundaries and survives Clerk slug drift", async () => {
     const t = convexTest(schema, modules);
     await seedWorld(t);
+    const renamedInClerk = t.withIdentity({
+      subject: "user_consumer",
+      org_id: "org_consumer",
+      org_slug: "brand-new-slug",
+      org_role: "org:admin",
+    } as {
+      subject: string;
+      org_id: string;
+      org_slug: string;
+      org_role: string;
+    });
+
+    const overview = await renamedInClerk.query(api.analytics.orgOverview, {
+      orgSlug: "brand-new-slug",
+    });
+    expect(overview.recent.some((event) => event.credits === 999)).toBe(true);
+    expect(overview.callsCycle).toBe(4);
+    expect(overview.creditsCycle).toBe(85);
+  });
+});
+
+describe("billing.cycleBreakdown", () => {
+  it("never uses a supplied slug to escape the signed org scope", async () => {
+    const t = convexTest(schema, modules);
+    await seedWorld(t);
+    await t.run(async (ctx) => {
+      await ctx.db.insert("organizations", {
+        clerkOrgId: "org_other",
+        name: "Other",
+        slug: "other",
+      });
+    });
     const outsider = t.withIdentity({
       subject: "user_outsider",
       org_id: "org_other",
@@ -285,9 +323,11 @@ describe("billing.cycleBreakdown", () => {
       org_slug: string;
       org_role: string;
     });
-    await expect(
-      outsider.query(api.billing.cycleBreakdown, { orgSlug: "consumer-co" }),
-    ).rejects.toThrow(/Not a member/);
+    const result = await outsider.query(api.billing.cycleBreakdown, {
+      orgSlug: "consumer-co",
+    });
+    expect(result.totalCalls).toBe(0);
+    expect(result.totalCredits).toBe(0);
   });
 
   it("aggregates current UTC month byKey and byProject", async () => {
