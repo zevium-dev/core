@@ -738,9 +738,19 @@ export function validateAuditEnvironment(environment = process.env) {
       );
     }
     if (DIRECT_ENV_OVERRIDE_KEYS.has(upperKey)) {
-      throw new AuditValidationError(
-        `${key} overrides audit scope, registry, lockfile, or filtering policy.`,
-      );
+      const miseToolNodePath =
+        upperKey === "NODE_PATH" &&
+        typeof value === "string" &&
+        value.length > 0 &&
+        value.split(path.delimiter).every((entry) => {
+          if (entry.length === 0 || entry.includes("\0")) return false;
+          return /[/\\]mise[/\\]installs[/\\]/u.test(path.resolve(entry));
+        });
+      if (!miseToolNodePath) {
+        throw new AuditValidationError(
+          `${key} overrides audit scope, registry, lockfile, or filtering policy.`,
+        );
+      }
     }
     if (upperKey.startsWith("COREPACK_") && upperKey !== "COREPACK_ROOT") {
       throw new AuditValidationError(
