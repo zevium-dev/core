@@ -441,9 +441,21 @@ export function validateAuditBootstrap({ requireInstalled = false } = {}) {
         /^pnpm\/11\.8\.0 npm\/\? node\/v24\.15\.0 [a-z0-9_-]+ [a-z0-9_-]+$/u.test(
           value ?? "",
         ));
+    const miseToolNodePath =
+      upper === "NODE_PATH" &&
+      typeof value === "string" &&
+      value.length > 0 &&
+      value
+        .split(path.delimiter)
+        .every(
+          (entry) =>
+            entry.length > 0 &&
+            /[/\\]mise[/\\]installs[/\\]/u.test(entry) &&
+            !entry.includes(".."),
+        );
     if (
       upper === "NODE_OPTIONS" ||
-      upper === "NODE_PATH" ||
+      (upper === "NODE_PATH" && !miseToolNodePath) ||
       (upper.startsWith("COREPACK_") && upper !== "COREPACK_ROOT") ||
       ((upper.startsWith("NPM_CONFIG_") || upper.startsWith("PNPM_CONFIG_")) &&
         !allowedPackageManagerRuntime)
