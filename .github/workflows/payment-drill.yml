@@ -36,7 +36,7 @@ jobs:
   real-sandbox-checkout:
     if: github.event_name == 'workflow_dispatch'
     runs-on: blacksmith-2vcpu-ubuntu-2404
-    timeout-minutes: 20
+    timeout-minutes: 30
     environment: staging
     steps:
       - uses: actions/checkout@v6
@@ -53,7 +53,16 @@ jobs:
         run: |
           npm install --global agent-browser@0.27.1
           agent-browser install --with-deps
-      - name: Run authenticated publish and metered-call journey
+      - name: Buy credits through real hosted Checkout and verify exact grant
+        env:
+          E2E_BASE_URL: ${{ vars.STAGING_WEB_URL }}
+          E2E_EMAIL: ${{ secrets.STAGING_E2E_EMAIL }}
+          E2E_PASSWORD: ${{ secrets.STAGING_E2E_PASSWORD }}
+          E2E_OTP: ${{ secrets.STAGING_E2E_OTP }}
+          PAYMENT_DRILL_PHASE: grant
+          STRIPE_SECRET_KEY: ${{ secrets.STAGING_STRIPE_SECRET_KEY }}
+        run: e2e/04-payment-drill.sh
+      - name: Run authenticated publish and paid metered-call journey
         env:
           E2E_BASE_URL: ${{ vars.STAGING_WEB_URL }}
           GATEWAY_URL: ${{ vars.STAGING_GATEWAY_URL }}
@@ -63,18 +72,66 @@ jobs:
           E2E_API_KEY: ${{ secrets.STAGING_E2E_API_KEY }}
           E2E_ORG_SLUG: ${{ vars.STAGING_E2E_ORG_SLUG }}
         run: e2e/run-all.sh
-      - name: Run real Stripe Checkout and refund journey
+      - name: Prove partial and full refunds plus signed webhook replay
         env:
           E2E_BASE_URL: ${{ vars.STAGING_WEB_URL }}
           E2E_EMAIL: ${{ secrets.STAGING_E2E_EMAIL }}
           E2E_PASSWORD: ${{ secrets.STAGING_E2E_PASSWORD }}
           E2E_OTP: ${{ secrets.STAGING_E2E_OTP }}
+          PAYMENT_DRILL_PHASE: refund
+          STRIPE_SECRET_KEY: ${{ secrets.STAGING_STRIPE_SECRET_KEY }}
+          STRIPE_WEBHOOK_ENDPOINT_URL: ${{ vars.STAGING_CONVEX_SITE_URL }}/stripe-webhook
+        run: e2e/04-payment-drill.sh
+      - name: Recover paid drill Checkout
+        if: always()
+        env:
+          PAYMENT_DRILL_PHASE: cleanup
           STRIPE_SECRET_KEY: ${{ secrets.STAGING_STRIPE_SECRET_KEY }}
         run: e2e/04-payment-drill.sh
-      - name: Upload failure evidence
-        if: failure()
+      - name: Sanitize browser and provider evidence
+        if: always()
+        env:
+          E2E_API_KEY: ${{ secrets.STAGING_E2E_API_KEY }}
+          E2E_EMAIL: ${{ secrets.STAGING_E2E_EMAIL }}
+          E2E_OTP: ${{ secrets.STAGING_E2E_OTP }}
+          E2E_PASSWORD: ${{ secrets.STAGING_E2E_PASSWORD }}
+          STRIPE_SECRET_KEY: ${{ secrets.STAGING_STRIPE_SECRET_KEY }}
+        run: node e2e/sanitize-artifacts.mjs
+      - name: Upload sanitized provider evidence
+        if: always()
         uses: actions/upload-artifact@v7
         with:
           name: payment-drill-evidence
           path: e2e/artifacts
           if-no-files-found: ignore
+          retention-days: 14
+
+  provider-sandbox-primitives:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 10
+    environment: staging
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/cache@v5
+        with:
+          path: ~/.local/share/pnpm/store
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+      - uses: jdx/mise-action@v4
+      - name: Verify Stripe onboarding-link, transfer, reversal, and payout primitives
+        env:
+          STRIPE_PROOF_RUN_REF: ${{ github.run_id }}-${{ github.run_attempt }}
+          STRIPE_SECRET_KEY: ${{ secrets.STAGING_STRIPE_SECRET_KEY }}
+        run: node e2e/stripe-provider-proof.mjs provider-settlement
+      - name: Upload sanitized provider-primitives evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: stripe-provider-primitives-evidence
+          path: e2e/artifacts/stripe-provider-proof.json
+          if-no-files-found: error
+          retention-days: 14

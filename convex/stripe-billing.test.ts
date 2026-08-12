@@ -313,10 +313,28 @@ describe("Stripe Checkout control plane", () => {
   it("keeps exhausted poison receipts dead until an explicit admin replay", async () => {
     const t = convexTest(schema, modules);
     await t.run(async (ctx) => {
+      const organizationId = await ctx.db.insert("organizations", {
+        clerkOrgId: "org_poison_recovery",
+        name: "Poison recovery",
+        slug: "poison-recovery",
+      });
+      await ctx.db.insert("checkoutIntents", {
+        organizationId,
+        packId: "pack_10",
+        stripePriceId: "price_poison",
+        amount: 1_000,
+        currency: "usd",
+        credits: 100_000,
+        stripeCheckoutSessionId: "cs_poison",
+        status: "open",
+        createdAt: 1,
+        updatedAt: 1,
+        expiresAt: 2,
+      });
       await ctx.db.insert("paymentEvents", {
         stripeEventId: "evt_poison",
         stripeAccount: "platform",
-        eventType: "checkout.session.completed",
+        eventType: "checkout.session.expired",
         objectId: "cs_poison",
         status: "failed",
         attempts: STRIPE_EVENT_MAX_ATTEMPTS,
@@ -329,7 +347,7 @@ describe("Stripe Checkout control plane", () => {
       await t.mutation(internal.billing.receiveStripeEvent, {
         stripeEventId: "evt_poison",
         stripeAccount: "platform",
-        eventType: "checkout.session.completed",
+        eventType: "checkout.session.expired",
         objectId: "cs_poison",
       }),
     ).toEqual({ isNew: false, scheduled: false });
@@ -374,6 +392,39 @@ describe("Stripe Checkout control plane", () => {
       replayCount: 1,
       lastReplayedBy: "operator",
     });
+    const priorStripeKey = process.env.STRIPE_SECRET_KEY;
+    process.env.STRIPE_SECRET_KEY = "sk_test_local_projection";
+    try {
+      await t.action(internal.billing.processStripeEvent, {
+        stripeEventId: "evt_poison",
+      });
+    } finally {
+      if (priorStripeKey === undefined) delete process.env.STRIPE_SECRET_KEY;
+      else process.env.STRIPE_SECRET_KEY = priorStripeKey;
+    }
+    const recovered = await t.run(async (ctx) => {
+      const [event, checkout] = await Promise.all([
+        ctx.db
+          .query("paymentEvents")
+          .withIndex("by_stripe_event", (q) =>
+            q.eq("stripeEventId", "evt_poison"),
+          )
+          .unique(),
+        ctx.db
+          .query("checkoutIntents")
+          .withIndex("by_checkout_session", (q) =>
+            q.eq("stripeCheckoutSessionId", "cs_poison"),
+          )
+          .unique(),
+      ]);
+      return { event, checkout };
+    });
+    expect(recovered.event).toMatchObject({
+      status: "processed",
+      attempts: 1,
+      replayCount: 1,
+    });
+    expect(recovered.checkout).toMatchObject({ status: "expired" });
   });
 
   it("projects failed and expired Checkout sessions into terminal UI states", async () => {
