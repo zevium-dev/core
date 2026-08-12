@@ -746,13 +746,6 @@ export const runDueProbes = internalAction({
   },
 });
 
-export function toQualitySnapshotContract(
-  snapshot: Doc<"qualitySnapshots">,
-  now = Date.now(),
-): QualitySnapshotContract {
-  return qualitySnapshotContract(snapshot, now);
-}
-
 export const getPublicSnapshot = query({
   args: { projectId: v.id("projects") },
   handler: async (ctx, args): Promise<QualitySnapshotContract | null> => {
@@ -772,7 +765,7 @@ export const getPublicSnapshot = query({
       .first();
     return latest === null || latest._id !== snapshot.specVersionId
       ? null
-      : toQualitySnapshotContract(snapshot);
+      : qualitySnapshotContract(snapshot);
   },
 });
 

@@ -26,7 +26,7 @@ Outbox rows materialize complete event JSON at source mutation time. Claims use 
 
 ## Secrets And Keys
 
-Raw API-key secrets never enter Convex arguments, tables, outbox rows, events, logs, vectors, or telemetry. `key.put` carries only `secretSha256`, Clerk key identity, owner/subject identity, independent `budgetId`, lifecycle, caps, and scopes. Publisher credentials use AES-GCM transport envelopes with revision-bound AAD.
+Raw API-key secrets never enter Convex arguments, tables, outbox rows, events, logs, vectors, or telemetry. `key.put` carries only `secretSha256`, Clerk key identity, owner and subject identity, independent `budgetId`, lifecycle, caps, and scopes. Publisher credentials use AES-GCM transport envelopes with revision-bound AAD.
 
 ## Rollout
 

@@ -9,7 +9,6 @@ import {
   FixtureSpecSource,
   InternalHttpSpecSource,
   type PublicSpecSource,
-  type SpecSource,
 } from "./spec-source";
 import {
   CachedCatalogueSource,

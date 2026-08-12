@@ -23,7 +23,7 @@ export function lineDiff(oldText: string, newText: string): DiffLine[] {
 
   // lcs[i][j] = length of LCS of a[i:] and b[j:]
   const lcs: number[][] = Array.from({ length: m + 1 }, () =>
-    new Array<number>(n + 1).fill(0),
+    Array.from<number>({ length: n + 1 }).fill(0),
   );
   for (let i = m - 1; i >= 0; i--) {
     for (let j = n - 1; j >= 0; j--) {

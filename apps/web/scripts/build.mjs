@@ -27,9 +27,14 @@ for (const name of [
   "VITE_CONVEX_URL",
   "VITE_GATEWAY_URL",
 ]) {
-  if (!process.env[name]) {
+  if (!process.env[name]?.trim()) {
     throw new Error(`${name} is required for a production build`);
   }
+}
+
+if (process.argv.includes("--check-env")) {
+  process.stdout.write("Production build environment is complete\n");
+  process.exit(0);
 }
 
 const result = spawnSync("pnpm", ["exec", "vite", "build"], {

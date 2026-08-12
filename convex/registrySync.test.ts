@@ -11,17 +11,15 @@ import {
 } from "@zevium/shared";
 import { convexTest } from "convex-test";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { api, internal } from "./_generated/api";
+import { internal } from "./_generated/api";
 import { encryptCredential } from "./lib/credentialCrypto";
 import {
-  enqueueCatalogueSnapshot,
   enqueueKeyPut,
   enqueueKeyRevoke,
   enqueueOrgArchive,
   enqueueOrgPut,
   enqueuePublishedProjectProjection,
   enqueueRegistryEvent,
-  enqueueRouteArchive,
 } from "./registrySync";
 import schema from "./schema";
 

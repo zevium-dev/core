@@ -22,8 +22,9 @@ const GATEWAY = resolveGatewayOrigin(
   import.meta.env.VITE_GATEWAY_URL as string | undefined,
 );
 
-const FIRST_CALL = `curl "${GATEWAY}/gateway/acme/summarize/v1/summarize" \\
-  -H "Authorization: Bearer ak_your_api_key" \\
+const FIRST_CALL = `ZEVIUM_API_KEY="paste-your-key-here"
+curl "${GATEWAY}/gateway/acme/summarize/v1/summarize" \\
+  --oauth2-bearer "$ZEVIUM_API_KEY" \\
   -H "Content-Type: application/json" \\
   -d '{"text":"Zevium is an agent-first API marketplace."}'`;
 

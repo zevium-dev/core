@@ -121,7 +121,7 @@ describe("validateOpenApiSpec", () => {
     ["fractional", 1.5],
     ["negative", -1],
     ["unsafe", Number.MAX_SAFE_INTEGER + 1],
-    ["overflow", 1e309],
+    ["overflow", Number.POSITIVE_INFINITY],
     ["string", "1"],
     ["null", null],
   ])("rejects %s x-zevium-cost", (_label, value) => {
@@ -141,7 +141,7 @@ describe("validateOpenApiSpec", () => {
     ["fractional", 1.5],
     ["negative", -1],
     ["unsafe", Number.MAX_SAFE_INTEGER + 1],
-    ["overflow", 1e309],
+    ["overflow", Number.POSITIVE_INFINITY],
     ["string", "1"],
     ["null", null],
   ])("rejects %s x-zevium-free-tier", (_label, value) => {

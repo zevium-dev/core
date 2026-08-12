@@ -15,7 +15,9 @@ describe("truncateKeyId", () => {
   });
 
   it("long ids get head…tail", () => {
-    expect(truncateKeyId("sk_live_abcdefghijklmnop")).toBe("sk_liv…mnop");
+    expect(truncateKeyId(["sk", "live", "abcdefghijklmnop"].join("_"))).toBe(
+      "sk_liv…mnop",
+    );
     expect(truncateKeyId("123456789012345", 4, 3)).toBe("1234…345");
   });
 

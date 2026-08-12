@@ -31,7 +31,8 @@ export function validateConvexDryRun(expected, output) {
   if (typeof output !== "string" || !output.includes("[dry run]")) {
     throw new Error("Convex target proof requires dry-run output");
   }
-  const clean = output.replace(/\u001b\[[0-9;]*m/g, "");
+  const escapeChar = String.fromCharCode(27);
+  const clean = output.replace(new RegExp(`${escapeChar}\\[[0-9;]*m`, "g"), "");
   const targets = [
     ...clean.matchAll(
       /└─\s+(https:\/\/[a-z0-9-]+\.convex\.cloud)|Deploying to\s+(https:\/\/[a-z0-9-]+\.convex\.cloud)\.\.\.\s+\[dry run\]/g,

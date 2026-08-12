@@ -351,7 +351,6 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
   #orgArchived = false;
   #syncInFlight: Promise<SyncGrantsResult> | null = null;
   #flushSeq = 0;
-  #loaded = false;
   #mutationTail: Promise<void> = Promise.resolve();
 
   constructor(ctx: DurableObjectState, env: Cloudflare.Env) {
@@ -430,7 +429,6 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
       (stored.get(K_LAST_COMPACTION_AT) as number | undefined) ?? 0;
     this.#orgArchived =
       (stored.get(K_ORG_ARCHIVED) as boolean | undefined) ?? false;
-    this.#loaded = true;
   }
 
   #available(): number {

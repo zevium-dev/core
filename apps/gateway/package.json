@@ -4,10 +4,10 @@
   "type": "module",
   "scripts": {
     "dev": "wrangler dev --port 8787",
-    "test": "vitest run",
-    "lint": "eslint --max-warnings 0 src test",
+    "test": "vitest run --allowOnly=false",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "lint": "oxlint --config ../../.oxlintrc.json --deny-warnings --report-unused-disable-directives --no-ignore --disable-nested-config src test vitest.config.ts worker-configuration.d.ts"
   },
   "dependencies": {
     "@zevium/shared": "workspace:*",

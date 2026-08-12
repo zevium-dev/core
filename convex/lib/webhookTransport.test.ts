@@ -198,12 +198,11 @@ describe("deliverPinnedHttps", () => {
         async () => response(200),
       ),
     );
-    const rejection = expect(promise).rejects.toBeInstanceOf(
-      WebhookTransportError,
-    );
+    const rejection = promise.catch((error: unknown) => error);
     await vi.advanceTimersByTimeAsync(WEBHOOK_DNS_TIMEOUT_MS);
-    await rejection;
-    await expect(promise).rejects.toMatchObject({ retryable: true });
+    const error = await rejection;
+    expect(error).toBeInstanceOf(WebhookTransportError);
+    expect(error).toMatchObject({ retryable: true });
   });
 
   it("aborts response streaming after strict body limit", async () => {

@@ -629,6 +629,7 @@ function KeyRow({
           <Button
             variant="ghost"
             size="sm"
+            aria-label="Rotate API key"
             onClick={onRotate}
             disabled={lifecycle !== "current"}
             title="Rotate key (old key works 24h)"

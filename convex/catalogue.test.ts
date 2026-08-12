@@ -252,7 +252,7 @@ describe("catalogue.listPublic", () => {
 
   it("attaches pricing summary from latest published spec", async () => {
     const t = convexTest(schema, modules);
-    const seed = await seedCatalogue(t);
+    await seedCatalogue(t);
 
     const result = await t.query(api.catalogue.listPublic, {});
     const bySlug = Object.fromEntries(

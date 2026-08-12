@@ -429,7 +429,7 @@ export type RegistryVerifiedKeyRotationProjection = {
 const ZERO_DIGEST = "0".repeat(64);
 const HEX_SHA256 = /^[a-f0-9]{64}$/;
 const NONCE = /^[A-Za-z0-9_-]{16,128}$/;
-const IDENTIFIER = /^[A-Za-z0-9_:.\/-]+$/;
+const IDENTIFIER = /^[A-Za-z0-9_:./-]+$/;
 const KEBAB = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 export function registryGenesisDigest(): Sha256Hex {
