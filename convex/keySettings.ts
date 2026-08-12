@@ -82,6 +82,7 @@ const verifiedKeyRotationProjectionValidator = v.object({
 export type KeySettingView = {
   _id: Id<"keySettings">;
   keyId: string;
+  keyFamilyId: string;
   keyName?: string;
   ownerUserId?: string;
   budgetId?: string;
@@ -99,6 +100,7 @@ export type KeySettingView = {
 
 export type GatewayKeySettingRow = {
   keyId: string;
+  keyFamilyId: string;
   budgetId?: string;
   budgetRevision?: number;
   monthlyCapCredits?: number;
@@ -113,6 +115,7 @@ function toView(doc: Doc<"keySettings">): KeySettingView {
   return {
     _id: doc._id,
     keyId: doc.keyId,
+    keyFamilyId: doc.keyFamilyId ?? doc.keyId,
     keyName: doc.keyName,
     ownerUserId: doc.ownerUserId,
     budgetId: doc.budgetId,
@@ -130,6 +133,7 @@ function toView(doc: Doc<"keySettings">): KeySettingView {
 export function toGatewayRow(doc: Doc<"keySettings">): GatewayKeySettingRow {
   return {
     keyId: doc.keyId,
+    keyFamilyId: doc.keyFamilyId ?? doc.keyId,
     budgetId: doc.budgetId,
     budgetRevision: doc.budgetRevision,
     monthlyCapCredits: doc.monthlyCapCredits,
@@ -219,12 +223,13 @@ async function getOwnedVerifiedRow(
 async function insertVerifiedSetting(
   ctx: MutationCtx,
   provision: RegistryPayloadMap["key.put"],
-  patch: Pick<UpsertPatch, "rotatedFromKeyId"> = {},
+  patch: Pick<UpsertPatch, "rotatedFromKeyId" | "keyFamilyId"> = {},
 ): Promise<Doc<"keySettings">> {
   const now = Date.now();
   const id = await ctx.db.insert("keySettings", {
     clerkOrgId: provision.clerkOrgId,
     keyId: provision.clerkKeyId,
+    keyFamilyId: patch.keyFamilyId ?? provision.clerkKeyId,
     subjectUserId: provision.subjectUserId,
     ownerUserId: provision.ownerUserId,
     budgetId: provision.budgetId,
@@ -250,6 +255,7 @@ async function insertVerifiedSetting(
 }
 
 type UpsertPatch = {
+  keyFamilyId?: string;
   monthlyCapCredits?: number;
   disabled?: boolean;
   rotatedFromKeyId?: string;
@@ -636,6 +642,7 @@ export const completeRotation = mutation({
     }
     const newDoc = await insertVerifiedSetting(ctx, projection.newProvision, {
       rotatedFromKeyId: projection.oldKeyId,
+      keyFamilyId: old.keyFamilyId ?? old.keyId,
     });
     await enqueueKeyPut(ctx, projection.newProvision);
     void newDoc;

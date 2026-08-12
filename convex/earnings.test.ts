@@ -29,10 +29,12 @@ async function seedEarnings(
       visibility: "public",
       tags: [],
     });
-    await ctx.db.insert("publisherEarnings", {
+    const earningId = await ctx.db.insert("publisherEarnings", {
       publisherOrganizationId: organizationId,
       consumerOrganizationId: organizationId,
       projectId,
+      projectName: "Forecast",
+      projectSlug: "forecast",
       usageSettlementRefId: "settle:one",
       grossCredits: 100_001,
       platformFeeAtoms: 50_000_500,
@@ -46,6 +48,31 @@ async function seedEarnings(
       status: "available",
       createdAt: Date.now(),
       updatedAt: Date.now(),
+    });
+    const publisherBalanceId = await ctx.db.insert("publisherBalances", {
+      publisherOrganizationId: organizationId,
+      availableAtoms: 950_009_500,
+      allocatedAtoms: 0,
+      paidAtoms: 0,
+      pendingRiskAtoms: 0,
+      reversedAtoms: 0,
+      failedAtoms: 0,
+      sequence: 1,
+      migrationStatus: "verified",
+      migrationWatermarkSequence: 1,
+      updatedAt: Date.now(),
+    });
+    await ctx.db.insert("publisherSettlementEntries", {
+      publisherBalanceId,
+      publisherOrganizationId: organizationId,
+      kind: "earning_release",
+      availableDeltaAtoms: 950_009_500,
+      allocatedDeltaAtoms: 0,
+      paidDeltaAtoms: 0,
+      refId: `publisher:earning:${earningId}:release`,
+      sequence: 1,
+      earningId,
+      createdAt: Date.now(),
     });
     return { organizationId, projectId };
   });

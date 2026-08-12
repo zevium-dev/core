@@ -142,7 +142,7 @@ describe("hostile control-plane state", () => {
       });
       await ctx.db.insert("wallets", {
         organizationId,
-        balance: 10,
+        balance: 0,
         sequence: 0,
       });
       const versionId = await ctx.db.insert("specVersions", {
@@ -158,6 +158,11 @@ describe("hostile control-plane state", () => {
       ownerUserId: "user_hostile",
       clerkOrgId: "org_hostile",
     });
+    await t.mutation(internal.wallets.applyAdminAdjustment, {
+      organizationId,
+      amount: 10,
+      refId: "admin:hostile-owned",
+    });
     const result = await t.mutation(internal.wallets.recordUsage, {
       events: [
         {
@@ -165,14 +170,24 @@ describe("hostile control-plane state", () => {
           projectId: seeded.projectId,
           endpoint: "/run",
           method: "GET",
+          listedCostCredits: 1,
+          pricingDecision: "listed_price" as const,
           credits: 1,
           status: 200,
           latencyMs: 1,
           keyId: "key_owned",
+          keyFamilyId: "key_family_owned",
+          budgetPeriod: "2026-08",
+          budgetUsedBefore: 0,
+          budgetReservedBefore: 0,
+          budgetReservationCredits: 1,
           at: 1,
+          reservationId: "owned",
           settleRefId: "settle:owned",
           consumerClerkOrgId: "org_hostile",
           specVersionId: seeded.versionId,
+          specVersion: "1.0.0",
+          operationId: "GET /run",
           billingOutcome: "settled",
           qualityOutcome: "success",
         },

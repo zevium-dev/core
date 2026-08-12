@@ -59,7 +59,10 @@ async function seedWallet(t: TestConvex<typeof schema>): Promise<SeededWallet> {
       reversedCredits: 0,
       refundedAmount: 0,
       refundedCredits: 0,
+      walletReversedCredits: 0,
       publisherClawbackTargetCredits: 0,
+      reversalSequence: 0,
+      financeMigrationStatus: "verified",
       status: "paid",
       createdAt: 1,
       updatedAt: 1,
@@ -93,7 +96,15 @@ async function seedWallet(t: TestConvex<typeof schema>): Promise<SeededWallet> {
     const specVersionId = await ctx.db.insert("specVersions", {
       projectId: project._id,
       version: "1.0.0",
-      spec: "{}",
+      spec: JSON.stringify({
+        openapi: "3.1.0",
+        info: { title: "Publisher API", version: "1.0.0" },
+        paths: {
+          "/forecast": {
+            get: { operationId: "getForecast", "x-zevium-cost": 15 },
+          },
+        },
+      }),
       publishedAt: 1,
     });
     return {
@@ -111,13 +122,23 @@ function usageEvent(seed: SeededWallet, refId: string, credits = 15) {
     organizationId: seed.publisherOrganizationId,
     projectId: seed.projectId,
     specVersionId: seed.specVersionId,
+    specVersion: "1.0.0",
+    operationId: "getForecast",
     endpoint: "/forecast",
     method: "GET",
+    listedCostCredits: credits,
+    pricingDecision: "listed_price" as const,
     credits,
     status: 200,
     latencyMs: 10,
     keyId: "key_test",
+    keyFamilyId: "key_family_test",
+    budgetPeriod: "2026-08",
+    budgetUsedBefore: 0,
+    budgetReservedBefore: 0,
+    budgetReservationCredits: credits,
     at: 10,
+    reservationId: refId.replace(/^settle:/, ""),
     settleRefId: refId,
     consumerClerkOrgId: "org_consumer",
     billingOutcome: credits === 0 ? ("free" as const) : ("settled" as const),
@@ -143,13 +164,23 @@ describe("wallet settlement ingest contract", () => {
       organizationId: "publisher",
       projectId: "project",
       specVersionId: "version",
+      specVersion: "1.0.0",
+      operationId: "getX",
       endpoint: "/x",
       method: "GET",
+      listedCostCredits: 1,
+      pricingDecision: "listed_price",
       credits: 1,
       status: 200,
       latencyMs: 1,
       keyId: "key",
+      keyFamilyId: "key_family",
+      budgetPeriod: "2026-08",
+      budgetUsedBefore: 0,
+      budgetReservedBefore: 0,
+      budgetReservationCredits: 1,
       at: 1,
+      reservationId: "one",
       settleRefId: "settle:one",
       billingOutcome: "settled",
       qualityOutcome: "success",
@@ -215,8 +246,8 @@ describe("wallet settlement ingest contract", () => {
         {
           refId: "settle:too-expensive",
           status: "rejected",
-          reason: "insufficient authoritative balance",
-          retryable: true,
+          reason: "reservation checkpoint is stale after ledger debit",
+          retryable: false,
         },
       ],
       wallet: { clerkOrgId: "org_consumer", balance: 85, sequence: 2 },
@@ -267,7 +298,7 @@ describe("wallet settlement ingest contract", () => {
         "x-internal-secret": SECRET,
       },
       body: JSON.stringify({
-        events: [{ ...usageEvent(seed, "settle:one"), credits: 16 }],
+        events: [{ ...usageEvent(seed, "settle:one"), latencyMs: 11 }],
       }),
     });
     expect(await alteredReplay.json()).toEqual({
@@ -275,7 +306,7 @@ describe("wallet settlement ingest contract", () => {
         {
           refId: "settle:one",
           status: "rejected",
-          reason: "settlement reference payload conflict",
+          reason: "settlement replay changed immutable payload or linkage",
           retryable: false,
         },
       ],
@@ -290,7 +321,7 @@ describe("wallet settlement ingest contract", () => {
       organizationId: seed.consumerOrganizationId,
       paymentId: seed.paymentId,
       amount: 100,
-      refId: "grant:boundaries",
+      refId: "stripe:payment_intent:pi_test",
     });
 
     const result = await t.mutation(internal.wallets.recordUsage, {
@@ -334,7 +365,7 @@ describe("wallet settlement ingest contract", () => {
       {
         refId: "settle:wrong-publisher",
         status: "rejected",
-        reason: "settlement publisher does not own project",
+        reason: "publisher organization does not own project",
         retryable: false,
       },
     ]);
@@ -348,7 +379,7 @@ describe("wallet settlement ingest contract", () => {
       organizationId: seed.consumerOrganizationId,
       paymentId: seed.paymentId,
       amount: 100,
-      refId: "grant:retirement-freeze",
+      refId: "stripe:payment_intent:pi_test",
     });
     await t.run(async (ctx) => {
       await ctx.db.patch(seed.projectId, {

@@ -227,10 +227,16 @@ describe("retirement consumer fanout", () => {
       });
       await ctx.db.insert("wallets", {
         organizationId: lateConsumerId,
-        balance: 10,
+        balance: 0,
         sequence: 0,
       });
       return { projectId, publisherId, lateConsumerId, versionId };
+    });
+
+    await t.mutation(internal.wallets.applyAdminAdjustment, {
+      organizationId: seed.lateConsumerId,
+      amount: 10,
+      refId: "admin:late-consumer-funding",
     });
 
     expect(
@@ -250,15 +256,25 @@ describe("retirement consumer fanout", () => {
           projectId: seed.projectId,
           endpoint: "/charge",
           method: "POST",
+          listedCostCredits: 1,
+          pricingDecision: "listed_price" as const,
           credits: 1,
           status: 200,
           latencyMs: 10,
           keyId: "key_late",
+          keyFamilyId: "key_family_late",
+          budgetPeriod: "2026-08",
+          budgetUsedBefore: 0,
+          budgetReservedBefore: 0,
+          budgetReservationCredits: 1,
           // Older event time puts this row behind the already-committed cursor.
           at: now - 1,
+          reservationId: "late-retirement-consumer",
           settleRefId: "settle:late-retirement-consumer",
           consumerClerkOrgId: "org_late_consumer",
           specVersionId: seed.versionId,
+          specVersion: "1.0.0",
+          operationId: "POST /charge",
           billingOutcome: "settled",
           qualityOutcome: "success",
         },

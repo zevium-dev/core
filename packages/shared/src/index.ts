@@ -64,6 +64,12 @@ export {
 } from "./org-capabilities.js";
 
 export {
+  signTransferCorrelation,
+  verifyTransferCorrelation,
+  type TransferCorrelationPayload,
+} from "./finance.js";
+
+export {
   isValidSlug,
   isValidSemver,
   collectOpenApiSpecIssues,

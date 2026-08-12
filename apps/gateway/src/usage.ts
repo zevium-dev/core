@@ -16,17 +16,31 @@ export type UsageEvent = {
   consumerClerkOrgId: string;
   projectId: string;
   specVersionId: string;
+  specVersion: string;
+  operationId: string;
   keyId: string;
+  keyFamilyId?: string;
   orgSlug: string;
   projectSlug: string;
   method: string;
   pathTemplate: string;
+  listedCostCredits?: number;
+  freeTierLimit?: number;
+  freeTierUsedBefore?: number;
+  pricingDecision?: "listed_price" | "free_tier" | "zero_price";
+  monthlyCapCredits?: number;
+  budgetPeriod?: string;
+  budgetUsedBefore?: number;
+  budgetReservedBefore?: number;
+  budgetReservationCredits?: number;
   cost: number;
   status: number;
-  /** settled | refunded | blocked | free */
-  outcome: "settled" | "refunded" | "blocked" | "free";
+  /** settled | ambiguous | refunded | blocked | free */
+  outcome: "settled" | "ambiguous" | "refunded" | "blocked" | "free";
   /** Transport truth when no upstream HTTP response existed. */
   qualityOutcome?: "network_error";
+  ambiguous?: boolean;
+  publisherIdempotencyKey?: string;
   latencyMs: number;
   reservationId: string;
 };
@@ -39,16 +53,31 @@ export type ConvexUsageRecord = {
   consumerClerkOrgId: string;
   projectId: string;
   specVersionId: string;
+  specVersion: string;
+  operationId: string;
   endpoint: string;
   method: string;
+  listedCostCredits: number;
+  freeTierLimit?: number;
+  freeTierUsedBefore?: number;
+  pricingDecision: "listed_price" | "free_tier" | "zero_price";
   credits: number;
   status: number;
   latencyMs: number;
   keyId: string;
+  keyFamilyId: string;
+  monthlyCapCredits?: number;
+  budgetPeriod: string;
+  budgetUsedBefore: number;
+  budgetReservedBefore: number;
+  budgetReservationCredits: number;
   at: number;
+  reservationId: string;
   settleRefId: string;
   billingOutcome: "settled" | "refunded" | "free";
   qualityOutcome: "success" | "client_error" | "server_error" | "network_error";
+  ambiguous?: boolean;
+  publisherIdempotencyKey?: string;
 };
 
 /**
@@ -475,23 +504,50 @@ export class ConvexUsageSink implements UsageSink {
 }
 
 export function usageEventToRecord(event: UsageEvent): ConvexUsageRecord {
+  if (
+    event.specVersionId === undefined ||
+    event.specVersion === undefined ||
+    event.operationId === undefined ||
+    event.keyFamilyId === undefined ||
+    event.listedCostCredits === undefined ||
+    event.pricingDecision === undefined ||
+    event.budgetPeriod === undefined ||
+    event.budgetUsedBefore === undefined ||
+    event.budgetReservedBefore === undefined ||
+    event.budgetReservationCredits === undefined
+  ) {
+    throw new Error("settled usage lacks immutable pricing identity");
+  }
   return {
     organizationId: event.organizationId,
     consumerClerkOrgId: event.consumerClerkOrgId,
     projectId: event.projectId,
     specVersionId: event.specVersionId,
+    specVersion: event.specVersion,
+    operationId: event.operationId,
     endpoint: event.pathTemplate,
     method: event.method,
+    listedCostCredits: event.listedCostCredits,
+    freeTierLimit: event.freeTierLimit,
+    freeTierUsedBefore: event.freeTierUsedBefore,
+    pricingDecision: event.pricingDecision,
     credits: event.cost,
     status: event.status,
     latencyMs: event.latencyMs,
     keyId: event.keyId,
+    keyFamilyId: event.keyFamilyId,
+    monthlyCapCredits: event.monthlyCapCredits,
+    budgetPeriod: event.budgetPeriod,
+    budgetUsedBefore: event.budgetUsedBefore,
+    budgetReservedBefore: event.budgetReservedBefore,
+    budgetReservationCredits: event.budgetReservationCredits,
     at: Date.now(),
+    reservationId: event.reservationId,
     settleRefId: `settle:${event.reservationId}`,
     billingOutcome:
       event.outcome === "free"
         ? "free"
-        : event.outcome === "settled"
+        : event.outcome === "settled" || event.outcome === "ambiguous"
           ? "settled"
           : "refunded",
     qualityOutcome:
@@ -503,40 +559,76 @@ export function usageEventToRecord(event: UsageEvent): ConvexUsageRecord {
           : event.status >= 500
             ? "server_error"
             : "network_error"),
+    ...(event.ambiguous === undefined ? {} : { ambiguous: event.ambiguous }),
+    ...(event.publisherIdempotencyKey === undefined
+      ? {}
+      : { publisherIdempotencyKey: event.publisherIdempotencyKey }),
   };
 }
 
 export function pendingToUsageRecord(input: {
   settlementId: string;
+  reservationId: string;
   cost: number;
   settledAt: number;
   organizationId: string;
   consumerClerkOrgId: string;
   projectId: string;
   specVersionId: string;
+  specVersion: string;
+  operationId: string;
   endpoint: string;
   method: string;
+  listedCostCredits: number;
+  freeTierLimit?: number;
+  freeTierUsedBefore?: number;
+  pricingDecision: "listed_price" | "free_tier" | "zero_price";
   status: number;
   latencyMs: number;
   keyId: string;
   billingOutcome: ConvexUsageRecord["billingOutcome"];
   qualityOutcome: ConvexUsageRecord["qualityOutcome"];
+  keyFamilyId: string;
+  monthlyCapCredits?: number;
+  budgetPeriod: string;
+  budgetUsedBefore: number;
+  budgetReservedBefore: number;
+  budgetReservationCredits: number;
+  ambiguous?: boolean;
+  publisherIdempotencyKey?: string;
 }): ConvexUsageRecord {
   return {
     organizationId: input.organizationId,
     consumerClerkOrgId: input.consumerClerkOrgId,
     projectId: input.projectId,
     specVersionId: input.specVersionId,
+    specVersion: input.specVersion,
+    operationId: input.operationId,
     endpoint: input.endpoint,
     method: input.method,
+    listedCostCredits: input.listedCostCredits,
+    freeTierLimit: input.freeTierLimit,
+    freeTierUsedBefore: input.freeTierUsedBefore,
+    pricingDecision: input.pricingDecision,
     credits: input.cost,
     status: input.status,
     latencyMs: input.latencyMs,
     keyId: input.keyId,
+    keyFamilyId: input.keyFamilyId,
+    monthlyCapCredits: input.monthlyCapCredits,
+    budgetPeriod: input.budgetPeriod,
+    budgetUsedBefore: input.budgetUsedBefore,
+    budgetReservedBefore: input.budgetReservedBefore,
+    budgetReservationCredits: input.budgetReservationCredits,
     at: input.settledAt,
+    reservationId: input.reservationId,
     settleRefId: input.settlementId,
     billingOutcome: input.billingOutcome,
     qualityOutcome: input.qualityOutcome,
+    ...(input.ambiguous === undefined ? {} : { ambiguous: input.ambiguous }),
+    ...(input.publisherIdempotencyKey === undefined
+      ? {}
+      : { publisherIdempotencyKey: input.publisherIdempotencyKey }),
   };
 }
 
@@ -604,7 +696,7 @@ function parseRecordUsageResult(value: unknown): RecordUsageResult {
     !Number.isFinite(wallet.balance) ||
     typeof wallet.sequence !== "number" ||
     !Number.isSafeInteger(wallet.sequence) ||
-    wallet.sequence < 0
+    wallet.sequence < -1
   ) {
     throw new UsageIngestError(
       "convex ingest result has invalid wallet checkpoint",

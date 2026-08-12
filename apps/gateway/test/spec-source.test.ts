@@ -20,6 +20,7 @@ describe("internal gateway spec source", () => {
         Response.json({
           spec: '{"openapi":"3.1.0"}',
           specVersionId: "version",
+          version: "1.0.0",
           projectId: "project",
           organizationId: "organization",
           clerkOrgId: "org_publisher",
@@ -54,6 +55,7 @@ describe("internal gateway spec source", () => {
         return Response.json({
           spec: '{"openapi":"3.1.0"}',
           specVersionId: "version",
+          version: "1.0.0",
           projectId: "project",
           organizationId: "organization",
           clerkOrgId: "org_publisher",
@@ -75,6 +77,7 @@ describe("internal gateway spec source", () => {
       parsePublishedSpecPayload({
         spec: "{}",
         specVersionId: "version",
+        version: "1.0.0",
         projectId: "project",
         organizationId: "organization",
         clerkOrgId: "org_publisher",

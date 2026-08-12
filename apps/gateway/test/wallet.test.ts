@@ -1068,4 +1068,70 @@ describe("WalletDO property/fuzz", () => {
     expect(state.pendingSettlements).toHaveLength(0);
     expect(ledger.net).toBe(state.balance);
   });
+  it("dead-letters terminal financial rejects and preserves retryable rejects", async () => {
+    const stub = walletStub("unit-terminal-dead-letter");
+    __setTestGrantsFetcher(async () => ({
+      wallet: {
+        clerkOrgId: "unit-terminal-dead-letter",
+        balance: 20,
+        sequence: 3,
+      },
+      keySettings: [],
+    }));
+    await stub.syncGrants("unit-terminal-dead-letter", 100_000);
+    __setTestGrantsFetcher(null);
+    const usage = {
+      organizationId: "org_publisher",
+      consumerClerkOrgId: "unit-terminal-dead-letter",
+      projectId: "project",
+      endpoint: "/endpoint",
+      method: "GET",
+      status: 200,
+      latencyMs: 1,
+      keyId: "key",
+    };
+    await stub.reserve("r-terminal", 10);
+    await stub.reserve("r-retry", 10);
+    await stub.settle("r-terminal", usage);
+    await stub.settle("r-retry", usage);
+    __setTestUsageMutation(async (_name, { events }) => ({
+      results: events.map((event) =>
+        event.settleRefId === "settle:r-terminal"
+          ? {
+              refId: event.settleRefId,
+              status: "rejected" as const,
+              reason: "immutable payload mismatch",
+              retryable: false,
+            }
+          : {
+              refId: event.settleRefId,
+              status: "rejected" as const,
+              reason: "migration pending",
+              retryable: true,
+            },
+      ),
+      wallet: {
+        clerkOrgId: "unit-terminal-dead-letter",
+        balance: 20,
+        sequence: 3,
+      },
+    }));
+
+    expect(await stub.flushToConvex()).toMatchObject({
+      flushed: 2,
+      acked: 0,
+      rejected: 1,
+      retryable: 1,
+      remaining: 1,
+    });
+    const state = await stub.getState();
+    expect(state.deadLetterCount).toBe(1);
+    expect(state.pendingSettlements).toEqual([
+      expect.objectContaining({ settlementId: "settle:r-retry" }),
+    ]);
+    // Same-sequence authoritative response restores exactly the terminal
+    // rejection while retaining the retryable settlement's local debit.
+    expect(state.balance).toBe(10);
+    expect(state.available).toBe(10);
+  });
 });

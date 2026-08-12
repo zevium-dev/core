@@ -358,6 +358,7 @@ export const getPublishedForGateway = query({
   ): Promise<{
     spec: string;
     version: string;
+    specVersionId: string;
     visibility: Doc<"projects">["visibility"];
     deprecatedAt: number | undefined;
     sunsetAt: number | undefined;
@@ -384,6 +385,7 @@ export const getPublishedForGateway = query({
     return {
       spec: latest.spec,
       version: latest.version,
+      specVersionId: latest._id,
       visibility: project.visibility,
       deprecatedAt: project.deprecationStartedAt ?? latest.deprecatedAt,
       // Version sunset is informational. Only project retirement may cut off
@@ -411,6 +413,7 @@ export const getPublishedForGatewayInternal = internalQuery({
   ): Promise<{
     spec: string;
     version: string;
+    specVersionId: string;
     projectId: string;
     organizationId: string;
     clerkOrgId: string;
@@ -476,6 +479,7 @@ export const getPublishedForGatewayInternal = internalQuery({
     return {
       spec: latest.spec,
       version: latest.version,
+      specVersionId: latest._id,
       projectId: project._id,
       organizationId: org._id,
       clerkOrgId: org.clerkOrgId,
