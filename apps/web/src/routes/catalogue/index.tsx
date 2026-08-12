@@ -6,6 +6,10 @@ import { ArrowLeft, PackageSearch, Sparkles } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import { FadeIn } from "#/components/motion/fade-in";
+import {
+  CatalogueSortSelect,
+  type CatalogueSort,
+} from "#/components/catalogue-sort-select";
 import { PublicHeader } from "#/components/public-header";
 import { Badge } from "#/components/ui/badge";
 import { Button } from "#/components/ui/button";
@@ -36,14 +40,6 @@ import {
 } from "#/components/ui/field";
 import { Input } from "#/components/ui/input";
 import { Separator } from "#/components/ui/separator";
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "#/components/ui/select";
 import { Skeleton } from "#/components/ui/skeleton";
 import { ToggleGroup, ToggleGroupItem } from "#/components/ui/toggle-group";
 import {
@@ -55,8 +51,6 @@ import { api } from "#/lib/convex-api";
 import type { SearchListing } from "../../../../../convex/search";
 
 const SEARCH_DEBOUNCE_MS = 250;
-
-type CatalogueSort = "newest" | "name" | "cheapest";
 
 /** Card shape shared by browse + semantic results; `score` only on ranked hits. */
 type CatalogueCardItem = Omit<SearchListing, "score"> & { score?: number };
@@ -489,21 +483,7 @@ function BrowseFilters({
     <FieldGroup className="gap-4 sm:flex-row sm:items-end">
       <Field className="sm:max-w-40">
         <FieldLabel htmlFor="catalogue-sort">Sort</FieldLabel>
-        <Select
-          value={sort}
-          onValueChange={(value) => setSort(value as CatalogueSort)}
-        >
-          <SelectTrigger id="catalogue-sort" aria-label="Sort catalogue">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectGroup>
-              <SelectItem value="newest">Newest</SelectItem>
-              <SelectItem value="name">Name</SelectItem>
-              <SelectItem value="cheapest">Cheapest</SelectItem>
-            </SelectGroup>
-          </SelectContent>
-        </Select>
+        <CatalogueSortSelect value={sort} onValueChange={setSort} />
       </Field>
 
       <Field className="sm:max-w-28">
@@ -647,7 +627,11 @@ function CatalogueList({
   if (catalogueQuery.isPending) return <CatalogueGridSkeleton />;
   if (catalogueQuery.isError || catalogueQuery.data === undefined) {
     return (
-      <Empty className="border border-destructive/40" role="alert">
+      <Empty
+        className="min-h-64 border border-destructive/40"
+        role="alert"
+        data-state="error"
+      >
         <EmptyHeader>
           <EmptyMedia variant="icon">
             <PackageSearch />
@@ -806,7 +790,11 @@ function CatalogueCard({ item }: { item: CatalogueCardItem }) {
 
 function CatalogueEmpty({ hasSearch }: { hasSearch: boolean }) {
   return (
-    <Empty className="border border-dashed">
+    <Empty
+      className="min-h-64 border border-dashed"
+      role="status"
+      data-state={hasSearch ? "no-results" : "no-supply"}
+    >
       <EmptyHeader>
         <EmptyMedia variant="icon">
           <PackageSearch />
@@ -822,15 +810,15 @@ function CatalogueEmpty({ hasSearch }: { hasSearch: boolean }) {
       </EmptyHeader>
       <EmptyContent>
         {hasSearch ? (
-          <Button asChild variant="outline">
+          <Button asChild>
             <Link to="/catalogue" search={{}}>
               Clear search and filters
             </Link>
           </Button>
         ) : (
-          <Button asChild variant="outline">
+          <Button asChild>
             <Link to="/sign-in/$" search={{ redirect: "/app/projects" }}>
-              Sign in to publish
+              Publish an API
             </Link>
           </Button>
         )}

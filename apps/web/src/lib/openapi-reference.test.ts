@@ -151,6 +151,70 @@ describe("parsePublishedEndpoints", () => {
       }),
     ]);
   });
+
+  it("resolves chained and RFC 6901-escaped component references", () => {
+    const [endpoint] = parsePublishedEndpoints(
+      JSON.stringify({
+        openapi: "3.1.0",
+        components: {
+          parameters: {
+            Alias: { $ref: "#/components/parameters/owner~1id~0parameter" },
+            "owner/id~parameter": {
+              name: "id",
+              in: "path",
+              required: true,
+              schema: { type: "string", example: "escaped-id" },
+            },
+          },
+          requestBodies: {
+            Alias: { $ref: "#/components/requestBodies/JSON%7E0body" },
+            "JSON~body": {
+              required: true,
+              content: {
+                "application/json": {
+                  schema: { type: "object", example: { ok: true } },
+                },
+              },
+            },
+          },
+          responses: {
+            Alias: { $ref: "#/components/responses/good~1response" },
+            "good/response": {
+              description: "Escaped response",
+              content: {
+                "application/json": { example: { id: "ok" } },
+              },
+            },
+          },
+        },
+        paths: {
+          "/items/{id}": {
+            parameters: [{ $ref: "#/components/parameters/Alias" }],
+            post: {
+              requestBody: { $ref: "#/components/requestBodies/Alias" },
+              responses: {
+                "200": { $ref: "#/components/responses/Alias" },
+              },
+            },
+          },
+        },
+      }),
+    );
+
+    expect(endpoint?.parameters[0]).toMatchObject({
+      key: "path:id",
+      initialValue: "escaped-id",
+    });
+    expect(endpoint).toMatchObject({
+      requestBodyRequired: true,
+      requestContentType: "application/json",
+      requestBodyExample: '{\n  "ok": true\n}',
+    });
+    expect(endpoint?.responses[0]).toMatchObject({
+      description: "Escaped response",
+      example: '{\n  "id": "ok"\n}',
+    });
+  });
 });
 
 describe("request URL helpers", () => {

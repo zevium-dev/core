@@ -1,6 +1,7 @@
 import {
   extractPricing,
   parseSpec,
+  resolveLocalJsonRefChain,
   type HttpMethod,
   type OpenApiOperation,
 } from "@zevium/shared";
@@ -53,18 +54,9 @@ function resolveComponentRef(
   section: "parameters" | "requestBodies" | "responses",
   components?: Record<string, unknown>,
 ): unknown {
-  let current = value;
-  const seen = new Set<string>();
-  while (isRecord(current) && typeof current.$ref === "string") {
-    if (seen.has(current.$ref)) return current;
-    seen.add(current.$ref);
-    const prefix = `#/components/${section}/`;
-    if (!current.$ref.startsWith(prefix)) return current;
-    const records = components?.[section];
-    if (!isRecord(records)) return current;
-    current = records[decodeURIComponent(current.$ref.slice(prefix.length))];
-  }
-  return current;
+  if (!isRecord(value) || typeof value.$ref !== "string") return value;
+  if (!value.$ref.startsWith(`#/components/${section}/`)) return value;
+  return resolveLocalJsonRefChain(value, { components });
 }
 
 function stringValue(value: unknown): string {

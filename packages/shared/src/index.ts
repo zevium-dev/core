@@ -10,6 +10,11 @@ export const PLATFORM_CUT = 0.05;
 export type { EndpointPricing } from "./pricing.js";
 
 export {
+  resolveLocalJsonPointer,
+  resolveLocalJsonRefChain,
+} from "./json-pointer.js";
+
+export {
   parseSpec,
   matchOperation,
   extractPricing,
