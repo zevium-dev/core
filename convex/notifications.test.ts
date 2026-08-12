@@ -1,6 +1,6 @@
 /// <reference types="vite/client" />
 import { convexTest } from "convex-test";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { api } from "./_generated/api";
 import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
@@ -8,6 +8,8 @@ import schema from "./schema";
 import { createNotification, upsertNotification } from "./lib/notifications";
 
 const modules = import.meta.glob("./**/*.ts");
+
+afterEach(() => vi.useRealTimers());
 
 function asMember(
   t: ReturnType<typeof convexTest>,
@@ -355,5 +357,59 @@ describe("notifications.markAllRead", () => {
         .collect();
     });
     expect(unread).toHaveLength(0);
+  });
+
+  it("drains hundreds in bounded pages and keeps unread metadata honest", async () => {
+    vi.useFakeTimers();
+    const t = convexTest(schema, modules);
+    const orgId = await t.run(async (ctx) => {
+      const id = await ctx.db.insert("organizations", {
+        clerkOrgId: "org_test",
+        name: "Test",
+        slug: "test-co",
+      });
+      for (let index = 0; index < 205; index += 1) {
+        await ctx.db.insert("notifications", {
+          clerkOrgId: "org_test",
+          kind: "low_balance",
+          title: `Notice ${index}`,
+          body: "Top up",
+          refId: `scale_${index}`,
+          createdAt: index + 1,
+        });
+      }
+      return id;
+    });
+    const actor = asMember(t);
+
+    const list = await actor.query(api.notifications.listForOrg, {
+      orgSlug: "test-co",
+      paginationOpts: { numItems: 10_000, cursor: null },
+    });
+    expect(list.page).toHaveLength(50);
+    expect(list.unreadCount).toBe(100);
+    expect(list.unreadCountCapped).toBe(true);
+
+    expect(
+      await actor.mutation(api.notifications.markAllRead, {
+        orgSlug: "test-co",
+      }),
+    ).toEqual({ updated: 100, complete: false });
+    await t.finishAllScheduledFunctions(() => vi.runAllTimers());
+
+    const state = await t.run(async (ctx) => ({
+      unread: await ctx.db
+        .query("notifications")
+        .withIndex("by_org_read", (q) =>
+          q.eq("clerkOrgId", "org_test").eq("readAt", undefined),
+        )
+        .take(1),
+      org: await ctx.db.get(orgId),
+    }));
+    expect(state.unread).toHaveLength(0);
+    expect(state.org).toMatchObject({
+      unreadNotificationCount: 0,
+      unreadNotificationCountCapped: false,
+    });
   });
 });

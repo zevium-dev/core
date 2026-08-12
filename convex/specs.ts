@@ -14,6 +14,7 @@ import {
   requireEncryptedCredential,
 } from "./lib/credentialCrypto";
 import { draftFingerprint, readinessValidity } from "./publishReadiness";
+import { syncCatalogueListing } from "./catalogue";
 import {
   isValidSemver,
   type SpecIssue,
@@ -250,6 +251,7 @@ export const publish = mutation({
     if (versionDoc === null || project === null) {
       throw new Error("Failed to load published version");
     }
+    await syncCatalogueListing(ctx, project._id);
     // Notify publisher org + fire webhook event.
     await createNotification(ctx, {
       clerkOrgId: org.clerkOrgId,

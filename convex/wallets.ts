@@ -12,6 +12,7 @@ import {
 import { requireOrgMemberBySlug } from "./lib/auth";
 import { toGatewayRow, type GatewayKeySettingRow } from "./keySettings";
 import { PUBLISHER_RISK_HOLD_MS, publisherEarningSplit } from "./accounting";
+import { MAX_ENDPOINT_COST_CREDITS } from "@zevium/shared";
 
 export type SettlementStatus = "applied" | "already_applied" | "rejected";
 
@@ -94,6 +95,7 @@ export async function appendWalletEntry(
     refId: string;
     paymentId?: Id<"payments">;
     usageEventId?: Id<"usageEvents">;
+    settlementFingerprint?: string;
   },
 ): Promise<{ applied: boolean; wallet: Doc<"wallets"> }> {
   const existing = await ctx.db
@@ -119,6 +121,7 @@ export async function appendWalletEntry(
     sequence,
     paymentId: args.paymentId,
     usageEventId: args.usageEventId,
+    settlementFingerprint: args.settlementFingerprint,
     createdAt: Date.now(),
   });
   await ctx.db.patch(args.wallet._id, { balance, sequence });
@@ -334,6 +337,63 @@ const usageEventArg = v.object({
   consumerClerkOrgId: v.string(),
 });
 
+type SettlementFingerprintInput = {
+  organizationId: Id<"organizations">;
+  projectId: Id<"projects">;
+  endpoint: string;
+  method: string;
+  credits: number;
+  status: number;
+  latencyMs: number;
+  keyId: string;
+  at: number;
+  consumerClerkOrgId: string;
+};
+
+function settlementFingerprint(event: SettlementFingerprintInput): string {
+  // JSON array is an unambiguous, deterministic binding; no delimiter attacks.
+  return JSON.stringify([
+    event.consumerClerkOrgId,
+    event.organizationId,
+    event.projectId,
+    event.endpoint,
+    event.method,
+    event.credits,
+    event.status,
+    event.latencyMs,
+    event.keyId,
+    event.at,
+  ]);
+}
+
+function validSettlementBoundary(
+  event: SettlementFingerprintInput & { settleRefId: string },
+): boolean {
+  return (
+    event.settleRefId.trim().length > 0 &&
+    event.settleRefId.length <= 200 &&
+    event.consumerClerkOrgId.trim().length > 0 &&
+    event.consumerClerkOrgId.length <= 256 &&
+    event.endpoint.trim().length > 0 &&
+    event.endpoint.length <= 2_048 &&
+    event.method.trim().length > 0 &&
+    event.method.length <= 16 &&
+    event.keyId.trim().length > 0 &&
+    event.keyId.length <= 256 &&
+    Number.isSafeInteger(event.credits) &&
+    event.credits >= 0 &&
+    event.credits <= MAX_ENDPOINT_COST_CREDITS &&
+    Number.isSafeInteger(event.at) &&
+    event.at > 0 &&
+    Number.isSafeInteger(event.status) &&
+    event.status >= 100 &&
+    event.status <= 599 &&
+    Number.isSafeInteger(event.latencyMs) &&
+    event.latencyMs >= 0 &&
+    event.latencyMs <= 86_400_000
+  );
+}
+
 /**
  * Gateway settlement ingest. A request belongs to precisely one consumer
  * Wallet DO, so mixed-organizations are rejected before any ledger mutation.
@@ -366,14 +426,7 @@ export const recordUsage = internalMutation({
     const retirementNoticeProjectIds = new Set<Id<"projects">>();
 
     for (const event of args.events) {
-      if (
-        event.settleRefId.trim() === "" ||
-        !Number.isSafeInteger(event.credits) ||
-        event.credits < 0 ||
-        !Number.isFinite(event.at) ||
-        !Number.isFinite(event.status) ||
-        !Number.isFinite(event.latencyMs)
-      ) {
+      if (!validSettlementBoundary(event)) {
         results.push({
           refId: event.settleRefId,
           status: "rejected",
@@ -382,13 +435,47 @@ export const recordUsage = internalMutation({
         continue;
       }
 
+      const fingerprint = settlementFingerprint(event);
+
       const existing = await ctx.db
         .query("walletEntries")
         .withIndex("by_ref", (q) => q.eq("refId", event.settleRefId))
         .unique();
       if (existing !== null) {
         if (existing.walletId === wallet._id) {
-          results.push({ refId: event.settleRefId, status: "already_applied" });
+          let existingFingerprint = existing.settlementFingerprint;
+          if (
+            existingFingerprint === undefined &&
+            existing.usageEventId !== undefined
+          ) {
+            const usage = await ctx.db.get(existing.usageEventId);
+            if (usage !== null) {
+              const usageProject = await ctx.db.get(usage.projectId);
+              if (usageProject !== null) {
+                existingFingerprint = settlementFingerprint({
+                  organizationId: usageProject.organizationId,
+                  projectId: usage.projectId,
+                  endpoint: usage.endpoint,
+                  method: usage.method,
+                  credits: usage.credits,
+                  status: usage.status,
+                  latencyMs: usage.latencyMs,
+                  keyId: usage.keyId,
+                  at: usage.at,
+                  consumerClerkOrgId: clerkOrgId,
+                });
+              }
+            }
+          }
+          results.push(
+            existingFingerprint === fingerprint
+              ? { refId: event.settleRefId, status: "already_applied" }
+              : {
+                  refId: event.settleRefId,
+                  status: "rejected",
+                  reason: "settlement reference payload conflict",
+                },
+          );
         } else {
           results.push({
             refId: event.settleRefId,
@@ -407,6 +494,59 @@ export const recordUsage = internalMutation({
           reason: "project not found",
         });
         continue;
+      }
+      if (event.organizationId !== project.organizationId) {
+        results.push({
+          refId: event.settleRefId,
+          status: "rejected",
+          reason: "settlement publisher does not own project",
+        });
+        continue;
+      }
+      let entitlement =
+        project.organizationId === consumerOrg._id
+          ? null
+          : await ctx.db
+              .query("projectConsumerEntitlements")
+              .withIndex("by_project_consumer", (q) =>
+                q
+                  .eq("projectId", project._id)
+                  .eq("consumerOrganizationId", consumerOrg._id),
+              )
+              .unique();
+      if (
+        project.organizationId !== consumerOrg._id &&
+        entitlement === null &&
+        project.deprecationStartedAt !== undefined &&
+        event.at >= project.deprecationStartedAt
+      ) {
+        const historicalUse = await ctx.db
+          .query("usageEvents")
+          .withIndex("by_org_project_at", (q) =>
+            q
+              .eq("organizationId", consumerOrg._id)
+              .eq("projectId", project._id)
+              .lte("at", project.deprecationStartedAt!),
+          )
+          .first();
+        if (historicalUse === null) {
+          results.push({
+            refId: event.settleRefId,
+            status: "rejected",
+            reason: "consumer became eligible after retirement freeze",
+          });
+          continue;
+        }
+        const entitlementId = await ctx.db.insert(
+          "projectConsumerEntitlements",
+          {
+            projectId: project._id,
+            consumerOrganizationId: consumerOrg._id,
+            firstUsedAt: historicalUse.at,
+            createdAt: Date.now(),
+          },
+        );
+        entitlement = await ctx.db.get(entitlementId);
       }
       if (wallet.balance - event.credits < 0) {
         results.push({
@@ -435,8 +575,18 @@ export const recordUsage = internalMutation({
         amount: -event.credits,
         refId: event.settleRefId,
         usageEventId,
+        settlementFingerprint: fingerprint,
       });
       wallet = settled.wallet;
+
+      if (project.organizationId !== consumerOrg._id && entitlement === null) {
+        await ctx.db.insert("projectConsumerEntitlements", {
+          projectId: project._id,
+          consumerOrganizationId: consumerOrg._id,
+          firstUsedAt: event.at,
+          createdAt: Date.now(),
+        });
+      }
 
       const split = publisherEarningSplit(event.credits);
       const existingEarning = await ctx.db

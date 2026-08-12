@@ -1,6 +1,12 @@
 import type { SpecIssue } from "@zevium/shared";
 import { useOrganization } from "@clerk/tanstack-react-start";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { convexQuery, useConvexMutation } from "@convex-dev/react-query";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Archive, MoreHorizontal, RotateCcw } from "lucide-react";
@@ -100,6 +106,17 @@ export function SpecRailEndpoints({
   const flushTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
     undefined,
   );
+  const onPricingChangeRef = useRef(onPricingChange);
+  onPricingChangeRef.current = onPricingChange;
+
+  const flushPendingEdits = useCallback((): void => {
+    clearTimeout(flushTimer.current);
+    flushTimer.current = undefined;
+    const edits = [...pendingEdits.current.values()];
+    pendingEdits.current.clear();
+    pendingKeys.current.clear();
+    for (const edit of edits) onPricingChangeRef.current?.(edit);
+  }, []);
 
   // Resync inputs from the prop, but never overwrite an unflushed local edit.
   useEffect(() => {
@@ -118,9 +135,10 @@ export function SpecRailEndpoints({
 
   useEffect(() => {
     return () => {
-      clearTimeout(flushTimer.current);
+      // Preserve the user's last edit when they navigate before debounce fires.
+      flushPendingEdits();
     };
-  }, []);
+  }, [flushPendingEdits]);
 
   function handleField(
     ep: SpecEndpointRow,
@@ -158,11 +176,7 @@ export function SpecRailEndpoints({
 
     clearTimeout(flushTimer.current);
     flushTimer.current = setTimeout(() => {
-      flushTimer.current = undefined;
-      const edits = [...pendingEdits.current.values()];
-      pendingEdits.current.clear();
-      pendingKeys.current.clear();
-      for (const e of edits) onPricingChange?.(e);
+      flushPendingEdits();
     }, PRICING_DEBOUNCE_MS);
   }
 

@@ -27,6 +27,57 @@ export type CreateNotificationResult = {
   id: Id<"notifications"> | null;
 };
 
+const LEGACY_UNREAD_COUNT_CAP = 100;
+
+/** Keep unread UI O(1); legacy rows use one bounded bootstrap read. */
+export async function changeUnreadNotificationCount(
+  ctx: MutationCtx,
+  clerkOrgId: string,
+  delta: number,
+): Promise<void> {
+  const organization = await ctx.db
+    .query("organizations")
+    .withIndex("by_clerk_org", (q) => q.eq("clerkOrgId", clerkOrgId))
+    .unique();
+  if (organization === null) return;
+  if (organization.unreadNotificationCountCapped === true) return;
+  if (organization.unreadNotificationCount !== undefined) {
+    await ctx.db.patch(organization._id, {
+      unreadNotificationCount: Math.max(
+        0,
+        organization.unreadNotificationCount + delta,
+      ),
+      unreadNotificationCountCapped: false,
+    });
+    return;
+  }
+  const unread = await ctx.db
+    .query("notifications")
+    .withIndex("by_org_read", (q) =>
+      q.eq("clerkOrgId", clerkOrgId).eq("readAt", undefined),
+    )
+    .take(LEGACY_UNREAD_COUNT_CAP);
+  await ctx.db.patch(organization._id, {
+    unreadNotificationCount: unread.length,
+    unreadNotificationCountCapped: unread.length === LEGACY_UNREAD_COUNT_CAP,
+  });
+}
+
+export async function clearUnreadNotificationCount(
+  ctx: MutationCtx,
+  clerkOrgId: string,
+): Promise<void> {
+  const organization = await ctx.db
+    .query("organizations")
+    .withIndex("by_clerk_org", (q) => q.eq("clerkOrgId", clerkOrgId))
+    .unique();
+  if (organization === null) return;
+  await ctx.db.patch(organization._id, {
+    unreadNotificationCount: 0,
+    unreadNotificationCountCapped: false,
+  });
+}
+
 /**
  * Idempotent notification insert. If a notification with the same refId
  * already exists, returns { created: false } without writing.
@@ -57,6 +108,7 @@ export async function createNotification(
     projectSlug: args.projectSlug,
     createdAt: Date.now(),
   });
+  await changeUnreadNotificationCount(ctx, args.clerkOrgId, 1);
   return { created: true, id };
 }
 
@@ -85,6 +137,7 @@ export async function upsertNotification(
   ) {
     return { created: false, id: existing._id };
   }
+  const wasRead = existing.readAt !== undefined;
   await ctx.db.patch(existing._id, {
     kind: args.kind,
     title: args.title,
@@ -94,6 +147,9 @@ export async function upsertNotification(
     readAt: undefined,
     createdAt: Date.now(),
   });
+  if (wasRead) {
+    await changeUnreadNotificationCount(ctx, args.clerkOrgId, 1);
+  }
   return { created: false, id: existing._id };
 }
 

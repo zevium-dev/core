@@ -1,4 +1,5 @@
 import Stripe from "stripe";
+import { MAX_ENDPOINT_COST_CREDITS } from "@zevium/shared";
 import { httpRouter } from "convex/server";
 import { Webhook } from "svix";
 import { internal } from "./_generated/api";
@@ -22,6 +23,8 @@ type ClerkOrgEventData = {
   name: string;
   slug: string;
   image_url?: string | null;
+  updated_at?: number;
+  deleted_at?: number | null;
 };
 type ClerkWebhookEvent = {
   type: string;
@@ -54,11 +57,19 @@ http.route({
     } catch {
       return new Response("Invalid signature", { status: 400 });
     }
+    const signedAtSeconds = Number(svixTimestamp);
+    if (!Number.isSafeInteger(signedAtSeconds) || signedAtSeconds <= 0) {
+      return new Response("Invalid svix timestamp", { status: 400 });
+    }
     switch (event.type) {
       case "organization.created":
       case "organization.updated": {
         const data = event.data as ClerkOrgEventData;
-        await ctx.runMutation(internal.organizations.upsertFromClerk, {
+        const sourceTimestamp = data.updated_at ?? signedAtSeconds * 1000;
+        await ctx.runMutation(internal.organizations.applyOrganizationWebhook, {
+          svixId,
+          eventTimestamp: sourceTimestamp,
+          eventType: event.type,
           clerkOrgId: data.id,
           name: data.name,
           slug: data.slug,
@@ -66,11 +77,17 @@ http.route({
         });
         break;
       }
-      case "organization.deleted":
-        await ctx.runMutation(internal.organizations.archiveFromClerk, {
-          clerkOrgId: (event.data as ClerkOrgEventData).id,
+      case "organization.deleted": {
+        const data = event.data as ClerkOrgEventData;
+        await ctx.runMutation(internal.organizations.applyOrganizationWebhook, {
+          svixId,
+          eventTimestamp:
+            data.deleted_at ?? data.updated_at ?? signedAtSeconds * 1000,
+          eventType: "organization.deleted",
+          clerkOrgId: data.id,
         });
         break;
+      }
       case "user.created":
       case "user.updated": {
         const data = event.data as ClerkUserEventData;
@@ -292,7 +309,12 @@ export function parseIngestUsageBody(
     if (
       requiredStrings.some(
         (value) => typeof value !== "string" || value.trim() === "",
-      )
+      ) ||
+      (event.endpoint as string).length > 2_048 ||
+      (event.method as string).length > 16 ||
+      (event.keyId as string).length > 256 ||
+      (event.settleRefId as string).length > 200 ||
+      (event.consumerClerkOrgId as string).length > 256
     ) {
       return { ok: false, status: 400, error: "invalid event" };
     }
@@ -300,12 +322,18 @@ export function parseIngestUsageBody(
       typeof event.credits !== "number" ||
       !Number.isSafeInteger(event.credits) ||
       event.credits < 0 ||
+      event.credits > MAX_ENDPOINT_COST_CREDITS ||
       typeof event.status !== "number" ||
-      !Number.isFinite(event.status) ||
+      !Number.isSafeInteger(event.status) ||
+      event.status < 100 ||
+      event.status > 599 ||
       typeof event.latencyMs !== "number" ||
-      !Number.isFinite(event.latencyMs) ||
+      !Number.isSafeInteger(event.latencyMs) ||
+      event.latencyMs < 0 ||
+      event.latencyMs > 86_400_000 ||
       typeof event.at !== "number" ||
-      !Number.isFinite(event.at)
+      !Number.isSafeInteger(event.at) ||
+      event.at <= 0
     ) {
       return { ok: false, status: 400, error: "invalid event" };
     }
@@ -402,6 +430,49 @@ http.route({
         error instanceof Error ? error.message : "wallet checkpoint failed";
       console.error("wallet checkpoint failed", { message });
       return json({ error: "wallet checkpoint failed" }, 500);
+    }
+  }),
+});
+
+/** Version-pinned, paginated org/key bootstrap for edge control receivers. */
+http.route({
+  path: "/gateway-control-manifest",
+  method: "GET",
+  handler: httpAction(async (ctx, request) => {
+    const secret = process.env.GATEWAY_INTERNAL_SECRET;
+    if (
+      secret === undefined ||
+      secret.length === 0 ||
+      request.headers.get("x-internal-secret") !== secret
+    ) {
+      return json({ error: "unauthorized" }, 401);
+    }
+    const url = new URL(request.url);
+    const clerkOrgId = url.searchParams.get("clerkOrgId")?.trim() ?? "";
+    const revisionText = url.searchParams.get("sourceRevision") ?? "";
+    const sourceRevision = Number(revisionText);
+    const cursor = url.searchParams.get("cursor");
+    if (
+      clerkOrgId === "" ||
+      !Number.isSafeInteger(sourceRevision) ||
+      sourceRevision <= 0
+    ) {
+      return json(
+        { error: "clerkOrgId and positive sourceRevision required" },
+        400,
+      );
+    }
+    try {
+      const page = await ctx.runQuery(
+        internal.organizations.getGatewayControlManifestPage,
+        { clerkOrgId, sourceRevision, cursor },
+      );
+      return json(page, page.status === "stale" ? 409 : 200);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "control manifest failed";
+      console.error("gateway control manifest failed", { message });
+      return json({ error: "control manifest failed" }, 500);
     }
   }),
 });

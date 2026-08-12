@@ -2,7 +2,7 @@
 import { convexTest } from "convex-test";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Webhook } from "svix";
-import { api } from "./_generated/api";
+import { api, internal } from "./_generated/api";
 import schema from "./schema";
 
 const modules = import.meta.glob("./**/*.ts");
@@ -239,5 +239,67 @@ describe("Clerk webhook user lifecycle", () => {
     expect(result).not.toHaveProperty("_id");
     expect(result).not.toHaveProperty("clerkOrgId");
     expect(result).not.toHaveProperty("slug");
+  });
+
+  it("deduplicates Svix ids and rejects stale organization profile events", async () => {
+    const t = convexTest(schema, modules);
+    await expect(
+      t.mutation(internal.organizations.applyOrganizationWebhook, {
+        svixId: "msg_create_ordered",
+        eventTimestamp: 100,
+        eventType: "organization.created",
+        clerkOrgId: "org_ordered",
+        name: "Original",
+        slug: "original",
+      }),
+    ).resolves.toEqual({ status: "processed" });
+    await expect(
+      t.mutation(internal.organizations.applyOrganizationWebhook, {
+        svixId: "msg_update_new",
+        eventTimestamp: 300,
+        eventType: "organization.updated",
+        clerkOrgId: "org_ordered",
+        name: "Newest",
+        slug: "newest-slug",
+      }),
+    ).resolves.toEqual({ status: "processed" });
+    await expect(
+      t.mutation(internal.organizations.applyOrganizationWebhook, {
+        svixId: "msg_update_stale",
+        eventTimestamp: 200,
+        eventType: "organization.updated",
+        clerkOrgId: "org_ordered",
+        name: "Stale",
+        slug: "stale-slug",
+      }),
+    ).resolves.toEqual({ status: "ignored_stale" });
+    await expect(
+      t.mutation(internal.organizations.applyOrganizationWebhook, {
+        svixId: "msg_update_new",
+        eventTimestamp: 999,
+        eventType: "organization.updated",
+        clerkOrgId: "org_ordered",
+        name: "Replay attack",
+        slug: "replay-attack",
+      }),
+    ).resolves.toEqual({ status: "duplicate" });
+
+    const state = await t.run(async (ctx) => ({
+      org: await ctx.db
+        .query("organizations")
+        .withIndex("by_clerk_org", (q) => q.eq("clerkOrgId", "org_ordered"))
+        .unique(),
+      receipts: await ctx.db.query("clerkWebhookReceipts").collect(),
+    }));
+    expect(state.org).toMatchObject({
+      name: "Newest",
+      slug: "newest-slug",
+      publicHandle: "original",
+      lastClerkEventAt: 300,
+    });
+    expect(state.receipts).toHaveLength(3);
+    expect(
+      state.receipts.find((receipt) => receipt.svixId === "msg_update_stale"),
+    ).toMatchObject({ status: "ignored_stale" });
   });
 });

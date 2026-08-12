@@ -3,6 +3,18 @@ import { internal } from "./_generated/api";
 
 const crons = cronJobs();
 
+crons.interval(
+  "retry-gateway-control-outbox",
+  { minutes: 1 },
+  internal.organizations.retryGatewayControlOutbox,
+);
+
+crons.interval(
+  "resume-catalogue-projection-backfill",
+  { minutes: 5 },
+  internal.catalogue.resumeCatalogueProjectionBackfill,
+);
+
 /** Hourly low-balance check — one notification per org per UTC day. */
 crons.hourly(
   "low-balance-check",

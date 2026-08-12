@@ -20,7 +20,7 @@ import {
   internalQuery,
 } from "./_generated/server";
 import { internal } from "./_generated/api";
-import type { Doc, Id } from "./_generated/dataModel";
+import type { Doc } from "./_generated/dataModel";
 import { summarizePublishedPricing, type PublicListing } from "./catalogue";
 
 /** Max results returned by a semantic search (VectorSearchQuery.limit caps at 256). */
@@ -229,15 +229,19 @@ export const embedProject = internalAction({
 
 /** All published+public project ids — for backfill. */
 export const listPublishedPublicProjects = internalQuery({
-  args: {},
-  handler: async (ctx): Promise<Id<"projects">[]> => {
+  args: { cursor: v.union(v.string(), v.null()) },
+  handler: async (ctx, args) => {
     const rows = await ctx.db
       .query("projects")
       .withIndex("by_visibility_status", (q) =>
         q.eq("visibility", "public").eq("status", "published"),
       )
-      .collect();
-    return rows.map((r) => r._id);
+      .paginate({ cursor: args.cursor, numItems: 100, maximumRowsRead: 101 });
+    return {
+      ids: rows.page.map((row) => row._id),
+      continueCursor: rows.continueCursor,
+      isDone: rows.isDone,
+    };
   },
 });
 
@@ -246,18 +250,23 @@ export const listPublishedPublicProjects = internalQuery({
  * Run once via `npx convex run search:embedAllPublished`.
  */
 export const embedAllPublished = internalAction({
-  args: {},
-  handler: async (ctx): Promise<{ scheduled: number }> => {
-    const projectIds = await ctx.runQuery(
+  args: { cursor: v.optional(v.union(v.string(), v.null())) },
+  handler: async (ctx, args): Promise<{ scheduled: number }> => {
+    const page = await ctx.runQuery(
       internal.search.listPublishedPublicProjects,
-      {},
+      { cursor: args.cursor ?? null },
     );
-    for (const projectId of projectIds) {
+    for (const projectId of page.ids) {
       await ctx.scheduler.runAfter(0, internal.search.embedProject, {
         projectId,
       });
     }
-    return { scheduled: projectIds.length };
+    if (!page.isDone) {
+      await ctx.scheduler.runAfter(0, internal.search.embedAllPublished, {
+        cursor: page.continueCursor,
+      });
+    }
+    return { scheduled: page.ids.length };
   },
 });
 
@@ -286,6 +295,12 @@ export const fetchSearchListings = internalQuery({
     scores: v.array(v.float64()),
   },
   handler: async (ctx, args): Promise<SearchListing[]> => {
+    if (
+      args.ids.length !== args.scores.length ||
+      args.ids.length > SEARCH_LIMIT_MAX
+    ) {
+      throw new Error("Invalid search result page");
+    }
     const out: SearchListing[] = [];
 
     for (let i = 0; i < args.ids.length; i++) {
@@ -348,15 +363,15 @@ export const searchCatalogue = action({
     limit: v.optional(v.number()),
   },
   handler: async (ctx, args): Promise<SearchCatalogueResult> => {
-    const trimmed = args.query.trim();
+    const trimmed = args.query.trim().slice(0, 200);
     if (trimmed.length === 0) {
       return { items: [], degraded: false };
     }
 
-    const limit = Math.min(
-      Math.max(args.limit === undefined ? SEARCH_LIMIT_DEFAULT : args.limit, 1),
-      SEARCH_LIMIT_MAX,
-    );
+    const requestedLimit = args.limit ?? SEARCH_LIMIT_DEFAULT;
+    const limit = Number.isSafeInteger(requestedLimit)
+      ? Math.min(Math.max(requestedLimit, 1), SEARCH_LIMIT_MAX)
+      : SEARCH_LIMIT_DEFAULT;
 
     let queryEmbedding: number[];
     try {

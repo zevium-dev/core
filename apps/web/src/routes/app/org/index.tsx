@@ -143,6 +143,7 @@ function PublicHandleCard() {
     enabled: normalized.length > 0 && !handleLocked && !mine.isPending,
   });
   const unavailable = lookup.data?.available === false;
+  const availabilityConfirmed = lookup.data?.available === true;
   const valid = /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(normalized);
   const isAdmin = membership?.role === "org:admin";
   const { mutate: save, isPending } = useMutation({
@@ -156,6 +157,17 @@ function PublicHandleCard() {
       toast.error(humanError(error, "Could not update public handle"));
     },
   });
+
+  async function copyPublicUrl() {
+    try {
+      await navigator.clipboard.writeText(
+        `${window.location.origin}/catalogue/${current}`,
+      );
+      toast.success("Public catalogue URL copied");
+    } catch {
+      toast.error("Could not copy public catalogue URL");
+    }
+  }
 
   return (
     <Card>
@@ -175,7 +187,7 @@ function PublicHandleCard() {
             name="public-handle"
             value={handle}
             onChange={(event) => setHandle(event.target.value)}
-            autoComplete="username"
+            autoComplete="off"
             spellCheck={false}
             aria-describedby="public-handle-help"
             aria-invalid={normalized !== "" && !valid}
@@ -191,7 +203,9 @@ function PublicHandleCard() {
               isPending ||
               normalized === current ||
               !valid ||
-              unavailable
+              lookup.isPending ||
+              lookup.isError ||
+              !availabilityConfirmed
             }
           >
             Save handle
@@ -215,12 +229,7 @@ function PublicHandleCard() {
               type="button"
               variant="outline"
               size="sm"
-              onClick={() => {
-                void navigator.clipboard.writeText(
-                  `${window.location.origin}/catalogue/${current}`,
-                );
-                toast.success("Public catalogue URL copied");
-              }}
+              onClick={() => void copyPublicUrl()}
             >
               Copy public URL
             </Button>
@@ -239,9 +248,15 @@ function PublicHandleCard() {
             ? "Choose lowercase letters, numbers, and single hyphens."
             : !valid
               ? "Use lowercase letters, numbers, and single hyphens."
-              : unavailable
-                ? "This handle is already taken."
-                : "This handle is available."}
+              : lookup.isPending
+                ? "Checking availability…"
+                : lookup.isError
+                  ? "Availability check failed. Try again."
+                  : unavailable
+                    ? "This handle is already taken."
+                    : availabilityConfirmed
+                      ? "This handle is available."
+                      : "Enter a new handle to check availability."}
         </p>
       </CardContent>
       <Dialog open={confirming} onOpenChange={setConfirming}>
@@ -261,7 +276,10 @@ function PublicHandleCard() {
             >
               Cancel
             </Button>
-            <Button onClick={() => save()} disabled={isPending}>
+            <Button
+              onClick={() => save()}
+              disabled={isPending || !availabilityConfirmed}
+            >
               {isPending ? "Saving…" : "Change handle"}
             </Button>
           </DialogFooter>

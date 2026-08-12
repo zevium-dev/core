@@ -20,7 +20,10 @@ function asAdmin(t: ReturnType<typeof convexTest>, orgId = "org_pub") {
   });
 }
 
-afterEach(() => vi.useRealTimers());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+});
 
 describe("stable public handles", () => {
   it("allows draft-stage setup but freezes the handle after first publish", async () => {
@@ -70,6 +73,92 @@ describe("stable public handles", () => {
 });
 
 describe("organization archive ordering and scale", () => {
+  it("delivers one canonical archive event with HMAC-bound raw bytes", async () => {
+    const previousBaseUrl = process.env.GATEWAY_CONTROL_BASE_URL;
+    const previousSecret = process.env.GATEWAY_INTERNAL_SECRET;
+    process.env.GATEWAY_CONTROL_BASE_URL = "https://gateway.test";
+    process.env.GATEWAY_INTERNAL_SECRET = "control-test-secret";
+    try {
+      const t = convexTest(schema, modules);
+      await t.run(async (ctx) => {
+        await ctx.db.insert("organizations", {
+          clerkOrgId: "org_signed_archive",
+          name: "Signed Archive",
+          slug: "signed-archive",
+          publicHandle: "signed-archive",
+        });
+      });
+      await t.mutation(internal.organizations.archiveFromClerk, {
+        clerkOrgId: "org_signed_archive",
+      });
+      await t.mutation(internal.organizations.archiveFromClerk, {
+        clerkOrgId: "org_signed_archive",
+      });
+      const outbox = await t.run(async (ctx) =>
+        ctx.db.query("gatewayControlOutbox").collect(),
+      );
+      expect(outbox).toHaveLength(1);
+
+      let signedRequest: Request | undefined;
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+          signedRequest = new Request(input, init);
+          const body = JSON.parse(await signedRequest.clone().text()) as {
+            operation: string;
+            sourceRevision: number;
+          };
+          return Response.json({
+            status: "applied",
+            operation: body.operation,
+            sourceRevision: body.sourceRevision,
+          });
+        }),
+      );
+
+      await expect(
+        t.action(internal.organizations.deliverGatewayControlOutbox, {
+          outboxId: outbox[0]!._id,
+        }),
+      ).resolves.toEqual({ delivered: true });
+      expect(signedRequest?.url).toBe(
+        "https://gateway.test/internal/registry/v1/org/archive",
+      );
+      const timestamp = signedRequest?.headers.get("x-zevium-timestamp");
+      const nonce = signedRequest?.headers.get("x-zevium-nonce");
+      const signature = signedRequest?.headers.get("x-zevium-signature");
+      const rawBody = await signedRequest!.clone().text();
+      expect(timestamp).toMatch(/^\d+$/);
+      expect(nonce).toMatch(/^[0-9a-f-]{36}$/i);
+      const key = await crypto.subtle.importKey(
+        "raw",
+        new TextEncoder().encode("control-test-secret"),
+        { name: "HMAC", hash: "SHA-256" },
+        false,
+        ["sign"],
+      );
+      const expectedBytes = await crypto.subtle.sign(
+        "HMAC",
+        key,
+        new TextEncoder().encode(`${timestamp}.${nonce}.${rawBody}`),
+      );
+      const expected = [...new Uint8Array(expectedBytes)]
+        .map((value) => value.toString(16).padStart(2, "0"))
+        .join("");
+      expect(signature).toBe(`v1=${expected}`);
+      expect(
+        await t.run(async (ctx) => ctx.db.get(outbox[0]!._id)),
+      ).toMatchObject({ status: "acked", attempts: 1 });
+    } finally {
+      if (previousBaseUrl === undefined)
+        delete process.env.GATEWAY_CONTROL_BASE_URL;
+      else process.env.GATEWAY_CONTROL_BASE_URL = previousBaseUrl;
+      if (previousSecret === undefined)
+        delete process.env.GATEWAY_INTERNAL_SECRET;
+      else process.env.GATEWAY_INTERNAL_SECRET = previousSecret;
+    }
+  });
+
   it("retains a delete-before-create tombstone and never resurrects the org", async () => {
     vi.useFakeTimers();
     const t = convexTest(schema, modules);

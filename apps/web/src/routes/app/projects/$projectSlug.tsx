@@ -486,9 +486,9 @@ function ProjectAnalyticsPanel({
         </Card>
         <Card>
           <CardHeader className="pb-2">
-            <CardDescription>Credits earned</CardDescription>
+            <CardDescription>Net credits earned</CardDescription>
             <CardTitle className="text-2xl tabular-nums">
-              <NumberTicker value={analytics.credits} />
+              <NumberTicker value={analytics.netCredits} />
             </CardTitle>
           </CardHeader>
         </Card>

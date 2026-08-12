@@ -4,6 +4,8 @@ import { query } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { requireOrgMemberBySlug } from "./lib/auth";
 
+const USAGE_PAGE_SIZE_MAX = 50;
+
 export type UsageListItem = {
   _id: Id<"usageEvents">;
   projectId: Id<"projects">;
@@ -34,6 +36,39 @@ export const listForOrg = query({
   },
   handler: async (ctx, args) => {
     const { org } = await requireOrgMemberBySlug(ctx, args.orgSlug);
+    if (
+      args.since !== undefined &&
+      (!Number.isSafeInteger(args.since) || args.since < 0)
+    ) {
+      throw new Error("Invalid start time");
+    }
+    if (
+      args.until !== undefined &&
+      (!Number.isSafeInteger(args.until) || args.until < 0)
+    ) {
+      throw new Error("Invalid end time");
+    }
+    if (
+      args.since !== undefined &&
+      args.until !== undefined &&
+      args.since >= args.until
+    ) {
+      throw new Error("Start time must be before end time");
+    }
+    if (args.keyId !== undefined && args.keyId.length > 256) {
+      throw new Error("Key filter is too long");
+    }
+    const paginationOpts = {
+      ...args.paginationOpts,
+      numItems: Number.isSafeInteger(args.paginationOpts.numItems)
+        ? Math.min(
+            Math.max(args.paginationOpts.numItems, 1),
+            USAGE_PAGE_SIZE_MAX,
+          )
+        : USAGE_PAGE_SIZE_MAX,
+      maximumRowsRead: USAGE_PAGE_SIZE_MAX + 1,
+      maximumBytesRead: 256 * 1024,
+    };
 
     const result =
       args.projectId !== undefined && args.keyId !== undefined
@@ -52,7 +87,7 @@ export const listForOrg = query({
               return base;
             })
             .order("desc")
-            .paginate(args.paginationOpts)
+            .paginate(paginationOpts)
         : args.projectId !== undefined
           ? await ctx.db
               .query("usageEvents")
@@ -68,7 +103,7 @@ export const listForOrg = query({
                 return base;
               })
               .order("desc")
-              .paginate(args.paginationOpts)
+              .paginate(paginationOpts)
           : args.keyId !== undefined
             ? await ctx.db
                 .query("usageEvents")
@@ -86,7 +121,7 @@ export const listForOrg = query({
                   return base;
                 })
                 .order("desc")
-                .paginate(args.paginationOpts)
+                .paginate(paginationOpts)
             : await ctx.db
                 .query("usageEvents")
                 .withIndex("by_org_at", (q) => {
@@ -101,7 +136,7 @@ export const listForOrg = query({
                   return base;
                 })
                 .order("desc")
-                .paginate(args.paginationOpts);
+                .paginate(paginationOpts);
 
     const projectCache = new Map<
       Id<"projects">,

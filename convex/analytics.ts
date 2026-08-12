@@ -64,6 +64,8 @@ export type ProjectAnalytics = {
   rangeDays: number;
   rangeStart: number;
   calls: number;
+  /** Publisher net after the platform fee. */
+  netCredits: number;
   credits: number;
   successRate: number;
   p50: number | null;
@@ -275,7 +277,23 @@ export const projectAnalytics = query({
       .order("desc")
       .take(PROJECT_SCAN_CAP);
 
-    const truncated = scanned.length >= PROJECT_SCAN_CAP;
+    const earnings = await ctx.db
+      .query("publisherEarnings")
+      .withIndex("by_project_created", (q) =>
+        q
+          .eq("projectId", project._id)
+          .gte("createdAt", rangeStart)
+          .lt("createdAt", now + 1),
+      )
+      .order("desc")
+      .take(PROJECT_SCAN_CAP);
+
+    const truncated =
+      scanned.length >= PROJECT_SCAN_CAP || earnings.length >= PROJECT_SCAN_CAP;
+    const netCredits = earnings.reduce(
+      (total, earning) => total + earning.netCredits,
+      0,
+    );
 
     type Acc = {
       method: string;
@@ -362,6 +380,7 @@ export const projectAnalytics = query({
       rangeDays,
       rangeStart,
       calls,
+      netCredits,
       credits,
       successRate: calls === 0 ? 0 : success / calls,
       p50: percentile(allLatencies, 50),

@@ -278,6 +278,67 @@ describe("retirement consumer fanout", () => {
 });
 
 describe("retirement queue draining", () => {
+  it("retires due work even when malformed scheduled rows sort first", async () => {
+    vi.useFakeTimers();
+    const t = convexTest(schema, modules);
+    const cutoff = Date.now() - 1;
+    const { dueId, malformedIds } = await t.run(async (ctx) => {
+      const orgId = await ctx.db.insert("organizations", {
+        clerkOrgId: "org_poison",
+        name: "Poison Queue Publisher",
+        slug: "poison-queue",
+        publicHandle: "poison-queue",
+      });
+      const malformedIds: Id<"projects">[] = [];
+      for (let index = 0; index < 130; index += 1) {
+        malformedIds.push(
+          await ctx.db.insert("projects", {
+            organizationId: orgId,
+            name: `Malformed ${index}`,
+            slug: `malformed-${index}`,
+            status: "published",
+            visibility: "public",
+            tags: [],
+            deprecationStartedAt: cutoff - MIN_DEPRECATION_NOTICE_MS,
+            retirementState: "scheduled",
+          }),
+        );
+      }
+      const dueId = await ctx.db.insert("projects", {
+        organizationId: orgId,
+        name: "Due API",
+        slug: "due-api",
+        status: "published",
+        visibility: "public",
+        tags: [],
+        deprecationStartedAt: cutoff - MIN_DEPRECATION_NOTICE_MS,
+        sunsetAt: cutoff,
+        retirementState: "scheduled",
+      });
+      return { dueId, malformedIds };
+    });
+
+    const first = await t.mutation(internal.projects.retireSunsetProjects, {});
+    expect(first).toEqual({ retired: 1, hasMore: true });
+    expect(await t.run(async (ctx) => ctx.db.get(dueId))).toMatchObject({
+      retirementState: "retired",
+      retirementCutoffAt: cutoff,
+      retiredAt: expect.any(Number),
+    });
+
+    await t.finishAllScheduledFunctions(() => vi.runAllTimers());
+    const malformed = await t.run(async (ctx) =>
+      Promise.all(malformedIds.map((id) => ctx.db.get(id))),
+    );
+    expect(
+      malformed.every(
+        (project) =>
+          project?.retirementState === undefined &&
+          project.deprecationStartedAt === undefined,
+      ),
+    ).toBe(true);
+  });
+
   it("drains more than 100 scheduled rows and preserves immutable cutoffs", async () => {
     vi.useFakeTimers();
     const t = convexTest(schema, modules);

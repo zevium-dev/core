@@ -18,9 +18,11 @@ import {
 } from "./lib/notifications";
 import { fireWebhookEvent } from "./webhooks";
 import { isValidSlug } from "./lib/validate";
+import { syncCatalogueListing } from "./catalogue";
 
 export const MIN_DEPRECATION_NOTICE_MS = 7 * 24 * 60 * 60 * 1000;
 const RETIREMENT_BATCH_SIZE = 100;
+const RETIREMENT_REPAIR_BATCH_SIZE = 25;
 const NOTICE_USAGE_PAGE_SIZE = 100;
 const INLINE_CREDENTIAL_CLEANUP_SIZE = 10;
 const CREDENTIAL_CLEANUP_PAGE_SIZE = 100;
@@ -298,6 +300,7 @@ export const update = mutation({
     if (updated === null) {
       throw new Error("Failed to load updated project");
     }
+    await syncCatalogueListing(ctx, updated._id);
     return updated;
   },
 });
@@ -332,6 +335,7 @@ export const remove = mutation({
         retiredAt: Date.now(),
       });
     }
+    await syncCatalogueListing(ctx, args.projectId);
     return { deleted: args.projectId };
   },
 });
@@ -408,6 +412,7 @@ export const scheduleRetirement = mutation({
     });
     const updated = await ctx.db.get(project._id);
     if (updated === null) throw new Error("Project not found");
+    await syncCatalogueListing(ctx, project._id);
     return updated;
   },
 });
@@ -471,6 +476,7 @@ export const cancelRetirement = mutation({
     });
     const updated = await ctx.db.get(project._id);
     if (updated === null) throw new Error("Project not found");
+    await syncCatalogueListing(ctx, project._id);
     return updated;
   },
 });
@@ -597,10 +603,29 @@ export const retireSunsetProjects = internalMutation({
   args: {},
   handler: async (ctx): Promise<{ retired: number; hasMore: boolean }> => {
     const now = Date.now();
+    // Optional-first schema permits malformed legacy rows. Repair them on a
+    // separate bounded range so missing sunsetAt values can never pin due work.
+    const malformed = await ctx.db
+      .query("projects")
+      .withIndex("by_retirement_state_sunset", (q) =>
+        q.eq("retirementState", "scheduled").eq("sunsetAt", undefined),
+      )
+      .take(RETIREMENT_REPAIR_BATCH_SIZE);
+    for (const project of malformed) {
+      await ctx.db.patch(project._id, {
+        deprecationStartedAt: undefined,
+        deprecationMessage: undefined,
+        retirementState: undefined,
+      });
+      await syncCatalogueListing(ctx, project._id);
+    }
     const candidates = await ctx.db
       .query("projects")
       .withIndex("by_retirement_state_sunset", (q) =>
-        q.eq("retirementState", "scheduled").lte("sunsetAt", now),
+        q
+          .eq("retirementState", "scheduled")
+          .gt("sunsetAt", 0)
+          .lte("sunsetAt", now),
       )
       .take(RETIREMENT_BATCH_SIZE);
     let retired = 0;
@@ -614,6 +639,7 @@ export const retireSunsetProjects = internalMutation({
           retirementCutoffAt: project.retirementCutoffAt ?? project.sunsetAt,
           sunsetAt: undefined,
         });
+        await syncCatalogueListing(ctx, project._id);
         continue;
       }
       if (project.deprecationStartedAt === undefined) {
@@ -622,6 +648,7 @@ export const retireSunsetProjects = internalMutation({
           retirementCutoffAt: project.retirementCutoffAt ?? project.sunsetAt,
           sunsetAt: undefined,
         });
+        await syncCatalogueListing(ctx, project._id);
         continue;
       }
       await cleanupProjectRuntime(ctx, project._id);
@@ -632,6 +659,7 @@ export const retireSunsetProjects = internalMutation({
         sunsetAt: undefined,
         retiredAt: now,
       });
+      await syncCatalogueListing(ctx, project._id);
       retired += 1;
     }
     // Transitional drain for rows written before retirementState existed.
@@ -661,6 +689,7 @@ export const retireSunsetProjects = internalMutation({
           sunsetAt: undefined,
           retiredAt: now,
         });
+        await syncCatalogueListing(ctx, project._id);
         retired += 1;
       } else {
         await ctx.db.patch(project._id, {
@@ -669,10 +698,13 @@ export const retireSunsetProjects = internalMutation({
           retirementCutoffAt: project.retirementCutoffAt ?? project.sunsetAt,
           sunsetAt: undefined,
         });
+        await syncCatalogueListing(ctx, project._id);
       }
     }
     const processed = candidates.length + legacyCandidates.length;
-    const hasMore = processed === RETIREMENT_BATCH_SIZE;
+    const hasMore =
+      processed === RETIREMENT_BATCH_SIZE ||
+      malformed.length === RETIREMENT_REPAIR_BATCH_SIZE;
     if (hasMore) {
       await ctx.scheduler.runAfter(
         0,

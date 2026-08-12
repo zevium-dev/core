@@ -1,8 +1,21 @@
 import { paginationOptsValidator } from "convex/server";
 import { v } from "convex/values";
-import { mutation, query } from "./_generated/server";
+import {
+  internalMutation,
+  mutation,
+  query,
+  type MutationCtx,
+} from "./_generated/server";
+import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import { requireIdentity, requireOrgMemberBySlug } from "./lib/auth";
+import {
+  changeUnreadNotificationCount,
+  clearUnreadNotificationCount,
+} from "./lib/notifications";
+
+const NOTIFICATION_PAGE_SIZE_MAX = 50;
+const MARK_ALL_PAGE_SIZE = 100;
 
 export type NotificationView = {
   _id: Id<"notifications">;
@@ -21,6 +34,7 @@ export type NotificationsPage = {
   isDone: boolean;
   continueCursor: string;
   unreadCount: number;
+  unreadCountCapped: boolean;
 };
 
 /**
@@ -34,20 +48,33 @@ export const listForOrg = query({
   },
   handler: async (ctx, args): Promise<NotificationsPage> => {
     const { org } = await requireOrgMemberBySlug(ctx, args.orgSlug);
+    const numItems = Number.isSafeInteger(args.paginationOpts.numItems)
+      ? Math.min(
+          Math.max(args.paginationOpts.numItems, 1),
+          NOTIFICATION_PAGE_SIZE_MAX,
+        )
+      : NOTIFICATION_PAGE_SIZE_MAX;
 
     const result = await ctx.db
       .query("notifications")
       .withIndex("by_org", (q) => q.eq("clerkOrgId", org.clerkOrgId))
       .order("desc")
-      .paginate(args.paginationOpts);
+      .paginate({
+        ...args.paginationOpts,
+        numItems,
+        maximumRowsRead: NOTIFICATION_PAGE_SIZE_MAX + 1,
+        maximumBytesRead: 256 * 1024,
+      });
 
-    // Count unread — bounded scan of the by_org index (readAt undefined).
-    // This is a background/dashboard query, not a hot path.
-    const unreadRows = await ctx.db
-      .query("notifications")
-      .withIndex("by_org", (q) => q.eq("clerkOrgId", org.clerkOrgId))
-      .filter((q) => q.eq(q.field("readAt"), undefined))
-      .collect();
+    const legacyUnread =
+      org.unreadNotificationCount === undefined
+        ? await ctx.db
+            .query("notifications")
+            .withIndex("by_org_read", (q) =>
+              q.eq("clerkOrgId", org.clerkOrgId).eq("readAt", undefined),
+            )
+            .take(MARK_ALL_PAGE_SIZE)
+        : null;
 
     return {
       page: result.page.map((n) => ({
@@ -63,7 +90,10 @@ export const listForOrg = query({
       })),
       isDone: result.isDone,
       continueCursor: result.continueCursor,
-      unreadCount: unreadRows.length,
+      unreadCount: org.unreadNotificationCount ?? legacyUnread?.length ?? 0,
+      unreadCountCapped:
+        org.unreadNotificationCountCapped === true ||
+        legacyUnread?.length === MARK_ALL_PAGE_SIZE,
     };
   },
 });
@@ -87,6 +117,7 @@ export const markRead = mutation({
     }
     if (notification.readAt !== undefined) return { ok: true };
     await ctx.db.patch(args.notificationId, { readAt: Date.now() });
+    await changeUnreadNotificationCount(ctx, claims.orgId, -1);
     return { ok: true };
   },
 });
@@ -96,17 +127,58 @@ export const markRead = mutation({
  */
 export const markAllRead = mutation({
   args: { orgSlug: v.string() },
-  handler: async (ctx, args): Promise<{ updated: number }> => {
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{ updated: number; complete: boolean }> => {
     const { org } = await requireOrgMemberBySlug(ctx, args.orgSlug);
-    const now = Date.now();
-    const unread = await ctx.db
-      .query("notifications")
-      .withIndex("by_org", (q) => q.eq("clerkOrgId", org.clerkOrgId))
-      .filter((q) => q.eq(q.field("readAt"), undefined))
-      .collect();
-    for (const n of unread) {
-      await ctx.db.patch(n._id, { readAt: now });
+    const result = await markUnreadPage(ctx, org.clerkOrgId);
+    if (!result.complete) {
+      await ctx.scheduler.runAfter(0, internal.notifications.markAllReadPage, {
+        clerkOrgId: org.clerkOrgId,
+      });
     }
-    return { updated: unread.length };
+    return result;
+  },
+});
+
+async function markUnreadPage(
+  ctx: MutationCtx,
+  clerkOrgId: string,
+): Promise<{ updated: number; complete: boolean }> {
+  const now = Date.now();
+  const unread = await ctx.db
+    .query("notifications")
+    .withIndex("by_org_read", (q) =>
+      q.eq("clerkOrgId", clerkOrgId).eq("readAt", undefined),
+    )
+    .take(MARK_ALL_PAGE_SIZE);
+  for (const notification of unread) {
+    await ctx.db.patch(notification._id, { readAt: now });
+  }
+  const complete = unread.length < MARK_ALL_PAGE_SIZE;
+  if (complete) {
+    await clearUnreadNotificationCount(ctx, clerkOrgId);
+  } else {
+    await changeUnreadNotificationCount(ctx, clerkOrgId, -unread.length);
+  }
+  return { updated: unread.length, complete };
+}
+
+export const markAllReadPage = internalMutation({
+  args: { clerkOrgId: v.string() },
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{ updated: number; complete: boolean }> => {
+    const result = await markUnreadPage(ctx, args.clerkOrgId);
+    if (!result.complete) {
+      await ctx.scheduler.runAfter(
+        0,
+        internal.notifications.markAllReadPage,
+        args,
+      );
+    }
+    return result;
   },
 });

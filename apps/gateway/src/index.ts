@@ -179,6 +179,7 @@ function mockDeps(deps: WorkerDeps): MockDeps {
     keyVerifier: deps.keyVerifier,
     specSource: deps.publicSpecSource,
     idGenerator: deps.idGenerator,
+    now: deps.now,
   };
 }
 

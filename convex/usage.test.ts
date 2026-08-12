@@ -274,6 +274,41 @@ describe("usage.listForOrg", () => {
     expect(seen).toEqual(["/interleaved/6", "/interleaved/0"]);
     expect(new Set(seen).size).toBe(seen.length);
   });
+
+  it("caps attacker-controlled page sizes and rejects invalid time windows", async () => {
+    const t = convexTest(schema, modules);
+    const seed = await seedWorld(t);
+    await t.run(async (ctx) => {
+      for (let index = 0; index < 80; index += 1) {
+        await ctx.db.insert("usageEvents", {
+          organizationId: seed.consumerOrgId,
+          projectId: seed.projectAId,
+          endpoint: `/bulk/${index}`,
+          method: "GET",
+          credits: 1,
+          status: 200,
+          latencyMs: 1,
+          keyId: "bulk-key",
+          at: seed.inMonth + 1_000 + index,
+        });
+      }
+    });
+    const consumer = asMember(t, "org_consumer");
+    const capped = await consumer.query(api.usage.listForOrg, {
+      orgSlug: "consumer-co",
+      paginationOpts: { numItems: 10_000, cursor: null },
+    });
+    expect(capped.page).toHaveLength(50);
+    expect(capped.isDone).toBe(false);
+    await expect(
+      consumer.query(api.usage.listForOrg, {
+        orgSlug: "consumer-co",
+        paginationOpts: { numItems: 1, cursor: null },
+        since: 10,
+        until: 10,
+      }),
+    ).rejects.toThrow(/before end time/);
+  });
 });
 
 describe("analytics.orgOverview", () => {
@@ -298,6 +333,33 @@ describe("analytics.orgOverview", () => {
     expect(overview.recent.some((event) => event.credits === 999)).toBe(true);
     expect(overview.callsCycle).toBe(4);
     expect(overview.creditsCycle).toBe(85);
+  });
+
+  it("reports publisher net earnings separately from gross usage credits", async () => {
+    const t = convexTest(schema, modules);
+    const seed = await seedWorld(t);
+    const now = Date.now();
+    await t.run(async (ctx) => {
+      await ctx.db.insert("publisherEarnings", {
+        publisherOrganizationId: seed.publisherOrgId,
+        projectId: seed.projectAId,
+        usageSettlementRefId: "settle:net-analytics",
+        grossCredits: 100,
+        platformFeeCredits: 5,
+        netCredits: 95,
+        availableAt: now,
+        status: "available",
+        createdAt: now,
+        updatedAt: now,
+      });
+    });
+
+    const result = await asMember(t, "org_publisher").query(
+      api.analytics.projectAnalytics,
+      { orgSlug: "publisher-co", projectSlug: "weather", rangeDays: 7 },
+    );
+    expect(result?.netCredits).toBe(95);
+    expect(result?.netCredits).not.toBe(100);
   });
 });
 

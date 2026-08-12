@@ -20,6 +20,7 @@ export type MockDeps = {
   keyVerifier?: KeyVerifier;
   specSource: PublicSpecSource;
   idGenerator?: () => string;
+  now?: () => number;
 };
 
 export type MockRoute = {
@@ -58,6 +59,36 @@ export async function handleMockRequest(
   );
   if (!published) {
     return jsonError(404, "project_not_found", "Unknown project", requestId);
+  }
+
+  const started = (deps.now ?? Date.now)();
+  if (
+    published.retiredAt !== undefined ||
+    (published.sunsetAt !== undefined && started >= published.sunsetAt)
+  ) {
+    const response = jsonError(
+      410,
+      "sunset_reached",
+      "This API has reached its published sunset",
+      requestId,
+    );
+    if (published.deprecatedAt !== undefined) {
+      response.headers.set(
+        "Deprecation",
+        `@${Math.floor(published.deprecatedAt / 1000)}`,
+      );
+      response.headers.append(
+        "Link",
+        `<https://zevium.dev/catalogue/${route.publisherHandle}/${route.projectSlug}>; rel="deprecation"`,
+      );
+    }
+    if (published.sunsetAt !== undefined) {
+      response.headers.set(
+        "Sunset",
+        new Date(published.sunsetAt).toUTCString(),
+      );
+    }
+    return response;
   }
 
   let parsed;
