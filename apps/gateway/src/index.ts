@@ -47,6 +47,12 @@ export interface Env {
   GATEWAY_INTERNAL_SECRET?: string;
   /** Immutable git SHA stamped into every release candidate. */
   ZEVIUM_RELEASE?: string;
+  /** Cloudflare-owned immutable version metadata binding. */
+  CF_VERSION_METADATA?: {
+    id: string;
+    tag: string;
+    timestamp: string;
+  };
   /**
    * Test-only: when set, Worker uses fixture key/spec sources populated via
    * internal test helpers (see test/pipeline.test.ts). Not for production.
@@ -71,6 +77,35 @@ export function __setTestPipelineDeps(deps: WorkerDeps | null): void {
 
 export function __getTestPipelineDeps(): WorkerDeps | null {
   return testDeps;
+}
+
+function gatewayDeploymentProof(env: Env) {
+  return {
+    schema: "zevium.cloudflare-runtime/v1",
+    service: "gateway",
+    gitSha: env.ZEVIUM_RELEASE ?? "",
+    versionId: env.CF_VERSION_METADATA?.id ?? "",
+    versionTag: env.CF_VERSION_METADATA?.tag ?? "",
+    deployedAt: env.CF_VERSION_METADATA?.timestamp ?? "",
+  } as const;
+}
+
+function validGatewayDeploymentProof(
+  proof: ReturnType<typeof gatewayDeploymentProof>,
+): boolean {
+  const deployedAt = Date.parse(proof.deployedAt);
+  return (
+    /^[0-9a-f]{40}$/.test(proof.gitSha) &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(
+      proof.versionId,
+    ) &&
+    /^(?:preview-[1-9][0-9]*-[1-9][0-9]*|(?:staging|production)-[0-9a-f]{40})$/.test(
+      proof.versionTag,
+    ) &&
+    proof.versionTag.endsWith(proof.gitSha) &&
+    Number.isFinite(deployedAt) &&
+    new Date(deployedAt).toISOString() === proof.deployedAt
+  );
 }
 
 // Module-scoped prod deps, lazily built on first request and reused across
@@ -240,13 +275,15 @@ async function dispatchRequest(
 
   if (url.pathname === "/" || url.pathname === "/health") {
     const testMode = env.GATEWAY_TEST_MODE === "1";
+    const deployment = gatewayDeploymentProof(env);
     const specConfigReady =
       testMode ||
       Boolean(
         env.CONVEX_URL &&
         env.CONVEX_SITE_URL &&
         env.GATEWAY_INTERNAL_SECRET &&
-        env.CLERK_SECRET_KEY,
+        env.CLERK_SECRET_KEY &&
+        validGatewayDeploymentProof(deployment),
       );
     return withCors(
       Response.json(
@@ -255,6 +292,7 @@ async function dispatchRequest(
           service: "zevium-gateway",
           release: env.ZEVIUM_RELEASE ?? "development",
           contract: 1,
+          deployment,
         },
         { status: specConfigReady ? 200 : 503 },
       ),

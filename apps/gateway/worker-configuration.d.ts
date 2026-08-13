@@ -9,6 +9,12 @@ declare namespace Cloudflare {
     CONVEX_DEPLOY_KEY?: string;
     GATEWAY_INTERNAL_SECRET?: string;
     GATEWAY_TEST_MODE?: string;
+    ZEVIUM_RELEASE?: string;
+    CF_VERSION_METADATA?: {
+      id: string;
+      tag: string;
+      timestamp: string;
+    };
   }
 }
 

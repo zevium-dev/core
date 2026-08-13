@@ -1,0 +1,155 @@
+name: Cloudflare Preview Deployment
+
+on:
+  workflow_call:
+    inputs:
+      artifact_name:
+        required: false
+        type: string
+      checkout_sha:
+        required: true
+        type: string
+      component:
+        required: true
+        type: string
+      convex_site_url:
+        required: false
+        type: string
+      convex_url:
+        required: false
+        type: string
+      head_sha:
+        required: true
+        type: string
+      pr_number:
+        required: true
+        type: number
+    outputs:
+      deploy_url:
+        value: ${{ jobs.deploy.outputs.deploy_url }}
+
+permissions:
+  actions: read
+  contents: read
+  id-token: write
+
+env:
+  MISE_EXPERIMENTAL: true
+  CLOUDFLARE_ACCOUNT_ID: 1ea9299555b026a6a7484c8323c5a953
+  VERSION_TAG: preview-${{ github.run_id }}-${{ github.run_attempt }}
+  WRANGLER_SEND_ERROR_REPORTS: false
+  WRANGLER_SEND_METRICS: false
+
+jobs:
+  security:
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: ~/.local/share/pnpm/store
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+      - uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4
+        with:
+          version: 2026.7.13
+          install: true
+          install_args: node@24.15.0 npm:pnpm@11.8.0 actionlint@1.7.12 gitleaks@8.30.1 shellcheck@0.11.0
+      - name: Verify exact Node and pnpm
+        run: |
+          test "$(node --version)" = "v24.15.0"
+          test "$(pnpm --version)" = "11.8.0"
+      - name: Verify dependency bootstrap policy
+        run: node scripts/audit-preflight.mjs
+      - name: Install dependencies without lifecycle scripts
+        run: pnpm --filter . install --frozen-lockfile --ignore-pnpmfile --ignore-scripts --registry=https://registry.npmjs.org/ --config.trust-lockfile=false --config.verify-store-integrity=true
+      - name: Verify dependency supply chain
+        run: node scripts/audit.mjs
+
+  deploy:
+    needs: [security]
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 10
+    environment: preview
+    outputs:
+      deploy_url: ${{ steps.deploy.outputs.deploy_url }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ inputs.checkout_sha }}
+          persist-credentials: false
+      - name: Download web Worker build
+        if: inputs.component == 'web'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: ${{ inputs.artifact_name }}
+          path: apps/web/dist
+      - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: ~/.local/share/pnpm/store
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+      - uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4
+        with:
+          version: 2026.7.13
+          install: true
+          install_args: node@24.15.0 npm:pnpm@11.8.0 actionlint@1.7.12 gitleaks@8.30.1 shellcheck@0.11.0
+      - name: Verify exact Node and pnpm
+        run: |
+          test "$(node --version)" = "v24.15.0"
+          test "$(pnpm --version)" = "11.8.0"
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Deploy isolated Worker through broker
+        id: deploy
+        env:
+          CLERK_SECRET_KEY: ${{ secrets.CLERK_PREVIEW_SECRET_KEY }}
+          CONVEX_SITE_URL: ${{ inputs.convex_site_url }}
+          DEPLOY_HEAD_SHA: ${{ inputs.head_sha }}
+          GATEWAY_INTERNAL_SECRET: ${{ secrets.GATEWAY_PREVIEW_INTERNAL_SECRET }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+          VITE_CONVEX_URL: ${{ inputs.convex_url }}
+        run: |
+          case "${{ inputs.component }}" in
+            gateway)
+              worker_name="zevium-gateway-pr-$PR_NUMBER"
+              profile="preview-gateway"
+              ;;
+            web)
+              worker_name="zevium-web-pr-$PR_NUMBER"
+              profile="preview-web"
+              ;;
+            *)
+              echo "Unsupported preview component" >&2
+              exit 1
+              ;;
+          esac
+
+          broker_env="$(mktemp)"
+          module_root=""
+          trap 'rm -f "$broker_env"; if [ -n "$module_root" ]; then rm -r -- "$module_root"; fi' EXIT
+          if [ "${{ inputs.component }}" = "gateway" ]; then
+            module_root="$(mktemp -d)"
+            pnpm --filter gateway exec wrangler versions upload --dry-run \
+              --outdir "$module_root" --name "$worker_name" \
+              --config wrangler.preview.jsonc --tag "$VERSION_TAG" \
+              --var "CONVEX_URL:$VITE_CONVEX_URL" \
+              --var "CONVEX_SITE_URL:$CONVEX_SITE_URL"
+            export DEPLOY_MODULE_ROOT="$module_root"
+          else
+            export DEPLOY_MODULE_ROOT="apps/web/dist/server"
+            export DEPLOY_ASSET_ROOT="apps/web/dist/client"
+          fi
+          export DEPLOY_MAIN_MODULE="index.js"
+          BROKER_ENV_FILE="$broker_env" node --experimental-strip-types \
+            apps/deploy-broker/scripts/register.ts --profile "$profile"
+          set -a
+          # shellcheck disable=SC1090
+          . "$broker_env"
+          set +a
+
+          node --experimental-strip-types \
+            apps/deploy-broker/scripts/publish.ts --profile "$profile"
+          echo "deploy_url=https://${worker_name}.zevium-dev.workers.dev" >> "$GITHUB_OUTPUT"

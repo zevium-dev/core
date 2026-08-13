@@ -51,6 +51,7 @@ const EXPECTED_OVERRIDES = Object.freeze({
   "jayson>uuid": "11.1.1",
   postcss: "8.5.25",
   sharp: "0.35.0",
+  undici: "7.29.0",
 });
 const EXPECTED_ALLOW_BUILDS = Object.freeze({
   "agent-browser": true,
@@ -107,6 +108,11 @@ const EXPECTED_LIFECYCLE_PACKAGES = Object.freeze({
     allowed: true,
     gypfile: false,
     scripts: Object.freeze({ install: "node-gyp-build" }),
+  }),
+  "workerd@1.20260708.1": Object.freeze({
+    allowed: true,
+    gypfile: false,
+    scripts: Object.freeze({ postinstall: "node install.js" }),
   }),
   "workerd@1.20260804.1": Object.freeze({
     allowed: true,
@@ -2285,6 +2291,8 @@ function validateWorkflowAction(rawStep, workflowName, jobName, stepIndex) {
     rawStep.uses,
     `${workflowName}.${jobName}.steps[${String(stepIndex)}].uses`,
   );
+  // Local reusable workflow calls are same-repo and immutable per checkout.
+  if (/^\.\/\.github\/workflows\/[\w.-]+\.ya?ml$/u.test(uses)) return;
   const match = uses.match(/^([^@\s]+)@([a-f0-9]{40})$/u);
   if (!match) {
     throw new AuditValidationError(

@@ -66,6 +66,7 @@ function expectedPnpmConfig(configOverrides = {}) {
       "jayson>uuid": "11.1.1",
       postcss: "8.5.25",
       sharp: "0.35.0",
+      undici: "7.29.0",
     },
     packages: ["apps/*", "packages/*"],
     strictDepBuilds: true,
@@ -178,7 +179,12 @@ function makeAuditRepositoryCopy() {
       path.join(root, relativePath),
     );
   }
-  for (const importerId of ["apps/gateway", "apps/web", "packages/shared"]) {
+  for (const importerId of [
+    "apps/deploy-broker",
+    "apps/gateway",
+    "apps/web",
+    "packages/shared",
+  ]) {
     mkdirSync(path.join(root, importerId), { recursive: true });
     cpSync(
       path.join(repositoryRoot, importerId, "package.json"),
@@ -303,17 +309,18 @@ test("parses exact repository workspace graph with every dependency type", () =>
 
   assert.deepEqual(graph.lockfile.workspaceImporters, [
     ".",
+    "apps/deploy-broker",
     "apps/gateway",
     "apps/web",
     "packages/shared",
   ]);
   assert.deepEqual(graph.dependencyCounts, {
-    dependencies: 282,
-    devDependencies: 311,
-    optionalDependencies: 223,
-    totalDependencies: 737,
+    dependencies: 283,
+    devDependencies: 320,
+    optionalDependencies: 228,
+    totalDependencies: 747,
   });
-  assert.equal(graph.occurrences.size, 737);
+  assert.equal(graph.occurrences.size, 747);
   assert.equal(Object.keys(graph.request).length, 662);
   assert.match(graph.lockfile.sha256, /^[a-f0-9]{64}$/);
   assert.equal(graph.lockfile.path, "pnpm-lock.yaml");
@@ -321,7 +328,7 @@ test("parses exact repository workspace graph with every dependency type", () =>
   assert.deepEqual(graph.supplyChain.integrity, {
     algorithm: "sha512",
     completeDigestBytes: 64,
-    entries: 737,
+    entries: 747,
   });
   assert.equal(
     graph.supplyChain.resolution,
@@ -334,7 +341,8 @@ test("parses exact repository workspace graph with every dependency type", () =>
     "concurrently>shell-quote": 1,
     "jayson>uuid": 0,
     postcss: 1,
-    sharp: 2,
+    sharp: 3,
+    undici: 4,
   });
   assert.ok(
     graph.supplyChain.lifecycleScripts.allowed.includes("agent-browser"),
@@ -343,7 +351,7 @@ test("parses exact repository workspace graph with every dependency type", () =>
 });
 
 test("validates pinned mise and immutable workflow action identities", () => {
-  assert.equal(validateAutomationPolicy(), 8);
+  assert.equal(validateAutomationPolicy(), 11);
 });
 
 test("binds registry metadata to lock identity, tarball, digest, and graph semantics", () => {
@@ -1032,8 +1040,10 @@ test("public CLI rejects metamorphic lock, workspace, manifest, CI, and mise att
       name: "workflow global npm install",
       mutate(root) {
         mutateYaml(root, ".github/workflows/payment-drill.yml", (workflow) => {
-          const step = workflow.jobs["real-sandbox-checkout"].steps.find(
-            (candidate) => candidate.name === "Install browser runtime",
+          const step = workflow.jobs[
+            "real-zevium-stripe-acceptance"
+          ].steps.find(
+            (candidate) => candidate.name === "Install pinned browser runtime",
           );
           step.run = "npm install --global attacker@1.0.0";
         });
@@ -1872,7 +1882,7 @@ test("full audit pins pnpm/config/root while allowing deterministic transport", 
   });
 
   assert.equal(outcome.exitCode, 0);
-  assert.equal(capturedProvenanceGraph.supplyChain.integrity.entries, 737);
+  assert.equal(capturedProvenanceGraph.supplyChain.integrity.entries, 747);
   assert.equal(Object.keys(capturedRequest).length, 662);
   assert.equal(
     capturedAuthorization === undefined ||
@@ -1886,7 +1896,7 @@ test("full audit pins pnpm/config/root while allowing deterministic transport", 
     high: 0,
     critical: 0,
   });
-  assert.equal(outcome.summary.dependencyGraph.totalDependencies, 737);
+  assert.equal(outcome.summary.dependencyGraph.totalDependencies, 747);
 });
 
 test(

@@ -117,7 +117,7 @@ function gitRepository() {
 }
 
 test("workflow toolchains pin mise, Node, pnpm, and frozen installs", () => {
-  assert.equal(checkWorkflowToolchains(), 8);
+  assert.equal(checkWorkflowToolchains(), 11);
   assert.equal(attestMiseRuntime(), 5);
   const source = readFileSync(
     resolve(repositoryRoot, ".github/workflows/ci.yml"),
@@ -300,8 +300,8 @@ test("focus scanner catches computed, assigned, aliased, and wrapper imports", (
 });
 
 test("Vitest configs and commands force allowOnly false without mutable indirection", () => {
-  assert.equal(attestVitestConfigs().length, 4);
-  assert.equal(attestVitestCommands(), 4);
+  assert.equal(attestVitestConfigs().length, 5);
+  assert.equal(attestVitestCommands(), 5);
 
   const directory = mkdtempSync(join(tmpdir(), "zevium-vitest-config-"));
   const configPath = join(directory, "vitest.config.ts");

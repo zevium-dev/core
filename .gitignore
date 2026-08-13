@@ -1,4 +1,5 @@
 /node_modules/
+/apps/deploy-broker/node_modules/
 /apps/gateway/node_modules/
 /apps/web/node_modules/
 /convex/node_modules/
@@ -43,6 +44,7 @@
 
 # convex
 /.turbo/
+/apps/deploy-broker/.turbo/
 /apps/gateway/.turbo/
 /apps/web/.turbo/
 /packages/shared/.turbo/

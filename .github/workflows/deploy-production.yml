@@ -1,4 +1,4 @@
-name: Deploy Production
+name: Production Broker Preflight
 
 on:
   workflow_run:
@@ -13,6 +13,7 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
+  actions: read
   contents: read
   statuses: read
 
