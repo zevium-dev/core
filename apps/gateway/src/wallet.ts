@@ -99,6 +99,10 @@ export type SettlementUsage = {
   ambiguous?: boolean;
   /** Stable platform-generated key sent to publisher for replay protection. */
   publisherIdempotencyKey?: string;
+  /** Present only for authenticated release probes. */
+  releaseChallenge?: string;
+  /** Immutable git SHA stamped into gateway build. */
+  gatewayRelease?: string;
 };
 
 export type PendingSettlement = {
@@ -1428,6 +1432,8 @@ export class WalletDO extends DurableObject<Cloudflare.Env> {
           budgetReservationCredits: usage.budgetReservationCredits,
           ambiguous: usage.ambiguous,
           publisherIdempotencyKey: usage.publisherIdempotencyKey,
+          releaseChallenge: usage.releaseChallenge,
+          gatewayRelease: usage.gatewayRelease,
         }),
       );
     }

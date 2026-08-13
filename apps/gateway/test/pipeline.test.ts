@@ -355,6 +355,47 @@ describe("gateway pipeline", () => {
     expect(usage.events[0]!.status).toBe(200);
   });
 
+  it("persists authenticated release challenge and strips it from upstream", async () => {
+    const clerkOrgId = "org_pipe_release_challenge";
+    const challenge = "c".repeat(64);
+    const release = "a".repeat(40);
+    const { fetchImpl } = makeFetchMock((req) => {
+      expect(req.headers.get("x-zevium-release-challenge")).toBeNull();
+      return new Response("ok", { status: 200 });
+    });
+    await installFixtures({ clerkOrgId, fetchImpl, credits: 100 });
+    const workerEnv = env as Env;
+    const previousRelease = workerEnv.ZEVIUM_RELEASE;
+    workerEnv.ZEVIUM_RELEASE = release;
+    try {
+      const response = await gatewayFetch(
+        `/gateway/${ORG_SLUG}/${PROJECT_SLUG}/stream`,
+        { headers: { "x-zevium-release-challenge": challenge } },
+      );
+      expect(response.status).toBe(200);
+      const state = await walletStub(clerkOrgId).getState();
+      expect(state.pendingSettlements[0]?.usage).toMatchObject({
+        releaseChallenge: challenge,
+        gatewayRelease: release,
+      });
+    } finally {
+      workerEnv.ZEVIUM_RELEASE = previousRelease;
+    }
+  });
+
+  it("rejects malformed release challenge before reservation", async () => {
+    const clerkOrgId = "org_pipe_bad_release_challenge";
+    const { fetchImpl, calls } = makeFetchMock(() => new Response("no"));
+    await installFixtures({ clerkOrgId, fetchImpl, credits: 100 });
+    const response = await gatewayFetch(
+      `/gateway/${ORG_SLUG}/${PROJECT_SLUG}/stream`,
+      { headers: { "x-zevium-release-challenge": "not-random" } },
+    );
+    expect(response.status).toBe(400);
+    expect(calls).toHaveLength(0);
+    expect((await walletStub(clerkOrgId).getState()).balance).toBe(100);
+  });
+
   it("strips consumer auth and injects publisher upstream credentials", async () => {
     const clerkOrgId = "org_pipe_upstream_auth";
     const { fetchImpl } = makeFetchMock((req) => {
