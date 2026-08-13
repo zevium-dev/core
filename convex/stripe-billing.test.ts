@@ -1355,6 +1355,7 @@ describe("Stripe Checkout control plane", () => {
     const t = convexTest(schema, modules);
     const seed = await seedFinancialPayment(t, "paid_clawback", 100);
     await t.mutation(internal.payouts.setConnectedAccount, {
+      expectedLivemode: false,
       organizationId: seed.publisherOrganizationId,
       stripeConnectedAccountId: "acct_paid_clawback",
     });
@@ -1418,15 +1419,18 @@ describe("Stripe Checkout control plane", () => {
     });
     const priorCorrelationSecret =
       process.env.STRIPE_TRANSFER_CORRELATION_SECRET;
+    const priorPlatformAccount = process.env.STRIPE_PLATFORM_ACCOUNT_ID;
     process.env.STRIPE_TRANSFER_CORRELATION_SECRET =
       "transfer-test-secret-32-bytes-minimum";
+    process.env.STRIPE_PLATFORM_ACCOUNT_ID = "acct_platformtest";
     try {
       const transfer = await t.mutation(
         internal.payouts.preparePublisherTransfer,
         {
+          expectedLivemode: false,
           publisherOrganizationId: seed.publisherOrganizationId,
           correlationNonce: "a".repeat(64),
-          platformAccountId: "acct_platform_test",
+          platformAccountId: "acct_platformtest",
         },
       );
       await t.mutation(internal.payouts.projectStripeTransfer, {
@@ -1448,6 +1452,11 @@ describe("Stripe Checkout control plane", () => {
         delete process.env.STRIPE_TRANSFER_CORRELATION_SECRET;
       } else {
         process.env.STRIPE_TRANSFER_CORRELATION_SECRET = priorCorrelationSecret;
+      }
+      if (priorPlatformAccount === undefined) {
+        delete process.env.STRIPE_PLATFORM_ACCOUNT_ID;
+      } else {
+        process.env.STRIPE_PLATFORM_ACCOUNT_ID = priorPlatformAccount;
       }
     }
 

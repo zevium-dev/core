@@ -111,6 +111,7 @@ function EarningsContent() {
     convexQuery(api.payouts.getPayoutState, {}),
   );
   const startOnboarding = useAction(api.payouts.startOnboarding);
+  const refreshOnboarding = useAction(api.payouts.refreshOnboarding);
   const { mutate: openOnboarding, isPending: onboardingPending } = useMutation({
     mutationFn: () =>
       startOnboarding({
@@ -126,13 +127,22 @@ function EarningsContent() {
       toast.error(humanError(error, "Could not open Stripe onboarding."));
     },
   });
+  const { mutate: openFreshOnboarding } = useMutation({
+    mutationFn: () => refreshOnboarding({}),
+    onSuccess: ({ url }) => {
+      window.location.assign(url);
+    },
+    onError: (error: unknown) => {
+      toast.error(humanError(error, "Could not refresh Stripe onboarding."));
+    },
+  });
   const { profile, earnings, payouts, transfers } = payoutState;
   useEffect(() => {
     if (!canManagePayouts || onboarding !== "refresh" || refreshStarted.current)
       return;
     refreshStarted.current = true;
-    openOnboarding();
-  }, [canManagePayouts, onboarding, openOnboarding]);
+    openFreshOnboarding();
+  }, [canManagePayouts, onboarding, openFreshOnboarding]);
   const initiatePublisherTransfer = useAction(
     api.payouts.initiatePublisherTransfer,
   );

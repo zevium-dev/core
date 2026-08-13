@@ -60,4 +60,10 @@ crons.interval(
   { minutes: 1 },
   internal.payouts.recoverPublisherTransferDispatches,
 );
+
+crons.interval(
+  "connect-operation-pii-cleanup",
+  { hours: 1 },
+  internal.payouts.cleanupConnectOperationPii,
+);
 export default crons;

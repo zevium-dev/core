@@ -53,6 +53,10 @@ async function ensureWallet(
   if (existing !== null) {
     return existing._id;
   }
+  const organization = await ctx.db.get(organizationId);
+  if (organization?.archivedAt !== undefined) {
+    throw new Error("Archived organization cannot receive a new wallet");
+  }
   const walletId = await ctx.db.insert("wallets", {
     organizationId,
     balance: 0,
@@ -399,6 +403,88 @@ export const applyOrganizationWebhook = internalMutation({
   },
 });
 
+async function assertArchivable(
+  ctx: MutationCtx,
+  organizationId: Id<"organizations">,
+): Promise<void> {
+  const migration = await ctx.db
+    .query("financialMigrationJobs")
+    .withIndex("by_migration_key", (q) =>
+      q.eq("migrationKey", "finance-v2-universal-funding-v2"),
+    )
+    .unique();
+  if (migration !== null && migration.status !== "verified") {
+    throw new Error("Organization archive blocked by finance migration");
+  }
+  for (const status of ["pending", "disputed"] as const) {
+    const payment = await ctx.db
+      .query("payments")
+      .withIndex("by_organization", (q) =>
+        q.eq("organizationId", organizationId),
+      )
+      .filter((q) => q.eq(q.field("status"), status))
+      .take(1);
+    if (payment.length > 0) {
+      throw new Error("Organization archive blocked by unresolved payment");
+    }
+  }
+  const disputes = await ctx.db
+    .query("paymentDisputes")
+    .withIndex("by_organization_status", (q) =>
+      q.eq("organizationId", organizationId).eq("status", "needs_response"),
+    )
+    .take(1);
+  if (disputes.length > 0) {
+    throw new Error("Organization archive blocked by unresolved dispute");
+  }
+  const exposures = await ctx.db
+    .query("paymentExposures")
+    .withIndex("by_organization_active", (q) =>
+      q.eq("organizationId", organizationId).eq("active", true),
+    )
+    .take(1);
+  if (exposures.length > 0) {
+    throw new Error("Organization archive blocked by unresolved exposure");
+  }
+  const reconciliation = await ctx.db
+    .query("publisherReconciliationJobs")
+    .withIndex("by_consumer_status", (q) =>
+      q.eq("consumerOrganizationId", organizationId).eq("status", "pending"),
+    )
+    .take(1);
+  if (reconciliation.length > 0) {
+    throw new Error("Organization archive blocked by publisher reconciliation");
+  }
+  for (const status of ["created", "pending"] as const) {
+    const transfer = await ctx.db
+      .query("publisherTransfers")
+      .withIndex("by_publisher_status", (q) =>
+        q.eq("publisherOrganizationId", organizationId).eq("status", status),
+      )
+      .take(1);
+    if (transfer.length > 0) {
+      throw new Error("Organization archive blocked by unresolved transfer");
+    }
+  }
+  const profile = await ctx.db
+    .query("organizationPayments")
+    .withIndex("by_organization", (q) => q.eq("organizationId", organizationId))
+    .unique();
+  if (profile?.stripeConnectedAccountId !== undefined) {
+    const payouts = await ctx.db
+      .query("connectedPayouts")
+      .withIndex("by_connected_account_status", (q) =>
+        q
+          .eq("stripeConnectedAccountId", profile.stripeConnectedAccountId!)
+          .eq("status", "pending"),
+      )
+      .take(1);
+    if (payouts.length > 0) {
+      throw new Error("Organization archive blocked by unresolved payout");
+    }
+  }
+}
+
 export const archiveFromClerk = internalMutation({
   args: { clerkOrgId: v.string() },
   handler: async (ctx, args): Promise<void> => {
@@ -430,6 +516,7 @@ export const archiveFromClerk = internalMutation({
     }
 
     if (existing.archivedAt === undefined) {
+      await assertArchivable(ctx, existing._id);
       await ctx.db.patch(existing._id, { archivedAt: now });
     }
     await ctx.scheduler.runAfter(
