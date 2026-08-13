@@ -722,6 +722,18 @@ function quotedRuntimeStrings(source) {
   return strings;
 }
 
+function stripQuotedSegments(source) {
+  const segments = quotedRuntimeStrings(source);
+  if (segments.length === 0) return source;
+  let stripped = "";
+  let cursor = 0;
+  for (const { start, end } of segments) {
+    stripped += source.slice(cursor, start);
+    cursor = end;
+  }
+  return stripped + source.slice(cursor);
+}
+
 function decodeMarkupAndCss(source) {
   let decoded = source.replace(
     /\\([0-9a-f]{1,6})(?:\s)?/gi,
@@ -843,7 +855,7 @@ function reconstructedStringVariants(source, literals) {
     const inner = match[1] ?? "";
     const parts = quotedRuntimeStrings(inner);
     if (parts.length === 0) continue;
-    const stripped = inner.replace(/["'`](?:\\.|[\s\S])*?["'`]/gu, "");
+    const stripped = stripQuotedSegments(inner);
     if (/[^\s,]/u.test(stripped)) continue;
     const separatorParts = quotedRuntimeStrings(match[2] ?? "");
     const separator = separatorParts[0]?.value ?? ",";
