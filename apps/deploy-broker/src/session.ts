@@ -124,11 +124,25 @@ function rawPathAndSearch(url: string): { pathname: string; search: string } {
     "path_rejected",
     "URL fragment is not allowed",
   );
-  const match = /^https?:\/\/[^/?#]+([^?#]*)(\?[^#]*)?$/.exec(url);
-  invariant(match, 400, "path_rejected", "Request URL is invalid");
+  const schemeLength = url.startsWith("https://")
+    ? 8
+    : url.startsWith("http://")
+      ? 7
+      : 0;
+  invariant(schemeLength > 0, 400, "path_rejected", "Request URL is invalid");
+  const rest = url.slice(schemeLength);
+  const queryIndex = rest.indexOf("?");
+  const head = queryIndex === -1 ? rest : rest.slice(0, queryIndex);
+  const slashIndex = head.indexOf("/");
+  invariant(
+    (slashIndex === -1 ? head : head.slice(0, slashIndex)).length > 0,
+    400,
+    "path_rejected",
+    "Request URL is invalid",
+  );
   return {
-    pathname: match[1] || "/",
-    search: match[2] ?? "",
+    pathname: slashIndex === -1 ? "/" : head.slice(slashIndex),
+    search: queryIndex === -1 ? "" : rest.slice(queryIndex),
   };
 }
 
