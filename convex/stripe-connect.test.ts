@@ -10,13 +10,21 @@ import {
   publisherEarningSplit,
 } from "./accounting";
 import {
+  assertConnectedAccountIdentity,
   connectAccountProjection,
+  connectOnboardingUrls,
+  createAccountLinkForOperation,
   createAndRetrieveStripeTransfer,
-  createOnboardingLink,
   reconcileStripeTransferProvider,
   repairAndRetrieveStripeTransferMetadata,
   STRIPE_TRANSFER_SAFE_RETRY_MS,
   transferRequestFingerprint,
+  createConnectedAccountForOperation,
+  resolveConnectedAccountForOperation,
+  runConnectOnboardingWorkflow,
+  stripeLivemodeFromSecretKey,
+  type ConnectOnboardingClient,
+  type ConnectOnboardingWorkflowDependencies,
 } from "./payouts";
 import { FINANCE_MIGRATION_KEY } from "./lib/financeMigrationGate";
 import schema from "./schema";
@@ -25,8 +33,116 @@ const modules = import.meta.glob("./**/*.ts");
 const TRANSFER_SECRET = "transfer-test-secret-32-bytes-minimum";
 const TRANSFER_CORRELATION = {
   correlationNonce: "b".repeat(64),
-  platformAccountId: "acct_platform_test",
+  platformAccountId: "acct_platformtest",
 } as const;
+const ACCOUNT_OPERATION_ID = "11111111-1111-4111-8111-111111111111";
+const LINK_OPERATION_ID = "22222222-2222-4222-8222-222222222222";
+const REFRESH_OPERATION_ID = "33333333-3333-4333-8333-333333333333";
+const TEST_NOW = Date.parse("2026-08-12T00:00:00.000Z");
+
+function connectedAccountFixture(
+  overrides: Partial<Stripe.V2.Core.Account> = {},
+): Stripe.V2.Core.Account {
+  return {
+    id: "acct_V2Recipient123",
+    object: "v2.core.account",
+    applied_configurations: ["recipient"],
+    configuration: {
+      recipient: {
+        applied: true,
+        capabilities: {
+          stripe_balance: {
+            stripe_transfers: {},
+          },
+        },
+      },
+    },
+    created: "2026-08-12T00:00:00.000Z",
+    dashboard: "express",
+    defaults: {
+      responsibilities: {
+        fees_collector: "application",
+        losses_collector: "application",
+        requirements_collector: "stripe",
+      },
+    },
+    identity: { country: "ae" },
+    livemode: false,
+    metadata: {
+      zevium_clerk_org_id: "org_publisher",
+      zevium_connect_operation_id: ACCOUNT_OPERATION_ID,
+      zevium_organization_id: "org_doc",
+    },
+    ...overrides,
+  };
+}
+
+function accountLinkFixture(
+  overrides: Partial<Stripe.V2.Core.AccountLink> = {},
+): Stripe.V2.Core.AccountLink {
+  return {
+    object: "v2.core.account_link",
+    account: "acct_V2Recipient123",
+    created: "2026-08-12T00:00:00.000Z",
+    expires_at: "2026-08-12T00:10:00.000Z",
+    livemode: false,
+    url: "https://connect.stripe.test/onboard-one",
+    use_case: {
+      type: "account_onboarding",
+      account_onboarding: {
+        configurations: ["recipient"],
+        collection_options: {
+          fields: "eventually_due",
+          future_requirements: "include",
+        },
+        refresh_url: "https://zevium.test/app/earnings?onboarding=refresh",
+        return_url: "https://zevium.test/app/earnings?onboarding=return",
+      },
+    },
+    ...overrides,
+  };
+}
+
+function connectClientFixture(
+  overrides: {
+    createAccount?: ConnectOnboardingClient["accountsV2"]["create"];
+    retrieveAccount?: ConnectOnboardingClient["accountsV2"]["retrieve"];
+    listRecipientAccounts?: ConnectOnboardingClient["accountsV2"]["listRecipientAccounts"];
+    createLink?: ConnectOnboardingClient["accountLinksV2"]["create"];
+  } = {},
+): ConnectOnboardingClient {
+  return {
+    accountsV2: {
+      create:
+        overrides.createAccount ?? (async () => connectedAccountFixture()),
+      retrieve:
+        overrides.retrieveAccount ?? (async () => connectedAccountFixture()),
+      listRecipientAccounts:
+        overrides.listRecipientAccounts ?? (async () => []),
+    },
+    accountLinksV2: {
+      create:
+        overrides.createLink ??
+        (async (params) =>
+          accountLinkFixture({
+            use_case: {
+              type: "account_onboarding",
+              account_onboarding: {
+                configurations: ["recipient"],
+                collection_options: {
+                  fields: "eventually_due",
+                  future_requirements: "include",
+                },
+                refresh_url:
+                  params.use_case.account_onboarding?.refresh_url ?? "",
+                return_url:
+                  params.use_case.account_onboarding?.return_url ?? "",
+              },
+            },
+          })),
+    },
+  };
+}
 
 type ConnectSeed = {
   organizationId: Id<"organizations">;
@@ -85,9 +201,11 @@ async function seedConnect(t: TestConvex<typeof schema>): Promise<ConnectSeed> {
 
 describe("Stripe Connect publisher accounting", () => {
   const previousSecret = process.env.STRIPE_TRANSFER_CORRELATION_SECRET;
+  const previousPlatform = process.env.STRIPE_PLATFORM_ACCOUNT_ID;
 
   beforeEach(() => {
     process.env.STRIPE_TRANSFER_CORRELATION_SECRET = TRANSFER_SECRET;
+    process.env.STRIPE_PLATFORM_ACCOUNT_ID = "acct_platformtest";
   });
 
   afterEach(() => {
@@ -95,6 +213,11 @@ describe("Stripe Connect publisher accounting", () => {
       delete process.env.STRIPE_TRANSFER_CORRELATION_SECRET;
     } else {
       process.env.STRIPE_TRANSFER_CORRELATION_SECRET = previousSecret;
+    }
+    if (previousPlatform === undefined) {
+      delete process.env.STRIPE_PLATFORM_ACCOUNT_ID;
+    } else {
+      process.env.STRIPE_PLATFORM_ACCOUNT_ID = previousPlatform;
     }
   });
   it("rejects onboarding and transfers from an ordinary organization member", async () => {
@@ -161,54 +284,742 @@ describe("Stripe Connect publisher accounting", () => {
     });
   });
 
-  it("creates an Accounts v2 recipient with platform fee and loss liability", async () => {
-    const createCalls: unknown[] = [];
-    const result = await createOnboardingLink(
-      {
-        accountsV2: {
-          create: async (params) => {
-            createCalls.push(params);
-            return { id: "acct_v2_recipient" };
-          },
-        },
-        accountLinks: {
-          create: async () => ({ url: "https://connect.stripe.test/onboard" }),
-        },
+  it("uses exact Accounts v2 recipient and Account Links v2 onboarding calls", async () => {
+    const accountCalls: Array<{
+      params: Stripe.V2.Core.AccountCreateParams;
+      options?: Stripe.RequestOptions;
+    }> = [];
+    const linkCalls: Array<{
+      params: Stripe.V2.Core.AccountLinkCreateParams;
+      options?: Stripe.RequestOptions;
+    }> = [];
+    const client = connectClientFixture({
+      createAccount: async (params, options) => {
+        accountCalls.push({ params, options });
+        return connectedAccountFixture();
       },
-      {
-        connectedAccountId: null,
-        clerkOrgId: "org_publisher",
-        organizationId: "org_doc",
-        country: "AE",
-        contactEmail: "publisher@example.com",
-        refreshUrl: "https://zevium.test/refresh",
-        returnUrl: "https://zevium.test/return",
+      createLink: async (params, options) => {
+        linkCalls.push({ params, options });
+        return accountLinkFixture();
       },
-    );
+    });
+    const account = await createConnectedAccountForOperation(client, {
+      operationId: ACCOUNT_OPERATION_ID,
+      clerkOrgId: "org_publisher",
+      organizationId: "org_doc",
+      organizationName: "Publisher",
+      country: "AE",
+      contactEmail: "publisher@example.com",
+      expectedLivemode: false,
+    });
+    const link = await createAccountLinkForOperation(client, {
+      operationId: LINK_OPERATION_ID,
+      connectedAccountId: account.id,
+      expectedLivemode: false,
+      refreshUrl: "https://zevium.test/app/earnings?onboarding=refresh",
+      returnUrl: "https://zevium.test/app/earnings?onboarding=return",
+    });
 
-    expect(result.connectedAccountId).toBe("acct_v2_recipient");
-    expect(createCalls).toEqual([
-      expect.objectContaining({
-        dashboard: "express",
-        defaults: {
-          responsibilities: {
-            fees_collector: "application",
-            losses_collector: "application",
+    expect(link.url).toBe("https://connect.stripe.test/onboard-one");
+    expect(accountCalls).toEqual([
+      {
+        params: {
+          dashboard: "express",
+          defaults: {
+            responsibilities: {
+              fees_collector: "application",
+              losses_collector: "application",
+            },
           },
-        },
-        configuration: {
-          recipient: {
-            capabilities: {
-              stripe_balance: {
-                stripe_transfers: { requested: true },
+          configuration: {
+            recipient: {
+              capabilities: {
+                stripe_balance: {
+                  stripe_transfers: { requested: true },
+                },
               },
             },
           },
+          contact_email: "publisher@example.com",
+          display_name: "Publisher",
+          identity: { country: "ae" },
+          include: [
+            "configuration.recipient",
+            "defaults",
+            "identity",
+            "requirements",
+          ],
+          metadata: {
+            zevium_clerk_org_id: "org_publisher",
+            zevium_connect_operation_id: ACCOUNT_OPERATION_ID,
+            zevium_organization_id: "org_doc",
+          },
         },
-        identity: { country: "AE" },
-        contact_email: "publisher@example.com",
-      }),
+        options: {
+          idempotencyKey: `zevium-connect-account:${ACCOUNT_OPERATION_ID}`,
+        },
+      },
     ]);
+    expect(linkCalls).toEqual([
+      {
+        params: {
+          account: "acct_V2Recipient123",
+          use_case: {
+            type: "account_onboarding",
+            account_onboarding: {
+              configurations: ["recipient"],
+              collection_options: {
+                fields: "eventually_due",
+                future_requirements: "include",
+              },
+              refresh_url:
+                "https://zevium.test/app/earnings?onboarding=refresh",
+              return_url: "https://zevium.test/app/earnings?onboarding=return",
+            },
+          },
+        },
+        options: {
+          idempotencyKey: `zevium-connect-link:${LINK_OPERATION_ID}`,
+        },
+      },
+    ]);
+  });
+
+  it("requires explicit Stripe mode and HTTPS onboarding URLs", () => {
+    expect(stripeLivemodeFromSecretKey("sk_test_example")).toBe(false);
+    expect(stripeLivemodeFromSecretKey("rk_test_example")).toBe(false);
+    expect(stripeLivemodeFromSecretKey("sk_live_example")).toBe(true);
+    expect(stripeLivemodeFromSecretKey("rk_live_example")).toBe(true);
+    expect(() => stripeLivemodeFromSecretKey("opaque-secret")).toThrow(
+      "must identify Stripe test or live mode",
+    );
+    expect(connectOnboardingUrls("https://zevium.test/path")).toEqual({
+      refreshUrl: "https://zevium.test/app/earnings?onboarding=refresh",
+      returnUrl: "https://zevium.test/app/earnings?onboarding=return",
+    });
+    expect(() => connectOnboardingUrls("http://localhost:5173")).toThrow(
+      "must use HTTPS",
+    );
+  });
+
+  it("rejects wrong connected-account identity and test/live mode", async () => {
+    expect(() =>
+      assertConnectedAccountIdentity(
+        connectedAccountFixture({
+          metadata: {
+            zevium_clerk_org_id: "org_attacker",
+            zevium_connect_operation_id: ACCOUNT_OPERATION_ID,
+            zevium_organization_id: "org_doc",
+          },
+        }),
+        {
+          accountId: "acct_V2Recipient123",
+          clerkOrgId: "org_publisher",
+          organizationId: "org_doc",
+          expectedLivemode: false,
+        },
+      ),
+    ).toThrow("organization does not match");
+    expect(() =>
+      assertConnectedAccountIdentity(
+        connectedAccountFixture({ livemode: true }),
+        {
+          accountId: "acct_V2Recipient123",
+          clerkOrgId: "org_publisher",
+          organizationId: "org_doc",
+          expectedLivemode: false,
+        },
+      ),
+    ).toThrow("mode does not match");
+
+    await expect(
+      createAccountLinkForOperation(
+        connectClientFixture({
+          createLink: async () =>
+            accountLinkFixture({ account: "acct_Other123" }),
+        }),
+        {
+          operationId: LINK_OPERATION_ID,
+          connectedAccountId: "acct_V2Recipient123",
+          expectedLivemode: false,
+          refreshUrl: "https://zevium.test/refresh",
+          returnUrl: "https://zevium.test/return",
+        },
+      ),
+    ).rejects.toThrow("another account");
+    await expect(
+      createAccountLinkForOperation(
+        connectClientFixture({
+          createLink: async () => accountLinkFixture({ livemode: true }),
+        }),
+        {
+          operationId: LINK_OPERATION_ID,
+          connectedAccountId: "acct_V2Recipient123",
+          expectedLivemode: false,
+          refreshUrl: "https://zevium.test/refresh",
+          returnUrl: "https://zevium.test/return",
+        },
+      ),
+    ).rejects.toThrow("mode does not match");
+  });
+
+  it("reuses one link operation but gives refresh a new single-use link", async () => {
+    const linksByIdempotencyKey = new Map<string, Stripe.V2.Core.AccountLink>();
+    const idempotencyKeys: string[] = [];
+    const client = connectClientFixture({
+      createLink: async (params, options) => {
+        const idempotencyKey = options?.idempotencyKey;
+        if (idempotencyKey === undefined) {
+          throw new Error("missing idempotency key");
+        }
+        idempotencyKeys.push(idempotencyKey);
+        const existing = linksByIdempotencyKey.get(idempotencyKey);
+        if (existing !== undefined) return existing;
+        const link = accountLinkFixture({
+          account: params.account,
+          url: `https://connect.stripe.test/${linksByIdempotencyKey.size + 1}`,
+          use_case: params.use_case,
+        });
+        linksByIdempotencyKey.set(idempotencyKey, link);
+        return link;
+      },
+    });
+    const args = {
+      operationId: LINK_OPERATION_ID,
+      connectedAccountId: "acct_V2Recipient123",
+      expectedLivemode: false,
+      refreshUrl: "https://zevium.test/refresh",
+      returnUrl: "https://zevium.test/return",
+    } as const;
+    const first = await createAccountLinkForOperation(client, args);
+    const sameOperationRetry = await createAccountLinkForOperation(
+      client,
+      args,
+    );
+    const refresh = await createAccountLinkForOperation(client, {
+      ...args,
+      operationId: REFRESH_OPERATION_ID,
+    });
+
+    expect(sameOperationRetry.url).toBe(first.url);
+    expect(refresh.url).not.toBe(first.url);
+    expect(linksByIdempotencyKey.size).toBe(2);
+    expect(idempotencyKeys).toEqual([
+      `zevium-connect-link:${LINK_OPERATION_ID}`,
+      `zevium-connect-link:${LINK_OPERATION_ID}`,
+      `zevium-connect-link:${REFRESH_OPERATION_ID}`,
+    ]);
+  });
+
+  it("replays the same account operation while v2 list visibility lags", async () => {
+    const accountsByIdempotencyKey = new Map<string, Stripe.V2.Core.Account>();
+    const idempotencyKeys: string[] = [];
+    const client = connectClientFixture({
+      listRecipientAccounts: async () => [],
+      createAccount: async (_params, options) => {
+        const idempotencyKey = options?.idempotencyKey;
+        if (idempotencyKey === undefined) {
+          throw new Error("missing idempotency key");
+        }
+        idempotencyKeys.push(idempotencyKey);
+        const existing = accountsByIdempotencyKey.get(idempotencyKey);
+        if (existing !== undefined) return existing;
+        const account = connectedAccountFixture();
+        accountsByIdempotencyKey.set(idempotencyKey, account);
+        return account;
+      },
+    });
+    const args = {
+      operationId: ACCOUNT_OPERATION_ID,
+      clerkOrgId: "org_publisher",
+      organizationId: "org_doc",
+      organizationName: "Publisher",
+      country: "AE",
+      contactEmail: "publisher@example.com",
+      expectedLivemode: false,
+      reconcileFirst: true,
+      operationStartedAt: TEST_NOW,
+      now: TEST_NOW + 1_000,
+    } as const;
+    const first = await resolveConnectedAccountForOperation(client, args);
+    const retry = await resolveConnectedAccountForOperation(client, args);
+
+    expect(retry.id).toBe(first.id);
+    expect(accountsByIdempotencyKey.size).toBe(1);
+    expect(idempotencyKeys).toEqual([
+      `zevium-connect-account:${ACCOUNT_OPERATION_ID}`,
+      `zevium-connect-account:${ACCOUNT_OPERATION_ID}`,
+    ]);
+  });
+
+  it("recovers account-create crash before local write without duplicating provider account", async () => {
+    const organizationId = "org_doc" as Id<"organizations">;
+    const providerAccount = connectedAccountFixture();
+    const events: string[] = [];
+    let accountPersisted = false;
+    let providerAccountCreated = false;
+    let commitAttempts = 0;
+    const client = connectClientFixture({
+      createAccount: async () => {
+        events.push("provider-account-create");
+        providerAccountCreated = true;
+        return providerAccount;
+      },
+      listRecipientAccounts: async () => {
+        events.push("provider-account-list");
+        return providerAccountCreated ? [providerAccount] : [];
+      },
+      retrieveAccount: async () => {
+        events.push("provider-account-retrieve");
+        return providerAccount;
+      },
+      createLink: async (params) => {
+        events.push("provider-link-create");
+        return accountLinkFixture({
+          use_case: {
+            type: "account_onboarding",
+            account_onboarding: {
+              configurations: ["recipient"],
+              collection_options: {
+                fields: "eventually_due",
+                future_requirements: "include",
+              },
+              refresh_url:
+                params.use_case.account_onboarding?.refresh_url ?? "",
+              return_url: params.use_case.account_onboarding?.return_url ?? "",
+            },
+          },
+        });
+      },
+    });
+    const store: ConnectOnboardingWorkflowDependencies["store"] = {
+      prepareAccount: async () => ({
+        organizationId,
+        organizationName: "Publisher",
+        connectedAccountId: accountPersisted ? providerAccount.id : null,
+        connectedAccountLivemode: accountPersisted ? false : null,
+        operation: accountPersisted
+          ? null
+          : {
+              operationId: ACCOUNT_OPERATION_ID,
+              country: "AE",
+              contactEmail: "publisher@example.com",
+              startedAt: TEST_NOW,
+              isRetry: commitAttempts > 0,
+            },
+      }),
+      commitAccount: async () => {
+        commitAttempts += 1;
+        events.push("local-account-commit");
+        if (commitAttempts === 1) {
+          throw new Error("simulated local write crash");
+        }
+        accountPersisted = true;
+        return { accepted: true, connectedAccountId: providerAccount.id };
+      },
+      confirmAccount: async () => undefined,
+      prepareLink: async () => {
+        expect(accountPersisted).toBe(true);
+        events.push("local-link-prepare");
+        return {
+          operationId: LINK_OPERATION_ID,
+          connectedAccountId: providerAccount.id,
+          expectedLivemode: false,
+          isRetry: false,
+        };
+      },
+      expireLink: async () => undefined,
+      completeLink: async () => {
+        events.push("local-link-complete");
+        return true;
+      },
+    };
+    const dependencies: ConnectOnboardingWorkflowDependencies = {
+      stripe: client,
+      store,
+      expectedLivemode: false,
+      refreshUrl: "https://zevium.test/refresh",
+      returnUrl: "https://zevium.test/return",
+      newOperationId: () => LINK_OPERATION_ID,
+      now: () => TEST_NOW,
+    };
+    const actor = {
+      clerkOrgId: "org_publisher",
+      contactEmail: "publisher@example.com",
+    };
+    const input = {
+      country: "AE",
+      forceFreshLink: false,
+      requireExistingAccount: false,
+    };
+
+    await expect(
+      runConnectOnboardingWorkflow(actor, input, dependencies),
+    ).rejects.toThrow("simulated local write crash");
+    const result = await runConnectOnboardingWorkflow(
+      actor,
+      input,
+      dependencies,
+    );
+
+    expect(result.url).toBe("https://connect.stripe.test/onboard-one");
+    expect(
+      events.filter((event) => event === "provider-account-create"),
+    ).toHaveLength(1);
+    expect(events.indexOf("local-account-commit")).toBeLessThan(
+      events.indexOf("provider-link-create"),
+    );
+  });
+
+  it("replays one link operation after provider response crashes before local completion", async () => {
+    const organizationId = "org_doc" as Id<"organizations">;
+    const linksByIdempotencyKey = new Map<string, Stripe.V2.Core.AccountLink>();
+    const linkCalls: string[] = [];
+    let completeAttempts = 0;
+    const client = connectClientFixture({
+      createLink: async (params, options) => {
+        const idempotencyKey = options?.idempotencyKey;
+        if (idempotencyKey === undefined) {
+          throw new Error("missing idempotency key");
+        }
+        linkCalls.push(idempotencyKey);
+        const existing = linksByIdempotencyKey.get(idempotencyKey);
+        if (existing !== undefined) return existing;
+        const link = accountLinkFixture({
+          account: params.account,
+          use_case: params.use_case,
+        });
+        linksByIdempotencyKey.set(idempotencyKey, link);
+        return link;
+      },
+    });
+    const store: ConnectOnboardingWorkflowDependencies["store"] = {
+      prepareAccount: async () => ({
+        organizationId,
+        organizationName: "Publisher",
+        connectedAccountId: "acct_V2Recipient123",
+        connectedAccountLivemode: false,
+        operation: null,
+      }),
+      commitAccount: async () => {
+        throw new Error("account already persisted");
+      },
+      confirmAccount: async () => undefined,
+      prepareLink: async () => ({
+        operationId: LINK_OPERATION_ID,
+        connectedAccountId: "acct_V2Recipient123",
+        expectedLivemode: false,
+        isRetry: completeAttempts > 0,
+      }),
+      expireLink: async () => undefined,
+      completeLink: async () => {
+        completeAttempts += 1;
+        if (completeAttempts === 1) {
+          throw new Error("simulated link completion crash");
+        }
+        return true;
+      },
+    };
+    const dependencies: ConnectOnboardingWorkflowDependencies = {
+      stripe: client,
+      store,
+      expectedLivemode: false,
+      refreshUrl: "https://zevium.test/refresh",
+      returnUrl: "https://zevium.test/return",
+      newOperationId: () => LINK_OPERATION_ID,
+      now: () => TEST_NOW,
+    };
+    const actor = {
+      clerkOrgId: "org_publisher",
+      contactEmail: "publisher@example.com",
+    };
+    const input = {
+      country: null,
+      forceFreshLink: false,
+      requireExistingAccount: false,
+    };
+
+    await expect(
+      runConnectOnboardingWorkflow(actor, input, dependencies),
+    ).rejects.toThrow("simulated link completion crash");
+    await expect(
+      runConnectOnboardingWorkflow(actor, input, dependencies),
+    ).resolves.toEqual({ url: "https://connect.stripe.test/onboard-one" });
+    expect(linksByIdempotencyKey.size).toBe(1);
+    expect(linkCalls).toEqual([
+      `zevium-connect-link:${LINK_OPERATION_ID}`,
+      `zevium-connect-link:${LINK_OPERATION_ID}`,
+    ]);
+  });
+
+  it("adopts a 5f8-era create-before-link orphan instead of creating another account", async () => {
+    const legacyAccount = connectedAccountFixture({
+      id: "acct_LegacyRecipient123",
+      metadata: { clerkOrgId: "org_publisher" },
+    });
+    let accountCreates = 0;
+    const resolved = await resolveConnectedAccountForOperation(
+      connectClientFixture({
+        createAccount: async () => {
+          accountCreates += 1;
+          return connectedAccountFixture();
+        },
+        listRecipientAccounts: async () => [legacyAccount],
+        retrieveAccount: async () => legacyAccount,
+      }),
+      {
+        operationId: ACCOUNT_OPERATION_ID,
+        clerkOrgId: "org_publisher",
+        organizationId: "org_doc",
+        organizationName: "Publisher",
+        country: "AE",
+        contactEmail: "publisher@example.com",
+        expectedLivemode: false,
+        reconcileFirst: true,
+        operationStartedAt: TEST_NOW,
+        now: TEST_NOW,
+      },
+    );
+    expect(resolved.id).toBe("acct_LegacyRecipient123");
+    expect(accountCreates).toBe(0);
+  });
+
+  it("fails closed after v2 replay window when bounded reconciliation finds nothing", async () => {
+    let accountCreates = 0;
+    await expect(
+      resolveConnectedAccountForOperation(
+        connectClientFixture({
+          createAccount: async () => {
+            accountCreates += 1;
+            return connectedAccountFixture();
+          },
+          listRecipientAccounts: async () => [],
+        }),
+        {
+          operationId: ACCOUNT_OPERATION_ID,
+          clerkOrgId: "org_publisher",
+          organizationId: "org_doc",
+          organizationName: "Publisher",
+          country: "AE",
+          contactEmail: "publisher@example.com",
+          expectedLivemode: false,
+          reconcileFirst: true,
+          operationStartedAt: TEST_NOW - 30 * 24 * 60 * 60 * 1_000,
+          now: TEST_NOW,
+        },
+      ),
+    ).rejects.toThrow("reconciliation is required");
+    expect(accountCreates).toBe(0);
+  });
+
+  it("fails closed when the bounded reconciliation scan is saturated", async () => {
+    const visibleMatch = connectedAccountFixture();
+    const saturatedAccounts = Array.from({ length: 1_000 }, (_, index) =>
+      index === 0
+        ? visibleMatch
+        : connectedAccountFixture({
+            id: `acct_Unrelated${index}`,
+            metadata: {
+              zevium_clerk_org_id: `org_unrelated_${index}`,
+              zevium_connect_operation_id:
+                "44444444-4444-4444-8444-444444444444",
+              zevium_organization_id: `org_doc_${index}`,
+            },
+          }),
+    );
+    let accountCreates = 0;
+    await expect(
+      resolveConnectedAccountForOperation(
+        connectClientFixture({
+          createAccount: async () => {
+            accountCreates += 1;
+            return connectedAccountFixture();
+          },
+          listRecipientAccounts: async () => saturatedAccounts,
+        }),
+        {
+          operationId: ACCOUNT_OPERATION_ID,
+          clerkOrgId: "org_publisher",
+          organizationId: "org_doc",
+          organizationName: "Publisher",
+          country: "AE",
+          contactEmail: "publisher@example.com",
+          expectedLivemode: false,
+          reconcileFirst: true,
+          operationStartedAt: TEST_NOW,
+          now: TEST_NOW,
+        },
+      ),
+    ).rejects.toThrow("reconciliation scan is full");
+    expect(accountCreates).toBe(0);
+  });
+
+  it("persists durable account and link operations across crash windows", async () => {
+    const t = convexTest(schema, modules);
+    const seed = await seedConnect(t);
+    const first = await t.mutation(
+      internal.payouts.prepareConnectAccountOperation,
+      {
+        clerkOrgId: "org_publisher",
+        candidateOperationId: ACCOUNT_OPERATION_ID,
+        expectedLivemode: false,
+        country: "AE",
+        contactEmail: "publisher@example.com",
+        requireExistingAccount: false,
+      },
+    );
+    const retry = await t.mutation(
+      internal.payouts.prepareConnectAccountOperation,
+      {
+        clerkOrgId: "org_publisher",
+        candidateOperationId: "44444444-4444-4444-8444-444444444444",
+        expectedLivemode: false,
+        country: "US",
+        contactEmail: "changed@example.com",
+        requireExistingAccount: false,
+      },
+    );
+    expect(retry.operation).toEqual({
+      ...first.operation,
+      isRetry: true,
+    });
+    await expect(
+      t.mutation(internal.payouts.prepareConnectLinkOperation, {
+        organizationId: seed.organizationId,
+        candidateOperationId: LINK_OPERATION_ID,
+        expectedLivemode: false,
+        forceFresh: false,
+      }),
+    ).rejects.toThrow("must be persisted before onboarding");
+
+    const committed = await t.mutation(
+      internal.payouts.commitConnectAccountOperation,
+      {
+        organizationId: seed.organizationId,
+        operationId: ACCOUNT_OPERATION_ID,
+        stripeConnectedAccountId: "acct_V2Recipient123",
+        expectedLivemode: false,
+      },
+    );
+    expect(committed).toEqual({
+      accepted: true,
+      connectedAccountId: "acct_V2Recipient123",
+    });
+    const link = await t.mutation(
+      internal.payouts.prepareConnectLinkOperation,
+      {
+        organizationId: seed.organizationId,
+        candidateOperationId: LINK_OPERATION_ID,
+        expectedLivemode: false,
+        forceFresh: false,
+      },
+    );
+    const linkRetry = await t.mutation(
+      internal.payouts.prepareConnectLinkOperation,
+      {
+        organizationId: seed.organizationId,
+        candidateOperationId: REFRESH_OPERATION_ID,
+        expectedLivemode: false,
+        forceFresh: false,
+      },
+    );
+    expect(linkRetry).toEqual({ ...link, isRetry: true });
+    expect(
+      await t.mutation(internal.payouts.completeConnectLinkOperation, {
+        organizationId: seed.organizationId,
+        operationId: link.operationId,
+        stripeConnectedAccountId: link.connectedAccountId,
+        expectedLivemode: false,
+        providerExpiresAt: TEST_NOW + 10 * 60 * 1_000,
+      }),
+    ).toBe(true);
+    const refresh = await t.mutation(
+      internal.payouts.prepareConnectLinkOperation,
+      {
+        organizationId: seed.organizationId,
+        candidateOperationId: REFRESH_OPERATION_ID,
+        expectedLivemode: false,
+        forceFresh: true,
+      },
+    );
+    expect(refresh.operationId).toBe(REFRESH_OPERATION_ID);
+    expect(refresh.operationId).not.toBe(link.operationId);
+    const state = await t.run(async (ctx) => ({
+      profile: await ctx.db
+        .query("organizationPayments")
+        .withIndex("by_organization", (q) =>
+          q.eq("organizationId", seed.organizationId),
+        )
+        .unique(),
+      operations: await ctx.db
+        .query("stripeConnectOnboardingOperations")
+        .collect(),
+    }));
+    expect(state.profile).toMatchObject({
+      stripeConnectedAccountId: "acct_V2Recipient123",
+      stripeConnectedAccountLivemode: false,
+    });
+    expect(
+      state.operations.map((operation) => operation.status).sort(),
+    ).toEqual(["account_persisted", "link_created", "prepared"]);
+  });
+
+  it("records create-before-write ambiguity without replacing or closing real account", async () => {
+    const t = convexTest(schema, modules);
+    const seed = await seedConnect(t);
+    await t.mutation(internal.payouts.prepareConnectAccountOperation, {
+      clerkOrgId: "org_publisher",
+      candidateOperationId: ACCOUNT_OPERATION_ID,
+      expectedLivemode: false,
+      country: "AE",
+      contactEmail: "publisher@example.com",
+      requireExistingAccount: false,
+    });
+    await t.run(async (ctx) => {
+      const profile = await ctx.db
+        .query("organizationPayments")
+        .withIndex("by_organization", (q) =>
+          q.eq("organizationId", seed.organizationId),
+        )
+        .unique();
+      if (profile === null) throw new Error("profile missing");
+      await ctx.db.patch(profile._id, {
+        stripeConnectedAccountId: "acct_RealPublisher123",
+        stripeConnectedAccountLivemode: false,
+      });
+    });
+    expect(
+      await t.mutation(internal.payouts.commitConnectAccountOperation, {
+        organizationId: seed.organizationId,
+        operationId: ACCOUNT_OPERATION_ID,
+        stripeConnectedAccountId: "acct_AmbiguousCandidate123",
+        expectedLivemode: false,
+      }),
+    ).toEqual({
+      accepted: false,
+      connectedAccountId: "acct_RealPublisher123",
+    });
+    const state = await t.run(async (ctx) => ({
+      profile: await ctx.db
+        .query("organizationPayments")
+        .withIndex("by_organization", (q) =>
+          q.eq("organizationId", seed.organizationId),
+        )
+        .unique(),
+      operation: await ctx.db
+        .query("stripeConnectOnboardingOperations")
+        .withIndex("by_operation", (q) =>
+          q.eq("operationId", ACCOUNT_OPERATION_ID),
+        )
+        .unique(),
+    }));
+    expect(state.profile?.stripeConnectedAccountId).toBe(
+      "acct_RealPublisher123",
+    );
+    expect(state.operation).toMatchObject({
+      status: "requires_reconciliation",
+      stripeConnectedAccountId: "acct_AmbiguousCandidate123",
+    });
   });
 
   it("splits every call exactly in atom units without rounding theft", () => {
@@ -266,12 +1077,14 @@ describe("Stripe Connect publisher accounting", () => {
       await t.mutation(internal.payouts.setConnectedAccount, {
         organizationId: seed.organizationId,
         stripeConnectedAccountId: "acct_reused",
+        expectedLivemode: false,
       }),
     ).toBe("acct_reused");
     expect(
       await t.mutation(internal.payouts.setConnectedAccount, {
         organizationId: seed.organizationId,
         stripeConnectedAccountId: "acct_other",
+        expectedLivemode: false,
       }),
     ).toBe("acct_reused");
     await t.mutation(internal.payouts.projectConnectedAccount, {
@@ -322,6 +1135,9 @@ describe("Stripe Connect publisher accounting", () => {
       member.action(api.payouts.startOnboarding, { country: "US" }),
     ).rejects.toThrow("Org admin or owner role required");
     await expect(
+      member.action(api.payouts.refreshOnboarding, {}),
+    ).rejects.toThrow("Org admin or owner role required");
+    await expect(
       member.action(api.payouts.initiatePublisherTransfer, {}),
     ).rejects.toThrow("Org admin or owner role required");
     const state = await t.run(async (ctx) => ({
@@ -347,9 +1163,11 @@ describe("Stripe Connect publisher accounting", () => {
     await t.mutation(internal.payouts.setConnectedAccount, {
       organizationId: seed.organizationId,
       stripeConnectedAccountId: "acct_transfer",
+      expectedLivemode: false,
     });
     await expect(
       t.mutation(internal.payouts.preparePublisherTransfer, {
+        expectedLivemode: false,
         publisherOrganizationId: seed.organizationId,
         ...TRANSFER_CORRELATION,
       }),
@@ -373,6 +1191,7 @@ describe("Stripe Connect publisher accounting", () => {
     });
     await expect(
       t.mutation(internal.payouts.preparePublisherTransfer, {
+        expectedLivemode: false,
         publisherOrganizationId: seed.organizationId,
         ...TRANSFER_CORRELATION,
       }),
@@ -388,10 +1207,12 @@ describe("Stripe Connect publisher accounting", () => {
     });
     const [first, retry] = await Promise.all([
       t.mutation(internal.payouts.preparePublisherTransfer, {
+        expectedLivemode: false,
         publisherOrganizationId: seed.organizationId,
         ...TRANSFER_CORRELATION,
       }),
       t.mutation(internal.payouts.preparePublisherTransfer, {
+        expectedLivemode: false,
         publisherOrganizationId: seed.organizationId,
         ...TRANSFER_CORRELATION,
       }),
@@ -468,6 +1289,7 @@ describe("Stripe Connect publisher accounting", () => {
     await t.mutation(internal.payouts.setConnectedAccount, {
       organizationId: seed.organizationId,
       stripeConnectedAccountId: "acct_carry",
+      expectedLivemode: false,
     });
     await t.run(async (ctx) => {
       const profile = await ctx.db
@@ -502,6 +1324,7 @@ describe("Stripe Connect publisher accounting", () => {
     });
 
     const first = await t.mutation(internal.payouts.preparePublisherTransfer, {
+      expectedLivemode: false,
       publisherOrganizationId: seed.organizationId,
       ...TRANSFER_CORRELATION,
     });
@@ -523,6 +1346,7 @@ describe("Stripe Connect publisher accounting", () => {
     });
     await expect(
       t.mutation(internal.payouts.preparePublisherTransfer, {
+        expectedLivemode: false,
         publisherOrganizationId: seed.organizationId,
         ...TRANSFER_CORRELATION,
       }),
@@ -562,6 +1386,7 @@ describe("Stripe Connect publisher accounting", () => {
     });
 
     const second = await t.mutation(internal.payouts.preparePublisherTransfer, {
+      expectedLivemode: false,
       publisherOrganizationId: seed.organizationId,
       ...TRANSFER_CORRELATION,
     });
@@ -575,6 +1400,7 @@ describe("Stripe Connect publisher accounting", () => {
     await t.mutation(internal.payouts.setConnectedAccount, {
       organizationId: seed.organizationId,
       stripeConnectedAccountId: "acct_projection",
+      expectedLivemode: false,
     });
     await t.run(async (ctx) => {
       const profile = await ctx.db
@@ -592,6 +1418,7 @@ describe("Stripe Connect publisher accounting", () => {
     const transfer = await t.mutation(
       internal.payouts.preparePublisherTransfer,
       {
+        expectedLivemode: false,
         publisherOrganizationId: seed.organizationId,
         ...TRANSFER_CORRELATION,
       },
@@ -703,6 +1530,7 @@ describe("Stripe Connect publisher accounting", () => {
     await t.mutation(internal.payouts.setConnectedAccount, {
       organizationId: seed.organizationId,
       stripeConnectedAccountId: "acct_crash",
+      expectedLivemode: false,
     });
     await t.run(async (ctx) => {
       const profile = await ctx.db
@@ -718,6 +1546,7 @@ describe("Stripe Connect publisher accounting", () => {
       publisherOrganizationId: seed.organizationId,
     });
     const local = await t.mutation(internal.payouts.preparePublisherTransfer, {
+      expectedLivemode: false,
       publisherOrganizationId: seed.organizationId,
       ...TRANSFER_CORRELATION,
     });
@@ -875,7 +1704,7 @@ describe("Stripe Connect publisher accounting", () => {
         idempotencyKey: "publisher-transfer:legacy-original",
         reversedAmount: 0,
         correlationNonce: "c".repeat(64),
-        platformAccountId: "acct_platform_test",
+        platformAccountId: "acct_platformtest",
         correlationState: "provider_repair_required",
         metadataRepairVersion: 1,
         providerCreateMetadataShape: "publisher_only",
@@ -886,7 +1715,7 @@ describe("Stripe Connect publisher accounting", () => {
       const correlationHmac = await signTransferCorrelation(TRANSFER_SECRET, {
         publisherTransferId: transferId,
         nonce: "c".repeat(64),
-        platformAccountId: "acct_platform_test",
+        platformAccountId: "acct_platformtest",
         destination: "acct_legacy_destination",
         currency: "usd",
         amount: 500,
@@ -1038,7 +1867,7 @@ describe("Stripe Connect publisher accounting", () => {
         idempotencyKey: "publisher-transfer:correlated-v0-original",
         reversedAmount: 0,
         correlationNonce: "d".repeat(64),
-        platformAccountId: "acct_platform_test",
+        platformAccountId: "acct_platformtest",
         correlationState: "provider_repair_required",
         metadataRepairVersion: 1,
         providerCreateMetadataShape: "correlated_v0",
@@ -1049,7 +1878,7 @@ describe("Stripe Connect publisher accounting", () => {
       const correlationHmac = await signTransferCorrelation(TRANSFER_SECRET, {
         publisherTransferId: transferId,
         nonce: "d".repeat(64),
-        platformAccountId: "acct_platform_test",
+        platformAccountId: "acct_platformtest",
         destination: "acct_correlated_v0",
         currency: "usd",
         amount: 700,
@@ -1131,7 +1960,7 @@ describe("Stripe Connect publisher accounting", () => {
     const correlationHmac = await signTransferCorrelation(TRANSFER_SECRET, {
       publisherTransferId: transferId,
       nonce: correlationNonce,
-      platformAccountId: "acct_platform_test",
+      platformAccountId: "acct_platformtest",
       destination: "acct_provider_property",
       currency: "usd",
       amount: 1_234,
@@ -1145,7 +1974,7 @@ describe("Stripe Connect publisher accounting", () => {
       idempotencyKey: "publisher-transfer:provider-property",
       correlationNonce,
       correlationHmac,
-      platformAccountId: "acct_platform_test",
+      platformAccountId: "acct_platformtest",
     };
     const requestFingerprint = await transferRequestFingerprint(immutable);
     const local = {

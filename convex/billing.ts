@@ -156,6 +156,31 @@ export function stripeClient(): Stripe {
   return new Stripe(secretKey, { apiVersion: STRIPE_API_VERSION });
 }
 
+async function verifyBillingPlatformIdentity(stripe: Stripe): Promise<void> {
+  const configured = process.env.STRIPE_PLATFORM_ACCOUNT_ID;
+  const secret = process.env.STRIPE_SECRET_KEY?.trim() ?? "";
+  const expectedLivemode = /^(?:sk|rk)_live_/.test(secret)
+    ? true
+    : /^(?:sk|rk)_test_/.test(secret)
+      ? false
+      : null;
+  if (
+    configured === undefined ||
+    !/^acct_[A-Za-z0-9]+$/.test(configured) ||
+    expectedLivemode === null ||
+    (process.env.STRIPE_SANDBOX !== undefined &&
+      process.env.STRIPE_SANDBOX !== String(!expectedLivemode))
+  ) {
+    throw new Error("Stripe platform configuration is invalid");
+  }
+  const account = await stripe.accounts.retrieve(configured);
+  const providerLivemode = (account as unknown as { livemode?: unknown })
+    .livemode;
+  if (account.id !== configured || providerLivemode !== expectedLivemode) {
+    throw new Error("Stripe platform identity does not match configuration");
+  }
+}
+
 function stringId(
   value: string | { id: string } | null | undefined,
 ): string | null {
@@ -374,6 +399,8 @@ export const createCheckout = action({
       throw new Error("Active organization required");
     }
     const stripePriceId = stripePriceForPack(args.packId);
+    const stripe = stripeClient();
+    await verifyBillingPlatformIdentity(stripe);
     const prepared = await ctx.runMutation(
       internal.billing.prepareCheckoutIntent,
       {
@@ -382,7 +409,6 @@ export const createCheckout = action({
         stripePriceId,
       },
     );
-    const stripe = stripeClient();
     let stripeCustomerId = prepared.stripeCustomerId;
     if (stripeCustomerId === null) {
       const customer = await stripe.customers.create(
@@ -1784,6 +1810,7 @@ export const processStripeEvent = internalAction({
           });
           break;
         }
+        case "v2.core.account.closed":
         case "v2.core.account.updated":
         case "v2.core.account[configuration.recipient].updated":
         case "v2.core.account[configuration.recipient].capability_status_updated":
@@ -1821,8 +1848,10 @@ export const processStripeEvent = internalAction({
           break;
         }
         case "payout.created":
+        case "payout.updated":
         case "payout.paid":
-        case "payout.failed": {
+        case "payout.failed":
+        case "payout.canceled": {
           const payout =
             args.stripeAccount === "platform"
               ? await stripe.payouts.retrieve(args.objectId)
