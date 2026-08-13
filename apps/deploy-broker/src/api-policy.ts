@@ -423,7 +423,14 @@ function validateBindings(
   return explicitSecrets;
 }
 
-function validateMigration(value: unknown, target: TargetManifest): void {
+export interface WorkerMigrationIntent {
+  oldTag: string | null;
+}
+
+function validateMigration(
+  value: unknown,
+  target: TargetManifest,
+): WorkerMigrationIntent | null {
   const finalMigration = target.migrations.at(-1);
   if (!finalMigration) {
     invariant(
@@ -432,9 +439,9 @@ function validateMigration(value: unknown, target: TargetManifest): void {
       "migration_rejected",
       "Worker migration is not declared",
     );
-    return;
+    return null;
   }
-  if (value === undefined) return;
+  if (value === undefined) return null;
   invariant(
     isRecord(value),
     400,
@@ -484,6 +491,7 @@ function validateMigration(value: unknown, target: TargetManifest): void {
     "migration_rejected",
     "Durable Object lifecycle does not match manifest",
   );
+  return { oldTag: typeof oldTag === "string" ? oldTag : null };
 }
 
 function validatePackageDependencies(value: unknown): void {
@@ -551,7 +559,7 @@ export function validateWorkerMetadata(
 ): {
   assetsJwt?: string;
   mainModule: string;
-  migrationMode: "initial" | "none";
+  migrationIntent: WorkerMigrationIntent | null;
   secretBindings?: ExplicitSecretBinding[];
 } {
   invariant(
@@ -593,7 +601,7 @@ export function validateWorkerMetadata(
     "Worker compatibility settings do not match manifest",
   );
   const secretBindings = validateBindings(value.bindings, target);
-  validateMigration(value.migrations, target);
+  const migrationIntent = validateMigration(value.migrations, target);
   const assetsJwt = validateAssets(value.assets, target);
   validatePackageDependencies(value.package_dependencies);
 
@@ -613,7 +621,7 @@ export function validateWorkerMetadata(
   );
   return {
     mainModule: value.main_module,
-    migrationMode: value.migrations === undefined ? "none" : "initial",
+    migrationIntent,
     ...(assetsJwt === undefined ? {} : { assetsJwt }),
     ...(secretBindings.length === 0 ? {} : { secretBindings }),
   };

@@ -1325,11 +1325,11 @@ export class DeploySessionDO extends DurableObject<BrokerEnv> {
 
   private async verifyMigrationState(
     target: TargetManifest,
-    migrationMode: "initial" | "none" | undefined,
+    migrationIntent: { oldTag: string | null } | null | undefined,
     authorization: string,
   ): Promise<void> {
     invariant(
-      migrationMode !== undefined,
+      migrationIntent !== undefined,
       500,
       "migration_state_invalid",
       "Worker multipart migration state is missing",
@@ -1337,7 +1337,7 @@ export class DeploySessionDO extends DurableObject<BrokerEnv> {
     const finalMigration = target.migrations.at(-1);
     if (!finalMigration) {
       invariant(
-        migrationMode === "none",
+        migrationIntent === null,
         400,
         "migration_rejected",
         "Worker migration is not declared",
@@ -1356,10 +1356,12 @@ export class DeploySessionDO extends DurableObject<BrokerEnv> {
       "migration_state_rejected",
       "Worker migration is outside signed lifecycle state",
     );
-    const expected =
-      current?.migrationTag === finalMigration.tag ? "none" : "initial";
+    const expectedOldTag = current?.migrationTag ?? null;
     invariant(
-      migrationMode === expected,
+      current?.migrationTag === finalMigration.tag
+        ? migrationIntent === null
+        : migrationIntent !== null &&
+            timingSafeEqual(migrationIntent.oldTag ?? "", expectedOldTag ?? ""),
       409,
       "migration_state_rejected",
       "Worker migration does not match current signed lifecycle state",
@@ -1513,7 +1515,7 @@ export class DeploySessionDO extends DurableObject<BrokerEnv> {
     let recoveryActiveDeploymentId: string | undefined;
     let recoveryReleaseSha: string | undefined;
     let uploadedAssetHashes: string[] = [];
-    let versionMigrationMode: "initial" | "none" | undefined;
+    let versionMigrationIntent: { oldTag: string | null } | null | undefined;
     if (route.maximumBodyBytes === 0) {
       ensureNoBody(request);
     } else if (
@@ -1588,7 +1590,7 @@ export class DeploySessionDO extends DurableObject<BrokerEnv> {
       await this.verifyCompletionJwt(route, inspected.assetsJwt);
       body = inspected.body;
       forwardedContentLength = inspected.contentLength;
-      versionMigrationMode = inspected.migrationMode;
+      versionMigrationIntent = inspected.migrationIntent;
     } else if (route.kind === "asset-upload-bulk") {
       invariant(
         route.target && assetState,
@@ -1681,7 +1683,7 @@ export class DeploySessionDO extends DurableObject<BrokerEnv> {
         if (route.kind === "version-upload") {
           await this.verifyMigrationState(
             route.target!,
-            versionMigrationMode,
+            versionMigrationIntent,
             authorization,
           );
         } else if (route.kind === "deployment-create") {
