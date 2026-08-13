@@ -9,7 +9,7 @@
 1. **TypeScript everywhere.** The only hard language constraint. The one component that may ever be ported for efficiency (the proxy Worker) is deliberately isolated so a future Go rewrite touches nothing else.
 2. **Control plane / data plane split.** The metered proxy is the product's hot path: latency-sensitive, streaming, global. It lives at the edge. Everything else (CRUD, dashboards, catalog, ledger authority) is the control plane and optimizes for developer velocity, not latency.
 3. **Buy the undifferentiated, own the differentiated.** Auth, payments, database sync = bought. Credit gating, metering, proxy, MCP surface = ours (that's the product).
-4. **The seams are where bugs live.** Current stack's four known bugs are all integration glue (embedding upsert, Better Auth server props, unmetered MCP, unwired secrets). Fewer seams > familiar seams.
+4. **The seams are where bugs live.** Cross-service identity, metering, cache and webhook boundaries receive explicit tests. Fewer seams > familiar seams.
 
 ## Stack decision (2026-07-12)
 
@@ -23,35 +23,34 @@
 | Credit ledger          | **Convex is the source of truth** (own tables), Worker holds the edge gate   | Vendor credit ledgers + Redis gate           |
 | Embeddings             | Provider API (Gemini or similar) via Convex action → Convex `vectorIndex`    | Gemini + Turso `vector_top_k`                |
 
-### Why Convex for the control plane (verified 2026-07-11)
+### Why Convex for the control plane
 
 - Realtime sync for free → dashboards that live-tick (feeds DESIGN.md "alive"), no cache invalidation code, no manual optimistic-update plumbing
 - OCC hot-document contention on org wallets is a **named, solved problem**: first-party `@convex-dev/rate-limiter` component (sharded, transactionally-correct check-and-consume)
 - Native vector search for catalogue semantic search
-- Pricing sane: 25M function calls included at $25/seat; control-plane-only usage lands well inside it
-- Constraint accepted: **single-region** (US-East or EU-West, +30%). Fine for the control plane; disqualifying for the proxy — which is why the proxy doesn't live there
+- Control-plane traffic is outside the per-call proxy hot path; vendor price and region choices must be rechecked against the active account before launch
 
 ### Why the proxy stays a Cloudflare Worker
 
-- Convex is single-region with no edge story: +75–230ms per call for EU/Asia consumers. Proxy latency complaints helped kill RapidAPI; not repeating that
-- Workers: global PoPs, native streaming passthrough (`fetch` → `Response` body pipe), cheap at millions of calls
+- Worker placement keeps request streaming and credit authorization out of the control-plane request path
+- Workers support native streaming passthrough (`fetch` → `Response` body pipe)
 - Isolated data plane = the future Go-port candidate, if ever needed
 
 ### Why Clerk
 
 - Org-scoped billing is a product decision (PRODUCT.md); Clerk ships prebuilt `<OrganizationSwitcher/>`, `<OrganizationProfile/>`, invitations, roles — weeks of UI we don't build
-- **Machine API Keys GA (2026-04-17)**: end-user keys scoped to user or organization, prebuilt management UI, $0.001/creation + $0.00001/verification (first 100k verifications/mo free). Replaces the Better Auth apikey plugin (the currently-broken piece)
+- **Machine API Keys GA (2026-04-06)**: Clerk's [2026-04-17 changelog](https://clerk.com/changelog/2026-04-17-api-keys-ga) says availability began April 6. End-user keys are scoped to user or organization. Replaces the Better Auth apikey plugin
 - Deepest Convex auth integration (`ConvexProviderWithClerk`, JWT templates)
-- Known caveats: TanStack Start SDK is beta; vendor lock accepted (greenfield, zero users, worst case is a rebuild we've already proven we can do)
-- **Clerk Billing is NOT used**: verified subscriptions-only, no metered/usage billing, and no marketplace publisher settlement. Billing is ours + Stripe Checkout/Connect
+- Vendor lock is accepted for a greenfield product with no users; current package compatibility is proved by repository typecheck/build tests, not this document
+- **Clerk Billing is not used**: Zevium's current funds flow is implemented with prepaid credits and publisher settlement through Stripe
 
 ### Why Stripe Checkout + Connect
 
 - Checkout collects fixed, one-time credit-pack payments. A verified paid event grants the consumer organization exactly once; browser redirects never grant credits.
 - Launch accounting is USD-only. Stripe Checkout adaptive pricing is disabled, and the platform Stripe account must settle into a USD balance so Connect transfers use the same currency as the credit ledger. A non-USD platform requires an explicit FX ledger before use.
-- Connect owns publisher onboarding/KYC, connected-account capabilities, transfers, and bank-payout events. Zevium uses separate charges and transfers because a publisher is unknown when universal credits are purchased.
+- Connect handles hosted publisher onboarding, connected-account capabilities, transfers, and bank-payout events. Zevium uses [separate charges and transfers](https://docs.stripe.com/connect/separate-charges-and-transfers) because a publisher is unknown when universal credits are purchased. Connected accounts use the recipient configuration described by [Stripe Accounts v2](https://docs.stripe.com/connect/accounts-v2).
 - Convex remains authoritative for credits, 95/5 usage settlement, earning holds, reversals, and transfer eligibility. Stripe Billing meters/customer credits never gate gateway calls.
-- Stripe owns external payment/refund/dispute/transfer/payout facts. Zevium is the platform/merchant of record for this Connect funds flow and carries refund/dispute exposure.
+- Stripe supplies external payment/refund/dispute/transfer/payout facts. Current code creates the platform charge and later transfer; legal role, tax, refund and dispute allocation remain launch blockers in `docs/launch-security-compliance.md` and are not settled by architecture text
 
 ## Repo shape
 
@@ -82,7 +81,7 @@ Turborepo drives build/typecheck/test/lint pipelines with caching; each app depl
                             │  events)     ▼
 ┌─────────┐         ┌──────────────────────────────────────────┐
 │ Clerk   │◀───────▶│ CLOUDFLARE WORKER (data plane, edge)     │
-│ auth,   │ key     │  /proxy/{org}/{project}/*  + /mcp        │
+│ auth,   │ key     │  /gateway/{org}/{project}/* + /mcp       │
 │ orgs,   │ verify  │  1. verify API key (edge-cached)         │
 │ API keys│ (cached)│  2. credit gate (Durable Object wallet)  │
 └─────────┘         │  3. inject publisher upstream secrets    │
@@ -98,17 +97,18 @@ Turborepo drives build/typecheck/test/lint pipelines with caching; each app depl
 - **Durable Object per org wallet**: single-threaded actor = race-free reserve/settle/refund with zero lock code, lives at the edge near traffic
 - Convex ledger is authoritative; DO holds a monotonic balance/sequence checkpoint plus active reservations and pending settlements. DO batches stable settlement refs to Convex; Convex returns per-ref `applied`/`already_applied`/`rejected` outcomes and a newer checkpoint. Only accepted refs are acknowledged, so lost acknowledgements and partial rejection converge without dropping usage.
 - Zero balance **blocks** (PRODUCT.md rule: never surprise-overage). DO answers in-memory → sub-ms gate
-- Key verification: Clerk verify API on first sight → cached in the DO/KV with TTL; Clerk webhooks (key revoked/updated) purge cache. Hot path never waits on Clerk
+- Key verification: Clerk verify API on first sight → cached in the DO with a short TTL. Zevium-owned key revoke/rotate/disable screens push control changes into the wallet state; no Clerk API-key webhook exists. TTL expiry is the fail-safe. Hot path never waits on Clerk
 
 ### What each domain owns (Convex schema sketch)
 
 - `organizations` (mirror of Clerk orgs via webhook; Clerk is auth truth, Convex holds app data keyed by Clerk org id)
-- `projects`, `specs` + `specVersions` (immutable published versions), `catalogueMeta` (derived quality signals)
-- `wallets` (ledger: grants, reservations, settlements, refunds — append-only entries + materialized balance)
+- `projects`, `specs` + `specVersions` (immutable published spec bodies; deprecation metadata remains mutable)
+- `wallets` + `walletEntries` (append-only ledger entries + materialized authoritative balance)
 - `usageEvents` (per-call: project, endpoint, org, credits, latency, status) + rollup tables via cron (publisher analytics p95/p99 come from here)
 - `organizationPayments`, `checkoutIntents`, `payments`, `paymentEvents` (Stripe customer/Connect projection, hosted Checkout correlation, durable webhook dedupe)
 - `publisherEarnings`, `publisherTransfers`, `connectedPayouts` (risk-held 95/5 earnings, Connect transfer state, bank-payout projection)
-- `embeddings` via `vectorIndex` (catalogue semantic search)
+- `specEmbeddings` via `vectorIndex` (catalogue semantic search)
+- `specImportRateLeases` (durable organization/member fixed-window import bounds)
 
 ## Implementation notes (verified against code, waves 1-9 + hardening)
 
@@ -140,23 +140,28 @@ Decisions made during the build that extend or sharpen the stack decision above:
 - **Deprecation signaling**: RFC 8594 headers on gateway responses for deprecated spec versions — `Deprecation: @<epoch-seconds>`, `Sunset: <HTTP-date>`, `Link: <catalogue-url>; rel="deprecation"`
 - **Admin gate**: platform-admin access is an env allowlist, `ADMIN_USER_IDS` (Clerk subject ids), checked server-side in Convex — no separate roles table
 - **Payouts**: Stripe Connect onboarding replaces free-form payout destinations. Earnings move through pending-risk, available, allocated, transferred, and reversed/failed states; `/admin/payouts` operates failed transfer retries while Stripe payout events project bank-delivery state.
-- **x402**: a stub, not the full rail. Every unauthenticated/invalid-key/insufficient-credit response on the keyless-capable surfaces (`/gateway`, `/mock`) returns a `402` with a machine-readable `actions` envelope (create-key, top-up, docs links) so an agent can self-serve next steps. No payment-header verification via a facilitator yet — that part of the x402 rail is still deferred (see below)
+- **Payment-required errors**: unauthenticated, invalid-key, and insufficient-credit responses on `/gateway` return a generic `402` with machine-readable create-key, top-up, and docs actions. This is prepaid-credit recovery metadata, not x402: no payment requirements, signed-payment verification, facilitator, or settlement exists in this tree. `/mock` is keyless and free; project, spec, and route failures return generic `404` responses
+- **Body handling**: direct `/gateway` requests and responses stream without
+  application buffering. MCP `call_api` reuses the same authenticated, metered
+  pipeline, then buffers its JSON-RPC request and upstream response in Worker
+  memory with explicit 1 MiB limits because MCP tool results embed response text.
+  Neither path persists payload bodies in application tables.
 
 ## What dies from the current repo
 
 tRPC + oRPC, Drizzle + Turso, Upstash Redis, Better Auth (+ apikey plugin), Polar plugin wiring in auth, drizzle/ migrations, the seed script in current form. Route tree, shadcn components, and Motion setup carry over conceptually; code is rewritten against Convex hooks.
 
-## Pre-build spikes — all verified GO (2026-07-11)
+## Historical pre-build spike notes (2026-07-11)
 
-Four spikes ran as real code (scratch projects, reports + artifacts in session scratchpad). Verdicts and the design consequences they bought:
-
-1. **Clerk + TanStack Start SDK** — GO. `@clerk/tanstack-react-start` 1.4.x: install/typecheck/production build clean against Start 1.168 + React 19.2; `auth()` works in server functions via `clerkMiddleware` → Start context → `ClerkProvider` hydration. Notes: **pin `react`/`react-dom`** (Clerk peers use tilde patch ranges, `19.4.x` would break resolution); middleware hard-fails all routes on bad keys; route protection is opt-in per route; Start scaffold pins `nitro-nightly` — budget upgrade churn. Live auth flow still unproven until a real Clerk instance exists
-2. **Clerk API-key verify from Workers** — GO. `POST /v1/api_keys/verify` returns `subject` (`org_`/`user_`), scopes, expiry, revoked — everything the gateway cache needs. Measured p50 ~94ms fresh / ~33ms keepalive → confirms cache-first. Limits: 1000 req/10s per instance; $0.00001/verify after 100k/mo. **No `api_key.*` webhook events exist** → cache purge must come from OUR key screens (call Clerk, then purge wallet-DO cache) + short TTL (~60s) safety net. Do not use Clerk's prebuilt key-management component — it would bypass the purge. `@clerk/backend` is workerd-compatible
-3. **Convex + TanStack Start SSR** — GO. Proven: Start loader `ensureQueryData(convexQuery(...))` fetches via HTTP client during SSR, listing text present in raw HTML (view-source SEO requirement), client hydrates into WebSocket subscription with same query keys. Convex local dev works with **zero account** (`CONVEX_AGENT_MODE=anonymous`) — CI/fresh-clone DX solved. Authed SSR needs explicit server-side token forwarding (Clerk guide exists)
-4. **Wallet DO reconcile invariant** — GO. Full DO implemented + fuzz-tested in workerd (10/10 green; 200-op runs with ~30% ack loss and forced evictions). Invariant held: `ledgerGrants − ledgerSettled == doBalance + inFlight`, never negative. Hardening baked into the design: **stable settlement ids** (`settle:{reservationId}` — batch ids insufficient under lost-ack), terminal map for settle/refund idempotency, `storage.transaction` + `blockConcurrencyWhile` reload, refund restores availability without a ledger row. Spike code seeds `apps/gateway`
+Internal spikes informed initial choices for Clerk/Start integration, API-key
+verification, authenticated Convex SSR, and wallet reconciliation. Scratchpad
+artifacts are not retained launch evidence, and no external review or approval
+is recorded. Current source, tests and generated builds are the only repository
+evidence for implementation behavior; production account configuration and
+operating effectiveness remain blocked in `docs/launch-security-compliance.md`.
 
 ## Later (explicitly deferred)
 
 - Go port of the proxy Worker if TypeScript ever becomes the bottleneck (isolated by design; measure first)
-- x402 rail, full: the 402 + actions-envelope stub is live (see Implementation notes above); actual payment-header verification via a facilitator is still deferred — P1 per PRODUCT.md, lands after the credit path is solid
+- x402 rail: entirely deferred to P1 per PRODUCT.md. Any future implementation needs signed-payment retry, facilitator verification, settlement/replay controls, tests, data inventory, and approved operating evidence; generic current `402` action envelopes are not an x402 stub
 - Multi-region Convex / read replicas: not our problem; control plane latency is not user-facing hot path

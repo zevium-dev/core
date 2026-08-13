@@ -12,11 +12,6 @@ through a metered edge gateway. Zero balance blocks the call. Publishers keep 95
 ![Stripe](https://img.shields.io/badge/Stripe-Checkout%20%2B%20Connect-635bff?style=for-the-badge&logo=stripe)
 ![WTFPL](https://img.shields.io/badge/license-WTFPL-696969?style=for-the-badge)
 
-![Zevium demo — landing, catalogue, and a keyless mock call](docs/assets/demo.gif)
-
-_Full walkthrough with the publisher console, billing, earnings, and admin:
-[docs/assets/demo.mp4](docs/assets/demo.mp4)_
-
 ## How it works
 
 1. **Publish** — upload an OpenAPI spec. Upstream URL, endpoints, and pricing
@@ -30,21 +25,12 @@ _Full walkthrough with the publisher console, billing, earnings, and admin:
    credits before the proxy, settles on 2xx, refunds on failure. $1 = 10,000
    credits; the platform takes 5%, publishers accrue 95% toward payouts.
 
-## Screenshots
-
-|                                                                             |                                                                     |
-| --------------------------------------------------------------------------- | ------------------------------------------------------------------- |
-| ![Catalogue with pricing badges and tag filters](docs/assets/catalogue.png) | ![API detail with per-endpoint pricing](docs/assets/api-detail.png) |
-| _Catalogue — search, tags, price badges_                                    | _API detail — spec-driven pricing table_                            |
-| ![Spec editor with live pricing rail](docs/assets/spec-editor.png)          | ![Billing with cycle breakdown](docs/assets/billing.png)            |
-| _Spec editor — live validation + pricing rail_                              | _Billing — wallet, packs, cycle breakdown_                          |
-
 ## What's inside
 
 - **Metered gateway** (Cloudflare Worker) — key verification with edge caching,
   per-org wallet DO (reserve → settle/refund), per-key monthly caps and
   rotation with grace, RFC 8594 deprecation headers, CORS for browser callers,
-  x402 payment-required envelopes, keyless `/mock` mode, `/mcp` + `/discovery`
+  generic payment-required action envelopes, keyless `/mock` mode, `/mcp` + `/discovery`
   for agents.
 - **Control plane** (Convex) — projects and immutable spec versions, credit
   ledger, usage analytics, publisher earnings, Stripe event reconciliation,
@@ -70,6 +56,9 @@ docs/            # market research + demo assets
 
 Source-of-truth docs: [PRODUCT.md](PRODUCT.md) · [FLOW.md](FLOW.md) ·
 [TECH.md](TECH.md) · [DESIGN.md](DESIGN.md)
+
+Trust docs: [Security policy](SECURITY.md) ·
+[Launch security and compliance posture](docs/launch-security-compliance.md)
 
 ## Development
 

@@ -113,6 +113,7 @@ async function installFixtures(opts: {
   keySettings?: KeySetting[];
   checkpointBalance?: number;
   archived?: boolean;
+  version?: string;
 }) {
   const usage = opts.usage ?? new CollectingUsageSink();
   const organizationId = opts.organizationId ?? opts.clerkOrgId;
@@ -127,7 +128,7 @@ async function installFixtures(opts: {
   specs.set(ORG_SLUG, PROJECT_SLUG, {
     spec: opts.spec ?? SPEC,
     specVersionId: "version_demo",
-    version: "1.0.0",
+    version: opts.version ?? "1.0.0",
     projectId: "proj_demo",
     organizationId,
     clerkOrgId: opts.clerkOrgId,
@@ -256,6 +257,62 @@ describe("gateway pipeline", () => {
     await expect(res.json()).resolves.toMatchObject({ error: "invalid_spec" });
     expect(calls).toHaveLength(0);
     expect(usage.events).toHaveLength(0);
+    expect((await walletStub(clerkOrgId).getState()).balance).toBe(100);
+  });
+
+  it("fails closed on unsafe published spec before reserve or upstream fetch", async () => {
+    const clerkOrgId = "org_pipe_unsafe_copy";
+    const { fetchImpl, calls } = makeFetchMock(() => new Response("no"));
+    const parsed = JSON.parse(SPEC) as Record<string, unknown>;
+    parsed.info = { title: "Demo", version: "PCI compliant" };
+    await installFixtures({
+      clerkOrgId,
+      fetchImpl,
+      credits: 100,
+      spec: JSON.stringify(parsed),
+    });
+
+    const res = await gatewayFetch(
+      `/gateway/${ORG_SLUG}/${PROJECT_SLUG}/stream`,
+    );
+    expect(res.status).toBe(404);
+    expect(calls).toHaveLength(0);
+    expect((await walletStub(clerkOrgId).getState()).balance).toBe(100);
+  });
+
+  it("fails closed on malformed published JSON before reserve or upstream fetch", async () => {
+    const clerkOrgId = "org_pipe_malformed_spec";
+    const { fetchImpl, calls } = makeFetchMock(() => new Response("no"));
+    await installFixtures({
+      clerkOrgId,
+      fetchImpl,
+      credits: 100,
+      spec: "{malformed",
+    });
+
+    const res = await gatewayFetch(
+      `/gateway/${ORG_SLUG}/${PROJECT_SLUG}/stream`,
+    );
+    expect(res.status).toBe(404);
+    expect(calls).toHaveLength(0);
+    expect((await walletStub(clerkOrgId).getState()).balance).toBe(100);
+  });
+
+  it("fails closed on unsafe immutable release copy before reserve", async () => {
+    const clerkOrgId = "org_pipe_unsafe_version";
+    const { fetchImpl, calls } = makeFetchMock(() => new Response("no"));
+    await installFixtures({
+      clerkOrgId,
+      fetchImpl,
+      credits: 100,
+      version: "C.C.P.A compliant",
+    });
+
+    const res = await gatewayFetch(
+      `/gateway/${ORG_SLUG}/${PROJECT_SLUG}/stream`,
+    );
+    expect(res.status).toBe(404);
+    expect(calls).toHaveLength(0);
     expect((await walletStub(clerkOrgId).getState()).balance).toBe(100);
   });
 
@@ -662,7 +719,7 @@ describe("gateway pipeline", () => {
     expect(calls).toHaveLength(1);
   });
 
-  it("402 (x402 payment_required, not 401) on bad key", async () => {
+  it("402 payment_required (not 401) on bad key", async () => {
     const clerkOrgId = "org_pipe_badkey";
     const { fetchImpl, calls } = makeFetchMock(() => new Response("x"));
     await installFixtures({ clerkOrgId, fetchImpl, credits: 10 });
@@ -691,7 +748,7 @@ describe("gateway pipeline", () => {
     expect(calls).toHaveLength(0);
   });
 
-  it("402 (x402 payment_required, not 401) on missing key", async () => {
+  it("402 payment_required (not 401) on missing key", async () => {
     const clerkOrgId = "org_pipe_missingkey";
     const { fetchImpl, calls } = makeFetchMock(() => new Response("x"));
     await installFixtures({ clerkOrgId, fetchImpl, credits: 10 });

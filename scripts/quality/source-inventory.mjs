@@ -619,6 +619,7 @@ export function attestIgnorePolicies(repository) {
     "/.project/e2e-key.env",
     "/.dev.vars",
     "/apps/gateway/.dev.vars",
+    "/apps/gateway/.compliance-dist/",
   ]);
   assertExactIgnoreLines(root, "apps/web/.gitignore", [
     "/.DS_Store",

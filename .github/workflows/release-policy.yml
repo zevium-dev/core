@@ -50,7 +50,7 @@ jobs:
 
   evaluate:
     needs: [security]
-    if: github.event.pull_request.draft == false
+    if: github.event.pull_request.draft == false && vars.RELEASE_REFEREE_REF != '' && vars.RELEASE_REFEREE_SHA256 != '' && vars.RELEASE_POLICY_TREE_SHA256 != ''
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 20
     environment: production-policy

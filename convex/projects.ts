@@ -20,6 +20,11 @@ import {
 } from "./lib/notifications";
 import { fireWebhookEvent } from "./webhooks";
 import { assertFinanceMigrationAllowsRuntime } from "./lib/financeMigrationGate";
+import {
+  assertOrganizationCopyAllowed,
+  assertProjectCopyAllowed,
+  isPublishedSurfaceAllowed,
+} from "./lib/publicClaims";
 import { isValidSlug } from "./lib/validate";
 import { syncCatalogueListing } from "./catalogue";
 import { isProjectRetired, retirePublicRoute } from "./lib/publicRoutes";
@@ -348,6 +353,13 @@ export const create = mutation({
     if (description !== undefined && description.length > 2000) {
       throw new Error("Description must be at most 2000 characters");
     }
+    assertProjectCopyAllowed({
+      name,
+      slug,
+      description: description === "" ? undefined : description,
+      tags: [],
+    });
+    assertOrganizationCopyAllowed(org);
 
     const existing = await ctx.db
       .query("projects")
@@ -476,6 +488,44 @@ export const update = mutation({
         throw new Error("At most 32 tags");
       }
       tags = unique;
+    }
+
+    const nextProject = {
+      ...current,
+      name,
+      description,
+      visibility,
+      tags,
+    };
+    const copyChanged =
+      args.patch.name !== undefined ||
+      args.patch.description !== undefined ||
+      args.patch.tags !== undefined;
+    const visibilityOnlyRemediation =
+      current.visibility === "public" &&
+      visibility === "private" &&
+      !copyChanged;
+    if (!visibilityOnlyRemediation) assertProjectCopyAllowed(nextProject);
+    if (visibility === "public") {
+      const org = await getActiveOrgById(ctx, current.organizationId);
+      if (org === null) {
+        throw new Error("Organization is unavailable");
+      }
+      const latest = await ctx.db
+        .query("specVersions")
+        .withIndex("by_project_published", (q) =>
+          q.eq("projectId", args.projectId),
+        )
+        .order("desc")
+        .first();
+      if (
+        latest !== null &&
+        !isPublishedSurfaceAllowed(nextProject, org, latest)
+      ) {
+        throw new Error(
+          "Project cannot be public until publisher, project, and published spec copy pass public policy",
+        );
+      }
     }
 
     if (descriptionCleared) {

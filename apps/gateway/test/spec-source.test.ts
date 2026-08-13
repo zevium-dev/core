@@ -115,4 +115,55 @@ describe("internal gateway spec source", () => {
       }),
     ).toBeNull();
   });
+
+  it("fails closed on malformed JSON and unsafe publisher text", () => {
+    const base = {
+      specVersionId: "version",
+      version: "1.0.0",
+      projectId: "project",
+      organizationId: "organization",
+      clerkOrgId: "org_publisher",
+      visibility: "public",
+    };
+    expect(parsePublishedSpecPayload({ ...base, spec: "{broken" })).toBeNull();
+    expect(
+      parsePublishedSpecPayload({
+        ...base,
+        version: "G.D.P.R compliant",
+        spec: "{}",
+      }),
+    ).toBeNull();
+    expect(
+      parsePublishedSpecPayload({
+        ...base,
+        spec: JSON.stringify({
+          openapi: "3.1.0",
+          info: { title: "Demo", version: "PCI compliant" },
+          paths: {},
+        }),
+      }),
+    ).toBeNull();
+    expect(
+      parsePublishedSpecPayload({
+        ...base,
+        version: "HIPAA",
+        deprecationMessage: "compliant",
+        spec: "{}",
+      }),
+    ).toBeNull();
+    expect(
+      parsePublishedSpecPayload({
+        ...base,
+        spec: JSON.stringify({
+          openapi: "3.1.0",
+          info: {
+            title: "HIPAA",
+            description: "compliant",
+            version: "1.0.0",
+          },
+          paths: {},
+        }),
+      }),
+    ).toBeNull();
+  });
 });

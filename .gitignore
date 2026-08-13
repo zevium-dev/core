@@ -54,3 +54,4 @@
 /.project/e2e-key.env
 /.dev.vars
 /apps/gateway/.dev.vars
+/apps/gateway/.compliance-dist/

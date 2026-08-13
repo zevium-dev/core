@@ -1,4 +1,5 @@
 import { v } from "convex/values";
+import { isPublicCopyAllowed } from "@zevium/shared";
 import {
   internalMutation,
   mutation,
@@ -14,6 +15,11 @@ import {
   requireIdentity,
   requireOrgAdmin,
 } from "./lib/auth";
+import {
+  assertOrganizationCopyAllowed,
+  isOrganizationCopyAllowed,
+  isOrganizationPublicSurfaceAllowed,
+} from "./lib/publicClaims";
 import { isValidSlug } from "./lib/validate";
 
 import { enqueueOrgArchive, enqueueOrgPut } from "./registrySync";
@@ -92,7 +98,11 @@ export const getByPublicHandle = query({
   args: { handle: v.string() },
   handler: async (ctx, args): Promise<PublicOrganization | null> => {
     const org = await getOrgByPublicHandle(ctx, args.handle);
-    if (org === null || org.publicHandle === undefined) {
+    if (
+      org === null ||
+      org.publicHandle === undefined ||
+      !isOrganizationPublicSurfaceAllowed(org)
+    ) {
       return null;
     }
     return {
@@ -110,6 +120,9 @@ export const checkPublicHandleAvailability = query({
     const claims = await requireIdentity(ctx);
     if (!claims.orgId) throw new Error("No active organization");
     const handle = args.handle.trim().toLowerCase();
+    if (!isValidSlug(handle) || !isPublicCopyAllowed(handle)) {
+      return { available: false };
+    }
     const current = await getOrgByClerkId(ctx, claims.orgId);
     if (current === null) {
       throw new Error("Organization is archived");
@@ -195,6 +208,11 @@ export const upsertFromClerk = internalMutation({
         slug,
         args.clerkOrgId,
       );
+      assertOrganizationCopyAllowed({
+        name: args.name,
+        slug,
+        publicHandle,
+      });
       const organizationId = await ctx.db.insert("organizations", {
         clerkOrgId: args.clerkOrgId,
         name: args.name,
@@ -223,6 +241,11 @@ export const upsertFromClerk = internalMutation({
     const publicHandle =
       existing.publicHandle ??
       (await availablePublicHandle(ctx, slug, args.clerkOrgId, existing._id));
+    assertOrganizationCopyAllowed({
+      name: args.name,
+      slug,
+      publicHandle,
+    });
     await ctx.db.patch(existing._id, {
       name: args.name,
       slug,
@@ -356,12 +379,19 @@ export const applyOrganizationWebhook = internalMutation({
       return { status: "ignored_stale" as const };
     }
 
+    const publicHandle = existing?.publicHandle ?? args.slug;
+    assertOrganizationCopyAllowed({
+      name: args.name,
+      slug: args.slug,
+      publicHandle,
+    });
+
     if (existing === null) {
       const organizationId = await ctx.db.insert("organizations", {
         clerkOrgId: args.clerkOrgId,
         name: args.name,
         slug: args.slug,
-        publicHandle: args.slug,
+        publicHandle,
         imageUrl: args.imageUrl,
         lastClerkEventAt: args.eventTimestamp,
         unreadNotificationCount: 0,
@@ -610,7 +640,6 @@ export const ensureOrganization = mutation({
       .query("organizations")
       .withIndex("by_clerk_org", (q) => q.eq("clerkOrgId", args.clerkOrgId))
       .unique();
-
     if (existing === null) {
       const signedSlug = claims.orgSlug?.trim().toLowerCase();
       if (signedSlug === undefined || !isValidSlug(signedSlug)) {
@@ -618,6 +647,11 @@ export const ensureOrganization = mutation({
           "Active organization is awaiting Clerk synchronization",
         );
       }
+      assertOrganizationCopyAllowed({
+        name: signedSlug,
+        slug: signedSlug,
+        publicHandle: signedSlug,
+      });
       const organizationId = await ctx.db.insert("organizations", {
         clerkOrgId: args.clerkOrgId,
         name: signedSlug,
@@ -650,6 +684,11 @@ export const setPublicHandle = mutation({
     const handle = args.handle.trim().toLowerCase();
     if (!isValidSlug(handle)) {
       throw new Error("Public handle must be kebab-case");
+    }
+    if (!isPublicCopyAllowed(handle)) {
+      throw new Error(
+        "Public handle contains an unsupported compliance or absolute security claim",
+      );
     }
     const organization = await getOrgByClerkId(ctx, claims.orgId);
     if (!organization) throw new Error("Organization not found");
@@ -692,7 +731,7 @@ export const backfillPublicHandles = internalMutation({
   handler: async (
     ctx,
     args,
-  ): Promise<{ updated: number; collisions: number }> => {
+  ): Promise<{ updated: number; collisions: number; blocked: number }> => {
     const page = await ctx.db.query("organizations").paginate({
       cursor: args.cursor ?? null,
       numItems: 100,
@@ -700,6 +739,7 @@ export const backfillPublicHandles = internalMutation({
     });
     let updated = 0;
     let collisions = 0;
+    let blocked = 0;
     for (const organization of page.page) {
       if (organization.publicHandle !== undefined) continue;
       const normalized = organization.slug
@@ -708,6 +748,13 @@ export const backfillPublicHandles = internalMutation({
         .replace(/[^a-z0-9]+/g, "-")
         .replace(/^-|-$/g, "");
       const base = normalized || "publisher";
+      if (
+        !isValidSlug(base) ||
+        !isOrganizationCopyAllowed({ ...organization, publicHandle: base })
+      ) {
+        blocked += 1;
+        continue;
+      }
       let handle = base;
       const taken = await ctx.db
         .query("organizations")
@@ -720,6 +767,13 @@ export const backfillPublicHandles = internalMutation({
           .toLowerCase()
           .replace(/[^a-z0-9]/g, "")}`;
       }
+      if (
+        !isValidSlug(handle) ||
+        !isOrganizationCopyAllowed({ ...organization, publicHandle: handle })
+      ) {
+        blocked += 1;
+        continue;
+      }
       await ctx.db.patch(organization._id, { publicHandle: handle });
       updated += 1;
     }
@@ -730,6 +784,6 @@ export const backfillPublicHandles = internalMutation({
         { cursor: page.continueCursor },
       );
     }
-    return { updated, collisions };
+    return { updated, collisions, blocked };
   },
 });

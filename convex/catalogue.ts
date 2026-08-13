@@ -11,11 +11,23 @@ import { internal } from "./_generated/api";
 import { getActiveOrgById, getOrgByClerkId } from "./lib/auth";
 import { qualitySnapshotContract } from "./lib/qualityContract";
 import { resolveActivePublicRoute } from "./lib/publicRoutes";
+import { isPublishedSurfaceAllowed } from "./lib/publicClaims";
 
 const PAGE_SIZE = 24;
 const PUBLIC_SCAN_CAP = 240;
 const PROJECTION_BACKFILL_PAGE_SIZE = 25;
 const CATALOGUE_STATS_KEY = "public";
+
+export function isListingPublicCopyAllowed(
+  project: Pick<Doc<"projects">, "name" | "slug" | "description" | "tags">,
+  org: Pick<Doc<"organizations">, "name" | "slug" | "publicHandle">,
+  version: Pick<
+    Doc<"specVersions">,
+    "version" | "spec" | "deprecationMessage"
+  > | null,
+): boolean {
+  return isPublishedSurfaceAllowed(project, org, version);
+}
 
 export type CatalogueSort = "newest" | "name" | "cheapest";
 
@@ -41,7 +53,8 @@ export type PublicListing = {
 
 /**
  * Summarize per-endpoint costs from a published OpenAPI JSON string.
- * Invalid/unparseable specs yield null (listing still visible, no price chip).
+ * Invalid/unparseable specs yield null. Public callers exclude those listings
+ * before pricing is summarized.
  */
 export function summarizePublishedPricing(
   specJson: string,
@@ -487,6 +500,9 @@ export const listPublic = query({
           )
           .order("desc")
           .first();
+        if (!isListingPublicCopyAllowed(project, organization, latest)) {
+          continue;
+        }
         const pricing =
           latest === null ? null : summarizePublishedPricing(latest.spec);
         const hay =
@@ -824,6 +840,10 @@ export const getPublicDetail = query({
       .query("qualitySnapshots")
       .withIndex("by_project", (q) => q.eq("projectId", project._id))
       .unique();
+
+    if (!isListingPublicCopyAllowed(project, org, latest)) {
+      return null;
+    }
 
     return {
       project: {

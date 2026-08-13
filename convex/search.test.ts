@@ -385,6 +385,31 @@ describe("search.searchCatalogue — degraded path", () => {
     const result = await t.action(api.search.searchCatalogue, { query: "   " });
     expect(result).toEqual({ items: [], degraded: false });
   });
+
+  it("public search action filters unsafe legacy rows after vector search", async () => {
+    const previousFetch = globalThis.fetch;
+    process.env.GEMINI_API_KEY = "test-key";
+    globalThis.fetch = (async () =>
+      Response.json({
+        embedding: { values: dummyEmbed(0.9) },
+      })) as typeof fetch;
+    try {
+      const t = convexTest(schema, modules);
+      const seed = await seedSearchWorld(t);
+      await t.run(async (ctx) => {
+        await ctx.db.patch(seed.publicId, {
+          name: "SOC.2 certified search API",
+        });
+      });
+
+      const result = await t.action(api.search.searchCatalogue, {
+        query: "weather",
+      });
+      expect(result).toEqual({ items: [], degraded: false });
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
+  });
 });
 
 describe("search.embedProject — embedding pipeline", () => {

@@ -107,7 +107,8 @@ packages/shared/ # spec parsing, x-zevium-* extraction, types shared web↔gatew
 ### Gateway (Worker) rules
 
 - Hot path budget: no network calls to Clerk/Convex per request — verify keys via edge cache, gate credits via the wallet DO
-- Stream upstream responses; never buffer whole bodies
+- Stream direct proxy responses; protocol adapters may buffer only when their
+  response format requires it, with a small explicit limit (MCP: 1 MiB)
 - Emit usage events async; never block the response on metering
 - Keep the Worker dependency-light — it is the future Go-port candidate
 

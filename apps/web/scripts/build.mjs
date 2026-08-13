@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, unlinkSync } from "node:fs";
+import { existsSync, rmSync, unlinkSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { applyProductionEnv } from "./build-env.mjs";
@@ -48,4 +48,11 @@ try {
   process.exitCode = result.status ?? 1;
 } finally {
   scrubForbiddenArtifact();
+  // Retired raster PWA assets linger in older checkouts but are not referenced
+  // by the current manifest; never carry opaque files into deploy input.
+  for (const name of ["favicon.ico", "logo192.png", "logo512.png"]) {
+    rmSync(resolve(import.meta.dirname, `../dist/client/${name}`), {
+      force: true,
+    });
+  }
 }
