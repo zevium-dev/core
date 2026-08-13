@@ -44,6 +44,7 @@
 
 # convex
 /.turbo/
+/apps/deploy-broker/.turbo/
 /apps/gateway/.turbo/
 /apps/web/.turbo/
 /packages/shared/.turbo/

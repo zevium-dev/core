@@ -1,3 +1,0 @@
-$ oxlint --config ../../.oxlintrc.json --deny-warnings --report-unused-disable-directives --no-ignore --disable-nested-config src test scripts vitest.config.ts vitest.integration.config.ts wrangler.jsonc
-Found 0 warnings and 0 errors.
-Finished in 569ms on 28 files with 178 rules using 16 threads.
