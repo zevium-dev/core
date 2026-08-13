@@ -71,6 +71,16 @@ export {
 } from "./finance.js";
 
 export {
+  findPublicClaimViolations,
+  findOpenApiPublicClaimViolations,
+  isPublicCopyAllowed,
+  isPublicCopySetAllowed,
+  isOpenApiPublicCopyAllowed,
+  type PublicClaimViolation,
+  type OpenApiPublicClaimViolation,
+} from "./public-claims.js";
+
+export {
   isValidSlug,
   isValidSemver,
   collectOpenApiSpecIssues,

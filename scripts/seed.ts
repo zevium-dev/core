@@ -9,6 +9,7 @@
  * Credentials: test+clerk_test@zevium.dev / zevium-test-password
  */
 import { createClerkClient } from "@clerk/backend";
+import { isPublicCopyAllowed } from "@zevium/shared";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -32,6 +33,9 @@ function loadSecretKey(): string {
 const clerk = createClerkClient({ secretKey: loadSecretKey() });
 
 async function main() {
+  if (!isPublicCopyAllowed([ORG_NAME, ORG_SLUG].join("\n"))) {
+    throw new Error("Seed organization violates public-copy policy");
+  }
   const existing = await clerk.users.getUserList({ emailAddress: [EMAIL] });
   const user =
     existing.data.at(0) ??

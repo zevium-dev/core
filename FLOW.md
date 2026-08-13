@@ -1,6 +1,6 @@
 # Zevium Product Flow
 
-> Last updated: 2026-07-12
+> Last updated: 2026-08-12
 > Companion to [PRODUCT.md](PRODUCT.md) (what), [DESIGN.md](DESIGN.md) (feel), [TECH.md](TECH.md) (how). This doc is **what users see on screen**, screen by screen, per persona — the target product, not the current code.
 > Priority tags (P0/P1/P2) follow the PRODUCT.md roadmap; untagged = P0.
 
@@ -44,7 +44,7 @@ The listing's product page — shareable URL, the API's landing page. Spec metad
 - Pricing table: per-endpoint credits, free tier highlighted
 - Docs: rendered from the published spec — three-column pattern (nav / prose / runnable code samples in curl/js/python), prose↔code hover-sync
 - **Try it** panel: one-click use-my-key (or paste key), run request in-page, live response. Key held in browser session storage only; test mode visually loud
-- **Mock mode**: free spec-generated mock responses — exercise the API shape without spending credits. Implemented: keyless and anonymous by design (never executes upstream, 0 credits), ahead of its P1 tag
+- **Mock mode**: free, anonymous spec-generated responses — exercise the API shape without spending credits or executing the upstream
 - **Connect your agent** tab: copy-paste agent-tool config per client + agent-readable usage notes
 - Version picker: published versions, spec-diff changelog between versions (P2)
 - Reviews/ratings (P2)
@@ -71,13 +71,13 @@ The listing's product page — shareable URL, the API's landing page. Spec metad
 
 - Key table: name, masked key, per-key spend limit, remaining, last used, per-key usage sparkline, enable/disable
 - Create key dialog: name → create → copy-once reveal (blur-in animation per DESIGN.md)
-- Per-key spend limits with daily/weekly/monthly reset + auto-disable on limit (P1). Implemented: monthly cap + auto-disable only, DO-enforced; daily/weekly reset windows remain P1
-- Zero-downtime rotation: roll key, old key valid through grace period (P1). Implemented: 24h grace period, DO-enforced — ahead of its P1 tag
+- Per-key spend limits with auto-disable. Monthly limits are available; daily and weekly reset choices remain P1
+- Zero-downtime rotation: roll key, old key remains usable for a 24-hour grace period
 - Programmatic key-management API for SaaS consumers (P1)
 
 ### 2.3 Wallet & billing — `/app/organizations/{org}/billing`
 
-> Implementation note: shipped as `/app/billing` — org scope comes from the Clerk **active org** (switcher-selected), not a slug segment in the URL. Same for every `/app/organizations/{org}/...` path below (§4, §5): the active-org model replaced per-org URL segments.
+Current screen: `/app/billing`. Org switcher selects workspace for this and every org-scoped screen in §4 and §5; URL does not repeat org slug.
 
 Org-scoped — the org owns the wallet; admins manage it, members view their own attribution.
 
@@ -122,8 +122,8 @@ Org-scoped — the org owns the wallet; admins manage it, members view their own
 
 ### 3.4 x402 machine payments (P1)
 
-- Payment-required responses with payment instructions on gateway endpoints; agents pay per-call with zero signup
-- Implemented as a stub: every keyless/unauthenticated/insufficient-credit response on `/gateway` and `/mock` carries a `402` with a machine-readable actions envelope (create key, top up, docs). Facilitator-verified on-chain payment is still P1/deferred
+- Future signed-payment retry, facilitator verification, and settlement flow; no x402 payment implementation exists in the current tree
+- Current `/gateway` authentication and credit failures use a generic `402` actions envelope (create key, top up, docs) for the prepaid-credit flow. That envelope contains no x402 payment requirements and cannot authorize or settle a payment. Keyless `/mock` has no authentication or payment failure path; missing, unsafe, or unreadable projects/specs/routes return generic `404` responses
 
 ---
 
@@ -166,7 +166,7 @@ Org-scoped — the org owns the wallet; admins manage it, members view their own
 - Latency: p50 / p95 / p99 per endpoint
 - Consumers: count, top consumers by calls (anonymized), retention
 - Revenue: credits earned per endpoint per period
-- Live-updating (realtime sync per TECH.md — dashboards tick, per DESIGN.md "alive")
+- Live-updating — dashboards tick per DESIGN.md "alive"
 
 ### 4.8 Earnings & payouts — `.../organizations/{org}/earnings` (P2)
 

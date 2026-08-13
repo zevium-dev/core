@@ -507,6 +507,14 @@ jobs:
             --config dist/server/wrangler.json --strict --tag "$VERSION_TAG"
           node .github/scripts/release-state.mjs uploaded release-evidence
 
+      - name: Build and scan exact deploy inputs
+        env:
+          CLERK_PUBLISHABLE_KEY: ${{ secrets.CLERK_PRODUCTION_PUBLISHABLE_KEY }}
+          CLERK_SECRET_KEY: ${{ secrets.CLERK_PRODUCTION_SECRET_KEY }}
+        run: |
+          pnpm build:compliance-inputs
+          pnpm check:compliance-claims:deploy
+
       - name: Deploy compatible Convex expansion, verify Workers, then converge
         env:
           CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_PRODUCTION_DEPLOY_KEY }}

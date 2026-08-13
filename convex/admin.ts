@@ -30,6 +30,7 @@ import {
   requireCompletedSecurityAudit,
   securityRolloutGeneration,
 } from "./securityRollout";
+import { isPublishedSurfaceAllowed } from "./lib/publicClaims";
 
 /** Cap for month-to-date usage count (by_at index range scan). */
 const USAGE_STATS_CAP = 50_000;
@@ -104,7 +105,7 @@ export const migrateSecurityRollout = mutation({
     keyring: CredentialKeyringPreflight;
     credentials: CredentialMigrationPage;
     webhookSecrets: WebhookSecretMigrationPage;
-    handles: { updated: number; collisions: number };
+    handles: { updated: number; collisions: number; blocked: number };
   }> => {
     await requireAdmin(ctx);
     await requireCompletedSecurityAudit(ctx, args.auditId);
@@ -130,7 +131,7 @@ export const migrateSecurityRollout = mutation({
         ...(args.numItems === undefined ? {} : { numItems: args.numItems }),
       },
     );
-    const handles: { updated: number; collisions: number } =
+    const handles: { updated: number; collisions: number; blocked: number } =
       await ctx.runMutation(internal.organizations.backfillPublicHandles, {});
     return {
       keyring,
@@ -378,6 +379,25 @@ export const setProjectVisibility = mutation({
     }
     if ((await getActiveOrgById(ctx, project.organizationId)) === null) {
       throw new Error("Project organization is archived");
+    }
+
+    if (args.visibility === "public") {
+      const organization = await ctx.db.get(project.organizationId);
+      const latest = await ctx.db
+        .query("specVersions")
+        .withIndex("by_project_published", (q) =>
+          q.eq("projectId", project._id),
+        )
+        .order("desc")
+        .first();
+      if (
+        organization === null ||
+        !isPublishedSurfaceAllowed(project, organization, latest)
+      ) {
+        throw new Error(
+          "Project cannot be public until publisher, project, and published spec copy pass public policy",
+        );
+      }
     }
 
     await ctx.db.patch(project._id, { visibility: args.visibility });

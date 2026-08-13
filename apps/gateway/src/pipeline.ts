@@ -10,14 +10,17 @@ import {
   type KeyVerifier,
   type VerifyOutcome,
 } from "./key-verifier";
-import type { SpecSource } from "./spec-source";
+import {
+  isPublishedSpecCopyAllowed,
+  SpecSourceUnavailableError,
+  type SpecSource,
+} from "./spec-source";
 import { filterRequestHeaders, filterResponseHeaders } from "./headers";
 import type { UsageSink } from "./usage";
 import { logDependencyFailure } from "./telemetry";
 import { jsonError } from "./errors";
-import { paymentRequiredResponse } from "./x402";
+import { paymentRequiredResponse } from "./payment-required";
 import { assertSafeUpstreamTarget } from "./upstream-safety";
-import { SpecSourceUnavailableError } from "./spec-source";
 
 const UPSTREAM_HEADERS_TIMEOUT_MS = 15_000;
 const RELEASE_CHALLENGE_RE = /^[0-9a-f]{64}$/;
@@ -108,7 +111,7 @@ export async function handleGatewayRequest(
 
   const secret = extractApiKey(request);
   if (!secret) {
-    // x402: unauthenticated calls never execute — no unmetered path.
+    // Unauthenticated calls never execute — no unmetered path.
     return paymentRequiredResponse(requestId, "API key required", {
       reason: "missing_api_key",
     });
@@ -187,6 +190,15 @@ export async function handleGatewayRequest(
     throw error;
   }
   if (!published) {
+    return jsonError(404, "project_not_found", "Unknown project", requestId);
+  }
+  if (
+    !isPublishedSpecCopyAllowed(
+      published,
+      route.publisherHandle,
+      route.projectSlug,
+    )
+  ) {
     return jsonError(404, "project_not_found", "Unknown project", requestId);
   }
 
@@ -453,7 +465,7 @@ export async function handleGatewayRequest(
         latencyMs: (deps.now ?? Date.now)() - started,
         reservationId,
       });
-      // x402: zero/insufficient balance blocks the call — same payment shape
+      // Zero/insufficient balance blocks the call — same payment shape
       // as an unauthenticated request, plus the balance detail agents need.
       return paymentRequiredResponse(requestId, "Insufficient credits", {
         reason: "insufficient_credits",

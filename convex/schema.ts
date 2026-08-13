@@ -349,6 +349,18 @@ export default defineSchema({
     lastSavedAt: v.number(),
   }).index("by_project", ["projectId"]),
 
+  // Durable fixed-window lease for authenticated URL spec imports. New table,
+  // so no existing-row validator is tightened during rollout.
+  specImportRateLeases: defineTable({
+    clerkOrgId: v.string(),
+    userId: v.string(),
+    windowStartedAt: v.number(),
+    count: v.number(),
+    expiresAt: v.number(),
+  })
+    .index("by_principal", ["clerkOrgId", "userId"])
+    .index("by_expiry", ["expiresAt"]),
+
   // Immutable published OpenAPI versions
   specVersions: defineTable({
     projectId: v.id("projects"),

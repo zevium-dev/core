@@ -7,7 +7,11 @@
 import { ConvexHttpClient } from "convex/browser";
 import { makeFunctionReference } from "convex/server";
 import { logDependencyFailure } from "./telemetry";
-import { trimTrailingSlashes } from "@zevium/shared";
+import {
+  isOpenApiPublicCopyAllowed,
+  isPublicCopySetAllowed,
+  trimTrailingSlashes,
+} from "@zevium/shared";
 
 export type PublishedSpec = {
   /** Raw OpenAPI JSON string. */
@@ -65,6 +69,34 @@ export interface PublicSpecSource {
 }
 
 export class SpecSourceUnavailableError extends Error {}
+
+/** Claim-copy defense for fixtures, stale caches, and control-plane regressions. */
+export function isPublishedSpecCopyAllowed(
+  published: PublicPublishedSpec,
+  publisherHandle: string,
+  projectSlug: string,
+): boolean {
+  return (
+    isPublicCopySetAllowed([
+      publisherHandle,
+      projectSlug,
+      published.version ?? "",
+      published.deprecationMessage ?? "",
+    ]) && isOpenApiPublicCopyAllowed(published.spec)
+  );
+}
+
+/** Public anonymous surfaces additionally require explicit public visibility. */
+export function isPublishedSpecPublicCopyAllowed(
+  published: PublicPublishedSpec,
+  publisherHandle: string,
+  projectSlug: string,
+): boolean {
+  return (
+    published.visibility === "public" &&
+    isPublishedSpecCopyAllowed(published, publisherHandle, projectSlug)
+  );
+}
 
 /** Production safety valve when the authenticated control-plane source is absent. */
 export class FailClosedSpecSource implements SpecSource {
@@ -351,6 +383,9 @@ export function parsePublishedSpecPayload(json: unknown): PublishedSpec | null {
   if (typeof candidate !== "object") return null;
 
   if (!("spec" in candidate) || typeof candidate.spec !== "string") return null;
+  if (!("version" in candidate) || typeof candidate.version !== "string") {
+    return null;
+  }
   if (!("projectId" in candidate) || typeof candidate.projectId !== "string") {
     return null;
   }
@@ -442,6 +477,15 @@ export function parsePublishedSpecPayload(json: unknown): PublishedSpec | null {
     Number.isFinite(candidate.retiredAt)
   ) {
     published.retiredAt = candidate.retiredAt;
+  }
+  if (
+    !isPublicCopySetAllowed([
+      published.version,
+      published.deprecationMessage ?? "",
+    ]) ||
+    !isOpenApiPublicCopyAllowed(published.spec)
+  ) {
+    return null;
   }
   return published;
 }

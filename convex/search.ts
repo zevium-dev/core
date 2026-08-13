@@ -21,7 +21,11 @@ import {
 } from "./_generated/server";
 import { internal } from "./_generated/api";
 import type { Doc } from "./_generated/dataModel";
-import { summarizePublishedPricing, type PublicListing } from "./catalogue";
+import {
+  isListingPublicCopyAllowed,
+  summarizePublishedPricing,
+  type PublicListing,
+} from "./catalogue";
 import { getActiveOrgById } from "./lib/auth";
 import { qualitySnapshotContract } from "./lib/qualityContract";
 import {
@@ -37,8 +41,9 @@ const SEARCH_LIMIT_DEFAULT = 10;
 /**
  * Gemini embedContent endpoint. We use `gemini-embedding-001` pinned to
  * `outputDimensionality: 768` to match the pre-existing `by_embedding`
- * vectorIndex (768 dims). `text-embedding-004` (also 768-dim) was removed
- * from the v1beta API (HTTP 404); this is the current 768-dim replacement.
+ * vectorIndex (768 dims). Google still lists this stable text model, while
+ * `gemini-embedding-2` is newer and would require re-embedding all stored data
+ * because the two embedding spaces are incompatible.
  */
 const GEMINI_EMBED_URL =
   "https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent";
@@ -176,11 +181,18 @@ export const getProjectForEmbed = internalQuery({
       .order("desc")
       .first();
 
+    if (
+      latest === null ||
+      !isListingPublicCopyAllowed(project, organization, latest)
+    ) {
+      return null;
+    }
+
     return {
       name: project.name,
       description: project.description,
       tags: project.tags,
-      specJson: latest === null ? null : latest.spec,
+      specJson: latest.spec,
     };
   },
 });
@@ -341,6 +353,10 @@ export const fetchSearchListings = internalQuery({
         )
         .order("desc")
         .first();
+
+      if (!isListingPublicCopyAllowed(project, org, latest)) {
+        continue;
+      }
 
       const pricing =
         latest === null ? null : summarizePublishedPricing(latest.spec);
