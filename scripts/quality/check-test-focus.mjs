@@ -29,12 +29,14 @@ const testModules = new Set([
 const unknown = Object.freeze({ kind: "unknown" });
 const dynamicProperty = Symbol("dynamic-property");
 const expectedVitestConfigs = [
+  "apps/deploy-broker/vitest.config.ts",
   "apps/gateway/vitest.config.ts",
   "apps/web/vitest.config.ts",
   "convex/vitest.config.ts",
   "packages/shared/vitest.config.ts",
 ];
 const requiredVitestCommands = [
+  ["apps/deploy-broker/package.json", "test"],
   ["package.json", "test:convex"],
   ["apps/gateway/package.json", "test"],
   ["apps/web/package.json", "test"],

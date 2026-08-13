@@ -1,4 +1,5 @@
 /node_modules/
+/apps/deploy-broker/node_modules/
 /apps/gateway/node_modules/
 /apps/web/node_modules/
 /convex/node_modules/

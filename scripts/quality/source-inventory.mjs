@@ -63,6 +63,10 @@ export const repositoryExclusions = Object.freeze([
   { path: "apps/gateway/.turbo", provenance: "Turborepo cache" },
   { path: "apps/gateway/.wrangler", provenance: "Wrangler state" },
   { path: "apps/gateway/dist", provenance: "gateway build output" },
+  {
+    path: "apps/deploy-broker/node_modules",
+    provenance: "pnpm dependency tree",
+  },
   { path: "apps/gateway/node_modules", provenance: "pnpm dependency tree" },
   { path: "apps/web/.nitro", provenance: "Nitro build state" },
   { path: "apps/web/.output", provenance: "Nitro build output" },
@@ -568,6 +572,7 @@ export function attestIgnorePolicies(repository) {
   const root = resolve(repository);
   assertExactIgnoreLines(root, ".gitignore", [
     "/node_modules/",
+    "/apps/deploy-broker/node_modules/",
     "/apps/gateway/node_modules/",
     "/apps/web/node_modules/",
     "/convex/node_modules/",

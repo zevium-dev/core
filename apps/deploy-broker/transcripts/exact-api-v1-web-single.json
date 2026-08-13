@@ -1,0 +1,30 @@
+[
+  {
+    "method": "GET",
+    "path": "/client/v4/accounts/1ea9299555b026a6a7484c8323c5a953/workers/scripts/zevium-web-pr-123/deployments"
+  },
+  {
+    "method": "POST",
+    "path": "/client/v4/accounts/1ea9299555b026a6a7484c8323c5a953/workers/scripts/zevium-web-pr-123/assets-upload-session"
+  },
+  {
+    "method": "POST",
+    "path": "/client/v4/accounts/1ea9299555b026a6a7484c8323c5a953/workers/assets/upload/5dfd878f3b93f8e1c7e971766efbf985"
+  },
+  {
+    "method": "POST",
+    "path": "/client/v4/accounts/1ea9299555b026a6a7484c8323c5a953/workers/assets/upload/c7bfdfdc91e4757db0ecebdd71c46018"
+  },
+  {
+    "method": "POST",
+    "path": "/client/v4/accounts/1ea9299555b026a6a7484c8323c5a953/workers/scripts/zevium-web-pr-123/versions"
+  },
+  {
+    "method": "POST",
+    "path": "/client/v4/accounts/1ea9299555b026a6a7484c8323c5a953/workers/scripts/zevium-web-pr-123/deployments"
+  },
+  {
+    "method": "POST",
+    "path": "/client/v4/accounts/1ea9299555b026a6a7484c8323c5a953/workers/scripts/zevium-web-pr-123/subdomain"
+  }
+]

@@ -15,6 +15,7 @@ import type * as billing from "../billing.js";
 import type * as catalogue from "../catalogue.js";
 import type * as cronTasks from "../cronTasks.js";
 import type * as crons from "../crons.js";
+import type * as deploymentProof from "../deploymentProof.js";
 import type * as earnings from "../earnings.js";
 import type * as financeMigration from "../financeMigration.js";
 import type * as http from "../http.js";
@@ -72,6 +73,7 @@ declare const fullApi: ApiFromModules<{
   catalogue: typeof catalogue;
   cronTasks: typeof cronTasks;
   crons: typeof crons;
+  deploymentProof: typeof deploymentProof;
   earnings: typeof earnings;
   financeMigration: typeof financeMigration;
   http: typeof http;

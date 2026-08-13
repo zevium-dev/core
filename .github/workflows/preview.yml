@@ -208,6 +208,10 @@ jobs:
 
   web-preview:
     needs: [security, preview-target, web-build]
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 10
     environment: preview

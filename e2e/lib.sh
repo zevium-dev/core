@@ -69,6 +69,12 @@ ab() {
   timeout 60s agent-browser "$@"
 }
 
+ab_timeout() {
+  local duration="$1"
+  shift
+  timeout "$duration" agent-browser "$@"
+}
+
 log() {
   printf '[e2e] %s\n' "$*"
 }
@@ -179,7 +185,8 @@ fail() {
 }
 
 assert_eq() {
-  local got="$1" want="$2" msg="${3:-expected '$want', got '$got'}"
+  local got="$1" want="$2"
+  local msg="${3:-expected \"$want\", got \"$got\"}"
   if [[ "$got" != "$want" ]]; then
     fail "$msg (got='$got' want='$want')"
   fi
@@ -187,7 +194,7 @@ assert_eq() {
 
 assert_contains() {
   local hay="$1" needle="$2"
-  local msg="${3:-missing '$needle'}"
+  local msg="${3:-missing \"$needle\"}"
   if [[ "$hay" != *"$needle"* ]]; then
     fail "$msg"
   fi
@@ -195,7 +202,7 @@ assert_contains() {
 
 assert_not_contains() {
   local hay="$1" needle="$2"
-  local msg="${3:-unexpected '$needle'}"
+  local msg="${3:-unexpected \"$needle\"}"
   if [[ "$hay" == *"$needle"* ]]; then
     fail "$msg"
   fi
@@ -203,7 +210,7 @@ assert_not_contains() {
 
 assert_url_contains() {
   local needle="$1"
-  local msg="${2:-url missing '$needle'}"
+  local msg="${2:-url missing \"$needle\"}"
   local url
   url="$(ab get url)"
   assert_contains "$url" "$needle" "$msg (url=$url)"
@@ -211,7 +218,7 @@ assert_url_contains() {
 
 assert_url_not_contains() {
   local needle="$1"
-  local msg="${2:-url still has '$needle'}"
+  local msg="${2:-url still has \"$needle\"}"
   local url
   url="$(ab get url)"
   assert_not_contains "$url" "$needle" "$msg (url=$url)"
