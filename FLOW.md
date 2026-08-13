@@ -175,8 +175,10 @@ Org-scoped — the org owns the wallet; admins manage it, members view their own
 
 ### 4.9 Listing lifecycle
 
-- Org admins publish through automated gates (spec valid, upstream reachable, uptime probe); post-hoc review may delist
-- Org admins deprecate/unpublish (P1): cannot silently kill an API with active consumers — set sunset date → consumers notified (banner + email), gateway signals deprecation, new subscriptions freeze, wind-down, hard cutoff
+- Organization owners/admins alone may change visibility, publish, deprecate, or permanently archive a listing. Members may edit mutable drafts and metadata.
+- Publish: auto-publish with automated gates (spec valid, upstream reachable, uptime probe); post-hoc review may delist
+- Deprecate/unpublish (P1): cannot silently kill an API with active consumers — set sunset date → consumers notified (banner + email), gateway signals deprecation, new subscriptions freeze, wind-down, hard cutoff
+- Archive: terminal. Preserve immutable versions and public URL as a tombstone; neither publisher handle nor project slug may resurrect that URL.
 - Quality surface (P2): uptime status on own listing, security-scan results, freshness nudges
 
 ### 4.10 Publisher webhooks (P1)

@@ -65,6 +65,15 @@ export function collectOpenApiSpecIssues(specText: string): SpecIssue[] {
     return issues;
   }
 
+  if (new TextEncoder().encode(specText).byteLength > MAX_OPENAPI_SPEC_BYTES) {
+    issues.push({
+      level: "error",
+      path: "$",
+      message: "Spec exceeds 393216 UTF-8 bytes",
+    });
+    return issues;
+  }
+
   let raw: unknown;
   try {
     raw = JSON.parse(specText) as unknown;

@@ -21,7 +21,6 @@ import {
   isOrganizationPublicSurfaceAllowed,
 } from "./lib/publicClaims";
 import { isValidSlug } from "./lib/validate";
-
 import { enqueueOrgArchive, enqueueOrgPut } from "./registrySync";
 import { availablePublicHandle } from "./lib/publicRoutes";
 
@@ -46,6 +45,7 @@ async function requireAvailableOrganizationSlug(
     throw new Error("Organization slug is already in use");
   }
 }
+
 import { assertFinanceMigrationAllowsRuntime } from "./lib/financeMigrationGate";
 
 async function ensureWallet(
@@ -379,19 +379,26 @@ export const applyOrganizationWebhook = internalMutation({
       return { status: "ignored_stale" as const };
     }
 
-    const publicHandle = existing?.publicHandle ?? args.slug;
+    const slug = trustedOrganizationSlug(args.slug);
+    const publicHandle = existing?.publicHandle ?? slug;
     assertOrganizationCopyAllowed({
       name: args.name,
-      slug: args.slug,
+      slug,
       publicHandle,
     });
 
     if (existing === null) {
+      await requireAvailableOrganizationSlug(ctx, slug);
+      const resolvedPublicHandle = await availablePublicHandle(
+        ctx,
+        slug,
+        args.clerkOrgId,
+      );
       const organizationId = await ctx.db.insert("organizations", {
         clerkOrgId: args.clerkOrgId,
         name: args.name,
-        slug: args.slug,
-        publicHandle,
+        slug,
+        publicHandle: resolvedPublicHandle,
         imageUrl: args.imageUrl,
         lastClerkEventAt: args.eventTimestamp,
         unreadNotificationCount: 0,
