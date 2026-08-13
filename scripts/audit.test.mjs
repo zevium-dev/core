@@ -351,7 +351,7 @@ test("parses exact repository workspace graph with every dependency type", () =>
 });
 
 test("validates pinned mise and immutable workflow action identities", () => {
-  assert.equal(validateAutomationPolicy(), 14);
+  assert.equal(validateAutomationPolicy(), 13);
 });
 
 test("binds registry metadata to lock identity, tarball, digest, and graph semantics", () => {
@@ -1039,11 +1039,9 @@ test("public CLI rejects metamorphic lock, workspace, manifest, CI, and mise att
     {
       name: "workflow global npm install",
       mutate(root) {
-        mutateYaml(root, ".github/workflows/payment-drill.yml", (workflow) => {
-          const step = workflow.jobs[
-            "real-zevium-stripe-acceptance"
-          ].steps.find(
-            (candidate) => candidate.name === "Install pinned browser runtime",
+        mutateYaml(root, ".github/workflows/preview.yml", (workflow) => {
+          const step = workflow.jobs["full-e2e"].steps.find(
+            (candidate) => candidate.name === "Install browser runtime",
           );
           step.run = "npm install --global attacker@1.0.0";
         });

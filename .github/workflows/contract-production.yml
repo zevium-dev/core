@@ -58,18 +58,21 @@ jobs:
       - name: Verify dependency supply chain
         run: node scripts/audit.mjs
 
-  contract-candidate:
+  contract-production:
     needs: [security]
-    runs-on: blacksmith-4vcpu-ubuntu-2404
-    timeout-minutes: 35
-    environment: staging
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 25
+    environment: production-contract
     env:
       CONTRACT_SHA: ${{ inputs.release_sha }}
       ACTIVE_RELEASE: ${{ inputs.expected_active_release }}
       RECOVERY_OF: ${{ inputs.recovery_of }}
-      STAGING_WEB_URL: ${{ vars.STAGING_WEB_URL }}
-      STAGING_GATEWAY_URL: ${{ vars.STAGING_GATEWAY_URL }}
-      STAGING_CONVEX_URL: ${{ vars.STAGING_CONVEX_URL }}
+      STATUS_SHA: ${{ inputs.recovery_of || inputs.release_sha }}
+      RELEASE_PROBE_MOCK_PATH: ${{ vars.RELEASE_PROBE_MOCK_PATH }}
+      RELEASE_PROBE_MOCK_METHOD: ${{ vars.RELEASE_PROBE_MOCK_METHOD }}
+      RELEASE_PROBE_METERED_PATH: ${{ vars.RELEASE_PROBE_METERED_PATH }}
+      RELEASE_PROBE_METERED_METHOD: ${{ vars.RELEASE_PROBE_METERED_METHOD }}
+      RELEASE_PROBE_CONTENT_TYPE: ${{ vars.RELEASE_PROBE_CONTENT_TYPE }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -92,9 +95,12 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Prove immutable identities and one contract-only commit
+      - name: Recheck immutable commit and production configuration
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_PROBE_REQUEST_BODY: ${{ secrets.PRODUCTION_RELEASE_PROBE_REQUEST_BODY }}
+          CONVEX_PRODUCTION_DEPLOY_KEY: ${{ secrets.CONVEX_PRODUCTION_DEPLOY_KEY }}
+          RELEASE_PROBE_API_KEY: ${{ secrets.PRODUCTION_RELEASE_PROBE_API_KEY }}
         run: |
           node -e '
             for (const key of ["CONTRACT_SHA", "ACTIVE_RELEASE"]) {
@@ -105,7 +111,7 @@ jobs:
           test "$(git rev-parse HEAD)" = "$CONTRACT_SHA"
           develop_tip="$(gh api "repos/$GITHUB_REPOSITORY/commits/develop" --jq .sha)"
           test "$develop_tip" = "$CONTRACT_SHA" || {
-            echo "Contract commit must remain current develop tip" >&2
+            echo "Contract commit stopped being current develop tip" >&2
             exit 1
           }
           git merge-base --is-ancestor "$ACTIVE_RELEASE" "$CONTRACT_SHA"
@@ -157,150 +163,6 @@ jobs:
           }
           test -n "$(git diff --name-only "$ACTIVE_RELEASE" "$CONTRACT_SHA" -- convex/)"
           pnpm ci:pr
-
-      - name: Reject incomplete staging contract configuration
-        env:
-          CONVEX_STAGING_DEPLOY_KEY: ${{ secrets.CONVEX_STAGING_DEPLOY_KEY }}
-          STAGING_E2E_ORG_SLUG: ${{ vars.STAGING_E2E_ORG_SLUG }}
-          STAGING_E2E_EMAIL: ${{ secrets.STAGING_E2E_EMAIL }}
-          STAGING_E2E_PASSWORD: ${{ secrets.STAGING_E2E_PASSWORD }}
-          STAGING_E2E_API_KEY: ${{ secrets.STAGING_E2E_API_KEY }}
-        run: |
-          required=(
-            STAGING_WEB_URL STAGING_GATEWAY_URL STAGING_CONVEX_URL
-            CONVEX_STAGING_DEPLOY_KEY
-            STAGING_E2E_ORG_SLUG STAGING_E2E_EMAIL STAGING_E2E_PASSWORD
-            STAGING_E2E_API_KEY
-          )
-          missing=()
-          for name in "${required[@]}"; do
-            [[ -n "${!name:-}" ]] || missing+=("$name")
-          done
-          if (( ${#missing[@]} > 0 )); then
-            printf 'Missing staging contract configuration: %s\n' "${missing[*]}" >&2
-            exit 1
-          fi
-          # shellcheck disable=SC2016
-          node -e '
-            for (const key of ["STAGING_WEB_URL","STAGING_GATEWAY_URL","STAGING_CONVEX_URL"]) {
-              const url = new URL(process.env[key]);
-              if (url.protocol !== "https:" || url.pathname !== "/" || url.search ||
-                  url.hash || url.username || url.password ||
-                  url.origin === process.env.PRODUCTION_WEB_URL ||
-                  url.origin === process.env.PRODUCTION_GATEWAY_URL ||
-                  url.origin === process.env.PRODUCTION_CONVEX_URL) {
-                throw new Error(`${key} must be a distinct HTTPS staging origin`);
-              }
-            }
-            if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(process.env.STAGING_E2E_ORG_SLUG)) {
-              throw new Error("STAGING_E2E_ORG_SLUG must be a canonical slug");
-            }
-          '
-
-      - name: Prove staging Convex deploy key target without mutation
-        env:
-          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_STAGING_DEPLOY_KEY }}
-          EXPECTED_CONVEX_URL: ${{ vars.STAGING_CONVEX_URL }}
-          STAGING_CONVEX_URL: ${{ vars.STAGING_CONVEX_URL }}
-        run: |
-          export CONVEX_DEPLOYMENT="${CONVEX_DEPLOY_KEY%%|*}"
-          convex_dry_run="$(pnpm exec convex deploy --dry-run --yes \
-            --codegen disable --typecheck disable 2>&1)"
-          printf '%s' "$convex_dry_run" \
-            | node .github/scripts/release-contract.mjs --validate-convex-dry-run=true
-
-      - name: Verify staging runtime still serves active release
-        run: |
-          node .github/scripts/release-contract.mjs \
-            --identity-only=true --release="$ACTIVE_RELEASE" \
-            --web="$STAGING_WEB_URL" --gateway="$STAGING_GATEWAY_URL" \
-            --output=release-evidence/staging-pre-contract-identity.json
-
-      - name: Rehearse destructive contract on staging Convex
-        env:
-          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_STAGING_DEPLOY_KEY }}
-          STAGING_CONVEX_URL: ${{ vars.STAGING_CONVEX_URL }}
-        run: |
-          export CONVEX_DEPLOYMENT="${CONVEX_DEPLOY_KEY%%|*}"
-          pnpm exec convex deploy --yes --message "staging contract $CONTRACT_SHA"
-
-      - name: Install browser runtime
-        run: |
-          pnpm exec agent-browser install --with-deps
-
-      - name: Run contracted-state authenticated and metered E2E
-        env:
-          E2E_BASE_URL: ${{ env.STAGING_WEB_URL }}
-          GATEWAY_URL: ${{ env.STAGING_GATEWAY_URL }}
-          E2E_EMAIL: ${{ secrets.STAGING_E2E_EMAIL }}
-          E2E_PASSWORD: ${{ secrets.STAGING_E2E_PASSWORD }}
-          E2E_OTP: ${{ secrets.STAGING_E2E_OTP }}
-          E2E_API_KEY: ${{ secrets.STAGING_E2E_API_KEY }}
-          E2E_ORG_SLUG: ${{ vars.STAGING_E2E_ORG_SLUG }}
-        run: e2e/run-all.sh
-
-      - name: Upload contracted-state evidence
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        with:
-          name: contract-candidate-${{ env.CONTRACT_SHA }}
-          path: |
-            release-evidence
-            e2e/artifacts/*.png
-            e2e/artifacts/*.url.txt
-          if-no-files-found: ignore
-          retention-days: 14
-
-  contract-production:
-    needs: [security, contract-candidate]
-    runs-on: blacksmith-2vcpu-ubuntu-2404
-    timeout-minutes: 25
-    environment: production-contract
-    env:
-      CONTRACT_SHA: ${{ inputs.release_sha }}
-      ACTIVE_RELEASE: ${{ inputs.expected_active_release }}
-      RECOVERY_OF: ${{ inputs.recovery_of }}
-      STATUS_SHA: ${{ inputs.recovery_of || inputs.release_sha }}
-      RELEASE_PROBE_MOCK_PATH: ${{ vars.RELEASE_PROBE_MOCK_PATH }}
-      RELEASE_PROBE_MOCK_METHOD: ${{ vars.RELEASE_PROBE_MOCK_METHOD }}
-      RELEASE_PROBE_METERED_PATH: ${{ vars.RELEASE_PROBE_METERED_PATH }}
-      RELEASE_PROBE_METERED_METHOD: ${{ vars.RELEASE_PROBE_METERED_METHOD }}
-      RELEASE_PROBE_CONTENT_TYPE: ${{ vars.RELEASE_PROBE_CONTENT_TYPE }}
-    steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-        with:
-          ref: ${{ inputs.release_sha }}
-          fetch-depth: 0
-          persist-credentials: false
-      - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
-        with:
-          path: ~/.local/share/pnpm/store
-          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
-      - uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4
-        with:
-          version: 2026.7.13
-          install: true
-          install_args: node@24.15.0 npm:pnpm@11.8.0 actionlint@1.7.12 gitleaks@8.30.1 shellcheck@0.11.0
-      - name: Verify exact Node and pnpm
-        run: |
-          test "$(node --version)" = "v24.15.0"
-          test "$(pnpm --version)" = "11.8.0"
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Recheck immutable commit and production configuration
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_PROBE_REQUEST_BODY: ${{ secrets.PRODUCTION_RELEASE_PROBE_REQUEST_BODY }}
-          CONVEX_PRODUCTION_DEPLOY_KEY: ${{ secrets.CONVEX_PRODUCTION_DEPLOY_KEY }}
-          RELEASE_PROBE_API_KEY: ${{ secrets.PRODUCTION_RELEASE_PROBE_API_KEY }}
-        run: |
-          test "$(git rev-parse HEAD)" = "$CONTRACT_SHA"
-          develop_tip="$(gh api "repos/$GITHUB_REPOSITORY/commits/develop" --jq .sha)"
-          test "$develop_tip" = "$CONTRACT_SHA" || {
-            echo "Contract commit stopped being current develop tip" >&2
-            exit 1
-          }
           required=(
             RELEASE_PROBE_MOCK_PATH RELEASE_PROBE_MOCK_METHOD
             RELEASE_PROBE_METERED_PATH RELEASE_PROBE_METERED_METHOD

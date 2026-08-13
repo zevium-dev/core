@@ -355,15 +355,11 @@ function runChild(command, env, spawnImpl = spawn) {
 export async function main(argv = process.argv.slice(2), dependencies = {}) {
   const { options, command } = parseArgs(argv);
   const secretEnv = options["clerk-secret-env"];
-  if (
-    secretEnv !== "CLERK_PRODUCTION_SECRET_KEY" &&
-    secretEnv !== "CLERK_STAGING_SECRET_KEY"
-  ) {
-    throw new Error("clerk secret env must name staging or production key");
+  if (secretEnv !== "CLERK_PRODUCTION_SECRET_KEY") {
+    throw new Error("clerk secret env must name the production key");
   }
   const clerkSecret = requiredString(process.env[secretEnv], secretEnv);
-  const requiredPrefix =
-    secretEnv === "CLERK_PRODUCTION_SECRET_KEY" ? "sk_live_" : "sk_test_";
+  const requiredPrefix = "sk_live_";
   if (!clerkSecret.startsWith(requiredPrefix)) {
     throw new Error(`${secretEnv} has wrong Clerk instance type`);
   }
