@@ -14,6 +14,9 @@ const HOP_BY_HOP: Record<string, true> = {
   // Request auth must not leak to upstream; gateway authenticates itself later.
   authorization: true,
   "x-api-key": true,
+  // Runner-only correlation value. Persist in settlement metadata, never send
+  // it to publisher-controlled upstreams.
+  "x-zevium-release-challenge": true,
   // Cloudflare / intermediate noise
   "cf-connecting-ip": true,
   "cf-ipcountry": true,

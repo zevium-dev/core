@@ -322,6 +322,8 @@ type IngestUsageEvent = {
   qualityOutcome: "success" | "client_error" | "server_error" | "network_error";
   ambiguous?: boolean;
   publisherIdempotencyKey?: string;
+  releaseChallenge?: string;
+  gatewayRelease?: string;
 };
 
 /** Parse exactly the one-wallet settlement batch accepted from a Wallet DO. */
@@ -446,6 +448,18 @@ export function parseIngestUsageBody(
     ) {
       return { ok: false, status: 400, error: "invalid event" };
     }
+    if (
+      (event.releaseChallenge !== undefined &&
+        (typeof event.releaseChallenge !== "string" ||
+          !/^[0-9a-f]{64}$/.test(event.releaseChallenge))) ||
+      (event.gatewayRelease !== undefined &&
+        (typeof event.gatewayRelease !== "string" ||
+          !/^[0-9a-f]{40}$/.test(event.gatewayRelease))) ||
+      (event.releaseChallenge === undefined) !==
+        (event.gatewayRelease === undefined)
+    ) {
+      return { ok: false, status: 400, error: "invalid release metadata" };
+    }
     const consumer = event.consumerClerkOrgId as string;
     if (consumerClerkOrgId !== null && consumerClerkOrgId !== consumer) {
       return { ok: false, status: 400, error: "mixed consumer organizations" };
@@ -504,6 +518,12 @@ export function parseIngestUsageBody(
         : {
             publisherIdempotencyKey: event.publisherIdempotencyKey as string,
           }),
+      ...(typeof event.releaseChallenge === "string"
+        ? { releaseChallenge: event.releaseChallenge }
+        : {}),
+      ...(typeof event.gatewayRelease === "string"
+        ? { gatewayRelease: event.gatewayRelease }
+        : {}),
     });
   }
   return { ok: true, events };
@@ -512,8 +532,137 @@ export function parseIngestUsageBody(
 function json(body: unknown, status: number): Response {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      "Cache-Control": "no-store",
+    },
   });
+}
+
+const RELEASE_REQUEST_ID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
+const RELEASE_CHALLENGE_RE = /^[0-9a-f]{64}$/;
+const RELEASE_SHA_RE = /^[0-9a-f]{40}$/;
+const MAX_RELEASE_PROBE_BODY_BYTES = 1024;
+const MIN_RELEASE_PROBE_SECRET_BYTES = 32;
+const MAX_RELEASE_PROBE_SECRET_BYTES = 256;
+
+export type ReleaseProbeBody = {
+  requestId: string;
+  challenge: string;
+  notBefore: number;
+  expectedGatewayRelease: string;
+};
+
+export function parseReleaseProbeBody(
+  body: unknown,
+): ({ ok: true } & ReleaseProbeBody) | { ok: false } {
+  if (body === null || typeof body !== "object" || Array.isArray(body)) {
+    return { ok: false };
+  }
+  const record = body as Record<string, unknown>;
+  if (
+    Object.keys(record).length !== 4 ||
+    typeof record.requestId !== "string" ||
+    !RELEASE_REQUEST_ID_RE.test(record.requestId) ||
+    typeof record.challenge !== "string" ||
+    !RELEASE_CHALLENGE_RE.test(record.challenge) ||
+    typeof record.notBefore !== "number" ||
+    !Number.isSafeInteger(record.notBefore) ||
+    typeof record.expectedGatewayRelease !== "string" ||
+    !RELEASE_SHA_RE.test(record.expectedGatewayRelease)
+  ) {
+    return { ok: false };
+  }
+  return {
+    ok: true,
+    requestId: record.requestId,
+    challenge: record.challenge,
+    notBefore: record.notBefore,
+    expectedGatewayRelease: record.expectedGatewayRelease,
+  };
+}
+
+/** Fixed-size SHA-256 digest comparison; raw credential lengths never drive it. */
+export async function releaseProbeSecretMatches(
+  expected: string | undefined,
+  received: string | null,
+): Promise<boolean> {
+  if (expected === undefined || received === null) return false;
+  const encoder = new TextEncoder();
+  const expectedBytes = encoder.encode(expected);
+  const receivedBytes = encoder.encode(received);
+  if (
+    expectedBytes.byteLength < MIN_RELEASE_PROBE_SECRET_BYTES ||
+    expectedBytes.byteLength > MAX_RELEASE_PROBE_SECRET_BYTES ||
+    receivedBytes.byteLength < MIN_RELEASE_PROBE_SECRET_BYTES ||
+    receivedBytes.byteLength > MAX_RELEASE_PROBE_SECRET_BYTES
+  ) {
+    return false;
+  }
+  const [expectedDigest, receivedDigest] = await Promise.all(
+    [expectedBytes, receivedBytes].map(
+      async (value) =>
+        new Uint8Array(await crypto.subtle.digest("SHA-256", value)),
+    ),
+  );
+  let difference = 0;
+  for (let index = 0; index < 32; index += 1) {
+    difference |= expectedDigest[index]! ^ receivedDigest[index]!;
+  }
+  return difference === 0;
+}
+
+async function readReleaseProbeJson(
+  request: Request,
+): Promise<{ ok: true; body: unknown } | { ok: false; status: number }> {
+  const contentType = request.headers.get("content-type") ?? "";
+  if (
+    contentType.split(";", 1)[0]!.trim().toLowerCase() !== "application/json"
+  ) {
+    return { ok: false, status: 415 };
+  }
+  const declaredLength = request.headers.get("content-length");
+  if (declaredLength !== null) {
+    const parsedLength = Number(declaredLength);
+    if (
+      !Number.isSafeInteger(parsedLength) ||
+      parsedLength < 0 ||
+      parsedLength > MAX_RELEASE_PROBE_BODY_BYTES
+    ) {
+      return { ok: false, status: 413 };
+    }
+  }
+  if (request.body === null) return { ok: false, status: 400 };
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let length = 0;
+  try {
+    while (true) {
+      const part = await reader.read();
+      if (part.done) break;
+      length += part.value.byteLength;
+      if (length > MAX_RELEASE_PROBE_BODY_BYTES) {
+        await reader.cancel();
+        return { ok: false, status: 413 };
+      }
+      chunks.push(part.value);
+    }
+  } catch {
+    return { ok: false, status: 400 };
+  }
+  const bytes = new Uint8Array(length);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  try {
+    return { ok: true, body: JSON.parse(new TextDecoder().decode(bytes)) };
+  } catch {
+    return { ok: false, status: 400 };
+  }
 }
 
 http.route({
@@ -556,6 +705,67 @@ http.route({
         }),
       );
       return json({ error: "ingest failed" }, 500);
+    }
+  }),
+});
+
+/**
+ * Request-scoped release proof. Separate credential can claim one bounded
+ * challenge, but cannot ingest usage, deploy, or perform general Convex reads.
+ */
+http.route({
+  path: "/release-probe-accounting",
+  method: "POST",
+  handler: httpAction(async (ctx, request) => {
+    const configuredSecret = process.env.RELEASE_PROBE_SECRET;
+    if (configuredSecret === undefined || configuredSecret.length === 0) {
+      return json({ error: "release probe unavailable" }, 503);
+    }
+    if (
+      !(await releaseProbeSecretMatches(
+        configuredSecret,
+        request.headers.get("x-release-probe-secret"),
+      ))
+    ) {
+      return json({ error: "unauthorized" }, 401);
+    }
+    const decoded = await readReleaseProbeJson(request);
+    if (!decoded.ok) return json({ error: "invalid request" }, decoded.status);
+    const parsed = parseReleaseProbeBody(decoded.body);
+    if (!parsed.ok) return json({ error: "invalid body" }, 400);
+
+    const now = Date.now();
+    if (
+      parsed.notBefore > now + 30_000 ||
+      now - parsed.notBefore > 5 * 60_000
+    ) {
+      return json({ error: "stale request" }, 409);
+    }
+
+    try {
+      const accounting = await ctx.runMutation(
+        internal.wallets.claimReleaseProbeAccounting,
+        {
+          requestId: parsed.requestId,
+          challenge: parsed.challenge,
+          notBefore: parsed.notBefore,
+          expectedGatewayRelease: parsed.expectedGatewayRelease,
+          now,
+        },
+      );
+      if (accounting === null) return json({ status: "pending" }, 202);
+      return json({ status: "settled", ...accounting }, 200);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "release probe failed";
+      if (
+        message.includes("already claimed") ||
+        message.includes("rate limit")
+      ) {
+        return json({ error: "release probe rejected" }, 409);
+      }
+      console.error("release probe accounting invariant failed");
+      return json({ error: "release probe failed" }, 500);
     }
   }),
 });

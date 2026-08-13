@@ -3,15 +3,28 @@ import { convexTest, type TestConvex } from "convex-test";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
-import { parseIngestUsageBody } from "./http";
+import {
+  parseIngestUsageBody,
+  parseReleaseProbeBody,
+  releaseProbeSecretMatches,
+} from "./http";
 import schema from "./schema";
 
 const modules = import.meta.glob("./**/*.ts");
 const SECRET = "test-gateway-internal-secret";
+const RELEASE_SECRET = "release-probe-" + "p".repeat(32);
+const REQUEST_ID = "123e4567-e89b-42d3-a456-426614174000";
+const SECOND_REQUEST_ID = "223e4567-e89b-42d3-a456-426614174000";
+const CHALLENGE = "c".repeat(64);
+const SECOND_CHALLENGE = "d".repeat(64);
+const RELEASE = "a".repeat(40);
 
 type SeededWallet = {
   consumerOrganizationId: Id<"organizations">;
+  otherOrganizationId: Id<"organizations">;
   publisherOrganizationId: Id<"organizations">;
+  consumerWalletId: Id<"wallets">;
+  otherWalletId: Id<"wallets">;
   projectId: Id<"projects">;
   specVersionId: Id<"specVersions">;
   paymentId: Id<"payments">;
@@ -24,13 +37,23 @@ async function seedWallet(t: TestConvex<typeof schema>): Promise<SeededWallet> {
       name: "Consumer",
       slug: "consumer",
     });
+    const otherOrganizationId = await ctx.db.insert("organizations", {
+      clerkOrgId: "org_other",
+      name: "Other",
+      slug: "other",
+    });
     const publisherOrganizationId = await ctx.db.insert("organizations", {
       clerkOrgId: "org_publisher",
       name: "Publisher",
       slug: "publisher",
     });
-    await ctx.db.insert("wallets", {
+    const consumerWalletId = await ctx.db.insert("wallets", {
       organizationId: consumerOrganizationId,
+      balance: 0,
+      sequence: 0,
+    });
+    const otherWalletId = await ctx.db.insert("wallets", {
+      organizationId: otherOrganizationId,
       balance: 0,
       sequence: 0,
     });
@@ -109,7 +132,10 @@ async function seedWallet(t: TestConvex<typeof schema>): Promise<SeededWallet> {
     });
     return {
       consumerOrganizationId,
+      otherOrganizationId,
       publisherOrganizationId,
+      consumerWalletId,
+      otherWalletId,
       projectId: project._id,
       specVersionId,
       paymentId,
@@ -117,7 +143,16 @@ async function seedWallet(t: TestConvex<typeof schema>): Promise<SeededWallet> {
   });
 }
 
-function usageEvent(seed: SeededWallet, refId: string, credits = 15) {
+function usageEvent(
+  seed: SeededWallet,
+  refId: string,
+  credits = 15,
+  extras: {
+    at?: number;
+    releaseChallenge?: string;
+    gatewayRelease?: string;
+  } = {},
+) {
   return {
     organizationId: seed.publisherOrganizationId,
     projectId: seed.projectId,
@@ -137,13 +172,43 @@ function usageEvent(seed: SeededWallet, refId: string, credits = 15) {
     budgetUsedBefore: 0,
     budgetReservedBefore: 0,
     budgetReservationCredits: credits,
-    at: 10,
+    at: extras.at ?? 10,
     reservationId: refId.replace(/^settle:/, ""),
     settleRefId: refId,
     consumerClerkOrgId: "org_consumer",
     billingOutcome: credits === 0 ? ("free" as const) : ("settled" as const),
     qualityOutcome: "success" as const,
+    ...(extras.releaseChallenge === undefined
+      ? {}
+      : { releaseChallenge: extras.releaseChallenge }),
+    ...(extras.gatewayRelease === undefined
+      ? {}
+      : { gatewayRelease: extras.gatewayRelease }),
   };
+}
+
+function probeBody(
+  requestId = REQUEST_ID,
+  challenge = CHALLENGE,
+  notBefore = Date.now() - 1_000,
+) {
+  return {
+    requestId,
+    challenge,
+    notBefore,
+    expectedGatewayRelease: RELEASE,
+  };
+}
+
+async function claim(
+  t: TestConvex<typeof schema>,
+  body: ReturnType<typeof probeBody>,
+  now = Date.now(),
+) {
+  return await t.mutation(internal.wallets.claimReleaseProbeAccounting, {
+    ...body,
+    now,
+  });
 }
 
 describe("wallet settlement ingest contract", () => {
@@ -471,5 +536,326 @@ describe("wallet settlement ingest contract", () => {
       ledgerBalance: 80,
       entries: 2,
     });
+  });
+});
+
+describe("one-time release proof", () => {
+  const previousReleaseSecret = process.env.RELEASE_PROBE_SECRET;
+
+  beforeEach(() => {
+    process.env.RELEASE_PROBE_SECRET = RELEASE_SECRET;
+  });
+  afterEach(() => {
+    if (previousReleaseSecret === undefined)
+      delete process.env.RELEASE_PROBE_SECRET;
+    else process.env.RELEASE_PROBE_SECRET = previousReleaseSecret;
+  });
+
+  function probeEvent(
+    seed: SeededWallet,
+    requestId: string,
+    challenge: string,
+    at: number,
+  ) {
+    return usageEvent(seed, `settle:${requestId}`, 15, {
+      at,
+      releaseChallenge: challenge,
+      gatewayRelease: RELEASE,
+    });
+  }
+
+  async function grant(t: TestConvex<typeof schema>, seed: SeededWallet) {
+    await t.mutation(internal.wallets.grantPaymentCredits, {
+      organizationId: seed.consumerOrganizationId,
+      paymentId: seed.paymentId,
+      amount: 100,
+      refId: "stripe:payment_intent:pi_test",
+    });
+  }
+
+  it("accepts exact bounded request shape and fixed-digest credential", async () => {
+    const body = probeBody();
+    expect(parseReleaseProbeBody(body)).toEqual({ ok: true, ...body });
+    expect(parseReleaseProbeBody({ ...body, extra: true }).ok).toBe(false);
+    expect(parseReleaseProbeBody({ ...body, challenge: "short" }).ok).toBe(
+      false,
+    );
+    expect(
+      await releaseProbeSecretMatches(RELEASE_SECRET, RELEASE_SECRET),
+    ).toBe(true);
+    expect(
+      await releaseProbeSecretMatches(RELEASE_SECRET, `${RELEASE_SECRET}x`),
+    ).toBe(false);
+    expect(await releaseProbeSecretMatches("short", "short")).toBe(false);
+  });
+
+  it("rejects half-present release metadata at ingest boundary", () => {
+    const base = {
+      organizationId: "publisher",
+      projectId: "project",
+      specVersionId: "version",
+      specVersion: "1.0.0",
+      operationId: "getX",
+      endpoint: "/x",
+      method: "GET",
+      listedCostCredits: 1,
+      pricingDecision: "listed_price",
+      credits: 1,
+      status: 200,
+      latencyMs: 1,
+      keyId: "key",
+      keyFamilyId: "key_family",
+      budgetPeriod: "2026-08",
+      budgetUsedBefore: 0,
+      budgetReservedBefore: 0,
+      budgetReservationCredits: 1,
+      at: 1,
+      reservationId: "one",
+      settleRefId: "settle:one",
+      consumerClerkOrgId: "org_one",
+      billingOutcome: "settled",
+      qualityOutcome: "success",
+    };
+    expect(
+      parseIngestUsageBody({
+        events: [{ ...base, releaseChallenge: CHALLENGE }],
+      }).ok,
+    ).toBe(false);
+    expect(
+      parseIngestUsageBody({
+        events: [
+          { ...base, releaseChallenge: CHALLENGE, gatewayRelease: "bad" },
+        ],
+      }).ok,
+    ).toBe(false);
+  });
+
+  it("moves pending to one minimal settled proof and replays the exact result", async () => {
+    const t = convexTest(schema, modules);
+    const seed = await seedWallet(t);
+    await grant(t, seed);
+    const started = Date.now() - 100;
+    const body = probeBody(REQUEST_ID, CHALLENGE, started);
+
+    const pending = await t.fetch("/release-probe-accounting", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-release-probe-secret": RELEASE_SECRET,
+      },
+      body: JSON.stringify(body),
+    });
+    expect(pending.status).toBe(202);
+    expect(await pending.json()).toEqual({ status: "pending" });
+
+    await t.mutation(internal.wallets.recordUsage, {
+      events: [probeEvent(seed, REQUEST_ID, CHALLENGE, started + 10)],
+    });
+    const settled = await t.fetch("/release-probe-accounting", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-release-probe-secret": RELEASE_SECRET,
+      },
+      body: JSON.stringify(body),
+    });
+    expect(settled.status).toBe(200);
+    expect(await settled.json()).toEqual({
+      status: "settled",
+      requestId: REQUEST_ID,
+      challenge: CHALLENGE,
+      credits: 15,
+      platformFeeCredits: 0.75,
+      publisherNetCredits: 14.25,
+    });
+
+    const replay = await t.fetch("/release-probe-accounting", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-release-probe-secret": RELEASE_SECRET,
+      },
+      body: JSON.stringify(body),
+    });
+    expect(replay.status).toBe(200);
+    expect(await replay.json()).toEqual({
+      status: "settled",
+      requestId: REQUEST_ID,
+      challenge: CHALLENGE,
+      credits: 15,
+      platformFeeCredits: 0.75,
+      publisherNetCredits: 14.25,
+    });
+
+    const mismatchedReplay = await t.fetch("/release-probe-accounting", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-release-probe-secret": RELEASE_SECRET,
+      },
+      body: JSON.stringify({ ...body, notBefore: body.notBefore + 1 }),
+    });
+    expect(mismatchedReplay.status).toBe(409);
+    expect(await mismatchedReplay.json()).toEqual({
+      error: "release probe rejected",
+    });
+  });
+
+  it("rejects stale usage even when request id and challenge match", async () => {
+    const t = convexTest(schema, modules);
+    const seed = await seedWallet(t);
+    await grant(t, seed);
+    const now = Date.now();
+    await t.mutation(internal.wallets.recordUsage, {
+      events: [probeEvent(seed, REQUEST_ID, CHALLENGE, now - 10 * 60_000)],
+    });
+    await expect(
+      claim(t, probeBody(REQUEST_ID, CHALLENGE, now - 11 * 60_000), now),
+    ).rejects.toThrow(/usage linkage is invalid/);
+  });
+
+  it("rejects cross-wallet ledger linkage", async () => {
+    const t = convexTest(schema, modules);
+    const seed = await seedWallet(t);
+    await grant(t, seed);
+    const now = Date.now();
+    await t.mutation(internal.wallets.recordUsage, {
+      events: [probeEvent(seed, REQUEST_ID, CHALLENGE, now)],
+    });
+    await t.run(async (ctx) => {
+      const ledger = await ctx.db
+        .query("walletEntries")
+        .withIndex("by_ref", (q) => q.eq("refId", `settle:${REQUEST_ID}`))
+        .unique();
+      if (ledger === null) throw new Error("ledger missing");
+      await ctx.db.patch(ledger._id, { walletId: seed.otherWalletId });
+    });
+    await expect(
+      claim(t, probeBody(REQUEST_ID, CHALLENGE, now - 1), now + 1),
+    ).rejects.toThrow(/consumer wallet linkage is invalid/);
+  });
+
+  it("rejects duplicate settlement references instead of choosing a row", async () => {
+    const t = convexTest(schema, modules);
+    const seed = await seedWallet(t);
+    await grant(t, seed);
+    const now = Date.now();
+    await t.mutation(internal.wallets.recordUsage, {
+      events: [probeEvent(seed, REQUEST_ID, CHALLENGE, now)],
+    });
+    await t.run(async (ctx) => {
+      const original = await ctx.db
+        .query("walletEntries")
+        .withIndex("by_ref", (q) => q.eq("refId", `settle:${REQUEST_ID}`))
+        .unique();
+      if (original === null) throw new Error("ledger missing");
+      await ctx.db.insert("walletEntries", {
+        walletId: original.walletId,
+        kind: original.kind,
+        amount: original.amount,
+        refId: original.refId,
+        sequence: original.sequence,
+        balanceAfter: original.balanceAfter,
+        usageEventId: original.usageEventId,
+        createdAt: original.createdAt,
+      });
+    });
+    await expect(
+      claim(t, probeBody(REQUEST_ID, CHALLENGE, now - 1), now + 1),
+    ).rejects.toThrow(/more than one result/);
+  });
+
+  it("rejects materialized wallet checkpoint drift", async () => {
+    const t = convexTest(schema, modules);
+    const seed = await seedWallet(t);
+    await grant(t, seed);
+    const now = Date.now();
+    await t.mutation(internal.wallets.recordUsage, {
+      events: [probeEvent(seed, REQUEST_ID, CHALLENGE, now)],
+    });
+    await t.run(async (ctx) => {
+      const wallet = await ctx.db.get(seed.consumerWalletId);
+      if (wallet === null) throw new Error("wallet missing");
+      await ctx.db.patch(wallet._id, { balance: wallet.balance + 1 });
+    });
+    await expect(
+      claim(t, probeBody(REQUEST_ID, CHALLENGE, now - 1), now + 1),
+    ).rejects.toThrow(/wallet checkpoint is invalid/);
+  });
+
+  it("rejects same challenge on a second request after first claim", async () => {
+    const t = convexTest(schema, modules);
+    const seed = await seedWallet(t);
+    await grant(t, seed);
+    const now = Date.now();
+    await t.mutation(internal.wallets.recordUsage, {
+      events: [
+        probeEvent(seed, REQUEST_ID, CHALLENGE, now),
+        probeEvent(seed, SECOND_REQUEST_ID, CHALLENGE, now + 1),
+      ],
+    });
+    await expect(
+      claim(t, probeBody(REQUEST_ID, CHALLENGE, now - 1), now + 2),
+    ).resolves.toMatchObject({ requestId: REQUEST_ID, challenge: CHALLENGE });
+    await expect(
+      claim(t, probeBody(SECOND_REQUEST_ID, CHALLENGE, now - 1), now + 3),
+    ).rejects.toThrow(/already claimed/);
+  });
+
+  it("enforces auth header, media type, and body size without secret leakage", async () => {
+    const t = convexTest(schema, modules);
+    const unauthorized = await t.fetch("/release-probe-accounting", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-release-probe-secret": "x".repeat(40),
+      },
+      body: JSON.stringify(probeBody()),
+    });
+    expect(unauthorized.status).toBe(401);
+    expect(await unauthorized.text()).not.toContain(RELEASE_SECRET);
+
+    const wrongType = await t.fetch("/release-probe-accounting", {
+      method: "POST",
+      headers: {
+        "Content-Type": "text/plain",
+        "x-release-probe-secret": RELEASE_SECRET,
+      },
+      body: JSON.stringify(probeBody()),
+    });
+    expect(wrongType.status).toBe(415);
+
+    const oversized = await t.fetch("/release-probe-accounting", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-release-probe-secret": RELEASE_SECRET,
+      },
+      body: JSON.stringify({ ...probeBody(), padding: "x".repeat(2_000) }),
+    });
+    expect(oversized.status).toBe(413);
+  });
+
+  it("keeps independent challenges independent", async () => {
+    const t = convexTest(schema, modules);
+    const seed = await seedWallet(t);
+    await grant(t, seed);
+    const now = Date.now();
+    await t.mutation(internal.wallets.recordUsage, {
+      events: [
+        probeEvent(seed, REQUEST_ID, CHALLENGE, now),
+        probeEvent(seed, SECOND_REQUEST_ID, SECOND_CHALLENGE, now + 1),
+      ],
+    });
+    await expect(
+      claim(t, probeBody(REQUEST_ID, CHALLENGE, now - 1), now + 2),
+    ).resolves.toMatchObject({ requestId: REQUEST_ID });
+    await expect(
+      claim(
+        t,
+        probeBody(SECOND_REQUEST_ID, SECOND_CHALLENGE, now - 1),
+        now + 3,
+      ),
+    ).resolves.toMatchObject({ requestId: SECOND_REQUEST_ID });
   });
 });

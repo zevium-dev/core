@@ -130,6 +130,8 @@ type UsageListItem = {
   memberId?: string | null;
   memberName?: string | null;
   at: number;
+  requestId: string | null;
+  releaseChallenge: string | null;
 };
 
 type UsagePageData = {

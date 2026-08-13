@@ -141,9 +141,12 @@ const MISE_VERIFY_COMMAND = [
   'test "$(pnpm --version)" = "11.8.0"',
 ].join("\n");
 const PLAIN_INSTALL_COMMAND = "pnpm install --frozen-lockfile";
+const REFEREE_INSTALL_COMMAND =
+  'pnpm --dir "$REFEREE_ROOT" install --frozen-lockfile --ignore-scripts';
 const REBUILD_COMMAND = "pnpm rebuild";
 const BROWSER_INSTALL_COMMAND = "pnpm exec agent-browser install --with-deps";
 const ALLOWED_ACTIONS = new Map([
+  ["actions/attest", "1e69f48acb82d1966a394da916b4c1698aa569d6"],
   ["actions/checkout", "d23441a48e516b6c34aea4fa41551a30e30af803"],
   ["actions/cache", "caa296126883cff596d87d8935842f9db880ef25"],
   ["actions/upload-artifact", "043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"],
@@ -214,6 +217,7 @@ const IMPORTER_KEYS = new Set(DEPENDENCY_TYPES);
 const IMPORTER_DEPENDENCY_KEYS = new Set(["specifier", "version"]);
 const MANIFEST_KEYS = new Set([
   ...DEPENDENCY_TYPES,
+  "engines",
   "exports",
   "imports",
   "name",
@@ -2473,6 +2477,7 @@ function validateWorkflowDependencyPolicy(workflow, workflowName) {
         run === FULL_INSTALL_COMMAND ||
         run === BROWSER_INSTALL_COMMAND ||
         run === PLAIN_INSTALL_COMMAND ||
+        run === REFEREE_INSTALL_COMMAND ||
         run === MISE_VERIFY_COMMAND
       ) {
         continue;

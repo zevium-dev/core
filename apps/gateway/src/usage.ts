@@ -46,6 +46,10 @@ export type UsageEvent = {
   publisherIdempotencyKey?: string;
   latencyMs: number;
   reservationId: string;
+  /** Runner-generated one-time release correlation, when this is a probe. */
+  releaseChallenge?: string;
+  /** Immutable gateway git SHA serving this request. */
+  gatewayRelease?: string;
 };
 
 /** Shape stored on pending settlements and sent to wallets:recordUsage. */
@@ -81,6 +85,8 @@ export type ConvexUsageRecord = {
   qualityOutcome: "success" | "client_error" | "server_error" | "network_error";
   ambiguous?: boolean;
   publisherIdempotencyKey?: string;
+  releaseChallenge?: string;
+  gatewayRelease?: string;
 };
 
 /**
@@ -570,6 +576,10 @@ export function usageEventToRecord(event: UsageEvent): ConvexUsageRecord {
     ...(event.publisherIdempotencyKey === undefined
       ? {}
       : { publisherIdempotencyKey: event.publisherIdempotencyKey }),
+    ...(event.releaseChallenge
+      ? { releaseChallenge: event.releaseChallenge }
+      : {}),
+    ...(event.gatewayRelease ? { gatewayRelease: event.gatewayRelease } : {}),
   };
 }
 
@@ -603,6 +613,8 @@ export function pendingToUsageRecord(input: {
   budgetReservationCredits: number;
   ambiguous?: boolean;
   publisherIdempotencyKey?: string;
+  releaseChallenge?: string;
+  gatewayRelease?: string;
 }): ConvexUsageRecord {
   return {
     organizationId: input.organizationId,
@@ -636,6 +648,10 @@ export function pendingToUsageRecord(input: {
     ...(input.publisherIdempotencyKey === undefined
       ? {}
       : { publisherIdempotencyKey: input.publisherIdempotencyKey }),
+    ...(input.releaseChallenge
+      ? { releaseChallenge: input.releaseChallenge }
+      : {}),
+    ...(input.gatewayRelease ? { gatewayRelease: input.gatewayRelease } : {}),
   };
 }
 

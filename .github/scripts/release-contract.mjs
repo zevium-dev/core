@@ -1,21 +1,36 @@
 import { mkdir, writeFile } from "node:fs/promises";
+import { randomBytes } from "node:crypto";
 import { dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const SHA_RE = /^[0-9a-f]{40}$/;
 const INTEGER_RE = /^[1-9]\d*$/;
+const REQUEST_ID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const CHALLENGE_RE = /^[0-9a-f]{64}$/;
 const MEDIA_TYPE_RE =
   /^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*(?:\s*;\s*charset=[a-z0-9-]+)?$/i;
 const HTTP_METHODS = new Set(["DELETE", "GET", "HEAD", "PATCH", "POST", "PUT"]);
 const DEFAULT_ATTEMPTS = 23;
 const DEFAULT_INTERVAL_MS = 2_000;
+const MAX_PROBE_BODY_BYTES = 64 * 1024;
+const MAX_API_KEY_BYTES = 1024;
 
 export function validateRelease(release) {
   if (!SHA_RE.test(release)) {
     throw new Error("release must be a lowercase 40-character git SHA");
   }
   return release;
+}
+
+export function validateCurrentDevelop(release, currentDevelop) {
+  const expected = validateRelease(release);
+  const current = validateRelease(currentDevelop);
+  if (current !== expected) {
+    throw new Error("release stopped being current develop during approval");
+  }
+  return expected;
 }
 
 export function validateConvexTarget(expected, actual) {
@@ -65,6 +80,26 @@ function validateOrigin(value, name) {
   return url.origin;
 }
 
+function validateAccountingUrl(value) {
+  if (typeof value !== "string" || value.length === 0) {
+    throw new Error("accounting URL is required");
+  }
+  const url = new URL(value);
+  if (
+    url.protocol !== "https:" ||
+    url.pathname !== "/release-probe-accounting" ||
+    url.search ||
+    url.hash ||
+    url.username ||
+    url.password
+  ) {
+    throw new Error(
+      "accounting URL must be an HTTPS /release-probe-accounting endpoint",
+    );
+  }
+  return url.toString();
+}
+
 function validateProbePath(value, prefix, name) {
   if (
     typeof value !== "string" ||
@@ -93,7 +128,14 @@ function validateRequestBody(method, body, contentType) {
   if (typeof body !== "string" || body.length === 0) {
     throw new Error("RELEASE_PROBE_REQUEST_BODY is required for body methods");
   }
-  if (typeof contentType !== "string" || !MEDIA_TYPE_RE.test(contentType)) {
+  if (Buffer.byteLength(body, "utf8") > MAX_PROBE_BODY_BYTES) {
+    throw new Error("RELEASE_PROBE_REQUEST_BODY exceeds 64 KiB");
+  }
+  if (
+    typeof contentType !== "string" ||
+    contentType.length > 128 ||
+    !MEDIA_TYPE_RE.test(contentType)
+  ) {
     throw new Error(
       "RELEASE_PROBE_CONTENT_TYPE must be a valid media type for body methods",
     );
@@ -192,7 +234,8 @@ export function validateProbeOptions(options) {
   const meteredMethod = validateMethod(options.meteredMethod, "meteredMethod");
   if (
     typeof options.apiKey !== "string" ||
-    options.apiKey.trim().length === 0
+    options.apiKey.trim().length === 0 ||
+    Buffer.byteLength(options.apiKey, "utf8") > MAX_API_KEY_BYTES
   ) {
     throw new Error("RELEASE_PROBE_API_KEY is required");
   }
@@ -213,6 +256,14 @@ export function validateProbeOptions(options) {
     options.requestBody,
     options.contentType,
   );
+  const accountingUrl = validateAccountingUrl(options.accountingUrl);
+  if (
+    typeof options.probeSecret !== "string" ||
+    options.probeSecret.length < 32 ||
+    options.probeSecret.length > 256
+  ) {
+    throw new Error("RELEASE_PROBE_SECRET must contain 32-256 characters");
+  }
 
   return {
     release,
@@ -230,6 +281,8 @@ export function validateProbeOptions(options) {
     requestBody: request.body,
     requestContentType: request.contentType,
     apiKey: options.apiKey,
+    accountingUrl,
+    probeSecret: options.probeSecret,
   };
 }
 
@@ -267,6 +320,11 @@ async function waitForReady({
       const result = await request(fetchImpl, requestUrl, init, 2_000);
       lastStatus = result.response.status;
       const inspected = await inspect(result.response);
+      if (inspected.terminal) {
+        const error = new Error(`${name} failed: ${inspected.reason}`);
+        error.terminal = true;
+        throw error;
+      }
       if (inspected.ready) {
         return {
           ...inspected,
@@ -277,6 +335,14 @@ async function waitForReady({
       }
       lastFailure = inspected.reason;
     } catch (error) {
+      if (error?.terminal === true) {
+        error.probeDetails = {
+          status: lastStatus,
+          attempts: attempt,
+          durationMs: Date.now() - startedAt,
+        };
+        throw error;
+      }
       lastFailure = errorMessage(error);
     }
 
@@ -431,6 +497,8 @@ export async function probeRelease(options, fetchImpl = fetch) {
       requestBody,
       requestContentType,
       apiKey,
+      accountingUrl,
+      probeSecret,
     } = normalized;
     evidence.release = release;
 
@@ -515,6 +583,11 @@ export async function probeRelease(options, fetchImpl = fetch) {
       evidence.outcome = "passed";
       return evidence;
     }
+
+    assert(
+      !legacyIdentity,
+      "paid release proof requires an immutable gateway release SHA",
+    );
 
     if (!gatewayOnly) {
       const catalogue = await runCheck("web-catalogue-ssr", async () => {
@@ -665,10 +738,23 @@ export async function probeRelease(options, fetchImpl = fetch) {
     });
     record("published-spec-mock", mock);
 
+    const challenge =
+      options.challengeFactory?.() ?? randomBytes(32).toString("hex");
+    assert(
+      typeof challenge === "string" && CHALLENGE_RE.test(challenge),
+      "release challenge generator returned invalid output",
+    );
+    const notBefore = (options.now ?? Date.now)();
+    assert(
+      Number.isSafeInteger(notBefore) && notBefore > 0,
+      "release probe clock returned invalid timestamp",
+    );
+
     const metered = await runCheck("metered-wallet-upstream", async () => {
       const init = bodyInit(meteredMethod, requestBody, requestContentType);
       const headers = new Headers(init.headers);
       headers.set("authorization", `Bearer ${apiKey}`);
+      headers.set("x-zevium-release-challenge", challenge);
       const result = await request(fetchImpl, `${gateway}${meteredPath}`, {
         ...gatewayInit({ ...init, headers }),
       });
@@ -685,18 +771,110 @@ export async function probeRelease(options, fetchImpl = fetch) {
         Number(cost) === declaredCost,
         "metered response cost differs from published discovery price",
       );
+      const requestId =
+        result.response.headers.get("x-zevium-request-id")?.trim() ?? "";
       assert(
-        Boolean(result.response.headers.get("x-zevium-request-id")),
-        "metered response request id missing",
+        REQUEST_ID_RE.test(requestId),
+        "metered request id is not canonical",
       );
       await result.response.body?.cancel();
       return {
         status: result.response.status,
         durationMs: result.durationMs,
         cost: Number(cost),
+        requestId,
       };
     });
-    record("metered-wallet-upstream", metered, { cost: metered.cost });
+    record("metered-wallet-upstream", metered, {
+      cost: metered.cost,
+      requestId: metered.requestId,
+    });
+
+    const accounting = await runCheck("authoritative-usage-accounting", () =>
+      waitForReady({
+        fetchImpl,
+        url: accountingUrl,
+        attempts,
+        intervalMs,
+        sleep,
+        name: "authoritative usage accounting",
+        init: {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-release-probe-secret": probeSecret,
+          },
+          body: JSON.stringify({
+            requestId: metered.requestId,
+            challenge,
+            notBefore,
+            expectedGatewayRelease: release,
+          }),
+        },
+        inspect: async (response) => {
+          const responseType =
+            response.headers.get("content-type")?.split(";", 1)[0]?.trim() ??
+            "";
+          if (responseType.toLowerCase() !== "application/json") {
+            return {
+              ready: false,
+              terminal: response.status !== 202,
+              reason: "accounting response content type was not JSON",
+            };
+          }
+          let body;
+          try {
+            body = await response.json();
+          } catch {
+            return {
+              ready: false,
+              terminal: response.status !== 202,
+              reason: "accounting response was not JSON",
+            };
+          }
+          if (response.status === 202 && body?.status === "pending") {
+            return { ready: false, reason: "settlement still pending" };
+          }
+          if (response.status !== 200 || body?.status !== "settled") {
+            return {
+              ready: false,
+              terminal: true,
+              reason: `accounting endpoint returned HTTP ${response.status}`,
+            };
+          }
+
+          const expectedFee = Math.floor((metered.cost * 500) / 10_000);
+          const expectedNet = metered.cost - expectedFee;
+          const exact =
+            Object.keys(body).length === 6 &&
+            body.requestId === metered.requestId &&
+            body.challenge === challenge &&
+            body.credits === metered.cost &&
+            body.platformFeeCredits === expectedFee &&
+            body.publisherNetCredits === expectedNet;
+          if (!exact) {
+            return {
+              ready: false,
+              terminal: true,
+              reason: "request challenge or accounting mismatch",
+            };
+          }
+          return {
+            ready: true,
+            requestId: metered.requestId,
+            cost: metered.cost,
+            platformFeeCredits: expectedFee,
+            publisherNetCredits: expectedNet,
+          };
+        },
+      }),
+    );
+    record("authoritative-usage-accounting", accounting, {
+      requestId: accounting.requestId,
+      cost: accounting.cost,
+      platformFeeCredits: accounting.platformFeeCredits,
+      publisherNetCredits: accounting.publisherNetCredits,
+    });
 
     evidence.outcome = "passed";
     return evidence;
@@ -731,6 +909,10 @@ async function writeEvidence(output, evidence) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
+  if (args["validate-current-develop"] === "true") {
+    validateCurrentDevelop(args.release, process.env.CURRENT_DEVELOP_SHA);
+    return;
+  }
   const options = {
     release: args.release,
     web: args.web,
@@ -747,6 +929,8 @@ async function main() {
     contentType: args["content-type"],
     requestBody: process.env.RELEASE_PROBE_REQUEST_BODY || undefined,
     apiKey: process.env.RELEASE_PROBE_API_KEY,
+    accountingUrl: args.accounting,
+    probeSecret: process.env.RELEASE_PROBE_SECRET,
   };
   if (args["current-release"] === "true") {
     process.stdout.write(await resolveCurrentRelease(options));

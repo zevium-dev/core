@@ -18,7 +18,6 @@ permissions:
   contents: read
 
 env:
-  MISE_EXPERIMENTAL: true
   PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
   CLOUDFLARE_ACCOUNT_ID: 1ea9299555b026a6a7484c8323c5a953
 

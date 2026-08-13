@@ -351,7 +351,7 @@ test("parses exact repository workspace graph with every dependency type", () =>
 });
 
 test("validates pinned mise and immutable workflow action identities", () => {
-  assert.equal(validateAutomationPolicy(), 11);
+  assert.equal(validateAutomationPolicy(), 14);
 });
 
 test("binds registry metadata to lock identity, tarball, digest, and graph semantics", () => {

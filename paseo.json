@@ -1,10 +1,7 @@
 {
-  "worktree": {
-    "setup": "mise trust --yes --quiet"
-  },
   "scripts": {
     "setup": {
-      "command": "cp \"$PASEO_SOURCE_CHECKOUT_PATH/.env\" .env; cp \"$PASEO_SOURCE_CHECKOUT_PATH/.env.local\" .env.local; pnpm i"
+      "command": "cp \"$PASEO_SOURCE_CHECKOUT_PATH/.env\" .env; cp \"$PASEO_SOURCE_CHECKOUT_PATH/.env.local\" .env.local; corepack prepare pnpm@11.8.0 --activate; pnpm install --frozen-lockfile"
     },
     "dev": {
       "type": "service",
