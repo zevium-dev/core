@@ -125,6 +125,9 @@ function publishArguments(argv: string[]): PublishArguments {
   }
   if (receiptPath === "") fail("receipt path is invalid");
   if (recoveryReceiptPath === "") fail("recovery receipt path is invalid");
+  if (profile.startsWith("staging-") && !receiptPath) {
+    fail("staging publication requires a receipt path");
+  }
   if (
     recoveryReceiptPath &&
     (!profile.startsWith("staging-") || !receiptPath)
@@ -588,6 +591,9 @@ export async function publishProfile(
   profile: DeploymentProfile,
   options: { receiptPath?: string; recoveryReceiptPath?: string } = {},
 ): Promise<void> {
+  if (profile.startsWith("staging-") && !options.receiptPath) {
+    fail("staging publication requires a receipt path");
+  }
   const recoveryReceipt = options.recoveryReceiptPath
     ? await readRecoveryReceipt(options.recoveryReceiptPath)
     : undefined;

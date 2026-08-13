@@ -176,6 +176,22 @@ describe("signed deployment manifest", () => {
         sourceRunId: "8999",
       }),
     ).toThrow("staging cannot target production Convex");
+    expect(() =>
+      buildManifest({
+        ...TEST_MODULE_ARTIFACTS,
+        convexSiteUrl: "https://zevium-stage.convex.site",
+        convexUrl: "https://zevium-stage.convex.cloud",
+        eventName: "workflow_dispatch",
+        headSha: HEAD_SHA,
+        oidcSha: PRODUCTION_SHA,
+        profile: "staging-gateway",
+        ref: "refs/heads/develop",
+        runAttempt: 1,
+        runId: "9003",
+        secretDigests: PREVIEW_SECRET_DIGESTS,
+        sourceRunId: "8999",
+      }),
+    ).toThrow("checked-out OIDC SHA");
   });
 
   it("binds staging recovery selectors while removing upload authority", () => {
@@ -410,7 +426,7 @@ describe("mutation metadata", () => {
       validateWorkerMetadata(metadata, productionTarget, "version"),
     ).toEqual({
       mainModule: "index.js",
-      migrationMode: "initial",
+      migrationIntent: { oldTag: null },
       secretBindings: [
         { name: "CLERK_SECRET_KEY", text: "redacted-clerk" },
         { name: "GATEWAY_INTERNAL_SECRET", text: "redacted-gateway" },
@@ -438,18 +454,35 @@ describe("mutation metadata", () => {
     ).toThrow("migration");
     expect(
       validateWorkerMetadata(
-        { ...metadata, migrations: undefined },
+        {
+          ...metadata,
+          migrations: {
+            new_tag: "v3",
+            old_tag: "v1",
+            steps: [
+              { new_sqlite_classes: ["RegistryDO"] },
+              { new_sqlite_classes: ["X402PaymentDO"] },
+            ],
+          },
+        },
         productionTarget,
         "version",
       ),
     ).toEqual({
       mainModule: "index.js",
-      migrationMode: "none",
+      migrationIntent: { oldTag: "v1" },
       secretBindings: [
         { name: "CLERK_SECRET_KEY", text: "redacted-clerk" },
         { name: "GATEWAY_INTERNAL_SECRET", text: "redacted-gateway" },
       ],
     });
+    expect(
+      validateWorkerMetadata(
+        { ...metadata, migrations: undefined },
+        productionTarget,
+        "version",
+      ),
+    ).toMatchObject({ migrationIntent: null });
   });
 
   it("bounds secrets, traffic, and asset manifests", () => {

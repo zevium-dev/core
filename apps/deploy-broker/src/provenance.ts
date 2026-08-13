@@ -405,6 +405,7 @@ export async function verifyProvenance(
     invariant(
       claims.event_name === "workflow_dispatch" &&
         claims.ref === "refs/heads/develop" &&
+        manifest.headSha === claims.sha &&
         (claims.base_ref === undefined || claims.base_ref === "") &&
         (claims.head_ref === undefined || claims.head_ref === ""),
       403,

@@ -1,6 +1,7 @@
 import {
   ASSET_HASH_PATTERN,
   isSafeModuleName,
+  type WorkerMigrationIntent,
   validateWorkerMetadata,
 } from "./api-policy";
 import { BrokerError, invariant } from "./errors";
@@ -44,7 +45,7 @@ export interface InspectedMultipart {
   body: ReadableStream<Uint8Array>;
   contentLength: number | null;
   mainModule?: string;
-  migrationMode?: "initial" | "none";
+  migrationIntent?: WorkerMigrationIntent | null;
 }
 
 function concat(left: Uint8Array, right: Uint8Array): Uint8Array<ArrayBuffer> {
@@ -158,7 +159,7 @@ class StreamingMultipartInspector {
   private state: "body" | "boundary" | "finished" | "headers" | "start" =
     "start";
   mainModule: string | undefined;
-  migrationMode: "initial" | "none" | undefined;
+  migrationIntent: WorkerMigrationIntent | null | undefined;
   assetsJwt: string | undefined;
   readonly assetHashes: string[] = [];
   ready = false;
@@ -587,7 +588,7 @@ class StreamingMultipartInspector {
         "version",
       );
       this.mainModule = result.mainModule;
-      this.migrationMode = result.migrationMode;
+      this.migrationIntent = result.migrationIntent;
       this.assetsJwt = result.assetsJwt;
       this.secretBindings = result.secretBindings ?? [];
       this.ready = true;
@@ -737,7 +738,9 @@ export async function inspectMultipart(
     body: forwarded.body,
     contentLength: forwarded.contentLength,
     ...(parser.mainModule ? { mainModule: parser.mainModule } : {}),
-    ...(parser.migrationMode ? { migrationMode: parser.migrationMode } : {}),
+    ...(parser.migrationIntent === undefined
+      ? {}
+      : { migrationIntent: parser.migrationIntent }),
   };
 }
 

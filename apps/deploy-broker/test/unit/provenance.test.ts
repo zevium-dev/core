@@ -205,6 +205,16 @@ describe("GitHub immutable provenance", () => {
         fetcher: async () => Response.json(source),
       }),
     ).resolves.toBeUndefined();
+    await expect(
+      verifyProvenance(
+        { ...manifest, headSha: PRODUCTION_SHA },
+        stagingClaims(AUDIENCE),
+        {
+          fetcher: async () =>
+            Response.json({ ...source, head_sha: PRODUCTION_SHA }),
+        },
+      ),
+    ).rejects.toMatchObject({ code: "staging_ref_rejected" });
     expect(() =>
       validateIdentityClaims(
         manifest,
