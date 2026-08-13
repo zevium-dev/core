@@ -1,7 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
-export const MAX_SPEC_IMPORT_BYTES = 2 * 1024 * 1024;
+export const MAX_SPEC_IMPORT_BYTES = 393_216;
 
 export const importSpecUrlSchema = z.object({
   url: z
