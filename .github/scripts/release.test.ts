@@ -679,19 +679,14 @@ describe("production workflow invariants", () => {
     "utf8",
   );
 
-  it("serializes releases and separates staging from production approval", () => {
+  it("serializes releases behind a single production approval", () => {
     expect(workflow).toContain("group: production-release");
-    expect(workflow).toContain("environment: staging");
+    expect(workflow).not.toContain("environment: staging");
     expect(workflow).toContain("environment: production");
-    expect(workflow.indexOf("environment: staging")).toBeLessThan(
-      workflow.indexOf("environment: production"),
-    );
   });
 
   it("fails closed, verifies zero-traffic candidates, and verifies rollback", () => {
-    expect(workflow).toContain(
-      "Reject incomplete staging release configuration",
-    );
+    expect(workflow).not.toContain("staging");
     expect(workflow).toContain(
       "Reject incomplete production release configuration",
     );
@@ -717,12 +712,11 @@ describe("production workflow invariants", () => {
     expect(previewWorkflow).toContain("access-control-allow-origin");
   });
 
-  it("isolates one contract-only commit behind two approval phases", () => {
-    expect(contractWorkflow).toContain("environment: staging");
+  it("isolates one contract-only commit behind production approval", () => {
+    expect(contractWorkflow).not.toContain("environment: staging");
     expect(contractWorkflow).toContain("environment: production-contract");
     expect(contractWorkflow).toContain("git rev-list --count");
     expect(contractWorkflow).toContain("awk '$0 !~ /^convex\\// { print }'");
-    expect(contractWorkflow).toContain("e2e/run-all.sh");
     expect(contractWorkflow).toContain("recovery_of");
     expect(contractWorkflow).toContain("fix\\(convex\\):*");
     expect(contractWorkflow).toContain("pre-recovery-identity.json");

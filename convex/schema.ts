@@ -10,7 +10,7 @@ const fundingProvenanceSlice = v.object({
 export default defineSchema({
   // Append-only receipts created through the admin-authenticated Convex CLI
   // after a successful code push. Runtime URLs and creation time originate in
-  // Convex; the native document ID binds the staging proof to this deployment.
+  // Convex; the native document ID binds the release proof to this deployment.
   deploymentReceipts: defineTable({
     schema: v.literal("zevium.convex-deploy-receipt/v1"),
     gitSha: v.string(),

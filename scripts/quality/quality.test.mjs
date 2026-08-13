@@ -117,7 +117,7 @@ function gitRepository() {
 }
 
 test("workflow toolchains pin mise, Node, pnpm, and frozen installs", () => {
-  assert.equal(checkWorkflowToolchains(), 14);
+  assert.equal(checkWorkflowToolchains(), 13);
   assert.equal(attestMiseRuntime(), 5);
   const source = readFileSync(
     resolve(repositoryRoot, ".github/workflows/ci.yml"),

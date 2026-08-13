@@ -973,7 +973,7 @@ export function run(argv = process.argv.slice(2)) {
     );
     if (classification.hasChange) {
       throw new Error(
-        "Generic release must skip Durable Object lifecycle diffs; dedicated workflow exclusively owns staging and production",
+        "Generic release must skip Durable Object lifecycle diffs; dedicated workflow exclusively owns production",
       );
     }
     if (!proof.provable || !proof.matches) {
