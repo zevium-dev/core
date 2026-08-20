@@ -385,7 +385,7 @@ let source = "";
 process.stdin.setEncoding("utf8");
 process.stdin.on("data", (chunk) => { source += chunk; });
 process.stdin.on("end", () => {
-  const tag = source.match(/<meta\b[^>]*\bname=["\x27]zevium-build["\x27][^>]*>/i)?.[0] ?? "";
+  const tag = source.match(/<meta\b[^>]*\bname=["\x27]zevium-release["\x27][^>]*>/i)?.[0] ?? "";
   const sha = tag.match(/\bcontent=["\x27]([0-9a-f]{40})["\x27]/i)?.[1] ?? "";
   process.stdout.write(sha);
 });
