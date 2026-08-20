@@ -224,6 +224,7 @@ const MANIFEST_KEYS = new Set([
   "packageManager",
   "private",
   "scripts",
+  "sideEffects",
   "type",
 ]);
 const PLATFORM_VALUES = Object.freeze({

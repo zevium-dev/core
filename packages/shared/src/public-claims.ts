@@ -759,8 +759,8 @@ function frameworkLabelForCandidate(candidate: string): string | null {
   ).length;
   if (wildcardCount > 1) return null;
   // A framework acronym needs at least one real letter. Pure digit runs such
-  // as the HTTP status literal 502 otherwise alias "soc 2" through the
-  // confusable map plus one-edit slack.
+  // as an HTTP status literal otherwise alias conformance acronyms through
+  // the confusable map plus one-edit slack.
   if (!/[a-z]/u.test(candidate)) return null;
   for (const target of FRAMEWORK_TARGETS) {
     if (
