@@ -455,7 +455,6 @@ jobs:
           E2E_PASSWORD: ${{ secrets.PREVIEW_E2E_PASSWORD }}
           E2E_OTP: ${{ secrets.PREVIEW_E2E_OTP }}
         run: |
-          export PATH="$GITHUB_WORKSPACE/node_modules/.bin:$PATH"
           if e2e/run-all.sh; then
             exit 0
           fi

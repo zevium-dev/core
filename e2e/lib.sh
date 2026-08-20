@@ -19,6 +19,15 @@ E2E_REDUCED_MOTION="${E2E_REDUCED_MOTION:-no-preference}"
 E2E_RUN_ID="${E2E_RUN_ID:-$(date +%Y%m%d-%H%M%S)-$$}"
 E2E_OWNS_RUNTIME="${E2E_OWNS_RUNTIME:-0}"
 
+# Resolve the agent-browser CLI without mutating PATH (workflow supply-chain
+# audit forbids shell PATH overrides): PATH first so tests can stub the
+# binary, then the workspace install for bare-shell CI steps.
+E2E_AGENT_BROWSER="$(command -v agent-browser || true)"
+if [[ -z "$E2E_AGENT_BROWSER" && -x "$E2E_ROOT/../node_modules/.bin/agent-browser" ]]; then
+  E2E_AGENT_BROWSER="$E2E_ROOT/../node_modules/.bin/agent-browser"
+fi
+[[ -n "$E2E_AGENT_BROWSER" ]] || { printf '[e2e] agent-browser CLI not found; run pnpm install.\n' >&2; exit 1; }
+
 if [[ -z "${E2E_RUNTIME_DIR:-}" ]]; then
   E2E_RUNTIME_DIR="$(mktemp -d /tmp/zevium-e2e-runtime.XXXXXX)"
   E2E_OWNS_RUNTIME=1
@@ -66,13 +75,13 @@ chmod 700 "$E2E_ARTIFACTS" "$E2E_RUNTIME_DIR" "$E2E_RAW_DIR" "$E2E_FIXTURES_DIR"
 
 ab() {
   # agent-browser can hang on a wedged native host; bound every call.
-  timeout 60s agent-browser "$@"
+  timeout 60s "$E2E_AGENT_BROWSER" "$@"
 }
 
 ab_timeout() {
   local duration="$1"
   shift
-  timeout "$duration" agent-browser "$@"
+  timeout "$duration" "$E2E_AGENT_BROWSER" "$@"
 }
 
 log() {
