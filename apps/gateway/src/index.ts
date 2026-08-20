@@ -99,7 +99,7 @@ function validGatewayDeploymentProof(
     /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(
       proof.versionId,
     ) &&
-    /^(?:preview-[1-9][0-9]*-[1-9][0-9]*|(?:staging|production)-[0-9a-f]{40})$/.test(
+    /^(?:preview-[1-9][0-9]*-[0-9a-f]{40}|(?:staging|production)-[0-9a-f]{40})$/.test(
       proof.versionTag,
     ) &&
     proof.versionTag.endsWith(proof.gitSha) &&

@@ -159,6 +159,7 @@ jobs:
           pnpm --filter gateway build:compliance
           node scripts/check-compliance-claims.mjs --require-generated=gateway
           pnpm --filter gateway exec wrangler deploy --name "$gateway_name" --config wrangler.preview.jsonc \
+            --tag "preview-$PR_NUMBER-$release_sha" \
             --var "CONVEX_URL:$VITE_CONVEX_URL" \
             --var "CONVEX_SITE_URL:$CONVEX_SITE_URL" \
             --var "ZEVIUM_RELEASE:$release_sha"
