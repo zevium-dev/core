@@ -315,12 +315,12 @@ test("parses exact repository workspace graph with every dependency type", () =>
     "packages/shared",
   ]);
   assert.deepEqual(graph.dependencyCounts, {
-    dependencies: 283,
+    dependencies: 280,
     devDependencies: 320,
     optionalDependencies: 228,
-    totalDependencies: 747,
+    totalDependencies: 744,
   });
-  assert.equal(graph.occurrences.size, 747);
+  assert.equal(graph.occurrences.size, 744);
   assert.equal(Object.keys(graph.request).length, 662);
   assert.match(graph.lockfile.sha256, /^[a-f0-9]{64}$/);
   assert.equal(graph.lockfile.path, "pnpm-lock.yaml");
@@ -328,7 +328,7 @@ test("parses exact repository workspace graph with every dependency type", () =>
   assert.deepEqual(graph.supplyChain.integrity, {
     algorithm: "sha512",
     completeDigestBytes: 64,
-    entries: 747,
+    entries: 744,
   });
   assert.equal(
     graph.supplyChain.resolution,
@@ -1651,8 +1651,8 @@ test("escapes complete summary for GitHub HTML output", () => {
     html,
     /&lt;script&gt;\\&quot;hostile\\&quot; &amp; &#39;payload&#39;&lt;\/script&gt;/,
   );
-  // codeql[js/bad-tag-filter] -- assertion proves escaping removed every tag; lowercase-only check is the invariant under test
-  assert.doesNotMatch(html, /<script>/);
+  // Escaping under test must remove every tag regardless of case.
+  assert.doesNotMatch(html, /<script\b/i);
   assert.match(html, /fixture-package/);
   assert.match(html, /vulnerabilities/);
 });
@@ -1750,8 +1750,7 @@ test("network connect timeout aborts a stalled TLS handshake", async () => {
         { package: ["1.0.0"] },
         {
           requestImpl: httpsRequest,
-          // codeql[js/disabling-certificate-validation] -- loopback fixture simulates a hostile TLS peer to prove connect-timeout handling
-          requestOptions: { rejectUnauthorized: false },
+          requestOptions: { rejectUnauthorized: false }, // codeql[js/disabling-certificate-validation] -- loopback fixture simulates a hostile TLS peer to prove connect-timeout handling
           connectTimeoutMs: 80,
           idleTimeoutMs: 500,
           totalTimeoutMs: 1_000,
@@ -1880,7 +1879,7 @@ test("full audit pins pnpm/config/root while allowing deterministic transport", 
   });
 
   assert.equal(outcome.exitCode, 0);
-  assert.equal(capturedProvenanceGraph.supplyChain.integrity.entries, 747);
+  assert.equal(capturedProvenanceGraph.supplyChain.integrity.entries, 744);
   assert.equal(Object.keys(capturedRequest).length, 662);
   assert.equal(
     capturedAuthorization === undefined ||
@@ -1894,7 +1893,7 @@ test("full audit pins pnpm/config/root while allowing deterministic transport", 
     high: 0,
     critical: 0,
   });
-  assert.equal(outcome.summary.dependencyGraph.totalDependencies, 747);
+  assert.equal(outcome.summary.dependencyGraph.totalDependencies, 744);
 });
 
 test(

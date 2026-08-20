@@ -152,6 +152,7 @@ test("failed DOM redaction publishes no screenshot bytes", () => {
   const artifacts = join(dir, "artifacts");
   const runtime = join(dir, "runtime");
   const result = spawnSync(
+    // codeql[js/shell-command-injection-from-environment] -- test fixture intentionally prepends a temp stub dir to PATH to simulate a failing browser binary
     "bash",
     [
       "-c",
