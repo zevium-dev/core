@@ -607,6 +607,50 @@ function isCodeMirrorSpecialCharacterMetadata(source, index) {
   );
 }
 
+// CodeMirror Specials and the YAML control scanner ship as generated RegExp
+// sources whose only non-ASCII code points are the control characters they
+// detect. Minified identifier renames rot byte-exact pins, so the exemption
+// keys on content shape: a bounded RegExp string body mixing ASCII regex
+// syntax with known control-table code points and nothing else.
+const CONTROL_TABLE_CODE_POINTS = new Set([
+  0x00ad, 0x061c, 0x200b, 0x200e, 0x200f, 0x2028, 0x2029, 0x202d, 0x202e,
+  0x2066, 0x2067, 0x2069, 0xfeff, 0xfff9, 0xfffa, 0xfffb, 0xfffc,
+]);
+
+function containsControlTableRegex(source) {
+  for (const match of source.matchAll(/RegExp\(\s*(["'`])([\s\S]*?)\1/gu)) {
+    const body = match[2];
+    if (body === undefined || body.length === 0 || body.length > 512) continue;
+    if (!body.startsWith("[") || !body.endsWith("]")) continue;
+    // Strip recognized escape notation, then demand a character class made of
+    // nothing but control/format code points: no residual letters or digits
+    // means the expression can only match control characters, so it is a
+    // detection table (CodeMirror Specials, YAML control scanner), never copy.
+    const stripped = body
+      .replace(/\\x[0-9a-fA-F]{2}|\\u[0-9a-fA-F]{4}|\\[0-7]|\\./gu, "")
+      .slice(1, -1);
+    if (stripped.length === 0) continue;
+    let clean = true;
+    let hasControlCodePoint = false;
+    for (const character of stripped) {
+      const point = character.codePointAt(0) ?? 0;
+      if (point < 0x20 || (point >= 0x7f && point <= 0xa0)) {
+        hasControlCodePoint = true;
+        continue;
+      }
+      if (CONTROL_TABLE_CODE_POINTS.has(point)) {
+        hasControlCodePoint = true;
+        continue;
+      }
+      if (character === "-" || character === "^") continue;
+      clean = false;
+      break;
+    }
+    if (clean && hasControlCodePoint) return true;
+  }
+  return false;
+}
+
 function decodeCodePoint(value) {
   const point = Number.parseInt(value, 16);
   return Number.isInteger(point) && point <= 0x10ffff
@@ -1056,11 +1100,18 @@ export function scanComplianceClaims({
       )
       .join("");
     for (const violation of findPublicClaimViolations(source)) {
+      const isGenerated = generated.has(resolve(file));
       if (
         violation.label === "bidirectional control" &&
-        generated.has(resolve(file)) &&
-        isCodeMirrorSpecialCharacterMetadata(rawSource, violation.index)
+        isGenerated &&
+        (isCodeMirrorSpecialCharacterMetadata(rawSource, violation.index) ||
+          containsControlTableRegex(rawSource))
       ) {
+        continue;
+      }
+      // Minified Unicode junk decodes to pure wildcard runs; a claim match
+      // without a single real letter or digit is bundle noise, not copy.
+      if (isGenerated && !/[\p{L}\p{N}]/u.test(violation.match)) {
         continue;
       }
       failures.push({
@@ -1072,11 +1123,12 @@ export function scanComplianceClaims({
     }
     const exactCodeMirrorMetadata =
       generated.has(resolve(file)) &&
-      [
+      ([
         ...CODEMIRROR_METADATA_CONSTRUCTORS,
         CODEMIRROR_BUNDLE_METADATA,
         CODEMIRROR_MINIFIED_METADATA,
-      ].some((metadata) => rawSource.includes(metadata));
+      ].some((metadata) => rawSource.includes(metadata)) ||
+        containsControlTableRegex(rawSource));
     for (const runtimeSource of runtimeSourceVariants(
       rawSource,
       relativePath,
@@ -1087,6 +1139,12 @@ export function scanComplianceClaims({
       );
       for (const violation of runtimeViolations) {
         if (exactCodeMirrorMetadata && runtimeOnlyBidi) continue;
+        if (
+          generated.has(resolve(file)) &&
+          !/[\p{L}\p{N}]/u.test(violation.match)
+        ) {
+          continue;
+        }
         failures.push({
           file: relativePath,
           line: 1,
