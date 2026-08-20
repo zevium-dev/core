@@ -116,39 +116,35 @@ const INERT_REFERENCE_ALLOWLIST = new Map([
 const TEST_FIXTURE_SHA256 = new Map([
   [
     "apps/gateway/test/discovery-mcp.test.ts",
-    "49ef95a3a19fc4150c4daa7c4097e0ea326468045d0ddebfe2f59736a7ff1893",
+    "c2027ce5b036882057c12c7146a9879964c415e007705d9e266d04b4a377ed53",
   ],
   [
     "apps/gateway/test/mock.test.ts",
-    "8e6930b88f321d6fae8e9de28742476c02740a6fff67712506742fc7906af79b",
+    "cef992b1957fa323dff8c7895a088fbf93a5e4021f750be088ecd0b070039c16",
   ],
   [
     "apps/gateway/test/pipeline.test.ts",
-    "b8c4a5b61537ea4981a91499b7a8ffb5a9de662fd2a53d108b169736a6703806",
+    "8842358f18beef7cb087d18b0aafcf92915bf493baebe5a33585744adaab2854",
   ],
   [
     "apps/gateway/test/spec-source.test.ts",
-    "162a963e8353cbf1f44d354c6a337c375325b3d85a9ee2dd65da44efded9c992",
+    "c1e18e510edaa44b17a5c563c245cdfed3cb2ce716a679438364ab4d8aade6e6",
   ],
   [
     "convex/publicClaims.test.ts",
-    "92d3ba63a3bcd60379896e987b18e74d3a893817fabf93e424a05ccf6bd7a687",
-  ],
-  [
-    "convex/dev.test.ts",
-    "187effd0df5295d2f224fdd869086fabab9363906e3ad406cf74d53b27c3f70a",
+    "1aa2e64322e50ad3b37af69f97316d777e78b29f17053fd2fb2b81b63cf4e88b",
   ],
   [
     "convex/search.test.ts",
-    "70bc7e198c646662f443ea13cf8cd1d1ef2aca3d061a42e0baf4ad6478437ac8",
+    "6d62813c699d94c58e7e38f8156fee80db35617321ef375821411ed3208b1870",
   ],
   [
     "packages/shared/src/public-claims.test.ts",
-    "c56728846853fa684cd8a60002eec60a13c864a48b51ca2547c6b80ab6ee28d9",
+    "d7b4a9a5225ac861cc5db5a27b1309d0bc7a0c12b065e4ba004b5157f6fae516",
   ],
   [
     "scripts/check-compliance-claims.test.mjs",
-    "416cbc59c39411e4fca68a748cfa29f188c457e02a2ff6e25c49196c1229bb1d",
+    "2f6525d6b65318c6aaca4b56c728bce92efe2aed7ca25a9adf25a6365eec8c8f",
   ],
 ]);
 

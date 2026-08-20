@@ -199,7 +199,7 @@ jobs:
         env:
           CLERK_PUBLISHABLE_KEY: ${{ secrets.CLERK_PREVIEW_PUBLISHABLE_KEY }}
           CLERK_SECRET_KEY: ${{ secrets.CLERK_PREVIEW_SECRET_KEY }}
-        run: VITE_RELEASE_SHA="$(git rev-parse HEAD)" pnpm --filter web build
+        run: VITE_BUILD_SHA="$(git rev-parse HEAD)" pnpm --filter web build
       - name: Scan exact web deploy inputs
         run: node scripts/check-compliance-claims.mjs --require-generated=web
       - name: Upload web Worker build

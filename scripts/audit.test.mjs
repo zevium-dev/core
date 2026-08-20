@@ -1750,7 +1750,6 @@ test("network connect timeout aborts a stalled TLS handshake", async () => {
         { package: ["1.0.0"] },
         {
           requestImpl: httpsRequest,
-          requestOptions: { rejectUnauthorized: false }, // codeql[js/disabling-certificate-validation] -- loopback fixture simulates a hostile TLS peer to prove connect-timeout handling
           connectTimeoutMs: 80,
           idleTimeoutMs: 500,
           totalTimeoutMs: 1_000,

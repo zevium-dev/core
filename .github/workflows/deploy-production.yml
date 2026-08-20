@@ -263,7 +263,7 @@ jobs:
 
       - name: Build immutable production web artifact after approval
         env:
-          VITE_RELEASE_SHA: ${{ env.RELEASE_SHA }}
+          VITE_BUILD_SHA: ${{ env.RELEASE_SHA }}
           CLERK_PUBLISHABLE_KEY: ${{ secrets.CLERK_PRODUCTION_PUBLISHABLE_KEY }}
           CLERK_SECRET_KEY: ${{ secrets.CLERK_PRODUCTION_SECRET_KEY }}
         run: pnpm --filter web build
