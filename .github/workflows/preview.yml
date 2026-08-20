@@ -159,12 +159,18 @@ jobs:
           pnpm --filter gateway build:compliance
           node scripts/check-compliance-claims.mjs --require-generated=gateway
           pnpm --filter gateway exec wrangler deploy --name "$gateway_name" --config wrangler.preview.jsonc \
-            --tag "preview-$PR_NUMBER-$release_sha" \
             --var "CONVEX_URL:$VITE_CONVEX_URL" \
             --var "CONVEX_SITE_URL:$CONVEX_SITE_URL" \
             --var "ZEVIUM_RELEASE:$release_sha"
           printf '%s' "$CLERK_PREVIEW_SECRET_KEY" | pnpm --filter gateway exec wrangler secret put CLERK_SECRET_KEY --name "$gateway_name" --config wrangler.preview.jsonc
           printf '%s' "$GATEWAY_PREVIEW_INTERNAL_SECRET" | pnpm --filter gateway exec wrangler secret put GATEWAY_INTERNAL_SECRET --name "$gateway_name" --config wrangler.preview.jsonc
+          # secret put mints a new current version without metadata; redeploy
+          # last so the serving version carries the release tag proof.
+          pnpm --filter gateway exec wrangler deploy --name "$gateway_name" --config wrangler.preview.jsonc \
+            --tag "preview-$PR_NUMBER-$release_sha" \
+            --var "CONVEX_URL:$VITE_CONVEX_URL" \
+            --var "CONVEX_SITE_URL:$CONVEX_SITE_URL" \
+            --var "ZEVIUM_RELEASE:$release_sha"
           echo "gateway_url=https://${gateway_name}.zevium-dev.workers.dev" >> "$GITHUB_OUTPUT"
           echo "release_sha=$release_sha" >> "$GITHUB_OUTPUT"
 
