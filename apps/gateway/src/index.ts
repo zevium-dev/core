@@ -103,8 +103,9 @@ function validGatewayDeploymentProof(
       proof.versionTag,
     ) &&
     proof.versionTag.endsWith(proof.gitSha) &&
-    Number.isFinite(deployedAt) &&
-    new Date(deployedAt).toISOString() === proof.deployedAt
+    // Cloudflare emits microsecond precision (e.g. .29368Z); a strict
+    // toISOString roundtrip would reject every real timestamp.
+    Number.isFinite(deployedAt)
   );
 }
 
