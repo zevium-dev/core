@@ -345,6 +345,30 @@ assert_anonymous_identity() {
   [[ "$present" != *"true"* ]] || fail "anonymous context contains a Clerk user"
 }
 
+ensure_org_active() {
+  local attempt active result
+  for attempt in 1 2 3; do
+    active="$(ab eval "Boolean(window.Clerk?.organization?.id)" 2>/dev/null || true)"
+    if [[ "$active" == *"true"* ]]; then
+      return 0
+    fi
+    ab eval "
+(() => {
+  const clerk = window.Clerk;
+  if (!clerk) { window.__e2eSetActive = 'no-clerk'; return; }
+  clerk.setActive({ organization: \"$E2E_ORG_SLUG\" })
+    .then(() => { window.__e2eSetActive = clerk.organization ? 'activated' : 'no-org-after'; })
+    .catch((error) => { window.__e2eSetActive = 'error:' + (error?.errors?.[0]?.code || error?.message || 'unknown'); });
+})()
+" >/dev/null 2>&1 || true
+    ab wait 2000 >/dev/null
+    result="$(ab eval "window.__e2eSetActive ?? 'pending'" 2>/dev/null || true)"
+    log "organization activation attempt $attempt: $result"
+  done
+  active="$(ab eval "Boolean(window.Clerk?.organization?.id)" 2>/dev/null || true)"
+  [[ "$active" == *"true"* ]] || fail "could not activate fixture organization (last=$result)"
+}
+
 record_browser_contract() {
   local lane="$1" context="$2" auth_mode="$3" raw
   raw="$(ab eval "

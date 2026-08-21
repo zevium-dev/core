@@ -48,6 +48,7 @@ assert_not_contains "$snap" "Something went wrong" "projects page error banner"
 assert_not_contains "$snap" "No active organization" "seed organization must be active"
 assert_contains "$snap" "Projects" "projects heading missing"
 assert_contains "$snap" "New project" "admin project action missing"
+ensure_org_active
 record_browser_contract "auth" "projects-signed-in" "signed-in"
 
 log "01-auth PASS"
