@@ -180,6 +180,7 @@ ab wait 2000 >/dev/null
 snap="$(page_text)"
 assert_not_contains "$snap" "Could not update visibility" "visibility mutation failed"
 assert_not_contains "$snap" "Project is private" "project remained private after mutation"
+record_browser_contract "publisher" "published-spec" "signed-in"
 
 step "assert catalogue lists project"
 open_path "/catalogue"
@@ -189,6 +190,5 @@ assert_contains "$snap" "Catalogue" "catalogue heading missing"
 if [[ "$snap" != *"$PROJECT_NAME"* && "$snap" != *"$PROJECT_SLUG"* ]]; then
   fail "catalogue does not list published project '$PROJECT_NAME' (app may lack live catalogue data)"
 fi
-record_browser_contract "publisher" "published-catalogue" "signed-in"
 
 log "02-publisher PASS name=$PROJECT_NAME slug=$PROJECT_SLUG"
