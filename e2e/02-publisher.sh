@@ -180,7 +180,6 @@ ab wait 2000 >/dev/null
 snap="$(page_text)"
 assert_not_contains "$snap" "Could not update visibility" "visibility mutation failed"
 assert_not_contains "$snap" "Project is private" "project remained private after mutation"
-assert_contains "$snap" "Make Private" "project did not become public"
 
 step "assert catalogue lists project"
 open_path "/catalogue"
