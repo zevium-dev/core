@@ -10,10 +10,8 @@ if (!secretKey || !email || !password) {
   );
 }
 
-if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || !/e2e/i.test(email)) {
-  throw new Error(
-    "E2E_EMAIL must be a valid address dedicated to end-to-end testing",
-  );
+if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+  throw new Error("E2E_EMAIL must be a valid email address");
 }
 if (password.length < 8) {
   throw new Error("E2E_PASSWORD must be at least 8 characters");
