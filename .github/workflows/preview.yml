@@ -449,6 +449,12 @@ jobs:
       - name: Install browser runtime
         run: |
           pnpm exec agent-browser install --with-deps
+      - name: Provision preview E2E user
+        env:
+          CLERK_PREVIEW_SECRET_KEY: ${{ secrets.CLERK_PREVIEW_SECRET_KEY }}
+          E2E_EMAIL: ${{ secrets.PREVIEW_E2E_EMAIL }}
+          E2E_PASSWORD: ${{ secrets.PREVIEW_E2E_PASSWORD }}
+        run: node .github/scripts/ensure-e2e-user.mjs
       - name: Run authenticated publish and catalogue journey
         env:
           GATEWAY_URL: ""
