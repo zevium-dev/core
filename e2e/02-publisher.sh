@@ -148,7 +148,7 @@ if [[ "$snap" != *"Published"* && "$snap" != *"v0.0.1"* && "$snap" != *"0.0.1"* 
   snap="$(page_text)"
 fi
 if [[ "$snap" == *"Publish failed"* || "$snap" == *"Could not publish"* ]]; then
-  fail "publish mutation error: $(printf '%s' "$snap" | grep -iA3 "publish" | head -4 | tr '\n' ' ' | cut -c1-300)"
+  fail "publish mutation error: $(printf '%s' "$snap" | grep -iA10 "publish failed\|Could not publish" | head -12 | tr '\n' ' ' | cut -c1-500)"
 fi
 if [[ "$snap" != *"Published"* && "$snap" != *"0.0.1"* && "$snap" != *"v0.0.1"* ]]; then
   fail "no publish success toast/badge (expected Published / v0.0.1)"
