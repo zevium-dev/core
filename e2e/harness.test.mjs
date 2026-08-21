@@ -163,7 +163,7 @@ test("failed DOM redaction publishes no screenshot bytes", () => {
       encoding: "utf8",
       env: {
         ...process.env,
-        PATH: `${bin}:${process.env.PATH}`,
+        PATH: `${bin}:/usr/bin:/bin`,
         E2E_ARTIFACTS: artifacts,
         E2E_RUNTIME_DIR: runtime,
         E2E_OWNS_RUNTIME: "0",

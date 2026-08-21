@@ -1,8 +1,9 @@
 import { Link, useRouterState } from "@tanstack/react-router";
-import { Github, Menu, X } from "lucide-react";
+import { Menu, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { BrandMark } from "#/components/brand-mark";
+import { GithubMark } from "#/components/github-mark";
 import { ThemeToggle } from "#/components/theme-toggle";
 import { Button } from "#/components/ui/button";
 import { cn } from "#/lib/utils";
@@ -113,7 +114,7 @@ export function PublicHeader({ active = null, className }: PublicHeaderProps) {
                 rel="noreferrer"
                 aria-label="Open Zevium on GitHub"
               >
-                <Github data-icon="inline-start" />
+                <GithubMark data-icon="inline-start" />
               </a>
             </Button>
             <ThemeToggle className="size-11 sm:size-9" />

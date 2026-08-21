@@ -46,7 +46,7 @@
     "@clerk/backend": "^3.16.4",
     "@edge-runtime/vm": "^5.0.0",
     "@tanstack/eslint-plugin-router": "1.162.0",
-    "@types/node": "22.20.1",
+    "@types/node": "26.2.0",
     "agent-browser": "0.27.1",
     "concurrently": "^10.0.4",
     "convex-test": "^0.0.54",

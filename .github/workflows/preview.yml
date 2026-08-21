@@ -116,6 +116,16 @@ jobs:
             --cmd 'node .github/scripts/capture-preview-env.mjs' \
             --cmd-url-env-var-name CONVEX_URL
 
+      - name: Configure preview Convex environment
+        env:
+          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_PREVIEW_DEPLOY_KEY }}
+        run: |
+          deployment="${{ steps.deploy.outputs.convex_url }}"
+          deployment="${deployment#https://}"
+          deployment="${deployment%.convex.cloud}"
+          keyring="$(node -e 'const { randomBytes } = require("node:crypto"); const id = randomBytes(32).toString("hex"); console.log(JSON.stringify({ current: id, keys: { [id]: randomBytes(32).toString("hex") } }))')"
+          printf '%s' "$keyring" | pnpm exec convex env set GATEWAY_REGISTRY_TRANSPORT_KEYRING --deployment "$deployment"
+
   gateway-preview:
     needs: [security, preview-target, preview-convex]
     runs-on: blacksmith-2vcpu-ubuntu-2404
@@ -164,6 +174,13 @@ jobs:
             --var "ZEVIUM_RELEASE:$release_sha"
           printf '%s' "$CLERK_PREVIEW_SECRET_KEY" | pnpm --filter gateway exec wrangler secret put CLERK_SECRET_KEY --name "$gateway_name" --config wrangler.preview.jsonc
           printf '%s' "$GATEWAY_PREVIEW_INTERNAL_SECRET" | pnpm --filter gateway exec wrangler secret put GATEWAY_INTERNAL_SECRET --name "$gateway_name" --config wrangler.preview.jsonc
+          # secret put mints a new current version without metadata; redeploy
+          # last so the serving version carries the release tag proof.
+          pnpm --filter gateway exec wrangler deploy --name "$gateway_name" --config wrangler.preview.jsonc \
+            --tag "preview-$PR_NUMBER-$release_sha" \
+            --var "CONVEX_URL:$VITE_CONVEX_URL" \
+            --var "CONVEX_SITE_URL:$CONVEX_SITE_URL" \
+            --var "ZEVIUM_RELEASE:$release_sha"
           echo "gateway_url=https://${gateway_name}.zevium-dev.workers.dev" >> "$GITHUB_OUTPUT"
           echo "release_sha=$release_sha" >> "$GITHUB_OUTPUT"
 
@@ -199,7 +216,7 @@ jobs:
         env:
           CLERK_PUBLISHABLE_KEY: ${{ secrets.CLERK_PREVIEW_PUBLISHABLE_KEY }}
           CLERK_SECRET_KEY: ${{ secrets.CLERK_PREVIEW_SECRET_KEY }}
-        run: VITE_RELEASE_SHA="$(git rev-parse HEAD)" pnpm --filter web build
+        run: VITE_BUILD_SHA="$(git rev-parse HEAD)" pnpm --filter web build
       - name: Scan exact web deploy inputs
         run: node scripts/check-compliance-claims.mjs --require-generated=web
       - name: Upload web Worker build
@@ -241,7 +258,7 @@ jobs:
           CLERK_PUBLISHABLE_KEY: ${{ secrets.CLERK_PREVIEW_PUBLISHABLE_KEY }}
           CLERK_SECRET_KEY: ${{ secrets.CLERK_PREVIEW_SECRET_KEY }}
         run: |
-          pnpm build:compliance-inputs
+          VITE_BUILD_SHA="$(git rev-parse HEAD)" pnpm build:compliance-inputs
           pnpm check:compliance-claims:deploy
 
   web-preview:
@@ -417,6 +434,7 @@ jobs:
     environment: preview
     env:
       E2E_BASE_URL: ${{ needs.deploy-and-test.outputs.web_url }}
+      E2E_EXPECTED_COMMIT: ${{ needs.preview-target.outputs.ref }}
       PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
@@ -441,6 +459,12 @@ jobs:
       - name: Install browser runtime
         run: |
           pnpm exec agent-browser install --with-deps
+      - name: Provision preview E2E user
+        env:
+          CLERK_PREVIEW_SECRET_KEY: ${{ secrets.CLERK_PREVIEW_SECRET_KEY }}
+          E2E_EMAIL: ${{ secrets.PREVIEW_E2E_EMAIL }}
+          E2E_PASSWORD: ${{ secrets.PREVIEW_E2E_PASSWORD }}
+        run: node .github/scripts/ensure-e2e-user.mjs
       - name: Run authenticated publish and catalogue journey
         env:
           GATEWAY_URL: ""
@@ -462,6 +486,7 @@ jobs:
         with:
           name: preview-e2e-${{ env.PR_NUMBER }}
           path: |
-            e2e/artifacts/*.png
-            e2e/artifacts/*.url.txt
+            e2e/artifacts/**/*.png
+            e2e/artifacts/**/*.url.txt
+            e2e/artifacts/**/*.snapshot.txt
           if-no-files-found: ignore

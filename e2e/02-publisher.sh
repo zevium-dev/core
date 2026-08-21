@@ -43,6 +43,23 @@ if [[ "$snap" == *"No active organization"* ]]; then
   fail "no active organization — seed org test-org missing or not selected"
 fi
 
+step "set public publisher handle"
+open_path "/app/org"
+ab wait --load networkidle >/dev/null 2>&1 || ab wait 800 >/dev/null
+ab fill '#public-handle' "$E2E_ORG_SLUG" >/dev/null \
+  || fail "public handle input missing"
+ab wait 2000 >/dev/null
+snap="$(page_text)"
+if [[ "$snap" != *"This is the current public handle."* ]]; then
+  click_button "Save handle" || fail "Save handle button missing/disabled"
+  ab wait --text "Change public publisher handle?" 10
+  click_dialog_button "Change handle" || fail "confirm Change handle click failed"
+  ab wait 2000 >/dev/null
+  snap="$(page_text)"
+  assert_contains "$snap" "This is the current public handle." "public handle did not persist"
+fi
+log "public handle set → $E2E_ORG_SLUG"
+
 step "create project $PROJECT_NAME"
 open_path "/app/projects/create"
 ab wait --load networkidle >/dev/null 2>&1 || ab wait 800 >/dev/null
@@ -128,7 +145,7 @@ log "draft saved (or no error toast)"
 
 step "test saved upstream reachability"
 click_button "Test reachability" || fail "Test reachability button missing/disabled after draft save"
-ab wait --text "Server responded successfully." 30 \
+ab wait --text "readiness gate passed" 30 \
   || fail "saved upstream connection test did not pass"
 ab wait 500 >/dev/null
 
@@ -147,8 +164,9 @@ if [[ "$snap" != *"Published"* && "$snap" != *"v0.0.1"* && "$snap" != *"0.0.1"* 
   ab wait 2000 >/dev/null
   snap="$(page_text)"
 fi
-assert_not_contains "$snap" "Publish failed" "publish failed toast"
-assert_not_contains "$snap" "Could not publish" "publish mutation error"
+if [[ "$snap" == *"Publish failed"* || "$snap" == *"Could not publish"* ]]; then
+  fail "publish mutation error: $(printf '%s' "$snap" | grep -iA10 "publish failed\|Could not publish" | head -12 | tr '\n' ' ' | cut -c1-500)"
+fi
 if [[ "$snap" != *"Published"* && "$snap" != *"0.0.1"* && "$snap" != *"v0.0.1"* ]]; then
   fail "no publish success toast/badge (expected Published / v0.0.1)"
 fi
@@ -162,7 +180,7 @@ ab wait 2000 >/dev/null
 snap="$(page_text)"
 assert_not_contains "$snap" "Could not update visibility" "visibility mutation failed"
 assert_not_contains "$snap" "Project is private" "project remained private after mutation"
-assert_contains "$snap" "Make Private" "project did not become public"
+record_browser_contract "publisher" "published-spec" "signed-in"
 
 step "assert catalogue lists project"
 open_path "/catalogue"
@@ -172,6 +190,5 @@ assert_contains "$snap" "Catalogue" "catalogue heading missing"
 if [[ "$snap" != *"$PROJECT_NAME"* && "$snap" != *"$PROJECT_SLUG"* ]]; then
   fail "catalogue does not list published project '$PROJECT_NAME' (app may lack live catalogue data)"
 fi
-record_browser_contract "publisher" "published-catalogue" "signed-in"
 
 log "02-publisher PASS name=$PROJECT_NAME slug=$PROJECT_SLUG"

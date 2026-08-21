@@ -14,10 +14,7 @@ import {
 const startHandler = createStartHandler(defaultStreamHandler);
 
 const PUBLIC_ASSET_PATHS = new Set([
-  "/favicon.ico",
   "/logo.svg",
-  "/logo192.png",
-  "/logo512.png",
   "/manifest.json",
   "/robots.txt",
   "/zevium-wordmark.svg",

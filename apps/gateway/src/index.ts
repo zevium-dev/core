@@ -99,12 +99,15 @@ function validGatewayDeploymentProof(
     /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(
       proof.versionId,
     ) &&
-    /^(?:preview-[1-9][0-9]*-[1-9][0-9]*|(?:staging|production)-[0-9a-f]{40})$/.test(
+    /^(?:preview-[1-9][0-9]*-[0-9a-f]{40}|(?:staging|production)-[0-9a-f]{40})$/.test(
       proof.versionTag,
     ) &&
     proof.versionTag.endsWith(proof.gitSha) &&
-    Number.isFinite(deployedAt) &&
-    new Date(deployedAt).toISOString() === proof.deployedAt
+    // Cloudflare emits microsecond precision (e.g. .29368Z); a strict
+    // toISOString() roundtrip would reject every real timestamp. Require
+    // full RFC 3339 datetime shape instead of date-only strings.
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d+Z$/.test(proof.deployedAt) &&
+    Number.isFinite(deployedAt)
   );
 }
 

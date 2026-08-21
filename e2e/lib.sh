@@ -10,14 +10,24 @@ E2E_ARTIFACTS="${E2E_ARTIFACTS:-$E2E_ROOT/artifacts}"
 E2E_EMAIL="${E2E_EMAIL:-}"
 E2E_PASSWORD="${E2E_PASSWORD:-}"
 E2E_OTP="${E2E_OTP:-}"
+E2E_ORG_SLUG="${E2E_ORG_SLUG:-zevium-e2e}"
 E2E_SESSION="${E2E_SESSION:-zevium-e2e}"
 E2E_STEP="${E2E_STEP:-unknown}"
 E2E_VIEWPORT_WIDTH="${E2E_VIEWPORT_WIDTH:-1440}"
 E2E_VIEWPORT_HEIGHT="${E2E_VIEWPORT_HEIGHT:-900}"
 E2E_COLOR_SCHEME="${E2E_COLOR_SCHEME:-light}"
 E2E_REDUCED_MOTION="${E2E_REDUCED_MOTION:-no-preference}"
-E2E_RUN_ID="${E2E_RUN_ID:-$(date +%Y%m%d-%H%M%S)-$$}"
+E2E_RUN_ID="${E2E_RUN_ID:-$(date +%Y%m%dT%H%M%S)-$$}"
 E2E_OWNS_RUNTIME="${E2E_OWNS_RUNTIME:-0}"
+
+# Resolve the agent-browser CLI without mutating PATH (workflow supply-chain
+# audit forbids shell PATH overrides): PATH first so tests can stub the
+# binary, then the workspace install for bare-shell CI steps.
+E2E_AGENT_BROWSER="$(command -v agent-browser || true)"
+if [[ -z "$E2E_AGENT_BROWSER" && -x "$E2E_ROOT/../node_modules/.bin/agent-browser" ]]; then
+  E2E_AGENT_BROWSER="$E2E_ROOT/../node_modules/.bin/agent-browser"
+fi
+[[ -n "$E2E_AGENT_BROWSER" ]] || { printf '[e2e] agent-browser CLI not found; run pnpm install.\n' >&2; exit 1; }
 
 if [[ -z "${E2E_RUNTIME_DIR:-}" ]]; then
   E2E_RUNTIME_DIR="$(mktemp -d /tmp/zevium-e2e-runtime.XXXXXX)"
@@ -66,13 +76,13 @@ chmod 700 "$E2E_ARTIFACTS" "$E2E_RUNTIME_DIR" "$E2E_RAW_DIR" "$E2E_FIXTURES_DIR"
 
 ab() {
   # agent-browser can hang on a wedged native host; bound every call.
-  timeout 60s agent-browser "$@"
+  timeout 60s "$E2E_AGENT_BROWSER" "$@"
 }
 
 ab_timeout() {
   local duration="$1"
   shift
-  timeout "$duration" agent-browser "$@"
+  timeout "$duration" "$E2E_AGENT_BROWSER" "$@"
 }
 
 log() {
@@ -154,7 +164,7 @@ redact_dom_for_artifact() {
 fail() {
   local msg="${1:-assertion failed}"
   local ts slug raw_shot raw_url raw_snapshot
-  ts="$(date +%Y%m%d-%H%M%S)-$(date +%N)"
+  ts="$(date +%Y%m%dT%H%M%S)-$(date +%N)"
   slug="$(printf '%s' "$E2E_STEP" | tr -cs '[:alnum:]._-' '_' | cut -c1-80)"
   raw_shot="$E2E_RAW_DIR/${ts}-${slug}.raw.png"
   raw_url="$E2E_RAW_DIR/${ts}-${slug}.url.raw.txt"
@@ -335,6 +345,34 @@ assert_anonymous_identity() {
   [[ "$present" != *"true"* ]] || fail "anonymous context contains a Clerk user"
 }
 
+ensure_org_active() {
+  local attempt active result diag
+  for attempt in 1 2 3; do
+    active="$(ab eval "Boolean(window.Clerk?.organization?.id)" 2>/dev/null || true)"
+    diag="$(ab eval "JSON.stringify((() => { const clerk = window.Clerk; const orgId = clerk?.organization?.id ?? null; const membership = clerk?.user?.organizationMemberships?.find?.((entry) => entry.organization?.id === orgId); return { org: orgId, role: clerk?.organization?.membership?.role ?? membership?.role ?? null }; })())" 2>/dev/null || true)"
+    log "org context attempt $attempt: $diag"
+    if [[ "$active" == *"true"* && "$diag" == *'"role":"org:'* ]]; then
+      return 0
+    fi
+    ab eval "
+(() => {
+  const clerk = window.Clerk;
+  if (!clerk) { window.__e2eSetActive = 'no-clerk'; return; }
+  clerk.setActive({ organization: \"$E2E_ORG_SLUG\" })
+    .then(() => (clerk.organization?.reload ? clerk.organization.reload() : undefined))
+    .then(() => { window.__e2eSetActive = clerk.organization ? 'activated role=' + (clerk.organization?.membership?.role ?? 'none') : 'no-org-after'; })
+    .catch((error) => { window.__e2eSetActive = 'error:' + (error?.errors?.[0]?.code || error?.message || 'unknown'); });
+})()
+" >/dev/null 2>&1 || true
+    ab wait 2000 >/dev/null
+    result="$(ab eval "window.__e2eSetActive ?? 'pending'" 2>/dev/null || true)"
+    log "organization activation attempt $attempt: $result"
+  done
+  active="$(ab eval "Boolean(window.Clerk?.organization?.id)" 2>/dev/null || true)"
+  diag="$(ab eval "(() => { const clerk = window.Clerk; const orgId = clerk?.organization?.id ?? null; const membership = clerk?.user?.organizationMemberships?.find?.((entry) => entry.organization?.id === orgId); return clerk?.organization?.membership?.role ?? membership?.role ?? ''; })()" 2>/dev/null || true)"
+  [[ "$active" == *"true"* && "$diag" == *"org:"* ]] || fail "could not activate fixture organization (last=$result role=$diag)"
+}
+
 record_browser_contract() {
   local lane="$1" context="$2" auth_mode="$3" raw
   raw="$(ab eval "
@@ -346,11 +384,18 @@ JSON.stringify({
   },
   colorScheme: matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light',
   reducedMotion: matchMedia('(prefers-reduced-motion: reduce)').matches,
-  auth: {
-    userId: window.Clerk?.user?.id ?? null,
-    organizationId: window.Clerk?.organization?.id ?? null,
-    role: window.Clerk?.organization?.membership?.role ?? null
-  }
+  auth: (() => {
+    const clerk = window.Clerk;
+    const organizationId = clerk?.organization?.id ?? null;
+    const membership = clerk?.user?.organizationMemberships?.find?.(
+      (entry) => entry.organization?.id === organizationId,
+    );
+    return {
+      userId: clerk?.user?.id ?? null,
+      organizationId,
+      role: clerk?.organization?.membership?.role ?? membership?.role ?? null
+    };
+  })()
 })
 " 2>/dev/null)" || fail "could not observe browser evidence contract"
   printf '%s' "$raw" | node "$E2E_ROOT/evidence-manifest.mjs" \
@@ -376,7 +421,7 @@ let source = "";
 process.stdin.setEncoding("utf8");
 process.stdin.on("data", (chunk) => { source += chunk; });
 process.stdin.on("end", () => {
-  const tag = source.match(/<meta\b[^>]*\bname=["\x27]zevium-build["\x27][^>]*>/i)?.[0] ?? "";
+  const tag = source.match(/<meta\b[^>]*\bname=["\x27]zevium-release["\x27][^>]*>/i)?.[0] ?? "";
   const sha = tag.match(/\bcontent=["\x27]([0-9a-f]{40})["\x27]/i)?.[1] ?? "";
   process.stdout.write(sha);
 });
@@ -671,6 +716,23 @@ sign_in() {
   fi
   snap="$(page_text)"
   assert_not_contains "$snap" "Something went wrong" "app shell errored after sign_in"
+
+  # Activate the fixture organization when the fresh session lacks one.
+  org_active="$(ab eval "Boolean(window.Clerk?.organization?.id)" 2>/dev/null || true)"
+  if [[ "$org_active" != *"true"* ]]; then
+    ab eval "
+(() => {
+  const clerk = window.Clerk;
+  if (!clerk) { window.__e2eSetActive = 'no-clerk'; return; }
+  clerk.setActive({ organization: \"$E2E_ORG_SLUG\" })
+    .then(() => { window.__e2eSetActive = clerk.organization ? 'activated' : 'no-org-after'; })
+    .catch((error) => { window.__e2eSetActive = 'error:' + (error?.errors?.[0]?.code || error?.message || 'unknown'); });
+})()
+" >/dev/null 2>&1 || true
+    ab wait 2000 >/dev/null
+    org_result="$(ab eval "window.__e2eSetActive ?? 'pending'" 2>/dev/null || true)"
+    log "organization activation: $org_result"
+  fi
   log "signed in → $url"
 }
 
@@ -711,6 +773,7 @@ minimal_openapi_json() {
         "operationId": "httpbinGet",
         "summary": "Echo GET",
         "x-zevium-cost": 1,
+        "x-zevium-health-check": true,
         "responses": {
           "200": { "description": "OK" }
         }

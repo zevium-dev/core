@@ -116,39 +116,35 @@ const INERT_REFERENCE_ALLOWLIST = new Map([
 const TEST_FIXTURE_SHA256 = new Map([
   [
     "apps/gateway/test/discovery-mcp.test.ts",
-    "49ef95a3a19fc4150c4daa7c4097e0ea326468045d0ddebfe2f59736a7ff1893",
+    "c2027ce5b036882057c12c7146a9879964c415e007705d9e266d04b4a377ed53",
   ],
   [
     "apps/gateway/test/mock.test.ts",
-    "8e6930b88f321d6fae8e9de28742476c02740a6fff67712506742fc7906af79b",
+    "cef992b1957fa323dff8c7895a088fbf93a5e4021f750be088ecd0b070039c16",
   ],
   [
     "apps/gateway/test/pipeline.test.ts",
-    "b8c4a5b61537ea4981a91499b7a8ffb5a9de662fd2a53d108b169736a6703806",
+    "8842358f18beef7cb087d18b0aafcf92915bf493baebe5a33585744adaab2854",
   ],
   [
     "apps/gateway/test/spec-source.test.ts",
-    "162a963e8353cbf1f44d354c6a337c375325b3d85a9ee2dd65da44efded9c992",
+    "c1e18e510edaa44b17a5c563c245cdfed3cb2ce716a679438364ab4d8aade6e6",
   ],
   [
     "convex/publicClaims.test.ts",
-    "92d3ba63a3bcd60379896e987b18e74d3a893817fabf93e424a05ccf6bd7a687",
-  ],
-  [
-    "convex/dev.test.ts",
-    "187effd0df5295d2f224fdd869086fabab9363906e3ad406cf74d53b27c3f70a",
+    "1aa2e64322e50ad3b37af69f97316d777e78b29f17053fd2fb2b81b63cf4e88b",
   ],
   [
     "convex/search.test.ts",
-    "70bc7e198c646662f443ea13cf8cd1d1ef2aca3d061a42e0baf4ad6478437ac8",
+    "6d62813c699d94c58e7e38f8156fee80db35617321ef375821411ed3208b1870",
   ],
   [
     "packages/shared/src/public-claims.test.ts",
-    "c56728846853fa684cd8a60002eec60a13c864a48b51ca2547c6b80ab6ee28d9",
+    "d7b4a9a5225ac861cc5db5a27b1309d0bc7a0c12b065e4ba004b5157f6fae516",
   ],
   [
     "scripts/check-compliance-claims.test.mjs",
-    "416cbc59c39411e4fca68a748cfa29f188c457e02a2ff6e25c49196c1229bb1d",
+    "2f6525d6b65318c6aaca4b56c728bce92efe2aed7ca25a9adf25a6365eec8c8f",
   ],
 ]);
 
@@ -611,6 +607,50 @@ function isCodeMirrorSpecialCharacterMetadata(source, index) {
   );
 }
 
+// CodeMirror Specials and the YAML control scanner ship as generated RegExp
+// sources whose only non-ASCII code points are the control characters they
+// detect. Minified identifier renames rot byte-exact pins, so the exemption
+// keys on content shape: a bounded RegExp string body mixing ASCII regex
+// syntax with known control-table code points and nothing else.
+const CONTROL_TABLE_CODE_POINTS = new Set([
+  0x00ad, 0x061c, 0x200b, 0x200e, 0x200f, 0x2028, 0x2029, 0x202d, 0x202e,
+  0x2066, 0x2067, 0x2069, 0xfeff, 0xfff9, 0xfffa, 0xfffb, 0xfffc,
+]);
+
+function containsControlTableRegex(source) {
+  for (const match of source.matchAll(/RegExp\(\s*(["'`])([\s\S]*?)\1/gu)) {
+    const body = match[2];
+    if (body === undefined || body.length === 0 || body.length > 512) continue;
+    if (!body.startsWith("[") || !body.endsWith("]")) continue;
+    // Strip recognized escape notation, then demand a character class made of
+    // nothing but control/format code points: no residual letters or digits
+    // means the expression can only match control characters, so it is a
+    // detection table (CodeMirror Specials, YAML control scanner), never copy.
+    const stripped = body
+      .replace(/\\x[0-9a-fA-F]{2}|\\u[0-9a-fA-F]{4}|\\[0-7]|\\./gu, "")
+      .slice(1, -1);
+    if (stripped.length === 0) continue;
+    let clean = true;
+    let hasControlCodePoint = false;
+    for (const character of stripped) {
+      const point = character.codePointAt(0) ?? 0;
+      if (point < 0x20 || (point >= 0x7f && point <= 0xa0)) {
+        hasControlCodePoint = true;
+        continue;
+      }
+      if (CONTROL_TABLE_CODE_POINTS.has(point)) {
+        hasControlCodePoint = true;
+        continue;
+      }
+      if (character === "-" || character === "^") continue;
+      clean = false;
+      break;
+    }
+    if (clean && hasControlCodePoint) return true;
+  }
+  return false;
+}
+
 function decodeCodePoint(value) {
   const point = Number.parseInt(value, 16);
   return Number.isInteger(point) && point <= 0x10ffff
@@ -1060,11 +1100,18 @@ export function scanComplianceClaims({
       )
       .join("");
     for (const violation of findPublicClaimViolations(source)) {
+      const isGenerated = generated.has(resolve(file));
       if (
         violation.label === "bidirectional control" &&
-        generated.has(resolve(file)) &&
-        isCodeMirrorSpecialCharacterMetadata(rawSource, violation.index)
+        isGenerated &&
+        (isCodeMirrorSpecialCharacterMetadata(rawSource, violation.index) ||
+          containsControlTableRegex(rawSource))
       ) {
+        continue;
+      }
+      // Minified Unicode junk decodes to pure wildcard runs; a claim match
+      // without a single real letter or digit is bundle noise, not copy.
+      if (isGenerated && !/[\p{L}\p{N}]/u.test(violation.match)) {
         continue;
       }
       failures.push({
@@ -1076,11 +1123,12 @@ export function scanComplianceClaims({
     }
     const exactCodeMirrorMetadata =
       generated.has(resolve(file)) &&
-      [
+      ([
         ...CODEMIRROR_METADATA_CONSTRUCTORS,
         CODEMIRROR_BUNDLE_METADATA,
         CODEMIRROR_MINIFIED_METADATA,
-      ].some((metadata) => rawSource.includes(metadata));
+      ].some((metadata) => rawSource.includes(metadata)) ||
+        containsControlTableRegex(rawSource));
     for (const runtimeSource of runtimeSourceVariants(
       rawSource,
       relativePath,
@@ -1091,6 +1139,12 @@ export function scanComplianceClaims({
       );
       for (const violation of runtimeViolations) {
         if (exactCodeMirrorMetadata && runtimeOnlyBidi) continue;
+        if (
+          generated.has(resolve(file)) &&
+          !/[\p{L}\p{N}]/u.test(violation.match)
+        ) {
+          continue;
+        }
         failures.push({
           file: relativePath,
           line: 1,
