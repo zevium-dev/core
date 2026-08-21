@@ -43,6 +43,23 @@ if [[ "$snap" == *"No active organization"* ]]; then
   fail "no active organization — seed org test-org missing or not selected"
 fi
 
+step "set public publisher handle"
+open_path "/app/org"
+ab wait --load networkidle >/dev/null 2>&1 || ab wait 800 >/dev/null
+ab fill '#public-handle' "$E2E_ORG_SLUG" >/dev/null \
+  || fail "public handle input missing"
+ab wait 2000 >/dev/null
+snap="$(page_text)"
+if [[ "$snap" != *"This is the current public handle."* ]]; then
+  click_button "Save handle" || fail "Save handle button missing/disabled"
+  ab wait --text "Change public publisher handle?" 10
+  click_dialog_button "Change handle" || fail "confirm Change handle click failed"
+  ab wait 2000 >/dev/null
+  snap="$(page_text)"
+  assert_contains "$snap" "This is the current public handle." "public handle did not persist"
+fi
+log "public handle set → $E2E_ORG_SLUG"
+
 step "create project $PROJECT_NAME"
 open_path "/app/projects/create"
 ab wait --load networkidle >/dev/null 2>&1 || ab wait 800 >/dev/null
