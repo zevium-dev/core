@@ -349,7 +349,7 @@ ensure_org_active() {
   local attempt active result diag
   for attempt in 1 2 3; do
     active="$(ab eval "Boolean(window.Clerk?.organization?.id)" 2>/dev/null || true)"
-    diag="$(ab eval "JSON.stringify({org: window.Clerk?.organization?.id ?? null, role: window.Clerk?.organization?.membership?.role ?? null})" 2>/dev/null || true)"
+    diag="$(ab eval "JSON.stringify((() => { const clerk = window.Clerk; const orgId = clerk?.organization?.id ?? null; const membership = clerk?.user?.organizationMemberships?.find?.((entry) => entry.organization?.id === orgId); return { org: orgId, role: clerk?.organization?.membership?.role ?? membership?.role ?? null }; })())" 2>/dev/null || true)"
     log "org context attempt $attempt: $diag"
     if [[ "$active" == *"true"* && "$diag" == *'"role":"org:'* ]]; then
       return 0
@@ -369,7 +369,7 @@ ensure_org_active() {
     log "organization activation attempt $attempt: $result"
   done
   active="$(ab eval "Boolean(window.Clerk?.organization?.id)" 2>/dev/null || true)"
-  diag="$(ab eval "window.Clerk?.organization?.membership?.role ?? ''" 2>/dev/null || true)"
+  diag="$(ab eval "(() => { const clerk = window.Clerk; const orgId = clerk?.organization?.id ?? null; const membership = clerk?.user?.organizationMemberships?.find?.((entry) => entry.organization?.id === orgId); return clerk?.organization?.membership?.role ?? membership?.role ?? ''; })()" 2>/dev/null || true)"
   [[ "$active" == *"true"* && "$diag" == *"org:"* ]] || fail "could not activate fixture organization (last=$result role=$diag)"
 }
 
@@ -384,11 +384,18 @@ JSON.stringify({
   },
   colorScheme: matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light',
   reducedMotion: matchMedia('(prefers-reduced-motion: reduce)').matches,
-  auth: {
-    userId: window.Clerk?.user?.id ?? null,
-    organizationId: window.Clerk?.organization?.id ?? null,
-    role: window.Clerk?.organization?.membership?.role ?? null
-  }
+  auth: (() => {
+    const clerk = window.Clerk;
+    const organizationId = clerk?.organization?.id ?? null;
+    const membership = clerk?.user?.organizationMemberships?.find?.(
+      (entry) => entry.organization?.id === organizationId,
+    );
+    return {
+      userId: clerk?.user?.id ?? null,
+      organizationId,
+      role: clerk?.organization?.membership?.role ?? membership?.role ?? null
+    };
+  })()
 })
 " 2>/dev/null)" || fail "could not observe browser evidence contract"
   printf '%s' "$raw" | node "$E2E_ROOT/evidence-manifest.mjs" \
