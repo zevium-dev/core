@@ -16,7 +16,7 @@ E2E_VIEWPORT_WIDTH="${E2E_VIEWPORT_WIDTH:-1440}"
 E2E_VIEWPORT_HEIGHT="${E2E_VIEWPORT_HEIGHT:-900}"
 E2E_COLOR_SCHEME="${E2E_COLOR_SCHEME:-light}"
 E2E_REDUCED_MOTION="${E2E_REDUCED_MOTION:-no-preference}"
-E2E_RUN_ID="${E2E_RUN_ID:-$(date +%Y%m%d-%H%M%S)-$$}"
+E2E_RUN_ID="${E2E_RUN_ID:-$(date +%Y%m%dT%H%M%S)-$$}"
 E2E_OWNS_RUNTIME="${E2E_OWNS_RUNTIME:-0}"
 
 # Resolve the agent-browser CLI without mutating PATH (workflow supply-chain
@@ -163,7 +163,7 @@ redact_dom_for_artifact() {
 fail() {
   local msg="${1:-assertion failed}"
   local ts slug raw_shot raw_url raw_snapshot
-  ts="$(date +%Y%m%d-%H%M%S)-$(date +%N)"
+  ts="$(date +%Y%m%dT%H%M%S)-$(date +%N)"
   slug="$(printf '%s' "$E2E_STEP" | tr -cs '[:alnum:]._-' '_' | cut -c1-80)"
   raw_shot="$E2E_RAW_DIR/${ts}-${slug}.raw.png"
   raw_url="$E2E_RAW_DIR/${ts}-${slug}.url.raw.txt"

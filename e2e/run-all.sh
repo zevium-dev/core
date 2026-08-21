@@ -4,7 +4,7 @@ set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export E2E_BASE_URL="${E2E_BASE_URL:-http://localhost:3000}"
-export E2E_RUN_ID="${E2E_RUN_ID:-$(date +%Y%m%d-%H%M%S)-$$}"
+export E2E_RUN_ID="${E2E_RUN_ID:-$(date +%Y%m%dT%H%M%S)-$$}"
 export E2E_SESSION_PREFIX="${E2E_SESSION_PREFIX:-zevium-e2e-$E2E_RUN_ID}"
 export E2E_RUNTIME_DIR="${E2E_RUNTIME_DIR:-$(mktemp -d /tmp/zevium-e2e-runtime.XXXXXX)}"
 export E2E_OWNS_RUNTIME=1

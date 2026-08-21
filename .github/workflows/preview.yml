@@ -470,7 +470,7 @@ jobs:
         with:
           name: preview-e2e-${{ env.PR_NUMBER }}
           path: |
-            e2e/artifacts/*.png
-            e2e/artifacts/*.url.txt
-            e2e/artifacts/*.snapshot.txt
+            e2e/artifacts/**/*.png
+            e2e/artifacts/**/*.url.txt
+            e2e/artifacts/**/*.snapshot.txt
           if-no-files-found: ignore
