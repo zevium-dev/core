@@ -116,6 +116,16 @@ jobs:
             --cmd 'node .github/scripts/capture-preview-env.mjs' \
             --cmd-url-env-var-name CONVEX_URL
 
+      - name: Configure preview Convex environment
+        env:
+          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_PREVIEW_DEPLOY_KEY }}
+        run: |
+          deployment="${{ steps.deploy.outputs.convex_url }}"
+          deployment="${deployment#https://}"
+          deployment="${deployment%.convex.cloud}"
+          keyring="$(node -e 'const { randomBytes } = require("node:crypto"); const id = randomBytes(32).toString("hex"); console.log(JSON.stringify({ current: id, keys: { [id]: randomBytes(32).toString("hex") } }))')"
+          printf '%s' "$keyring" | pnpm exec convex env set GATEWAY_REGISTRY_TRANSPORT_KEYRING --deployment "$deployment"
+
   gateway-preview:
     needs: [security, preview-target, preview-convex]
     runs-on: blacksmith-2vcpu-ubuntu-2404
