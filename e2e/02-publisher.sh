@@ -128,7 +128,7 @@ log "draft saved (or no error toast)"
 
 step "test saved upstream reachability"
 click_button "Test reachability" || fail "Test reachability button missing/disabled after draft save"
-ab wait --text "Server responded successfully." 30 \
+ab wait --text "readiness gate passed" 30 \
   || fail "saved upstream connection test did not pass"
 ab wait 500 >/dev/null
 

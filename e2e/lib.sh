@@ -773,6 +773,7 @@ minimal_openapi_json() {
         "operationId": "httpbinGet",
         "summary": "Echo GET",
         "x-zevium-cost": 1,
+        "x-zevium-health-check": true,
         "responses": {
           "200": { "description": "OK" }
         }
