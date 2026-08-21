@@ -346,10 +346,12 @@ assert_anonymous_identity() {
 }
 
 ensure_org_active() {
-  local attempt active result
+  local attempt active result diag
   for attempt in 1 2 3; do
     active="$(ab eval "Boolean(window.Clerk?.organization?.id)" 2>/dev/null || true)"
-    if [[ "$active" == *"true"* ]]; then
+    diag="$(ab eval "JSON.stringify({org: window.Clerk?.organization?.id ?? null, role: window.Clerk?.organization?.membership?.role ?? null})" 2>/dev/null || true)"
+    log "org context attempt $attempt: $diag"
+    if [[ "$active" == *"true"* && "$diag" == *'"role":"org:'* ]]; then
       return 0
     fi
     ab eval "
@@ -357,7 +359,8 @@ ensure_org_active() {
   const clerk = window.Clerk;
   if (!clerk) { window.__e2eSetActive = 'no-clerk'; return; }
   clerk.setActive({ organization: \"$E2E_ORG_SLUG\" })
-    .then(() => { window.__e2eSetActive = clerk.organization ? 'activated' : 'no-org-after'; })
+    .then(() => (clerk.organization?.reload ? clerk.organization.reload() : undefined))
+    .then(() => { window.__e2eSetActive = clerk.organization ? 'activated role=' + (clerk.organization?.membership?.role ?? 'none') : 'no-org-after'; })
     .catch((error) => { window.__e2eSetActive = 'error:' + (error?.errors?.[0]?.code || error?.message || 'unknown'); });
 })()
 " >/dev/null 2>&1 || true
@@ -366,7 +369,8 @@ ensure_org_active() {
     log "organization activation attempt $attempt: $result"
   done
   active="$(ab eval "Boolean(window.Clerk?.organization?.id)" 2>/dev/null || true)"
-  [[ "$active" == *"true"* ]] || fail "could not activate fixture organization (last=$result)"
+  diag="$(ab eval "window.Clerk?.organization?.membership?.role ?? ''" 2>/dev/null || true)"
+  [[ "$active" == *"true"* && "$diag" == *"org:"* ]] || fail "could not activate fixture organization (last=$result role=$diag)"
 }
 
 record_browser_contract() {
