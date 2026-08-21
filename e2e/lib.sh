@@ -10,6 +10,7 @@ E2E_ARTIFACTS="${E2E_ARTIFACTS:-$E2E_ROOT/artifacts}"
 E2E_EMAIL="${E2E_EMAIL:-}"
 E2E_PASSWORD="${E2E_PASSWORD:-}"
 E2E_OTP="${E2E_OTP:-}"
+E2E_ORG_SLUG="${E2E_ORG_SLUG:-zevium-e2e}"
 E2E_SESSION="${E2E_SESSION:-zevium-e2e}"
 E2E_STEP="${E2E_STEP:-unknown}"
 E2E_VIEWPORT_WIDTH="${E2E_VIEWPORT_WIDTH:-1440}"
@@ -680,6 +681,13 @@ sign_in() {
   fi
   snap="$(page_text)"
   assert_not_contains "$snap" "Something went wrong" "app shell errored after sign_in"
+
+  # Activate the fixture organization when the fresh session lacks one.
+  org_active="$(ab eval "Boolean(window.Clerk?.organization?.id)" 2>/dev/null || true)"
+  if [[ "$org_active" != *"true"* ]]; then
+    ab eval "window.Clerk?.setActive?.({ organization: \"$E2E_ORG_SLUG\" }).then(() => true).catch(() => false)" >/dev/null 2>&1 || true
+    ab wait 1000 >/dev/null
+  fi
   log "signed in → $url"
 }
 
