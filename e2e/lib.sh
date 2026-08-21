@@ -685,8 +685,18 @@ sign_in() {
   # Activate the fixture organization when the fresh session lacks one.
   org_active="$(ab eval "Boolean(window.Clerk?.organization?.id)" 2>/dev/null || true)"
   if [[ "$org_active" != *"true"* ]]; then
-    ab eval "window.Clerk?.setActive?.({ organization: \"$E2E_ORG_SLUG\" }).then(() => true).catch(() => false)" >/dev/null 2>&1 || true
-    ab wait 1000 >/dev/null
+    ab eval "
+(() => {
+  const clerk = window.Clerk;
+  if (!clerk) { window.__e2eSetActive = 'no-clerk'; return; }
+  clerk.setActive({ organization: \"$E2E_ORG_SLUG\" })
+    .then(() => { window.__e2eSetActive = clerk.organization ? 'activated' : 'no-org-after'; })
+    .catch((error) => { window.__e2eSetActive = 'error:' + (error?.errors?.[0]?.code || error?.message || 'unknown'); });
+})()
+" >/dev/null 2>&1 || true
+    ab wait 2000 >/dev/null
+    org_result="$(ab eval "window.__e2eSetActive ?? 'pending'" 2>/dev/null || true)"
+    log "organization activation: $org_result"
   fi
   log "signed in → $url"
 }
