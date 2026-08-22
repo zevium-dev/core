@@ -109,11 +109,6 @@ const EXPECTED_LIFECYCLE_PACKAGES = Object.freeze({
     gypfile: false,
     scripts: Object.freeze({ install: "node-gyp-build" }),
   }),
-  "workerd@1.20260708.1": Object.freeze({
-    allowed: true,
-    gypfile: false,
-    scripts: Object.freeze({ postinstall: "node install.js" }),
-  }),
   "workerd@1.20260804.1": Object.freeze({
     allowed: true,
     gypfile: false,

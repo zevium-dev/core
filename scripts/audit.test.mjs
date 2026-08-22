@@ -179,12 +179,7 @@ function makeAuditRepositoryCopy() {
       path.join(root, relativePath),
     );
   }
-  for (const importerId of [
-    "apps/deploy-broker",
-    "apps/gateway",
-    "apps/web",
-    "packages/shared",
-  ]) {
+  for (const importerId of ["apps/gateway", "apps/web", "packages/shared"]) {
     mkdirSync(path.join(root, importerId), { recursive: true });
     cpSync(
       path.join(repositoryRoot, importerId, "package.json"),
@@ -309,18 +304,17 @@ test("parses exact repository workspace graph with every dependency type", () =>
 
   assert.deepEqual(graph.lockfile.workspaceImporters, [
     ".",
-    "apps/deploy-broker",
     "apps/gateway",
     "apps/web",
     "packages/shared",
   ]);
   assert.deepEqual(graph.dependencyCounts, {
-    dependencies: 280,
-    devDependencies: 320,
-    optionalDependencies: 228,
-    totalDependencies: 744,
+    dependencies: 279,
+    devDependencies: 311,
+    optionalDependencies: 223,
+    totalDependencies: 734,
   });
-  assert.equal(graph.occurrences.size, 744);
+  assert.equal(graph.occurrences.size, 734);
   assert.equal(Object.keys(graph.request).length, 662);
   assert.match(graph.lockfile.sha256, /^[a-f0-9]{64}$/);
   assert.equal(graph.lockfile.path, "pnpm-lock.yaml");
@@ -328,7 +322,7 @@ test("parses exact repository workspace graph with every dependency type", () =>
   assert.deepEqual(graph.supplyChain.integrity, {
     algorithm: "sha512",
     completeDigestBytes: 64,
-    entries: 744,
+    entries: 734,
   });
   assert.equal(
     graph.supplyChain.resolution,
@@ -341,8 +335,8 @@ test("parses exact repository workspace graph with every dependency type", () =>
     "concurrently>shell-quote": 1,
     "jayson>uuid": 0,
     postcss: 1,
-    sharp: 3,
-    undici: 4,
+    sharp: 2,
+    undici: 3,
   });
   assert.ok(
     graph.supplyChain.lifecycleScripts.allowed.includes("agent-browser"),
@@ -351,7 +345,7 @@ test("parses exact repository workspace graph with every dependency type", () =>
 });
 
 test("validates pinned mise and immutable workflow action identities", () => {
-  assert.equal(validateAutomationPolicy(), 13);
+  assert.equal(validateAutomationPolicy(), 6);
 });
 
 test("binds registry metadata to lock identity, tarball, digest, and graph semantics", () => {
@@ -1878,7 +1872,7 @@ test("full audit pins pnpm/config/root while allowing deterministic transport", 
   });
 
   assert.equal(outcome.exitCode, 0);
-  assert.equal(capturedProvenanceGraph.supplyChain.integrity.entries, 744);
+  assert.equal(capturedProvenanceGraph.supplyChain.integrity.entries, 734);
   assert.equal(Object.keys(capturedRequest).length, 662);
   assert.equal(
     capturedAuthorization === undefined ||
@@ -1892,7 +1886,7 @@ test("full audit pins pnpm/config/root while allowing deterministic transport", 
     high: 0,
     critical: 0,
   });
-  assert.equal(outcome.summary.dependencyGraph.totalDependencies, 744);
+  assert.equal(outcome.summary.dependencyGraph.totalDependencies, 734);
 });
 
 test(

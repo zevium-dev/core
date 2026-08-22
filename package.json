@@ -35,7 +35,7 @@
     "test:e2e-harness": "node --test e2e/harness.test.mjs",
     "test:convex": "vitest run --allowOnly=false --config convex/vitest.config.ts",
     "test:quality": "node --test scripts/quality/quality.test.mjs",
-    "test:release": "vitest run .github/scripts/release.test.ts",
+    "test:deploy": "vitest run .github/scripts/deploy-production.test.ts",
     "typecheck": "turbo typecheck",
     "check:compliance-claims": "pnpm test:compliance-claims && node scripts/check-compliance-claims.mjs",
     "check:compliance-claims:deploy": "pnpm test:compliance-claims && node scripts/check-compliance-claims.mjs --require-generated",
