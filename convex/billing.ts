@@ -596,7 +596,7 @@ export const receiveStripeEvent = internalMutation({
         throw new Error("Stripe event id was redelivered with different data");
       }
       await ctx.db.patch(existing._id, {
-        deliveries: existing.deliveries + 1,
+        deliveries: (existing.deliveries ?? 1) + 1,
       });
       await ensureStripeOutbox(ctx, existing);
       // HTTP redelivery is evidence, not operator intent. It must never reset

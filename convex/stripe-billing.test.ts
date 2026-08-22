@@ -367,6 +367,40 @@ describe("Stripe Checkout control plane", () => {
     ).toMatchObject({ status: "processed", attempts: 2, deliveries: 4 });
   });
 
+  it("normalizes legacy Stripe receipts on redelivery", async () => {
+    const t = convexTest(schema, modules);
+    await t.run(async (ctx) => {
+      await ctx.db.insert("paymentEvents", {
+        stripeEventId: "evt_legacy",
+        stripeAccount: "platform",
+        eventType: "checkout.session.completed",
+        objectId: "cs_legacy",
+        status: "processed",
+        attempts: 1,
+        receivedAt: 1,
+        processedAt: 2,
+      });
+    });
+
+    expect(
+      await t.mutation(internal.billing.receiveStripeEvent, {
+        stripeEventId: "evt_legacy",
+        stripeAccount: "platform",
+        eventType: "checkout.session.completed",
+        objectId: "cs_legacy",
+      }),
+    ).toEqual({ isNew: false, scheduled: false });
+    const event = await t.run(async (ctx) =>
+      ctx.db
+        .query("paymentEvents")
+        .withIndex("by_stripe_event", (q) =>
+          q.eq("stripeEventId", "evt_legacy"),
+        )
+        .unique(),
+    );
+    expect(event?.deliveries).toBe(2);
+  });
+
   it("keeps exhausted poison receipts dead until an explicit admin replay", async () => {
     const t = convexTest(schema, modules);
     await t.run(async (ctx) => {

@@ -1567,7 +1567,7 @@ export default defineSchema({
     ),
     /** Processing attempts, not duplicate HTTP deliveries. */
     attempts: v.number(),
-    deliveries: v.number(),
+    deliveries: v.optional(v.number()),
     lastError: v.optional(v.string()),
     receivedAt: v.number(),
     nextAttemptAt: v.optional(v.number()),
