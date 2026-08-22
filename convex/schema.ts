@@ -1625,8 +1625,11 @@ export default defineSchema({
     amount: v.number(),
     currency: v.string(),
     grantedCredits: v.number(),
-    refundedAmount: v.number(),
-    refundedCredits: v.number(),
+    /** Optional until finance-v2 migration verifies every legacy payment. */
+    refundedAmount: v.optional(v.number()),
+    refundedCredits: v.optional(v.number()),
+    /** Retained only so pre-finance-v2 rows remain schema-compatible. */
+    disputedCredits: v.optional(v.number()),
     /** Effective wallet reversal, capped to the immutable grant. */
     reversedCredits: v.number(),
     /** Active reversal satisfied by removing unspent payment-funded credits. */

@@ -1047,6 +1047,8 @@ const stripeRefundStatus = v.union(
 type StripeRefundStatus = Doc<"paymentExposures">["sourceStatus"] & string;
 
 function requireVerifiedPaymentFinance(payment: Doc<"payments">): {
+  refundedAmount: number;
+  refundedCredits: number;
   walletReversedCredits: number;
   publisherClawbackTargetCredits: number;
   reversalSequence: number;
@@ -1054,6 +1056,8 @@ function requireVerifiedPaymentFinance(payment: Doc<"payments">): {
   if (
     payment.financeMigrationStatus !== "verified" ||
     payment.financeMigrationJobId !== undefined ||
+    payment.refundedAmount === undefined ||
+    payment.refundedCredits === undefined ||
     payment.walletReversedCredits === undefined ||
     payment.publisherClawbackTargetCredits === undefined ||
     payment.reversalSequence === undefined
@@ -1061,6 +1065,8 @@ function requireVerifiedPaymentFinance(payment: Doc<"payments">): {
     throw new Error("Payment finance migration is not verified");
   }
   if (
+    payment.refundedAmount < 0 ||
+    payment.refundedCredits < 0 ||
     payment.walletReversedCredits < 0 ||
     payment.publisherClawbackTargetCredits < 0 ||
     payment.reversalSequence < 0
@@ -1068,6 +1074,8 @@ function requireVerifiedPaymentFinance(payment: Doc<"payments">): {
     throw new Error("Payment finance projection is invalid");
   }
   return {
+    refundedAmount: payment.refundedAmount,
+    refundedCredits: payment.refundedCredits,
     walletReversedCredits: payment.walletReversedCredits,
     publisherClawbackTargetCredits: payment.publisherClawbackTargetCredits,
     reversalSequence: payment.reversalSequence,
@@ -1430,7 +1438,7 @@ export const applyRefundProjection = internalMutation({
       )
       .unique();
     if (payment === null) return { kind: "ignored" as const };
-    requireVerifiedPaymentFinance(payment);
+    const verified = requireVerifiedPaymentFinance(payment);
     if (
       !Number.isSafeInteger(args.totalRefundedAmount) ||
       args.totalRefundedAmount < 0 ||
@@ -1450,7 +1458,7 @@ export const applyRefundProjection = internalMutation({
         ? args.refundAmount
         : (existingExposure?.sourceAmount ??
           args.refundAmount ??
-          Math.max(0, args.totalRefundedAmount - payment.refundedAmount));
+          Math.max(0, args.totalRefundedAmount - verified.refundedAmount));
     if (!Number.isSafeInteger(sourceAmount) || sourceAmount <= 0) {
       if (existingExposure !== null) {
         return {
@@ -1470,8 +1478,8 @@ export const applyRefundProjection = internalMutation({
     const disputes = await boundedPaymentDisputes(ctx, payment._id);
     const projected = await applyEffectivePaymentReversal(ctx, {
       payment,
-      refundedAmount: payment.refundedAmount,
-      refundedCredits: payment.refundedCredits,
+      refundedAmount: verified.refundedAmount,
+      refundedCredits: verified.refundedCredits,
       disputes,
       sourceKind: "refund",
       sourceRef,
@@ -1510,7 +1518,7 @@ export const applyDisputeProjection = internalMutation({
       )
       .unique();
     if (payment === null) return { kind: "ignored" as const };
-    requireVerifiedPaymentFinance(payment);
+    const verified = requireVerifiedPaymentFinance(payment);
     if (payment.currency !== args.currency) {
       throw new Error("Stripe dispute currency does not match payment");
     }
@@ -1577,8 +1585,8 @@ export const applyDisputeProjection = internalMutation({
     const disputes = await boundedPaymentDisputes(ctx, payment._id);
     const projected = await applyEffectivePaymentReversal(ctx, {
       payment,
-      refundedAmount: payment.refundedAmount,
-      refundedCredits: payment.refundedCredits,
+      refundedAmount: verified.refundedAmount,
+      refundedCredits: verified.refundedCredits,
       disputes,
       sourceKind: "dispute",
       sourceRef: `stripe:dispute:${args.stripeDisputeId}`,
