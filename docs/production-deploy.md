@@ -49,8 +49,9 @@ Gateway deploys second. Wrangler applies append-only Durable Object migrations
 from `apps/gateway/wrangler.jsonc`; never edit or reuse an existing migration
 tag.
 
-Web deploys last. Both Workers are tagged `production-<git-sha>`, and gateway
-`ZEVIUM_RELEASE` plus web metadata expose the same exact SHA.
+Web deploys last. Both Workers upload tagged versions and promote them to 100%
+without changing their preconfigured routes. Tags use `production-<git-sha>`,
+and gateway `ZEVIUM_RELEASE` plus web metadata expose the same exact SHA.
 
 ## Failure Handling
 
