@@ -1330,7 +1330,7 @@ async function finalizePaymentMigration(
         source.amount === undefined || source.status === undefined,
     )
     .map(([sourceRef]) => sourceRef);
-  if (payment.refundedAmount > 0 && refunds.length === 0) {
+  if ((payment.refundedAmount ?? 0) > 0 && refunds.length === 0) {
     unresolvedRefunds.push("missing_refund_source");
   }
   if (unresolvedRefunds.length > 0) {

@@ -333,9 +333,7 @@ describe("staged finance migration", () => {
         amount: 1_000,
         currency: "usd",
         grantedCredits: 1_000,
-        // Legacy aggregate is incomplete; exact provider facts below repair it.
-        refundedAmount: 199,
-        refundedCredits: 200,
+        // Legacy row predates refund aggregates; provider facts below repair it.
         reversedCredits: 200,
         status: "partially_refunded",
         createdAt: 1,
