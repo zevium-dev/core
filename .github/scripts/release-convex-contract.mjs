@@ -800,6 +800,7 @@ function exportedValues(path, sources, cache, stack = new Set()) {
   for (const statement of source.statements) {
     if (
       !ts.isExportDeclaration(statement) ||
+      statement.isTypeOnly ||
       !statement.moduleSpecifier ||
       !ts.isStringLiteral(statement.moduleSpecifier)
     )
@@ -826,6 +827,7 @@ function exportedValues(path, sources, cache, stack = new Set()) {
       }
     } else if (ts.isNamedExports(statement.exportClause)) {
       for (const element of statement.exportClause.elements) {
+        if (element.isTypeOnly) continue;
         const imported = element.propertyName?.text ?? element.name.text;
         const value = target.get(imported);
         if (value === undefined) {
@@ -846,11 +848,18 @@ function constantsIn(source, path, sources, exportCache = new Map()) {
   for (const statement of source.statements) {
     if (
       ts.isImportDeclaration(statement) &&
+      statement.importClause?.isTypeOnly
+    ) {
+      continue;
+    }
+    if (
+      ts.isImportDeclaration(statement) &&
       ts.isStringLiteral(statement.moduleSpecifier) &&
       statement.importClause?.namedBindings &&
       ts.isNamedImports(statement.importClause.namedBindings)
     ) {
       for (const element of statement.importClause.namedBindings.elements) {
+        if (element.isTypeOnly) continue;
         const imported = element.propertyName?.text ?? element.name.text;
         const identity = `${statement.moduleSpecifier.text}:${imported}`;
         const knownValidator = KNOWN_VALIDATOR_IMPORTS.get(identity);
