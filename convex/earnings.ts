@@ -4,7 +4,10 @@ import type { Id } from "./_generated/dataModel";
 import { requireOrgMemberBySlug } from "./lib/auth";
 import { atomsToCredits } from "./accounting";
 import { assertFinanceMigrationAllowsRuntime } from "./lib/financeMigrationGate";
-import { assertPublisherBalanceReady } from "./lib/publisherLedger";
+import {
+  assertPublisherBalanceReady,
+  assertPublisherEarningReady,
+} from "./lib/publisherLedger";
 
 const MAX_STATEMENT_EARNINGS = 5_000;
 
@@ -83,6 +86,7 @@ export const forOrg = query({
     let allNet = 0;
 
     for (const earning of earnings) {
+      assertPublisherEarningReady(earning);
       const netCredits = atomsToCredits(earning.publisherNetAtoms);
       allGross += earning.grossCredits;
       allNet += netCredits;

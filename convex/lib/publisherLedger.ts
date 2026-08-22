@@ -9,6 +9,28 @@ import {
 
 type SettlementKind = Doc<"publisherSettlementEntries">["kind"];
 
+export function assertPublisherEarningReady(
+  earning: Doc<"publisherEarnings">,
+): asserts earning is Doc<"publisherEarnings"> & {
+  consumerOrganizationId: Id<"organizations">;
+  platformFeeAtoms: number;
+  publisherNetAtoms: number;
+  clawedBackGrossCredits: number;
+  clawedBackAtoms: number;
+  releasedAtoms: number;
+} {
+  if (
+    earning.consumerOrganizationId === undefined ||
+    earning.platformFeeAtoms === undefined ||
+    earning.publisherNetAtoms === undefined ||
+    earning.clawedBackGrossCredits === undefined ||
+    earning.clawedBackAtoms === undefined ||
+    earning.releasedAtoms === undefined
+  ) {
+    throw new Error("Publisher earning finance migration is not verified");
+  }
+}
+
 function safeAtomDelta(value: number, name: string): void {
   if (!Number.isSafeInteger(value)) {
     throw new Error(`${name} must be a safe integer number of atoms`);
@@ -255,6 +277,7 @@ export async function releasePublisherEarning(
   ctx: MutationCtx,
   earning: Doc<"publisherEarnings">,
 ): Promise<number> {
+  assertPublisherEarningReady(earning);
   if (earning.status !== "pending_risk" || earning.availableAt > Date.now()) {
     return 0;
   }
@@ -390,6 +413,7 @@ async function restoreExposureChunk(
     const amountAtoms = publisherEarningSplit(grossCredits).publisherNetAtoms;
     const earning = await ctx.db.get(row.earningId);
     if (earning === null) throw new Error("Clawed-back earning is missing");
+    assertPublisherEarningReady(earning);
     const allocation =
       row.allocationId === undefined
         ? null
@@ -530,6 +554,7 @@ async function allocateExposureChunk(
     if (capacity <= 0) continue;
     const earning = await ctx.db.get(allocation.earningId);
     if (earning === null) throw new Error("Funded earning is missing");
+    assertPublisherEarningReady(earning);
     const grossCredits = Math.min(capacity, remaining);
     const amountAtoms = publisherEarningSplit(grossCredits).publisherNetAtoms;
     const now = Date.now();
