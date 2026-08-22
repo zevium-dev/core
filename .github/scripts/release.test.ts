@@ -1840,7 +1840,7 @@ describe("protected workflow provenance", () => {
       writeFileSync("apps/gateway/wrangler.jsonc", JSON.stringify(legacyBase));
       writeFileSync(
         "convex/schema.ts",
-        'import { defineSchema, defineTable } from "convex/server";\nimport { v } from "convex/values";\nexport default defineSchema({ items: defineTable({ value: v.optional(v.string()) }).index("by_value", ["value"]) });\n',
+        'import { defineSchema, defineTable } from "convex/server";\nimport { v } from "convex/values";\nimport type { Doc } from "./_generated/dataModel";\nexport default defineSchema({ items: defineTable({ value: v.optional(v.string()) }).index("by_value", ["value"]) });\n',
       );
       execFileSync("git", ["add", "."]);
       execFileSync("git", ["commit", "-qm", "feat: base"]);
@@ -1864,7 +1864,7 @@ describe("protected workflow provenance", () => {
 
       writeFileSync(
         "convex/schema.ts",
-        'import { defineSchema, defineTable } from "convex/server";\nimport { v } from "convex/values";\nexport default defineSchema({ items: defineTable({ value: v.string() }) });\n',
+        'import { defineSchema, defineTable } from "convex/server";\nimport { v } from "convex/values";\nimport type { Doc } from "./_generated/dataModel";\nexport default defineSchema({ items: defineTable({ value: v.string() }) });\n',
       );
       execFileSync("git", ["add", "."]);
       execFileSync("git", [
@@ -1900,7 +1900,7 @@ describe("protected workflow provenance", () => {
 
       writeFileSync(
         "convex/schema.ts",
-        'import { defineSchema, defineTable } from "convex/server";\nimport { v } from "convex/values";\nexport default defineSchema({ items: defineTable({ value: v.literal("fixed") }) });\n',
+        'import { defineSchema, defineTable } from "convex/server";\nimport { v } from "convex/values";\nimport type { Doc } from "./_generated/dataModel";\nexport default defineSchema({ items: defineTable({ value: v.literal("fixed") }) });\n',
       );
       execFileSync("git", ["add", "."]);
       execFileSync("git", [
