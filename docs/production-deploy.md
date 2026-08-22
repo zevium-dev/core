@@ -14,13 +14,13 @@ cancellation disabled:
   then web. It never carries a Durable Object lifecycle diff or unapplied
   Convex contract.
 - **Contract Production Schema** applies one reviewed semantic Convex
-  contraction after proving old consumers against staging and production. Exact
+  contraction after proving active production consumers. Exact
   parent/target contract inventories decide eligibility; commit subjects and
   non-Convex companion files carry no authority.
-- **Gateway Durable Object Lifecycle** owns every staging and production DO
+- **Gateway Durable Object Lifecycle** owns every production DO
   lifecycle mutation. Generic release classifies complete lifecycle state before
-  any staging environment or provider mutation and exits successfully with
-  `eligible=false` whenever lifecycle differs.
+  any provider mutation and exits successfully with `eligible=false` whenever
+  lifecycle differs.
 - **Recover Production** is separately dispatchable and protected by
   `production-recovery`. It consumes one failed run's persisted manifest,
   re-resolves current provider state, and performs only bounded roll-forward or
@@ -152,8 +152,8 @@ satisfy test.
 
 ## Clerk release-key resolution
 
-No production or staging API key secret is stored in GitHub. Immediately before
-every paid staging, production, contract, lifecycle, or recovery probe,
+No probe API key secret is stored in GitHub. Immediately before every paid
+production, contract, lifecycle, or recovery probe,
 `with-clerk-release-key.mjs` uses protected Clerk secret key to:
 
 1. paginate organizations and resolve exactly one configured slug;
@@ -161,12 +161,11 @@ every paid staging, production, contract, lifecycle, or recovery probe,
 3. paginate all API keys, including invalid rows;
 4. select exactly one active `api_key` whose subject, creator, and `org_id`
    claim match member and organization;
-5. require exact configured `ak_` key ID and active expiry no more than 15
-   minutes away;
+5. require exact configured `ak_` key ID and reject revoked or expired keys;
 6. fetch key material, immediately mask it before any other output, verify it,
    and pass it only through an allowlisted child-process environment;
-7. after probe exits, re-fetch and verify same ID, expiry, subject, creator,
-   organization claims, active state, and unexpired deadline.
+7. after probe exits, re-fetch and verify same ID, expiration, subject, creator,
+   organization claims, and active state.
 
 Zero or multiple matches fail. Resolver rejects malformed Clerk payloads,
 revoked/expired keys, cross-org claims, wrong creators, and wrong subjects. It
@@ -175,31 +174,32 @@ JavaScript evaluation, and curl headers receive secret through environment or
 stdin. Child loses Clerk, Cloudflare, Convex, GitHub, and Actions/OIDC
 credentials.
 
+Probe key is one dedicated Zevium-projected key with a bounded budget and funded
+consumer wallet. It may be persistent or have a future expiry. Routine releases
+reuse it; rotation is scheduled maintenance or incident response, not per-release
+ceremony.
+
 ## Normal release sequence
 
 1. Secret-free preflight runs immutable-referee semantic Convex classification,
    resolves current active public release, classifies complete DO lifecycle
    projection, verifies every policy/contract/lifecycle attestation, and runs
    uncached release CI.
-2. Staging approval re-runs GitHub guard before checkout. Convex dry-run target,
-   active gateway lifecycle metadata, and active web version are checked in same
-   blocks as staging deploys.
-3. Staging paid contract and browser E2E prove exact accounting.
-4. Production approval re-verifies current tip, active public identity, and all
+2. Production approval re-verifies current tip, active public identity, and all
    protected provenance.
-5. Exact gateway/web rollback pointers and intent manifest are captured,
+3. Exact gateway/web rollback pointers and intent manifest are captured,
    content-addressed, signed, and uploaded before first provider mutation.
-6. Both immutable Worker candidates upload. Candidate IDs finalize lineage;
+4. Both immutable Worker candidates upload. Candidate IDs finalize lineage;
    finalized manifest is content-addressed and signed before control-plane or
    traffic mutation.
-7. Roll-forward-only mutation checkpoint is atomically written,
+5. Roll-forward-only mutation checkpoint is atomically written,
    content-addressed, signed, and uploaded before Convex expansion deploys. Old
    Workers are then probed against expanded control plane.
-8. Gateway enters 0% deployment, is paid-probed through exact version override,
+6. Gateway enters 0% deployment, is paid-probed through exact version override,
    then moves to 100% after weights/config recheck.
-9. Web enters 0%, stamped HTML and referenced hashed assets are checked through
+7. Web enters 0%, stamped HTML and referenced hashed assets are checked through
    override, then web moves to 100%.
-10. Final public paid accounting proves convergence and exact active release.
+8. Final public paid accounting proves convergence and exact active release.
 
 ## Durable Object lifecycle
 
@@ -236,8 +236,8 @@ Cloudflare version reads omit write-only tombstone destinations and cannot prove
 all reconciliation state. Current automation therefore marks delete/rename/
 transfer, pending-transfer cancellation/finalization, and tombstone cleanup as
 `manualInspectionRequired` and fails dedicated secret-free preflight before
-staging or provider mutation. Never weaken this to inferred state. Extend
-provider proof with authoritative reconciliation/source/target metadata first.
+provider mutation. Never weaken this to inferred state. Extend provider proof
+with authoritative reconciliation/source/target metadata first.
 
 Lifecycle changes use `wrangler deploy`; `wrangler versions upload` cannot apply
 them. Lifecycle is non-rollbackable because Worker version rollback does not
@@ -295,22 +295,21 @@ failed lifecycle run.
 Use required reviewers, prevent self-review, restrict deployment branches to
 `develop`, and disable admin bypass where policy allows.
 
-| Environment            | Variables                                                                                                                                                                                                                                                                                                                       | Secrets                                                                                                                                        |
-| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| `production-policy`    | Organization-scoped exact `RELEASE_REFEREE_REF`, `RELEASE_REFEREE_SHA256`, and `RELEASE_POLICY_TREE_SHA256`                                                                                                                                                                                                                     | None                                                                                                                                           |
-| `staging`              | `STAGING_WEB_URL`, `STAGING_GATEWAY_URL`, `STAGING_CONVEX_URL`, `STAGING_CONVEX_SITE_URL`; probe paths/methods/content type; exact `RELEASE_PROBE_CONSUMER_ORG_SLUG`, `RELEASE_PROBE_CONSUMER_MEMBER_USER_ID`, `RELEASE_PROBE_API_KEY_ID`; exact `STAGING_E2E_ORG_SLUG`, `STAGING_E2E_MEMBER_USER_ID`, `STAGING_E2E_API_KEY_ID` | Cloudflare token; staging Clerk publishable/secret keys; staging Convex deploy key; staging probe secret/body; E2E email/password/optional OTP |
-| `production`           | Probe paths/methods/content type; exact consumer org, member, and key ID                                                                                                                                                                                                                                                        | Cloudflare token; production Clerk publishable/secret keys; production Convex deploy key; production probe secret/body                         |
-| `production-contract`  | Same production probe variables                                                                                                                                                                                                                                                                                                 | Production Clerk secret key; Convex deploy key; probe secret/body                                                                              |
-| `production-lifecycle` | Same production probe variables                                                                                                                                                                                                                                                                                                 | Cloudflare token; production Clerk publishable/secret keys; Convex deploy key; probe secret/body                                               |
-| `production-recovery`  | Same production probe variables                                                                                                                                                                                                                                                                                                 | Same production provider, Clerk, Convex, and probe secrets needed by bounded recovery                                                          |
+| Environment            | Variables                                                                                                                                          | Secrets                                                                                                                                            |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `production-policy`    | Organization-scoped exact `RELEASE_REFEREE_REF`, `RELEASE_REFEREE_SHA256`, and `RELEASE_POLICY_TREE_SHA256`                                        | None                                                                                                                                               |
+| `production`           | Probe paths/methods/content type; exact `RELEASE_PROBE_CONSUMER_ORG_SLUG`, `RELEASE_PROBE_CONSUMER_MEMBER_USER_ID`, and `RELEASE_PROBE_API_KEY_ID` | Cloudflare token; production Clerk publishable/secret keys; production Convex deploy key; `PRODUCTION_RELEASE_PROBE_SECRET`; optional request body |
+| `production-contract`  | Same production probe variables                                                                                                                    | Production Clerk secret key; Convex deploy key; `PRODUCTION_RELEASE_PROBE_SECRET`; optional request body                                           |
+| `production-lifecycle` | Same production probe variables                                                                                                                    | Cloudflare token; production Clerk publishable/secret keys; Convex deploy key; `PRODUCTION_RELEASE_PROBE_SECRET`; optional request body            |
+| `production-recovery`  | Same production probe variables                                                                                                                    | Same production provider, Clerk, Convex, and probe secrets needed by bounded recovery                                                              |
 
 `RELEASE_PROBE_REQUEST_BODY` is required only for body methods. JSON body must
 match content type and operation schema. Probe fixture must be public,
 positive-cost, outside free tier, reliable, funded, and owned by exact consumer
-org. Keep credits for staging, baseline, candidate, convergence, and recovery.
+org. Keep credits for baseline, candidate, convergence, and recovery.
 
-There is deliberately no `PRODUCTION_RELEASE_PROBE_API_KEY`, staging equivalent,
-or E2E API-key secret.
+There is deliberately no `PRODUCTION_RELEASE_PROBE_API_KEY` or E2E API-key
+secret.
 
 `RELEASE_CHROME_EXECUTABLE` is organization-managed exact path available to
 browser jobs. Referee variables are organization-owned and available to every
@@ -321,10 +320,10 @@ production lane; candidate repository content cannot update them.
 Artifacts contain SHAs, run IDs and attempts, candidate-lineage digests,
 timestamps, state, provider version pointers, minimal accounting totals, and
 failure screenshots. They exclude keys, challenge, headers, cookies,
-request/response bodies, environment dumps, and consumer identity. Staging
-retention is 14 days; production/recovery caches 30 days; protected attestation
-subjects 90 days. Recovery authority is signed content-addressed attestation,
-not artifact retention.
+request/response bodies, environment dumps, and consumer identity.
+Production/recovery caches retain 30 days; protected attestation subjects retain
+90 days. Recovery authority is signed content-addressed attestation, not artifact
+retention.
 
 Repository cannot enforce or verify these external controls:
 
@@ -334,7 +333,7 @@ Repository cannot enforce or verify these external controls:
 - Convex deploy-key scope, production environment variables, deployed bootstrap
   schema, and secret rotation;
 - Clerk dedicated member/key fixture and funded consumer wallet;
-- Clerk short-expiry issuance plus live revocation/rotation race behavior;
+- Clerk dedicated-key revocation/rotation race behavior;
 - immutable runner-image label ownership and Chrome/OS-library provisioning;
 - first deployment of `/release-probe-accounting` expansion. Until endpoint and
   `RELEASE_PROBE_SECRET` exist in production, HTTP 404/401/503 blocks release.
@@ -349,8 +348,8 @@ later release. Ref rotation uses old referee to approve one policy commit; only
 after merge may independent organization owner rotate variables to new reviewed
 commit/digests.
 
-Bootstrap and real staging cancellation/recovery injection, Clerk
-expiry/revocation/rotation, runner image, Cloudflare/Convex state, environment,
-and required-check drills remain external work. This repository change claims
-none passed. Never bypass failed checks, paste API-key secret into commands, or
+Bootstrap and real cancellation/recovery injection, Clerk
+revocation/rotation, runner image, Cloudflare/Convex state, environment, and
+required-check drills remain external work. This repository change claims none
+passed. Never bypass failed checks, paste API-key secret into commands, or
 manually forge provenance.

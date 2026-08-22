@@ -26,7 +26,11 @@ permissions:
 
 env:
   MISE_EXPERIMENTAL: true
+  RELEASE_REFEREE_REF: ${{ vars.RELEASE_REFEREE_REF }}
+  RELEASE_REFEREE_SHA256: ${{ vars.RELEASE_REFEREE_SHA256 }}
+  RELEASE_POLICY_TREE_SHA256: ${{ vars.RELEASE_POLICY_TREE_SHA256 }}
   PRODUCTION_CONVEX_URL: https://polite-ermine-809.convex.cloud
+  PRODUCTION_CONVEX_SITE_URL: https://polite-ermine-809.convex.site
   PRODUCTION_WEB_URL: https://www.zevium.dev
   PRODUCTION_GATEWAY_URL: https://gateway.zevium.dev
 
@@ -73,6 +77,9 @@ jobs:
       RELEASE_PROBE_METERED_PATH: ${{ vars.RELEASE_PROBE_METERED_PATH }}
       RELEASE_PROBE_METERED_METHOD: ${{ vars.RELEASE_PROBE_METERED_METHOD }}
       RELEASE_PROBE_CONTENT_TYPE: ${{ vars.RELEASE_PROBE_CONTENT_TYPE }}
+      RELEASE_PROBE_CONSUMER_ORG_SLUG: ${{ vars.RELEASE_PROBE_CONSUMER_ORG_SLUG }}
+      RELEASE_PROBE_CONSUMER_MEMBER_USER_ID: ${{ vars.RELEASE_PROBE_CONSUMER_MEMBER_USER_ID }}
+      RELEASE_PROBE_API_KEY_ID: ${{ vars.RELEASE_PROBE_API_KEY_ID }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -95,12 +102,29 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Recheck immutable commit and production configuration
+      - name: Materialize immutable protected release referee
+        run: |
+          [[ "$RELEASE_REFEREE_REF" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$RELEASE_REFEREE_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$RELEASE_POLICY_TREE_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          referee_root="$(mktemp -d "$RUNNER_TEMP/zevium-release-referee.XXXXXX")"
+          git archive "$RELEASE_REFEREE_REF" | tar -x -C "$referee_root"
+          echo "REFEREE_ROOT=$referee_root" >> "$GITHUB_ENV"
+      - name: Install immutable referee dependencies
+        run: pnpm --dir "$REFEREE_ROOT" install --frozen-lockfile --ignore-pnpmfile --ignore-scripts --registry=https://registry.npmjs.org/ --config.trust-lockfile=false --config.verify-store-integrity=true
+      - name: Verify immutable release referee
+        run: |
+          referee_dir="$REFEREE_ROOT/.github/scripts"
+          node "$referee_dir/release-attestation.mjs" verify-referee \
+            --ref="$RELEASE_REFEREE_REF" --target="$CONTRACT_SHA" \
+            --evaluator-digest="$RELEASE_REFEREE_SHA256" \
+            --tree-digest="$RELEASE_POLICY_TREE_SHA256" \
+            --repository="$GITHUB_REPOSITORY" --target-branch=develop
+          echo "RELEASE_REFEREE_DIR=$referee_dir" >> "$GITHUB_ENV"
+
+      - name: Recheck immutable contract commit
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_PROBE_REQUEST_BODY: ${{ secrets.PRODUCTION_RELEASE_PROBE_REQUEST_BODY }}
-          CONVEX_PRODUCTION_DEPLOY_KEY: ${{ secrets.CONVEX_PRODUCTION_DEPLOY_KEY }}
-          RELEASE_PROBE_API_KEY: ${{ secrets.PRODUCTION_RELEASE_PROBE_API_KEY }}
         run: |
           node -e '
             for (const key of ["CONTRACT_SHA", "ACTIVE_RELEASE"]) {
@@ -163,10 +187,21 @@ jobs:
           }
           test -n "$(git diff --name-only "$ACTIVE_RELEASE" "$CONTRACT_SHA" -- convex/)"
           pnpm ci:pr
+
+      - name: Reject incomplete production contract configuration
+        env:
+          CLERK_PRODUCTION_SECRET_KEY: ${{ secrets.CLERK_PRODUCTION_SECRET_KEY }}
+          CONVEX_PRODUCTION_DEPLOY_KEY: ${{ secrets.CONVEX_PRODUCTION_DEPLOY_KEY }}
+          RELEASE_PROBE_REQUEST_BODY: ${{ secrets.PRODUCTION_RELEASE_PROBE_REQUEST_BODY }}
+          RELEASE_PROBE_SECRET: ${{ secrets.PRODUCTION_RELEASE_PROBE_SECRET }}
+        run: |
           required=(
             RELEASE_PROBE_MOCK_PATH RELEASE_PROBE_MOCK_METHOD
             RELEASE_PROBE_METERED_PATH RELEASE_PROBE_METERED_METHOD
-            CONVEX_PRODUCTION_DEPLOY_KEY RELEASE_PROBE_API_KEY
+            RELEASE_PROBE_CONSUMER_ORG_SLUG
+            RELEASE_PROBE_CONSUMER_MEMBER_USER_ID RELEASE_PROBE_API_KEY_ID
+            CLERK_PRODUCTION_SECRET_KEY CONVEX_PRODUCTION_DEPLOY_KEY
+            RELEASE_PROBE_SECRET
           )
           missing=()
           for name in "${required[@]}"; do
@@ -176,14 +211,20 @@ jobs:
             printf 'Missing production contract configuration: %s\n' "${missing[*]}" >&2
             exit 1
           fi
-          node .github/scripts/release-contract.mjs --validate-only=true \
-            --release="$ACTIVE_RELEASE" --web="$PRODUCTION_WEB_URL" \
-            --gateway="$PRODUCTION_GATEWAY_URL" \
-            --mock-path="$RELEASE_PROBE_MOCK_PATH" \
-            --mock-method="$RELEASE_PROBE_MOCK_METHOD" \
-            --metered-path="$RELEASE_PROBE_METERED_PATH" \
-            --metered-method="$RELEASE_PROBE_METERED_METHOD" \
-            --content-type="$RELEASE_PROBE_CONTENT_TYPE"
+          node "$RELEASE_REFEREE_DIR/with-clerk-release-key.mjs" \
+            --clerk-secret-env=CLERK_PRODUCTION_SECRET_KEY \
+            --org-slug="$RELEASE_PROBE_CONSUMER_ORG_SLUG" \
+            --member-user-id="$RELEASE_PROBE_CONSUMER_MEMBER_USER_ID" \
+            --key-id="$RELEASE_PROBE_API_KEY_ID" -- \
+            node "$RELEASE_REFEREE_DIR/release-contract.mjs" --validate-only=true \
+              --release="$ACTIVE_RELEASE" --web="$PRODUCTION_WEB_URL" \
+              --gateway="$PRODUCTION_GATEWAY_URL" \
+              --mock-path="$RELEASE_PROBE_MOCK_PATH" \
+              --mock-method="$RELEASE_PROBE_MOCK_METHOD" \
+              --metered-path="$RELEASE_PROBE_METERED_PATH" \
+              --metered-method="$RELEASE_PROBE_METERED_METHOD" \
+              --content-type="$RELEASE_PROBE_CONTENT_TYPE" \
+              --accounting="$PRODUCTION_CONVEX_SITE_URL/release-probe-accounting"
 
       - name: Prove production Convex deploy key target without mutation
         env:
@@ -194,20 +235,29 @@ jobs:
           convex_dry_run="$(pnpm exec convex deploy --dry-run --yes \
             --codegen disable --typecheck disable 2>&1)"
           printf '%s' "$convex_dry_run" \
-            | node .github/scripts/release-contract.mjs --validate-convex-dry-run=true
+            | node "$RELEASE_REFEREE_DIR/release-contract.mjs" --validate-convex-dry-run=true
+
+      - name: Verify active identity before contract recovery
+        if: env.RECOVERY_OF != ''
+        run: |
+          node "$RELEASE_REFEREE_DIR/release-contract.mjs" \
+            --identity-only=true --release="$ACTIVE_RELEASE" \
+            --web="$PRODUCTION_WEB_URL" --gateway="$PRODUCTION_GATEWAY_URL" \
+            --output=release-evidence/pre-recovery-identity.json
 
       - name: Verify all active consumers before destructive contract
+        if: env.RECOVERY_OF == ''
         env:
-          RELEASE_PROBE_API_KEY: ${{ secrets.PRODUCTION_RELEASE_PROBE_API_KEY }}
+          CLERK_PRODUCTION_SECRET_KEY: ${{ secrets.CLERK_PRODUCTION_SECRET_KEY }}
           RELEASE_PROBE_REQUEST_BODY: ${{ secrets.PRODUCTION_RELEASE_PROBE_REQUEST_BODY }}
+          RELEASE_PROBE_SECRET: ${{ secrets.PRODUCTION_RELEASE_PROBE_SECRET }}
         run: |
-          if [[ -n "$RECOVERY_OF" ]]; then
-            node .github/scripts/release-contract.mjs \
-              --identity-only=true --release="$ACTIVE_RELEASE" \
-              --web="$PRODUCTION_WEB_URL" --gateway="$PRODUCTION_GATEWAY_URL" \
-              --output=release-evidence/pre-recovery-identity.json
-          else
-            node .github/scripts/release-contract.mjs \
+          node "$RELEASE_REFEREE_DIR/with-clerk-release-key.mjs" \
+            --clerk-secret-env=CLERK_PRODUCTION_SECRET_KEY \
+            --org-slug="$RELEASE_PROBE_CONSUMER_ORG_SLUG" \
+            --member-user-id="$RELEASE_PROBE_CONSUMER_MEMBER_USER_ID" \
+            --key-id="$RELEASE_PROBE_API_KEY_ID" -- \
+            node "$RELEASE_REFEREE_DIR/release-contract.mjs" \
               --release="$ACTIVE_RELEASE" --web="$PRODUCTION_WEB_URL" \
               --gateway="$PRODUCTION_GATEWAY_URL" \
               --mock-path="$RELEASE_PROBE_MOCK_PATH" \
@@ -215,8 +265,8 @@ jobs:
               --metered-path="$RELEASE_PROBE_METERED_PATH" \
               --metered-method="$RELEASE_PROBE_METERED_METHOD" \
               --content-type="$RELEASE_PROBE_CONTENT_TYPE" \
+              --accounting="$PRODUCTION_CONVEX_SITE_URL/release-probe-accounting" \
               --output=release-evidence/pre-contract.json
-          fi
 
       - name: Mark production contraction pending
         id: contract_status
@@ -238,18 +288,25 @@ jobs:
 
       - name: Deep probe contracted state
         env:
-          RELEASE_PROBE_API_KEY: ${{ secrets.PRODUCTION_RELEASE_PROBE_API_KEY }}
+          CLERK_PRODUCTION_SECRET_KEY: ${{ secrets.CLERK_PRODUCTION_SECRET_KEY }}
           RELEASE_PROBE_REQUEST_BODY: ${{ secrets.PRODUCTION_RELEASE_PROBE_REQUEST_BODY }}
+          RELEASE_PROBE_SECRET: ${{ secrets.PRODUCTION_RELEASE_PROBE_SECRET }}
         run: |
-          node .github/scripts/release-contract.mjs \
-            --release="$ACTIVE_RELEASE" --web="$PRODUCTION_WEB_URL" \
-            --gateway="$PRODUCTION_GATEWAY_URL" \
-            --mock-path="$RELEASE_PROBE_MOCK_PATH" \
-            --mock-method="$RELEASE_PROBE_MOCK_METHOD" \
-            --metered-path="$RELEASE_PROBE_METERED_PATH" \
-            --metered-method="$RELEASE_PROBE_METERED_METHOD" \
-            --content-type="$RELEASE_PROBE_CONTENT_TYPE" \
-            --output=release-evidence/post-contract.json
+          node "$RELEASE_REFEREE_DIR/with-clerk-release-key.mjs" \
+            --clerk-secret-env=CLERK_PRODUCTION_SECRET_KEY \
+            --org-slug="$RELEASE_PROBE_CONSUMER_ORG_SLUG" \
+            --member-user-id="$RELEASE_PROBE_CONSUMER_MEMBER_USER_ID" \
+            --key-id="$RELEASE_PROBE_API_KEY_ID" -- \
+            node "$RELEASE_REFEREE_DIR/release-contract.mjs" \
+              --release="$ACTIVE_RELEASE" --web="$PRODUCTION_WEB_URL" \
+              --gateway="$PRODUCTION_GATEWAY_URL" \
+              --mock-path="$RELEASE_PROBE_MOCK_PATH" \
+              --mock-method="$RELEASE_PROBE_MOCK_METHOD" \
+              --metered-path="$RELEASE_PROBE_METERED_PATH" \
+              --metered-method="$RELEASE_PROBE_METERED_METHOD" \
+              --content-type="$RELEASE_PROBE_CONTENT_TYPE" \
+              --accounting="$PRODUCTION_CONVEX_SITE_URL/release-probe-accounting" \
+              --output=release-evidence/post-contract.json
 
       - name: Mark production contraction applied
         env:

@@ -195,8 +195,8 @@ function releaseFetch(
           requestId: REQUEST_ID,
           challenge: CHALLENGE,
           credits: 3,
-          platformFeeCredits: 0,
-          publisherNetCredits: 3,
+          platformFeeCredits: 0.15,
+          publisherNetCredits: 2.85,
         },
         { status: 200, headers: { "content-type": "application/json" } },
       );
@@ -253,8 +253,8 @@ describe("challenge-bound release probe", () => {
         requestId: REQUEST_ID,
         challenge: "d".repeat(64),
         credits: 3,
-        platformFeeCredits: 0,
-        publisherNetCredits: 3,
+        platformFeeCredits: 0.15,
+        publisherNetCredits: 2.85,
       },
     };
     await expect(
@@ -681,6 +681,14 @@ describe("production workflow invariants", () => {
     ".github/workflows/contract-production.yml",
     "utf8",
   );
+  const lifecycleWorkflow = readFileSync(
+    ".github/workflows/gateway-do-lifecycle.yml",
+    "utf8",
+  );
+  const recoveryWorkflow = readFileSync(
+    ".github/workflows/recover-production.yml",
+    "utf8",
+  );
 
   it("serializes releases behind a single production approval", () => {
     expect(workflow).toContain("group: production-release");
@@ -706,6 +714,58 @@ describe("production workflow invariants", () => {
     expect(workflow).toContain("release-state.mjs recover");
     expect(workflow).toContain("metered-method");
     expect(workflow).not.toMatch(/smoke/i);
+  });
+
+  it("resolves constrained probe keys at runtime through immutable referee", () => {
+    const protectedWorkflows = [
+      workflow,
+      contractWorkflow,
+      lifecycleWorkflow,
+      recoveryWorkflow,
+    ];
+    for (const protectedWorkflow of protectedWorkflows) {
+      expect(protectedWorkflow).not.toContain(
+        "PRODUCTION_RELEASE_PROBE_API_KEY",
+      );
+      expect(protectedWorkflow).not.toContain(
+        "node .github/scripts/release-contract.mjs",
+      );
+      expect(protectedWorkflow).toContain(
+        "RELEASE_PROBE_CONSUMER_ORG_SLUG: ${{ vars.RELEASE_PROBE_CONSUMER_ORG_SLUG }}",
+      );
+      expect(protectedWorkflow).toContain(
+        "RELEASE_PROBE_CONSUMER_MEMBER_USER_ID: ${{ vars.RELEASE_PROBE_CONSUMER_MEMBER_USER_ID }}",
+      );
+      expect(protectedWorkflow).toContain(
+        "RELEASE_PROBE_API_KEY_ID: ${{ vars.RELEASE_PROBE_API_KEY_ID }}",
+      );
+      expect(protectedWorkflow).toContain(
+        "RELEASE_PROBE_SECRET: ${{ secrets.PRODUCTION_RELEASE_PROBE_SECRET }}",
+      );
+      expect(protectedWorkflow).toContain(
+        'node "$RELEASE_REFEREE_DIR/with-clerk-release-key.mjs"',
+      );
+      expect(protectedWorkflow).toContain(
+        'node "$RELEASE_REFEREE_DIR/release-contract.mjs"',
+      );
+      expect(protectedWorkflow).toContain(
+        "install --frozen-lockfile --ignore-pnpmfile --ignore-scripts --registry=https://registry.npmjs.org/ --config.trust-lockfile=false --config.verify-store-integrity=true",
+      );
+      expect(protectedWorkflow).toContain(
+        '--accounting="$PRODUCTION_CONVEX_SITE_URL/release-probe-accounting"',
+      );
+    }
+
+    expect(workflow.match(/with-clerk-release-key\.mjs/g)).toHaveLength(4);
+    expect(contractWorkflow.match(/with-clerk-release-key\.mjs/g)).toHaveLength(
+      3,
+    );
+    expect(
+      lifecycleWorkflow.match(/with-clerk-release-key\.mjs/g),
+    ).toHaveLength(1);
+    expect(recoveryWorkflow.match(/with-clerk-release-key\.mjs/g)).toHaveLength(
+      1,
+    );
   });
 
   it("bounds preview propagation and checks response contracts", () => {
@@ -798,7 +858,7 @@ describe("Clerk runtime release-key resolver", () => {
     revoked: false,
     revocationReason: null,
     expired: false,
-    expiration: NOW + 10 * 60_000,
+    expiration: null,
     description: "Dedicated release probe",
     lastUsedAt: null,
     createdAt: NOW - 60_000,
@@ -863,7 +923,7 @@ describe("Clerk runtime release-key resolver", () => {
       id: "ak_exact",
       secret: API_KEY,
       organizationId: "org_exact",
-      expiration: NOW + 10 * 60_000,
+      expiration: null,
     });
     expect(client.organizations.getOrganizationList).toHaveBeenCalledTimes(2);
     expect(
@@ -874,7 +934,7 @@ describe("Clerk runtime release-key resolver", () => {
     );
   });
 
-  it("requires one exact short-lived key id", async () => {
+  it("requires one exact dedicated key id", async () => {
     const second = { ...matchingKey, id: "ak_second" };
     const ambiguous = paginatedClient([matchingKey, second]);
     await expect(
@@ -895,6 +955,29 @@ describe("Clerk runtime release-key resolver", () => {
         now: NOW,
       }),
     ).resolves.toMatchObject({ id: "ak_second" });
+  });
+
+  it("accepts persistent and future-expiring dedicated keys", async () => {
+    await expect(
+      resolveClerkReleaseKey({
+        client: paginatedClient(),
+        orgSlug: "consumer",
+        memberUserId: "user_member",
+        keyId: "ak_exact",
+        now: NOW,
+      }),
+    ).resolves.toMatchObject({ expiration: null });
+    await expect(
+      resolveClerkReleaseKey({
+        client: paginatedClient([
+          { ...matchingKey, expiration: NOW + 365 * 24 * 60 * 60_000 },
+        ]),
+        orgSlug: "consumer",
+        memberUserId: "user_member",
+        keyId: "ak_exact",
+        now: NOW,
+      }),
+    ).resolves.toMatchObject({ expiration: NOW + 365 * 24 * 60 * 60_000 });
   });
 
   it("rejects revoked, expired, wrong creator, and cross-org claims", async () => {
@@ -1051,6 +1134,100 @@ describe("Clerk runtime release-key resolver", () => {
           },
         ),
       ).rejects.toThrow(/exited 9/);
+      expect(client.apiKeys.verify).toHaveBeenCalledTimes(2);
+    } finally {
+      if (previous === undefined)
+        delete process.env.CLERK_PRODUCTION_SECRET_KEY;
+      else process.env.CLERK_PRODUCTION_SECRET_KEY = previous;
+    }
+  });
+
+  it("rejects every post-probe identity and active-state change", async () => {
+    const previous = process.env.CLERK_PRODUCTION_SECRET_KEY;
+    process.env.CLERK_PRODUCTION_SECRET_KEY = "sk_live_" + "s".repeat(40);
+    const changedRows = [
+      { ...matchingKey, revoked: true },
+      { ...matchingKey, expired: true },
+      { ...matchingKey, expiration: NOW },
+      { ...matchingKey, id: "ak_rotated" },
+      { ...matchingKey, claims: { org_id: "org_other" } },
+      { ...matchingKey, expiration: NOW + 60_000 },
+    ];
+    try {
+      for (const changed of changedRows) {
+        const client = paginatedClient();
+        client.apiKeys.verify
+          .mockReset()
+          .mockResolvedValueOnce(matchingKey)
+          .mockResolvedValueOnce(changed);
+        const spawnImpl = vi.fn(() => {
+          const child = new EventEmitter();
+          queueMicrotask(() => child.emit("exit", 0, null));
+          return child;
+        });
+        await expect(
+          runWithClerkKey(
+            [
+              "--clerk-secret-env=CLERK_PRODUCTION_SECRET_KEY",
+              "--org-slug=consumer",
+              "--member-user-id=user_member",
+              "--key-id=ak_exact",
+              "--",
+              "node",
+              "probe.mjs",
+            ],
+            {
+              client,
+              now: () => NOW,
+              mask: vi.fn(),
+              spawnImpl,
+            },
+          ),
+        ).rejects.toThrow(/rotated, revoked, or expired during probe/);
+        expect(client.apiKeys.verify).toHaveBeenCalledTimes(2);
+      }
+    } finally {
+      if (previous === undefined)
+        delete process.env.CLERK_PRODUCTION_SECRET_KEY;
+      else process.env.CLERK_PRODUCTION_SECRET_KEY = previous;
+    }
+  });
+
+  it("rejects a future-expiring key that expires during the probe", async () => {
+    const previous = process.env.CLERK_PRODUCTION_SECRET_KEY;
+    process.env.CLERK_PRODUCTION_SECRET_KEY = "sk_live_" + "s".repeat(40);
+    const expiringKey = { ...matchingKey, expiration: NOW + 60_000 };
+    const client = paginatedClient([expiringKey]);
+    client.apiKeys.verify.mockReset().mockResolvedValue(expiringKey);
+    const clock = vi
+      .fn()
+      .mockReturnValueOnce(NOW)
+      .mockReturnValueOnce(NOW + 60_001);
+    const spawnImpl = vi.fn(() => {
+      const child = new EventEmitter();
+      queueMicrotask(() => child.emit("exit", 0, null));
+      return child;
+    });
+    try {
+      await expect(
+        runWithClerkKey(
+          [
+            "--clerk-secret-env=CLERK_PRODUCTION_SECRET_KEY",
+            "--org-slug=consumer",
+            "--member-user-id=user_member",
+            "--key-id=ak_exact",
+            "--",
+            "node",
+            "probe.mjs",
+          ],
+          {
+            client,
+            now: clock,
+            mask: vi.fn(),
+            spawnImpl,
+          },
+        ),
+      ).rejects.toThrow(/rotated, revoked, or expired during probe/);
       expect(client.apiKeys.verify).toHaveBeenCalledTimes(2);
     } finally {
       if (previous === undefined)
