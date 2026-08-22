@@ -843,8 +843,8 @@ export async function probeRelease(options, fetchImpl = fetch) {
             };
           }
 
-          const expectedFee = Math.floor((metered.cost * 500) / 10_000);
-          const expectedNet = metered.cost - expectedFee;
+          const expectedFee = (metered.cost * 500) / 10_000;
+          const expectedNet = (metered.cost * 9_500) / 10_000;
           const exact =
             Object.keys(body).length === 6 &&
             body.requestId === metered.requestId &&
