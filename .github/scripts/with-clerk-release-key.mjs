@@ -126,12 +126,12 @@ function apiKeyRow(value) {
   return row;
 }
 
-async function collectPages(fetchPage, name) {
+async function collectPages(fetchPage, name, pageSize = PAGE_SIZE) {
   const rows = [];
   let offset = 0;
   let totalCount = null;
   while (totalCount === null || offset < totalCount) {
-    const page = await fetchPage({ limit: PAGE_SIZE, offset });
+    const page = await fetchPage({ limit: pageSize, offset });
     if (
       page === null ||
       !Array.isArray(page.data) ||
@@ -249,6 +249,7 @@ export async function resolveClerkReleaseKey({
         offset,
       }),
     "API keys",
+    100,
   );
   const matches = keys.map(apiKeyRow).filter((key) =>
     keyMatches(key, {

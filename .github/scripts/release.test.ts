@@ -930,7 +930,11 @@ describe("Clerk runtime release-key resolver", () => {
       client.organizations.getOrganizationMembershipList,
     ).toHaveBeenCalledTimes(2);
     expect(client.apiKeys.list).toHaveBeenCalledWith(
-      expect.objectContaining({ subject: "user_member", includeInvalid: true }),
+      expect.objectContaining({
+        subject: "user_member",
+        includeInvalid: true,
+        limit: 100,
+      }),
     );
   });
 
