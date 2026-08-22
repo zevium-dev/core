@@ -1828,37 +1828,67 @@ async function runPublisherChunk(
       if (earning.projectId === undefined) {
         throw new Error("Publisher earning lacks project provenance");
       }
-      const project = await ctx.db.get(earning.projectId);
+      const [project, usage] = await Promise.all([
+        ctx.db.get(earning.projectId),
+        ctx.db
+          .query("usageEvents")
+          .withIndex("by_settlement", (q) =>
+            q.eq("settleRefId", earning.usageSettlementRefId),
+          )
+          .unique(),
+      ]);
       if (
         project === null ||
+        usage === null ||
         project.organizationId !== earning.publisherOrganizationId
       ) {
-        throw new Error("Publisher earning project ownership is invalid");
+        throw new Error("Publisher earning provenance is invalid");
       }
+      const split = publisherEarningSplit(earning.grossCredits);
+      const clawedBackGrossCredits =
+        earning.clawedBackGrossCredits ??
+        (earning.status === "reversed" ? earning.grossCredits : 0);
+      const clawedBackAtoms =
+        earning.clawedBackAtoms ??
+        publisherEarningSplit(clawedBackGrossCredits).publisherNetAtoms;
+      const releasedAtoms =
+        earning.releasedAtoms ??
+        (earning.status === "pending_risk"
+          ? 0
+          : split.publisherNetAtoms - clawedBackAtoms);
       await ctx.db.patch(earning._id, {
+        consumerOrganizationId:
+          earning.consumerOrganizationId ?? usage.organizationId,
         projectName: project.name,
         projectSlug: project.slug,
+        platformFeeAtoms: split.platformFeeAtoms,
+        publisherNetAtoms: split.publisherNetAtoms,
+        clawedBackGrossCredits,
+        clawedBackAtoms,
+        releasedAtoms,
       });
       if (
-        earning.platformFeeAtoms + earning.publisherNetAtoms !==
+        split.platformFeeAtoms + split.publisherNetAtoms !==
           earning.grossCredits * ACCOUNTING_ATOMS_PER_CREDIT ||
-        earning.clawedBackGrossCredits < 0 ||
-        earning.clawedBackGrossCredits > earning.grossCredits ||
-        earning.clawedBackAtoms < 0 ||
-        earning.clawedBackAtoms > earning.publisherNetAtoms
+        clawedBackGrossCredits < 0 ||
+        clawedBackGrossCredits > earning.grossCredits ||
+        clawedBackAtoms < 0 ||
+        clawedBackAtoms > split.publisherNetAtoms ||
+        releasedAtoms < 0 ||
+        releasedAtoms > split.publisherNetAtoms
       ) {
         throw new Error("Publisher earning atom conservation failed");
       }
       if (earning.status === "pending_risk") {
         state.pending = safeAdd(
           state.pending,
-          earning.publisherNetAtoms - earning.clawedBackAtoms,
+          split.publisherNetAtoms - clawedBackAtoms,
           "Publisher pending risk",
         );
       }
       state.reversed = safeAdd(
         state.reversed,
-        earning.clawedBackAtoms,
+        clawedBackAtoms,
         "Publisher reversed aggregate",
       );
     }
@@ -3558,6 +3588,16 @@ async function runConservationChunk(
         maximumRowsRead: VERIFY_BATCH * 2,
       });
     for (const earning of page.page) {
+      if (
+        earning.consumerOrganizationId === undefined ||
+        earning.platformFeeAtoms === undefined ||
+        earning.publisherNetAtoms === undefined ||
+        earning.clawedBackGrossCredits === undefined ||
+        earning.clawedBackAtoms === undefined ||
+        earning.releasedAtoms === undefined
+      ) {
+        throw new Error(`Earning ${earning._id} migration is incomplete`);
+      }
       const split = publisherEarningSplit(earning.grossCredits);
       const publisher = await ctx.db.get(earning.publisherOrganizationId);
       const consumer = await ctx.db.get(earning.consumerOrganizationId);

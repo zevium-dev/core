@@ -28,6 +28,7 @@ import {
   adjustPublisherBalanceAggregates,
   appendPublisherSettlementEntry,
   assertPublisherBalanceReady,
+  assertPublisherEarningReady,
   getOrCreatePublisherBalance,
   releasePublisherEarning,
 } from "./lib/publisherLedger";
@@ -3846,16 +3847,19 @@ export const getPayoutState = query({
         canTransfer:
           (publisherBalance?.availableAtoms ?? 0) >=
           PUBLISHER_MINIMUM_PAYOUT_ATOMS,
-        rows: earnings.map((earning) => ({
-          id: earning._id,
-          grossCredits: earning.grossCredits,
-          platformFeeCredits: atomsToCredits(earning.platformFeeAtoms),
-          netCredits: atomsToCredits(earning.publisherNetAtoms),
-          clawedBackCredits: atomsToCredits(earning.clawedBackAtoms),
-          availableAt: earning.availableAt,
-          status: earning.status,
-          createdAt: earning.createdAt,
-        })),
+        rows: earnings.map((earning) => {
+          assertPublisherEarningReady(earning);
+          return {
+            id: earning._id,
+            grossCredits: earning.grossCredits,
+            platformFeeCredits: atomsToCredits(earning.platformFeeAtoms),
+            netCredits: atomsToCredits(earning.publisherNetAtoms),
+            clawedBackCredits: atomsToCredits(earning.clawedBackAtoms),
+            availableAt: earning.availableAt,
+            status: earning.status,
+            createdAt: earning.createdAt,
+          };
+        }),
       },
       transfers: transfers.map((transfer) => ({
         id: transfer._id,

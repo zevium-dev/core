@@ -1757,7 +1757,7 @@ export default defineSchema({
   // Each successful settlement creates exactly one immutable publisher split.
   publisherEarnings: defineTable({
     publisherOrganizationId: v.id("organizations"),
-    consumerOrganizationId: v.id("organizations"),
+    consumerOrganizationId: v.optional(v.id("organizations")),
     /** Immutable published project that earned this settlement. */
     projectId: v.optional(v.id("projects")),
     specVersionId: v.optional(v.id("specVersions")),
@@ -1767,13 +1767,13 @@ export default defineSchema({
     usageSettlementRefId: v.string(),
     grossCredits: v.number(),
     /** Exact atom values are canonical; decimal credits are display mirrors. */
-    platformFeeAtoms: v.number(),
-    publisherNetAtoms: v.number(),
+    platformFeeAtoms: v.optional(v.number()),
+    publisherNetAtoms: v.optional(v.number()),
     platformFeeCredits: v.number(),
     netCredits: v.number(),
-    clawedBackGrossCredits: v.number(),
-    clawedBackAtoms: v.number(),
-    releasedAtoms: v.number(),
+    clawedBackGrossCredits: v.optional(v.number()),
+    clawedBackAtoms: v.optional(v.number()),
+    releasedAtoms: v.optional(v.number()),
     availableAt: v.number(),
     status: v.union(
       v.literal("pending_risk"),
