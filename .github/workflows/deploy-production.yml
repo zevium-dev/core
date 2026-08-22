@@ -136,20 +136,27 @@ jobs:
         run: |
           remote="$(git ls-remote origin refs/heads/develop)"
           test "${remote%%[[:space:]]*}" = "$RELEASE_SHA"
-          pnpm --filter @zevium/gateway exec wrangler deploy --strict --keep-vars \
+          pnpm --filter @zevium/gateway exec wrangler versions upload --strict --keep-vars \
             --tag "production-$RELEASE_SHA" \
             --message "production $RELEASE_SHA" \
             --var "ZEVIUM_RELEASE:$RELEASE_SHA" \
             --var "CONVEX_URL:$PRODUCTION_CONVEX_URL" \
             --var "CONVEX_SITE_URL:https://polite-ermine-809.convex.site"
+          pnpm --filter @zevium/gateway exec wrangler versions deploy \
+            --version-tag "production-$RELEASE_SHA@100%" --yes \
+            --message "production $RELEASE_SHA"
 
       - name: Deploy web
         run: |
           remote="$(git ls-remote origin refs/heads/develop)"
           test "${remote%%[[:space:]]*}" = "$RELEASE_SHA"
-          pnpm --filter web exec wrangler deploy \
+          pnpm --filter web exec wrangler versions upload \
             --config dist/server/wrangler.json --strict --keep-vars \
             --tag "production-$RELEASE_SHA" \
+            --message "production $RELEASE_SHA"
+          pnpm --filter web exec wrangler versions deploy \
+            --config dist/server/wrangler.json \
+            --version-tag "production-$RELEASE_SHA@100%" --yes \
             --message "production $RELEASE_SHA"
 
       - name: Verify production

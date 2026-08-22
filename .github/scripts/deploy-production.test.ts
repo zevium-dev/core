@@ -20,7 +20,9 @@ describe("production deployment workflow", () => {
 
   it("uses supported provider commands in dependency order", () => {
     const convex = workflow.indexOf("pnpm exec convex deploy --message");
-    const gateway = workflow.indexOf("wrangler deploy --strict --keep-vars");
+    const gateway = workflow.indexOf(
+      "@zevium/gateway exec wrangler versions upload",
+    );
     const web = workflow.indexOf("--config dist/server/wrangler.json");
     const smoke = workflow.indexOf("Verify production");
     expect(Math.min(convex, gateway, web, smoke)).toBeGreaterThan(0);
@@ -30,6 +32,10 @@ describe("production deployment workflow", () => {
     expect(workflow).toContain("convex deploy --dry-run");
     expect(workflow).not.toMatch(/convex deploy[^\n]*--yes/);
     expect(workflow).toContain('--tag "production-$RELEASE_SHA"');
+    expect(workflow.match(/wrangler versions deploy/g)).toHaveLength(2);
+    expect(workflow).toContain(
+      '--version-tag "production-$RELEASE_SHA@100%" --yes',
+    );
   });
 
   it("has no self-hosted release policy or paid probe dependency", () => {
