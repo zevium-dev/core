@@ -6,12 +6,11 @@ const commands = [
   ["pnpm", ["exec", "turbo", "test"]],
   ["pnpm", ["run", "test:convex"]],
   ["pnpm", ["run", "test:proofs"]],
-  ["pnpm", ["--dir", "apps/deploy-broker", "run", "test:integration"]],
   ["pnpm", ["--dir", "apps/web", "run", "test:csrf-runtime"]],
   ["pnpm", ["run", "test:build-contract"]],
   ["pnpm", ["run", "test:e2e-harness"]],
   ["pnpm", ["run", "test:quality"]],
-  ["pnpm", ["run", "test:release"]],
+  ["pnpm", ["run", "test:deploy"]],
   ["pnpm", ["run", "test:audit"]],
 ];
 

@@ -29,8 +29,6 @@ jobs:
       contents: read
       pull-requests: read
     outputs:
-      checkout_sha: ${{ steps.context.outputs.checkout_sha }}
-      head_sha: ${{ steps.context.outputs.head_sha }}
       pr_number: ${{ steps.context.outputs.pr_number }}
     steps:
       - name: Resolve immutable closed PR context
@@ -50,16 +48,39 @@ jobs:
               core.setFailed('Fork cleanup identity is forbidden')
             }
             core.setOutput('pr_number', String(number))
-            core.setOutput('head_sha', pr.head.sha)
-            core.setOutput('checkout_sha', context.sha)
 
   cleanup:
     needs: cleanup-context
-    permissions:
-      contents: read
-      id-token: write
-    uses: ./.github/workflows/cloudflare-cleanup.yml
-    with:
-      checkout_sha: ${{ needs.cleanup-context.outputs.checkout_sha }}
-      head_sha: ${{ needs.cleanup-context.outputs.head_sha }}
-      pr_number: ${{ fromJSON(needs.cleanup-context.outputs.pr_number) }}
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 5
+    environment: preview
+    env:
+      CLOUDFLARE_ACCOUNT_ID: 1ea9299555b026a6a7484c8323c5a953
+      PR_NUMBER: ${{ needs.cleanup-context.outputs.pr_number }}
+    steps:
+      - name: Delete isolated Workers
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          response_body="$(mktemp)"
+          trap 'rm -f "$response_body"' EXIT
+
+          delete_worker() {
+            worker="$1"
+            status="$(curl --silent --show-error --output "$response_body" \
+              --write-out '%{http_code}' --request DELETE \
+              --header "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+              "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$worker")"
+
+            if [ "$status" = "200" ] || [ "$status" = "404" ]; then
+              echo "Removed $worker"
+              return
+            fi
+            echo "Failed to remove $worker (HTTP $status)" >&2
+            return 1
+          }
+
+          failed=0
+          delete_worker "zevium-web-pr-$PR_NUMBER" || failed=1
+          delete_worker "zevium-gateway-pr-$PR_NUMBER" || failed=1
+          exit "$failed"
