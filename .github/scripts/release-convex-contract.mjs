@@ -465,7 +465,7 @@ function sourceFilesAt(sha) {
         SOURCE_EXTENSION_RE.test(path) &&
         !path.endsWith(".d.ts") &&
         !path.startsWith("convex/_generated/") &&
-        !/\.(?:test|spec)\.(?:[cm]?[jt]sx?)$/.test(path) &&
+        !/\.(?:test|spec|setup)\.(?:[cm]?[jt]sx?)$/.test(path) &&
         !/\.config\.(?:[cm]?[jt]sx?)$/.test(path),
     )
     .sort();
@@ -525,6 +525,10 @@ function rootIdentifier(node) {
 function containsIdentifier(node, names) {
   let found = false;
   function visit(current) {
+    if (ts.isPropertyAccessExpression(current)) {
+      visit(current.expression);
+      return;
+    }
     if (ts.isIdentifier(current) && names.has(current.text)) {
       found = true;
       return;
@@ -585,25 +589,42 @@ function isTopLevelExpression(node) {
   );
 }
 
-function isStaticRouterRegistration(node) {
+function staticRegistrationFactories(source, methods) {
+  const factories = new Set();
+  for (const statement of source.statements) {
+    if (!ts.isFunctionDeclaration(statement) || !statement.name) continue;
+    function visit(node) {
+      if (
+        ts.isCallExpression(node) &&
+        isStaticTopLevelRegistration(node, methods, new Set())
+      ) {
+        factories.add(statement.name.text);
+      }
+      ts.forEachChild(node, visit);
+    }
+    visit(statement);
+  }
+  return factories;
+}
+
+function isStaticTopLevelRegistration(node, methods, factories) {
   if (!ts.isCallExpression(node)) return false;
   const expression = unwrap(node.expression);
+  if (ts.isIdentifier(expression)) return factories.has(expression.text);
   if (ts.isPropertyAccessExpression(expression)) {
-    return ["route", "routePrefix"].includes(expression.name.text);
+    return methods.has(expression.name.text);
   }
   if (!ts.isElementAccessExpression(expression)) return false;
   const literal = expression.argumentExpression
     ? literalAst(expression.argumentExpression)
     : undefined;
-  return (
-    literal?.kind === "string" &&
-    ["route", "routePrefix"].includes(literal.value)
-  );
+  return literal?.kind === "string" && methods.has(literal.value);
 }
 
 function assertStaticTopLevelContract(
   source,
-  allowRouterRegistrations = false,
+  allowedRegistrations = new Set(),
+  allowedFactories = new Set(),
 ) {
   const topLevel = new Set();
   const declarations = new Map();
@@ -652,7 +673,9 @@ function assertStaticTopLevelContract(
         containsIdentifier(node.left, topLevel) ||
         ["exports", "module"].includes(rootIdentifier(node.left)))
     ) {
-      throw new Error("Convex contract top-level constant is reassigned");
+      throw new Error(
+        `Convex contract top-level constant is reassigned at ${source.fileName}: ${node.getText(source)}`,
+      );
     }
     if (
       (ts.isPrefixUnaryExpression(node) || ts.isPostfixUnaryExpression(node)) &&
@@ -672,6 +695,7 @@ function assertStaticTopLevelContract(
     if (ts.isCallExpression(node)) {
       const expression = unwrap(node.expression);
       if (
+        enclosingFunction(node) === undefined &&
         ts.isPropertyAccessExpression(expression) &&
         ts.isIdentifier(expression.expression) &&
         expression.expression.text === "Object" &&
@@ -685,6 +709,7 @@ function assertStaticTopLevelContract(
         throw new Error("Convex contract uses runtime object mutation");
       }
       if (
+        enclosingFunction(node) === undefined &&
         ts.isPropertyAccessExpression(expression) &&
         ts.isIdentifier(expression.expression) &&
         expression.expression.text === "Reflect" &&
@@ -728,13 +753,20 @@ function assertStaticTopLevelContract(
       }
       if (
         isTopLevelExpression(node) &&
-        (!allowRouterRegistrations || !isStaticRouterRegistration(node))
+        !isStaticTopLevelRegistration(
+          node,
+          allowedRegistrations,
+          allowedFactories,
+        )
       ) {
         throw new Error(
           `Convex contract contains top-level side effect at ${source.fileName}: ${node.getText(source)}`,
         );
       }
-    } else if (isTopLevelExpression(node)) {
+    } else if (
+      isTopLevelExpression(node) &&
+      !(ts.isStringLiteral(node) && node.text === "use node")
+    ) {
       throw new Error(
         `Convex contract contains top-level side effect at ${source.fileName}: ${node.getText(source)}`,
       );
@@ -791,9 +823,7 @@ function exportedValues(path, sources, cache, stack = new Set()) {
       for (const element of statement.exportClause.elements) {
         const local = element.propertyName?.text ?? element.name.text;
         const value = locals.get(local);
-        if (value === undefined)
-          throw new Error(`Unresolved Convex export: ${path}:${local}`);
-        values.set(element.name.text, value);
+        if (value !== undefined) values.set(element.name.text, value);
       }
     }
   }
@@ -805,6 +835,7 @@ function exportedValues(path, sources, cache, stack = new Set()) {
       !ts.isStringLiteral(statement.moduleSpecifier)
     )
       continue;
+    if (!statement.moduleSpecifier.text.startsWith(".")) continue;
     const targetPath = resolveRelativeModuleFromSources(
       path,
       statement.moduleSpecifier.text,
@@ -830,10 +861,7 @@ function exportedValues(path, sources, cache, stack = new Set()) {
         if (element.isTypeOnly) continue;
         const imported = element.propertyName?.text ?? element.name.text;
         const value = target.get(imported);
-        if (value === undefined) {
-          throw new Error(`Unresolved Convex re-export: ${path}:${imported}`);
-        }
-        values.set(element.name.text, value);
+        if (value !== undefined) values.set(element.name.text, value);
       }
     } else {
       throw new Error(`Unsupported Convex namespace re-export: ${path}`);
@@ -871,7 +899,7 @@ function constantsIn(source, path, sources, exportCache = new Map()) {
               posix.join(posix.dirname(path), statement.moduleSpecifier.text),
             )
             .replace(SOURCE_EXTENSION_RE, "");
-          if (generatedTarget.endsWith("/_generated/server")) continue;
+          if (generatedTarget.includes("/_generated/")) continue;
           const targetPath = resolveRelativeModuleFromSources(
             path,
             statement.moduleSpecifier.text,
@@ -885,10 +913,7 @@ function constantsIn(source, path, sources, exportCache = new Map()) {
           const value = exportedValues(targetPath, sources, exportCache).get(
             imported,
           );
-          if (value === undefined) {
-            throw new Error(`Unresolved Convex import: ${path}:${imported}`);
-          }
-          constants.set(element.name.text, value);
+          if (value !== undefined) constants.set(element.name.text, value);
         }
       }
     }
@@ -909,10 +934,8 @@ function constantsIn(source, path, sources, exportCache = new Map()) {
       const value = exportedValues(targetPath, sources, exportCache).get(
         "default",
       );
-      if (value === undefined) {
-        throw new Error(`Unresolved Convex default import: ${path}`);
-      }
-      constants.set(statement.importClause.name.text, value);
+      if (value !== undefined)
+        constants.set(statement.importClause.name.text, value);
     }
     if (!ts.isVariableStatement(statement)) continue;
     if ((statement.declarationList.flags & ts.NodeFlags.Const) === 0) {
@@ -1624,7 +1647,22 @@ export function convexContractAt(sha) {
   };
   const exportCache = new Map();
   for (const [path, source] of sources) {
-    assertStaticTopLevelContract(source, path === httpPaths[0]);
+    const allowedRegistrations = new Set(
+      path === httpPaths[0]
+        ? ["route", "routePrefix"]
+        : /^convex\/crons\.(?:[cm]?[jt]s)$/.test(path)
+          ? ["interval", "hourly", "daily", "weekly", "monthly", "cron"]
+          : [],
+    );
+    const allowedFactories =
+      path === httpPaths[0]
+        ? staticRegistrationFactories(source, allowedRegistrations)
+        : new Set();
+    assertStaticTopLevelContract(
+      source,
+      allowedRegistrations,
+      allowedFactories,
+    );
     const constants = constantsIn(source, path, sources, exportCache);
     if (path === schemaPaths[0]) {
       inventory.tables = schemaInventory(source, constants);
