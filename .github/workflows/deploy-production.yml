@@ -165,11 +165,15 @@ jobs:
           wait_for_200() {
             url="$1"
             output="$2"
+            expected="${3:-}"
             for attempt in $(seq 1 30); do
               status="$(curl --location --silent --show-error --output "$output" \
                 --connect-timeout 2 --max-time 5 --write-out '%{http_code}' \
                 --header 'cache-control: no-cache' "$url" || true)"
-              test "$status" = 200 && return 0
+              if test "$status" = 200 && \
+                { test -z "$expected" || grep --fixed-strings --quiet "$expected" "$output"; }; then
+                return 0
+              fi
               (( attempt == 30 )) || sleep 2
             done
             return 1
@@ -181,8 +185,8 @@ jobs:
             if (health.ok !== true || health.service !== "zevium-gateway" ||
                 health.release !== process.env.RELEASE_SHA || health.contract !== 1) process.exit(1);
           '
-          wait_for_200 "$PRODUCTION_WEB_URL/?release=$RELEASE_SHA" deploy-evidence/landing.html
-          grep --fixed-strings --quiet "name=\"zevium-release\" content=\"$RELEASE_SHA\"" deploy-evidence/landing.html
+          wait_for_200 "$PRODUCTION_WEB_URL/?release=$RELEASE_SHA" deploy-evidence/landing.html \
+            "name=\"zevium-release\" content=\"$RELEASE_SHA\""
           wait_for_200 "$PRODUCTION_WEB_URL/catalogue" deploy-evidence/catalogue.html
           grep --fixed-strings --quiet '<title>Catalogue · Zevium</title>' deploy-evidence/catalogue.html
           grep --fixed-strings --quiet 'Public APIs with per-call credits' deploy-evidence/catalogue.html

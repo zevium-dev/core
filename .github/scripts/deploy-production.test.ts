@@ -45,4 +45,14 @@ describe("production deployment workflow", () => {
     expect(workflow).toContain("$PRODUCTION_GATEWAY_URL/health");
     expect(workflow).toContain("$PRODUCTION_WEB_URL/catalogue");
   });
+
+  it("waits for the promoted web release instead of accepting a stale 200", () => {
+    expect(workflow).toContain('expected="${3:-}"');
+    expect(workflow).toContain(
+      '{ test -z "$expected" || grep --fixed-strings --quiet "$expected" "$output"; }',
+    );
+    expect(workflow).toContain(
+      '"name=\\"zevium-release\\" content=\\"$RELEASE_SHA\\""',
+    );
+  });
 });
