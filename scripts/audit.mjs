@@ -142,7 +142,7 @@ const MISE_VERIFY_COMMAND = [
 ].join("\n");
 const PLAIN_INSTALL_COMMAND = "pnpm install --frozen-lockfile";
 const REFEREE_INSTALL_COMMAND =
-  'pnpm --dir "$REFEREE_ROOT" install --frozen-lockfile --ignore-scripts';
+  'pnpm --dir "$REFEREE_ROOT" install --frozen-lockfile --ignore-pnpmfile --ignore-scripts --registry=https://registry.npmjs.org/ --config.trust-lockfile=false --config.verify-store-integrity=true';
 const REBUILD_COMMAND = "pnpm rebuild";
 const BROWSER_INSTALL_COMMAND = "pnpm exec agent-browser install --with-deps";
 const ALLOWED_ACTIONS = new Map([

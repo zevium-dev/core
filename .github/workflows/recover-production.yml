@@ -103,7 +103,7 @@ jobs:
           git archive "$RELEASE_REFEREE_REF" | tar -x -C "$referee_root"
           echo "REFEREE_ROOT=$referee_root" >> "$GITHUB_ENV"
       - name: Install immutable referee dependencies
-        run: pnpm --dir "$REFEREE_ROOT" install --frozen-lockfile --ignore-scripts
+        run: pnpm --dir "$REFEREE_ROOT" install --frozen-lockfile --ignore-pnpmfile --ignore-scripts --registry=https://registry.npmjs.org/ --config.trust-lockfile=false --config.verify-store-integrity=true
       - name: Verify immutable release referee
         run: |
           referee_dir="$REFEREE_ROOT/.github/scripts"
@@ -314,7 +314,7 @@ jobs:
           git archive "$RELEASE_REFEREE_REF" | tar -x -C "$referee_root"
           echo "REFEREE_ROOT=$referee_root" >> "$GITHUB_ENV"
       - name: Install immutable referee dependencies
-        run: pnpm --dir "$REFEREE_ROOT" install --frozen-lockfile --ignore-scripts
+        run: pnpm --dir "$REFEREE_ROOT" install --frozen-lockfile --ignore-pnpmfile --ignore-scripts --registry=https://registry.npmjs.org/ --config.trust-lockfile=false --config.verify-store-integrity=true
       - name: Verify immutable release referee
         run: |
           referee_dir="$REFEREE_ROOT/.github/scripts"

@@ -8,7 +8,6 @@ const MEMBERSHIP_ID_RE = /^orgmem_[A-Za-z0-9]+$/;
 const USER_ID_RE = /^user_[A-Za-z0-9]+$/;
 const KEY_ID_RE = /^ak_[A-Za-z0-9]+$/;
 const PAGE_SIZE = 500;
-const MAX_RELEASE_KEY_TTL_MS = 15 * 60 * 1000;
 const CHILD_ENV_NAMES = new Set([
   "AGENT_BROWSER_BIN",
   "AGENT_BROWSER_EXECUTABLE_PATH",
@@ -161,9 +160,7 @@ function isActiveKey(key, now) {
   return (
     key.revoked === false &&
     key.expired === false &&
-    Number.isSafeInteger(key.expiration) &&
-    key.expiration > now &&
-    key.expiration - now <= MAX_RELEASE_KEY_TTL_MS
+    (key.expiration === null || key.expiration > now)
   );
 }
 
@@ -263,7 +260,7 @@ export async function resolveClerkReleaseKey({
   );
   if (matches.length !== 1) {
     throw new Error(
-      `expected one exact short-lived active Clerk API key, found ${matches.length}`,
+      `expected one exact active Clerk API key, found ${matches.length}`,
     );
   }
 
@@ -444,5 +441,3 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
     process.exitCode = 1;
   });
 }
-
-export { MAX_RELEASE_KEY_TTL_MS };
