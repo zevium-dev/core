@@ -1,7 +1,7 @@
 name: Pull Request Preview Cleanup
 
 on:
-  pull_request:
+  pull_request_target:
     types: [closed]
   workflow_dispatch:
     inputs:
@@ -36,10 +36,10 @@ jobs:
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         with:
           script: |
-            const number = context.eventName === 'pull_request'
+            const number = context.eventName === 'pull_request_target'
               ? context.payload.pull_request.number
               : Number('${{ inputs.pr_number }}')
-            const pr = context.eventName === 'pull_request'
+            const pr = context.eventName === 'pull_request_target'
               ? context.payload.pull_request
               : (await github.rest.pulls.get({ ...context.repo, pull_number: number })).data
             if (pr.state !== 'closed') core.setFailed('Cleanup PR must be closed')
