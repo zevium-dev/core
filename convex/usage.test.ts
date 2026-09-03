@@ -1,6 +1,6 @@
 /// <reference types="vite/client" />
 import { convexTest } from "convex-test";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { projectedCycleCredits } from "./billing";
@@ -596,6 +596,15 @@ describe("usage.listForOrg — scope and pagination hardening", () => {
 });
 
 describe("analytics.orgOverview", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-15T12:00:00.000Z"));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("keeps recent calls across month boundaries and survives Clerk slug drift", async () => {
     const t = convexTest(schema, modules);
     await seedWorld(t);
