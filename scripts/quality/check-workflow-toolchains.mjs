@@ -15,9 +15,6 @@ export const toolchainPolicy = Object.freeze({
     "node@24.15.0 npm:pnpm@11.8.0 actionlint@1.7.12 gitleaks@8.30.1 shellcheck@0.11.0",
 });
 const exactMiseConfig = [
-  "[hooks]",
-  'postinstall = "node scripts/audit-preflight.mjs && pnpm --filter . install --frozen-lockfile --ignore-pnpmfile --ignore-scripts --registry=https://registry.npmjs.org/ --config.trust-lockfile=false --config.verify-store-integrity=true"',
-  "",
   "[tasks]",
   'ci = "pnpm run ci:pr"',
   "",
@@ -90,26 +87,13 @@ export function validateWorkflowToolchain(path) {
       .filter(([run]) => run === exactVerification)
       .map(([, index]) => index);
     const verifyIndex = verifyIndexes[0] ?? -1;
-    const runsAudit = steps.some(
-      (step) => runText(step) === "node scripts/audit.mjs",
-    );
-    const auditBootstrapInstall =
-      "pnpm --filter . install --frozen-lockfile --ignore-pnpmfile --ignore-scripts --registry=https://registry.npmjs.org/ --config.trust-lockfile=false --config.verify-store-integrity=true";
     const installIndexes = steps
       .map((step, index) => [runText(step), index])
-      .filter(([run]) =>
-        runsAudit
-          ? run === auditBootstrapInstall
-          : run === "pnpm install --frozen-lockfile",
-      )
+      .filter(([run]) => run === "pnpm install --frozen-lockfile")
       .map(([, index]) => index);
     const allInstallIndexes = steps
       .map((step, index) => [runText(step), index])
-      .filter(
-        ([run]) =>
-          /(^|\s)pnpm\s+(?:install|i)(?:\s|$)/m.test(run) ||
-          (runsAudit && run === auditBootstrapInstall),
-      )
+      .filter(([run]) => /(^|\s)pnpm\s+(?:install|i)(?:\s|$)/m.test(run))
       .map(([, index]) => index);
     if (verifyIndexes.length !== 1 || verifyIndex <= miseIndex) {
       failures.push(
@@ -140,7 +124,6 @@ export function validateWorkflowToolchain(path) {
       if (
         index < installIndex &&
         index !== verifyIndex &&
-        !(runsAudit && run === "node scripts/audit-preflight.mjs") &&
         dependencyCommand.test(run)
       ) {
         failures.push(
