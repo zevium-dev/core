@@ -84,3 +84,52 @@ jobs:
           delete_worker "zevium-web-pr-$PR_NUMBER" || failed=1
           delete_worker "zevium-gateway-pr-$PR_NUMBER" || failed=1
           exit "$failed"
+
+      - name: Delete isolated Convex preview
+        if: ${{ !cancelled() }}
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        env:
+          CONVEX_PREVIEW_DEPLOY_KEY: ${{ secrets.CONVEX_PREVIEW_DEPLOY_KEY }}
+        with:
+          script: |
+            const key = process.env.CONVEX_PREVIEW_DEPLOY_KEY
+            const match = /^preview:([^:|]+):([^:|]+)\|.+$/.exec(key || '')
+            const pr = process.env.PR_NUMBER
+            if (!match || !/^[1-9][0-9]*$/.test(pr || '')) {
+              throw new Error('Valid preview deploy key and PR number required')
+            }
+            const previewName = `pr-${pr}`
+            const headers = { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' }
+            const response = await fetch('https://api.convex.dev/api/deployment/authorize_preview', {
+              method: 'POST',
+              headers,
+              signal: AbortSignal.timeout(30000),
+              body: JSON.stringify({
+                previewName,
+                projectSelection: {
+                  kind: 'teamAndProjectSlugs',
+                  teamSlug: match[1],
+                  projectSlug: match[2],
+                },
+              }),
+            })
+            const deployment = await response.json()
+            if (response.status === 404 && deployment.code === 'PreviewNotFound') {
+              core.info(`Convex preview ${previewName} already absent`)
+              return
+            }
+            if (!response.ok) throw new Error(`Convex preview lookup failed (HTTP ${response.status})`)
+            if (deployment.deploymentType !== 'preview' ||
+                deployment.reference !== `preview/${previewName}` ||
+                !/^[a-z0-9-]+$/.test(deployment.deploymentName || '')) {
+              throw new Error('Convex preview identity mismatch; refusing deletion')
+            }
+            const deleted = await fetch(`https://api.convex.dev/v1/deployments/${deployment.deploymentName}/delete`, {
+              method: 'POST',
+              headers,
+              signal: AbortSignal.timeout(30000),
+            })
+            if (!deleted.ok && deleted.status !== 404) {
+              throw new Error(`Convex preview deletion failed (HTTP ${deleted.status})`)
+            }
+            core.info(`Removed Convex preview ${previewName}`)
