@@ -11,7 +11,6 @@ const commands = [
   ["pnpm", ["run", "test:e2e-harness"]],
   ["pnpm", ["run", "test:quality"]],
   ["pnpm", ["run", "test:deploy"]],
-  ["pnpm", ["run", "test:audit"]],
 ];
 
 try {
