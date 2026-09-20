@@ -40,7 +40,7 @@
     "test:compliance-claims": "node --test scripts/check-compliance-claims.test.mjs && pnpm --filter @zevium/shared exec vitest run src/public-claims.test.ts"
   },
   "devDependencies": {
-    "@clerk/backend": "^3.16.4",
+    "@clerk/backend": "^3.18.1",
     "@edge-runtime/vm": "^5.0.0",
     "@tanstack/eslint-plugin-router": "1.162.0",
     "@types/node": "26.2.0",
