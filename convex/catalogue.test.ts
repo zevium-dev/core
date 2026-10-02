@@ -238,6 +238,55 @@ describe("summarizePublishedPricing", () => {
 });
 
 describe("catalogue.listPublic", () => {
+  it.each([
+    ["raw", "missing"],
+    ["raw", "retired"],
+    ["raw", "rebound"],
+    ["projected", "missing"],
+    ["projected", "retired"],
+    ["projected", "rebound"],
+  ] as const)("hides %s cards whose route is %s", async (mode, failure) => {
+    const t = convexTest(schema, modules);
+    const seed = await seedCatalogue(t);
+    if (mode === "projected") {
+      await t.mutation(internal.catalogue.backfillCatalogueListingsPage, {
+        cursor: null,
+      });
+    }
+    await t.run(async (ctx) => {
+      const binding = await ctx.db
+        .query("publicRouteTombstones")
+        .withIndex("by_project", (q) => q.eq("projectId", seed.cheapId))
+        .unique();
+      if (!binding) throw new Error("Expected seeded route binding");
+      if (failure === "missing") await ctx.db.delete(binding._id);
+      else if (failure === "retired")
+        await ctx.db.patch(binding._id, { retiredAt: seed.t2 });
+      else await ctx.db.patch(binding._id, { projectId: seed.freeId });
+    });
+
+    expect(
+      await t.query(api.catalogue.getPublicDetail, {
+        publisherHandle: "pub-co",
+        projectSlug: "cheap",
+      }),
+    ).toBeNull();
+    for (const args of [{}, { tag: "tools" }, { search: "cheap" }]) {
+      const page = await t.query(api.catalogue.listPublic, args);
+      expect(page.items.map((item) => item.slug)).not.toContain("cheap");
+    }
+    await t.mutation(internal.catalogue.backfillCatalogueListingsPage, {
+      cursor: null,
+    });
+    const listing = await t.run((ctx) =>
+      ctx.db
+        .query("catalogueListings")
+        .withIndex("by_project", (q) => q.eq("projectId", seed.cheapId))
+        .unique(),
+    );
+    expect(listing?.discoverable ?? false).toBe(false);
+  });
+
   it("excludes private and draft projects", async () => {
     const t = convexTest(schema, modules);
     await seedCatalogue(t);
@@ -458,6 +507,13 @@ describe("catalogue.listPublic", () => {
           status: "published",
           visibility: "public",
           tags: ["scale"],
+        });
+        await ctx.db.insert("publicRouteTombstones", {
+          organizationId: orgId,
+          projectId,
+          publisherHandle: "scale-publisher",
+          projectSlug: `api-${suffix}`,
+          reservedAt: index + 1,
         });
         await ctx.db.insert("specVersions", {
           projectId,

@@ -5,12 +5,20 @@ import {
   type QualitySnapshotContract,
 } from "@zevium/shared";
 import { v } from "convex/values";
-import { internalMutation, query, type MutationCtx } from "./_generated/server";
+import {
+  internalMutation,
+  query,
+  type MutationCtx,
+  type QueryCtx,
+} from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
-import { getActiveOrgById, getOrgByClerkId } from "./lib/auth";
+import { getActiveOrgById } from "./lib/auth";
 import { qualitySnapshotContract } from "./lib/qualityContract";
-import { resolveActivePublicRoute } from "./lib/publicRoutes";
+import {
+  getActivePublicRouteBinding,
+  resolveActivePublicRoute,
+} from "./lib/publicRoutes";
 import { isPublishedSurfaceAllowed } from "./lib/publicClaims";
 
 const PAGE_SIZE = 24;
@@ -125,6 +133,26 @@ function publicListing(listing: Doc<"catalogueListings">): PublicListing {
     pricing: listingPricing(listing),
     quality: null,
   };
+}
+
+/** Cards must resolve to the same active route that their detail page reads. */
+async function isListingRouteActive(
+  ctx: QueryCtx,
+  listing: Doc<"catalogueListings">,
+): Promise<boolean> {
+  const route = await resolveActivePublicRoute(
+    ctx,
+    listing.publisherHandle,
+    listing.slug,
+  );
+  return (
+    route !== null &&
+    route.project._id === listing.projectId &&
+    route.organization.clerkOrgId === listing.clerkOrgId &&
+    route.project.status === "published" &&
+    route.project.visibility === "public" &&
+    route.project.deprecationStartedAt === undefined
+  );
 }
 
 async function adjustCatalogueCount(
@@ -244,7 +272,8 @@ export async function syncCatalogueListing(
     project.visibility === "public" &&
     project.deprecationStartedAt === undefined &&
     project.retiredAt === undefined &&
-    organization.archivedAt === undefined;
+    organization.archivedAt === undefined &&
+    (await getActivePublicRouteBinding(ctx, organization, project)) !== null;
   if (!discoverable && existing === null) return null;
   const latest = await ctx.db
     .query("specVersions")
@@ -493,6 +522,15 @@ export const listPublic = query({
         ) {
           continue;
         }
+        const route = await resolveActivePublicRoute(
+          ctx,
+          organization.publicHandle,
+          project.slug,
+        );
+        if (route?.project._id !== project._id) {
+          staleCount += 1;
+          continue;
+        }
         const latest = await ctx.db
           .query("specVersions")
           .withIndex("by_project_published", (q) =>
@@ -623,10 +661,7 @@ export const listPublic = query({
                 listing.minCost > maxCostCap)
             )
               return null;
-            const organization = await getOrgByClerkId(ctx, listing.clerkOrgId);
-            return organization?.publicHandle === listing.publisherHandle
-              ? listing
-              : null;
+            return (await isListingRouteActive(ctx, listing)) ? listing : null;
           }),
         )
       ).filter(
@@ -732,8 +767,7 @@ export const listPublic = query({
     });
     const active = await Promise.all(
       filtered.map(async (listing) => {
-        const organization = await getOrgByClerkId(ctx, listing.clerkOrgId);
-        return organization?.publicHandle === listing.publisherHandle
+        return (await isListingRouteActive(ctx, listing))
           ? { listing, stale: false }
           : { listing, stale: true };
       }),
