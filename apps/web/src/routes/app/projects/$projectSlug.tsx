@@ -97,9 +97,9 @@ export const Route = createFileRoute("/app/projects/$projectSlug")({
       projectSlug: params.projectSlug,
     });
 
-    // Client nav: fire-and-forget; component skeletons cover pending.
+    // Wait for the shared title; slow requests still use the route skeleton.
     if (typeof window !== "undefined") {
-      void queryClient.prefetchQuery(queryOpts);
+      await queryClient.prefetchQuery(queryOpts);
       return;
     }
 
@@ -114,6 +114,7 @@ export const Route = createFileRoute("/app/projects/$projectSlug")({
     meta: [{ title: `${params.projectSlug} · Projects · Zevium` }],
   }),
   pendingComponent: ProjectPageSkeleton,
+  pendingMs: 1000,
 });
 
 function ProjectLayoutPage() {
@@ -239,7 +240,7 @@ function ProjectShell({
             <Badge variant="outline">{project.visibility}</Badge>
           </div>
           <h1
-            className="min-w-0 text-2xl font-semibold tracking-tight [overflow-wrap:anywhere]"
+            className="w-fit min-w-0 max-w-full text-2xl font-semibold tracking-tight [overflow-wrap:anywhere]"
             style={{
               viewTransitionName: `project-title-${project.slug}`,
             }}

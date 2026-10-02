@@ -676,7 +676,7 @@ function CatalogueCard({ item }: { item: CatalogueCardItem }) {
         <CardHeader>
           <div className="flex min-w-0 flex-wrap items-start justify-between gap-2">
             <CardTitle
-              className="min-w-0 [overflow-wrap:anywhere]"
+              className="w-fit min-w-0 max-w-full [overflow-wrap:anywhere]"
               style={{
                 viewTransitionName: `api-title-${item.publisherHandle}-${item.slug}`,
               }}

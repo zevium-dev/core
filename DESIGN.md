@@ -99,7 +99,7 @@ Naming convention `{kind}-{slug}`, must be unique per snapshot. The signature mo
 | Org switcher → org home                            | `org-name-{slug}`                                                                               |
 | Credits balance (sidebar chip → billing page stat) | `credit-balance`                                                                                |
 
-- Text that changes size/font across a morph: show the new snapshot immediately while the _group_ animates position/size over `DUR.page` — prevents font-crossfade flash. Elements present on only one side fade in or out. `main-content` crossfades without interpolating page dimensions
+- Text that changes size/font across a morph: fit named elements to their text, constrained to the available width. Show the new snapshot immediately while the _group_ animates position/size over `DUR.page` — prevents font-crossfade flash. Elements present on only one side fade in or out. `main-content` crossfades without interpolating page dimensions
 - The morph inventory grows with FLOW.md; every new list→detail pair ships with a morph or a written reason why not
 
 ### VT ↔ Motion coordination
