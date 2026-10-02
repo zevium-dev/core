@@ -126,11 +126,13 @@ function LandingPage() {
             <div className="flex flex-wrap items-center gap-3">
               <Magnetic strength={0.3}>
                 <Button asChild size="lg" className="min-h-11">
-                  <Link
-                    to="/catalogue"
-                    style={{ viewTransitionName: "catalogue-heading" }}
-                  >
-                    Browse catalogue
+                  <Link to="/catalogue">
+                    <span
+                      className="inline-block"
+                      style={{ viewTransitionName: "catalogue-heading" }}
+                    >
+                      Browse catalogue
+                    </span>
                   </Link>
                 </Button>
               </Magnetic>

@@ -90,14 +90,14 @@ configureViewTransitions(router);
 
 Naming convention `{kind}-{slug}`, must be unique per snapshot. The signature moments:
 
-| From → To                                          | Morphing element(s)                                                                            |
-| -------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| Catalogue card → API detail                        | `api-title-{slug}`, `api-logo-{slug}`, `api-price-{slug}` — card title grows into page heading |
-| Projects list → project page                       | `project-title-{slug}`, `project-status-{slug}`                                                |
-| Project page → spec editor / explorer              | `project-title-{slug}` persists in breadcrumb                                                  |
-| Landing hero CTA → catalogue heading               | `catalogue-heading`                                                                            |
-| Org switcher → org home                            | `org-name-{slug}`                                                                              |
-| Credits balance (sidebar chip → billing page stat) | `credit-balance`                                                                               |
+| From → To                                          | Morphing element(s)                                                                             |
+| -------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| Catalogue card → API detail                        | `api-title-{slug}`, `api-logo-{slug}`, `api-price-{slug}` — card title grows into page heading  |
+| Projects list → project page                       | `project-title-{slug}`, `project-status-{slug}`                                                 |
+| Project page → spec editor / explorer              | `project-title-{slug}` persists in breadcrumb                                                   |
+| Landing hero CTA → catalogue heading               | `catalogue-heading` — text only; heading fits its content, button chrome stays in the page fade |
+| Org switcher → org home                            | `org-name-{slug}`                                                                               |
+| Credits balance (sidebar chip → billing page stat) | `credit-balance`                                                                                |
 
 - Text that changes size/font across a morph: show the new snapshot immediately while the _group_ animates position/size over `DUR.page` — prevents font-crossfade flash. Elements present on only one side fade in or out. `main-content` crossfades without interpolating page dimensions
 - The morph inventory grows with FLOW.md; every new list→detail pair ships with a morph or a written reason why not

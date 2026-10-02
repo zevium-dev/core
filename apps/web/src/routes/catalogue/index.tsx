@@ -279,7 +279,7 @@ function CataloguePage() {
         <div>
           <div>
             <h1
-              className="text-3xl font-semibold tracking-tight"
+              className="w-fit text-3xl font-semibold tracking-tight"
               style={{ viewTransitionName: "catalogue-heading" }}
             >
               Catalogue
