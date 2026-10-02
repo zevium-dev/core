@@ -122,6 +122,8 @@ body {
 }
 
 @theme inline {
+  --default-transition-duration: var(--dur-instant);
+  --default-transition-timing-function: var(--ease);
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -194,6 +196,17 @@ body {
   animation: content-enter var(--dur-page) var(--ease) both;
 }
 
+/* Hard-load entrances must not replay inside or after a route snapshot. */
+html[data-navigation="client"] .content-enter,
+html[data-view-transition="active"] .content-enter {
+  animation: none;
+}
+
+html[data-view-transition="active"] .motion-entrance {
+  opacity: 1 !important;
+  transform: none !important;
+}
+
 @keyframes content-enter {
   from {
     opacity: 0;
@@ -203,17 +216,56 @@ body {
   }
 }
 
-/* View Transitions — default cross-fade of main-content */
-::view-transition-old(root),
-::view-transition-new(root) {
+/* Shared groups travel together; their text swaps without double exposure. */
+::view-transition {
+  pointer-events: none;
+}
+
+::view-transition-group(*) {
   animation-duration: var(--dur-page);
   animation-timing-function: var(--ease);
 }
 
-::view-transition-old(main-content),
+::view-transition-old(*) {
+  animation: none;
+  opacity: 0;
+}
+
+::view-transition-new(*) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+
+/* Elements present in only one snapshot still get an entrance or exit. */
+::view-transition-old(*):only-child {
+  opacity: 1;
+  animation: content-exit var(--dur-page) var(--ease) both;
+}
+
+::view-transition-new(*):only-child {
+  animation: content-enter var(--dur-page) var(--ease) both;
+}
+
+/* Page surfaces crossfade without stretching to the other page's height. */
+::view-transition-group(main-content) {
+  animation: none;
+}
+
+::view-transition-old(root),
+::view-transition-old(main-content) {
+  opacity: 1;
+  animation: content-exit var(--dur-page) var(--ease) both;
+}
+
+::view-transition-new(root),
 ::view-transition-new(main-content) {
-  animation-duration: var(--dur-page);
-  animation-timing-function: var(--ease);
+  animation: content-enter var(--dur-page) var(--ease) both;
+}
+
+@keyframes content-exit {
+  to {
+    opacity: 0;
+  }
 }
 
 /* Sidebar-level hops (no list→detail morph): fast swap, not 400ms page morph */
@@ -222,6 +274,33 @@ html:active-view-transition-type(nav-swap)::view-transition-new(root),
 html:active-view-transition-type(nav-swap)::view-transition-old(main-content),
 html:active-view-transition-type(nav-swap)::view-transition-new(main-content) {
   animation-duration: var(--dur-fast);
+}
+
+/* Retiming lives here so stock shadcn/Radix markup stays intact. */
+[data-slot="dialog-overlay"],
+[data-slot="sheet-overlay"],
+[data-slot="dropdown-menu-content"],
+[data-slot="dropdown-menu-sub-content"],
+[data-slot="popover-content"],
+[data-slot="select-content"],
+[data-slot="tooltip-content"] {
+  animation-duration: var(--dur-fast);
+  animation-timing-function: var(--ease);
+}
+
+[data-slot="dialog-content"],
+[data-slot="sheet-content"] {
+  animation-duration: var(--dur-base);
+  animation-timing-function: var(--ease);
+}
+
+[data-slot="tabs-content"][data-state="active"] {
+  animation: content-enter var(--dur-fast) var(--ease);
+}
+
+[data-sonner-toaster] [data-sonner-toast][data-styled="true"] {
+  transition-duration: var(--dur-base);
+  transition-timing-function: var(--ease);
 }
 
 /* Inline link underline draw */

@@ -50,4 +50,27 @@ describe("route view-transition policy", () => {
       }),
     ).toEqual(["navigate-forward"]);
   });
+
+  it.each([
+    ["/catalogue", "/catalogue/acme/weather"],
+    ["/app/projects", "/app/projects/weather"],
+  ])("preserves morphs to and from %s", (list, detail) => {
+    stubMotionPreference(false);
+    expect(
+      routeViewTransitionTypes({
+        fromIndex: 1,
+        toIndex: 2,
+        fromPath: list,
+        toPath: detail,
+      }),
+    ).toEqual(["navigate-forward"]);
+    expect(
+      routeViewTransitionTypes({
+        fromIndex: 2,
+        toIndex: 1,
+        fromPath: detail,
+        toPath: list,
+      }),
+    ).toEqual(["navigate-back"]);
+  });
 });

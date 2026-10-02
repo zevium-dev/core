@@ -229,6 +229,7 @@ function ApiDetailPage() {
 
       <main
         id="main-content"
+        style={{ viewTransitionName: "main-content" }}
         tabIndex={-1}
         className="mx-auto max-w-6xl px-4 py-8 outline-none content-enter"
       >
@@ -345,7 +346,7 @@ function ApiDetailBody({
                   {" "}
                   ·{" "}
                   <span
-                    className="tabular-nums text-foreground"
+                    className="inline-block tabular-nums text-foreground"
                     style={{
                       viewTransitionName: `api-price-${data.org.publisherHandle}-${data.project.slug}`,
                     }}
@@ -1513,6 +1514,7 @@ function ApiDetailSkeleton() {
       <PublicHeader active="catalogue" />
       <main
         id="main-content"
+        style={{ viewTransitionName: "main-content" }}
         tabIndex={-1}
         className="mx-auto max-w-6xl px-4 py-8 outline-none"
       >

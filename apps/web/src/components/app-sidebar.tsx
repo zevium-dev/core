@@ -96,7 +96,6 @@ export function AppSidebar() {
           <SidebarGroupLabel>Workspace</SidebarGroupLabel>
           <SidebarGroupContent>
             <OrganizationSwitcher
-              key={compact ? "compact" : "expanded"}
               appearance={{
                 theme: clerkShadcnTheme,
                 elements: {
@@ -162,7 +161,6 @@ export function AppSidebar() {
           <SidebarMenuItem>
             <div className="flex min-w-0 items-center gap-2 rounded-md p-1 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:p-0">
               <UserButton
-                key={compact ? "compact" : "expanded"}
                 showName={!compact}
                 appearance={{
                   theme: clerkShadcnTheme,

@@ -10,7 +10,7 @@ import { LazyMotion, domAnimation } from "motion/react";
 
 import { RouteError } from "#/components/route-error";
 import { routeViewTransitionTypes } from "#/lib/view-transition";
-import { markViewTransitionActive } from "#/lib/vt";
+import { configureViewTransitions } from "#/lib/vt";
 import { routeTree } from "./routeTree.gen";
 
 export interface RouterContext {
@@ -115,7 +115,6 @@ export function getRouter(): AnyRouter {
           fromPath: fromLocation?.pathname,
           toPath: toLocation.pathname,
         });
-        if (types !== false) markViewTransitionActive();
         return types;
       },
     },
@@ -126,6 +125,7 @@ export function getRouter(): AnyRouter {
     ),
   });
 
+  configureViewTransitions(router);
   setupRouterSsrQueryIntegration({ router, queryClient });
 
   return router;

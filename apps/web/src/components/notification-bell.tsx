@@ -13,7 +13,7 @@ import {
   Webhook,
   type LucideIcon,
 } from "lucide-react";
-import { m, useReducedMotion } from "motion/react";
+import { m } from "motion/react";
 import { useEffect, useState, type ComponentType } from "react";
 import { toast } from "sonner";
 
@@ -31,6 +31,7 @@ import { humanError } from "#/lib/human-error";
 import { DUR, EASE, SPRING, STAGGER } from "#/lib/motion";
 import { formatRelativeTime } from "#/lib/relative-time";
 import { vtState } from "#/lib/vt";
+import { useHydratedReducedMotion } from "#/hooks/use-hydrated-reduced-motion";
 
 /**
  * lucide icon per notification kind. A fallback covers any future kind without
@@ -122,7 +123,7 @@ function DisabledBell({ ready }: { ready: boolean }) {
 }
 
 function BellWithOrg({ orgSlug }: { orgSlug: string }) {
-  const reduce = useReducedMotion();
+  const reduce = useHydratedReducedMotion();
   const [open, setOpen] = useState(false);
   const [cursor, setCursor] = useState<string | null>(null);
   const [olderPages, setOlderPages] = useState<BellNotification[]>([]);
@@ -213,9 +214,9 @@ function BellWithOrg({ orgSlug }: { orgSlug: string }) {
           {unread > 0 ? (
             <m.span
               key={unread}
-              initial={reduce ? false : { scale: 0 }}
+              initial={reduce || vtState.active ? false : { scale: 0 }}
               animate={{ scale: 1 }}
-              transition={SPRING.pop}
+              transition={reduce ? { duration: 0 } : SPRING.pop}
               className="absolute -top-0.5 -right-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-foreground px-1 text-[10px] font-semibold leading-none text-background tabular-nums"
             >
               {unreadLabel}
@@ -342,8 +343,8 @@ function NotificationRow({
     "aria-hidden"?: boolean | "true" | "false";
   }>;
   // Cap stagger so long lists don't string out past 400ms (DESIGN.md).
-  const delay = Math.min(index, 7) * STAGGER;
-  const skip = reduce || vtState.active;
+  const delay = Math.min(index * STAGGER, DUR.page - DUR.fast);
+  const skip = reduce || vtState.active || index >= 8;
 
   const content = (
     <>
@@ -366,7 +367,11 @@ function NotificationRow({
   const motionProps = {
     initial: skip ? (false as const) : { opacity: 0, y: 4 },
     animate: { opacity: 1, y: 0 },
-    transition: { duration: DUR.fast, ease: EASE, delay },
+    transition: {
+      duration: skip ? 0 : DUR.fast,
+      ease: EASE,
+      delay: skip ? 0 : delay,
+    },
     onClick,
     className:
       "flex w-full cursor-pointer items-start gap-2.5 border-b px-3 py-2.5 text-left transition-[background-color] duration-[var(--dur-instant)] ease-[var(--ease)] hover:bg-accent focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 data-[read=true]:opacity-60 last:border-b-0",
@@ -389,14 +394,14 @@ function NotificationRow({
 }
 
 function EmptyState() {
-  const reduce = useReducedMotion();
+  const reduce = useHydratedReducedMotion();
   const skip = Boolean(reduce) || vtState.active;
   return (
     <div className="flex flex-col items-center gap-2 px-4 py-10 text-center">
       <m.span
         initial={skip ? false : { opacity: 0, y: 6 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: DUR.base, ease: EASE }}
+        transition={{ duration: skip ? 0 : DUR.base, ease: EASE }}
         className="flex size-10 items-center justify-center rounded-full bg-muted text-muted-foreground"
       >
         <BellOff aria-hidden="true" className="size-5" />

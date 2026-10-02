@@ -108,6 +108,7 @@ function LandingPage() {
 
       <main
         id="main-content"
+        style={{ viewTransitionName: "main-content" }}
         tabIndex={-1}
         className="mx-auto flex w-full max-w-[100rem] flex-col gap-24 px-4 py-16 outline-none sm:py-24"
       >
@@ -519,7 +520,11 @@ function TeaserCard({
   return (
     <Card className="h-full transition-[translate,scale,box-shadow,border-color] duration-[var(--dur-instant)] ease-[var(--ease)] group-hover:-translate-y-0.5 group-hover:shadow-sm group-active:scale-[0.98] motion-reduce:transition-none motion-reduce:group-hover:translate-y-0 motion-reduce:group-active:scale-100">
       <CardHeader>
-        <CardTitle>{name}</CardTitle>
+        <CardTitle
+          style={{ viewTransitionName: `api-title-${publisherHandle}-${slug}` }}
+        >
+          {name}
+        </CardTitle>
         <CardAction>
           <Badge variant="secondary" className="shrink-0">
             {orgName}

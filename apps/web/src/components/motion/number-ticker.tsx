@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 
 import { DUR } from "#/lib/motion";
+import { useHydratedReducedMotion } from "#/hooks/use-hydrated-reduced-motion";
+import { vtState } from "#/lib/vt";
 import { cn } from "#/lib/utils";
 
 export type NumberTickerProps = {
@@ -23,16 +25,6 @@ function defaultFormat(n: number, decimals: number): string {
   });
 }
 
-function prefersReducedMotion(): boolean {
-  if (
-    typeof window === "undefined" ||
-    typeof window.matchMedia !== "function"
-  ) {
-    return false;
-  }
-  return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-}
-
 /**
  * Count-up for credits balance / stats.
  * Cubic ease-out ≤1s; reduced-motion renders final value immediately.
@@ -44,12 +36,13 @@ export function NumberTicker({
   format,
   viewTransitionName,
 }: NumberTickerProps) {
+  const reduce = useHydratedReducedMotion();
   const [display, setDisplay] = useState(value);
   const fromRef = useRef(value);
   const frameRef = useRef<number | null>(null);
 
   useEffect(() => {
-    if (prefersReducedMotion()) {
+    if (reduce || vtState.active) {
       setDisplay(value);
       fromRef.current = value;
       return;
@@ -71,6 +64,7 @@ export function NumberTicker({
       const elapsed = now - start;
       const t = Math.min(1, elapsed / durationMs);
       const next = from + (to - from) * easeOutCubic(t);
+      fromRef.current = next;
       setDisplay(next);
       if (t < 1) {
         frameRef.current = requestAnimationFrame(tick);
@@ -85,14 +79,17 @@ export function NumberTicker({
       if (frameRef.current !== null) {
         cancelAnimationFrame(frameRef.current);
       }
-      fromRef.current = to;
     };
-  }, [value]);
+  }, [reduce, value]);
 
+  const visibleValue = reduce ? value : display;
   const text =
     format !== undefined
-      ? format(display)
-      : defaultFormat(decimals === 0 ? Math.round(display) : display, decimals);
+      ? format(visibleValue)
+      : defaultFormat(
+          decimals === 0 ? Math.round(visibleValue) : visibleValue,
+          decimals,
+        );
 
   return (
     <span

@@ -272,6 +272,7 @@ function CataloguePage() {
 
       <main
         id="main-content"
+        style={{ viewTransitionName: "main-content" }}
         tabIndex={-1}
         className="mx-auto flex max-w-6xl flex-col gap-6 px-4 py-8 outline-none content-enter"
       >
@@ -815,6 +816,7 @@ function CatalogueSkeleton() {
       <PublicHeader active="catalogue" />
       <main
         id="main-content"
+        style={{ viewTransitionName: "main-content" }}
         tabIndex={-1}
         className="mx-auto flex max-w-6xl flex-col gap-6 px-4 py-8 outline-none"
       >
