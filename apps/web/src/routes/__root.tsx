@@ -87,11 +87,6 @@ export const Route = createRootRouteWithContext<RouterContext>()({
       };
     }
 
-    const serverContext = (
-      options as typeof options & { serverContext?: { nonce?: string } }
-    ).serverContext;
-    if (serverContext?.nonce) context.applySsrNonce(serverContext.nonce);
-
     const { userId, token, orgSlug, orgId } = await fetchConvexAuth();
     await context.principalCache.transition(userId, orgId);
 

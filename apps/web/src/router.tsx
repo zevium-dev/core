@@ -5,6 +5,7 @@ import {
   type AnyRouter,
 } from "@tanstack/react-router";
 import { setupRouterSsrQueryIntegration } from "@tanstack/react-router-ssr-query";
+import { getGlobalStartContext } from "@tanstack/react-start";
 import { LazyMotion, domAnimation } from "motion/react";
 
 import { RouteError } from "#/components/route-error";
@@ -24,8 +25,6 @@ export interface RouterContext {
   /** Active Clerk org id; null when none selected. */
   orgId: string | null;
   principalCache: PrincipalCache;
-  /** Request-scoped SSR nonce setter; inert in browser router. */
-  applySsrNonce: (nonce: string) => void;
 }
 
 export interface PrincipalCache {
@@ -40,7 +39,12 @@ if (typeof convexUrl !== "string" || convexUrl.length === 0) {
 }
 
 export function getRouter(): AnyRouter {
-  let routerRef: AnyRouter | null = null;
+  let nonce: string | undefined;
+  try {
+    nonce = getGlobalStartContext()?.nonce;
+  } catch {
+    // Clerk redirects also create routers outside Start's request context.
+  }
   // TanStack Start calls getRouter once per SSR request and once in the
   // browser. Keeping both clients here isolates SSR auth and query caches
   // without relying on worker AsyncLocalStorage support.
@@ -82,6 +86,8 @@ export function getRouter(): AnyRouter {
 
   const router = createTanStackRouter({
     routeTree,
+    // Streaming captures the nonce before beforeLoad runs.
+    ssr: { nonce },
     scrollRestoration: true,
     defaultPreload: "intent",
     // Intent-preloads must survive to the click; 0 discards them.
@@ -98,11 +104,6 @@ export function getRouter(): AnyRouter {
       orgSlug: null,
       orgId: null,
       principalCache,
-      applySsrNonce: (nonce: string) => {
-        if (routerRef !== null) {
-          routerRef.options.ssr = { ...routerRef.options.ssr, nonce };
-        }
-      },
     } satisfies RouterContext,
     defaultViewTransition: {
       types: ({ fromLocation, toLocation }) => {
@@ -126,8 +127,6 @@ export function getRouter(): AnyRouter {
   });
 
   setupRouterSsrQueryIntegration({ router, queryClient });
-  routerRef = router;
-  routerRef = router;
 
   return router;
 }
@@ -135,5 +134,11 @@ export function getRouter(): AnyRouter {
 declare module "@tanstack/react-router" {
   interface Register {
     router: AnyRouter;
+  }
+}
+
+declare module "@tanstack/react-start" {
+  interface Register {
+    server: { requestContext: { nonce?: string } };
   }
 }
