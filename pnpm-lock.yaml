@@ -42,8 +42,8 @@ importers:
         specifier: 26.6.4
         version: 26.6.4
       agent-browser:
-        specifier: 0.27.1
-        version: 0.27.1
+        specifier: 0.38.2
+        version: 0.38.2
       concurrently:
         specifier: ^10.0.5
         version: 10.0.5
@@ -3129,8 +3129,8 @@ packages:
     engines: {node: '>=0.4.0'}
     hasBin: true
 
-  agent-browser@0.27.1:
-    resolution: {integrity: sha512-lLzpWDV7nlVsA5km7yMCH1wppvnLLNx160hLwLdDUkCst9x38UhhxoiTmmJ2qreOnCa/Hp4/Gm6Adkahhtb6Hg==}
+  agent-browser@0.38.2:
+    resolution: {integrity: sha512-b/7hvo2RrqocvybjB9kwpX12kGkxkFvtdJ4XPDoott5TLK2n3aPX+lYg7ALd+2YvPi2LrTKGzQYu/rxZC2Y7ZA==}
     engines: {node: '>=24.0.0', pnpm: '>=11.0.0'}
     hasBin: true
 
@@ -7155,7 +7155,7 @@ snapshots:
 
   acorn@8.18.0: {}
 
-  agent-browser@0.27.1: {}
+  agent-browser@0.38.2: {}
 
   ajv@6.15.0:
     dependencies:
