@@ -1,3 +1,5 @@
+// @vitest-environment jsdom
+
 import { MAX_ENDPOINT_COST_CREDITS } from "@zevium/shared";
 import {
   createMemoryHistory,
@@ -61,6 +63,7 @@ describe("catalogue URL search boundary", () => {
         validateSearch: catalogueSearchSchema,
       });
       return createRouter({
+        isServer: false,
         routeTree: root.addChildren([catalogue]),
         history: createMemoryHistory({ initialEntries: [initialEntry] }),
       });
@@ -127,6 +130,7 @@ describe("admin moderation tab URL boundary", () => {
         validateSearch: reviewModerationSearchSchema,
       });
       return createRouter({
+        isServer: false,
         routeTree: root.addChildren([reviews]),
         history: createMemoryHistory({ initialEntries: [initialEntry] }),
       });
