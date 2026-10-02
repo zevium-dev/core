@@ -26,6 +26,8 @@ minimumReleaseAgeExclude:
   - "@clerk/*"
 
 overrides:
+  # Lezer NodeProp ids must come from one module across parser and highlighter.
+  "@lezer/common": 1.5.3
   undici: 7.30.0
   "concurrently>shell-quote": 1.10.0
   "jayson>uuid": 11.1.1

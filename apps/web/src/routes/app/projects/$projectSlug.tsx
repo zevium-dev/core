@@ -50,7 +50,7 @@ import {
   EmptyTitle,
 } from "#/components/ui/empty";
 import { Skeleton } from "#/components/ui/skeleton";
-import { Tabs, TabsList, TabsTrigger } from "#/components/ui/tabs";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "#/components/ui/tabs";
 import { ToggleGroup, ToggleGroupItem } from "#/components/ui/toggle-group";
 import {
   ANALYTICS_RANGES,
@@ -347,51 +347,55 @@ function ProjectShell({
           <TabsTrigger value="earnings">Earnings</TabsTrigger>
           <TabsTrigger value="settings">Settings</TabsTrigger>
         </TabsList>
+        <TabsContent value={tab}>
+          {isSpecRoute ? (
+            <Outlet />
+          ) : panel === "analytics" ? (
+            <Suspense fallback={<AnalyticsSkeleton />}>
+              <ProjectAnalyticsPanel
+                orgSlug={orgSlug}
+                projectSlug={project.slug}
+                rangeDays={searchRange ?? 7}
+                onRangeChange={(rangeDays) =>
+                  void navigate({
+                    to: "/app/projects/$projectSlug",
+                    params: { projectSlug: project.slug },
+                    search: {
+                      tab: "analytics",
+                      ...(rangeDays === 7 ? {} : { range: rangeDays }),
+                    },
+                  })
+                }
+              />
+            </Suspense>
+          ) : panel === "earnings" ? (
+            <Suspense fallback={<EarningsSkeleton />}>
+              <ProjectEarningsPanel
+                orgSlug={orgSlug}
+                projectSlug={project.slug}
+              />
+            </Suspense>
+          ) : panel === "settings" ? (
+            <ProjectSettingsPanel
+              key={String(project._id)}
+              project={project}
+              orgSlug={orgSlug}
+              canAdminister={canAdminister}
+            />
+          ) : (
+            <ProjectOverview
+              project={project}
+              onEdit={() =>
+                void navigate({
+                  to: "/app/projects/$projectSlug",
+                  params: { projectSlug: project.slug },
+                  search: { tab: "settings" },
+                })
+              }
+            />
+          )}
+        </TabsContent>
       </Tabs>
-
-      {isSpecRoute ? (
-        <Outlet />
-      ) : panel === "analytics" ? (
-        <Suspense fallback={<AnalyticsSkeleton />}>
-          <ProjectAnalyticsPanel
-            orgSlug={orgSlug}
-            projectSlug={project.slug}
-            rangeDays={searchRange ?? 7}
-            onRangeChange={(rangeDays) =>
-              void navigate({
-                to: "/app/projects/$projectSlug",
-                params: { projectSlug: project.slug },
-                search: {
-                  tab: "analytics",
-                  ...(rangeDays === 7 ? {} : { range: rangeDays }),
-                },
-              })
-            }
-          />
-        </Suspense>
-      ) : panel === "earnings" ? (
-        <Suspense fallback={<EarningsSkeleton />}>
-          <ProjectEarningsPanel orgSlug={orgSlug} projectSlug={project.slug} />
-        </Suspense>
-      ) : panel === "settings" ? (
-        <ProjectSettingsPanel
-          key={String(project._id)}
-          project={project}
-          orgSlug={orgSlug}
-          canAdminister={canAdminister}
-        />
-      ) : (
-        <ProjectOverview
-          project={project}
-          onEdit={() =>
-            void navigate({
-              to: "/app/projects/$projectSlug",
-              params: { projectSlug: project.slug },
-              search: { tab: "settings" },
-            })
-          }
-        />
-      )}
     </div>
   );
 }

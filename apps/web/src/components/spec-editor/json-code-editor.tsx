@@ -84,8 +84,13 @@ export function JsonCodeEditor({
       linter(lintSource, { delay: LINT_DEBOUNCE_MS }),
       createShadcnEditorTheme(),
       EditorViewMinHeight,
+      EditorView.contentAttributes.of({
+        "aria-label": readOnly
+          ? "Published OpenAPI specification"
+          : "OpenAPI specification",
+      }),
     ],
-    [lintSource],
+    [lintSource, readOnly],
   );
 
   return (
