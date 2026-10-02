@@ -79,6 +79,10 @@ describe("actual moderation route surface", () => {
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     expect(await screen.findByText("Broken contract")).toBeTruthy();
     expect(screen.getByText("2 open reports")).toBeTruthy();
+    const selectedTab = screen.getByRole("tab", { selected: true });
+    const panel = screen.getByRole("tabpanel", { name: "Reported" });
+    expect(selectedTab.getAttribute("aria-controls")).toBe(panel.id);
+    expect(panel.contains(screen.getByText("Broken contract"))).toBe(true);
   });
 
   it("associates and focuses inline moderation failure", async () => {
