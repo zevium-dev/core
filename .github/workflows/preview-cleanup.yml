@@ -53,7 +53,9 @@ jobs:
     needs: cleanup-context
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 5
-    environment: preview
+    environment:
+      name: preview
+      deployment: false
     env:
       CLOUDFLARE_ACCOUNT_ID: 1ea9299555b026a6a7484c8323c5a953
       PR_NUMBER: ${{ needs.cleanup-context.outputs.pr_number }}

@@ -2,7 +2,7 @@ name: Pull Request Preview
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, labeled]
+    types: [labeled]
   workflow_dispatch:
     inputs:
       pr_number:
@@ -11,7 +11,13 @@ on:
         type: number
 
 concurrency:
-  group: preview-${{ github.event.pull_request.number || inputs.pr_number }}
+  # Unrelated labels must not cancel a running preview or queued cleanup.
+  group: >-
+    ${{ (github.event_name == 'workflow_dispatch' ||
+    github.event.label.name == 'preview' ||
+    (github.event.label.name == 'full-e2e' && contains(github.event.pull_request.labels.*.name, 'preview'))) &&
+    format('preview-{0}', github.event.pull_request.number || inputs.pr_number) ||
+    format('preview-skipped-{0}', github.run_id) }}
   cancel-in-progress: true
 
 permissions:
@@ -24,8 +30,8 @@ env:
 jobs:
   preview-target:
     if: >-
-      github.event_name == 'workflow_dispatch' || github.event.action != 'labeled' ||
-      github.event.label.name == 'full-e2e'
+      github.event_name == 'workflow_dispatch' || github.event.label.name == 'preview' ||
+      (github.event.label.name == 'full-e2e' && contains(github.event.pull_request.labels.*.name, 'preview'))
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 3
     permissions:
@@ -55,7 +61,9 @@ jobs:
     needs: [preview-target]
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 10
-    environment: preview
+    environment:
+      name: preview
+      deployment: false
     outputs:
       convex_url: ${{ steps.deploy.outputs.convex_url }}
       convex_site_url: ${{ steps.deploy.outputs.convex_site_url }}
@@ -103,7 +111,9 @@ jobs:
     needs: [preview-target, preview-convex]
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 10
-    environment: preview
+    environment:
+      name: preview
+      deployment: false
     outputs:
       gateway_url: ${{ steps.deploy.outputs.gateway_url }}
       release_sha: ${{ steps.deploy.outputs.release_sha }}
@@ -161,7 +171,9 @@ jobs:
     needs: [preview-target, preview-convex]
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 10
-    environment: preview
+    environment:
+      name: preview
+      deployment: false
     env:
       VITE_CONVEX_URL: ${{ needs.preview-convex.outputs.convex_url }}
       VITE_GATEWAY_URL: https://zevium-gateway-pr-${{ github.event.pull_request.number || inputs.pr_number }}.zevium-dev.workers.dev
@@ -203,7 +215,9 @@ jobs:
     needs: preview-convex
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 10
-    environment: preview
+    environment:
+      name: preview
+      deployment: false
     env:
       VITE_CONVEX_URL: ${{ needs.preview-convex.outputs.convex_url }}
       VITE_GATEWAY_URL: https://zevium-gateway-pr-${{ github.event.pull_request.number || inputs.pr_number }}.zevium-dev.workers.dev
@@ -242,7 +256,9 @@ jobs:
       id-token: write
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 10
-    environment: preview
+    environment:
+      name: preview
+      deployment: false
     outputs:
       web_url: ${{ steps.deploy.outputs.web_url }}
     steps:
@@ -283,10 +299,13 @@ jobs:
           echo "web_url=https://${web_name}.zevium-dev.workers.dev" >> "$GITHUB_OUTPUT"
 
   deploy-and-test:
-    needs: [preview-target, gateway-preview, web-preview]
+    needs: [preview-target, gateway-preview, web-preview, exact-compliance-surface]
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 5
-    environment: preview
+    # One deployment record represents the complete preview and its smoke checks.
+    environment:
+      name: preview
+      url: ${{ needs.web-preview.outputs.web_url }}
     permissions:
       contents: read
       pull-requests: write
@@ -401,10 +420,12 @@ jobs:
     if: >-
       needs.deploy-and-test.result == 'success' &&
       (github.event_name == 'workflow_dispatch' ||
-      (github.event.action == 'labeled' && github.event.label.name == 'full-e2e'))
+      contains(github.event.pull_request.labels.*.name, 'full-e2e'))
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 20
-    environment: preview
+    environment:
+      name: preview
+      deployment: false
     env:
       E2E_BASE_URL: ${{ needs.deploy-and-test.outputs.web_url }}
       E2E_EXPECTED_COMMIT: ${{ needs.preview-target.outputs.ref }}
