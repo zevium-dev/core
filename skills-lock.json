@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "anti-slop-writing": {
+      "source": "adewale/anti-slop-writing",
+      "sourceType": "github",
+      "skillPath": "skills/anti-slop-writing/SKILL.md",
+      "computedHash": "e263b4f15ec1a6da16f2c31936d28cc8047980b0f31961ba7d0478edef249df0"
+    }
+  }
+}

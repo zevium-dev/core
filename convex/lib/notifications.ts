@@ -181,7 +181,7 @@ export async function upsertProjectRetirementConsumerNotice(
         : `${args.projectName} retirement canceled`,
     body:
       args.event === "scheduled"
-        ? `${args.publisherName}'s ${args.projectName} API will sunset ${new Date(args.sunsetAt).toISOString()}. ${args.message ?? "Migrate before the cutoff."}`
+        ? `${args.publisherName}'s ${args.projectName} API will stop accepting live calls on ${new Date(args.sunsetAt).toISOString()}. ${args.message ?? "Migrate before this date."}`
         : `${args.publisherName}'s ${args.projectName} API retirement scheduled for ${new Date(args.sunsetAt).toISOString()} was canceled.`,
     refId: `project_retirement:${args.projectId}:consumer:${args.consumerClerkOrgId}`,
     publisherHandle: args.publisherHandle,

@@ -161,7 +161,8 @@ function CreateProjectPage() {
         <CardHeader>
           <CardTitle>Project details</CardTitle>
           <CardDescription>
-            Slug is unique within your organization and used in gateway URLs.
+            The slug forms part of this API’s URL. It must be unique within your
+            organization and cannot be changed after creation.
           </CardDescription>
         </CardHeader>
         <CardContent>

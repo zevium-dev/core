@@ -175,7 +175,9 @@ export function ProjectSettingsPanel({
   const { mutate: deleteProject, isPending: deletePending } = useMutation({
     mutationFn: () => removeProject({ projectId: project._id }),
     onSuccess: async () => {
-      toast.success("Project archived");
+      toast.success(
+        project.status === "draft" ? "Project deleted" : "Project retired",
+      );
       setDeleteOpen(false);
       await queryClient.invalidateQueries({
         queryKey: convexQuery(api.projects.list, { orgSlug }).queryKey,
@@ -183,7 +185,7 @@ export function ProjectSettingsPanel({
       void navigate({ to: "/app/projects" });
     },
     onError: (err: unknown) => {
-      toast.error(humanError(err, "Could not archive project"));
+      toast.error(humanError(err, "Could not remove project"));
     },
   });
 
@@ -275,7 +277,7 @@ export function ProjectSettingsPanel({
           <CardTitle>Admin access required</CardTitle>
           <CardDescription>
             Organization admins manage project metadata, visibility, upstream
-            credentials, webhooks, and deletion. Your access remains read-only.
+            credentials, webhooks, and deletion. Ask an admin to make changes.
           </CardDescription>
         </CardHeader>
       </Card>
@@ -499,7 +501,7 @@ export function ProjectSettingsPanel({
                   </DialogTitle>
                   <DialogDescription>
                     {isPublishedPublic
-                      ? "New discovery freezes immediately. Existing gateway traffic continues through sunset, then stops."
+                      ? "This API will leave new discovery. Existing consumers can keep calling it until the sunset date, when live calls stop."
                       : nextVisibility === "public"
                         ? "Public projects appear in the catalogue when published. Only published specs are listed."
                         : "Private projects stay hidden from the public catalogue."}
@@ -600,8 +602,8 @@ export function ProjectSettingsPanel({
           <CardTitle className="text-destructive">Danger zone</CardTitle>
           <CardDescription>
             {project.status === "draft"
-              ? "Delete this draft and its unpublished spec permanently."
-              : "Retire this published project after its sunset. Immutable versions, usage, and financial records remain available for audit integrity."}
+              ? "Remove this draft project from your workspace. Its API URL cannot be reused."
+              : "Remove this published API after its sunset. Published versions, usage history, and financial records will be kept."}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -666,7 +668,11 @@ export function ProjectSettingsPanel({
                   disabled={deletePending || !canDelete}
                   onClick={() => deleteProject()}
                 >
-                  {deletePending ? "Archiving…" : "Archive project"}
+                  {deletePending
+                    ? "Removing…"
+                    : project.status === "draft"
+                      ? "Delete project"
+                      : "Retire project"}
                 </Button>
               </DialogFooter>
             </DialogContent>
@@ -811,8 +817,9 @@ function UpstreamCredentialsCard({ project }: { project: Doc<"projects"> }) {
           Upstream credentials
         </CardTitle>
         <CardDescription>
-          Gateway injects these headers after removing consumer credentials.
-          Secret values are write-only and never shown again.
+          The gateway uses these headers to authenticate with your API. Consumer
+          keys are removed before forwarding. Save secrets carefully; their
+          values cannot be shown again.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-5">
@@ -943,9 +950,8 @@ function UpstreamCredentialsCard({ project }: { project: Doc<"projects"> }) {
               Remove {credentialToRemove?.name ?? "credential"}?
             </DialogTitle>
             <DialogDescription>
-              Gateway calls may start failing immediately after the propagation
-              window. Replace this credential first if the upstream still
-              requires it.
+              Replace this credential first if your API still requires it. Live
+              calls may fail once its removal reaches the gateway.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -1141,8 +1147,9 @@ function WebhooksCard({ project }: { project: Doc<"projects"> }) {
           Webhooks
         </CardTitle>
         <CardDescription>
-          Receive spec lifecycle events (publish, deprecate) at your endpoint.
-          One endpoint per project.
+          Receive events when a version is published or deprecated, or when
+          project visibility changes. Each project can have one webhook
+          endpoint.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-5">
@@ -1311,8 +1318,8 @@ function WebhooksCard({ project }: { project: Doc<"projects"> }) {
             </p>
           ) : deliveries.length === 0 ? (
             <p className="text-xs text-muted-foreground">
-              No deliveries yet. Events appear here after a publish or
-              deprecate.
+              No deliveries yet. Publish or deprecate a version, or change
+              project visibility, to trigger an event.
             </p>
           ) : (
             <ul className="space-y-1.5">

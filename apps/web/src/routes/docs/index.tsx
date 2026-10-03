@@ -32,25 +32,23 @@ function DocsIndexPage() {
   return (
     <DocsPage
       title="Getting started"
-      description="Zevium is an agent-first, per-call API marketplace. Publishers list APIs via OpenAPI specs; consumers prepay credits and pay per call through a metered gateway."
+      description="Find an API, add credits to your organization’s wallet, and make your first live call."
     >
       <h2>What is Zevium</h2>
       <p>
-        Publishers publish APIs described by OpenAPI specs. Consumers — human
-        developers and AI agents — pay per call via prepaid credits through a
-        metered gateway. The spec is the product: upstream address, endpoints,
-        per-endpoint pricing, and free tier all live in the spec.
+        Zevium is an API marketplace for developers and agents. Publishers list
+        APIs with an OpenAPI spec that describes each endpoint and its price.
+        You can try free mock responses before paying for live calls.
       </p>
       <p>
-        Every call flows through one gateway URL, authenticated by one key,
-        metered against one org wallet. Zero balance blocks the call — never a
-        surprise overage.
+        Your Zevium key works across the catalogue. Live calls use your
+        organization’s prepaid wallet and stop when it has no balance.
       </p>
 
       <h2>Credits model</h2>
       <p>
-        Pricing is declared per endpoint in the spec as credits. One global
-        exchange rate, never per-API:
+        Each endpoint has a price in credits. Credits have the same dollar value
+        across the catalogue:
       </p>
       <DocsCodeBlock
         lang="text"
@@ -62,41 +60,43 @@ Per call:
   Publisher earns      95 credits  (95% revenue share)`}
       />
       <p>
-        Credits are prepaid by the consumer org via one-time top-ups. The
-        platform cut and publisher share settle per call at charge time.
-        Publisher earnings accumulate toward payouts.
+        Add credits with a one-time top-up. Each successful paid call spends
+        credits from your organization’s wallet, with 95% of the charge going to
+        the publisher.
       </p>
 
       <h2>Quickstart</h2>
       <p>
-        From zero to first metered call in under a minute, fully self-serve.
+        Choose an API from the catalogue, then follow these steps for a live
+        call.
       </p>
       <ol>
         <li>
-          <strong>Sign up.</strong> Create an account. A personal org is created
-          automatically — the org owns the wallet.
+          <strong>Sign up.</strong> Create an account, then choose or create an
+          organization. Its wallet funds your live API calls.
         </li>
         <li>
           <strong>Top up.</strong> Buy credits from{" "}
-          <Link to="/app">Dashboard → Billing</Link>. $1 buys 10,000 credits.
+          <Link to="/app/billing">Billing</Link>. $1 buys 10,000 credits.
         </li>
         <li>
           <strong>Create a key.</strong> From{" "}
-          <Link to="/app/settings/keys">Settings → Keys</Link>. Keys are
-          org-scoped — one per user, drawing from the org wallet. The secret is
-          shown once; copy it now.
+          <Link to="/app/settings/keys">Settings → Keys</Link>. Keys are linked
+          to the selected organization’s wallet, with one current key per
+          member. The secret is shown once; save it before closing the dialog.
         </li>
         <li>
-          <strong>Make your first call.</strong> Find an API in the{" "}
-          <Link to="/catalogue">catalogue</Link>, then call its gateway URL:
+          <strong>Make your first call.</strong> Copy the gateway URL from your
+          chosen API’s <Link to="/catalogue">catalogue</Link> page. The example
+          below uses placeholder API names and a sample body; replace them with
+          the endpoint you chose:
         </li>
       </ol>
       <DocsCodeBlock lang="bash" code={FIRST_CALL} />
       <p>
-        The gateway authenticates your key, checks the wallet covers the call,
-        forwards to the publisher's upstream, and streams the response back. You
-        pay only on a successful upstream response — failures refund
-        automatically.
+        The gateway checks your key and reserves the call’s cost before
+        contacting the publisher. A successful response settles the charge. A
+        failed upstream response releases the reservation.
       </p>
 
       <h2>Next</h2>

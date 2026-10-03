@@ -384,8 +384,9 @@ function ApiDetailBody({
           </div>
         ) : null}
         <p className="text-xs text-muted-foreground">
-          Runtime reliability and publisher verification are not reported yet.
-          Start with the keyless mock before choosing a live call.
+          Try a free mock to inspect the response shape. Quality badges show
+          measured call results and health checks when enough samples are
+          available.
         </p>
       </div>
 
@@ -495,8 +496,8 @@ function EndpointDocs({
       <div>
         <h2 className="text-lg font-semibold tracking-tight">API reference</h2>
         <p className="text-sm text-muted-foreground">
-          Parameters, examples, responses, and exact live cost come from this
-          immutable published OpenAPI version.
+          Request fields, response examples, and endpoint prices come from the
+          published OpenAPI spec.
         </p>
       </div>
       <div className="space-y-4">
@@ -987,8 +988,8 @@ function TryItPanel({
       <CardHeader>
         <CardTitle className="text-base">Request playground</CardTitle>
         <CardDescription>
-          Mock is default: schema-generated response, no key, no upstream, zero
-          credits. Switch to live only when ready to spend.
+          Start with a free mock response generated from the spec. Switch to
+          Live to call the publisher’s API at the displayed price.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -1022,8 +1023,9 @@ function TryItPanel({
             >
               <Badge variant="secondary">mock response · 0 credits</Badge>
               <span>
-                Calls hit <span className="font-mono text-xs">/mock</span> — no
-                API key needed, never touches upstream.
+                Calls hit <span className="font-mono text-xs">/mock</span> to
+                return a sample response without contacting the publisher. No
+                key is needed.
               </span>
             </div>
           ) : (
@@ -1035,7 +1037,8 @@ function TryItPanel({
               {endpoint?.freeTier !== undefined
                 ? ` First ${endpoint.freeTier} eligible calls per day cost 0; remaining allowance is unavailable in this view.`
                 : ""}{" "}
-              Zero balance blocks paid execution. Key stays in this browser tab.
+              Live calls require a funded wallet, including endpoints priced at
+              zero credits.
             </div>
           )}
 
@@ -1149,8 +1152,9 @@ function TryItPanel({
                   aria-describedby="api-key-help"
                 />
                 <FieldDescription id="api-key-help">
-                  Stored in this browser session only. Never sent to Convex. Use
-                  the canonical <code>Authorization: Bearer</code> header.
+                  Kept in this browser tab’s session storage and sent to the
+                  gateway for live calls using the{" "}
+                  <code>Authorization: Bearer</code> header.
                 </FieldDescription>
                 <FieldError>{errors.apiKey}</FieldError>
                 <p className="text-xs text-muted-foreground">
@@ -1322,18 +1326,18 @@ function TryItPanel({
                       Gateway could not be reached
                     </p>
                     <p className="text-muted-foreground">
-                      Check your connection and gateway URL. If this persists,
-                      allow this site in gateway CORS settings, then retry.
+                      Check your connection and the request URL, then retry. You
+                      can also copy the curl command to try outside the browser.
                     </p>
                   </div>
                 ) : result.status >= 400 ? (
                   <p className="text-sm text-muted-foreground">
                     {result.status === 401
-                      ? "Your API key was not accepted. Create or rotate a key, then try again."
+                      ? "Authentication failed. If your Zevium key works with other APIs, contact this publisher."
                       : result.status === 402
-                        ? "Your organization needs credits before this call can run."
+                        ? "Check your API key and organization wallet balance, then retry."
                         : result.status === 429
-                          ? "This key reached a limit. Wait or adjust its cap."
+                          ? "This request was rate-limited. Wait before retrying."
                           : result.status >= 500
                             ? "The upstream service failed. Retry later."
                             : "Check the request fields and try again."}
@@ -1348,9 +1352,8 @@ function TryItPanel({
                   </pre>
                 ) : result.status >= 400 ? (
                   <p className="text-xs text-muted-foreground">
-                    Response body is hidden because it is not a verified Zevium
-                    error envelope. Use request ID above when contacting
-                    support.
+                    Response details are unavailable. Include the request ID
+                    above when contacting support.
                   </p>
                 ) : result.status > 0 ? (
                   <p className="text-xs text-muted-foreground">
@@ -1411,7 +1414,7 @@ function ConnectAgentPanel({
   const notes = `// Agent notes for ${publisherHandle}/${projectSlug}
 // 1. Search catalogue with tool search_apis({ query })
 // 2. Load docs with get_api_docs({ org: "${publisherHandle}", project: "${projectSlug}" })
-// 3. Call via call_api — same key-authenticated, credit-gated gateway as humans
+// 3. Call an endpoint with call_api using your Zevium key and prepaid wallet
 // Gateway base: ${gatewayBaseUrl()}/${publisherHandle}/${projectSlug}`;
 
   return (
@@ -1439,7 +1442,7 @@ function ConnectAgentPanel({
         <CardHeader>
           <CardTitle className="text-base">Usage notes</CardTitle>
           <CardDescription>
-            Agent-readable connection path for this API.
+            Search for this API, read its reference, then call an endpoint.
           </CardDescription>
         </CardHeader>
         <CardContent className="min-w-0 space-y-3">

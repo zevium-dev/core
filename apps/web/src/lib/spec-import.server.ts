@@ -16,7 +16,7 @@ import {
 const FETCH_TIMEOUT_MS = 10_000;
 const MAX_REDIRECTS = 5;
 const GENERIC_FETCH_ERROR = "Failed to fetch spec";
-const SIZE_ERROR = "Spec is larger than 2MB";
+const SIZE_ERROR = "Spec exceeds the 384 KiB import limit";
 const EMPTY_ERROR = "URL returned empty body";
 const MIME_ERROR = "URL did not return supported JSON or YAML";
 const INVALID_SPEC_ERROR = "URL did not return a valid OpenAPI 3 document";

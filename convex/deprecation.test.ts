@@ -628,7 +628,7 @@ describe("project retirement lifecycle", () => {
         projectId: seed.projectId,
         patch: { visibility: "private" },
       }),
-    ).rejects.toThrow(/deprecation notice/);
+    ).rejects.toThrow(/Schedule project retirement/);
     await expect(
       asPublisher(t).mutation(api.projects.remove, {
         projectId: seed.projectId,

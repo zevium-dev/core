@@ -61,7 +61,7 @@ export async function handleMockRequest(
     route.projectSlug,
   );
   if (!published) {
-    return jsonError(404, "project_not_found", "Unknown project", requestId);
+    return jsonError(404, "project_not_found", "API not found", requestId);
   }
   if (
     !isPublishedSpecPublicCopyAllowed(
@@ -70,7 +70,7 @@ export async function handleMockRequest(
       route.projectSlug,
     )
   ) {
-    return jsonError(404, "project_not_found", "Unknown project", requestId);
+    return jsonError(404, "project_not_found", "API not found", requestId);
   }
 
   const started = (deps.now ?? Date.now)();
@@ -127,7 +127,12 @@ export async function handleMockRequest(
     );
   }
   if (!matched) {
-    return jsonError(404, "route_not_found", "Unknown route", requestId);
+    return jsonError(
+      404,
+      "route_not_found",
+      "No endpoint matches this method and path",
+      requestId,
+    );
   }
 
   const mock = generateMockResponse(
@@ -136,7 +141,12 @@ export async function handleMockRequest(
     matched.method,
   );
   if (!mock) {
-    return jsonError(404, "route_not_found", "Unknown route", requestId);
+    return jsonError(
+      404,
+      "route_not_found",
+      "No endpoint matches this method and path",
+      requestId,
+    );
   }
 
   const body =

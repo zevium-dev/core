@@ -198,7 +198,7 @@ function BillingContent({
         <CardHeader>
           <CardTitle>Billing did not load</CardTitle>
           <CardDescription>
-            Check your connection, then retry. No billing state was changed.
+            Check your connection and retry to view billing.
           </CardDescription>
         </CardHeader>
         <CardFooter>
@@ -312,7 +312,7 @@ function BillingContent({
                 Buy credits
               </h2>
               <p className="text-sm text-muted-foreground">
-                $1 = 10,000 credits. One-time packs at one fixed exchange rate.
+                $1 buys 10,000 credits. Choose a one-time top-up below.
               </p>
             </div>
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -613,8 +613,8 @@ export function CycleUsage({ cycle }: { cycle: CycleUsageData }) {
             <EmptyHeader>
               <EmptyTitle>No metered calls this cycle</EmptyTitle>
               <EmptyDescription>
-                Keyless mock calls cost zero and do not appear in billing usage.
-                Live calls will break down by API and key here.
+                Live call usage will appear here by API and key. Free mock
+                responses are not included.
               </EmptyDescription>
             </EmptyHeader>
           </Empty>

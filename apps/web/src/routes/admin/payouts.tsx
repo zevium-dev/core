@@ -135,7 +135,7 @@ function AdminPayoutsPage() {
       retryPublisherTransfer({ transferId }),
     onSuccess: () => {
       toast.success(
-        "Transfer retry requested. The server will reuse the original idempotency key.",
+        "Transfer retry requested using the original transfer reference.",
       );
       setRetryTarget(null);
       setCursor(null);

@@ -418,7 +418,7 @@ function ProjectOverview({
           <div className="space-y-1.5">
             <CardTitle>Overview</CardTitle>
             <CardDescription>
-              Project status and catalogue readiness.
+              Check publication status and prepare this API for the catalogue.
             </CardDescription>
           </div>
           <Button type="button" variant="outline" size="sm" onClick={onEdit}>
@@ -469,12 +469,12 @@ function ProjectOverview({
           </Button>
           <p className="text-sm text-muted-foreground">
             {isLive ? (
-              "Edit your draft when you are ready to publish a new immutable version."
+              "Edit the draft to prepare your next published version."
             ) : (
               <>
-                Add <code className="font-mono text-xs">x-zevium-cost</code> per
-                operation, save draft, publish a version, then make project
-                public.
+                Add <code className="font-mono text-xs">x-zevium-cost</code> to
+                each operation, save the draft, and test the health endpoint.
+                Publish a version, then make the project public.
               </>
             )}
           </p>

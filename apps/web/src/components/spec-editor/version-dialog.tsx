@@ -122,8 +122,8 @@ function VersionDialogBody({
       <div className="space-y-3 rounded-md border border-dashed p-4">
         <p className="font-medium">Published version not found</p>
         <p className="text-sm text-muted-foreground">
-          It may have been removed. Close this dialog and choose another
-          version.
+          This version is unavailable in the selected organization. Close this
+          dialog and choose another version.
         </p>
         <Button type="button" variant="outline" onClick={onClose}>
           Close

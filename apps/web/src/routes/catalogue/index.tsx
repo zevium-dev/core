@@ -286,7 +286,7 @@ function CataloguePage() {
               Catalogue
             </h1>
             <p className="mt-1 text-sm text-muted-foreground">
-              Public APIs with per-call credits. No auth required to browse.
+              Compare API prices and try free mocks before making a live call.
             </p>
           </div>
         </div>
@@ -295,8 +295,7 @@ function CataloguePage() {
           <CardHeader>
             <CardTitle>Find an API</CardTitle>
             <CardDescription>
-              Filter exact metadata instantly or rank results by semantic
-              intent.
+              Search by name or describe what you need an API to do.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -327,8 +326,8 @@ function CataloguePage() {
                     </Button>
                   </div>
                   <FieldDescription>
-                    Typing filters names and descriptions. Semantic search ranks
-                    APIs by intent.
+                    Typing filters names and descriptions. Use Semantic search
+                    to find APIs that match a task.
                   </FieldDescription>
                   <p
                     aria-live="polite"
@@ -606,7 +605,7 @@ function CatalogueList({
           {data.total === 1 ? "1 API" : `${data.total} APIs`}
         </p>
         <p className="text-xs text-muted-foreground">
-          Published specs · keyless mocks · per-call pricing
+          Try free mocks. Live endpoint prices are shown in credits.
         </p>
       </div>
       {tags.length > 0 ? (
@@ -759,8 +758,8 @@ function CatalogueEmpty({ hasSearch }: { hasSearch: boolean }) {
         </EmptyTitle>
         <EmptyDescription>
           {hasSearch
-            ? "Try different search, tags, or price filters. Public listings show up here when publishers make an API public."
-            : "Publishers haven't listed any public APIs yet. Check back soon, or sign in to publish your own."}
+            ? "Try another search or adjust the tag and price filters."
+            : "No APIs have been listed yet. Sign in to publish yours."}
         </EmptyDescription>
       </EmptyHeader>
       <EmptyContent>

@@ -268,11 +268,10 @@ function KeysContent({ userId, orgId }: { userId: string; orgId: string }) {
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h2 className="text-lg font-semibold tracking-tight">
-            Gateway API keys
-          </h2>
+          <h2 className="text-lg font-semibold tracking-tight">API keys</h2>
           <p className="text-sm text-muted-foreground">
-            Machine keys for the gateway. One active key per user.
+            Call catalogue APIs from code or agents. Each member can have one
+            current key in this organization.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -282,7 +281,7 @@ function KeysContent({ userId, orgId }: { userId: string; orgId: string }) {
             </Button>
           ) : null}
           {hasKey ? (
-            <Badge variant="outline">1 active key allowed per user</Badge>
+            <Badge variant="outline">1 current key per member</Badge>
           ) : null}
         </div>
       </div>
@@ -379,7 +378,7 @@ function KeysContent({ userId, orgId }: { userId: string; orgId: string }) {
                   }}
                 >
                   <Plus data-icon="inline-start" />
-                  Create current key
+                  Create key
                 </Button>
               ) : null}
             </div>
@@ -524,8 +523,8 @@ function KeysContent({ userId, orgId }: { userId: string; orgId: string }) {
             <DialogTitle>Revoke API key?</DialogTitle>
             <DialogDescription>
               {revokeTarget
-                ? `“${revokeTarget.name}” stops working immediately. Gateway calls with this key will fail.`
-                : "This key will stop working immediately."}
+                ? `“${revokeTarget.name}” stops working at the gateway within one minute. Applications using it will need another key.`
+                : "This key will stop working at the gateway within one minute."}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -773,7 +772,7 @@ function KeyRow({
             disabled={!canAdminister || revokePending}
           >
             <Trash2 className="size-4" />
-            {graceActive ? "Revoke previous now" : "Revoke"}
+            {graceActive ? "Revoke previous key" : "Revoke"}
           </Button>
         </div>
       </td>
@@ -877,7 +876,7 @@ function EmptyKeys({
         </EmptyMedia>
         <EmptyTitle>No API keys yet</EmptyTitle>
         <EmptyDescription>
-          Create one key to call the gateway from curl, SDKs, or agents.
+          Create a key to call APIs from curl, your application, or an agent.
         </EmptyDescription>
       </EmptyHeader>
       <EmptyContent>
@@ -931,11 +930,10 @@ function KeysSkeleton() {
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h2 className="text-lg font-semibold tracking-tight">
-            Gateway API keys
-          </h2>
+          <h2 className="text-lg font-semibold tracking-tight">API keys</h2>
           <p className="text-sm text-muted-foreground">
-            Machine keys for the gateway. One active key per user.
+            Call catalogue APIs from code or agents. Each member can have one
+            current key in this organization.
           </p>
         </div>
         <Skeleton className="h-9 w-28" />

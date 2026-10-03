@@ -244,7 +244,7 @@ export const syncPublishedTarget = internalMutation({
       project.qualityStatus === "suspended" ||
       project.qualityStatus === "recovering"
     ) {
-      const reason = `Replacement version needs ${INCIDENT_RECOVERY_PASSES} consecutive passing declared-health checks before relisting`;
+      const reason = `The replacement version’s health endpoint must pass ${INCIDENT_RECOVERY_PASSES} consecutive checks before this API is relisted`;
       await ctx.db.insert("qualityIncidents", {
         projectId: args.projectId,
         specVersionId: args.specVersionId,
@@ -550,7 +550,7 @@ export const recordProbeResult = internalMutation({
             clerkOrgId: owner.clerkOrgId,
             kind: "quality_restored",
             title: `${project.name} relisted`,
-            body: `Declared health endpoint passed ${INCIDENT_RECOVERY_PASSES} consecutive checks. Listing access is restored.`,
+            body: `The health endpoint passed ${INCIDENT_RECOVERY_PASSES} consecutive checks. Catalogue listing and gateway access are restored.`,
             refId: `quality-restored:${openIncident._id}`,
           });
         }
@@ -582,7 +582,7 @@ export const recordProbeResult = internalMutation({
       failureWindow.length === INCIDENT_WINDOW_SIZE &&
       failuresInWindow >= INCIDENT_FAILURE_THRESHOLD
     ) {
-      const reason = `${failuresInWindow} unhealthy declared-health checks in the latest ${INCIDENT_WINDOW_SIZE}-sample window`;
+      const reason = `The health endpoint failed ${failuresInWindow} of its last ${INCIDENT_WINDOW_SIZE} checks`;
       const incidentId = await ctx.db.insert("qualityIncidents", {
         projectId: target.projectId,
         specVersionId: target.specVersionId,
@@ -615,7 +615,7 @@ export const recordProbeResult = internalMutation({
           clerkOrgId: owner.clerkOrgId,
           kind: "quality_suspended",
           title: `${project.name} suspended`,
-          body: `${reason}. Zevium disabled public listing and gateway access. Recovery needs ${INCIDENT_RECOVERY_PASSES} consecutive passing checks.`,
+          body: `${reason}. Catalogue listing and gateway access are suspended until the health endpoint passes ${INCIDENT_RECOVERY_PASSES} consecutive checks.`,
           refId: `quality-suspended:${incidentId}`,
         });
       }

@@ -73,7 +73,7 @@ function AdminOrgsPage() {
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Organizations</h1>
         <p className="text-sm text-muted-foreground">
-          All mirrored Clerk organizations and their wallet balances.
+          Organizations and their wallet balances.
         </p>
       </div>
 
@@ -197,7 +197,7 @@ function EmptyOrgs() {
         </EmptyMedia>
         <EmptyTitle>No organizations</EmptyTitle>
         <EmptyDescription>
-          Mirrored Clerk orgs appear here once members sign in.
+          Organizations appear here once their members sign in.
         </EmptyDescription>
       </EmptyHeader>
     </Empty>

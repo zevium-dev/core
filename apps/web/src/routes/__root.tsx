@@ -164,8 +164,8 @@ function GlobalNotFound() {
               Page not found
             </h1>
             <EmptyDescription>
-              This address does not match a Zevium page. Choose a safe route or
-              return to your previous page.
+              Check the address, return to your previous page, or browse the
+              catalogue.
             </EmptyDescription>
           </EmptyHeader>
           <EmptyContent className="flex-row flex-wrap justify-center">

@@ -123,8 +123,8 @@ export function AdminReviewsQueue({
           Review moderation
         </h1>
         <p className="text-sm text-muted-foreground">
-          Inspect active, hidden, and reported verified reviews. Every hide and
-          restore keeps reason.
+          Inspect active, hidden, and reported reviews. Hiding or restoring a
+          review requires a reason, which is saved in moderation history.
         </p>
       </div>
 
@@ -322,8 +322,8 @@ export function AdminReviewsQueue({
                 {target?.action === "hidden" ? "Hide" : "Restore"} review?
               </DialogTitle>
               <DialogDescription>
-                {target?.projectName}. Reason enters immutable moderation
-                history.
+                {target?.projectName}. Your reason will be recorded in
+                moderation history.
               </DialogDescription>
             </DialogHeader>
             <Field>

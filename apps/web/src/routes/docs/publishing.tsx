@@ -87,14 +87,14 @@ function DocsPublishingPage() {
   return (
     <DocsPage
       title="Publishing"
-      description="Publish a paid API in minutes: declare pricing in the OpenAPI spec, validate, publish a semver version, make it public. No billing infrastructure required."
+      description="List your API with an OpenAPI spec and earn 95% of each successful paid call. Zevium handles prepaid billing."
     >
       <h2>The model</h2>
       <p>
-        Each API is a <strong>project</strong> owned by an org. The project's
-        OpenAPI spec is the single source of truth for the upstream address,
-        available endpoints, and per-endpoint pricing. There are no parallel
-        pricing tables — the spec is the product.
+        Each API is a <strong>project</strong> owned by an organization. Its
+        OpenAPI spec defines the upstream address, request and response shapes,
+        and each endpoint’s price. Start with a draft, test the health endpoint,
+        then publish a version.
       </p>
       <ol>
         <li>
@@ -119,9 +119,9 @@ function DocsPublishingPage() {
           without publisher or consumer credentials.
         </li>
         <li>
-          <strong>Validate and publish.</strong> Fix errors, pass
-          declared-health reachability/readiness test, then publish a semver
-          version (e.g. <code>0.1.0</code>) and make it public.
+          <strong>Validate and publish.</strong> Fix validation errors and pass
+          the saved draft’s health check. Publish a semver version (e.g.{" "}
+          <code>0.1.0</code>) and make it public.
         </li>
       </ol>
 
@@ -144,29 +144,32 @@ function DocsPublishingPage() {
         </li>
         <li>
           <code>x-zevium-health-check</code> — required on exactly one safe
-          credential-free <code>GET</code> or <code>HEAD</code>. Zevium labels
-          this evidence reachability/readiness, never success of other API
-          operations.
+          credential-free <code>GET</code> or <code>HEAD</code>. A passing
+          health check shows that this endpoint is reachable. Success rates for
+          other operations are measured separately from gateway calls.
         </li>
       </ul>
       <p>
-        Production agent-tool pricing clusters at 20–500 credits per call
-        ($0.002–$0.05). Agents loop on the cheapest useful endpoint — price for
-        machine volume.
+        For example, 10 credits costs the consumer $0.001 per successful call.
+        Choose a price that covers your upstream costs and the 5% platform
+        share.
       </p>
 
       <h2>Immutability</h2>
       <p>
-        A published version is immutable. To change an API, publish a new semver
-        version. Consumers integrate against a specific version; nothing shifts
-        under them.
+        Published specs cannot be edited. Save changes as a draft and publish a
+        new semver version. The gateway uses the latest published version, so
+        check compatibility before publishing changes that affect existing
+        consumers.
       </p>
 
       <h2>Deprecation</h2>
       <p>
-        A publisher cannot silently kill an API with active consumers.
-        Deprecating a version sets a sunset date, freezes new subscriptions, and
-        signals consumers on every response:
+        Deprecate a version to add a migration notice and an optional migration
+        date at least seven days away. This date is informational. To stop live
+        calls, schedule project retirement in Settings with at least seven days’
+        notice. The API leaves new discovery, while existing consumers can call
+        it until the project’s sunset. Responses then include headers such as:
       </p>
       <DocsCodeBlock
         lang="http"
@@ -177,7 +180,7 @@ Sunset: Wed, 31 Dec 2025 23:59:59 GMT`}
 
       <h2>Webhooks</h2>
       <p>
-        Add an HTTPS endpoint per project (one per project). Zevium signs every
+        Add one HTTPS webhook endpoint in project Settings. Zevium signs every
         delivery with HMAC-SHA256. Current events:
       </p>
       <ul>
@@ -185,8 +188,8 @@ Sunset: Wed, 31 Dec 2025 23:59:59 GMT`}
           <code>spec.published</code> — a new version published.
         </li>
         <li>
-          <code>spec.deprecated</code> — a version deprecated (with{" "}
-          <code>sunsetAt</code>).
+          <code>spec.deprecated</code> — a version deprecated (with an optional{" "}
+          <code>sunsetAt</code> migration date).
         </li>
         <li>
           <code>project.visibility_changed</code> — project made public or
@@ -205,11 +208,10 @@ x-zevium-signature: <hex HMAC-SHA256 of body>
 {"id":"<same stable delivery id>","event":"spec.published","data":{"projectId":"...","version":"0.1.0"},"timestamp":1735689600000}`}
       />
       <p>
-        Verify raw-body signature, signed timestamp, and signed delivery ID
-        before trusting payload. Atomically dedupe delivery ID before side
-        effects. Signing secret is generated and encrypted server-side when you
-        create endpoint. Org admins can explicitly reveal it from project
-        Settings:
+        Verify the signature against the raw body, check the signed timestamp
+        and delivery ID, then deduplicate deliveries before applying changes.
+        Zevium generates the signing secret when you create the endpoint.
+        Organization admins can reveal it in project Settings:
       </p>
       <DocsCodeBlock lang="typescript" code={VERIFY_WEBHOOK} />
     </DocsPage>

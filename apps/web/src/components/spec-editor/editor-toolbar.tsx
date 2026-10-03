@@ -126,8 +126,9 @@ export function EditorToolbar({ onApplyText, disabled }: EditorToolbarProps) {
           <DialogHeader>
             <DialogTitle>Import from URL</DialogTitle>
             <DialogDescription>
-              Fetch an OpenAPI document server-side. Max 2MB. YAML converts to
-              JSON.
+              Import an OpenAPI document from an HTTPS URL. JSON drafts must fit
+              within 384 KiB. YAML inputs are limited to 256 KiB and converted
+              to JSON.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-2 py-2">

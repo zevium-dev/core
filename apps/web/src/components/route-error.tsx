@@ -52,8 +52,8 @@ export function RouteError({ error }: ErrorComponentProps) {
           </div>
           <CardTitle>This view could not be loaded</CardTitle>
           <CardDescription>
-            Your account data was not changed. Retry this view, or use one of
-            the links below to keep working.
+            Check your connection and retry. You can also return to the
+            dashboard or browse APIs.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">

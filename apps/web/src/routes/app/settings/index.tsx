@@ -16,7 +16,7 @@ function SettingsPage() {
       <div>
         <h2 className="text-lg font-semibold tracking-tight">Account</h2>
         <p className="text-sm text-muted-foreground">
-          Profile, security, and connected accounts via Clerk.
+          Manage your profile, sign-in methods, and account security.
         </p>
       </div>
 

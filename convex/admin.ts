@@ -409,7 +409,7 @@ export const setProjectVisibility = mutation({
         clerkOrgId: org.clerkOrgId,
         kind: "visibility_changed",
         title: "Project visibility changed",
-        body: `Your project "${project.name}" visibility was set to ${args.visibility} by platform admin.`,
+        body: `A Zevium admin made your project "${project.name}" ${args.visibility}.`,
         refId: `visibility_changed:${project._id}:${Date.now()}`,
       });
     }
