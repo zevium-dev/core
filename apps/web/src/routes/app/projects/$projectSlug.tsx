@@ -223,26 +223,21 @@ function ProjectShell({
     project.status === "published" && project.visibility === "public";
 
   return (
-    <div className="flex flex-col gap-6">
+    <div
+      data-transition-surface={`project-surface-${project.slug}`}
+      className="flex flex-col gap-6"
+    >
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="space-y-2">
           <div className="flex flex-wrap items-center gap-2">
             <Badge
               variant={project.status === "published" ? "default" : "secondary"}
-              style={{
-                viewTransitionName: `project-status-${project.slug}`,
-              }}
             >
               {project.status}
             </Badge>
             <Badge variant="outline">{project.visibility}</Badge>
           </div>
-          <h1
-            className="w-fit min-w-0 max-w-full text-2xl font-semibold tracking-tight [overflow-wrap:anywhere]"
-            style={{
-              viewTransitionName: `project-title-${project.slug}`,
-            }}
-          >
+          <h1 className="w-fit min-w-0 max-w-full text-2xl font-semibold tracking-tight [overflow-wrap:anywhere]">
             {project.name}
           </h1>
           <p className="font-mono text-sm text-muted-foreground">

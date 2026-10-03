@@ -1,6 +1,6 @@
 import { useOrganization } from "@clerk/tanstack-react-start";
 import { convexQuery } from "@convex-dev/react-query";
-import { useSuspenseQuery } from "@tanstack/react-query";
+import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { Link, createFileRoute } from "@tanstack/react-router";
 import { useConvexAuth } from "convex/react";
 import { FolderPlus, Plus } from "lucide-react";
@@ -94,6 +94,7 @@ function ProjectsIndexPage() {
 }
 
 function ProjectsList({ orgSlug }: { orgSlug: string }) {
+  const queryClient = useQueryClient();
   const { membership } = useOrganization();
   const canCreate = isPrivilegedOrgRole(membership?.role);
   const { data: projects } = useSuspenseQuery(
@@ -128,30 +129,35 @@ function ProjectsList({ orgSlug }: { orgSlug: string }) {
               key={project._id}
               to="/app/projects/$projectSlug"
               params={{ projectSlug: project.slug }}
+              onClick={() => {
+                // The authenticated list already contains the exact detail row.
+                // Seed it before capture so a cold click morphs into real content.
+                queryClient.setQueryData(
+                  convexQuery(api.projects.get, {
+                    orgSlug,
+                    projectSlug: project.slug,
+                  }).queryKey,
+                  project,
+                );
+              }}
               className="group block rounded-xl outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
             >
-              <Card className="h-full transition-[translate,scale,box-shadow,border-color] duration-[var(--dur-instant)] ease-[var(--ease)] group-hover:-translate-y-0.5 group-hover:shadow-sm group-active:scale-[0.98] motion-reduce:transition-none motion-reduce:group-hover:translate-y-0 motion-reduce:group-active:scale-100">
+              <Card
+                data-transition-surface={`project-surface-${project.slug}`}
+                className="h-full transition-[translate,scale,box-shadow,border-color] duration-[var(--dur-instant)] ease-[var(--ease)] group-hover:-translate-y-0.5 group-hover:shadow-sm group-active:scale-[0.98] motion-reduce:transition-none motion-reduce:group-hover:translate-y-0 motion-reduce:group-active:scale-100"
+              >
                 <CardHeader>
                   <div className="mb-1 flex flex-wrap items-center gap-2">
                     <Badge
                       variant={
                         project.status === "published" ? "default" : "secondary"
                       }
-                      style={{
-                        viewTransitionName: `project-status-${project.slug}`,
-                      }}
                     >
                       {project.status}
                     </Badge>
                     <Badge variant="outline">{project.visibility}</Badge>
                   </div>
-                  {/* VT morph: projects list → project page (project-title/status-{slug}) */}
-                  <CardTitle
-                    className="w-fit min-w-0 max-w-full text-base [overflow-wrap:anywhere]"
-                    style={{
-                      viewTransitionName: `project-title-${project.slug}`,
-                    }}
-                  >
+                  <CardTitle className="w-fit min-w-0 max-w-full text-base [overflow-wrap:anywhere]">
                     {project.name}
                   </CardTitle>
                   <CardDescription className="font-mono text-xs">

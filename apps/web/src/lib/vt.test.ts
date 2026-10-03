@@ -22,12 +22,23 @@ let typed = true;
 let dataset: Record<string, string>;
 let completions: ReturnType<typeof deferred>[];
 let start: ReturnType<typeof vi.fn>;
+function surface(name: string) {
+  const dataset: Record<string, string> = { transitionSurface: name };
+  return {
+    dataset,
+    removeAttribute: () => {
+      delete dataset.viewTransitionShared;
+    },
+  };
+}
+let surfaces: ReturnType<typeof surface>[];
 
 beforeEach(() => {
   reduced = false;
   typed = true;
   dataset = {};
   completions = [];
+  surfaces = [];
   start = vi.fn(
     (options: ViewTransitionUpdateCallback | StartViewTransitionOptions) => {
       const update = typeof options === "function" ? options : options.update!;
@@ -47,6 +58,12 @@ beforeEach(() => {
   vi.stubGlobal("document", {
     documentElement: { dataset },
     startViewTransition: start,
+    querySelectorAll: (selector: string) =>
+      selector === "[data-transition-surface]"
+        ? surfaces
+        : surfaces.filter(
+            (element) => element.dataset.viewTransitionShared !== undefined,
+          ),
   });
   vi.stubGlobal("self", {});
 });
@@ -63,7 +80,7 @@ describe("native transition lifecycle", () => {
     const task = runViewTransition(() => update.promise, ["navigate-forward"]);
     expect(vtState.active).toBe(true);
     expect(dataset.viewTransition).toBe("active");
-    expect(dataset.viewTransitionKind).toBe("morph");
+    expect(dataset.viewTransitionKind).toBe("swap");
     update.resolve();
     await task;
     expect(vtState.active).toBe(true);
@@ -111,8 +128,79 @@ describe("native transition lifecycle", () => {
     typed = false;
     const update = vi.fn(async () => undefined);
     await runViewTransition(update, ["navigate-back"]);
-    expect(start).toHaveBeenCalledWith(update);
+    expect(start).toHaveBeenCalledWith(expect.any(Function));
+    expect(update).toHaveBeenCalledOnce();
     expect(vtState.active).toBe(true);
+  });
+
+  it("pairs one entire card with its destination and clears it only after motion", async () => {
+    const other = surface("project-surface-other");
+    const card = surface("project-surface-weather");
+    const detail = surface("project-surface-weather");
+    surfaces = [other, card];
+    await runViewTransition(async () => {
+      expect(card.dataset.viewTransitionShared).toBe("");
+      expect(other.dataset.viewTransitionShared).toBeUndefined();
+      surfaces = [detail];
+    }, ["navigate-forward", "nav-morph", "project-surface-weather"]);
+    expect(detail.dataset.viewTransitionShared).toBe("");
+    expect(dataset.viewTransitionKind).toBe("morph");
+    completions[0].resolve();
+    await Promise.resolve();
+    expect(detail.dataset.viewTransitionShared).toBeUndefined();
+    expect(dataset.viewTransitionDirection).toBeUndefined();
+  });
+
+  it("ignores destination selection from an older overlapping update", async () => {
+    const oldUpdate = deferred();
+    surfaces = [surface("project-surface-weather")];
+    const older = runViewTransition(
+      () => oldUpdate.promise,
+      ["navigate-forward", "nav-morph", "project-surface-weather"],
+    );
+    const newer = surface("project-surface-other");
+    surfaces = [newer];
+    await runViewTransition(
+      async () => undefined,
+      ["navigate-back", "nav-morph", "project-surface-other"],
+    );
+    oldUpdate.resolve();
+    await older;
+    expect(newer.dataset.viewTransitionShared).toBe("");
+    expect(dataset.viewTransitionDirection).toBe("back");
+  });
+
+  it("falls back to page motion if either matching surface is missing", async () => {
+    surfaces = [surface("api-surface-acme/weather")];
+    await runViewTransition(async () => {
+      surfaces = [];
+    }, ["navigate-forward", "nav-morph", "api-surface-acme/weather"]);
+    expect(dataset.viewTransitionKind).toBe("swap");
+    const detail = surface("api-surface-acme/weather");
+    await runViewTransition(async () => {
+      surfaces = [detail];
+    }, ["navigate-back", "nav-morph", "api-surface-acme/weather"]);
+    expect(detail.dataset.viewTransitionShared).toBeUndefined();
+    expect(dataset.viewTransitionKind).toBe("swap");
+    expect(dataset.viewTransitionDirection).toBe("back");
+  });
+
+  it("does not let a skipped older morph clear the newer selected surface", async () => {
+    surfaces = [surface("project-surface-weather")];
+    await runViewTransition(
+      async () => undefined,
+      ["navigate-forward", "nav-morph", "project-surface-weather"],
+    );
+    const newer = surface("project-surface-other");
+    surfaces = [newer];
+    await runViewTransition(
+      async () => undefined,
+      ["navigate-back", "nav-morph", "project-surface-other"],
+    );
+    completions[0].resolve();
+    await Promise.resolve();
+    expect(newer.dataset.viewTransitionShared).toBe("");
+    expect(dataset.viewTransitionKind).toBe("morph");
   });
 
   it.each([true, false])(

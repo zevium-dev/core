@@ -74,6 +74,7 @@ body {
   --dur-fast: 250ms;
   --dur-base: 350ms;
   --dur-page: 400ms;
+  --dist: 16px;
   --dur-slow: 600ms;
 }
 
@@ -246,7 +247,7 @@ html[data-view-transition="active"] .motion-entrance {
   animation: content-enter var(--dur-page) var(--ease) both;
 }
 
-/* The shared shell stays visible; only the page surface fades. */
+/* Shared chrome stays still; page motion belongs to the content snapshot. */
 ::view-transition-group(root),
 ::view-transition-group(main-content) {
   animation: none;
@@ -263,12 +264,27 @@ html[data-view-transition="active"] .motion-entrance {
 }
 
 ::view-transition-old(main-content) {
-  opacity: 1;
-  animation: content-exit var(--dur-page) var(--ease) both;
+  opacity: 0;
+  animation: none;
 }
 
 ::view-transition-new(main-content) {
-  animation: content-enter var(--dur-page) var(--ease) both;
+  animation: page-enter var(--dur-page) var(--ease) both;
+}
+
+@keyframes page-enter {
+  from {
+    opacity: 0;
+    transform: translateX(var(--page-offset, var(--dist)));
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+html[data-view-transition-direction="back"] {
+  --page-offset: calc(-1 * var(--dist));
 }
 
 @keyframes content-exit {
@@ -277,25 +293,41 @@ html[data-view-transition="active"] .motion-entrance {
   }
 }
 
-/* Ordinary page hops reveal the destination without overlaying stale content.
-   Dataset also covers browsers without native transition-type selectors. */
-/* Capture the complete page surface, including list/detail navigation.
-   Separate title/badge snapshots split cards into independently moving pieces. */
-html[data-view-transition-kind="swap"] * {
+/* Only the chosen complete card gets a separate snapshot. Its children remain
+   inside it; unrelated cards, titles, prices and badges never detach. */
+html[data-view-transition="active"] * {
   view-transition-name: none !important;
 }
 
-html[data-view-transition-kind="swap"] #main-content {
+html[data-view-transition="active"] #main-content {
   view-transition-name: main-content !important;
 }
 
-html[data-view-transition-kind="swap"]::view-transition-old(*) {
-  animation: none;
-  opacity: 0;
+html[data-view-transition="active"] [data-view-transition-shared] {
+  view-transition-name: shared-card !important;
 }
 
-html[data-view-transition-kind="swap"]::view-transition-new(main-content) {
-  animation-duration: var(--dur-fast);
+html[data-view-transition-kind="morph"]::view-transition-new(main-content) {
+  animation-name: content-enter;
+}
+
+::view-transition-group(shared-card) {
+  z-index: 1;
+}
+
+::view-transition-old(shared-card) {
+  opacity: 1;
+  animation: content-exit var(--dur-page) var(--ease) both;
+}
+
+::view-transition-new(shared-card) {
+  animation: content-enter var(--dur-page) var(--ease) both;
+}
+
+/* Missing/deleted destinations still navigate with the full page entrance. */
+html[data-view-transition-kind="swap"]::view-transition-old(shared-card) {
+  animation: none;
+  opacity: 0;
 }
 
 /* Retiming lives here so stock shadcn/Radix markup stays intact. */
