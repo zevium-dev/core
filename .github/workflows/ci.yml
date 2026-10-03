@@ -43,8 +43,52 @@ jobs:
           TURBO_FORCE: "true"
         run: pnpm ci:pr
 
+  worktree-macos:
+    runs-on: macos-15
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4
+        with:
+          version: 2026.7.13
+          install: true
+          install_args: node@24.15.0 npm:pnpm@11.8.0 actionlint@1.7.12 gitleaks@8.30.1 shellcheck@0.11.0
+      - name: Verify exact Node and pnpm
+        run: |
+          test "$(node --version)" = "v24.15.0"
+          test "$(pnpm --version)" = "11.8.0"
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Verify APFS cloning and shared dependency links
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from "node:assert/strict";
+          import { execFileSync } from "node:child_process";
+          import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+          import { tmpdir } from "node:os";
+          import { join, resolve } from "node:path";
+          assert(realpathSync("node_modules/yaml").includes("/links/"));
+          assert.equal(realpathSync("node_modules/@zevium/shared"), resolve("packages/shared"));
+          const root = mkdtempSync(join(tmpdir(), "zevium-apfs-"));
+          try {
+            const source = join(root, "source");
+            const copy = join(root, "copy");
+            writeFileSync(source, Buffer.alloc(1024 * 1024, 65));
+            execFileSync("/bin/cp", ["-c", source, copy]);
+            writeFileSync(copy, "worktree edit");
+            assert.equal(readFileSync(source).length, 1024 * 1024);
+            assert.equal(readFileSync(source)[0], 65);
+          } finally {
+            rmSync(root, { recursive: true, force: true });
+          }
+          NODE
+      - name: Verify worktree env copies and types
+        run: pnpm test:worktree-setup && pnpm typecheck
+
   ci:
-    needs: [quality]
+    needs: [quality, worktree-macos]
     if: always()
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 2
@@ -52,5 +96,7 @@ jobs:
       - name: Require quality and tests to pass
         env:
           QUALITY: ${{ needs.quality.result }}
+          WORKTREE_MACOS: ${{ needs.worktree-macos.result }}
         run: |
           test "$QUALITY" = "success"
+          test "$WORKTREE_MACOS" = "success"

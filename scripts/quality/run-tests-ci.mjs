@@ -8,6 +8,7 @@ const commands = [
   ["pnpm", ["run", "test:proofs"]],
   ["pnpm", ["--dir", "apps/web", "run", "test:csrf-runtime"]],
   ["pnpm", ["run", "test:build-contract"]],
+  ["pnpm", ["run", "test:worktree-setup"]],
   ["pnpm", ["run", "test:e2e-harness"]],
   ["pnpm", ["run", "test:quality"]],
   ["pnpm", ["run", "test:deploy"]],

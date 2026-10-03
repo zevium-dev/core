@@ -156,7 +156,7 @@ jobs:
             "name=\"zevium-release\" content=\"$RELEASE_SHA\""
           wait_for_200 "$PRODUCTION_WEB_URL/catalogue" deploy-evidence/catalogue.html
           grep --fixed-strings --quiet '<title>Catalogue · Zevium</title>' deploy-evidence/catalogue.html
-          grep --fixed-strings --quiet 'Public APIs with per-call credits' deploy-evidence/catalogue.html
+          grep --fixed-strings --quiet 'id="catalogue-search"' deploy-evidence/catalogue.html
           if grep --fixed-strings --quiet 'Something went wrong' deploy-evidence/catalogue.html; then exit 1; fi
 
           status="$(curl --silent --show-error --output deploy-evidence/gateway-404.json \
