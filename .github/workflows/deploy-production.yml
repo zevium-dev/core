@@ -38,6 +38,9 @@ jobs:
       VITE_CLERK_PUBLISHABLE_KEY: ${{ secrets.CLERK_PRODUCTION_PUBLISHABLE_KEY }}
       VITE_CONVEX_URL: https://polite-ermine-809.convex.cloud
       VITE_GATEWAY_URL: https://gateway.zevium.dev
+      GATEWAY_REGISTRY_TRANSPORT_KEYRING: ${{ secrets.PRODUCTION_REGISTRY_TRANSPORT_KEYRING }}
+      REGISTRY_KEY_PROJECTION_HMAC_SECRET: ${{ secrets.PRODUCTION_REGISTRY_KEY_PROJECTION_HMAC_SECRET }}
+      UPSTREAM_CREDENTIAL_ENCRYPTION_KEYS: ${{ secrets.PRODUCTION_UPSTREAM_CREDENTIAL_ENCRYPTION_KEYS }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -78,9 +81,16 @@ jobs:
           '
           remote="$(git ls-remote origin refs/heads/develop)"
           test "${remote%%[[:space:]]*}" = "$RELEASE_SHA"
-          for name in CLOUDFLARE_API_TOKEN CONVEX_DEPLOY_KEY CLERK_SECRET_KEY VITE_CLERK_PUBLISHABLE_KEY; do
+          for name in CLOUDFLARE_API_TOKEN CONVEX_DEPLOY_KEY CLERK_SECRET_KEY VITE_CLERK_PUBLISHABLE_KEY GATEWAY_REGISTRY_TRANSPORT_KEYRING REGISTRY_KEY_PROJECTION_HMAC_SECRET UPSTREAM_CREDENTIAL_ENCRYPTION_KEYS; do
             test -n "${!name:-}"
           done
+          node --import tsx --input-type=module -e '
+            import { parseRegistryTransportKeyring } from "@zevium/shared";
+            import { credentialKeyringPreflight } from "./convex/lib/credentialCrypto.ts";
+            parseRegistryTransportKeyring(process.env.GATEWAY_REGISTRY_TRANSPORT_KEYRING);
+            if (!credentialKeyringPreflight().boundEnvelopeReady) process.exit(1);
+            if (process.env.REGISTRY_KEY_PROJECTION_HMAC_SECRET.length < 32) process.exit(1);
+          '
 
       - name: Build production web
         run: pnpm --filter web build
@@ -114,18 +124,44 @@ jobs:
             --version-tag "$RELEASE_TAG@100%" --yes \
             --message "production $RELEASE_SHA"
 
+      - name: Configure registry runtime
+        run: |
+          remote="$(git ls-remote origin refs/heads/develop)"
+          test "${remote%%[[:space:]]*}" = "$RELEASE_SHA"
+          printf '%s' "$GATEWAY_REGISTRY_TRANSPORT_KEYRING" | pnpm exec convex env set GATEWAY_REGISTRY_TRANSPORT_KEYRING
+          printf '%s' "$REGISTRY_KEY_PROJECTION_HMAC_SECRET" | pnpm exec convex env set REGISTRY_KEY_PROJECTION_HMAC_SECRET
+          printf '%s' "$UPSTREAM_CREDENTIAL_ENCRYPTION_KEYS" | pnpm exec convex env set UPSTREAM_CREDENTIAL_ENCRYPTION_KEYS
+          node --input-type=module -e '
+            import { writeFileSync } from "node:fs";
+            import { join } from "node:path";
+            writeFileSync(join(process.env.RUNNER_TEMP, "zevium-web-runtime-secrets.json"),
+              JSON.stringify({ REGISTRY_KEY_PROJECTION_HMAC_SECRET: process.env.REGISTRY_KEY_PROJECTION_HMAC_SECRET }),
+              { mode: 0o600 });
+          '
+
       - name: Deploy web
         run: |
           remote="$(git ls-remote origin refs/heads/develop)"
           test "${remote%%[[:space:]]*}" = "$RELEASE_SHA"
           pnpm --filter web exec wrangler versions upload \
             --config dist/server/wrangler.json --strict --keep-vars \
+            --secrets-file "$RUNNER_TEMP/zevium-web-runtime-secrets.json" \
             --tag "$RELEASE_TAG" \
             --message "production $RELEASE_SHA"
           pnpm --filter web exec wrangler versions deploy \
             --config dist/server/wrangler.json \
             --version-tag "$RELEASE_TAG@100%" --yes \
             --message "production $RELEASE_SHA"
+
+      - name: Remove runtime secret file
+        if: always()
+        run: |
+          node --input-type=module -e '
+            import { unlinkSync } from "node:fs";
+            import { join } from "node:path";
+            try { unlinkSync(join(process.env.RUNNER_TEMP, "zevium-web-runtime-secrets.json")); }
+            catch (error) { if (error.code !== "ENOENT") throw error; }
+          '
 
       - name: Verify production
         run: |

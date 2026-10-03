@@ -31,10 +31,21 @@ The GitHub `production` environment owns these secrets:
 - `CONVEX_PRODUCTION_DEPLOY_KEY`
 - `CLERK_PRODUCTION_PUBLISHABLE_KEY`
 - `CLERK_PRODUCTION_SECRET_KEY`
+- `PRODUCTION_REGISTRY_TRANSPORT_KEYRING`: JSON keyring with a current key ID
+  and independently generated 32-byte hexadecimal transport keys. Retain old
+  entries when rotating; stored registry envelopes still refer to them.
+- `PRODUCTION_REGISTRY_KEY_PROJECTION_HMAC_SECRET`: independently generated
+  secret of at least 32 characters, shared by web and Convex key registration.
+- `PRODUCTION_UPSTREAM_CREDENTIAL_ENCRYPTION_KEYS`: credential keyring with
+  canonical padded base64 keys encoding 32 bytes. Retain previous versions
+  through the migration and rollback window.
 
-Cloudflare Worker runtime secrets remain configured in Cloudflare. Convex
-runtime secrets remain configured in Convex. Deployment does not copy runtime
-secrets through artifacts or logs.
+The workflow validates the registry and credential secrets before provider writes,
+then configures both keyrings and the registration secret in Convex. The same
+registration secret is included additively in the tagged web Worker upload.
+Its temporary runner file has mode `0600`, is removed even on failure, and
+never enters deployment artifacts. Other runtime secrets remain configured
+in Cloudflare or Convex. Secrets never enter logs or artifacts.
 
 No release API key, release-probe variables, referee SHA, policy-tree digest,
 or separate contract/lifecycle/recovery environment is required.
@@ -53,6 +64,40 @@ Web deploys last. Both Workers upload tagged versions and promote them to 100%
 without changing their preconfigured routes. Tags use
 `production-<git-sha>-<run-id>-<attempt>` so retry uploads have unique tags,
 and gateway `ZEVIUM_RELEASE` plus web metadata expose the same exact SHA.
+
+## Initial Registry Migration
+
+Legacy published projects require the existing initial rollout to reserve
+their permanent public routes. A rendered empty catalogue is not proof that
+this migration completed. After backing up Convex and configuring the
+transport keyring, an authenticated production operator runs:
+
+```bash
+pnpm exec convex run registryRollout:startOrResume '{}' --prod
+pnpm exec convex run registryRollout:get '{}' --prod
+```
+
+If credential rows still contain legacy plaintext, first run the bounded
+security audit through internal `securityRollout:startAuditOperator` and
+`securityRollout:auditPageOperator`. Require a completed zero-corruption audit
+for the current generation, then pass its `auditId` to the internal
+`upstreamCredentials:migrateLegacyPlaintext` and
+`webhooks:migrateLegacyPlaintext` pages. Run a fresh complete audit afterward;
+require zero old, plaintext, corrupt, and broken rows. These operator entry
+points require deployment credentials and grant no user an application role.
+Keep the backup and both encryption key versions for rollback compatibility.
+Legacy API keys whose one-time secret hash cannot be recovered are disabled
+by the existing registry rollout and need replacement; never invent a hash.
+
+The scheduled bounded job must report `status: "complete"` with matching
+production and verification counts/digests. If interrupted, resume the same
+job; do not remove its source receipts. Verify an existing published project
+through public catalogue/detail reads and compare its immutable spec and
+original wallet/earning records against the backup.
+
+This restores the current Convex-backed public read path. The registry-v2
+edge receiver remains pending as documented in `TECH.md`; rollout completion
+does not claim delivery acknowledgements or change the gateway to that path.
 
 ## Failure Handling
 
