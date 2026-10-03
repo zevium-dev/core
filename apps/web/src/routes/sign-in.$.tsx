@@ -19,7 +19,7 @@ function Page() {
   const { redirect } = Route.useSearch();
 
   return (
-    <ClerkProvider>
+    <ClerkProvider appearance={{ cssLayerName: "components" }}>
       <div className="flex min-h-svh items-center justify-center p-4">
         <div className="auth-card-shell grid w-full max-w-sm place-items-center [&>*]:[grid-area:1/1]">
           <div className="auth-card-pending w-full">

@@ -31,12 +31,8 @@ export const Route = createFileRoute("/app/projects/$projectSlug/spec")({
       projectSlug: params.projectSlug,
     });
 
-    // Client nav: fire-and-forget project fetch; draft/versions need project id
-    // so component queries handle those after project resolves.
-    if (typeof window !== "undefined") {
-      void queryClient.prefetchQuery(projectQuery);
-      return;
-    }
+    // Browser components wait for Convex authentication before any query.
+    if (typeof window !== "undefined") return;
 
     try {
       const project = await queryClient.ensureQueryData(projectQuery);

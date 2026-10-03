@@ -36,12 +36,9 @@ export const Route = createFileRoute("/app/projects/")({
 
     const queryOpts = convexQuery(api.projects.list, { orgSlug });
 
-    // Await cards so a cold detail → list navigation can capture shared titles.
-    // Mirror is handled by useEnsureMirror in app.tsx.
-    if (typeof window !== "undefined") {
-      await queryClient.prefetchQuery(queryOpts);
-      return;
-    }
+    // Components wait for verified browser auth before subscribing. Cached
+    // titles still morph; a cold list reveals its skeleton until data is ready.
+    if (typeof window !== "undefined") return;
 
     try {
       // Mirror user/org rows before authed list so first SSR doesn't 500

@@ -73,4 +73,43 @@ describe("route view-transition policy", () => {
       }),
     ).toEqual(["navigate-back"]);
   });
+
+  it.each([
+    ["/app/projects/weather", "/app/billing"],
+    ["/app/settings", "/app/projects/weather"],
+    ["/app/projects/weather", "/app/projects/other"],
+    ["/app/projects", "/app/projects/create"],
+    ["/catalogue/acme/weather", "/docs"],
+    ["/catalogue/acme/weather", "/catalogue/acme/other"],
+    ["/", "/catalogue"],
+  ])("keeps unrelated %s → %s on one page surface", (fromPath, toPath) => {
+    stubMotionPreference(false);
+    expect(
+      routeViewTransitionTypes({ fromIndex: 1, toIndex: 2, fromPath, toPath }),
+    ).toEqual(["navigate-forward", "nav-swap"]);
+  });
+
+  it("preserves the same project's title into its spec editor", () => {
+    stubMotionPreference(false);
+    expect(
+      routeViewTransitionTypes({
+        fromIndex: 1,
+        toIndex: 2,
+        fromPath: "/app/projects/weather/",
+        toPath: "/app/projects/weather/spec",
+      }),
+    ).toEqual(["navigate-forward"]);
+  });
+
+  it("leaves Clerk hashes and same-page changes to the mounted UI", () => {
+    stubMotionPreference(false);
+    expect(
+      routeViewTransitionTypes({
+        fromIndex: 1,
+        toIndex: 2,
+        fromPath: "/app/settings/",
+        toPath: "/app/settings",
+      }),
+    ).toBe(false);
+  });
 });

@@ -270,6 +270,17 @@ html[data-view-transition="active"] .motion-entrance {
 
 /* Ordinary page hops reveal the destination without overlaying stale content.
    Dataset also covers browsers without native transition-type selectors. */
+/* Capture the whole page surface on ordinary hops. Extracted headings/cards
+   otherwise move independently while the surrounding page fades. Set before
+   both snapshots; list/detail morphs keep their named elements. */
+html[data-view-transition-kind="swap"] * {
+  view-transition-name: none !important;
+}
+
+html[data-view-transition-kind="swap"] #main-content {
+  view-transition-name: main-content !important;
+}
+
 html[data-view-transition-kind="swap"]::view-transition-old(*) {
   animation: none;
   opacity: 0;

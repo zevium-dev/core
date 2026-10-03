@@ -97,11 +97,9 @@ export const Route = createFileRoute("/app/projects/$projectSlug")({
       projectSlug: params.projectSlug,
     });
 
-    // Wait for the shared title; slow requests still use the route skeleton.
-    if (typeof window !== "undefined") {
-      await queryClient.prefetchQuery(queryOpts);
-      return;
-    }
+    // Browser queries belong to the auth-gated component, not the loader that
+    // can run before the authenticated provider has mounted.
+    if (typeof window !== "undefined") return;
 
     try {
       await queryClient.ensureQueryData(queryOpts);

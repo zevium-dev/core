@@ -84,21 +84,21 @@ configureViewTransitions(router);
 ```
 
 - Default: **cross-fade** of `main-content` over `DUR.page` with THE easing. No directional slides on morphing routes (slides fight morphs); `navigate-forward`/`back` types are reserved for stack-like flows (e.g. multi-step checkout) only
-- Ordinary page hops (`nav-swap`, including docs → home) hide the outgoing snapshot immediately and reveal the destination over `DUR.fast`. List → detail routes retain their shared-element morphs and page crossfade. The adapter exposes the swap policy through a dataset for browsers without transition-type selectors.
+- Ordinary page hops (`nav-swap`, including docs → home) capture one main surface, hide the outgoing snapshot immediately, and reveal the destination over `DUR.fast`. Unrelated headings and cards are not extracted into separate moving snapshots. Only matching catalogue list/detail and project list/detail/editor pairs retain shared-element morphs. Same-page changes, including Clerk profile hashes, use the mounted UI's own transition. The adapter exposes this policy through a dataset for browsers without transition-type selectors.
 - **Hard loads** (refresh, direct URL — no old DOM to transition from): `.content-enter` CSS class on `<main>` — opacity-only reveal, `DUR.page`. Spatial transforms are forbidden here because moving the full main region creates measurable CLS; soft navigation uses View Transitions instead
 
 ### Shared-element morphs (`view-transition-name`)
 
 Naming convention `{kind}-{slug}`, must be unique per snapshot. The signature moments:
 
-| From → To                                          | Morphing element(s)                                                                             |
-| -------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| Catalogue card → API detail                        | `api-title-{slug}`, `api-logo-{slug}`, `api-price-{slug}` — card title grows into page heading  |
-| Projects list → project page                       | `project-title-{slug}`, `project-status-{slug}`                                                 |
-| Project page → spec editor / explorer              | `project-title-{slug}` persists in breadcrumb                                                   |
-| Landing hero CTA → catalogue heading               | `catalogue-heading` — text only; heading fits its content, button chrome stays in the page fade |
-| Org switcher → org home                            | `org-name-{slug}`                                                                               |
-| Credits balance (sidebar chip → billing page stat) | `credit-balance`                                                                                |
+| From → To                                          | Morphing element(s)                                                                            |
+| -------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| Catalogue card → API detail                        | `api-title-{slug}`, `api-logo-{slug}`, `api-price-{slug}` — card title grows into page heading |
+| Projects list → project page                       | `project-title-{slug}`, `project-status-{slug}`                                                |
+| Project page → spec editor / explorer              | `project-title-{slug}` persists in breadcrumb                                                  |
+| Landing → catalogue                                | Whole main surface reveal; independent CTA/heading motion is suppressed for page coherence     |
+| Org switcher → org home                            | `org-name-{slug}`                                                                              |
+| Credits balance (sidebar chip → billing page stat) | `credit-balance`                                                                               |
 
 - Text that changes size/font across a morph: fit named elements to their text, constrained to the available width. Show the new snapshot immediately while the _group_ animates position/size over `DUR.page` — prevents font-crossfade flash. Elements present on only one side fade in or out. `main-content` crossfades without interpolating page dimensions
 - The morph inventory grows with FLOW.md; every new list→detail pair ships with a morph or a written reason why not
@@ -142,7 +142,7 @@ Landing page only (delight budget): magnetic cursor-pull on primary CTA + social
 
 ## Loading & perceived speed
 
-- Route loaders prefetch (TanStack `ensureQueryData`) so most navs transition with data ready — VT morphs need the destination rendered; a morph into a spinner is a failed morph
+- Public and server loaders prefetch data. Protected browser queries begin inside components after Convex confirms authentication; starting them in route loaders can run before the authenticated provider mounts. Cached list/detail data retains its morph. Cold protected destinations use layout-stable skeletons, then reveal their data instead of blocking navigation for a shared title.
 - Optimistic UI everywhere mutations allow (repo convention already) — the animation of the result IS the feedback; no spinner if under ~300ms
 - Never two loading indicators for one action. Button-local spinner beats page overlay
 - Suspense fallbacks: skeleton screens matching real layout, never blank white / centered giant spinner

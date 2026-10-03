@@ -8,14 +8,13 @@ import {
   type ErrorComponentProps,
   createRootRouteWithContext,
   useRouter,
-  useRouterState,
 } from "@tanstack/react-router";
 import { TanStackRouterDevtoolsPanel } from "@tanstack/react-router-devtools";
 import { createServerFn } from "@tanstack/react-start";
-import { ConvexProvider } from "convex/react";
 import { useEffect, useRef } from "react";
 
 import { PublicHeader } from "#/components/public-header";
+import { RouteProviders } from "#/components/route-providers";
 import { ThemeProvider } from "#/components/theme-provider";
 import { Button } from "#/components/ui/button";
 import {
@@ -27,7 +26,6 @@ import {
 import { Toaster } from "#/components/ui/sonner";
 import { TooltipProvider } from "#/components/ui/tooltip";
 import { readClientClerkAuth } from "#/lib/clerk-client";
-import { needsAuthenticatedProviders } from "#/lib/provider-scope";
 import type { RouterContext } from "#/router";
 
 import appCss from "../styles.css?url";
@@ -123,14 +121,12 @@ export const Route = createRootRouteWithContext<RouterContext>()({
   shellComponent: RootDocument,
 });
 
-function RootError({ error, reset }: ErrorComponentProps) {
+function RootError({ reset }: ErrorComponentProps) {
   return (
     <main className="mx-auto flex min-h-dvh max-w-xl flex-col justify-center gap-4 px-6">
       <h1 className="text-2xl font-semibold">Page failed to load</h1>
       <p className="text-sm text-muted-foreground">
-        {error instanceof Error
-          ? error.message
-          : "Unexpected application error"}
+        Check your connection and retry to load this page.
       </p>
       <Button className="self-start" onClick={reset}>
         Retry
@@ -206,9 +202,6 @@ function RootDocument({ children }: { children: React.ReactNode }) {
 function RootComponent() {
   const { convexQueryClient } = Route.useRouteContext();
 
-  const pathname = useRouterState({
-    select: (state) => state.location.pathname,
-  });
   const nonce = useRouter().options.ssr?.nonce;
 
   const content = (
@@ -231,13 +224,9 @@ function RootComponent() {
     </ThemeProvider>
   );
 
-  // App/admin layouts own Convex auth; auth forms only need Clerk. Avoid nesting
-  // the same Convex client under an anonymous provider, which can race tokens.
-  if (needsAuthenticatedProviders(pathname)) return content;
-
   return (
-    <ConvexProvider client={convexQueryClient.convexClient}>
+    <RouteProviders client={convexQueryClient.convexClient}>
       {content}
-    </ConvexProvider>
+    </RouteProviders>
   );
 }

@@ -17,7 +17,7 @@ export function AuthenticatedProviders({
   principalCache,
 }: AuthenticatedProvidersProps) {
   return (
-    <ClerkProvider>
+    <ClerkProvider appearance={{ cssLayerName: "components" }}>
       <ConvexProviderWithClerk client={client} useAuth={useAuth}>
         <PrincipalBoundary principalCache={principalCache}>
           {children}

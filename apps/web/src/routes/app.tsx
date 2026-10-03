@@ -27,7 +27,7 @@ export const Route = createFileRoute("/app")({
     const signInRedirect = () =>
       redirect({
         to: "/sign-in/$",
-        search: { redirect_url: safeAppReturnPath(location.href) },
+        search: { redirect: safeAppReturnPath(location.href) },
       });
 
     // Client: gate from live Clerk / cached context — no server fn.
