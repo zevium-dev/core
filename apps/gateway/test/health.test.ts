@@ -31,6 +31,42 @@ async function health(overrides: Partial<Env>) {
 }
 
 describe("production health configuration matrix", () => {
+  it.each([
+    `production-${"a".repeat(40)}`,
+    `production-${"a".repeat(40)}-37120598038-1`,
+    `production-${"a".repeat(40)}-37120598038-2`,
+    `preview-295-${"a".repeat(40)}`,
+  ])("accepts the exact deployed release in tag %s", async (tag) => {
+    const response = await health({
+      GATEWAY_TEST_MODE: undefined,
+      CF_VERSION_METADATA: {
+        id: "123e4567-e89b-42d3-a456-426614174000",
+        tag,
+        timestamp: "2026-08-12T00:00:00.29368Z",
+      },
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ ok: true });
+  });
+
+  it.each([
+    `production-${"b".repeat(40)}-37120598038-1`,
+    `production-${"a".repeat(40)}-0-1`,
+    `production-${"a".repeat(40)}-37120598038-0`,
+    `production-${"a".repeat(40)}-37120598038`,
+    `production-${"a".repeat(40)}-37120598038-1-extra`,
+  ])("rejects mismatched or malformed release-attempt tag %s", async (tag) => {
+    const response = await health({
+      GATEWAY_TEST_MODE: undefined,
+      CF_VERSION_METADATA: {
+        id: "123e4567-e89b-42d3-a456-426614174000",
+        tag,
+        timestamp: "2026-08-12T00:00:00.29368Z",
+      },
+    });
+    expect(response.status).toBe(503);
+  });
+
   it("exposes immutable release and contract identities", async () => {
     const response = await health({
       GATEWAY_TEST_MODE: "1",

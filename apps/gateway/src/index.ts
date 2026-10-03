@@ -94,15 +94,19 @@ function validGatewayDeploymentProof(
   proof: ReturnType<typeof gatewayDeploymentProof>,
 ): boolean {
   const deployedAt = Date.parse(proof.deployedAt);
+  const legacyTag =
+    /^(?:preview-[1-9][0-9]*-[0-9a-f]{40}|(?:staging|production)-[0-9a-f]{40})$/.test(
+      proof.versionTag,
+    ) && proof.versionTag.endsWith(proof.gitSha);
+  const attemptTag = proof.versionTag.match(
+    /^production-([0-9a-f]{40})-[1-9][0-9]*-[1-9][0-9]*$/,
+  );
   return (
     /^[0-9a-f]{40}$/.test(proof.gitSha) &&
     /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(
       proof.versionId,
     ) &&
-    /^(?:preview-[1-9][0-9]*-[0-9a-f]{40}|(?:staging|production)-[0-9a-f]{40})$/.test(
-      proof.versionTag,
-    ) &&
-    proof.versionTag.endsWith(proof.gitSha) &&
+    (legacyTag || attemptTag?.[1] === proof.gitSha) &&
     // Cloudflare emits microsecond precision (e.g. .29368Z); a strict
     // toISOString() roundtrip would reject every real timestamp. Require
     // full RFC 3339 datetime shape instead of date-only strings.
