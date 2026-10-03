@@ -84,24 +84,12 @@ configureViewTransitions(router);
 ```
 
 - Default: **cross-fade** of `main-content` over `DUR.page` with THE easing. No directional slides on morphing routes (slides fight morphs); `navigate-forward`/`back` types are reserved for stack-like flows (e.g. multi-step checkout) only
-- Ordinary page hops (`nav-swap`, including docs → home) capture one main surface, hide the outgoing snapshot immediately, and reveal the destination over `DUR.fast`. Unrelated headings and cards are not extracted into separate moving snapshots. Only matching catalogue list/detail and project list/detail/editor pairs retain shared-element morphs. Same-page changes, including Clerk profile hashes, use the mounted UI's own transition. The adapter exposes this policy through a dataset for browsers without transition-type selectors.
+- All route changes (`nav-swap`, including docs → home and project/catalogue list → detail) capture one complete `main-content` surface, hide the outgoing snapshot immediately, and reveal the destination over `DUR.fast`. Root snapshots show the new shared header/sidebar immediately with no fade or movement. Individual title/badge morphs are disabled: separating them from their card caused fragments to travel independently while the surrounding content faded. This is the written list→detail exception until a complete card-to-detail surface morph can be verified. Same-page changes, including Clerk profile hashes, use the mounted UI's own transition. The adapter exposes this policy through a dataset for browsers without transition-type selectors.
 - **Hard loads** (refresh, direct URL — no old DOM to transition from): `.content-enter` CSS class on `<main>` — opacity-only reveal, `DUR.page`. Spatial transforms are forbidden here because moving the full main region creates measurable CLS; soft navigation uses View Transitions instead
 
 ### Shared-element morphs (`view-transition-name`)
 
-Naming convention `{kind}-{slug}`, must be unique per snapshot. The signature moments:
-
-| From → To                                          | Morphing element(s)                                                                            |
-| -------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| Catalogue card → API detail                        | `api-title-{slug}`, `api-logo-{slug}`, `api-price-{slug}` — card title grows into page heading |
-| Projects list → project page                       | `project-title-{slug}`, `project-status-{slug}`                                                |
-| Project page → spec editor / explorer              | `project-title-{slug}` persists in breadcrumb                                                  |
-| Landing → catalogue                                | Whole main surface reveal; independent CTA/heading motion is suppressed for page coherence     |
-| Org switcher → org home                            | `org-name-{slug}`                                                                              |
-| Credits balance (sidebar chip → billing page stat) | `credit-balance`                                                                               |
-
-- Text that changes size/font across a morph: fit named elements to their text, constrained to the available width. Show the new snapshot immediately while the _group_ animates position/size over `DUR.page` — prevents font-crossfade flash. Elements present on only one side fade in or out. `main-content` crossfades without interpolating page dimensions
-- The morph inventory grows with FLOW.md; every new list→detail pair ships with a morph or a written reason why not
+Route navigation currently names only the complete `main-content` surface. Named title, price and badge elements are suppressed during snapshot capture so the destination appears together. Future list→detail morphs must include the complete card and corresponding detail surface, keep shared chrome stationary, and pass browser checks with loading content and reduced motion before they replace this policy.
 
 ### VT ↔ Motion coordination
 

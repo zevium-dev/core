@@ -246,18 +246,27 @@ html[data-view-transition="active"] .motion-entrance {
   animation: content-enter var(--dur-page) var(--ease) both;
 }
 
-/* Page surfaces crossfade without stretching to the other page's height. */
+/* The shared shell stays visible; only the page surface fades. */
+::view-transition-group(root),
 ::view-transition-group(main-content) {
   animation: none;
 }
 
-::view-transition-old(root),
+::view-transition-old(root) {
+  animation: none;
+  opacity: 0;
+}
+
+::view-transition-new(root) {
+  animation: none;
+  opacity: 1;
+}
+
 ::view-transition-old(main-content) {
   opacity: 1;
   animation: content-exit var(--dur-page) var(--ease) both;
 }
 
-::view-transition-new(root),
 ::view-transition-new(main-content) {
   animation: content-enter var(--dur-page) var(--ease) both;
 }
@@ -270,9 +279,8 @@ html[data-view-transition="active"] .motion-entrance {
 
 /* Ordinary page hops reveal the destination without overlaying stale content.
    Dataset also covers browsers without native transition-type selectors. */
-/* Capture the whole page surface on ordinary hops. Extracted headings/cards
-   otherwise move independently while the surrounding page fades. Set before
-   both snapshots; list/detail morphs keep their named elements. */
+/* Capture the complete page surface, including list/detail navigation.
+   Separate title/badge snapshots split cards into independently moving pieces. */
 html[data-view-transition-kind="swap"] * {
   view-transition-name: none !important;
 }
@@ -286,7 +294,6 @@ html[data-view-transition-kind="swap"]::view-transition-old(*) {
   opacity: 0;
 }
 
-html[data-view-transition-kind="swap"]::view-transition-new(root),
 html[data-view-transition-kind="swap"]::view-transition-new(main-content) {
   animation-duration: var(--dur-fast);
 }

@@ -25,16 +25,7 @@ export function routeViewTransitionTypes({
   const to = normalize(toPath);
   // Clerk profile hashes and same-page controls own their local transitions.
   if (from === to) return false;
-  const project = (path: string | undefined) =>
-    path?.match(/^\/app\/projects\/(?!create(?:\/|$))([^/]+)(?:\/spec)?$/)?.[1];
-  const catalogue = (path: string | undefined) =>
-    path?.match(/^\/catalogue\/[^/]+\/[^/]+$/);
-  const related =
-    (from === "/catalogue" && catalogue(to)) ||
-    (to === "/catalogue" && catalogue(from)) ||
-    (from === "/app/projects" && project(to)) ||
-    (to === "/app/projects" && project(from)) ||
-    (project(from) && project(from) === project(to));
-
-  return related ? [direction] : [direction, "nav-swap"];
+  // Capture one complete page surface. Extracting card titles and badges made
+  // list/detail navigation move fragments independently from their content.
+  return [direction, "nav-swap"];
 }

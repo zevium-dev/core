@@ -30,7 +30,7 @@ describe("route view-transition policy", () => {
     ).toBe(false);
   });
 
-  it("preserves direction and list-detail morph types otherwise", () => {
+  it("preserves navigation direction while capturing one page surface", () => {
     stubMotionPreference(false);
 
     expect(
@@ -48,13 +48,13 @@ describe("route view-transition policy", () => {
         fromPath: "/catalogue",
         toPath: "/catalogue/acme/weather",
       }),
-    ).toEqual(["navigate-forward"]);
+    ).toEqual(["navigate-forward", "nav-swap"]);
   });
 
   it.each([
     ["/catalogue", "/catalogue/acme/weather"],
     ["/app/projects", "/app/projects/weather"],
-  ])("preserves morphs to and from %s", (list, detail) => {
+  ])("keeps list/detail navigation coherent to and from %s", (list, detail) => {
     stubMotionPreference(false);
     expect(
       routeViewTransitionTypes({
@@ -63,7 +63,7 @@ describe("route view-transition policy", () => {
         fromPath: list,
         toPath: detail,
       }),
-    ).toEqual(["navigate-forward"]);
+    ).toEqual(["navigate-forward", "nav-swap"]);
     expect(
       routeViewTransitionTypes({
         fromIndex: 2,
@@ -71,7 +71,7 @@ describe("route view-transition policy", () => {
         fromPath: detail,
         toPath: list,
       }),
-    ).toEqual(["navigate-back"]);
+    ).toEqual(["navigate-back", "nav-swap"]);
   });
 
   it.each([
@@ -89,7 +89,7 @@ describe("route view-transition policy", () => {
     ).toEqual(["navigate-forward", "nav-swap"]);
   });
 
-  it("preserves the same project's title into its spec editor", () => {
+  it("keeps the project and spec editor on one page surface", () => {
     stubMotionPreference(false);
     expect(
       routeViewTransitionTypes({
@@ -98,7 +98,7 @@ describe("route view-transition policy", () => {
         fromPath: "/app/projects/weather/",
         toPath: "/app/projects/weather/spec",
       }),
-    ).toEqual(["navigate-forward"]);
+    ).toEqual(["navigate-forward", "nav-swap"]);
   });
 
   it("leaves Clerk hashes and same-page changes to the mounted UI", () => {
