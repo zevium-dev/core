@@ -86,6 +86,61 @@ async function completeAudit(t: TestConvex<typeof schema>): Promise<string> {
 }
 
 describe("security rollout audit fence", () => {
+  it("lets internal operators audit and migrate without granting application admin access", async () => {
+    process.env.UPSTREAM_CREDENTIAL_ENCRYPTION_KEYS = KEYRING;
+    delete process.env.ADMIN_USER_IDS;
+    const t = convexTest(schema, modules);
+    const { projectId } = await seedProject(t);
+    const credentialId = await t.run(
+      async (ctx) =>
+        await ctx.db.insert("upstreamCredentials", {
+          projectId,
+          name: "authorization",
+          secret: "offline-legacy-secret",
+          updatedAt: 1,
+        }),
+    );
+    await expect(
+      t.mutation(api.securityRollout.startAudit, {}),
+    ).rejects.toThrow("Not authenticated");
+    let audit = await t.mutation(
+      internal.securityRollout.startAuditOperator,
+      {},
+    );
+    await expect(
+      t.mutation(internal.upstreamCredentials.migrateLegacyPlaintext, {
+        auditId: audit.auditId,
+      }),
+    ).rejects.toThrow("completed zero-corruption security audit");
+    while (audit.phase !== "completed") {
+      audit = await t.mutation(internal.securityRollout.auditPageOperator, {
+        auditId: audit.auditId,
+        numItems: 1,
+      });
+    }
+    expect(audit).toMatchObject({
+      zeroCorruption: true,
+      plaintext: 1,
+      broken: 0,
+      corrupt: 0,
+    });
+    const before = await t.run(async (ctx) => await ctx.db.get(credentialId));
+    expect(before?.secret).toBe("offline-legacy-secret");
+    const migrated = await t.mutation(
+      internal.upstreamCredentials.migrateLegacyPlaintext,
+      { auditId: audit.auditId },
+    );
+    expect(migrated).toMatchObject({ isDone: true, scrubbed: 1, broken: 0 });
+    const after = await t.run(async (ctx) => await ctx.db.get(credentialId));
+    expect(after?.secret).toBeUndefined();
+    expect(await decryptCredential(after!, projectId, "authorization")).toBe(
+      "offline-legacy-secret",
+    );
+    await expect(
+      t.mutation(api.securityRollout.auditPage, { auditId: audit.auditId }),
+    ).rejects.toThrow("Not authenticated");
+  });
+
   const previousAdminIds = process.env.ADMIN_USER_IDS;
   const previousKeyring = process.env.UPSTREAM_CREDENTIAL_ENCRYPTION_KEYS;
 

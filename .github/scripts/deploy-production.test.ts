@@ -4,6 +4,7 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -74,6 +75,202 @@ describe("production deployment workflow", () => {
       '"name=\\"zevium-release\\" content=\\"$RELEASE_SHA\\""',
     );
     expect(workflow).toContain('"\\"release\\":\\"$RELEASE_SHA\\""');
+  });
+
+  it("configures matching registration secrets without logging them", () => {
+    const root = mkdtempSync(join(tmpdir(), "zevium-production-registry-"));
+    try {
+      const sha = "a".repeat(40);
+      const git = join(root, "git");
+      writeFileSync(
+        git,
+        '#!/bin/sh\nprintf "%s\\trefs/heads/develop\\n" "$REMOTE_SHA"\n',
+      );
+      chmodSync(git, 0o755);
+      const pnpm = join(root, "pnpm");
+      writeFileSync(
+        pnpm,
+        `#!/usr/bin/env node
+const fs = require("node:fs");
+fs.appendFileSync(process.env.CALLS, JSON.stringify({ args: process.argv.slice(2), value: fs.readFileSync(0, "utf8") }) + "\\n");
+`,
+      );
+      chmodSync(pnpm, 0o755);
+      const document = parse(workflow);
+      const steps = document.jobs.deploy.steps;
+      const configure = steps.find(
+        (step: { name?: string }) => step.name === "Configure registry runtime",
+      ).run;
+      const cleanup = steps.find(
+        (step: { name?: string }) => step.name === "Remove runtime secret file",
+      );
+      const ring = JSON.stringify({
+        current: "fixture-v1",
+        keys: { "fixture-v1": "42".repeat(32) },
+      });
+      const secret = "fixture-projection-secret-for-deploy-tests";
+      const credentialRing = JSON.stringify({
+        current: "fixture-v1",
+        keys: { "fixture-v1": Buffer.alloc(32, 0x42).toString("base64") },
+      });
+      const calls = join(root, "calls.jsonl");
+      const secretFile = join(root, "zevium-web-runtime-secrets.json");
+      const env = {
+        ...process.env,
+        PATH: `${root}:${process.env.PATH}`,
+        RUNNER_TEMP: root,
+        RELEASE_SHA: sha,
+        REMOTE_SHA: sha,
+        CALLS: calls,
+        GATEWAY_REGISTRY_TRANSPORT_KEYRING: ring,
+        REGISTRY_KEY_PROJECTION_HMAC_SECRET: secret,
+        UPSTREAM_CREDENTIAL_ENCRYPTION_KEYS: credentialRing,
+      };
+      const run = spawnSync("bash", ["-e", "-o", "pipefail", "-c", configure], {
+        env,
+        encoding: "utf8",
+        timeout: 5000,
+      });
+      expect(run.status).toBe(0);
+      expect(run.stdout + run.stderr).not.toContain(secret);
+      expect(run.stdout + run.stderr).not.toContain(ring);
+      expect(
+        readFileSync(calls, "utf8")
+          .trim()
+          .split("\n")
+          .map((line) => JSON.parse(line)),
+      ).toEqual([
+        {
+          args: [
+            "exec",
+            "convex",
+            "env",
+            "set",
+            "GATEWAY_REGISTRY_TRANSPORT_KEYRING",
+          ],
+          value: ring,
+        },
+        {
+          args: [
+            "exec",
+            "convex",
+            "env",
+            "set",
+            "REGISTRY_KEY_PROJECTION_HMAC_SECRET",
+          ],
+          value: secret,
+        },
+        {
+          args: [
+            "exec",
+            "convex",
+            "env",
+            "set",
+            "UPSTREAM_CREDENTIAL_ENCRYPTION_KEYS",
+          ],
+          value: credentialRing,
+        },
+      ]);
+      expect(JSON.parse(readFileSync(secretFile, "utf8"))).toEqual({
+        REGISTRY_KEY_PROJECTION_HMAC_SECRET: secret,
+      });
+      expect(statSync(secretFile).mode & 0o777).toBe(0o600);
+      expect(workflow).toContain(
+        '--secrets-file "$RUNNER_TEMP/zevium-web-runtime-secrets.json"',
+      );
+      expect(cleanup.if).toBe("always()");
+      const cleaned = spawnSync("bash", ["-e", "-c", cleanup.run], {
+        env,
+        encoding: "utf8",
+      });
+      expect(cleaned.status).toBe(0);
+      expect(() => statSync(secretFile)).toThrow("ENOENT");
+      rmSync(calls);
+      const stale = spawnSync(
+        "bash",
+        ["-e", "-o", "pipefail", "-c", configure],
+        { env: { ...env, REMOTE_SHA: "b".repeat(40) }, encoding: "utf8" },
+      );
+      expect(stale.status).not.toBe(0);
+      expect(() => statSync(calls)).toThrow("ENOENT");
+      expect(() => statSync(secretFile)).toThrow("ENOENT");
+      expect(
+        steps.findIndex(
+          (step: { name?: string }) => step.name === "Deploy Convex",
+        ),
+      ).toBeLessThan(
+        steps.findIndex(
+          (step: { name?: string }) =>
+            step.name === "Configure registry runtime",
+        ),
+      );
+      expect(
+        steps.findIndex(
+          (step: { name?: string }) =>
+            step.name === "Configure registry runtime",
+        ),
+      ).toBeLessThan(
+        steps.findIndex(
+          (step: { name?: string }) => step.name === "Deploy web",
+        ),
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects malformed encryption keys and weak registration secrets before deployment", () => {
+    const document = parse(workflow);
+    const identity = document.jobs.deploy.steps.find(
+      (step: { name?: string }) =>
+        step.name === "Verify approved release identity",
+    ).run;
+    const validate = identity.slice(identity.indexOf("node --import tsx"));
+    const ring = JSON.stringify({
+      current: "fixture-v1",
+      keys: { "fixture-v1": "42".repeat(32) },
+    });
+    const credentialRing = JSON.stringify({
+      current: "fixture-v1",
+      keys: { "fixture-v1": Buffer.alloc(32, 0x42).toString("base64") },
+    });
+    const run = (
+      transport: string,
+      projection: string,
+      credential = credentialRing,
+    ) =>
+      spawnSync("bash", ["-e", "-c", validate], {
+        encoding: "utf8",
+        timeout: 5000,
+        env: {
+          ...process.env,
+          GATEWAY_REGISTRY_TRANSPORT_KEYRING: transport,
+          REGISTRY_KEY_PROJECTION_HMAC_SECRET: projection,
+          UPSTREAM_CREDENTIAL_ENCRYPTION_KEYS: credential,
+        },
+      }).status;
+    expect(run(ring, "fixture-projection-secret-for-deploy-tests")).toBe(0);
+    expect(run("{}", "fixture-projection-secret-for-deploy-tests")).not.toBe(0);
+    expect(
+      run(
+        JSON.stringify({
+          current: "missing",
+          keys: { "fixture-v1": "42".repeat(32) },
+        }),
+        "fixture-projection-secret-for-deploy-tests",
+      ),
+    ).not.toBe(0);
+    expect(run(ring, "weak")).not.toBe(0);
+    expect(
+      run(
+        ring,
+        "fixture-projection-secret-for-deploy-tests",
+        JSON.stringify({
+          current: "fixture-v1",
+          keys: { "fixture-v1": "legacy-unbound-material" },
+        }),
+      ),
+    ).not.toBe(0);
   });
 
   it("accepts changed catalogue copy but rejects a broken catalogue surface", () => {

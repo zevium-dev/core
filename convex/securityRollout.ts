@@ -3,6 +3,7 @@ import { v } from "convex/values";
 import type { Doc } from "./_generated/dataModel";
 import {
   mutation,
+  internalMutation,
   query,
   type MutationCtx,
   type QueryCtx,
@@ -170,42 +171,52 @@ function previousWebhookSecret(
   };
 }
 
+async function startAuditImpl(ctx: MutationCtx): Promise<SecurityAuditView> {
+  const now = Date.now();
+  const auditId = crypto.randomUUID();
+  const generation = await securityRolloutGeneration(ctx);
+  const [latestCredential, latestWebhook] = await Promise.all([
+    ctx.db.query("upstreamCredentials").order("desc").first(),
+    ctx.db.query("webhookEndpoints").order("desc").first(),
+  ]);
+  const highWaterCreationTime = Math.max(
+    latestCredential?._creationTime ?? 0,
+    latestWebhook?._creationTime ?? 0,
+  );
+  const id = await ctx.db.insert("securityRolloutAudits", {
+    auditId,
+    generation,
+    highWaterCreationTime,
+    phase: "credentials",
+    credentialCursor: null,
+    webhookCursor: null,
+    credentialsScanned: 0,
+    webhooksScanned: 0,
+    current: 0,
+    old: 0,
+    plaintext: 0,
+    corrupt: 0,
+    broken: 0,
+    zeroCorruption: false,
+    createdAt: now,
+  });
+  const row = await ctx.db.get(id);
+  if (row === null) throw new Error("Security audit could not be started");
+  return auditView(row);
+}
+
 export const startAudit = mutation({
   args: {},
   handler: async (ctx): Promise<SecurityAuditView> => {
     await requireAdmin(ctx);
-    const now = Date.now();
-    const auditId = crypto.randomUUID();
-    const generation = await securityRolloutGeneration(ctx);
-    const [latestCredential, latestWebhook] = await Promise.all([
-      ctx.db.query("upstreamCredentials").order("desc").first(),
-      ctx.db.query("webhookEndpoints").order("desc").first(),
-    ]);
-    const highWaterCreationTime = Math.max(
-      latestCredential?._creationTime ?? 0,
-      latestWebhook?._creationTime ?? 0,
-    );
-    const id = await ctx.db.insert("securityRolloutAudits", {
-      auditId,
-      generation,
-      highWaterCreationTime,
-      phase: "credentials",
-      credentialCursor: null,
-      webhookCursor: null,
-      credentialsScanned: 0,
-      webhooksScanned: 0,
-      current: 0,
-      old: 0,
-      plaintext: 0,
-      corrupt: 0,
-      broken: 0,
-      zeroCorruption: false,
-      createdAt: now,
-    });
-    const row = await ctx.db.get(id);
-    if (row === null) throw new Error("Security audit could not be started");
-    return auditView(row);
+    return await startAuditImpl(ctx);
   },
+});
+
+/** Deployment operators use the same audit without granting application roles. */
+export const startAuditOperator = internalMutation({
+  args: {},
+  handler: startAuditImpl,
 });
 
 export const getAudit = query({
@@ -221,115 +232,121 @@ export const getAudit = query({
  * Pages across both secret tables without changing a secret row. Generation
  * and creation-time high-water remain immutable from start through completion.
  */
-export const auditPage = mutation({
-  args: { auditId: v.string(), numItems: v.optional(v.number()) },
-  handler: async (ctx, args): Promise<SecurityAuditView> => {
-    await requireAdmin(ctx);
-    const audit = await auditById(ctx, args.auditId);
-    if (audit === null) throw new Error("Security audit not found");
-    if (audit.phase === "completed" || audit.phase === "invalidated") {
-      return auditView(audit);
-    }
-    const generation = await securityRolloutGeneration(ctx);
-    if (generation !== audit.generation) {
-      await ctx.db.patch(audit._id, {
-        phase: "invalidated",
-        zeroCorruption: false,
-      });
-      const invalidated = await ctx.db.get(audit._id);
-      if (invalidated === null) throw new Error("Security audit unavailable");
-      return auditView(invalidated);
-    }
+async function auditPageImpl(
+  ctx: MutationCtx,
+  args: { auditId: string; numItems?: number },
+): Promise<SecurityAuditView> {
+  const audit = await auditById(ctx, args.auditId);
+  if (audit === null) throw new Error("Security audit not found");
+  if (audit.phase === "completed" || audit.phase === "invalidated") {
+    return auditView(audit);
+  }
+  const generation = await securityRolloutGeneration(ctx);
+  if (generation !== audit.generation) {
+    await ctx.db.patch(audit._id, {
+      phase: "invalidated",
+      zeroCorruption: false,
+    });
+    const invalidated = await ctx.db.get(audit._id);
+    if (invalidated === null) throw new Error("Security audit unavailable");
+    return auditView(invalidated);
+  }
 
-    const requested = args.numItems ?? 50;
-    const numItems = Math.max(
-      1,
-      Math.min(MAX_AUDIT_PAGE, Math.floor(requested)),
-    );
-    let counts: AuditCounts = {
-      current: audit.current,
-      old: audit.old,
-      plaintext: audit.plaintext,
-      corrupt: audit.corrupt,
-      broken: audit.broken,
-    };
+  const requested = args.numItems ?? 50;
+  const numItems = Math.max(1, Math.min(MAX_AUDIT_PAGE, Math.floor(requested)));
+  let counts: AuditCounts = {
+    current: audit.current,
+    old: audit.old,
+    plaintext: audit.plaintext,
+    corrupt: audit.corrupt,
+    broken: audit.broken,
+  };
 
-    if (audit.phase === "credentials") {
-      const page = await ctx.db.query("upstreamCredentials").paginate({
-        cursor: audit.credentialCursor ?? null,
-        numItems,
-      });
-      for (const row of page.page) {
-        if (row._creationTime > audit.highWaterCreationTime) {
-          await ctx.db.patch(audit._id, {
-            phase: "invalidated",
-            zeroCorruption: false,
-          });
-          const invalidated = await ctx.db.get(audit._id);
-          if (invalidated === null)
-            throw new Error("Security audit unavailable");
-          return auditView(invalidated);
-        }
-        counts = addCounts(
-          counts,
-          await inspectSecret(row, credentialBinding(row.projectId, row.name)),
-        );
+  if (audit.phase === "credentials") {
+    const page = await ctx.db.query("upstreamCredentials").paginate({
+      cursor: audit.credentialCursor ?? null,
+      numItems,
+    });
+    for (const row of page.page) {
+      if (row._creationTime > audit.highWaterCreationTime) {
+        await ctx.db.patch(audit._id, {
+          phase: "invalidated",
+          zeroCorruption: false,
+        });
+        const invalidated = await ctx.db.get(audit._id);
+        if (invalidated === null) throw new Error("Security audit unavailable");
+        return auditView(invalidated);
       }
-      await ctx.db.patch(audit._id, {
-        ...counts,
-        credentialsScanned: audit.credentialsScanned + page.page.length,
-        credentialCursor: page.continueCursor,
-        phase: page.isDone ? "webhooks" : "credentials",
-      });
-    } else {
-      const page = await ctx.db.query("webhookEndpoints").paginate({
-        cursor: audit.webhookCursor ?? null,
-        numItems,
-      });
-      for (const row of page.page) {
-        if (row._creationTime > audit.highWaterCreationTime) {
-          await ctx.db.patch(audit._id, {
-            phase: "invalidated",
-            zeroCorruption: false,
-          });
-          const invalidated = await ctx.db.get(audit._id);
-          if (invalidated === null)
-            throw new Error("Security audit unavailable");
-          return auditView(invalidated);
-        }
-        const currentVersion = row.secretVersion ?? 1;
+      counts = addCounts(
+        counts,
+        await inspectSecret(row, credentialBinding(row.projectId, row.name)),
+      );
+    }
+    await ctx.db.patch(audit._id, {
+      ...counts,
+      credentialsScanned: audit.credentialsScanned + page.page.length,
+      credentialCursor: page.continueCursor,
+      phase: page.isDone ? "webhooks" : "credentials",
+    });
+  } else {
+    const page = await ctx.db.query("webhookEndpoints").paginate({
+      cursor: audit.webhookCursor ?? null,
+      numItems,
+    });
+    for (const row of page.page) {
+      if (row._creationTime > audit.highWaterCreationTime) {
+        await ctx.db.patch(audit._id, {
+          phase: "invalidated",
+          zeroCorruption: false,
+        });
+        const invalidated = await ctx.db.get(audit._id);
+        if (invalidated === null) throw new Error("Security audit unavailable");
+        return auditView(invalidated);
+      }
+      const currentVersion = row.secretVersion ?? 1;
+      counts = addCounts(
+        counts,
+        await inspectSecret(row, webhookBinding(row.projectId, currentVersion)),
+      );
+      const previous = previousWebhookSecret(row);
+      if (previous !== null) {
         counts = addCounts(
           counts,
           await inspectSecret(
-            row,
-            webhookBinding(row.projectId, currentVersion),
+            previous,
+            webhookBinding(row.projectId, row.previousSecretVersion ?? 1),
           ),
         );
-        const previous = previousWebhookSecret(row);
-        if (previous !== null) {
-          counts = addCounts(
-            counts,
-            await inspectSecret(
-              previous,
-              webhookBinding(row.projectId, row.previousSecretVersion ?? 1),
-            ),
-          );
-        }
       }
-      const completedAt = page.isDone ? Date.now() : undefined;
-      await ctx.db.patch(audit._id, {
-        ...counts,
-        webhooksScanned: audit.webhooksScanned + page.page.length,
-        webhookCursor: page.continueCursor,
-        phase: page.isDone ? "completed" : "webhooks",
-        zeroCorruption:
-          page.isDone && counts.corrupt === 0 && counts.broken === 0,
-        completedAt,
-      });
     }
+    const completedAt = page.isDone ? Date.now() : undefined;
+    await ctx.db.patch(audit._id, {
+      ...counts,
+      webhooksScanned: audit.webhooksScanned + page.page.length,
+      webhookCursor: page.continueCursor,
+      phase: page.isDone ? "completed" : "webhooks",
+      zeroCorruption:
+        page.isDone && counts.corrupt === 0 && counts.broken === 0,
+      completedAt,
+    });
+  }
 
-    const updated = await ctx.db.get(audit._id);
-    if (updated === null) throw new Error("Security audit unavailable");
-    return auditView(updated);
+  const updated = await ctx.db.get(audit._id);
+  if (updated === null) throw new Error("Security audit unavailable");
+  return auditView(updated);
+}
+
+const auditPageArgs = { auditId: v.string(), numItems: v.optional(v.number()) };
+
+export const auditPage = mutation({
+  args: auditPageArgs,
+  handler: async (ctx, args): Promise<SecurityAuditView> => {
+    await requireAdmin(ctx);
+    return await auditPageImpl(ctx, args);
   },
+});
+
+export const auditPageOperator = internalMutation({
+  args: auditPageArgs,
+  handler: auditPageImpl,
 });
