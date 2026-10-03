@@ -34,13 +34,13 @@ function DocsAgentsPage() {
   return (
     <DocsPage
       title="Agents"
-      description="Every published API is consumable as agent tools through the same metered, credit-gated gateway as human traffic. No unmetered side doors."
+      description="Connect over MCP to find an API, read its endpoint reference, and make calls using your organization’s prepaid wallet."
     >
       <h2>Connect an agent</h2>
       <p>
         Zevium exposes an MCP (Model Context Protocol) Streamable HTTP endpoint.
-        Point any MCP-compatible client at it and authenticate with a Zevium API
-        key:
+        Use a client that supports Streamable HTTP and authenticate with a
+        Zevium API key:
       </p>
       <DocsCodeBlock lang="json" code={MCP_CONFIG} />
       <p>
@@ -58,7 +58,7 @@ function DocsAgentsPage() {
       <DocsCodeBlock lang="bash" code={`curl "${DISCOVERY_URL}"`} />
 
       <h2>Tools</h2>
-      <p>Three tools — search-then-load, never a dump of every endpoint:</p>
+      <p>Search for an API first, read its reference, then call an endpoint:</p>
       <ul>
         <li>
           <code>search_apis</code> — search the public catalogue. Returns
@@ -68,8 +68,9 @@ function DocsAgentsPage() {
         <li>
           <code>get_api_docs</code> — load the endpoint list, pricing, and usage
           notes for one published API. Use after <code>search_apis</code> to
-          load only the tools you need. Inputs: <code>org</code>,{" "}
-          <code>project</code>.
+          read the reference for the API you chose. The <code>org</code> input
+          is the public publisher handle from its catalogue URL. Inputs:{" "}
+          <code>org</code>, <code>project</code>.
         </li>
         <li>
           <code>call_api</code> — execute a metered API call through the
@@ -83,25 +84,27 @@ function DocsAgentsPage() {
 
       <h2>Credit gating</h2>
       <p>
-        <code>call_api</code> routes through the same credit gate as human
-        traffic. Zero balance blocks the call — the gateway returns{" "}
-        <code>402 insufficient_credits</code> with the wallet's current balance
-        and the call's cost. No unmetered paths exist.
+        <code>call_api</code> reserves credits before contacting the publisher
+        and settles the charge on a successful response. If your wallet is empty
+        or cannot cover the call, the tool returns an error result with{" "}
+        <code>status: 402</code>. Its body contains{" "}
+        <code>payment_required</code>, a reason, and links to create a key or
+        add credits.
       </p>
 
       <h2>Mock mode</h2>
       <p>
-        Every published API also serves free, spec-generated mock responses —
-        live and keyless. Swap <code>/gateway</code> for <code>/mock</code> in
-        the call path:
+        Use a mock response to inspect the published spec’s response shape
+        without contacting the publisher. Swap <code>/gateway</code> for{" "}
+        <code>/mock</code> in the call path:
       </p>
       <DocsCodeBlock
         lang="text"
         code={`${GATEWAY}/mock/{org}/{project}/{path}`}
       />
       <p>
-        No API key, no upstream call, <code>0</code> credits. Responses carry{" "}
-        <code>x-zevium-mock: 1</code> — useful for agent evaluation and
+        Mock calls need no API key and cost <code>0</code> credits. Responses
+        carry <code>x-zevium-mock: 1</code> — useful for agent evaluation and
         integration testing before spending credits.
       </p>
     </DocsPage>

@@ -215,7 +215,7 @@ export const createKey = createServerFn({ method: "POST" })
     });
     if (active) {
       throw new Error(
-        "Only one active API key per organization. Revoke or rotate the existing key first.",
+        "You already have a current key in this organization. Rotate it, or revoke it before creating another.",
       );
     }
 

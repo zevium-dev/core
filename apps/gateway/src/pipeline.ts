@@ -142,7 +142,7 @@ export async function handleGatewayRequest(
     deps.routeAllowed &&
     !(await deps.routeAllowed(route.publisherHandle, route.projectSlug))
   ) {
-    return jsonError(404, "project_not_found", "Unknown project", requestId);
+    return jsonError(404, "project_not_found", "API not found", requestId);
   }
   const verified = outcome.key;
 
@@ -190,7 +190,7 @@ export async function handleGatewayRequest(
     throw error;
   }
   if (!published) {
-    return jsonError(404, "project_not_found", "Unknown project", requestId);
+    return jsonError(404, "project_not_found", "API not found", requestId);
   }
   if (
     !isPublishedSpecCopyAllowed(
@@ -199,7 +199,7 @@ export async function handleGatewayRequest(
       route.projectSlug,
     )
   ) {
-    return jsonError(404, "project_not_found", "Unknown project", requestId);
+    return jsonError(404, "project_not_found", "API not found", requestId);
   }
 
   if (
@@ -223,7 +223,7 @@ export async function handleGatewayRequest(
     published.visibility !== "public" &&
     verified.orgId !== published.clerkOrgId
   ) {
-    return jsonError(404, "project_not_found", "Unknown project", requestId);
+    return jsonError(404, "project_not_found", "API not found", requestId);
   }
 
   let parsed;
@@ -250,7 +250,12 @@ export async function handleGatewayRequest(
     );
   }
   if (!matched) {
-    return jsonError(404, "route_not_found", "Unknown route", requestId);
+    return jsonError(
+      404,
+      "route_not_found",
+      "No endpoint matches this method and path",
+      requestId,
+    );
   }
   // Keep settlement identity total even during a rolling shared-package
   // upgrade where an older matcher result may omit the new derived field.
@@ -266,7 +271,7 @@ export async function handleGatewayRequest(
     return jsonError(
       404,
       "no_upstream",
-      "Spec has no servers[0].url",
+      "Publisher has not configured an upstream URL",
       requestId,
     );
   }
@@ -509,7 +514,7 @@ export async function handleGatewayRequest(
             ? "API key is not managed by Zevium"
             : reserve.reason === "organization_archived"
               ? "Organization is archived"
-              : "Monthly credit cap reached for this key",
+              : "Monthly spending limit reached for this key",
         requestId,
       );
     }
@@ -517,7 +522,7 @@ export async function handleGatewayRequest(
       return jsonError(
         500,
         "reserve_failed",
-        "Credit reservation failed",
+        "Could not reserve credits. Try again.",
         requestId,
       );
     }
@@ -528,7 +533,7 @@ export async function handleGatewayRequest(
     return jsonError(
       500,
       "pricing_identity_failed",
-      "Credit identity could not be recorded",
+      "Could not authorize credits for this call. Try again.",
       requestId,
     );
   }

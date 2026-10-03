@@ -216,8 +216,8 @@ function NoOrgState() {
         <EmptyHeader>
           <EmptyTitle>No active organization</EmptyTitle>
           <EmptyDescription>
-            Use the organization switcher in the sidebar to create or select an
-            org. Projects are org-scoped.
+            Choose an organization from the sidebar to see its projects, or
+            create a new organization.
           </EmptyDescription>
         </EmptyHeader>
       </Empty>

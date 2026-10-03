@@ -386,7 +386,7 @@ describe("publish readiness validity", () => {
     ).resolves.toMatchObject({
       status: "reachable_unhealthy",
       statusCode: 503,
-      message: expect.stringContaining("Publication gate failed"),
+      message: expect.stringContaining("Health check failed"),
     });
     await expect(
       asAdmin(t).query(api.publishReadiness.getCurrent, { projectId }),

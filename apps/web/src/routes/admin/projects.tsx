@@ -133,7 +133,7 @@ function AdminProjectsPage() {
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Projects</h1>
         <p className="text-sm text-muted-foreground">
-          All projects with a platform-admin visibility kill switch.
+          Review project status and change public catalogue visibility.
         </p>
       </div>
 
@@ -215,7 +215,7 @@ function AdminProjectsPage() {
                         scope="col"
                         className="px-2 py-2 font-medium text-right"
                       >
-                        Kill switch
+                        Visibility action
                       </th>
                     </tr>
                   </thead>

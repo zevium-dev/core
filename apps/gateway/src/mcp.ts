@@ -93,13 +93,13 @@ const TOOLS: ToolDef[] = [
   {
     name: "get_api_docs",
     description:
-      "Load endpoint list, pricing, and usage notes for one published API. Use after search_apis to load only the tools you need.",
+      "Read endpoint definitions, prices, and usage notes for one published API. Use the publisher handle and project slug returned by search_apis.",
     inputSchema: {
       type: "object",
       properties: {
         org: {
           type: "string",
-          description: "Publisher organization slug",
+          description: "Public publisher handle from the catalogue URL",
         },
         project: {
           type: "string",
@@ -112,11 +112,14 @@ const TOOLS: ToolDef[] = [
   {
     name: "call_api",
     description:
-      "Execute a metered API call through the Zevium gateway. Requires a consumer API key (Authorization: Bearer ak_…/zev_… on the MCP request, or key argument). Credits are reserved and settled like any gateway call — zero balance blocks.",
+      "Call an API endpoint using prepaid credits. Supply a Zevium key with Authorization: Bearer on the MCP request or the key argument. A funded wallet is required. A 2xx upstream response settles the endpoint price; other upstream responses release the reservation.",
     inputSchema: {
       type: "object",
       properties: {
-        org: { type: "string", description: "Publisher org slug" },
+        org: {
+          type: "string",
+          description: "Public publisher handle from the catalogue URL",
+        },
         project: { type: "string", description: "API / project slug" },
         method: {
           type: "string",
@@ -370,7 +373,7 @@ async function handleGetApiDocs(
       "Credits are prepaid on the consumer org wallet; zero balance returns 402.",
       "Non-2xx upstream responses refund the reservation — consumer pays only on success.",
       "Pricing is declared per-operation as x-zevium-cost in the OpenAPI spec.",
-      "Prefer search_apis → get_api_docs → call_api; never dump every endpoint into context.",
+      "Use search_apis to find a match, get_api_docs to read its reference, and call_api to execute an endpoint.",
     ],
   };
 

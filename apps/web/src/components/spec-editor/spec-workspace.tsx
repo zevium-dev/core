@@ -504,16 +504,16 @@ export function SpecWorkspace({
       detail: dirty
         ? "Save the current draft before publishing."
         : hasClientErrors
-          ? "Fix the errors in the validation rail."
+          ? "Fix the errors in the Validation panel."
           : "A valid OpenAPI draft is saved.",
     },
     {
-      label: "Declared health reachability",
+      label: "Health endpoint",
       complete: readinessCurrent,
       detail:
         connectionResult?.message ??
         (readinessCurrent
-          ? "Saved credential-free reachability test is current."
+          ? "A passing health check is saved for this draft and credential configuration."
           : persistedReadiness.data?.reason === "expired"
             ? "Saved passing test expired. Run it again."
             : persistedReadiness.data?.reason === "draft_changed"
@@ -525,11 +525,11 @@ export function SpecWorkspace({
                   : "Opt in one safe GET or HEAD operation with x-zevium-health-check, then test its reachability."),
     },
     {
-      label: "Credential-free health contract",
+      label: "Health check safety",
       complete:
         connectionResult === null || connectionResult.status === "ready",
       detail:
-        "Health checks never send publisher or consumer credentials. Keep declared operation safe and parameter-free.",
+        "The health check runs without credentials. Declare a safe GET or HEAD operation with no parameters.",
     },
     {
       label: "Pricing",
@@ -625,7 +625,7 @@ export function SpecWorkspace({
               hasClientErrors
             }
           >
-            {connectionPending ? "Testing…" : "Test reachability"}
+            {connectionPending ? "Testing…" : "Test health endpoint"}
           </Button>
         </div>
         <ul className="mt-3 flex flex-col gap-2">
@@ -649,7 +649,7 @@ export function SpecWorkspace({
       </section>
       {!hasDescription ? (
         <p className="rounded-md border border-dashed px-3 py-2 text-xs text-muted-foreground">
-          No description — catalogue card will look empty.{" "}
+          Add a description so consumers know what this API does.{" "}
           <Link
             to="/app/projects/$projectSlug"
             params={{ projectSlug }}
@@ -674,15 +674,15 @@ export function SpecWorkspace({
               dirty || savePending || hasClientErrors || !readinessCurrent
             }
           >
-            {readinessCurrent ? "Publish" : "Test reachability to publish"}
+            {readinessCurrent ? "Publish" : "Test health endpoint to publish"}
           </Button>
         </DialogTrigger>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Publish version</DialogTitle>
             <DialogDescription>
-              Published versions are immutable. Use semver (e.g. 0.1.0).
-              Snapshots the saved draft.
+              Publish the saved draft as a version that cannot be edited. Use
+              semantic versioning, such as 0.1.0.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-2 py-2">

@@ -59,16 +59,16 @@ export function QualityBadges({
       <CardHeader>
         <CardTitle className="text-base">Quality evidence</CardTitle>
         <CardDescription>
-          API success and latency use privacy-minimized real gateway calls.
-          Reachability checks only publisher-declared safe health endpoint; it
-          never claims other API operations succeed.
+          API success and latency are measured from gateway calls. Reachability
+          measures the publisher’s declared health endpoint, which can pass even
+          when other operations fail.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
         {content}
         <p className="text-xs text-muted-foreground">
-          Metrics stay hidden until minimum sample counts are met and reset for
-          every published version.
+          Metrics appear once the minimum sample count is reached. Each
+          published version starts with fresh samples.
         </p>
       </CardContent>
     </Card>

@@ -19,7 +19,7 @@ describe("checkoutDisplay", () => {
     expect(checkoutDisplay("processing")).toEqual({
       title: "Confirming payment",
       description:
-        "We are waiting for Stripe to confirm this payment. Credits are not added from this page.",
+        "Waiting for Stripe to confirm your payment. Credits will be added to your wallet after confirmation.",
       variant: "outline",
     });
   });

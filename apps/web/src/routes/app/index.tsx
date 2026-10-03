@@ -234,7 +234,7 @@ function DashboardContent({
           <CardHeader>
             <CardTitle>API key status did not load</CardTitle>
             <CardDescription>
-              Onboarding progress is paused until key status is available.
+              Retry to check whether you already have an API key.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -269,8 +269,8 @@ function DashboardContent({
                 </EmptyMedia>
                 <EmptyTitle>No calls yet</EmptyTitle>
                 <EmptyDescription>
-                  Create a key, top up, then hit the gateway. Usage lands here
-                  live.
+                  Create a key, add credits, and make a live API call. Its usage
+                  will appear here.
                 </EmptyDescription>
               </EmptyHeader>
               <EmptyContent>
@@ -390,7 +390,7 @@ function OnboardingChecklist({
       id: "key" as const,
       done: hasKey,
       title: "Get an API key",
-      body: "One key per user. Copy it once — you won't see it again.",
+      body: "One current key per member in this organization. Save the secret when it is shown.",
       href: "/app/settings/keys" as const,
       cta: "Create key",
       icon: KeyRound,
@@ -399,7 +399,7 @@ function OnboardingChecklist({
       id: "topup" as const,
       done: hasTopUp,
       title: "Top up credits",
-      body: "Prepaid org wallet. Zero balance blocks every call.",
+      body: "Add credits to this organization’s wallet before making live calls.",
       href: "/app/billing" as const,
       cta: "Top up",
       icon: Wallet,
@@ -422,7 +422,8 @@ function OnboardingChecklist({
           <h2>Get started</h2>
         </CardTitle>
         <CardDescription>
-          Validate requests free, then create key → add credits → send live.
+          Try a free mock response first. For a live call, create a key and add
+          credits.
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
@@ -432,8 +433,8 @@ function OnboardingChecklist({
             <div className="space-y-1">
               <p className="text-sm font-medium">Try an API without a key</p>
               <p className="text-sm text-muted-foreground">
-                Mock mode generates a response from the published schema. Zero
-                credits and no upstream execution.
+                Mock mode returns a sample response from the published spec
+                without contacting the publisher.
               </p>
             </div>
           </div>

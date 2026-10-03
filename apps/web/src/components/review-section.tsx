@@ -154,8 +154,9 @@ export function ReviewSection({ projectId }: { projectId: Id<"projects"> }) {
                 Verified consumer reviews
               </CardTitle>
               <CardDescription>
-                Only organizations with a settled gateway call can publish one
-                review. Buyer identity remains private.
+                Each organization that has completed a settled gateway call can
+                publish one review. Reviews appear publicly as “Verified
+                consumer.”
               </CardDescription>
             </div>
             {aggregateQuery.isPending ? (
@@ -173,7 +174,7 @@ export function ReviewSection({ projectId }: { projectId: Id<"projects"> }) {
                 </Button>
               </div>
             ) : aggregateQuery.data.count === 0 ? (
-              <Badge variant="outline">Insufficient review data</Badge>
+              <Badge variant="outline">No ratings yet</Badge>
             ) : (
               <Badge variant="secondary" className="gap-2">
                 <Stars
@@ -424,7 +425,8 @@ export function ReviewSection({ projectId }: { projectId: Id<"projects"> }) {
           <DialogHeader>
             <DialogTitle>Withdraw review?</DialogTitle>
             <DialogDescription>
-              Review leaves public aggregate. You can reactivate it later.
+              Your review and rating will be removed from the public listing.
+              You can publish them again later.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -479,8 +481,8 @@ export function ReviewSection({ projectId }: { projectId: Id<"projects"> }) {
             <DialogHeader>
               <DialogTitle>Report review</DialogTitle>
               <DialogDescription>
-                Explain policy concern. Staff sees reason; reviewer identity
-                stays private.
+                Explain why this review needs moderation. Staff can read your
+                report; it will not appear publicly.
               </DialogDescription>
             </DialogHeader>
             <Field>
@@ -555,7 +557,7 @@ export function ReviewEmptyState() {
         </EmptyMedia>
         <EmptyTitle>No verified reviews yet</EmptyTitle>
         <EmptyDescription>
-          Rating stays unscored until eligible consumers contribute.
+          The first verified consumer review will add a rating for this API.
         </EmptyDescription>
       </EmptyHeader>
     </Empty>

@@ -22,7 +22,7 @@ export function checkoutDisplay(state: CheckoutState): CheckoutDisplay {
       return {
         title: "Payment confirmed",
         description:
-          "Your credited balance updates after the payment ledger is fulfilled.",
+          "Your wallet balance updates once the confirmed payment has been processed.",
         variant: "secondary",
       };
     case "failed":
@@ -42,7 +42,7 @@ export function checkoutDisplay(state: CheckoutState): CheckoutDisplay {
       return {
         title: "Confirming payment",
         description:
-          "We are waiting for Stripe to confirm this payment. Credits are not added from this page.",
+          "Waiting for Stripe to confirm your payment. Credits will be added to your wallet after confirmation.",
         variant: "outline",
       };
   }
@@ -167,7 +167,7 @@ export function connectedAccountDisplay(
   switch (status) {
     case "not_started":
       return {
-        title: "Connect account not started",
+        title: "Stripe account not connected",
         description:
           "Complete Stripe Connect onboarding before you can receive transfers.",
         action: "start",

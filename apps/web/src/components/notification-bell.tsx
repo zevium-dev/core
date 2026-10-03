@@ -406,9 +406,10 @@ function EmptyState() {
       >
         <BellOff aria-hidden="true" className="size-5" />
       </m.span>
-      <p className="text-sm font-medium">You&apos;re all caught up</p>
+      <p className="text-sm font-medium">No notifications yet</p>
       <p className="text-xs text-muted-foreground">
-        New activity in your org shows up here.
+        Notifications about your organization’s APIs and wallet will appear
+        here.
       </p>
     </div>
   );

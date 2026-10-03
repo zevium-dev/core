@@ -178,9 +178,9 @@ function PublicHandleCard() {
       <CardHeader>
         <CardTitle>Public publisher handle</CardTitle>
         <CardDescription>
-          This stable handle appears in catalogue, gateway, mock, and MCP URLs.
-          Clerk organization slugs are internal identity values and never form
-          public URLs.
+          This handle identifies your organization in public API URLs. Choose it
+          before publishing; it becomes permanent with your first published
+          version.
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
@@ -339,7 +339,7 @@ function PublisherPaymentsCard() {
         <CardHeader>
           <CardTitle>Publisher payout status did not load</CardTitle>
           <CardDescription>
-            Check your connection, then retry. No payout settings were changed.
+            Check your connection and retry to view payout settings.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -408,7 +408,8 @@ function PublisherPaymentsCard() {
                   onChange={(event) => setPublisherCountry(event.target.value)}
                 />
                 <p className="text-xs text-muted-foreground">
-                  Two-letter ISO country code for the publisher legal entity.
+                  Enter the two-letter country code where your business is
+                  registered, such as US or GB.
                 </p>
               </div>
             ) : null}
@@ -446,8 +447,8 @@ function NoActiveOrg() {
           </EmptyMedia>
           <EmptyTitle>No active organization</EmptyTitle>
           <EmptyDescription>
-            Wallet, projects, and API keys are org-scoped. Pick an org below or
-            create a new one.
+            Each organization has its own wallet, projects, and API keys. Choose
+            one below or create a new organization.
           </EmptyDescription>
         </EmptyHeader>
         <EmptyContent>

@@ -300,7 +300,9 @@ export function SpecRailValidation({ issues }: SpecRailValidationProps) {
             <Badge variant="outline">Clean</Badge>
           )}
         </div>
-        <CardDescription>Fix these issues before publishing.</CardDescription>
+        <CardDescription>
+          Fix errors before publishing. Review warnings for possible issues.
+        </CardDescription>
       </CardHeader>
       <CardContent>
         {issues.length === 0 ? (
@@ -521,7 +523,7 @@ function VersionRow({
                   onClick={() => onUndeprecate(version)}
                 >
                   <RotateCcw aria-hidden="true" className="size-4" />
-                  {sunsetReached ? "Sunset reached" : "Undeprecate"}
+                  {sunsetReached ? "Migration date passed" : "Undeprecate"}
                 </DropdownMenuItem>
               ) : (
                 <DropdownMenuItem onClick={() => onDeprecate(version)}>
@@ -590,14 +592,14 @@ function DeprecateDialog({
         <DialogHeader>
           <DialogTitle>Deprecate version {target?.version ?? ""}</DialogTitle>
           <DialogDescription>
-            Marks this published version as deprecated. The spec body stays
-            immutable; only deprecation metadata changes. Consumers see a
-            warning banner.
+            Add a migration notice to this version. The published spec stays
+            unchanged. To stop live calls, schedule project retirement in
+            Settings.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4 py-2">
           <div className="space-y-2">
-            <Label htmlFor="deprecate-sunset">Sunset date (optional)</Label>
+            <Label htmlFor="deprecate-sunset">Migration date (optional)</Label>
             <Input
               id="deprecate-sunset"
               name="sunset-date"
@@ -622,7 +624,7 @@ function DeprecateDialog({
             >
               {!sunsetValid
                 ? "Sunset must be at least 7 days away."
-                : "Optional. Earliest cutoff is 7 full days from now."}
+                : "Optional target date for migration, at least 7 days away. This date alone does not stop live calls."}
             </p>
           </div>
           <div className="space-y-2">
@@ -636,7 +638,7 @@ function DeprecateDialog({
               maxLength={1000}
               rows={3}
               disabled={pending}
-              placeholder="e.g. Move to v2 before cutoff…"
+              placeholder="e.g. Use /v2/summarize; rename text to input…"
               className="min-h-20"
               aria-describedby="deprecate-message-help"
               aria-invalid={message.length > 0 && !messageValid}
@@ -653,7 +655,7 @@ function DeprecateDialog({
             >
               {!messageValid && message.length > 0
                 ? "Enter migration guidance, not whitespace."
-                : "Required. Consumers see this message before cutoff."}
+                : "Required. Tell consumers where to migrate and what changes they need to make."}
             </p>
           </div>
         </div>
@@ -707,8 +709,8 @@ function UndeprecateDialog({
         <DialogHeader>
           <DialogTitle>Restore version {target?.version ?? ""}?</DialogTitle>
           <DialogDescription>
-            Clears deprecation metadata. The version returns to normal in the
-            catalogue and consumer banner.
+            Remove this version’s migration notice and deprecation status.
+            Project retirement, if scheduled, is managed separately in Settings.
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>

@@ -229,7 +229,8 @@ function EarningsContent() {
                     }
                   />
                   <p className="text-xs text-muted-foreground">
-                    Two-letter ISO country code for the publisher legal entity.
+                    Enter the two-letter country code where your business is
+                    registered, such as US or GB.
                   </p>
                 </div>
               ) : null}
@@ -271,9 +272,9 @@ function EarningsContent() {
         <Card>
           <CardContent className="grid gap-6 sm:grid-cols-2 xl:grid-cols-4">
             <EarningTotal
-              label="Pending review"
+              label="Pending"
               value={earnings.pendingRisk}
-              description="Held during risk review."
+              description="Held before becoming available for transfer."
             />
             <EarningTotal
               label="Available"
@@ -288,7 +289,7 @@ function EarningsContent() {
             <EarningTotal
               label="Stripe balance"
               value={earnings.transferred}
-              description="Delivered to connected account."
+              description="Transferred to your Stripe account."
             />
           </CardContent>
         </Card>
@@ -297,7 +298,7 @@ function EarningsContent() {
             {(
               earnings.minimumPayoutCredits - earnings.available
             ).toLocaleString(undefined, { maximumFractionDigits: 2 })}{" "}
-            more credits needed to reach the $10 payout minimum. Every
+            more credits needed to reach the $10 transfer minimum. Every
             fractional credit stays in your balance.
           </p>
         ) : null}
@@ -313,7 +314,7 @@ function EarningsContent() {
         {earnings.failed > 0 ? (
           <p className="text-sm text-destructive">
             {earnings.failed.toLocaleString("en-US")} credits need transfer
-            review. See transfer history for the safe failure reason.
+            review. Check transfer history for the reason and next step.
           </p>
         ) : null}
         {earnings.reversed > 0 ? (
@@ -387,7 +388,7 @@ function EarningsLedgerCard({
           Earnings ledger
         </CardTitle>
         <CardDescription>
-          Each completed usage settlement creates one immutable earning.
+          Your 95% share of each settled paid call appears here.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -492,7 +493,7 @@ function TransferHistoryCard({
           Transfer history
         </CardTitle>
         <CardDescription>
-          Platform-to-connected-account Stripe transfers.
+          Transfers from your available earnings to your Stripe account.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -568,7 +569,7 @@ function PayoutHistoryCard({ payouts }: { payouts: ConnectedPayout[] }) {
           Bank payout history
         </CardTitle>
         <CardDescription>
-          Payouts from the connected account to the bank account held by Stripe.
+          Payouts from your Stripe balance to your bank account.
         </CardDescription>
       </CardHeader>
       <CardContent>

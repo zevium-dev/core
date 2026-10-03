@@ -13,7 +13,7 @@ export const Route = createFileRoute("/app/settings")({
 
 const tabs = [
   { title: "Account", to: "/app/settings", exact: true },
-  { title: "Gateway keys", to: "/app/settings/keys", exact: false },
+  { title: "API keys", to: "/app/settings/keys", exact: false },
   { title: "Activity", to: "/app/settings/activity", exact: false },
 ] as const;
 
@@ -25,7 +25,7 @@ function SettingsLayout() {
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
         <p className="text-sm text-muted-foreground">
-          Account, gateway keys, and organization activity.
+          Manage your account and API keys, or inspect call activity.
         </p>
       </div>
       <nav

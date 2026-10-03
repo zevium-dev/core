@@ -93,7 +93,7 @@ export const testConnection = action({
       statusCode: result.statusCode,
       latencyMs: result.latencyMs,
       message: reachable
-        ? `${result.message} ${gatePassed ? "Reachability and declared-health readiness gate passed." : "Publication gate failed; make the declared health endpoint return 2xx/3xx and test again."}`
+        ? `${result.message} ${gatePassed ? "Health check passed for the saved draft." : "Health check failed. Make the declared endpoint return 2xx or 3xx, then test again before publishing."}`
         : result.message,
     };
   },

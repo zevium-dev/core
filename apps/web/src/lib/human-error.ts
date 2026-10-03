@@ -7,13 +7,13 @@ export function humanError(
     const msg = err.message.trim();
     const publicFinanceErrors: Record<string, string> = {
       CONNECT_ACCOUNT_RECONCILIATION_REQUIRED:
-        "Stripe onboarding needs operator reconciliation before it can continue.",
+        "Support needs to check your Stripe account before onboarding can continue.",
       CONNECT_PROVIDER_REJECTED:
         "Stripe rejected onboarding details. Check country and contact details, then try again.",
       TRANSFER_PROVIDER_REJECTED:
-        "Stripe rejected this payout without sending funds. Correct payout details and try again.",
+        "Stripe rejected this transfer without sending funds. Check your connected account details and try again.",
       TRANSFER_REQUIRES_RECONCILIATION:
-        "This payout needs Stripe reconciliation. Do not retry it; support will resolve it safely.",
+        "This transfer needs a status check with Stripe. Contact support before retrying to avoid sending funds twice.",
     };
     if (publicFinanceErrors[msg] !== undefined) return publicFinanceErrors[msg];
     if (msg === "Forbidden" || msg === "Unauthorized") {

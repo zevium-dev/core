@@ -467,7 +467,7 @@ export const update = mutation({
         args.patch.visibility === "private"
       ) {
         throw new Error(
-          "Published projects require a deprecation notice before unpublishing",
+          "Schedule project retirement before removing a published API from discovery",
         );
       }
       visibility = args.patch.visibility;
@@ -586,7 +586,7 @@ export const remove = mutation({
     if (project.status === "published") {
       if (project.sunsetAt === undefined) {
         throw new Error(
-          "Schedule deprecation before deleting a published project",
+          "Schedule project retirement before removing a published API",
         );
       }
       if (Date.now() < project.sunsetAt) {
@@ -713,7 +713,7 @@ export const scheduleRetirement = mutation({
       clerkOrgId: org.clerkOrgId,
       kind: "project_retirement",
       title: "Project retirement scheduled",
-      body: `${project.name} will sunset ${new Date(args.sunsetAt).toISOString()}. ${message}`,
+      body: `${project.name} will stop accepting live calls on ${new Date(args.sunsetAt).toISOString()}. ${message}`,
       refId: `project_retirement:${project._id}:publisher`,
     });
     await ctx.scheduler.runAfter(

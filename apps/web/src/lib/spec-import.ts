@@ -43,7 +43,7 @@ export function parseImportSpecUrl(
   return { ok: true, data: parsed.data };
 }
 
-/** Fetch OpenAPI text server-side (avoids CORS). Size hard-cap 2MB. */
+/** Fetch OpenAPI text server-side (avoids CORS). Size hard-cap 384 KiB. */
 export const fetchSpecFromUrl = createServerFn({ method: "POST" })
   .validator((input: unknown) => {
     const parsed = parseImportSpecUrl(input);

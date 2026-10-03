@@ -35,23 +35,24 @@ const HOW_STEPS = [
   {
     n: "1",
     title: "Publish an OpenAPI spec",
-    bodyBefore: "Pricing lives in the spec — set ",
+    bodyBefore: "Set ",
     mono: "x-zevium-cost",
-    bodyAfter: " per endpoint. Spec is the contract and the price sheet.",
+    bodyAfter:
+      " per endpoint to put prices alongside request and response definitions.",
   },
   {
     n: "2",
     title: "Discover and call",
     bodyBefore:
-      "Agents and devs find APIs in the catalogue, then hit the metered edge gateway with one key.",
+      "Developers and agents choose an API from the catalogue and call it with a Zevium key.",
     mono: null,
     bodyAfter: null,
   },
   {
     n: "3",
-    title: "Credits settle per call",
+    title: "Pay for successful calls",
     bodyBefore:
-      "Zero balance blocks the call. Publishers keep 95%; platform takes 5%.",
+      "Successful calls spend prepaid credits. Publishers earn 95% of each charge; Zevium keeps 5%.",
     mono: null,
     bodyAfter: null,
   },
@@ -116,12 +117,12 @@ function LandingPage() {
         <section className="grid items-center gap-12 lg:grid-cols-2 lg:gap-10">
           <div className="flex max-w-xl flex-col gap-6">
             <h1 className="min-w-0 text-4xl font-semibold tracking-tight [overflow-wrap:anywhere] sm:text-5xl">
-              One key. Every API. Pay per call.
+              APIs for your code and agents. Pay per call.
             </h1>
             <p className="text-lg text-muted-foreground">
-              Discover APIs, see exact prices before calling, and route every
-              request through one metered gateway. No subscriptions. No surprise
-              overages.
+              Find an API, try a free mock response, then use prepaid credits
+              for live calls. Your Zevium key works across the catalogue, so
+              each new API uses the same wallet.
             </p>
             <div className="flex flex-wrap items-center gap-3">
               <Magnetic strength={0.3}>
@@ -157,7 +158,7 @@ function LandingPage() {
               )}
             </div>
             <p className="text-sm text-muted-foreground">
-              $1 buys 10,000 credits. Zero balance stops requests.
+              $1 buys 10,000 credits. Live calls stop when your wallet runs out.
             </p>
           </div>
 
@@ -167,15 +168,16 @@ function LandingPage() {
                 <CardHeader>
                   <CardTitle>Every live request</CardTitle>
                   <CardDescription>
-                    Same enforced path for every API. No unmetered shortcut.
+                    The gateway checks your balance before contacting the
+                    publisher.
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="flex flex-col gap-4 text-sm">
                   {[
-                    ["01", "Verify key at the edge"],
-                    ["02", "Read exact cost from the published spec"],
-                    ["03", "Reserve credits or block at zero"],
-                    ["04", "Stream upstream response and settle usage"],
+                    ["01", "Check your API key"],
+                    ["02", "Read the endpoint price"],
+                    ["03", "Reserve credits if your wallet can cover the call"],
+                    ["04", "Return the response and charge only on success"],
                   ].map(([number, label]) => (
                     <div
                       key={number}
@@ -189,7 +191,7 @@ function LandingPage() {
                   ))}
                   <div className="flex flex-wrap gap-2 pt-1">
                     <Badge variant="secondary">prepaid only</Badge>
-                    <Badge variant="outline">spec-priced</Badge>
+                    <Badge variant="outline">prices in the spec</Badge>
                     <Badge variant="outline">streamed</Badge>
                   </div>
                 </CardContent>
@@ -240,12 +242,12 @@ function LandingPage() {
                 CONSUMERS
               </p>
               <h2 className="text-xl font-semibold tracking-tight">
-                One wallet across every API
+                A shared API wallet for your team
               </h2>
               <p className="text-sm leading-relaxed text-muted-foreground">
-                Fund your organization once. Members create their own keys;
-                admins set spend caps, inspect every call, and stop spend at
-                zero.
+                Add credits to your organization’s wallet. Members call APIs
+                with their own keys; admins can set monthly key limits and
+                review usage by member.
               </p>
               <Button asChild variant="outline">
                 <Link to="/catalogue">Find an API</Link>
@@ -259,8 +261,9 @@ function LandingPage() {
                 Ship your spec. Keep 95%.
               </h2>
               <p className="text-sm leading-relaxed text-muted-foreground">
-                Put endpoint prices in OpenAPI. Zevium handles keys, credit
-                gates, usage records, earnings, and Stripe payouts.
+                Set endpoint prices in your OpenAPI spec. Zevium collects
+                prepaid credits for successful calls and sends your share to
+                your connected Stripe account.
               </p>
               <Button asChild variant="outline">
                 <Link to="/app/projects">Start publishing</Link>
@@ -274,16 +277,16 @@ function LandingPage() {
         <Reveal as="section" className="flex flex-col gap-4">
           <h2 className="text-2xl font-semibold tracking-tight">For agents</h2>
           <p className="max-w-2xl text-sm text-muted-foreground">
-            Machine-readable discovery plus metered agent tooling. Search the
-            catalogue, load only the tools you need, call through the same
-            credit-gated gateway as humans.
+            Connect your agent over MCP to search for APIs, read a matching
+            API’s reference, and call its endpoints. Calls draw from your
+            organization’s wallet.
           </p>
           <div className="grid min-w-0 gap-4 lg:grid-cols-2">
             <Card className="min-w-0">
               <CardHeader>
-                <CardTitle>Surfaces</CardTitle>
+                <CardTitle>Connect over MCP</CardTitle>
                 <CardDescription>
-                  Machine-readable gateway endpoints for agent clients.
+                  Use MCP tools or fetch the discovery index directly.
                 </CardDescription>
               </CardHeader>
               <CardContent className="flex flex-col gap-4">
@@ -294,7 +297,8 @@ function LandingPage() {
                 <p className="text-sm text-muted-foreground">
                   MCP endpoint +{" "}
                   <span className="font-mono text-xs">/discovery</span> index
-                  with per-endpoint pricing. No unmetered side doors.
+                  with endpoint prices so your agent can check cost before
+                  calling.
                 </p>
               </CardContent>
             </Card>
@@ -310,7 +314,7 @@ function LandingPage() {
                 Live catalogue
               </h2>
               <p className="text-sm text-muted-foreground">
-                Public listings with real per-call pricing.
+                Compare endpoint prices and try free mock responses.
               </p>
             </div>
             <Button asChild variant="ghost" size="sm">
@@ -370,8 +374,8 @@ function LandingPage() {
                 </CardTitle>
                 <CardDescription>
                   {catalogueQuery.isError
-                    ? "Listings could not be loaded. Nothing fabricated is shown in their place."
-                    : "First published API will appear here. Mock calls remain free and never reach upstreams."}
+                    ? "We couldn’t load the catalogue. Retry to see available APIs."
+                    : "Publish an API and make it public to list it here."}
                 </CardDescription>
               </CardHeader>
               <CardContent className="flex flex-wrap gap-2">

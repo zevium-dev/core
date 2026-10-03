@@ -40,9 +40,8 @@ export function ProjectEarningsPanel({
         <CardHeader>
           <CardTitle>Earnings</CardTitle>
           <CardDescription>
-            You keep 95% of gross credits charged to consumers. Platform takes
-            5%. Conversion: {CREDITS_PER_DOLLAR.toLocaleString("en-US")} credits
-            = $1.
+            You earn 95% of each successful paid call; Zevium keeps 5%.{" "}
+            {CREDITS_PER_DOLLAR.toLocaleString("en-US")} credits = $1.
           </CardDescription>
         </CardHeader>
       </Card>
@@ -87,8 +86,8 @@ export function ProjectEarningsPanel({
       {project.calls === 0 ? (
         <Card>
           <CardContent className="py-10 text-center text-sm text-muted-foreground">
-            No metered calls on this project yet. Publish, go public, and
-            earnings land here at 95% of consumer spend.
+            No earnings yet. Publish this API and make it public. Your share
+            will appear here after a successful paid call settles.
           </CardContent>
         </Card>
       ) : null}

@@ -333,7 +333,7 @@ describe("fetchSpecFromUrlForRequest", () => {
         { url: "https://example.com/openapi.json" },
         fixture.runtime,
       ),
-    ).rejects.toThrow("Spec is larger than 2MB");
+    ).rejects.toThrow("Spec exceeds the 384 KiB import limit");
     expect(cancel).toHaveBeenCalledOnce();
   });
 
@@ -360,7 +360,7 @@ describe("fetchSpecFromUrlForRequest", () => {
         { url: "https://example.com/openapi.json" },
         fixture.runtime,
       ),
-    ).rejects.toThrow("Spec is larger than 2MB");
+    ).rejects.toThrow("Spec exceeds the 384 KiB import limit");
     expect(cancel).toHaveBeenCalledOnce();
   });
 
@@ -618,7 +618,7 @@ describe("fetchSpecFromUrl server boundary", () => {
         },
       }),
     );
-    await expect(invoke()).rejects.toThrow(/larger than 2MB/);
+    await expect(invoke()).rejects.toThrow(/exceeds the 384 KiB import limit/);
   });
 
   it("enforces redirect and streamed-body limits", async () => {
@@ -643,7 +643,7 @@ describe("fetchSpecFromUrl server boundary", () => {
         { headers: { "content-type": "application/json" } },
       ),
     );
-    await expect(invoke()).rejects.toThrow(/larger than 2MB/);
+    await expect(invoke()).rejects.toThrow(/exceeds the 384 KiB import limit/);
   });
 
   it("enforces one total network timeout", async () => {

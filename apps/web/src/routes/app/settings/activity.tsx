@@ -657,7 +657,7 @@ function ActivityContent({ orgSlug }: { orgSlug: string }) {
                 <EmptyTitle>Could not load activity</EmptyTitle>
                 <EmptyDescription>
                   {serverProjectionRejected
-                    ? "Server access projection could not be verified. No activity rows were displayed."
+                    ? "We couldn’t confirm your organization access. Refresh and retry."
                     : humanError(
                         accessQuery.error ??
                           cycleQuery.error ??
@@ -750,7 +750,7 @@ function ActivityContent({ orgSlug }: { orgSlug: string }) {
                       disabled={event.eventId === null}
                       title={
                         event.eventId === null
-                          ? "Legacy call has no public inspector ID."
+                          ? "Details are unavailable for this older call."
                           : undefined
                       }
                       onClick={(clickEvent) => {
@@ -843,7 +843,7 @@ function ActivityContent({ orgSlug }: { orgSlug: string }) {
                             disabled={event.eventId === null}
                             title={
                               event.eventId === null
-                                ? "Legacy call has no public inspector ID."
+                                ? "Details are unavailable for this older call."
                                 : undefined
                             }
                             onClick={(clickEvent) => {
@@ -967,7 +967,7 @@ function ActivityInspector({
         <SheetHeader>
           <SheetTitle>Call inspector</SheetTitle>
           <SheetDescription>
-            Exact usage metadata retained for this metered gateway call.
+            Status, cost, and timing recorded for this gateway call.
           </SheetDescription>
         </SheetHeader>
         {pending ? (
@@ -1078,7 +1078,7 @@ function EmptyActivity({ filtered }: { filtered: boolean }) {
         <EmptyDescription>
           {filtered
             ? "No calls match this drill-down and time range. Clear the filter or widen the range."
-            : "Usage events land after gateway calls. Browse the catalogue, create a key, and make a call."}
+            : "Live calls will appear here. Choose an API from the catalogue, create a key, and add credits to make your first call."}
         </EmptyDescription>
       </EmptyHeader>
       <EmptyContent>
