@@ -41,10 +41,19 @@ describe("production deployment workflow", () => {
     expect(web).toBeLessThan(smoke);
     expect(workflow).toContain("convex deploy --dry-run");
     expect(workflow).not.toMatch(/convex deploy[^\n]*--yes/);
-    expect(workflow).toContain('--tag "production-$RELEASE_SHA"');
+    expect(workflow).toContain('--tag "$RELEASE_TAG"');
     expect(workflow.match(/wrangler versions deploy/g)).toHaveLength(2);
-    expect(workflow).toContain(
-      '--version-tag "production-$RELEASE_SHA@100%" --yes',
+    expect(workflow).toContain('--version-tag "$RELEASE_TAG@100%" --yes');
+  });
+
+  it("keeps upload tags unique across workflow retries and deploys the same tag", () => {
+    const document = parse(workflow);
+    expect(document.jobs.deploy.env.RELEASE_TAG).toBe(
+      "production-${{ github.event.workflow_run.head_sha }}-${{ github.run_id }}-${{ github.run_attempt }}",
+    );
+    expect(workflow.match(/--tag "\$RELEASE_TAG"/g)).toHaveLength(2);
+    expect(workflow.match(/--version-tag "\$RELEASE_TAG@100%"/g)).toHaveLength(
+      2,
     );
   });
 
@@ -56,7 +65,7 @@ describe("production deployment workflow", () => {
     expect(workflow).toContain("$PRODUCTION_WEB_URL/catalogue");
   });
 
-  it("waits for the promoted web release instead of accepting a stale 200", () => {
+  it("waits for both promoted releases instead of accepting a stale 200", () => {
     expect(workflow).toContain('expected="${3:-}"');
     expect(workflow).toContain(
       '{ test -z "$expected" || grep --fixed-strings --quiet "$expected" "$output"; }',
@@ -64,6 +73,7 @@ describe("production deployment workflow", () => {
     expect(workflow).toContain(
       '"name=\\"zevium-release\\" content=\\"$RELEASE_SHA\\""',
     );
+    expect(workflow).toContain('"\\"release\\":\\"$RELEASE_SHA\\""');
   });
 
   it("accepts changed catalogue copy but rejects a broken catalogue surface", () => {
@@ -81,6 +91,12 @@ while [ "$#" -gt 0 ]; do
 done
 case "$url" in
   */health)
+    if test "\${STALE_GATEWAY_HEALTH:-}" = 1 && ! test -f "$HEALTH_ATTEMPT_MARKER"; then
+      touch "$HEALTH_ATTEMPT_MARKER"
+      printf '{"ok":true,"service":"zevium-gateway","release":"previous-release","contract":1}' > "$output"
+      printf 200
+      exit 0
+    fi
     printf '{"ok":true,"service":"zevium-gateway","release":"%s","contract":1}' "$RELEASE_SHA" > "$output"
     printf 200 ;;
   */catalogue)
@@ -96,13 +112,18 @@ esac
 `,
       );
       chmodSync(curl, 0o755);
+      const sleep = join(root, "sleep");
+      writeFileSync(sleep, "#!/bin/sh\nexit 0\n");
+      chmodSync(sleep, 0o755);
       const catalogue = join(root, "catalogue.html");
+      const healthMarker = join(root, "health-attempt");
       const document = parse(workflow);
       const smoke = document.jobs.deploy.steps.find(
         (step: { name?: string }) => step.name === "Verify production",
       ).run;
-      const run = (html: string) => {
+      const run = (html: string, staleGateway = false) => {
         writeFileSync(catalogue, html);
+        rmSync(healthMarker, { force: true });
         return spawnSync("bash", ["-e", "-c", smoke], {
           cwd: root,
           encoding: "utf8",
@@ -114,12 +135,15 @@ esac
             PRODUCTION_GATEWAY_URL: "https://gateway.example.invalid",
             PRODUCTION_WEB_URL: "https://web.example.invalid",
             CATALOGUE_FIXTURE: catalogue,
+            STALE_GATEWAY_HEALTH: staleGateway ? "1" : "0",
+            HEALTH_ATTEMPT_MARKER: healthMarker,
           },
         }).status;
       };
       const title = "<title>Catalogue · Zevium</title>";
       const search = '<input id="catalogue-search">';
       expect(run(`${title}${search}<p>New catalogue description</p>`)).toBe(0);
+      expect(run(`${title}${search}`, true)).toBe(0);
       expect(run(`${title}<p>Missing search form</p>`)).toBe(1);
       expect(run(`${title}${search}<p>Something went wrong</p>`)).toBe(1);
     } finally {

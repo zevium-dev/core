@@ -50,7 +50,8 @@ from `apps/gateway/wrangler.jsonc`; never edit or reuse an existing migration
 tag.
 
 Web deploys last. Both Workers upload tagged versions and promote them to 100%
-without changing their preconfigured routes. Tags use `production-<git-sha>`,
+without changing their preconfigured routes. Tags use
+`production-<git-sha>-<run-id>-<attempt>` so retry uploads have unique tags,
 and gateway `ZEVIUM_RELEASE` plus web metadata expose the same exact SHA.
 
 ## Failure Handling
@@ -82,3 +83,7 @@ curl --fail --silent 'https://www.zevium.dev/catalogue?q=&sort=newest'
 Gateway health must report `ok: true`, service `zevium-gateway`, contract `1`,
 and current `develop` SHA. Web HTML must contain matching `zevium-release`
 metadata.
+
+The workflow waits for both services to report the expected release before
+checking their contracts; a healthy response from the previous version does not
+complete verification.
