@@ -268,11 +268,15 @@ html[data-view-transition="active"] .motion-entrance {
   }
 }
 
-/* Sidebar-level hops (no list→detail morph): fast swap, not 400ms page morph */
-html:active-view-transition-type(nav-swap)::view-transition-old(root),
-html:active-view-transition-type(nav-swap)::view-transition-new(root),
-html:active-view-transition-type(nav-swap)::view-transition-old(main-content),
-html:active-view-transition-type(nav-swap)::view-transition-new(main-content) {
+/* Ordinary page hops reveal the destination without overlaying stale content.
+   Dataset also covers browsers without native transition-type selectors. */
+html[data-view-transition-kind="swap"]::view-transition-old(*) {
+  animation: none;
+  opacity: 0;
+}
+
+html[data-view-transition-kind="swap"]::view-transition-new(root),
+html[data-view-transition-kind="swap"]::view-transition-new(main-content) {
   animation-duration: var(--dur-fast);
 }
 

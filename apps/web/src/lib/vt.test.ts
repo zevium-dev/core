@@ -63,6 +63,7 @@ describe("native transition lifecycle", () => {
     const task = runViewTransition(() => update.promise, ["navigate-forward"]);
     expect(vtState.active).toBe(true);
     expect(dataset.viewTransition).toBe("active");
+    expect(dataset.viewTransitionKind).toBe("morph");
     update.resolve();
     await task;
     expect(vtState.active).toBe(true);
@@ -70,6 +71,7 @@ describe("native transition lifecycle", () => {
     await Promise.resolve();
     expect(vtState.active).toBe(false);
     expect(dataset.viewTransition).toBeUndefined();
+    expect(dataset.viewTransitionKind).toBeUndefined();
   });
 
   it("does not let an older skipped transition clear a newer transition", async () => {
@@ -112,6 +114,21 @@ describe("native transition lifecycle", () => {
     expect(start).toHaveBeenCalledWith(update);
     expect(vtState.active).toBe(true);
   });
+
+  it.each([true, false])(
+    "exposes the page-swap policy until finished (type support: %s)",
+    async (supportsTypes) => {
+      typed = supportsTypes;
+      await runViewTransition(
+        async () => undefined,
+        ["navigate-back", "nav-swap"],
+      );
+      expect(dataset.viewTransitionKind).toBe("swap");
+      completions[0].resolve();
+      await Promise.resolve();
+      expect(dataset.viewTransitionKind).toBeUndefined();
+    },
+  );
 
   it.each([true, false])(
     "skips all native motion when reduced motion is enabled (type support: %s)",

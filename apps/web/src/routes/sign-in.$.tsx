@@ -1,9 +1,8 @@
-import { SignIn } from "@clerk/tanstack-react-start";
+import { ClerkProvider, SignIn } from "@clerk/tanstack-react-start";
 import { createFileRoute } from "@tanstack/react-router";
 
 import { clerkShadcnTheme } from "#/lib/clerk-theme";
 import { AuthCardSkeleton } from "#/components/auth-card-skeleton";
-import { AuthenticatedProviders } from "#/components/authenticated-providers";
 import { safeReturnPath } from "#/lib/return-path";
 
 export const Route = createFileRoute("/sign-in/$")({
@@ -17,14 +16,10 @@ export const Route = createFileRoute("/sign-in/$")({
 });
 
 function Page() {
-  const { convexQueryClient, principalCache } = Route.useRouteContext();
   const { redirect } = Route.useSearch();
 
   return (
-    <AuthenticatedProviders
-      client={convexQueryClient.convexClient}
-      principalCache={principalCache}
-    >
+    <ClerkProvider>
       <div className="flex min-h-svh items-center justify-center p-4">
         <div className="auth-card-shell grid w-full max-w-sm place-items-center [&>*]:[grid-area:1/1]">
           <div className="auth-card-pending w-full">
@@ -36,6 +31,6 @@ function Page() {
           />
         </div>
       </div>
-    </AuthenticatedProviders>
+    </ClerkProvider>
   );
 }

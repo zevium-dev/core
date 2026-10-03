@@ -24,6 +24,11 @@ export function runViewTransition(
   currentTransition = owner;
   vtState.active = true;
   document.documentElement.dataset.viewTransition = "active";
+  document.documentElement.dataset.viewTransitionKind = types.includes(
+    "nav-swap",
+  )
+    ? "swap"
+    : "morph";
 
   const clear = () => {
     // A skipped older transition can finish after a newer one has started.
@@ -31,6 +36,7 @@ export function runViewTransition(
     currentTransition = undefined;
     vtState.active = false;
     delete document.documentElement.dataset.viewTransition;
+    delete document.documentElement.dataset.viewTransitionKind;
   };
 
   try {

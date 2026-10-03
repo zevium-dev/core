@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   applyWebSecurityHeaders,
@@ -15,7 +15,62 @@ const REQUIRED_HEADERS = [
   "cross-origin-resource-policy",
 ] as const;
 
+afterEach(() => vi.unstubAllEnvs());
+
 describe("outer web security headers", () => {
+  it.each([
+    ["live", "clerk.zevium.dev"],
+    ["test", "example-instance-42.clerk.accounts.dev"],
+  ])(
+    "allows the configured %s Clerk instance, including its environment fetch",
+    (mode, hostname) => {
+      vi.stubEnv(
+        "VITE_CLERK_PUBLISHABLE_KEY",
+        `pk_${mode}_${btoa(`${hostname}$`).replace(/=+$/, "")}`,
+      );
+      const policy = buildWebContentSecurityPolicy("nonce-test-value");
+      for (const directive of [
+        "connect-src",
+        "script-src",
+        "frame-src",
+        "form-action",
+      ]) {
+        const sources = policy
+          .split("; ")
+          .find((value) => value.startsWith(`${directive} `));
+        expect(sources?.split(" ")).toContain(`https://${hostname}`);
+      }
+      expect(policy).not.toContain("https://*.zevium.dev");
+    },
+  );
+
+  it.each([
+    undefined,
+    "pk_live_invalid",
+    `pk_live_${btoa("clerk.zevium.dev")}`,
+    `pk_live_${btoa("clerk.zevium.dev; connect-src *$")}`,
+    `pk_live_${btoa("clerk.zevium.dev/path$")}`,
+    `pk_live_${btoa("clerk.zevium.dev:443$")}`,
+  ])("does not turn malformed instance keys into CSP sources (%s)", (key) => {
+    vi.stubEnv("VITE_CLERK_PUBLISHABLE_KEY", key);
+    const policy = buildWebContentSecurityPolicy("nonce-test-value");
+    expect(policy).not.toContain("https://clerk.zevium.dev");
+    expect(policy).not.toMatch(/(?:^|\s)\*(?:\s|;|$)/);
+  });
+
+  it("allows Clerk's bot protection scripts, frames, and nonstandard connection ports", () => {
+    const directives =
+      buildWebContentSecurityPolicy("nonce-test-value").split("; ");
+    expect(
+      directives.find((value) => value.startsWith("connect-src ")),
+    ).toContain("https://*.protect.clerk.com:*");
+    for (const name of ["script-src", "frame-src"]) {
+      expect(
+        directives.find((value) => value.startsWith(`${name} `)),
+      ).toContain("https://*.protect.clerk.com");
+    }
+  });
+
   it("builds nonce-bound executable policy without unsafe eval or broad wildcard", () => {
     const policy = buildWebContentSecurityPolicy("nonce-test-value");
     expect(policy).toContain("script-src 'self' 'nonce-nonce-test-value'");
