@@ -33,24 +33,25 @@ export function Reveal({
 }: RevealProps) {
   const reduce = useHydratedReducedMotion();
   const skip = reduce || vtState.active;
-  const y = reduce ? 0 : distance;
+  const y = skip ? 0 : distance;
   const Comp = m[as];
 
   return (
     <Comp
       className={cn(
-        "motion-reduce:!transform-none motion-reduce:!opacity-100",
+        "motion-entrance motion-reduce:!transform-none motion-reduce:!opacity-100",
         className,
       )}
       // Content remains fully visible in SSR, no-JS, hydration, screenshots,
       // and slow clients. Motion is progressive enhancement, never a gate.
       initial={skip ? false : { y }}
-      whileInView={{ y: 0 }}
+      animate={skip ? { y: 0 } : undefined}
+      whileInView={skip ? undefined : { y: 0 }}
       viewport={{ once: true, margin: "-60px" }}
       transition={{
-        duration: reduce ? 0 : duration,
+        duration: skip ? 0 : duration,
         ease: EASE,
-        delay: reduce ? 0 : delay,
+        delay: skip ? 0 : delay,
       }}
     >
       {children}

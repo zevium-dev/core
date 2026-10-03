@@ -65,6 +65,9 @@ packages/shared/ # spec parsing, x-zevium-* extraction, types shared web↔gatew
 
 Turborepo drives build/typecheck/test/lint pipelines with caching; each app deploys independently (web → its host, gateway → Cloudflare, convex → `npx convex deploy`).
 
+- **Frontend cache isolation**: each SSR request and browser router owns its QueryClient. Query hashes include the Clerk user and active organization. Router dehydration carries those two identifiers, and hydration restores their namespace before hydrating queries; changing principal cancels queries and clears query and mutation caches. Tokens are not part of this cache snapshot.
+- **Spec editor dependencies**: the JSON parser and syntax highlighter share one workspace-pinned `@lezer/common` version. Separate module instances allocate conflicting NodeProp identities and can crash highlighting even when both versions satisfy package ranges.
+
 ## Architecture
 
 ```

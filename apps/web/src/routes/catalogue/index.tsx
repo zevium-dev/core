@@ -97,12 +97,13 @@ export const Route = createFileRoute("/catalogue/")({
       }),
     );
     if (typeof window !== "undefined") {
-      void queryClient.prefetchQuery(queryOpts);
+      await queryClient.prefetchQuery(queryOpts);
       return;
     }
     await queryClient.ensureQueryData(queryOpts);
   },
   component: CataloguePage,
+  pendingMs: 1000,
   head: () => ({
     meta: [
       { title: "Catalogue · Zevium" },
@@ -272,13 +273,14 @@ function CataloguePage() {
 
       <main
         id="main-content"
+        style={{ viewTransitionName: "main-content" }}
         tabIndex={-1}
         className="mx-auto flex max-w-6xl flex-col gap-6 px-4 py-8 outline-none content-enter"
       >
         <div>
           <div>
             <h1
-              className="text-3xl font-semibold tracking-tight"
+              className="w-fit text-3xl font-semibold tracking-tight"
               style={{ viewTransitionName: "catalogue-heading" }}
             >
               Catalogue
@@ -675,7 +677,7 @@ function CatalogueCard({ item }: { item: CatalogueCardItem }) {
         <CardHeader>
           <div className="flex min-w-0 flex-wrap items-start justify-between gap-2">
             <CardTitle
-              className="min-w-0 [overflow-wrap:anywhere]"
+              className="w-fit min-w-0 max-w-full [overflow-wrap:anywhere]"
               style={{
                 viewTransitionName: `api-title-${item.publisherHandle}-${item.slug}`,
               }}
@@ -815,6 +817,7 @@ function CatalogueSkeleton() {
       <PublicHeader active="catalogue" />
       <main
         id="main-content"
+        style={{ viewTransitionName: "main-content" }}
         tabIndex={-1}
         className="mx-auto flex max-w-6xl flex-col gap-6 px-4 py-8 outline-none"
       >

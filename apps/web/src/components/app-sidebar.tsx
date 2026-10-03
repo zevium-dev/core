@@ -1,5 +1,6 @@
 import { OrganizationSwitcher, UserButton } from "@clerk/tanstack-react-start";
 import { Link, useRouterState } from "@tanstack/react-router";
+import { useEffect, type MouseEvent } from "react";
 import {
   Activity,
   Banknote,
@@ -70,14 +71,31 @@ const navGroups = [
 
 export function AppSidebar() {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
-  const { isMobile, state } = useSidebar();
+  const { isMobile, state, setOpenMobile } = useSidebar();
   const compact = state === "collapsed" && !isMobile;
+
+  useEffect(() => {
+    if (isMobile) setOpenMobile(false);
+  }, [isMobile, pathname, setOpenMobile]);
+
+  function closeMobileNavigation(event: MouseEvent<HTMLAnchorElement>) {
+    if (
+      event.button === 0 &&
+      !event.metaKey &&
+      !event.ctrlKey &&
+      !event.shiftKey &&
+      !event.altKey
+    ) {
+      setOpenMobile(false);
+    }
+  }
 
   return (
     <Sidebar collapsible="icon" variant="inset">
       <SidebarHeader className="h-14 justify-center border-b p-3">
         <Link
           to="/app"
+          onClick={closeMobileNavigation}
           aria-label="Zevium dashboard"
           className="flex items-center gap-1 rounded-md px-1 outline-none transition-transform duration-[var(--dur-base)] ease-[var(--ease)] focus-visible:ring-[3px] focus-visible:ring-sidebar-ring/50 group-data-[collapsible=icon]:-translate-x-1"
         >
@@ -96,7 +114,6 @@ export function AppSidebar() {
           <SidebarGroupLabel>Workspace</SidebarGroupLabel>
           <SidebarGroupContent>
             <OrganizationSwitcher
-              key={compact ? "compact" : "expanded"}
               appearance={{
                 theme: clerkShadcnTheme,
                 elements: {
@@ -142,7 +159,7 @@ export function AppSidebar() {
                         isActive={active}
                         tooltip={item.title}
                       >
-                        <Link to={item.to}>
+                        <Link to={item.to} onClick={closeMobileNavigation}>
                           <item.icon />
                           <span>{item.title}</span>
                         </Link>
@@ -162,7 +179,6 @@ export function AppSidebar() {
           <SidebarMenuItem>
             <div className="flex min-w-0 items-center gap-2 rounded-md p-1 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:p-0">
               <UserButton
-                key={compact ? "compact" : "expanded"}
                 showName={!compact}
                 appearance={{
                   theme: clerkShadcnTheme,

@@ -74,12 +74,13 @@ TanStack Router drives the native View Transitions API. This is the #1 coherence
 // router.tsx
 defaultViewTransition: {
   types: ({ fromLocation, toLocation }) => {
-    vtState.active = true; // see coordination below
     const from = fromLocation?.state.__TSR_index ?? 0;
     const to = toLocation?.state.__TSR_index ?? 0;
     return to >= from ? ["navigate-forward"] : ["navigate-back"];
   },
 },
+// After creating the router:
+configureViewTransitions(router);
 ```
 
 - Default: **cross-fade** of `main-content` over `DUR.page` with THE easing. No directional slides on morphing routes (slides fight morphs); `navigate-forward`/`back` types are reserved for stack-like flows (e.g. multi-step checkout) only
@@ -89,21 +90,21 @@ defaultViewTransition: {
 
 Naming convention `{kind}-{slug}`, must be unique per snapshot. The signature moments:
 
-| From → To                                          | Morphing element(s)                                                                            |
-| -------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| Catalogue card → API detail                        | `api-title-{slug}`, `api-logo-{slug}`, `api-price-{slug}` — card title grows into page heading |
-| Projects list → project page                       | `project-title-{slug}`, `project-status-{slug}`                                                |
-| Project page → spec editor / explorer              | `project-title-{slug}` persists in breadcrumb                                                  |
-| Landing hero CTA → catalogue heading               | `catalogue-heading`                                                                            |
-| Org switcher → org home                            | `org-name-{slug}`                                                                              |
-| Credits balance (sidebar chip → billing page stat) | `credit-balance`                                                                               |
+| From → To                                          | Morphing element(s)                                                                             |
+| -------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| Catalogue card → API detail                        | `api-title-{slug}`, `api-logo-{slug}`, `api-price-{slug}` — card title grows into page heading  |
+| Projects list → project page                       | `project-title-{slug}`, `project-status-{slug}`                                                 |
+| Project page → spec editor / explorer              | `project-title-{slug}` persists in breadcrumb                                                   |
+| Landing hero CTA → catalogue heading               | `catalogue-heading` — text only; heading fits its content, button chrome stays in the page fade |
+| Org switcher → org home                            | `org-name-{slug}`                                                                               |
+| Credits balance (sidebar chip → billing page stat) | `credit-balance`                                                                                |
 
-- Text that changes size/font across a morph: snap content instantly (`animation-duration: 0.01s; step-end`) while the _group_ animates position/size over `DUR.page` — prevents font-crossfade flash
+- Text that changes size/font across a morph: fit named elements to their text, constrained to the available width. Show the new snapshot immediately while the _group_ animates position/size over `DUR.page` — prevents font-crossfade flash. Elements present on only one side fade in or out. `main-content` crossfades without interpolating page dimensions
 - The morph inventory grows with FLOW.md; every new list→detail pair ships with a morph or a written reason why not
 
 ### VT ↔ Motion coordination
 
-Module-level flag (`src/lib/vt.ts`): `vtState.active` set synchronously in the router `types` callback, cleared on `viewtransitionend` (600ms fallback). Motion components read it to set `initial={vtState.active ? false : enterVariant}` — entrance animations must never render `opacity: 0` into the new-state VT snapshot. Without this, morphs flicker. Non-negotiable pattern.
+The router's `configureViewTransitions` adapter (`src/lib/vt.ts`) resolves navigation options in browsers with and without transition-type support. `vtState.active` is set before native snapshot capture and cleared by the actual `ViewTransition.finished` promise, including skipped and failed transitions. Older transitions cannot clear newer ones. Motion components read it to set `initial={vtState.active ? false : enterVariant}` — entrance animations must never render `opacity: 0` into the new-state VT snapshot. CSS entrances are permanently disabled after client navigation so they cannot restart when the snapshot disappears. No invented completion event or fixed cleanup timer.
 
 ## Micro-interactions (the "alive" layer)
 

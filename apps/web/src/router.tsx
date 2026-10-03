@@ -10,8 +10,15 @@ import { LazyMotion, domAnimation } from "motion/react";
 
 import { RouteError } from "#/components/route-error";
 import { routeViewTransitionTypes } from "#/lib/view-transition";
-import { markViewTransitionActive } from "#/lib/vt";
+import { configureViewTransitions } from "#/lib/vt";
+import {
+  createPrincipalCache,
+  type PrincipalCache,
+  type PrincipalSnapshot,
+} from "#/lib/principal-cache";
 import { routeTree } from "./routeTree.gen";
+
+export type { PrincipalCache } from "#/lib/principal-cache";
 
 export interface RouterContext {
   convexQueryClient: ConvexQueryClient;
@@ -25,12 +32,6 @@ export interface RouterContext {
   /** Active Clerk org id; null when none selected. */
   orgId: string | null;
   principalCache: PrincipalCache;
-}
-
-export interface PrincipalCache {
-  readonly currentKey: string;
-  keyFor(userId: string | null, orgId: string | null): string;
-  transition(userId: string | null, orgId: string | null): Promise<void>;
 }
 
 const convexUrl = import.meta.env.VITE_CONVEX_URL;
@@ -55,29 +56,13 @@ export function getRouter(): AnyRouter {
     dangerouslyUseInconsistentQueriesDuringSSR: true,
   });
   const convexHash = convexQueryClient.hashFn();
-  let currentPrincipalKey = "anonymous:-";
   let queryClient: QueryClient;
-  const principalCache: PrincipalCache = {
-    get currentKey() {
-      return currentPrincipalKey;
-    },
-    keyFor(userId, orgId) {
-      return `${userId ?? "anonymous"}:${orgId ?? "-"}`;
-    },
-    async transition(userId, orgId) {
-      const next = this.keyFor(userId, orgId);
-      if (next === currentPrincipalKey) return;
-      await queryClient.cancelQueries();
-      queryClient.removeQueries();
-      queryClient.getMutationCache().clear();
-      currentPrincipalKey = next;
-    },
-  };
+  const principalCache = createPrincipalCache(() => queryClient);
   queryClient = new QueryClient({
     defaultOptions: {
       queries: {
         queryKeyHashFn: (queryKey: QueryKey) =>
-          `${currentPrincipalKey}:${convexHash(queryKey)}`,
+          `${principalCache.currentKey}:${convexHash(queryKey)}`,
         queryFn: convexQueryClient.queryFn(),
       },
     },
@@ -96,6 +81,12 @@ export function getRouter(): AnyRouter {
     defaultPendingMs: 100,
     defaultPendingMinMs: 300,
     defaultErrorComponent: RouteError,
+    // Restore the cache namespace before SSR query hydration. Hydration reuses
+    // transported beforeLoad context, so it does not rerun its transition.
+    dehydrate: () => ({ principal: principalCache.snapshot }),
+    hydrate: async ({ principal }: { principal: PrincipalSnapshot }) => {
+      await principalCache.transition(principal.userId, principal.orgId);
+    },
     context: {
       convexQueryClient,
       queryClient,
@@ -115,7 +106,6 @@ export function getRouter(): AnyRouter {
           fromPath: fromLocation?.pathname,
           toPath: toLocation.pathname,
         });
-        if (types !== false) markViewTransitionActive();
         return types;
       },
     },
@@ -126,6 +116,7 @@ export function getRouter(): AnyRouter {
     ),
   });
 
+  configureViewTransitions(router);
   setupRouterSsrQueryIntegration({ router, queryClient });
 
   return router;

@@ -1,5 +1,11 @@
 import { m, useMotionValue, useSpring } from "motion/react";
-import { useCallback, useRef, type PointerEvent, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  type PointerEvent,
+  type ReactNode,
+} from "react";
 
 import { SPRING } from "#/lib/motion";
 import { useHydratedReducedMotion } from "#/hooks/use-hydrated-reduced-motion";
@@ -28,6 +34,14 @@ export function Magnetic({
   const x = useSpring(rawX, SPRING.cursor);
   const y = useSpring(rawY, SPRING.cursor);
 
+  useEffect(() => {
+    if (!reduce) return;
+    rawX.jump(0);
+    rawY.jump(0);
+    x.jump(0);
+    y.jump(0);
+  }, [reduce, rawX, rawY, x, y]);
+
   const reset = useCallback(() => {
     rawX.set(0);
     rawY.set(0);
@@ -49,15 +63,11 @@ export function Magnetic({
     [rawX, rawY, reduce, strength],
   );
 
-  if (reduce) {
-    return <div className={cn("inline-flex", className)}>{children}</div>;
-  }
-
   return (
     <m.div
       ref={ref}
       className={cn("inline-flex will-change-transform", className)}
-      style={{ x, y }}
+      style={{ x: reduce ? 0 : x, y: reduce ? 0 : y }}
       onPointerMove={onPointerMove}
       onPointerLeave={reset}
       onPointerCancel={reset}

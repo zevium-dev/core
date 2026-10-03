@@ -35,7 +35,7 @@ import {
 } from "#/components/ui/empty";
 import { Field, FieldLabel } from "#/components/ui/field";
 import { Skeleton } from "#/components/ui/skeleton";
-import { Tabs, TabsList, TabsTrigger } from "#/components/ui/tabs";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "#/components/ui/tabs";
 import { Textarea } from "#/components/ui/textarea";
 
 type ModerationTarget = {
@@ -68,6 +68,15 @@ export function AdminReviewsQueue({
   const [cursor, setCursor] = useState<string | null>(null);
   const [previous, setPrevious] = useState<Array<string | null>>([]);
   const [target, setTarget] = useState<ModerationTarget | null>(null);
+  const [previousMode, setPreviousMode] = useState(mode);
+  if (previousMode !== mode) {
+    // Reset route-owned pagination without remounting focused tab triggers.
+    // This also handles browser history, which bypasses switchMode.
+    setPreviousMode(mode);
+    setCursor(null);
+    setPrevious([]);
+    setTarget(null);
+  }
   const mutationErrorRef = useRef<HTMLParagraphElement>(null);
   const queueQuery = useQuery(
     convexQuery(api.reviews.listModerationQueue, {
@@ -119,7 +128,7 @@ export function AdminReviewsQueue({
         </p>
       </div>
 
-      <Tabs value={mode} onValueChange={switchMode}>
+      <Tabs value={mode} onValueChange={switchMode} className="gap-6">
         <TabsList
           className="h-auto w-full flex-wrap justify-start"
           aria-label="Review queue"
@@ -130,160 +139,165 @@ export function AdminReviewsQueue({
             </TabsTrigger>
           ))}
         </TabsList>
-      </Tabs>
-
-      {queueQuery.isPending ? (
-        <ReviewsQueueSkeleton />
-      ) : queueQuery.isError ? (
-        <Card>
-          <CardContent
-            className="flex flex-wrap items-center gap-2 pt-6"
-            role="alert"
-          >
-            <span className="text-sm">
-              Moderation queue could not be loaded.
-            </span>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => void queueQuery.refetch()}
-            >
-              Retry
-            </Button>
-          </CardContent>
-        </Card>
-      ) : queueQuery.data.page.length === 0 ? (
-        <ModerationQueueEmpty mode={mode} />
-      ) : (
-        <div className="space-y-3" aria-live="polite">
-          {queueQuery.data.page.map((row, index) => {
-            if (row.item === null) return null;
-            const item = row.item;
-            return (
-              <Card key={`${row.kind}:${item.reviewId}:${index}`}>
-                <CardHeader className="gap-3 sm:flex-row sm:items-start sm:justify-between">
-                  <div className="min-w-0 space-y-1.5">
-                    <CardTitle className="break-words text-base">
-                      {item.projectName}
-                    </CardTitle>
-                    <CardDescription className="break-words">
-                      {item.publisherName} · {item.rating}/5 · verified consumer
-                    </CardDescription>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    <Badge variant={item.hidden ? "secondary" : "outline"}>
-                      {item.hidden ? "Hidden" : "Active"}
-                    </Badge>
-                    {item.reportCount > 0 ? (
-                      <Badge variant="secondary">
-                        {item.reportCount} open report
-                        {item.reportCount === 1 ? "" : "s"}
-                      </Badge>
-                    ) : null}
-                  </div>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <p className="whitespace-pre-wrap break-words text-sm">
-                    {item.body ?? "Rating only."}
-                  </p>
-                  {item.response ? (
-                    <div className="rounded-md bg-muted p-3">
-                      <p className="text-xs font-medium">Publisher response</p>
-                      <p className="mt-1 whitespace-pre-wrap break-words text-sm">
-                        {item.response.body}
+        <TabsContent value={mode}>
+          {queueQuery.isPending ? (
+            <ReviewsQueueSkeleton />
+          ) : queueQuery.isError ? (
+            <Card>
+              <CardContent
+                className="flex flex-wrap items-center gap-2 pt-6"
+                role="alert"
+              >
+                <span className="text-sm">
+                  Moderation queue could not be loaded.
+                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void queueQuery.refetch()}
+                >
+                  Retry
+                </Button>
+              </CardContent>
+            </Card>
+          ) : queueQuery.data.page.length === 0 ? (
+            <ModerationQueueEmpty mode={mode} />
+          ) : (
+            <div className="space-y-3" aria-live="polite">
+              {queueQuery.data.page.map((row, index) => {
+                if (row.item === null) return null;
+                const item = row.item;
+                return (
+                  <Card key={`${row.kind}:${item.reviewId}:${index}`}>
+                    <CardHeader className="gap-3 sm:flex-row sm:items-start sm:justify-between">
+                      <div className="min-w-0 space-y-1.5">
+                        <CardTitle className="break-words text-base">
+                          {item.projectName}
+                        </CardTitle>
+                        <CardDescription className="break-words">
+                          {item.publisherName} · {item.rating}/5 · verified
+                          consumer
+                        </CardDescription>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <Badge variant={item.hidden ? "secondary" : "outline"}>
+                          {item.hidden ? "Hidden" : "Active"}
+                        </Badge>
+                        {item.reportCount > 0 ? (
+                          <Badge variant="secondary">
+                            {item.reportCount} open report
+                            {item.reportCount === 1 ? "" : "s"}
+                          </Badge>
+                        ) : null}
+                      </div>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      <p className="whitespace-pre-wrap break-words text-sm">
+                        {item.body ?? "Rating only."}
                       </p>
-                    </div>
-                  ) : null}
-                  {item.reports.length > 0 ? (
-                    <div className="space-y-2 rounded-md border p-3">
-                      <p className="flex items-center gap-2 text-xs font-medium">
-                        <Flag className="size-3.5" aria-hidden="true" /> Report
-                        reasons
-                      </p>
-                      {item.reports.map((report) => (
-                        <p
-                          key={`${report.at}:${report.reason}`}
-                          className="break-words text-sm text-muted-foreground"
-                        >
-                          {report.reason}
+                      {item.response ? (
+                        <div className="rounded-md bg-muted p-3">
+                          <p className="text-xs font-medium">
+                            Publisher response
+                          </p>
+                          <p className="mt-1 whitespace-pre-wrap break-words text-sm">
+                            {item.response.body}
+                          </p>
+                        </div>
+                      ) : null}
+                      {item.reports.length > 0 ? (
+                        <div className="space-y-2 rounded-md border p-3">
+                          <p className="flex items-center gap-2 text-xs font-medium">
+                            <Flag className="size-3.5" aria-hidden="true" />{" "}
+                            Report reasons
+                          </p>
+                          {item.reports.map((report) => (
+                            <p
+                              key={`${report.at}:${report.reason}`}
+                              className="break-words text-sm text-muted-foreground"
+                            >
+                              {report.reason}
+                            </p>
+                          ))}
+                        </div>
+                      ) : null}
+                      {row.kind === "history" ? (
+                        <div className="rounded-md border p-3 text-sm">
+                          <p className="font-medium capitalize">
+                            {row.action.action}
+                          </p>
+                          <p className="break-words text-muted-foreground">
+                            {row.action.reason}
+                          </p>
+                          <time
+                            className="text-xs text-muted-foreground"
+                            dateTime={new Date(row.action.at).toISOString()}
+                          >
+                            {MODERATION_DATE_FORMAT.format(row.action.at)} UTC
+                          </time>
+                        </div>
+                      ) : item.latestAction ? (
+                        <p className="text-xs text-muted-foreground">
+                          Latest action: {item.latestAction.action} —{" "}
+                          {item.latestAction.reason}
                         </p>
-                      ))}
-                    </div>
-                  ) : null}
-                  {row.kind === "history" ? (
-                    <div className="rounded-md border p-3 text-sm">
-                      <p className="font-medium capitalize">
-                        {row.action.action}
-                      </p>
-                      <p className="break-words text-muted-foreground">
-                        {row.action.reason}
-                      </p>
-                      <time
-                        className="text-xs text-muted-foreground"
-                        dateTime={new Date(row.action.at).toISOString()}
-                      >
-                        {MODERATION_DATE_FORMAT.format(row.action.at)} UTC
-                      </time>
-                    </div>
-                  ) : item.latestAction ? (
-                    <p className="text-xs text-muted-foreground">
-                      Latest action: {item.latestAction.action} —{" "}
-                      {item.latestAction.reason}
-                    </p>
-                  ) : null}
-                  {row.kind !== "history" ? (
-                    <Button
-                      type="button"
-                      variant={item.hidden ? "outline" : "destructive"}
-                      onClick={() => {
-                        moderation.reset();
-                        setTarget({
-                          reviewId: item.reviewId,
-                          action: item.hidden ? "restored" : "hidden",
-                          projectName: item.projectName,
-                          expectedModerationGeneration:
-                            item.expectedModerationGeneration,
-                          expectedContentRevision: item.expectedContentRevision,
-                        });
-                      }}
-                    >
-                      {item.hidden ? "Restore review" : "Hide review"}
-                    </Button>
-                  ) : null}
-                </CardContent>
-              </Card>
-            );
-          })}
-          <nav
-            className="flex flex-wrap justify-between gap-2"
-            aria-label="Review queue pages"
-          >
-            <Button
-              type="button"
-              variant="outline"
-              disabled={previous.length === 0}
-              onClick={() => {
-                const stack = previous.slice(0, -1);
-                setCursor(previous[previous.length - 1] ?? null);
-                setPrevious(stack);
-              }}
-            >
-              Previous page
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              disabled={queueQuery.data.nextCursor === null}
-              onClick={() => {
-                setPrevious((stack) => [...stack, cursor]);
-                setCursor(queueQuery.data.nextCursor);
-              }}
-            >
-              Next page
-            </Button>
-          </nav>
-        </div>
-      )}
+                      ) : null}
+                      {row.kind !== "history" ? (
+                        <Button
+                          type="button"
+                          variant={item.hidden ? "outline" : "destructive"}
+                          onClick={() => {
+                            moderation.reset();
+                            setTarget({
+                              reviewId: item.reviewId,
+                              action: item.hidden ? "restored" : "hidden",
+                              projectName: item.projectName,
+                              expectedModerationGeneration:
+                                item.expectedModerationGeneration,
+                              expectedContentRevision:
+                                item.expectedContentRevision,
+                            });
+                          }}
+                        >
+                          {item.hidden ? "Restore review" : "Hide review"}
+                        </Button>
+                      ) : null}
+                    </CardContent>
+                  </Card>
+                );
+              })}
+              <nav
+                className="flex flex-wrap justify-between gap-2"
+                aria-label="Review queue pages"
+              >
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={previous.length === 0}
+                  onClick={() => {
+                    const stack = previous.slice(0, -1);
+                    setCursor(previous[previous.length - 1] ?? null);
+                    setPrevious(stack);
+                  }}
+                >
+                  Previous page
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={queueQuery.data.nextCursor === null}
+                  onClick={() => {
+                    setPrevious((stack) => [...stack, cursor]);
+                    setCursor(queueQuery.data.nextCursor);
+                  }}
+                >
+                  Next page
+                </Button>
+              </nav>
+            </div>
+          )}
+        </TabsContent>
+      </Tabs>
 
       <Dialog
         open={target !== null}

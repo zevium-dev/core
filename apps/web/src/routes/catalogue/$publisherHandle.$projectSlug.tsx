@@ -113,7 +113,8 @@ export const Route = createFileRoute(
       projectSlug: params.projectSlug,
     });
     if (typeof window !== "undefined") {
-      void queryClient.prefetchQuery(queryOpts);
+      // The title must exist before the destination snapshot is captured.
+      await queryClient.prefetchQuery(queryOpts);
       return;
     }
     try {
@@ -136,6 +137,9 @@ export const Route = createFileRoute(
     ],
   }),
   pendingComponent: ApiDetailSkeleton,
+  // Keep the card snapshot through ordinary fetches; slow requests still show
+  // the layout-stable skeleton. An immediate skeleton loses the source morph.
+  pendingMs: 1000,
 });
 
 type PlayResult = {
@@ -229,6 +233,7 @@ function ApiDetailPage() {
 
       <main
         id="main-content"
+        style={{ viewTransitionName: "main-content" }}
         tabIndex={-1}
         className="mx-auto max-w-6xl px-4 py-8 outline-none content-enter"
       >
@@ -325,7 +330,7 @@ function ApiDetailBody({
               </span>
             </p>
             <h1
-              className="min-w-0 text-3xl font-semibold tracking-tight [overflow-wrap:anywhere]"
+              className="w-fit min-w-0 max-w-full text-3xl font-semibold tracking-tight [overflow-wrap:anywhere]"
               style={{
                 viewTransitionName: `api-title-${data.org.publisherHandle}-${data.project.slug}`,
               }}
@@ -345,7 +350,7 @@ function ApiDetailBody({
                   {" "}
                   ·{" "}
                   <span
-                    className="tabular-nums text-foreground"
+                    className="inline-block tabular-nums text-foreground"
                     style={{
                       viewTransitionName: `api-price-${data.org.publisherHandle}-${data.project.slug}`,
                     }}
@@ -1513,6 +1518,7 @@ function ApiDetailSkeleton() {
       <PublicHeader active="catalogue" />
       <main
         id="main-content"
+        style={{ viewTransitionName: "main-content" }}
         tabIndex={-1}
         className="mx-auto max-w-6xl px-4 py-8 outline-none"
       >

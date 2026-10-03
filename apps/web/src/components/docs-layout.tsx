@@ -59,6 +59,7 @@ export function DocsPage({ title, description, children }: DocsPageProps) {
           <DocsSidebar />
           <article
             id="main-content"
+            style={{ viewTransitionName: "main-content" }}
             tabIndex={-1}
             className={cn("content-enter min-w-0 outline-none", PROSE_CLASS)}
           >

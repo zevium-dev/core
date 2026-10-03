@@ -63,7 +63,7 @@ export const Route = createFileRoute("/")({
   loader: async ({ context }) => {
     const queryOpts = convexQuery(api.catalogue.listPublic, {});
     if (typeof window !== "undefined") {
-      void context.queryClient.prefetchQuery(queryOpts);
+      await context.queryClient.prefetchQuery(queryOpts);
       return;
     }
 
@@ -108,6 +108,7 @@ function LandingPage() {
 
       <main
         id="main-content"
+        style={{ viewTransitionName: "main-content" }}
         tabIndex={-1}
         className="mx-auto flex w-full max-w-[100rem] flex-col gap-24 px-4 py-16 outline-none sm:py-24"
       >
@@ -125,11 +126,13 @@ function LandingPage() {
             <div className="flex flex-wrap items-center gap-3">
               <Magnetic strength={0.3}>
                 <Button asChild size="lg" className="min-h-11">
-                  <Link
-                    to="/catalogue"
-                    style={{ viewTransitionName: "catalogue-heading" }}
-                  >
-                    Browse catalogue
+                  <Link to="/catalogue">
+                    <span
+                      className="inline-block"
+                      style={{ viewTransitionName: "catalogue-heading" }}
+                    >
+                      Browse catalogue
+                    </span>
                   </Link>
                 </Button>
               </Magnetic>
@@ -519,7 +522,12 @@ function TeaserCard({
   return (
     <Card className="h-full transition-[translate,scale,box-shadow,border-color] duration-[var(--dur-instant)] ease-[var(--ease)] group-hover:-translate-y-0.5 group-hover:shadow-sm group-active:scale-[0.98] motion-reduce:transition-none motion-reduce:group-hover:translate-y-0 motion-reduce:group-active:scale-100">
       <CardHeader>
-        <CardTitle>{name}</CardTitle>
+        <CardTitle
+          className="w-fit max-w-full [overflow-wrap:anywhere]"
+          style={{ viewTransitionName: `api-title-${publisherHandle}-${slug}` }}
+        >
+          {name}
+        </CardTitle>
         <CardAction>
           <Badge variant="secondary" className="shrink-0">
             {orgName}

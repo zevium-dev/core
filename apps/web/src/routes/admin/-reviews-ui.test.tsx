@@ -11,6 +11,7 @@ import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const state = vi.hoisted(() => ({
+  search: { tab: undefined as string | undefined },
   queueError: false,
   moderate: vi.fn(),
   queue: {
@@ -39,6 +40,14 @@ const state = vi.hoisted(() => ({
   },
 }));
 
+vi.mock("@tanstack/react-router", () => ({
+  createFileRoute: () => (options: object) => ({
+    options,
+    useSearch: () => state.search,
+  }),
+  useNavigate: () => vi.fn(),
+}));
+
 vi.mock("@convex-dev/react-query", () => ({
   convexQuery: () => ({
     queryKey: ["moderation-queue"],
@@ -51,6 +60,7 @@ vi.mock("@convex-dev/react-query", () => ({
 }));
 
 import { AdminReviewsQueue } from "./-reviews-ui";
+import { Route } from "./reviews";
 
 function Providers({ children }: { children: ReactNode }) {
   const client = new QueryClient({
@@ -61,12 +71,23 @@ function Providers({ children }: { children: ReactNode }) {
 
 afterEach(cleanup);
 beforeEach(() => {
+  state.search.tab = undefined;
   state.queueError = false;
   state.moderate.mockReset();
   state.moderate.mockResolvedValue({});
 });
 
 describe("actual moderation route surface", () => {
+  it("keeps tab focus when the route-owned queue mode changes", async () => {
+    const Page = Route.options.component!;
+    const rendered = render(<Page />, { wrapper: Providers });
+    const history = await screen.findByRole("tab", { name: "History" });
+    history.focus();
+    state.search.tab = "history";
+    rendered.rerender(<Page />);
+    expect(document.activeElement).toBe(history);
+    expect(screen.getByRole("tabpanel", { name: "History" })).toBeTruthy();
+  });
   it("recovers queue query through visible retry", async () => {
     state.queueError = true;
     render(<AdminReviewsQueue mode="reported" onModeChange={vi.fn()} />, {
@@ -79,6 +100,10 @@ describe("actual moderation route surface", () => {
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     expect(await screen.findByText("Broken contract")).toBeTruthy();
     expect(screen.getByText("2 open reports")).toBeTruthy();
+    const selectedTab = screen.getByRole("tab", { selected: true });
+    const panel = screen.getByRole("tabpanel", { name: "Reported" });
+    expect(selectedTab.getAttribute("aria-controls")).toBe(panel.id);
+    expect(panel.contains(screen.getByText("Broken contract"))).toBe(true);
   });
 
   it("associates and focuses inline moderation failure", async () => {

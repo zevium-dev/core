@@ -19,7 +19,6 @@ function AdminReviewsPage() {
   const navigate = useNavigate({ from: Route.fullPath });
   return (
     <AdminReviewsQueue
-      key={mode}
       mode={mode}
       onModeChange={(nextMode) =>
         void navigate({

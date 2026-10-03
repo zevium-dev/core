@@ -9,7 +9,7 @@ import { useAuth, useOrganization } from "@clerk/tanstack-react-start";
 import { createFileRoute } from "@tanstack/react-router";
 import { useConvexAuth } from "convex/react";
 import { Check, Copy, KeyRound, Plus, RotateCw, Trash2 } from "lucide-react";
-import { m, useReducedMotion } from "motion/react";
+import { m } from "motion/react";
 import {
   Suspense,
   useEffect,
@@ -51,6 +51,7 @@ import { Input } from "#/components/ui/input";
 import { Label } from "#/components/ui/label";
 import { Skeleton } from "#/components/ui/skeleton";
 import { Switch } from "#/components/ui/switch";
+import { useHydratedReducedMotion } from "#/hooks/use-hydrated-reduced-motion";
 import {
   createKey,
   listKeys,
@@ -120,7 +121,7 @@ function KeysContent({ userId, orgId }: { userId: string; orgId: string }) {
   const canAdminister = isPrivilegedOrgRole(membership?.role);
   const { returnTo } = Route.useSearch();
   const queryClient = useQueryClient();
-  const reduce = useReducedMotion();
+  const reduce = useHydratedReducedMotion();
   const principalKey = `${userId}:${orgId}`;
   const activePrincipalRef = useRef<string | null>(principalKey);
   const queryKey = keysQueryKey(userId, orgId);
@@ -831,7 +832,7 @@ function SecretRevealDialog({
                     : { opacity: 0, filter: "blur(8px)" }
                 }
                 animate={{ opacity: 1, filter: "blur(0px)" }}
-                transition={{ duration: DUR.base, ease: EASE }}
+                transition={{ duration: reduce ? 0 : DUR.base, ease: EASE }}
               >
                 <code className="block flex-1 overflow-x-auto rounded-md border bg-muted/50 px-3 py-2 font-mono text-xs break-all">
                   {revealed.secret}

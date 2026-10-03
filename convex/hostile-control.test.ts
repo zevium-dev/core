@@ -244,6 +244,13 @@ describe("hostile control-plane state", () => {
           visibility: "public",
           tags: ["hostile"],
         });
+        await ctx.db.insert("publicRouteTombstones", {
+          organizationId,
+          projectId,
+          publisherHandle: "hostile",
+          projectSlug: `api-${index}`,
+          reservedAt: index,
+        });
         const listingId = await ctx.db.insert("catalogueListings", {
           projectId,
           clerkOrgId: "org_hostile",
