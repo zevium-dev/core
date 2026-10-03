@@ -97,12 +97,13 @@ export const Route = createFileRoute("/catalogue/")({
       }),
     );
     if (typeof window !== "undefined") {
-      void queryClient.prefetchQuery(queryOpts);
+      await queryClient.prefetchQuery(queryOpts);
       return;
     }
     await queryClient.ensureQueryData(queryOpts);
   },
   component: CataloguePage,
+  pendingMs: 1000,
   head: () => ({
     meta: [
       { title: "Catalogue · Zevium" },

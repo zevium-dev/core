@@ -36,10 +36,10 @@ export const Route = createFileRoute("/app/projects/")({
 
     const queryOpts = convexQuery(api.projects.list, { orgSlug });
 
-    // Client nav: fire-and-forget prefetch; skeletons cover isPending.
-    // Mirror is handled by useEnsureMirror in app.tsx — never block client.
+    // Await cards so a cold detail → list navigation can capture shared titles.
+    // Mirror is handled by useEnsureMirror in app.tsx.
     if (typeof window !== "undefined") {
-      void queryClient.prefetchQuery(queryOpts);
+      await queryClient.prefetchQuery(queryOpts);
       return;
     }
 
@@ -60,6 +60,7 @@ export const Route = createFileRoute("/app/projects/")({
     }
   },
   component: ProjectsIndexPage,
+  pendingMs: 1000,
   head: () => ({
     meta: [{ title: "Projects · Zevium" }],
   }),

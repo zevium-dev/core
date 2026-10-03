@@ -63,7 +63,7 @@ export const Route = createFileRoute("/")({
   loader: async ({ context }) => {
     const queryOpts = convexQuery(api.catalogue.listPublic, {});
     if (typeof window !== "undefined") {
-      void context.queryClient.prefetchQuery(queryOpts);
+      await context.queryClient.prefetchQuery(queryOpts);
       return;
     }
 
