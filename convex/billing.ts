@@ -1868,25 +1868,36 @@ export const processStripeEvent = internalAction({
                   {},
                   { stripeAccount: args.stripeAccount },
                 );
-          await ctx.runMutation(internal.payouts.projectConnectedPayout, {
-            stripeConnectedAccountId: args.stripeAccount,
-            stripePayoutId: payout.id,
-            amount: payout.amount,
-            currency: payout.currency,
-            status:
-              payout.status === "paid"
-                ? "paid"
-                : payout.status === "failed"
-                  ? "failed"
-                  : payout.status === "canceled"
-                    ? "canceled"
-                    : "pending",
-            failureCode: payout.failure_code ?? undefined,
-            arrivalDate:
-              payout.arrival_date === null
-                ? undefined
-                : payout.arrival_date * 1000,
-          });
+          const projection = await ctx.runMutation(
+            internal.payouts.projectConnectedPayout,
+            {
+              stripeConnectedAccountId: args.stripeAccount,
+              stripePayoutId: payout.id,
+              amount: payout.amount,
+              currency: payout.currency,
+              status:
+                payout.status === "paid"
+                  ? "paid"
+                  : payout.status === "failed"
+                    ? "failed"
+                    : payout.status === "canceled"
+                      ? "canceled"
+                      : "pending",
+              failureCode: payout.failure_code ?? undefined,
+              arrivalDate:
+                payout.arrival_date === null
+                  ? undefined
+                  : payout.arrival_date * 1000,
+            },
+          );
+          if (!projection.owned) {
+            await ctx.runMutation(internal.billing.finishStripeEvent, {
+              stripeEventId: args.stripeEventId,
+              leaseToken: args.leaseToken,
+              status: "ignored",
+            });
+            return;
+          }
           break;
         }
         default:

@@ -3112,8 +3112,15 @@ export const projectConnectedPayout = internalMutation({
     failureCode: v.optional(v.string()),
     arrivalDate: v.optional(v.number()),
   },
-  handler: async (ctx, args): Promise<void> => {
+  handler: async (ctx, args): Promise<{ owned: boolean }> => {
     await assertFinanceMigrationAllowsRuntime(ctx);
+    const profile = await ctx.db
+      .query("organizationPayments")
+      .withIndex("by_connected_account", (q) =>
+        q.eq("stripeConnectedAccountId", args.stripeConnectedAccountId),
+      )
+      .unique();
+    if (profile === null) return { owned: false };
     const existing = await ctx.db
       .query("connectedPayouts")
       .withIndex("by_stripe_payout", (q) =>
@@ -3135,6 +3142,7 @@ export const projectConnectedPayout = internalMutation({
     } else {
       await ctx.db.patch(existing._id, payload);
     }
+    return { owned: true };
   },
 });
 

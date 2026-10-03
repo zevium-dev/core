@@ -30,6 +30,15 @@ import { requireAdmin } from "./lib/auth";
 import { FINANCE_MIGRATION_KEY } from "./lib/financeMigrationGate";
 import { paymentStatusForProjection } from "./lib/paymentStatus";
 import { settlementIdentityFingerprint } from "./lib/settlementIdentity";
+import {
+  isLegacySettlement,
+  legacySettlementFacts,
+} from "./lib/legacySettlement";
+
+import {
+  assertQuarantinedTestPayout,
+  assertQuarantinedStripeEvent,
+} from "./financeRecovery";
 
 const MIGRATION_KEY = FINANCE_MIGRATION_KEY;
 const SCOPE_BATCH = 1;
@@ -355,6 +364,20 @@ async function earningForUsage(
   earning: Doc<"publisherEarnings">;
   settlementFingerprint: string;
 }> {
+  if (isLegacySettlement(usage)) {
+    const facts = await legacySettlementFacts(ctx, usage, settleRefId);
+    await ctx.db.patch(usage._id, {
+      projectName: facts.project.name,
+      projectSlug: facts.project.slug,
+    });
+    await ctx.db.patch(facts.earning._id, {
+      consumerOrganizationId: usage.organizationId,
+      projectName: facts.project.name,
+      projectSlug: facts.project.slug,
+    });
+    await ensurePublisherFence(ctx, job, facts.publisher._id);
+    return { earning: facts.earning, settlementFingerprint: facts.fingerprint };
+  }
   const project = await ctx.db.get(usage.projectId);
   if (project === null) throw new Error("Migration usage project is missing");
   const consumer = await ctx.db.get(usage.organizationId);
@@ -495,7 +518,28 @@ async function migrateWalletEntry(
     });
     return 1;
   }
-  if (entry.amount === 0) return 0;
+  if (entry.amount === 0) {
+    if (entry.kind === "usage_settlement") {
+      const usage =
+        entry.usageEventId === undefined
+          ? null
+          : await ctx.db.get(entry.usageEventId);
+      if (usage === null) throw new Error("Migration usage event is missing");
+      const migrated = await earningForUsage(ctx, job, usage, entry.refId);
+      if (
+        entry.settlementFingerprint !== undefined &&
+        entry.settlementFingerprint !== migrated.settlementFingerprint
+      ) {
+        throw new Error(
+          "Legacy settlement fingerprint conflicts with identity",
+        );
+      }
+      await ctx.db.patch(entry._id, {
+        settlementFingerprint: migrated.settlementFingerprint,
+      });
+    }
+    return 0;
+  }
 
   if (entry.kind === "refund_reversal" || entry.kind === "dispute_reversal") {
     if (entry.paymentId === undefined) {
@@ -3425,6 +3469,30 @@ async function runConservationChunk(
         maximumRowsRead: VERIFY_BATCH * 2,
       });
     for (const usage of page.page) {
+      if (isLegacySettlement(usage)) {
+        const facts = await legacySettlementFacts(
+          ctx,
+          usage,
+          usage.settleRefId ?? "",
+        );
+        if (
+          facts.entry.settlementFingerprint !== facts.fingerprint ||
+          facts.earning.consumerOrganizationId !== usage.organizationId ||
+          usage.projectName === undefined ||
+          usage.projectSlug === undefined ||
+          usage.projectName.trim() === "" ||
+          usage.projectSlug.trim() === ""
+        ) {
+          throw new Error(`Usage ${usage._id} lacks verified project identity`);
+        }
+        state.watermark = await appendFinalWatermark(
+          state.watermark,
+          "usageEvents",
+          usage,
+        );
+        state.usage += 1;
+        continue;
+      }
       const project = await ctx.db.get(usage.projectId);
       const consumer = await ctx.db.get(usage.organizationId);
       const publisher =
@@ -3621,14 +3689,17 @@ async function runConservationChunk(
           q.eq("settleRefId", earning.usageSettlementRefId),
         )
         .unique();
+      const legacy = usage !== null && isLegacySettlement(usage);
+      if (legacy)
+        await legacySettlementFacts(ctx, usage, earning.usageSettlementRefId);
       if (
         publisher === null ||
         consumer === null ||
         earning.projectId === undefined ||
-        earning.specVersionId === undefined ||
+        (!legacy && earning.specVersionId === undefined) ||
         project === null ||
-        specVersion === null ||
-        specVersion.projectId !== project._id ||
+        (!legacy &&
+          (specVersion === null || specVersion.projectId !== project._id)) ||
         project.organizationId !== earning.publisherOrganizationId ||
         publisherBalance === null ||
         publisherBalance.migrationStatus !== "verified" ||
@@ -3787,6 +3858,8 @@ async function runConservationChunk(
           maximumRowsRead: DETAIL_BATCH * 2,
         });
       for (const event of page.page) {
+        if (event.quarantineCaseId !== undefined)
+          await assertQuarantinedStripeEvent(ctx, event);
         if (event.status !== "processed" && event.status !== "ignored") {
           throw new Error(
             `Stripe event ${event.stripeEventId} is not terminal`,
@@ -3921,6 +3994,16 @@ async function runConservationChunk(
         maximumRowsRead: VERIFY_BATCH * 2,
       });
     for (const payout of page.page) {
+      if (payout.quarantineCaseId !== undefined) {
+        await assertQuarantinedTestPayout(ctx, payout);
+        state.watermark = await appendFinalWatermark(
+          state.watermark,
+          "connectedPayouts",
+          payout,
+        );
+        state.connectedPayouts += 1;
+        continue;
+      }
       const profile = await ctx.db
         .query("organizationPayments")
         .withIndex("by_connected_account", (q) =>
@@ -4071,121 +4154,127 @@ async function runConservationChunk(
   await scheduleNext(ctx, job._id);
 }
 
+async function startFinanceMigration(ctx: MutationCtx) {
+  const existing = await ctx.db
+    .query("financialMigrationJobs")
+    .withIndex("by_migration_key", (q) => q.eq("migrationKey", MIGRATION_KEY))
+    .unique();
+  if (existing !== null) {
+    if (
+      existing.status === "verified" &&
+      existing.snapshotFenceToken !== undefined &&
+      existing.finalWatermark !== undefined &&
+      existing.finalWatermarkAt !== undefined
+    ) {
+      return existing._id;
+    }
+    if (existing.snapshotFenceToken === undefined) {
+      await assertInitialMigrationQuiescence(ctx);
+      const now = Date.now();
+      await ctx.db.patch(existing._id, {
+        status: "running",
+        phase: "wallets",
+        snapshotFenceToken: crypto.randomUUID(),
+        tableCursor: undefined,
+        detailCursor: undefined,
+        subphase: undefined,
+        activeWalletId: undefined,
+        activePaymentId: undefined,
+        activePublisherOrganizationId: undefined,
+        activeTransferId: undefined,
+        activeSequence: 0,
+        accumulatorA: 0,
+        accumulatorB: 0,
+        accumulatorC: 0,
+        accumulatorD: undefined,
+        accumulatorE: undefined,
+        accumulatorF: undefined,
+        verificationState: undefined,
+        finalWatermark: undefined,
+        finalWatermarkAt: undefined,
+        lastError: undefined,
+        updatedAt: now,
+      });
+      await audit(ctx, existing._id, "migration", "refence", "checkpoint", {
+        reason: "missing_global_snapshot_fence",
+      });
+    } else {
+      await ctx.db.patch(existing._id, {
+        status: "running",
+        phase: existing.status === "verified" ? "wallets" : existing.phase,
+        tableCursor:
+          existing.status === "verified" ? undefined : existing.tableCursor,
+        detailCursor:
+          existing.status === "verified" ? undefined : existing.detailCursor,
+        subphase:
+          existing.status === "verified" ? undefined : existing.subphase,
+        activeWalletId:
+          existing.status === "verified" ? undefined : existing.activeWalletId,
+        activePaymentId:
+          existing.status === "verified" ? undefined : existing.activePaymentId,
+        activePublisherOrganizationId:
+          existing.status === "verified"
+            ? undefined
+            : existing.activePublisherOrganizationId,
+        activeTransferId:
+          existing.status === "verified"
+            ? undefined
+            : existing.activeTransferId,
+        verificationState:
+          existing.status === "verified"
+            ? undefined
+            : existing.verificationState,
+        finalWatermark: undefined,
+        finalWatermarkAt: undefined,
+        lastError: undefined,
+        updatedAt: Date.now(),
+      });
+    }
+    await scheduleNext(ctx, existing._id);
+    return existing._id;
+  }
+  // Finance mutations span multiple webhook/reconciliation transactions.
+  // Establish global fence only from a drained checkpoint. Receipt writes
+  // also read this fence, so a concurrent webhook transaction either commits
+  // before this snapshot or fails before acceptance and Stripe retries it.
+  await assertInitialMigrationQuiescence(ctx);
+  const now = Date.now();
+  const jobId = await ctx.db.insert("financialMigrationJobs", {
+    migrationKey: MIGRATION_KEY,
+    snapshotFenceToken: crypto.randomUUID(),
+    status: "running",
+    phase: "wallets",
+    accumulatorA: 0,
+    accumulatorB: 0,
+    accumulatorC: 0,
+    rowsRead: 0,
+    rowsWritten: 0,
+    chunks: 0,
+    createdAt: now,
+    updatedAt: now,
+  });
+  await audit(ctx, jobId, "migration", "start", "checkpoint", {
+    migrationKey: MIGRATION_KEY,
+    scopeBatch: SCOPE_BATCH,
+    detailBatch: DETAIL_BATCH,
+    verifyBatch: VERIFY_BATCH,
+  });
+  await scheduleNext(ctx, jobId);
+  return jobId;
+}
+
 export const start = mutation({
   args: {},
   handler: async (ctx) => {
     await requireAdmin(ctx);
-    const existing = await ctx.db
-      .query("financialMigrationJobs")
-      .withIndex("by_migration_key", (q) => q.eq("migrationKey", MIGRATION_KEY))
-      .unique();
-    if (existing !== null) {
-      if (
-        existing.status === "verified" &&
-        existing.snapshotFenceToken !== undefined &&
-        existing.finalWatermark !== undefined &&
-        existing.finalWatermarkAt !== undefined
-      ) {
-        return existing._id;
-      }
-      if (existing.snapshotFenceToken === undefined) {
-        await assertInitialMigrationQuiescence(ctx);
-        const now = Date.now();
-        await ctx.db.patch(existing._id, {
-          status: "running",
-          phase: "wallets",
-          snapshotFenceToken: crypto.randomUUID(),
-          tableCursor: undefined,
-          detailCursor: undefined,
-          subphase: undefined,
-          activeWalletId: undefined,
-          activePaymentId: undefined,
-          activePublisherOrganizationId: undefined,
-          activeTransferId: undefined,
-          activeSequence: 0,
-          accumulatorA: 0,
-          accumulatorB: 0,
-          accumulatorC: 0,
-          accumulatorD: undefined,
-          accumulatorE: undefined,
-          accumulatorF: undefined,
-          verificationState: undefined,
-          finalWatermark: undefined,
-          finalWatermarkAt: undefined,
-          lastError: undefined,
-          updatedAt: now,
-        });
-        await audit(ctx, existing._id, "migration", "refence", "checkpoint", {
-          reason: "missing_global_snapshot_fence",
-        });
-      } else {
-        await ctx.db.patch(existing._id, {
-          status: "running",
-          phase: existing.status === "verified" ? "wallets" : existing.phase,
-          tableCursor:
-            existing.status === "verified" ? undefined : existing.tableCursor,
-          detailCursor:
-            existing.status === "verified" ? undefined : existing.detailCursor,
-          subphase:
-            existing.status === "verified" ? undefined : existing.subphase,
-          activeWalletId:
-            existing.status === "verified"
-              ? undefined
-              : existing.activeWalletId,
-          activePaymentId:
-            existing.status === "verified"
-              ? undefined
-              : existing.activePaymentId,
-          activePublisherOrganizationId:
-            existing.status === "verified"
-              ? undefined
-              : existing.activePublisherOrganizationId,
-          activeTransferId:
-            existing.status === "verified"
-              ? undefined
-              : existing.activeTransferId,
-          verificationState:
-            existing.status === "verified"
-              ? undefined
-              : existing.verificationState,
-          finalWatermark: undefined,
-          finalWatermarkAt: undefined,
-          lastError: undefined,
-          updatedAt: Date.now(),
-        });
-      }
-      await scheduleNext(ctx, existing._id);
-      return existing._id;
-    }
-    // Finance mutations span multiple webhook/reconciliation transactions.
-    // Establish global fence only from a drained checkpoint. Receipt writes
-    // also read this fence, so a concurrent webhook transaction either commits
-    // before this snapshot or fails before acceptance and Stripe retries it.
-    await assertInitialMigrationQuiescence(ctx);
-    const now = Date.now();
-    const jobId = await ctx.db.insert("financialMigrationJobs", {
-      migrationKey: MIGRATION_KEY,
-      snapshotFenceToken: crypto.randomUUID(),
-      status: "running",
-      phase: "wallets",
-      accumulatorA: 0,
-      accumulatorB: 0,
-      accumulatorC: 0,
-      rowsRead: 0,
-      rowsWritten: 0,
-      chunks: 0,
-      createdAt: now,
-      updatedAt: now,
-    });
-    await audit(ctx, jobId, "migration", "start", "checkpoint", {
-      migrationKey: MIGRATION_KEY,
-      scopeBatch: SCOPE_BATCH,
-      detailBatch: DETAIL_BATCH,
-      verifyBatch: VERIFY_BATCH,
-    });
-    await scheduleNext(ctx, jobId);
-    return jobId;
+    return startFinanceMigration(ctx);
   },
+});
+
+/** Deployment operators can recover legacy data without granting user roles. */
+export const startOperator = internalMutation({
+  args: {},
+  handler: startFinanceMigration,
 });
 
 const reconciledRefundStatus = v.union(
