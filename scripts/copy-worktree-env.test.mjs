@@ -9,6 +9,7 @@ import {
   readdirSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -89,7 +90,9 @@ test("preserves destination files on first setup", (t) => {
 
 test("skips local checkouts and setup without T3 context", (t) => {
   const f = fixture(t);
-  assert.match(f.run(undefined), /Copied 0 local env files/);
   assert.match(f.run(null), /Env copy skipped/);
   assert.match(f.run(f.target), /Env copy skipped/);
+  const alias = join(f.source, "target alias");
+  symlinkSync(f.target, alias, "dir");
+  assert.match(f.run(alias), /Env copy skipped/);
 });

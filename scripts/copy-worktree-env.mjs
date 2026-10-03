@@ -5,12 +5,13 @@ import {
   linkSync,
   mkdirSync,
   mkdtempSync,
+  realpathSync,
   rmSync,
 } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join } from "node:path";
 
 const projectRoot = process.env.T3CODE_PROJECT_ROOT;
-const worktreeRoot = process.cwd();
+const worktreeRoot = realpathSync(process.cwd());
 
 function copyEnvFile(source, destination) {
   if (process.platform !== "darwin") {
@@ -42,7 +43,7 @@ function copyEnvFile(source, destination) {
   }
 }
 
-if (!projectRoot || resolve(projectRoot) === worktreeRoot) {
+if (!projectRoot || realpathSync(projectRoot) === worktreeRoot) {
   console.log("Env copy skipped: no separate T3 project checkout.");
 } else {
   const directories = [
