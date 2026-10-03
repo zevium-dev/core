@@ -1,0 +1,30 @@
+{
+  "$schema": "https://t3.codes/schema/t3.json",
+  "iconPath": "apps/web/public/logo192.png",
+  "scripts": [
+    {
+      "name": "Setup Worktree",
+      "command": "node scripts/copy-worktree-env.mjs && pnpm --config.confirm-modules-purge=false install --frozen-lockfile",
+      "icon": "configure",
+      "runOnWorktreeCreate": true,
+      "async": true
+    },
+    {
+      "name": "Dev",
+      "command": "pnpm dev",
+      "icon": "play",
+      "previewUrl": "http://localhost:3000",
+      "autoOpenPreview": true
+    },
+    {
+      "name": "CI Checks",
+      "command": "pnpm ci:pr",
+      "icon": "test"
+    },
+    {
+      "name": "Build",
+      "command": "pnpm build",
+      "icon": "build"
+    }
+  ]
+}

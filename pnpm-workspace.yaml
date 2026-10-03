@@ -2,6 +2,11 @@ packages:
   - apps/*
   - packages/*
 
+# Share dependency graphs between worktrees. Reflink package contents on
+# Btrfs/APFS; copy on filesystems that cannot clone.
+enableGlobalVirtualStore: true
+packageImportMethod: clone-or-copy
+
 registry: https://registry.npmjs.org/
 trustLockfile: false
 verifyStoreIntegrity: true
@@ -24,6 +29,16 @@ minimumReleaseAgeStrict: true
 minimumReleaseAgeExclude:
   - "@cloudflare/workers-types"
   - "@clerk/*"
+
+packageExtensions:
+  # Published declarations import React types, but the package omits this peer.
+  # Declare it so type resolution works outside a project-local virtual store.
+  next-themes@0.4.6:
+    peerDependencies:
+      "@types/react": "*"
+    peerDependenciesMeta:
+      "@types/react":
+        optional: true
 
 overrides:
   # Lezer NodeProp ids must come from one module across parser and highlighter.
