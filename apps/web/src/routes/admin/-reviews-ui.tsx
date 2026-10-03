@@ -68,6 +68,15 @@ export function AdminReviewsQueue({
   const [cursor, setCursor] = useState<string | null>(null);
   const [previous, setPrevious] = useState<Array<string | null>>([]);
   const [target, setTarget] = useState<ModerationTarget | null>(null);
+  const [previousMode, setPreviousMode] = useState(mode);
+  if (previousMode !== mode) {
+    // Reset route-owned pagination without remounting focused tab triggers.
+    // This also handles browser history, which bypasses switchMode.
+    setPreviousMode(mode);
+    setCursor(null);
+    setPrevious([]);
+    setTarget(null);
+  }
   const mutationErrorRef = useRef<HTMLParagraphElement>(null);
   const queueQuery = useQuery(
     convexQuery(api.reviews.listModerationQueue, {
