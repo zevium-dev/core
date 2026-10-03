@@ -1,5 +1,15 @@
-import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import {
+  chmodSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { parse } from "yaml";
 
 const workflow = readFileSync(
   ".github/workflows/deploy-production.yml",
@@ -54,5 +64,66 @@ describe("production deployment workflow", () => {
     expect(workflow).toContain(
       '"name=\\"zevium-release\\" content=\\"$RELEASE_SHA\\""',
     );
+  });
+
+  it("accepts changed catalogue copy but rejects a broken catalogue surface", () => {
+    const root = mkdtempSync(join(tmpdir(), "zevium-production-smoke-"));
+    try {
+      const curl = join(root, "curl");
+      writeFileSync(
+        curl,
+        `#!/bin/sh
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --output) output="$2"; shift 2 ;;
+    *) url="$1"; shift ;;
+  esac
+done
+case "$url" in
+  */health)
+    printf '{"ok":true,"service":"zevium-gateway","release":"%s","contract":1}' "$RELEASE_SHA" > "$output"
+    printf 200 ;;
+  */catalogue)
+    cat "$CATALOGUE_FIXTURE" > "$output"
+    printf 200 ;;
+  */release-contract-missing)
+    printf '{"error":"not found"}' > "$output"
+    printf 404 ;;
+  *)
+    printf '<meta name="zevium-release" content="%s">' "$RELEASE_SHA" > "$output"
+    printf 200 ;;
+esac
+`,
+      );
+      chmodSync(curl, 0o755);
+      const catalogue = join(root, "catalogue.html");
+      const document = parse(workflow);
+      const smoke = document.jobs.deploy.steps.find(
+        (step: { name?: string }) => step.name === "Verify production",
+      ).run;
+      const run = (html: string) => {
+        writeFileSync(catalogue, html);
+        return spawnSync("bash", ["-e", "-c", smoke], {
+          cwd: root,
+          encoding: "utf8",
+          timeout: 5000,
+          env: {
+            ...process.env,
+            PATH: `${root}:${process.env.PATH}`,
+            RELEASE_SHA: "0".repeat(40),
+            PRODUCTION_GATEWAY_URL: "https://gateway.example.invalid",
+            PRODUCTION_WEB_URL: "https://web.example.invalid",
+            CATALOGUE_FIXTURE: catalogue,
+          },
+        }).status;
+      };
+      const title = "<title>Catalogue · Zevium</title>";
+      const search = '<input id="catalogue-search">';
+      expect(run(`${title}${search}<p>New catalogue description</p>`)).toBe(0);
+      expect(run(`${title}<p>Missing search form</p>`)).toBe(1);
+      expect(run(`${title}${search}<p>Something went wrong</p>`)).toBe(1);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
