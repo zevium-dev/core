@@ -1519,7 +1519,8 @@ export default defineSchema({
   })
     .index("by_operation", ["operationId"])
     .index("by_organization_kind_status", ["organizationId", "kind", "status"])
-    .index("by_pii_expiry", ["piiExpiresAt"]),
+    .index("by_pii_expiry", ["piiExpiresAt"])
+    .index("by_connected_account", ["stripeConnectedAccountId"]),
 
   // Checkout state is server-owned: browser-supplied metadata never grants.
   checkoutIntents: defineTable({
@@ -1576,6 +1577,7 @@ export default defineSchema({
     replayCount: v.optional(v.number()),
     lastReplayedAt: v.optional(v.number()),
     lastReplayedBy: v.optional(v.string()),
+    quarantineCaseId: v.optional(v.id("financeReconciliationCases")),
   })
     .index("by_stripe_event", ["stripeEventId"])
     .index("by_object", ["objectId"])
@@ -1936,7 +1938,8 @@ export default defineSchema({
     .index("by_publisher", ["publisherOrganizationId", "createdAt"])
     .index("by_publisher_status", ["publisherOrganizationId", "status"])
     .index("by_idempotency_key", ["idempotencyKey"])
-    .index("by_stripe_transfer", ["stripeTransferId"]),
+    .index("by_stripe_transfer", ["stripeTransferId"])
+    .index("by_connected_account", ["stripeConnectedAccountId"]),
 
   // Persisted before first provider attempt. Unknown outcomes reconcile by
   // signed request fingerprint; unsafe retries never issue another create.
@@ -2021,6 +2024,8 @@ export default defineSchema({
       v.literal("transfer"),
       v.literal("transfer_orphan"),
       v.literal("account_create"),
+      v.literal("foreign_stripe_event"),
+      v.literal("foreign_test_payout"),
     ),
     status: v.union(
       v.literal("open"),
@@ -2081,6 +2086,7 @@ export default defineSchema({
     ),
     failureCode: v.optional(v.string()),
     updatedAt: v.number(),
+    quarantineCaseId: v.optional(v.id("financeReconciliationCases")),
   })
     .index("by_connected_account", ["stripeConnectedAccountId", "updatedAt"])
     .index("by_connected_account_status", [
