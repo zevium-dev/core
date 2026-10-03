@@ -14,34 +14,62 @@ function sourceOrigin(raw: string | undefined): string | null {
   }
 }
 
+/** Clerk encodes its Frontend API hostname in the public instance key. */
+function clerkFrontendOrigin(
+  publishableKey: string | undefined,
+): string | null {
+  const encoded = publishableKey?.match(
+    /^pk_(?:live|test)_([A-Za-z0-9+/=]+)$/,
+  )?.[1];
+  if (!encoded) return null;
+  try {
+    const decoded = atob(encoded);
+    if (!decoded.endsWith("$")) return null;
+    const hostname = decoded.slice(0, -1);
+    // Only a hostname may become a CSP source, never URL syntax or directives.
+    if (!/^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$/i.test(hostname)) {
+      return null;
+    }
+    return `https://${hostname.toLowerCase()}`;
+  } catch {
+    return null;
+  }
+}
+
 export function buildWebContentSecurityPolicy(
   nonce: string,
   options: { upgradeInsecureRequests?: boolean } = {},
 ): string {
   const convex = sourceOrigin(import.meta.env.VITE_CONVEX_URL);
   const gateway = sourceOrigin(import.meta.env.VITE_GATEWAY_URL);
+  const clerk = clerkFrontendOrigin(import.meta.env.VITE_CLERK_PUBLISHABLE_KEY);
   const websocket = convex === null ? null : convex.replace(/^https:/, "wss:");
   const connectSources = [
     "'self'",
     convex,
     websocket,
     gateway,
+    clerk,
     "https://api.clerk.com",
     "https://*.clerk.accounts.dev",
     "https://clerk-telemetry.com",
+    "https://*.protect.clerk.com:*",
   ].filter((source): source is string => source !== null);
+  const clerkSources = ["https://*.clerk.accounts.dev", clerk]
+    .filter((source): source is string => source !== null)
+    .join(" ");
   return [
     "default-src 'self'",
-    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic' https://api.clerk.com https://*.clerk.accounts.dev https://challenges.cloudflare.com`,
+    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic' https://api.clerk.com ${clerkSources} https://challenges.cloudflare.com https://*.protect.clerk.com`,
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: blob: https://img.clerk.com https://images.clerk.dev",
     "font-src 'self' data:",
     `connect-src ${connectSources.join(" ")}`,
     "worker-src 'self' blob:",
-    "frame-src https://*.clerk.accounts.dev https://challenges.cloudflare.com",
+    `frame-src ${clerkSources} https://challenges.cloudflare.com https://*.protect.clerk.com`,
     "object-src 'none'",
     "base-uri 'self'",
-    "form-action 'self' https://*.clerk.accounts.dev",
+    `form-action 'self' ${clerkSources}`,
     "frame-ancestors 'none'",
     ...(options.upgradeInsecureRequests === false
       ? []

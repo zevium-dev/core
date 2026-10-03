@@ -231,8 +231,8 @@ function RootComponent() {
     </ThemeProvider>
   );
 
-  // App/admin/auth layouts own Clerk + Convex auth. Avoid nesting the same
-  // Convex client under an anonymous provider, which can race token setup.
+  // App/admin layouts own Convex auth; auth forms only need Clerk. Avoid nesting
+  // the same Convex client under an anonymous provider, which can race tokens.
   if (needsAuthenticatedProviders(pathname)) return content;
 
   return (

@@ -84,6 +84,7 @@ configureViewTransitions(router);
 ```
 
 - Default: **cross-fade** of `main-content` over `DUR.page` with THE easing. No directional slides on morphing routes (slides fight morphs); `navigate-forward`/`back` types are reserved for stack-like flows (e.g. multi-step checkout) only
+- Ordinary page hops (`nav-swap`, including docs → home) hide the outgoing snapshot immediately and reveal the destination over `DUR.fast`. List → detail routes retain their shared-element morphs and page crossfade. The adapter exposes the swap policy through a dataset for browsers without transition-type selectors.
 - **Hard loads** (refresh, direct URL — no old DOM to transition from): `.content-enter` CSS class on `<main>` — opacity-only reveal, `DUR.page`. Spatial transforms are forbidden here because moving the full main region creates measurable CLS; soft navigation uses View Transitions instead
 
 ### Shared-element morphs (`view-transition-name`)

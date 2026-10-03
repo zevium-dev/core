@@ -64,7 +64,8 @@ export const Route = createFileRoute("/")({
   loader: async ({ context }) => {
     const queryOpts = convexQuery(api.catalogue.listPublic, {});
     if (typeof window !== "undefined") {
-      await context.queryClient.prefetchQuery(queryOpts);
+      // Only catalogue teasers need data; render the home shell immediately.
+      void context.queryClient.prefetchQuery(queryOpts);
       return;
     }
 
