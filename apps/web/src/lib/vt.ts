@@ -7,6 +7,21 @@ export const vtState = { active: false };
 
 let currentTransition: object | undefined;
 
+function selectSharedSurface(surface: string | undefined): boolean {
+  for (const element of document.querySelectorAll(
+    "[data-view-transition-shared]",
+  )) {
+    element.removeAttribute("data-view-transition-shared");
+  }
+  if (!surface) return false;
+  const element = Array.from(
+    document.querySelectorAll<HTMLElement>("[data-transition-surface]"),
+  ).find((candidate) => candidate.dataset.transitionSurface === surface);
+  if (!element) return false;
+  element.dataset.viewTransitionShared = "";
+  return true;
+}
+
 export function runViewTransition(
   update: () => Promise<void>,
   types: string[] | false,
@@ -24,11 +39,25 @@ export function runViewTransition(
   currentTransition = owner;
   vtState.active = true;
   document.documentElement.dataset.viewTransition = "active";
-  document.documentElement.dataset.viewTransitionKind = types.includes(
-    "nav-swap",
+  const surface = types.find((type) => /^(project|api)-surface-/.test(type));
+  const hasSource = selectSharedSurface(surface);
+  document.documentElement.dataset.viewTransitionKind = hasSource
+    ? "morph"
+    : "swap";
+  document.documentElement.dataset.viewTransitionDirection = types.includes(
+    "navigate-back",
   )
-    ? "swap"
-    : "morph";
+    ? "back"
+    : "forward";
+
+  const captureDestination = async () => {
+    await update();
+    if (currentTransition !== owner) return;
+    const hasDestination = selectSharedSurface(hasSource ? surface : undefined);
+    document.documentElement.dataset.viewTransitionKind = hasDestination
+      ? "morph"
+      : "swap";
+  };
 
   const clear = () => {
     // A skipped older transition can finish after a newer one has started.
@@ -37,14 +66,16 @@ export function runViewTransition(
     vtState.active = false;
     delete document.documentElement.dataset.viewTransition;
     delete document.documentElement.dataset.viewTransitionKind;
+    delete document.documentElement.dataset.viewTransitionDirection;
+    selectSharedSurface(undefined);
   };
 
   try {
     const transition = window.CSS?.supports?.(
       "selector(:active-view-transition-type(a))",
     )
-      ? document.startViewTransition({ update, types })
-      : document.startViewTransition(update);
+      ? document.startViewTransition({ update: captureDestination, types })
+      : document.startViewTransition(captureDestination);
 
     // ready rejects when a snapshot is skipped (for example on rapid clicks).
     // Navigation still succeeds; only an update failure should reach the router.

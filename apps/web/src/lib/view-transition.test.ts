@@ -41,38 +41,34 @@ describe("route view-transition policy", () => {
         toPath: "/app/settings",
       }),
     ).toEqual(["navigate-back", "nav-swap"]);
-    expect(
-      routeViewTransitionTypes({
-        fromIndex: 1,
-        toIndex: 2,
-        fromPath: "/catalogue",
-        toPath: "/catalogue/acme/weather",
-      }),
-    ).toEqual(["navigate-forward", "nav-swap"]);
   });
 
   it.each([
-    ["/catalogue", "/catalogue/acme/weather"],
-    ["/app/projects", "/app/projects/weather"],
-  ])("keeps list/detail navigation coherent to and from %s", (list, detail) => {
-    stubMotionPreference(false);
-    expect(
-      routeViewTransitionTypes({
-        fromIndex: 1,
-        toIndex: 2,
-        fromPath: list,
-        toPath: detail,
-      }),
-    ).toEqual(["navigate-forward", "nav-swap"]);
-    expect(
-      routeViewTransitionTypes({
-        fromIndex: 2,
-        toIndex: 1,
-        fromPath: detail,
-        toPath: list,
-      }),
-    ).toEqual(["navigate-back", "nav-swap"]);
-  });
+    ["/catalogue", "/catalogue/acme/weather", "api-surface-acme/weather"],
+    ["/", "/catalogue/acme/weather", "api-surface-acme/weather"],
+    ["/app/projects", "/app/projects/weather", "project-surface-weather"],
+  ])(
+    "keeps list/detail navigation coherent to and from %s",
+    (list, detail, surface) => {
+      stubMotionPreference(false);
+      expect(
+        routeViewTransitionTypes({
+          fromIndex: 1,
+          toIndex: 2,
+          fromPath: list,
+          toPath: detail,
+        }),
+      ).toEqual(["navigate-forward", "nav-morph", surface]);
+      expect(
+        routeViewTransitionTypes({
+          fromIndex: 2,
+          toIndex: 1,
+          fromPath: detail,
+          toPath: list,
+        }),
+      ).toEqual(["navigate-back", "nav-morph", surface]);
+    },
+  );
 
   it.each([
     ["/app/projects/weather", "/app/billing"],

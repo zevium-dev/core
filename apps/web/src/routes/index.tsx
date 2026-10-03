@@ -525,12 +525,12 @@ function TeaserCard({
   description: string;
 }) {
   return (
-    <Card className="h-full transition-[translate,scale,box-shadow,border-color] duration-[var(--dur-instant)] ease-[var(--ease)] group-hover:-translate-y-0.5 group-hover:shadow-sm group-active:scale-[0.98] motion-reduce:transition-none motion-reduce:group-hover:translate-y-0 motion-reduce:group-active:scale-100">
+    <Card
+      data-transition-surface={`api-surface-${publisherHandle}/${slug}`}
+      className="h-full transition-[translate,scale,box-shadow,border-color] duration-[var(--dur-instant)] ease-[var(--ease)] group-hover:-translate-y-0.5 group-hover:shadow-sm group-active:scale-[0.98] motion-reduce:transition-none motion-reduce:group-hover:translate-y-0 motion-reduce:group-active:scale-100"
+    >
       <CardHeader>
-        <CardTitle
-          className="w-fit max-w-full [overflow-wrap:anywhere]"
-          style={{ viewTransitionName: `api-title-${publisherHandle}-${slug}` }}
-        >
+        <CardTitle className="w-fit max-w-full [overflow-wrap:anywhere]">
           {name}
         </CardTitle>
         <CardAction>

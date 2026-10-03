@@ -113,7 +113,7 @@ export const Route = createFileRoute(
       projectSlug: params.projectSlug,
     });
     if (typeof window !== "undefined") {
-      // The title must exist before the destination snapshot is captured.
+      // The complete detail surface must exist before the new snapshot.
       await queryClient.prefetchQuery(queryOpts);
       return;
     }
@@ -316,7 +316,10 @@ function ApiDetailBody({
   }
 
   return (
-    <div className="flex flex-col gap-8">
+    <div
+      data-transition-surface={`api-surface-${data.org.publisherHandle}/${data.project.slug}`}
+      className="flex flex-col gap-8"
+    >
       <div className="flex flex-col gap-4">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="min-w-0 space-y-2">
@@ -329,12 +332,7 @@ function ApiDetailBody({
                 {data.org.publisherHandle}/{data.project.slug}
               </span>
             </p>
-            <h1
-              className="w-fit min-w-0 max-w-full text-3xl font-semibold tracking-tight [overflow-wrap:anywhere]"
-              style={{
-                viewTransitionName: `api-title-${data.org.publisherHandle}-${data.project.slug}`,
-              }}
-            >
+            <h1 className="w-fit min-w-0 max-w-full text-3xl font-semibold tracking-tight [overflow-wrap:anywhere]">
               {data.project.name}
             </h1>
             <p className="text-sm text-muted-foreground">
@@ -349,12 +347,7 @@ function ApiDetailBody({
                 <>
                   {" "}
                   ·{" "}
-                  <span
-                    className="inline-block tabular-nums text-foreground"
-                    style={{
-                      viewTransitionName: `api-price-${data.org.publisherHandle}-${data.project.slug}`,
-                    }}
-                  >
+                  <span className="inline-block tabular-nums text-foreground">
                     {priceRange}
                   </span>
                 </>

@@ -55,6 +55,7 @@ CSS mirror (for CSS-only transitions):
   --dur-fast: 250ms;
   --dur-base: 350ms;
   --dur-page: 400ms;
+  --dist: 16px;
 }
 ```
 
@@ -83,13 +84,13 @@ defaultViewTransition: {
 configureViewTransitions(router);
 ```
 
-- Default: **cross-fade** of `main-content` over `DUR.page` with THE easing. No directional slides on morphing routes (slides fight morphs); `navigate-forward`/`back` types are reserved for stack-like flows (e.g. multi-step checkout) only
-- All route changes (`nav-swap`, including docs → home and project/catalogue list → detail) capture one complete `main-content` surface, hide the outgoing snapshot immediately, and reveal the destination over `DUR.fast`. Root snapshots show the new shared header/sidebar immediately with no fade or movement. Individual title/badge morphs are disabled: separating them from their card caused fragments to travel independently while the surrounding content faded. This is the written list→detail exception until a complete card-to-detail surface morph can be verified. Same-page changes, including Clerk profile hashes, use the mounted UI's own transition. The adapter exposes this policy through a dataset for browsers without transition-type selectors.
+- Default: the complete destination `main-content` enters over `DUR.page` with THE easing and `DIST` horizontal travel in the navigation direction. The outgoing snapshot disappears immediately, preventing stale docs from flashing on home. Shared header and sidebar stay stationary and fully visible.
+- List→detail pairs (`nav-morph`) morph the complete selected card into the complete detail body and back over `DUR.page`. Surrounding content reveals without a directional slide, so it does not fight the morph. Same-page changes, including Clerk profile hashes, use the mounted UI's own transition. Browsers without transition-type selectors use the same dataset-driven policy.
 - **Hard loads** (refresh, direct URL — no old DOM to transition from): `.content-enter` CSS class on `<main>` — opacity-only reveal, `DUR.page`. Spatial transforms are forbidden here because moving the full main region creates measurable CLS; soft navigation uses View Transitions instead
 
 ### Shared-element morphs (`view-transition-name`)
 
-Route navigation currently names only the complete `main-content` surface. Named title, price and badge elements are suppressed during snapshot capture so the destination appears together. Future list→detail morphs must include the complete card and corresponding detail surface, keep shared chrome stationary, and pass browser checks with loading content and reduced motion before they replace this policy.
+Project cards, catalogue cards and home API teasers each pair with their corresponding complete detail body. Only the selected pair receives the shared snapshot name; titles, prices, badges and unrelated cards stay within their page or card. If either matching surface is unavailable, navigation falls back to the full page entrance. Chrome never joins the morph.
 
 ### VT ↔ Motion coordination
 
@@ -130,7 +131,7 @@ Landing page only (delight budget): magnetic cursor-pull on primary CTA + social
 
 ## Loading & perceived speed
 
-- Public and server loaders prefetch data. Protected browser queries begin inside components after Convex confirms authentication; starting them in route loaders can run before the authenticated provider mounts. Cached list/detail data retains its morph. Cold protected destinations use layout-stable skeletons, then reveal their data instead of blocking navigation for a shared title.
+- Public and server loaders prefetch data. Protected browser queries begin inside components after Convex confirms authentication; starting them in route loaders can run before the authenticated provider mounts. Project list→detail navigation uses the already loaded project so a cold detail visit can morph into real content. Other cold protected destinations use layout-stable skeletons, then reveal their data.
 - Optimistic UI everywhere mutations allow (repo convention already) — the animation of the result IS the feedback; no spinner if under ~300ms
 - Never two loading indicators for one action. Button-local spinner beats page overlay
 - Suspense fallbacks: skeleton screens matching real layout, never blank white / centered giant spinner
@@ -167,7 +168,7 @@ Landing page only (delight budget): magnetic cursor-pull on primary CTA + social
 A screen matches this doc when:
 
 1. Zero raw Tailwind color classes; stock shadcn components unmodified
-2. Route into + out of the screen crossfades; list→detail pairs morph a named element
+2. Route into + out of the screen animates the full content; list→detail pairs morph the complete card
 3. Every interactive element responds on hover AND press within 150ms
 4. Loading is skeleton-shaped, layout-stable, single-indicator
 5. All durations/easings come from `motion.ts` / CSS vars

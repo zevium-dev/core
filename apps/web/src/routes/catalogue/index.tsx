@@ -672,15 +672,13 @@ function CatalogueCard({ item }: { item: CatalogueCardItem }) {
       params={{ publisherHandle: item.publisherHandle, projectSlug: item.slug }}
       className="group block rounded-xl outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
     >
-      <Card className="h-full transition-[translate,scale,box-shadow,border-color] duration-[var(--dur-instant)] ease-[var(--ease)] group-hover:-translate-y-0.5 group-hover:shadow-sm group-active:scale-[0.98] motion-reduce:transition-none motion-reduce:group-hover:translate-y-0 motion-reduce:group-active:scale-100">
+      <Card
+        data-transition-surface={`api-surface-${item.publisherHandle}/${item.slug}`}
+        className="h-full transition-[translate,scale,box-shadow,border-color] duration-[var(--dur-instant)] ease-[var(--ease)] group-hover:-translate-y-0.5 group-hover:shadow-sm group-active:scale-[0.98] motion-reduce:transition-none motion-reduce:group-hover:translate-y-0 motion-reduce:group-active:scale-100"
+      >
         <CardHeader>
           <div className="flex min-w-0 flex-wrap items-start justify-between gap-2">
-            <CardTitle
-              className="w-fit min-w-0 max-w-full [overflow-wrap:anywhere]"
-              style={{
-                viewTransitionName: `api-title-${item.publisherHandle}-${item.slug}`,
-              }}
-            >
+            <CardTitle className="w-fit min-w-0 max-w-full [overflow-wrap:anywhere]">
               {item.name}
             </CardTitle>
             <Badge
@@ -714,12 +712,7 @@ function CatalogueCard({ item }: { item: CatalogueCardItem }) {
               </Badge>
             ) : null}
             {priceLabel ? (
-              <Badge
-                variant="outline"
-                style={{
-                  viewTransitionName: `api-price-${item.publisherHandle}-${item.slug}`,
-                }}
-              >
+              <Badge variant="outline">
                 <code>{priceLabel}</code>
               </Badge>
             ) : null}
