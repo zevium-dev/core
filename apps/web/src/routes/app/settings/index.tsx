@@ -20,7 +20,7 @@ function SettingsPage() {
         </p>
       </div>
 
-      <div className="min-h-[28rem] w-full overflow-hidden rounded-xl">
+      <div className="min-h-[28rem] w-full min-w-0 rounded-xl bg-card">
         <UserProfile
           routing="hash"
           appearance={{
@@ -30,7 +30,6 @@ function SettingsPage() {
               cardBox: "w-full! max-w-none!",
               card: "w-full! max-w-none!",
               navbar: "border-border",
-              scrollBox: "w-full!",
             },
           }}
         />

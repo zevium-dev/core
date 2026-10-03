@@ -56,6 +56,9 @@ const DATE_TIME_FORMATTER = new Intl.DateTimeFormat("en-US", {
 
 export const Route = createFileRoute("/app/")({
   loader: async ({ context }) => {
+    // Browser queries start only after ConvexProviderWithClerk confirms auth.
+    // A public → app loader runs while the anonymous provider is still mounted.
+    if (typeof window !== "undefined") return;
     if (!context.orgSlug) return;
     await Promise.all([
       context.queryClient.prefetchQuery(
@@ -82,11 +85,11 @@ function DashboardPage() {
       ? organization.slug
       : null;
 
-  if (!isLoaded || convexAuthLoading || !userId || !orgId) {
+  if (!isLoaded || convexAuthLoading || !userId) {
     return <DashboardSkeleton />;
   }
 
-  if (!orgSlug) {
+  if (!orgSlug || !orgId) {
     return (
       <div className="flex flex-col gap-2">
         <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
@@ -124,9 +127,10 @@ function DashboardContent({
     convexQuery(api.analytics.orgOverview, { orgSlug }),
   );
 
-  const { data: wallet } = useSuspenseQuery(
+  const walletQuery = useQuery(
     convexQuery(api.wallets.getMyWallet, { orgSlug }),
   );
+  const wallet = walletQuery.data;
 
   const keysQuery = useQuery({
     queryKey: ["settings", "api-keys", "count", userId, orgId] as const,
@@ -141,9 +145,10 @@ function DashboardContent({
   const flags = deriveOnboardingFlags({
     keyCount,
     callsCycle: overview.callsCycle,
-    balance: wallet.balance,
+    balance: wallet?.balance ?? 0,
   });
-  const showOnboarding = shouldShowOnboarding({ keysLoaded, flags });
+  const showOnboarding =
+    walletQuery.isSuccess && shouldShowOnboarding({ keysLoaded, flags });
 
   return (
     <div className="flex flex-col gap-6">
@@ -154,7 +159,7 @@ function DashboardContent({
             Wallet balance and metered usage for this organization.
           </p>
         </div>
-        {keysLoaded && !showOnboarding ? (
+        {keysLoaded && walletQuery.isSuccess && !showOnboarding ? (
           <div className="flex flex-wrap gap-2">
             {canAdministerWallet ? (
               <Button asChild>
@@ -178,15 +183,33 @@ function DashboardContent({
             <CardDescription>Zero balance blocks new calls.</CardDescription>
           </CardHeader>
           <CardContent>
-            <p
-              className="text-3xl font-semibold tabular-nums"
-              style={{ viewTransitionName: "credit-balance" }}
-            >
-              <NumberTicker value={wallet.balance} />
-              <span className="ml-2 text-base font-normal text-muted-foreground">
-                credits
-              </span>
-            </p>
+            {walletQuery.isPending ? (
+              <Skeleton className="h-9 w-40" />
+            ) : walletQuery.isError || !wallet ? (
+              <div role="alert" className="space-y-2">
+                <p className="text-sm text-muted-foreground">
+                  Your credit balance could not be loaded. Retry to check
+                  available credits. Live calls require a verified wallet.
+                </p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void walletQuery.refetch()}
+                >
+                  Retry balance
+                </Button>
+              </div>
+            ) : (
+              <p
+                className="text-3xl font-semibold tabular-nums"
+                style={{ viewTransitionName: "credit-balance" }}
+              >
+                <NumberTicker value={wallet.balance} />
+                <span className="ml-2 text-base font-normal text-muted-foreground">
+                  credits
+                </span>
+              </p>
+            )}
           </CardContent>
         </Card>
 

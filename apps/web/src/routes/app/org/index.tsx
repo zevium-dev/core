@@ -106,7 +106,7 @@ function OrgHomePage() {
       <PublicHandleCard />
       <PublisherPaymentsCard />
 
-      <div className="min-h-[28rem] w-full overflow-hidden rounded-xl">
+      <div className="min-h-[28rem] w-full min-w-0 rounded-xl bg-card">
         <OrganizationProfile
           routing="hash"
           appearance={{

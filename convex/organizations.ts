@@ -23,6 +23,7 @@ import {
 import { isValidSlug } from "./lib/validate";
 import { enqueueOrgArchive, enqueueOrgPut } from "./registrySync";
 import { availablePublicHandle } from "./lib/publicRoutes";
+import { initializeUntouchedWalletFunding } from "./lib/funding";
 
 function trustedOrganizationSlug(raw: string | undefined): string {
   const slug = raw?.trim().toLowerCase();
@@ -57,6 +58,7 @@ async function ensureWallet(
     .withIndex("by_organization", (q) => q.eq("organizationId", organizationId))
     .unique();
   if (existing !== null) {
+    await initializeUntouchedWalletFunding(ctx, existing);
     return existing._id;
   }
   const organization = await ctx.db.get(organizationId);

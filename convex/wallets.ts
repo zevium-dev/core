@@ -24,6 +24,7 @@ import {
 import {
   commitFundingAllocation,
   FundingInvariantError,
+  initializeUntouchedWalletFunding,
   MAX_FUNDING_WRITE_UNITS_PER_BATCH,
   preflightFundingAllocation,
   recordPositiveFundingSource,
@@ -71,7 +72,10 @@ export async function getOrCreateWallet(
     .query("wallets")
     .withIndex("by_organization", (q) => q.eq("organizationId", organizationId))
     .unique();
-  if (existing !== null) return existing;
+  if (existing !== null) {
+    await initializeUntouchedWalletFunding(ctx, existing);
+    return existing;
+  }
   const organization = await ctx.db.get(organizationId);
   if (organization?.archivedAt !== undefined) {
     throw new Error("Archived organization cannot receive finance writes");

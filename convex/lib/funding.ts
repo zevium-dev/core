@@ -20,6 +20,91 @@ export class FundingInvariantError extends Error {
 
 type FundingSourceKind = Doc<"walletFundingLots">["sourceKind"];
 
+/** Bootstrap only a provably untouched legacy wallet. Historical scopes still
+ * require the full reconciled migration; zero balance alone is insufficient. */
+export async function initializeUntouchedWalletFunding(
+  ctx: MutationCtx,
+  wallet: Doc<"wallets">,
+): Promise<void> {
+  await assertFinanceMigrationAllowsRuntime(ctx);
+  if (
+    wallet.balance !== 0 ||
+    wallet.sequence !== 0 ||
+    (wallet.debtCredits ?? 0) !== 0 ||
+    (await getFundingState(ctx, wallet._id)) !== null
+  )
+    return;
+
+  const organization = await ctx.db.get(wallet.organizationId);
+  if (organization === null || organization.archivedAt !== undefined) return;
+  const tombstone = await ctx.db
+    .query("organizationTombstones")
+    .withIndex("by_clerk_org", (q) =>
+      q.eq("clerkOrgId", organization.clerkOrgId),
+    )
+    .unique();
+  if (tombstone !== null) return;
+
+  const [entry, lot, allocation, reversal, component, payment, legacyLot] =
+    await Promise.all([
+      ctx.db
+        .query("walletEntries")
+        .withIndex("by_wallet", (q) => q.eq("walletId", wallet._id))
+        .first(),
+      ctx.db
+        .query("walletFundingLots")
+        .withIndex("by_wallet_created", (q) => q.eq("walletId", wallet._id))
+        .first(),
+      ctx.db
+        .query("walletFundingAllocations")
+        .withIndex("by_wallet_created", (q) => q.eq("walletId", wallet._id))
+        .first(),
+      ctx.db
+        .query("walletFundingReversals")
+        .withIndex("by_wallet_created", (q) => q.eq("walletId", wallet._id))
+        .first(),
+      ctx.db
+        .query("walletFundingLotComponents")
+        .withIndex("by_wallet_created", (q) => q.eq("walletId", wallet._id))
+        .first(),
+      ctx.db
+        .query("payments")
+        .withIndex("by_organization", (q) =>
+          q.eq("organizationId", wallet.organizationId),
+        )
+        .first(),
+      ctx.db
+        .query("paymentFundingLots")
+        .withIndex("by_org_state_created", (q) =>
+          q.eq("organizationId", wallet.organizationId),
+        )
+        .first(),
+    ]);
+  if (
+    entry ||
+    lot ||
+    allocation ||
+    reversal ||
+    component ||
+    payment ||
+    legacyLot
+  )
+    return;
+
+  await ctx.db.insert("walletFundingStates", {
+    walletId: wallet._id,
+    organizationId: wallet.organizationId,
+    nonrefundableAvailableCredits: 0,
+    refundableAvailableCredits: 0,
+    allocatedCredits: 0,
+    reversedCredits: 0,
+    sequence: 0,
+    migrationStatus: "verified",
+    migrationWatermarkSequence: 0,
+    updatedAt: Date.now(),
+  });
+}
+
 export type FundingProvenanceSlice = {
   sourceRef: string;
   paymentId?: Id<"payments">;

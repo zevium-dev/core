@@ -21,7 +21,6 @@
 export const clerkShadcnTheme = {
   __type: "prebuilt_appearance",
   name: "shadcn",
-  cssLayerName: "components",
   variables: {
     colorBackground: "var(--card)",
     colorDanger: "var(--destructive)",
