@@ -170,7 +170,7 @@ function DashboardContent({
               <Link to="/app/settings/keys">Manage keys</Link>
             </Button>
             <Button asChild variant="outline">
-              <Link to="/catalogue">Browse APIs</Link>
+              <Link to="/app/catalogue">Browse APIs</Link>
             </Button>
           </div>
         ) : null}
@@ -298,7 +298,7 @@ function DashboardContent({
               </EmptyHeader>
               <EmptyContent>
                 <Button asChild variant="outline" size="sm">
-                  <Link to="/catalogue">Browse catalogue</Link>
+                  <Link to="/app/catalogue">Browse catalogue</Link>
                 </Button>
               </EmptyContent>
             </Empty>
@@ -432,7 +432,7 @@ function OnboardingChecklist({
       done: hasCall,
       title: "Send your first live call",
       body: "Return to your chosen operation and confirm its exact published cost.",
-      href: "/catalogue" as const,
+      href: "/app/catalogue" as const,
       cta: "Choose API",
       icon: PhoneCall,
     },
@@ -462,7 +462,7 @@ function OnboardingChecklist({
             </div>
           </div>
           <Button asChild size="sm" className="w-full shrink-0 sm:w-auto">
-            <Link to="/catalogue">Browse free mocks</Link>
+            <Link to="/app/catalogue">Browse free mocks</Link>
           </Button>
         </div>
         <Separator />

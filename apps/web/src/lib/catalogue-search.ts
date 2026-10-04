@@ -36,6 +36,29 @@ export type CatalogueLoaderDeps = Pick<
   "q" | "tag" | "sort" | "free" | "max"
 >;
 
+export function catalogueListArgs({
+  search,
+  tag,
+  sort,
+  freeOnly,
+  maxCost,
+}: {
+  search: string;
+  tag: string | null;
+  sort: CatalogueSortValue;
+  freeOnly: boolean;
+  maxCost: number | null;
+}) {
+  const trimmed = search.trim();
+  return {
+    ...(trimmed.length > 0 ? { search: trimmed } : {}),
+    ...(tag ? { tag } : {}),
+    sort,
+    ...(freeOnly ? { hasFreeTier: true } : {}),
+    ...(maxCost !== null ? { maxCost } : {}),
+  };
+}
+
 export function parseCatalogueMaxCost(value: unknown): number | undefined {
   if (typeof value !== "string" && typeof value !== "number") return undefined;
   const raw = String(value);

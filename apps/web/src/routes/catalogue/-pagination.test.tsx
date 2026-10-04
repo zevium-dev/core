@@ -17,8 +17,26 @@ const fixture = vi.hoisted(() => ({
 }));
 vi.mock("@tanstack/react-router", () => ({
   createFileRoute: () => (options: unknown) => options,
-  Link: ({ children }: { children: ReactNode }) => (
-    <a href="/catalogue/publisher/api">{children}</a>
+  Link: ({
+    children,
+    to,
+    params,
+  }: {
+    children: ReactNode;
+    to: string;
+    params?: { publisherHandle: string; projectSlug: string };
+  }) => (
+    <a
+      href={
+        params
+          ? to
+              .replace("$publisherHandle", params.publisherHandle)
+              .replace("$projectSlug", params.projectSlug)
+          : to
+      }
+    >
+      {children}
+    </a>
   ),
 }));
 vi.mock("#/components/motion/fade-in", () => ({
@@ -61,7 +79,8 @@ vi.mock("@convex-dev/react-query", () => ({
   }),
 }));
 
-import { CatalogueList } from "./index";
+import { CatalogueList } from "#/components/catalogue-browser";
+import { CatalogueShell } from "#/components/catalogue-shell";
 
 beforeEach(() => {
   fixture.failNext = false;
@@ -70,20 +89,23 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
-function renderCatalogue() {
+function renderCatalogue(inApp = false) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
+  const list = (
+    <CatalogueList
+      search=""
+      activeTag={null}
+      onTagChange={vi.fn()}
+      sort="newest"
+      freeOnly={false}
+      maxCost={null}
+    />
+  );
   render(
     <QueryClientProvider client={client}>
-      <CatalogueList
-        search=""
-        activeTag={null}
-        onTagChange={vi.fn()}
-        sort="newest"
-        freeOnly={false}
-        maxCost={null}
-      />
+      {inApp ? <CatalogueShell inApp>{list}</CatalogueShell> : list}
     </QueryClientProvider>,
   );
 }
@@ -102,6 +124,20 @@ it("reaches APIs beyond the first 24 and keeps global tag facets accessible", as
   expect(fixture.request).toHaveBeenCalledWith(
     expect.objectContaining({ cursor: "page-2" }),
   );
+});
+
+it("keeps API cards inside the app namespace, including later pages", async () => {
+  renderCatalogue(true);
+  const firstCard = await screen.findByText("API 1");
+  expect(firstCard.closest("a")?.getAttribute("href")).toBe(
+    "/app/catalogue/publisher/api-1",
+  );
+  fireEvent.click(screen.getByText("Load more APIs"));
+  const laterCard = await screen.findByText("API 26");
+  expect(laterCard.closest("a")?.getAttribute("href")).toBe(
+    "/app/catalogue/publisher/api-26",
+  );
+  expect(laterCard.closest("main")).toBeNull();
 });
 
 it("retains existing cards when another page fails and retries that page", async () => {

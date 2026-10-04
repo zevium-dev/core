@@ -1,5 +1,5 @@
 import { OrganizationSwitcher, UserButton } from "@clerk/tanstack-react-start";
-import { Link, useRouterState } from "@tanstack/react-router";
+import { ClientOnly, Link, useRouterState } from "@tanstack/react-router";
 import { useEffect, type MouseEvent } from "react";
 import {
   Activity,
@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 
 import { BrandMark } from "#/components/brand-mark";
+import { Skeleton } from "#/components/ui/skeleton";
 import { ThemeToggle } from "#/components/theme-toggle";
 import { clerkShadcnTheme } from "#/lib/clerk-theme";
 import {
@@ -37,7 +38,12 @@ const navGroups = [
     label: "Build",
     items: [
       { title: "Dashboard", to: "/app", icon: LayoutDashboard, exact: true },
-      { title: "Catalogue", to: "/catalogue", icon: BookOpen, exact: false },
+      {
+        title: "Catalogue",
+        to: "/app/catalogue",
+        icon: BookOpen,
+        exact: false,
+      },
       {
         title: "Projects",
         to: "/app/projects",
@@ -113,34 +119,36 @@ export function AppSidebar() {
         <SidebarGroup className="pb-0">
           <SidebarGroupLabel>Workspace</SidebarGroupLabel>
           <SidebarGroupContent>
-            <OrganizationSwitcher
-              organizationProfileMode="navigation"
-              organizationProfileUrl="/app/org"
-              appearance={{
-                theme: clerkShadcnTheme,
-                elements: {
-                  rootBox: "flex! w-full! min-w-0",
-                  organizationSwitcherTrigger: compact
-                    ? "size-8! justify-center! overflow-hidden p-0!"
-                    : "h-8! w-full! max-w-full min-w-0 justify-between overflow-hidden px-2!",
-                  organizationPreview: compact
-                    ? "w-full! justify-center! overflow-hidden"
-                    : "min-w-0 flex-1 overflow-hidden",
-                  organizationPreviewTextContainer: compact
-                    ? "hidden!"
-                    : "min-w-0",
-                  organizationPreviewMainIdentifier: compact
-                    ? "hidden!"
-                    : "block truncate",
-                  organizationSwitcherTriggerIcon: compact
-                    ? "hidden!"
-                    : "shrink-0",
-                },
-              }}
-              afterSelectOrganizationUrl="/app"
-              afterCreateOrganizationUrl="/app"
-              hidePersonal={false}
-            />
+            <ClientOnly fallback={<Skeleton className="h-8 w-full" />}>
+              <OrganizationSwitcher
+                organizationProfileMode="navigation"
+                organizationProfileUrl="/app/org"
+                appearance={{
+                  theme: clerkShadcnTheme,
+                  elements: {
+                    rootBox: "flex! w-full! min-w-0",
+                    organizationSwitcherTrigger: compact
+                      ? "size-8! justify-center! overflow-hidden p-0!"
+                      : "h-8! w-full! max-w-full min-w-0 justify-between overflow-hidden px-2!",
+                    organizationPreview: compact
+                      ? "w-full! justify-center! overflow-hidden"
+                      : "min-w-0 flex-1 overflow-hidden",
+                    organizationPreviewTextContainer: compact
+                      ? "hidden!"
+                      : "min-w-0",
+                    organizationPreviewMainIdentifier: compact
+                      ? "hidden!"
+                      : "block truncate",
+                    organizationSwitcherTriggerIcon: compact
+                      ? "hidden!"
+                      : "shrink-0",
+                  },
+                }}
+                afterSelectOrganizationUrl="/app"
+                afterCreateOrganizationUrl="/app"
+                hidePersonal={false}
+              />
+            </ClientOnly>
           </SidebarGroupContent>
         </SidebarGroup>
 
@@ -180,23 +188,27 @@ export function AppSidebar() {
         <SidebarMenu>
           <SidebarMenuItem>
             <div className="flex min-w-0 items-center gap-2 rounded-md p-1 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:p-0">
-              <UserButton
-                userProfileProps={{ apiKeysProps: { hide: true } }}
-                showName={!compact}
-                appearance={{
-                  theme: clerkShadcnTheme,
-                  elements: {
-                    rootBox: "flex! min-w-0 flex-1",
-                    userButtonTrigger: "min-h-11! w-full! min-w-0",
-                    userButtonBox: compact
-                      ? "w-full! justify-center!"
-                      : "w-full! min-w-0 justify-start! gap-2!",
-                    userButtonOuterIdentifier:
-                      "order-2! min-w-0 flex-1 truncate text-left text-sm",
-                    avatarBox: "order-1! size-7 shrink-0",
-                  },
-                }}
-              />
+              <ClientOnly
+                fallback={<Skeleton className="h-11 min-w-0 flex-1" />}
+              >
+                <UserButton
+                  userProfileProps={{ apiKeysProps: { hide: true } }}
+                  showName={!compact}
+                  appearance={{
+                    theme: clerkShadcnTheme,
+                    elements: {
+                      rootBox: "flex! min-w-0 flex-1",
+                      userButtonTrigger: "min-h-11! w-full! min-w-0",
+                      userButtonBox: compact
+                        ? "w-full! justify-center!"
+                        : "w-full! min-w-0 justify-start! gap-2!",
+                      userButtonOuterIdentifier:
+                        "order-2! min-w-0 flex-1 truncate text-left text-sm",
+                      avatarBox: "order-1! size-7 shrink-0",
+                    },
+                  }}
+                />
+              </ClientOnly>
               {compact ? null : <ThemeToggle className="size-8 shrink-0" />}
             </div>
           </SidebarMenuItem>

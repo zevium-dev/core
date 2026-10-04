@@ -29,7 +29,7 @@ export function routeViewTransitionTypes({
     path?.match(/^\/app\/projects\/([a-z0-9-]+)$/)?.[1];
   const api = (path: string | undefined) =>
     path
-      ?.match(/^\/catalogue\/([a-z0-9-]+)\/([a-z0-9-]+)$/)
+      ?.match(/^\/(?:app\/)?catalogue\/([a-z0-9-]+)\/([a-z0-9-]+)$/)
       ?.slice(1)
       .join("/");
   const projectSlug =
@@ -42,9 +42,9 @@ export function routeViewTransitionTypes({
     return [direction, "nav-morph", `project-surface-${projectSlug}`];
   }
   const apiSlug =
-    from === "/catalogue" || from === ""
+    from === "/catalogue" || from === "/app/catalogue" || from === ""
       ? api(to)
-      : to === "/catalogue" || to === ""
+      : to === "/catalogue" || to === "/app/catalogue" || to === ""
         ? api(from)
         : undefined;
   if (apiSlug) return [direction, "nav-morph", `api-surface-${apiSlug}`];

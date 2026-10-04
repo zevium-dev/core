@@ -37,7 +37,8 @@ export function AppHeader() {
   const crumbs = segments.map((segment, index) => {
     const href = `/${segments.slice(0, index + 1).join("/")}`;
     const isLast = index === segments.length - 1;
-    return { segment, href, isLast, label: labelFor(segment) };
+    const isPublisher = segments[1] === "catalogue" && index === 2;
+    return { segment, href, isLast, isPublisher, label: labelFor(segment) };
   });
 
   return (
@@ -60,6 +61,8 @@ export function AppHeader() {
                   <BreadcrumbPage className="block truncate whitespace-nowrap">
                     {crumb.label}
                   </BreadcrumbPage>
+                ) : crumb.isPublisher ? (
+                  <span className="whitespace-nowrap">{crumb.label}</span>
                 ) : (
                   <BreadcrumbLink asChild>
                     <Link to={crumb.href} className="whitespace-nowrap">

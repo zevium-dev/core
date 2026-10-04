@@ -64,6 +64,7 @@ The listing's product page — shareable URL, the API's landing page. Spec metad
 ### 2.1 App dashboard — `/app`
 
 - Sidebar: org switcher, Dashboard, Catalogue, Projects, Settings, theme, user menu
+- Browse actions open `/app/catalogue`; listing cards open `/app/catalogue/{org}/{api}`. Search, filters, API reference, playground, and back navigation keep the dashboard sidebar. Public catalogue URLs remain shareable outside the app.
 - Content: wallet balance card (live-ticking), calls this cycle + projected spend, recent calls, quick actions (top up, keys, browse)
 - First-visit onboarding checklist: get key → make first call → top up
 

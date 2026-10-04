@@ -1083,7 +1083,7 @@ function EmptyActivity({ filtered }: { filtered: boolean }) {
       </EmptyHeader>
       <EmptyContent>
         <Button asChild variant="outline">
-          <Link to="/catalogue">Browse catalogue</Link>
+          <Link to="/app/catalogue">Browse catalogue</Link>
         </Button>
       </EmptyContent>
     </Empty>
