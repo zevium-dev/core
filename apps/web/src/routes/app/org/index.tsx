@@ -11,6 +11,7 @@ import { Building2, KeyRound, Landmark, Plus, Users } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
+import { PublisherCountrySelect } from "#/components/publisher-country-select";
 import { FadeIn } from "#/components/motion/fade-in";
 import { Badge } from "#/components/ui/badge";
 import { Button } from "#/components/ui/button";
@@ -318,7 +319,7 @@ function PublisherPaymentsCard() {
       startOnboarding({
         country:
           payoutState.data?.profile.status === "not_started"
-            ? publisherCountry.trim().toUpperCase()
+            ? publisherCountry
             : undefined,
       }),
     onSuccess: ({ url }) => {
@@ -408,28 +409,19 @@ function PublisherPaymentsCard() {
             An organization admin manages Stripe onboarding and payout details.
           </p>
         ) : display.action && display.actionLabel ? (
-          <div className="space-y-3">
+          <div className="flex flex-col items-start gap-3">
             {profile.status === "not_started" ? (
-              <div className="max-w-xs space-y-2">
-                <Label htmlFor="org-publisher-country">Publisher country</Label>
-                <Input
-                  id="org-publisher-country"
-                  maxLength={2}
-                  placeholder="US"
-                  value={publisherCountry}
-                  onChange={(event) => setPublisherCountry(event.target.value)}
-                />
-                <p className="text-xs text-muted-foreground">
-                  Enter the two-letter country code where your business is
-                  registered, such as US or GB.
-                </p>
-              </div>
+              <PublisherCountrySelect
+                id="org-publisher-country"
+                value={publisherCountry}
+                onValueChange={setPublisherCountry}
+                disabled={isPending}
+              />
             ) : null}
             <Button
               disabled={
                 isPending ||
-                (profile.status === "not_started" &&
-                  !/^[A-Za-z]{2}$/.test(publisherCountry.trim()))
+                (profile.status === "not_started" && !publisherCountry)
               }
               onClick={() => openOnboarding()}
             >

@@ -1,6 +1,7 @@
 import Stripe from "stripe";
 import { assertStripePlatformIdentity } from "./lib/stripePlatform";
 import {
+  SUPPORTED_CONNECT_COUNTRY_CODES,
   signTransferCorrelation,
   verifyTransferCorrelation,
 } from "@zevium/shared";
@@ -144,54 +145,9 @@ const CONNECT_ONBOARDING_HOSTS = new Set([
   "connect.stripe.test",
   "connect.stripe.sandbox",
 ]);
-const SUPPORTED_CONNECT_COUNTRIES = new Set([
-  "AE",
-  "AT",
-  "AU",
-  "BE",
-  "BG",
-  "BR",
-  "CA",
-  "CH",
-  "CY",
-  "CZ",
-  "DE",
-  "DK",
-  "EE",
-  "ES",
-  "FI",
-  "FR",
-  "GB",
-  "GR",
-  "HK",
-  "HR",
-  "HU",
-  "ID",
-  "IE",
-  "IN",
-  "IT",
-  "JP",
-  "LI",
-  "LT",
-  "LU",
-  "LV",
-  "MT",
-  "MX",
-  "MY",
-  "NL",
-  "NO",
-  "NZ",
-  "PH",
-  "PL",
-  "PT",
-  "RO",
-  "SE",
-  "SG",
-  "SI",
-  "SK",
-  "TH",
-  "US",
-]);
+const SUPPORTED_CONNECT_COUNTRIES = new Set<string>(
+  SUPPORTED_CONNECT_COUNTRY_CODES,
+);
 
 type ConnectedAccountExpectation = {
   accountId?: string;
