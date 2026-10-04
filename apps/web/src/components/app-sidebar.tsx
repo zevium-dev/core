@@ -75,8 +75,20 @@ const navGroups = [
   },
 ] as const;
 
+// Prefer specific destinations over their parent sections.
+const navItems = navGroups
+  .flatMap((group) => [...group.items])
+  .sort((a, b) => b.to.length - a.to.length);
+
 export function AppSidebar() {
-  const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const pathname = useRouterState({
+    select: (s) => s.location.pathname.replace(/\/$/, ""),
+  });
+  const activeItem = navItems.find((item) =>
+    item.exact
+      ? pathname === item.to
+      : pathname === item.to || pathname.startsWith(`${item.to}/`),
+  );
   const { isMobile, state, setOpenMobile } = useSidebar();
   const compact = state === "collapsed" && !isMobile;
 
@@ -157,26 +169,20 @@ export function AppSidebar() {
             <SidebarGroupLabel>{group.label}</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu>
-                {group.items.map((item) => {
-                  const active = item.exact
-                    ? pathname === item.to
-                    : pathname === item.to ||
-                      pathname.startsWith(`${item.to}/`);
-                  return (
-                    <SidebarMenuItem key={item.to}>
-                      <SidebarMenuButton
-                        asChild
-                        isActive={active}
-                        tooltip={item.title}
-                      >
-                        <Link to={item.to} onClick={closeMobileNavigation}>
-                          <item.icon />
-                          <span>{item.title}</span>
-                        </Link>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  );
-                })}
+                {group.items.map((item) => (
+                  <SidebarMenuItem key={item.to}>
+                    <SidebarMenuButton
+                      asChild
+                      isActive={item === activeItem}
+                      tooltip={item.title}
+                    >
+                      <Link to={item.to} onClick={closeMobileNavigation}>
+                        <item.icon />
+                        <span>{item.title}</span>
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                ))}
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
