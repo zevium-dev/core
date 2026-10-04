@@ -294,7 +294,9 @@ function BillingContent({
                   ? "Confirmed"
                   : checkoutState === "failed"
                     ? "Not completed"
-                    : "Processing"}
+                    : checkoutState === "canceled"
+                      ? "Canceled"
+                      : "Processing"}
               </Badge>
             </div>
             <CardDescription>{checkoutNotice.description}</CardDescription>

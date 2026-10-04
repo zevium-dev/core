@@ -1,4 +1,5 @@
 import Stripe from "stripe";
+import { assertStripePlatformIdentity } from "./lib/stripePlatform";
 import {
   signTransferCorrelation,
   verifyTransferCorrelation,
@@ -263,19 +264,13 @@ export async function verifyStripePlatformIdentity(
   if (sandbox !== undefined && sandbox !== String(!expectedLivemode)) {
     throw new Error("Stripe sandbox configuration does not match secret key");
   }
-  const account = await stripe.accounts.retrieve(configured);
-  const providerLivemode = (account as unknown as { livemode?: unknown })
-    .livemode;
-  if (
-    account.id !== configured ||
-    providerLivemode !== expectedLivemode ||
-    !STRIPE_ACCOUNT_ID_PATTERN.test(account.id)
-  ) {
-    throw new Error("Stripe platform identity does not match configuration");
-  }
+  await assertStripePlatformIdentity(stripe, configured, expectedLivemode);
 }
 
-export function connectOnboardingUrls(rawOrigin: string | undefined): {
+export function connectOnboardingUrls(
+  rawOrigin: string | undefined,
+  expectedLivemode = true,
+): {
   refreshUrl: string;
   returnUrl: string;
 } {
@@ -286,15 +281,7 @@ export function connectOnboardingUrls(rawOrigin: string | undefined): {
   ) {
     throw new Error("APP_ORIGIN is not configured");
   }
-  let origin: URL;
-  try {
-    origin = new URL(rawOrigin);
-  } catch {
-    throw new Error("APP_ORIGIN must be an absolute HTTPS URL");
-  }
-  if (origin.protocol !== "https:") {
-    throw new Error("APP_ORIGIN must use HTTPS");
-  }
+  const origin = assertHttpsUrl(rawOrigin, "APP_ORIGIN", expectedLivemode);
   return {
     refreshUrl: `${origin.origin}/app/earnings?onboarding=refresh`,
     returnUrl: `${origin.origin}/app/earnings?onboarding=return`,
@@ -368,14 +355,22 @@ export function connectAccountRequestFingerprint(args: {
   });
 }
 
-function assertHttpsUrl(value: string, field: string): URL {
+function assertHttpsUrl(
+  value: string,
+  field: string,
+  expectedLivemode = true,
+): URL {
   let url: URL;
   try {
     url = new URL(value);
   } catch {
     throw new Error(`${field} must be an absolute HTTPS URL`);
   }
-  if (url.protocol !== "https:") {
+  const localTestUrl =
+    !expectedLivemode &&
+    url.protocol === "http:" &&
+    ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
+  if (url.protocol !== "https:" && !localTestUrl) {
     throw new Error(`${field} must use HTTPS`);
   }
   return url;
@@ -637,8 +632,8 @@ export async function createAccountLinkForOperation(
     returnUrl: string;
   },
 ): Promise<{ url: string; expiresAt: number }> {
-  assertHttpsUrl(args.refreshUrl, "Stripe refresh URL");
-  assertHttpsUrl(args.returnUrl, "Stripe return URL");
+  assertHttpsUrl(args.refreshUrl, "Stripe refresh URL", args.expectedLivemode);
+  assertHttpsUrl(args.returnUrl, "Stripe return URL", args.expectedLivemode);
   const link = await stripe.accountLinksV2.create(
     {
       account: args.connectedAccountId,
@@ -1764,7 +1759,7 @@ async function runConnectOnboardingAction(
   const expectedLivemode = stripeLivemodeFromSecretKey(
     process.env.STRIPE_SECRET_KEY,
   );
-  const urls = connectOnboardingUrls(process.env.APP_ORIGIN);
+  const urls = connectOnboardingUrls(process.env.APP_ORIGIN, expectedLivemode);
   const stripe = stripeClient();
   await verifyStripePlatformIdentity(stripe, expectedLivemode);
   try {
@@ -3864,7 +3859,11 @@ export const getPayoutState = query({
             netCredits: atomsToCredits(earning.publisherNetAtoms),
             clawedBackCredits: atomsToCredits(earning.clawedBackAtoms),
             availableAt: earning.availableAt,
-            status: earning.status,
+            status:
+              earning.publisherNetAtoms > 0 &&
+              earning.clawedBackAtoms === earning.publisherNetAtoms
+                ? ("reversed" as const)
+                : earning.status,
             createdAt: earning.createdAt,
           };
         }),

@@ -248,3 +248,174 @@ describe("organization archive ordering and scale", () => {
     expect(state.tombstones).toHaveLength(1);
   });
 });
+
+describe("Clerk-generated organization slugs", () => {
+  it("mirrors signup slugs without using them as invalid public handles", async () => {
+    const t = convexTest(schema, modules);
+    const slug =
+      "internet-assigned-numbers-authority-iana--1791085075284997749";
+    const actor = t.withIdentity({
+      subject: "user_signup",
+      org_id: "org_signup",
+      org_slug: slug,
+      org_role: "org:admin",
+    });
+    const mirrored = await actor.mutation(
+      api.organizations.ensureOrganization,
+      {
+        clerkOrgId: "org_signup",
+      },
+    );
+    expect(mirrored.slug).toBe(slug);
+    expect(mirrored.publicHandle).toBe("publisher");
+    const synced = await t.mutation(internal.organizations.upsertFromClerk, {
+      clerkOrgId: "org_signup",
+      name: "Internet Assigned Numbers Authority (IANA)",
+      slug,
+    });
+    expect(synced).toBe(mirrored._id);
+    expect(
+      (await actor.query(api.analytics.orgOverview, { orgSlug: slug }))
+        .callsCycle,
+    ).toBe(0);
+    expect(
+      (await actor.query(api.wallets.getMyWallet, { orgSlug: slug }))?.balance,
+    ).toBe(0);
+  });
+
+  it("assigns distinct public handles to long provider slugs and rejects unsafe claims", async () => {
+    const t = convexTest(schema, modules);
+    const slug = `${"organization".repeat(8)}--123`;
+    await t.mutation(internal.organizations.upsertFromClerk, {
+      clerkOrgId: "org_long_one",
+      name: "Long name",
+      slug,
+    });
+    const actor = t.withIdentity({
+      subject: "user_signup",
+      org_id: "org_long_two",
+      org_slug: `${slug}4`,
+      org_role: "org:admin",
+    });
+    const mirrored = await actor.mutation(
+      api.organizations.ensureOrganization,
+      {
+        clerkOrgId: "org_long_two",
+      },
+    );
+    expect(mirrored.slug).toBe(`${slug}4`);
+    expect(mirrored.publicHandle).not.toBe("publisher");
+    for (const invalid of [
+      "",
+      "org/path",
+      "org%2fpath",
+      "org?query",
+      "x".repeat(257),
+    ]) {
+      await expect(
+        t
+          .withIdentity({
+            subject: "user_signup",
+            org_id: "org_invalid",
+            org_slug: invalid,
+            org_role: "org:admin",
+          })
+          .mutation(api.organizations.ensureOrganization, {
+            clerkOrgId: "org_invalid",
+          }),
+      ).rejects.toThrow("Authenticated organization slug is invalid");
+    }
+  });
+});
+
+describe("archive after refunds", () => {
+  it("retains completed refund facts and blocks pending or unapplied exposures", async () => {
+    const t = convexTest(schema, modules);
+    const { orgId, exposureId, paymentId } = await t.run(async (ctx) => {
+      const orgId = await ctx.db.insert("organizations", {
+        clerkOrgId: "org_refunded",
+        name: "Refunded QA",
+        slug: "refunded-qa",
+        publicHandle: "refunded-qa",
+      });
+      const checkoutIntentId = await ctx.db.insert("checkoutIntents", {
+        organizationId: orgId,
+        packId: "pack_10",
+        stripePriceId: "price_qa",
+        amount: 1000,
+        currency: "usd",
+        credits: 100000,
+        status: "complete",
+        createdAt: 1,
+        updatedAt: 1,
+        expiresAt: 2,
+      });
+      const paymentId = await ctx.db.insert("payments", {
+        organizationId: orgId,
+        checkoutIntentId,
+        stripeCheckoutSessionId: "cs_test_qa",
+        amount: 1000,
+        currency: "usd",
+        grantedCredits: 100000,
+        reversedCredits: 100000,
+        status: "refunded",
+        createdAt: 1,
+        updatedAt: 1,
+      });
+      const exposureId = await ctx.db.insert("paymentExposures", {
+        organizationId: orgId,
+        paymentId,
+        sourceKind: "refund",
+        sourceRef: "stripe:refund:re_qa",
+        sourceAmount: 1000,
+        sourceAmountExact: true,
+        sourceStatus: "pending",
+        requestedCredits: 100000,
+        effectiveCredits: 100000,
+        walletCredits: 99999,
+        publisherCredits: 1,
+        appliedPublisherCredits: 0,
+        active: true,
+        createdAt: 1,
+        updatedAt: 1,
+      });
+      return { orgId, exposureId, paymentId };
+    });
+    const archive = () =>
+      t.mutation(internal.organizations.deleteFromClerk, {
+        clerkOrgId: "org_refunded",
+      });
+    await expect(archive()).rejects.toThrow("unresolved exposure");
+    await t.run((ctx) =>
+      ctx.db.patch(exposureId, { sourceStatus: "succeeded" }),
+    );
+    await expect(archive()).rejects.toThrow("unresolved exposure");
+    await t.run((ctx) =>
+      ctx.db.patch(exposureId, {
+        appliedPublisherCredits: 1,
+        walletCredits: 99998,
+      }),
+    );
+    await expect(archive()).rejects.toThrow("unresolved exposure");
+    await t.run((ctx) => ctx.db.patch(exposureId, { walletCredits: 99999 }));
+    for (const sourceAmountExact of [false, undefined]) {
+      await t.run((ctx) => ctx.db.patch(exposureId, { sourceAmountExact }));
+      await expect(archive()).rejects.toThrow("unresolved exposure");
+    }
+    await t.run((ctx) => ctx.db.patch(exposureId, { sourceAmountExact: true }));
+    await archive();
+    const state = await t.run(async (ctx) => ({
+      org: await ctx.db.get(orgId),
+      payment: await ctx.db.get(paymentId),
+      exposure: await ctx.db.get(exposureId),
+    }));
+    expect(state.org?.archivedAt).toEqual(expect.any(Number));
+    expect(state.payment?.status).toBe("refunded");
+    expect(state.exposure).toMatchObject({
+      active: true,
+      sourceStatus: "succeeded",
+      effectiveCredits: 100000,
+      appliedPublisherCredits: 1,
+    });
+  });
+});

@@ -16,6 +16,8 @@ import { AppHeader } from "#/components/app-header";
 import { AppSidebar } from "#/components/app-sidebar";
 import { AuthenticatedProviders } from "#/components/authenticated-providers";
 import { SidebarInset, SidebarProvider } from "#/components/ui/sidebar";
+import { Button } from "#/components/ui/button";
+import { Skeleton } from "#/components/ui/skeleton";
 import { useEnsureMirror } from "#/hooks/use-ensure-mirror";
 import { safeAppReturnPath } from "#/lib/auth-redirect";
 import { readClientClerkAuth } from "#/lib/clerk-client";
@@ -69,7 +71,7 @@ function AppProviderBoundary() {
 }
 
 function AppLayout() {
-  useEnsureMirror();
+  const mirror = useEnsureMirror();
   useOrgLessGuard();
 
   return (
@@ -89,7 +91,34 @@ function AppLayout() {
           className="flex min-w-0 w-full flex-1 flex-col gap-4 p-4 focus-visible:outline-none md:p-6 content-enter"
           style={{ viewTransitionName: "main-content" }}
         >
-          <Outlet />
+          {mirror.isReady ? (
+            <Outlet />
+          ) : mirror.isError ? (
+            <div className="space-y-3" role="alert">
+              <h1 className="text-2xl font-semibold">Workspace unavailable</h1>
+              <p className="text-sm text-muted-foreground">
+                Could not prepare your workspace. Check your connection and
+                retry.
+              </p>
+              <Button onClick={mirror.retry} disabled={mirror.isPending}>
+                Retry workspace
+              </Button>
+            </div>
+          ) : (
+            <div
+              className="space-y-6"
+              aria-busy="true"
+              aria-label="Loading workspace"
+            >
+              <Skeleton className="h-8 w-48" />
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                <Skeleton className="h-40 w-full" />
+                <Skeleton className="h-40 w-full" />
+                <Skeleton className="h-40 w-full" />
+              </div>
+              <Skeleton className="h-64 w-full" />
+            </div>
+          )}
         </div>
       </SidebarInset>
     </SidebarProvider>

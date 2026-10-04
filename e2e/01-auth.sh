@@ -24,7 +24,7 @@ ab wait --load networkidle >/dev/null 2>&1 || ab wait 800 >/dev/null
 code="$(curl -s -o /dev/null -w '%{http_code}' "$E2E_BASE_URL/")"
 assert_eq "$code" "200" "GET / should be 200"
 snap="$(page_text)"
-assert_contains "$snap" "One key. Every API. Pay per call." "landing hero missing"
+assert_contains "$snap" "APIs for your code and agents. Pay per call." "landing hero missing"
 assert_contains "$snap" "Browse catalogue" "landing CTA missing"
 
 step "anonymous /app redirects to sign-in"

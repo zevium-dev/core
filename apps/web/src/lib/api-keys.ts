@@ -255,6 +255,10 @@ export const createKey = createServerFn({ method: "POST" })
           projection,
         ),
       });
+      await convex.mutation(api.keySettings.registerOwnedKey, {
+        keyId: created.id,
+        keyName: created.name,
+      });
       return {
         id: created.id,
         name: created.name,

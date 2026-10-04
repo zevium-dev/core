@@ -10,11 +10,69 @@ import {
   type ErrorComponentProps,
 } from "@tanstack/react-router";
 import { ConvexProvider, ConvexReactClient, useConvex } from "convex/react";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
+import { QueryClient } from "@tanstack/react-query";
+import type { ReactNode, ComponentProps } from "react";
+import { createPrincipalCache } from "#/lib/principal-cache";
+
+vi.mock("./authenticated-providers", () => ({
+  AuthenticatedProviders: ({
+    client,
+    children,
+  }: {
+    client: ComponentProps<typeof ConvexProvider>["client"];
+    children: ReactNode;
+  }) => (
+    <ConvexProvider client={client}>
+      <div data-testid="authenticated-public-provider">{children}</div>
+    </ConvexProvider>
+  ),
+}));
 
 import { RouteProviders } from "./route-providers";
 
 afterEach(cleanup);
+
+it.each([
+  ["/catalogue/publisher/api", "user_qa", true],
+  ["/catalogue/publisher/api", null, false],
+  ["/catalogue", "user_qa", false],
+  ["/docs", "user_qa", false],
+])(
+  "selects catalogue auth for %s with principal %s",
+  async (path, userId, authenticated) => {
+    const client = new ConvexReactClient("https://example.convex.cloud");
+    const principalCache = createPrincipalCache(() => new QueryClient());
+    const root = createRootRoute({
+      beforeLoad: () => ({ userId }),
+      component: () => (
+        <RouteProviders client={client} principalCache={principalCache}>
+          <Outlet />
+        </RouteProviders>
+      ),
+    });
+    function Consumer() {
+      expect(useConvex()).toBe(client);
+      return <p>Public content</p>;
+    }
+    const page = createRoute({
+      getParentRoute: () => root,
+      path,
+      component: Consumer,
+    });
+    const router = createRouter({
+      routeTree: root.addChildren([page]),
+      history: createMemoryHistory({ initialEntries: [path] }),
+    });
+    await router.load();
+    render(<RouterProvider router={router} />);
+    await screen.findByText("Public content");
+    expect(Boolean(screen.queryByTestId("authenticated-public-provider"))).toBe(
+      authenticated,
+    );
+    await client.close();
+  },
+);
 
 it("keeps the outgoing public Convex consumer mounted until protected navigation commits", async () => {
   const client = new ConvexReactClient("https://example.convex.cloud");

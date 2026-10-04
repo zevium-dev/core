@@ -1,3 +1,5 @@
+import { resolveGatewayOrigin } from "./landing";
+
 const STRIP_HEADERS = [
   "x-clerk-auth-message",
   "x-clerk-auth-reason",
@@ -41,7 +43,9 @@ export function buildWebContentSecurityPolicy(
   options: { upgradeInsecureRequests?: boolean } = {},
 ): string {
   const convex = sourceOrigin(import.meta.env.VITE_CONVEX_URL);
-  const gateway = sourceOrigin(import.meta.env.VITE_GATEWAY_URL);
+  const gateway = sourceOrigin(
+    resolveGatewayOrigin(import.meta.env.VITE_GATEWAY_URL),
+  );
   const clerk = clerkFrontendOrigin(import.meta.env.VITE_CLERK_PUBLISHABLE_KEY);
   const websocket = convex === null ? null : convex.replace(/^https:/, "wss:");
   const connectSources = [

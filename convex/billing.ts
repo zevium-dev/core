@@ -1,4 +1,5 @@
 import Stripe from "stripe";
+import { assertStripePlatformIdentity } from "./lib/stripePlatform";
 import { v } from "convex/values";
 import {
   action,
@@ -173,12 +174,7 @@ async function verifyBillingPlatformIdentity(stripe: Stripe): Promise<void> {
   ) {
     throw new Error("Stripe platform configuration is invalid");
   }
-  const account = await stripe.accounts.retrieve(configured);
-  const providerLivemode = (account as unknown as { livemode?: unknown })
-    .livemode;
-  if (account.id !== configured || providerLivemode !== expectedLivemode) {
-    throw new Error("Stripe platform identity does not match configuration");
-  }
+  await assertStripePlatformIdentity(stripe, configured, expectedLivemode);
 }
 
 function stringId(

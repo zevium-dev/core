@@ -7,7 +7,7 @@ import { convexQuery, useConvexMutation } from "@convex-dev/react-query";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link, createFileRoute } from "@tanstack/react-router";
 import { useAction } from "convex/react";
-import { Building2, Landmark, Plus, Users } from "lucide-react";
+import { Building2, KeyRound, Landmark, Plus, Users } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
@@ -45,7 +45,10 @@ import { clerkShadcnTheme } from "#/lib/clerk-theme";
 import { humanError } from "#/lib/human-error";
 
 import { isPrivilegedOrgRole } from "#/lib/org-capabilities";
-import { connectedAccountDisplay } from "#/lib/stripe-ui";
+import {
+  connectedAccountDisplay,
+  connectedAccountRequirements,
+} from "#/lib/stripe-ui";
 
 export const Route = createFileRoute("/app/org/")({
   component: OrgHomePage,
@@ -109,6 +112,7 @@ function OrgHomePage() {
       <div className="min-h-[28rem] w-full min-w-0 rounded-xl bg-card">
         <OrganizationProfile
           routing="hash"
+          apiKeysProps={{ hide: true }}
           appearance={{
             theme: clerkShadcnTheme,
             elements: {
@@ -118,7 +122,13 @@ function OrgHomePage() {
             },
           }}
           afterLeaveOrganizationUrl="/app/org"
-        />
+        >
+          <OrganizationProfile.Link
+            label="API keys"
+            url="/app/settings/keys"
+            labelIcon={<KeyRound className="size-4" />}
+          />
+        </OrganizationProfile>
       </div>
     </FadeIn>
   );
@@ -385,9 +395,11 @@ function PublisherPaymentsCard() {
         ) : null}
         {profile.requirements.length > 0 ? (
           <ul className="list-disc space-y-1 pl-4 text-sm text-muted-foreground">
-            {profile.requirements.map((requirement) => (
-              <li key={requirement}>{requirement}</li>
-            ))}
+            {connectedAccountRequirements(profile.requirements).map(
+              (requirement) => (
+                <li key={requirement}>{requirement}</li>
+              ),
+            )}
           </ul>
         ) : null}
 

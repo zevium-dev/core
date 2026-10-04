@@ -145,7 +145,7 @@ log "draft saved (or no error toast)"
 
 step "test saved upstream reachability"
 click_button "Test health endpoint" || fail "Test health endpoint button missing/disabled after draft save"
-ab wait --text "readiness gate passed" 30 \
+ab wait --fn "Array.from(document.querySelectorAll('button')).some((button) => button.textContent?.trim() === 'Publish' && !button.disabled)" --timeout 30000 \
   || fail "saved upstream connection test did not pass"
 ab wait 500 >/dev/null
 

@@ -18,6 +18,28 @@ const REQUIRED_HEADERS = [
 afterEach(() => vi.unstubAllEnvs());
 
 describe("outer web security headers", () => {
+  it.each([undefined, "", "  "])(
+    "allows playground requests to the default local gateway (%s)",
+    (gateway) => {
+      vi.stubEnv("VITE_GATEWAY_URL", gateway);
+      const sources = buildWebContentSecurityPolicy("nonce-test-value")
+        .split("; ")
+        .find((directive) => directive.startsWith("connect-src "))
+        ?.split(" ");
+      expect(sources).toContain("http://localhost:8787");
+    },
+  );
+
+  it("allows the configured gateway instead of the local fallback", () => {
+    vi.stubEnv("VITE_GATEWAY_URL", " https://gateway.example.com/gateway/ ");
+    const sources = buildWebContentSecurityPolicy("nonce-test-value")
+      .split("; ")
+      .find((directive) => directive.startsWith("connect-src "))
+      ?.split(" ");
+    expect(sources).toContain("https://gateway.example.com");
+    expect(sources).not.toContain("http://localhost:8787");
+  });
+
   it.each([
     ["live", "clerk.zevium.dev"],
     ["test", "example-instance-42.clerk.accounts.dev"],

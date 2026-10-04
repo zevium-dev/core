@@ -23,6 +23,7 @@ function SettingsPage() {
       <div className="min-h-[28rem] w-full min-w-0 rounded-xl bg-card">
         <UserProfile
           routing="hash"
+          apiKeysProps={{ hide: true }}
           appearance={{
             theme: clerkShadcnTheme,
             elements: {

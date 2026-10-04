@@ -52,6 +52,8 @@
 # browser e2e
 /e2e/artifacts/
 /.project/e2e-key.env
+# Local Cloudflare Worker secrets, including web server bindings.
 /.dev.vars
 /apps/gateway/.dev.vars
+/apps/web/.dev.vars
 /apps/gateway/.compliance-dist/

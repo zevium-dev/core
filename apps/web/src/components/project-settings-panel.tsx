@@ -593,9 +593,12 @@ export function ProjectSettingsPanel({
         </CardContent>
       </Card>
 
-      <UpstreamCredentialsCard key={String(project._id)} project={project} />
+      <UpstreamCredentialsCard
+        key={`credentials:${project._id}`}
+        project={project}
+      />
 
-      <WebhooksCard key={String(project._id)} project={project} />
+      <WebhooksCard key={`webhooks:${project._id}`} project={project} />
 
       <Card className="border-destructive/40">
         <CardHeader>
@@ -983,7 +986,7 @@ function UpstreamCredentialsCard({ project }: { project: Doc<"projects"> }) {
 // Endpoint reads contain metadata only. Admins explicitly decrypt the signing
 // secret on demand; hiding it drops the plaintext from component state.
 // ---------------------------------------------------------------------------
-function WebhooksCard({ project }: { project: Doc<"projects"> }) {
+export function WebhooksCard({ project }: { project: Doc<"projects"> }) {
   const endpointQuery = useQuery(
     convexQuery(api.webhooks.getEndpoint, { projectId: project._id }),
   );
@@ -1000,6 +1003,7 @@ function WebhooksCard({ project }: { project: Doc<"projects"> }) {
   const [url, setUrl] = useState("");
   const [active, setActive] = useState(true);
   const [revealedSecret, setRevealedSecret] = useState<string | null>(null);
+  const revealedSecretVersionRef = useRef<number | null>(null);
   const [copiedSecret, setCopiedSecret] = useState(false);
   const [webhookError, setWebhookError] = useState<string | null>(null);
   const activeProjectRef = useRef<Id<"projects"> | null>(project._id);
@@ -1009,6 +1013,7 @@ function WebhooksCard({ project }: { project: Doc<"projects"> }) {
     setUrl("");
     setActive(true);
     setRevealedSecret(null);
+    revealedSecretVersionRef.current = null;
     setCopiedSecret(false);
     setWebhookError(null);
     return () => {
@@ -1023,10 +1028,23 @@ function WebhooksCard({ project }: { project: Doc<"projects"> }) {
       setUrl(endpoint.url);
       setActive(endpoint.active);
 
+      // A rotation response is the only reveal of its version. Its realtime
+      // metadata update must not erase that response before it can be copied.
+      const revealedVersion = revealedSecretVersionRef.current;
+      if (
+        revealedVersion !== null &&
+        endpoint.secretVersion > revealedVersion
+      ) {
+        revealedSecretVersionRef.current = null;
+        setRevealedSecret(null);
+        setCopiedSecret(false);
+      }
+    } else if (endpointQuery.isSuccess) {
+      revealedSecretVersionRef.current = null;
       setRevealedSecret(null);
       setCopiedSecret(false);
     }
-  }, [endpoint, project._id]);
+  }, [endpoint, endpointQuery.isSuccess, project._id]);
 
   const upsertMut = useConvexMutation(api.webhooks.upsertEndpoint);
   const revealMut = useConvexMutation(api.webhooks.revealSecret);
@@ -1039,6 +1057,7 @@ function WebhooksCard({ project }: { project: Doc<"projects"> }) {
         toast.error("Secret was already revealed. Rotate it to get a new one.");
         return;
       }
+      revealedSecretVersionRef.current = endpoint?.secretVersion ?? null;
       setRevealedSecret(result.secret);
     },
     onError: (err: unknown) =>
@@ -1049,6 +1068,7 @@ function WebhooksCard({ project }: { project: Doc<"projects"> }) {
     mutationFn: () =>
       rotateMut({ projectId: project._id, graceSeconds: 60 * 60 }),
     onSuccess: (result) => {
+      revealedSecretVersionRef.current = result.secretVersion;
       setRevealedSecret(result.secret);
       setCopiedSecret(false);
       revealMutation.reset();
@@ -1092,7 +1112,7 @@ function WebhooksCard({ project }: { project: Doc<"projects"> }) {
       setWebhookError(
         trimmedUrl === ""
           ? "Enter a webhook endpoint URL."
-          : "URL must use HTTPS. HTTP is allowed only for localhost development.",
+          : "Enter a public HTTPS URL without credentials. Localhost is not supported.",
       );
       document.getElementById("webhook-url")?.focus();
       return;
@@ -1179,7 +1199,7 @@ function WebhooksCard({ project }: { project: Doc<"projects"> }) {
               className={`min-h-5 text-xs ${webhookError ? "text-destructive" : "text-muted-foreground"}`}
             >
               {webhookError ??
-                "HTTPS required. HTTP is accepted only for localhost development."}
+                "Use a public HTTPS URL without credentials. Localhost is not supported."}
             </p>
           </div>
 
@@ -1205,6 +1225,7 @@ function WebhooksCard({ project }: { project: Doc<"projects"> }) {
                   size="icon"
                   onClick={() => {
                     if (revealedSecret !== null) {
+                      revealedSecretVersionRef.current = null;
                       setRevealedSecret(null);
                       setCopiedSecret(false);
                       revealMutation.reset();
@@ -1410,7 +1431,7 @@ function SettingsQueryErrorCard({
   );
 }
 
-/** Mirrors convex/webhooks.ts validateWebhookUrl (https or http://localhost). */
+/** Mirrors the public HTTPS requirements in validateWebhookUrl. */
 function isValidWebhookUrl(url: string): boolean {
   let parsed: URL;
   try {

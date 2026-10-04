@@ -38,7 +38,16 @@ function readAssetFetcher(options: unknown): AssetFetcher | null {
 }
 
 function isStaticAsset(pathname: string): boolean {
-  return pathname.startsWith("/assets/") || PUBLIC_ASSET_PATHS.has(pathname);
+  return (
+    pathname.startsWith("/assets/") ||
+    PUBLIC_ASSET_PATHS.has(pathname) ||
+    // Worker-first routing also intercepts Vite's unbundled client modules,
+    // styles and HMR entry points. Let the asset binding reach Vite in dev.
+    (import.meta.env.DEV &&
+      (pathname.startsWith("/src/") ||
+        pathname.startsWith("/@") ||
+        pathname.startsWith("/node_modules/")))
+  );
 }
 
 const fetch: RequestHandler<Register> = async (request, options) => {

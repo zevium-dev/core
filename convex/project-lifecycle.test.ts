@@ -248,7 +248,7 @@ describe("project lifecycle retention", () => {
   it("retires published listings, disables probes, blocks gateway, and retains evidence", async () => {
     const t = convexTest(schema, modules);
     const seeded = await seedProject(t, "published");
-    const retired = await publisher(t).mutation(api.projects.retire, {
+    const retired = await t.mutation(internal.projects.retire, {
       projectId: seeded.projectId,
     });
     expect(retired).toMatchObject({

@@ -155,13 +155,34 @@ export type ConnectedAccountDisplay = {
   variant: BadgeVariant;
 };
 
+/** Provider field paths belong in Stripe; publishers need readable tasks. */
+export function connectedAccountRequirements(requirements: readonly string[]) {
+  return [
+    ...new Set(
+      requirements.map((requirement) => {
+        if (requirement.includes("terms_of_service"))
+          return "Accept Stripe terms";
+        if (requirement === "defaults.profile.business_url")
+          return "Business website";
+        if (requirement === "external_account") return "Bank account";
+        if (requirement === "identity.entity_type") return "Business type";
+        if (requirement.startsWith("identity.") || requirement === "identity") {
+          return "Identity verification";
+        }
+        return "Additional account information";
+      }),
+    ),
+  ];
+}
+
 export function connectedAccountDisplay(
   status: ConnectedAccountStatus,
-  disabledReason?: string,
+  _disabledReason?: string,
   requirements: readonly string[] = [],
 ): ConnectedAccountDisplay {
-  const requirementSummary = requirements.length
-    ? ` Stripe still needs: ${requirements.join(", ")}.`
+  const labels = connectedAccountRequirements(requirements);
+  const requirementSummary = labels.length
+    ? ` Stripe still needs: ${labels.join(", ")}.`
     : "";
 
   switch (status) {
@@ -185,7 +206,7 @@ export function connectedAccountDisplay(
     case "restricted":
       return {
         title: "Connect account restricted",
-        description: `${disabledReason ?? "Stripe requires changes before transfers can resume."}${requirementSummary}`,
+        description: `Stripe requires changes before transfers can resume.${requirementSummary}`,
         action: "fix",
         actionLabel: "Fix in Stripe",
         variant: "destructive",

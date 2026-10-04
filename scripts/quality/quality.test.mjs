@@ -458,7 +458,7 @@ test("source inventory scans nested generated-looking names and rejects excluded
 });
 
 test("ignore policies anchor generated roots without hiding nested source", () => {
-  assert.equal(attestIgnorePolicies(repositoryRoot), 18);
+  assert.equal(attestIgnorePolicies(repositoryRoot), 20);
 });
 
 test("invalid JSON and YAML files fail parser checks", () => {

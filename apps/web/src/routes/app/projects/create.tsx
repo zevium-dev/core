@@ -2,6 +2,7 @@ import { useOrganization } from "@clerk/tanstack-react-start";
 import { useConvexMutation } from "@convex-dev/react-query";
 import { useMutation } from "@tanstack/react-query";
 import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
+import { isValidSlug } from "@zevium/shared";
 import { useRef, useState, type FormEvent } from "react";
 
 import { Button } from "#/components/ui/button";
@@ -49,7 +50,13 @@ function CreateProjectPage() {
   const slugInputRef = useRef<HTMLInputElement>(null);
 
   const nameError = name.trim() === "" ? "Enter a project name." : null;
-  const slugError = slug.trim() === "" ? "Enter a project slug." : null;
+  const trimmedSlug = slug.trim();
+  const slugError =
+    trimmedSlug === ""
+      ? "Enter a project slug."
+      : !isValidSlug(trimmedSlug)
+        ? "Use lowercase letters, numbers, and single hyphens between words."
+        : null;
 
   const { mutate, isPending } = useMutation({
     mutationFn: async (input: {
@@ -85,7 +92,7 @@ function CreateProjectPage() {
   function onSlugChange(value: string) {
     setSubmitError(null);
     setSlugEdited(true);
-    setSlug(slugify(value));
+    setSlug(value.toLowerCase());
   }
 
   function onSubmit(e: FormEvent) {
@@ -95,12 +102,11 @@ function CreateProjectPage() {
     setSubmitError(null);
 
     const trimmedName = name.trim();
-    const trimmedSlug = slug.trim();
     if (trimmedName.length === 0) {
       nameInputRef.current?.focus();
       return;
     }
-    if (trimmedSlug.length === 0) {
+    if (slugError !== null) {
       slugInputRef.current?.focus();
       return;
     }

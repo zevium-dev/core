@@ -1,6 +1,11 @@
 import { convexQuery } from "@convex-dev/react-query";
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
+import {
+  Link,
+  createFileRoute,
+  useHydrated,
+  useNavigate,
+} from "@tanstack/react-router";
 import { Check, Copy, PackageX, Terminal, TriangleAlert } from "lucide-react";
 import {
   Suspense,
@@ -715,7 +720,7 @@ function MethodBadge({ method }: { method: string }) {
   );
 }
 
-function TryItPanel({
+export function TryItPanel({
   publisherHandle,
   projectSlug,
   endpoints,
@@ -733,6 +738,7 @@ function TryItPanel({
   onModeChange: (mode: PlaygroundMode) => void;
 }) {
   const { userId } = Route.useRouteContext();
+  const hydrated = useHydrated();
   const endpoint =
     endpoints.find((e) => e.id === endpointId) ?? endpoints[0] ?? null;
 
@@ -818,7 +824,7 @@ function TryItPanel({
 
   async function onSend(e: FormEvent) {
     e.preventDefault();
-    if (!endpoint || sending) return;
+    if (!hydrated || !endpoint || sending) return;
     const nextErrors: Record<string, string> = {};
     for (const parameter of endpoint.parameters) {
       if (
@@ -986,380 +992,394 @@ function TryItPanel({
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <form className="space-y-5" onSubmit={onSend}>
-          <FieldGroup className="gap-3">
-            <Field>
-              <FieldLabel id="playground-mode-label">Environment</FieldLabel>
-              <ToggleGroup
-                type="single"
-                variant="outline"
-                value={mode}
-                onValueChange={(value) => {
-                  if (value === "mock" || value === "live") {
-                    onModeChange(value);
-                  }
-                }}
-                aria-labelledby="playground-mode-label"
+        <form method="post" onSubmit={onSend}>
+          <fieldset disabled={!hydrated || sending} className="space-y-5">
+            <FieldGroup className="gap-3">
+              <Field>
+                <FieldLabel id="playground-mode-label">Environment</FieldLabel>
+                <ToggleGroup
+                  type="single"
+                  variant="outline"
+                  value={mode}
+                  onValueChange={(value) => {
+                    if (value === "mock" || value === "live") {
+                      onModeChange(value);
+                    }
+                  }}
+                  aria-labelledby="playground-mode-label"
+                >
+                  <ToggleGroupItem value="mock">
+                    Mock · 0 credits
+                  </ToggleGroupItem>
+                  <ToggleGroupItem value="live">
+                    Live · {liveCostLabel(endpoint)}
+                  </ToggleGroupItem>
+                </ToggleGroup>
+              </Field>
+            </FieldGroup>
+
+            {mock ? (
+              <div
+                role="status"
+                className="flex flex-wrap items-center gap-2 rounded-md border bg-muted/30 px-3 py-2 text-sm text-muted-foreground"
               >
-                <ToggleGroupItem value="mock">Mock · 0 credits</ToggleGroupItem>
-                <ToggleGroupItem value="live">
-                  Live · {liveCostLabel(endpoint)}
-                </ToggleGroupItem>
-              </ToggleGroup>
-            </Field>
-          </FieldGroup>
-
-          {mock ? (
-            <div
-              role="status"
-              className="flex flex-wrap items-center gap-2 rounded-md border bg-muted/30 px-3 py-2 text-sm text-muted-foreground"
-            >
-              <Badge variant="secondary">mock response · 0 credits</Badge>
-              <span>
-                Calls hit <span className="font-mono text-xs">/mock</span> to
-                return a sample response without contacting the publisher. No
-                key is needed.
-              </span>
-            </div>
-          ) : (
-            <div
-              role="status"
-              className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
-            >
-              Live call · published price {creditsLabel(endpoint?.cost ?? 0)}.
-              {endpoint?.freeTier !== undefined
-                ? ` First ${endpoint.freeTier} eligible calls per day cost 0; remaining allowance is unavailable in this view.`
-                : ""}{" "}
-              Live calls require a funded wallet, including endpoints priced at
-              zero credits.
-            </div>
-          )}
-
-          <div className="grid gap-4 sm:grid-cols-2">
-            <Field className="sm:col-span-2">
-              <FieldLabel htmlFor="try-endpoint">Operation</FieldLabel>
-              <Select
-                value={endpoint?.id ?? ""}
-                onValueChange={onEndpointChange}
+                <Badge variant="secondary">mock response · 0 credits</Badge>
+                <span>
+                  Calls hit <span className="font-mono text-xs">/mock</span> to
+                  return a sample response without contacting the publisher. No
+                  key is needed.
+                </span>
+              </div>
+            ) : (
+              <div
+                role="status"
+                className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
               >
-                <SelectTrigger id="try-endpoint" className="w-full font-mono">
-                  <SelectValue placeholder="Select operation" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectGroup>
-                    {endpoints.map((ep) => (
-                      <SelectItem key={ep.id} value={ep.id}>
-                        {ep.method.toUpperCase()} {ep.path} ·{" "}
-                        {creditsLabel(ep.cost)}
-                      </SelectItem>
-                    ))}
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
-              <FieldDescription>
-                Selection is stored in URL so this exact operation is shareable.
-              </FieldDescription>
-            </Field>
+                Live call · published price {creditsLabel(endpoint?.cost ?? 0)}.
+                {endpoint?.freeTier !== undefined
+                  ? ` First ${endpoint.freeTier} eligible calls per day cost 0; remaining allowance is unavailable in this view.`
+                  : ""}{" "}
+                Live calls require a funded wallet, including endpoints priced
+                at zero credits.
+              </div>
+            )}
 
-            {endpoint?.parameters.map((parameter) => {
-              const inputId = parameterInputId(endpoint.id, parameter);
-              const error = errors[parameter.key];
-              const descriptionId = `${inputId}-description`;
-              const errorId = `${inputId}-error`;
-              return (
-                <Field key={parameter.key} data-invalid={Boolean(error)}>
-                  <FieldLabel htmlFor={inputId}>
-                    {parameter.name}
-                    <span className="font-normal text-muted-foreground">
-                      {parameter.location}
-                      {parameter.required ? " · required" : ""}
-                    </span>
-                  </FieldLabel>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field className="sm:col-span-2">
+                <FieldLabel htmlFor="try-endpoint">Operation</FieldLabel>
+                <Select
+                  value={endpoint?.id ?? ""}
+                  onValueChange={onEndpointChange}
+                >
+                  <SelectTrigger id="try-endpoint" className="w-full font-mono">
+                    <SelectValue placeholder="Select operation" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectGroup>
+                      {endpoints.map((ep) => (
+                        <SelectItem key={ep.id} value={ep.id}>
+                          {ep.method.toUpperCase()} {ep.path} ·{" "}
+                          {creditsLabel(ep.cost)}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+                <FieldDescription>
+                  Selection is stored in URL so this exact operation is
+                  shareable.
+                </FieldDescription>
+              </Field>
+
+              {endpoint?.parameters.map((parameter) => {
+                const inputId = parameterInputId(endpoint.id, parameter);
+                const error = errors[parameter.key];
+                const descriptionId = `${inputId}-description`;
+                const errorId = `${inputId}-error`;
+                return (
+                  <Field key={parameter.key} data-invalid={Boolean(error)}>
+                    <FieldLabel htmlFor={inputId}>
+                      {parameter.name}
+                      <span className="font-normal text-muted-foreground">
+                        {parameter.location}
+                        {parameter.required ? " · required" : ""}
+                      </span>
+                    </FieldLabel>
+                    <Input
+                      id={inputId}
+                      name={parameter.key}
+                      value={parameterValues[parameter.key] ?? ""}
+                      onChange={(event) => {
+                        setParameterValues((previous) => ({
+                          ...previous,
+                          [parameter.key]: event.target.value,
+                        }));
+                        if (error) {
+                          setErrors((previous) => {
+                            const next = { ...previous };
+                            delete next[parameter.key];
+                            return next;
+                          });
+                        }
+                      }}
+                      placeholder={`${parameter.type} value`}
+                      className="font-mono text-sm"
+                      aria-invalid={Boolean(error)}
+                      aria-describedby={
+                        [
+                          parameter.description ? descriptionId : null,
+                          error ? errorId : null,
+                        ]
+                          .filter(Boolean)
+                          .join(" ") || undefined
+                      }
+                    />
+                    {parameter.description ? (
+                      <FieldDescription id={descriptionId}>
+                        {parameter.description}
+                      </FieldDescription>
+                    ) : null}
+                    <FieldError id={errorId}>{error}</FieldError>
+                  </Field>
+                );
+              })}
+
+              {!mock ? (
+                <Field
+                  className="sm:col-span-2"
+                  data-invalid={Boolean(errors.apiKey)}
+                >
+                  <FieldLabel htmlFor="api-key">API key</FieldLabel>
                   <Input
-                    id={inputId}
-                    name={parameter.key}
-                    value={parameterValues[parameter.key] ?? ""}
-                    onChange={(event) => {
-                      setParameterValues((previous) => ({
-                        ...previous,
-                        [parameter.key]: event.target.value,
-                      }));
-                      if (error) {
+                    id="api-key"
+                    name="apiKey"
+                    type="password"
+                    autoComplete="off"
+                    data-1p-ignore
+                    data-lpignore="true"
+                    spellCheck={false}
+                    placeholder="zv_…"
+                    value={apiKey}
+                    onChange={(e) => {
+                      onApiKeyChange(e.target.value);
+                      if (errors.apiKey) {
                         setErrors((previous) => {
                           const next = { ...previous };
-                          delete next[parameter.key];
+                          delete next.apiKey;
                           return next;
                         });
                       }
                     }}
-                    placeholder={`${parameter.type} value`}
                     className="font-mono text-sm"
-                    aria-invalid={Boolean(error)}
-                    aria-describedby={
-                      [
-                        parameter.description ? descriptionId : null,
-                        error ? errorId : null,
-                      ]
-                        .filter(Boolean)
-                        .join(" ") || undefined
-                    }
+                    aria-invalid={Boolean(errors.apiKey)}
+                    aria-describedby="api-key-help"
                   />
-                  {parameter.description ? (
-                    <FieldDescription id={descriptionId}>
-                      {parameter.description}
-                    </FieldDescription>
-                  ) : null}
-                  <FieldError id={errorId}>{error}</FieldError>
+                  <FieldDescription id="api-key-help">
+                    Kept in this browser tab’s session storage and sent to the
+                    gateway for live calls using the{" "}
+                    <code>Authorization: Bearer</code> header.
+                  </FieldDescription>
+                  <FieldError>{errors.apiKey}</FieldError>
+                  <p className="text-xs text-muted-foreground">
+                    {userId ? (
+                      <Link
+                        to="/app/settings/keys"
+                        search={{ returnTo: returnPath }}
+                        className="underline underline-offset-2 hover:text-foreground"
+                      >
+                        Manage keys →
+                      </Link>
+                    ) : (
+                      <Link
+                        to="/sign-up/$"
+                        search={{ redirect: returnPath }}
+                        className="underline underline-offset-2 hover:text-foreground"
+                      >
+                        Create account, then a key →
+                      </Link>
+                    )}
+                  </p>
                 </Field>
-              );
-            })}
+              ) : null}
 
-            {!mock ? (
               <Field
                 className="sm:col-span-2"
-                data-invalid={Boolean(errors.apiKey)}
+                data-invalid={Boolean(errors.headers)}
               >
-                <FieldLabel htmlFor="api-key">API key</FieldLabel>
-                <Input
-                  id="api-key"
-                  name="apiKey"
-                  type="password"
-                  autoComplete="off"
-                  data-1p-ignore
-                  data-lpignore="true"
-                  spellCheck={false}
-                  placeholder="zv_…"
-                  value={apiKey}
-                  onChange={(e) => {
-                    onApiKeyChange(e.target.value);
-                    if (errors.apiKey) {
-                      setErrors((previous) => {
-                        const next = { ...previous };
-                        delete next.apiKey;
-                        return next;
-                      });
-                    }
-                  }}
-                  className="font-mono text-sm"
-                  aria-invalid={Boolean(errors.apiKey)}
-                  aria-describedby="api-key-help"
-                />
-                <FieldDescription id="api-key-help">
-                  Kept in this browser tab’s session storage and sent to the
-                  gateway for live calls using the{" "}
-                  <code>Authorization: Bearer</code> header.
-                </FieldDescription>
-                <FieldError>{errors.apiKey}</FieldError>
-                <p className="text-xs text-muted-foreground">
-                  {userId ? (
-                    <Link
-                      to="/app/settings/keys"
-                      search={{ returnTo: returnPath }}
-                      className="underline underline-offset-2 hover:text-foreground"
-                    >
-                      Manage keys →
-                    </Link>
-                  ) : (
-                    <Link
-                      to="/sign-up/$"
-                      search={{ redirect: returnPath }}
-                      className="underline underline-offset-2 hover:text-foreground"
-                    >
-                      Create account, then a key →
-                    </Link>
-                  )}
-                </p>
-              </Field>
-            ) : null}
-
-            <Field
-              className="sm:col-span-2"
-              data-invalid={Boolean(errors.headers)}
-            >
-              <FieldLabel htmlFor="try-headers">Additional headers</FieldLabel>
-              <Textarea
-                id="try-headers"
-                name="headers"
-                autoComplete="off"
-                spellCheck={false}
-                aria-invalid={Boolean(errors.headers)}
-                aria-describedby="try-headers-help"
-                value={headersText}
-                onChange={(e) => {
-                  setHeadersText(e.target.value);
-                  if (errors.headers) {
-                    setErrors((previous) => {
-                      const next = { ...previous };
-                      delete next.headers;
-                      return next;
-                    });
-                  }
-                }}
-                placeholder={"Accept: application/json"}
-                rows={3}
-                className="min-h-24 font-mono text-xs"
-              />
-              <FieldDescription id="try-headers-help">
-                One <code>Name: value</code> pair per line. Declared header
-                parameters have dedicated fields above.
-              </FieldDescription>
-              <FieldError>{errors.headers}</FieldError>
-            </Field>
-
-            {needsBody ? (
-              <Field
-                className="sm:col-span-2"
-                data-invalid={Boolean(errors.body)}
-              >
-                <FieldLabel htmlFor="try-body">
-                  Request body
-                  <span className="font-normal text-muted-foreground">
-                    {endpoint?.requestContentType}
-                    {endpoint?.requestBodyRequired ? " · required" : ""}
-                  </span>
+                <FieldLabel htmlFor="try-headers">
+                  Additional headers
                 </FieldLabel>
                 <Textarea
-                  id="try-body"
-                  name="request-body"
+                  id="try-headers"
+                  name="headers"
                   autoComplete="off"
-                  value={bodyText}
+                  spellCheck={false}
+                  aria-invalid={Boolean(errors.headers)}
+                  aria-describedby="try-headers-help"
+                  value={headersText}
                   onChange={(e) => {
-                    setBodyText(e.target.value);
-                    if (errors.body) {
+                    setHeadersText(e.target.value);
+                    if (errors.headers) {
                       setErrors((previous) => {
                         const next = { ...previous };
-                        delete next.body;
+                        delete next.headers;
                         return next;
                       });
                     }
                   }}
-                  rows={6}
-                  spellCheck={false}
+                  placeholder={"Accept: application/json"}
+                  rows={3}
                   className="min-h-24 font-mono text-xs"
-                  aria-invalid={Boolean(errors.body)}
-                  aria-describedby="try-body-help"
                 />
-                <FieldDescription id="try-body-help">
-                  Seeded from examples or schema defaults in the published spec.
+                <FieldDescription id="try-headers-help">
+                  One <code>Name: value</code> pair per line. Declared header
+                  parameters have dedicated fields above.
                 </FieldDescription>
-                <FieldError>{errors.body}</FieldError>
+                <FieldError>{errors.headers}</FieldError>
               </Field>
-            ) : null}
-          </div>
 
-          <div className="rounded-md border bg-muted/30 px-3 py-2">
-            <p className="text-xs text-muted-foreground">Request URL</p>
-            <p className="mt-1 break-all font-mono text-xs">{requestUrl}</p>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            <Button type="submit" disabled={sending || !endpoint}>
-              {sending
-                ? "Sending…"
-                : mock
-                  ? "Send mock · 0 credits"
-                  : `Send live · ${liveCostLabel(endpoint)}`}
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => onCopyCurl()}
-              disabled={!endpoint}
-            >
-              {copyState === "copied" ? (
-                <Check className="size-4" />
-              ) : (
-                <Copy className="size-4" />
-              )}
-              {copyState === "copied" ? "Copied curl" : "Copy curl"}
-            </Button>
-            <span className="text-xs text-muted-foreground" aria-live="polite">
-              {copyState === "error"
-                ? "Copy failed. Select request values and copy manually."
-                : mock
-                  ? "Generated curl uses the keyless mock endpoint."
-                  : "Generated curl uses a placeholder and never copies your secret."}
-            </span>
-          </div>
-
-          <div className="min-h-[24rem]" role="status" aria-live="polite">
-            {sending ? (
-              <div className="space-y-3 rounded-md border p-4">
-                <Skeleton className="h-5 w-48" />
-                <Skeleton className="h-72 w-full" />
-              </div>
-            ) : result ? (
-              <div className="space-y-2">
-                <div className="flex flex-wrap items-center gap-2 text-sm">
-                  <Badge
-                    variant={
-                      result.status >= 200 && result.status < 300
-                        ? "secondary"
-                        : "destructive"
-                    }
-                    className="tabular-nums"
-                  >
-                    {result.status || "ERR"} {result.statusText}
-                  </Badge>
-                  {result.mock ? (
-                    <Badge variant="outline">mock response · 0 credits</Badge>
-                  ) : null}
-                  <span className="text-muted-foreground tabular-nums">
-                    {result.ms} ms
-                  </span>
-                  {result.requestId ? (
-                    <span className="font-mono text-xs text-muted-foreground">
-                      Request {result.requestId}
+              {needsBody ? (
+                <Field
+                  className="sm:col-span-2"
+                  data-invalid={Boolean(errors.body)}
+                >
+                  <FieldLabel htmlFor="try-body">
+                    Request body
+                    <span className="font-normal text-muted-foreground">
+                      {endpoint?.requestContentType}
+                      {endpoint?.requestBodyRequired ? " · required" : ""}
                     </span>
+                  </FieldLabel>
+                  <Textarea
+                    id="try-body"
+                    name="request-body"
+                    autoComplete="off"
+                    value={bodyText}
+                    onChange={(e) => {
+                      setBodyText(e.target.value);
+                      if (errors.body) {
+                        setErrors((previous) => {
+                          const next = { ...previous };
+                          delete next.body;
+                          return next;
+                        });
+                      }
+                    }}
+                    rows={6}
+                    spellCheck={false}
+                    className="min-h-24 font-mono text-xs"
+                    aria-invalid={Boolean(errors.body)}
+                    aria-describedby="try-body-help"
+                  />
+                  <FieldDescription id="try-body-help">
+                    Seeded from examples or schema defaults in the published
+                    spec.
+                  </FieldDescription>
+                  <FieldError>{errors.body}</FieldError>
+                </Field>
+              ) : null}
+            </div>
+
+            <div className="rounded-md border bg-muted/30 px-3 py-2">
+              <p className="text-xs text-muted-foreground">Request URL</p>
+              <p className="mt-1 break-all font-mono text-xs">{requestUrl}</p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <Button type="submit" disabled={sending || !endpoint}>
+                {sending
+                  ? "Sending…"
+                  : mock
+                    ? "Send mock · 0 credits"
+                    : `Send live · ${liveCostLabel(endpoint)}`}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => onCopyCurl()}
+                disabled={!endpoint}
+              >
+                {copyState === "copied" ? (
+                  <Check className="size-4" />
+                ) : (
+                  <Copy className="size-4" />
+                )}
+                {copyState === "copied" ? "Copied curl" : "Copy curl"}
+              </Button>
+              <span
+                className="text-xs text-muted-foreground"
+                aria-live="polite"
+              >
+                {copyState === "error"
+                  ? "Copy failed. Select request values and copy manually."
+                  : mock
+                    ? "Generated curl uses the keyless mock endpoint."
+                    : "Generated curl uses a placeholder and never copies your secret."}
+              </span>
+            </div>
+
+            <div className="min-h-[24rem]" role="status" aria-live="polite">
+              {sending ? (
+                <div className="space-y-3 rounded-md border p-4">
+                  <Skeleton className="h-5 w-48" />
+                  <Skeleton className="h-72 w-full" />
+                </div>
+              ) : result ? (
+                <div className="space-y-2">
+                  <div className="flex flex-wrap items-center gap-2 text-sm">
+                    <Badge
+                      variant={
+                        result.status >= 200 && result.status < 300
+                          ? "secondary"
+                          : "destructive"
+                      }
+                      className="tabular-nums"
+                    >
+                      {result.status || "ERR"} {result.statusText}
+                    </Badge>
+                    {result.mock ? (
+                      <Badge variant="outline">mock response · 0 credits</Badge>
+                    ) : null}
+                    <span className="text-muted-foreground tabular-nums">
+                      {result.ms} ms
+                    </span>
+                    {result.requestId ? (
+                      <span className="font-mono text-xs text-muted-foreground">
+                        Request {result.requestId}
+                      </span>
+                    ) : null}
+                  </div>
+                  {result.status === 0 ? (
+                    <div className="space-y-1 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm">
+                      <p className="font-medium text-destructive">
+                        Gateway could not be reached
+                      </p>
+                      <p className="text-muted-foreground">
+                        Check your connection and the request URL, then retry.
+                        You can also copy the curl command to try outside the
+                        browser.
+                      </p>
+                    </div>
+                  ) : result.status >= 400 ? (
+                    <p className="text-sm text-muted-foreground">
+                      {result.status === 401
+                        ? "Authentication failed. If your Zevium key works with other APIs, contact this publisher."
+                        : result.status === 402
+                          ? "Check your API key and organization wallet balance, then retry."
+                          : result.status === 403
+                            ? "Access was denied. Check your API key permissions and status, then retry."
+                            : result.status === 429
+                              ? "This request was rate-limited. Wait before retrying."
+                              : result.status >= 500
+                                ? "The gateway or upstream service failed. Retry later."
+                                : "Check the request fields and try again."}
+                    </p>
+                  ) : null}
+                  {result.status > 0 && readableResultBody !== null ? (
+                    <pre className="max-h-80 overflow-auto rounded-md border bg-muted/40 p-3 font-mono text-xs whitespace-pre-wrap break-all">
+                      <SyntaxCode
+                        code={readableResultBody}
+                        lang={responseLanguage(readableResultBody)}
+                      />
+                    </pre>
+                  ) : result.status >= 400 ? (
+                    <p className="text-xs text-muted-foreground">
+                      Response details are unavailable. Include the request ID
+                      above when contacting support.
+                    </p>
+                  ) : result.status > 0 ? (
+                    <p className="text-xs text-muted-foreground">
+                      Binary response body is not displayed in the browser.
+                    </p>
                   ) : null}
                 </div>
-                {result.status === 0 ? (
-                  <div className="space-y-1 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm">
-                    <p className="font-medium text-destructive">
-                      Gateway could not be reached
-                    </p>
-                    <p className="text-muted-foreground">
-                      Check your connection and the request URL, then retry. You
-                      can also copy the curl command to try outside the browser.
-                    </p>
-                  </div>
-                ) : result.status >= 400 ? (
-                  <p className="text-sm text-muted-foreground">
-                    {result.status === 401
-                      ? "Authentication failed. If your Zevium key works with other APIs, contact this publisher."
-                      : result.status === 402
-                        ? "Check your API key and organization wallet balance, then retry."
-                        : result.status === 429
-                          ? "This request was rate-limited. Wait before retrying."
-                          : result.status >= 500
-                            ? "The upstream service failed. Retry later."
-                            : "Check the request fields and try again."}
-                  </p>
-                ) : null}
-                {result.status > 0 && readableResultBody !== null ? (
-                  <pre className="max-h-80 overflow-auto rounded-md border bg-muted/40 p-3 font-mono text-xs whitespace-pre-wrap break-all">
-                    <SyntaxCode
-                      code={readableResultBody}
-                      lang={responseLanguage(readableResultBody)}
-                    />
-                  </pre>
-                ) : result.status >= 400 ? (
-                  <p className="text-xs text-muted-foreground">
-                    Response details are unavailable. Include the request ID
-                    above when contacting support.
-                  </p>
-                ) : result.status > 0 ? (
-                  <p className="text-xs text-muted-foreground">
-                    Binary response body is not displayed in the browser.
-                  </p>
-                ) : null}
-              </div>
-            ) : (
-              <div className="flex h-80 items-center justify-center rounded-md border border-dashed text-sm text-muted-foreground">
-                Response appears here after you send the request.
-              </div>
-            )}
-          </div>
+              ) : (
+                <div className="flex h-80 items-center justify-center rounded-md border border-dashed text-sm text-muted-foreground">
+                  Response appears here after you send the request.
+                </div>
+              )}
+            </div>
+          </fieldset>
         </form>
       </CardContent>
     </Card>

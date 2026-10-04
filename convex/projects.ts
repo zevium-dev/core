@@ -625,12 +625,13 @@ export const remove = mutation({
   },
 });
 
-export const retire = mutation({
+/** Operator-only retirement for maintenance; publishers must honor sunset. */
+export const retire = internalMutation({
   args: { projectId: v.id("projects") },
   handler: async (ctx, args): Promise<Doc<"projects">> => {
-    const { claims, project } = await requireProjectMember(ctx, args.projectId);
-    requireOrgAdmin(claims);
     await assertFinanceMigrationAllowsRuntime(ctx);
+    const project = await ctx.db.get(args.projectId);
+    if (project === null) throw new Error("Project not found");
     if (project.status !== "published") {
       throw new Error("Only published projects can be retired");
     }
