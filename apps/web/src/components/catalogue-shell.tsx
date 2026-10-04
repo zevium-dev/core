@@ -29,9 +29,7 @@ export function CatalogueShell({
   return (
     <CatalogueScope.Provider value={inApp}>
       {inApp ? (
-        <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
-          {children}
-        </div>
+        <div className="flex min-w-0 w-full flex-col gap-6">{children}</div>
       ) : (
         <div className="min-h-screen bg-background">
           <PublicHeader active="catalogue" />
@@ -40,7 +38,7 @@ export function CatalogueShell({
             style={{ viewTransitionName: "main-content" }}
             tabIndex={-1}
             className={cn(
-              "mx-auto flex max-w-6xl flex-col gap-6 px-4 py-8 outline-none",
+              "flex min-w-0 w-full flex-col gap-6 px-4 py-8 outline-none md:px-6",
               !pending && "content-enter",
             )}
           >

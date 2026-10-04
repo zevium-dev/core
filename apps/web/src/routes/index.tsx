@@ -112,7 +112,7 @@ function LandingPage() {
         id="main-content"
         style={{ viewTransitionName: "main-content" }}
         tabIndex={-1}
-        className="mx-auto flex w-full max-w-[100rem] flex-col gap-24 px-4 py-16 outline-none sm:py-24"
+        className="flex w-full flex-col gap-24 px-4 py-16 outline-none sm:py-24 md:px-6"
       >
         {/* Hero */}
         <section className="grid items-center gap-12 lg:grid-cols-2 lg:gap-10">
@@ -401,7 +401,7 @@ function LandingPage() {
 
       <footer>
         <Separator />
-        <div className="mx-auto flex w-full max-w-[100rem] flex-col gap-5 px-4 py-8 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex w-full flex-col gap-5 px-4 py-8 sm:flex-row sm:items-center sm:justify-between md:px-6">
           <div className="flex min-w-0 flex-col gap-2">
             <Link
               to="/"
