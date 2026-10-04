@@ -49,7 +49,7 @@
     "concurrently": "^10.0.5",
     "convex-test": "^0.0.60",
     "eslint-plugin-security": "4.2.0",
-    "oxlint": "1.78.0",
+    "oxlint": "1.86.0",
     "prettier": "^3.9.9",
     "semver": "7.8.5",
     "tsx": "^4.23.15",
