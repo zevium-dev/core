@@ -7,6 +7,7 @@ import { Banknote, Landmark, Send, Wallet } from "lucide-react";
 import { Suspense, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
+import { PublisherCountrySelect } from "#/components/publisher-country-select";
 import { NumberTicker } from "#/components/motion/number-ticker";
 import { Badge } from "#/components/ui/badge";
 import { Button } from "#/components/ui/button";
@@ -24,8 +25,6 @@ import {
   EmptyTitle,
 } from "#/components/ui/empty";
 import { Skeleton } from "#/components/ui/skeleton";
-import { Input } from "#/components/ui/input";
-import { Label } from "#/components/ui/label";
 import { api } from "#/lib/convex-api";
 import { humanError } from "#/lib/human-error";
 
@@ -117,9 +116,7 @@ function EarningsContent() {
     mutationFn: () =>
       startOnboarding({
         country:
-          profile.status === "not_started"
-            ? publisherCountry.trim().toUpperCase()
-            : undefined,
+          profile.status === "not_started" ? publisherCountry : undefined,
       }),
     onSuccess: ({ url }) => {
       window.location.assign(url);
@@ -215,33 +212,19 @@ function EarningsContent() {
               transfers.
             </p>
           ) : connect.action && connect.actionLabel ? (
-            <div className="space-y-3">
+            <div className="flex flex-col items-start gap-3">
               {profile.status === "not_started" ? (
-                <div className="max-w-xs space-y-2">
-                  <Label htmlFor="publisher-country">Publisher country</Label>
-                  <Input
-                    id="publisher-country"
-                    name="publisher-country"
-                    autoComplete="off"
-                    spellCheck={false}
-                    maxLength={2}
-                    placeholder="US"
-                    value={publisherCountry}
-                    onChange={(event) =>
-                      setPublisherCountry(event.target.value)
-                    }
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    Enter the two-letter country code where your business is
-                    registered, such as US or GB.
-                  </p>
-                </div>
+                <PublisherCountrySelect
+                  id="publisher-country"
+                  value={publisherCountry}
+                  onValueChange={setPublisherCountry}
+                  disabled={onboardingPending}
+                />
               ) : null}
               <Button
                 disabled={
                   onboardingPending ||
-                  (profile.status === "not_started" &&
-                    !/^[A-Za-z]{2}$/.test(publisherCountry.trim()))
+                  (profile.status === "not_started" && !publisherCountry)
                 }
                 onClick={() => openOnboarding()}
               >

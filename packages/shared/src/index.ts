@@ -64,6 +64,8 @@ export {
   type OrgRole,
 } from "./org-capabilities.js";
 
+export { SUPPORTED_CONNECT_COUNTRY_CODES } from "./connect-countries.js";
+
 export {
   signTransferCorrelation,
   verifyTransferCorrelation,
