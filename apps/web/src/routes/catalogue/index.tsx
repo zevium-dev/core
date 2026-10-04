@@ -1,9 +1,10 @@
 import { convexQuery } from "@convex-dev/react-query";
-import { useQuery } from "@tanstack/react-query";
+import { useQueries, useQuery } from "@tanstack/react-query";
+import { MAX_ENDPOINT_COST_CREDITS } from "@zevium/shared";
 import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useAction } from "convex/react";
 import { ArrowLeft, PackageSearch, Sparkles } from "lucide-react";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 
 import { FadeIn } from "#/components/motion/fade-in";
 import {
@@ -47,12 +48,14 @@ import {
 } from "#/lib/catalogue-card";
 import {
   catalogueLoaderDeps,
+  CATALOGUE_SEARCH_MAX_LENGTH,
   catalogueUrlSearch,
   formatRelevance,
   useDebouncedUrlDraft,
   validateCatalogueSearch,
 } from "#/lib/catalogue-search";
 import { api } from "#/lib/convex-api";
+import { cn } from "#/lib/utils";
 import type { SearchListing } from "../../../../../convex/search";
 
 /** Card shape shared by browse + semantic results; `score` only on ranked hits. */
@@ -122,6 +125,7 @@ function CataloguePage() {
   const activeTag = routeSearch.tag ?? null;
   const sort: CatalogueSort = routeSearch.sort ?? "newest";
   const freeOnly = routeSearch.free ?? false;
+  const [filtersOpen, setFiltersOpen] = useState(false);
 
   const navigateSearch = (
     next: {
@@ -310,6 +314,7 @@ function CataloguePage() {
                       placeholder="Describe an API or task…"
                       className="min-w-0 flex-1"
                       value={searchInput}
+                      maxLength={CATALOGUE_SEARCH_MAX_LENGTH}
                       onChange={(e) => handleSearchInput(e.target.value)}
                     />
                     <Button
@@ -359,11 +364,24 @@ function CataloguePage() {
                 </Field>
 
                 {inSemanticMode ? null : (
-                  <details className="group rounded-md border px-3 py-2 sm:border-0 sm:p-0">
-                    <summary className="flex min-h-11 cursor-pointer items-center text-sm font-medium outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 sm:hidden">
+                  <div className="rounded-md border px-3 py-2 sm:border-0 sm:p-0">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      className="h-11 w-full justify-start sm:hidden"
+                      aria-expanded={filtersOpen}
+                      aria-controls="catalogue-filters"
+                      onClick={() => setFiltersOpen((open) => !open)}
+                    >
                       Filters and sorting
-                    </summary>
-                    <div className="hidden pt-4 group-open:block sm:block sm:pt-0">
+                    </Button>
+                    <div
+                      id="catalogue-filters"
+                      className={cn(
+                        "pt-4 sm:block sm:pt-0",
+                        filtersOpen ? "block" : "hidden",
+                      )}
+                    >
                       <BrowseFilters
                         sort={sort}
                         setSort={handleSortChange}
@@ -373,7 +391,7 @@ function CataloguePage() {
                         setMaxCostInput={handleMaxCostChange}
                       />
                     </div>
-                  </details>
+                  </div>
                 )}
               </FieldGroup>
             </form>
@@ -429,6 +447,7 @@ function BrowseFilters({
           id="catalogue-max-cost"
           type="number"
           min={0}
+          max={MAX_ENDPOINT_COST_CREDITS}
           step={1}
           inputMode="numeric"
           placeholder="Any"
@@ -467,6 +486,7 @@ function BrowsePanel({
 }) {
   return (
     <CatalogueList
+      key={JSON.stringify([search, activeTag, sort, freeOnly, maxCost])}
       search={search}
       activeTag={activeTag}
       onTagChange={onTagChange}
@@ -526,7 +546,7 @@ function SemanticResults({
   );
 }
 
-function CatalogueList({
+export function CatalogueList({
   search,
   activeTag,
   onTagChange,
@@ -542,27 +562,42 @@ function CatalogueList({
   maxCost: number | null;
 }) {
   const trimmed = search.trim();
-  const catalogueQuery = useQuery(
-    convexQuery(
-      api.catalogue.listPublic,
-      catalogueListArgs({
-        search,
-        tag: activeTag,
-        sort,
-        freeOnly,
-        maxCost,
+  const [cursors, setCursors] = useState<Array<string | undefined>>([
+    undefined,
+  ]);
+  const catalogueQueries = useQueries({
+    queries: cursors.map((cursor) =>
+      convexQuery(api.catalogue.listPublic, {
+        ...catalogueListArgs({
+          search,
+          tag: activeTag,
+          sort,
+          freeOnly,
+          maxCost,
+        }),
+        ...(cursor === undefined ? {} : { cursor }),
       }),
     ),
-  );
-  const items = catalogueQuery.data?.items;
+  });
+  const catalogueQuery = catalogueQueries[0]!;
+  const lastQuery = catalogueQueries[catalogueQueries.length - 1]!;
+  const items = useMemo(() => {
+    const unique = new Map<string, CatalogueCardItem>();
+    for (const query of catalogueQueries) {
+      for (const item of query.data?.items ?? []) {
+        unique.set(`${item.publisherHandle}/${item.slug}`, item);
+      }
+    }
+    return Array.from(unique.values());
+  }, [catalogueQueries]);
   const tags = useMemo(() => {
     const set = new Set<string>();
-    for (const item of items ?? []) {
-      for (const tag of item.tags) set.add(tag);
+    for (const tag of catalogueQuery.data?.facets.tags ?? []) {
+      if (tag.count > 0) set.add(tag.name);
     }
     if (activeTag) set.add(activeTag);
     return Array.from(set).sort((a, b) => a.localeCompare(b));
-  }, [items, activeTag]);
+  }, [catalogueQuery.data?.facets.tags, activeTag]);
 
   if (catalogueQuery.isPending) return <CatalogueGridSkeleton />;
   if (catalogueQuery.isError || catalogueQuery.data === undefined) {
@@ -593,7 +628,7 @@ function CatalogueList({
       </Empty>
     );
   }
-  const data = catalogueQuery.data;
+  const nextCursor = lastQuery.data?.nextCursor;
 
   const hasFilters =
     trimmed.length > 0 || activeTag !== null || freeOnly || maxCost !== null;
@@ -602,7 +637,7 @@ function CatalogueList({
     <FadeIn className="flex flex-col gap-6">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-sm font-medium tabular-nums" aria-live="polite">
-          {data.total === 1 ? "1 API" : `${data.total} APIs`}
+          {items.length === 1 ? "1 API shown" : `${items.length} APIs shown`}
         </p>
         <p className="text-xs text-muted-foreground">
           Try free mocks. Live endpoint prices are shown in credits.
@@ -639,11 +674,18 @@ function CatalogueList({
         </FieldSet>
       ) : null}
 
-      {data.items.length === 0 ? (
-        <CatalogueEmpty hasSearch={hasFilters} />
+      {items.length === 0 ? (
+        nextCursor || lastQuery.isPending ? (
+          <p role="status" className="text-sm text-muted-foreground">
+            No matching APIs in the results loaded so far. Load more to
+            continue.
+          </p>
+        ) : (
+          <CatalogueEmpty hasSearch={hasFilters} />
+        )
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {data.items.map((item) => (
+          {items.map((item) => (
             <CatalogueCard
               key={`${item.publisherHandle}/${item.slug}`}
               item={item}
@@ -651,6 +693,30 @@ function CatalogueList({
           ))}
         </div>
       )}
+      {cursors.length > 1 && lastQuery.isError ? (
+        <div role="alert" className="flex flex-wrap items-center gap-3 text-sm">
+          <p>More APIs did not load. Your current results are preserved.</p>
+          <Button variant="outline" onClick={() => void lastQuery.refetch()}>
+            Retry more APIs
+          </Button>
+        </div>
+      ) : lastQuery.isPending || nextCursor ? (
+        <Button
+          variant="outline"
+          className="self-center"
+          disabled={lastQuery.isPending}
+          onClick={() => {
+            if (nextCursor)
+              setCursors((previous) =>
+                previous.includes(nextCursor)
+                  ? previous
+                  : [...previous, nextCursor],
+              );
+          }}
+        >
+          {lastQuery.isPending ? "Loading more APIs…" : "Load more APIs"}
+        </Button>
+      ) : null}
     </FadeIn>
   );
 }

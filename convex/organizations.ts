@@ -27,7 +27,13 @@ import { initializeUntouchedWalletFunding } from "./lib/funding";
 
 function trustedOrganizationSlug(raw: string | undefined): string {
   const slug = raw?.trim().toLowerCase();
-  if (slug === undefined || !isValidSlug(slug)) {
+  // Clerk's automatic organization names can contain repeated hyphens and
+  // exceed the 64-character limit reserved for Zevium public handles.
+  if (
+    slug === undefined ||
+    slug.length > 256 ||
+    !/^[a-z0-9]+(?:-+[a-z0-9]+)*$/.test(slug)
+  ) {
     throw new Error("Authenticated organization slug is invalid");
   }
   return slug;
@@ -481,6 +487,20 @@ async function assertArchivable(
     .withIndex("by_organization_active", (q) =>
       q.eq("organizationId", organizationId).eq("active", true),
     )
+    // Successful refunds remain active forever as canonical reversal facts.
+    // Block unsettled money, rather than blocking those completed facts.
+    .filter((q) =>
+      q.or(
+        q.neq(q.field("sourceKind"), "refund"),
+        q.neq(q.field("sourceStatus"), "succeeded"),
+        q.neq(q.field("sourceAmountExact"), true),
+        q.neq(
+          q.field("effectiveCredits"),
+          q.add(q.field("walletCredits"), q.field("publisherCredits")),
+        ),
+        q.neq(q.field("appliedPublisherCredits"), q.field("publisherCredits")),
+      ),
+    )
     .take(1);
   if (exposures.length > 0) {
     throw new Error("Organization archive blocked by unresolved exposure");
@@ -635,7 +655,7 @@ export const ensureOrganization = mutation({
     if (claims.orgId === undefined || claims.orgId !== args.clerkOrgId) {
       throw new Error("Organization does not match authenticated identity");
     }
-    trustedOrganizationSlug(claims.orgSlug);
+    const signedSlug = trustedOrganizationSlug(claims.orgSlug);
 
     const tombstone = await ctx.db
       .query("organizationTombstones")
@@ -650,22 +670,22 @@ export const ensureOrganization = mutation({
       .withIndex("by_clerk_org", (q) => q.eq("clerkOrgId", args.clerkOrgId))
       .unique();
     if (existing === null) {
-      const signedSlug = claims.orgSlug?.trim().toLowerCase();
-      if (signedSlug === undefined || !isValidSlug(signedSlug)) {
-        throw new Error(
-          "Active organization is awaiting Clerk synchronization",
-        );
-      }
+      await requireAvailableOrganizationSlug(ctx, signedSlug);
+      const publicHandle = await availablePublicHandle(
+        ctx,
+        signedSlug,
+        args.clerkOrgId,
+      );
       assertOrganizationCopyAllowed({
         name: signedSlug,
         slug: signedSlug,
-        publicHandle: signedSlug,
+        publicHandle,
       });
       const organizationId = await ctx.db.insert("organizations", {
         clerkOrgId: args.clerkOrgId,
         name: signedSlug,
         slug: signedSlug,
-        publicHandle: signedSlug,
+        publicHandle,
       });
       await ensureWallet(ctx, organizationId);
       const created = await ctx.db.get(organizationId);

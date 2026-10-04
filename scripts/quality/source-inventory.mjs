@@ -619,6 +619,7 @@ export function attestIgnorePolicies(repository) {
     "/.project/e2e-key.env",
     "/.dev.vars",
     "/apps/gateway/.dev.vars",
+    "/apps/web/.dev.vars",
     "/apps/gateway/.compliance-dist/",
   ]);
   assertExactIgnoreLines(root, "apps/web/.gitignore", [
@@ -691,6 +692,8 @@ export function attestIgnorePolicies(repository) {
   }
 
   const probes = [
+    ["apps/web/.dev.vars", true],
+    ["apps/web/src/.dev.vars", false],
     ["apps/web/dist/probe.ts", true],
     ["apps/web/src/dist/probe.ts", false],
     ["apps/web/.output/probe.ts", true],

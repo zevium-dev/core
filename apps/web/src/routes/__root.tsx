@@ -200,7 +200,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
 }
 
 function RootComponent() {
-  const { convexQueryClient } = Route.useRouteContext();
+  const { convexQueryClient, principalCache } = Route.useRouteContext();
 
   const nonce = useRouter().options.ssr?.nonce;
 
@@ -225,7 +225,10 @@ function RootComponent() {
   );
 
   return (
-    <RouteProviders client={convexQueryClient.convexClient}>
+    <RouteProviders
+      client={convexQueryClient.convexClient}
+      principalCache={principalCache}
+    >
       {content}
     </RouteProviders>
   );

@@ -39,7 +39,7 @@ ab wait --load networkidle >/dev/null 2>&1 || ab wait 1200 >/dev/null
 assert_url_contains "/catalogue"
 snap="$(page_text)"
 assert_contains "$snap" "Catalogue" "catalogue heading missing"
-assert_contains "$snap" "Public APIs with per-call credits" "catalogue blurb missing"
+assert_contains "$snap" "Compare API prices and try free mocks before making a live call." "catalogue blurb missing"
 assert_anonymous_identity
 record_browser_contract "consumer" "anonymous-catalogue" "anonymous"
 
@@ -58,14 +58,13 @@ assert_url_contains "/${PROJECT_SLUG}" "catalogue card navigated to wrong API"
 
 url="$(ab get url)"
 snap="$(page_text)"
-# Detail route missing → still on list, 404, or Not Found shell.
+# Detail must be public and show the selected API.
 if [[ "$url" == *"/sign-in"* ]]; then
   fail "catalogue detail unexpectedly requires auth"
 fi
 if [[ "$snap" == *"Not Found"* || "$snap" == *"404"* \
-  || ( "$url" == *"/catalogue" && "$url" != *"$PROJECT_SLUG"* ) \
-  || ( "$url" == *"/catalogue" && "$snap" == *"Public APIs with per-call credits"* && "$snap" == *"Search catalogue"* ) ]]; then
-  fail "API detail route missing or listing not clickable (url=$url) — expected /catalogue/{org}/{api} with detail UI (pricing + try-it). App gap: cards are non-link Cards; no catalogue/\$org/\$slug route under apps/web/src/routes"
+  || ( "$url" == *"/catalogue" && "$url" != *"$PROJECT_SLUG"* ) ]]; then
+  fail "API detail did not load after clicking catalogue card (url=$url)"
 fi
 
 step "pricing table shows credits"
@@ -74,13 +73,7 @@ snap="$(page_text)"
 if [[ "$snap" != *"credit"* && "$snap" != *"Credit"* && "$snap" != *"x-zevium-cost"* && "$snap" != *"pricing"* && "$snap" != *"Pricing"* ]]; then
   fail "pricing/credits not visible on detail page (missing product UI)"
 fi
-# Reject false positive if we somehow only have catalogue shell blurb.
-if [[ "$snap" == *"Public APIs with per-call credits"* && "$snap" != *"x-zevium-cost"* && "$snap" != *"Pricing"* && "$snap" != *"pricing"* ]]; then
-  # blurb alone is not enough — need operation-level pricing signal
-  if [[ "$snap" != *"/get"* && "$snap" != *"operation"* && "$snap" != *"Operation"* && "$snap" != *"cost"* ]]; then
-    fail "pricing/credits signal is only catalogue blurb — no detail pricing table (app gap)"
-  fi
-fi
+assert_contains "$snap" "/get" "published operation missing from detail"
 log "pricing/credits signal present"
 
 step "try-it panel renders and sends real browser mock"
@@ -95,7 +88,7 @@ assert_contains "$snap" "mock response · 0 credits" "mock result badge missing"
 assert_not_contains "$snap" "Gateway could not be reached" "browser could not reach gateway"
 
 step "live mode fails closed without API key"
-click_button "Live · 1 credit" || fail "live-mode toggle missing"
+ab find role radio click --name "Live · 1 credit" >/dev/null 2>&1 || fail "live-mode toggle missing"
 ab wait 300 >/dev/null
 click_button "Send live · 1 credit" || fail "live submit button missing"
 ab wait 300 >/dev/null
@@ -119,7 +112,9 @@ if [[ "$E2E_REQUIRE_PAID_CONTRACT" == "1" ]]; then
 
   open_path "$DETAIL_PATH"
   wait_for_text "Request playground" 30
-  click_button "Live · ${E2E_EXPECTED_CALL_COST} credit" || click_button "Live · ${E2E_EXPECTED_CALL_COST} credits" || fail "paid live-mode toggle missing"
+  ab find role radio click --name "Live · ${E2E_EXPECTED_CALL_COST} credit" >/dev/null 2>&1 \
+    || ab find role radio click --name "Live · ${E2E_EXPECTED_CALL_COST} credits" >/dev/null 2>&1 \
+    || fail "paid live-mode toggle missing"
   ab fill '#api-key' "$E2E_API_KEY" >/dev/null || fail "paid fixture key field missing"
   click_button "Send live · ${E2E_EXPECTED_CALL_COST} credit" || click_button "Send live · ${E2E_EXPECTED_CALL_COST} credits" || fail "paid live submit missing"
   ab wait --fn "Array.from(document.querySelectorAll('[role=\"status\"]')).some((el) => /^\\s*200(?:\\s|$)/.test(el.textContent || ''))" --timeout 30000 >/dev/null 2>&1 \

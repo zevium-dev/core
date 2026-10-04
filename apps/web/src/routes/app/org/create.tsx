@@ -29,6 +29,7 @@ function CreateOrgPage() {
         <CreateOrganization
           appearance={{ theme: clerkShadcnTheme }}
           afterCreateOrganizationUrl="/app"
+          skipInvitationScreen
           routing="hash"
         />
       </div>

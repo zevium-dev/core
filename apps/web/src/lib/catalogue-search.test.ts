@@ -38,6 +38,28 @@ describe("catalogue route state", () => {
     expect(parseCatalogueMaxCost("-1")).toBeUndefined();
     expect(parseCatalogueMaxCost("1.5")).toBeUndefined();
     expect(parseCatalogueMaxCost("9007199254740992")).toBeUndefined();
+    expect(parseCatalogueMaxCost("1000000000000")).toBe(1_000_000);
+  });
+
+  it("bounds pasted and linked filters to the catalogue query limits", () => {
+    const filters = validateCatalogueSearch({
+      q: "a".repeat(201),
+      tag: "b".repeat(65),
+      max: "1000001",
+    });
+    expect(filters.q).toHaveLength(200);
+    expect(filters.tag).toBeUndefined();
+    expect(filters.max).toBe(1_000_000);
+    expect(
+      catalogueUrlSearch({
+        q: "a".repeat(201),
+        tag: null,
+        sort: "newest",
+        freeOnly: false,
+        maxCostInput: "1000001",
+        semantic: false,
+      }).q,
+    ).toHaveLength(200);
   });
 
   it("canonicalizes drafts without retaining false default parameters", () => {

@@ -33,6 +33,7 @@ import { isPrivilegedOrgRole } from "#/lib/org-capabilities";
 import { formatCreditsAsUsd } from "#/lib/project-helpers";
 import {
   connectedAccountDisplay,
+  connectedAccountRequirements,
   earningStatusLabel,
   earningStatusVariant,
   moneyMovementFailure,
@@ -200,9 +201,11 @@ function EarningsContent() {
           ) : null}
           {profile.requirements.length > 0 ? (
             <ul className="list-disc space-y-1 pl-4 text-sm text-muted-foreground">
-              {profile.requirements.map((requirement) => (
-                <li key={requirement}>{requirement}</li>
-              ))}
+              {connectedAccountRequirements(profile.requirements).map(
+                (requirement) => (
+                  <li key={requirement}>{requirement}</li>
+                ),
+              )}
             </ul>
           ) : null}
 
@@ -458,7 +461,9 @@ function EarningsLedgerCard({
                       })}
                     </td>
                     <td className="hidden px-2 py-2.5 whitespace-nowrap text-muted-foreground md:table-cell">
-                      {EARNINGS_DATE_FORMATTER.format(earning.availableAt)}
+                      {earning.status === "reversed"
+                        ? "—"
+                        : EARNINGS_DATE_FORMATTER.format(earning.availableAt)}
                     </td>
                   </tr>
                 ))}

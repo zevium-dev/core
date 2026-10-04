@@ -114,6 +114,8 @@ export function AppSidebar() {
           <SidebarGroupLabel>Workspace</SidebarGroupLabel>
           <SidebarGroupContent>
             <OrganizationSwitcher
+              organizationProfileMode="navigation"
+              organizationProfileUrl="/app/org"
               appearance={{
                 theme: clerkShadcnTheme,
                 elements: {
@@ -179,6 +181,7 @@ export function AppSidebar() {
           <SidebarMenuItem>
             <div className="flex min-w-0 items-center gap-2 rounded-md p-1 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:p-0">
               <UserButton
+                userProfileProps={{ apiKeysProps: { hide: true } }}
                 showName={!compact}
                 appearance={{
                   theme: clerkShadcnTheme,

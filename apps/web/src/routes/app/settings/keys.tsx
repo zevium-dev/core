@@ -318,7 +318,7 @@ function KeysContent({ userId, orgId }: { userId: string; orgId: string }) {
             />
           ) : (
             <div className="flex flex-col gap-3">
-              <div className="rounded-md border">
+              <div className="overflow-x-auto rounded-md border">
                 <table className="w-full text-left text-sm">
                   <thead className="hidden border-b bg-muted/40 text-muted-foreground lg:table-header-group">
                     <tr>

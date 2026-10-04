@@ -5,8 +5,11 @@ import {
   type Dispatch,
   type SetStateAction,
 } from "react";
+import { MAX_ENDPOINT_COST_CREDITS } from "@zevium/shared";
 
 export const CATALOGUE_SEARCH_DEBOUNCE_MS = 250;
+export const CATALOGUE_SEARCH_MAX_LENGTH = 200;
+const CATALOGUE_TAG_MAX_LENGTH = 64;
 
 export type CatalogueSortValue = "newest" | "name" | "cheapest";
 
@@ -38,7 +41,9 @@ export function parseCatalogueMaxCost(value: unknown): number | undefined {
   const raw = String(value);
   if (!/^\d+$/.test(raw)) return undefined;
   const parsed = Number(raw);
-  return Number.isSafeInteger(parsed) ? parsed : undefined;
+  return Number.isSafeInteger(parsed)
+    ? Math.min(parsed, MAX_ENDPOINT_COST_CREDITS)
+    : undefined;
 }
 
 export function validateCatalogueSearch(
@@ -48,9 +53,13 @@ export function validateCatalogueSearch(
   return {
     q:
       typeof search.q === "string" && search.q.trim() !== ""
-        ? search.q
+        ? search.q.slice(0, CATALOGUE_SEARCH_MAX_LENGTH)
         : undefined,
-    tag: typeof search.tag === "string" ? search.tag : undefined,
+    tag:
+      typeof search.tag === "string" &&
+      search.tag.length <= CATALOGUE_TAG_MAX_LENGTH
+        ? search.tag
+        : undefined,
     sort:
       search.sort === "name" || search.sort === "cheapest"
         ? search.sort
@@ -82,7 +91,10 @@ export function catalogueUrlSearch(
   draft: CatalogueSearchDraft,
 ): CatalogueRouteSearch {
   return {
-    q: draft.q.trim() === "" ? undefined : draft.q,
+    q:
+      draft.q.trim() === ""
+        ? undefined
+        : draft.q.slice(0, CATALOGUE_SEARCH_MAX_LENGTH),
     tag: draft.tag ?? undefined,
     sort: draft.sort === "newest" ? undefined : draft.sort,
     free: draft.freeOnly || undefined,

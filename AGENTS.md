@@ -120,7 +120,7 @@ pnpm dev            # do not run unless instructed
 pnpm format         # prettier + eslint fix
 ```
 
-- Dev server expected on http://localhost:5173
+- Dev server expected on http://localhost:3000
 - Legacy seed (`pnpm db:seed`, user@example.com / password) works only against legacy code; dies with the rebuild
 
 ## Commits

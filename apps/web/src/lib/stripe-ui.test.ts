@@ -6,6 +6,7 @@ import {
   checkoutStartFailureMessage,
   checkoutStateFromStatus,
   connectedAccountDisplay,
+  connectedAccountRequirements,
   earningStatusLabel,
   earningTotalsByStatus,
   moneyMovementFailure,
@@ -90,7 +91,7 @@ describe("connectedAccountDisplay", () => {
     ).toMatchObject({
       action: "continue",
       actionLabel: "Continue onboarding",
-      description: expect.stringContaining("identity"),
+      description: expect.stringContaining("Identity verification"),
     });
     expect(
       connectedAccountDisplay("restricted", "Payouts are paused", [
@@ -99,12 +100,33 @@ describe("connectedAccountDisplay", () => {
     ).toMatchObject({
       action: "fix",
       variant: "destructive",
-      description: expect.stringContaining("Payouts are paused"),
+      description: expect.stringContaining("Stripe requires changes"),
     });
     expect(connectedAccountDisplay("enabled")).toMatchObject({
       action: null,
       variant: "secondary",
     });
+    const requirements = [
+      "defaults.profile.business_url",
+      "external_account",
+      "identity.attestations.terms_of_service.account.date",
+      "identity.attestations.terms_of_service.account.ip",
+      "identity.entity_type",
+      "future.unknown_field",
+    ];
+    expect(connectedAccountRequirements(requirements)).toEqual([
+      "Business website",
+      "Bank account",
+      "Accept Stripe terms",
+      "Business type",
+      "Additional account information",
+    ]);
+    const description = connectedAccountDisplay(
+      "restricted",
+      "requirements.past_due",
+      requirements,
+    ).description;
+    expect(description).not.toMatch(/requirements\.|identity\.|unknown_field/);
   });
 });
 

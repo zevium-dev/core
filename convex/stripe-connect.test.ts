@@ -220,6 +220,47 @@ describe("Stripe Connect publisher accounting", () => {
       process.env.STRIPE_PLATFORM_ACCOUNT_ID = previousPlatform;
     }
   });
+  it.each([
+    [0, "pending_risk"],
+    [475_000_000, "pending_risk"],
+    [1_045_000_000, "reversed"],
+  ] as const)(
+    "projects earning status after %i atoms are clawed back",
+    async (clawedBackAtoms, status) => {
+      const t = convexTest(schema, modules);
+      const seed = await seedConnect(t);
+      await t.run(async (ctx) => {
+        await ctx.db.patch(seed.earningId, {
+          clawedBackAtoms,
+          clawedBackGrossCredits: clawedBackAtoms / 9500,
+        });
+        const balance = await ctx.db
+          .query("publisherBalances")
+          .withIndex("by_publisher", (q) =>
+            q.eq("publisherOrganizationId", seed.organizationId),
+          )
+          .unique();
+        await ctx.db.patch(balance!._id, {
+          pendingRiskAtoms: 1_045_000_000 - clawedBackAtoms,
+          reversedAtoms: clawedBackAtoms,
+        });
+      });
+      const state = await t
+        .withIdentity({ subject: "publisher", org_id: "org_publisher" })
+        .query(api.payouts.getPayoutState, {});
+
+      expect(state.earnings.rows[0]).toMatchObject({
+        status,
+        clawedBackCredits: clawedBackAtoms / ACCOUNTING_ATOMS_PER_CREDIT,
+      });
+      expect(state.earnings.pendingRisk + state.earnings.reversed).toBe(
+        104_500,
+      );
+      expect((await t.run((ctx) => ctx.db.get(seed.earningId)))?.status).toBe(
+        "pending_risk",
+      );
+    },
+  );
   it("rejects onboarding and transfers from an ordinary organization member", async () => {
     const t = convexTest(schema, modules);
     const member = t.withIdentity({
@@ -400,6 +441,46 @@ describe("Stripe Connect publisher accounting", () => {
     expect(() => connectOnboardingUrls("http://localhost:5173")).toThrow(
       "must use HTTPS",
     );
+  });
+
+  it("allows HTTP loopback onboarding only with a verified test-mode key", () => {
+    for (const host of ["localhost", "127.0.0.1", "[::1]"]) {
+      expect(connectOnboardingUrls(`http://${host}:3000/path`, false)).toEqual({
+        refreshUrl: `http://${host}:3000/app/earnings?onboarding=refresh`,
+        returnUrl: `http://${host}:3000/app/earnings?onboarding=return`,
+      });
+      expect(() => connectOnboardingUrls(`http://${host}:3000`, true)).toThrow(
+        "must use HTTPS",
+      );
+    }
+    for (const origin of ["http://zevium.test", "ftp://localhost:3000"]) {
+      expect(() => connectOnboardingUrls(origin, false)).toThrow(
+        "must use HTTPS",
+      );
+    }
+  });
+
+  it("creates a test onboarding link with loopback return URLs", async () => {
+    const urls = connectOnboardingUrls("http://localhost:3000", false);
+    await expect(
+      createAccountLinkForOperation(connectClientFixture(), {
+        operationId: LINK_OPERATION_ID,
+        connectedAccountId: "acct_V2Recipient123",
+        expectedLivemode: false,
+        ...urls,
+      }),
+    ).resolves.toEqual({
+      url: "https://connect.stripe.test/onboard-one",
+      expiresAt: TEST_NOW + 10 * 60 * 1000,
+    });
+    await expect(
+      createAccountLinkForOperation(connectClientFixture(), {
+        operationId: LINK_OPERATION_ID,
+        connectedAccountId: "acct_V2Recipient123",
+        expectedLivemode: true,
+        ...urls,
+      }),
+    ).rejects.toThrow("must use HTTPS");
   });
 
   it("rejects wrong connected-account identity and test/live mode", async () => {
