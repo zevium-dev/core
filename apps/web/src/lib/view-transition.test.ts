@@ -45,6 +45,11 @@ describe("route view-transition policy", () => {
 
   it.each([
     ["/catalogue", "/catalogue/acme/weather", "api-surface-acme/weather"],
+    [
+      "/app/catalogue",
+      "/app/catalogue/acme/weather",
+      "api-surface-acme/weather",
+    ],
     ["/", "/catalogue/acme/weather", "api-surface-acme/weather"],
     ["/app/projects", "/app/projects/weather", "project-surface-weather"],
   ])(

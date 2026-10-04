@@ -31,6 +31,7 @@ import { Route as DocsConsumingRouteImport } from './routes/docs/consuming'
 import { Route as DocsPublishingRouteImport } from './routes/docs/publishing'
 import { Route as SignInSplatRouteImport } from './routes/sign-in.$'
 import { Route as SignUpSplatRouteImport } from './routes/sign-up.$'
+import { Route as AppCatalogueIndexRouteImport } from './routes/app/catalogue/index'
 import { Route as AppOrgIndexRouteImport } from './routes/app/org/index'
 import { Route as AppOrgCreateRouteImport } from './routes/app/org/create'
 import { Route as AppProjectsIndexRouteImport } from './routes/app/projects/index'
@@ -40,6 +41,7 @@ import { Route as AppSettingsIndexRouteImport } from './routes/app/settings/inde
 import { Route as AppSettingsActivityRouteImport } from './routes/app/settings/activity'
 import { Route as AppSettingsKeysRouteImport } from './routes/app/settings/keys'
 import { Route as CataloguePublisherHandleProjectSlugRouteImport } from './routes/catalogue/$publisherHandle.$projectSlug'
+import { Route as AppCataloguePublisherHandleProjectSlugRouteImport } from './routes/app/catalogue/$publisherHandle.$projectSlug'
 import { Route as AppProjectsProjectSlugSpecRouteImport } from './routes/app/projects/$projectSlug/spec'
 
 const IndexRoute = IndexRouteImport.update({
@@ -152,6 +154,11 @@ const SignUpSplatRoute = SignUpSplatRouteImport.update({
   path: '/sign-up/$',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AppCatalogueIndexRoute = AppCatalogueIndexRouteImport.update({
+  id: '/catalogue/',
+  path: '/catalogue/',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppOrgIndexRoute = AppOrgIndexRouteImport.update({
   id: '/',
   path: '/',
@@ -198,6 +205,12 @@ const CataloguePublisherHandleProjectSlugRoute =
     path: '/$publisherHandle/$projectSlug',
     getParentRoute: () => CatalogueRoute,
   } as any)
+const AppCataloguePublisherHandleProjectSlugRoute =
+  AppCataloguePublisherHandleProjectSlugRouteImport.update({
+    id: '/catalogue/$publisherHandle/$projectSlug',
+    path: '/catalogue/$publisherHandle/$projectSlug',
+    getParentRoute: () => AppRoute,
+  } as any)
 const AppProjectsProjectSlugSpecRoute =
   AppProjectsProjectSlugSpecRouteImport.update({
     id: '/spec',
@@ -234,9 +247,11 @@ export interface FileRoutesByFullPath {
   '/app/settings/activity': typeof AppSettingsActivityRoute
   '/app/settings/keys': typeof AppSettingsKeysRoute
   '/catalogue/$publisherHandle/$projectSlug': typeof CataloguePublisherHandleProjectSlugRoute
+  '/app/catalogue/': typeof AppCatalogueIndexRoute
   '/app/org/': typeof AppOrgIndexRoute
   '/app/projects/': typeof AppProjectsIndexRoute
   '/app/settings/': typeof AppSettingsIndexRoute
+  '/app/catalogue/$publisherHandle/$projectSlug': typeof AppCataloguePublisherHandleProjectSlugRoute
   '/app/projects/$projectSlug/spec': typeof AppProjectsProjectSlugSpecRoute
 }
 export interface FileRoutesByTo {
@@ -262,9 +277,11 @@ export interface FileRoutesByTo {
   '/app/settings/activity': typeof AppSettingsActivityRoute
   '/app/settings/keys': typeof AppSettingsKeysRoute
   '/catalogue/$publisherHandle/$projectSlug': typeof CataloguePublisherHandleProjectSlugRoute
+  '/app/catalogue': typeof AppCatalogueIndexRoute
   '/app/org': typeof AppOrgIndexRoute
   '/app/projects': typeof AppProjectsIndexRoute
   '/app/settings': typeof AppSettingsIndexRoute
+  '/app/catalogue/$publisherHandle/$projectSlug': typeof AppCataloguePublisherHandleProjectSlugRoute
   '/app/projects/$projectSlug/spec': typeof AppProjectsProjectSlugSpecRoute
 }
 export interface FileRoutesById {
@@ -297,9 +314,11 @@ export interface FileRoutesById {
   '/app/settings/activity': typeof AppSettingsActivityRoute
   '/app/settings/keys': typeof AppSettingsKeysRoute
   '/catalogue/$publisherHandle/$projectSlug': typeof CataloguePublisherHandleProjectSlugRoute
+  '/app/catalogue/': typeof AppCatalogueIndexRoute
   '/app/org/': typeof AppOrgIndexRoute
   '/app/projects/': typeof AppProjectsIndexRoute
   '/app/settings/': typeof AppSettingsIndexRoute
+  '/app/catalogue/$publisherHandle/$projectSlug': typeof AppCataloguePublisherHandleProjectSlugRoute
   '/app/projects/$projectSlug/spec': typeof AppProjectsProjectSlugSpecRoute
 }
 export interface FileRouteTypes {
@@ -333,9 +352,11 @@ export interface FileRouteTypes {
     | '/app/settings/activity'
     | '/app/settings/keys'
     | '/catalogue/$publisherHandle/$projectSlug'
+    | '/app/catalogue/'
     | '/app/org/'
     | '/app/projects/'
     | '/app/settings/'
+    | '/app/catalogue/$publisherHandle/$projectSlug'
     | '/app/projects/$projectSlug/spec'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -361,9 +382,11 @@ export interface FileRouteTypes {
     | '/app/settings/activity'
     | '/app/settings/keys'
     | '/catalogue/$publisherHandle/$projectSlug'
+    | '/app/catalogue'
     | '/app/org'
     | '/app/projects'
     | '/app/settings'
+    | '/app/catalogue/$publisherHandle/$projectSlug'
     | '/app/projects/$projectSlug/spec'
   id:
     | '__root__'
@@ -395,9 +418,11 @@ export interface FileRouteTypes {
     | '/app/settings/activity'
     | '/app/settings/keys'
     | '/catalogue/$publisherHandle/$projectSlug'
+    | '/app/catalogue/'
     | '/app/org/'
     | '/app/projects/'
     | '/app/settings/'
+    | '/app/catalogue/$publisherHandle/$projectSlug'
     | '/app/projects/$projectSlug/spec'
   fileRoutesById: FileRoutesById
 }
@@ -570,6 +595,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SignUpSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/app/catalogue/': {
+      id: '/app/catalogue/'
+      path: '/catalogue'
+      fullPath: '/app/catalogue/'
+      preLoaderRoute: typeof AppCatalogueIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/app/org/': {
       id: '/app/org/'
       path: '/'
@@ -632,6 +664,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/catalogue/$publisherHandle/$projectSlug'
       preLoaderRoute: typeof CataloguePublisherHandleProjectSlugRouteImport
       parentRoute: typeof CatalogueRoute
+    }
+    '/app/catalogue/$publisherHandle/$projectSlug': {
+      id: '/app/catalogue/$publisherHandle/$projectSlug'
+      path: '/catalogue/$publisherHandle/$projectSlug'
+      fullPath: '/app/catalogue/$publisherHandle/$projectSlug'
+      preLoaderRoute: typeof AppCataloguePublisherHandleProjectSlugRouteImport
+      parentRoute: typeof AppRoute
     }
     '/app/projects/$projectSlug/spec': {
       id: '/app/projects/$projectSlug/spec'
@@ -727,6 +766,8 @@ interface AppRouteChildren {
   AppProjectsRoute: typeof AppProjectsRouteWithChildren
   AppSettingsRoute: typeof AppSettingsRouteWithChildren
   AppIndexRoute: typeof AppIndexRoute
+  AppCatalogueIndexRoute: typeof AppCatalogueIndexRoute
+  AppCataloguePublisherHandleProjectSlugRoute: typeof AppCataloguePublisherHandleProjectSlugRoute
 }
 
 const AppRouteChildren: AppRouteChildren = {
@@ -736,6 +777,9 @@ const AppRouteChildren: AppRouteChildren = {
   AppProjectsRoute: AppProjectsRouteWithChildren,
   AppSettingsRoute: AppSettingsRouteWithChildren,
   AppIndexRoute: AppIndexRoute,
+  AppCatalogueIndexRoute: AppCatalogueIndexRoute,
+  AppCataloguePublisherHandleProjectSlugRoute:
+    AppCataloguePublisherHandleProjectSlugRoute,
 }
 
 const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)

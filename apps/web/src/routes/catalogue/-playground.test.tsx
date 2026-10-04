@@ -19,7 +19,7 @@ vi.mock("#/components/syntax-code", () => ({
 }));
 
 import { parsePublishedEndpoints } from "#/lib/openapi-reference";
-import { TryItPanel } from "./$publisherHandle.$projectSlug";
+import { TryItPanel } from "#/components/catalogue-detail";
 
 const endpoints = parsePublishedEndpoints(
   JSON.stringify({
@@ -40,6 +40,7 @@ const endpoints = parsePublishedEndpoints(
 function panel() {
   return (
     <TryItPanel
+      userId={null}
       publisherHandle="publisher"
       projectSlug="weather"
       endpoints={endpoints}
