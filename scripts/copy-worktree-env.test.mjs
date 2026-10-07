@@ -96,3 +96,36 @@ test("skips local checkouts and setup without T3 context", (t) => {
   symlinkSync(f.target, alias, "dir");
   assert.match(f.run(alias), /Env copy skipped/);
 });
+
+// Setup must work before interactive mise hooks refresh PATH.
+test("setup uses mise tools and stops when trust fails", (t) => {
+  const root = mkdtempSync(join(tmpdir(), "zevium setup "));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const log = join(root, "commands");
+  const mise = join(root, "mise");
+  writeFileSync(
+    mise,
+    '#!/bin/sh\nprintf "%s\\n" "$*" >> "$SETUP_LOG"\nif [ "$1" = trust ]; then exit "${TRUST_EXIT:-0}"; fi\n',
+  );
+  chmodSync(mise, 0o755);
+  const config = JSON.parse(
+    readFileSync(resolve(import.meta.dirname, "../t3.json"), "utf8"),
+  );
+  const command = config.scripts.find(
+    (entry) => entry.runOnWorktreeCreate,
+  ).command;
+  const env = { ...process.env, PATH: root, SETUP_LOG: log };
+  execFileSync("/bin/sh", ["-c", command], { env });
+  assert.deepEqual(readFileSync(log, "utf8").trim().split("\n"), [
+    "trust --quiet mise.toml",
+    "exec -- node scripts/copy-worktree-env.mjs",
+    "exec -- pnpm --config.confirm-modules-purge=false install --frozen-lockfile",
+  ]);
+  writeFileSync(log, "");
+  assert.throws(() =>
+    execFileSync("/bin/sh", ["-c", command], {
+      env: { ...env, TRUST_EXIT: "1" },
+    }),
+  );
+  assert.equal(readFileSync(log, "utf8"), "trust --quiet mise.toml\n");
+});

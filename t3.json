@@ -4,7 +4,7 @@
   "scripts": [
     {
       "name": "Setup Worktree",
-      "command": "node scripts/copy-worktree-env.mjs && pnpm --config.confirm-modules-purge=false install --frozen-lockfile",
+      "command": "mise trust --quiet mise.toml && mise exec -- node scripts/copy-worktree-env.mjs && mise exec -- pnpm --config.confirm-modules-purge=false install --frozen-lockfile",
       "icon": "configure",
       "runOnWorktreeCreate": true,
       "async": true
