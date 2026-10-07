@@ -349,7 +349,15 @@ describe("gateway pipeline", () => {
       const body = await req.text();
       return new Response(`echo:${body}`, {
         status: 200,
-        headers: { "content-type": "text/plain", "x-upstream": "yes" },
+        headers: {
+          "content-type": "text/plain",
+          "x-upstream": "yes",
+          connection: "x-private-hop, x-zevium-cost",
+          "x-private-hop": "relay-only",
+          "x-zevium-cost": "0",
+          "x-zevium-free-tier": "1",
+          "x-zevium-future-metadata": "spoofed",
+        },
       });
     });
 
@@ -373,6 +381,9 @@ describe("gateway pipeline", () => {
     expect(res.headers.get("x-zevium-cost")).toBe("3");
     expect(res.headers.get("x-zevium-request-id")).toBeTruthy();
     expect(res.headers.get("x-upstream")).toBe("yes");
+    expect(res.headers.has("x-private-hop")).toBe(false);
+    expect(res.headers.has("x-zevium-free-tier")).toBe(false);
+    expect(res.headers.has("x-zevium-future-metadata")).toBe(false);
     // Non-deprecated spec: no RFC 8594 deprecation signalling.
     expect(res.headers.get("Deprecation")).toBeNull();
     expect(res.headers.get("Sunset")).toBeNull();
@@ -451,6 +462,62 @@ describe("gateway pipeline", () => {
     expect(response.status).toBe(400);
     expect(calls).toHaveLength(0);
     expect((await walletStub(clerkOrgId).getState()).balance).toBe(100);
+  });
+
+  it("isolates shared-account retry labels by consumer while preserving same-consumer retries", async () => {
+    const publisher = "org_idempotency_publisher";
+    const upstreamKeys: string[] = [];
+    const { fetchImpl } = makeFetchMock((req) => {
+      expect(req.headers.get("authorization")).toBe(
+        "Bearer shared-publisher-account",
+      );
+      const key = req.headers.get("idempotency-key");
+      expect(key).toMatch(/^[0-9a-f]{64}$/);
+      upstreamKeys.push(key!);
+      return new Response("accepted");
+    });
+    for (const consumer of [
+      "org_retry_buyer_a",
+      "org_retry_buyer_a",
+      "org_retry_buyer_b",
+    ]) {
+      await installFixtures({
+        clerkOrgId: publisher,
+        keyOrgId: consumer,
+        creditOrgId: consumer,
+        credits: 30,
+        visibility: "public",
+        upstreamHeaders: { authorization: "Bearer shared-publisher-account" },
+        fetchImpl,
+      });
+      const res = await gatewayFetch("/gateway/acme/demo/echo", {
+        method: "POST",
+        headers: { "Idempotency-Key": "retry-label" },
+        body: "payload",
+      });
+      expect(res.status).toBe(200);
+      expect(res.headers.get("x-zevium-cost")).toBe("3");
+    }
+    expect(upstreamKeys).toHaveLength(3);
+    expect(upstreamKeys[0]).toBe(upstreamKeys[1]);
+    expect(upstreamKeys[2]).not.toBe(upstreamKeys[0]);
+    expect(upstreamKeys).not.toContain("retry-label");
+  });
+
+  it("does not invent an upstream idempotency key when none was supplied", async () => {
+    const { fetchImpl } = makeFetchMock((req) => {
+      expect(req.headers.has("idempotency-key")).toBe(false);
+      return new Response("accepted");
+    });
+    await installFixtures({
+      clerkOrgId: "org_no_retry_label",
+      credits: 10,
+      fetchImpl,
+    });
+    expect(
+      (await gatewayFetch("/gateway/acme/demo/echo", { method: "POST" }))
+        .status,
+    ).toBe(200);
   });
 
   it("strips consumer auth and injects publisher upstream credentials", async () => {
