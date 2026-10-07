@@ -6,7 +6,7 @@
  *
  * Tools:
  *   search_apis  — catalogue search with compact pricing
- *   get_api_docs — endpoint list + pricing + usage notes
+ *   get_api_docs — call reference + pricing + usage notes
  *   call_api     — metered execute via the SAME pipeline (no side door)
  *
  * call_api REQUIRES a consumer API key from the MCP request Authorization /
@@ -15,6 +15,7 @@
 
 import { isPublicCopySetAllowed, parseSpec } from "@zevium/shared";
 import { listAllPublic, type CatalogueSource } from "./catalogue-source";
+import { apiDocsFromSpec } from "./mcp-api-docs";
 import { endpointsFromSpec, type DiscoveryEndpoint } from "./discovery";
 import { extractApiKey } from "./key-verifier";
 import {
@@ -93,7 +94,7 @@ const TOOLS: ToolDef[] = [
   {
     name: "get_api_docs",
     description:
-      "Read endpoint definitions, prices, and usage notes for one published API. Use the publisher handle and project slug returned by search_apis.",
+      "Read parameters, request/response schemas and examples, prices, and usage notes for one published API. Use the publisher handle and project slug returned by search_apis.",
     inputSchema: {
       type: "object",
       properties: {
@@ -344,12 +345,12 @@ async function handleGetApiDocs(
     return toolError("Published API unavailable");
   }
 
-  let endpoints: DiscoveryEndpoint[] = [];
+  let reference: ReturnType<typeof apiDocsFromSpec>;
   let title: string | undefined;
   let version: string | undefined;
   try {
     const parsed = parseSpec(published.spec);
-    endpoints = endpointsFromSpec(parsed);
+    reference = apiDocsFromSpec(parsed);
     title = parsed.info?.title;
     version = parsed.info?.version;
   } catch {
@@ -366,7 +367,7 @@ async function handleGetApiDocs(
       name: title ?? project,
       version,
       gatewayBaseUrl: `${origin}/gateway/${org}/${project}`,
-      endpoints,
+      ...reference,
     },
     trustedUsageNotes: [
       "Authenticate every call with Authorization: Bearer <ak_…|zev_…> or x-api-key.",
@@ -374,6 +375,8 @@ async function handleGetApiDocs(
       "Non-2xx upstream responses refund the reservation — consumer pays only on success.",
       "Pricing is declared per-operation as x-zevium-cost in the OpenAPI spec.",
       "Use search_apis to find a match, get_api_docs to read its reference, and call_api to execute an endpoint.",
+      "Substitute path parameters and encode query parameters in call_api path; send body with the documented Content-Type header.",
+      "Local component refs use publisherData.components. External and non-component refs, security metadata, response links/headers, and content encoding metadata are omitted; no references are fetched.",
     ],
   };
 

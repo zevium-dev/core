@@ -16,6 +16,7 @@ import {
   type SpecSource,
 } from "./spec-source";
 import { filterRequestHeaders, filterResponseHeaders } from "./headers";
+import { scopeUpstreamIdempotencyKey } from "./idempotency";
 import type { UsageSink } from "./usage";
 import { logDependencyFailure } from "./telemetry";
 import { jsonError } from "./errors";
@@ -562,6 +563,18 @@ export async function handleGatewayRequest(
   const upstreamHeaders = filterRequestHeaders(request.headers);
   for (const [name, value] of Object.entries(published.upstreamHeaders ?? {})) {
     upstreamHeaders.set(name, value);
+  }
+  const idempotencyKey = upstreamHeaders.get("idempotency-key");
+  if (idempotencyKey !== null) {
+    upstreamHeaders.set(
+      "idempotency-key",
+      await scopeUpstreamIdempotencyKey(idempotencyKey, {
+        consumerOrgId: verified.orgId,
+        projectId: published.projectId,
+        method: request.method,
+        upstreamUrl: upstreamUrl.toString(),
+      }),
+    );
   }
   const init: RequestInit & { duplex?: "half" } = {
     method: request.method,
