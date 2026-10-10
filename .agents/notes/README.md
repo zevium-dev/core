@@ -23,7 +23,7 @@ Code wins. When a note and the code disagree, fix the note in the same change.
 | [decisions/](decisions/README.md) | Dated decision log (`YYYY-MM-DD-slug.md`), with index                                                     |
 | [research/](research/)            | Market and vendor research. Input to decisions, never itself a decision                                   |
 | [sessions/](sessions/)            | Dated logs of substantial user ↔ agent discussions: asked, found, decided, proposed                       |
-| [findings/](findings/)            | Lessons, review findings, and run outputs (bruv `wisdomDir`). `values.md` = standing lessons              |
+| [findings/](findings/)            | Lessons and review findings. `values.md` = standing lessons                                               |
 | [history/](history/)              | Read-only archive: build plan and wave prompts from the greenfield build. Do not update                   |
 
 ## Features

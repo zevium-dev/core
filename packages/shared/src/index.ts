@@ -1,7 +1,7 @@
 // Shared between apps/web and apps/gateway: OpenAPI spec parsing,
 // x-zevium-* extension extraction, credit math. Grows with the build.
 
-/** $1 = 10,000 credits (agents/notes/features/pricing.md). One global constant, never per-API. */
+/** $1 = 10,000 credits (.agents/notes/features/pricing.md). One global constant, never per-API. */
 export const CREDITS_PER_DOLLAR = 10_000;
 
 /** Platform cut: 5%. Publishers keep 95%. */

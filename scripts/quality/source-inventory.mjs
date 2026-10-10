@@ -42,7 +42,7 @@ export const structuredDataExtensions = new Set([
 export const repositoryExclusions = Object.freeze([
   { path: ".git", provenance: "Git administrative data" },
   { path: ".claude", provenance: "agent-skill compatibility alias" },
-  { path: ".agents", provenance: "vendored agent skill assets" },
+  { path: ".agents", provenance: "agent skills and committed agent notes" },
   { path: ".project", provenance: "local project orchestration metadata" },
   { path: ".cache", provenance: "tool cache" },
   { path: ".vercel", provenance: "Vercel generated state" },

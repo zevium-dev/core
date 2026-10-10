@@ -68,7 +68,7 @@ body {
   --sidebar-border: oklch(0.922 0 0);
   --sidebar-ring: oklch(0.708 0 0);
 
-  /* Motion tokens (agents/notes/design/design-system.md) */
+  /* Motion tokens (.agents/notes/design/design-system.md) */
   --ease: cubic-bezier(0.16, 1, 0.3, 1);
   --dur-instant: 150ms;
   --dur-fast: 250ms;
@@ -192,7 +192,7 @@ body {
   }
 }
 
-/* Hard-load content enter (agents/notes/design/design-system.md) */
+/* Hard-load content enter (.agents/notes/design/design-system.md) */
 .content-enter {
   animation: content-enter var(--dur-page) var(--ease) both;
 }

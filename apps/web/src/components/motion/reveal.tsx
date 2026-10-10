@@ -19,7 +19,7 @@ type RevealProps = {
 };
 
 /**
- * Scroll-entrance wrapper (agents/notes/design/design-system.md `<Reveal>`).
+ * Scroll-entrance wrapper (.agents/notes/design/design-system.md `<Reveal>`).
  * Visible-first DIST rise, viewport once, margin -60px.
  * Final state when reduced-motion or active view transition.
  */

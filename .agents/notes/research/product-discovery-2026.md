@@ -3,8 +3,8 @@
 > Research captured 2026-07-11; factual corrections applied 2026-08-12.
 > This file records market input available during product discovery. It is not
 > current product status, architecture, operating evidence, legal review, or
-> external sign-off. agents/notes/product and agents/notes/features own product and user
-> experience, agents/notes/architecture owns current technical decisions, and code wins when it
+> external sign-off. .agents/notes/product and .agents/notes/features own product and user
+> experience, .agents/notes/architecture owns current technical decisions, and code wins when it
 > disagrees with any document.
 
 ## Verified market events available to the research
