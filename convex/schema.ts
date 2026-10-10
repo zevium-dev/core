@@ -42,6 +42,16 @@ export default defineSchema({
     .index("by_slug", ["slug"])
     .index("by_public_handle", ["publicHandle"]),
 
+  /** Permanent anti-farming claims; independent of deletable user mirrors. */
+  signupCreditGrants: defineTable({
+    clerkOrgId: v.string(),
+    creatorClerkUserId: v.string(),
+    organizationId: v.id("organizations"),
+    grantedAt: v.number(),
+  })
+    .index("by_clerk_org", ["clerkOrgId"])
+    .index("by_creator", ["creatorClerkUserId"]),
+
   /** Durable delete-before-create guard for out-of-order Clerk webhooks. */
   organizationTombstones: defineTable({
     clerkOrgId: v.string(),
@@ -613,10 +623,11 @@ export default defineSchema({
       "projectId",
       "settleRefId",
     ])
-    .index("by_org_project_billing_settlement", [
+    .index("by_org_project_review_eligibility", [
       "organizationId",
       "projectId",
       "billingOutcome",
+      "qualityOutcome",
       "settleRefId",
     ])
     .index("by_org_endpoint_at", ["organizationId", "endpoint", "at"])

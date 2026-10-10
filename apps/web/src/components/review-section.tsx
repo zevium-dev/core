@@ -149,8 +149,8 @@ export function ReviewSection({ projectId }: { projectId: Id<"projects"> }) {
                 Verified consumer reviews
               </CardTitle>
               <CardDescription>
-                Each organization that has completed a settled gateway call can
-                publish one review. Reviews appear publicly as “Verified
+                Each organization that has completed a successful gateway call
+                can publish one review. Reviews appear publicly as “Verified
                 consumer.”
               </CardDescription>
             </div>

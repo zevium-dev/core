@@ -23,6 +23,7 @@ type ClerkUserEventData = {
 };
 type ClerkOrgEventData = {
   id: string;
+  created_by?: string | null;
   name: string;
   slug: string;
   image_url?: string | null;
@@ -83,6 +84,7 @@ http.route({
           eventType: event.type,
           clerkOrgId: data.id,
           name: data.name,
+          creatorClerkUserId: data.created_by ?? undefined,
           slug: data.slug,
           imageUrl: data.image_url ?? undefined,
         });
