@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import type { Doc, Id } from "#/lib/convex-data-model";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   act,
@@ -10,7 +11,7 @@ import {
 } from "@testing-library/react";
 import { getFunctionName } from "convex/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Doc, Id } from "#/lib/convex-data-model";
+import { WebhooksCard } from "./project/webhooks-card";
 
 const state = vi.hoisted(() => ({ rotate: vi.fn(), reveal: vi.fn() }));
 vi.mock("@convex-dev/react-query", () => ({
@@ -34,7 +35,6 @@ vi.mock("@convex-dev/react-query", () => ({
       ? state.rotate
       : state.reveal,
 }));
-import { WebhooksCard } from "./project-settings-panel";
 
 afterEach(() => {
   cleanup();
@@ -82,6 +82,20 @@ function metadata(version: number) {
 }
 
 describe("one-time webhook secrets", () => {
+  it("keeps a typed URL when a rotation or endpoint metadata push arrives", async () => {
+    const client = setup();
+    const input = await screen.findByLabelText("Endpoint URL");
+    fireEvent.change(input, {
+      target: { value: "https://local.example/new-hook" },
+    });
+    await act(async () => {
+      client.setQueryData(["webhooks:getEndpoint"], metadata(2));
+    });
+    expect(
+      (screen.getByLabelText("Endpoint URL") as HTMLInputElement).value,
+    ).toBe("https://local.example/new-hook");
+  });
+
   it.each(["before", "after"])(
     "keeps rotated secret when realtime metadata arrives %s response",
     async (order) => {

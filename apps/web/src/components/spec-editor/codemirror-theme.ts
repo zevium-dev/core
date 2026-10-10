@@ -1,7 +1,7 @@
 import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
+import type { Extension } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { tags as t } from "@lezer/highlight";
-import type { Extension } from "@codemirror/state";
 
 /**
  * CodeMirror theme from shadcn CSS vars — native light + dark.
@@ -72,8 +72,8 @@ export function createShadcnEditorTheme(): Extension {
         borderLeftColor: "var(--muted-foreground)",
       },
       ".cm-lintRange-error": {
-        backgroundImage:
-          "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='6' height='3'%3E%3Cpath d='M0 3 L3 0 L6 3' fill='none' stroke='%23ef4444' stroke-width='1'/%3E%3C/svg%3E\")",
+        backgroundImage: "none",
+        textDecoration: "underline wavy var(--destructive)",
       },
       ".cm-panels": {
         backgroundColor: "var(--card)",

@@ -222,6 +222,7 @@ describe("publish readiness validity", () => {
     const save = await asAdmin(t).mutation(api.specs.saveDraft, {
       projectId,
       spec: DRAFT_B,
+      baseHash: await draftFingerprint(DRAFT_A),
     });
     expect(save.ok).toBe(true);
     expect(save.draftHash).toBe(await draftFingerprint(DRAFT_B));
@@ -249,6 +250,7 @@ describe("publish readiness validity", () => {
     const initialSave = await admin.mutation(api.specs.saveDraft, {
       projectId,
       spec: DRAFT_B,
+      baseHash: await draftFingerprint(DRAFT_A),
     });
     if (!initialSave.ok || !initialSave.draftHash) {
       throw new Error("Expected initial draft save to succeed");
@@ -265,6 +267,7 @@ describe("publish readiness validity", () => {
     const identicalSave = await admin.mutation(api.specs.saveDraft, {
       projectId,
       spec: DRAFT_B,
+      baseHash: await draftFingerprint(DRAFT_A),
     });
     expect(identicalSave).toMatchObject({
       ok: true,
@@ -278,6 +281,7 @@ describe("publish readiness validity", () => {
     await admin.mutation(api.specs.saveDraft, {
       projectId,
       spec: DRAFT_A,
+      baseHash: await draftFingerprint(DRAFT_B),
     });
     await expect(
       admin.query(api.publishReadiness.getCurrent, { projectId }),
@@ -412,6 +416,7 @@ describe("publish readiness validity", () => {
     await asAdmin(t).mutation(api.specs.saveDraft, {
       projectId,
       spec: DRAFT_B,
+      baseHash: await draftFingerprint(DRAFT_A),
     });
     const newHash = await draftFingerprint(DRAFT_B);
     expect(
@@ -431,5 +436,92 @@ describe("publish readiness validity", () => {
     await expect(
       asAdmin(t).query(api.publishReadiness.getCurrent, { projectId }),
     ).resolves.toMatchObject({ current: true });
+  });
+});
+
+describe("draft compare-and-swap", () => {
+  it("rejects a stale session, preserves the canonical draft and readiness, and allows explicit retry", async () => {
+    const t = convexTest(schema, modules);
+    const { projectId } = await seed(t);
+    const admin = asAdmin(t);
+    const baseHash = await draftFingerprint(DRAFT_A);
+    const saved = await admin.mutation(api.specs.saveDraft, {
+      projectId,
+      spec: DRAFT_B,
+      baseHash,
+    });
+    expect(saved.ok).toBe(true);
+    const currentHash = await draftFingerprint(DRAFT_B);
+    await t.mutation(internal.publishReadiness.recordPassingTest, {
+      projectId,
+      draftHash: currentHash,
+      healthCheckUrl: "https://api.example.com/ping",
+      healthCheckMethod: "GET",
+    });
+    const conflict = await admin.mutation(api.specs.saveDraft, {
+      projectId,
+      spec: DRAFT_A,
+      baseHash,
+    });
+    expect(conflict).toMatchObject({
+      ok: false,
+      conflict: true,
+      draft: DRAFT_B,
+      draftHash: currentHash,
+      lastSavedAt: saved.lastSavedAt,
+    });
+    expect(await admin.query(api.specs.getDraft, { projectId })).toMatchObject({
+      draft: DRAFT_B,
+    });
+    expect(
+      await admin.query(api.publishReadiness.getCurrent, { projectId }),
+    ).toMatchObject({ current: true });
+    expect(
+      await admin.mutation(api.specs.saveDraft, {
+        projectId,
+        spec: DRAFT_A,
+        baseHash: currentHash,
+      }),
+    ).toMatchObject({ ok: true, draft: DRAFT_A });
+  });
+  it("rejects a missing base against an existing draft and accepts the first save only once", async () => {
+    const t = convexTest(schema, modules);
+    const { projectId } = await seed(t);
+    const admin = asAdmin(t);
+    expect(
+      await admin.mutation(api.specs.saveDraft, {
+        projectId,
+        spec: DRAFT_B,
+        baseHash: null,
+      }),
+    ).toMatchObject({ ok: false, conflict: true });
+    await t.run(async (ctx) => {
+      const row = await ctx.db
+        .query("specs")
+        .withIndex("by_project", (q) => q.eq("projectId", projectId))
+        .unique();
+      if (row) await ctx.db.delete(row._id);
+    });
+    expect(
+      await admin.mutation(api.specs.saveDraft, {
+        projectId,
+        spec: DRAFT_A,
+        baseHash: null,
+      }),
+    ).toMatchObject({ ok: true });
+    expect(
+      await admin.mutation(api.specs.saveDraft, {
+        projectId,
+        spec: DRAFT_B,
+        baseHash: null,
+      }),
+    ).toMatchObject({ ok: false, conflict: true });
+    expect(
+      await admin.mutation(api.specs.saveDraft, {
+        projectId,
+        spec: DRAFT_A,
+        baseHash: null,
+      }),
+    ).toMatchObject({ ok: true });
   });
 });

@@ -1,7 +1,7 @@
 # Publishing specs
 
-> Status: built (P2 rollback not built) · Updated: 2026-10-10
-> Code: `convex/projects.ts`, `convex/specs.ts`, `convex/specImports.ts`, `convex/specImportLimits.ts`, `convex/publishReadiness.ts`, `convex/publishReadinessAction.ts`, `packages/shared/src/openapi.ts`, `packages/shared/src/validate.ts`, `apps/web/src/routes/app/projects/`, `apps/web/src/components/spec-editor/`, `apps/web/src/lib/spec-import.server.ts`
+> Status: built (editor/settings correctness #362 fixed; P2 rollback not built) · Updated: 2026-10-10
+> Code: `convex/projects.ts`, `convex/specs.ts`, `convex/specImportLimits.ts`, `convex/publishReadiness.ts`, `convex/publishReadinessAction.ts`, `packages/shared/src/openapi.ts`, `packages/shared/src/validate.ts`, `apps/web/src/routes/app/projects/`, `apps/web/src/components/spec-editor/`, `apps/web/src/components/project/`, `apps/web/src/lib/spec-import.server.ts`
 > Related: [pricing](pricing.md), [listing-lifecycle](listing-lifecycle.md), [quality-signals](quality-signals.md), [upstream-credentials](upstream-credentials.md), [catalogue-search](catalogue-search.md), [accounts-orgs](accounts-orgs.md), [product overview](../product/overview.md)
 
 Organizations publish APIs as projects, each described by an OpenAPI spec. The spec is the product: upstream address, endpoints, per-endpoint pricing and free tier all live in it. Publishers draft, validate and publish immutable semver versions self-serve, with no platform-team involvement.
@@ -59,15 +59,21 @@ Sign up → Create org → Create project
 From [architecture overview](../architecture/overview.md):
 
 - `projects`, `specs` + `specVersions` (immutable published spec bodies; deprecation metadata remains mutable)
-- `specImportRateLeases` (durable organization/member fixed-window import bounds)
+- `specImportLimits` (durable per-principal/global import concurrency and fixed-window rate bounds); the unused `specImportRateLeases` table is retained for separate schema cleanup.
 - **Spec editor dependencies**: the JSON parser and syntax highlighter share one workspace-pinned `@lezer/common` version. Separate module instances allocate conflicting NodeProp identities and can crash highlighting even when both versions satisfy package ranges.
 
 Code facts (read from source 2026-10-10, not from TECH.md):
 
 - `specs.saveDraft` / `specs.publish` / `specs.listVersions` / `specs.getVersion`. Publish rejects non-semver (`isValidSemver`), rejects an already-published version (`Version X already published (immutable)`), and requires a current publish-readiness record (`publishReadiness.readinessValidity`: status ok, `READINESS_TTL_MS` 15 min, same saved-draft SHA-256). Saving a draft deletes the readiness record. Publish schedules `internal.search.embedProject`.
 - Connection gate: `publishReadinessAction.testConnection` (org admin only) probes the spec's single `x-zevium-health-check` operation without publisher credentials; detail in [quality-signals](quality-signals.md).
-- URL import: `apps/web/src/lib/spec-import.server.ts`, HTTPS only, public-IP DNS check, JSON drafts ≤384 KiB, YAML input ≤256 KiB (converted client-side to canonical JSON). Two limiters run: `specImports.acquireLease` (fixed window 10/60s per org+member on `specImportRateLeases`) and `specImportLimits.acquire/renew/release` (per-principal concurrency 2, 10/60s, 30s lease; global concurrency 40, 200/window) on table `specImportLimits`.
-- Version view/diff: `components/spec-editor/version-dialog.tsx` shows a published version and a line diff against the saved draft. No rollback.
+- URL import: `apps/web/src/lib/spec-import.server.ts`, HTTPS only, public-IP DNS check, JSON drafts ≤384 KiB, YAML input ≤256 KiB (converted client-side to canonical JSON). The live path uses `specImportLimits.acquire/renew/release` (per-principal concurrency 2, 10/60s, 30s lease; global concurrency 40, 200/window) on table `specImportLimits`. The duplicate `fetchSpecFromUrlServerBoundary` pipeline and its unused `specImports.acquireLease` mutation were removed after checking callers. `text/plain` responses (including GitHub raw) pass the same validation, DNS, redirect, size, and lease checks.
+- Version view/diff: `components/spec-editor/version-dialog.tsx` shows a published version and a read-only `@codemirror/merge` unified diff against the saved draft. Bounded scanning/time and collapsed unchanged regions replace the quadratic LCS matrix. No rollback.
+
+- **Concurrent saves**: `specs.saveDraft` requires `baseHash` (`null` only for an absent row); it compares the current SHA-256 inside the mutation transaction. A conflict returns the canonical draft/hash/timestamp without changing the draft or readiness. Identical retries remain idempotent. `useSpecDraft` keeps the editing base stable across remote pushes and saves in flight; autosave pauses on conflict. Reload adopts the latest known snapshot; explicit overwrite retries against its hash, so another intervening save can still conflict.
+- **Editor ownership**: the workspace is keyed by project ID. Draft reducer, YAML conversion, publish controls, version dialog, lifecycle dialogs, and rail components are separate modules. `SaveStatusLabel` owns the one-second clock. Publish version suggestions are derived until typed; realtime version updates never reset typed text. Navigation has one save-and-leave completion path and does not leave if new text was typed during the save.
+- **Editor feedback**: pricing rail writes valid numbers immediately and keeps raw text such as `1.` until blur; failed `applyPricingEdit` writes show a human error. Endpoint rows are parsed once for the rail and pricing summary. Health results are tied to the tested draft. CodeMirror uses its own debounced linter and syntax-tree diagnostic ranges, without React lint state.
+- **YAML bounds**: byte/line preflight stays outside the killable worker; alias/expansion validation runs inside it, so markdown bullets and scalar text are not mistaken for aliases. A ready handshake separates the 10-second module startup bound from the 250 ms hard parser deadline. Conversion revisions are canceled on replacement, reload, rail edits, and unmount.
+- **Settings**: project-ID-keyed cards derive untouched fields from realtime data and retain local overrides while typing. Convex subscriptions own updates; there are no cache invalidations or manual optimistic cache writes in editor/settings. Admin/owner access follows the shared privileged-role predicate. Webhook URL input survives rotation; reveal-once version tracking remains intact.
 
 ## Decisions
 
@@ -81,5 +87,5 @@ Code facts (read from source 2026-10-10, not from TECH.md):
 
 - FLOW routes `/app/organizations/{org}/projects/...`; code routes `/app/projects/...` (org from active session). FLOW 2.3 already says URLs do not repeat the org slug; fix FLOW route lines.
 - FLOW "spec-diff between versions": code diffs a published version against the saved draft only, not version-to-version. Rollback (P2) absent.
-- TECH.md lists only `specImportRateLeases`; code also has `specImportLimits` table + module (concurrency/global bounds). Document it or delete one limiter.
+- Resolved #362: the duplicate import limiter entry point was dead; the active `specImportLimits` path is documented above. The unused table remains outside this change’s schema scope.
 - Research ideas above (claimable listings, founding-publisher fee lock) undecided.

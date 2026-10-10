@@ -1,4 +1,5 @@
-import { ChevronDown, FileUp, Link2, FileCode2 } from "lucide-react";
+import { useMutation } from "@tanstack/react-query";
+import { ChevronDown, FileCode2, FileUp, Link2 } from "lucide-react";
 import { useRef, useState } from "react";
 import { toast } from "sonner";
 
@@ -20,7 +21,11 @@ import {
 import { Input } from "#/components/ui/input";
 import { Label } from "#/components/ui/label";
 import { humanError } from "#/lib/human-error";
-import { fetchSpecFromUrl, parseImportSpecUrl } from "#/lib/spec-import";
+import {
+  fetchSpecFromUrl,
+  parseImportSpecUrl,
+  type ImportSpecUrlInput,
+} from "#/lib/spec-import";
 import { convertSpecInputToJson } from "#/lib/spec-yaml";
 
 import { OPENAPI_TEMPLATE } from "./template";
@@ -34,7 +39,6 @@ export function EditorToolbar({ onApplyText, disabled }: EditorToolbarProps) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [urlOpen, setUrlOpen] = useState(false);
   const [url, setUrl] = useState("");
-  const [urlPending, setUrlPending] = useState(false);
 
   async function applyImportedRaw(raw: string) {
     const converted = await convertSpecInputToJson(raw);
@@ -58,24 +62,23 @@ export function EditorToolbar({ onApplyText, disabled }: EditorToolbarProps) {
     }
   }
 
-  async function onImportUrl() {
-    const parsed = parseImportSpecUrl({ url });
-    if (!parsed.ok) {
-      toast.error(parsed.error);
-      return;
-    }
-    setUrlPending(true);
-    try {
-      const result = await fetchSpecFromUrl({ data: parsed.data });
-      await applyImportedRaw(result.text);
+  const { mutate: importUrl, isPending: urlPending } = useMutation({
+    mutationFn: async (data: ImportSpecUrlInput) => {
+      const result = await fetchSpecFromUrl({ data });
+      return convertSpecInputToJson(result.text);
+    },
+    onSuccess: (converted) => {
+      if (!converted.ok) {
+        toast.error(converted.error);
+        return;
+      }
+      onApplyText(converted.json);
       setUrlOpen(false);
       setUrl("");
-    } catch (err) {
-      toast.error(humanError(err, "Could not import from URL"));
-    } finally {
-      setUrlPending(false);
-    }
-  }
+    },
+    onError: (error: unknown) =>
+      toast.error(humanError(error, "Could not import from URL")),
+  });
 
   return (
     <>
@@ -151,7 +154,11 @@ export function EditorToolbar({ onApplyText, disabled }: EditorToolbarProps) {
               Cancel
             </Button>
             <Button
-              onClick={() => void onImportUrl()}
+              onClick={() => {
+                const parsed = parseImportSpecUrl({ url });
+                if (parsed.ok) importUrl(parsed.data);
+                else toast.error(parsed.error);
+              }}
               disabled={urlPending || url.trim() === ""}
             >
               {urlPending ? "Fetching…" : "Import"}

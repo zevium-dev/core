@@ -1,7 +1,7 @@
 # Upstream credentials (publisher secrets)
 
 > Status: built (P0) · Updated: 2026-10-10
-> Code: `convex/upstreamCredentials.ts`, `convex/lib/credentialCrypto.ts`, `convex/http.ts` (`/gateway-spec`), `apps/gateway/src/spec-source.ts`, `apps/gateway/src/pipeline.ts`, `apps/web/src/components/project-settings-panel.tsx` (`UpstreamCredentialsCard`), `apps/web/src/routes/app/projects/$projectSlug.tsx`
+> Code: `convex/upstreamCredentials.ts`, `convex/lib/credentialCrypto.ts`, `convex/http.ts` (`/gateway-spec`), `apps/gateway/src/spec-source.ts`, `apps/gateway/src/pipeline.ts`, `apps/web/src/components/project/credentials-card.tsx` (`UpstreamCredentialsCard`), `apps/web/src/routes/app/projects/$projectSlug.tsx`
 > Related: [gateway](gateway.md), [publishing-specs](publishing-specs.md), [webhooks-notifications](webhooks-notifications.md), [accounts-orgs](accounts-orgs.md)
 
 Publishers store the credentials their upstream API requires; the gateway attaches them to every forwarded call on the publisher's behalf. Consumers never see or supply them. Without this, no real authenticated API can be listed.

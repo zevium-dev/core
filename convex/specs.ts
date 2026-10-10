@@ -61,6 +61,7 @@ export const saveDraft = mutation({
   args: {
     projectId: v.id("projects"),
     spec: v.string(),
+    baseHash: v.union(v.string(), v.null()),
   },
   handler: async (
     ctx,
@@ -69,7 +70,8 @@ export const saveDraft = mutation({
     ok: boolean;
     issues: SpecIssue[];
     draft: string;
-    draftHash?: string;
+    draftHash?: string | null;
+    conflict?: boolean;
     lastSavedAt: number;
   }> => {
     await requireProjectMember(ctx, args.projectId);
@@ -101,6 +103,22 @@ export const saveDraft = mutation({
         draft: existing.draft,
         draftHash: await draftFingerprint(existing.draft),
         lastSavedAt: existing.lastSavedAt,
+      };
+    }
+
+    // The read and write share one Convex transaction: a concurrent save
+    // retries against the latest row, then fails this compare-and-swap.
+    const currentHash = existing
+      ? await draftFingerprint(existing.draft)
+      : null;
+    if (args.baseHash !== currentHash) {
+      return {
+        ok: false,
+        conflict: true,
+        issues: [],
+        draft: existing?.draft ?? "",
+        draftHash: currentHash,
+        lastSavedAt: existing?.lastSavedAt ?? 0,
       };
     }
 

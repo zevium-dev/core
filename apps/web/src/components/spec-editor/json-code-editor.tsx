@@ -1,17 +1,10 @@
-import { json } from "@codemirror/lang-json";
+import { json, jsonLanguage, jsonParseLinter } from "@codemirror/lang-json";
 import { linter, lintGutter, type Diagnostic } from "@codemirror/lint";
 import type { Extension } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
-import { collectOpenApiSpecIssues, type SpecIssue } from "@zevium/shared";
 import CodeMirror, { type ReactCodeMirrorRef } from "@uiw/react-codemirror";
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type RefObject,
-} from "react";
+import { collectOpenApiSpecIssues } from "@zevium/shared";
+import { useMemo, type RefObject } from "react";
 
 import { cn } from "#/lib/utils";
 
@@ -24,15 +17,52 @@ const EditorViewMinHeight = EditorView.theme({
   ".cm-scroller": { minHeight: "28rem" },
 });
 
-function issuesToDiagnostics(doc: string, issues: SpecIssue[]): Diagnostic[] {
-  if (issues.length === 0) return [];
-  const end = Math.max(doc.length, 0);
-  return issues.map((issue) => ({
-    from: 0,
-    to: Math.min(end, Math.max(1, end)),
-    severity: issue.level === "error" ? "error" : "warning",
-    message: `${issue.message} (${issue.path})`,
-  }));
+const syntaxLint = jsonParseLinter();
+function specLint(view: EditorView): Diagnostic[] {
+  const doc = view.state.doc.toString();
+  if (doc.trim() === "") return [];
+  const syntaxIssues = syntaxLint(view);
+  if (syntaxIssues.length) return syntaxIssues;
+  const ranges = new Map<string, { from: number; to: number }>();
+  type Node = ReturnType<typeof jsonLanguage.parser.parse>["topNode"];
+  function visit(node: Node, path: string) {
+    ranges.set(path, { from: node.from, to: node.to });
+    if (node.name === "Object") {
+      for (let child = node.firstChild; child; child = child.nextSibling) {
+        if (child.name !== "Property") continue;
+        const name = child.firstChild;
+        const value = child.lastChild;
+        if (!name || !value) continue;
+        const key = JSON.parse(doc.slice(name.from, name.to)) as string;
+        visit(
+          value,
+          path === "$.paths" ? `${path}["${key}"]` : `${path}.${key}`,
+        );
+      }
+    } else if (node.name === "Array") {
+      let index = 0;
+      for (let child = node.firstChild; child; child = child.nextSibling) {
+        if (child.name === "[" || child.name === "]" || child.name === ",")
+          continue;
+        visit(child, `${path}[${index++}]`);
+      }
+    }
+  }
+  const root = jsonLanguage.parser.parse(doc).topNode.firstChild;
+  if (root) visit(root, "$");
+  return collectOpenApiSpecIssues(doc).map((issue) => {
+    let path = issue.path;
+    while (!ranges.has(path) && path !== "$") {
+      path = path.replace(/(?:\.[^.[\]]+|\[[^\]]*\])$/, "");
+      if (!path) break;
+    }
+    const range = ranges.get(path);
+    return {
+      ...(range ?? { from: 0, to: Math.min(1, doc.length) }),
+      severity: issue.level === "error" ? "error" : "warning",
+      message: `${issue.message} (${issue.path})`,
+    };
+  });
 }
 
 export type JsonCodeEditorProps = {
@@ -52,36 +82,11 @@ export function JsonCodeEditor({
   readOnly = false,
   editorRef,
 }: JsonCodeEditorProps) {
-  const [lintDoc, setLintDoc] = useState(value);
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => {
-    clearTimeout(timerRef.current ?? undefined);
-    timerRef.current = setTimeout(() => {
-      setLintDoc(value);
-      timerRef.current = null;
-    }, LINT_DEBOUNCE_MS);
-    return () => {
-      clearTimeout(timerRef.current ?? undefined);
-    };
-  }, [value]);
-
-  const lintSource = useCallback(
-    (view: { state: { doc: { toString(): string } } }) => {
-      const text = view.state.doc.toString();
-      const source = text === lintDoc || lintDoc === "" ? text : lintDoc;
-      if (source.trim() === "") return [];
-      const issues = collectOpenApiSpecIssues(source);
-      return issuesToDiagnostics(source, issues);
-    },
-    [lintDoc],
-  );
-
   const extensions: Extension[] = useMemo(
     () => [
       json(),
       lintGutter(),
-      linter(lintSource, { delay: LINT_DEBOUNCE_MS }),
+      linter(specLint, { delay: LINT_DEBOUNCE_MS }),
       createShadcnEditorTheme(),
       EditorViewMinHeight,
       EditorView.contentAttributes.of({
@@ -90,7 +95,7 @@ export function JsonCodeEditor({
           : "OpenAPI specification",
       }),
     ],
-    [lintSource, readOnly],
+    [readOnly],
   );
 
   return (

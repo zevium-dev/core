@@ -1,4 +1,4 @@
-import { extractPricing, parseSpec } from "@zevium/shared";
+import { type SpecEndpointRow } from "./spec-endpoints";
 
 import { creditsLabel } from "./credits-label";
 
@@ -9,42 +9,20 @@ export type PricingSummary = {
   freeTier: number;
 };
 
-export function summarizeDraftPricing(draft: string): PricingSummary | null {
-  const trimmed = draft.trim();
-  if (trimmed === "") {
-    return {
-      endpointCount: 0,
-      minCredits: null,
-      maxCredits: null,
-      freeTier: 0,
-    };
+export function summarizeEndpoints(
+  endpoints: SpecEndpointRow[],
+): PricingSummary {
+  let minCredits: number | null = null;
+  let maxCredits: number | null = null;
+  let freeTier = 0;
+  for (const endpoint of endpoints) {
+    minCredits =
+      minCredits === null ? endpoint.cost : Math.min(minCredits, endpoint.cost);
+    maxCredits =
+      maxCredits === null ? endpoint.cost : Math.max(maxCredits, endpoint.cost);
+    if ((endpoint.freeTier ?? 0) > 0) freeTier += 1;
   }
-
-  try {
-    const spec = parseSpec(trimmed);
-    let endpointCount = 0;
-    let minCredits: number | null = null;
-    let maxCredits: number | null = null;
-    let freeTier = 0;
-
-    for (const pathItem of Object.values(spec.paths)) {
-      for (const op of Object.values(pathItem)) {
-        if (op === undefined || Array.isArray(op)) continue;
-        endpointCount += 1;
-        const pricing = extractPricing(op);
-        const cost = pricing.cost;
-        minCredits = minCredits === null ? cost : Math.min(minCredits, cost);
-        maxCredits = maxCredits === null ? cost : Math.max(maxCredits, cost);
-        if (pricing.freeTier !== undefined && pricing.freeTier > 0) {
-          freeTier += 1;
-        }
-      }
-    }
-
-    return { endpointCount, minCredits, maxCredits, freeTier };
-  } catch {
-    return null;
-  }
+  return { endpointCount: endpoints.length, minCredits, maxCredits, freeTier };
 }
 
 export function formatPricingSummary(summary: PricingSummary): string {
