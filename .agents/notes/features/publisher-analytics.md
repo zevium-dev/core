@@ -27,6 +27,10 @@ Publisher golden path step: "watch Analytics tick (calls, p95, errors, revenue)"
 ## Tech
 
 - **Shared presentation (#363)**: daily and endpoint tables use stock shadcn Table; day labels use shared UTC `lib/format.ts`. Visibility mutations rely on Convex subscriptions without manual cache invalidation.
+  **Dogfood — 2026-10-10**
+
+- **P2 #398:** two 7-credit calls produced 13.30 publisher credits in the earnings ledger, but Analytics rounded that figure to 13. Calls, success rate and gross spend agreed; this finding concerns display precision, not a ledger discrepancy.
+  Evidence, workarounds and scope: [dogfood findings](../findings/dogfood-2026-10-10.md).
 
 ### Domain
 

@@ -7,9 +7,19 @@ Status legend: **built** · **partial** · **planned**. Status is set by each fe
 
 ## Now — launch blockers
 
-1. #91 #313 #314 **Publish initial production catalogue** (now via house listings, [decision](../decisions/2026-10-10-house-supply-via-aggregators.md)). Live catalogue has zero public APIs. Publish 1–3 owned, reliable APIs with real upstreams, credentials, descriptions, tags, pricing, and agent-readable docs. (Landing fallback teaser cards were removed 2026-08-12, commit `85aad61`; landing now shows live listings or an empty state.) → [publishing-specs](../features/publishing-specs.md), [landing-docs](../features/landing-docs.md)
+1. #91 #313 #314 **Publish initial production catalogue** (now via house listings, [decision](../decisions/2026-10-10-house-supply-via-aggregators.md)). Anonymous dogfood on 2026-10-10 found one public API, Markdown to HTML; initial supply is still thin. Publish 1–3 owned, reliable APIs with real upstreams, credentials, descriptions, tags, pricing, and agent-readable docs. (Landing fallback teaser cards were removed 2026-08-12, commit `85aad61`; landing now shows live listings or an empty state.) → [publishing-specs](../features/publishing-specs.md), [landing-docs](../features/landing-docs.md)
 2. #315 **Prove real payment and settlement journey.** Configure staging env/secrets for the payment drill (`e2e/04-payment-drill.sh`, run in the preview E2E suite; the `payment-drill.yml` workflow named in older notes does not exist); manually run authenticated publish/call plus real Stripe Checkout, refund, and Connect settlement drill. Scheduled drills run deterministic tests only. → [wallet-billing](../features/wallet-billing.md), [earnings-payouts](../features/earnings-payouts.md)
 3. #315 **Finish external production gates.** Written Stripe approval for pooled prepaid credits across independent publishers; accept platform/MoR legal and tax obligations; fix supported countries/currency; write refund, dispute, debt, risk-hold, and payout policies; complete operational runbook from [stripe-connect-discovery](../research/stripe-connect-discovery.md).
+
+## Dogfood regressions — 2026-10-10
+
+Baseline `eaa7eff`; [journeys, evidence and limits](../findings/dogfood-2026-10-10.md). Issues are new findings, not completed fixes.
+
+- **P0:** #385 key issuance/deployment blocked by missing index; #389 credentialed publication blocked after passing health check. → [api-keys](../features/api-keys.md), [publishing-specs](../features/publishing-specs.md)
+- **P1:** #384 broken seed; #387 local Convex blocked by CSP. → [dev-environment](../architecture/dev-environment.md)
+- **P1:** #392 incorrect local discovery origin; #395 MCP query parameters fail; #396 MCP 402 loses recovery metadata. → [agent-surface](../features/agent-surface.md)
+- **P1:** #393 publisher visibility webhook omitted. → [webhooks-notifications](../features/webhooks-notifications.md)
+- **P2:** #386 docs main landmark; #397 app navigation/heading accessibility; #398 fractional earnings display; #399 invalid inline-price recovery. → [landing-docs](../features/landing-docs.md), [accounts-orgs](../features/accounts-orgs.md), [publisher-analytics](../features/publisher-analytics.md), [publishing-specs](../features/publishing-specs.md)
 
 ## Next — P0 product gaps
 

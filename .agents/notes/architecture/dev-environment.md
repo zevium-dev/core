@@ -5,6 +5,16 @@
 
 Facts an agent needs before running anything locally. Hard-won; keep them. If a fact stops being true, fix it here in the same change.
 
+## Dogfood setup findings — 2026-10-10
+
+Baseline `eaa7eff`; see [full findings and workaround limits](../findings/dogfood-2026-10-10.md).
+
+- **P1 #384:** `pnpm seed` fails module resolution; running via `tsx` exposes a deleted shared export. The documented seed command is currently broken on this baseline.
+- **P0 #385:** normal Convex startup typecheck fails on missing `keySettings.by_owner`; skipping typecheck only permits diagnosis, not working key issuance.
+- **P1 #387:** local anonymous Convex uses a `ws://127.0.0.1:3210` connection blocked by web CSP. Workspace remains loading. Fix CSP before treating this setup as supported.
+- `CONVEX_AGENT_MODE=anonymous` successfully provisioned an isolated backend. Repoint root/web/gateway local env files and set required backend env vars on that backend; do not push functions to shared dev during concurrent agent work. Auth, gateway and Stripe sandbox worked after the explicit workarounds in the findings.
+- The existing seed test user's documented password did not work during this run; email test OTP did. Do not reset a shared test password merely to finish dogfood.
+
 ## Commands
 
 ```bash

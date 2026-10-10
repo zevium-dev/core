@@ -27,6 +27,13 @@ Public front door and integration help. Landing page pitches the agent-first mar
 
 ## Tech
 
+**Dogfood — 2026-10-10**
+
+- **P2 #386:** production docs have no main landmark.
+- Existing **#326** also covers client-specific config friction: Claude Code rejected the generic URL/headers JSON; adding `"type": "http"` connected to local MCP. Production `/llms.txt` remains 404 (**#322**).
+
+Evidence, workarounds and scope: [dogfood findings](../findings/dogfood-2026-10-10.md).
+
 ### Code map (observed)
 
 - Landing data: `catalogue.listPublic` via `convexQuery`; `pickLandingTeasers(liveItems, 3)` maps live items only. Empty → "No public APIs yet" card with "Publish an API" CTA; error → "Catalogue unavailable" + Retry. Skeleton only while pending with no items.

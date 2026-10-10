@@ -25,6 +25,10 @@ Two outbound channels. Publisher webhooks: one signed HTTPS endpoint per project
 ## Tech
 
 - **Realtime bell (#363)**: `usePaginatedQuery(listForOrg)` keeps every loaded page reactive, including mark-read/all-read changes. `unreadForOrg` subscribes to the whole-org count independently of loaded rows; both queries share the same bounded legacy count fallback. Switching organizations remounts bell UI and resets pagination. No cached older pages or optimistic local read timestamps.
+  **Dogfood — 2026-10-10**
+
+- **P1 #393:** normal publisher visibility changes do not emit the documented webhook event. The admin mutation emits it, but `projects.update` does not. A local `spec.published` webhook delivered successfully in one attempt.
+  Evidence, workarounds and scope: [dogfood findings](../findings/dogfood-2026-10-10.md).
 
 ### Implementation notes
 

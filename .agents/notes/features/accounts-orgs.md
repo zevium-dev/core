@@ -54,6 +54,13 @@ Sign-up, sign-in, and the organization model. Everything in Zevium is org-scoped
 
 ## Tech
 
+**Dogfood — 2026-10-10**
+
+- **P2 #397:** authenticated sidebar lacks a navigation landmark and settings skip heading levels. Separate publisher/consumer orgs were created successfully under one test identity; this does not validate cross-user RBAC.
+- Local isolated-backend loading blocker **#387** is owned by [dev-environment](../architecture/dev-environment.md).
+
+Evidence, workarounds and scope: [dogfood findings](../findings/dogfood-2026-10-10.md).
+
 ### Why Clerk
 
 - Org-scoped billing is a product decision ([product overview](../product/overview.md)); Clerk ships prebuilt `<OrganizationSwitcher/>`, `<OrganizationProfile/>`, invitations, roles — weeks of UI we don't build

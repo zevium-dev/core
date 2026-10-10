@@ -46,6 +46,15 @@ Item 4 (machine-native payments, x402): [machine-payments](machine-payments.md).
 
 ## Tech
 
+**Dogfood — 2026-10-10**
+
+- **P1 #392:** local discovery/MCP metadata generates `http://gateway.zevium.dev/...` instead of the local gateway origin.
+- **P1 #395:** `call_api` treats a query-bearing path as the operation pathname and returns 404; the equivalent direct request succeeds.
+- **P1 #396:** MCP 402 sanitization drops the direct gateway payment reason, required/available credits and recovery actions. Zero balance still blocks execution.
+- Initialization, tool listing, search/docs and a queryless paid call worked; Claude Code connected after adding the HTTP transport type to config (existing **#326**).
+
+Evidence, workarounds and scope: [dogfood findings](../findings/dogfood-2026-10-10.md).
+
 - **MCP call reference**: `search_apis` and `/discovery` stay compact. Only `get_api_docs` projects call docs from the immutable published spec through `mcp-api-docs.ts`, using shared parsed types: inherited path parameters with operation overrides keyed by `(in, name)`, request/response media types, allowlisted schemas, inline/named examples, and reachable `#/components/{schemas,parameters,requestBodies,responses,examples}/<name>` definitions. Refs stay refs; a visited worklist handles recursive components and URI fragment decoding followed by JSON Pointer name escaping without expansion or network fetches. Unsupported/external refs, servers, security schemes, extensions, response headers/links, and media encoding metadata are omitted. Missing local refs remain unresolved. Schema/data walks cap at depth 64 and 50,000 nodes and fail with generic unreadable-spec tool error. All publisher text/schema/example payloads remain under `publisherData`; example/default/enum/const JSON keys are payload data, not metadata. Trusted usage notes are static. No registry or pricing store changes.
 - **Body handling** (MCP part): MCP `call_api` reuses the same authenticated, metered pipeline, then buffers its JSON-RPC request and upstream response in Worker memory with explicit 1 MiB limits because MCP tool results embed response text. Neither path persists payload bodies in application tables.
 - **Buffered-result billing (#361)**: MCP passes a `prepareResponse` hook into `handleGatewayRequest`. The pipeline passes it into `forward`, which consumes and bounds the upstream body inside its fetch/error boundary before `finalize` settles or refunds. Oversize (declared or streamed), body-read errors, and 10s execution timeouts refund paid holds and restore free-tier allowance. Failed usage records carry zero cost. Aborted late responses cannot settle; `waitUntil` keeps refund cleanup alive after the timeout response. Once the complete result is buffered, the timeout race stops before billing finalization, so a slow settlement cannot turn a charge into a timeout tool error. Direct gateway streaming is unchanged.
