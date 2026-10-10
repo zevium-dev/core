@@ -1,3 +1,13 @@
+import { StatusBadge } from "#/components/status-badge";
+import { formatDateTime, formatNumber } from "#/lib/format";
+import {
+  Table,
+  TableHeader,
+  TableBody,
+  TableRow,
+  TableHead,
+  TableCell,
+} from "#/components/ui/table";
 import { useAuth, useOrganization } from "@clerk/tanstack-react-start";
 import { isPrivilegedOrgRole } from "#/lib/org-capabilities";
 import { convexQuery } from "@convex-dev/react-query";
@@ -41,17 +51,6 @@ import {
   nextOnboardingStep,
   shouldShowOnboarding,
 } from "#/lib/onboarding";
-
-const NUMBER_FORMATTER = new Intl.NumberFormat("en-US");
-const DATE_TIME_FORMATTER = new Intl.DateTimeFormat("en-US", {
-  year: "numeric",
-  month: "short",
-  day: "numeric",
-  hour: "numeric",
-  minute: "2-digit",
-  timeZone: "UTC",
-  timeZoneName: "short",
-});
 
 export const Route = createFileRoute("/app/")({
   loader: async ({ context }) => {
@@ -326,63 +325,66 @@ function DashboardContent({
                 ))}
               </div>
               <div className="hidden overflow-x-auto sm:block">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b text-left text-muted-foreground">
-                      <th scope="col" className="px-2 py-2 font-medium">
+                <Table className="w-full text-sm">
+                  <TableHeader>
+                    <TableRow className="border-b text-left text-muted-foreground">
+                      <TableHead scope="col" className="px-2 py-2 font-medium">
                         When
-                      </th>
-                      <th scope="col" className="px-2 py-2 font-medium">
+                      </TableHead>
+                      <TableHead scope="col" className="px-2 py-2 font-medium">
                         API
-                      </th>
-                      <th scope="col" className="px-2 py-2 font-medium">
+                      </TableHead>
+                      <TableHead scope="col" className="px-2 py-2 font-medium">
                         Endpoint
-                      </th>
-                      <th scope="col" className="px-2 py-2 font-medium">
+                      </TableHead>
+                      <TableHead scope="col" className="px-2 py-2 font-medium">
                         Status
-                      </th>
-                      <th
+                      </TableHead>
+                      <TableHead
                         scope="col"
                         className="px-2 py-2 font-medium text-right"
                       >
                         Credits
-                      </th>
-                      <th
+                      </TableHead>
+                      <TableHead
                         scope="col"
                         className="px-2 py-2 font-medium text-right"
                       >
                         Latency
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
+                      </TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
                     {overview.recent.map((event) => (
-                      <tr key={event._id} className="border-b last:border-0">
-                        <td className="whitespace-nowrap px-2 py-2.5 text-muted-foreground">
+                      <TableRow
+                        key={event._id}
+                        className="border-b last:border-0"
+                      >
+                        <TableCell className="whitespace-nowrap px-2 py-2.5 text-muted-foreground">
                           {formatDateTime(event.at)}
-                        </td>
-                        <td className="px-2 py-2.5">
+                        </TableCell>
+                        <TableCell className="px-2 py-2.5">
                           {event.projectName ?? event.projectSlug ?? "—"}
-                        </td>
-                        <td className="px-2 py-2.5 font-mono text-xs">
+                        </TableCell>
+                        <TableCell className="px-2 py-2.5 font-mono text-xs">
                           <span className="text-muted-foreground">
                             {event.method}
                           </span>{" "}
                           {event.endpoint}
-                        </td>
-                        <td className="px-2 py-2.5">
+                        </TableCell>
+                        <TableCell className="px-2 py-2.5">
                           <StatusBadge status={event.status} />
-                        </td>
-                        <td className="px-2 py-2.5 text-right tabular-nums">
+                        </TableCell>
+                        <TableCell className="px-2 py-2.5 text-right tabular-nums">
                           {formatNumber(event.credits)}
-                        </td>
-                        <td className="px-2 py-2.5 text-right tabular-nums text-muted-foreground">
+                        </TableCell>
+                        <TableCell className="px-2 py-2.5 text-right tabular-nums text-muted-foreground">
                           {formatLatency(event.latencyMs)}
-                        </td>
-                      </tr>
+                        </TableCell>
+                      </TableRow>
                     ))}
-                  </tbody>
-                </table>
+                  </TableBody>
+                </Table>
               </div>
             </>
           )}
@@ -506,16 +508,6 @@ function OnboardingChecklist({
   );
 }
 
-function StatusBadge({ status }: { status: number }) {
-  if (status >= 200 && status < 400) {
-    return <Badge variant="secondary">{status}</Badge>;
-  }
-  if (status >= 400 && status < 500) {
-    return <Badge variant="outline">{status}</Badge>;
-  }
-  return <Badge variant="destructive">{status}</Badge>;
-}
-
 function OnboardingSkeleton() {
   return (
     <Card>
@@ -577,14 +569,6 @@ function DashboardSkeleton() {
       </Card>
     </div>
   );
-}
-
-function formatNumber(value: number): string {
-  return NUMBER_FORMATTER.format(value);
-}
-
-function formatDateTime(timestamp: number): string {
-  return DATE_TIME_FORMATTER.format(new Date(timestamp));
 }
 
 function formatLatency(latencyMs: number): string {

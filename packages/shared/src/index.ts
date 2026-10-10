@@ -154,3 +154,5 @@ export {
   type RegistryVerifiedKeyProjection,
   type RegistryVerifiedKeyRotationProjection,
 } from "./registry-sync.js";
+
+export { synthesize } from "./mock.js";

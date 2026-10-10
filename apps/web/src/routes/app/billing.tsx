@@ -1,3 +1,12 @@
+import { formatDateTime, formatMoney } from "#/lib/format";
+import {
+  Table,
+  TableHeader,
+  TableBody,
+  TableRow,
+  TableHead,
+  TableCell,
+} from "#/components/ui/table";
 import { useOrganization } from "@clerk/tanstack-react-start";
 import { convexQuery } from "@convex-dev/react-query";
 import { useMutation, useQueries, useQuery } from "@tanstack/react-query";
@@ -426,59 +435,59 @@ function PaymentHistory({
               ))}
             </div>
             <div className="hidden overflow-x-auto sm:block">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b text-left text-muted-foreground">
-                    <th scope="col" className="px-2 py-2 font-medium">
+              <Table className="w-full text-sm">
+                <TableHeader>
+                  <TableRow className="border-b text-left text-muted-foreground">
+                    <TableHead scope="col" className="px-2 py-2 font-medium">
                       Status
-                    </th>
-                    <th
+                    </TableHead>
+                    <TableHead
                       scope="col"
                       className="px-2 py-2 font-medium text-right"
                     >
                       Amount
-                    </th>
-                    <th
+                    </TableHead>
+                    <TableHead
                       scope="col"
                       className="px-2 py-2 font-medium text-right"
                     >
                       Credits
-                    </th>
-                    <th scope="col" className="px-2 py-2 font-medium">
+                    </TableHead>
+                    <TableHead scope="col" className="px-2 py-2 font-medium">
                       Date
-                    </th>
-                    <th scope="col" className="px-2 py-2 font-medium">
+                    </TableHead>
+                    <TableHead scope="col" className="px-2 py-2 font-medium">
                       Details
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
+                    </TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
                   {payments.map((payment, index) => (
-                    <tr
+                    <TableRow
                       key={`${payment.createdAt}:${payment.status}:${index}`}
                       className="border-b last:border-0"
                     >
-                      <td className="px-2 py-2.5">
+                      <TableCell className="px-2 py-2.5">
                         <Badge variant={paymentStatusVariant(payment.status)}>
                           {paymentStatusLabel(payment.status)}
                         </Badge>
-                      </td>
-                      <td className="px-2 py-2.5 text-right tabular-nums">
+                      </TableCell>
+                      <TableCell className="px-2 py-2.5 text-right tabular-nums">
                         {formatMoney(payment.amount, payment.currency)}
-                      </td>
-                      <td className="px-2 py-2.5 text-right tabular-nums">
+                      </TableCell>
+                      <TableCell className="px-2 py-2.5 text-right tabular-nums">
                         {formatCredits(payment.credits)}
-                      </td>
-                      <td className="px-2 py-2.5 whitespace-nowrap text-muted-foreground">
+                      </TableCell>
+                      <TableCell className="px-2 py-2.5 whitespace-nowrap text-muted-foreground">
                         {formatDateTime(payment.createdAt)}
-                      </td>
-                      <td className="max-w-64 truncate px-2 py-2.5 text-muted-foreground">
+                      </TableCell>
+                      <TableCell className="max-w-64 truncate px-2 py-2.5 text-muted-foreground">
                         {payment.failureReason ?? "—"}
-                      </td>
-                    </tr>
+                      </TableCell>
+                    </TableRow>
                   ))}
-                </tbody>
-              </table>
+                </TableBody>
+              </Table>
             </div>
           </>
         )}
@@ -715,24 +724,30 @@ function UsageBreakdownTable({
         <p className="text-sm text-muted-foreground">No breakdown available.</p>
       ) : (
         <div className="overflow-x-auto rounded-md border">
-          <table className="w-full min-w-[22rem] text-left text-sm">
-            <thead className="border-b bg-muted/40 text-xs text-muted-foreground">
-              <tr>
-                <th scope="col" className="px-3 py-2 font-medium">
+          <Table className="w-full min-w-[22rem] text-left text-sm">
+            <TableHeader className="border-b bg-muted/40 text-xs text-muted-foreground">
+              <TableRow>
+                <TableHead scope="col" className="px-3 py-2 font-medium">
                   Name
-                </th>
-                <th scope="col" className="px-3 py-2 text-right font-medium">
+                </TableHead>
+                <TableHead
+                  scope="col"
+                  className="px-3 py-2 text-right font-medium"
+                >
                   Calls
-                </th>
-                <th scope="col" className="px-3 py-2 text-right font-medium">
+                </TableHead>
+                <TableHead
+                  scope="col"
+                  className="px-3 py-2 text-right font-medium"
+                >
                   Credits
-                </th>
-              </tr>
-            </thead>
-            <tbody>
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {rows.map((row) => (
-                <tr key={row.id} className="border-b last:border-0">
-                  <th scope="row" className="px-3 py-2 font-medium">
+                <TableRow key={row.id} className="border-b last:border-0">
+                  <TableHead scope="row" className="px-3 py-2 font-medium">
                     {row.search ? (
                       <Link
                         to="/app/settings/activity"
@@ -747,42 +762,21 @@ function UsageBreakdownTable({
                     <span className="block font-mono text-xs font-normal text-muted-foreground">
                       {row.detail}
                     </span>
-                  </th>
-                  <td className="px-3 py-2 text-right tabular-nums">
+                  </TableHead>
+                  <TableCell className="px-3 py-2 text-right tabular-nums">
                     {formatCredits(row.calls)}
-                  </td>
-                  <td className="px-3 py-2 text-right tabular-nums">
+                  </TableCell>
+                  <TableCell className="px-3 py-2 text-right tabular-nums">
                     {formatCredits(row.credits)}
-                  </td>
-                </tr>
+                  </TableCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         </div>
       )}
     </div>
   );
-}
-
-const DATE_TIME_FORMATTER = new Intl.DateTimeFormat("en-US", {
-  year: "numeric",
-  month: "short",
-  day: "numeric",
-  hour: "numeric",
-  minute: "2-digit",
-  timeZone: "UTC",
-  timeZoneName: "short",
-});
-
-function formatDateTime(timestamp: number): string {
-  return DATE_TIME_FORMATTER.format(timestamp);
-}
-
-function formatMoney(amount: number, currency: string): string {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: currency.toUpperCase(),
-  }).format(amount / 100);
 }
 
 function BillingSkeleton() {

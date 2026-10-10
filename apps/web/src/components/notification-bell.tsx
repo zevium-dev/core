@@ -1,3 +1,5 @@
+import { ListBoundary } from "#/components/list-boundary";
+import { usePaginatedQuery } from "convex/react";
 import { convexQuery, useConvexMutation } from "@convex-dev/react-query";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
@@ -26,10 +28,10 @@ import {
 } from "#/components/ui/popover";
 import { useActiveOrgSlug } from "#/hooks/use-active-org-slug";
 import { api } from "#/lib/convex-api";
-import type { Doc, Id } from "#/lib/convex-data-model";
+import type { Id } from "#/lib/convex-data-model";
 import { humanError } from "#/lib/human-error";
 import { DUR, EASE, SPRING, STAGGER } from "#/lib/motion";
-import { formatRelativeTime } from "#/lib/relative-time";
+import { formatRelativeTime } from "#/lib/format";
 import { vtState } from "#/lib/vt";
 import { useHydratedReducedMotion } from "#/hooks/use-hydrated-reduced-motion";
 
@@ -74,14 +76,6 @@ function destinationForKind(
 const TIME_TICK_MS = 60_000;
 const NOTIFICATION_PAGE_SIZE = 20;
 
-type BellNotification = Pick<
-  Doc<"notifications">,
-  "_id" | "kind" | "title" | "body" | "readAt" | "createdAt"
-> & {
-  publisherHandle?: string;
-  projectSlug?: string;
-};
-
 function hrefForNotification(
   kind: string,
   publisherHandle: string | undefined,
@@ -104,7 +98,11 @@ export function NotificationBell() {
   if (!orgSlug) {
     return <DisabledBell ready={isLoaded} />;
   }
-  return <BellWithOrg orgSlug={orgSlug} />;
+  return (
+    <ListBoundary label="notifications" resetKey={orgSlug}>
+      <BellWithOrg key={orgSlug} orgSlug={orgSlug} />
+    </ListBoundary>
+  );
 }
 
 /** Static, disabled bell — shown before org loads or when none is selected. */
@@ -125,29 +123,28 @@ function DisabledBell({ ready }: { ready: boolean }) {
 function BellWithOrg({ orgSlug }: { orgSlug: string }) {
   const reduce = useHydratedReducedMotion();
   const [open, setOpen] = useState(false);
-  const [cursor, setCursor] = useState<string | null>(null);
-  const [olderPages, setOlderPages] = useState<BellNotification[]>([]);
-  // Keep relative timestamps fresh while the bell is mounted.
+  // Refresh relative timestamps only while notifications are visible.
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
+    if (!open) return;
     const id = setInterval(() => setNow(Date.now()), TIME_TICK_MS);
     return () => clearInterval(id);
-  }, []);
+  }, [open]);
 
-  const notificationsQuery = useQuery(
-    convexQuery(api.notifications.listForOrg, {
-      orgSlug,
-      paginationOpts: { numItems: NOTIFICATION_PAGE_SIZE, cursor },
-    }),
+  const {
+    results: page,
+    status,
+    loadMore,
+  } = usePaginatedQuery(
+    api.notifications.listForOrg,
+    { orgSlug },
+    { initialNumItems: NOTIFICATION_PAGE_SIZE },
   );
-
-  const unread = notificationsQuery.isSuccess
-    ? notificationsQuery.data.unreadCount
-    : 0;
-  const unreadCountCapped = notificationsQuery.isSuccess
-    ? notificationsQuery.data.unreadCountCapped
-    : false;
-
+  const unreadQuery = useQuery(
+    convexQuery(api.notifications.unreadForOrg, { orgSlug }),
+  );
+  const unread = unreadQuery.data?.unreadCount ?? 0;
+  const unreadCountCapped = unreadQuery.data?.unreadCountCapped ?? false;
   const markReadMut = useConvexMutation(api.notifications.markRead);
   const markAllMut = useConvexMutation(api.notifications.markAllRead);
 
@@ -166,11 +163,7 @@ function BellWithOrg({ orgSlug }: { orgSlug: string }) {
       toast.error(humanError(err, "Could not mark all read")),
   });
 
-  const data = notificationsQuery.isSuccess
-    ? notificationsQuery.data
-    : undefined;
-  const pagePending = notificationsQuery.isPending;
-  const page = [...olderPages, ...(data?.page ?? [])];
+  const pagePending = status === "LoadingMore";
   const unreadLabel = unreadCountCapped || unread > 99 ? "99+" : String(unread);
   const unreadAccessibleLabel = unreadCountCapped
     ? "more than 99 unread"
@@ -178,31 +171,11 @@ function BellWithOrg({ orgSlug }: { orgSlug: string }) {
 
   function onRowClick(notificationId: Id<"notifications">) {
     markRead(notificationId);
-    setOlderPages((rows) =>
-      rows.map((row) =>
-        row._id === notificationId ? { ...row, readAt: Date.now() } : row,
-      ),
-    );
     setOpen(false);
   }
 
-  function loadOlder() {
-    if (!data || data.isDone || pagePending) return;
-    setOlderPages((rows) => [...rows, ...data.page]);
-    setCursor(data.continueCursor);
-  }
-
   return (
-    <Popover
-      open={open}
-      onOpenChange={(next) => {
-        if (next && !open) {
-          setCursor(null);
-          setOlderPages([]);
-        }
-        setOpen(next);
-      }}
-    >
+    <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <Button
           variant="ghost"
@@ -244,7 +217,7 @@ function BellWithOrg({ orgSlug }: { orgSlug: string }) {
           </Button>
         </div>
 
-        {notificationsQuery.isPending ? (
+        {status === "LoadingFirstPage" ? (
           <div className="space-y-3 p-3" aria-label="Loading notifications">
             {Array.from({ length: 3 }).map((_, index) => (
               <div key={index} className="flex items-start gap-2.5">
@@ -255,21 +228,6 @@ function BellWithOrg({ orgSlug }: { orgSlug: string }) {
                 </div>
               </div>
             ))}
-          </div>
-        ) : notificationsQuery.isError ? (
-          <div className="space-y-3 px-4 py-8 text-center" role="alert">
-            <p className="text-sm font-medium">Notifications did not load</p>
-            <p className="text-xs text-muted-foreground">
-              Check your connection, then retry.
-            </p>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => void notificationsQuery.refetch()}
-            >
-              Retry
-            </Button>
           </div>
         ) : page.length === 0 ? (
           <EmptyState />
@@ -296,7 +254,7 @@ function BellWithOrg({ orgSlug }: { orgSlug: string }) {
             ))}
           </ul>
         )}
-        {data && !data.isDone ? (
+        {status === "CanLoadMore" || pagePending ? (
           <div className="border-t p-2">
             <Button
               type="button"
@@ -304,7 +262,7 @@ function BellWithOrg({ orgSlug }: { orgSlug: string }) {
               size="sm"
               className="w-full"
               disabled={pagePending}
-              onClick={loadOlder}
+              onClick={() => loadMore(NOTIFICATION_PAGE_SIZE)}
             >
               {pagePending ? "Loading…" : "Load older notifications"}
             </Button>

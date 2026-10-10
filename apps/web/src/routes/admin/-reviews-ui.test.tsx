@@ -116,7 +116,7 @@ describe("actual moderation route surface", () => {
     fireEvent.change(reason, { target: { value: "Policy violation" } });
     fireEvent.click(screen.getByRole("button", { name: "Confirm action" }));
     const alert = await screen.findByRole("alert");
-    expect(alert.textContent).toContain("Audit store unavailable");
+    expect(alert.textContent).toContain("Could not moderate review");
     expect(reason.getAttribute("aria-describedby")).toBe("moderation-error");
     await waitFor(() => expect(document.activeElement).toBe(alert));
   });

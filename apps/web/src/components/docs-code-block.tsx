@@ -1,9 +1,6 @@
-import { Check, Copy } from "lucide-react";
-import { useState } from "react";
-import { toast } from "sonner";
+import { CopyButton } from "#/components/copy-button";
 
 import { SyntaxCode } from "#/components/syntax-code";
-import { Button } from "#/components/ui/button";
 import { cn } from "#/lib/utils";
 
 type DocsCodeBlockProps = {
@@ -18,19 +15,6 @@ type DocsCodeBlockProps = {
  * semantic-token styling. All colors are semantic tokens (.agents/notes/design/design-system.md).
  */
 export function DocsCodeBlock({ code, lang, className }: DocsCodeBlockProps) {
-  const [copied, setCopied] = useState(false);
-
-  async function onCopy() {
-    try {
-      await navigator.clipboard.writeText(code);
-      setCopied(true);
-      toast.success("Copied");
-      window.setTimeout(() => setCopied(false), 1500);
-    } catch {
-      toast.error("Could not copy — select and copy manually");
-    }
-  }
-
   return (
     <div
       className={cn(
@@ -42,24 +26,7 @@ export function DocsCodeBlock({ code, lang, className }: DocsCodeBlockProps) {
         <span className="font-mono text-[11px] uppercase tracking-wide text-foreground">
           {lang ?? "code"}
         </span>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          className="h-7 gap-1.5 px-2 text-xs text-foreground"
-          onClick={() => void onCopy()}
-          aria-label="Copy code"
-        >
-          {copied ? (
-            <Check
-              data-icon="inline-start"
-              className="size-3.5 text-foreground"
-            />
-          ) : (
-            <Copy data-icon="inline-start" className="size-3.5" />
-          )}
-          {copied ? "Copied" : "Copy"}
-        </Button>
+        <CopyButton text={code} variant="ghost" aria-label="Copy code" />
       </div>
       <pre
         tabIndex={0}

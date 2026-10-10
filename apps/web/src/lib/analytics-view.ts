@@ -1,3 +1,4 @@
+import { formatDate } from "#/lib/format";
 export const ANALYTICS_RANGES = [7, 30, 90] as const;
 
 export type AnalyticsRange = (typeof ANALYTICS_RANGES)[number];
@@ -6,13 +7,6 @@ export function parseAnalyticsRange(value: unknown): AnalyticsRange | null {
   const numeric = typeof value === "string" ? Number(value) : value;
   return ANALYTICS_RANGES.find((range) => range === numeric) ?? null;
 }
-
-const UTC_DAY_FORMATTER = new Intl.DateTimeFormat("en-US", {
-  year: "numeric",
-  month: "short",
-  day: "numeric",
-  timeZone: "UTC",
-});
 
 const DAY_MS = 86_400_000;
 
@@ -30,7 +24,7 @@ export function buildDailyCallSeries(
     const at = rangeStart + index * DAY_MS;
     return {
       at,
-      label: UTC_DAY_FORMATTER.format(at),
+      label: formatDate(at),
       calls,
     };
   });

@@ -199,7 +199,7 @@ describe("quality and real review surface", () => {
     state.save.mockRejectedValueOnce(new Error("Settlement proof expired"));
     fireEvent.click(screen.getByRole("button", { name: "Publish review" }));
     const alert = await screen.findByRole("alert");
-    expect(alert.textContent).toContain("Settlement proof expired");
+    expect(alert.textContent).toContain("Review action failed");
     expect(document.activeElement).toBe(alert);
     view.unmount();
   });
@@ -229,7 +229,7 @@ describe("quality and real review surface", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Submit report" }));
     const alert = await screen.findByRole("alert");
-    expect(alert.textContent).toContain("Report quota reached");
+    expect(alert.textContent).toContain("Could not report review");
     expect(reason.getAttribute("aria-describedby")).toBe("report-error");
     await waitFor(() => expect(document.activeElement).toBe(alert));
   });

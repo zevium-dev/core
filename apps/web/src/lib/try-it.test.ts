@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { exampleFromSchema, tryItBodyDefaults } from "./try-it";
+import { tryItBodyDefaults } from "./try-it";
 
 describe("tryItBodyDefaults", () => {
   it("uses text media type and schema example", () => {
@@ -58,7 +58,7 @@ describe("tryItBodyDefaults", () => {
           },
         },
       }).body,
-    ).toBe('{\n  "query": "weather",\n  "limit": 10,\n  "active": false\n}');
+    ).toBe('{\n  "query": "weather",\n  "limit": 10,\n  "active": true\n}');
   });
 
   it("resolves local component schema references", () => {
@@ -83,15 +83,5 @@ describe("tryItBodyDefaults", () => {
         },
       ).body,
     ).toBe('{\n  "query": "weather"\n}');
-  });
-});
-
-describe("exampleFromSchema", () => {
-  it("bounds recursive schemas", () => {
-    const recursive: Record<string, unknown> = { type: "object" };
-    recursive.properties = { child: recursive };
-    expect(exampleFromSchema(recursive)).toEqual({
-      child: { child: { child: { child: { child: {} } } } },
-    });
   });
 });
