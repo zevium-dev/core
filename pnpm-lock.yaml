@@ -83,9 +83,6 @@ importers:
       '@zevium/shared':
         specifier: workspace:*
         version: link:../../packages/shared
-      convex:
-        specifier: ^1.46.0
-        version: 1.46.0(@clerk/react@6.17.5(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(bufferutil@4.1.0)(react@19.3.0)(utf-8-validate@6.0.6)
     devDependencies:
       '@cloudflare/vitest-pool-workers':
         specifier: ^0.22.0

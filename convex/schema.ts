@@ -966,6 +966,7 @@ export default defineSchema({
     updatedAt: v.number(),
   })
     .index("by_org", ["clerkOrgId"])
+    .index("by_owner", ["clerkOrgId", "ownerUserId"])
     .index("by_owner_status", ["clerkOrgId", "ownerUserId", "disabled"])
     .index("by_key", ["keyId"]),
 

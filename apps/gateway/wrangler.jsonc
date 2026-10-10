@@ -9,7 +9,6 @@
   "routes": [{ "pattern": "gateway.zevium.dev", "custom_domain": true }],
   "vars": {
     // CLERK_SECRET_KEY — Clerk secret for POST /v1/api_keys/verify
-    // CONVEX_DEPLOY_KEY — admin key fallback for wallets:recordUsage
     // GATEWAY_INTERNAL_SECRET — shared secret for /internal/grant + Convex /ingest-usage
     // GATEWAY_TEST_MODE — "1" only in vitest (see vitest config)
     "CONVEX_URL": "https://polite-ermine-809.convex.cloud",
@@ -25,10 +24,6 @@
         "name": "WALLET",
         "class_name": "WalletDO",
       },
-      {
-        "name": "CONTROL",
-        "class_name": "ControlDO",
-      },
     ],
   },
   "migrations": [
@@ -40,5 +35,6 @@
       "tag": "v2",
       "new_sqlite_classes": ["ControlDO"],
     },
+    { "tag": "v3", "deleted_classes": ["ControlDO"] },
   ],
 }

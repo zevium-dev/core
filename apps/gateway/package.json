@@ -9,8 +9,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@zevium/shared": "workspace:*",
-    "convex": "^1.46.0"
+    "@zevium/shared": "workspace:*"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.22.0",

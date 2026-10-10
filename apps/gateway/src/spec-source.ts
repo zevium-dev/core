@@ -4,10 +4,10 @@
  * CachedSpecSource wraps any source with a 30s TTL.
  */
 
-import { ConvexHttpClient } from "convex/browser";
-import { makeFunctionReference } from "convex/server";
+import { queryConvex } from "./convex-http";
+import { BoundedCache } from "./cache";
 import { logDependencyFailure } from "./telemetry";
-import { trimTrailingSlashes } from "@zevium/shared";
+import { parseSpec, trimTrailingSlashes } from "@zevium/shared";
 
 export type PublishedSpec = {
   /** Raw OpenAPI JSON string. */
@@ -66,14 +66,24 @@ export interface PublicSpecSource {
 
 export class SpecSourceUnavailableError extends Error {}
 
-/** Published spec bodies must be valid JSON; anything else fails closed. */
+const readableSpecs = new WeakMap<
+  { spec: string },
+  { spec: string; readable: boolean }
+>();
+
+/** Validate once per source payload; lifecycle metadata never enters the parsed cache. */
 export function isPublishedSpecReadable(published: { spec: string }): boolean {
+  const hit = readableSpecs.get(published);
+  if (hit?.spec === published.spec) return hit.readable;
+  let readable = false;
   try {
     JSON.parse(published.spec);
-    return true;
+    readable = true;
   } catch {
-    return false;
+    // Invalid payloads fail closed and never reach the proxy.
   }
+  readableSpecs.set(published, { spec: published.spec, readable });
+  return readable;
 }
 
 /** Public anonymous surfaces require explicit public visibility and a readable spec. */
@@ -99,157 +109,97 @@ export class FailClosedPublicSpecSource implements PublicSpecSource {
 const DEFAULT_TTL_MS = 30_000;
 const MEMORY_MAX = 256;
 
-const getPublishedPublicRef = makeFunctionReference<
-  "query",
-  { publisherHandle: string; projectSlug: string },
-  {
-    spec: string;
-    specVersionId: string;
-    version: string;
-    visibility?: "public" | "private";
-    deprecatedAt?: number;
-    sunsetAt?: number;
-    deprecationMessage?: string;
-    retiredAt?: number;
-  } | null
->("specs:getPublishedForGateway");
-
-type CacheEntry = {
-  value: PublishedSpec | null;
-  expiresAt: number;
-};
-
-type PublicCacheEntry = {
-  value: PublicPublishedSpec | null;
-  expiresAt: number;
-};
-
-export type CachedSpecSourceOptions = {
-  inner: SpecSource;
+export type CachedSpecSourceOptions<
+  T extends PublicPublishedSpec = PublishedSpec,
+> = {
+  inner: {
+    getPublishedSpec(
+      publisherHandle: string,
+      projectSlug: string,
+    ): Promise<T | null>;
+  };
   ttlMs?: number;
   now?: () => number;
 };
 
-/** Small TTL cache wrapping any SpecSource. */
-export class CachedSpecSource implements SpecSource {
-  readonly #inner: SpecSource;
-  readonly #ttlMs: number;
-  readonly #now: () => number;
-  readonly #cache = new Map<string, CacheEntry>();
-
-  constructor(opts: CachedSpecSourceOptions) {
+/** One cache layer for each source, shared by paid and anonymous route adapters. */
+export class CachedSpecSource<T extends PublicPublishedSpec = PublishedSpec> {
+  readonly #inner: CachedSpecSourceOptions<T>["inner"];
+  readonly #cache: BoundedCache<T | null>;
+  constructor(opts: CachedSpecSourceOptions<T>) {
     this.#inner = opts.inner;
-    this.#ttlMs = opts.ttlMs ?? DEFAULT_TTL_MS;
-    this.#now = opts.now ?? Date.now;
+    this.#cache = new BoundedCache(
+      MEMORY_MAX,
+      opts.ttlMs ?? DEFAULT_TTL_MS,
+      opts.now,
+    );
   }
-
   async getPublishedSpec(
     publisherHandle: string,
     projectSlug: string,
-  ): Promise<PublishedSpec | null> {
+  ): Promise<T | null> {
     const key = `${publisherHandle}/${projectSlug}`;
-    const now = this.#now();
     const hit = this.#cache.get(key);
-    if (hit && hit.expiresAt > now) return hit.value;
-
-    const value = await this.#inner.getPublishedSpec(
-      publisherHandle,
-      projectSlug,
+    if (hit !== undefined) return hit;
+    return this.#cache.set(
+      key,
+      await this.#inner.getPublishedSpec(publisherHandle, projectSlug),
     );
-    if (this.#cache.size >= MEMORY_MAX) {
-      const first = this.#cache.keys().next().value;
-      if (first !== undefined) this.#cache.delete(first);
-    }
-    this.#cache.set(key, { value, expiresAt: now + this.#ttlMs });
-    return value;
   }
-
   invalidate(publisherHandle?: string, projectSlug?: string): void {
-    if (publisherHandle && projectSlug) {
-      this.#cache.delete(`${publisherHandle}/${projectSlug}`);
-    } else {
-      this.#cache.clear();
-    }
+    this.#cache.invalidate(
+      publisherHandle && projectSlug
+        ? `${publisherHandle}/${projectSlug}`
+        : undefined,
+    );
   }
 }
 
-export class CachedPublicSpecSource implements PublicSpecSource {
-  readonly #inner: PublicSpecSource;
-  readonly #ttlMs: number;
-  readonly #now: () => number;
-  readonly #cache = new Map<string, PublicCacheEntry>();
-
-  constructor(opts: {
-    inner: PublicSpecSource;
-    ttlMs?: number;
-    now?: () => number;
-  }) {
-    this.#inner = opts.inner;
-    this.#ttlMs = opts.ttlMs ?? DEFAULT_TTL_MS;
-    this.#now = opts.now ?? Date.now;
-  }
-
-  async getPublishedSpec(
-    publisherHandle: string,
-    projectSlug: string,
-  ): Promise<PublicPublishedSpec | null> {
-    const key = `${publisherHandle}/${projectSlug}`;
-    const now = this.#now();
-    const hit = this.#cache.get(key);
-    if (hit && hit.expiresAt > now) return hit.value;
-    const value = await this.#inner.getPublishedSpec(
-      publisherHandle,
-      projectSlug,
-    );
-    if (this.#cache.size >= MEMORY_MAX) {
-      const first = this.#cache.keys().next().value;
-      if (first !== undefined) this.#cache.delete(first);
-    }
-    this.#cache.set(key, { value, expiresAt: now + this.#ttlMs });
-    return value;
-  }
+/** Immutable spec bytes identify the parsed version, across TTL metadata refreshes.
+ * Bounded independently of route aliases; credentials and lifecycle stay on the source payload.
+ */
+const parsedSpecs = new BoundedCache<ReturnType<typeof parseSpec>>(
+  64,
+  Infinity,
+);
+export function getParsedSpec(published: {
+  spec: string;
+}): ReturnType<typeof parseSpec> {
+  const hit = parsedSpecs.get(published.spec);
+  return hit ?? parsedSpecs.set(published.spec, parseSpec(published.spec));
 }
 
 export type ConvexPublicSpecSourceOptions = {
   convexUrl: string;
   /** Injected for tests. */
   fetchImpl?: typeof fetch;
-  /** Injected client (tests). */
-  client?: ConvexHttpClient;
 };
 
 /**
- * Control-plane published-spec lookup via Convex HTTP client.
+ * Control-plane published-spec lookup via the Convex public HTTP API.
  * Function: specs:getPublishedForGateway (public query).
  */
 export class ConvexPublicSpecSource implements PublicSpecSource {
-  readonly #client: ConvexHttpClient;
-
-  constructor(opts: ConvexPublicSpecSourceOptions) {
-    if (opts.client) {
-      this.#client = opts.client;
-    } else {
-      this.#client = new ConvexHttpClient(opts.convexUrl, {
-        skipConvexDeploymentUrlCheck: true,
-        logger: false,
-        fetch: opts.fetchImpl,
-      });
-    }
-  }
+  constructor(readonly options: ConvexPublicSpecSourceOptions) {}
 
   async getPublishedSpec(
     publisherHandle: string,
     projectSlug: string,
   ): Promise<PublicPublishedSpec | null> {
     try {
-      const value = await this.#client.query(getPublishedPublicRef, {
-        publisherHandle,
-        projectSlug,
-      });
+      const value = await queryConvex(
+        this.options.convexUrl,
+        "specs:getPublishedForGateway",
+        {
+          publisherHandle,
+          projectSlug,
+        },
+        this.options.fetchImpl,
+      );
 
       return parsePublicPublishedSpecPayload(value);
-    } catch (err) {
-      console.error("ConvexPublicSpecSource.getPublishedSpec failed", err);
+    } catch {
+      logDependencyFailure("public_spec_source");
       return null;
     }
   }
@@ -369,9 +319,6 @@ export function parsePublishedSpecPayload(json: unknown): PublishedSpec | null {
   if (typeof candidate !== "object") return null;
 
   if (!("spec" in candidate) || typeof candidate.spec !== "string") return null;
-  if (!("version" in candidate) || typeof candidate.version !== "string") {
-    return null;
-  }
   if (!("projectId" in candidate) || typeof candidate.projectId !== "string") {
     return null;
   }
@@ -388,13 +335,6 @@ export function parsePublishedSpecPayload(json: unknown): PublishedSpec | null {
   if (
     !("organizationId" in candidate) ||
     typeof candidate.organizationId !== "string"
-  ) {
-    return null;
-  }
-  if (
-    !("specVersionId" in candidate) ||
-    typeof candidate.specVersionId !== "string" ||
-    candidate.specVersionId.length === 0
   ) {
     return null;
   }

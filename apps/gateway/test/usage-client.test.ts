@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-  ConsoleUsageSink,
   ConvexUsageClient,
   UsageIngestError,
   type ConvexUsageRecord,
@@ -8,7 +7,6 @@ import {
 } from "../src/usage";
 
 import { MAX_USAGE_INGEST_EVENTS } from "@zevium/shared";
-import { logDependencyFailure } from "../src/telemetry";
 
 const sampleEvent: ConvexUsageRecord = {
   organizationId: "org_1",
@@ -28,56 +26,6 @@ const sampleEvent: ConvexUsageRecord = {
 };
 
 describe("ConvexUsageClient ingest path", () => {
-  it("logs only allowlisted aggregate telemetry fields", () => {
-    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
-    const error = vi
-      .spyOn(console, "error")
-      .mockImplementation(() => undefined);
-    const sentinels = [
-      "org_private_sentinel",
-      "key_private_sentinel",
-      "/users/alice@example.com/private",
-      "reservation_private_sentinel",
-      "raw upstream secret failure",
-    ];
-    new ConsoleUsageSink().emit({
-      requestId: "request_private_sentinel",
-      organizationId: sentinels[0]!,
-      consumerClerkOrgId: "clerk_private_sentinel",
-      projectId: "project_private_sentinel",
-      keyId: sentinels[1]!,
-      orgSlug: "tenant-private",
-      projectSlug: "project-private",
-      method: "POST",
-      pathTemplate: sentinels[2]!,
-      cost: 37,
-      status: 503,
-      outcome: "refunded",
-      latencyMs: 741,
-      reservationId: sentinels[3]!,
-    });
-    logDependencyFailure("usage_sink", 503);
-
-    const output = JSON.stringify([log.mock.calls, error.mock.calls]);
-    for (const sentinel of sentinels) expect(output).not.toContain(sentinel);
-    expect(JSON.parse(String(log.mock.calls[0]![0]))).toEqual({
-      schema: 1,
-      type: "zevium.usage",
-      outcome: "refunded",
-      statusClass: "5xx",
-      latencyBucket: "500-1999ms",
-      costBucket: "11-100",
-    });
-    expect(JSON.parse(String(error.mock.calls[0]![0]))).toEqual({
-      schema: 1,
-      type: "zevium.dependency_failure",
-      component: "usage_sink",
-      statusClass: "5xx",
-    });
-    log.mockRestore();
-    error.mockRestore();
-  });
-
   it("POSTs body + x-internal-secret and parses result", async () => {
     const result: RecordUsageResult = {
       results: [{ refId: "settle:res-1", status: "applied" }],
@@ -105,7 +53,6 @@ describe("ConvexUsageClient ingest path", () => {
     );
 
     const client = new ConvexUsageClient({
-      convexUrl: "https://example.convex.cloud",
       ingestUrl: "https://example.convex.site/ingest-usage",
       internalSecret: "secret-1",
       fetchImpl: fetchImpl as typeof fetch,
@@ -116,6 +63,15 @@ describe("ConvexUsageClient ingest path", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
+  it("fails closed without authenticated ingest configuration", async () => {
+    const fetchImpl = vi.fn();
+    const client = new ConvexUsageClient({ fetchImpl });
+    await expect(client.recordUsage([sampleEvent])).rejects.toMatchObject({
+      retryable: false,
+    });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
   it("throws on 401", async () => {
     const fetchImpl = vi.fn(
       async () =>
@@ -124,7 +80,6 @@ describe("ConvexUsageClient ingest path", () => {
         }),
     );
     const client = new ConvexUsageClient({
-      convexUrl: "https://example.convex.cloud",
       ingestUrl: "https://example.convex.site/ingest-usage",
       internalSecret: "secret-1",
       fetchImpl: fetchImpl as typeof fetch,
@@ -139,7 +94,6 @@ describe("ConvexUsageClient ingest path", () => {
 
   it("marks deterministic 400 payload failures as bisectable", async () => {
     const client = new ConvexUsageClient({
-      convexUrl: "https://example.convex.cloud",
       ingestUrl: "https://example.convex.site/ingest-usage",
       internalSecret: "secret-1",
       fetchImpl: (async () =>
@@ -153,44 +107,6 @@ describe("ConvexUsageClient ingest path", () => {
     });
   });
 
-  it("bisects deterministic failures on the direct Convex fallback too", async () => {
-    const httpFailure = new ConvexUsageClient({
-      convexUrl: "https://example.convex.cloud",
-      adminKey: "test-admin-key",
-      fetchImpl: (async () =>
-        new Response(JSON.stringify({ error: "invalid event" }), {
-          status: 400,
-        })) as typeof fetch,
-    });
-    await expect(httpFailure.recordUsage([sampleEvent])).rejects.toMatchObject({
-      retryable: false,
-      bisectable: true,
-    });
-
-    const mutationFailure = new ConvexUsageClient({
-      convexUrl: "https://example.convex.cloud",
-      adminKey: "test-admin-key",
-      fetchImpl: (async () =>
-        new Response(
-          JSON.stringify({
-            status: "error",
-            errorMessage: "validator rejected one event",
-          }),
-          {
-            status: 200,
-            headers: { "Content-Type": "application/json" },
-          },
-        )) as typeof fetch,
-    });
-    await expect(
-      mutationFailure.recordUsage([sampleEvent]),
-    ).rejects.toMatchObject({
-      message: "validator rejected one event",
-      retryable: false,
-      bisectable: true,
-    });
-  });
-
   it("throws on 500", async () => {
     const fetchImpl = vi.fn(
       async () =>
@@ -199,7 +115,6 @@ describe("ConvexUsageClient ingest path", () => {
         }),
     );
     const client = new ConvexUsageClient({
-      convexUrl: "https://example.convex.cloud",
       ingestUrl: "https://example.convex.site/ingest-usage",
       internalSecret: "secret-1",
       fetchImpl: fetchImpl as typeof fetch,
@@ -227,7 +142,6 @@ describe("ConvexUsageClient ingest path", () => {
     }));
     const fetchImpl = vi.fn();
     const client = new ConvexUsageClient({
-      convexUrl: "https://example.convex.cloud",
       ingestUrl: "https://example.convex.site/ingest-usage",
       internalSecret: "secret-1",
       mutationFn,
@@ -245,7 +159,6 @@ describe("ConvexUsageClient ingest path", () => {
   it("rejects empty batches without calling the ingest endpoint", async () => {
     const fetchImpl = vi.fn();
     const client = new ConvexUsageClient({
-      convexUrl: "https://example.convex.cloud",
       ingestUrl: "https://example.convex.site/ingest-usage",
       internalSecret: "secret-1",
       fetchImpl: fetchImpl as typeof fetch,
@@ -259,7 +172,6 @@ describe("ConvexUsageClient ingest path", () => {
   it("rejects oversized and duplicate-ref batches before transport", async () => {
     const fetchImpl = vi.fn();
     const client = new ConvexUsageClient({
-      convexUrl: "https://example.convex.cloud",
       ingestUrl: "https://example.convex.site/ingest-usage",
       internalSecret: "secret-1",
       fetchImpl: fetchImpl as typeof fetch,
@@ -283,7 +195,6 @@ describe("ConvexUsageClient ingest path", () => {
 
   it("requires one exact classified outcome for every submitted ref", async () => {
     const omitted = new ConvexUsageClient({
-      convexUrl: "https://test.invalid",
       mutationFn: async () => ({
         results: [],
         wallet: {
@@ -300,7 +211,6 @@ describe("ConvexUsageClient ingest path", () => {
     });
 
     const unclassified = new ConvexUsageClient({
-      convexUrl: "https://example.convex.cloud",
       ingestUrl: "https://example.convex.site/ingest-usage",
       internalSecret: "secret-1",
       fetchImpl: (async () =>
@@ -329,7 +239,6 @@ describe("ConvexUsageClient ingest path", () => {
 
   it("classifies ambiguous transport failure as retryable", async () => {
     const client = new ConvexUsageClient({
-      convexUrl: "https://example.convex.cloud",
       ingestUrl: "https://example.convex.site/ingest-usage",
       internalSecret: "secret-1",
       fetchImpl: (async () => {

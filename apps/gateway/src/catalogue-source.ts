@@ -4,8 +4,8 @@
  * CachedCatalogueSource wraps any source with a 60s TTL.
  */
 
-import { ConvexHttpClient } from "convex/browser";
-import { makeFunctionReference } from "convex/server";
+import { queryConvex } from "./convex-http";
+import { BoundedCache } from "./cache";
 import { logDependencyFailure } from "./telemetry";
 
 export type CatalogueListing = {
@@ -64,28 +64,6 @@ export class FailClosedCatalogueSource implements CatalogueSource {
 const DEFAULT_TTL_MS = 60_000;
 const MEMORY_MAX = 64;
 
-const listPublicRef = makeFunctionReference<
-  "query",
-  { search?: string; tag?: string; cursor?: string },
-  {
-    items: Array<{
-      name: string;
-      slug: string;
-      description?: string;
-      tags: string[];
-      orgName: string;
-      publisherHandle: string;
-      publishedAt: number | null;
-    }>;
-    nextCursor: string | null;
-  }
->("catalogue:listPublic");
-
-type CacheEntry = {
-  value: CataloguePage;
-  expiresAt: number;
-};
-
 export type CachedCatalogueSourceOptions = {
   inner: CatalogueSource;
   ttlMs?: number;
@@ -102,68 +80,53 @@ function cacheKey(args: CatalogueListArgs | undefined): string {
 /** Small TTL cache wrapping any CatalogueSource (default 60s). */
 export class CachedCatalogueSource implements CatalogueSource {
   readonly #inner: CatalogueSource;
-  readonly #ttlMs: number;
-  readonly #now: () => number;
-  readonly #cache = new Map<string, CacheEntry>();
+  readonly #cache: BoundedCache<CataloguePage>;
 
   constructor(opts: CachedCatalogueSourceOptions) {
     this.#inner = opts.inner;
-    this.#ttlMs = opts.ttlMs ?? DEFAULT_TTL_MS;
-    this.#now = opts.now ?? Date.now;
+    this.#cache = new BoundedCache(
+      MEMORY_MAX,
+      opts.ttlMs ?? DEFAULT_TTL_MS,
+      opts.now,
+    );
   }
 
   async listPublic(args?: CatalogueListArgs): Promise<CataloguePage> {
     const key = cacheKey(args);
-    const now = this.#now();
     const hit = this.#cache.get(key);
-    if (hit && hit.expiresAt > now) return hit.value;
-
-    const value = await this.#inner.listPublic(args);
-    if (this.#cache.size >= MEMORY_MAX) {
-      const first = this.#cache.keys().next().value;
-      if (first !== undefined) this.#cache.delete(first);
-    }
-    this.#cache.set(key, { value, expiresAt: now + this.#ttlMs });
-    return value;
+    if (hit !== undefined) return hit;
+    return this.#cache.set(key, await this.#inner.listPublic(args));
   }
 
   invalidate(): void {
-    this.#cache.clear();
+    this.#cache.invalidate();
   }
 }
 
 export type ConvexCatalogueSourceOptions = {
   convexUrl: string;
   fetchImpl?: typeof fetch;
-  client?: ConvexHttpClient;
 };
 
 /**
- * Control-plane public catalogue via Convex HTTP client.
+ * Control-plane public catalogue via the Convex public HTTP API.
  * Function: catalogue:listPublic (public query, no auth).
  */
 export class ConvexCatalogueSource implements CatalogueSource {
-  readonly #client: ConvexHttpClient;
-
-  constructor(opts: ConvexCatalogueSourceOptions) {
-    if (opts.client) {
-      this.#client = opts.client;
-    } else {
-      this.#client = new ConvexHttpClient(opts.convexUrl, {
-        skipConvexDeploymentUrlCheck: true,
-        logger: false,
-        fetch: opts.fetchImpl,
-      });
-    }
-  }
+  constructor(readonly options: ConvexCatalogueSourceOptions) {}
 
   async listPublic(args?: CatalogueListArgs): Promise<CataloguePage> {
     try {
-      const value = await this.#client.query(listPublicRef, {
-        search: args?.search,
-        tag: args?.tag,
-        cursor: args?.cursor,
-      });
+      const value = await queryConvex(
+        this.options.convexUrl,
+        "catalogue:listPublic",
+        {
+          search: args?.search,
+          tag: args?.tag,
+          cursor: args?.cursor,
+        },
+        this.options.fetchImpl,
+      );
       return parseCataloguePage(value) ?? { items: [], nextCursor: null };
     } catch {
       logDependencyFailure("catalogue_source");

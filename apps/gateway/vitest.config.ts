@@ -11,7 +11,6 @@ export default defineConfig({
         bindings: {
           CLERK_SECRET_KEY: "",
           CONVEX_URL: "",
-          CONVEX_DEPLOY_KEY: "",
           GATEWAY_INTERNAL_SECRET: "",
         },
       },

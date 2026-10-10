@@ -23,14 +23,8 @@ export function corsPreflight(): Response {
   });
 }
 
-/** Add CORS headers onto an outgoing response (streams untouched). */
-export function withCors(res: Response): Response {
-  const headers = new Headers(res.headers);
+/** Apply CORS at the outer response boundary without wrapping the stream again. */
+export function applyCorsHeaders(headers: Headers): void {
   headers.set("access-control-allow-origin", "*");
   headers.set("access-control-expose-headers", EXPOSE_HEADERS);
-  return new Response(res.body, {
-    status: res.status,
-    statusText: res.statusText,
-    headers,
-  });
 }

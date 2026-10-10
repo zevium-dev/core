@@ -2,9 +2,6 @@
 
 export const REGISTRY_PROTOCOL_VERSION = 2 as const;
 export const REGISTRY_EVENT_PATH = "/internal/registry/v2/events" as const;
-export const REGISTRY_BOOTSTRAP_PATH =
-  "/internal/registry/v2/bootstrap" as const;
-export const REGISTRY_RECEIVER_METHOD = "POST" as const;
 export const REGISTRY_EVENT_TIMESTAMP_HEADER =
   "x-zevium-registry-timestamp" as const;
 export const REGISTRY_EVENT_NONCE_HEADER = "x-zevium-registry-nonce" as const;
@@ -17,38 +14,11 @@ export const REGISTRY_MAX_EVENT_BYTES = 524_288;
 export const REGISTRY_MAX_SPEC_BYTES = 393_216;
 export const REGISTRY_MAX_CREDENTIAL_PLAINTEXT_BYTES = 32_768;
 export const REGISTRY_MAX_ACK_BYTES = 65_536;
-export const REGISTRY_BOOTSTRAP_MAX_EVENTS = 100;
-export const REGISTRY_BOOTSTRAP_MAX_ENCODED_EVENT_BYTES = 4 * 1024 * 1024;
-export const REGISTRY_MANIFEST_MAX_ITEMS = 100;
-export const REGISTRY_MANIFEST_MAX_BYTES = 262_144;
 export const REGISTRY_ROLLOUT_BATCH_SIZE = 10;
 export const REGISTRY_DELIVERY_LEASE_MS = 30_000;
 export const REGISTRY_DELIVERY_TIMEOUT_MS = 10_000;
 export const REGISTRY_DELIVERY_MAX_ATTEMPTS = 20;
 export const REGISTRY_DELIVERY_MAX_BACKOFF_MS = 900_000;
-
-export const REGISTRY_RECEIVER_SECURITY_CONTRACT = {
-  event: {
-    method: REGISTRY_RECEIVER_METHOD,
-    path: REGISTRY_EVENT_PATH,
-    maxBytes: REGISTRY_MAX_EVENT_BYTES,
-    body: "exact_canonical_json_utf8",
-    signature: "hmac_sha256_timestamp_nonce_body",
-  },
-  bootstrap: {
-    method: REGISTRY_RECEIVER_METHOD,
-    path: REGISTRY_BOOTSTRAP_PATH,
-    maxEvents: REGISTRY_BOOTSTRAP_MAX_EVENTS,
-    maxBytes: REGISTRY_BOOTSTRAP_MAX_ENCODED_EVENT_BYTES,
-  },
-  timestampWindowMs: REGISTRY_MAX_CLOCK_SKEW_MS,
-  nonce: "event.nonce_and_header_nonce_must_match",
-  replay: "exact_replay_is_idempotent_nonce_collision_is_conflict",
-  ordering: "per_stream_only",
-  tombstones: "permanent",
-  credentialStorage: "decrypt_then_reencrypt_at_rest",
-  acknowledgement: "signed_request_bound_ack",
-} as const;
 
 export const REGISTRY_V2_PRODUCER_CONTRACT = {
   schemaVersion: REGISTRY_PROTOCOL_VERSION,
@@ -297,32 +267,6 @@ export type RegistryOutboxRow = {
   updatedAt: number;
 };
 
-export type RegistryManifestKind = RegistryStreamKind;
-export type RegistryManifestItem = {
-  entityKey: string;
-  streamKey: string;
-  revision: number;
-  eventId: `r2_${string}`;
-  operation: RegistryOperation;
-  payloadSha256: Sha256Hex;
-  tombstone: boolean;
-};
-export type RegistryManifestPage = {
-  schemaVersion: 2;
-  snapshotId: `rm2_${string}`;
-  kind: RegistryManifestKind;
-  shard: string;
-  createdAt: number;
-  pageIndex: number;
-  afterEntityKey: string | null;
-  items: RegistryManifestItem[];
-  itemCount: number;
-  pageSha256: Sha256Hex;
-  totalCount: number;
-  totalSha256: Sha256Hex;
-  nextAfterEntityKey: string | null;
-};
-
 export type RegistryRolloutStatus = "running" | "complete";
 export type RegistryRolloutPhase =
   | "credentials"
@@ -365,38 +309,6 @@ export type RegistryRolloutManifest = {
   verification: RegistryRolloutVerification;
   completedAt?: number;
 };
-
-export type EntitlementAdmissionClaims = {
-  schemaVersion: 1;
-  reservationId: string;
-  consumerClerkOrgId: string;
-  projectId: string;
-  routeRevision: number;
-  policyRevision: number;
-  policyMode: RegistryAdmissionMode;
-  decision: "existing" | "grant_on_settlement";
-  admittedAt: number;
-};
-export type SignedEntitlementAdmission = {
-  claims: EntitlementAdmissionClaims;
-  signature: `v1=${string}`;
-};
-export type EntitlementAdmissionResult =
-  | { status: "admitted"; proof: SignedEntitlementAdmission }
-  | { status: "not_entitled" }
-  | { status: "route_changed" }
-  | { status: "unavailable" };
-export interface EntitlementAdmissionAdapter {
-  admit(input: {
-    reservationId: string;
-    consumerClerkOrgId: string;
-    projectId: string;
-    routeRevision: number;
-    admission: RegistryRouteAdmission;
-    nowMs: number;
-  }): Promise<EntitlementAdmissionResult>;
-  settle(proof: SignedEntitlementAdmission): Promise<"granted" | "existing">;
-}
 
 export type VerifiedOneTimeExecutionKey = {
   keyId: string;
@@ -1112,85 +1024,6 @@ export async function validateRegistryEvent(
   return event as RegistryEvent;
 }
 
-function compareBytes(left: string, right: string): number {
-  const a = utf8(left);
-  const b = utf8(right);
-  for (let index = 0; index < Math.min(a.length, b.length); index += 1) {
-    if (a[index] !== b[index]) return a[index]! - b[index]!;
-  }
-  return a.length - b.length;
-}
-
-export async function registryManifestShard(
-  entityKey: string,
-): Promise<string> {
-  const digest = await sha256Hex(entityKey);
-  return digest.slice(0, 2);
-}
-
-export async function registryManifestPageDigest(
-  items: readonly RegistryManifestItem[],
-): Promise<Sha256Hex> {
-  return await sha256Hex(canonicalJson(items));
-}
-
-export async function registryManifestTotalDigest(
-  kind: RegistryManifestKind,
-  shard: string,
-  items: readonly RegistryManifestItem[],
-): Promise<Sha256Hex> {
-  let input = `zevium-registry-manifest-v2\0${kind}\0${shard}\0`;
-  for (const item of items) {
-    const body = canonicalJson(item);
-    const length = new TextEncoder().encode(body).byteLength;
-    const prefix = new Uint8Array(4);
-    new DataView(prefix.buffer).setUint32(0, length);
-    input += String.fromCharCode(...prefix) + body;
-  }
-  return await sha256Hex(input);
-}
-
-export async function createRegistryManifestPage(
-  input: Omit<
-    RegistryManifestPage,
-    "snapshotId" | "itemCount" | "pageSha256" | "totalSha256"
-  >,
-): Promise<RegistryManifestPage> {
-  if (
-    input.items.length > REGISTRY_MANIFEST_MAX_ITEMS ||
-    registryEncodedByteLength(input.items) > REGISTRY_MANIFEST_MAX_BYTES
-  )
-    throw new Error("Registry manifest page exceeds size limit");
-  const items = [...input.items].sort(
-    (a, b) =>
-      compareBytes(a.entityKey, b.entityKey) ||
-      compareBytes(a.streamKey, b.streamKey),
-  );
-  const pageSha256 = await registryManifestPageDigest(items);
-  const totalSha256 = await registryManifestTotalDigest(
-    input.kind,
-    input.shard,
-    items,
-  );
-  const snapshotMaterial = {
-    kind: input.kind,
-    shard: input.shard,
-    createdAt: input.createdAt,
-    totalCount: input.totalCount,
-    totalSha256,
-  };
-  const snapshotId =
-    `rm2_${await sha256Hex(canonicalJson(snapshotMaterial))}` as `rm2_${string}`;
-  return {
-    ...input,
-    snapshotId,
-    items,
-    itemCount: items.length,
-    pageSha256,
-    totalSha256,
-  };
-}
-
 function bytesToBase64Url(value: Uint8Array): string {
   let binary = "";
   for (const byte of value) binary += String.fromCharCode(byte);
@@ -1431,52 +1264,6 @@ export async function signRegistryEventRequest(
 ): Promise<`v2=${string}`> {
   return `v2=${await hmac(secret, timestampBytes(timestamp, nonce, rawCanonicalBody))}`;
 }
-export async function verifyRegistryEventRequest(
-  secret: string,
-  timestamp: string,
-  nonce: string,
-  rawCanonicalBody: string,
-  signature: string,
-): Promise<boolean> {
-  if (!signature.startsWith("v2=")) return false;
-  try {
-    return await verifyHmac(
-      secret,
-      timestampBytes(timestamp, nonce, rawCanonicalBody),
-      signature.slice(3),
-    );
-  } catch {
-    return false;
-  }
-}
-export async function signRegistryBootstrapRequest(
-  secret: string,
-  timestamp: string,
-  nonce: string,
-  rawCanonicalBody: string,
-): Promise<`v2=${string}`> {
-  return await signRegistryEventRequest(
-    secret,
-    timestamp,
-    nonce,
-    rawCanonicalBody,
-  );
-}
-export async function verifyRegistryBootstrapRequest(
-  secret: string,
-  timestamp: string,
-  nonce: string,
-  rawCanonicalBody: string,
-  signature: string,
-): Promise<boolean> {
-  return await verifyRegistryEventRequest(
-    secret,
-    timestamp,
-    nonce,
-    rawCanonicalBody,
-    signature,
-  );
-}
 export async function signRegistryAck(
   secret: string,
   requestTimestamp: string,
@@ -1698,31 +1485,4 @@ export async function verifyRegistryVerifiedKeyRotationProjection(
       signature.slice(3),
     ))
   );
-}
-
-export async function signEntitlementAdmission(
-  secret: string,
-  claims: EntitlementAdmissionClaims,
-): Promise<SignedEntitlementAdmission> {
-  return {
-    claims,
-    signature: `v1=${await hmac(secret, utf8(`zevium-entitlement-admission-v1\0${canonicalJson(claims)}`))}`,
-  };
-}
-export async function verifyEntitlementAdmission(
-  secret: string,
-  proof: SignedEntitlementAdmission,
-): Promise<boolean> {
-  try {
-    return (
-      proof.signature.startsWith("v1=") &&
-      (await verifyHmac(
-        secret,
-        utf8(`zevium-entitlement-admission-v1\0${canonicalJson(proof.claims)}`),
-        proof.signature.slice(3),
-      ))
-    );
-  } catch {
-    return false;
-  }
 }
