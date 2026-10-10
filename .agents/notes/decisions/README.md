@@ -27,3 +27,4 @@ Statuses: `proposed` (awaiting user) · `accepted` · `accepted direction, not b
 | 2026-10-10 | [Two roles: admin + member](2026-10-10-two-roles-admin-member.md)                     | accepted                       |
 | 2026-10-10 | [Review eligibility](2026-10-10-review-eligibility.md)                                | accepted, not built            |
 | 2026-10-10 | [Codebase reset: rebuild Convex, prune rest](2026-10-10-codebase-reset.md)            | accepted direction             |
+| 2026-10-10 | [Capability taxonomy and normalized web search](2026-10-10-capability-taxonomy.md)    | proposed (awaiting user)       |
