@@ -163,6 +163,7 @@ function SpecEditorInner({
 
   return (
     <SpecWorkspace
+      key={projectId}
       projectId={projectId}
       orgSlug={orgSlug}
       projectSlug={projectSlug}
@@ -172,14 +173,7 @@ function SpecEditorInner({
       savedDraft={draftRow?.draft ?? ""}
       savedDraftHash={draftRow?.draftHash ?? null}
       lastSavedAt={draftRow?.lastSavedAt ?? null}
-      versions={versions.map((v) => ({
-        _id: v._id,
-        version: v.version,
-        publishedAt: v.publishedAt,
-        deprecatedAt: v.deprecatedAt,
-        sunsetAt: v.sunsetAt,
-        deprecationMessage: v.deprecationMessage,
-      }))}
+      versions={versions}
     />
   );
 }

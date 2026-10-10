@@ -1,5 +1,4 @@
 import {
-  MAX_YAML_ALIASES,
   MAX_YAML_INPUT_BYTES,
   MAX_YAML_LINES,
   YAML_ERROR_MESSAGES,
@@ -7,13 +6,6 @@ import {
   type YamlFailureCode,
 } from "./spec-yaml-limits";
 import type { YamlWorkerResult } from "./spec-yaml.worker-core";
-
-export {
-  MAX_EXPANDED_SPEC_BYTES,
-  MAX_YAML_ALIASES,
-  MAX_YAML_INPUT_BYTES,
-  MAX_YAML_LINES,
-} from "./spec-yaml-limits";
 
 export type YamlConvertResult =
   | { ok: true; json: string; convertedFromYaml: boolean }
@@ -27,6 +19,7 @@ type WorkerPort = Pick<
 export type YamlWorkerOptions = {
   createWorker?: () => WorkerPort;
   timeoutMs?: number;
+  startupTimeoutMs?: number;
 };
 
 const encoder = new TextEncoder();
@@ -36,16 +29,9 @@ function preflightYaml(text: string): YamlFailureCode | null {
     return "input_size";
   }
   let lines = 1;
-  let indicators = 0;
   for (let index = 0; index < text.length; index += 1) {
     if (text.charCodeAt(index) === 10 && ++lines > MAX_YAML_LINES) {
       return "line_count";
-    }
-    const char = text[index];
-    if ((char === "*" || char === "&") && index > 0) {
-      const previous = text[index - 1]!;
-      if (/\s|[,[{]/.test(previous)) indicators += 1;
-      if (indicators > MAX_YAML_ALIASES * 2) return "alias_count";
     }
   }
   return null;
@@ -83,11 +69,31 @@ async function parseInKillableWorker(
       worker.terminate();
       resolve(result);
     };
-    const onMessage = (event: MessageEvent<YamlWorkerResult>) => {
+    let ready = false;
+    const onMessage = (
+      event: MessageEvent<YamlWorkerResult | { ready: true }>,
+    ) => {
       const result = event.data;
+      if (
+        result !== null &&
+        typeof result === "object" &&
+        "ready" in result &&
+        result.ready === true &&
+        !ready
+      ) {
+        ready = true;
+        clearTimeout(timeout);
+        timeout = setTimeout(
+          () => finish({ ok: false, code: "cpu_limit" }),
+          options.timeoutMs ?? YAML_WORKER_TIMEOUT_MS,
+        );
+        worker.postMessage({ text });
+        return;
+      }
       if (
         result === null ||
         typeof result !== "object" ||
+        !("ok" in result) ||
         typeof result.ok !== "boolean"
       ) {
         finish({ ok: false, code: "parse_failed" });
@@ -96,13 +102,12 @@ async function parseInKillableWorker(
       finish(result);
     };
     const onError = () => finish({ ok: false, code: "parse_failed" });
-    const timeout = setTimeout(
+    let timeout = setTimeout(
       () => finish({ ok: false, code: "cpu_limit" }),
-      options.timeoutMs ?? YAML_WORKER_TIMEOUT_MS,
+      options.startupTimeoutMs ?? 10_000,
     );
     worker.addEventListener("message", onMessage);
     worker.addEventListener("error", onError);
-    worker.postMessage({ text });
   });
 }
 
@@ -127,9 +132,4 @@ export async function convertSpecInputToJson(
   return result.ok
     ? { ok: true, json: result.json, convertedFromYaml: true }
     : failure(result.code);
-}
-
-export function looksLikeYaml(text: string): boolean {
-  const trimmed = text.trim();
-  return trimmed !== "" && !trimmed.startsWith("{") && !trimmed.startsWith("[");
 }

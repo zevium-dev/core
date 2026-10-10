@@ -1,14 +1,22 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  convertSpecInputToJson,
-  looksLikeYaml,
   MAX_YAML_ALIASES,
   MAX_YAML_INPUT_BYTES,
   MAX_YAML_LINES,
-} from "./spec-yaml";
+} from "./spec-yaml-limits";
+import { convertSpecInputToJson } from "./spec-yaml";
 import { parseYamlInWorker } from "./spec-yaml.worker-core";
 
-function inlineWorker(): Worker {
+// Parser shape/expansion tests use a deterministic CPU clock. Actual worker
+// deadline tests below retain real timers and prove hard termination.
+beforeEach(() => {
+  vi.spyOn(performance, "now").mockReturnValue(0);
+});
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
+function inlineWorker(startupMs = 0, silent = false): Worker {
   const messageListeners = new Set<(event: MessageEvent) => void>();
   const errorListeners = new Set<() => void>();
   return {
@@ -22,12 +30,18 @@ function inlineWorker(): Worker {
           : (event: Event) => listener.handleEvent(event);
       if (type === "message") {
         messageListeners.add((event) => callback(event));
+        setTimeout(
+          () =>
+            callback(new MessageEvent("message", { data: { ready: true } })),
+          startupMs,
+        );
       } else if (type === "error") {
         errorListeners.add(() => callback(new Event("error")));
       }
     },
     removeEventListener() {},
     postMessage(value: unknown) {
+      if (silent) return;
       queueMicrotask(() => {
         const text =
           value !== null &&
@@ -46,19 +60,7 @@ function inlineWorker(): Worker {
   } as unknown as Worker;
 }
 
-const workerOptions = { createWorker: inlineWorker };
-
-describe("looksLikeYaml", () => {
-  it("detects yaml-ish paste", () => {
-    expect(looksLikeYaml("openapi: 3.1.0\ninfo:\n  title: x")).toBe(true);
-  });
-
-  it("rejects json and empty", () => {
-    expect(looksLikeYaml('{"openapi":"3.1.0"}')).toBe(false);
-    expect(looksLikeYaml("")).toBe(false);
-    expect(looksLikeYaml("  ")).toBe(false);
-  });
-});
+const workerOptions = { createWorker: () => inlineWorker() };
 
 describe("convertSpecInputToJson", () => {
   it("keeps valid JSON text", async () => {
@@ -163,6 +165,7 @@ ${aliases}`,
     const result = await convertSpecInputToJson("openapi: 3.1.0", {
       createWorker: () => silent,
       timeoutMs: 1,
+      startupTimeoutMs: 1,
     });
     expect(result).toMatchObject({ ok: false, code: "cpu_limit" });
     expect(terminated).toBe(true);
@@ -210,4 +213,30 @@ ${aliases}`,
     expect(JSON.stringify(result)).not.toContain(pii);
     expect(JSON.stringify(result)).not.toContain("private-token");
   });
+});
+
+it("accepts markdown bullets, anchors, and alias-like text inside a YAML block scalar", async () => {
+  const result = await convertSpecInputToJson(
+    `openapi: 3.1.0\ninfo:\n  description: |\n${Array.from({ length: 50 }, () => "    * use *markdown* & plain text").join("\n")}`,
+    workerOptions,
+  );
+  expect(result.ok).toBe(true);
+});
+it("gives a cold worker a separate startup budget", async () => {
+  const result = await convertSpecInputToJson("openapi: 3.1.0", {
+    createWorker: () => inlineWorker(30),
+    timeoutMs: 10,
+    startupTimeoutMs: 1000,
+  });
+  expect(result.ok).toBe(true);
+});
+it("terminates a ready worker that stops responding", async () => {
+  const worker = inlineWorker(0, true);
+  const terminate = vi.spyOn(worker, "terminate");
+  const result = await convertSpecInputToJson("openapi: 3.1.0", {
+    createWorker: () => worker,
+    timeoutMs: 5,
+  });
+  expect(result).toMatchObject({ ok: false, code: "cpu_limit" });
+  expect(terminate).toHaveBeenCalledOnce();
 });

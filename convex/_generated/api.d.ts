@@ -49,7 +49,6 @@ import type * as registrySync from "../registrySync.js";
 import type * as reviews from "../reviews.js";
 import type * as search from "../search.js";
 import type * as specImportLimits from "../specImportLimits.js";
-import type * as specImports from "../specImports.js";
 import type * as specs from "../specs.js";
 import type * as upstreamCredentials from "../upstreamCredentials.js";
 import type * as usage from "../usage.js";
@@ -106,7 +105,6 @@ declare const fullApi: ApiFromModules<{
   reviews: typeof reviews;
   search: typeof search;
   specImportLimits: typeof specImportLimits;
-  specImports: typeof specImports;
   specs: typeof specs;
   upstreamCredentials: typeof upstreamCredentials;
   usage: typeof usage;
