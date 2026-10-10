@@ -1,7 +1,7 @@
 /// <reference types="vite/client" />
 import { convexTest, type TestConvex } from "convex-test";
 import { describe, expect, it } from "vitest";
-import { internal } from "./_generated/api";
+import { api, internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import schema from "./schema";
 
@@ -230,14 +230,54 @@ describe("universal wallet funding", () => {
     expect(result.lots).toHaveLength(1);
   });
 
-  it("consumes promotion before refundable payment and refunds payment without clawback", async () => {
+  it("settles a signup-funded free-tier call and unlocks reviews without a payment", async () => {
+    const t = convexTest(schema, modules);
+    const s = await seed(t, "signup_free");
+    await t.mutation(internal.organizations.upsertFromClerk, {
+      clerkOrgId: "org_consumer_signup_free",
+      name: "Consumer",
+      slug: "consumer-signup-free",
+      creatorClerkUserId: "user_signup_free",
+    });
+    const result = await t.mutation(internal.wallets.recordUsage, {
+      events: [
+        {
+          ...usage(s, "settle:signup_free", 0),
+          pricingDecision: "free_tier",
+          listedCostCredits: 50,
+          freeTierLimit: 5,
+          freeTierUsedBefore: 0,
+        },
+      ],
+    });
+    expect(result.results[0]?.status).toBe("applied");
+    expect(result.wallet?.balance).toBe(10_000);
+    const consumer = t.withIdentity({
+      subject: "user_signup_free",
+      org_id: "org_consumer_signup_free",
+    });
+    expect(
+      await consumer.query(api.reviews.getViewerState, {
+        projectId: s.projectId,
+      }),
+    ).toMatchObject({ canReview: true });
+    await consumer.mutation(api.reviews.upsert, {
+      projectId: s.projectId,
+      rating: 5,
+    });
+    expect(
+      await t.run(async (ctx) => await ctx.db.query("payments").collect()),
+    ).toEqual([]);
+  });
+
+  it("consumes signup credit first and refunds only card-funded inventory", async () => {
     const t = convexTest(schema, modules);
     const s = await seed(t, "promo");
-    await t.mutation(internal.wallets.applyAdminAdjustment, {
-      organizationId: s.consumerId,
-      amount: 50,
-      refId: "promo:welcome",
-      promotion: true,
+    await t.mutation(internal.organizations.upsertFromClerk, {
+      clerkOrgId: "org_consumer_promo",
+      name: "Consumer",
+      slug: "consumer-promo",
+      creatorClerkUserId: "user_signup_promo",
     });
     const paymentId = await grantPayment(t, s, "promo_payment", 100);
     await t.mutation(internal.wallets.recordUsage, {
@@ -279,7 +319,7 @@ describe("universal wallet funding", () => {
         payment: await ctx.db.get(paymentId),
       };
     });
-    expect(result.wallet).toMatchObject({ balance: 0 });
+    expect(result.wallet).toMatchObject({ balance: 9_950 });
     expect(result.exposure).toMatchObject({
       walletCredits: 100,
       publisherCredits: 0,
