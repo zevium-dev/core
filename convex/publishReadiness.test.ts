@@ -1,6 +1,6 @@
 /// <reference types="vite/client" />
 import { convexTest, type TestConvex } from "convex-test";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api, internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import {
@@ -437,6 +437,159 @@ describe("publish readiness validity", () => {
       asAdmin(t).query(api.publishReadiness.getCurrent, { projectId }),
     ).resolves.toMatchObject({ current: true });
   });
+});
+
+describe("publication with upstream credentials (#389)", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    probeMock.mockReset();
+    probeMock.mockResolvedValue({
+      outcome: "healthy",
+      statusCode: 200,
+      latencyMs: 12,
+      finalOrigin: "https://httpbin.org",
+      message: "Upstream responded successfully without credentials.",
+    });
+  });
+
+  afterEach(() => {
+    vi.clearAllTimers();
+    vi.useRealTimers();
+    probeMock.mockReset();
+  });
+
+  async function setup() {
+    const t = convexTest(schema, modules);
+    const { projectId } = await seed(t);
+    const admin = asAdmin(t);
+    const spec = JSON.stringify({
+      openapi: "3.1.0",
+      info: { title: "Dogfood readiness", version: "0.0.1" },
+      servers: [{ url: "https://httpbin.org" }],
+      paths: {
+        "/status/200": {
+          get: {
+            "x-zevium-cost": 1,
+            "x-zevium-health-check": true,
+            responses: { "200": { description: "Healthy" } },
+          },
+        },
+      },
+    });
+    expect(
+      await admin.mutation(api.specs.saveDraft, {
+        projectId,
+        spec,
+        baseHash: await draftFingerprint(DRAFT_A),
+      }),
+    ).toMatchObject({ ok: true });
+    const credential = await admin.mutation(api.upstreamCredentials.upsert, {
+      projectId,
+      name: "X-Dogfood-Token",
+      secret: "harmless-test-value",
+    });
+    return { t, admin, projectId, spec, credential };
+  }
+
+  it.each(["new", "rotated", "legacy"] as const)(
+    "publishes after a passing health check with a %s credential",
+    async (kind) => {
+      const { t, admin, projectId, spec, credential } = await setup();
+      if (kind === "rotated") {
+        await admin.mutation(api.upstreamCredentials.upsert, {
+          projectId,
+          name: "X-Dogfood-Token",
+          secret: "rotated-test-value",
+        });
+      } else if (kind === "legacy") {
+        await t.run(async (ctx) => {
+          await ctx.db.patch(credential.id, { revision: undefined });
+        });
+      }
+
+      // Retesting unchanged credentials must remain publishable too.
+      for (let attempt = 0; attempt < 2; attempt++) {
+        await expect(
+          admin.action(api.publishReadinessAction.testConnection, {
+            projectId,
+          }),
+        ).resolves.toMatchObject({ status: "ready", statusCode: 200 });
+        await expect(
+          admin.query(api.publishReadiness.getCurrent, { projectId }),
+        ).resolves.toMatchObject({ current: true, reason: null });
+      }
+      expect(probeMock).toHaveBeenCalledWith(
+        "https://httpbin.org/status/200",
+        "GET",
+      );
+      await expect(
+        admin.mutation(api.specs.publish, { projectId, version: "0.0.1" }),
+      ).resolves.toMatchObject({
+        ok: true,
+        version: { version: "0.0.1", spec },
+        project: { status: "published" },
+      });
+      expect(
+        await admin.query(api.specs.listVersions, { projectId }),
+      ).toHaveLength(1);
+    },
+  );
+
+  it.each(["rotate", "add", "remove"] as const)(
+    "requires a fresh health check after credential %s, then permits publication",
+    async (change) => {
+      const { t, admin, projectId, credential } = await setup();
+      // A legacy row dominates the aggregate revision. Membership/fingerprint
+      // checks must still detect changes to the other credential at the same time.
+      await t.run(async (ctx) => {
+        await ctx.db.insert("upstreamCredentials", {
+          projectId,
+          name: "x-legacy-token",
+          secret: "legacy-test-value",
+          updatedAt: Date.now(),
+        });
+      });
+      await admin.action(api.publishReadinessAction.testConnection, {
+        projectId,
+      });
+      if (change === "remove") {
+        await admin.mutation(api.upstreamCredentials.remove, {
+          credentialId: credential.id,
+        });
+      } else {
+        await admin.mutation(api.upstreamCredentials.upsert, {
+          projectId,
+          name: change === "rotate" ? "X-Dogfood-Token" : "X-Another-Token",
+          secret: "changed-test-value",
+        });
+      }
+      await expect(
+        admin.query(api.publishReadiness.getCurrent, { projectId }),
+      ).resolves.toMatchObject({
+        current: false,
+        reason: "credentials_changed",
+      });
+      await expect(
+        admin.mutation(api.specs.publish, { projectId, version: "0.0.1" }),
+      ).resolves.toMatchObject({
+        ok: false,
+        issues: [expect.objectContaining({ path: "readiness" })],
+      });
+      expect(
+        await admin.query(api.specs.listVersions, { projectId }),
+      ).toHaveLength(0);
+
+      await expect(
+        admin.action(api.publishReadinessAction.testConnection, { projectId }),
+      ).resolves.toMatchObject({ status: "ready" });
+      await expect(
+        admin.query(api.publishReadiness.getCurrent, { projectId }),
+      ).resolves.toMatchObject({ current: true, reason: null });
+      await expect(
+        admin.mutation(api.specs.publish, { projectId, version: "0.0.1" }),
+      ).resolves.toMatchObject({ ok: true });
+    },
+  );
 });
 
 describe("draft compare-and-swap", () => {
