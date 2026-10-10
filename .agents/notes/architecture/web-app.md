@@ -1,6 +1,6 @@
 # Web app internals
 
-> Updated: 2026-10-10 (moved from former root `TECH.md` "Repo shape" bullets)
+> Updated: 2026-10-10 (public icons, deployment proof, route-error landmarks; #367)
 > Code: `apps/web/src/`
 > Related: [design system](../design/design-system.md), [app shell](../design/app-shell.md), [catalogue-search](../features/catalogue-search.md), [accounts-orgs](../features/accounts-orgs.md)
 
@@ -17,6 +17,10 @@ Catalogue route adapters and the navigation-provider rules (public vs authentica
 ## Local assets and CSP
 
 - **Local web assets**: the web dev server runs on port 3000. Worker-first routing forwards Vite client modules, styles, and HMR entry points through the asset binding in development; production only forwards built and allowlisted public assets. CSP uses the same gateway origin resolution as the playground, including the local port 8787 fallback.
+
+- **Public icons**: `apps/web/scripts/build.mjs` preserves the tracked favicon and 192/512 PNGs. `src/server.ts` forwards them through the asset binding; the HTML head links the SVG favicon and `public/manifest.json`, which also declares the raster icons. `t3.json` continues to use `public/logo192.png`.
+- **Deployment proof**: `src/server.ts` serves `GET`/`HEAD /.well-known/zevium-deployment.json` as uncached JSON for `e2e/stripe-provider-proof.mjs`. The v1 manifest contains only service, mode, built Git SHA, Cloudflare version ID, and normalized upload timestamp. The runtime version tag must match the built SHA; missing/invalid metadata returns JSON 503, never a static development placeholder. Production workflow verification still reads the HTML release meta tag. Gateway/Convex proof contracts are separate.
+- **Route errors**: `components/route-error.tsx` uses a neutral wrapper. App/admin layouts retain ownership of the main landmark and `main-content` skip-link target.
 
 ## Known pitfalls
 

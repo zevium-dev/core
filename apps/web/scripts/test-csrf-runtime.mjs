@@ -147,6 +147,50 @@ try {
   );
   await assetResponse.body?.cancel();
 
+  for (const [name, contentType] of [
+    ["favicon.ico", /image\/(?:x-icon|vnd.microsoft.icon)/],
+    ["logo192.png", /image\/png/],
+    ["logo512.png", /image\/png/],
+    ["manifest.json", /application\/json/],
+  ]) {
+    const response = await workerd.fetch(`http://localhost/${name}`);
+    assert.equal(response.status, 200, `${name} must be served`);
+    assert.match(response.headers.get("content-type"), contentType);
+    assertSecurityHeaders(name, response, { deployedHttps: false });
+    assert.deepEqual(
+      Buffer.from(await response.arrayBuffer()),
+      readFileSync(join(packageRoot, "public", name)),
+      `${name} must survive the build unchanged`,
+    );
+  }
+
+  const manifest = JSON.parse(
+    readFileSync(join(packageRoot, "dist/client/manifest.json"), "utf8"),
+  );
+  for (const name of ["favicon.ico", "logo192.png", "logo512.png"]) {
+    assert.ok(
+      manifest.icons.some((icon) => icon.src === `/${name}`),
+      `${name} missing from manifest`,
+    );
+  }
+
+  const proofResponse = await workerd.fetch(
+    "http://localhost/.well-known/zevium-deployment.json",
+  );
+  assert.equal(
+    proofResponse.status,
+    503,
+    "untagged local Worker must not claim deployment proof",
+  );
+  assert.match(proofResponse.headers.get("content-type"), /application\/json/);
+  assertSecurityHeaders("deployment proof", proofResponse, {
+    deployedHttps: false,
+    noStore: true,
+  });
+  assert.deepEqual(await proofResponse.json(), {
+    error: "Deployment metadata unavailable",
+  });
+
   const missingAssetResponse = await workerd.fetch(
     "http://localhost/assets/security-probe-missing.js",
   );

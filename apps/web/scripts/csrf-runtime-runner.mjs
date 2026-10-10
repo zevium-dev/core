@@ -148,12 +148,41 @@ async function invokePath(path, init) {
   );
 }
 
+const deploymentId = "12345678-1234-4123-8123-123456789abc";
+const proofResponse = await worker.fetch(
+  new Request("https://www.zevium.dev/.well-known/zevium-deployment.json"),
+  {
+    CF_VERSION_METADATA: {
+      id: deploymentId,
+      tag: `staging-${"0".repeat(40)}`,
+      timestamp: "2026-10-10T12:00:00.12345Z",
+    },
+    CLERK_SECRET_KEY: testSecretKey,
+  },
+  executionContext,
+);
+assert.equal(proofResponse.status, 200);
+assertSecurityHeaders("deployment proof", proofResponse, { noStore: true });
+assert.deepEqual(await proofResponse.json(), {
+  schemaVersion: 1,
+  service: "web",
+  mode: "staging",
+  gitSha: "0".repeat(40),
+  deploymentId,
+  deployedAt: "2026-10-10T12:00:00.123Z",
+});
+
 const documentResponse = await invokePath("/");
 assertSecurityHeaders("document", documentResponse, { noStore: true });
 const documentCsp = documentResponse.headers.get("content-security-policy");
 const documentNonce = documentCsp.match(/'nonce-([A-Za-z0-9_-]{24})'/)?.[1];
 assert.ok(documentNonce, "document CSP nonce missing");
 const documentBody = await documentResponse.text();
+assert.match(
+  documentBody,
+  /<link[^>]*rel="manifest"[^>]*href="\/manifest\.json"/,
+);
+assert.match(documentBody, /<link[^>]*rel="icon"[^>]*href="\/logo\.svg"/);
 assert.match(documentBody, new RegExp(`nonce=["']${documentNonce}["']`));
 const scriptTags = [...documentBody.matchAll(/<script\b[^>]*>/gi)].map(
   (match) => match[0],
