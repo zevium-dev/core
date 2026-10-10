@@ -7,6 +7,8 @@ Facts an agent needs before running anything locally. Hard-won; keep them. If a 
 
 ## Dogfood setup findings — 2026-10-10
 
+Round-two setup (`75633792`): normal seed and Convex typechecking succeeded; no CSP bypass needed. For a new isolated backend, configure `CLERK_JWT_ISSUER_DOMAIN`, test `CLERK_SECRET_KEY`, matching `REGISTRY_KEY_PROJECTION_HMAC_SECRET` and `GATEWAY_INTERNAL_SECRET`, `APP_ORIGIN`, plus both encryption keyrings before publication. Credential encryption requires canonical padded base64 for 32 bytes; registry transport accepts 32-byte hex or base64url (ordinary base64 containing `+` or `/` fails). Copying local web env files alone does not populate backend env. Signup credit requires the creator-bearing Clerk organization webhook; `ensureOrganization` alone does not grant it. The round-two local test used an explicit synthetic signed webhook, not live Clerk delivery. Stripe test credentials available during that run were expired; verify validity before claiming a Checkout pass. [Full evidence and limits](../findings/dogfood-2026-10-10-round-2.md).
+
 Baseline `eaa7eff`; see [full findings and workaround limits](../findings/dogfood-2026-10-10.md).
 
 - **P1 #384 (fixed):** the baseline seed failed module resolution and imported a deleted shared export. The current `tsx` command and working procedure are documented below.

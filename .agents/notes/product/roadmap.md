@@ -13,6 +13,13 @@ Status legend: **built** · **partial** · **planned**. Status is set by each fe
 
 ## Dogfood regressions — 2026-10-10
 
+Round 2 on `75633792`: [verification, new issues and limits](../findings/dogfood-2026-10-10-round-2.md). Ten requested round-one findings passed; #396 reopened for incomplete monthly-cap recovery. #385 was excluded from standalone re-verification. New work:
+
+- **P1 #417:** local 402 actions target production keys/billing. → [agent-surface](../features/agent-surface.md)
+- **P2 #416:** organization creation leaves notifications in a persistent authentication error. → [webhooks-notifications](../features/webhooks-notifications.md)
+
+The original baseline findings below are historical; use the round-two report for their current retest status.
+
 Baseline `eaa7eff`; [journeys, evidence and limits](../findings/dogfood-2026-10-10.md). Issues are new findings, not completed fixes.
 
 - **P0:** #385 key issuance/deployment blocked by missing index; #389 credentialed publication blocked after passing health check. → [api-keys](../features/api-keys.md), [publishing-specs](../features/publishing-specs.md)
