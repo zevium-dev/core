@@ -40,8 +40,7 @@ export function RouteError({ error }: ErrorComponentProps) {
   }, [queryErrorResetBoundary]);
 
   return (
-    <main
-      id="main-content"
+    <div
       className="mx-auto flex min-h-[60dvh] w-full max-w-2xl items-center px-4 py-12"
       data-router-error
     >
@@ -80,6 +79,6 @@ export function RouteError({ error }: ErrorComponentProps) {
           </div>
         </CardContent>
       </Card>
-    </main>
+    </div>
   );
 }
