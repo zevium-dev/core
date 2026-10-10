@@ -20,6 +20,7 @@ import {
 import { FixtureKeyVerifier } from "../src/key-verifier";
 import { FixtureSpecSource } from "../src/spec-source";
 import { CollectingUsageSink } from "../src/usage";
+import { handleMcpRequest, type McpDeps } from "../src/mcp";
 import { apiDocsFromSpec } from "../src/mcp-api-docs";
 import { parseSpec } from "@zevium/shared";
 import type { WalletDO } from "../src/wallet";
@@ -646,9 +647,7 @@ describe("MCP /mcp", () => {
     if (!isRecord(payload)) return;
     expect(payload.status).toBe(200);
     expect(payload.cost).toBe(3);
-    expect(typeof payload.body === "string" && payload.body).toBe(
-      "echo:hello-mcp",
-    );
+    expect(payload.publisherData).toMatchObject({ body: "echo:hello-mcp" });
 
     // Upstream called once through the same pipeline proxy path
     expect(calls).toHaveLength(1);
@@ -661,61 +660,193 @@ describe("MCP /mcp", () => {
     expect(after.pendingSettlements[0]!.cost).toBe(3);
   });
 
-  it("caps buffered call_api responses at 1 MiB", async () => {
-    const clerkOrgId = "org_mcp_response_limit";
-    await installAgentFixtures({
-      clerkOrgId,
-      credits: 100,
-      fetchImpl: async () =>
-        new Response("x".repeat(1024 * 1024 + 1), { status: 200 }),
-    });
-
-    const rpc: unknown = await mcpCall(
+  async function callEcho(path = "/echo") {
+    return mcpCall(
       "tools/call",
       {
         name: "call_api",
         arguments: {
           org: ORG_SLUG,
           project: PROJECT_SLUG,
-          method: "POST",
-          path: "/echo",
+          method: path === "/forecast" ? "GET" : "POST",
+          path,
         },
       },
       { headers: { authorization: `Bearer ${KEY_SECRET}` } },
     );
+  }
 
-    expect(isRecord(rpc)).toBe(true);
-    if (!isRecord(rpc)) return;
-    expect(
-      isRecord(rpc.result) &&
-        rpc.result.isError === true &&
-        toolText(rpc) === "Upstream response exceeds 1 MiB limit",
-    ).toBe(true);
-  });
+  async function expectRefund(clerkOrgId: string) {
+    const state = await walletStub(clerkOrgId).getState();
+    expect(state.balance).toBe(100);
+    expect(state.inFlightTotal).toBe(0);
+    expect(state.pendingSettlements).toEqual([
+      expect.objectContaining({
+        cost: 0,
+        usage: expect.objectContaining({ billingOutcome: "refunded" }),
+      }),
+    ]);
+  }
 
-  it("times out tool execution after 10 seconds", async () => {
-    vi.useFakeTimers();
-    try {
-      const clerkOrgId = "org_mcp_execution_limit";
+  it.each(["content-length", "stream"])(
+    "refunds responses exceeding 1 MiB (%s)",
+    async (limitSource) => {
+      const clerkOrgId = `org_mcp_response_limit_${limitSource}`;
+      const cancel = vi.fn();
       await installAgentFixtures({
         clerkOrgId,
         credits: 100,
-        fetchImpl: async (input) => {
-          const request =
-            input instanceof Request ? input : new Request(String(input));
+        fetchImpl: async () =>
+          new Response(
+            new ReadableStream({
+              start(controller) {
+                controller.enqueue(new Uint8Array(1024 * 1024));
+                controller.enqueue(new Uint8Array(1));
+              },
+              cancel,
+            }),
+            {
+              headers:
+                limitSource === "content-length"
+                  ? { "content-length": String(1024 * 1024 + 1) }
+                  : {},
+            },
+          ),
+      });
+      const rpc = await callEcho();
+      expect(rpc).toMatchObject({ result: { isError: true } });
+      expect(toolText(rpc)).toBe("Upstream response exceeds 1 MiB limit");
+      expect(cancel).toHaveBeenCalledOnce();
+      await expectRefund(clerkOrgId);
+    },
+  );
+
+  it("settles a fully buffered response exactly at 1 MiB", async () => {
+    const clerkOrgId = "org_mcp_response_at_limit";
+    await installAgentFixtures({
+      clerkOrgId,
+      credits: 100,
+      fetchImpl: async () => new Response("x".repeat(1024 * 1024)),
+    });
+    const rpc = await callEcho();
+    expect(rpc).not.toMatchObject({ result: { isError: true } });
+    expect(JSON.parse(toolText(rpc))).toMatchObject({
+      cost: 3,
+      publisherData: { body: "x".repeat(1024 * 1024) },
+    });
+    expect((await walletStub(clerkOrgId).getState()).balance).toBe(97);
+  });
+
+  it.each(["fetch", "body"])(
+    "refunds a thrown %s error without leaking its text",
+    async (source) => {
+      const clerkOrgId = `org_mcp_throw_${source}`;
+      const secret = "private upstream credential and internal stack trace";
+      await installAgentFixtures({
+        clerkOrgId,
+        credits: 100,
+        fetchImpl: async () => {
+          if (source === "fetch") throw new Error(secret);
+          return new Response(
+            new ReadableStream({
+              pull(controller) {
+                controller.error(new Error(secret));
+              },
+            }),
+          );
+        },
+      });
+      const rpc = await callEcho();
+      expect(rpc).toMatchObject({ result: { isError: true } });
+      expect(JSON.stringify(rpc)).not.toContain(secret);
+      if (source === "body") {
+        expect(toolText(rpc)).toBe(
+          "Could not read the API response. Please try again.",
+        );
+      } else {
+        expect(JSON.parse(toolText(rpc))).toMatchObject({
+          cost: 0,
+          message: "The API call failed. Please try again.",
+        });
+      }
+      await expectRefund(clerkOrgId);
+    },
+  );
+
+  it("restores free-tier allowance when buffering fails", async () => {
+    const clerkOrgId = "org_mcp_refund_free";
+    let fail = true;
+    await installAgentFixtures({
+      clerkOrgId,
+      credits: 100,
+      fetchImpl: async () =>
+        new Response(fail ? "x".repeat(1024 * 1024 + 1) : "ok"),
+    });
+    expect(await callEcho("/forecast")).toMatchObject({
+      result: { isError: true },
+    });
+    await expectRefund(clerkOrgId);
+    fail = false;
+    for (let i = 0; i < 5; i++) {
+      expect(JSON.parse(toolText(await callEcho("/forecast")))).toMatchObject({
+        cost: 0,
+      });
+    }
+    expect((await walletStub(clerkOrgId).getState()).balance).toBe(100);
+    expect(JSON.parse(toolText(await callEcho("/forecast")))).toMatchObject({
+      cost: 2,
+    });
+  });
+
+  it.each(["headers", "body"])(
+    "refunds the reservation on a 10s %s timeout",
+    async (phase) => {
+      const clerkOrgId = `org_mcp_timeout_${phase}`;
+      const entered = Promise.withResolvers<void>();
+      const cancel = vi.fn();
+      await installAgentFixtures({
+        clerkOrgId,
+        credits: 100,
+        fetchImpl: async (_input, init) => {
+          entered.resolve();
+          if (phase === "body") {
+            return new Response(new ReadableStream({ cancel }));
+          }
           return new Promise<Response>((_resolve, reject) => {
-            request.signal.addEventListener(
+            init?.signal?.addEventListener(
               "abort",
-              () => reject(request.signal.reason),
+              () => reject(new Error("private timeout detail")),
               { once: true },
             );
           });
         },
       });
+      vi.useFakeTimers();
+      try {
+        const pending = callEcho();
+        await entered.promise;
+        expect((await walletStub(clerkOrgId).getState()).inFlightTotal).toBe(3);
+        await vi.advanceTimersByTimeAsync(10_001);
+        const rpc = await pending;
+        expect(rpc).toMatchObject({ result: { isError: true } });
+        expect(toolText(rpc)).toBe("Tool execution timed out after 10 seconds");
+        if (phase === "body") expect(cancel).toHaveBeenCalledOnce();
+        await expectRefund(clerkOrgId);
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
 
-      const pending = mcpCall(
-        "tools/call",
-        {
+  function echoRequest() {
+    return new Request("https://gateway.test/mcp", {
+      method: "POST",
+      headers: { authorization: `Bearer ${KEY_SECRET}` },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/call",
+        params: {
           name: "call_api",
           arguments: {
             org: ORG_SLUG,
@@ -724,22 +855,148 @@ describe("MCP /mcp", () => {
             path: "/echo",
           },
         },
-        { headers: { authorization: `Bearer ${KEY_SECRET}` } },
-      );
-      await vi.advanceTimersByTimeAsync(20_001);
-      const rpc = await pending;
+      }),
+    });
+  }
 
-      expect(isRecord(rpc)).toBe(true);
-      if (!isRecord(rpc)) return;
-      expect(
-        isRecord(rpc.result) &&
-          rpc.result.isError === true &&
-          toolText(rpc) === "Tool execution timed out after 10 seconds",
-      ).toBe(true);
+  it("never settles a late response after a tool timeout", async () => {
+    const clerkOrgId = "org_mcp_late_headers";
+    const entered = Promise.withResolvers<void>();
+    const upstream = Promise.withResolvers<Response>();
+    await installAgentFixtures({
+      clerkOrgId,
+      credits: 100,
+      fetchImpl: async () => {
+        entered.resolve();
+        return upstream.promise;
+      },
+    });
+    vi.useFakeTimers();
+    const ctx = createExecutionContext();
+    try {
+      const pending = worker.fetch(echoRequest(), env as Env, ctx);
+      await entered.promise;
+      await vi.advanceTimersByTimeAsync(10_001);
+      const rpc = await (await pending).json();
+      expect(toolText(rpc)).toBe("Tool execution timed out after 10 seconds");
+      upstream.resolve(new Response("late success"));
+      await waitOnExecutionContext(ctx);
+      await expectRefund(clerkOrgId);
     } finally {
       vi.useRealTimers();
     }
   });
+
+  it("does not report a timeout while a prepared result is settling", async () => {
+    const clerkOrgId = "org_mcp_slow_settlement";
+    const fixtures = await installAgentFixtures({ clerkOrgId, credits: 100 });
+    const settling = Promise.withResolvers<void>();
+    const finishSettlement = Promise.withResolvers<void>();
+    const wallet = walletStub(clerkOrgId);
+    // This paid-path namespace delegates real billing to the DO, delaying only settlement.
+    const namespace = {
+      idFromName: (name: string) => env.WALLET.idFromName(name),
+      get: () => ({
+        reserve: (...args: Parameters<WalletDO["reserve"]>) =>
+          wallet.reserve(...args),
+        settle: async (...args: Parameters<WalletDO["settle"]>) => {
+          settling.resolve();
+          await finishSettlement.promise;
+          return wallet.settle(...args);
+        },
+      }),
+    } as unknown as McpDeps["pipelineEnv"]["WALLET"];
+    vi.useFakeTimers();
+    const ctx = createExecutionContext();
+    try {
+      const pending = handleMcpRequest(
+        echoRequest(),
+        {
+          catalogueSource: fixtures.catalogue,
+          specSource: fixtures.specs,
+          gatewayOrigin: "https://gateway.test",
+          pipelineEnv: { WALLET: namespace },
+          pipeline: {
+            keyVerifier: fixtures.keys,
+            specSource: fixtures.specs,
+            usageSink: fixtures.usage,
+            fetchImpl: async () => new Response("buffered success"),
+          },
+        },
+        ctx,
+      );
+      await settling.promise;
+      await vi.advanceTimersByTimeAsync(10_001);
+      finishSettlement.resolve();
+      const rpc = await (await pending).json();
+      await waitOnExecutionContext(ctx);
+      expect(rpc).not.toMatchObject({ result: { isError: true } });
+      expect(JSON.parse(toolText(rpc))).toMatchObject({
+        cost: 3,
+        publisherData: { body: "buffered success" },
+      });
+      const state = await wallet.getState();
+      expect(state.balance).toBe(97);
+      expect(state.inFlightTotal).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([302, 400, 500])(
+    "returns a static error and charges zero for upstream %i",
+    async (status) => {
+      const clerkOrgId = `org_mcp_upstream_error_${status}`;
+      const secret = "private upstream exception and stack";
+      await installAgentFixtures({
+        clerkOrgId,
+        credits: 100,
+        fetchImpl: async () =>
+          new Response(secret, { status, headers: { "x-error": secret } }),
+      });
+      const rpc = await callEcho();
+      expect(rpc).toMatchObject({ result: { isError: true } });
+      expect(JSON.stringify(rpc)).not.toContain(secret);
+      expect(JSON.parse(toolText(rpc))).toMatchObject({
+        status,
+        cost: 0,
+        message: "The API call failed. Please try again.",
+      });
+      await expectRefund(clerkOrgId);
+    },
+  );
+
+  it.each(["search_apis", "get_api_docs", "call_api"])(
+    "sanitizes unexpected %s dependency exceptions",
+    async (name) => {
+      const clerkOrgId = `org_mcp_dependency_error_${name}`;
+      const secret = "private dependency token and stack";
+      const fixtures = await installAgentFixtures({ clerkOrgId, credits: 100 });
+      vi.spyOn(fixtures.catalogue, "listPublic").mockRejectedValue(
+        new Error(secret),
+      );
+      vi.spyOn(fixtures.specs, "getPublishedSpec").mockRejectedValue(
+        new Error(secret),
+      );
+      const rpc = await mcpCall("tools/call", {
+        name,
+        arguments: {
+          org: ORG_SLUG,
+          project: PROJECT_SLUG,
+          method: "POST",
+          path: "/echo",
+          key: KEY_SECRET,
+        },
+      });
+      expect(rpc).toMatchObject({ result: { isError: true } });
+      expect(toolText(rpc)).toBe("Tool execution failed. Please try again.");
+      expect(JSON.stringify(rpc)).not.toContain(secret);
+      const state = await walletStub(clerkOrgId).getState();
+      expect(state.balance).toBe(100);
+      expect(state.inFlightTotal).toBe(0);
+      expect(state.pendingSettlements).toHaveLength(0);
+    },
+  );
 
   it("call_api without key fails without touching wallet", async () => {
     const clerkOrgId = "org_mcp_call_nokey";

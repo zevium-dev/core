@@ -101,6 +101,8 @@ export async function handleGatewayRequest(
   deps: PipelineDeps,
   ctx: ExecutionContext,
   route: GatewayRoute,
+  /** Buffered adapters prepare their result before settlement; rejection refunds. */
+  prepareResponse?: (response: Response) => Promise<Response>,
 ): Promise<Response> {
   const started = (deps.now ?? Date.now)();
   const requestId = (deps.idGenerator ?? defaultId)();
@@ -588,6 +590,7 @@ export async function handleGatewayRequest(
   let upstreamRes: Response;
   try {
     upstreamRes = await fetchImpl(upstreamUrl.toString(), init);
+    if (prepareResponse) upstreamRes = await prepareResponse(upstreamRes);
   } catch {
     const latencyMs = (deps.now ?? Date.now)() - started;
     if (!usedFree && !unmetered) {
