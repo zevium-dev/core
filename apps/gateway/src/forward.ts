@@ -35,7 +35,8 @@ export async function forward(
     redirect: "manual",
   };
   if (request.method !== "GET" && request.method !== "HEAD") {
-    init.body = request.body;
+    init.body = admission.tokenRequest?.body ?? request.body;
+    if (admission.tokenRequest) upstreamHeaders.delete("content-length");
     // Required by fetch when body is a stream.
     init.duplex = "half";
   }

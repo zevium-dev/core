@@ -1411,3 +1411,192 @@ describe("gateway pipeline", () => {
     expect(state.balance).toBe(8); // 10 - 2 (stream cost)
   });
 });
+
+describe("token-priced gateway calls", () => {
+  const tokenSpec = JSON.stringify({
+    openapi: "3.1.0",
+    servers: [{ url: "https://upstream.test" }],
+    paths: {
+      "/chat": {
+        post: {
+          "x-zevium-cost": {
+            per: "token",
+            input: 1_000_000,
+            output: 1_000_000,
+            maxPerCall: 100,
+          },
+        },
+      },
+    },
+  });
+  const call = (ctx: ExecutionContext, body: Record<string, unknown> = {}) =>
+    worker.fetch(
+      new Request("https://gateway.test/gateway/acme/demo/chat", {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${KEY_SECRET}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          messages: [{ role: "user", content: "hello" }],
+          max_tokens: 50,
+          ...body,
+        }),
+      }),
+      env as Env,
+      ctx,
+    );
+
+  it("returns stream bytes before final usage, then settles actual and releases hold", async () => {
+    const org = "token-stream";
+    let source!: ReadableStreamDefaultController<Uint8Array>;
+    const encoder = new TextEncoder();
+    const first = 'data: {"choices":[{"delta":{"content":"hello"}}]}\r\n\r\n';
+    const last =
+      'data: {"choices":[],"usage":{"prompt_tokens":7,"completion_tokens":11}}\r\n\r\ndata: [DONE]\r\n\r\n';
+    const mock = makeFetchMock(async (request) => {
+      expect(await request.json()).toMatchObject({
+        stream: true,
+        stream_options: { include_usage: true },
+        max_tokens: 50,
+      });
+      return new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            source = controller;
+            controller.enqueue(encoder.encode(first));
+          },
+        }),
+        { headers: { "content-type": "text/event-stream" } },
+      );
+    });
+    await installFixtures({
+      clerkOrgId: org,
+      credits: 1000,
+      spec: tokenSpec,
+      fetchImpl: mock.fetchImpl,
+    });
+    const ctx = createExecutionContext();
+    const response = await call(ctx, { stream: true });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-zevium-hold")).toBe("100");
+    expect(response.headers.has("x-zevium-cost")).toBe(false);
+    expect((await walletStub(org).getState()).inFlightTotal).toBe(100);
+    const reader = response.body!.getReader();
+    expect((await reader.read()).value).toEqual(encoder.encode(first));
+    // Deliberately split CRLF and usage JSON across network chunks.
+    for (const byte of encoder.encode(last))
+      source.enqueue(new Uint8Array([byte]));
+    source.close();
+    const remaining: number[] = [];
+    while (true) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      remaining.push(...chunk.value);
+    }
+    expect(new Uint8Array(remaining)).toEqual(encoder.encode(last));
+    await waitOnExecutionContext(ctx);
+    const state = await walletStub(org).getState();
+    expect(state).toMatchObject({
+      balance: 982,
+      inFlightTotal: 0,
+      available: 982,
+    });
+    expect(state.pendingSettlements[0]).toMatchObject({
+      cost: 18,
+      usage: {
+        listedCostCredits: 100,
+        budgetReservationCredits: 100,
+        pricingDecision: "token_usage",
+      },
+    });
+  });
+
+  it.each([
+    [{ usage: { prompt_tokens: 7, completion_tokens: 11 } }, 18],
+    [{ choices: [] }, 0],
+    [{ usage: { prompt_tokens: -1, completion_tokens: 11 } }, 0],
+    [{ usage: { prompt_tokens: 1000, completion_tokens: 1000 } }, 100],
+  ])(
+    "settles JSON usage with consumer-safe fallback/cap: %j",
+    async (body, expected) => {
+      const org = `token-json-${crypto.randomUUID()}`;
+      const serialized = JSON.stringify(body);
+      await installFixtures({
+        clerkOrgId: org,
+        credits: 1000,
+        spec: tokenSpec,
+        fetchImpl: makeFetchMock((request) => {
+          expect(request.headers.get("content-type")).toBe("application/json");
+          return new Response(serialized, {
+            headers: { "content-type": "application/json" },
+          });
+        }).fetchImpl,
+      });
+      const ctx = createExecutionContext();
+      const response = await call(ctx);
+      expect(await response.text()).toBe(serialized);
+      await waitOnExecutionContext(ctx);
+      expect(await walletStub(org).getState()).toMatchObject({
+        balance: 1000 - expected,
+        inFlightTotal: 0,
+      });
+    },
+  );
+
+  it("returns weight_exceeds_budget before contacting upstream", async () => {
+    const mock = makeFetchMock(() => new Response("unreachable"));
+    await installFixtures({
+      clerkOrgId: "token-heavy",
+      credits: 100,
+      spec: tokenSpec,
+      fetchImpl: mock.fetchImpl,
+    });
+    const ctx = createExecutionContext();
+    const response = await call(ctx);
+    expect(response.status).toBe(402);
+    expect(await response.json()).toMatchObject({
+      reason: "weight_exceeds_budget",
+      metadata: { reason: "weight_exceeds_budget" },
+    });
+    expect(mock.calls).toHaveLength(0);
+    await waitOnExecutionContext(ctx);
+  });
+
+  it("returns transient 402 with Retry-After while another call occupies budget", async () => {
+    const org = "token-busy";
+    let source!: ReadableStreamDefaultController<Uint8Array>;
+    const mock = makeFetchMock(
+      () =>
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              source = controller;
+            },
+          }),
+          { headers: { "content-type": "text/event-stream" } },
+        ),
+    );
+    await installFixtures({
+      clerkOrgId: org,
+      credits: 200,
+      spec: tokenSpec,
+      fetchImpl: mock.fetchImpl,
+    });
+    const firstCtx = createExecutionContext();
+    const first = await call(firstCtx, { stream: true });
+    const secondCtx = createExecutionContext();
+    const second = await call(secondCtx);
+    expect(second.status).toBe(402);
+    expect(second.headers.get("retry-after")).toBe("5");
+    expect(await second.json()).toMatchObject({
+      reason: "in_flight_budget_exhausted",
+    });
+    expect(mock.calls).toHaveLength(1);
+    source.close();
+    await first.text();
+    await waitOnExecutionContext(firstCtx);
+    await waitOnExecutionContext(secondCtx);
+    expect((await walletStub(org).getState()).available).toBe(200);
+  });
+});

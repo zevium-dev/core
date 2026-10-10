@@ -70,6 +70,7 @@ import { Textarea } from "#/components/ui/textarea";
 import { ToggleGroup, ToggleGroupItem } from "#/components/ui/toggle-group";
 import { api } from "#/lib/convex-api";
 import type { ApiDetailSearch } from "#/lib/catalogue-detail-search";
+import { tokenPricingLabel } from "@zevium/shared";
 import { creditsLabel } from "#/lib/credits-label";
 import { resolveGatewayOrigin, tryItBaseUrl } from "#/lib/landing";
 import {
@@ -165,6 +166,7 @@ function parameterInputId(endpointId: string, parameter: ApiParameter): string {
 
 function liveCostLabel(endpoint: EndpointRow | null): string {
   if (endpoint === null) return "cost unavailable";
+  if (endpoint.tokenPricing) return tokenPricingLabel(endpoint.tokenPricing);
   if (endpoint.freeTier !== undefined) {
     return `up to ${creditsLabel(endpoint.cost)}`;
   }
@@ -219,6 +221,8 @@ function ApiDetailBody({
 
   const priceRange = useMemo(() => {
     if (endpoints.length === 0) return null;
+    if (endpoints.some((ep) => ep.tokenPricing))
+      return "Token pricing · see endpoint rates";
     let min = endpoints[0]!.cost;
     let max = endpoints[0]!.cost;
     for (const ep of endpoints) {
@@ -450,7 +454,7 @@ function EndpointDocs({
                 </div>
                 <div className="flex shrink-0 flex-wrap items-center gap-2">
                   <Badge variant="secondary" className="tabular-nums">
-                    Live · {creditsLabel(ep.cost)}
+                    Live · {liveCostLabel(ep)}
                   </Badge>
                   <Button
                     type="button"
@@ -962,7 +966,7 @@ export function TryItPanel({
                 role="status"
                 className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
               >
-                Live call · published price {creditsLabel(endpoint?.cost ?? 0)}.
+                Live call · published price {liveCostLabel(endpoint ?? null)}.
                 {endpoint?.freeTier !== undefined
                   ? ` First ${endpoint.freeTier} eligible calls per day cost 0; remaining allowance is unavailable in this view.`
                   : ""}{" "}
@@ -986,7 +990,7 @@ export function TryItPanel({
                       {endpoints.map((ep) => (
                         <SelectItem key={ep.id} value={ep.id}>
                           {ep.method.toUpperCase()} {ep.path} ·{" "}
-                          {creditsLabel(ep.cost)}
+                          {liveCostLabel(ep)}
                         </SelectItem>
                       ))}
                     </SelectGroup>

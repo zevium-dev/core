@@ -1,6 +1,6 @@
 # LLM endpoints: per-token pricing, same fee rule
 
-> Date: 2026-10-10 · Status: accepted direction, not built · Decided by: user ("hold a max per call and settle the actual tokens used"; copy OpenRouter's hold sizing)
+> Date: 2026-10-10 · Status: accepted direction; implemented in #329 · Decided by: user ("hold a max per call and settle the actual tokens used"; copy OpenRouter's hold sizing)
 > Session: [2026-10-10](../sessions/2026-10-10-competitive-research-and-docs.md)
 
 ## Proposal
@@ -24,8 +24,18 @@ Zevium mapping: hold = estimate in the wallet DO reservation (existing reserve/s
 
 ## Open
 
-Spec extension shape; behaviour when upstream omits usage; non-OpenAI-shaped LLM APIs.
+Non-OpenAI-shaped LLM APIs remain unsupported by token metering.
 
 ## Affects
 
 [pricing](../features/pricing.md), [gateway](../features/gateway.md)
+
+## Implementation contract (#329)
+
+- `x-zevium-cost: { per: "token", input: 2000, output: 8000, maxPerCall: 1000 }`. Rates are whole credits per million tokens (0–1,000,000); optional `maxPerCall` is a positive whole-credit ceiling, at most 1,000,000. Scalar prices remain per-call. Missing prices remain hidden. No independent pricing table.
+- OpenAI-compatible JSON requests only, bounded to 1 MiB. Input estimate is **one token per original UTF-8 request byte**, including JSON overhead; client-supplied prompt counts are not trusted. Hold uses that estimate plus `max_completion_tokens`, otherwise `max_tokens`, otherwise 4,096 output tokens; output limit must be 1–1,000,000. Default output limit is forwarded explicitly. Only one completion (`n: 1`) is supported. Streaming requests get `stream_options.include_usage: true`.
+- Hold = ceil((estimated input × input rate + allowed output × output rate) / 1,000,000), limited by `maxPerCall` or the platform ceiling, minimum one credit for a paid token endpoint. Actual = floor((reported prompt tokens × input rate + completion tokens × output rate) / 1,000,000), capped at the hold. Whole-credit rounding follows the existing ledger unit and favors consumers at settlement. Publishers absorb sub-credit fractions and usage beyond the estimate/cap; no overage.
+- **Missing, invalid, oversized, interrupted, or timed-out usage charges zero**, releasing the entire hold. Publisher accepts this consumer-favorable fallback. Non-2xx and failed adapter responses use the existing refund path.
+- Upstream response bytes go straight to the caller through one tee branch. An asynchronous observer parses final OpenAI SSE usage (65,536 UTF-16 code units per event) or JSON usage (1 MiB observer limit). Observer timeout is five minutes, before the ten-minute wallet lease; failed observation never changes client bytes. Direct responses are never buffered by the forwarding path. Only token-priced request JSON is read before admission; ordinary requests still stream.
+- Token admissions enforce wallet in-flight budget = min(floor(current balance / 2), 100,000 credits). All active holds count toward exposure. A single hold above budget returns `402 weight_exceeds_budget`; exhausted remaining budget returns `402 in_flight_budget_exhausted` with `Retry-After: 5`. Reasons appear at top level and in `metadata.reason`. Existing key caps include the full hold; final counters consume only actual credits.
+- `x-zevium-hold` reports the reservation, not a final price. Final charge is available in usage after settlement. Free-tier/zero-price calls retain `x-zevium-cost: 0`. The existing durable outbox, immutable spec identity, and 95/5 split remain authoritative. No house LLM listings added.

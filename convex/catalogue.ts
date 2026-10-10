@@ -35,6 +35,7 @@ export type ListingPricingSummary = {
   maxCost: number;
   endpointCount: number;
   hasFreeTier: boolean;
+  hasTokenPricing?: boolean;
 };
 
 export type PublicListing = {
@@ -63,13 +64,16 @@ export function summarizePublishedPricing(
     let minCost = Number.POSITIVE_INFINITY;
     let maxCost = Number.NEGATIVE_INFINITY;
     let hasFreeTier = false;
+    let hasTokenPricing = false;
 
     for (const pathItem of Object.values(spec.paths)) {
       if (pathItem === undefined) continue;
       for (const op of Object.values(pathItem)) {
         if (op === undefined || Array.isArray(op)) continue;
+        if (op["x-zevium-cost"] === undefined) continue;
         endpointCount += 1;
         const pricing = extractPricing(op);
+        hasTokenPricing ||= pricing.token !== undefined;
         minCost = Math.min(minCost, pricing.cost);
         maxCost = Math.max(maxCost, pricing.cost);
         if (pricing.freeTier !== undefined && pricing.freeTier > 0) {
@@ -92,6 +96,7 @@ export function summarizePublishedPricing(
       maxCost,
       endpointCount,
       hasFreeTier,
+      ...(hasTokenPricing ? { hasTokenPricing } : {}),
     };
   } catch {
     return null;
@@ -107,6 +112,7 @@ function listingPricing(
         maxCost: listing.maxCost,
         endpointCount: listing.endpointCount,
         hasFreeTier: listing.hasFreeTier,
+        ...(listing.hasTokenPricing ? { hasTokenPricing: true } : {}),
       }
     : null;
 }
@@ -294,6 +300,7 @@ export async function syncCatalogueListing(
     maxCost: pricing?.maxCost ?? 0,
     endpointCount: pricing?.endpointCount ?? 0,
     hasFreeTier: pricing?.hasFreeTier ?? false,
+    hasTokenPricing: pricing?.hasTokenPricing,
     discoverable,
     updatedAt: Date.now(),
   };
@@ -315,6 +322,7 @@ export async function syncCatalogueListing(
     existing.maxCost === next.maxCost &&
     existing.endpointCount === next.endpointCount &&
     existing.hasFreeTier === next.hasFreeTier &&
+    existing.hasTokenPricing === next.hasTokenPricing &&
     existing.discoverable === next.discoverable;
   if (unchanged) return existing;
 

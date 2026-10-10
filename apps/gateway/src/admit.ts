@@ -8,6 +8,8 @@ import { assertSafeUpstreamTarget } from "./upstream-safety";
 import { applyDeprecationHeaders } from "./deprecation";
 import type { GatewayRoute, PipelineDeps, PipelineEnv } from "./pipeline";
 
+import { prepareTokenRequest } from "./token-metering";
+
 const RELEASE_CHALLENGE_RE = /^[0-9a-f]{64}$/;
 const RELEASE_SHA_RE = /^[0-9a-f]{40}$/;
 
@@ -189,7 +191,20 @@ export async function admit(
   const incoming = new URL(request.url);
   upstreamUrl.search = incoming.search;
 
-  const cost = matched.pricing.cost;
+  let tokenRequest: Awaited<ReturnType<typeof prepareTokenRequest>> | undefined;
+  if (matched.pricing.token && matched.pricing.cost > 0) {
+    try {
+      tokenRequest = await prepareTokenRequest(request, matched.pricing.token);
+    } catch {
+      return jsonError(
+        400,
+        "invalid_token_request",
+        "Token-priced calls require a JSON body up to 1 MiB, one completion, and a positive output limit up to 1000000 tokens",
+        requestId,
+      );
+    }
+  }
+  const cost = tokenRequest?.hold ?? matched.pricing.cost;
   const freeTier = matched.pricing.freeTier;
   const reservationId = requestId;
 
@@ -305,6 +320,7 @@ export async function admit(
 
   if (!usedFree && !unmetered) {
     const reserve = await wallet.reserve(reservationId, cost, {
+      tokenPricing: matched.pricing.token !== undefined,
       keyId: verified.keyId,
       clerkOrgId: verified.orgId,
     });
@@ -318,6 +334,26 @@ export async function admit(
         "Wallet temporarily unavailable",
         requestId,
       );
+    }
+    if (
+      reserve.status === "rejected" &&
+      (reserve.reason === "in_flight_budget_exhausted" ||
+        reserve.reason === "weight_exceeds_budget")
+    ) {
+      const response = paymentRequiredResponse(
+        requestId,
+        reserve.reason === "in_flight_budget_exhausted"
+          ? "Wait for active calls to finish"
+          : "Reduce the prompt or output limit, or add credits",
+        {
+          reason: reserve.reason,
+          metadata: { reason: reserve.reason },
+          cost,
+        },
+      );
+      if (reserve.reason === "in_flight_budget_exhausted")
+        response.headers.set("Retry-After", "5");
+      return response;
     }
     if (reserve.status === "insufficient") {
       // Zero/insufficient balance blocks the call — same payment shape
@@ -380,7 +416,9 @@ export async function admit(
       ? ("free_tier" as const)
       : cost === 0
         ? ("zero_price" as const)
-        : ("listed_price" as const),
+        : matched.pricing.token
+          ? ("token_usage" as const)
+          : ("listed_price" as const),
     ...(keyBudget.monthlyCapCredits === undefined
       ? {}
       : { monthlyCapCredits: keyBudget.monthlyCapCredits }),
@@ -398,6 +436,7 @@ export async function admit(
     published,
     matched,
     upstreamUrl,
+    tokenRequest,
     cost,
     reservationId,
     wallet,

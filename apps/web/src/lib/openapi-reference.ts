@@ -1,4 +1,5 @@
 import {
+  type TokenPricing,
   synthesize,
   extractPricing,
   parseSpec,
@@ -37,6 +38,7 @@ export type ApiEndpoint = {
   operationId?: string;
   tags: string[];
   cost: number;
+  tokenPricing?: TokenPricing;
   freeTier?: number;
   parameters: ApiParameter[];
   requestContentType: string;
@@ -206,6 +208,7 @@ export function parsePublishedEndpoints(specJson: string): ApiEndpoint[] {
           ? { requestBody: resolvedRequestBody }
           : {}),
       };
+      if (operation["x-zevium-cost"] === undefined) continue;
       const pricing = extractPricing(operation);
       const bodyDefaults = tryItBodyDefaults(
         resolvedOperation,
@@ -234,6 +237,7 @@ export function parsePublishedEndpoints(specJson: string): ApiEndpoint[] {
             )
           : [],
         cost: pricing.cost,
+        ...(pricing.token ? { tokenPricing: pricing.token } : {}),
         freeTier: pricing.freeTier,
         parameters: extractParameters(
           pathItem.parameters,

@@ -1276,3 +1276,50 @@ describe("Wallet SQLite retention and atomicity", () => {
     expect((await stub.getState()).balance).toBe(90);
   });
 });
+
+describe("token reservation settlement", () => {
+  it("releases remainder atomically, survives eviction and never charges twice", async () => {
+    const wallet = walletStub("token-partial-persistence");
+    await wallet.grant("initial", 1000);
+    expect(
+      (await wallet.reserve("token", 100, { tokenPricing: true })).status,
+    ).toBe("reserved");
+    await evictDurableObject(wallet);
+    expect(await wallet.settle("token", undefined, 101)).toMatchObject({
+      status: "rejected",
+    });
+    expect((await wallet.getState()).inFlightTotal).toBe(100);
+    await wallet.settle("token", undefined, 18);
+    await wallet.settle("token", undefined, 99);
+    await evictDurableObject(wallet);
+    expect(await wallet.getState()).toMatchObject({
+      balance: 982,
+      available: 982,
+      inFlightTotal: 0,
+      pendingSettlements: [{ cost: 18 }],
+    });
+    expect(
+      (await wallet.reserve("next", 491, { tokenPricing: true })).status,
+    ).toBe("reserved");
+    expect(
+      await wallet.reserve("busy", 1, { tokenPricing: true }),
+    ).toMatchObject({
+      status: "rejected",
+      reason: "in_flight_budget_exhausted",
+    });
+    await wallet.refund("next");
+    expect(
+      await wallet.reserve("heavy", 492, { tokenPricing: true }),
+    ).toMatchObject({ status: "rejected", reason: "weight_exceeds_budget" });
+  });
+  it("caps large-wallet exposure and blocks zero balance", async () => {
+    const wallet = walletStub("token-budget-ceiling");
+    expect(
+      await wallet.reserve("zero", 1, { tokenPricing: true }),
+    ).toMatchObject({ status: "insufficient" });
+    await wallet.grant("large", 1_000_000);
+    expect(
+      await wallet.reserve("large", 100_001, { tokenPricing: true }),
+    ).toMatchObject({ status: "rejected", reason: "weight_exceeds_budget" });
+  });
+});

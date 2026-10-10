@@ -569,6 +569,7 @@ export default defineSchema({
     pricingDecision: v.optional(
       v.union(
         v.literal("listed_price"),
+        v.literal("token_usage"),
         v.literal("free_tier"),
         v.literal("zero_price"),
       ),
@@ -1029,6 +1030,7 @@ export default defineSchema({
     maxCost: v.number(),
     endpointCount: v.number(),
     hasFreeTier: v.boolean(),
+    hasTokenPricing: v.optional(v.boolean()),
     discoverable: v.boolean(),
     updatedAt: v.number(),
   })

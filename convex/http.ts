@@ -338,7 +338,7 @@ type IngestUsageEvent = {
   listedCostCredits: number;
   freeTierLimit?: number;
   freeTierUsedBefore?: number;
-  pricingDecision: "listed_price" | "free_tier" | "zero_price";
+  pricingDecision: "listed_price" | "free_tier" | "zero_price" | "token_usage";
   credits: number;
   status: number;
   latencyMs: number;
@@ -438,6 +438,7 @@ export function parseIngestUsageBody(
           !Number.isSafeInteger(event.freeTierUsedBefore) ||
           event.freeTierUsedBefore < 0)) ||
       (event.pricingDecision !== "listed_price" &&
+        event.pricingDecision !== "token_usage" &&
         event.pricingDecision !== "free_tier" &&
         event.pricingDecision !== "zero_price") ||
       (event.monthlyCapCredits !== undefined &&

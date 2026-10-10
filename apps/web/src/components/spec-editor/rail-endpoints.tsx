@@ -1,4 +1,5 @@
 import {
+  tokenPricingLabel,
   MAX_ENDPOINT_COST_CREDITS,
   MAX_DAILY_FREE_TIER_CALLS,
 } from "@zevium/shared";
@@ -99,22 +100,30 @@ export function SpecRailEndpoints({
                   </div>
                   <div className="flex shrink-0 flex-col items-end gap-1">
                     <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                      <span className="tabular-nums">cr</span>
-                      <PricingInput
-                        value={ep.cost}
-                        maximum={MAX_ENDPOINT_COST_CREDITS}
-                        onValueChange={(value) =>
-                          onPricingChange?.({
-                            path: ep.path,
-                            method: ep.method,
-                            cost: value,
-                          })
-                        }
-                        disabled={!editable}
-                        inputMode="decimal"
-                        aria-label={`Cost for ${ep.method.toUpperCase()} ${ep.path}`}
-                        className="h-7 w-16 text-right font-mono text-xs"
-                      />
+                      {ep.tokenPricing ? (
+                        <span className="max-w-48 text-right">
+                          {tokenPricingLabel(ep.tokenPricing)} · edit in spec
+                        </span>
+                      ) : (
+                        <>
+                          <span className="tabular-nums">cr</span>
+                          <PricingInput
+                            value={ep.cost}
+                            maximum={MAX_ENDPOINT_COST_CREDITS}
+                            onValueChange={(value) =>
+                              onPricingChange?.({
+                                path: ep.path,
+                                method: ep.method,
+                                cost: value,
+                              })
+                            }
+                            disabled={!editable}
+                            inputMode="decimal"
+                            aria-label={`Cost for ${ep.method.toUpperCase()} ${ep.path}`}
+                            className="h-7 w-16 text-right font-mono text-xs"
+                          />
+                        </>
+                      )}
                     </div>
                     <div className="flex items-center gap-1 text-xs text-muted-foreground">
                       <span className="tabular-nums">free/day</span>

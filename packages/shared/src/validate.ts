@@ -1,6 +1,7 @@
 /** Kebab-case slug: lowercase alnum segments joined by single hyphens. */
 import {
   MAX_DAILY_FREE_TIER_CALLS,
+  parseTokenPricing,
   MAX_ENDPOINT_COST_CREDITS,
 } from "./pricing.js";
 
@@ -176,8 +177,20 @@ export function collectOpenApiSpecIssues(specText: string): SpecIssue[] {
         issues.push({
           level: "warning",
           path: `$.paths["${pathKey}"].${lower}.x-zevium-cost`,
-          message: "Missing x-zevium-cost (defaults to 1 at gateway)",
+          message:
+            "Missing x-zevium-cost (operation is hidden and not callable)",
         });
+      } else if (typeof cost === "object" && cost !== null) {
+        try {
+          parseTokenPricing(cost);
+        } catch (error) {
+          issues.push({
+            level: "error",
+            path: `$.paths["${pathKey}"].${lower}.x-zevium-cost`,
+            message:
+              error instanceof Error ? error.message : "Invalid token pricing",
+          });
+        }
       } else if (
         typeof cost !== "number" ||
         !Number.isSafeInteger(cost) ||

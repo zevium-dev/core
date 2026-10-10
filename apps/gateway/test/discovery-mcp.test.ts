@@ -1928,6 +1928,7 @@ describe("MCP published call reference", () => {
             paths: {
               "/deep": {
                 post: {
+                  "x-zevium-cost": 0,
                   requestBody: { content: { "application/json": { schema } } },
                 },
               },

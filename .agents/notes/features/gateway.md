@@ -39,6 +39,8 @@ Consumers see: one gateway URL per API, one key, one wallet, itemized charges. P
 
 ## Tech
 
+- **Per-token pricing (#329)**: built for OpenAI-compatible JSON/SSE. Spec rates are exposed in catalogue references, editor, discovery, and MCP; admission holds an estimated maximum, an asynchronous tee observer settles actual usage, and wallet settlement releases the remainder. Missing usage charges zero. Wallet budget, whole-credit rounding, stream/parser limits, and `x-zevium-hold` are defined in the [pricing contract](../decisions/2026-10-10-llm-per-token-pricing.md#implementation-contract-329). Code: `packages/shared/src/pricing.ts`, `apps/gateway/src/token-metering.ts`, `apps/gateway/src/{admit,finalize,wallet}.ts`, `convex/wallets.ts`. Unpriced operations are hidden; explicit zero-price calls remain available to funded wallets.
+
 Worker rules (hot-path budget, streaming, async metering, dependency-light): [`AGENTS.md` → Gateway (Worker) rules](../../../AGENTS.md#gateway-worker-rules). Not copied here.
 
 ### Why the proxy stays a Cloudflare Worker
@@ -72,7 +74,7 @@ Worker serves `/gateway/{org}/{project}/*` + `/mcp`; each call runs:
 - **Gateway CORS**: `/gateway`, `/mock`, `/discovery`, `/mcp` all allow wildcard origin. Safe because auth is bearer-key only, never cookie-based — a wildcard origin doesn't widen the attack surface for a bearer-token API
 - **Payment-required errors**: unauthenticated, invalid-key, and insufficient-credit responses on `/gateway` return a generic `402` with machine-readable create-key, top-up, and docs actions. This is prepaid-credit recovery metadata, not x402: no payment requirements, signed-payment verification, facilitator, or settlement exists in this tree. `/mock` is keyless and free; missing projects/routes return `404`; unreadable specs or invalid pricing return `422 invalid_spec`
 - **Gateway forwarding boundary**: drop fixed hop-by-hop and `Connection`-nominated fields in both directions. Requests also drop forwarded identity and reserved `x-zevium-*` metadata; upstream platform metadata cannot override gateway cost/free-tier/request-id facts. Publisher credentials inject after request filtering. Effective upstream `Idempotency-Key` becomes a stable SHA-256 digest over a versioned tuple of authenticated consumer org, project, method, concrete upstream URL (query included), and label. Rotation does not change that namespace. This partitions shared publisher accounts; it does not add gateway response replay or once-only billing. No label means no generated key.
-- **Body handling** (direct gateway part): direct `/gateway` requests and responses stream without application buffering. Neither path persists payload bodies in application tables. (MCP part: [agent-surface](agent-surface.md).)
+- **Body handling** (direct gateway part): direct `/gateway` responses and ordinary per-call requests stream without application buffering. Token-priced calls read a bounded 1 MiB JSON request before admission to size the hold and request usage. Neither path persists payload bodies in application tables. (MCP part: [agent-surface](agent-surface.md).)
 
 ### Findings
 
@@ -85,8 +87,8 @@ Worker serves `/gateway/{org}/{project}/*` + `/mcp`; each call runs:
 - 2026-07-11 — Consumer's own org wallet pays; foreign-org keys on private projects get `404`; wildcard CORS on public gateway surfaces (commit `32d5c17`).
 - 2026-10-07 — Upstream `Idempotency-Key` scoped per consumer org/project/method/URL; forwarding identity, `Connection`-nominated and `x-zevium-*` headers stripped (commit `e968b1e`). See findings above.
 - 2026-10-10 — ACCEPTED: keyless x402 wallet sessions become a second auth path beside API keys. Not built. [decision](../decisions/2026-10-10-dual-rail-keys-and-x402.md); details in [machine-payments](machine-payments.md).
-- 2026-10-10 — ACCEPTED (not built): operations without `x-zevium-cost` are hidden and not callable; free only when explicitly `0`. Replaces code's default of 1 credit. [decision](../decisions/2026-10-10-unpriced-operations-hidden.md)
-- 2026-10-10 — ACCEPTED (not built): LLM per-token pricing — hold estimated input + `max_tokens` (or fixed cap) at spec rates, settle actual, release rest; in-flight budget + 402 reasons copied from OpenRouter. [decision](../decisions/2026-10-10-llm-per-token-pricing.md)
+- 2026-10-10 — BUILT: operations without `x-zevium-cost` are hidden and not callable; free only when explicitly `0`. Replaces code's default of 1 credit. [decision](../decisions/2026-10-10-unpriced-operations-hidden.md)
+- 2026-10-10 — BUILT (#329): LLM per-token pricing — hold estimated input + `max_tokens` (or fixed cap) at spec rates, settle actual, release rest; in-flight budget + 402 reasons copied from OpenRouter. [decision](../decisions/2026-10-10-llm-per-token-pricing.md)
 
 ## Open questions
 

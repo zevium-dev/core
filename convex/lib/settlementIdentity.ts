@@ -11,7 +11,7 @@ export type SettlementIdentityV2 = {
   listedCostCredits: number;
   freeTierLimit?: number;
   freeTierUsedBefore?: number;
-  pricingDecision: "listed_price" | "free_tier" | "zero_price";
+  pricingDecision: "listed_price" | "free_tier" | "zero_price" | "token_usage";
   credits: number;
   status: number;
   latencyMs: number;

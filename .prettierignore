@@ -3,3 +3,5 @@
 /pnpm-lock.yaml
 /apps/web/src/routeTree.gen.ts
 /apps/web/dist/
+
+/.tmp/

@@ -113,6 +113,7 @@ describe("parsePublishedEndpoints", () => {
               },
             ],
             get: {
+              "x-zevium-cost": 0,
               parameters: [
                 {
                   name: "x-tenant",
@@ -192,6 +193,7 @@ describe("parsePublishedEndpoints", () => {
           "/items/{id}": {
             parameters: [{ $ref: "#/components/parameters/Alias" }],
             post: {
+              "x-zevium-cost": 0,
               requestBody: { $ref: "#/components/requestBodies/Alias" },
               responses: {
                 "200": { $ref: "#/components/responses/Alias" },

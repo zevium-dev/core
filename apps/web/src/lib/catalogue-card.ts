@@ -1,6 +1,7 @@
 /** Pricing rollup returned by catalogue.listPublic. */
 export type CatalogueCardPricing = {
   minCost: number;
+  hasTokenPricing?: boolean;
   maxCost: number;
   endpointCount: number;
   hasFreeTier: boolean;
@@ -12,6 +13,7 @@ export function formatCataloguePriceRange(
 ): string | null {
   if (pricing === null || pricing === undefined) return null;
   if (pricing.endpointCount === 0) return null;
+  if (pricing.hasTokenPricing) return "Token pricing";
   if (pricing.minCost === pricing.maxCost) {
     return `${pricing.minCost} cr/call`;
   }

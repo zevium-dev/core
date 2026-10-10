@@ -1,9 +1,15 @@
-import { extractPricing, parseSpec, type HttpMethod } from "@zevium/shared";
+import {
+  type TokenPricing,
+  extractPricing,
+  parseSpec,
+  type HttpMethod,
+} from "@zevium/shared";
 
 export type SpecEndpointRow = {
   method: HttpMethod;
   path: string;
   cost: number;
+  tokenPricing?: TokenPricing;
   freeTier?: number;
   summary?: string;
 };
@@ -32,11 +38,13 @@ export function listSpecEndpoints(specText: string): SpecEndpointRow[] | null {
       for (const method of METHOD_ORDER) {
         const op = pathItem[method];
         if (op === undefined) continue;
+        if (op["x-zevium-cost"] === undefined) continue;
         const pricing = extractPricing(op);
         rows.push({
           method,
           path,
           cost: pricing.cost,
+          ...(pricing.token ? { tokenPricing: pricing.token } : {}),
           freeTier: pricing.freeTier,
           summary:
             typeof op.summary === "string" && op.summary.trim() !== ""

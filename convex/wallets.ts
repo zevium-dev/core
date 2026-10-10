@@ -706,6 +706,7 @@ const usageEventArg = v.object({
   freeTierUsedBefore: v.optional(v.number()),
   pricingDecision: v.union(
     v.literal("listed_price"),
+    v.literal("token_usage"),
     v.literal("free_tier"),
     v.literal("zero_price"),
   ),
@@ -752,7 +753,7 @@ type UsageEventArg = {
   listedCostCredits: number;
   freeTierLimit?: number;
   freeTierUsedBefore?: number;
-  pricingDecision: "listed_price" | "free_tier" | "zero_price";
+  pricingDecision: "listed_price" | "free_tier" | "zero_price" | "token_usage";
   credits: number;
   status: number;
   latencyMs: number;
@@ -845,6 +846,13 @@ function validSettlementBoundary(event: UsageEventArg): boolean {
         event.budgetReservationCredits <=
         event.monthlyCapCredits) &&
     (event.billingOutcome === "refunded" ||
+      (event.pricingDecision === "token_usage" &&
+        event.listedCostCredits > 0 &&
+        event.budgetReservationCredits === event.listedCostCredits &&
+        event.credits <= event.budgetReservationCredits &&
+        (event.freeTierLimit === undefined ||
+          (event.freeTierUsedBefore !== undefined &&
+            event.freeTierUsedBefore >= event.freeTierLimit))) ||
       (event.pricingDecision === "listed_price" &&
         event.listedCostCredits > 0 &&
         event.credits === event.listedCostCredits &&
