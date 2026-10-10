@@ -500,8 +500,8 @@ export const fetchSearchListings = internalQuery({
 
       const pricing =
         latest === null ? null : summarizePublishedPricing(latest.spec);
-      const snapshot = await ctx.db
-        .query("qualitySnapshots")
+      const listing = await ctx.db
+        .query("catalogueListings")
         .withIndex("by_project", (q) => q.eq("projectId", project._id))
         .unique();
 
@@ -515,11 +515,9 @@ export const fetchSearchListings = internalQuery({
         publishedAt: latest?.publishedAt ?? null,
         pricing,
         quality:
-          snapshot === null ||
-          latest === null ||
-          snapshot.specVersionId !== latest._id
-            ? null
-            : qualitySnapshotContract(snapshot),
+          listing?.quality && listing.quality.specVersionId === latest?._id
+            ? qualitySnapshotContract(listing.quality)
+            : null,
         score: args.scores[i] ?? 0,
       });
     }

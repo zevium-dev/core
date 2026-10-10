@@ -28,6 +28,7 @@ import {
   EarningsSkeleton,
   ProjectEarningsPanel,
 } from "#/components/project-earnings-panel";
+import { ProjectQualityPanel } from "#/components/project-quality-panel";
 import { ProjectSettingsPanel } from "#/components/project-settings-panel";
 import { Badge } from "#/components/ui/badge";
 import { Button } from "#/components/ui/button";
@@ -71,7 +72,8 @@ import { humanError } from "#/lib/human-error";
 import { isPrivilegedOrgRole } from "#/lib/org-capabilities";
 import type { RouterContext } from "#/router";
 
-type ProjectPanel = "overview" | "analytics" | "earnings" | "settings";
+type ProjectPanel =
+  "overview" | "analytics" | "quality" | "earnings" | "settings";
 type ProjectSearch = {
   tab?: Exclude<ProjectPanel, "overview">;
   range?: Exclude<AnalyticsRange, 7>;
@@ -80,6 +82,7 @@ type ProjectSearch = {
 export const Route = createFileRoute("/app/projects/$projectSlug")({
   validateSearch: (search: Record<string, unknown>): ProjectSearch => {
     const tab =
+      search.tab === "quality" ||
       search.tab === "analytics" ||
       search.tab === "earnings" ||
       search.tab === "settings"
@@ -310,6 +313,7 @@ function ProjectShell({
 
           if (
             value === "overview" ||
+            value === "quality" ||
             value === "analytics" ||
             value === "earnings" ||
             value === "settings"
@@ -334,6 +338,7 @@ function ProjectShell({
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="spec">Spec</TabsTrigger>
           <TabsTrigger value="analytics">Analytics</TabsTrigger>
+          <TabsTrigger value="quality">Quality</TabsTrigger>
           <TabsTrigger value="earnings">Earnings</TabsTrigger>
           <TabsTrigger value="settings">Settings</TabsTrigger>
         </TabsList>
@@ -358,6 +363,8 @@ function ProjectShell({
                 }
               />
             </Suspense>
+          ) : panel === "quality" ? (
+            <ProjectQualityPanel projectId={project._id} />
           ) : panel === "earnings" ? (
             <Suspense fallback={<EarningsSkeleton />}>
               <ProjectEarningsPanel

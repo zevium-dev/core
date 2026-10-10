@@ -10,13 +10,17 @@ import {
 } from "#/components/ui/card";
 
 function latency(value: number | null): string {
-  return value === null ? "unavailable" : `${Math.round(value)} ms p50`;
+  return typeof value === "number" && Number.isFinite(value)
+    ? `${Math.round(value)} ms p50`
+    : "latency unavailable";
 }
 
 export function QualityBadges({
   quality,
+  compact = false,
 }: {
   quality: QualitySnapshotContract | null;
+  compact?: boolean;
 }) {
   const badges =
     quality === null
@@ -55,6 +59,16 @@ export function QualityBadges({
     </div>
   );
 
+  if (compact)
+    return (
+      <div className="flex flex-col gap-2">
+        {content}
+        <p className="text-xs text-muted-foreground">
+          Reachability checks the health endpoint, not paid operations.
+        </p>
+      </div>
+    );
+
   return (
     <Card>
       <CardHeader>
@@ -65,7 +79,7 @@ export function QualityBadges({
           when other operations fail.
         </CardDescription>
       </CardHeader>
-      <CardContent className="space-y-3">
+      <CardContent className="flex flex-col gap-3">
         {content}
         <p className="text-xs text-muted-foreground">
           Metrics appear once the minimum sample count is reached. Each

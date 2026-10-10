@@ -703,3 +703,120 @@ describe("scheduled quality truth", () => {
     expect(consumerId).toBeTruthy();
   });
 });
+
+describe("publisher quality view", () => {
+  it("authorizes org members, including suspended private listings, and bounds current-version history", async () => {
+    const t = convexTest(schema, modules);
+    const seeded = await seed(t);
+    await t.mutation(internal.quality.syncPublishedTarget, {
+      projectId: seeded.projectId,
+      specVersionId: seeded.specVersionId,
+    });
+    await t.run(async (ctx) => {
+      await ctx.db.patch(seeded.projectId, {
+        visibility: "private",
+        qualityStatus: "recovering",
+        qualitySuspensionReason: "Health check failures",
+        qualitySuspendedAt: 100,
+        qualityRecoveryPasses: 2,
+      });
+      for (let i = 0; i < 26; i++)
+        await ctx.db.insert("qualityProbeResults", {
+          projectId: seeded.projectId,
+          specVersionId: seeded.specVersionId,
+          executionId: `publisher-history-${i}`,
+          checkedAt: i + 1,
+          outcome: "healthy",
+          statusCode: 204,
+          latencyMs: 20,
+        });
+      const older = await ctx.db.insert("specVersions", {
+        projectId: seeded.projectId,
+        version: "0.9.0",
+        spec: SPEC,
+        publishedAt: 0,
+      });
+      await ctx.db.insert("qualityProbeResults", {
+        projectId: seeded.projectId,
+        specVersionId: older,
+        executionId: "old",
+        checkedAt: Date.now(),
+        outcome: "timeout",
+      });
+    });
+    const args = { projectId: seeded.projectId };
+    await expect(
+      t.query(api.quality.getPublisherQuality, args),
+    ).rejects.toThrow("Not authenticated");
+    const consumer = t.withIdentity({
+      subject: "consumer",
+      org_id: "org_consumer",
+      org_role: "org:admin",
+    });
+    await expect(
+      consumer.query(api.quality.getPublisherQuality, args),
+    ).rejects.toThrow("Not a member");
+    const publisher = t.withIdentity({
+      subject: "publisher",
+      org_id: "org_publisher",
+      org_role: "org:member",
+    });
+    const result = await publisher.query(api.quality.getPublisherQuality, args);
+    expect(result).toMatchObject({
+      version: "1.0.0",
+      status: "recovering",
+      suspensionReason: "Health check failures",
+      recoveryPasses: 2,
+      recoveryRequired: 3,
+      quality: { insufficientApiData: true, apiSuccessRatePercent: null },
+    });
+    expect(result.probes).toHaveLength(24);
+    expect(result.probes[0]).toMatchObject({
+      checkedAt: 26,
+      outcome: "healthy",
+      statusCode: 204,
+    });
+    expect(result.probes[23]?.checkedAt).toBe(3);
+    expect(result.probes[0]).not.toHaveProperty("executionId");
+    expect(await t.query(api.quality.getPublicSnapshot, args)).toBeNull();
+    await t.run(async (ctx) => {
+      await ctx.db.insert("specVersions", {
+        projectId: seeded.projectId,
+        version: "2.0.0",
+        spec: SPEC,
+        publishedAt: Date.now() + 1,
+      });
+    });
+    expect(
+      await publisher.query(api.quality.getPublisherQuality, args),
+    ).toMatchObject({ version: "2.0.0", quality: null, probes: [] });
+  });
+
+  it("returns empty evidence for an unpublished project", async () => {
+    const t = convexTest(schema, modules);
+    const seeded = await seed(t);
+    const projectId = await t.run((ctx) =>
+      ctx.db.insert("projects", {
+        organizationId: seeded.publisherId,
+        name: "Draft",
+        slug: "draft",
+        status: "draft",
+        visibility: "private",
+        tags: [],
+      }),
+    );
+    const publisher = t.withIdentity({
+      subject: "publisher",
+      org_id: "org_publisher",
+      org_role: "org:member",
+    });
+    expect(
+      await publisher.query(api.quality.getPublisherQuality, { projectId }),
+    ).toMatchObject({
+      version: null,
+      quality: null,
+      probes: [],
+      suspensionReason: null,
+    });
+  });
+});

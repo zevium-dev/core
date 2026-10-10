@@ -28,7 +28,7 @@ Source: [agent-api-marketplace-landscape](../research/agent-api-marketplace-land
 
 - Catalogue listing cards and API detail header show quality badges (latency p50, success rate, uptime, freshness) — screens in [catalogue-search](catalogue-search.md).
 - Spec editor (org admins): connection gate before Publish ([publishing-specs](publishing-specs.md)).
-- **Quality surface (P2)** on publisher's own listing: uptime status on own listing, security-scan results, freshness nudges.
+- **Quality tab** on the publisher project page: current published version’s metrics, latest health probes, suspension reason, consecutive recovery progress, and steps to restore access. Available to all members of the owning organization, including while private or suspended. Security scans and freshness nudges remain P2.
 - **Platform admin** `/admin` — **Quality dashboard**: listings failing uptime/security gates, auto-delist toggles ([platform-admin](platform-admin.md)).
 - Notifications: listing-status changes ([webhooks-notifications](webhooks-notifications.md)).
 
@@ -46,7 +46,10 @@ No TECH.md bullet covers quality signals. Code facts (read from source 2026-10-1
 - **Snapshot** (`qualitySnapshots`, one per project, current published version only; each version starts fresh): reachability over last 24 probes, floor 3 samples (`reachabilityPercent` = any HTTP response); API success/latency p50 over last 100 `gatewayQualitySamples` (privacy-minimized real gateway outcomes written in `wallets.ts`), floor 20; freshness `stale` after 30 min since last measurement. Contract `QualitySnapshotContract` in shared; below floor returns `null` metrics + `insufficient*Data: true`.
 - **Suspension/recovery**: incident opens when ≥3 of last 5 probes non-healthy (`qualityIncidents`); project forced `visibility: "private"`, `qualityStatus: "suspended"`, `desiredVisibility` remembered, `quality_suspended` notification with reason. 3 consecutive healthy probes resolve incident, restore desired visibility, `quality_restored` notification. Intermediate state `recovering` stays unlisted.
 - Public queries: `quality.getPublicSnapshot`, `quality.listPublicIncidents`; snapshot also embedded in `catalogue.listPublic`/`getPublicDetail`/search results. Subscriptions `quality.setSubscription`/`listSubscriptions`/`subscriberCount` on `listingSubscriptions`.
-- UI: `QualityBadges` renders "API quality: insufficient data (n/20)", "Reachability: insufficient data (n/3)", "Data fresh|stale"; used only on API detail page.
+- **Catalogue projection (#331)**: `syncCatalogueListing` copies bounded current-version aggregate evidence into `catalogueListings.quality`; normal browse pages map the projection directly with no per-card snapshot/version reads. Compatibility browse and semantic hydration also read projected quality. Probe results, gateway recomputation and initial target setup refresh it; republishing clears old-version evidence. Freshness is derived on read, never frozen at projection time. Existing rows gain evidence on the next quality sync; `internal.catalogue.backfillCatalogueListingsPage({ cursor: null })` can populate all existing rows immediately.
+- **Delivery (#331): built.** Publisher UI: `apps/web/src/components/project-quality-panel.tsx`; UI regressions: `catalogue-card-quality.test.tsx` and `project-quality-panel.test.tsx` in the same components directory.
+- **Publisher query (#331)**: `quality.getPublisherQuality` uses `requireProjectMember`, returns the same `qualitySnapshotContract` as public detail, reads at most 24 current-version probes via `by_project_version_checked`, and returns suspension/recovery state. No raw gateway samples, execution IDs, or upstream URLs are exposed. UI uses a realtime Convex query, skeleton and sanitized retry state.
+- UI: `QualityBadges` renders "API quality: insufficient data (n/20)", "Reachability: insufficient data (n/3)", "Data fresh|stale"; shared by API detail, catalogue cards (compact mode), and the publisher Quality tab. Finite-number guards prevent missing percentages/latencies from rendering as `undefined` or `NaN`.
 
 ## Decisions
 
@@ -57,9 +60,8 @@ No TECH.md bullet covers quality signals. Code facts (read from source 2026-10-1
 - Resolved #355: `projects.update` and `cancelRetirement` no longer erase suspension through partial document replacement.
 
 - [roadmap](../product/roadmap.md) (former BACKLOG) "Public quality signals and automated listing gates" (probe reachability/uptime, expose latency/success/freshness, block publication on failed gates) is largely built in code; backlog stale. Remaining: per-API status surfaces.
-- FLOW says listing cards show quality badges; code renders `QualityBadges` only on detail page, though `listPublic` returns `quality`.
+- Resolved #331: catalogue cards and the publisher Quality tab now reuse detail-page quality badges with the same evidence floors.
 - FLOW detail header lists "latency p50, success rate, uptime, freshness"; code shows API success + p50, reachability % + p50, data freshness. "Freshness" in code = measurement recency, not spec recency.
 - No admin quality dashboard or auto-delist toggle UI (admin can force project private via `admin.setProjectVisibility`).
-- No publisher-facing quality surface on project page; publisher learns status only via notifications.
 - `listPublicIncidents` and listing subscriptions have no web caller; per-API status pages (P2 #18) not built. Security scanning: no code.
 - Broader quality grades and cost per successful call remain undecided.

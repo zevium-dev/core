@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { api, internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import schema from "./schema";
-import { summarizePublishedPricing } from "./catalogue";
+import { syncCatalogueListing, summarizePublishedPricing } from "./catalogue";
 
 const modules = import.meta.glob("./**/*.ts");
 
@@ -359,6 +359,7 @@ describe("catalogue.listPublic", () => {
         publishedAt: version1.publishedAt,
         updatedAt: seed.t2,
       });
+      await syncCatalogueListing(ctx, seed.cheapId);
     });
     const current = await t.query(api.catalogue.listPublic, { sort: "name" });
     expect(
@@ -383,6 +384,7 @@ describe("catalogue.listPublic", () => {
         }),
       });
     });
+    await t.run((ctx) => syncCatalogueListing(ctx, seed.cheapId));
     const stale = await t.query(api.catalogue.listPublic, { sort: "name" });
     expect(
       stale.items.find((item) => item.slug === "cheap")?.quality,
@@ -392,6 +394,112 @@ describe("catalogue.listPublic", () => {
       projectSlug: "cheap",
     });
     expect(staleDetail?.quality).toBeNull();
+  });
+
+  it("serves projected quality across browse, pagination and semantic cards, refreshes on samples and resets on publish", async () => {
+    vi.useFakeTimers();
+    const t = convexTest(schema, modules);
+    const seed = await seedCatalogue(t);
+    vi.setSystemTime(seed.t2);
+    const { snapshotId, embeddingId } = await t.run(async (ctx) => {
+      const version = await ctx.db
+        .query("specVersions")
+        .withIndex("by_project", (q) => q.eq("projectId", seed.cheapId))
+        .unique();
+      if (!version) throw new Error("missing version");
+      const snapshotId = await ctx.db.insert("qualitySnapshots", {
+        projectId: seed.cheapId,
+        specVersionId: version._id,
+        reachabilitySampleSize: 3,
+        reachabilityResponseCount: 3,
+        reachabilityPercent: 100,
+        reachabilityLatencyP50Ms: 12,
+        insufficientReachabilityData: false,
+        apiSampleSize: 20,
+        apiSuccessCount: 18,
+        apiSuccessRatePercent: 90,
+        apiLatencyP50Ms: 42,
+        insufficientApiData: false,
+        publishedAt: version.publishedAt,
+        updatedAt: seed.t2,
+      });
+      const embeddingId = await ctx.db.insert("specEmbeddings", {
+        projectId: seed.cheapId,
+        embedding: Array(768).fill(0),
+        text: "Quality API",
+        updatedAt: seed.t2,
+      });
+      return { snapshotId, embeddingId };
+    });
+    await t.mutation(internal.catalogue.backfillCatalogueListingsPage, {
+      cursor: null,
+    });
+    const detail = await t.query(api.catalogue.getPublicDetail, {
+      publisherHandle: "pub-co",
+      projectSlug: "cheap",
+    });
+    const browse = await t.query(api.catalogue.listPublic, {});
+    const paginated = await t.query(api.catalogue.listPublicPaginated, {
+      paginationOpts: { cursor: null, numItems: 24 },
+    });
+    const semantic = await t.query(internal.search.fetchSearchListings, {
+      ids: [embeddingId],
+      scores: [0.9],
+    });
+    expect(browse.items.find((item) => item.slug === "cheap")?.quality).toEqual(
+      detail?.quality,
+    );
+    expect(
+      paginated.page.find((item) => item.slug === "cheap")?.quality,
+    ).toEqual(detail?.quality);
+    expect(semantic[0]?.quality).toEqual(detail?.quality);
+    const publisher = t.withIdentity({
+      subject: "publisher",
+      org_id: "org_pub",
+      org_role: "org:member",
+    });
+    expect(
+      (
+        await publisher.query(api.quality.getPublisherQuality, {
+          projectId: seed.cheapId,
+        })
+      ).quality,
+    ).toEqual(detail?.quality);
+    // Changing source evidence alone cannot affect reads: cards use the projection.
+    await t.run((ctx) =>
+      ctx.db.patch(snapshotId, { apiSuccessRatePercent: 95 }),
+    );
+    expect(
+      (await t.query(api.catalogue.listPublic, {})).items.find(
+        (item) => item.slug === "cheap",
+      )?.quality?.apiSuccessRatePercent,
+    ).toBe(90);
+    await t.run((ctx) => syncCatalogueListing(ctx, seed.cheapId));
+    expect(
+      (await t.query(api.catalogue.listPublic, {})).items.find(
+        (item) => item.slug === "cheap",
+      )?.quality?.apiSuccessRatePercent,
+    ).toBe(95);
+    vi.setSystemTime(seed.t2 + 31 * 60_000);
+    expect(
+      (await t.query(api.catalogue.listPublic, {})).items.find(
+        (item) => item.slug === "cheap",
+      )?.quality?.freshness.status,
+    ).toBe("stale");
+    await t.run(async (ctx) => {
+      await ctx.db.insert("specVersions", {
+        projectId: seed.cheapId,
+        version: "2.0.0",
+        spec: openapiSpec({ "/new": { get: { "x-zevium-cost": 1 } } }),
+        publishedAt: Date.now(),
+      });
+      await syncCatalogueListing(ctx, seed.cheapId);
+    });
+    expect(
+      (await t.query(api.catalogue.listPublic, {})).items.find(
+        (item) => item.slug === "cheap",
+      )?.quality,
+    ).toBeNull();
   });
 
   it("filters by hasFreeTier", async () => {
