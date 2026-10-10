@@ -18,7 +18,6 @@ import {
 import {
   decryptSecret,
   encryptSecret,
-  migrateStoredSecret,
   requireEncryptedSecret,
   webhookBinding,
   type EncryptedSecret,
@@ -27,10 +26,6 @@ import {
 import { createNotification } from "./lib/notifications";
 import { validateWebhookUrl } from "./lib/webhookDelivery";
 import { publicReference } from "./lib/publicIds";
-import {
-  bumpSecurityRolloutGeneration,
-  requireCompletedSecurityAudit,
-} from "./securityRollout";
 
 export { validateWebhookUrl } from "./lib/webhookDelivery";
 
@@ -170,7 +165,6 @@ export const upsertEndpoint = mutation({
       });
       const created = await ctx.db.get(id);
       if (created === null) throw new Error("Failed to create endpoint");
-      await bumpSecurityRolloutGeneration(ctx);
       return endpointMetadata(created);
     }
     if (existing.retiringAt !== undefined) {
@@ -181,7 +175,6 @@ export const upsertEndpoint = mutation({
       url,
       active: args.active ?? existing.active,
     });
-    await bumpSecurityRolloutGeneration(ctx);
     const updated = await ctx.db.get(existing._id);
     if (updated === null) throw new Error("Failed to load endpoint");
     return endpointMetadata(updated);
@@ -221,7 +214,6 @@ export const revealSecret = mutation({
         webhookBinding(args.projectId, endpoint.secretVersion ?? 1),
       );
       await ctx.db.patch(endpoint._id, { secretRevealedAt: Date.now() });
-      await bumpSecurityRolloutGeneration(ctx);
       return {
         secret,
       };
@@ -304,7 +296,6 @@ export const rotateSecret = mutation({
       previousSecretVersion: currentVersion,
       previousValidUntil,
     });
-    await bumpSecurityRolloutGeneration(ctx);
     return { secret, secretVersion, previousValidUntil };
   },
 });
@@ -537,101 +528,6 @@ export const claimDelivery = internalMutation({
       event: delivery.event,
       payload: delivery.payload,
       attempts: delivery.attempts,
-    };
-  },
-});
-
-export type WebhookSecretMigrationPage = {
-  scanned: number;
-  current: number;
-  old: number;
-  broken: number;
-  corrupt: number;
-  plaintext: number;
-  recovered: number;
-  rewrapped: number;
-  scrubbed: number;
-  continueCursor: string;
-  isDone: boolean;
-};
-
-/** Cursor-bounded dual-envelope migration. Repeat until isDone, then audit again. */
-export const migrateLegacyPlaintext = internalMutation({
-  args: {
-    auditId: v.string(),
-    cursor: v.optional(v.union(v.string(), v.null())),
-    numItems: v.optional(v.number()),
-  },
-  handler: async (ctx, args): Promise<WebhookSecretMigrationPage> => {
-    const audit = await requireCompletedSecurityAudit(ctx, args.auditId);
-    const requested = args.numItems ?? 50;
-    const numItems = Math.max(1, Math.min(100, Math.floor(requested)));
-    const result = await ctx.db.query("webhookEndpoints").paginate({
-      cursor: args.cursor ?? null,
-      numItems,
-    });
-    const counts = {
-      scanned: result.page.length,
-      current: 0,
-      old: 0,
-      broken: 0,
-      corrupt: 0,
-      plaintext: 0,
-      recovered: 0,
-      rewrapped: 0,
-      scrubbed: 0,
-    };
-
-    for (const row of result.page) {
-      if (row._creationTime > audit.highWaterCreationTime) {
-        throw new Error("Webhook row exceeds audited high-water fence");
-      }
-      const secretVersion = row.secretVersion ?? 1;
-      const migration = await migrateStoredSecret(
-        row,
-        webhookBinding(row.projectId, secretVersion),
-      );
-      if (migration.plaintext) counts.plaintext += 1;
-      if (migration.old) counts.old += 1;
-      if (migration.corrupt) counts.corrupt += 1;
-      if (migration.broken) counts.broken += 1;
-      else counts.current += 1;
-      if (migration.recovered) counts.recovered += 1;
-      if (migration.rewrapped) counts.rewrapped += 1;
-      if (migration.scrubbed) counts.scrubbed += 1;
-      const patch: Partial<Doc<"webhookEndpoints">> = {};
-      if (migration.patch) Object.assign(patch, migration.patch);
-
-      if (row.previousSecretVersion !== undefined) {
-        const previous = await migrateStoredSecret(
-          previousSecretEnvelope(row),
-          webhookBinding(row.projectId, row.previousSecretVersion),
-        );
-        if (previous.plaintext) counts.plaintext += 1;
-        if (previous.old) counts.old += 1;
-        if (previous.corrupt) counts.corrupt += 1;
-        if (previous.broken) counts.broken += 1;
-        else counts.current += 1;
-        if (previous.recovered) counts.recovered += 1;
-        if (previous.rewrapped) counts.rewrapped += 1;
-        if (previous.scrubbed) counts.scrubbed += 1;
-        if (previous.patch) {
-          patch.previousCiphertext = previous.patch.ciphertext;
-          patch.previousIv = previous.patch.iv;
-          patch.previousKeyVersion = previous.patch.keyVersion;
-          patch.previousSealedCiphertext = previous.patch.sealedCiphertext;
-          patch.previousSealedIv = previous.patch.sealedIv;
-          patch.previousSealedKeyVersion = previous.patch.sealedKeyVersion;
-          patch.previousSealedVersion = previous.patch.sealedVersion;
-        }
-      }
-      if (Object.keys(patch).length > 0) await ctx.db.patch(row._id, patch);
-    }
-
-    return {
-      ...counts,
-      continueCursor: result.continueCursor,
-      isDone: result.isDone,
     };
   },
 });

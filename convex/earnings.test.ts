@@ -58,8 +58,6 @@ async function seedEarnings(
       reversedAtoms: 0,
       failedAtoms: 0,
       sequence: 1,
-      migrationStatus: "verified",
-      migrationWatermarkSequence: 1,
       updatedAt: Date.now(),
     });
     await ctx.db.insert("publisherSettlementEntries", {

@@ -1,34 +1,14 @@
 /// <reference types="vite/client" />
-import { convexTest, type TestConvex } from "convex-test";
+import { convexTest } from "convex-test";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { api, internal } from "./_generated/api";
+import { api } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import schema from "./schema";
 
 const modules = import.meta.glob("./**/*.ts");
 const INTERNAL_SECRET = "test-gateway-internal-secret";
 const ADMIN = "security_admin";
-
-async function completeSecurityAudit(
-  t: TestConvex<typeof schema>,
-): Promise<string> {
-  const admin = t.withIdentity({ subject: ADMIN } as { subject: string });
-  let audit = await admin.mutation(api.securityRollout.startAudit, {});
-  while (audit.phase !== "completed" && audit.phase !== "invalidated") {
-    audit = await admin.mutation(api.securityRollout.auditPage, {
-      auditId: audit.auditId,
-      numItems: 100,
-    });
-  }
-  expect(audit).toMatchObject({
-    phase: "completed",
-    zeroCorruption: true,
-    corrupt: 0,
-    broken: 0,
-  });
-  return audit.auditId;
-}
 
 async function seedProject(
   t: ReturnType<typeof convexTest>,
@@ -285,59 +265,6 @@ describe("upstream credentials", () => {
     ).toEqual([]);
   });
 
-  it("blocks migration after independent audit detects a mismatched hybrid", async () => {
-    const t = convexTest(schema, modules);
-    const { projectId } = await seedProject(t);
-    const created = await asPublisher(t).mutation(
-      api.upstreamCredentials.upsert,
-      {
-        projectId,
-        name: "authorization",
-        secret: "encrypted-value",
-      },
-    );
-    const encryptedBefore = await t.run(async (ctx) => ctx.db.get(created.id));
-    const legacyId = await t.run(async (ctx) => {
-      await ctx.db.patch(created.id, { secret: "stale-plaintext-copy" });
-      return await ctx.db.insert("upstreamCredentials", {
-        projectId,
-        name: "x-api-key",
-        secret: "legacy-value",
-        updatedAt: 1,
-      });
-    });
-
-    const admin = t.withIdentity({ subject: ADMIN } as { subject: string });
-    let audit = await admin.mutation(api.securityRollout.startAudit, {});
-    while (audit.phase !== "completed" && audit.phase !== "invalidated") {
-      audit = await admin.mutation(api.securityRollout.auditPage, {
-        auditId: audit.auditId,
-        numItems: 100,
-      });
-    }
-    expect(audit).toMatchObject({
-      phase: "completed",
-      zeroCorruption: false,
-      corrupt: 1,
-    });
-    await expect(
-      t.mutation(internal.upstreamCredentials.migrateLegacyPlaintext, {
-        auditId: audit.auditId,
-      }),
-    ).rejects.toThrow("zero-corruption security audit");
-
-    const rows = await t.run(async (ctx) => ({
-      encrypted: await ctx.db.get(created.id),
-      legacy: await ctx.db.get(legacyId),
-    }));
-    expect(rows.encrypted?.secret).toBe("stale-plaintext-copy");
-    expect(rows.legacy?.secret).toBe("legacy-value");
-    expect(rows.encrypted?.ciphertext).toBe(encryptedBefore?.ciphertext);
-    expect(rows.encrypted?.sealedCiphertext).toBe(
-      encryptedBefore?.sealedCiphertext,
-    );
-  });
-
   it("returns one non-enumerating error for missing and cross-org credential ids", async () => {
     const t = convexTest(schema, modules);
     const { projectId } = await seedProject(t);
@@ -365,71 +292,5 @@ describe("upstream credentials", () => {
         caller.mutation(api.upstreamCredentials.remove, { credentialId }),
       ).rejects.toThrow("Upstream credential unavailable");
     }
-  });
-
-  it("rewraps in cursor-bounded pages before old key retirement", async () => {
-    const t = convexTest(schema, modules);
-    const { projectId } = await seedProject(t);
-    const publisher = asPublisher(t);
-    await publisher.mutation(api.upstreamCredentials.upsert, {
-      projectId,
-      name: "authorization",
-      secret: "Bearer one",
-    });
-    await publisher.mutation(api.upstreamCredentials.upsert, {
-      projectId,
-      name: "x-api-key",
-      secret: "two",
-    });
-    process.env.UPSTREAM_CREDENTIAL_ENCRYPTION_KEYS = JSON.stringify({
-      current: "test-v2",
-      keys: {
-        "test-v1": "MTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTE=",
-        "test-v2": "MjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjI=",
-      },
-    });
-
-    const auditId = await completeSecurityAudit(t);
-
-    const first = await t.mutation(
-      internal.upstreamCredentials.migrateLegacyPlaintext,
-      { auditId, cursor: null, numItems: 1 },
-    );
-    expect(first).toMatchObject({
-      scanned: 1,
-      old: 1,
-      rewrapped: 1,
-      broken: 0,
-      isDone: false,
-    });
-    const second = await t.mutation(
-      internal.upstreamCredentials.migrateLegacyPlaintext,
-      { auditId, cursor: first.continueCursor, numItems: 1 },
-    );
-    expect(second).toMatchObject({
-      scanned: 1,
-      old: 1,
-      rewrapped: 1,
-      broken: 0,
-      isDone: true,
-    });
-
-    process.env.UPSTREAM_CREDENTIAL_ENCRYPTION_KEYS = JSON.stringify({
-      current: "test-v2",
-      keys: {
-        "test-v2": "MjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjI=",
-      },
-    });
-    const response = await t.fetch(
-      "/gateway-spec?publisherHandle=publisher&projectSlug=md-to-html",
-      { headers: { "x-internal-secret": INTERNAL_SECRET } },
-    );
-    expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({
-      upstreamHeaders: {
-        authorization: "Bearer one",
-        "x-api-key": "two",
-      },
-    });
   });
 });

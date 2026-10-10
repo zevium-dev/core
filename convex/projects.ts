@@ -19,7 +19,6 @@ import {
   upsertProjectRetirementConsumerNotice,
 } from "./lib/notifications";
 import { fireWebhookEvent } from "./webhooks";
-import { assertFinanceMigrationAllowsRuntime } from "./lib/financeMigrationGate";
 import { isOrganizationPublicSurfaceAllowed } from "./lib/publicSurface";
 import { isValidSlug } from "./lib/validate";
 import { syncCatalogueListing } from "./catalogue";
@@ -327,7 +326,6 @@ export const create = mutation({
   handler: async (ctx, args): Promise<Doc<"projects">> => {
     const { claims, org } = await requireOrgMemberBySlug(ctx, args.orgSlug);
     requireOrgAdmin(claims);
-    await assertFinanceMigrationAllowsRuntime(ctx);
 
     const name = args.name.trim();
     if (name.length === 0) {
@@ -538,14 +536,12 @@ export const update = mutation({
 
 export const remove = mutation({
   args: { projectId: v.id("projects") },
-
   handler: async (
     ctx,
     args,
   ): Promise<{ archived: Id<"projects">; retiredAt: number }> => {
     const { claims, project } = await requireProjectMember(ctx, args.projectId);
     requireOrgAdmin(claims);
-    await assertFinanceMigrationAllowsRuntime(ctx);
     if (
       project.retiredAt !== undefined &&
       project.deletionState !== undefined
@@ -599,7 +595,6 @@ export const remove = mutation({
 export const retire = internalMutation({
   args: { projectId: v.id("projects") },
   handler: async (ctx, args): Promise<Doc<"projects">> => {
-    await assertFinanceMigrationAllowsRuntime(ctx);
     const project = await ctx.db.get(args.projectId);
     if (project === null) throw new Error("Project not found");
     if (project.status !== "published") {

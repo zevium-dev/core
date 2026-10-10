@@ -2,10 +2,6 @@ import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx } from "../_generated/server";
 import { publisherEarningSplit } from "../accounting";
 import { internal } from "../_generated/api";
-import {
-  assertFinanceMigrationAllowsRuntime,
-  assertFinanceMigrationJobActive,
-} from "./financeMigrationGate";
 
 type SettlementKind = Doc<"publisherSettlementEntries">["kind"];
 
@@ -27,7 +23,7 @@ export function assertPublisherEarningReady(
     earning.clawedBackAtoms === undefined ||
     earning.releasedAtoms === undefined
   ) {
-    throw new Error("Publisher earning finance migration is not verified");
+    throw new Error("Publisher earning accounting fields are incomplete");
   }
 }
 
@@ -40,13 +36,7 @@ function safeAtomDelta(value: number, name: string): void {
 export async function getOrCreatePublisherBalance(
   ctx: MutationCtx,
   publisherOrganizationId: Id<"organizations">,
-  migrationJobId?: Id<"financialMigrationJobs">,
 ): Promise<Doc<"publisherBalances">> {
-  if (migrationJobId === undefined) {
-    await assertFinanceMigrationAllowsRuntime(ctx);
-  } else {
-    await assertFinanceMigrationJobActive(ctx, migrationJobId);
-  }
   const existing = await ctx.db
     .query("publisherBalances")
     .withIndex("by_publisher", (q) =>
@@ -54,7 +44,7 @@ export async function getOrCreatePublisherBalance(
     )
     .unique();
   if (existing !== null) {
-    assertPublisherBalanceReady(existing, migrationJobId);
+    assertPublisherBalanceReady(existing);
     return existing;
   }
 
@@ -68,9 +58,6 @@ export async function getOrCreatePublisherBalance(
     reversedAtoms: 0,
     failedAtoms: 0,
     sequence: 0,
-    migrationStatus: migrationJobId === undefined ? "verified" : "building",
-    migrationJobId,
-    migrationWatermarkSequence: 0,
     updatedAt: now,
   });
   const created = await ctx.db.get(id);
@@ -80,25 +67,12 @@ export async function getOrCreatePublisherBalance(
 
 export function assertPublisherBalanceReady(
   balance: Doc<"publisherBalances">,
-  migrationJobId?: Id<"financialMigrationJobs">,
 ): asserts balance is Doc<"publisherBalances"> & {
   pendingRiskAtoms: number;
   reversedAtoms: number;
   failedAtoms: number;
 } {
-  const fenced =
-    migrationJobId !== undefined &&
-    ((balance.migrationStatus === "building" &&
-      balance.migrationJobId === migrationJobId) ||
-      (balance.migrationStatus === "verified" &&
-        balance.migrationJobId === undefined &&
-        balance.migrationWatermarkSequence === balance.sequence));
-  const verified =
-    migrationJobId === undefined &&
-    balance.migrationStatus === "verified" &&
-    balance.migrationWatermarkSequence === balance.sequence;
   if (
-    (!fenced && !verified) ||
     balance.pendingRiskAtoms === undefined ||
     balance.reversedAtoms === undefined ||
     balance.failedAtoms === undefined ||
@@ -114,7 +88,7 @@ export function assertPublisherBalanceReady(
     balance.reversedAtoms < 0 ||
     balance.failedAtoms < 0
   ) {
-    throw new Error("Publisher finance migration is not verified");
+    throw new Error("Publisher balance accounting fields are invalid");
   }
 }
 
@@ -126,14 +100,8 @@ export async function adjustPublisherBalanceAggregates(
     reversedAtoms?: number;
     failedAtoms?: number;
   },
-  migrationJobId?: Id<"financialMigrationJobs">,
 ): Promise<Doc<"publisherBalances">> {
-  if (migrationJobId === undefined) {
-    await assertFinanceMigrationAllowsRuntime(ctx);
-  } else {
-    await assertFinanceMigrationJobActive(ctx, migrationJobId);
-  }
-  assertPublisherBalanceReady(balance, migrationJobId);
+  assertPublisherBalanceReady(balance);
   const pendingRiskAtoms =
     balance.pendingRiskAtoms + (deltas.pendingRiskAtoms ?? 0);
   const reversedAtoms = balance.reversedAtoms + (deltas.reversedAtoms ?? 0);
@@ -174,15 +142,9 @@ export async function appendPublisherSettlementEntry(
     earningId?: Id<"publisherEarnings">;
     transferId?: Id<"publisherTransfers">;
     paymentId?: Id<"payments">;
-    migrationJobId?: Id<"financialMigrationJobs">;
   },
 ): Promise<{ applied: boolean; balance: Doc<"publisherBalances"> }> {
-  if (args.migrationJobId === undefined) {
-    await assertFinanceMigrationAllowsRuntime(ctx);
-  } else {
-    await assertFinanceMigrationJobActive(ctx, args.migrationJobId);
-  }
-  assertPublisherBalanceReady(args.balance, args.migrationJobId);
+  assertPublisherBalanceReady(args.balance);
   safeAtomDelta(args.availableDeltaAtoms, "Available delta");
   safeAtomDelta(args.allocatedDeltaAtoms, "Allocated delta");
   safeAtomDelta(args.paidDeltaAtoms, "Paid delta");
@@ -256,7 +218,6 @@ export async function appendPublisherSettlementEntry(
     allocatedAtoms,
     paidAtoms,
     sequence,
-    migrationWatermarkSequence: sequence,
     updatedAt: now,
   });
   return {
@@ -267,7 +228,6 @@ export async function appendPublisherSettlementEntry(
       allocatedAtoms,
       paidAtoms,
       sequence,
-      migrationWatermarkSequence: sequence,
       updatedAt: now,
     },
   };

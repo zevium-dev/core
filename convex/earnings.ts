@@ -3,7 +3,6 @@ import { query } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { requireOrgMemberBySlug } from "./lib/auth";
 import { atomsToCredits } from "./accounting";
-import { assertFinanceMigrationAllowsRuntime } from "./lib/financeMigrationGate";
 import {
   assertPublisherBalanceReady,
   assertPublisherEarningReady,
@@ -39,7 +38,6 @@ export type OrgEarnings = {
 export const forOrg = query({
   args: { orgSlug: v.string() },
   handler: async (ctx, args): Promise<OrgEarnings> => {
-    await assertFinanceMigrationAllowsRuntime(ctx);
     const { org } = await requireOrgMemberBySlug(ctx, args.orgSlug);
     const now = Date.now();
     const monthStart = Date.UTC(
@@ -64,7 +62,7 @@ export const forOrg = query({
       .unique();
     if (publisherBalance === null) {
       if (earnings.length > 0) {
-        throw new Error("Publisher finance migration is not verified");
+        throw new Error("Publisher balance accounting fields are invalid");
       }
     } else {
       assertPublisherBalanceReady(publisherBalance);
@@ -100,7 +98,7 @@ export const forOrg = query({
         earning.projectName === undefined ||
         earning.projectSlug === undefined
       ) {
-        throw new Error("Publisher statement migration is not verified");
+        throw new Error("Publisher statement accounting fields are incomplete");
       }
       const row = rows.get(earning.projectId) ?? {
         name: earning.projectName,

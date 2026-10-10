@@ -98,6 +98,8 @@ Call pipeline detail: [gateway](../features/gateway.md). Credit gate (wallet DO)
 
 `convex/schema.ts` is authoritative; this table is a map, not a schema.
 
+Fresh-deployment cleanup (#354) removes finance/security/registry migration and rollout operators, 14 dead tables, and unused indexes. Runtime ledger/funding checks remain. Registry outbox/streams and `registrySync` stay until #353 replaces key identity proof and moves route reservation out of enqueue. Deployment proof tables, `specImportRateLeases`, and listing subscription tables still have callers/writers and are retained.
+
 ## History
 
 - **What died in the rebuild**: tRPC + oRPC, Drizzle + Turso, Upstash Redis, Better Auth (+ apikey plugin), Polar plugin wiring in auth, drizzle/ migrations, the seed script in its legacy form. Route tree, shadcn components, and Motion setup carried over conceptually; code was rewritten against Convex hooks. Never resurrect these patterns.
