@@ -56,4 +56,3 @@
 /.dev.vars
 /apps/gateway/.dev.vars
 /apps/web/.dev.vars
-/apps/gateway/.compliance-dist/

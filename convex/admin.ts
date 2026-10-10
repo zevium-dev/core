@@ -30,7 +30,7 @@ import {
   requireCompletedSecurityAudit,
   securityRolloutGeneration,
 } from "./securityRollout";
-import { isPublishedSurfaceAllowed } from "./lib/publicClaims";
+import { isPublishedSurfaceAllowed } from "./lib/publicSurface";
 
 /** Cap for month-to-date usage count (by_at index range scan). */
 const USAGE_STATS_CAP = 50_000;
@@ -392,10 +392,10 @@ export const setProjectVisibility = mutation({
         .first();
       if (
         organization === null ||
-        !isPublishedSurfaceAllowed(project, organization, latest)
+        !isPublishedSurfaceAllowed(organization, latest)
       ) {
         throw new Error(
-          "Project cannot be public until publisher, project, and published spec copy pass public policy",
+          "Project cannot be public until it has a published version and the publisher has a public handle",
         );
       }
     }

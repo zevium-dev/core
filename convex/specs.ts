@@ -1,8 +1,5 @@
 import { v } from "convex/values";
-import {
-  findOpenApiPublicClaimViolations,
-  isPublicCopyAllowed,
-} from "@zevium/shared";
+import {} from "@zevium/shared";
 import { internalQuery, mutation, query } from "./_generated/server";
 import type { Doc } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
@@ -26,20 +23,15 @@ import {
 import { syncCatalogueListing } from "./catalogue";
 import { enqueuePublishedProjectProjection } from "./registrySync";
 import { resolveActivePublicRoute } from "./lib/publicRoutes";
-import { isPublishedSurfaceAllowed } from "./lib/publicClaims";
+import {
+  isOrganizationPublicSurfaceAllowed,
+  isPublishedSurfaceAllowed,
+} from "./lib/publicSurface";
 import {
   isValidSemver,
   type SpecIssue,
   validateOpenApiSpec,
 } from "./lib/validate";
-
-function publicClaimIssues(spec: string): SpecIssue[] {
-  return findOpenApiPublicClaimViolations(spec).map((violation) => ({
-    level: "error" as const,
-    path: violation.path,
-    message: `Unsupported public claim (${violation.label}). Use narrow, evidenced control wording.`,
-  }));
-}
 
 export const getDraft = query({
   args: { projectId: v.id("projects") },
@@ -82,10 +74,7 @@ export const saveDraft = mutation({
   }> => {
     await requireProjectMember(ctx, args.projectId);
 
-    const issues = [
-      ...validateOpenApiSpec(args.spec),
-      ...publicClaimIssues(args.spec),
-    ];
+    const issues = validateOpenApiSpec(args.spec);
     // Empty draft is allowed to clear editor; only non-empty drafts must parse.
     const effectiveIssues = args.spec.trim() === "" ? [] : issues;
 
@@ -258,25 +247,15 @@ export const publish = mutation({
       };
     }
 
-    const projectForClaims = await ctx.db.get(args.projectId);
-    if (projectForClaims === null) {
-      throw new Error("Project not found");
-    }
     const issues = [
       ...validateOpenApiSpec(draftRow.draft),
-      ...publicClaimIssues(draftRow.draft),
-      ...(isPublishedSurfaceAllowed(projectForClaims, org, {
-        version,
-        spec: draftRow.draft,
-        deprecationMessage: undefined,
-      })
+      ...(isOrganizationPublicSurfaceAllowed(org)
         ? []
         : [
             {
               level: "error" as const,
-              path: "project",
-              message:
-                "Project or publisher copy contains an unsupported compliance or absolute security claim.",
+              path: "publisher",
+              message: "Publisher needs a public handle before publishing.",
             },
           ]),
     ];
@@ -436,7 +415,7 @@ export const getPublishedForGateway = query({
       .order("desc")
       .first();
     if (latest === null) return null;
-    if (!isPublishedSurfaceAllowed(project, organization, latest)) return null;
+    if (!isPublishedSurfaceAllowed(organization, latest)) return null;
 
     return {
       spec: latest.spec,
@@ -521,7 +500,7 @@ export const getPublishedForGatewayInternal = internalQuery({
       .order("desc")
       .first();
     if (latest === null) return null;
-    if (!isPublishedSurfaceAllowed(project, org, latest)) return null;
+    if (!isPublishedSurfaceAllowed(org, latest)) return null;
 
     const isPastSunset =
       project.retiredAt !== undefined ||
@@ -576,11 +555,6 @@ export const deprecateVersion = mutation({
   handler: async (ctx, args): Promise<Doc<"specVersions">> => {
     const { org, version } = await requireSpecVersionAdmin(ctx, args.versionId);
 
-    if (args.message !== undefined && !isPublicCopyAllowed(args.message)) {
-      throw new Error(
-        "Public copy contains an unsupported compliance or absolute security claim",
-      );
-    }
     const now = Date.now();
     if (version.sunsetAt !== undefined && version.sunsetAt <= now) {
       throw new Error("A version cannot be changed after its sunset");

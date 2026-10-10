@@ -19,23 +19,12 @@ import {
   getActivePublicRouteBinding,
   resolveActivePublicRoute,
 } from "./lib/publicRoutes";
-import { isPublishedSurfaceAllowed } from "./lib/publicClaims";
+import { isPublishedSurfaceAllowed } from "./lib/publicSurface";
 
 const PAGE_SIZE = 24;
 const PUBLIC_SCAN_CAP = 240;
 const PROJECTION_BACKFILL_PAGE_SIZE = 25;
 const CATALOGUE_STATS_KEY = "public";
-
-export function isListingPublicCopyAllowed(
-  project: Pick<Doc<"projects">, "name" | "slug" | "description" | "tags">,
-  org: Pick<Doc<"organizations">, "name" | "slug" | "publicHandle">,
-  version: Pick<
-    Doc<"specVersions">,
-    "version" | "spec" | "deprecationMessage"
-  > | null,
-): boolean {
-  return isPublishedSurfaceAllowed(project, org, version);
-}
 
 export type CatalogueSort = "newest" | "name" | "cheapest";
 
@@ -538,7 +527,7 @@ export const listPublic = query({
           )
           .order("desc")
           .first();
-        if (!isListingPublicCopyAllowed(project, organization, latest)) {
+        if (!isPublishedSurfaceAllowed(organization, latest)) {
           continue;
         }
         const pricing =
@@ -875,7 +864,7 @@ export const getPublicDetail = query({
       .withIndex("by_project", (q) => q.eq("projectId", project._id))
       .unique();
 
-    if (!isListingPublicCopyAllowed(project, org, latest)) {
+    if (!isPublishedSurfaceAllowed(org, latest)) {
       return null;
     }
 

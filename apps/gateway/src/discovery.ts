@@ -5,16 +5,12 @@
 
 import {
   extractPricing,
-  isPublicCopySetAllowed,
   parseSpec,
   type HttpMethod,
   type ParsedOpenApiSpec,
 } from "@zevium/shared";
 import { listAllPublic, type CatalogueSource } from "./catalogue-source";
-import {
-  isPublishedSpecPublicCopyAllowed,
-  type PublicSpecSource,
-} from "./spec-source";
+import { isPublishedSpecPublic, type PublicSpecSource } from "./spec-source";
 
 const HTTP_METHODS: readonly HttpMethod[] = [
   "get",
@@ -91,30 +87,11 @@ export async function buildDiscoveryIndex(
   const apis: DiscoveryApi[] = [];
 
   for (const item of items) {
-    if (
-      !isPublicCopySetAllowed([
-        item.name,
-        item.slug,
-        item.description ?? "",
-        ...item.tags,
-        item.orgName,
-        item.publisherHandle,
-      ])
-    ) {
-      continue;
-    }
     const published = await deps.specSource.getPublishedSpec(
       item.publisherHandle,
       item.slug,
     );
-    if (
-      published === null ||
-      !isPublishedSpecPublicCopyAllowed(
-        published,
-        item.publisherHandle,
-        item.slug,
-      )
-    ) {
+    if (published === null || !isPublishedSpecPublic(published)) {
       continue;
     }
     let endpoints: DiscoveryEndpoint[] = [];

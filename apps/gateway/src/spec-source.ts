@@ -7,11 +7,7 @@
 import { ConvexHttpClient } from "convex/browser";
 import { makeFunctionReference } from "convex/server";
 import { logDependencyFailure } from "./telemetry";
-import {
-  isOpenApiPublicCopyAllowed,
-  isPublicCopySetAllowed,
-  trimTrailingSlashes,
-} from "@zevium/shared";
+import { trimTrailingSlashes } from "@zevium/shared";
 
 export type PublishedSpec = {
   /** Raw OpenAPI JSON string. */
@@ -70,31 +66,20 @@ export interface PublicSpecSource {
 
 export class SpecSourceUnavailableError extends Error {}
 
-/** Claim-copy defense for fixtures, stale caches, and control-plane regressions. */
-export function isPublishedSpecCopyAllowed(
-  published: PublicPublishedSpec,
-  publisherHandle: string,
-  projectSlug: string,
-): boolean {
-  return (
-    isPublicCopySetAllowed([
-      publisherHandle,
-      projectSlug,
-      published.version ?? "",
-      published.deprecationMessage ?? "",
-    ]) && isOpenApiPublicCopyAllowed(published.spec)
-  );
+/** Published spec bodies must be valid JSON; anything else fails closed. */
+export function isPublishedSpecReadable(published: { spec: string }): boolean {
+  try {
+    JSON.parse(published.spec);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
-/** Public anonymous surfaces additionally require explicit public visibility. */
-export function isPublishedSpecPublicCopyAllowed(
-  published: PublicPublishedSpec,
-  publisherHandle: string,
-  projectSlug: string,
-): boolean {
+/** Public anonymous surfaces require explicit public visibility and a readable spec. */
+export function isPublishedSpecPublic(published: PublicPublishedSpec): boolean {
   return (
-    published.visibility === "public" &&
-    isPublishedSpecCopyAllowed(published, publisherHandle, projectSlug)
+    published.visibility === "public" && isPublishedSpecReadable(published)
   );
 }
 
@@ -317,6 +302,7 @@ export function parsePublicPublishedSpecPayload(
   ) {
     published.retiredAt = candidate.retiredAt;
   }
+  if (!isPublishedSpecReadable(published)) return null;
   return published;
 }
 
@@ -478,15 +464,7 @@ export function parsePublishedSpecPayload(json: unknown): PublishedSpec | null {
   ) {
     published.retiredAt = candidate.retiredAt;
   }
-  if (
-    !isPublicCopySetAllowed([
-      published.version,
-      published.deprecationMessage ?? "",
-    ]) ||
-    !isOpenApiPublicCopyAllowed(published.spec)
-  ) {
-    return null;
-  }
+  if (!isPublishedSpecReadable(published)) return null;
   return published;
 }
 

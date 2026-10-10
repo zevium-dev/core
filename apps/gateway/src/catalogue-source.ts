@@ -7,7 +7,6 @@
 import { ConvexHttpClient } from "convex/browser";
 import { makeFunctionReference } from "convex/server";
 import { logDependencyFailure } from "./telemetry";
-import { isPublicCopySetAllowed } from "@zevium/shared";
 
 export type CatalogueListing = {
   name: string;
@@ -212,18 +211,6 @@ function parseListing(raw: unknown): CatalogueListing | null {
   }
 
   const publishedAt = asNumberOrNull(raw.publishedAt);
-  if (
-    !isPublicCopySetAllowed([
-      name,
-      slug,
-      description ?? "",
-      ...tags,
-      orgName,
-      publisherHandle,
-    ])
-  ) {
-    return null;
-  }
   return {
     name,
     slug,

@@ -260,26 +260,6 @@ describe("gateway pipeline", () => {
     expect((await walletStub(clerkOrgId).getState()).balance).toBe(100);
   });
 
-  it("fails closed on unsafe published spec before reserve or upstream fetch", async () => {
-    const clerkOrgId = "org_pipe_unsafe_copy";
-    const { fetchImpl, calls } = makeFetchMock(() => new Response("no"));
-    const parsed = JSON.parse(SPEC) as Record<string, unknown>;
-    parsed.info = { title: "Demo", version: "PCI compliant" };
-    await installFixtures({
-      clerkOrgId,
-      fetchImpl,
-      credits: 100,
-      spec: JSON.stringify(parsed),
-    });
-
-    const res = await gatewayFetch(
-      `/gateway/${ORG_SLUG}/${PROJECT_SLUG}/stream`,
-    );
-    expect(res.status).toBe(404);
-    expect(calls).toHaveLength(0);
-    expect((await walletStub(clerkOrgId).getState()).balance).toBe(100);
-  });
-
   it("fails closed on malformed published JSON before reserve or upstream fetch", async () => {
     const clerkOrgId = "org_pipe_malformed_spec";
     const { fetchImpl, calls } = makeFetchMock(() => new Response("no"));
@@ -288,24 +268,6 @@ describe("gateway pipeline", () => {
       fetchImpl,
       credits: 100,
       spec: "{malformed",
-    });
-
-    const res = await gatewayFetch(
-      `/gateway/${ORG_SLUG}/${PROJECT_SLUG}/stream`,
-    );
-    expect(res.status).toBe(404);
-    expect(calls).toHaveLength(0);
-    expect((await walletStub(clerkOrgId).getState()).balance).toBe(100);
-  });
-
-  it("fails closed on unsafe immutable release copy before reserve", async () => {
-    const clerkOrgId = "org_pipe_unsafe_version";
-    const { fetchImpl, calls } = makeFetchMock(() => new Response("no"));
-    await installFixtures({
-      clerkOrgId,
-      fetchImpl,
-      credits: 100,
-      version: "C.C.P.A compliant",
     });
 
     const res = await gatewayFetch(

@@ -195,47 +195,10 @@ describe("mock gateway route", () => {
     expect(await res.text()).toBe("<h1>Rendered Markdown</h1>");
   });
 
-  it("fails closed before emitting hostile publisher mock bodies", async () => {
-    const parsed = JSON.parse(SPEC) as Record<string, unknown>;
-    const paths = parsed.paths as Record<string, unknown>;
-    const example = paths["/example"] as Record<string, unknown>;
-    const operation = example.get as Record<string, unknown>;
-    operation.responses = {
-      200: {
-        content: {
-          "application/json": {
-            schema: {
-              type: "object",
-              example: { message: "PCI compliant" },
-            },
-          },
-        },
-      },
-    };
-    await installFixtures({
-      clerkOrgId: "org_mock_unsafe_body",
-      spec: JSON.stringify(parsed),
-    });
-
-    const res = await mockFetch(`/mock/${ORG_SLUG}/${PROJECT_SLUG}/example`);
-    expect(res.status).toBe(404);
-    await expect(res.text()).resolves.not.toMatch(/pci compliant/i);
-  });
-
   it("fails closed on malformed published JSON", async () => {
     await installFixtures({
       clerkOrgId: "org_mock_malformed",
       spec: "{malformed",
-    });
-
-    const res = await mockFetch(`/mock/${ORG_SLUG}/${PROJECT_SLUG}/example`);
-    expect(res.status).toBe(404);
-  });
-
-  it("fails closed on unsafe immutable release copy", async () => {
-    await installFixtures({
-      clerkOrgId: "org_mock_unsafe_version",
-      version: "I.S.O 27001 certified",
     });
 
     const res = await mockFetch(`/mock/${ORG_SLUG}/${PROJECT_SLUG}/example`);
