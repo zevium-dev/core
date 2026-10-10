@@ -60,7 +60,7 @@ Worker serves `/gateway/{org}/{project}/*` + `/mcp`; each call runs:
 5. emit usage event → Convex (async) — [wallet-billing](wallet-billing.md)
 6. non-2xx → refund reservation
 
-Code order (`pipeline.ts` header): verify key → load spec → match op → free-tier or reserve → proxy → settle/refund → usage.
+Code order (`pipeline.ts` header): verify key → load spec → match op → free-tier or reserve → proxy → optional buffered-adapter `prepareResponse` → settle/refund → usage. The hook runs inside the fetch/refund boundary; rejection uses the existing paid/free-tier refund paths. MCP behavior: [agent-surface](agent-surface.md).
 
 ### Implementation notes
 
