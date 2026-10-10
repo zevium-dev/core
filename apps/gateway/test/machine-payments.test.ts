@@ -328,7 +328,7 @@ describe("anonymous x402 wallet rail", () => {
       };
     }
     const result = await mcp(token);
-    expect(result.result.isError, JSON.stringify(result)).not.toBe(true);
+    expect(result.result.isError).not.toBe(true);
     const unpaid = await mcp();
     expect(unpaid.result.isError).toBe(true);
     expect(JSON.parse(unpaid.result.content[0]!.text)).toMatchObject({
