@@ -1081,6 +1081,8 @@ export default defineSchema({
     tagCounts: v.optional(v.record(v.string(), v.number())),
     freeTierCount: v.optional(v.number()),
     projectionComplete: v.boolean(),
+    /** Price extraction semantics used by the completed/in-progress backfill. */
+    pricingVersion: v.optional(v.number()),
     backfillCursor: v.optional(v.string()),
     updatedAt: v.number(),
   }).index("by_key", ["key"]),

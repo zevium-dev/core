@@ -39,7 +39,7 @@ Org switcher selects the workspace; URLs do not repeat the org slug (see Open qu
   - Members: code editor with live validation, Issues panel, Save draft.
   - Org admins: connection gate, Publish (semver dialog), visibility, deprecate/restore lifecycle ([listing-lifecycle](listing-lifecycle.md)).
   - JSON + YAML both accepted.
-  - Pricing lint: warn on operations missing `x-zevium-cost`; pricing summary sidebar ("12 endpoints, 2–10 credits, free tier on 3").
+  - Pricing lint: warn that unpriced operations will be hidden and not callable; publish is allowed; pricing summary sidebar ("12 endpoints, 2–10 credits, free tier on 3").
   - Import from URL / file upload.
   - Version history: published versions immutable, spec-diff between versions, rollback (P2).
 
@@ -65,6 +65,7 @@ Evidence, workarounds and scope: [dogfood findings](../findings/dogfood-2026-10-
 
 - **Inline correction (#399)**: pricing inputs keep invalid text local and show an accessible validation message through blur. Only safe non-negative integers within the shared cost/free-tier limits enter the draft. Invalid input therefore cannot disable its own control or sibling controls; correction clears the field error.
 - **Settings headings (#397)**: project page supplies the level 1 heading; each settings `CardTitle` receives `role="heading" aria-level={2}` at its usage site, including loading, error, and admin-access notices. Webhook delivery history is level 3 under Webhooks. Stock shadcn components remain unchanged. Component tests cover complete heading order and query/access states.
+- **Unpriced operations (#316)**: `collectOpenApiSpecIssues` emits a warning explaining that the operation stays hidden and cannot be called; explicit zero is free. Save/publish remain allowed. `spec-endpoints.ts` represents missing cost as `null`; the editable rail keeps a blank input and a hidden label. Draft price ranges/free-tier counts ignore unpriced operations.
 
 - **Per-token pricing (#329)**: built for OpenAI-compatible JSON/SSE. Spec rates are exposed in catalogue references, editor, discovery, and MCP; admission holds an estimated maximum, an asynchronous tee observer settles actual usage, and wallet settlement releases the remainder. Missing usage charges zero. Wallet budget, whole-credit rounding, stream/parser limits, and `x-zevium-hold` are defined in the [pricing contract](../decisions/2026-10-10-llm-per-token-pricing.md#implementation-contract-329). Code: `packages/shared/src/pricing.ts`, `apps/gateway/src/token-metering.ts`, `apps/gateway/src/{admit,finalize,wallet}.ts`, `convex/wallets.ts`. Unpriced operations are hidden; explicit zero-price calls remain available to funded wallets.
 
@@ -93,7 +94,7 @@ Code facts (read from source 2026-10-10, not from TECH.md):
 - 2026-07-11 — Spec editor: direction C phased. Cut 1 editor + validation + read-only rail; cut 2 write-back + diffs. Mockups: claude.ai/code/artifact/3591af48.
 - 2026-07-11 — YAML accepted at input, converted client-side, stored canonical JSON (gateway stays JSON-only).
 - 2026-10-10 — ACCEPTED: Zevium publishes house listings to seed supply, sourced via treg then RapidAPI, replaced over time by direct integrations; eats losses for now. ToS gate per source. [decision](../decisions/2026-10-10-house-supply-via-aggregators.md)
-- 2026-10-10 — BUILT: operations without `x-zevium-cost` are hidden and not callable; free only when explicitly `0`. Replaces code's default of 1 credit. [decision](../decisions/2026-10-10-unpriced-operations-hidden.md)
+- 2026-10-10 — BUILT (#316): operations without `x-zevium-cost` are hidden and not callable; free only when explicitly `0`. Publishing remains allowed with a warning. [decision](../decisions/2026-10-10-unpriced-operations-hidden.md)
 - 2026-10-10 — House listings labeled "Operated by Zevium". [decision](../decisions/2026-10-10-house-supply-via-aggregators.md)
 
 ## Open questions

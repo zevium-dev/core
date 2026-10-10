@@ -314,3 +314,19 @@ describe("sanitizedGatewayErrorResponse", () => {
     ).toBeNull();
   });
 });
+
+it("omits unpriced operations from the catalogue reference and playground", () => {
+  const endpoints = parsePublishedEndpoints(
+    JSON.stringify({
+      paths: {
+        "/hidden": { get: { summary: "Hidden", "x-zevium-free-tier": 10 } },
+        "/free": { get: { "x-zevium-cost": 0 } },
+        "/paid": { post: { "x-zevium-cost": 5 } },
+      },
+    }),
+  );
+  expect(endpoints.map(({ path, cost }) => ({ path, cost }))).toEqual([
+    { path: "/free", cost: 0 },
+    { path: "/paid", cost: 5 },
+  ]);
+});

@@ -40,6 +40,7 @@ Consumers see: one gateway URL per API, one key, one wallet, itemized charges. P
 ## Tech
 
 - **Per-token pricing (#329)**: built for OpenAI-compatible JSON/SSE. Spec rates are exposed in catalogue references, editor, discovery, and MCP; admission holds an estimated maximum, an asynchronous tee observer settles actual usage, and wallet settlement releases the remainder. Missing usage charges zero. Wallet budget, whole-credit rounding, stream/parser limits, and `x-zevium-hold` are defined in the [pricing contract](../decisions/2026-10-10-llm-per-token-pricing.md#implementation-contract-329). Code: `packages/shared/src/pricing.ts`, `apps/gateway/src/token-metering.ts`, `apps/gateway/src/{admit,finalize,wallet}.ts`, `convex/wallets.ts`. Unpriced operations are hidden; explicit zero-price calls remain available to funded wallets.
+- **Explicit pricing (#316)**: shared `matchOperation` rejects an unpriced match as `null` before wallet access; `admit.ts` returns the same `404 route_not_found` as an unknown route. No upstream call, charge, or usage event. Explicit zero still requires key authorization and a positive wallet balance, and charges zero.
 
 Worker rules (hot-path budget, streaming, async metering, dependency-light): [`AGENTS.md` → Gateway (Worker) rules](../../../AGENTS.md#gateway-worker-rules). Not copied here.
 
@@ -87,7 +88,10 @@ Worker serves `/gateway/{org}/{project}/*` + `/mcp`; each call runs:
 - 2026-07-11 — Consumer's own org wallet pays; foreign-org keys on private projects get `404`; wildcard CORS on public gateway surfaces (commit `32d5c17`).
 - 2026-10-07 — Upstream `Idempotency-Key` scoped per consumer org/project/method/URL; forwarding identity, `Connection`-nominated and `x-zevium-*` headers stripped (commit `e968b1e`). See findings above.
 - 2026-10-10 — ACCEPTED: keyless x402 wallet sessions become a second auth path beside API keys. Built behind configuration in #109. [decision](../decisions/2026-10-10-dual-rail-keys-and-x402.md); details in [machine-payments](machine-payments.md).
+- 2026-10-10 — BUILT (#316): operations without `x-zevium-cost` are hidden and not callable; free only when explicitly `0`. Publishing remains allowed with a warning. [decision](../decisions/2026-10-10-unpriced-operations-hidden.md)
 - 2026-10-10 — BUILT: operations without `x-zevium-cost` are hidden and not callable; free only when explicitly `0`. Replaces code's default of 1 credit. [decision](../decisions/2026-10-10-unpriced-operations-hidden.md)
+- 2026-10-10 — BUILT (#316): operations without `x-zevium-cost` are hidden and not callable; free only when explicitly `0`. Publishing remains allowed with a warning. [decision](../decisions/2026-10-10-unpriced-operations-hidden.md)
+- 2026-10-10 — ACCEPTED: keyless x402 wallet sessions become a second auth path beside API keys. Not built. [decision](../decisions/2026-10-10-dual-rail-keys-and-x402.md); details in [machine-payments](machine-payments.md).
 - 2026-10-10 — BUILT (#329): LLM per-token pricing — hold estimated input + `max_tokens` (or fixed cap) at spec rates, settle actual, release rest; in-flight budget + 402 reasons copied from OpenRouter. [decision](../decisions/2026-10-10-llm-per-token-pricing.md)
 
 ## Open questions

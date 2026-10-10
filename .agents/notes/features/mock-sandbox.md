@@ -29,6 +29,7 @@ Free, anonymous, spec-generated responses for any published API: exercise the AP
 ## Tech
 
 - **Shared examples (#363)**: `packages/shared/src/mock.ts` exports bounded `synthesize` for gateway mocks, reference responses, and playground request bodies. Explicit examples/defaults and local component refs share one implementation; boolean/date/depth behavior no longer drifts in `lib/try-it.ts`. Realtime quality refreshes preserve playground inputs/results; selecting another operation resets its defaults. CopyButton keeps curl authorization as a placeholder.
+- **Unpriced routes (#316)**: shared `matchOperation` returns no match for a missing `x-zevium-cost`; `/mock` returns its usual `404 route_not_found`. Explicit zero and positive-priced operations remain available as zero-credit, keyless mocks.
 
 - **Payment-required errors** (mock part): `/mock` is keyless and free; project, spec, and route failures return generic `404` responses
 - **Gateway CORS**: `/gateway`, `/mock`, `/discovery`, `/mcp` all allow wildcard origin. Safe because auth is bearer-key only, never cookie-based — a wildcard origin doesn't widen the attack surface for a bearer-token API
@@ -38,7 +39,7 @@ Code facts (`mock.ts`): resolves the public published spec, applies `isPublished
 ## Decisions
 
 - 2026-07-11 — Mock went keyless and anonymous at 0 credits (commit `32d5c17`, "keyless mock"). Supersedes the build-plan wave 9b row that says "key-authed".
-- 2026-10-10 — ACCEPTED (not built): operations without `x-zevium-cost` are hidden and not callable; free only when explicitly `0`. Replaces code's default of 1 credit. [decision](../decisions/2026-10-10-unpriced-operations-hidden.md)
+- 2026-10-10 — BUILT (#316): operations without `x-zevium-cost` are hidden and not callable; free only when explicitly `0`. Publishing remains allowed with a warning. [decision](../decisions/2026-10-10-unpriced-operations-hidden.md)
 
 ## Open questions
 

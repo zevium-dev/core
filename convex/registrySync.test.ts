@@ -404,3 +404,32 @@ describe("canonical registry producer", () => {
     expect(requests).toHaveLength(1);
   });
 });
+
+it("registry catalogue pricing excludes unpriced operations and their free tiers", async () => {
+  const t = convexTest(schema, modules);
+  const { projectId, versionId } = await seedPublished(t);
+  await t.run(async (ctx) => {
+    await ctx.db.patch(versionId, {
+      spec: JSON.stringify({
+        paths: {
+          "/hidden": { get: { "x-zevium-free-tier": 10 } },
+          "/free": { get: { "x-zevium-cost": 0 } },
+          "/paid": { post: { "x-zevium-cost": 7 } },
+        },
+      }),
+    });
+    await enqueuePublishedProjectProjection(ctx, projectId);
+  });
+  const event = await t.run(async (ctx) => {
+    const rows = await ctx.db.query("registryOutbox").collect();
+    const row = rows.find((row) => row.operation === "catalogue.snapshot");
+    if (!row) throw new Error("Missing catalogue snapshot");
+    return JSON.parse(row.eventJson) as RegistryEvent<"catalogue.snapshot">;
+  });
+  expect(event.payload.listing?.pricing).toEqual({
+    minCostCredits: 0,
+    maxCostCredits: 7,
+    endpointCount: 2,
+    hasFreeTier: false,
+  });
+});

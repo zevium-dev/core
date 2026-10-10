@@ -197,6 +197,8 @@ export function parsePublishedEndpoints(specJson: string): ApiEndpoint[] {
     for (const [method, rawOperation] of Object.entries(pathItem)) {
       if (method === "parameters" || !isRecord(rawOperation)) continue;
       const operation = rawOperation as OpenApiOperation;
+      const pricing = extractPricing(operation);
+      if (pricing === null) continue;
       const resolvedRequestBody = resolveComponentRef(
         operation.requestBody,
         "requestBodies",
@@ -208,8 +210,6 @@ export function parsePublishedEndpoints(specJson: string): ApiEndpoint[] {
           ? { requestBody: resolvedRequestBody }
           : {}),
       };
-      if (operation["x-zevium-cost"] === undefined) continue;
-      const pricing = extractPricing(operation);
       const bodyDefaults = tryItBodyDefaults(
         resolvedOperation,
         spec.components,

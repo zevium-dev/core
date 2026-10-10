@@ -66,6 +66,39 @@ describe("inline pricing correction", () => {
     },
   );
 
+  it("keeps a cleared price hidden through invalid input and accepts explicit zero", () => {
+    render(<DraftRail />);
+    const cost = screen.getByLabelText<HTMLInputElement>("Cost for GET /ping");
+    fireEvent.change(cost, { target: { value: "" } });
+    fireEvent.blur(cost);
+    expect(cost.value).toBe("");
+    expect(
+      screen.getByText("Hidden until priced. Set 0 for free."),
+    ).toBeTruthy();
+    const unpricedDraft = screen.getByTestId("draft").textContent!;
+    expect(
+      JSON.parse(unpricedDraft).paths["/ping"].get["x-zevium-cost"],
+    ).toBeUndefined();
+    fireEvent.change(cost, { target: { value: "-1" } });
+    fireEvent.blur(cost);
+    expect(cost.value).toBe("-1");
+    expect(cost.disabled).toBe(false);
+    expect(screen.getByRole("alert")).toBeTruthy();
+    expect(screen.getByTestId("draft").textContent).toBe(unpricedDraft);
+    fireEvent.change(cost, { target: { value: "0" } });
+    fireEvent.blur(cost);
+    expect(cost.value).toBe("0");
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(
+      screen.queryByText("Hidden until priced. Set 0 for free."),
+    ).toBeNull();
+    expect(
+      JSON.parse(screen.getByTestId("draft").textContent!).paths["/ping"].get[
+        "x-zevium-cost"
+      ],
+    ).toBe(0);
+  });
+
   it("corrects an invalid free tier and accepts zero, clearing, and the upper bound", () => {
     render(<DraftRail />);
     const free = screen.getByLabelText<HTMLInputElement>(

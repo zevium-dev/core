@@ -38,7 +38,7 @@ Baseline `eaa7eff`; [journeys, evidence and limits](../findings/dogfood-2026-10-
 
 Small, decided items. Each links to its decision; build in any order unless noted.
 
-1. #316 Unpriced operations hidden + not callable; explicit `0` = free — [decision](../decisions/2026-10-10-unpriced-operations-hidden.md)
+1. #316 Built — unpriced operations hidden + not callable; explicit `0` = free — [decision](../decisions/2026-10-10-unpriced-operations-hidden.md)
 2. **Built** #317 $1 signup credit per eligible org, once per Clerk creator (funds free-tier calls) — [decision](../decisions/2026-10-10-signup-credit.md)
 3. #318 Card fee passed through at cost on top-ups (legal check first) — [decision](../decisions/2026-10-10-card-fee-passthrough.md)
 4. **Built** #319 Review eligibility includes free-tier callers — [decision](../decisions/2026-10-10-review-eligibility.md)

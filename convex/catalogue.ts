@@ -29,6 +29,8 @@ const PAGE_SIZE = 24;
 const PUBLIC_SCAN_CAP = 240;
 const PROJECTION_BACKFILL_PAGE_SIZE = 25;
 const CATALOGUE_STATS_KEY = "public";
+// Legacy projections included a fabricated 1-credit price for unpriced operations.
+const PRICING_PROJECTION_VERSION = 1;
 
 export type CatalogueSort = "newest" | "name" | "cheapest";
 
@@ -73,9 +75,9 @@ export function summarizePublishedPricing(
       if (pathItem === undefined) continue;
       for (const op of Object.values(pathItem)) {
         if (op === undefined || Array.isArray(op)) continue;
-        if (op["x-zevium-cost"] === undefined) continue;
-        endpointCount += 1;
         const pricing = extractPricing(op);
+        if (pricing === null) continue;
+        endpointCount += 1;
         hasTokenPricing ||= pricing.token !== undefined;
         minCost = Math.min(minCost, pricing.cost);
         maxCost = Math.max(maxCost, pricing.cost);
@@ -358,8 +360,17 @@ export async function syncCatalogueListing(
 export const backfillCatalogueListingsPage = internalMutation({
   args: { cursor: v.union(v.string(), v.null()) },
   handler: async (ctx, args): Promise<{ processed: number; done: boolean }> => {
+    const previousStats = await ctx.db
+      .query("catalogueStats")
+      .withIndex("by_key", (q) => q.eq("key", CATALOGUE_STATS_KEY))
+      .unique();
+    // A continuation queued before deployment must restart under the new pricing rule.
+    const cursor =
+      previousStats?.pricingVersion === PRICING_PROJECTION_VERSION
+        ? args.cursor
+        : null;
     const page = await ctx.db.query("projects").paginate({
-      cursor: args.cursor,
+      cursor,
       numItems: PROJECTION_BACKFILL_PAGE_SIZE,
       maximumRowsRead: PROJECTION_BACKFILL_PAGE_SIZE + 1,
     });
@@ -375,6 +386,7 @@ export const backfillCatalogueListingsPage = internalMutation({
         key: CATALOGUE_STATS_KEY,
         publicCount: 0,
         projectionComplete: page.isDone,
+        pricingVersion: PRICING_PROJECTION_VERSION,
         backfillCursor: page.isDone ? undefined : page.continueCursor,
         updatedAt: Date.now(),
       });
@@ -382,6 +394,7 @@ export const backfillCatalogueListingsPage = internalMutation({
     } else {
       await ctx.db.patch(stats._id, {
         projectionComplete: page.isDone,
+        pricingVersion: PRICING_PROJECTION_VERSION,
         backfillCursor: page.isDone ? undefined : page.continueCursor,
         updatedAt: Date.now(),
       });
@@ -404,11 +417,13 @@ export const resumeCatalogueProjectionBackfill = internalMutation({
       .query("catalogueStats")
       .withIndex("by_key", (q) => q.eq("key", CATALOGUE_STATS_KEY))
       .unique();
-    if (stats?.projectionComplete === true) return { scheduled: false };
+    const currentPricing = stats?.pricingVersion === PRICING_PROJECTION_VERSION;
+    if (currentPricing && stats?.projectionComplete === true)
+      return { scheduled: false };
     await ctx.scheduler.runAfter(
       0,
       internal.catalogue.backfillCatalogueListingsPage,
-      { cursor: stats?.backfillCursor ?? null },
+      { cursor: currentPricing ? (stats?.backfillCursor ?? null) : null },
     );
     return { scheduled: true };
   },
@@ -518,7 +533,10 @@ const publicList = {
 
     // Deploy-safe compatibility path: bounded raw-page reads remain live while
     // the projection backfill advances. No table scan, offset, or unbounded N+1.
-    if (stats?.projectionComplete !== true) {
+    if (
+      stats?.projectionComplete !== true ||
+      stats.pricingVersion !== PRICING_PROJECTION_VERSION
+    ) {
       const items: PublicListing[] = [];
       let staleCount = 0;
       const rawPage = await ctx.db

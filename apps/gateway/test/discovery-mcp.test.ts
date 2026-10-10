@@ -1967,3 +1967,135 @@ describe("MCP published call reference", () => {
     ).toThrow("API reference too complex");
   });
 });
+
+describe("unpriced operation visibility", () => {
+  const spec = JSON.stringify({
+    servers: [{ url: "https://upstream.test" }],
+    paths: {
+      "/hidden": {
+        get: {
+          summary: "Hidden endpoint",
+          "x-zevium-free-tier": 10,
+          responses: {
+            "200": {
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/HiddenOnly" },
+                },
+              },
+            },
+          },
+        },
+      },
+      "/free": { get: { "x-zevium-cost": 0 } },
+      "/paid": { post: { "x-zevium-cost": 7 } },
+    },
+    components: { schemas: { HiddenOnly: { type: "string" } } },
+  });
+  const visible = [
+    { method: "GET", path: "/free", credits: 0 },
+    { method: "POST", path: "/paid", credits: 7 },
+  ];
+
+  it("omits unpriced operations from discovery", async () => {
+    await installAgentFixtures({ clerkOrgId: "org_hidden_discovery", spec });
+    const response = await workerFetch("/discovery");
+    expect(await response.json()).toMatchObject({
+      apis: [{ endpoints: visible }],
+    });
+  });
+
+  it.each(["search_apis", "get_api_docs"])(
+    "omits unpriced operations from %s",
+    async (name) => {
+      await installAgentFixtures({
+        clerkOrgId: `org_hidden_${name}`,
+        spec,
+        listings: [
+          {
+            ...LISTING,
+            pricing: {
+              minCost: 0,
+              maxCost: 7,
+              endpointCount: 2,
+              hasFreeTier: false,
+            },
+          },
+        ],
+      });
+      const rpc = await mcpCall("tools/call", {
+        name,
+        arguments:
+          name === "search_apis"
+            ? { query: "weather" }
+            : { org: ORG_SLUG, project: PROJECT_SLUG },
+      });
+      const payload: unknown = JSON.parse(toolText(rpc));
+      expect(payload).toMatchObject({
+        publisherData:
+          name === "search_apis"
+            ? {
+                matches: [
+                  {
+                    pricing: {
+                      minCost: 0,
+                      maxCost: 7,
+                      endpointCount: 2,
+                      hasFreeTier: false,
+                    },
+                  },
+                ],
+              }
+            : { endpoints: visible },
+      });
+      expect(toolText(rpc)).not.toContain("/hidden");
+      expect(toolText(rpc)).not.toContain("HiddenOnly");
+    },
+  );
+
+  it.each([undefined, 0, 7])(
+    "call_api enforces explicit pricing: %s",
+    async (cost) => {
+      const clerkOrgId = `org_mcp_explicit_${String(cost)}`;
+      const mock = makeFetchMock(() => new Response("ok"));
+      await installAgentFixtures({
+        clerkOrgId,
+        fetchImpl: mock.fetchImpl,
+        credits: 100,
+        spec: JSON.stringify({
+          servers: [{ url: "https://upstream.test" }],
+          paths: {
+            "/priced": { get: { "x-zevium-cost": cost } },
+          },
+        }),
+      });
+      const before = await walletStub(clerkOrgId).getState();
+      const rpc = await mcpCall(
+        "tools/call",
+        {
+          name: "call_api",
+          arguments: {
+            org: ORG_SLUG,
+            project: PROJECT_SLUG,
+            method: "GET",
+            path: "/priced",
+          },
+        },
+        { headers: { authorization: `Bearer ${KEY_SECRET}` } },
+      );
+      const payload: unknown = JSON.parse(toolText(rpc));
+      expect(payload).toMatchObject({
+        status: cost === undefined ? 404 : 200,
+        cost: cost ?? 0,
+      });
+      const after = await walletStub(clerkOrgId).getState();
+      if (cost === undefined) {
+        expect(after).toEqual(before);
+        expect(mock.calls).toHaveLength(0);
+      } else {
+        expect(after.balance).toBe(100 - cost);
+        expect(mock.calls).toHaveLength(1);
+      }
+    },
+  );
+});

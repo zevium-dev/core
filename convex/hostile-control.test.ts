@@ -233,6 +233,7 @@ describe("hostile control-plane state", () => {
         tagCounts: { hostile: 101 },
         freeTierCount: 0,
         projectionComplete: true,
+        pricingVersion: 1,
         updatedAt: 1,
       });
       for (let index = 0; index < 101; index += 1) {

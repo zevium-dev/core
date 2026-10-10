@@ -92,6 +92,11 @@ export function SpecRailEndpoints({
                         {ep.path}
                       </span>
                     </div>
+                    {ep.cost === null ? (
+                      <p className="mt-0.5 text-xs text-muted-foreground">
+                        Hidden until priced. Set 0 for free.
+                      </p>
+                    ) : null}
                     {ep.summary ? (
                       <p className="mt-0.5 text-xs text-muted-foreground">
                         {ep.summary}
@@ -161,7 +166,7 @@ function PricingInput({
   onValueChange,
   ...props
 }: Omit<React.ComponentProps<typeof Input>, "value" | "onChange"> & {
-  value: number | undefined;
+  value: number | null | undefined;
   maximum: number;
   onValueChange: (value: number | null) => void;
 }) {
@@ -183,7 +188,9 @@ function PricingInput({
     >
       <Input
         {...props}
-        value={raw ?? (value === undefined ? "" : String(value))}
+        value={
+          raw ?? (value === undefined || value === null ? "" : String(value))
+        }
         aria-invalid={invalid}
         aria-describedby={invalid ? errorId : undefined}
         onChange={(event) => {

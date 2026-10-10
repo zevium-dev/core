@@ -114,7 +114,7 @@ describe("matchOperation", () => {
     expect(hit!.operation.operationId).toBe("getUser");
   });
 
-  it("hides operations with missing price", () => {
+  it("does not match an operation when its price is missing", () => {
     const hit = matchOperation(spec, "PUT", "/items/1/tags/hot");
     expect(hit).toBeNull();
   });
@@ -153,6 +153,25 @@ describe("matchOperation", () => {
     }
   });
 
+  it("does not route unpriced concrete paths through priced templates", () => {
+    const paths = {
+      "/pets/{id}": { get: { "x-zevium-cost": 9 } },
+      "/pets/mine": { get: {} },
+      "/free": { get: { "x-zevium-cost": 0 } },
+    };
+    for (const entries of [
+      Object.entries(paths),
+      Object.entries(paths).reverse(),
+    ]) {
+      const spec = parseSpec(
+        JSON.stringify({ paths: Object.fromEntries(entries) }),
+      );
+      expect(matchOperation(spec, "GET", "/pets/mine")).toBeNull();
+      expect(matchOperation(spec, "GET", "/pets/other")?.pricing.cost).toBe(9);
+      expect(matchOperation(spec, "GET", "/free")?.pricing.cost).toBe(0);
+    }
+  });
+
   it("uses stable specificity ordering for ambiguous templates", () => {
     const pathOrders = [
       {
@@ -178,8 +197,9 @@ describe("matchOperation", () => {
 });
 
 describe("extractPricing", () => {
-  it("rejects unspecified pricing", () => {
-    expect(() => extractPricing({})).toThrow(/hidden/);
+  it("exposes missing pricing as null, even with a free tier", () => {
+    expect(extractPricing({})).toBeNull();
+    expect(extractPricing({ "x-zevium-free-tier": 10 })).toBeNull();
   });
 
   it("keeps cost 0 as a valid free-tier cost (no rewrite to 1)", () => {

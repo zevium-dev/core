@@ -178,7 +178,7 @@ export function collectOpenApiSpecIssues(specText: string): SpecIssue[] {
           level: "warning",
           path: `$.paths["${pathKey}"].${lower}.x-zevium-cost`,
           message:
-            "Missing x-zevium-cost (operation is hidden and not callable)",
+            "Missing x-zevium-cost: operation will be hidden and not callable. Set 0 to make it free.",
         });
       } else if (typeof cost === "object" && cost !== null) {
         try {
