@@ -16,7 +16,7 @@ type FadeInProps = {
 const subscribe = () => () => undefined;
 
 /**
- * Skeleton→content crossfade (DESIGN.md).
+ * Skeleton→content crossfade (agents/notes/design/design-system.md).
  * Opacity only when reduced-motion; skips enter during active view transitions.
  */
 export function FadeIn({

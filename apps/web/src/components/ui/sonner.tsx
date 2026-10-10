@@ -17,7 +17,7 @@ const Toaster = ({ ...props }: ToasterProps) => {
     <Sonner
       theme={theme as ToasterProps["theme"]}
       className="toaster group"
-      // DESIGN.md: toast entrances retimed to base + THE easing
+      // agents/notes/design/design-system.md: toast entrances retimed to base + THE easing
       duration={4000}
       icons={{
         success: <CircleCheckIcon className="size-4" />,

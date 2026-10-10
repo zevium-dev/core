@@ -47,14 +47,14 @@ apps/gateway/    # CF Worker: metered proxy, wallet DO, mock, MCP, discovery
 convex/          # Convex schema + functions (control plane)
 packages/shared/ # OpenAPI parsing, x-zevium-* pricing, validation
 e2e/             # agent-browser end-to-end suite (auth, publisher, consumer)
-docs/            # market research + demo assets
+agents/notes/    # committed agent memory: product, features, architecture, decisions, research
 ```
 
-Source-of-truth docs: [PRODUCT.md](PRODUCT.md) · [FLOW.md](FLOW.md) ·
-[TECH.md](TECH.md) · [DESIGN.md](DESIGN.md)
+Docs: everything lives in [agents/notes/](agents/notes/README.md) — start with the
+[product overview](agents/notes/product/overview.md), [roadmap](agents/notes/product/roadmap.md),
+[features](agents/notes/features/), and [architecture](agents/notes/architecture/overview.md).
 
-Trust docs: [Security policy](SECURITY.md) ·
-[Launch security and compliance posture](docs/launch-security-compliance.md)
+Security policy: [SECURITY.md](SECURITY.md)
 
 ## Development
 

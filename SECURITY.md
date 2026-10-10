@@ -1,9 +1,7 @@
 # Security Policy
 
-Security and compliance status, limitations, data inventory, incident procedure,
-and launch gates are documented in
-[Launch security and compliance posture](docs/launch-security-compliance.md).
-Zevium does not claim a compliance certification or audit report.
+Zevium is pre-launch with zero users. It does not claim any compliance
+certification or audit report.
 
 ## Supported versions
 

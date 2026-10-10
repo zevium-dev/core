@@ -15,7 +15,7 @@ type DocsCodeBlockProps = {
 /**
  * Code block with copy button for in-app docs.
  * `not-prose` escapes @tailwindcss/typography so the <pre> keeps its own
- * semantic-token styling. All colors are semantic tokens (DESIGN.md).
+ * semantic-token styling. All colors are semantic tokens (agents/notes/design/design-system.md).
  */
 export function DocsCodeBlock({ code, lang, className }: DocsCodeBlockProps) {
   const [copied, setCopied] = useState(false);
