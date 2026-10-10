@@ -1,7 +1,7 @@
 # Pricing
 
-> Status: partial (per-call `x-zevium-cost` + daily free tier + signup credit #317 built; tiered, per-token, outcome pricing planned) · Updated: 2026-10-10
-> Code: `packages/shared/src/openapi.ts`, `packages/shared/src/pricing.ts`, `packages/shared/src/validate.ts`, `apps/gateway/src/pipeline.ts`, `apps/gateway/src/wallet.ts` (`consumeFreeTier`), `apps/gateway/src/discovery.ts`, `convex/accounting.ts`
+> Status: #399 fixed; partial (per-call `x-zevium-cost` + daily free tier built; tiered, per-token, outcome pricing planned) · Updated: 2026-10-10
+> Code: `packages/shared/src/openapi.ts`, `packages/shared/src/pricing.ts`, `packages/shared/src/validate.ts`, `apps/gateway/src/pipeline.ts`, `apps/gateway/src/wallet.ts` (`consumeFreeTier`), `apps/gateway/src/discovery.ts`, `convex/accounting.ts`, `apps/web/src/components/spec-editor/rail-endpoints.tsx`, `apps/web/src/components/spec-editor/rail-endpoints.test.tsx`
 > Related: [publishing-specs](publishing-specs.md), [wallet-billing](wallet-billing.md), [earnings-payouts](earnings-payouts.md), [gateway](gateway.md), [catalogue-search](catalogue-search.md), [agent-surface](agent-surface.md), [machine-payments](machine-payments.md), [decision: platform fee publisher side](../decisions/2026-10-10-platform-fee-publisher-side.md), [decision: LLM per-token pricing (proposed)](../decisions/2026-10-10-llm-per-token-pricing.md)
 
 Per-call pricing declared by the publisher in the OpenAPI spec (`x-zevium-cost`, optional `x-zevium-free-tier`). No parallel pricing tables: the published, immutable spec version is the only price source. Every charge splits 95% publisher / 5% platform at charge time, priced in credits at one global rate ($1 = 10,000 credits).
@@ -75,6 +75,8 @@ Pricing has no screen of its own; it surfaces in other features:
 - Gateway charges the matched endpoint's price per call; `402` on insufficient balance — [gateway](gateway.md)
 
 ## Tech
+
+- **Inline pricing validation (#399)**: the editor checks safe non-negative integers and the shared cost/free-tier caps before write-back. Rejected text stays local and editable, with a field-linked error retained through blur; the valid JSON draft and other controls remain intact. Clearing still removes the extension; zero and the inclusive upper bound remain valid.
 
 - Repo shape: `packages/shared/` owns spec parsing, `x-zevium-*` extraction, and types shared web↔gateway (see [architecture overview](../architecture/overview.md))
 - Exact 95/5 split uses accounting atoms (`10,000 atoms = 1 credit`) — see **Connect settlement** in [earnings-payouts](earnings-payouts.md)

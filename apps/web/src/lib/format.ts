@@ -1,6 +1,10 @@
 /** Locale and timezone are explicit so server and browser render identical text. */
 const integer = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
 const decimal = new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 });
+const publisherCredits = new Intl.NumberFormat("en-US", {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
 const date = new Intl.DateTimeFormat("en-US", {
   year: "numeric",
   month: "short",
@@ -34,6 +38,11 @@ const cycleMonth = new Intl.DateTimeFormat("en-US", {
 
 export function formatCredits(value: number): string {
   return integer.format(Number.isFinite(value) ? Math.trunc(value) : 0);
+}
+
+/** Decimal credits converted from canonical accounting atoms by the server. */
+export function formatPublisherCredits(value: number): string {
+  return publisherCredits.format(Number.isFinite(value) ? value : 0);
 }
 
 export function formatNumber(value: number): string {

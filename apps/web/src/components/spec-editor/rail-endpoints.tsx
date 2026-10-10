@@ -1,4 +1,9 @@
-import { useState } from "react";
+import {
+  MAX_ENDPOINT_COST_CREDITS,
+  MAX_DAILY_FREE_TIER_CALLS,
+} from "@zevium/shared";
+import { Field, FieldError } from "#/components/ui/field";
+import { useId, useState } from "react";
 
 import { Badge } from "#/components/ui/badge";
 import {
@@ -97,6 +102,7 @@ export function SpecRailEndpoints({
                       <span className="tabular-nums">cr</span>
                       <PricingInput
                         value={ep.cost}
+                        maximum={MAX_ENDPOINT_COST_CREDITS}
                         onValueChange={(value) =>
                           onPricingChange?.({
                             path: ep.path,
@@ -114,6 +120,7 @@ export function SpecRailEndpoints({
                       <span className="tabular-nums">free/day</span>
                       <PricingInput
                         value={ep.freeTier}
+                        maximum={MAX_DAILY_FREE_TIER_CALLS}
                         onValueChange={(value) =>
                           onPricingChange?.({
                             path: ep.path,
@@ -141,30 +148,51 @@ export function SpecRailEndpoints({
 
 function PricingInput({
   value,
+  maximum,
   onValueChange,
   ...props
 }: Omit<React.ComponentProps<typeof Input>, "value" | "onChange"> & {
   value: number | undefined;
+  maximum: number;
   onValueChange: (value: number | null) => void;
 }) {
   const [raw, setRaw] = useState<string | null>(null);
-  const invalid =
-    raw !== null &&
-    raw.trim() !== "" &&
-    (!Number.isFinite(Number(raw)) || Number(raw) < 0);
+  const errorId = useId();
+  function isValid(text: string) {
+    const number = Number(text);
+    return (
+      text.trim() === "" ||
+      (Number.isSafeInteger(number) && number >= 0 && number <= maximum)
+    );
+  }
+  const invalid = raw !== null && !isValid(raw);
   return (
-    <Input
-      {...props}
-      value={raw ?? (value === undefined ? "" : String(value))}
-      aria-invalid={invalid}
-      onChange={(event) => {
-        const next = event.target.value;
-        setRaw(next);
-        if (next.trim() === "") onValueChange(null);
-        else if (Number.isFinite(Number(next)) && Number(next) >= 0)
-          onValueChange(Number(next));
-      }}
-      onBlur={() => setRaw(null)}
-    />
+    <Field
+      data-invalid={invalid}
+      data-disabled={props.disabled}
+      className="w-auto items-end gap-1"
+    >
+      <Input
+        {...props}
+        value={raw ?? (value === undefined ? "" : String(value))}
+        aria-invalid={invalid}
+        aria-describedby={invalid ? errorId : undefined}
+        onChange={(event) => {
+          const next = event.target.value;
+          setRaw(next);
+          if (isValid(next))
+            onValueChange(next.trim() === "" ? null : Number(next));
+        }}
+        onBlur={() => {
+          // Keep rejected text and its error visible until the publisher corrects it.
+          if (!invalid) setRaw(null);
+        }}
+      />
+      {invalid ? (
+        <FieldError id={errorId} className="max-w-40">
+          Enter a whole number from 0 to {maximum.toLocaleString("en-US")}.
+        </FieldError>
+      ) : null}
+    </Field>
   );
 }

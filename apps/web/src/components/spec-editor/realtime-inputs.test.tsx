@@ -160,10 +160,7 @@ describe("input survives realtime", () => {
     fireEvent.change(screen.getByLabelText("Cost for GET /ping"), {
       target: { value: "1.5" },
     });
-    expect(change).toHaveBeenLastCalledWith({
-      path: "/ping",
-      method: "get",
-      cost: 1.5,
-    });
+    expect(change).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("alert").textContent).toContain("whole number");
   });
 });

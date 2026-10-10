@@ -1,7 +1,7 @@
 # Earnings & payouts
 
-> Status: partial (#363 list/presentation fixes complete) (P2 — built ahead of tag on Stripe Connect; settlement schedule + statement export absent) · Updated: 2026-10-10
-> Code: `convex/earnings.ts`, `convex/payouts.ts`, `convex/accounting.ts`, `convex/billing.ts` (publisher reconciliation), `convex/admin.ts` (`retryPublisherTransfer`), `convex/http.ts` (`/stripe-connect-webhook`, `/stripe-connect-v2-webhook`), `packages/shared/src/connect-countries.ts`, `apps/web/src/routes/app/earnings.tsx`, `apps/web/src/routes/app/org/index.tsx`, `apps/web/src/routes/admin/payouts.tsx`
+> Status: #398 fixed; partial (#363 list/presentation fixes complete) (P2 — built ahead of tag on Stripe Connect; settlement schedule + statement export absent) · Updated: 2026-10-10
+> Code: `convex/earnings.ts`, `convex/payouts.ts`, `convex/accounting.ts`, `convex/billing.ts` (publisher reconciliation), `convex/admin.ts` (`retryPublisherTransfer`), `convex/http.ts` (`/stripe-connect-webhook`, `/stripe-connect-v2-webhook`), `packages/shared/src/connect-countries.ts`, `apps/web/src/routes/app/earnings.tsx`, `apps/web/src/routes/app/org/index.tsx`, `apps/web/src/routes/admin/payouts.tsx`, `apps/web/src/lib/format.ts`, `convex/earnings.test.ts`
 > Related: [wallet-billing](wallet-billing.md), [pricing](pricing.md), [publisher-analytics](publisher-analytics.md), [platform-admin](platform-admin.md), [webhooks-notifications](webhooks-notifications.md), [accounts-orgs](accounts-orgs.md), [decision: platform fee publisher side](../decisions/2026-10-10-platform-fee-publisher-side.md), [stripe discovery](../research/stripe-connect-discovery.md)
 
 Publisher side of the money flow. Each settled call credits the publisher org 95% of its price as a risk-held earning; matured earnings become available and an org admin transfers them (≥ $10) to the org's Stripe Connect account, from which Stripe pays out to the bank. Convex owns the publisher ledger; Stripe owns transfer and payout facts.
@@ -29,6 +29,8 @@ Roadmap ([roadmap](../product/roadmap.md)):
 Publisher golden path tail: Analytics tick (calls, p95, errors, revenue) → earnings accrue at 95% → payout.
 
 ## Tech
+
+- **Earnings precision (#398)**: statement project/month/all-time totals accumulate accounting atoms before converting to decimal credits. Analytics follows the same conversion; all net tickers and ledger credit columns use `formatPublisherCredits` (two decimals). USD equivalents retain the shared `formatCreditsAsUsd` rounding.
 
 - **Presentation and operations (#363)**: earnings, transfers, and bank payout histories use stock shadcn Table and shared `lib/format.ts` money/decimal-credit/UTC date formatting. Fractional publisher credits keep two decimals with an explicit `en-US` locale. Admin transfers use native reactive pagination; retry actions rely on subscription updates rather than clearing and refetching pages. Dead `earningTotalsByStatus` helpers were removed; authoritative totals still come from Convex.
 

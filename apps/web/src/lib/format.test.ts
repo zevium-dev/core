@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   formatCredits,
+  formatPublisherCredits,
   formatNumber,
   formatMoney,
   formatDate,
@@ -14,6 +15,14 @@ describe("shared display formats", () => {
     expect(formatCredits(1234.99)).toBe("1,234");
     expect(formatNumber(1234.95)).toBe("1,234.95");
     expect(formatCredits(Number.NaN)).toBe("0");
+  });
+  it("preserves publisher fractional credits with the same fixed precision", () => {
+    expect(formatPublisherCredits(6.65)).toBe("6.65");
+    expect(formatPublisherCredits(13.3)).toBe("13.30");
+    expect(formatPublisherCredits(0.95)).toBe("0.95");
+    expect(formatPublisherCredits(0)).toBe("0.00");
+    expect(formatPublisherCredits(1234.95)).toBe("1,234.95");
+    expect(formatPublisherCredits(-6.65)).toBe("-6.65");
   });
   it("uses the UTC day at a local-midnight boundary", () => {
     const at = Date.parse("2026-10-10T23:59:05Z");
