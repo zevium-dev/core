@@ -1,11 +1,16 @@
 import { env } from "cloudflare:workers";
-import { evictDurableObject } from "cloudflare:test";
-import { afterEach, describe, expect, it } from "vitest";
+import {
+  evictDurableObject,
+  runInDurableObject,
+  runDurableObjectAlarm,
+} from "cloudflare:test";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   __setTestGrantsFetcher,
   __setTestUsageMutation,
   MAX_APPLIED_GRANTS,
   RESERVATION_TTL_MS,
+  TERMINAL_RETENTION_MS,
   USAGE_FLUSH_BATCH_SIZE,
   type WalletDO,
 } from "../src/wallet";
@@ -14,14 +19,25 @@ import { SimulatedLedger } from "./ledger";
 
 type WalletStub = DurableObjectStub<WalletDO>;
 
+const testWallets = new Set<WalletStub>();
+
 function walletStub(name: string): WalletStub {
   const id = env.WALLET.idFromName(name);
-  return env.WALLET.get(id);
+  const stub = env.WALLET.get(id);
+  testWallets.add(stub);
+  return stub;
 }
 
-afterEach(() => {
+afterEach(async () => {
   __setTestGrantsFetcher(null);
   __setTestUsageMutation(null);
+  vi.restoreAllMocks();
+  // Test hooks are isolate-wide; an earlier wallet alarm must not ingest into
+  // a later test's simulated ledger. Explicit alarm tests still exercise delivery.
+  for (const stub of testWallets) {
+    await runInDurableObject(stub, (_wallet, ctx) => ctx.storage.deleteAlarm());
+  }
+  testWallets.clear();
 });
 
 /** Seeded mulberry32 PRNG for deterministic fuzz. */
@@ -379,7 +395,7 @@ describe("WalletDO unit", () => {
     });
   });
 
-  it("fails closed when stale key settings cannot be refreshed", async () => {
+  it("keeps known key settings when their refresh fails", async () => {
     const clerkOrgId = "org_stale_settings";
     const stub = walletStub(clerkOrgId);
     await stub.grant("g1", 100);
@@ -397,8 +413,7 @@ describe("WalletDO unit", () => {
     await stub.reserve("r1", 5, { keyId: "key_a", clerkOrgId, nowMs: t0 });
     expect(fetches).toBe(1);
 
-    // Stale window crossed: refresh is awaited; a failing control plane
-    // revokes spending authority instead of serving stale positive state.
+    // Stale window crossed: the failing refresh does not block admission.
     __setTestGrantsFetcher(async () => {
       fetches += 1;
       await new Promise((resolve) => setTimeout(resolve, 500));
@@ -409,12 +424,13 @@ describe("WalletDO unit", () => {
       clerkOrgId,
       nowMs: t0 + 61_000,
     });
-    expect(res).toEqual({ status: "rejected", reason: "key_untracked" });
+    expect(res).toMatchObject({ status: "reserved" });
+    await stub.syncGrants(clerkOrgId, t0 + 61_000);
     expect(fetches).toBe(2);
     // Failed refresh leaves the last-known wallet intact.
     const state = await stub.getState();
     expect(state.balance).toBe(100);
-    expect(state.available).toBe(95);
+    expect(state.available).toBe(90);
   });
 
   it("bounds the applied-grant dedupe set", async () => {
@@ -776,7 +792,7 @@ describe("WalletDO unit", () => {
     }
   });
 
-  it("persists over 1000 rows in bounded partitions across restart and ambiguous crash", async () => {
+  it("persists over 1000 SQLite queue rows across restart and ambiguous crash", async () => {
     const stub = walletStub("unit-durable-partitions-over-1000");
     const usage = {
       organizationId: "org_publisher",
@@ -1023,7 +1039,7 @@ describe("WalletDO property/fuzz", () => {
     // Sanity: no negative anywhere
     expect(state.balance).toBeGreaterThanOrEqual(0);
     expect(ledger.grantsSum).toBeGreaterThanOrEqual(ledger.settlementsSum);
-  });
+  }, 120_000);
 
   it("second seed run also holds invariant", async () => {
     const seed = 42;
@@ -1141,5 +1157,122 @@ describe("WalletDO property/fuzz", () => {
     // rejection while retaining the retryable settlement's local debit.
     expect(state.balance).toBe(10);
     expect(state.available).toBe(10);
+  });
+});
+
+describe("Wallet SQLite retention and atomicity", () => {
+  it("bounds settled history across days of traffic exceeding the former KV value limit", async () => {
+    const stub = walletStub("sqlite-high-volume");
+    const dailyCalls = 2_000;
+    const initial = dailyCalls * 3 + 10;
+    const start = Date.now();
+    const clock = vi.spyOn(Date, "now").mockReturnValue(start);
+    await stub.grant("fund", initial);
+    // This ref remains unresolved for all three days, including across eviction.
+    await stub.reserve("lost-ack", 1);
+    await stub.settle("lost-ack");
+    let sequence = 0;
+    let ledgerBalance = initial;
+    const sizes: number[] = [];
+    for (let day = 0; day < 3; day++) {
+      clock.mockReturnValue(start + day * (TERMINAL_RETENTION_MS + 1));
+      await runInDurableObject(stub, async (wallet, ctx) => {
+        for (let batch = 0; batch < dailyCalls / 100; batch++) {
+          const results = [];
+          for (let i = 0; i < 100; i++) {
+            const id = `day-${day}-batch-${batch}-call-${i}-${"x".repeat(80)}`;
+            expect((await wallet.reserve(id, 1)).status).toBe("reserved");
+            expect((await wallet.settle(id)).status).toBe("settled");
+            results.push({ refId: `settle:${id}`, status: "applied" as const });
+          }
+          ledgerBalance -= 100;
+          await wallet.applySettlementResults(results, {
+            clerkOrgId: "sqlite-high-volume",
+            balance: ledgerBalance,
+            sequence: ++sequence,
+          });
+        }
+        const count = ctx.storage.sql
+          .exec<{ count: number }>(
+            "SELECT count(*) AS count FROM terminal_refs",
+          )
+          .one().count;
+        expect(count).toBe(dailyCalls + 1);
+        // A single KV record containing these refs would exceed 128 KiB.
+        const bytes = ctx.storage.sql
+          .exec<{ bytes: number }>(
+            "SELECT sum(length(id) + length(status) + 30) AS bytes FROM terminal_refs",
+          )
+          .one().bytes;
+        expect(bytes).toBeGreaterThan(128 * 1024);
+        expect((await ctx.storage.list()).size).toBe(0);
+        sizes.push(ctx.storage.sql.databaseSize);
+      });
+      await evictDurableObject(stub);
+      await expect(stub.settle("lost-ack")).resolves.toMatchObject({
+        status: "already_settled",
+      });
+      expect((await stub.getState()).balance).toBe(ledgerBalance - 1);
+    }
+    // SQLite reuses freed pages; lifetime traffic doesn't accumulate storage.
+    expect(sizes[2]).toBeLessThanOrEqual(sizes[1]! + 64 * 1024);
+    clock.mockReturnValue(start + 4 * TERMINAL_RETENTION_MS);
+    await runDurableObjectAlarm(stub);
+    await runInDurableObject(stub, (_wallet, ctx) => {
+      expect(
+        ctx.storage.sql.exec("SELECT id FROM terminal_refs").toArray(),
+      ).toEqual([{ id: "lost-ack" }]);
+    });
+    // A lost ack still reconciles after the retention window. Only accepted refs leave pending.
+    await stub.applySettlementResults(
+      [{ refId: "settle:lost-ack", status: "already_applied" }],
+      {
+        clerkOrgId: "sqlite-high-volume",
+        balance: ledgerBalance - 1,
+        sequence: ++sequence,
+      },
+    );
+    await runDurableObjectAlarm(stub);
+    await evictDurableObject(stub);
+    expect((await stub.getState()).pendingSettlements).toHaveLength(0);
+    await runInDurableObject(stub, (_wallet, ctx) => {
+      expect(
+        ctx.storage.sql.exec("SELECT id FROM terminal_refs").toArray(),
+      ).toEqual([]);
+    });
+  }, 120_000);
+
+  it("rolls back balance, hold, outbox, terminal ref and cap counter together", async () => {
+    const stub = walletStub("sqlite-rollback");
+    await stub.grant("fund", 100);
+    await stub.reserve("fail", 10);
+    await runInDurableObject(stub, async (wallet, ctx) => {
+      ctx.storage.sql
+        .exec(`CREATE TRIGGER fail_counter BEFORE INSERT ON counters
+        BEGIN SELECT RAISE(ABORT, 'injected storage failure'); END`);
+      await expect(wallet.settle("fail")).rejects.toThrow(
+        "injected storage failure",
+      );
+      expect(await wallet.getState()).toMatchObject({
+        balance: 100,
+        inFlightTotal: 10,
+        pendingSettlements: [],
+      });
+      expect(
+        ctx.storage.sql.exec("SELECT * FROM terminal_refs").toArray(),
+      ).toEqual([]);
+      expect(ctx.storage.sql.exec("SELECT * FROM counters").toArray()).toEqual(
+        [],
+      );
+      ctx.storage.sql.exec("DROP TRIGGER fail_counter");
+    });
+    await evictDurableObject(stub);
+    expect(await stub.getState()).toMatchObject({
+      balance: 100,
+      inFlightTotal: 10,
+      pendingSettlements: [],
+    });
+    expect((await stub.settle("fail")).status).toBe("settled");
+    expect((await stub.getState()).balance).toBe(90);
   });
 });

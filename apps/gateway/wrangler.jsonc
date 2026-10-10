@@ -22,7 +22,7 @@
     "bindings": [
       {
         "name": "WALLET",
-        "class_name": "WalletDO",
+        "class_name": "WalletSqliteDO",
       },
     ],
   },
@@ -36,5 +36,10 @@
       "new_sqlite_classes": ["ControlDO"],
     },
     { "tag": "v3", "deleted_classes": ["ControlDO"] },
+    {
+      "tag": "v4-wallet-sqlite",
+      "new_sqlite_classes": ["WalletSqliteDO"],
+      "deleted_classes": ["WalletDO"],
+    },
   ],
 }
