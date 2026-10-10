@@ -1,4 +1,4 @@
-import { WalletDO } from "./wallet";
+import { WalletSqliteDO, type WalletDO } from "./wallet";
 import { ClerkKeyVerifier, FixtureKeyVerifier } from "./key-verifier";
 import {
   CachedSpecSource,
@@ -28,7 +28,7 @@ import { handleMockRequest, parseMockPath, type MockDeps } from "./mock";
 
 import { applyGatewaySecurityHeaders } from "./security-headers";
 
-export { WalletDO };
+export { WalletSqliteDO };
 export { __setTestUsageMutation, __setTestGrantsFetcher } from "./wallet";
 
 export interface Env {

@@ -194,6 +194,28 @@ afterEach(() => {
 });
 
 describe("gateway pipeline", () => {
+  it.each(["/stream", "/free", "/zero"])(
+    "returns 503 for cold wallet control outage on %s",
+    async (path) => {
+      const clerkOrgId = `org_cold_wallet_${path}`;
+      const upstream = makeFetchMock(() => new Response("must not execute"));
+      await installFixtures({
+        clerkOrgId,
+        credits: 100,
+        fetchImpl: upstream.fetchImpl,
+      });
+      __setTestGrantsFetcher(async () => null);
+      const response = await gatewayFetch(
+        `/gateway/${ORG_SLUG}/${PROJECT_SLUG}${path}`,
+      );
+      expect(response.status).toBe(503);
+      expect(await response.json()).toMatchObject({
+        error: "wallet_unavailable",
+      });
+      expect(upstream.calls).toHaveLength(0);
+    },
+  );
+
   it("returns 503 when Clerk verification is unavailable instead of caching an invalid key", async () => {
     const clerkOrgId = "org_pipe_clerk_outage";
     await installFixtures({ clerkOrgId, credits: 100 });
