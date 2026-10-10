@@ -1,4 +1,9 @@
-import { formatDate, formatMoney, formatNumber } from "#/lib/format";
+import {
+  formatDate,
+  formatMoney,
+  formatNumber,
+  formatPublisherCredits,
+} from "#/lib/format";
 import {
   Table,
   TableHeader,
@@ -332,7 +337,7 @@ function EarningTotal({
     <div className="min-w-0 space-y-2">
       <p className="text-sm text-muted-foreground">{label}</p>
       <p className="text-2xl font-semibold tabular-nums">
-        <NumberTicker value={value} decimals={2} />
+        <NumberTicker value={value} format={formatPublisherCredits} />
         <span className="ml-1 text-sm font-normal text-muted-foreground">
           credits
         </span>
@@ -430,16 +435,16 @@ function EarningsLedgerCard({
                       </Badge>
                     </TableCell>
                     <TableCell className="px-2 py-2.5 text-right tabular-nums">
-                      {formatNumber(earning.grossCredits)}
+                      {formatPublisherCredits(earning.grossCredits)}
                     </TableCell>
                     <TableCell className="hidden px-2 py-2.5 text-right tabular-nums text-muted-foreground sm:table-cell">
-                      {formatNumber(earning.platformFeeCredits)}
+                      {formatPublisherCredits(earning.platformFeeCredits)}
                     </TableCell>
                     <TableCell className="px-2 py-2.5 text-right tabular-nums">
-                      {formatNumber(earning.netCredits)}
+                      {formatPublisherCredits(earning.netCredits)}
                     </TableCell>
                     <TableCell className="hidden px-2 py-2.5 text-right tabular-nums text-muted-foreground md:table-cell">
-                      {formatNumber(earning.clawedBackCredits)}
+                      {formatPublisherCredits(earning.clawedBackCredits)}
                     </TableCell>
                     <TableCell className="hidden px-2 py-2.5 whitespace-nowrap text-muted-foreground md:table-cell">
                       {earning.status === "reversed"

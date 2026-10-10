@@ -1,3 +1,4 @@
+import { formatPublisherCredits } from "#/lib/format";
 import { convexQuery } from "@convex-dev/react-query";
 import { useSuspenseQuery } from "@tanstack/react-query";
 
@@ -129,7 +130,7 @@ function EarningsStatGrid({
         <CardHeader className="pb-2">
           <CardDescription>Net credits (you keep 95%)</CardDescription>
           <CardTitle className="text-2xl tabular-nums">
-            <NumberTicker value={netCredits} decimals={2} />
+            <NumberTicker value={netCredits} format={formatPublisherCredits} />
           </CardTitle>
         </CardHeader>
         <CardContent className="text-xs text-muted-foreground">

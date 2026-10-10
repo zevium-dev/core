@@ -1,4 +1,5 @@
-import { formatNumber } from "#/lib/format";
+import { formatCreditsAsUsd } from "#/lib/project-helpers";
+import { formatNumber, formatPublisherCredits } from "#/lib/format";
 import {
   Table,
   TableHeader,
@@ -482,7 +483,7 @@ function formatPct(rate: number): string {
   return `${(rate * 100).toFixed(rate === 0 || rate === 1 ? 0 : 1)}%`;
 }
 
-function ProjectAnalyticsPanel({
+export function ProjectAnalyticsPanel({
   orgSlug,
   projectSlug,
   rangeDays,
@@ -539,9 +540,15 @@ function ProjectAnalyticsPanel({
           <CardHeader className="pb-2">
             <CardDescription>Net credits earned</CardDescription>
             <CardTitle className="text-2xl tabular-nums">
-              <NumberTicker value={analytics.netCredits} />
+              <NumberTicker
+                value={analytics.netCredits}
+                format={formatPublisherCredits}
+              />
             </CardTitle>
           </CardHeader>
+          <CardContent className="text-xs text-muted-foreground">
+            ≈ {formatCreditsAsUsd(analytics.netCredits)} publisher share
+          </CardContent>
         </Card>
         <Card>
           <CardHeader className="pb-2">

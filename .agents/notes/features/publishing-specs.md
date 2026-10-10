@@ -1,7 +1,7 @@
 # Publishing specs
 
-> Status: built (upstream-credential publication #389 and editor/settings correctness #362 fixed; P2 rollback not built) · Updated: 2026-10-10
-> Code: `convex/projects.ts`, `convex/specs.ts`, `convex/specImportLimits.ts`, `convex/publishReadiness.ts`, `convex/publishReadinessAction.ts`, `packages/shared/src/openapi.ts`, `packages/shared/src/validate.ts`, `apps/web/src/routes/app/projects/`, `apps/web/src/components/spec-editor/`, `apps/web/src/components/project/`, `apps/web/src/lib/spec-import.server.ts`, `convex/specImports.ts`, `convex/publishReadiness.test.ts`
+> Status: #399 fixed; built (editor/settings correctness #362 fixed; P2 rollback not built) · Updated: 2026-10-10
+> Code: `convex/projects.ts`, `convex/specs.ts`, `convex/specImportLimits.ts`, `convex/publishReadiness.ts`, `convex/publishReadinessAction.ts`, `packages/shared/src/openapi.ts`, `packages/shared/src/validate.ts`, `apps/web/src/routes/app/projects/`, `apps/web/src/components/spec-editor/`, `apps/web/src/components/project/`, `apps/web/src/lib/spec-import.server.ts`, `convex/specImports.ts`, `convex/publishReadiness.test.ts`, `apps/web/src/components/spec-editor/rail-endpoints.test.tsx`
 > Related: [pricing](pricing.md), [listing-lifecycle](listing-lifecycle.md), [quality-signals](quality-signals.md), [upstream-credentials](upstream-credentials.md), [catalogue-search](catalogue-search.md), [accounts-orgs](accounts-orgs.md), [product overview](../product/overview.md)
 
 Organizations publish APIs as projects, each described by an OpenAPI spec. The spec is the product: upstream address, endpoints, per-endpoint pricing and free tier all live in it. Publishers draft, validate and publish immutable semver versions self-serve, with no platform-team involvement.
@@ -63,6 +63,8 @@ Sign up → Create org → Create project
 
 Evidence, workarounds and scope: [dogfood findings](../findings/dogfood-2026-10-10.md).
 
+- **Inline correction (#399)**: pricing inputs keep invalid text local and show an accessible validation message through blur. Only safe non-negative integers within the shared cost/free-tier limits enter the draft. Invalid input therefore cannot disable its own control or sibling controls; correction clears the field error.
+
 From [architecture overview](../architecture/overview.md):
 
 - `projects`, `specs` + `specVersions` (immutable published spec bodies; deprecation metadata remains mutable)
@@ -78,7 +80,7 @@ Code facts (read from source 2026-10-10, not from TECH.md):
 
 - **Concurrent saves**: `specs.saveDraft` requires `baseHash` (`null` only for an absent row); it compares the current SHA-256 inside the mutation transaction. A conflict returns the canonical draft/hash/timestamp without changing the draft or readiness. Identical retries remain idempotent. `useSpecDraft` keeps the editing base stable across remote pushes and saves in flight; autosave pauses on conflict. Reload adopts the latest known snapshot; explicit overwrite retries against its hash, so another intervening save can still conflict.
 - **Editor ownership**: the workspace is keyed by project ID. Draft reducer, YAML conversion, publish controls, version dialog, lifecycle dialogs, and rail components are separate modules. `SaveStatusLabel` owns the one-second clock. Publish version suggestions are derived until typed; realtime version updates never reset typed text. Navigation has one save-and-leave completion path and does not leave if new text was typed during the save.
-- **Editor feedback**: pricing rail writes valid numbers immediately and keeps raw text such as `1.` until blur; failed `applyPricingEdit` writes show a human error. Endpoint rows are parsed once for the rail and pricing summary. Health results are tied to the tested draft. CodeMirror uses its own debounced linter and syntax-tree diagnostic ranges, without React lint state.
+- **Editor feedback**: pricing rail writes valid bounded integers immediately and keeps raw text such as `1.` until blur; failed `applyPricingEdit` writes show a human error. Endpoint rows are parsed once for the rail and pricing summary. Health results are tied to the tested draft. CodeMirror uses its own debounced linter and syntax-tree diagnostic ranges, without React lint state.
 - **YAML bounds**: byte/line preflight stays outside the killable worker; alias/expansion validation runs inside it, so markdown bullets and scalar text are not mistaken for aliases. A ready handshake separates the 10-second module startup bound from the 250 ms hard parser deadline. Conversion revisions are canceled on replacement, reload, rail edits, and unmount.
 - **Settings**: project-ID-keyed cards derive untouched fields from realtime data and retain local overrides while typing. Convex subscriptions own updates; there are no cache invalidations or manual optimistic cache writes in editor/settings. Admin/owner access follows the shared privileged-role predicate. Webhook URL input survives rotation; reveal-once version tracking remains intact.
 
